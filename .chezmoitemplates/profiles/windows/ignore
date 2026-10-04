@@ -1,7 +1,7 @@
 # Target paths chezmoi never applies to the home directory.
 
 # Machine-local login state, contains tokens.
-# config.yml is expected to hold only portable settings and stays under dotfiles management.
+# This profile manages no GitHub CLI configuration; the unified ignore list also excludes config.yml here.
 .config/gh/hosts.yml
 
 # Runtime state
