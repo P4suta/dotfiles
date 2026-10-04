@@ -93,7 +93,11 @@ fn gate(remote: &str, input: &str) -> i32 {
 
     let types = std::env::var("RENOVATE_LOCAL_GATE_TYPES")
         .unwrap_or_else(|_| DEFAULT_GATE_TYPES.to_owned());
-    let Some(out) = jq_candidates(&types, &report) else {
+    let out = jq_candidates(&types, &report);
+    if let Some(dir) = report.parent() {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    let Some(out) = out else {
         return 0; // jq failed: fail-open, same contract as a missing report
     };
     let (blocked, stale) = classify(
@@ -307,6 +311,7 @@ fn renovate_report() -> Option<PathBuf> {
         Some(std::env::var("RENOVATE_LOCAL_LOG_LEVEL").unwrap_or_else(|_| "warn".into()));
     let ok = run_prepared(&cfg, true).is_some_and(|code| code == 0)
         && report.metadata().is_ok_and(|m| m.len() > 0);
+    let _ = std::fs::remove_dir_all(&cfg.snapshot);
     if ok {
         Some(report)
     } else {

@@ -27,7 +27,14 @@ pub fn authorize(ssh_dir: &Path, key: &str, sshd_config: &str) -> Result<()> {
         eprintln!("  {}", path.display());
     }
 
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    // Only a missing file starts empty; an unreadable one must not be replaced with just this key.
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(error).with_context(|| format!("reading {}", path.display()));
+        }
+    };
     let wanted = merge(&existing, key);
     if wanted == existing {
         println!("    authorized key already present");

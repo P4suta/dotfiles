@@ -21,16 +21,25 @@ pub fn scan_diff(diff: &str) -> Vec<FileHits> {
     let mut out: Vec<FileHits> = Vec::new();
     let mut path = String::new();
     let mut lineno = 0usize;
+    // File headers only appear before a file's first hunk; inside a hunk, `+++ ` is an added line that begins with `++ `.
+    let mut in_hunk = false;
 
     for line in diff.lines() {
-        if let Some(p) = line.strip_prefix("+++ b/") {
-            p.clone_into(&mut path);
+        if line.starts_with("diff --git ") {
+            in_hunk = false;
             continue;
         }
-        if line.starts_with("+++ ") || line.starts_with("--- ") {
-            continue;
+        if !in_hunk {
+            if let Some(p) = line.strip_prefix("+++ b/") {
+                p.clone_into(&mut path);
+                continue;
+            }
+            if line.starts_with("+++ ") || line.starts_with("--- ") {
+                continue;
+            }
         }
         if let Some(rest) = line.strip_prefix("@@") {
+            in_hunk = true;
             lineno = rest
                 .split('+')
                 .nth(1)
@@ -85,7 +94,11 @@ pub fn is_exempt(path: &str) -> bool {
 /// The staged diff, or `None` when there is no repository / nothing staged.
 pub fn staged_diff() -> Option<String> {
     realgit::capture(&[
+        "-c",
+        "core.quotePath=false",
         "diff",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
         "--cached",
         "--unified=0",
         "--no-color",
@@ -126,7 +139,17 @@ mod tests {
 
     #[test]
     fn removed_lines_are_not_scanned() {
-        let diff = "+++ b/a.txt\n@@ -1 +1 @@\n-这个\n+ok\n";
+        let diff =
+            "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-这个\n+ok\n";
         assert!(scan_diff(diff).is_empty());
+    }
+
+    #[test]
+    fn an_added_line_that_looks_like_a_header_is_still_scanned() {
+        let diff = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -0,0 +1,2 @@\n+++ b/这个\n+ok\n";
+        let files = scan_diff(diff);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "a.txt");
+        assert_eq!(files[0].hits[0].0, 1);
     }
 }

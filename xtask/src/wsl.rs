@@ -19,7 +19,13 @@ pub fn translate(
     let mut index = 2;
     while index < arguments.len() {
         let argument = &arguments[index];
-        if argument == "-q" {
+        // Git passes `-U` for a literal signing key held by the agent and `-Overify-time=...` as one attached option.
+        if argument == "-q"
+            || argument == "-U"
+            || argument
+                .to_str()
+                .is_some_and(|value| value.len() > 2 && value.starts_with("-O"))
+        {
             result.push(argument.clone());
             index += 1;
             continue;
@@ -128,5 +134,56 @@ mod tests {
             .is_err()
         );
         assert!(translate(&sign, |_| anyhow::bail!("conversion unavailable")).is_err());
+    }
+
+    #[test]
+    fn git_literal_key_and_verify_time_arguments_are_preserved() {
+        let windows = |path: &OsStr| -> Result<OsString> {
+            Ok(format!("windows:{}", path.to_string_lossy()).into())
+        };
+        let sign: Vec<OsString> = [
+            "-Y",
+            "sign",
+            "-n",
+            "git",
+            "-f",
+            "/tmp/.git_signing_key_tmpAbCdEf",
+            "-U",
+            "/tmp/.git_signing_buffer_tmpAbCdEf",
+        ]
+        .map(Into::into)
+        .into();
+        assert_eq!(
+            translate(&sign, windows).unwrap(),
+            [
+                "-Y",
+                "sign",
+                "-n",
+                "git",
+                "-f",
+                "windows:/tmp/.git_signing_key_tmpAbCdEf",
+                "-U",
+                "windows:/tmp/.git_signing_buffer_tmpAbCdEf",
+            ]
+        );
+        let verify: Vec<OsString> = [
+            "-Y",
+            "verify",
+            "-n",
+            "git",
+            "-f",
+            "/home/fixture/signers",
+            "-I",
+            "user@example.invalid",
+            "-s",
+            "/tmp/signature",
+            "-Overify-time=20261004093000",
+        ]
+        .map(Into::into)
+        .into();
+        let output = translate(&verify, windows).unwrap();
+        assert_eq!(output[10], "-Overify-time=20261004093000");
+        let unsupported: Vec<OsString> = ["-Y", "sign", "-Z", "x"].map(Into::into).into();
+        assert!(translate(&unsupported, windows).is_err());
     }
 }

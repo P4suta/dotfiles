@@ -58,9 +58,12 @@ pub fn apply(original: &str, directives: &[(&str, String)]) -> String {
         .iter()
         .position(|line| {
             let trimmed = line.trim_start();
-            trimmed.len() >= 5
-                && trimmed[..5].eq_ignore_ascii_case("match")
-                && trimmed[5..].starts_with(char::is_whitespace)
+            trimmed
+                .get(..5)
+                .is_some_and(|keyword| keyword.eq_ignore_ascii_case("match"))
+                && trimmed
+                    .get(5..)
+                    .is_some_and(|rest| rest.starts_with(char::is_whitespace))
         })
         .unwrap_or(lines.len());
 

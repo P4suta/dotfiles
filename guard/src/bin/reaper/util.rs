@@ -174,25 +174,28 @@ fn which(program: &str) -> Option<PathBuf> {
 
 /// Which of `lines` match the extended regular expression, via `grep -E`: the two patterns this serves are user configuration, and reimplementing ERE without a regex engine would change what a config edit means.
 /// `anchor_line` makes the whole line the subject, like `[[ =~ ]]` did.
-pub fn grep_matching(pattern: &str, lines: &[String]) -> Vec<usize> {
+/// `None` means grep could not answer (missing, invalid pattern, or failed), which callers must not read as "no match".
+pub fn grep_matching(pattern: &str, lines: &[String]) -> Option<Vec<usize>> {
     let mut cmd = Command::new("/usr/bin/grep");
-    cmd.args(["-n", "-E", pattern])
+    cmd.args(["-n", "-E", "-e", pattern])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let Ok(mut child) = cmd.spawn() else {
-        return Vec::new();
-    };
+    let mut child = cmd.spawn().ok()?;
     if let Some(mut si) = child.stdin.take() {
         let _ = si.write_all(lines.join("\n").as_bytes());
     }
-    match child.wait_with_output() {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
-            .lines()
-            .filter_map(|l| l.split_once(':').and_then(|(n, _)| n.parse::<usize>().ok()))
-            .map(|n| n.saturating_sub(1))
-            .collect(),
-        _ => Vec::new(),
+    let output = child.wait_with_output().ok()?;
+    match output.status.code() {
+        Some(0) => Some(
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter_map(|l| l.split_once(':').and_then(|(n, _)| n.parse::<usize>().ok()))
+                .map(|n| n.saturating_sub(1))
+                .collect(),
+        ),
+        Some(1) => Some(Vec::new()),
+        _ => None,
     }
 }
 
@@ -223,7 +226,10 @@ mod tests {
     fn grep_matching_reports_indices() {
         let lines: Vec<String> = vec!["java".into(), "sleep".into(), "gradlew".into()];
         let hits = grep_matching("java|gradle|kotlin", &lines);
-        assert_eq!(hits, vec![0, 2]);
-        assert_eq!(grep_matching("nothing", &lines), Vec::<usize>::new());
+        assert_eq!(hits, Some(vec![0, 2]));
+        assert_eq!(grep_matching("nothing", &lines), Some(Vec::new()));
+        let dashed: Vec<String> = vec!["-x".into()];
+        assert_eq!(grep_matching("-x", &dashed), Some(vec![0]));
+        assert_eq!(grep_matching("(", &lines), None);
     }
 }

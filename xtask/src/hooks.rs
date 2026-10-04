@@ -43,9 +43,11 @@ fn piped(command: &mut Command, input: &[u8]) -> Result<()> {
         .context("child input is unavailable")?
         .write_all(input);
     let status = child.wait()?;
-    written?;
     ensure!(status.success(), "hook gate failed with {status}");
-    Ok(())
+    match written {
+        Err(error) if error.kind() != std::io::ErrorKind::BrokenPipe => Err(error.into()),
+        _ => Ok(()),
+    }
 }
 
 pub fn configured_hooks(bytes: &[u8]) -> Result<Vec<String>> {
@@ -310,6 +312,15 @@ mod tests {
             ["pre-commit"]
         );
         assert!(configured_hooks(b"- pre-push\n").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_gate_that_ignores_its_input_is_judged_by_its_exit_status() {
+        // More than a pipe buffer, so the write can only end in a broken pipe once the child exits.
+        let input = vec![b'x'; 1 << 20];
+        piped(&mut Command::new("true"), &input).unwrap();
+        assert!(piped(&mut Command::new("false"), &input).is_err());
     }
 
     #[test]

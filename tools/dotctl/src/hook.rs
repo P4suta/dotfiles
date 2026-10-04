@@ -156,8 +156,10 @@ pub fn pre_push(remote: &str) -> Result<i32> {
             continue;
         }
 
-        let range = if is_zero(remote_sha) {
-            // New branch: only commits that no remote ref already holds, so history already pushed is not re-verified.
+        let remote_known = !is_zero(remote_sha)
+            && git_ok(&["cat-file", "-e", &format!("{remote_sha}^{{commit}}")]);
+        let range = if !remote_known {
+            // New branch, or a remote tip this repository has never fetched: only commits that no remote ref already holds, so history already pushed is not re-verified.
             git_lines(&[
                 "rev-list",
                 local_sha,
@@ -166,6 +168,13 @@ pub fn pre_push(remote: &str) -> Result<i32> {
             ])
         } else {
             git_lines(&["rev-list", &format!("{remote_sha}..{local_sha}")])
+        };
+        let Some(range) = range else {
+            eprintln!(
+                "::error:: could not determine which commits this push sends for {local_sha}"
+            );
+            code = 1;
+            continue;
         };
 
         for commit in range {
@@ -207,17 +216,18 @@ fn is_zero(sha: &str) -> bool {
     !sha.is_empty() && sha.bytes().all(|b| b == b'0')
 }
 
-fn git_lines(args: &[&str]) -> Vec<String> {
-    let Ok(out) = proc::capture(git().args(args)) else {
-        return Vec::new();
-    };
+/// `None` when git could not answer, which a gate must not read as "nothing to check".
+fn git_lines(args: &[&str]) -> Option<Vec<String>> {
+    let out = proc::capture(git().args(args)).ok()?;
     if !out.ok() {
-        return Vec::new();
+        return None;
     }
-    out.stdout_text()
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(ToOwned::to_owned)
-        .collect()
+    Some(
+        out.stdout_text()
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(ToOwned::to_owned)
+            .collect(),
+    )
 }

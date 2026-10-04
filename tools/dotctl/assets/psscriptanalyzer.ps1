@@ -12,6 +12,10 @@ param(
     [Parameter(Mandatory)][string]$Settings
 )
 
+# A missing module or unreadable settings must fail the lint rather than report a clean run.
+$ErrorActionPreference = 'Stop'
+Import-Module PSScriptAnalyzer
+
 $entries = Get-Content -Raw -LiteralPath $Manifest | ConvertFrom-Json
 $exitCode = 0
 

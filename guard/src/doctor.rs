@@ -136,26 +136,13 @@ fn doctored_path() -> String {
     if let Ok(p) = std::env::var("PATH") {
         dirs.extend(std::env::split_paths(&p));
     }
-    if let Ok(out) = Command::new("opam").args(["env", "--readonly"]).output()
+    // The active switch's bin directory, asked for directly rather than parsed out of `opam env` shell syntax.
+    if let Ok(out) = Command::new("opam").args(["var", "bin"]).output()
         && out.status.success()
     {
-        let env = String::from_utf8_lossy(&out.stdout);
-        for line in env.lines() {
-            // lines look like: export PATH="~/.opam/5.5.0/bin:..."
-            if let Some(v) = line.trim().strip_prefix("export PATH=") {
-                let v = v.trim().trim_matches('"');
-                // ~ is opam's shorthand for HOME.
-                let expanded = v.trim_start_matches('~');
-                let base = if v.starts_with('~') {
-                    h.clone()
-                } else {
-                    PathBuf::from("")
-                };
-                let p = base.join(expanded.trim_start_matches('/'));
-                if p.is_dir() {
-                    dirs.push(p);
-                }
-            }
+        let p = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+        if p.is_dir() {
+            dirs.push(p);
         }
     }
     std::env::join_paths(dirs).map_or_else(|_| String::new(), |s| s.to_string_lossy().into_owned())

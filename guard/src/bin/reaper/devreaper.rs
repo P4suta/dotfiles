@@ -525,7 +525,8 @@ fn heavy_process_running(docker: &Path, fid: &str, regex: &str) -> bool {
         return false;
     };
     let lines: Vec<String> = out.lines().skip(1).map(str::to_owned).collect();
-    !util::grep_matching(regex, &lines).is_empty()
+    // An unanswerable pattern keeps the container rather than treating it as idle.
+    util::grep_matching(regex, &lines).is_none_or(|hits| !hits.is_empty())
 }
 
 /// `docker stats --no-stream --format '{{.CPUPerc}}'` → the number without the `%`.

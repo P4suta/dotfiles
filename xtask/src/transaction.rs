@@ -62,17 +62,18 @@ pub fn capture(destination: &Path, backup: &Path, targets: &[PathBuf]) -> Result
     ensure!(!backup.exists(), "backup must use a fresh directory");
     ensure!(!targets.is_empty(), "backup requires managed targets");
     let destination = destination.canonicalize()?;
-    let parent = backup
+    let backup = backup
         .parent()
         .context("backup parent is missing")?
-        .canonicalize()?;
+        .canonicalize()?
+        .join(backup.file_name().context("backup name is missing")?);
     let mut targets = targets.to_vec();
     targets.sort();
     targets.dedup();
     for target in &targets {
         relative(target)?;
         ensure!(
-            !parent.starts_with(destination.join(target)),
+            !backup.starts_with(destination.join(target)),
             "backup must be outside every captured target"
         );
         for ancestor in target
@@ -93,11 +94,11 @@ pub fn capture(destination: &Path, backup: &Path, targets: &[PathBuf]) -> Result
                 .any(|parent| *path != parent && path.starts_with(parent))
         })
         .collect();
-    fs::create_dir(backup)?;
+    fs::create_dir(&backup)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(backup, fs::Permissions::from_mode(0o700))?;
+        fs::set_permissions(&backup, fs::Permissions::from_mode(0o700))?;
     }
     let mut entries = Vec::new();
     for path in roots {
@@ -229,6 +230,7 @@ mod tests {
         let home = scope.path().join("home");
         fs::create_dir_all(home.join("managed")).unwrap();
         assert!(capture(&home, &home.join("managed/backup"), &["managed".into()]).is_err());
+        assert!(capture(&home, &home.join("pending"), &["pending".into()]).is_err());
         capture(&home, &home.join("backup"), &["managed".into()]).unwrap();
         assert!(home.join("backup/manifest.json").is_file());
     }

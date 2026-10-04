@@ -29,9 +29,13 @@ function Get-State {
     $capability = Get-WindowsCapability -Online -Name 'OpenSSH.Server*' |
         Sort-Object -Property Name | Select-Object -Last 1
     $service = Get-Service -Name sshd -ErrorAction SilentlyContinue
-    # When the running process started, so the caller can tell whether it predates the config on disk.
-    $startedAt = (Get-Process -Name sshd -ErrorAction SilentlyContinue |
-        Sort-Object StartTime | Select-Object -Last 1).StartTime
+    # When the service's listener started, so the caller can tell whether it predates the config on disk.
+    # Per-session sshd processes start later and must not stand in for the listener.
+    $startedAt = $null
+    $servicePid = (Get-CimInstance -ClassName Win32_Service -Filter "Name='sshd'" -ErrorAction SilentlyContinue).ProcessId
+    if ($servicePid) {
+        $startedAt = (Get-Process -Id $servicePid -ErrorAction SilentlyContinue).StartTime
+    }
     $rule = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue
 
     [pscustomobject]@{

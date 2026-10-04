@@ -103,12 +103,20 @@ fn installed(root: &Path, app: &str) -> bool {
 }
 
 fn configure_public_scoop_https(repo: &Path) -> Result<()> {
+    // A Scoop installed or bucket added from an archive has no Git repository to configure.
+    if !repo.join(".git").exists() {
+        return Ok(());
+    }
     let out = proc::capture(env::command("git").arg("-C").arg(repo).args([
         "config",
         "--local",
         "--get",
         "remote.origin.url",
     ]))?;
+    // `git config --get` exits 1 when the key is unset: no origin, nothing to rewrite.
+    if out.code == 1 {
+        return Ok(());
+    }
     if !out.ok() {
         bail!("reading the Scoop remote for {} failed", repo.display());
     }

@@ -358,9 +358,10 @@ fn whoami_uid() -> String {
         })
 }
 
+/// An allow-list that cannot be evaluated protects the process rather than exposing it.
 fn matches_allow(ucomm: &str, allow_regex: &str) -> bool {
     let lines = vec![ucomm.to_owned()];
-    !util::grep_matching(allow_regex, &lines).is_empty()
+    util::grep_matching(allow_regex, &lines).is_none_or(|hits| !hits.is_empty())
 }
 
 /// Tier B's "orphaned" substitute: the executable lives under one of the user-space prefixes rather than under `/System` or `/usr/lib`.
@@ -470,7 +471,7 @@ fn load_seen(path: &PathBuf) -> HashMap<String, i64> {
         return out;
     };
     for line in text.lines() {
-        if let Some((k, v)) = line.split_once(' ')
+        if let Some((k, v)) = line.rsplit_once(' ')
             && let Ok(v) = v.trim().parse()
         {
             out.insert(k.to_owned(), v);
@@ -481,7 +482,19 @@ fn load_seen(path: &PathBuf) -> HashMap<String, i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionConfig, parse_ps_line, user_space_exe};
+    use super::{SessionConfig, load_seen, parse_ps_line, user_space_exe};
+
+    #[test]
+    fn seen_keys_keep_spaced_macos_start_times() {
+        let path = std::env::temp_dir().join(format!("session-reaper-seen-{}", std::process::id()));
+        std::fs::write(&path, "4241:Sat Oct  4 21:00:00 2026 1791000000\n").unwrap();
+        let seen = load_seen(&path);
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            seen.get("4241:Sat Oct  4 21:00:00 2026"),
+            Some(&1_791_000_000)
+        );
+    }
 
     #[test]
     fn ps_lines_parse_with_spaced_comms() {

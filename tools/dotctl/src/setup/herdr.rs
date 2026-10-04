@@ -275,29 +275,41 @@ fn prune(releases: &Path, retain: usize, current: &str) {
     let Ok(entries) = std::fs::read_dir(releases) else {
         return;
     };
-    let names: Vec<String> = entries
+    let installed: Vec<(String, std::time::SystemTime)> = entries
         .filter_map(Result::ok)
         .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter_map(|entry| {
+            let modified = entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .ok()?;
+            Some((entry.file_name().into_string().ok()?, modified))
+        })
         .collect();
 
-    for name in stale_releases(&names, retain, current) {
+    for name in stale_releases(&installed, retain, current) {
         let _ = std::fs::remove_dir_all(releases.join(name));
     }
 }
 
-fn stale_releases(names: &[String], retain: usize, current: &str) -> Vec<String> {
-    let releases: Vec<&String> = names
+/// Releases beyond the newest `retain` by installation time; version names do not sort numerically (`0.10` < `0.9` as text).
+fn stale_releases(
+    releases: &[(String, std::time::SystemTime)],
+    retain: usize,
+    current: &str,
+) -> Vec<String> {
+    let mut sorted: Vec<&(String, std::time::SystemTime)> = releases
         .iter()
-        .filter(|name| !name.starts_with(".staging.") && !name.starts_with(".backup."))
+        .filter(|(name, _)| !name.starts_with(".staging.") && !name.starts_with(".backup."))
         .collect();
-    let mut sorted: Vec<&String> = releases.to_vec();
-    sorted.sort_by(|a, b| b.cmp(a));
+    sorted.sort_by(|(a_name, a_time), (b_name, b_time)| {
+        b_time.cmp(a_time).then_with(|| b_name.cmp(a_name))
+    });
     sorted
         .into_iter()
         .skip(retain)
-        .filter(|name| name.as_str() != current)
-        .cloned()
+        .filter(|(name, _)| name.as_str() != current)
+        .map(|(name, _)| name.clone())
         .collect()
 }
 
@@ -315,6 +327,18 @@ fn herdr_home() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn timed(releases: &[(&str, u64)]) -> Vec<(String, std::time::SystemTime)> {
+        releases
+            .iter()
+            .map(|(name, seconds)| {
+                (
+                    (*name).to_owned(),
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(*seconds),
+                )
+            })
+            .collect()
+    }
 
     const SAMPLE: &str = r#"{
         "base_version": "0.9.2",
@@ -421,12 +445,12 @@ mod tests {
 
     #[test]
     fn retention_keeps_the_newest_builds() {
-        let names = vec![
-            "0.9.2-preview.2026-07-26-a-x86_64-pc-windows-msvc".to_owned(),
-            "0.9.2-preview.2026-07-28-c-x86_64-pc-windows-msvc".to_owned(),
-            "0.9.2-preview.2026-07-27-b-x86_64-pc-windows-msvc".to_owned(),
-            "0.9.2-preview.2026-07-25-z-x86_64-pc-windows-msvc".to_owned(),
-        ];
+        let names = timed(&[
+            ("0.9.2-preview.2026-07-26-a-x86_64-pc-windows-msvc", 26),
+            ("0.9.2-preview.2026-07-28-c-x86_64-pc-windows-msvc", 28),
+            ("0.9.2-preview.2026-07-27-b-x86_64-pc-windows-msvc", 27),
+            ("0.9.2-preview.2026-07-25-z-x86_64-pc-windows-msvc", 25),
+        ]);
         assert_eq!(
             stale_releases(
                 &names,
@@ -439,11 +463,11 @@ mod tests {
 
     #[test]
     fn retention_never_removes_the_current_build() {
-        let names = vec![
-            "0.9.2-preview.2026-07-28-c-x86_64-pc-windows-msvc".to_owned(),
-            "0.9.2-preview.2026-07-27-b-x86_64-pc-windows-msvc".to_owned(),
-            "0.9.2-preview.2026-07-26-a-x86_64-pc-windows-msvc".to_owned(),
-        ];
+        let names = timed(&[
+            ("0.9.2-preview.2026-07-28-c-x86_64-pc-windows-msvc", 28),
+            ("0.9.2-preview.2026-07-27-b-x86_64-pc-windows-msvc", 27),
+            ("0.9.2-preview.2026-07-26-a-x86_64-pc-windows-msvc", 26),
+        ]);
         let current = "0.9.2-preview.2026-07-26-a-x86_64-pc-windows-msvc";
         assert_eq!(stale_releases(&names, 1, current).len(), 1);
         assert!(!stale_releases(&names, 1, current).contains(&current.to_owned()));
@@ -451,17 +475,29 @@ mod tests {
 
     #[test]
     fn retention_below_the_limit_removes_nothing() {
-        let names = vec!["0.9.1-x86_64-pc-windows-msvc".to_owned()];
+        let names = timed(&[("0.9.1-x86_64-pc-windows-msvc", 1)]);
         assert!(stale_releases(&names, 3, "0.9.1-x86_64-pc-windows-msvc").is_empty());
     }
 
     #[test]
+    fn retention_orders_by_installation_rather_than_version_text() {
+        let names = timed(&[
+            ("0.9.9-x86_64-pc-windows-msvc", 1),
+            ("0.10.0-x86_64-pc-windows-msvc", 2),
+        ]);
+        assert_eq!(
+            stale_releases(&names, 1, "0.10.0-x86_64-pc-windows-msvc"),
+            vec!["0.9.9-x86_64-pc-windows-msvc".to_owned()]
+        );
+    }
+
+    #[test]
     fn retention_ignores_staging_and_backup_directories() {
-        let names = vec![
-            ".staging.0.9.1-x86_64-pc-windows-msvc".to_owned(),
-            ".backup.0.9.1-x86_64-pc-windows-msvc.1234".to_owned(),
-            "0.9.1-x86_64-pc-windows-msvc".to_owned(),
-        ];
+        let names = timed(&[
+            (".staging.0.9.1-x86_64-pc-windows-msvc", 3),
+            (".backup.0.9.1-x86_64-pc-windows-msvc.1234", 2),
+            ("0.9.1-x86_64-pc-windows-msvc", 1),
+        ]);
         assert!(stale_releases(&names, 3, "0.9.1-x86_64-pc-windows-msvc").is_empty());
         assert_eq!(
             stale_releases(&names, 0, "0.9.1-x86_64-pc-windows-msvc").len(),
