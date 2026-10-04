@@ -258,3 +258,21 @@ fn comment_overrides_cannot_capture_whole_directories() {
         assert!(quality::comment_scopes(scope.path()).is_err(), "{refused}");
     }
 }
+
+#[test]
+fn setup_order_rejects_a_step_that_runs_before_its_prerequisite() {
+    use dotfiles_xtask::setup::{Step, ordering_violations};
+    assert!(
+        ordering_violations(&[Step::Runtime, Step::Mise, Step::Tools, Step::Domyjob]).is_empty()
+    );
+    assert_eq!(
+        ordering_violations(&[Step::Mise, Step::Domyjob, Step::Tools]),
+        [(Step::Domyjob, Step::Tools)]
+    );
+    assert!(ordering_violations(&[Step::Domyjob]).is_empty());
+    let listing = br#"{"10-b.sh":{"sourceRelative":"run_onchange_after_10-b.sh.tmpl"},"a.sh":{"sourceRelative":"run_after_a.sh.tmpl"},"z.sh":{"sourceRelative":"run_onchange_before_z.sh.tmpl"}}"#;
+    assert_eq!(
+        profiles::script_order(listing).unwrap(),
+        ["z.sh", "10-b.sh", "a.sh"]
+    );
+}

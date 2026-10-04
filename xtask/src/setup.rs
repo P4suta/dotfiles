@@ -118,6 +118,47 @@ pub fn run(source: &Path, config: &Path, step: Step, live: bool) -> Result<()> {
     execute(&context, &mut native, step)
 }
 
+impl Step {
+    /// Steps whose effects this step relies on: when both run in one application, these must run first.
+    /// Every step is listed, so a new step cannot be added without deciding what it depends on.
+    pub fn after(self) -> &'static [Step] {
+        match self {
+            Self::Ocomment | Self::Domyjob | Self::Fleet => &[Self::Tools],
+            Self::Ocaml | Self::Haskell | Self::Integrations => &[Self::Tools],
+            Self::Racket => &[Self::Desktop],
+            Self::Adapters | Self::Guard => &[Self::Runtime],
+            Self::Tools | Self::Upgrade => &[Self::Mise],
+            Self::Runtime
+            | Self::Mise
+            | Self::Github
+            | Self::Nix
+            | Self::Desktop
+            | Self::Fcitx5
+            | Self::MacosDefaults
+            | Self::ForgeKeys
+            | Self::Claude
+            | Self::RetireTmux
+            | Self::Wezterm => &[],
+        }
+    }
+}
+
+/// Dependency pairs `(step, prerequisite)` that a run order breaks: the prerequisite runs later, or only later.
+pub fn ordering_violations(sequence: &[Step]) -> Vec<(Step, Step)> {
+    let mut violations = Vec::new();
+    for (index, step) in sequence.iter().enumerate() {
+        for prerequisite in step.after() {
+            let first = sequence
+                .iter()
+                .position(|candidate| candidate == prerequisite);
+            if first.is_some_and(|first| first > index) {
+                violations.push((*step, *prerequisite));
+            }
+        }
+    }
+    violations
+}
+
 /// Setup steps a rendered script runs, in script order, from `dotfiles-xtask ... setup STEP` invocations.
 pub fn scripted_steps(scripts: &str) -> Vec<Step> {
     use clap::ValueEnum;

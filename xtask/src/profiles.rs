@@ -179,6 +179,27 @@ pub fn native_action_arguments(name: &str) -> Vec<&str> {
     }
 }
 
+/// Script targets in the order chezmoi runs them: every `run_before_` script, then every `run_after_` script, each group by target name.
+pub fn script_order(listing: &[u8]) -> Result<Vec<String>> {
+    let entries: std::collections::BTreeMap<String, Value> = serde_json::from_slice(listing)?;
+    let mut before = Vec::new();
+    let mut after = Vec::new();
+    for (target, entry) in entries {
+        let source = entry["sourceRelative"]
+            .as_str()
+            .context("script listing requires sourceRelative")?;
+        let name = source.rsplit('/').next().unwrap_or(source);
+        let attributes: Vec<_> = name.split('_').collect();
+        if attributes.contains(&"before") {
+            before.push(target);
+        } else {
+            after.push(target);
+        }
+    }
+    before.extend(after);
+    Ok(before)
+}
+
 /// `chezmoi managed --nul-path-separator` output; its `--format` flag does not apply to relative paths, which are always printed as text.
 pub fn managed_paths(stdout: &[u8]) -> Result<Vec<String>> {
     stdout
@@ -272,6 +293,36 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
             )?;
             managed_paths(&listed.stdout)
         };
+        let order = script_order(
+            &output(
+                chezmoi(root, &scope, &config, &destination)
+                    .arg("--override-data")
+                    .arg(&overrides)
+                    .args([
+                        "managed",
+                        "--include",
+                        "scripts",
+                        "--path-style",
+                        "all",
+                        "--format",
+                        "json",
+                    ]),
+                &format!("{} script order", profile.name()),
+            )?
+            .stdout,
+        )?;
+        let sequence: Vec<_> = order
+            .iter()
+            .flat_map(|target| {
+                crate::setup::scripted_steps(dump[target]["contents"].as_str().unwrap_or_default())
+            })
+            .collect();
+        let violations = crate::setup::ordering_violations(&sequence);
+        ensure!(
+            violations.is_empty(),
+            "{} profile runs a setup step before a step it relies on: {violations:?} in {order:?}",
+            profile.name()
+        );
         let empty = empty_directories(&managed("dirs")?, &managed("files,symlinks")?);
         ensure!(
             empty.is_empty(),
@@ -369,7 +420,7 @@ pub fn declared_skips(data: &Value) -> Result<Vec<SkippedScript>> {
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
                 && (skip.script.ends_with(".sh") || skip.script.ends_with(".ps1")),
-            "setup.skip names a script target such as install-tools.sh: {}",
+            "setup.skip names a script target such as 10-install-tools.sh: {}",
             skip.script
         );
         ensure!(

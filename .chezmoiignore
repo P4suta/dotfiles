@@ -134,7 +134,7 @@ Documents/PowerShell/Microsoft.PowerShell_profile.ps1
 50-enable-sshd.ps1
 55-setup-keyboard.ps1
 60-watch-storage-scout.ps1
-brew-bundle.sh
+05-brew-bundle.sh
 import-forge-signing-keys.sh
 install-claude-code.sh
 install-domyjob.sh
@@ -238,14 +238,14 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .profile
 .zprofile
 .zshrc
-brew-bundle.sh
+05-brew-bundle.sh
 configure-fcitx5.sh
 import-forge-signing-keys.sh
 install-claude-code.sh
 install-domyjob.sh
 install-fleet.sh
 install-ocomment.sh
-install-tools.sh
+10-install-tools.sh
 macos-defaults.sh
 refresh-desktop.sh
 refresh-integrations.sh
@@ -363,7 +363,7 @@ Documents/PowerShell/Microsoft.PowerShell_profile.ps1
 50-enable-sshd.ps1
 55-setup-keyboard.ps1
 60-watch-storage-scout.ps1
-brew-bundle.sh
+05-brew-bundle.sh
 configure-fcitx5.sh
 import-forge-signing-keys.sh
 install-claude-code.sh
