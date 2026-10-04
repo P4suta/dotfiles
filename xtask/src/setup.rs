@@ -835,6 +835,14 @@ impl OwnerSource {
         }
     }
 
+    /// An argument the installed binary accepts without side effects; domyjob has no `--version`.
+    fn probe(self) -> &'static str {
+        match self {
+            Self::Ocomment | Self::Fleet => "--version",
+            Self::Domyjob => "--help",
+        }
+    }
+
     fn clone_url(self) -> String {
         if self.public() {
             format!("https://github.com/P4suta/{}.git", self.repository())
@@ -881,7 +889,7 @@ fn source_tool(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
         &[],
     );
     checked(runner, Tool::Cargo, &arguments)?;
-    checked(runner, binary, &args(&["--version"]))?;
+    checked(runner, binary, &args(&[source.probe()]))?;
     Ok(())
 }
 
