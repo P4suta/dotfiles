@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
+use dotfiles_xtask::tool::Tool;
 use dotfiles_xtask::{
     check_build_dir, export_checks, skill_source_paths, skills, split_frontmatter, validate_tree,
 };
@@ -7,7 +8,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Parser)]
 struct Cli {
@@ -117,6 +117,11 @@ enum Action {
         backup: Option<PathBuf>,
     },
     Skills,
+    /// Apply the native profile with its scripts, twice, on a disposable CI host.
+    Rehearse {
+        #[arg(long)]
+        disposable_host: bool,
+    },
     Check,
     Aliases,
     FormatMetadata,
@@ -138,7 +143,8 @@ enum Action {
 
 fn cargo(root: &Path, manifest: &Path, args: &[&str]) -> Result<()> {
     let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
-    let status = Command::new("cargo")
+    let status = Tool::Cargo
+        .command()
         .current_dir(root)
         .env(
             "CARGO_TARGET_DIR",
@@ -156,7 +162,8 @@ fn cargo(root: &Path, manifest: &Path, args: &[&str]) -> Result<()> {
 fn check_package(root: &Path, manifest: &Path) -> Result<()> {
     cargo(root, manifest, &["fmt", "--check"])?;
     let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
-    let status = Command::new("cargo")
+    let status = Tool::Cargo
+        .command()
         .current_dir(root)
         .env(
             "CARGO_TARGET_DIR",
@@ -172,7 +179,7 @@ fn check_package(root: &Path, manifest: &Path) -> Result<()> {
 
 fn run() -> Result<()> {
     let mut cli = Cli::parse();
-    cli.root = cli.root.canonicalize()?;
+    cli.root = dotfiles_xtask::canonical(&cli.root)?;
     match cli.command {
         Action::Agent {
             agent,
@@ -280,7 +287,8 @@ fn run() -> Result<()> {
                 &binary,
                 Path::new(&user_directory),
                 |paths| {
-                    let status = Command::new("chezmoi")
+                    let status = Tool::Chezmoi
+                        .command()
                         .arg("--source")
                         .arg(&cli.root)
                         .args([
@@ -309,8 +317,17 @@ fn run() -> Result<()> {
                 validate_tree(&cli.root)?
             );
         }
+        Action::Rehearse { disposable_host } => {
+            dotfiles_xtask::rehearsal::run(&cli.root, disposable_host)?
+        }
         Action::Check => {
             dotfiles_xtask::skill_ops::check_catalog(&cli.root)?;
+            dotfiles_xtask::quality::comment_scopes(&cli.root)?;
+            let unreferenced = dotfiles_xtask::quality::unreferenced_leaves(&cli.root)?;
+            anyhow::ensure!(
+                unreferenced.is_empty(),
+                "profile leaves that no template includes: {unreferenced:?}"
+            );
             println!(
                 "Validated {} shared skills and aliases",
                 validate_tree(&cli.root)?
@@ -387,7 +404,8 @@ fn run() -> Result<()> {
         Action::Install => {
             let paths = skill_source_paths(&cli.root)?;
             ensure!(!paths.is_empty(), "no skill files to install");
-            let status = Command::new("chezmoi")
+            let status = Tool::Chezmoi
+                .command()
                 .arg("--source")
                 .arg(&cli.root)
                 .args([
@@ -411,7 +429,8 @@ fn run() -> Result<()> {
                 Path::new("xtask/Cargo.toml"),
                 &["build", "--locked", "--release", "--bin", "coderabbit"],
             )?;
-            let status = Command::new("chezmoi")
+            let status = Tool::Chezmoi
+                .command()
                 .arg("--source")
                 .arg(&cli.root)
                 .args([
@@ -457,7 +476,8 @@ fn run() -> Result<()> {
                 &binary,
                 Path::new(&user_directory),
                 |path| {
-                    let status = Command::new("chezmoi")
+                    let status = Tool::Chezmoi
+                        .command()
                         .arg("--source")
                         .arg(&cli.root)
                         .args([

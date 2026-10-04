@@ -1,8 +1,9 @@
 use crate::runtime::{Native, Runner, args, checked};
+use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -50,24 +51,24 @@ pub fn run(
         .context("native home is unavailable")?;
     let mut native = Native::new(Path::new(&home))?;
     if child {
-        if matches!(session, Session::Herdr) && native.available("herdr") {
+        if matches!(session, Session::Herdr) && native.available(Tool::Herdr) {
             if cfg!(target_os = "macos") {
-                if native.available("herdr-agent") {
-                    let _ = native.run("herdr-agent", &args(&["ensure"]));
+                if native.available(Tool::HerdrAgent) {
+                    let _ = native.run(Tool::HerdrAgent, &args(&["ensure"]));
                 }
-                let server = native.run("herdr", &args(&["status", "server"]))?;
+                let server = native.run(Tool::Herdr, &args(&["status", "server"]))?;
                 if !server.success
                     || !String::from_utf8_lossy(&server.bytes).contains("status: running")
                 {
                     native
-                        .command("nohup")
+                        .command(Tool::Nohup)
                         .args(["herdr", "server"])
                         .stdin(Stdio::null())
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())
                         .spawn()?;
                     for _ in 0..50 {
-                        let server = native.run("herdr", &args(&["status", "server"]))?;
+                        let server = native.run(Tool::Herdr, &args(&["status", "server"]))?;
                         if server.success
                             && String::from_utf8_lossy(&server.bytes).contains("status: running")
                         {
@@ -77,19 +78,19 @@ pub fn run(
                     }
                 }
             }
-            let mut command = native.command("herdr");
+            let mut command = native.command(Tool::Herdr);
             command.args(arguments);
             return execute(command);
         }
-        if native.available("nu") {
-            let mut command = native.command("nu");
+        if native.available(Tool::Nu) {
+            let mut command = native.command(Tool::Nu);
             command.args(arguments);
             return execute(command);
         }
         let mut command = native.command(if cfg!(target_os = "macos") {
-            "/bin/zsh"
+            Tool::Zsh
         } else {
-            "/bin/bash"
+            Tool::Bash
         });
         command
             .arg("-l")
@@ -114,12 +115,13 @@ pub fn run(
     };
     let bridge = Path::new(&home).join(format!(".local/bin/{emulator_name}-{session_name}"));
     let mut command = if matches!(emulator, Emulator::Ghostty) {
-        let binary = if native.available("ghostty") {
-            PathBuf::from("ghostty")
+        let mut command = if native.available(Tool::Ghostty) {
+            native.command(Tool::Ghostty)
         } else {
-            PathBuf::from("/Applications/Ghostty.app/Contents/MacOS/ghostty")
+            native.command_installed(Path::new(
+                "/Applications/Ghostty.app/Contents/MacOS/ghostty",
+            ))
         };
-        let mut command = native.command(binary);
         let path = bridge
             .to_str()
             .context("terminal bridge path is not UTF-8")?
@@ -128,8 +130,8 @@ pub fn run(
             .arg(format!("--title={title}"))
             .arg(format!("--command='{path}' --child"));
         command
-    } else if native.available("kitty") {
-        let mut command = native.command("kitty");
+    } else if native.available(Tool::Kitty) {
+        let mut command = native.command(Tool::Kitty);
         command
             .args([
                 "--class",
@@ -146,10 +148,10 @@ pub fn run(
         command
     } else {
         ensure!(
-            native.available("gnome-terminal"),
+            native.available(Tool::GnomeTerminal),
             "neither Kitty nor GNOME Terminal is installed"
         );
-        let mut command = native.command("gnome-terminal");
+        let mut command = native.command(Tool::GnomeTerminal);
         command
             .arg(format!("--title={title}"))
             .arg("--")
@@ -169,7 +171,7 @@ pub fn doctor(strict: bool) -> Result<()> {
     if cfg!(target_os = "macos") {
         let output = checked(
             &mut native,
-            "dotguard",
+            Tool::Dotguard,
             &args(if strict {
                 &["doctor", "--strict"]
             } else {
@@ -180,28 +182,49 @@ pub fn doctor(strict: bool) -> Result<()> {
         return Ok(());
     }
     let mut missing = 0;
-    let required: &[&str] = if cfg!(windows) {
+    let required: &[Tool] = if cfg!(windows) {
         &[
-            "chezmoi", "just", "git", "gh", "mise", "herdr", "claude", "codex", "opencode",
+            Tool::Chezmoi,
+            Tool::Just,
+            Tool::Git,
+            Tool::Gh,
+            Tool::Mise,
+            Tool::Herdr,
+            Tool::Claude,
+            Tool::Codex,
+            Tool::Opencode,
         ]
     } else {
         &[
-            "chezmoi", "mise", "nu", "starship", "herdr", "atuin", "zoxide", "java", "rustc", "go",
-            "opam", "ocaml", "gleam", "erl",
+            Tool::Chezmoi,
+            Tool::Mise,
+            Tool::Nu,
+            Tool::Starship,
+            Tool::Herdr,
+            Tool::Atuin,
+            Tool::Zoxide,
+            Tool::Java,
+            Tool::Rustc,
+            Tool::Go,
+            Tool::Opam,
+            Tool::Ocaml,
+            Tool::Gleam,
+            Tool::Erl,
         ]
     };
-    for name in required {
-        let available = native.available(name);
+    for &tool in required {
+        let name = tool.program();
+        let available = native.available(tool);
         println!("{name}: {}", if available { "ready" } else { "missing" });
         if !available {
             missing += 1;
         }
     }
     if cfg!(windows) {
-        if native.available("herdr") {
+        if native.available(Tool::Herdr) {
             let status = String::from_utf8(checked(
                 &mut native,
-                "herdr",
+                Tool::Herdr,
                 &args(&["integration", "status"]),
             )?)?;
             for name in ["claude", "codex", "opencode"] {
@@ -220,7 +243,7 @@ pub fn doctor(strict: bool) -> Result<()> {
             "gpg.format",
             "user.signingkey",
         ] {
-            let reply = native.run("git", &args(&["config", "--get", key]))?;
+            let reply = native.run(Tool::Git, &args(&["config", "--get", key]))?;
             if !reply.success || reply.bytes.is_empty() {
                 println!("git:{key}: missing");
                 missing += 1;
@@ -236,10 +259,18 @@ pub fn doctor(strict: bool) -> Result<()> {
             }
         }
     }
-    for name in ["codex", "claude", "docker", "code", "op", "fcitx5"] {
+    for tool in [
+        Tool::Codex,
+        Tool::Claude,
+        Tool::Docker,
+        Tool::Code,
+        Tool::Op,
+        Tool::Fcitx5,
+    ] {
         println!(
-            "{name}: {}",
-            if native.available(name) {
+            "{}: {}",
+            tool.program(),
+            if native.available(tool) {
                 "ready"
             } else {
                 "optional, absent"
@@ -290,7 +321,8 @@ pub fn touchid(live: bool, elevated: bool) -> Result<()> {
             file.set_permissions(std::fs::Permissions::from_mode(0o444))?;
         }
     } else {
-        let status = Command::new("sudo")
+        let status = Tool::Sudo
+            .command()
             .arg(std::env::current_exe()?)
             .args(["touchid", "--live", "--elevated"])
             .status()?;

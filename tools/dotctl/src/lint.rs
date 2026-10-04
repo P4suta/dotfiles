@@ -14,6 +14,9 @@ use crate::{env, proc, render};
 /// PowerShell has to check PowerShell: PSScriptAnalyzer is a pwsh module with no other interface.
 /// Embedded so the repo keeps no loose wrapper scripts.
 const PSSA_HELPER: &str = include_str!("../assets/psscriptanalyzer.ps1");
+/// The repository's rules are compiled in, so a missing file fails the build instead of every lint run.
+const YAMLLINT_CONFIG: &str = include_str!("../../../.yamllint");
+const PSSA_SETTINGS: &str = include_str!("../../../PSScriptAnalyzerSettings.psd1");
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Kind {
@@ -136,7 +139,7 @@ fn external(
 /// yamllint is a global mise tool (.chezmoidata.toml), so the shim answers it from any directory.
 /// Going through `uvx` instead made every run re-resolve a Python interpreter, which a stale `uv` earlier on PATH could break.
 fn yaml(path: &Path, content: &str) -> Result<bool> {
-    let config = env::repo_root().join(".yamllint");
+    let config = write_temp(YAMLLINT_CONFIG, ".yaml")?;
     let config = config.to_string_lossy().into_owned();
     external(path, content, ".yaml", "yamllint", &["-c", &config])
 }
@@ -185,7 +188,7 @@ fn powershell(files: &[&Path]) -> Result<i32> {
 
     let manifest = write_temp(&serde_json::to_string(&entries)?, ".json")?;
     let helper = write_temp(PSSA_HELPER, ".ps1")?;
-    let settings = env::repo_root().join("PSScriptAnalyzerSettings.psd1");
+    let settings = write_temp(PSSA_SETTINGS, ".psd1")?;
 
     let mut cmd = env::command("pwsh");
     cmd.args(["-NoLogo", "-NoProfile", "-File"])
@@ -193,7 +196,7 @@ fn powershell(files: &[&Path]) -> Result<i32> {
         .arg("-Manifest")
         .arg(manifest.as_os_str())
         .arg("-Settings")
-        .arg(settings);
+        .arg(settings.as_os_str());
     let analyzer = proc::status(&mut cmd)?;
     Ok(if analyzer == 0 { code } else { analyzer })
 }

@@ -1,3 +1,4 @@
+use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
 use std::fs::File;
 use std::io::{Read, Write};
@@ -392,7 +393,6 @@ pub fn now_ms() -> Result<u64> {
 }
 
 pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
-    use std::process::Command;
     let (organization, version) = validate_policy(&std::fs::read_to_string(
         user_directory.join(".config/coderabbit-guard/policy.json"),
     )?)?;
@@ -432,7 +432,8 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
             "managed service reviews and usage queries run only on the Mac; other hosts perform native local checks"
         );
     }
-    let location = Command::new("mise")
+    let location = Tool::Mise
+        .command()
         .args(["where", &format!("http:coderabbit@{version}")])
         .output()
         .context("locate the dotfiles-managed CodeRabbit runtime")?;
@@ -460,7 +461,7 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
                 &user_directory.join(".local/state/coderabbit-guard/usage.log"),
                 now_ms()?,
                 || {
-                    Ok(Command::new(vendor)
+                    Ok(crate::tool::external(vendor)
                         .args(args)
                         .env("CI", "true")
                         .status()?
@@ -469,7 +470,7 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
                 },
             );
         }
-        return Ok(Command::new(vendor)
+        return Ok(crate::tool::external(vendor)
             .args(args)
             .status()?
             .code()
@@ -479,7 +480,7 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
         std::env::var_os("CODERABBIT_API_KEY").is_none(),
         "inline authentication cannot bypass the guarded account"
     );
-    let runtime = Command::new(&vendor).arg("--version").output()?;
+    let runtime = crate::tool::external(&vendor).arg("--version").output()?;
     ensure!(
         runtime.status.success() && std::str::from_utf8(&runtime.stdout)?.trim() == version,
         "CodeRabbit runtime has drifted from its pinned version; review refused"
@@ -491,7 +492,7 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
         now_ms()?,
         &organization,
         || {
-            let mut command = Command::new(&vendor);
+            let mut command = crate::tool::external(&vendor);
             command.args(["usage", "--agent"]).env("CI", "true");
             if let Some(directory) = directory {
                 command.current_dir(directory);
@@ -504,7 +505,7 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
             Ok(String::from_utf8(usage.stdout)?)
         },
         || {
-            let status = Command::new(&vendor)
+            let status = crate::tool::external(&vendor)
                 .args(args)
                 .env("CI", "true")
                 .status()

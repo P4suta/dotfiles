@@ -1,4 +1,5 @@
 use crate::runtime::{Native, Runner, args};
+use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::ffi::OsString;
 use std::fs;
@@ -78,7 +79,7 @@ fn delegate(
     global: Option<&Path>,
 ) -> Result<()> {
     if global.is_none() {
-        let reply = native.run("git", &args(&["rev-parse", "--show-toplevel"]))?;
+        let reply = native.run(Tool::Git, &args(&["rev-parse", "--show-toplevel"]))?;
         if !reply.success {
             return Ok(());
         }
@@ -100,10 +101,10 @@ fn delegate(
         }
     }
     ensure!(
-        native.available("lefthook"),
+        native.available(Tool::Lefthook),
         "lefthook is required for configured hook gates"
     );
-    let mut dump = native.command("lefthook");
+    let mut dump = native.command(Tool::Lefthook);
     dump.arg("dump");
     if let Some(config) = global {
         dump.env("LEFTHOOK_CONFIG", config);
@@ -117,7 +118,7 @@ fn delegate(
     if !hooks.iter().any(|name| name == hook.name()) {
         return Ok(());
     }
-    let mut command = native.command("lefthook");
+    let mut command = native.command(Tool::Lefthook);
     if let Some(config) = global {
         command.env("LEFTHOOK_CONFIG", config);
     }
@@ -158,7 +159,11 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
         ))
         || (cfg!(windows) && matches!(hook, Hook::PrePush | Hook::PostCommit))
     {
-        let mut command = native.command(if cfg!(windows) { "dotctl" } else { "dotguard" });
+        let mut command = native.command(if cfg!(windows) {
+            Tool::Dotctl
+        } else {
+            Tool::Dotguard
+        });
         if cfg!(windows) {
             command.arg("hook");
         }
@@ -177,7 +182,7 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     if matches!(hook, Hook::PrePush) && !cfg!(windows) {
         piped(
             native
-                .command("dotguard")
+                .command(Tool::Dotguard)
                 .arg("renovate-gate")
                 .args(arguments),
             &input,
@@ -192,7 +197,7 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
         let executable = native.home.join(".cargo/bin/storage-scout");
         let policy = native.home.join(".config/storage-scout/auto.toml");
         if executable.is_file() && policy.is_file() {
-            let mut command = native.command(executable);
+            let mut command = native.command_installed(&executable);
             command
                 .args(["auto", "--config"])
                 .arg(policy)
@@ -222,7 +227,8 @@ fn unwanted_attribution(text: &str) -> bool {
 
 pub fn git(arguments: &[OsString]) -> Result<std::process::ExitStatus> {
     ensure!(!cfg!(windows), "the Unix Git wrapper requires a Unix host");
-    Command::new("dotguard")
+    Tool::Dotguard
+        .command()
         .arg("git")
         .args(arguments)
         .status()
@@ -256,7 +262,8 @@ pub fn audit(root: &Path, fix: bool) -> Result<()> {
     println!("repo\tunsigned\thooksPath\tstale_hooks\tlocal_gpgsign");
     for repo in repos {
         let capture = |arguments: &[&str]| -> Result<String> {
-            let reply = Command::new("git")
+            let reply = Tool::Git
+                .command()
                 .arg("-C")
                 .arg(&repo)
                 .args(arguments)
@@ -319,8 +326,8 @@ mod tests {
     fn a_gate_that_ignores_its_input_is_judged_by_its_exit_status() {
         // More than a pipe buffer, so the write can only end in a broken pipe once the child exits.
         let input = vec![b'x'; 1 << 20];
-        piped(&mut Command::new("true"), &input).unwrap();
-        assert!(piped(&mut Command::new("false"), &input).is_err());
+        piped(&mut crate::tool::external("true"), &input).unwrap();
+        assert!(piped(&mut crate::tool::external("false"), &input).is_err());
     }
 
     #[test]

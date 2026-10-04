@@ -5,6 +5,9 @@
 {{- $isLocal := not (or (env "SSH_CONNECTION") (env "SSH_CLIENT") (env "SSH_TTY")) -}}
 {{- $app := default "/Applications/1Password.app" (env "DOTFILES_ONEPASSWORD_APP") -}}
 {{- $hasOnePassword := and (eq .chezmoi.os "darwin") $isLocal (stat $app) -}}
+{{- /* The gcp skill installs Google's gcloud MCP bundle per machine; declare it only where that bundle exists, with mise's stable latest Node. */ -}}
+{{- $gcloudMcp := joinPath .chezmoi.homeDir ".local/share/gcloud-mcp/node_modules/@google-cloud/gcloud-mcp/dist/bundle.js" -}}
+{{- $node := joinPath .chezmoi.homeDir ".local/share/mise/installs/node/latest/bin" -}}
 {
   "$schema": "https://opencode.ai/config.json",
   "autoupdate": false,
@@ -44,7 +47,17 @@
       },
       "oauth": false,
       "enabled": true
-    }
+    }{{ if stat $gcloudMcp }},
+    "gcloud": {
+      "type": "local",
+      "command": [{{ joinPath $node "node" | toJson }}, {{ $gcloudMcp | toJson }}],
+      "environment": {
+        "CLOUDSDK_CORE_DISABLE_PROMPTS": "1",
+        "PATH": {{ printf "/opt/homebrew/share/google-cloud-sdk/bin:%s:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" $node | toJson }}
+      },
+      "enabled": true,
+      "timeout": 30000
+    }{{ end }}
   }{{ if $hasOnePassword }},
   "plugin": ["@upstash/context7-opencode"]{{ end }}
 }

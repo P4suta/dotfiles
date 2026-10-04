@@ -2,6 +2,7 @@ use crate::pr_rules::{
     Effect, Generation, IssueGate, Operation, api_quota_available, coderabbit_body_marker_allowed,
     issue_gate, plan,
 };
+use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use clap::{Args, Parser, Subcommand};
 use pulldown_cmark::{Event, Tag, TagEnd};
@@ -10,7 +11,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
 
 const TITLE_REQUEST: &str = "@coderabbitai";
 const SUMMARY_REQUEST: &str = "@coderabbitai summary";
@@ -385,7 +385,8 @@ fn read_document(document: DocumentArgs, final_check: bool) -> Result<(Target, V
 }
 
 fn gh(args: &[OsString]) -> Result<String> {
-    let output = Command::new("gh")
+    let output = Tool::Gh
+        .command()
         .env("GH_HOST", "github.com")
         .args(args)
         .output()

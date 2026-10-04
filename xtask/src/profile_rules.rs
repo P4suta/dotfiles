@@ -93,8 +93,13 @@ pub fn context7_needed(local_gui: bool, tool_exists: bool, installed: bool) -> b
     local_gui && tool_exists && !installed
 }
 
-pub fn forge_key_accepted(primary_count: usize, first_fingerprint_matches: bool) -> bool {
-    primary_count == 1 && first_fingerprint_matches
+/// GitHub publishes its web-flow signing keys as one bundle; import it only when every primary key is pinned and the current key is among them.
+pub fn forge_bundle_accepted(
+    primary_count: usize,
+    unpinned: usize,
+    contains_current: bool,
+) -> bool {
+    primary_count > 0 && unpinned == 0 && contains_current
 }
 
 #[cfg(kani)]
@@ -113,12 +118,18 @@ fn remote_or_installed_context7_never_requires_a_mutation() {
 
 #[cfg(kani)]
 #[kani::proof]
-fn forge_import_requires_exactly_one_matching_primary_key() {
+fn forge_import_requires_only_pinned_keys_including_the_current_one() {
     let count: usize = kani::any();
-    let matched: bool = kani::any();
-    assert_eq!(forge_key_accepted(count, matched), count == 1 && matched);
-    kani::cover!(forge_key_accepted(count, matched));
-    kani::cover!(!forge_key_accepted(count, matched));
+    let unpinned: usize = kani::any();
+    let current: bool = kani::any();
+    kani::assume(unpinned <= count);
+    let accepted = forge_bundle_accepted(count, unpinned, current);
+    assert_eq!(accepted, count > 0 && unpinned == 0 && current);
+    if unpinned > 0 || !current {
+        assert!(!accepted);
+    }
+    kani::cover!(accepted);
+    kani::cover!(!accepted && current);
 }
 
 #[cfg(kani)]

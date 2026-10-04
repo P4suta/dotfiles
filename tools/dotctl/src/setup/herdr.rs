@@ -34,6 +34,8 @@ pub fn run(options: &Options) -> Result<i32> {
     Ok(0)
 }
 
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
 fn manifest_url(options: &Options) -> String {
     const STABLE: &str = "latest.json";
     const PREVIEW: &str = "preview.json";
@@ -244,7 +246,12 @@ fn link(link_path: &Path, target: &Path) -> Result<()> {
     if let Some(parent) = link_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let is_junction = junction::exists(link_path).unwrap_or(false);
+    // Inspect the link itself: an elevated process may refuse to follow a junction a standard process created, which would make an existing link look absent.
+    let existing = std::fs::symlink_metadata(link_path);
+    let is_junction = existing.as_ref().is_ok_and(|metadata| {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }) && junction::get_target(link_path).is_ok();
 
     if is_junction {
         if junction::get_target(link_path).is_ok_and(|current| current == target) {
@@ -253,7 +260,7 @@ fn link(link_path: &Path, target: &Path) -> Result<()> {
         junction::delete(link_path)?;
         std::fs::remove_dir(link_path)
             .with_context(|| format!("removing the emptied junction at {}", link_path.display()))?;
-    } else if link_path.exists() {
+    } else if existing.is_ok() {
         if !is_empty_dir(link_path) {
             bail!(
                 "{} exists and is not a junction; refusing to replace it",
@@ -441,6 +448,21 @@ mod tests {
     fn a_manifest_without_a_sha_is_an_error() {
         let json = r#"{"build_id": "x", "assets": {"windows-x86_64": {"url": "u"}}}"#;
         assert!(parse_manifest(json).is_err());
+    }
+
+    #[test]
+    fn relinking_keeps_a_matching_junction_and_replaces_a_different_one() {
+        let scope = tempfile::tempdir().unwrap();
+        let first = scope.path().join("releases/first");
+        let second = scope.path().join("releases/second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        let current = scope.path().join("current");
+        link(&current, &first).unwrap();
+        link(&current, &first).unwrap();
+        assert_eq!(junction::get_target(&current).unwrap(), first);
+        link(&current, &second).unwrap();
+        assert_eq!(junction::get_target(&current).unwrap(), second);
     }
 
     #[test]

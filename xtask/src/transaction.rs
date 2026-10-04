@@ -20,14 +20,70 @@ pub fn relative(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Windows removes a directory symlink or junction with `remove_dir`; `remove_file` is denied for it.
+fn is_directory_link(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTypeExt;
+        metadata.file_type().is_symlink_dir()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = metadata;
+        false
+    }
+}
+
 fn remove(path: &Path) -> Result<()> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_dir() && !metadata.is_symlink() => fs::remove_dir_all(path)?,
+        Ok(metadata) if is_directory_link(&metadata) => fs::remove_dir(path)?,
         Ok(_) => fs::remove_file(path)?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),
     }
     Ok(())
+}
+
+/// Whether `current` already matches the captured `saved` tree, so restoring it would change nothing.
+fn unchanged(saved: &Path, current: &Path) -> Result<bool> {
+    let saved_metadata = fs::symlink_metadata(saved)?;
+    let current_metadata = match fs::symlink_metadata(current) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    if saved_metadata.is_symlink() || current_metadata.is_symlink() {
+        return Ok(saved_metadata.is_symlink()
+            && current_metadata.is_symlink()
+            && fs::read_link(saved)? == fs::read_link(current)?);
+    }
+    if saved_metadata.permissions() != current_metadata.permissions() {
+        return Ok(false);
+    }
+    if saved_metadata.is_dir() || current_metadata.is_dir() {
+        if !(saved_metadata.is_dir() && current_metadata.is_dir()) {
+            return Ok(false);
+        }
+        let mut saved_names = fs::read_dir(saved)?
+            .map(|entry| Ok(entry?.file_name()))
+            .collect::<Result<Vec<_>>>()?;
+        let mut current_names = fs::read_dir(current)?
+            .map(|entry| Ok(entry?.file_name()))
+            .collect::<Result<Vec<_>>>()?;
+        saved_names.sort();
+        current_names.sort();
+        if saved_names != current_names {
+            return Ok(false);
+        }
+        for name in saved_names {
+            if !unchanged(&saved.join(&name), &current.join(&name))? {
+                return Ok(false);
+            }
+        }
+        return Ok(true);
+    }
+    Ok(current_metadata.is_file() && fs::read(saved)? == fs::read(current)?)
 }
 
 fn copy(source: &Path, destination: &Path) -> Result<()> {
@@ -61,11 +117,8 @@ fn copy(source: &Path, destination: &Path) -> Result<()> {
 pub fn capture(destination: &Path, backup: &Path, targets: &[PathBuf]) -> Result<()> {
     ensure!(!backup.exists(), "backup must use a fresh directory");
     ensure!(!targets.is_empty(), "backup requires managed targets");
-    let destination = destination.canonicalize()?;
-    let backup = backup
-        .parent()
-        .context("backup parent is missing")?
-        .canonicalize()?
+    let destination = crate::canonical(destination)?;
+    let backup = crate::canonical(backup.parent().context("backup parent is missing")?)?
         .join(backup.file_name().context("backup name is missing")?);
     let mut targets = targets.to_vec();
     targets.sort();
@@ -128,7 +181,7 @@ pub fn capture(destination: &Path, backup: &Path, targets: &[PathBuf]) -> Result
 }
 
 pub fn restore(destination: &Path, backup: &Path) -> Result<()> {
-    let destination = destination.canonicalize()?;
+    let destination = crate::canonical(destination)?;
     ensure!(
         fs::read(backup.join("destination.txt"))? == destination.as_os_str().as_encoded_bytes(),
         "backup destination identity differs"
@@ -149,9 +202,14 @@ pub fn restore(destination: &Path, backup: &Path) -> Result<()> {
     }
     for entry in entries {
         let target = destination.join(&entry.path);
-        remove(&target)?;
+        let saved = backup.join("files").join(&entry.path);
+        // Untouched targets stay in place: rewriting them gains nothing and can fail on a file another process holds open.
+        if entry.existed && unchanged(&saved, &target)? {
+            continue;
+        }
+        remove(&target).with_context(|| format!("restore {}", entry.path.display()))?;
         if entry.existed {
-            copy(&backup.join("files").join(entry.path), &target)?;
+            copy(&saved, &target).with_context(|| format!("restore {}", entry.path.display()))?;
         }
     }
     Ok(())
@@ -222,6 +280,65 @@ mod tests {
         }
         capture(&home, &scope.path().join("backup"), &["new".into()]).unwrap();
         assert!(restore(scope.path(), &scope.path().join("backup")).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rollback_removes_a_directory_symlink_it_created() {
+        let scope = tempfile::tempdir().unwrap();
+        let destination = scope.path().join("home");
+        fs::create_dir_all(destination.join("skills/shared")).unwrap();
+        let backup = scope.path().join("backup");
+        let result = apply(
+            &destination,
+            &backup,
+            &["linked".into()],
+            || {
+                std::os::windows::fs::symlink_dir(
+                    destination.join("skills/shared"),
+                    destination.join("linked"),
+                )?;
+                anyhow::bail!("injected apply failure")
+            },
+            || Ok(()),
+        );
+        assert!(result.unwrap_err().to_string().contains("restored"));
+        assert!(fs::symlink_metadata(destination.join("linked")).is_err());
+        assert!(destination.join("skills/shared").is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rollback_leaves_untouched_targets_that_cannot_be_rewritten() {
+        use std::os::unix::fs::PermissionsExt;
+        let scope = tempfile::tempdir().unwrap();
+        let destination = scope.path().join("home");
+        fs::create_dir_all(destination.join("held")).unwrap();
+        fs::write(destination.join("held/config"), "kept").unwrap();
+        fs::write(destination.join("changed"), "before").unwrap();
+        let backup = scope.path().join("backup");
+        let result = apply(
+            &destination,
+            &backup,
+            &["held/config".into(), "changed".into()],
+            || {
+                fs::write(destination.join("changed"), "after")?;
+                // The untouched target's directory now refuses removal, as a held file does on Windows.
+                fs::set_permissions(destination.join("held"), fs::Permissions::from_mode(0o500))?;
+                anyhow::bail!("injected apply failure")
+            },
+            || Ok(()),
+        );
+        fs::set_permissions(destination.join("held"), fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.unwrap_err().to_string().contains("restored"));
+        assert_eq!(
+            fs::read_to_string(destination.join("changed")).unwrap(),
+            "before"
+        );
+        assert_eq!(
+            fs::read_to_string(destination.join("held/config")).unwrap(),
+            "kept"
+        );
     }
 
     #[test]

@@ -1,2 +1,0 @@
-#!/bin/sh
-exec dotfiles-xtask setup retire-tmux --config "$HOME/.config/chezmoi/chezmoi.toml" --live

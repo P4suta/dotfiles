@@ -1,4 +1,5 @@
 use crate::profile_rules::{Mode, Profile, permitted};
+use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use std::fs;
@@ -153,7 +154,7 @@ fn output(command: &mut Command, phase: &str) -> Result<Output> {
 }
 
 pub fn chezmoi(root: &Path, scope: &Path, config: &Path, destination: &Path) -> Command {
-    let mut command = Command::new("chezmoi");
+    let mut command = Tool::Chezmoi.command();
     command
         .arg("--source")
         .arg(root)
@@ -167,6 +168,54 @@ pub fn chezmoi(root: &Path, scope: &Path, config: &Path, destination: &Path) -> 
         .arg(scope.join("state.boltdb"))
         .args(["--refresh-externals=never", "--no-tty"]);
     command
+}
+
+/// Scripts are actions rather than state, and an always-run `run_` script would make every verification fail.
+pub fn native_action_arguments(name: &str) -> Vec<&str> {
+    if name == "verify" {
+        vec![name, "--exclude", "scripts"]
+    } else {
+        vec![name]
+    }
+}
+
+/// Packaged tools the rendered scripts require that the profile's platform data does not install.
+pub fn unprovisioned(profile: Profile, platform: &Value, scripts: &str) -> Vec<String> {
+    crate::setup::scripted_requirements(profile, scripts)
+        .into_iter()
+        .filter_map(|tool| tool.package(profile))
+        .filter(|(pointer, entry)| {
+            let list = platform.pointer(pointer);
+            !(list
+                .and_then(Value::as_array)
+                .is_some_and(|items| items.iter().any(|item| item == entry))
+                || list
+                    .and_then(Value::as_object)
+                    .is_some_and(|items| items.get(*entry).is_some_and(|spec| spec != "")))
+        })
+        .map(|(pointer, entry)| format!("{pointer}/{entry}"))
+        .collect()
+}
+
+/// Script targets in the order chezmoi runs them: every `run_before_` script, then every `run_after_` script, each group by target name.
+pub fn script_order(listing: &[u8]) -> Result<Vec<String>> {
+    let entries: std::collections::BTreeMap<String, Value> = serde_json::from_slice(listing)?;
+    let mut before = Vec::new();
+    let mut after = Vec::new();
+    for (target, entry) in entries {
+        let source = entry["sourceRelative"]
+            .as_str()
+            .context("script listing requires sourceRelative")?;
+        let name = source.rsplit('/').next().unwrap_or(source);
+        let attributes: Vec<_> = name.split('_').collect();
+        if attributes.contains(&"before") {
+            before.push(target);
+        } else {
+            after.push(target);
+        }
+    }
+    before.extend(after);
+    Ok(before)
 }
 
 /// `chezmoi managed --nul-path-separator` output; its `--format` flag does not apply to relative paths, which are always printed as text.
@@ -198,6 +247,7 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
         fs::create_dir(report).context("profile report requires a fresh output directory")?;
     }
     let scratch = tempfile::tempdir()?;
+    let source_data: Value = serde_json::from_slice(&fs::read(root.join(".chezmoidata.json"))?)?;
     for profile in Profile::ALL {
         let scope = scratch.path().join(profile.name());
         let destination = scope.join("home with ' quote");
@@ -262,6 +312,48 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
             )?;
             managed_paths(&listed.stdout)
         };
+        let order = script_order(
+            &output(
+                chezmoi(root, &scope, &config, &destination)
+                    .arg("--override-data")
+                    .arg(&overrides)
+                    .args([
+                        "managed",
+                        "--include",
+                        "scripts",
+                        "--path-style",
+                        "all",
+                        "--format",
+                        "json",
+                    ]),
+                &format!("{} script order", profile.name()),
+            )?
+            .stdout,
+        )?;
+        let sequence: Vec<_> = order
+            .iter()
+            .flat_map(|target| {
+                crate::setup::scripted_steps(dump[target]["contents"].as_str().unwrap_or_default())
+            })
+            .collect();
+        let scripts: String = order
+            .iter()
+            .filter_map(|target| dump[target]["contents"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let platform = &source_data["platforms"][profile.name()];
+        let unprovisioned = unprovisioned(profile, platform, &scripts);
+        ensure!(
+            unprovisioned.is_empty(),
+            "{} profile runs setup that needs packages its data does not install: {unprovisioned:?}",
+            profile.name()
+        );
+        let violations = crate::setup::ordering_violations(&sequence);
+        ensure!(
+            violations.is_empty(),
+            "{} profile runs a setup step before a step it relies on: {violations:?} in {order:?}",
+            profile.name()
+        );
         let empty = empty_directories(&managed("dirs")?, &managed("files,symlinks")?);
         ensure!(
             empty.is_empty(),
@@ -300,7 +392,8 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
             "obsolete credential exporter was preserved"
         );
         output(
-            Command::new("git")
+            Tool::Git
+                .command()
                 .args(["config", "--file"])
                 .arg(destination.join(if profile == Profile::Windows {
                     ".config/git/config"
@@ -335,6 +428,41 @@ pub fn native_profile() -> Result<Profile> {
     }
 }
 
+/// A setup script a machine-local configuration deliberately leaves out, with the reason that makes the omission reviewable.
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkippedScript {
+    pub script: String,
+    pub reason: String,
+}
+
+/// `setup.skip` entries, which `.chezmoiignore` removes from application; every entry must name one script target and say why.
+pub fn declared_skips(data: &Value) -> Result<Vec<SkippedScript>> {
+    let Some(entries) = data.pointer("/setup/skip") else {
+        return Ok(Vec::new());
+    };
+    let skips: Vec<SkippedScript> = serde_json::from_value(entries.clone())
+        .context("setup.skip requires a list of script and reason entries")?;
+    for skip in &skips {
+        ensure!(
+            !skip.script.is_empty()
+                && skip
+                    .script
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                && (skip.script.ends_with(".sh") || skip.script.ends_with(".ps1")),
+            "setup.skip names a script target such as 10-install-tools.sh: {}",
+            skip.script
+        );
+        ensure!(
+            !skip.reason.trim().is_empty(),
+            "setup.skip requires a reason for {}",
+            skip.script
+        );
+    }
+    Ok(skips)
+}
+
 pub fn configured_profile(data: &Value) -> Result<Profile> {
     match data["profile"].as_str() {
         Some("mac") => Ok(Profile::Mac),
@@ -360,7 +488,7 @@ pub fn operate(
         "native paths must be explicit absolute paths"
     );
     ensure!(
-        !config.canonicalize()?.starts_with(root),
+        !crate::canonical(config)?.starts_with(root),
         "machine-local config belongs outside the public source"
     );
     let scope = tempfile::tempdir()?;
@@ -371,6 +499,9 @@ pub fn operate(
     .stdout;
     let data: Value = serde_json::from_slice(&bytes)?;
     let profile = configured_profile(&data)?;
+    for skip in declared_skips(&data)? {
+        println!("Skipping setup script {}: {}", skip.script, skip.reason);
+    }
     let mode = if matches!(action, NativeAction::Apply) {
         Mode::Full
     } else {
@@ -384,7 +515,7 @@ pub fn operate(
         let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
             .context("native home is unavailable")?;
         ensure!(
-            destination.canonicalize()? == Path::new(&home).canonicalize()?,
+            crate::canonical(destination)? == crate::canonical(Path::new(&home))?,
             "setup scripts require this host's own native home destination"
         );
     }
@@ -397,7 +528,7 @@ pub fn operate(
     };
     let execute = |name: &str| -> Result<()> {
         let status = chezmoi(root, state, config, destination)
-            .arg(name)
+            .args(native_action_arguments(name))
             .status()?;
         ensure!(status.success(), "chezmoi {name} failed with {status}");
         Ok(())
@@ -405,6 +536,30 @@ pub fn operate(
     if matches!(action, NativeAction::Apply) {
         let backup = backup.context("application requires an explicit fresh --backup directory")?;
         outside_public(root, backup)?;
+        let scripts = output(
+            chezmoi(root, scope.path(), config, destination).args([
+                "dump",
+                "--include",
+                "scripts",
+                "--format",
+                "json",
+            ]),
+            "render setup scripts",
+        )?;
+        let rendered: Value = serde_json::from_slice(&scripts.stdout)?;
+        let contents: String = rendered
+            .as_object()
+            .context("script dump must be a mapping")?
+            .values()
+            .filter_map(|script| script["contents"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let context = crate::setup::load(root, config, destination)?;
+        crate::setup::preflight(
+            &context,
+            &mut crate::runtime::Native::new(destination)?,
+            &crate::setup::scripted_steps(&contents),
+        )?;
         let state_file = state.join("state.boltdb");
         let previous_state = match fs::read(&state_file) {
             Ok(bytes) => Some(bytes),
@@ -434,9 +589,37 @@ pub fn operate(
                 if let Some(bytes) = &previous_state {
                     fs::write(backup.join("previous-state.boltdb"), bytes)?;
                 }
-                execute("apply")
+                execute("apply")?;
+                // Scripts can install programs that templates probe for, so files are rendered once more against the machine they produced before verification.
+                let status = chezmoi(root, state, config, destination)
+                    .args(["apply", "--exclude", "scripts"])
+                    .status()?;
+                ensure!(
+                    status.success(),
+                    "chezmoi convergence apply failed with {status}"
+                );
+                Ok(())
             },
-            || execute("verify"),
+            || {
+                execute("verify").map_err(|error| {
+                    // Name the diverging targets before the transaction restores them, or the evidence is gone.
+                    let report = |arguments: &[&str]| {
+                        chezmoi(root, state, config, destination)
+                            .args(arguments)
+                            .output()
+                            .map(|output| {
+                                let text = String::from_utf8_lossy(&output.stdout);
+                                text.lines().take(200).collect::<Vec<_>>().join("\n")
+                            })
+                            .unwrap_or_default()
+                    };
+                    let pending = report(&["status", "--exclude", "scripts,externals"]);
+                    let difference = report(&["diff", "--exclude", "scripts,externals"]);
+                    error.context(format!(
+                        "targets still differing after apply:\n{pending}\n{difference}"
+                    ))
+                })
+            },
         );
         if let Err(error) = result {
             if let Some(bytes) = previous_state {
@@ -457,7 +640,7 @@ pub fn operate(
 }
 
 fn outside_public(root: &Path, path: &Path) -> Result<()> {
-    let root = root.canonicalize()?;
+    let root = crate::canonical(root)?;
     ensure!(
         path.is_absolute()
             && !path
@@ -470,7 +653,7 @@ fn outside_public(root: &Path, path: &Path) -> Result<()> {
         .find(|path| path.exists())
         .context("private path has no existing ancestor")?;
     ensure!(
-        !existing.canonicalize()?.starts_with(&root) && !path.starts_with(&root),
+        !crate::canonical(existing)?.starts_with(&root) && !path.starts_with(&root),
         "private state and backups belong outside the public source"
     );
     Ok(())

@@ -1,8 +1,8 @@
 {{- $context := merge (dict) . (index .platforms .profile) -}}
 {{- if eq .profile "mac" -}}
-{{ include ".chezmoitemplates/profiles/mac/dot_config/git/hooks/executable_pre-push" }}
+{{ includeTemplate "profiles/mac/dot_config/git/hooks/executable_pre-push.tmpl" $context }}
 {{- else if eq .profile "linux" -}}
-{{ include ".chezmoitemplates/profiles/linux/dot_config/git/hooks/executable_pre-push" }}
+{{ includeTemplate "profiles/linux/dot_config/git/hooks/executable_pre-push.tmpl" $context }}
 {{- else if eq .profile "wsl" -}}
-{{ include ".chezmoitemplates/profiles/wsl/dot_config/git/hooks/executable_pre-push" }}
+{{ includeTemplate "profiles/wsl/dot_config/git/hooks/executable_pre-push.tmpl" $context }}
 {{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}

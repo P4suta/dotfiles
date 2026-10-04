@@ -1,9 +1,9 @@
+use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 pub const HARNESSES: [&str; 6] = [
     "adapter_activation_requires_policy_and_installed_runtime",
@@ -30,7 +30,7 @@ pub const PROFILE_HARNESSES: [&str; 7] = [
     "secrets_require_present_nonempty_resolved_values",
     "windows_path_translation_preserves_inline_public_keys",
     "remote_or_installed_context7_never_requires_a_mutation",
-    "forge_import_requires_exactly_one_matching_primary_key",
+    "forge_import_requires_only_pinned_keys_including_the_current_one",
 ];
 
 pub const REAPER_HARNESSES: [&str; 3] = [
@@ -128,7 +128,7 @@ fn verify_file(
     counterexample: bool,
 ) -> Result<()> {
     let output = directory.join("results.json");
-    let mut command = Command::new("kani");
+    let mut command = Tool::Kani.command();
     command
         .current_dir(directory)
         .arg(source)
@@ -157,7 +157,8 @@ fn verify_file(
 }
 
 fn verify_inventory(source: &Path, directory: &Path, expected: &[&str]) -> Result<()> {
-    let status = Command::new("kani")
+    let status = Tool::Kani
+        .command()
         .current_dir(directory)
         .args(["list", "--format", "json", "-Z", "stubbing"])
         .arg(source)
@@ -188,13 +189,13 @@ pub fn verify(root: &Path) -> Result<()> {
         cfg!(any(target_os = "macos", target_os = "linux")),
         "Kani is required on a supported Mac or Linux verification host; this native host does not provide that verifier"
     );
-    let version = Command::new("kani").arg("--version").output()?;
+    let version = Tool::Kani.command().arg("--version").output()?;
     ensure!(
         version.status.success()
             && String::from_utf8(version.stdout)?.contains("Kani Rust Verifier 0.68.0"),
         "the pinned Kani version is unavailable"
     );
-    let source = root.join("xtask/src/skill_rules.rs").canonicalize()?;
+    let source = crate::canonical(&root.join("xtask/src/skill_rules.rs"))?;
     let original = fs::read(&source)?;
     let directory = tempfile::tempdir()?;
     verify_inventory(&source, directory.path(), &HARNESSES)?;
@@ -217,7 +218,7 @@ pub fn verify(root: &Path) -> Result<()> {
         fs::read(source)? == original,
         "production proof source changed during verification"
     );
-    let source = root.join("xtask/src/pr_rules.rs").canonicalize()?;
+    let source = crate::canonical(&root.join("xtask/src/pr_rules.rs"))?;
     let original = fs::read(&source)?;
     let directory = tempfile::tempdir()?;
     verify_inventory(&source, directory.path(), &PR_HARNESSES)?;
@@ -241,7 +242,7 @@ pub fn verify(root: &Path) -> Result<()> {
         fs::read(source)? == original,
         "production PR proof source changed during verification"
     );
-    let source = root.join("xtask/src/profile_rules.rs").canonicalize()?;
+    let source = crate::canonical(&root.join("xtask/src/profile_rules.rs"))?;
     let original = fs::read(&source)?;
     let directory = tempfile::tempdir()?;
     verify_inventory(&source, directory.path(), &PROFILE_HARNESSES)?;
@@ -264,7 +265,7 @@ pub fn verify(root: &Path) -> Result<()> {
         fs::read(source)? == original,
         "production profile proof source changed during verification"
     );
-    let source = root.join("guard/src/reaper_rules.rs").canonicalize()?;
+    let source = crate::canonical(&root.join("guard/src/reaper_rules.rs"))?;
     let original = fs::read(&source)?;
     let directory = tempfile::tempdir()?;
     verify_inventory(&source, directory.path(), &REAPER_HARNESSES)?;
@@ -273,7 +274,7 @@ pub fn verify(root: &Path) -> Result<()> {
         fs::read(source)? == original,
         "production reaper proof source changed during verification"
     );
-    let source = root.join("xtask/src/review_rules.rs").canonicalize()?;
+    let source = crate::canonical(&root.join("xtask/src/review_rules.rs"))?;
     let original = fs::read(&source)?;
     let directory = tempfile::tempdir()?;
     verify_inventory(&source, directory.path(), &REVIEW_HARNESSES)?;

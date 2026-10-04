@@ -1,0 +1,5 @@
+disallowed-methods = [
+  { path = "std::process::Command::new", reason = "run external programs through crate::tool so each host provision is declared" },
+  { path = "std::path::Path::canonicalize", reason = "use crate::canonical so every path has one spelling on every host" },
+  { path = "std::fs::canonicalize", reason = "use crate::canonical so every path has one spelling on every host" },
+]

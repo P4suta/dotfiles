@@ -1,6 +1,6 @@
 {{- $context := merge (dict) . (index .platforms .profile) -}}
 {{- if eq .profile "mac" -}}
-{{ include ".chezmoitemplates/profiles/mac/dot_config/git/hooks/executable_commit-msg" }}
+{{ includeTemplate "profiles/mac/dot_config/git/hooks/executable_commit-msg.tmpl" $context }}
 {{- else if eq .profile "linux" -}}
-{{ include ".chezmoitemplates/profiles/linux/dot_config/git/hooks/executable_commit-msg" }}
+{{ includeTemplate "profiles/linux/dot_config/git/hooks/executable_commit-msg.tmpl" $context }}
 {{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}

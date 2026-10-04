@@ -22,7 +22,6 @@ paths = [
   ".chezmoitemplates/prose_policy",
   ".chezmoitemplates/remote_machines",
   ".chezmoitemplates/signing_pubkey",
-  ".chezmoitemplates/profiles/windows/remote_machines",
 ]
 language = "markdown"
 
@@ -39,7 +38,14 @@ paths = ["**/*.json.tmpl"]
 language = "jsonc"
 
 [[overrides]]
-paths = ["dot_config/dev-reaper/config", "dot_config/session-reaper/config"]
+paths = [
+  "dot_config/dev-reaper/config.tmpl",
+  "dot_config/session-reaper/config.tmpl",
+  ".chezmoitemplates/profiles/mac/dot_config/dev-reaper/config",
+  ".chezmoitemplates/profiles/mac/dot_config/session-reaper/config",
+  ".chezmoitemplates/profiles/linux/dot_config/dev-reaper/config",
+  ".chezmoitemplates/profiles/linux/dot_config/session-reaper/config",
+]
 language = "toml"
 
 # NOTE: `#` to the end of the line, a shell-shaped string, and that is the whole of what these have in common with a shell script.
@@ -51,7 +57,6 @@ paths = [
   "**/*.nu",
   "**/*.nu.tmpl",
   "justfile",
-  "install-docker-as-admin.sh",
 ]
 language = "shell"
 

@@ -1,6 +1,7 @@
+use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::ffi::{OsStr, OsString};
-use std::process::{Command, ExitStatus};
+use std::process::ExitStatus;
 
 pub fn translate(
     arguments: &[OsString],
@@ -65,7 +66,7 @@ pub fn run(arguments: &[OsString]) -> Result<ExitStatus> {
         "WSL signing requires a native WSL host"
     );
     let translated = translate(arguments, |path| {
-        let output = Command::new("wslpath").arg("-w").arg(path).output()?;
+        let output = Tool::Wslpath.command().arg("-w").arg(path).output()?;
         ensure!(output.status.success(), "Windows path conversion failed");
         let path = String::from_utf8(output.stdout)?
             .trim_end_matches(['\r', '\n'])
@@ -76,7 +77,8 @@ pub fn run(arguments: &[OsString]) -> Result<ExitStatus> {
         );
         Ok(path.into())
     })?;
-    Command::new("ssh-keygen.exe")
+    Tool::SshKeygen
+        .command()
         .args(translated)
         .status()
         .context("start Windows OpenSSH signing")

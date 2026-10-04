@@ -1,7 +1,8 @@
+use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::ffi::OsString;
 use std::path::Path;
-use std::process::{Command, ExitStatus};
+use std::process::ExitStatus;
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub enum Agent {
@@ -26,7 +27,7 @@ pub fn agent(
     arguments: &[OsString],
 ) -> Result<ExitStatus> {
     ensure!(
-        config.is_absolute() && !config.canonicalize()?.starts_with(root),
+        config.is_absolute() && !crate::canonical(config)?.starts_with(root),
         "agent configuration must be machine-local"
     );
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
@@ -56,7 +57,7 @@ pub fn agent(
         .chain(arguments.iter().cloned())
         .collect();
     if selected.is_empty() {
-        return Command::new(&command[0])
+        return crate::tool::external(&command[0])
             .args(&command[1..])
             .status()
             .context("start agent without API secrets");
@@ -113,7 +114,7 @@ pub fn validate(input: &str, environment: impl Fn(&str) -> Option<OsString>) -> 
 pub fn consume(input: &str, command: &[OsString]) -> Result<ExitStatus> {
     validate(input, |name| std::env::var_os(name))?;
     let executable = command.first().context("consuming command is required")?;
-    let mut child = Command::new(executable);
+    let mut child = crate::tool::external(executable);
     child.args(&command[1..]);
     if !names(input)?.contains(&"DOPPLER_TOKEN") {
         child.env_remove("DOPPLER_TOKEN");
@@ -129,7 +130,8 @@ pub fn run(project: &str, config: &str, input: &str, command: &[OsString]) -> Re
     );
     ensure!(!command.is_empty(), "consuming command is required");
     let executable = std::env::current_exe()?;
-    Command::new("doppler")
+    Tool::Doppler
+        .command()
         .args([
             "run",
             "--project",

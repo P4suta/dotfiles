@@ -119,7 +119,7 @@ pub fn check_review(
         "duplicate analysis finding"
     );
     let mut found = BTreeSet::new();
-    let root = evidence_root.canonicalize()?;
+    let root = crate::canonical(evidence_root)?;
     for decision in &review.decisions {
         ensure!(
             expected.contains(&decision.id) && found.insert(&decision.id),
@@ -148,10 +148,8 @@ pub fn check_review(
                         .all(|part| matches!(part, Component::Normal(_))),
                 "evidence must be a relative local path"
             );
-            let resolved = root
-                .join(path)
-                .canonicalize()
-                .context("missing decision evidence")?;
+            let resolved =
+                crate::canonical(&root.join(path)).context("missing decision evidence")?;
             ensure!(
                 resolved.starts_with(&root) && resolved.is_file(),
                 "decision evidence escapes its root or is not a file"
@@ -170,7 +168,7 @@ pub fn hash(value: &impl Serialize) -> Result<String> {
 }
 
 pub fn evidence_hashes(review: &Review, root: &Path) -> Result<BTreeMap<String, String>> {
-    let root = root.canonicalize()?;
+    let root = crate::canonical(root)?;
     let mut result = BTreeMap::new();
     for name in review
         .decisions
@@ -185,7 +183,7 @@ pub fn evidence_hashes(review: &Review, root: &Path) -> Result<BTreeMap<String, 
                     .all(|part| matches!(part, Component::Normal(_))),
             "evidence must be a relative local path"
         );
-        let resolved = root.join(path).canonicalize()?;
+        let resolved = crate::canonical(&root.join(path))?;
         ensure!(
             resolved.starts_with(&root) && resolved.is_file(),
             "evidence escapes its root"
@@ -295,7 +293,7 @@ pub fn catalog_owned(tree: &Path, scope: &Catalog) -> Result<Catalog> {
 }
 
 fn capture_catalog(tree: &Path, scope: Option<&Catalog>) -> Result<Catalog> {
-    let tree = tree.canonicalize()?;
+    let tree = crate::canonical(tree)?;
     let mut skills = BTreeMap::new();
     for entry in fs::read_dir(&tree)? {
         let entry = entry?;
@@ -463,9 +461,9 @@ pub fn observations(
             if let Some(path) = args["file_path"]
                 .as_str()
                 .or_else(|| args["filePath"].as_str())
-                && let Ok(resolved) = Path::new(path).canonicalize()
+                && let Ok(resolved) = crate::canonical(Path::new(path))
             {
-                let root = owned_tree.canonicalize()?;
+                let root = crate::canonical(owned_tree)?;
                 for name in catalog.skills.keys() {
                     if resolved == root.join(name).join("SKILL.md") {
                         found.insert(name.clone(), Signal::FileRead);

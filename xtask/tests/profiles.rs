@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_methods,
+    reason = "integration tests spawn the binaries and real tools they verify"
+)]
+
 use dotfiles_xtask::{
     profile_rules::{Mode, Profile, Reconcile, permitted, reconcile, selected},
     profiles, quality,
@@ -83,4 +88,299 @@ fn managed_listings_are_nul_separated_text() {
     );
     assert!(profiles::managed_paths(b"").unwrap().is_empty());
     assert!(profiles::managed_paths(b"\xff\0").is_err());
+}
+
+#[test]
+fn native_verification_ignores_always_run_scripts() {
+    assert_eq!(
+        profiles::native_action_arguments("verify"),
+        ["verify", "--exclude", "scripts"]
+    );
+    assert_eq!(profiles::native_action_arguments("apply"), ["apply"]);
+    assert_eq!(profiles::native_action_arguments("diff"), ["diff"]);
+}
+
+#[test]
+fn skipped_setup_scripts_need_a_target_name_and_a_reason() {
+    let accepted = serde_json::json!({"setup": {"skip": [{"script": "setup-ocaml.sh", "reason": "compiles a toolchain"}]}});
+    assert_eq!(profiles::declared_skips(&accepted).unwrap().len(), 1);
+    for rejected in [
+        serde_json::json!({"setup": {"skip": [{"script": "setup-ocaml.sh", "reason": " "}]}}),
+        serde_json::json!({"setup": {"skip": [{"script": "../escape.sh", "reason": "x"}]}}),
+        serde_json::json!({"setup": {"skip": [{"script": "setup-ocaml.sh"}]}}),
+        serde_json::json!({"setup": {"skip": [{"script": "a.sh", "reason": "x", "extra": 1}]}}),
+    ] {
+        assert!(profiles::declared_skips(&rejected).is_err(), "{rejected}");
+    }
+    assert!(
+        profiles::declared_skips(&serde_json::json!({}))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
+    let snapshot = source_snapshot();
+    let root = snapshot.path();
+    for profile in Profile::ALL {
+        let scope = tempfile::tempdir().unwrap();
+        let home = scope.path().join("home");
+        fs::create_dir(&home).unwrap();
+        let config = scope.path().join("chezmoi.toml");
+        fs::write(
+            &config,
+            dotfiles_xtask::rehearsal::configuration(root, profile, &home).unwrap(),
+        )
+        .unwrap();
+        let output = profiles::chezmoi(root, scope.path(), &config, &home)
+            .args(["data", "--format", "json"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let data: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(profiles::configured_profile(&data).unwrap(), profile);
+        assert_eq!(
+            data["platforms"][profile.name()]["tools"]["common"],
+            serde_json::json!(["jq"])
+        );
+        let mise = profiles::chezmoi(root, scope.path(), &config, &home)
+            .arg("--override-data")
+            .arg(format!(
+                r#"{{"platforms":{{"{0}":{{"tools":{{"personal":["jq"]}}}}}}}}"#,
+                profile.name()
+            ))
+            .args(["cat"])
+            .arg(home.join(".config/mise/config.toml"))
+            .output()
+            .unwrap();
+        assert!(
+            mise.status.success(),
+            "{}",
+            String::from_utf8_lossy(&mise.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&mise.stdout)
+                .matches("\n\"jq\" =")
+                .count(),
+            1,
+            "a tool listed twice must render once"
+        );
+        let platform = &data["platforms"][profile.name()];
+        let scripts = profiles::chezmoi(root, scope.path(), &config, &home)
+            .args(["dump", "--include", "scripts", "--format", "json"])
+            .output()
+            .unwrap();
+        let scripts: serde_json::Value = serde_json::from_slice(&scripts.stdout).unwrap();
+        let contents: String = scripts
+            .as_object()
+            .unwrap()
+            .values()
+            .filter_map(|script| script["contents"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            profiles::unprovisioned(profile, platform, &contents).is_empty(),
+            "the rehearsal data must still install what its scripts require"
+        );
+        let skips = profiles::declared_skips(&data).unwrap();
+        assert_eq!(skips.is_empty(), profile == Profile::Windows, "{skips:?}");
+        let listed = profiles::chezmoi(root, scope.path(), &config, &home)
+            .args(["managed", "--include", "scripts", "--nul-path-separator"])
+            .output()
+            .unwrap();
+        assert!(
+            listed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&listed.stderr)
+        );
+        let scripts = profiles::managed_paths(&listed.stdout).unwrap();
+        assert!(!scripts.is_empty());
+        for skip in skips {
+            assert!(
+                !scripts.contains(&skip.script),
+                "{} still runs",
+                skip.script
+            );
+        }
+    }
+}
+
+#[test]
+fn public_owner_sources_clone_over_https_despite_a_host_ssh_rewrite() {
+    use dotfiles_xtask::setup::OwnerSource;
+    let scope = tempfile::tempdir().unwrap();
+    let global = scope.path().join("gitconfig");
+    fs::write(
+        &global,
+        "[url \"git@github.com:\"]\n\tinsteadOf = https://github.com/\n",
+    )
+    .unwrap();
+    for (source, expected) in [
+        (
+            OwnerSource::Ocomment,
+            "https://github.com/P4suta/OComment.git",
+        ),
+        (
+            OwnerSource::Domyjob,
+            "https://github.com/P4suta/domyjob.git",
+        ),
+        (OwnerSource::Fleet, "git@github.com:P4suta/fleet"),
+    ] {
+        let mut arguments = source.clone_arguments(&scope.path().join("checkout"));
+        let clone = arguments
+            .iter()
+            .position(|argument| argument == "clone")
+            .unwrap();
+        let url = arguments[clone + 1].clone();
+        arguments.truncate(clone);
+        let resolved = std::process::Command::new("git")
+            .env("GIT_CONFIG_GLOBAL", &global)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .args(&arguments)
+            .args(["ls-remote", "--get-url"])
+            .arg(url)
+            .output()
+            .unwrap();
+        assert!(resolved.status.success());
+        assert_eq!(String::from_utf8(resolved.stdout).unwrap().trim(), expected);
+    }
+}
+
+#[test]
+fn scripted_steps_are_read_from_rendered_launchers_in_order() {
+    use dotfiles_xtask::setup::{Step, scripted_steps};
+    let scripts = "#!/bin/sh\nexec '/h/.local/bin/dotfiles-xtask' --root '/s' setup fleet --config '/c' --live\n#!/bin/sh\nexec cargo run -- --root '/s' setup runtime --config '/c' --live\n& 'dotctl.exe' setup keyboard\n";
+    assert_eq!(scripted_steps(scripts), [Step::Fleet, Step::Runtime]);
+}
+
+#[test]
+fn comment_overrides_cannot_capture_whole_directories() {
+    let scope = tempfile::tempdir().unwrap();
+    fs::write(scope.path().join("notes"), "prose\n").unwrap();
+    let write = |paths: &str| {
+        fs::write(
+            scope.path().join(".ocomment.toml"),
+            format!("version = 1\n[[overrides]]\npaths = [{paths}]\nlanguage = \"markdown\"\n"),
+        )
+        .unwrap();
+    };
+    write(r#""**/*.md.tmpl", "notes""#);
+    quality::comment_scopes(scope.path()).unwrap();
+    for refused in [r#"".chezmoitemplates/*""#, r#""missing""#, r#""docs/**""#] {
+        write(refused);
+        assert!(quality::comment_scopes(scope.path()).is_err(), "{refused}");
+    }
+}
+
+#[test]
+fn setup_order_rejects_a_step_that_runs_before_its_prerequisite() {
+    use dotfiles_xtask::setup::{Step, ordering_violations};
+    assert!(
+        ordering_violations(&[Step::Runtime, Step::Mise, Step::Tools, Step::Domyjob]).is_empty()
+    );
+    assert_eq!(
+        ordering_violations(&[Step::Mise, Step::Domyjob, Step::Tools]),
+        [(Step::Domyjob, Step::Tools)]
+    );
+    assert!(ordering_violations(&[Step::Domyjob]).is_empty());
+    let listing = br#"{"10-b.sh":{"sourceRelative":"run_onchange_after_10-b.sh.tmpl"},"a.sh":{"sourceRelative":"run_after_a.sh.tmpl"},"z.sh":{"sourceRelative":"run_onchange_before_z.sh.tmpl"}}"#;
+    assert_eq!(
+        profiles::script_order(listing).unwrap(),
+        ["z.sh", "10-b.sh", "a.sh"]
+    );
+}
+
+#[test]
+fn setup_that_needs_a_package_requires_the_profile_to_install_it() {
+    let scripts = "exec dotfiles-xtask --root /s setup domyjob --config /c --live\n";
+    let provided = serde_json::json!({"brew": {"formulae": ["jq", "lefthook"]}});
+    assert!(profiles::unprovisioned(Profile::Mac, &provided, scripts).is_empty());
+    let missing = serde_json::json!({"brew": {"formulae": ["jq"]}});
+    assert_eq!(
+        profiles::unprovisioned(Profile::Mac, &missing, scripts),
+        ["/brew/formulae/lefthook"]
+    );
+    let disabled = serde_json::json!({"nix": {"packages": {"lefthook": ""}}});
+    assert_eq!(
+        profiles::unprovisioned(Profile::Linux, &disabled, "setup ocomment\n").len(),
+        1
+    );
+    let shell = "& 'C:/h/.local/bin/dotctl.exe' setup shell\n";
+    assert_eq!(
+        profiles::unprovisioned(
+            Profile::Windows,
+            &serde_json::json!({"scoop": {"apps": ["starship"]}}),
+            shell
+        ),
+        ["/scoop/apps/zoxide"]
+    );
+}
+
+#[test]
+fn launchers_exec_their_installed_path_rather_than_the_runtime_home() {
+    let home = "#!/bin/sh\nexec \"$HOME/.local/bin/dotguard\" git \"$@\"\n";
+    assert!(quality::launcher_resolves_through_home(
+        ".local/bin/git",
+        home
+    ));
+    assert!(quality::launcher_resolves_through_home(
+        ".config/git/hooks/pre-push",
+        home
+    ));
+    let installed = "#!/bin/sh\nexec '/Users/fixture/.local/bin/dotguard' git \"$@\"\n";
+    assert!(!quality::launcher_resolves_through_home(
+        ".local/bin/git",
+        installed
+    ));
+    assert!(!quality::launcher_resolves_through_home(".bashrc", home));
+}
+
+#[test]
+fn profile_leaves_must_be_included_by_a_template() {
+    let scope = tempfile::tempdir().unwrap();
+    let leaves = scope.path().join(".chezmoitemplates/profiles/mac");
+    fs::create_dir_all(&leaves).unwrap();
+    fs::write(leaves.join("used"), "a\n").unwrap();
+    fs::write(leaves.join("stale"), "b\n").unwrap();
+    fs::write(
+        scope.path().join("dot_used.tmpl"),
+        "{{ includeTemplate \"profiles/mac/used\" . }}\n",
+    )
+    .unwrap();
+    assert_eq!(
+        quality::unreferenced_leaves(scope.path()).unwrap(),
+        ["profiles/mac/stale"]
+    );
+}
+
+/// chezmoi reads every entry under its source, including ignored build directories, so a concurrent build in the checkout can remove a file between its listing and its lstat.
+/// Contract tests read a copy without build outputs instead.
+fn source_snapshot() -> tempfile::TempDir {
+    fn copy(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name();
+            if matches!(name.to_str(), Some("target" | "node_modules" | ".git")) {
+                continue;
+            }
+            let kind = entry.file_type().unwrap();
+            if kind.is_dir() {
+                copy(&entry.path(), &to.join(&name));
+            } else if kind.is_file() {
+                fs::copy(entry.path(), to.join(&name)).unwrap();
+            }
+        }
+    }
+    let snapshot = tempfile::tempdir().unwrap();
+    copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap(),
+        snapshot.path(),
+    );
+    snapshot
 }
