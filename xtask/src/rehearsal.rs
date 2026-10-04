@@ -58,52 +58,105 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
     let data: serde_json::Value =
         serde_json::from_slice(&fs::read(root.join(".chezmoidata.json"))?)?;
     let projects = home.join("projects");
-    let mut text = String::new();
+    let mut identity = String::new();
     if profile == Profile::Windows {
-        text.push_str(
+        identity.push_str(
             "[interpreters.ps1]\ncommand = \"pwsh\"\nargs = [\"-NoLogo\", \"-NoProfile\"]\n\n",
         );
     }
-    text.push_str(&format!(
+    identity.push_str(&format!(
         "[data]\nprofile = {}\nrole = \"personal\"\n\n[data.git]\nname = \"Rehearsal\"\nemail = \"rehearsal@example.invalid\"\n\n[data.signing]\nenabled = false\npublic_key = \"\"\npubkey = \"\"\nkey_comment = \"\"\n\n[data.herdr_agent]\npublic_keys = []\n\n[data.doppler]\nproject = \"\"\nconfig = \"\"\n\n[data.doppler.secrets]\ncodex = []\nclaude = []\nopencode = []\n\n[data.paths]\nprojects = {}\n\n",
         toml_string(profile.name()),
         toml_string(&projects.to_string_lossy()),
     ));
-    let name = profile.name();
-    text.push_str(&format!(
-        "[data.platforms.{name}.tools]\ncommon = [\"jq\"]\npersonal = []\nwork = []\n\n"
-    ));
-    match profile {
-        Profile::Mac => text.push_str(
-            "[data.platforms.mac.brew]\nformulae = [\"jq\"]\ncasks = []\n\n[data.platforms.mac.racket]\ncollections = []\n\n[data.platforms.mac.ocaml]\nplatform_tools = []\n\n",
-        ),
-        Profile::Linux => {
-            text.push_str("[data.platforms.linux.ocaml]\nplatform_tools = []\n\n");
-            text.push_str("[data.platforms.linux.nix.packages]\n");
-            for package in data
-                .pointer("/platforms/linux/nix/packages")
-                .and_then(serde_json::Value::as_object)
-                .context("Linux Nix packages are missing")?
-                .keys()
-            {
-                text.push_str(&format!("{} = \"\"\n", toml_string(package)));
-            }
-            text.push('\n');
-        }
-        // The tools step installs Lefthook's hooks into the source checkout and the shell step caches Starship and zoxide initialization, so Scoop must still provide them.
-        Profile::Windows => text.push_str(
-            "[data.platforms.windows.scoop]\napps = [\"jq\", \"lefthook\", \"starship\", \"zoxide\"]\nwinget_duplicates = []\n\n[data.platforms.windows.winget]\napps = []\n\n",
-        ),
-        Profile::Wsl => {}
-    }
     for skip in omitted(profile) {
-        text.push_str(&format!(
+        identity.push_str(&format!(
             "[[data.setup.skip]]\nscript = {}\nreason = {}\n\n",
             toml_string(skip.script),
             toml_string(skip.reason)
         ));
     }
+    // The scripts that will run decide which packages must survive the reduction, so a step's declared requirements cannot drift from the rehearsal data.
+    let kept = required_packages(root, profile, home, &identity)?;
+    let keep = |pointer: &str| -> Vec<String> {
+        kept.iter()
+            .filter(|(list, _)| *list == pointer)
+            .map(|(_, entry)| toml_string(entry))
+            .collect()
+    };
+    let list = |pointer: &str| {
+        std::iter::once(toml_string("jq"))
+            .chain(keep(pointer))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut text = identity;
+    let name = profile.name();
+    text.push_str(&format!(
+        "[data.platforms.{name}.tools]\ncommon = [\"jq\"]\npersonal = []\nwork = []\n\n"
+    ));
+    match profile {
+        Profile::Mac => text.push_str(&format!(
+            "[data.platforms.mac.brew]\nformulae = [{}]\ncasks = []\n\n[data.platforms.mac.racket]\ncollections = []\n\n[data.platforms.mac.ocaml]\nplatform_tools = []\n\n",
+            list("/brew/formulae")
+        )),
+        Profile::Linux => {
+            text.push_str("[data.platforms.linux.ocaml]\nplatform_tools = []\n\n");
+            text.push_str("[data.platforms.linux.nix.packages]\n");
+            let packages = data
+                .pointer("/platforms/linux/nix/packages")
+                .and_then(serde_json::Value::as_object)
+                .context("Linux Nix packages are missing")?;
+            let required = keep("/nix/packages");
+            for (package, spec) in packages {
+                let spec = if required.contains(&toml_string(package)) {
+                    spec.as_str().unwrap_or_default()
+                } else {
+                    ""
+                };
+                text.push_str(&format!("{} = {}\n", toml_string(package), toml_string(spec)));
+            }
+            text.push('\n');
+        }
+        Profile::Windows => text.push_str(&format!(
+            "[data.platforms.windows.scoop]\napps = [{}]\nwinget_duplicates = []\n\n[data.platforms.windows.winget]\napps = []\n\n",
+            list("/scoop/apps")
+        )),
+        Profile::Wsl => {}
+    }
     Ok(text)
+}
+
+/// Package-list entries for the tools that this profile's scripts require, read from the scripts rendered with full data.
+fn required_packages(
+    root: &Path,
+    profile: Profile,
+    home: &Path,
+    identity: &str,
+) -> Result<Vec<(&'static str, &'static str)>> {
+    let scope = tempfile::tempdir()?;
+    let config = scope.path().join("chezmoi.toml");
+    fs::write(&config, identity)?;
+    let rendered = crate::profiles::chezmoi(root, scope.path(), &config, home)
+        .args(["dump", "--include", "scripts", "--format", "json"])
+        .output()?;
+    ensure!(
+        rendered.status.success(),
+        "render rehearsal scripts: {}",
+        String::from_utf8_lossy(&rendered.stderr)
+    );
+    let scripts: serde_json::Value = serde_json::from_slice(&rendered.stdout)?;
+    let contents: String = scripts
+        .as_object()
+        .context("script dump must be a mapping")?
+        .values()
+        .filter_map(|script| script["contents"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(crate::setup::scripted_requirements(profile, &contents)
+        .into_iter()
+        .filter_map(|tool| tool.package(profile))
+        .collect())
 }
 
 fn native_home() -> Result<PathBuf> {

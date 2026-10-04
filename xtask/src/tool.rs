@@ -2,6 +2,7 @@
 //!
 //! Spawning a process anywhere else is a lint error (see `clippy.toml`), so a new dependency on a host tool cannot appear without a declared provision.
 
+use crate::profile_rules::Profile;
 use crate::setup::Step;
 use std::process::Command;
 
@@ -360,6 +361,22 @@ impl Tool {
             | Self::Raco
             | Self::Tmux
             | Self::XdgMime => Provision::Owner,
+        }
+    }
+
+    /// The package list a profile installs this tool from, as a platform data pointer and entry, for tools a setup step requires.
+    pub fn package(self, profile: Profile) -> Option<(&'static str, &'static str)> {
+        let pointer = match profile {
+            Profile::Mac => "/brew/formulae",
+            Profile::Linux => "/nix/packages",
+            Profile::Windows => "/scoop/apps",
+            Profile::Wsl => return None,
+        };
+        match self {
+            Self::Lefthook => Some((pointer, "lefthook")),
+            Self::Starship => Some((pointer, "starship")),
+            Self::Zoxide => Some((pointer, "zoxide")),
+            _ => None,
         }
     }
 

@@ -143,6 +143,67 @@ impl Step {
     }
 }
 
+impl Step {
+    /// Packaged tools this step invokes, beyond those the host or this repository pins.
+    /// Owner sources are cloned under the global Git hooks, which run Lefthook for repositories that configure it.
+    /// On Windows the tools step runs `dotctl setup tools`, which installs Lefthook's hooks into the source checkout.
+    pub fn requires(self, profile: Profile) -> &'static [Tool] {
+        match self {
+            Self::Ocomment | Self::Domyjob | Self::Fleet => &[Tool::Lefthook],
+            Self::Tools if profile == Profile::Windows => dotctl_requires("tools"),
+            Self::Runtime
+            | Self::Mise
+            | Self::Github
+            | Self::Nix
+            | Self::Tools
+            | Self::Upgrade
+            | Self::Integrations
+            | Self::Desktop
+            | Self::Fcitx5
+            | Self::Ocaml
+            | Self::Haskell
+            | Self::Racket
+            | Self::Guard
+            | Self::MacosDefaults
+            | Self::ForgeKeys
+            | Self::Claude
+            | Self::RetireTmux
+            | Self::Adapters
+            | Self::Wezterm => &[],
+        }
+    }
+}
+
+/// Packaged tools the Windows `dotctl setup` commands invoke.
+fn dotctl_requires(command: &str) -> &'static [Tool] {
+    match command {
+        "tools" => &[Tool::Lefthook],
+        "shell" => &[Tool::Starship, Tool::Zoxide],
+        _ => &[],
+    }
+}
+
+/// Packaged tools the rendered scripts require, through xtask steps and `dotctl` commands.
+pub fn scripted_requirements(profile: Profile, scripts: &str) -> Vec<Tool> {
+    let mut tools: Vec<Tool> = scripted_steps(scripts)
+        .into_iter()
+        .flat_map(|step| step.requires(profile).iter().copied())
+        .collect();
+    for words in scripts
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>())
+    {
+        for triple in words.windows(3) {
+            if triple[0].trim_matches(['\'', '"']).ends_with("dotctl.exe") && triple[1] == "setup" {
+                tools.extend(dotctl_requires(triple[2]));
+            }
+        }
+    }
+    tools.sort();
+    tools.dedup();
+    tools
+}
+
 /// Dependency pairs `(step, prerequisite)` that a run order breaks: the prerequisite runs later, or only later.
 pub fn ordering_violations(sequence: &[Step]) -> Vec<(Step, Step)> {
     let mut violations = Vec::new();

@@ -169,6 +169,23 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
             1,
             "a tool listed twice must render once"
         );
+        let platform = &data["platforms"][profile.name()];
+        let scripts = profiles::chezmoi(root, scope.path(), &config, &home)
+            .args(["dump", "--include", "scripts", "--format", "json"])
+            .output()
+            .unwrap();
+        let scripts: serde_json::Value = serde_json::from_slice(&scripts.stdout).unwrap();
+        let contents: String = scripts
+            .as_object()
+            .unwrap()
+            .values()
+            .filter_map(|script| script["contents"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            profiles::unprovisioned(profile, platform, &contents).is_empty(),
+            "the rehearsal data must still install what its scripts require"
+        );
         let skips = profiles::declared_skips(&data).unwrap();
         assert_eq!(skips.is_empty(), profile == Profile::Windows, "{skips:?}");
         let listed = profiles::chezmoi(root, scope.path(), &config, &home)
@@ -274,5 +291,31 @@ fn setup_order_rejects_a_step_that_runs_before_its_prerequisite() {
     assert_eq!(
         profiles::script_order(listing).unwrap(),
         ["z.sh", "10-b.sh", "a.sh"]
+    );
+}
+
+#[test]
+fn setup_that_needs_a_package_requires_the_profile_to_install_it() {
+    let scripts = "exec dotfiles-xtask --root /s setup domyjob --config /c --live\n";
+    let provided = serde_json::json!({"brew": {"formulae": ["jq", "lefthook"]}});
+    assert!(profiles::unprovisioned(Profile::Mac, &provided, scripts).is_empty());
+    let missing = serde_json::json!({"brew": {"formulae": ["jq"]}});
+    assert_eq!(
+        profiles::unprovisioned(Profile::Mac, &missing, scripts),
+        ["/brew/formulae/lefthook"]
+    );
+    let disabled = serde_json::json!({"nix": {"packages": {"lefthook": ""}}});
+    assert_eq!(
+        profiles::unprovisioned(Profile::Linux, &disabled, "setup ocomment\n").len(),
+        1
+    );
+    let shell = "& 'C:/h/.local/bin/dotctl.exe' setup shell\n";
+    assert_eq!(
+        profiles::unprovisioned(
+            Profile::Windows,
+            &serde_json::json!({"scoop": {"apps": ["starship"]}}),
+            shell
+        ),
+        ["/scoop/apps/zoxide"]
     );
 }

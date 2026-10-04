@@ -179,6 +179,24 @@ pub fn native_action_arguments(name: &str) -> Vec<&str> {
     }
 }
 
+/// Packaged tools the rendered scripts require that the profile's platform data does not install.
+pub fn unprovisioned(profile: Profile, platform: &Value, scripts: &str) -> Vec<String> {
+    crate::setup::scripted_requirements(profile, scripts)
+        .into_iter()
+        .filter_map(|tool| tool.package(profile))
+        .filter(|(pointer, entry)| {
+            let list = platform.pointer(pointer);
+            !(list
+                .and_then(Value::as_array)
+                .is_some_and(|items| items.iter().any(|item| item == entry))
+                || list
+                    .and_then(Value::as_object)
+                    .is_some_and(|items| items.get(*entry).is_some_and(|spec| spec != "")))
+        })
+        .map(|(pointer, entry)| format!("{pointer}/{entry}"))
+        .collect()
+}
+
 /// Script targets in the order chezmoi runs them: every `run_before_` script, then every `run_after_` script, each group by target name.
 pub fn script_order(listing: &[u8]) -> Result<Vec<String>> {
     let entries: std::collections::BTreeMap<String, Value> = serde_json::from_slice(listing)?;
@@ -229,6 +247,7 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
         fs::create_dir(report).context("profile report requires a fresh output directory")?;
     }
     let scratch = tempfile::tempdir()?;
+    let source_data: Value = serde_json::from_slice(&fs::read(root.join(".chezmoidata.json"))?)?;
     for profile in Profile::ALL {
         let scope = scratch.path().join(profile.name());
         let destination = scope.join("home with ' quote");
@@ -317,6 +336,18 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
                 crate::setup::scripted_steps(dump[target]["contents"].as_str().unwrap_or_default())
             })
             .collect();
+        let scripts: String = order
+            .iter()
+            .filter_map(|target| dump[target]["contents"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let platform = &source_data["platforms"][profile.name()];
+        let unprovisioned = unprovisioned(profile, platform, &scripts);
+        ensure!(
+            unprovisioned.is_empty(),
+            "{} profile runs setup that needs packages its data does not install: {unprovisioned:?}",
+            profile.name()
+        );
         let violations = crate::setup::ordering_violations(&sequence);
         ensure!(
             violations.is_empty(),
