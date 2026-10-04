@@ -117,7 +117,7 @@ enum Action {
         backup: Option<PathBuf>,
     },
     Skills,
-    /// Apply the native profile with its scripts, twice, on a disposable CI host.
+    /// Apply the native profile, rerun every script on the provisioned host, and apply again, on a disposable CI host.
     Rehearse {
         #[arg(long)]
         disposable_host: bool,

@@ -1,7 +1,7 @@
 //! Native application rehearsal on a disposable host.
 //!
 //! The profile gate renders and applies files in owned fixtures, which cannot exercise setup scripts, native verification, rollback, or the takeover of a machine that earlier repositories provisioned.
-//! This runs the real `profile apply` against the host's own home, twice, after seeding earlier provisioning, so those paths fail in CI instead of on an owner's machine.
+//! This runs the real `profile apply` against the host's own home three times, the second rerunning every script, after seeding earlier provisioning, so those paths fail in CI instead of on an owner's machine.
 
 use crate::profile_rules::Profile;
 use crate::profiles::{NativeAction, forget_script_runs, native_profile, operate};

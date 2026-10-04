@@ -46,5 +46,5 @@ jobs:
         with:
           persist-credentials: false
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
-      - name: Apply the native profile twice with its scripts on this disposable host
+      - name: Apply, reprovision, and reapply the native profile on this disposable host
         run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- rehearse --disposable-host
