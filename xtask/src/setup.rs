@@ -2,6 +2,7 @@ use crate::profile_rules::{Mode, Profile, permitted};
 use crate::runtime::{Native, Runner, args, checked, optional, replace};
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -138,19 +139,33 @@ fn strings(data: &Value, pointer: &str) -> Result<Vec<String>> {
         .collect()
 }
 
+/// `--force` replaces binaries another package or an earlier source path installed, so cutover and reapplication converge on this source.
+pub(crate) fn cargo_install_arguments(
+    path: &Path,
+    root: &Path,
+    binaries: &[&str],
+) -> Vec<OsString> {
+    let mut arguments = args(&["install", "--locked", "--force", "--path"]);
+    arguments.push(path.into());
+    arguments.push("--root".into());
+    arguments.push(root.into());
+    for binary in binaries {
+        arguments.extend(args(&["--bin", binary]));
+    }
+    arguments
+}
+
 fn install_crate(
     context: &ContextData,
     runner: &mut impl Runner,
     relative: &str,
     binaries: &[&str],
 ) -> Result<()> {
-    let mut arguments = args(&["install", "--locked", "--path"]);
-    arguments.push(context.source.join(relative).into());
-    arguments.extend(args(&["--root"]));
-    arguments.push(context.home.join(".local").into());
-    for binary in binaries {
-        arguments.extend(args(&["--bin", binary]));
-    }
+    let arguments = cargo_install_arguments(
+        &context.source.join(relative),
+        &context.home.join(".local"),
+        binaries,
+    );
     checked(runner, "cargo", &arguments)?;
     Ok(())
 }
@@ -648,18 +663,14 @@ fn source_tool(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
             ],
         )?;
     }
-    let mut arguments = args(&["install", "--locked", "--path"]);
-    arguments.push(checkout.join(relative).into());
-    arguments.push("--root".into());
-    arguments.push(
-        context
-            .home
-            .join(if matches!(step, Step::Domyjob) {
-                ".cargo"
-            } else {
-                ".local"
-            })
-            .into(),
+    let arguments = cargo_install_arguments(
+        &checkout.join(relative),
+        &context.home.join(if matches!(step, Step::Domyjob) {
+            ".cargo"
+        } else {
+            ".local"
+        }),
+        &[],
     );
     checked(runner, "cargo", &arguments)?;
     checked(runner, binary, &args(&["--version"]))?;
@@ -783,6 +794,28 @@ fn retire_tmux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn helper_installation_replaces_binaries_from_another_source() {
+        let arguments = super::cargo_install_arguments(
+            std::path::Path::new("/source/xtask"),
+            std::path::Path::new("/home/fixture/.local"),
+            &["skill-ops"],
+        );
+        assert_eq!(
+            arguments,
+            [
+                "install",
+                "--locked",
+                "--force",
+                "--path",
+                "/source/xtask",
+                "--root",
+                "/home/fixture/.local",
+                "--bin",
+                "skill-ops",
+            ]
+        );
+    }
     use super::*;
 
     #[test]
