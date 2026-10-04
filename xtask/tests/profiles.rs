@@ -63,3 +63,24 @@ fn windows_launcher_parsing_uses_the_git_shell_rather_than_wsl() {
         None
     );
 }
+
+#[test]
+fn directories_without_managed_content_are_reported() {
+    let directories =
+        ["Library", "Library/LaunchAgents", ".config", ".config/git"].map(String::from);
+    let leaves = [".config/git/config", "Library-notes.txt"].map(String::from);
+    assert_eq!(
+        profiles::empty_directories(&directories, &leaves),
+        ["Library", "Library/LaunchAgents"]
+    );
+}
+
+#[test]
+fn managed_listings_are_nul_separated_text() {
+    assert_eq!(
+        profiles::managed_paths(b".config/git/config\0path with ' quote\0").unwrap(),
+        [".config/git/config", "path with ' quote"]
+    );
+    assert!(profiles::managed_paths(b"").unwrap().is_empty());
+    assert!(profiles::managed_paths(b"\xff\0").is_err());
+}

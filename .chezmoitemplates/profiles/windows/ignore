@@ -1,7 +1,7 @@
 # Target paths chezmoi never applies to the home directory.
 
 # Machine-local login state, contains tokens.
-# config.yml is expected to hold only portable settings and stays under dotfiles management.
+# This profile manages no GitHub CLI configuration; the unified ignore list also excludes config.yml here.
 .config/gh/hosts.yml
 
 # Runtime state
@@ -36,3 +36,32 @@ tools/**
 # dot_config/git/config.tmpl carries our own Git settings instead.
 # Patterns here are target paths (relative to ~/), so this is `.gitconfig` rather than the source name `dot_gitconfig.tmpl`.
 .gitconfig
+
+# Directories that only hold another profile's targets in the unified source; ignoring them keeps this home from gaining empty trees or changed permissions.
+.claude/shims
+.config/atuin
+.config/bat
+.config/coderabbit-guard
+.config/dev-reaper
+.config/fcitx5
+.config/fzf
+.config/gh
+.config/ghostty
+.config/git/hooks
+.config/herdr
+.config/herdr-agent
+.config/homebrew
+.config/jj
+.config/kitty
+.config/lazygit
+.config/lefthook
+.config/mise/tasks
+.config/nushell
+.config/opencode/agents
+.config/opencode/commands
+.config/opencode/themes
+.config/session-reaper
+.config/shell
+.config/systemd
+.local/share
+Library

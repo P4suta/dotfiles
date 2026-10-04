@@ -80,3 +80,21 @@ ops
 
 # DEPRECATED, superseded by ops/site.yml --tags docker; kept one release
 install-docker-as-admin.sh
+
+# Directories that only hold another profile's targets in the unified source; ignoring them keeps this home from gaining empty trees or changed permissions.
+.config/bat
+.config/fzf
+.config/ghostty
+.config/git/template
+.config/herdr-agent
+.config/homebrew
+.config/lazygit
+.config/lefthook
+.config/opencode/agents
+.config/opencode/commands
+.config/opencode/themes
+.config/wezterm
+.local/share/dotfiles
+AppData
+Documents
+Library

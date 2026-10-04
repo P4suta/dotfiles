@@ -26,3 +26,31 @@ README.md
 # repo dev tooling (ホームへは展開しない、git 追跡のみ)
 lefthook.yml
 .typos.toml
+
+# Directories that only hold another profile's targets in the unified source; ignoring them keeps this home from gaining empty trees or changed permissions.
+.config/bat
+.config/coderabbit-guard
+.config/dev-reaper
+.config/fcitx5
+.config/fzf
+.config/ghostty
+.config/git/template
+.config/herdr
+.config/herdr-agent
+.config/homebrew
+.config/kitty
+.config/lazygit
+.config/lefthook
+.config/nushell
+.config/ocomment
+.config/opencode/agents
+.config/opencode/commands
+.config/opencode/themes
+.config/session-reaper
+.config/shell
+.config/storage-scout
+.config/wezterm
+.local/share
+AppData
+Documents
+Library
