@@ -1,0 +1,17 @@
+# typos spell-checker config (https://github.com/crate-ci/typos)
+#
+# Runs on staged files from the lefthook pre-commit hook.
+# Silence a false positive by adding "wrong = correct" to extend-words below, or by excluding it with a regex in extend-identifiers-re.
+
+[files]
+extend-exclude = [".git/"]
+# Also check hidden files such as .chezmoi.toml.tmpl
+ignore-hidden = false
+
+[default]
+# Filename checking produces too many false positives (it flags extensions like tmpl)
+check-filename = false
+
+[default.extend-words]
+tre = "tre"     # tool name (dduan/tre); stops typos reading it as "tree"
+serie = "serie" # tool name (lusingander/serie)

@@ -1,0 +1,23 @@
+# Git's global ignore file (core.excludesFile defaults here under XDG).
+#
+# Only for things that are this machine's rather than any project's.
+# A path ignored here is invisible in every repository, including ones whose maintainers would have wanted it tracked, so the bar is: would committing it be wrong in *every* repository I will ever clone?
+
+# Claude Code's per-machine state inside a project.
+**/.claude/settings.local.json
+
+# What an assistant is told about a repository is the person's, not the project's.
+# These files are written for whichever tool is in front of the person holding the machine, they drift with that tool, and a contributor who is not using it needs CONTRIBUTING.md and the project's own docs instead.
+# A project that does want one checked in can `git add -f` it or unignore it in its own .gitignore.
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+AGENT.md
+GEMINI.md
+.cursorrules
+.windsurfrules
+.aider*
+.claude/
+.cursor/
+.aider.chat.history.md
+.aider.input.history

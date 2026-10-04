@@ -1,0 +1,63 @@
+---
+# Repo + tailscaled install/enable, plus persistent IP forwarding for exit-node and subnet-router use.
+# `tailscale up` and `tailscale set --advertise-*` stay manual (see ops/README.md): they need web auth or change live state.
+
+- name: Install Tailscale apt keyring
+  become: true
+  ansible.builtin.get_url:
+    url: "https://pkgs.tailscale.com/stable/ubuntu/{{ ubuntu_codename }}.noarmor.gpg"
+    dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    mode: '0644'
+    owner: root
+    group: root
+    force: false
+
+- name: Register Tailscale apt source
+  become: true
+  ansible.builtin.get_url:
+    url: "https://pkgs.tailscale.com/stable/ubuntu/{{ ubuntu_codename }}.tailscale-keyring.list"
+    dest: /etc/apt/sources.list.d/tailscale.list
+    mode: '0644'
+    owner: root
+    group: root
+    force: true
+
+- name: Install tailscale
+  become: true
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+    update_cache: true
+
+- name: Enable tailscaled.service
+  become: true
+  ansible.builtin.systemd:
+    name: tailscaled
+    enabled: true
+    state: started
+
+- name: Remind that tailscale up is a manual step
+  ansible.builtin.debug:
+    msg: |
+      tailscaled is running. If this host has not joined the Tailnet yet:
+        sudo tailscale up --ssh --operator={{ workspace_user }}
+      Already joined: nothing to do.
+
+# Docker only sets net.ipv4.ip_forward=1 as a side effect at startup, which is neither guaranteed to persist nor IPv6-aware.
+# Declaring it in sysctl.d (the file Tailscale recommends) restarts no service, so live sessions are safe.
+- name: Persist IP forwarding for Tailscale exit node / subnet router
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-tailscale.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      net.ipv4.ip_forward = 1
+      net.ipv6.conf.all.forwarding = 1
+
+- name: Load sysctl.d settings (no service restart)
+  become: true
+  ansible.builtin.command:
+    cmd: sysctl --system
+  changed_when: false

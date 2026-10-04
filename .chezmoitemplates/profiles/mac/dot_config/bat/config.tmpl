@@ -1,0 +1,11 @@
+# bat reads ~/.config/bat/config on macOS as well as Linux, so unlike Nushell and lazygit it needs no platform-path symlink.
+#
+# `ansi` resolves every syntax colour through the terminal's sixteen ANSI slots,
+# which this repo renders from [palette] into the Ghostty config.
+# That makes the palette the single owner of what a man page or a `bat`-ed file looks like.
+# The alternative — vendoring a Tokyo Night .tmTheme and running `bat cache --build` — gives finer-grained syntax colours in exchange for an asset to keep current and a cache that can go stale without saying so.
+--theme=ansi
+
+# man pages arrive already wrapped; re-wrapping them mangles tables.
+--style=plain
+--paging=auto

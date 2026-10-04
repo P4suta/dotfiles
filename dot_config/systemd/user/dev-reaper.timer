@@ -1,0 +1,15 @@
+[Unit]
+Description=Sample idle dev containers every 5 minutes and reap them
+
+[Timer]
+# Sampler of *current* state: fire shortly after the user instance comes up,
+# then every 5 minutes. Persistent=false on purpose — missed runs need no
+# catch-up, and replaying them after a suspend/resume could falsely stop a
+# container the user is about to use.
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=false
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target

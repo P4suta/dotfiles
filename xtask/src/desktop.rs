@@ -1,0 +1,384 @@
+use crate::profile_rules::Profile;
+use crate::runtime::{Runner, args, checked, optional, replace};
+use crate::setup::ContextData;
+use anyhow::{Context, Result, ensure};
+use std::fs;
+use std::path::Path;
+
+fn text(data: &serde_json::Value, pointer: &str) -> Result<String> {
+    Ok(data
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_str)
+        .with_context(|| format!("desktop setting is missing: {pointer}"))?
+        .to_owned())
+}
+
+pub fn refresh(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+    match context.profile {
+        Profile::Mac => mac(context, runner),
+        Profile::Linux => linux(context, runner),
+        Profile::Windows => {
+            checked(runner, "dotctl", &args(&["setup", "shell"]))?;
+            Ok(())
+        }
+        Profile::Wsl => Ok(()),
+    }
+}
+
+pub fn bundle_shim(target: &Path, binary: &Path) -> Result<()> {
+    ensure!(
+        !fs::symlink_metadata(target).is_ok_and(|metadata| metadata.is_dir()),
+        "bundle shim target is a directory"
+    );
+    let old = fs::read(target).unwrap_or_default();
+    let legacy = format!("#!/bin/sh\nexec {} \"$@\"\n", binary.display());
+    if target.is_file()
+        && !old.starts_with(b"#!/bin/sh\n# dotfiles bundle launcher\n")
+        && old != legacy.as_bytes()
+        && fs::symlink_metadata(target).is_ok_and(|metadata| !metadata.is_symlink())
+    {
+        anyhow::bail!("refusing to replace a launcher owned by another tool");
+    }
+    let quoted = binary
+        .to_str()
+        .context("bundle path is not UTF-8")?
+        .replace('\'', "'\\''");
+    replace(
+        target,
+        format!("#!/bin/sh\n# dotfiles bundle launcher\nexec '{quoted}' \"$@\"\n").as_bytes(),
+        true,
+    )
+}
+
+fn mac(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+    let brewfile = context.home.join(".config/homebrew/Brewfile");
+    ensure!(
+        runner.available("brew") && brewfile.is_file(),
+        "Homebrew and the applied Brewfile are required"
+    );
+    let arguments = vec![
+        "bundle".into(),
+        "check".into(),
+        "--no-upgrade".into(),
+        "--file".into(),
+        brewfile.clone().into(),
+    ];
+    if !runner.run("brew", &arguments)?.success {
+        checked(
+            runner,
+            "brew",
+            &[
+                "bundle".into(),
+                "install".into(),
+                "--no-upgrade".into(),
+                "--file".into(),
+                brewfile.into(),
+            ],
+        )?;
+    }
+    for (name, binary) in [
+        (
+            "ghostty",
+            "/Applications/Ghostty.app/Contents/MacOS/ghostty",
+        ),
+        (
+            "tailscale",
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+        ),
+    ] {
+        if Path::new(binary).is_file() {
+            let target = context.home.join(".local/bin").join(name);
+            if !runner.available(name) || target.exists() || fs::symlink_metadata(&target).is_ok() {
+                bundle_shim(&target, Path::new(binary))?;
+            }
+        }
+    }
+    if runner.available("ghostty") {
+        checked(
+            runner,
+            "ghostty",
+            &args(&["+show-config", "--default=false"]),
+        )?;
+    }
+    Ok(())
+}
+
+fn gsetting(runner: &mut impl Runner, schema: &str, key: &str, value: &str) -> Result<()> {
+    if runner.available("gsettings") {
+        let writable = runner.run("gsettings", &args(&["writable", schema, key]))?;
+        if writable.success
+            && writable
+                .bytes
+                .strip_suffix(b"\n")
+                .unwrap_or(&writable.bytes)
+                == b"true"
+        {
+            checked(runner, "gsettings", &args(&["set", schema, key, value]))?;
+        }
+    }
+    Ok(())
+}
+
+fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+    let kitty_channel = text(&context.data, "/desktop/kitty_channel")?;
+    ensure!(
+        matches!(kitty_channel.as_str(), "stable" | "nightly"),
+        "unknown Kitty channel"
+    );
+    let zed_channel = text(&context.data, "/desktop/zed_channel")?;
+    let (suffix, app_id) = match zed_channel.as_str() {
+        "stable" => ("", "dev.zed.Zed"),
+        "preview" => ("-preview", "dev.zed.Zed-Preview"),
+        "nightly" => ("-nightly", "dev.zed.Zed-Nightly"),
+        "dev" => ("-dev", "dev.zed.Zed-Dev"),
+        _ => anyhow::bail!("unknown Zed channel"),
+    };
+    let font_version = text(&context.data, "/desktop/nerd_fonts_version")?;
+    ensure!(
+        font_version.starts_with('v')
+            && font_version[1..]
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || byte == b'.'),
+        "invalid Nerd Font version"
+    );
+    let destination = format!("dest={}", context.home.join(".local").display());
+    let channel = format!("installer={kitty_channel}");
+    let mut arguments = vec!["launch=n", destination.as_str()];
+    if kitty_channel != "stable" {
+        arguments.push(&channel);
+    }
+    crate::setup::vendor_installer(
+        runner,
+        "https://sw.kovidgoyal.net/kitty/installer.sh",
+        &arguments,
+    )?;
+    for name in ["kitty", "kitten"] {
+        link(
+            &context.home.join(".local/kitty.app/bin").join(name),
+            &context.home.join(".local/bin").join(name),
+        )?;
+    }
+    let bundle = context.home.join(format!(".local/zed{suffix}.app"));
+    let binary = bundle.join("bin/zed");
+    if !binary.is_file()
+        || !runner
+            .run(
+                binary.to_str().context("invalid Zed binary path")?,
+                &args(&["--version"]),
+            )?
+            .success
+    {
+        let scope = tempfile::tempdir()?;
+        let script = scope.path().join("zed-installer.sh");
+        checked(
+            runner,
+            "curl",
+            &[
+                "--proto".into(),
+                "=https".into(),
+                "--tlsv1.2".into(),
+                "-fsSL".into(),
+                "--max-time".into(),
+                "300".into(),
+                "https://zed.dev/install.sh".into(),
+                "-o".into(),
+                script.clone().into(),
+            ],
+        )?;
+        checked(
+            runner,
+            "env",
+            &[
+                format!("ZED_CHANNEL={zed_channel}").into(),
+                "sh".into(),
+                script.into(),
+            ],
+        )?;
+        ensure!(
+            binary.is_file()
+                && runner
+                    .run(
+                        binary.to_str().context("invalid Zed binary path")?,
+                        &args(&["--version"])
+                    )?
+                    .success,
+            "Zed installation is incomplete or unusable"
+        );
+    }
+    let mut desktop_source = bundle.join(format!("share/applications/{app_id}.desktop"));
+    if !desktop_source.is_file() {
+        desktop_source = bundle.join(format!("share/applications/zed{suffix}.desktop"));
+    }
+    let content = fs::read_to_string(desktop_source)?;
+    let quoted_binary = format!(
+        "\"{}\"",
+        binary
+            .to_str()
+            .context("invalid desktop executable path")?
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+    );
+    let desktop = content
+        .replace(
+            "Icon=zed",
+            &format!(
+                "Icon={}",
+                bundle
+                    .join("share/icons/hicolor/512x512/apps/zed.png")
+                    .display()
+            ),
+        )
+        .replace("Exec=zed", &format!("Exec={quoted_binary}"));
+    let desktop_target = context
+        .home
+        .join(format!(".local/share/applications/{app_id}.desktop"));
+    replace(&desktop_target, desktop.as_bytes(), false)?;
+    link(&binary, &context.home.join(".local/bin/zed"))?;
+    if runner.available("desktop-file-validate") {
+        checked(
+            runner,
+            "desktop-file-validate",
+            &[desktop_target.clone().into()],
+        )?;
+    }
+    let fonts = context
+        .home
+        .join(".local/share/fonts/JetBrainsMonoNerdFont");
+    let stamp = fonts.join(".nerdfont-version");
+    if !fs::read_to_string(&stamp).is_ok_and(|version| version.trim() == font_version) {
+        let scope = tempfile::tempdir()?;
+        let archive = scope.path().join("font.zip");
+        checked(runner, "curl", &["--proto".into(), "=https".into(), "--tlsv1.2".into(), "-fsSL".into(), "--max-time".into(), "300".into(), "-o".into(), archive.clone().into(), format!("https://github.com/ryanoasis/nerd-fonts/releases/download/{font_version}/JetBrainsMono.zip").into()])?;
+        fs::create_dir_all(&fonts)?;
+        checked(
+            runner,
+            "unzip",
+            &[
+                "-jo".into(),
+                archive.into(),
+                "JetBrainsMonoNerdFontMono-*.ttf".into(),
+                "-d".into(),
+                fonts.clone().into(),
+            ],
+        )?;
+        replace(&stamp, format!("{font_version}\n").as_bytes(), false)?;
+        if runner.available("fc-cache") {
+            checked(runner, "fc-cache", &["-f".into(), fonts.into()])?;
+        }
+    }
+    if runner.available("gsettings") {
+        let profile = runner.run(
+            "gsettings",
+            &args(&["get", "org.gnome.Terminal.ProfilesList", "default"]),
+        )?;
+        if profile.success {
+            let id = String::from_utf8(profile.bytes)?
+                .trim()
+                .trim_matches('\'')
+                .to_owned();
+            ensure!(
+                !id.is_empty()
+                    && id
+                        .bytes()
+                        .all(|byte| byte.is_ascii_hexdigit() || byte == b'-'),
+                "invalid terminal profile identifier"
+            );
+            let schema = format!(
+                "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:{id}/"
+            );
+            for (key, value) in [
+                ("use-theme-colors", "false"),
+                ("foreground-color", "rgb(192,202,245)"),
+                ("background-color", "rgb(26,27,38)"),
+                ("use-transparent-background", "true"),
+                ("background-transparency-percent", "15"),
+                ("use-system-font", "false"),
+                ("font", "JetBrainsMono Nerd Font Mono 11"),
+            ] {
+                gsetting(runner, &schema, key, value)?;
+            }
+            gsetting(
+                runner,
+                &schema,
+                "palette",
+                "['rgb(21,22,30)', 'rgb(247,118,142)', 'rgb(158,206,106)', 'rgb(224,175,104)', 'rgb(122,162,247)', 'rgb(187,154,247)', 'rgb(125,207,255)', 'rgb(169,177,214)', 'rgb(65,72,104)', 'rgb(247,118,142)', 'rgb(158,206,106)', 'rgb(224,175,104)', 'rgb(122,162,247)', 'rgb(187,154,247)', 'rgb(125,207,255)', 'rgb(192,202,245)']",
+            )?;
+        }
+        for schema in [
+            "org.cinnamon.desktop.peripherals.keyboard",
+            "org.gnome.desktop.peripherals.keyboard",
+        ] {
+            gsetting(runner, schema, "repeat", "true")?;
+            for (key, pointer) in [
+                ("delay", "/desktop/keyboard/delay"),
+                ("repeat-interval", "/desktop/keyboard/repeat_interval"),
+            ] {
+                let value = context
+                    .data
+                    .pointer(pointer)
+                    .and_then(serde_json::Value::as_u64)
+                    .context("invalid keyboard timing")?;
+                gsetting(runner, schema, key, &format!("uint32 {value}"))?;
+            }
+        }
+        gsetting(
+            runner,
+            "org.cinnamon.desktop.default-applications.terminal",
+            "exec",
+            "kitty-herdr",
+        )?;
+    }
+    optional(
+        runner,
+        "update-desktop-database",
+        &[context
+            .home
+            .join(".local/share/applications")
+            .to_str()
+            .context("invalid applications path")?],
+    );
+    if runner.available("xdg-mime") {
+        for mime in ["text/plain", "text/markdown"] {
+            checked(
+                runner,
+                "xdg-mime",
+                &args(&["default", &format!("{app_id}.desktop"), mime]),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn link(source: &Path, destination: &Path) -> Result<()> {
+    if fs::symlink_metadata(destination).is_ok() {
+        fs::remove_file(destination)?;
+    }
+    fs::create_dir_all(destination.parent().context("link parent is missing")?)?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(source, destination)?;
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(source, destination)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tailscale_launches_inside_its_bundle_and_does_not_overwrite_an_unrelated_binary() {
+        let scope = tempfile::tempdir().unwrap();
+        let shim = scope.path().join("tailscale");
+        let bundle = Path::new("/Applications/Tailscale.app/Contents/MacOS/Tailscale");
+        bundle_shim(&shim, bundle).unwrap();
+        assert!(!fs::symlink_metadata(&shim).unwrap().is_symlink());
+        assert!(
+            fs::read_to_string(&shim)
+                .unwrap()
+                .contains("exec '/Applications/Tailscale.app/Contents/MacOS/Tailscale'")
+        );
+        fs::write(&shim, b"another tool").unwrap();
+        assert!(bundle_shim(&shim, bundle).is_err());
+        assert_eq!(fs::read(&shim).unwrap(), b"another tool");
+    }
+}

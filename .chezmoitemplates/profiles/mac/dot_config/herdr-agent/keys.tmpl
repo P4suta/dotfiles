@@ -1,0 +1,7 @@
+# Public keys herdr-agent loads from 1Password into Herdr's own ssh-agent; rendered from .chezmoidata.toml.
+{{- if .signing.enabled }}
+{{ .signing.public_key }}
+{{- end }}
+{{- range .herdr_agent.public_keys }}
+{{ . }}
+{{- end }}

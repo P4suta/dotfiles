@@ -1,0 +1,4 @@
+{{- $context := merge (dict) . (index .platforms .profile) -}}
+{{- if eq .profile "wsl" -}}
+{{ includeTemplate "profiles/wsl/dot_claude/settings.json.tmpl" $context }}
+{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}

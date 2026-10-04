@@ -1,0 +1,39 @@
+{{- $native := .chezmoi.os -}}
+{{- if eq $native "darwin" -}}{{- $native = "mac" -}}{{- end -}}
+{{- if and (eq $native "linux") (ne (env "WSL_DISTRO_NAME") "") -}}{{- $native = "wsl" -}}{{- end -}}
+{{- $profile := promptStringOnce . "profile" "Dotfiles profile (mac/linux/windows/wsl)" $native -}}
+{{- if not (has $profile (list "mac" "linux" "windows" "wsl")) -}}{{ fail "Unknown dotfiles profile" }}{{- end -}}
+{{- $name := promptStringOnce . "git.name" "Git author name" -}}
+{{- $email := promptStringOnce . "git.email" "Git author email" -}}
+{{- $key := promptStringOnce . "signing.public_key" "SSH signing public key (empty disables signing)" -}}
+umask = 0o022
+
+[data]
+profile = {{ $profile | quote }}
+role = {{ promptStringOnce . "role" "Machine role (personal/work)" "personal" | quote }}
+
+[data.git]
+name = {{ $name | quote }}
+email = {{ $email | quote }}
+
+[data.signing]
+enabled = {{ ne $key "" }}
+public_key = {{ $key | quote }}
+pubkey = {{ $key | quote }}
+key_comment = ""
+
+[data.herdr_agent]
+public_keys = {{ dig "herdr_agent" "public_keys" (list) . | toJson }}
+
+[data.doppler]
+project = {{ promptStringOnce . "doppler.project" "Doppler project (optional)" "" | quote }}
+config = {{ promptStringOnce . "doppler.config" "Doppler config (optional)" "" | quote }}
+
+[data.paths]
+projects = {{ promptStringOnce . "paths.projects" "Project checkout directory" (joinPath .chezmoi.homeDir "projects") | quote }}
+
+{{ if eq $profile "windows" -}}
+[interpreters.ps1]
+command = "pwsh"
+args = ["-NoLogo", "-NoProfile"]
+{{ end -}}

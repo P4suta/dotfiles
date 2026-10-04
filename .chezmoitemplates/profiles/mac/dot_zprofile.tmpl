@@ -1,0 +1,22 @@
+# ~/.zprofile: login environment for terminals, SSH, and GUI-launched editors.
+#
+# macOS runs /etc/zprofile -> path_helper before this file, which REBUILDS PATH from /etc/paths.d.
+# Anything prepended here therefore survives; anything prepended in /etc/zshenv would not.
+# That is why PATH lives in .zprofile and not .zshenv.
+
+# Homebrew owns the system tier (see ~/.config/homebrew/Brewfile).
+# Its shellenv must come first so the rest of this file can prepend in front of it.
+if [ -x /opt/homebrew/bin/brew ]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
+
+# Local desktops use the 1Password app-group agent; remote SSH sessions preserve their forwarded agent socket.
+# shellcheck source=dot_config/shell/ssh-agent.sh
+if [ -r "${HOME}/.config/shell/ssh-agent.sh" ]; then
+  . "${HOME}/.config/shell/ssh-agent.sh"
+fi
+
+# Shims are available even to GUI apps and remote extension hosts that never start an interactive shell.
+# Repository-local mise pins still take precedence.
+# ~/.local/bin sits in front of Homebrew so the ~/.local/bin/git wrapper is the git every shell resolves.
+export PATH="${HOME}/.local/share/mise/shims:${HOME}/.opam/{{ .ocaml.switch }}/bin:${HOME}/.local/bin:${PATH}"

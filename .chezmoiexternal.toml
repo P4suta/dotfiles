@@ -1,0 +1,7 @@
+{{ if eq .profile "mac" }}
+[".config/ghostty/shaders/cursor_warp.glsl"]
+type = "file"
+url = "https://raw.githubusercontent.com/sahaj-b/ghostty-cursor-shaders/0a274beac8b93ee6ce6b94402b7313a0417b8e38/cursor_warp.glsl"
+checksum.sha256 = "589f71f537cee890a07e408f13d062ff7d93de6d9f742c84e4bde6104c5d51fb"
+
+{{ end }}

@@ -1,0 +1,21 @@
+{{- /*
+  gh CLI portable settings (~/.config/gh/config.yml).
+
+  Machine-specific auth state (hosts.yml, which holds the OAuth token) is
+  excluded by .chezmoiignore; each machine runs `gh auth login` once. mise reads
+  that auth state directly for its own GitHub API calls; the token is never
+  exported into the general shell environment.
+
+  Format: gh canonicalizes this file (strips block comments, drops blank lines,
+  adds `version: "1"`), so the template mirrors that shape to minimize drift.
+  This block comment is Go template syntax and disappears on deploy.
+*/ -}}
+# Use the SSH protocol for git operations (clone, fork, ...).
+# Auth goes through the active native or forwarded 1Password SSH agent.
+git_protocol: ssh
+# Keep interactive prompts on.
+prompt: enabled
+aliases:
+# Shorthand for gh pr checkout; only the one that gets used
+    co: pr checkout
+version: "1"

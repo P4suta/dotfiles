@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+reviews:
+  auto_title_placeholder: "@coderabbitai"
+  auto_title_instructions: >-
+    Follow the destination repository's contribution rules.
+    Otherwise use an English Conventional Commits title with an optional scope and ! for breaking changes.
+    Describe the final behavior concisely.
+  high_level_summary_placeholder: "@coderabbitai summary"
+  high_level_summary_in_walkthrough: false
+  high_level_summary_instructions: >-
+    Follow the destination PR template.
+    Otherwise explain the reason and resulting behavior using Why and Changes sections.
+    Fit an existing placeholder's section without duplicating headings.
+    Preserve supplied validation results and do not invent executed checks or passing outcomes.
+    Write each prose sentence on its own source line.
+    Avoid a file-by-file changelog or author statistics.

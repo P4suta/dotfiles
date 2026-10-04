@@ -1,0 +1,3 @@
+{{- $key := trim .signing.public_key -}}
+{{- if and .signing.enabled (eq $key "") -}}{{ fail "Signing requires a machine-local public key" }}{{- end -}}
+{{- $key -}}

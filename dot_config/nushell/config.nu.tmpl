@@ -1,0 +1,6 @@
+{{- $context := merge (dict) . (index .platforms .profile) -}}
+{{- if eq .profile "mac" -}}
+{{ includeTemplate "profiles/mac/dot_config/nushell/config.nu.tmpl" $context }}
+{{- else if eq .profile "linux" -}}
+{{ include ".chezmoitemplates/profiles/linux/dot_config/nushell/config.nu" }}
+{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}

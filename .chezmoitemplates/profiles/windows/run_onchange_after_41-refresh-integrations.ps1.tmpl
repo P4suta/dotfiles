@@ -1,0 +1,8 @@
+# configuration: {{ . | toJson | sha256sum }}
+# herdr revision: {{ .herdr.revision }}
+# managed tools: {{ join "," .tools.common }}
+# scoop apps: {{ join "," .scoop.apps }}
+$ErrorActionPreference = 'Stop'
+
+& {{ includeTemplate "ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles-xtask.exe") }} --root {{ includeTemplate "ps_quote" .chezmoi.sourceDir }} setup integrations --config {{ includeTemplate "ps_quote" .chezmoi.configFile }} --live
+exit $LASTEXITCODE

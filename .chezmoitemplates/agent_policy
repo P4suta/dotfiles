@@ -1,0 +1,45 @@
+# Global rules
+
+These personal preferences apply to every project on this machine.
+A project's own instructions take precedence when they conflict.
+
+## Language
+
+- Respond to me in Japanese.
+- Write outward-facing artifacts such as commit messages, PRs, issues, code comments, documentation, and release notes in English.
+
+## Environment
+
+- Use `mise x -- <command>` when a project pins a specific tool version.
+- Use `gh` for GitHub operations.
+- Follow Conventional Commits and omit AI co-author footers and session URLs.
+- Keep diffs reviewable by editing the smallest relevant region.
+
+## Workflow
+
+- Make the smallest change that accomplishes the task.
+- Before GitHub-bound implementation, load `pull-request` and run `pr-workflow start` for the exact destination.
+Personal non-fork repositories require an existing issue describing the problem, scope, and acceptance criteria; external repositories and forks follow the destination's contribution rules.
+- Use `pr-workflow` for PR creation, document edits, and ready transitions, and confirm that the diff stays within the issue's scope.
+- Verify changes with a project's own lint, typecheck, and test commands when they exist.
+- Load `formal-assurance` for every implementation change; require source-bound proofs wherever applicable and a checked, justified alternative at genuine semantic or empirical boundaries before declaring it complete.
+- Load `verification-tools` and `type-contracts` for implementation work, and turn enforceable rules into required gates with `executable-policy`.
+- Load `ci-budget` before an authorized push or PR update; run available CI-equivalent checks locally and honor an active machine-local push hold until explicitly resumed.
+- For an initial substantive PR, load `coderabbit-review` after local checks and use one guarded CLI review when verified allowance permits.
+Use `floor(capacity * 0.9 * 0.8)` budgets for verified allowances and applicable adaptive thresholds, keep CLI and PR pools separate, and hold publication when the required capacity cannot be verified; elapsed time alone does not authorize a push.
+- Honor an owner-imposed CodeRabbit pause before service calls, quota inquiries, or review requests, and require explicit resumption.
+- Use `reliability` for time, concurrency, persistence, environment dependencies, and intermittent failures; fix the mechanism rather than relying on repeated green runs.
+- For dotfiles changes, load `dotfiles` and apply equivalent behavior through each affected Mac, Linux, and Windows host's own profile.
+- Prefer `skill-ops load NAME` or a relevant bundle for shared skills; inspect `skill-ops check` before completion and use `skill-operations` for pending maintenance or skill changes.
+- Commit only when I ask, and push only when I tell you to.
+
+## CodeRabbit PR reviews
+
+CodeRabbit automatically reviews ready PRs where it is enabled, and supported actionable findings must be addressed as part of the PR workflow.
+When working on an existing PR or an authorized PR update, load `coderabbit-review` and use `gh` to inspect the current head, CI, CodeRabbit review outcome, and unresolved findings.
+Wait for the automatic review of the final pushed head and fix supported findings within the authorized task, then rerun the affected checks.
+Explain unsupported findings with concrete evidence instead of applying them blindly or dismissing them without inspection.
+Do not declare the PR complete while supported findings, required checks, or a current-head review remain outstanding.
+A passing CodeRabbit check or resolved thread alone does not establish a completed review or verified fix; paused, skipped, stale, failed, and rate-limited reviews remain pending.
+Use the existing PR review before requesting a CLI review of the same diff, and preserve the CLI's local budget.
+Commit, push, PR replies, thread resolution, manual review triggers, and merge still require the applicable user authorization.

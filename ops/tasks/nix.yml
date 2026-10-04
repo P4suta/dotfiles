@@ -1,0 +1,47 @@
+---
+- name: Confirm Nix publishes a tarball for this architecture
+  ansible.builtin.assert:
+    that: ansible_facts.architecture in nix_sha256
+    fail_msg: "Nix {{ nix_version }} has no pinned tarball for {{ ansible_facts.architecture }}."
+
+- name: Download the pinned Nix tarball
+  become: true
+  ansible.builtin.get_url:
+    url: >-
+      https://releases.nixos.org/nix/nix-{{ nix_version }}/nix-{{ nix_version }}-{{ ansible_facts.architecture }}-linux.tar.xz
+    dest: >-
+      /var/cache/nix-{{ nix_version }}-{{ ansible_facts.architecture }}-linux.tar.xz
+    checksum: "sha256:{{ nix_sha256[ansible_facts.architecture] }}"
+    mode: "0644"
+    owner: root
+    group: root
+
+- name: Unpack the pinned Nix tarball
+  become: true
+  ansible.builtin.unarchive:
+    src: >-
+      /var/cache/nix-{{ nix_version }}-{{ ansible_facts.architecture }}-linux.tar.xz
+    dest: /var/cache
+    remote_src: true
+    creates: >-
+      /var/cache/nix-{{ nix_version }}-{{ ansible_facts.architecture }}-linux/install
+
+- name: Install multi-user Nix
+  become: true
+  ansible.builtin.command:
+    argv:
+      - /var/cache/nix-{{ nix_version }}-{{ ansible_facts.architecture }}-linux/install
+      - --daemon
+      - --yes
+      - --no-channel-add
+    creates: /nix/var/nix/profiles/default/bin/nix
+
+- name: Enable flakes and the nix command
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/nix/nix.conf
+    regexp: "^experimental-features ="
+    line: "experimental-features = nix-command flakes"
+    mode: "0644"
+    owner: root
+    group: root

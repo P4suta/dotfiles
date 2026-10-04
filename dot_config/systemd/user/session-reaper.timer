@@ -1,0 +1,14 @@
+[Unit]
+Description=Hourly sweep for abandoned orphaned processes
+
+[Timer]
+# Sampler of *current* state. Persistent=false on purpose — a stopped+orphaned
+# process is still there after a missed run, so there is nothing to catch up,
+# and replaying after suspend/resume must not collapse the grace window.
+OnBootSec=5min
+OnUnitActiveSec=1h
+Persistent=false
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

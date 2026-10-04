@@ -1,0 +1,45 @@
+[tools]
+rust = { version = "1.99.0", components = ["clippy", "rustfmt"] }
+bun = "1.4.2"
+chezmoi = "2.73.0"
+uv = "0.12.22"
+just = "1.58.0"
+taplo = "0.10.0"
+shellcheck = "0.11.0"
+gitleaks = "8.30.1"
+typos = "1.50.3"
+yamllint = "1.38.0"
+nu = "0.116.0"
+powershell = "7.6.5"
+"pypi:ansible-core" = { version = "2.21.4", os = ["linux"] }
+"cargo:kani-verifier" = { version = "0.68.0", os = ["macos", "linux"] }
+
+[tasks."check:skills"]
+run = "cargo run --locked --manifest-path xtask/Cargo.toml -- skills"
+
+[tasks."check:rust"]
+run = "cargo run --locked --manifest-path xtask/Cargo.toml -- check"
+
+[tasks."check:proofs"]
+run = "cargo run --locked --manifest-path xtask/Cargo.toml -- proofs"
+
+[tasks."check:adapters"]
+run = "cargo run --locked --manifest-path xtask/Cargo.toml -- check-adapters"
+
+[tasks."check:profiles"]
+run = "cargo run --locked --manifest-path xtask/Cargo.toml -- profiles"
+
+[tasks."check:secrets"]
+run = "cargo run --locked --manifest-path xtask/Cargo.toml -- check-secrets"
+
+[tasks."check:ops"]
+run = "cargo run --locked --manifest-path xtask/Cargo.toml -- ops-check"
+
+[tasks."install:review-guard"]
+run = "cargo run --locked --manifest-path xtask/Cargo.toml -- install-review-guard"
+
+[tasks."install:skill-ops"]
+run = "cargo run --locked --manifest-path xtask/Cargo.toml -- install-skill-ops"
+
+[tasks."install:pr-workflow"]
+run = "cargo run --locked --manifest-path xtask/Cargo.toml -- install-pr-workflow"

@@ -1,0 +1,71 @@
+# Paths chezmoi does not track: neither applied to $HOME nor kept in git.
+
+# Machine-specific login state, contains tokens.
+# config.yml stays managed on the assumption that it only ever holds portable settings.
+.config/gh/hosts.yml
+
+# Runtime state
+.local/share/atuin/**
+.local/share/mise/**
+.local/state/**
+.cache/**
+.bash_history
+.zsh_history
+.zcompdump*
+
+# macOS filesystem noise
+.DS_Store
+**/.DS_Store
+
+# 1Password application state and its live SSH-agent socket are machine-local.
+# On macOS both live inside the signed app group container.
+Library/Group Containers/2BUA8C4S2C.com.1password/**
+.config/op/**
+.1password/**
+
+# Homebrew is the system tier: its prefix, taps and caches are installation state, never dotfiles.
+# Brewfile.tmpl is the declaration; /opt/homebrew is not.
+.cache/Homebrew/**
+
+# Zed is installation-only (Brewfile).
+# Settings and keymaps, extensions,
+# history, logs, AI preferences, and login data remain machine-local; secrets stay in the login keychain rather than in chezmoi.
+.config/zed
+.config/zed/**
+Library/Application Support/Zed/**
+
+# VS Code is installation-only (Brewfile).
+# Both local settings and Remote SSH server state are machine-local and may contain credentials and IPC metadata.
+Library/Application Support/Code/**
+.vscode-server
+.vscode-server/**
+
+# Ghostty keeps its own state (window positions, crash reports) next to the app group; only ~/.config/ghostty/config is managed.
+Library/Application Support/com.mitchellh.ghostty/**
+
+# Claude Code machine-local data
+.claude/projects/**
+.claude/plans/**
+.claude/shell-snapshots/**
+.claude/todos/**
+.claude/history.jsonl
+.claude/settings.local.json
+# Claude Code rewrites settings.json at runtime (model and similar keys drift constantly), so it is left to each machine.
+.claude/settings.json
+.claude.json
+
+# Repo docs: tracked in git, never applied to $HOME
+README.md
+
+# CI definition: tracked in git, never applied to $HOME
+.github
+
+# Repo dev tooling: tracked in git, never applied to $HOME
+lefthook.yml
+.typos.toml
+justfile
+scripts/**
+
+# The dotguard crate: tracked in git, built to ~/.local/bin/dotguard by run_onchange_after_setup-guard.sh, never copied into $HOME as source.
+guard
+guard/**

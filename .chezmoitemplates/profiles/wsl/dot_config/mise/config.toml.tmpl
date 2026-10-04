@@ -1,0 +1,11 @@
+[tools]
+{{- range (concat .tools.common (index .tools .role)) }}
+{{ . | quote }} = "latest"
+{{- end }}
+
+# github backend で単一バイナリアセット `tealdeer-linux-x86_64-musl` をコマンド `tldr` にリネームする。
+# 単一バイナリリリースは `bin`(tarball を展開するときは `rename_exe`)を使う。
+"github:tealdeer-rs/tealdeer" = { version = "latest", bin = "tldr" }
+
+[settings]
+experimental = true

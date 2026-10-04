@@ -1,0 +1,6 @@
+[Unit]
+Description=Upgrade mise-managed CLI tools
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/mise upgrade --bump -y

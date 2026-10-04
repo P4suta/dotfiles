@@ -1,0 +1,11 @@
+[Unit]
+Description=Maintain user-scoped desktop tools and defaults
+
+[Timer]
+OnBootSec=15m
+OnUnitActiveSec=7d
+RandomizedDelaySec=2h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

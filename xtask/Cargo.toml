@@ -1,0 +1,28 @@
+[package]
+name = "dotfiles-xtask"
+default-run = "dotfiles-xtask"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.6", features = ["derive", "env"] }
+pulldown-cmark = "0.13"
+yaml-rust2 = "0.13"
+serde_json = "1.0"
+serde = { version = "1.0.229", features = ["derive"] }
+sha2 = "0.11.0"
+tempfile = "3.27"
+
+[lints.rust]
+unsafe_code = "forbid"
+unfulfilled_lint_expectations = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
+
+[lints.clippy]
+all = "warn"
+
+[workspace]

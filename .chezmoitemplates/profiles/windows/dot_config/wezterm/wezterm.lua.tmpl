@@ -1,0 +1,53 @@
+local wezterm = require 'wezterm'
+local act = wezterm.action
+local config = wezterm.config_builder()
+
+{{ if eq .terminal.multiplexer "none" -}}
+config.default_prog = { 'pwsh', '-NoLogo' }
+{{- else -}}
+config.default_prog = { 'pwsh', '-NoLogo', '-NoExit', '-Command', {{ .terminal.multiplexer | quote }} }
+{{- end }}
+
+config.front_end = 'WebGpu'
+config.webgpu_power_preference = 'HighPerformance'
+config.max_fps = {{ .terminal.max_fps }}
+config.animation_fps = {{ .terminal.max_fps }}
+config.use_ime = true
+
+config.font = wezterm.font({{ .terminal.font_family | quote }}, { weight = 'Medium' })
+config.font_size = {{ .terminal.font_size }}
+config.line_height = 1.1
+
+config.win32_system_backdrop = 'Acrylic'
+config.window_background_opacity = {{ .terminal.opacity }}
+config.window_padding = { left = 12, right = 12, top = 8, bottom = 8 }
+config.hide_tab_bar_if_only_one_tab = true
+config.default_cursor_style = 'SteadyBar'
+config.scrollback_lines = 10000
+
+config.colors = {
+  foreground = '{{ .palette.fg }}',
+  background = '{{ .palette.bg }}',
+  cursor_bg = '{{ .palette.fg }}',
+  cursor_fg = '{{ .palette.bg }}',
+  cursor_border = '{{ .palette.fg }}',
+  selection_fg = '{{ .palette.fg }}',
+  selection_bg = '{{ .palette.selection }}',
+  ansi = {
+    '{{ .palette.bg_dim }}', '{{ .palette.red }}', '{{ .palette.green }}', '{{ .palette.yellow }}',
+    '{{ .palette.blue }}', '{{ .palette.magenta }}', '{{ .palette.cyan }}', '{{ .palette.fg_dim }}',
+  },
+  brights = {
+    '{{ .palette.bright_black }}', '{{ .palette.red }}', '{{ .palette.green }}', '{{ .palette.yellow }}',
+    '{{ .palette.blue }}', '{{ .palette.magenta }}', '{{ .palette.cyan }}', '{{ .palette.fg }}',
+  },
+}
+
+config.keys = {
+  { key = 'LeftArrow', mods = 'ALT', action = act.SendString '\x01' },
+  { key = 'RightArrow', mods = 'ALT', action = act.SendString '\x05' },
+  { key = 'LeftArrow', mods = 'CTRL', action = act.SendString '\x1bb' },
+  { key = 'RightArrow', mods = 'CTRL', action = act.SendString '\x1bf' },
+}
+
+return config

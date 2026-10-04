@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh user-scoped desktop tools and defaults
+Documentation=https://sw.kovidgoyal.net/kitty/binary/ https://zed.dev/docs/linux
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=30m
+ExecStart=%h/.local/bin/dotfiles-refresh-desktop

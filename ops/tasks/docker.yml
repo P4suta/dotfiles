@@ -1,0 +1,70 @@
+---
+# Docker CE (rootful).
+# Requires the ubuntu_codename / apt_arch facts from preflight.
+
+- name: Remove conflicting legacy Docker packages
+  become: true
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-doc
+      - docker-compose
+      - docker-compose-v2
+      - podman-docker
+    state: absent
+    purge: true
+
+- name: Ensure /etc/apt/keyrings exists
+  become: true
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Install Docker apt keyring
+  become: true
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: '0644'
+    owner: root
+    group: root
+    force: false
+
+- name: Register Docker apt source
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/docker.list
+    mode: '0644'
+    owner: root
+    group: root
+    content: |
+      deb [arch={{ apt_arch }} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ubuntu_codename }} stable
+
+- name: Install Docker Engine + plugins
+  become: true
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+- name: Enable docker.service
+  become: true
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Add workspace user to docker group
+  become: true
+  ansible.builtin.user:
+    name: "{{ workspace_user }}"
+    groups: docker
+    append: true

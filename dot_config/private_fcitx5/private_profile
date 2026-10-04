@@ -1,0 +1,25 @@
+[Groups/0]
+Name="Group 1"
+Default Layout=jp
+DefaultIM=mozc
+
+[Groups/0/Items/0]
+Name=keyboard-jp
+Layout=
+
+[Groups/0/Items/1]
+Name=mozc
+Layout=
+
+[Groups/1]
+Name="Group 2"
+Default Layout=us
+DefaultIM=keyboard-us
+
+[Groups/1/Items/0]
+Name=keyboard-us
+Layout=
+
+[GroupOrder]
+0="Group 1"
+1="Group 2"

@@ -1,0 +1,21 @@
+[tools]
+{{- range (concat .tools.common (index .tools .role)) }}
+{{ . | quote }} = {{ if hasKey $.tool_versions . }}{{ index $.tool_versions . | quote }}{{ else }}"latest"{{ end }}
+{{- end }}
+
+"github:haskell/haskell-language-server" = { version = {{ index .tool_versions "haskell-language-server" | quote }}, bin = ["haskell-language-server-wrapper", {{ printf "haskell-language-server-%s" .tool_versions.ghc | quote }}] }
+
+[tool_alias]
+ghc = "asdf:mise-plugins/mise-ghcup"
+
+[settings]
+experimental = true
+jobs = {{ .mise.jobs }}
+# domyjob runs the owner's own projects in this work area, and each new workspace path would otherwise have its mise.toml refused.
+trusted_config_paths = [{{ joinPath .chezmoi.homeDir ".local/state/domyjob/v3/work" | quote }}]
+
+[settings.hook_env]
+chpwd_only = true
+
+[settings.github]
+gh_cli_tokens = true

@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily cleanup of abandoned dev containers (remove old exited + safe prune)
+
+[Timer]
+# Daily, with catch-up: unlike the reaper this is not time-critical, and a
+# single run after the machine has been off is exactly what we want.
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target

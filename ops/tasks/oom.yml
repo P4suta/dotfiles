@@ -1,0 +1,162 @@
+---
+# Protect the management path and bound development workloads on the 16 GiB host.
+
+- name: Validate the workload deployment before changing system settings
+  ansible.builtin.import_tasks: oom-preflight.yml
+
+- name: Install earlyoom
+  become: true
+  ansible.builtin.apt:
+    name: earlyoom
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Configure earlyoom
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/default/earlyoom
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      # Trigger below 5% mem and 5% swap, report every 60s.
+      # --avoid deprioritizes management and desktop processes; it is not an absolute exemption.
+      EARLYOOM_ARGS="-r 60 -m 5 -s 5 --avoid '(^|/)(NetworkManager|tailscaled|sshd|systemd|systemd-.*|\
+      cinnamon|Xorg|mintsystem)$'"
+  register: earlyoom_conf
+
+- name: Enable and (re)start earlyoom
+  become: true
+  ansible.builtin.systemd:
+    name: earlyoom
+    enabled: true
+    state: "{{ 'restarted' if earlyoom_conf is changed else 'started' }}"
+
+# 2 GB -> 8 GB by adding a second file.
+# Keep /swapfile active; swapoff would move its contents back into RAM under memory pressure.
+- name: Allocate /swapfile2 (6 GiB)
+  become: true
+  ansible.builtin.command:
+    cmd: dd if=/dev/zero of=/swapfile2 bs=1M count=6144
+    creates: /swapfile2
+
+- name: Secure /swapfile2 perms
+  become: true
+  ansible.builtin.file:
+    path: /swapfile2
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Probe /swapfile2 for an existing swap signature
+  become: true
+  ansible.builtin.command:
+    cmd: blkid -p -s TYPE -o value /swapfile2
+  register: swapfile2_sig
+  changed_when: false
+  failed_when: false
+
+- name: Initialize swap area on /swapfile2
+  become: true
+  ansible.builtin.command:
+    cmd: mkswap /swapfile2
+  when: (swapfile2_sig.stdout | trim) != 'swap'
+  changed_when: true
+
+- name: Persist /swapfile2 in /etc/fstab
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^/swapfile2\s'
+    line: /swapfile2 none swap sw 0 0
+
+- name: Activate fstab swap (harmless to the already active /swapfile)
+  become: true
+  ansible.builtin.command:
+    cmd: swapon --all
+  changed_when: false
+
+- name: Tune VM for OOM resilience
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-oom.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      # Dev box: keep active pages in RAM and suppress thrashing.
+      vm.swappiness = 10
+
+- name: Reload sysctl.d settings (no service restart)
+  become: true
+  ansible.builtin.command:
+    cmd: sysctl --system
+  changed_when: false
+
+- name: Create tailscaled OOM drop-in dir
+  become: true
+  ansible.builtin.file:
+    path: /etc/systemd/system/tailscaled.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Protect tailscaled from the OOM-killer
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/tailscaled.service.d/oom.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Service]
+      OOMScoreAdjust=-900
+
+- name: Reload systemd unit files
+  become: true
+  ansible.builtin.systemd:
+    daemon_reload: true
+  changed_when: false
+
+- name: Create NetworkManager management protection directory
+  become: true
+  ansible.builtin.file:
+    path: /etc/systemd/system/NetworkManager.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Protect and automatically recover NetworkManager
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/NetworkManager.service.d/oom.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Service]
+      OOMScoreAdjust=-900
+      Restart=always
+      RestartSec=5s
+
+- name: Reload management unit configuration without restarting services
+  become: true
+  ansible.builtin.systemd:
+    daemon_reload: true
+  changed_when: false
+
+- name: Apply OOM protection to existing management processes without restarting
+  become: true
+  ansible.builtin.command:
+    argv: [choom, --pid, "{{ item }}", --adjust, '-900']
+  loop: "{{ oom_management_pids }}"
+  changed_when: false
+
+- name: Apply the workload resource hierarchy
+  ansible.builtin.import_tasks: oom-resources.yml
+
+- name: Verify the deployed management and workload configuration
+  ansible.builtin.import_tasks: oom-verify.yml

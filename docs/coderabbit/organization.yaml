@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+reviews:
+  request_changes_workflow: true
+  high_level_summary_in_walkthrough: true
+  review_details: true
+  fail_commit_status: true
+  auto_apply_labels: true
+  auto_assign_reviewers: true
+  slop_detection:
+    include_all_authors: true
+  path_instructions:
+    - path: "**"
+      instructions: >-
+        Prioritize supported correctness, security, and regression findings with a concrete failure scenario.
+        Respect the repository's existing instructions and authoritative CI rather than proposing parallel policy or speculative abstraction.
+        Keep source prose minimal and write each documentation or comment sentence on its own line.
+        Do not demand new tests for trivial prose or behavior-preserving edits, or tests that merely repeat the implementation.
+    - path: "**/*.rs"
+      instructions: >-
+        Check important state and error boundaries against the intended contract.
+        Prefer typed invariants and exhaustive state handling when they prevent a demonstrated defect; avoid unrelated abstraction or rewrites.
+        Treat panic paths, cancellation, partial failure, filesystem ownership, and command argument boundaries as correctness concerns when the changed code touches them.
+    - path: "**/*.gleam"
+      instructions: >-
+        Check public function and type compatibility, exhaustive variants, and Result error propagation against the intended behavior.
+        Validate Erlang or JavaScript interop assumptions when changed rather than assuming both targets behave identically.
+  finishing_touches:
+    simplify:
+      enabled: true
+code_generation:
+  unit_tests:
+    path_instructions:
+      - path: "**"
+        instructions: >-
+          Use the repository's existing test framework and commands.
+          Add focused regression, boundary, and error-path tests for observable behavior, with an independent expected result.
+          Do not mirror implementation logic, weaken existing gates, or add redundant tests merely to increase coverage.
+          Keep test changes and fixtures scoped to the PR's intended behavior.

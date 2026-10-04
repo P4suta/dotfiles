@@ -1,0 +1,2 @@
+& {{ includeTemplate "ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles-xtask.exe") }} --root {{ includeTemplate "ps_quote" .chezmoi.sourceDir }} doctor --strict
+exit $LASTEXITCODE

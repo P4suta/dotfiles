@@ -1,0 +1,4 @@
+# policy: {{ include "dot_config/storage-scout/auto.toml.tmpl" | sha256sum }}
+$ErrorActionPreference = 'Stop'
+& {{ includeTemplate "ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup storage-scout
+exit $LASTEXITCODE

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run tools-upgrade shortly after boot, and weekly while up
+
+[Timer]
+OnStartupSec=5min
+OnUnitActiveSec=1w
+Persistent=false
+
+[Install]
+WantedBy=timers.target

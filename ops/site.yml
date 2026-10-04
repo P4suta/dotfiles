@@ -1,0 +1,81 @@
+---
+- name: System tier (run by admin)
+  hosts: all
+  become: false
+  gather_facts: true
+
+  pre_tasks:
+    - name: Require machine-local workspace identity
+      ansible.builtin.assert:
+        that:
+          - workspace_user is defined
+          - workspace_user | length > 0
+        fail_msg: Supply workspace_user through a private inventory or extra-vars file.
+      tags: [always]
+
+    - name: Refuse to run on WSL
+      ansible.builtin.assert:
+        that: "'microsoft' not in (ansible_facts.kernel | lower)"
+        fail_msg: ops/ targets bare-metal Linux only; WSL is left to Docker Desktop integration.
+      tags: [always]
+
+  tasks:
+    - name: Preflight (codename fact)
+      ansible.builtin.import_tasks: tasks/preflight.yml
+      tags: [always]
+
+    - name: Base packages
+      ansible.builtin.import_tasks: tasks/base.yml
+      tags: [base]
+
+    - name: Desktop developer tools (VS Code, 1Password, Fcitx 5, and terminal dependencies)
+      ansible.builtin.import_tasks: tasks/desktop.yml
+      tags: [desktop]
+
+    - name: Remove retired Orca agent development environment
+      ansible.builtin.import_tasks: tasks/retire-orca.yml
+      tags: [desktop]
+
+    - name: Nix (multi-user, flakes)
+      ansible.builtin.import_tasks: tasks/nix.yml
+      tags: [nix]
+
+    - name: Claude Code sandbox prerequisites
+      ansible.builtin.import_tasks: tasks/sandbox.yml
+      tags: [sandbox]
+
+    - name: Unattended-upgrades
+      ansible.builtin.import_tasks: tasks/unattended_upgrades.yml
+      tags: [unattended]
+
+    - name: OOM resilience and bounded development workloads
+      ansible.builtin.import_tasks: tasks/oom.yml
+      tags: [oom]
+
+    - name: OOM resilience verification (read-only)
+      ansible.builtin.import_tasks: tasks/oom-verify.yml
+      tags: [oom-verify, never]
+
+    - name: Openssh-server (opt-in)
+      ansible.builtin.import_tasks: tasks/openssh.yml
+      tags: [openssh, never]
+
+    - name: Docker CE (rootful)
+      ansible.builtin.import_tasks: tasks/docker.yml
+      tags: [docker]
+
+    - name: KVM / libvirt (Windows VM platform)
+      ansible.builtin.import_tasks: tasks/libvirt.yml
+      tags: [libvirt]
+
+    - name: Tailscale (install and enable only; up stays manual)
+      ansible.builtin.import_tasks: tasks/tailscale.yml
+      tags: [tailscale]
+
+    - name: XRDP remote desktop (opt-in, over Tailscale)
+      ansible.builtin.import_tasks: tasks/xrdp.yml
+      tags: [xrdp, never]
+
+    - name: Post-apply verification (read-only)
+      ansible.builtin.import_tasks: tasks/postcheck.yml
+      tags: [verify, never]

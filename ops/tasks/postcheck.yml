@@ -1,0 +1,84 @@
+---
+# Read-only assertions, invoked explicitly with --tags verify (the import in site.yml carries `never`, so a normal apply skips it).
+
+- name: Check Docker daemon is reachable from workspace user
+  become: true
+  become_user: "{{ workspace_user }}"
+  ansible.builtin.command: docker version --format '{% raw %}{{.Server.Version}}{% endraw %}'
+  changed_when: false
+  register: docker_version
+
+- name: Report Docker server version
+  ansible.builtin.debug:
+    msg: "Docker daemon: {{ docker_version.stdout }}"
+
+- name: Read tailscale status
+  become: true
+  ansible.builtin.command: tailscale status --json
+  changed_when: false
+  register: ts_status
+
+- name: Confirm Tailscale BackendState == Running
+  ansible.builtin.assert:
+    that: "(ts_status.stdout | from_json).BackendState == 'Running'"
+    fail_msg: |
+      tailscale up has not completed. Run `sudo tailscale up --ssh --operator={{ workspace_user }}` by hand.
+
+# ripgrep is deliberately not checked here: it is mise-managed, so it depends on $HOME PATH and is not the system tier's business.
+- name: Gather apt package facts
+  become: true
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: Confirm desktop developer packages are installed
+  ansible.builtin.assert:
+    that: item in ansible_facts.packages
+    fail_msg: "{{ item }} is missing; run `ansible-playbook -K site.yml --tags desktop`."
+  loop:
+    - 1password
+    - 1password-cli
+    - code
+    - fcitx5
+    - fcitx5-config-qt
+    - fcitx5-frontend-all
+    - fcitx5-mozc
+
+- name: Confirm retired Orca ADE is absent
+  ansible.builtin.assert:
+    that: "'orca-ide' not in ansible_facts.packages"
+    fail_msg: orca-ide is still installed; run `ansible-playbook -K site.yml --tags desktop`.
+
+- name: Confirm legacy input method packages are absent
+  ansible.builtin.assert:
+    that: item not in ansible_facts.packages
+    fail_msg: "{{ item }} is still installed; run `ansible-playbook -K site.yml --tags desktop`."
+  loop:
+    - fcitx
+    - fcitx-bin
+    - ibus-mozc
+
+- name: Confirm sandbox packages are installed
+  ansible.builtin.assert:
+    that: item in ansible_facts.packages
+    fail_msg: "{{ item }} is missing; run `ansible-playbook -K site.yml --tags sandbox`."
+  loop:
+    - bubblewrap
+    - socat
+
+- name: Report sandbox package versions
+  ansible.builtin.debug:
+    msg: "{{ item }}: {{ ansible_facts.packages[item][0].version }}"
+  loop:
+    - bubblewrap
+    - socat
+
+- name: Stat seccomp actions_avail
+  ansible.builtin.stat:
+    path: /proc/sys/kernel/seccomp/actions_avail
+  register: postcheck_seccomp
+
+- name: Confirm kernel seccomp filter is available
+  ansible.builtin.assert:
+    that: postcheck_seccomp.stat.exists
+    fail_msg: seccomp filter is missing, so the sandbox cannot run (kernel requirement).
+    success_msg: seccomp filter available

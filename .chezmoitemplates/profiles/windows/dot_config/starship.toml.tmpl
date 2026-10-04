@@ -1,0 +1,90 @@
+"$schema" = "https://starship.rs/config-schema.json"
+format = """
+[╭─](surface0)$os$username$hostname$directory$git_branch$git_state$git_status$fill$cmd_duration$status$time
+[╰─](surface0)$character"""
+add_newline = true
+scan_timeout = 20
+command_timeout = 800
+palette = "tokyo_night"
+
+[palettes.tokyo_night]
+background = "{{ .palette.bg }}"
+surface0 = "{{ .palette.surface }}"
+surface1 = "{{ .palette.comment }}"
+foreground = "{{ .palette.fg }}"
+blue = "{{ .palette.blue }}"
+cyan = "{{ .palette.cyan }}"
+green = "{{ .palette.green }}"
+magenta = "{{ .palette.magenta }}"
+orange = "{{ .palette.orange }}"
+red = "{{ .palette.red }}"
+yellow = "{{ .palette.yellow }}"
+
+[os]
+format = "[$symbol]($style)"
+disabled = false
+style = "bold blue"
+
+[os.symbols]
+Windows = "󰖳 "
+
+[username]
+format = "[](fg:orange)[$user]($style)[](fg:orange) "
+style_user = "bg:orange fg:background bold"
+style_root = "bg:red fg:background bold"
+
+[hostname]
+ssh_only = true
+format = "[](fg:cyan)[󰒋 $hostname]($style)[](fg:cyan) "
+style = "bg:cyan fg:background bold"
+
+[directory]
+read_only_style = "bg:blue fg:background"
+format = "[](fg:blue)[$path$read_only]($style)[](fg:blue) "
+style = "bg:blue fg:background bold"
+truncation_length = 4
+truncate_to_repo = true
+read_only = " 󰌾"
+fish_style_pwd_dir_length = 1
+
+[character]
+success_symbol = "[❯](bold green) "
+error_symbol = "[❯](bold red) "
+vimcmd_symbol = "[❮](bold magenta) "
+
+[git_branch]
+format = "[](fg:magenta)[$symbol$branch(:$remote_branch)]($style)[](fg:magenta) "
+symbol = " "
+style = "bg:magenta fg:background bold"
+
+[git_state]
+format = "[](fg:orange)[$state( $progress_current/$progress_total)]($style)[](fg:orange) "
+style = "bg:orange fg:background bold"
+
+[git_status]
+format = "([$all_status$ahead_behind ]($style))"
+style = "bold yellow"
+conflicted = "="
+ahead = "⇡"
+behind = "⇣"
+diverged = "⇕"
+
+[fill]
+symbol = "─"
+style = "surface0"
+
+[cmd_duration]
+min_time = 500
+format = " [󱎫 $duration](yellow)"
+
+[status]
+disabled = false
+format = " [$symbol$status]($style)"
+symbol = "✘ "
+style = "bold red"
+
+[time]
+disabled = false
+format = " [ $time]($style)"
+time_format = "%H:%M"
+style = "surface1"

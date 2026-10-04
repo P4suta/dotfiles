@@ -1,0 +1,17 @@
+# release-plz only proposes the release pull request.
+# The maintainer's signed tag starts release.yml, which publishes after an approved deployment.
+[workspace]
+allow_dirty = false
+changelog_update = true
+dependencies_update = false
+git_tag_enable = false
+git_tag_name = "v{{ version }}"
+git_release_enable = false
+publish = false
+pr_draft = true
+pr_name = "chore(release): v{{ version }}"
+semver_check = true
+
+[changelog]
+protect_breaking_commits = true
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+$"

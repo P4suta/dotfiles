@@ -1,0 +1,35 @@
+{{- $tools := concat .tools.common (index .tools .role) -}}
+{{- $nix := stat (joinPath .chezmoi.homeDir ".nix-profile/bin/nu") -}}
+{{- if not $nix -}}
+{{-   range $_, $spec := .nix.packages -}}
+{{-     if $spec }}{{ $tools = append $tools $spec }}{{ end -}}
+{{-   end -}}
+{{- end -}}
+[tools]
+{{- range $tools }}
+{{ . | quote }} = {{ if hasKey $.tool_versions . }}{{ index $.tool_versions . | quote }}{{ else }}"latest"{{ end }}
+{{- end }}
+{{- if not $nix }}
+"github:tealdeer-rs/tealdeer" = { version = "latest", bin = "tldr" }
+{{- end }}
+
+[tools."http:coderabbit"]
+version = {{ .coderabbit.version | quote }}
+rename_exe = "coderabbit-vendor"
+
+[tools."http:coderabbit".platforms]
+{{- range $platform, $artifact := .coderabbit.platforms }}
+{{ $platform }} = { url = "https://cli.coderabbit.ai/releases/{{ $.coderabbit.version }}/{{ $artifact.artifact }}", checksum = "sha256:{{ $artifact.sha256 }}"{{ if hasPrefix "windows-" $platform }}, rename_exe = "coderabbit-vendor.exe"{{ end }} }
+{{- end }}
+
+[settings]
+experimental = true
+jobs = {{ .mise.jobs }}
+# domyjob runs the owner's own projects in this work area, and each new workspace path would otherwise have its mise.toml refused.
+trusted_config_paths = [{{ joinPath .chezmoi.homeDir ".local/state/domyjob/v3/work" | quote }}]
+
+[settings.hook_env]
+chpwd_only = true
+
+[settings.github]
+gh_cli_tokens = true

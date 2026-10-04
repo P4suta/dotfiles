@@ -1,0 +1,17 @@
+# fzf default options, read via FZF_DEFAULT_OPTS_FILE (fzf 0.52+).
+#
+# A file rather than an FZF_DEFAULT_OPTS string exported from both ~/.zshrc and Nushell's env.nu: two shells exporting the same long string is two places for it to diverge, and neither could be rendered from [palette].
+--height=60%
+--layout=reverse
+--border=rounded
+--info=inline
+--preview-window=border-rounded
+
+# bg is deliberately left at the terminal default (-1) rather than set to the palette background.
+# The terminal runs at 85% opacity; painting fzf's own background would punch an opaque rectangle through it.
+--color=bg:-1,bg+:{{ .palette.bg_highlight }}
+--color=fg:{{ .palette.fg_dim }},fg+:{{ .palette.fg }}
+--color=hl:{{ .palette.blue }},hl+:{{ .palette.blue }}
+--color=info:{{ .palette.cyan }},prompt:{{ .palette.cyan }},pointer:{{ .palette.magenta }}
+--color=marker:{{ .palette.green }},spinner:{{ .palette.magenta }},header:{{ .palette.blue }}
+--color=border:{{ .palette.surface }}

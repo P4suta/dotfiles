@@ -1,0 +1,3 @@
+$ErrorActionPreference = 'Stop'
+& {{ includeTemplate "ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles-xtask.exe") }} --root {{ includeTemplate "ps_quote" (.chezmoi.sourceDir) }} setup mise --config {{ includeTemplate "ps_quote" (.chezmoi.configFile) }} --live
+exit $LASTEXITCODE

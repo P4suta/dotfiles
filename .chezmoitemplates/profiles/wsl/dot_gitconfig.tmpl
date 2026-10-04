@@ -1,0 +1,53 @@
+[user]
+	name = {{ .git.name | quote }}
+	email = {{ .git.email | quote }}
+
+[core]
+	sshCommand = ssh.exe
+	pager = delta
+{{- if .signing.enabled }}
+	# 全 repo (既存含む) で署名 hook を強制実行する単一ソース。
+	# 実体は dot_config/git/hooks/ (chezmoi 管理)。
+	# dotfiles repo 自身は run_onchange で local override し
+	# .git/hooks に戻して lefthook (typos/shellcheck) を生かしている。
+	hooksPath = ~/.config/git/hooks
+{{- end }}
+
+[interactive]
+	diffFilter = delta --color-only
+
+[delta]
+	navigate = true
+	line-numbers = true
+	side-by-side = true
+	syntax-theme = Monokai Extended
+
+[diff]
+	colorMoved = default
+
+[pull]
+	rebase = true
+
+[init]
+	defaultBranch = main
+
+[alias]
+	dft = -c diff.external=difft diff
+	co-jj = "!f() { jj git init --colocate; }; f"
+
+{{ if .signing.enabled -}}
+[gpg]
+	format = ssh
+[gpg "ssh"]
+	# Windows OpenSSH の ssh-keygen を呼ぶ。
+	# WSL から 1Password の SSH agent (\\.\pipe\openssh-ssh-agent) と
+	# 整合した動作にするため、署名検証も Windows 側バイナリで統一する。
+	program = {{ joinPath .chezmoi.homeDir ".local/bin/dotfiles-wsl-ssh-keygen" | quote }}
+	allowedSignersFile = ~/.config/git/allowed_signers
+[commit]
+	gpgsign = true
+[tag]
+	gpgsign = true
+[user]
+	signingkey = {{ printf "key::%s" (includeTemplate "signing_pubkey" . | trim) | quote }}
+{{- end }}

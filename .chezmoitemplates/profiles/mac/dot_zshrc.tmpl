@@ -1,0 +1,44 @@
+case $- in
+  *i*) ;;
+  *) return ;;
+esac
+
+HISTFILE="${HOME}/.zsh_history"
+HISTSIZE=100000
+SAVEHIST=100000
+setopt HIST_IGNORE_ALL_DUPS HIST_IGNORE_SPACE HIST_REDUCE_BLANKS
+setopt SHARE_HISTORY INC_APPEND_HISTORY EXTENDED_HISTORY
+setopt AUTO_CD INTERACTIVE_COMMENTS NO_BEEP
+
+# shellcheck source=dot_config/shell/ssh-agent.sh
+if [[ -r "${HOME}/.config/shell/ssh-agent.sh" ]]; then
+  . "${HOME}/.config/shell/ssh-agent.sh"
+fi
+
+if [[ -o interactive && -t 0 && -t 1 ]] \
+  && [[ -z "${DOTFILES_NO_NU:-}${DOTFILES_BASH_ONLY:-}" ]] \
+  && command -v nu >/dev/null 2>&1; then
+  exec nu
+fi
+
+if [[ -x "${HOME}/.local/bin/mise" ]]; then
+  eval "$("${HOME}/.local/bin/mise" activate zsh)"
+fi
+
+export PATH="${HOME}/.local/bin:${PATH}"
+
+if [[ -r "${HOME}/.opam/opam-init/init.zsh" ]]; then
+  . "${HOME}/.opam/opam-init/init.zsh" >/dev/null 2>&1 || true
+fi
+
+command -v starship >/dev/null && eval "$(starship init zsh)"
+command -v zoxide   >/dev/null && eval "$(zoxide init zsh)"
+command -v atuin    >/dev/null && eval "$(atuin init zsh --disable-up-arrow)"
+command -v fzf      >/dev/null && eval "$(fzf --zsh)"
+export FZF_DEFAULT_OPTS_FILE="${HOME}/.config/fzf/fzfrc"
+
+command -v bat   >/dev/null && export MANPAGER="sh -c 'col -bx | bat -l man -p'"
+command -v vivid >/dev/null && export LS_COLORS="$(vivid generate tokyonight-night)"
+
+{{ if eq .role "work" -}}
+{{- end }}

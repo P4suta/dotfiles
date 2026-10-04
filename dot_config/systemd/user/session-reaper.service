@@ -1,0 +1,10 @@
+[Unit]
+Description=Reap abandoned orphaned processes (stopped + re-parented to init)
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/session-reaper/config
+Environment=SESSION_REAPER_STATE_DIR=%h/.local/state/session-reaper
+ExecStart=%h/.local/bin/session-reaper reap
+SyslogIdentifier=session-reaper
+Nice=10

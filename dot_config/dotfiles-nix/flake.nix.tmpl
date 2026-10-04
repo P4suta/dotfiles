@@ -1,0 +1,20 @@
+{{ if eq .profile "linux" -}}
+{
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  outputs = { nixpkgs, ... }:
+    let
+      system = "{{ if eq .chezmoi.arch "arm64" }}aarch64{{ else }}x86_64{{ end }}-linux";
+      pkgs = nixpkgs.legacyPackages.${system};
+    in {
+      packages.${system}.default = pkgs.buildEnv {
+        name = "dotfiles-nix";
+        ignoreCollisions = true;
+        paths = with pkgs; [
+{{ range $name, $_ := .platforms.linux.nix.packages }}
+          {{ $name }}
+{{ end }}
+        ];
+      };
+    };
+}
+{{ end -}}

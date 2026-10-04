@@ -1,0 +1,170 @@
+---
+- name: Resolve the workspace user for read-only resource verification
+  ansible.builtin.command:
+    argv: [id, -u, "{{ workspace_user }}"]
+  register: oom_verify_uid
+  changed_when: false
+  check_mode: false
+
+- name: Read effective management unit properties
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - "{{ item }}"
+      - --property=ActiveState,MainPID,OOMScoreAdjust,Restart,RestartUSec
+  loop: [NetworkManager.service, tailscaled.service]
+  register: oom_effective_services
+  changed_when: false
+  check_mode: false
+
+- name: Verify management services and NetworkManager recovery
+  ansible.builtin.assert:
+    that:
+      - "'ActiveState=active' in item.stdout_lines"
+      - "'OOMScoreAdjust=-900' in item.stdout_lines"
+      - "item.item != 'NetworkManager.service' or 'Restart=always' in item.stdout_lines"
+      - "item.item != 'NetworkManager.service' or 'RestartUSec=5s' in item.stdout_lines"
+      - "oom_management_pids is not defined or ('MainPID=' ~ oom_management_pids[oom_verify_index]) in item.stdout_lines"
+  loop: "{{ oom_effective_services.results }}"
+  loop_control:
+    index_var: oom_verify_index
+    label: "{{ item.item }}"
+  when: not ansible_check_mode
+
+- name: Read live management OOM protection
+  become: true
+  ansible.builtin.slurp:
+    src: "/proc/{{ (item.stdout | regex_findall('(?m)^MainPID=([0-9]+)$'))[0] }}/oom_score_adj"
+  loop: "{{ oom_effective_services.results }}"
+  register: oom_live_scores
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Verify protection on the existing management processes
+  ansible.builtin.assert:
+    that:
+      - item.content | b64decode | trim == '-900'
+  loop: "{{ oom_live_scores.results }}"
+  loop_control:
+    label: "{{ item.item.item }}"
+  when: not ansible_check_mode
+
+- name: Read the earlyoom configuration
+  ansible.builtin.slurp:
+    src: /etc/default/earlyoom
+  register: oom_earlyoom
+
+- name: Verify earlyoom deprioritizes management services
+  ansible.builtin.assert:
+    that:
+      - "'--avoid' in (oom_earlyoom.content | b64decode)"
+      - "'NetworkManager|tailscaled|sshd' in (oom_earlyoom.content | b64decode)"
+  when: not ansible_check_mode
+
+- name: Read effective workspace memory limits
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - "user-{{ oom_verify_uid.stdout }}.slice"
+      - --property=MemoryHigh,MemoryMax,MemorySwapMax,CPUQuotaPerSecUSec
+  register: oom_effective_user
+  changed_when: false
+  check_mode: false
+
+- name: Verify the complete workspace backstop and unrestricted CPU
+  ansible.builtin.assert:
+    that:
+      - "('MemoryHigh=' ~ oom_resources.user_high_bytes) in oom_effective_user.stdout_lines"
+      - "('MemoryMax=' ~ oom_resources.user_max_bytes) in oom_effective_user.stdout_lines"
+      - "('MemorySwapMax=' ~ oom_resources.user_swap_bytes) in oom_effective_user.stdout_lines"
+      - "'CPUQuotaPerSecUSec=infinity' in oom_effective_user.stdout_lines"
+  when: not ansible_check_mode
+
+- name: Read effective aggregate job limits
+  become: true
+  become_user: "{{ workspace_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ oom_verify_uid.stdout }}"
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --user
+      - show
+      - domyjob.slice
+      - --property=MemoryHigh,MemoryMax,MemorySwapMax,CPUQuotaPerSecUSec
+  register: oom_effective_jobs
+  changed_when: false
+  check_mode: false
+
+- name: Verify aggregate domyjob memory limits and unrestricted CPU
+  ansible.builtin.assert:
+    that:
+      - "('MemoryHigh=' ~ oom_resources.domyjob.memory_high_bytes) in oom_effective_jobs.stdout_lines"
+      - "('MemoryMax=' ~ oom_resources.domyjob.memory_max_bytes) in oom_effective_jobs.stdout_lines"
+      - "('MemorySwapMax=' ~ oom_resources.domyjob.memory_swap_max_bytes) in oom_effective_jobs.stdout_lines"
+      - "'CPUQuotaPerSecUSec=infinity' in oom_effective_jobs.stdout_lines"
+  when: not ansible_check_mode
+
+- name: Read the deployed mandatory job policy
+  ansible.builtin.slurp:
+    src: /etc/domyjob/resource-policy.json
+  register: oom_deployed_policy
+  when: not ansible_check_mode
+
+- name: Read policy ownership without following links
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: [/etc/domyjob, /etc/domyjob/resource-policy.json]
+  register: oom_policy_permissions
+  when: not ansible_check_mode
+
+- name: Verify mandatory policy contents and trusted ownership
+  ansible.builtin.assert:
+    that:
+      - (oom_deployed_policy.content | b64decode | from_json) == oom_resources.domyjob
+      - item.stat.uid == 0
+      - not item.stat.islnk
+      - item.stat.mode == ('0755' if item.stat.isdir else '0644')
+  loop: "{{ oom_policy_permissions.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not ansible_check_mode
+
+- name: Verify earlyoom and OpenSSH remain active
+  ansible.builtin.command:
+    argv: [systemctl, is-active, "{{ item }}"]
+  loop: [earlyoom.service, ssh.service]
+  changed_when: false
+  check_mode: false
+
+- name: Read global IPv4 addresses and default routes
+  ansible.builtin.command:
+    argv: "{{ item }}"
+  loop:
+    - [ip, -j, -4, address, show, scope, global]
+    - [ip, -j, -4, route, show, default]
+  register: oom_network_state
+  changed_when: false
+  check_mode: false
+
+- name: Verify the host still has an address and a default route
+  ansible.builtin.assert:
+    that:
+      - (oom_network_state.results[0].stdout | from_json | map(attribute='addr_info') | flatten | length) > 0
+      - (oom_network_state.results[1].stdout | from_json | length) > 0
+
+- name: Read Tailscale backend state without changing enrollment
+  ansible.builtin.command:
+    argv: [tailscale, status, --json]
+  register: oom_tailscale
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Verify the existing tailnet session remains running
+  ansible.builtin.assert:
+    that:
+      - (oom_tailscale.stdout | from_json).BackendState == 'Running'

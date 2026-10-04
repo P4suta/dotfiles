@@ -1,0 +1,12 @@
+# Rust hook dispatchers select this configuration with LEFTHOOK_CONFIG before the repository's own gates.
+
+output:
+  - failure
+
+pre-commit:
+  parallel: true
+  commands:
+    prose-sembr:
+# Style edits affect the staged additions; removals remain reports and partial staging is preserved.
+      glob: "*"
+      run: ocomment fix --tidy --staged {staged_files}

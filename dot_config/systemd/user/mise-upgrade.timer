@@ -1,0 +1,12 @@
+[Unit]
+Description=Run mise upgrade after WSL boot (and weekly if it stays up)
+
+[Timer]
+# WSL は停止している時間が長いので OnCalendar より OnStartupSec のほうが意味がある。
+# 起動から 5 分遅れてトリガし、以降(通常は回らないが)1 週間おきにも再実行。
+OnStartupSec=5min
+OnUnitActiveSec=1w
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,17 @@
+{
+  ".gitconfig": 11,
+  ".config/git/config": 4,
+  ".local/bin/dotfiles-wsl-ssh-keygen": 8,
+  ".config/nushell/config.nu": 3,
+  "Documents/PowerShell/Microsoft.PowerShell_profile.ps1": 4,
+  "Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist": 1,
+  ".config/systemd/user/tools-upgrade.service": 2,
+  ".config/systemd/user/mise-upgrade.service": 8,
+  "00-runtime.sh": 11,
+  "00-runtime.ps1": 4,
+  "25-install-wezterm.ps1": 4,
+  ".config/shell/github-token.sh": 0,
+  ".claude/CLAUDE.md": 15,
+  ".codex/AGENTS.md": 15,
+  ".config/opencode/AGENTS.md": 15
+}

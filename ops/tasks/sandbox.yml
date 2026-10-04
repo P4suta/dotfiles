@@ -1,0 +1,29 @@
+---
+# Prerequisites for the Claude Code sandbox (bubblewrap-based isolation).
+#
+# ripgrep is also required but belongs to mise (.chezmoidata.toml tools.common):
+# it lives under $HOME, and an apt copy would lose to the mise one on PATH.
+# seccomp filter is a kernel feature, so it is asserted rather than installed.
+
+- name: Install sandbox prerequisites (bubblewrap + socat)
+  become: true
+  ansible.builtin.apt:
+    name:
+      - bubblewrap  # bwrap: builds the mount/pid/net namespaces
+      - socat       # relays the sandbox socket outward
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Stat seccomp actions_avail
+  ansible.builtin.stat:
+    path: /proc/sys/kernel/seccomp/actions_avail
+  register: sandbox_seccomp
+
+# Present only when CONFIG_SECCOMP_FILTER=y.
+# Without it bwrap cannot restrict syscalls, so the sandbox is unusable short of replacing the kernel.
+- name: Confirm the kernel supports seccomp filter
+  ansible.builtin.assert:
+    that: sandbox_seccomp.stat.exists
+    fail_msg: This kernel lacks seccomp filter (CONFIG_SECCOMP_FILTER); the sandbox cannot run.
+    success_msg: seccomp filter available

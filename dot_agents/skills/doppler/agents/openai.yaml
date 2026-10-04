@@ -1,0 +1,3 @@
+interface:
+  display_name: "Doppler"
+  short_description: "Manage Doppler secrets and CI authentication"

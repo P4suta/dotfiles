@@ -1,0 +1,5 @@
+$ErrorActionPreference = 'Stop'
+& {{ includeTemplate "ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup keyboard `
+    --keyboard-delay {{ .keyboard.keyboard_delay }} `
+    --keyboard-speed {{ .keyboard.keyboard_speed }}
+exit $LASTEXITCODE

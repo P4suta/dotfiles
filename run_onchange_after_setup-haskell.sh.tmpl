@@ -1,0 +1,4 @@
+{{- $context := merge (dict) . (index .platforms .profile) -}}
+{{- if eq .profile "mac" -}}
+{{ includeTemplate "profiles/mac/run_onchange_after_setup-haskell.sh.tmpl" $context }}
+{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}

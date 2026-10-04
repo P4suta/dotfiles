@@ -1,0 +1,10 @@
+[Unit]
+Description=Reap idle dev containers (stop those idle past the threshold)
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/dev-reaper/config
+Environment=DEV_REAPER_STATE_DIR=%h/.local/state/dev-reaper
+ExecStart=%h/.local/bin/dev-reaper reap
+SyslogIdentifier=dev-reaper
+Nice=10
