@@ -323,6 +323,11 @@ fn run() -> Result<()> {
         Action::Check => {
             dotfiles_xtask::skill_ops::check_catalog(&cli.root)?;
             dotfiles_xtask::quality::comment_scopes(&cli.root)?;
+            let unreferenced = dotfiles_xtask::quality::unreferenced_leaves(&cli.root)?;
+            anyhow::ensure!(
+                unreferenced.is_empty(),
+                "profile leaves that no template includes: {unreferenced:?}"
+            );
             println!(
                 "Validated {} shared skills and aliases",
                 validate_tree(&cli.root)?

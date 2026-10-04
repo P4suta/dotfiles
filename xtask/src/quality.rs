@@ -19,6 +19,15 @@ fn run(mut command: Command, root: &Path, name: &str, arguments: &[&str]) -> Res
     Ok(())
 }
 
+/// Whether a rendered command launcher or Git hook execs a program located through `$HOME` at run time.
+pub fn launcher_resolves_through_home(name: &str, contents: &str) -> bool {
+    (name.starts_with(".local/bin/") || name.contains("/hooks/"))
+        && contents.lines().any(|line| {
+            line.trim_start().starts_with("exec ")
+                && (line.contains("$HOME") || line.contains("${HOME}"))
+        })
+}
+
 /// Git for Windows ships the POSIX shell beside its `mingw64/libexec/git-core` directory.
 pub fn git_for_windows_shell(exec_path: &Path) -> Option<PathBuf> {
     Some(exec_path.ancestors().nth(3)?.join("usr/bin/sh.exe"))
@@ -119,6 +128,10 @@ pub fn rendered(dump: &Value, directory: &Path) -> Result<()> {
             );
         }
         if contents.starts_with("#!/bin/sh\n") {
+            ensure!(
+                !launcher_resolves_through_home(name, contents),
+                "launcher {name} finds its program through the runtime HOME, which tools that run Git with another HOME replace; render the installed path"
+            );
             let file = directory.join(format!("{index}.sh"));
             fs::write(&file, contents)?;
             run(
@@ -315,4 +328,47 @@ pub fn comment_scopes(root: &Path) -> Result<()> {
         refused.join(", ")
     );
     Ok(())
+}
+
+/// Profile leaves that no template includes: a leaf nothing renders keeps stale behavior that reviewers mistake for live configuration.
+pub fn unreferenced_leaves(root: &Path) -> Result<Vec<String>> {
+    let leaves_root = root.join(".chezmoitemplates/profiles");
+    let mut leaves = Vec::new();
+    let mut stack = vec![leaves_root.clone()];
+    while let Some(directory) = stack.pop() {
+        for entry in fs::read_dir(&directory)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                let relative = path.strip_prefix(root.join(".chezmoitemplates"))?;
+                leaves.push(relative.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    let mut referenced = std::collections::BTreeSet::new();
+    let mut sources = vec![root.to_path_buf()];
+    while let Some(directory) = sources.pop() {
+        for entry in fs::read_dir(&directory)? {
+            let path = entry?.path();
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
+            if path.is_dir() {
+                if !matches!(name, ".git" | "target" | "node_modules") {
+                    sources.push(path);
+                }
+            } else if let Ok(text) = fs::read_to_string(&path) {
+                for (index, _) in text.match_indices("profiles/") {
+                    let tail = &text[index..];
+                    let reference: String = tail.chars().take_while(|c| *c != '"').collect();
+                    referenced.insert(reference);
+                }
+            }
+        }
+    }
+    leaves.retain(|leaf| !referenced.contains(leaf));
+    leaves.sort();
+    Ok(leaves)
 }

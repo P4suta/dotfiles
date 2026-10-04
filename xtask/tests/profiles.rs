@@ -121,7 +121,8 @@ fn skipped_setup_scripts_need_a_target_name_and_a_reason() {
 
 #[test]
 fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let snapshot = source_snapshot();
+    let root = snapshot.path();
     for profile in Profile::ALL {
         let scope = tempfile::tempdir().unwrap();
         let home = scope.path().join("home");
@@ -318,4 +319,68 @@ fn setup_that_needs_a_package_requires_the_profile_to_install_it() {
         ),
         ["/scoop/apps/zoxide"]
     );
+}
+
+#[test]
+fn launchers_exec_their_installed_path_rather_than_the_runtime_home() {
+    let home = "#!/bin/sh\nexec \"$HOME/.local/bin/dotguard\" git \"$@\"\n";
+    assert!(quality::launcher_resolves_through_home(
+        ".local/bin/git",
+        home
+    ));
+    assert!(quality::launcher_resolves_through_home(
+        ".config/git/hooks/pre-push",
+        home
+    ));
+    let installed = "#!/bin/sh\nexec '/Users/fixture/.local/bin/dotguard' git \"$@\"\n";
+    assert!(!quality::launcher_resolves_through_home(
+        ".local/bin/git",
+        installed
+    ));
+    assert!(!quality::launcher_resolves_through_home(".bashrc", home));
+}
+
+#[test]
+fn profile_leaves_must_be_included_by_a_template() {
+    let scope = tempfile::tempdir().unwrap();
+    let leaves = scope.path().join(".chezmoitemplates/profiles/mac");
+    fs::create_dir_all(&leaves).unwrap();
+    fs::write(leaves.join("used"), "a\n").unwrap();
+    fs::write(leaves.join("stale"), "b\n").unwrap();
+    fs::write(
+        scope.path().join("dot_used.tmpl"),
+        "{{ includeTemplate \"profiles/mac/used\" . }}\n",
+    )
+    .unwrap();
+    assert_eq!(
+        quality::unreferenced_leaves(scope.path()).unwrap(),
+        ["profiles/mac/stale"]
+    );
+}
+
+/// chezmoi reads every entry under its source, including ignored build directories, so a concurrent build in the checkout can remove a file between its listing and its lstat.
+/// Contract tests read a copy without build outputs instead.
+fn source_snapshot() -> tempfile::TempDir {
+    fn copy(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name();
+            if matches!(name.to_str(), Some("target" | "node_modules" | ".git")) {
+                continue;
+            }
+            let kind = entry.file_type().unwrap();
+            if kind.is_dir() {
+                copy(&entry.path(), &to.join(&name));
+            } else if kind.is_file() {
+                fs::copy(entry.path(), to.join(&name)).unwrap();
+            }
+        }
+    }
+    let snapshot = tempfile::tempdir().unwrap();
+    copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap(),
+        snapshot.path(),
+    );
+    snapshot
 }

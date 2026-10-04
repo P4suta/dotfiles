@@ -22,7 +22,6 @@ paths = [
   ".chezmoitemplates/prose_policy",
   ".chezmoitemplates/remote_machines",
   ".chezmoitemplates/signing_pubkey",
-  ".chezmoitemplates/profiles/windows/remote_machines",
 ]
 language = "markdown"
 
