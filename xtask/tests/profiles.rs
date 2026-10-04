@@ -384,3 +384,41 @@ fn source_snapshot() -> tempfile::TempDir {
     );
     snapshot
 }
+
+#[test]
+fn forgetting_script_runs_reruns_every_onchange_script() {
+    let scope = tempfile::tempdir().unwrap();
+    let source = scope.path().join("source");
+    let destination = scope.path().join("home");
+    let state = scope.path().join("state");
+    let log = scope.path().join("runs");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&destination).unwrap();
+    let (script, contents) = if cfg!(windows) {
+        (
+            "run_onchange_after_10-record.ps1",
+            format!("Add-Content -LiteralPath '{}' -Value ran\n", log.display()),
+        )
+    } else {
+        (
+            "run_onchange_after_10-record.sh",
+            format!("#!/bin/sh\necho ran >> '{}'\n", log.display()),
+        )
+    };
+    fs::write(source.join(script), contents).unwrap();
+    let config = scope.path().join("chezmoi.toml");
+    fs::write(&config, "").unwrap();
+    let apply = || {
+        let status = dotfiles_xtask::profiles::chezmoi(&source, &state, &config, &destination)
+            .arg("apply")
+            .status()
+            .unwrap();
+        assert!(status.success());
+    };
+    apply();
+    apply();
+    assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 1);
+    dotfiles_xtask::profiles::forget_script_runs(&source, &state, &config, &destination).unwrap();
+    apply();
+    assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 2);
+}

@@ -18,7 +18,8 @@ Paths were untyped strings, so Windows verbatim, forward-slash, and backslash sp
 ## Decision
 
 Required CI rehearses native application on disposable Linux, macOS, and Windows hosts.
-`xtask rehearse` writes an anonymous machine-local configuration, seeds helper binaries owned by another cargo package and existing review history, then applies the native profile with its scripts, verifies it, applies it again, and verifies again.
+`xtask rehearse` writes an anonymous machine-local configuration, seeds helper binaries owned by another cargo package and existing review history, then applies the native profile with its scripts and verifies it three times.
+Before the second application it forgets which scripts ran, so every script runs again on the host it provisioned, with services loaded and running, which is the path that takes over an earlier repository's machine; the third application changes nothing.
 It refuses to run unless CI reports a disposable host and `--disposable-host` is given.
 Provisioning lists keep one representative entry and every entry that a later step invokes, so each step's real code path runs with small inputs.
 A script the host cannot run is omitted only through a `setup.skip` entry that names the script and gives a reason; application prints those entries before any change, and the reasons are part of review.
@@ -37,7 +38,7 @@ After scripts run, files are applied once more without scripts before verificati
 The gate also rejects three structural mistakes that reached a host or a reviewer: a launcher or Git hook that locates its program through the runtime `HOME`, which tools replace when they run Git; a profile leaf that no template includes; and an OComment language override that names a directory pattern or a missing file.
 Repository files that `dotctl` reads are compiled into it.
 
-Defects found this way are fixed in the boundary that owns them: native verification excludes always-run scripts, rollback skips untouched targets and removes Windows directory links correctly, managed listings are read as NUL-separated text, helper installation replaces earlier sources, public owner sources clone over HTTPS despite host rewrites, and the forge bundle is accepted only when every primary key is pinned and the current key is present.
+Defects found this way are fixed in the boundary that owns them: native verification excludes always-run scripts, rollback skips untouched targets and removes Windows directory links correctly, managed listings are read as NUL-separated text, helper installation replaces earlier sources, public owner sources clone over HTTPS despite host rewrites, the forge bundle is accepted only when every primary key is pinned and the current key is present, and a LaunchAgent is bootstrapped only after launchd has removed its running predecessor, which a test checks against the real launchd.
 
 ## Alternatives
 

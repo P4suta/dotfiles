@@ -615,16 +615,57 @@ fn tools(context: &ContextData, runner: &mut impl Runner, upgrade: bool) -> Resu
     Ok(())
 }
 
+/// Launchd stops a running job before it removes it, and `bootout` returns before the job exits, so a bootstrap that follows at once fails with EINPROGRESS.
+/// The wait outlasts launchd's default 20-second exit timeout, after which launchd kills the job.
+const AGENT_REMOVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn agent_loaded(runner: &mut impl Runner, target: &str) -> Result<bool> {
+    Ok(runner
+        .run(Tool::Launchctl, &args(&["print", target]))?
+        .success)
+}
+
+/// Boots a LaunchAgent out and returns once launchd no longer knows it.
+pub fn unload_agent(runner: &mut impl Runner, domain: &str, label: &str) -> Result<()> {
+    let target = format!("{domain}/{label}");
+    if !agent_loaded(runner, &target)? {
+        return Ok(());
+    }
+    optional(runner, Tool::Launchctl, &["bootout", &target]);
+    let deadline = std::time::Instant::now() + AGENT_REMOVAL;
+    while agent_loaded(runner, &target)? {
+        ensure!(
+            std::time::Instant::now() < deadline,
+            "{label} was still loaded {} seconds after its bootout",
+            AGENT_REMOVAL.as_secs()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Ok(())
+}
+
+/// Replaces a LaunchAgent's loaded definition with the one in `plist`, loading it if it was not loaded.
+pub fn reload_agent(
+    runner: &mut impl Runner,
+    domain: &str,
+    label: &str,
+    plist: &Path,
+) -> Result<()> {
+    unload_agent(runner, domain, label)?;
+    checked(
+        runner,
+        Tool::Launchctl,
+        &["bootstrap".into(), domain.into(), plist.into()],
+    )?;
+    Ok(())
+}
+
 fn services(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     fs::create_dir_all(context.home.join(".local/state/dotfiles/log"))?;
     if context.profile == Profile::Mac {
         let uid = String::from_utf8(checked(runner, Tool::Id, &args(&["-u"]))?)?;
         let domain = format!("gui/{}", uid.trim());
-        optional(
-            runner,
-            Tool::Launchctl,
-            &["bootout", &format!("{domain}/dev.dotfiles.mise-upgrade")],
-        );
+        unload_agent(runner, &domain, "dev.dotfiles.mise-upgrade")?;
         for label in [
             "tools-upgrade",
             "desktop-refresh",
@@ -639,16 +680,7 @@ fn services(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
                 .join("Library/LaunchAgents")
                 .join(format!("{label}.plist"));
             if plist.is_file() {
-                optional(
-                    runner,
-                    Tool::Launchctl,
-                    &["bootout", &format!("{domain}/{label}")],
-                );
-                checked(
-                    runner,
-                    Tool::Launchctl,
-                    &["bootstrap".into(), domain.clone().into(), plist.into()],
-                )?;
+                reload_agent(runner, &domain, &label, &plist)?;
             }
         }
     } else if context.profile == Profile::Linux
