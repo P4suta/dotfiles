@@ -118,6 +118,77 @@ pub fn run(source: &Path, config: &Path, step: Step, live: bool) -> Result<()> {
     execute(&context, &mut native, step)
 }
 
+/// Setup steps a rendered script runs, in script order, from `dotfiles-xtask ... setup STEP` invocations.
+pub fn scripted_steps(scripts: &str) -> Vec<Step> {
+    use clap::ValueEnum;
+    let mut steps = Vec::new();
+    for words in scripts
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>())
+    {
+        for pair in words.windows(2) {
+            if pair[0] == "setup"
+                && let Ok(step) = Step::from_str(pair[1], false)
+                && !steps.contains(&step)
+            {
+                steps.push(step);
+            }
+        }
+    }
+    steps
+}
+
+/// Requirements a step cannot satisfy midway: checked for every scripted step before application changes anything.
+pub fn preflight(context: &ContextData, runner: &mut impl Runner, steps: &[Step]) -> Result<()> {
+    let mut unmet = Vec::new();
+    for &step in steps {
+        if let Some(source) = owner_source(step)
+            && !source.public()
+            && !owner_checkout(context, source)?.join(".git").exists()
+        {
+            let mut arguments = args(&[
+                "-c",
+                "core.sshCommand=ssh -o BatchMode=yes",
+                "ls-remote",
+                "--heads",
+            ]);
+            arguments.push(source.clone_url().into());
+            if !runner.run(Tool::Git, &arguments)?.success {
+                unmet.push(format!(
+                    "{step:?} clones {} with the owner's GitHub credentials, which this session cannot use non-interactively",
+                    source.repository()
+                ));
+            }
+        }
+    }
+    ensure!(
+        unmet.is_empty(),
+        "setup cannot complete on this host; run from a session that satisfies it or name the script in setup.skip:\n{}",
+        unmet.join("\n")
+    );
+    Ok(())
+}
+
+fn owner_source(step: Step) -> Option<OwnerSource> {
+    match step {
+        Step::Ocomment => Some(OwnerSource::Ocomment),
+        Step::Domyjob => Some(OwnerSource::Domyjob),
+        Step::Fleet => Some(OwnerSource::Fleet),
+        _ => None,
+    }
+}
+
+fn owner_checkout(context: &ContextData, source: OwnerSource) -> Result<PathBuf> {
+    let projects = string(&context.data, "/paths/projects")?;
+    ensure!(
+        !projects.is_empty(),
+        "machine-local project root is missing"
+    );
+    Ok(Path::new(&projects)
+        .join("github.com/P4suta")
+        .join(source.repository()))
+}
+
 fn string(data: &Value, pointer: &str) -> Result<String> {
     Ok(data
         .pointer(pointer)
@@ -662,18 +733,23 @@ impl OwnerSource {
         }
     }
 
+    fn clone_url(self) -> String {
+        if self.public() {
+            format!("https://github.com/P4suta/{}.git", self.repository())
+        } else {
+            format!("git@github.com:P4suta/{}", self.repository())
+        }
+    }
+
     /// `git` arguments that clone this source into `checkout`.
     /// A public URL is mapped onto itself: git applies the longest matching `insteadOf`, so a host-wide HTTPS-to-SSH rewrite cannot turn it into an SSH clone.
     pub fn clone_arguments(self, checkout: &Path) -> Vec<OsString> {
         let mut arguments = Vec::new();
-        let url = if self.public() {
-            let url = format!("https://github.com/P4suta/{}.git", self.repository());
+        let url = self.clone_url();
+        if self.public() {
             arguments.push("-c".into());
             arguments.push(format!("url.{url}.insteadOf={url}").into());
-            url
-        } else {
-            format!("git@github.com:P4suta/{}", self.repository())
-        };
+        }
         arguments.push("clone".into());
         arguments.push(url.into());
         arguments.push(checkout.into());
@@ -688,14 +764,7 @@ fn source_tool(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
         Step::Fleet => (OwnerSource::Fleet, "", Tool::Fleet),
         _ => unreachable!(),
     };
-    let projects = string(&context.data, "/paths/projects")?;
-    ensure!(
-        !projects.is_empty(),
-        "machine-local project root is missing"
-    );
-    let checkout = Path::new(&projects)
-        .join("github.com/P4suta")
-        .join(source.repository());
+    let checkout = owner_checkout(context, source)?;
     if !checkout.join(".git").exists() {
         fs::create_dir_all(checkout.parent().context("checkout parent is missing")?)?;
         checked(runner, Tool::Git, &source.clone_arguments(&checkout))?;
@@ -860,6 +929,39 @@ fn retire_tmux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    struct Refusing;
+    impl crate::runtime::Runner for Refusing {
+        fn available(&self, _: Tool) -> bool {
+            true
+        }
+        fn run(&mut self, tool: Tool, _: &[OsString]) -> Result<crate::runtime::Reply> {
+            assert_eq!(tool, Tool::Git);
+            Ok(crate::runtime::Reply {
+                success: false,
+                bytes: Vec::new(),
+            })
+        }
+        fn run_installed(&mut self, _: &Path, _: &[OsString]) -> Result<crate::runtime::Reply> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn a_private_source_without_credentials_stops_before_application() {
+        let scope = tempfile::tempdir().unwrap();
+        let context = ContextData {
+            source: scope.path().into(),
+            home: scope.path().into(),
+            profile: Profile::Mac,
+            data: serde_json::json!({"paths": {"projects": scope.path()}}),
+        };
+        let refused = preflight(&context, &mut Refusing, &[Step::Runtime, Step::Fleet]);
+        assert!(refused.unwrap_err().to_string().contains("setup.skip"));
+        preflight(&context, &mut Refusing, &[Step::Runtime, Step::Ocomment]).unwrap();
+        std::fs::create_dir_all(scope.path().join("github.com/P4suta/fleet/.git")).unwrap();
+        preflight(&context, &mut Refusing, &[Step::Fleet]).unwrap();
+    }
+
     #[test]
     fn cargo_receives_drive_paths_without_the_verbatim_prefix() {
         use std::path::{Path, PathBuf};

@@ -454,6 +454,30 @@ pub fn operate(
     if matches!(action, NativeAction::Apply) {
         let backup = backup.context("application requires an explicit fresh --backup directory")?;
         outside_public(root, backup)?;
+        let scripts = output(
+            chezmoi(root, scope.path(), config, destination).args([
+                "dump",
+                "--include",
+                "scripts",
+                "--format",
+                "json",
+            ]),
+            "render setup scripts",
+        )?;
+        let rendered: Value = serde_json::from_slice(&scripts.stdout)?;
+        let contents: String = rendered
+            .as_object()
+            .context("script dump must be a mapping")?
+            .values()
+            .filter_map(|script| script["contents"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let context = crate::setup::load(root, config, destination)?;
+        crate::setup::preflight(
+            &context,
+            &mut crate::runtime::Native::new(destination)?,
+            &crate::setup::scripted_steps(&contents),
+        )?;
         let state_file = state.join("state.boltdb");
         let previous_state = match fs::read(&state_file) {
             Ok(bytes) => Some(bytes),
@@ -483,17 +507,35 @@ pub fn operate(
                 if let Some(bytes) = &previous_state {
                     fs::write(backup.join("previous-state.boltdb"), bytes)?;
                 }
-                execute("apply")
+                execute("apply")?;
+                // Scripts can install programs that templates probe for, so files are rendered once more against the machine they produced before verification.
+                let status = chezmoi(root, state, config, destination)
+                    .args(["apply", "--exclude", "scripts"])
+                    .status()?;
+                ensure!(
+                    status.success(),
+                    "chezmoi convergence apply failed with {status}"
+                );
+                Ok(())
             },
             || {
                 execute("verify").map_err(|error| {
                     // Name the diverging targets before the transaction restores them, or the evidence is gone.
-                    let pending = chezmoi(root, state, config, destination)
-                        .args(["status", "--exclude", "scripts,externals"])
-                        .output()
-                        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
-                        .unwrap_or_default();
-                    error.context(format!("targets still differing after apply:\n{pending}"))
+                    let report = |arguments: &[&str]| {
+                        chezmoi(root, state, config, destination)
+                            .args(arguments)
+                            .output()
+                            .map(|output| {
+                                let text = String::from_utf8_lossy(&output.stdout);
+                                text.lines().take(200).collect::<Vec<_>>().join("\n")
+                            })
+                            .unwrap_or_default()
+                    };
+                    let pending = report(&["status", "--exclude", "scripts,externals"]);
+                    let difference = report(&["diff", "--exclude", "scripts,externals"]);
+                    error.context(format!(
+                        "targets still differing after apply:\n{pending}\n{difference}"
+                    ))
                 })
             },
         );

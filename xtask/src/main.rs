@@ -322,6 +322,7 @@ fn run() -> Result<()> {
         }
         Action::Check => {
             dotfiles_xtask::skill_ops::check_catalog(&cli.root)?;
+            dotfiles_xtask::quality::comment_scopes(&cli.root)?;
             println!(
                 "Validated {} shared skills and aliases",
                 validate_tree(&cli.root)?

@@ -90,9 +90,9 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
             }
             text.push('\n');
         }
-        // The tools step installs Lefthook's hooks into the source checkout, so Scoop must still provide it.
+        // The tools step installs Lefthook's hooks into the source checkout and the shell step caches Starship and zoxide initialization, so Scoop must still provide them.
         Profile::Windows => text.push_str(
-            "[data.platforms.windows.scoop]\napps = [\"jq\", \"lefthook\"]\nwinget_duplicates = []\n\n[data.platforms.windows.winget]\napps = []\n\n",
+            "[data.platforms.windows.scoop]\napps = [\"jq\", \"lefthook\", \"starship\", \"zoxide\"]\nwinget_duplicates = []\n\n[data.platforms.windows.winget]\napps = []\n\n",
         ),
         Profile::Wsl => {}
     }

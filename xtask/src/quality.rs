@@ -276,3 +276,43 @@ pub fn secrets(root: &Path) -> Result<()> {
     println!("Secret scan passed on the publication source snapshot");
     Ok(())
 }
+
+#[derive(serde::Deserialize)]
+struct CommentConfig {
+    #[serde(default)]
+    overrides: Vec<CommentOverride>,
+}
+
+#[derive(serde::Deserialize)]
+struct CommentOverride {
+    paths: Vec<String>,
+    language: String,
+}
+
+/// OComment language overrides decide how a prose rule rewrites each file; a directory-wide pattern silently captures every file later added beneath it.
+/// Patterns must name an existing file or select by extension, as in `**/*.md.tmpl`.
+pub fn comment_scopes(root: &Path) -> Result<()> {
+    let config: CommentConfig = toml::from_str(&fs::read_to_string(root.join(".ocomment.toml"))?)
+        .context("read .ocomment.toml overrides")?;
+    let mut refused = Vec::new();
+    for entry in &config.overrides {
+        for path in &entry.paths {
+            let accepted = if path.contains('*') {
+                path.strip_prefix("**/*.").is_some_and(|extension| {
+                    !extension.is_empty() && !extension.contains(['*', '/', '?', '['])
+                })
+            } else {
+                root.join(path).is_file()
+            };
+            if !accepted {
+                refused.push(format!("{} ({})", path, entry.language));
+            }
+        }
+    }
+    ensure!(
+        refused.is_empty(),
+        "OComment overrides must name an existing file or an extension pattern such as **/*.md.tmpl: {}",
+        refused.join(", ")
+    );
+    Ok(())
+}

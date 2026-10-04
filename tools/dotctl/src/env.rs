@@ -2,16 +2,6 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
 
-pub fn repo_root() -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    for dir in cwd.ancestors() {
-        if dir.join("lefthook.yml").is_file() {
-            return dir.to_path_buf();
-        }
-    }
-    cwd
-}
-
 pub fn command(program: &str) -> Command {
     let mut cmd = Command::new(program);
     cmd.env("PATH", augmented_path());

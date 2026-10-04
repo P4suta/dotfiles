@@ -232,3 +232,29 @@ fn public_owner_sources_clone_over_https_despite_a_host_ssh_rewrite() {
         assert_eq!(String::from_utf8(resolved.stdout).unwrap().trim(), expected);
     }
 }
+
+#[test]
+fn scripted_steps_are_read_from_rendered_launchers_in_order() {
+    use dotfiles_xtask::setup::{Step, scripted_steps};
+    let scripts = "#!/bin/sh\nexec '/h/.local/bin/dotfiles-xtask' --root '/s' setup fleet --config '/c' --live\n#!/bin/sh\nexec cargo run -- --root '/s' setup runtime --config '/c' --live\n& 'dotctl.exe' setup keyboard\n";
+    assert_eq!(scripted_steps(scripts), [Step::Fleet, Step::Runtime]);
+}
+
+#[test]
+fn comment_overrides_cannot_capture_whole_directories() {
+    let scope = tempfile::tempdir().unwrap();
+    fs::write(scope.path().join("notes"), "prose\n").unwrap();
+    let write = |paths: &str| {
+        fs::write(
+            scope.path().join(".ocomment.toml"),
+            format!("version = 1\n[[overrides]]\npaths = [{paths}]\nlanguage = \"markdown\"\n"),
+        )
+        .unwrap();
+    };
+    write(r#""**/*.md.tmpl", "notes""#);
+    quality::comment_scopes(scope.path()).unwrap();
+    for refused in [r#"".chezmoitemplates/*""#, r#""missing""#, r#""docs/**""#] {
+        write(refused);
+        assert!(quality::comment_scopes(scope.path()).is_err(), "{refused}");
+    }
+}

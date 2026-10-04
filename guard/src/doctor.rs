@@ -211,36 +211,42 @@ fn modern_terminal(d: &mut Doctor) {
 
     // Some tools follow the macOS platform convention instead of XDG and read ~/Library/Application Support/<tool>.
     // Ask each tool where it actually looks and resolve the answer physically: a symlink can be present and still point somewhere wrong, and getting that wrong fails in the worst possible way — the tool starts fine, writes fresh defaults at the platform path, and every setting here quietly does not apply.
-    let check_platform_config =
-        |d: &mut Doctor, label: &str, reported: Option<String>, leaf: &str| {
-            let Some(reported) = reported.filter(|s| !s.is_empty()) else {
-                d.bad(
-                    &format!("{label} config path"),
-                    "the tool reported no config directory",
-                );
-                return;
-            };
-            let expected = home().join(".config").join(leaf);
-            let resolved = std::fs::canonicalize(&reported).ok();
-            if resolved.as_deref() == Some(expected.as_path()) {
-                ok(
-                    &format!("{label} config path"),
-                    &expected
-                        .display()
-                        .to_string()
-                        .replacen(&home().display().to_string(), "~", 1),
-                );
-            } else {
-                d.bad(
-                    &format!("{label} config path"),
-                    &format!(
-                        "reads {reported}, which resolves to {}, not {}",
-                        resolved.map_or_else(|| "nowhere".into(), |r| r.display().to_string()),
-                        expected.display()
-                    ),
-                );
-            }
+    let check_platform_config = |d: &mut Doctor,
+                                 label: &str,
+                                 reported: Option<String>,
+                                 leaf: &str| {
+        let Some(reported) = reported.filter(|s| !s.is_empty()) else {
+            d.bad(
+                &format!("{label} config path"),
+                "the tool reported no config directory",
+            );
+            return;
         };
+        let expected = home().join(".config").join(leaf);
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "Unix paths have no verbatim spelling, and the doctor compares a resolved binary with PATH resolution"
+        )]
+        let resolved = std::fs::canonicalize(&reported).ok();
+        if resolved.as_deref() == Some(expected.as_path()) {
+            ok(
+                &format!("{label} config path"),
+                &expected
+                    .display()
+                    .to_string()
+                    .replacen(&home().display().to_string(), "~", 1),
+            );
+        } else {
+            d.bad(
+                &format!("{label} config path"),
+                &format!(
+                    "reads {reported}, which resolves to {}, not {}",
+                    resolved.map_or_else(|| "nowhere".into(), |r| r.display().to_string()),
+                    expected.display()
+                ),
+            );
+        }
+    };
 
     let nu_dir = which_doctored("nu").and_then(|_| {
         Command::new("nu")
