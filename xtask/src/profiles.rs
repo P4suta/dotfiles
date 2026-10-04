@@ -436,7 +436,17 @@ pub fn operate(
                 }
                 execute("apply")
             },
-            || execute("verify"),
+            || {
+                execute("verify").map_err(|error| {
+                    // Name the diverging targets before the transaction restores them, or the evidence is gone.
+                    let pending = chezmoi(root, state, config, destination)
+                        .args(["status", "--exclude", "scripts,externals"])
+                        .output()
+                        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+                        .unwrap_or_default();
+                    error.context(format!("targets still differing after apply:\n{pending}"))
+                })
+            },
         );
         if let Err(error) = result {
             if let Some(bytes) = previous_state {
