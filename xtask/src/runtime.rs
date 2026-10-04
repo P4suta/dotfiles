@@ -1,10 +1,12 @@
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+use crate::tool::Tool;
 
 pub struct Reply {
     pub success: bool,
@@ -12,8 +14,10 @@ pub struct Reply {
 }
 
 pub trait Runner {
-    fn available(&self, name: &str) -> bool;
-    fn run(&mut self, name: &str, arguments: &[OsString]) -> Result<Reply>;
+    fn available(&self, tool: Tool) -> bool;
+    fn run(&mut self, tool: Tool, arguments: &[OsString]) -> Result<Reply>;
+    /// Run a binary this repository installed at a known path, such as a bundle executable it just verified.
+    fn run_installed(&mut self, program: &Path, arguments: &[OsString]) -> Result<Reply>;
 }
 
 pub struct Native {
@@ -56,9 +60,17 @@ impl Native {
         })
     }
 
-    pub fn command(&self, name: impl AsRef<OsStr>) -> Command {
-        let mut command = Command::new(&name);
-        if cfg!(windows) && name.as_ref() == "codex" {
+    pub fn command(&self, tool: Tool) -> Command {
+        self.prepare(tool.command(), tool == Tool::Codex)
+    }
+
+    /// A binary this repository installed at a known path, run with the same environment as registered tools.
+    pub fn command_installed(&self, program: &Path) -> Command {
+        self.prepare(crate::tool::external(program), false)
+    }
+
+    fn prepare(&self, mut command: Command, codex: bool) -> Command {
+        if cfg!(windows) && codex {
             command.env("GIT_CONFIG_GLOBAL", "NUL");
         }
         command
@@ -73,7 +85,8 @@ impl Native {
 }
 
 impl Runner for Native {
-    fn available(&self, name: &str) -> bool {
+    fn available(&self, tool: Tool) -> bool {
+        let name = tool.program();
         if Path::new(name).is_absolute() {
             return executable(Path::new(name));
         }
@@ -86,14 +99,29 @@ impl Runner for Native {
         })
     }
 
-    fn run(&mut self, name: &str, arguments: &[OsString]) -> Result<Reply> {
+    fn run(&mut self, tool: Tool, arguments: &[OsString]) -> Result<Reply> {
+        let name = tool.program();
         let output = self
-            .command(name)
+            .command(tool)
             .args(arguments)
             .stdin(Stdio::inherit())
             .stderr(Stdio::inherit())
             .output()
             .with_context(|| format!("start {name}"))?;
+        Ok(Reply {
+            success: output.status.success(),
+            bytes: output.stdout,
+        })
+    }
+
+    fn run_installed(&mut self, program: &Path, arguments: &[OsString]) -> Result<Reply> {
+        let output = self
+            .command_installed(program)
+            .args(arguments)
+            .stdin(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .output()
+            .with_context(|| format!("start {}", program.display()))?;
         Ok(Reply {
             success: output.status.success(),
             bytes: output.stdout,
@@ -123,15 +151,15 @@ fn executable(path: &Path) -> bool {
     }
 }
 
-pub fn checked(runner: &mut impl Runner, name: &str, arguments: &[OsString]) -> Result<Vec<u8>> {
-    let reply = runner.run(name, arguments)?;
-    ensure!(reply.success, "{name} failed");
+pub fn checked(runner: &mut impl Runner, tool: Tool, arguments: &[OsString]) -> Result<Vec<u8>> {
+    let reply = runner.run(tool, arguments)?;
+    ensure!(reply.success, "{} failed", tool.program());
     Ok(reply.bytes)
 }
 
-pub fn optional(runner: &mut impl Runner, name: &str, arguments: &[&str]) {
-    if runner.available(name)
-        && let Err(error) = checked(runner, name, &args(arguments))
+pub fn optional(runner: &mut impl Runner, tool: Tool, arguments: &[&str]) {
+    if runner.available(tool)
+        && let Err(error) = checked(runner, tool, &args(arguments))
     {
         eprintln!("Warning: {error:#}");
     }
@@ -182,12 +210,12 @@ struct Marketplace {
 }
 
 pub fn context7(runner: &mut impl Runner, local_gui: bool) -> Result<()> {
-    if !crate::profile_rules::context7_needed(local_gui, runner.available("codex"), false) {
+    if !crate::profile_rules::context7_needed(local_gui, runner.available(Tool::Codex), false) {
         return Ok(());
     }
     let plugins: Plugins = serde_json::from_slice(&checked(
         runner,
-        "codex",
+        Tool::Codex,
         &args(&["plugin", "list", "--json"]),
     )?)?;
     let installed = plugins
@@ -199,7 +227,7 @@ pub fn context7(runner: &mut impl Runner, local_gui: bool) -> Result<()> {
     }
     let marketplaces: Marketplaces = serde_json::from_slice(&checked(
         runner,
-        "codex",
+        Tool::Codex,
         &args(&["plugin", "marketplace", "list", "--json"]),
     )?)?;
     if !marketplaces
@@ -209,13 +237,13 @@ pub fn context7(runner: &mut impl Runner, local_gui: bool) -> Result<()> {
     {
         checked(
             runner,
-            "codex",
+            Tool::Codex,
             &args(&["plugin", "marketplace", "add", "upstash/context7", "--json"]),
         )?;
     }
     checked(
         runner,
-        "codex",
+        Tool::Codex,
         &args(&["plugin", "add", "context7@context7-marketplace", "--json"]),
     )?;
     Ok(())
@@ -224,18 +252,18 @@ pub fn context7(runner: &mut impl Runner, local_gui: bool) -> Result<()> {
 pub fn integrations(home: &Path, runner: &mut impl Runner, local_gui: bool) -> Result<()> {
     let generated = home.join(".config/nushell/generated");
     for (name, tool, arguments) in [
-        ("mise", "mise", args(&["activate", "nu"])),
-        ("starship", "starship", args(&["init", "nu"])),
-        ("television", "tv", args(&["init", "nu"])),
+        ("mise", Tool::Mise, args(&["activate", "nu"])),
+        ("starship", Tool::Starship, args(&["init", "nu"])),
+        ("television", Tool::Television, args(&["init", "nu"])),
         (
             "atuin",
-            "atuin",
+            Tool::Atuin,
             args(&["init", "nu", "--disable-up-arrow"]),
         ),
-        ("zoxide", "zoxide", args(&["init", "nushell"])),
+        ("zoxide", Tool::Zoxide, args(&["init", "nushell"])),
         (
             "ls-colors",
-            "vivid",
+            Tool::Vivid,
             args(&["generate", "tokyonight-night"]),
         ),
     ] {
@@ -259,10 +287,14 @@ pub fn integrations(home: &Path, runner: &mut impl Runner, local_gui: bool) -> R
 }
 
 pub fn agent_integrations(runner: &mut impl Runner, local_gui: bool) -> Result<()> {
-    if runner.available("herdr") {
-        for agent in ["claude", "codex", "opencode"] {
+    if runner.available(Tool::Herdr) {
+        for agent in [Tool::Claude, Tool::Codex, Tool::Opencode] {
             if runner.available(agent) {
-                optional(runner, "herdr", &["integration", "install", agent]);
+                optional(
+                    runner,
+                    Tool::Herdr,
+                    &["integration", "install", agent.program()],
+                );
             }
         }
     }
@@ -282,16 +314,19 @@ mod tests {
         calls: Vec<Vec<OsString>>,
     }
     impl Runner for Fake {
-        fn available(&self, name: &str) -> bool {
-            matches!(name, "codex" | "mise")
+        fn available(&self, tool: Tool) -> bool {
+            matches!(tool, Tool::Codex | Tool::Mise)
         }
-        fn run(&mut self, name: &str, arguments: &[OsString]) -> Result<Reply> {
+        fn run(&mut self, tool: Tool, arguments: &[OsString]) -> Result<Reply> {
             self.calls.push(
-                std::iter::once(name.into())
+                std::iter::once(tool.program().into())
                     .chain(arguments.iter().cloned())
                     .collect(),
             );
             self.replies.pop_front().context("unexpected command")
+        }
+        fn run_installed(&mut self, program: &Path, _: &[OsString]) -> Result<Reply> {
+            anyhow::bail!("unexpected installed program {}", program.display())
         }
     }
 

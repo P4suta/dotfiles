@@ -1,16 +1,21 @@
+use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-pub fn command(root: &Path, program: &str, arguments: &[&str]) -> Result<()> {
-    let status = Command::new(program)
+pub fn command(root: &Path, tool: Tool, arguments: &[&str]) -> Result<()> {
+    run(tool.command(), root, tool.program(), arguments)
+}
+
+fn run(mut command: Command, root: &Path, name: &str, arguments: &[&str]) -> Result<()> {
+    let status = command
         .current_dir(root)
         .args(arguments)
         .status()
-        .with_context(|| format!("start required checker {program}"))?;
-    ensure!(status.success(), "{program} failed with {status}");
+        .with_context(|| format!("start required checker {name}"))?;
+    ensure!(status.success(), "{name} failed with {status}");
     Ok(())
 }
 
@@ -20,11 +25,12 @@ pub fn git_for_windows_shell(exec_path: &Path) -> Option<PathBuf> {
 }
 
 /// Native Windows has no `sh` on PATH, and its System32 `bash.exe` enters WSL, so launchers are parsed by Git for Windows' shell.
-fn posix_shell() -> Result<PathBuf> {
+fn posix_shell() -> Result<Command> {
     if !cfg!(windows) {
-        return Ok("sh".into());
+        return Ok(Tool::Sh.command());
     }
-    let output = Command::new("git")
+    let output = Tool::Git
+        .command()
         .arg("--exec-path")
         .output()
         .context("locate Git for Windows")?;
@@ -36,14 +42,12 @@ fn posix_shell() -> Result<PathBuf> {
         "Git for Windows shell is missing at {}",
         shell.display()
     );
-    Ok(shell)
+    Ok(crate::tool::external(shell))
 }
 
 pub fn rendered(dump: &Value, directory: &Path) -> Result<()> {
     let targets = dump.as_object().context("profile dump must be a mapping")?;
     fs::create_dir(directory)?;
-    let shell = posix_shell()?;
-    let shell = shell.to_str().context("invalid POSIX shell path")?;
     for (index, (name, target)) in targets.iter().enumerate() {
         if target["type"] != "file" && target["type"] != "script" {
             continue;
@@ -58,7 +62,8 @@ pub fn rendered(dump: &Value, directory: &Path) -> Result<()> {
         if name.ends_with(".toml") {
             let file = directory.join(format!("{index}.toml"));
             fs::write(&file, contents)?;
-            let output = Command::new("taplo")
+            let output = Tool::Taplo
+                .command()
                 .current_dir(directory)
                 .args(["lint", "--no-schema", "--no-auto-config"])
                 .arg(file)
@@ -96,7 +101,8 @@ pub fn rendered(dump: &Value, directory: &Path) -> Result<()> {
             }
             let file = directory.join(format!("{index}.nu"));
             fs::write(&file, text)?;
-            let output = Command::new("nu")
+            let output = Tool::Nu
+                .command()
                 .current_dir(directory)
                 .args([
                     "--no-config-file",
@@ -115,14 +121,15 @@ pub fn rendered(dump: &Value, directory: &Path) -> Result<()> {
         if contents.starts_with("#!/bin/sh\n") {
             let file = directory.join(format!("{index}.sh"));
             fs::write(&file, contents)?;
-            command(
+            run(
+                posix_shell()?,
                 directory,
-                shell,
+                "sh",
                 &["-n", file.to_str().context("invalid fixture path")?],
             )?;
             command(
                 directory,
-                "shellcheck",
+                Tool::Shellcheck,
                 &[
                     "--severity=style",
                     file.to_str().context("invalid fixture path")?,
@@ -176,7 +183,7 @@ pub fn rendered(dump: &Value, directory: &Path) -> Result<()> {
             }
             let file = directory.join(format!("{index}.ps1"));
             fs::write(&file, contents)?;
-            let status = Command::new("pwsh").current_dir(directory).args(["-NoProfile", "-NonInteractive", "-Command",
+            let status = Tool::Pwsh.command().current_dir(directory).args(["-NoProfile", "-NonInteractive", "-Command",
                 "$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile($env:DOTFILES_PARSE_FILE,[ref]$tokens,[ref]$errors) > $null; if($errors.Count){$errors | Out-String | Write-Error; exit 1}"])
                 .env("DOTFILES_PARSE_FILE", &file).stdin(Stdio::null()).status()?;
             ensure!(status.success(), "invalid rendered PowerShell: {name}");
@@ -188,24 +195,24 @@ pub fn rendered(dump: &Value, directory: &Path) -> Result<()> {
 pub fn adapters(root: &Path) -> Result<()> {
     command(
         root,
-        "bun",
+        Tool::Bun,
         &["install", "--frozen-lockfile", "--ignore-scripts"],
     )?;
-    command(root, "bun", &["run", "check"])
+    command(root, Tool::Bun, &["run", "check"])
 }
 
 pub fn ops(root: &Path) -> Result<()> {
     let owned = tempfile::tempdir()?;
     let collections = owned.path().join("collections");
-    let command = |program: &str| {
-        let mut command = Command::new(program);
+    let command = |tool: Tool| {
+        let mut command = tool.command();
         command
             .current_dir(root.join("ops"))
             .env("ANSIBLE_HOME", owned.path())
             .env("ANSIBLE_COLLECTIONS_PATH", &collections);
         command
     };
-    let status = command("ansible-galaxy")
+    let status = command(Tool::AnsibleGalaxy)
         .args([
             "collection",
             "install",
@@ -220,7 +227,7 @@ pub fn ops(root: &Path) -> Result<()> {
         status.success(),
         "pinned Ansible collection installation failed"
     );
-    let status = command("ansible-playbook")
+    let status = command(Tool::AnsiblePlaybook)
         .args(["--syntax-check", "site.yml"])
         .status()?;
     ensure!(status.success(), "Ansible syntax check failed");
@@ -238,7 +245,8 @@ pub fn secrets(root: &Path) -> Result<()> {
         fs::copy(file, target)?;
     }
     let report = tempfile::NamedTempFile::new()?;
-    let output = Command::new("gitleaks")
+    let output = Tool::Gitleaks
+        .command()
         .current_dir(root)
         .args([
             "dir",

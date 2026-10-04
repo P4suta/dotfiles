@@ -5,6 +5,7 @@
 {{-     if $spec }}{{ $tools = append $tools $spec }}{{ end -}}
 {{-   end -}}
 {{- end -}}
+{{- $tools = uniq $tools -}}
 [tools]
 {{- range $tools }}
 {{ . | quote }} = {{ if hasKey $.tool_versions . }}{{ index $.tool_versions . | quote }}{{ else }}"latest"{{ end }}

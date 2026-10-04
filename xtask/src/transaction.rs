@@ -20,9 +20,24 @@ pub fn relative(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Windows removes a directory symlink or junction with `remove_dir`; `remove_file` is denied for it.
+fn is_directory_link(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTypeExt;
+        metadata.file_type().is_symlink_dir()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = metadata;
+        false
+    }
+}
+
 fn remove(path: &Path) -> Result<()> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_dir() && !metadata.is_symlink() => fs::remove_dir_all(path)?,
+        Ok(metadata) if is_directory_link(&metadata) => fs::remove_dir(path)?,
         Ok(_) => fs::remove_file(path)?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),
@@ -102,11 +117,8 @@ fn copy(source: &Path, destination: &Path) -> Result<()> {
 pub fn capture(destination: &Path, backup: &Path, targets: &[PathBuf]) -> Result<()> {
     ensure!(!backup.exists(), "backup must use a fresh directory");
     ensure!(!targets.is_empty(), "backup requires managed targets");
-    let destination = destination.canonicalize()?;
-    let backup = backup
-        .parent()
-        .context("backup parent is missing")?
-        .canonicalize()?
+    let destination = crate::canonical(destination)?;
+    let backup = crate::canonical(backup.parent().context("backup parent is missing")?)?
         .join(backup.file_name().context("backup name is missing")?);
     let mut targets = targets.to_vec();
     targets.sort();
@@ -169,7 +181,7 @@ pub fn capture(destination: &Path, backup: &Path, targets: &[PathBuf]) -> Result
 }
 
 pub fn restore(destination: &Path, backup: &Path) -> Result<()> {
-    let destination = destination.canonicalize()?;
+    let destination = crate::canonical(destination)?;
     ensure!(
         fs::read(backup.join("destination.txt"))? == destination.as_os_str().as_encoded_bytes(),
         "backup destination identity differs"
@@ -268,6 +280,31 @@ mod tests {
         }
         capture(&home, &scope.path().join("backup"), &["new".into()]).unwrap();
         assert!(restore(scope.path(), &scope.path().join("backup")).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rollback_removes_a_directory_symlink_it_created() {
+        let scope = tempfile::tempdir().unwrap();
+        let destination = scope.path().join("home");
+        fs::create_dir_all(destination.join("skills/shared")).unwrap();
+        let backup = scope.path().join("backup");
+        let result = apply(
+            &destination,
+            &backup,
+            &["linked".into()],
+            || {
+                std::os::windows::fs::symlink_dir(
+                    destination.join("skills/shared"),
+                    destination.join("linked"),
+                )?;
+                anyhow::bail!("injected apply failure")
+            },
+            || Ok(()),
+        );
+        assert!(result.unwrap_err().to_string().contains("restored"));
+        assert!(fs::symlink_metadata(destination.join("linked")).is_err());
+        assert!(destination.join("skills/shared").is_dir());
     }
 
     #[cfg(unix)]

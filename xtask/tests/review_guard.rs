@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_methods,
+    reason = "integration tests spawn the binaries and real tools they verify"
+)]
+
 use dotfiles_xtask::review_guard::{
     DAY_MS, HOUR_MS, Invocation, PROBE_GAP_MS, check_budget, check_usage, classify, execute_probe,
     execute_reserved, install, reserve, review_directory, usage_query, validate_policy,

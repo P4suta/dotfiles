@@ -5,6 +5,7 @@
 
 use crate::profile_rules::Profile;
 use crate::profiles::{NativeAction, native_profile, operate};
+use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -52,7 +53,10 @@ fn toml_string(value: &str) -> String {
 }
 
 /// The machine-local configuration for the rehearsal: an anonymous identity, no secrets, and one representative entry in each provisioning list.
-pub fn configuration(profile: Profile, home: &Path) -> String {
+/// Lists keep entries that later steps invoke, and maps are emptied key by key because configuration data merges into maps rather than replacing them.
+pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<String> {
+    let data: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join(".chezmoidata.json"))?)?;
     let projects = home.join("projects");
     let mut text = String::new();
     if profile == Profile::Windows {
@@ -73,11 +77,22 @@ pub fn configuration(profile: Profile, home: &Path) -> String {
         Profile::Mac => text.push_str(
             "[data.platforms.mac.brew]\nformulae = [\"jq\"]\ncasks = []\n\n[data.platforms.mac.racket]\ncollections = []\n\n[data.platforms.mac.ocaml]\nplatform_tools = []\n\n",
         ),
-        Profile::Linux => text.push_str(
-            "[data.platforms.linux.nix]\npackages = {}\n\n[data.platforms.linux.ocaml]\nplatform_tools = []\n\n",
-        ),
+        Profile::Linux => {
+            text.push_str("[data.platforms.linux.ocaml]\nplatform_tools = []\n\n");
+            text.push_str("[data.platforms.linux.nix.packages]\n");
+            for package in data
+                .pointer("/platforms/linux/nix/packages")
+                .and_then(serde_json::Value::as_object)
+                .context("Linux Nix packages are missing")?
+                .keys()
+            {
+                text.push_str(&format!("{} = \"\"\n", toml_string(package)));
+            }
+            text.push('\n');
+        }
+        // The tools step installs Lefthook's hooks into the source checkout, so Scoop must still provide it.
         Profile::Windows => text.push_str(
-            "[data.platforms.windows.scoop]\napps = [\"jq\"]\nwinget_duplicates = []\n\n[data.platforms.windows.winget]\napps = []\n\n",
+            "[data.platforms.windows.scoop]\napps = [\"jq\", \"lefthook\"]\nwinget_duplicates = []\n\n[data.platforms.windows.winget]\napps = []\n\n",
         ),
         Profile::Wsl => {}
     }
@@ -88,7 +103,7 @@ pub fn configuration(profile: Profile, home: &Path) -> String {
             toml_string(skip.reason)
         ));
     }
-    text
+    Ok(text)
 }
 
 fn native_home() -> Result<PathBuf> {
@@ -120,7 +135,8 @@ fn seed_foreign_helpers(home: &Path, scope: &Path) -> Result<()> {
         )?;
     }
     checked(
-        Command::new("cargo")
+        Tool::Cargo
+            .command()
             .args(["install", "--path"])
             .arg(&package)
             .arg("--root")
@@ -157,7 +173,7 @@ pub fn run(root: &Path, disposable_host: bool) -> Result<()> {
         .prefix("dotfiles-rehearsal")
         .tempdir()?;
     let config = scope.path().join("chezmoi.toml");
-    fs::write(&config, configuration(profile, &home))?;
+    fs::write(&config, configuration(root, profile, &home)?)?;
     seed_foreign_helpers(&home, scope.path())?;
     let preserved = seed_history(&home)?;
     let state = scope.path().join("state");

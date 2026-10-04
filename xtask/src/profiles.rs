@@ -1,4 +1,5 @@
 use crate::profile_rules::{Mode, Profile, permitted};
+use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use std::fs;
@@ -153,7 +154,7 @@ fn output(command: &mut Command, phase: &str) -> Result<Output> {
 }
 
 pub fn chezmoi(root: &Path, scope: &Path, config: &Path, destination: &Path) -> Command {
-    let mut command = Command::new("chezmoi");
+    let mut command = Tool::Chezmoi.command();
     command
         .arg("--source")
         .arg(root)
@@ -309,7 +310,8 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
             "obsolete credential exporter was preserved"
         );
         output(
-            Command::new("git")
+            Tool::Git
+                .command()
                 .args(["config", "--file"])
                 .arg(destination.join(if profile == Profile::Windows {
                     ".config/git/config"
@@ -431,7 +433,7 @@ pub fn operate(
         let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
             .context("native home is unavailable")?;
         ensure!(
-            destination.canonicalize()? == Path::new(&home).canonicalize()?,
+            crate::canonical(destination)? == crate::canonical(Path::new(&home))?,
             "setup scripts require this host's own native home destination"
         );
     }

@@ -22,6 +22,7 @@ pub mod skill_ops;
 pub mod skill_proofs;
 pub mod skill_rules;
 pub mod terminal;
+pub mod tool;
 pub mod transaction;
 pub mod windows_setup;
 pub mod wsl;
@@ -102,12 +103,13 @@ pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
 }
 
 /// `canonicalize` without the Windows verbatim drive prefix, so every comparison and every path handed to another tool uses one spelling.
+#[allow(clippy::disallowed_methods)]
 pub fn canonical(path: &Path) -> Result<PathBuf> {
     Ok(without_verbatim_prefix(&path.canonicalize()?))
 }
 
 pub fn validate_links(text: &str, file: &Path, root: &Path) -> Result<()> {
-    let root = root.canonicalize()?;
+    let root = canonical(root)?;
     for event in Parser::new(text) {
         if let Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) = event {
             let link = dest_url.split(['#', '?']).next().context("missing link")?;
@@ -119,8 +121,7 @@ pub fn validate_links(text: &str, file: &Path, root: &Path) -> Result<()> {
                 continue;
             }
             let path = file.parent().context("missing parent")?.join(link);
-            let resolved = path
-                .canonicalize()
+            let resolved = canonical(&path)
                 .with_context(|| format!("broken resource {}: {link}", file.display()))?;
             ensure!(
                 resolved.starts_with(&root),

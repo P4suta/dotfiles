@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_methods,
+    reason = "integration tests spawn the binaries and real tools they verify"
+)]
+
 use dotfiles_xtask::{
     profile_rules::{Mode, Profile, Reconcile, permitted, reconcile, selected},
     profiles, quality,
@@ -124,7 +129,7 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
         let config = scope.path().join("chezmoi.toml");
         fs::write(
             &config,
-            dotfiles_xtask::rehearsal::configuration(profile, &home),
+            dotfiles_xtask::rehearsal::configuration(root, profile, &home).unwrap(),
         )
         .unwrap();
         let output = profiles::chezmoi(root, scope.path(), &config, &home)
@@ -141,6 +146,28 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
         assert_eq!(
             data["platforms"][profile.name()]["tools"]["common"],
             serde_json::json!(["jq"])
+        );
+        let mise = profiles::chezmoi(root, scope.path(), &config, &home)
+            .arg("--override-data")
+            .arg(format!(
+                r#"{{"platforms":{{"{0}":{{"tools":{{"personal":["jq"]}}}}}}}}"#,
+                profile.name()
+            ))
+            .args(["cat"])
+            .arg(home.join(".config/mise/config.toml"))
+            .output()
+            .unwrap();
+        assert!(
+            mise.status.success(),
+            "{}",
+            String::from_utf8_lossy(&mise.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&mise.stdout)
+                .matches("\n\"jq\" =")
+                .count(),
+            1,
+            "a tool listed twice must render once"
         );
         let skips = profiles::declared_skips(&data).unwrap();
         assert_eq!(skips.is_empty(), profile == Profile::Windows, "{skips:?}");

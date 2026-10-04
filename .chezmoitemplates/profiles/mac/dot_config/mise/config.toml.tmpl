@@ -1,5 +1,5 @@
 [tools]
-{{- range (concat .tools.common (index .tools .role)) }}
+{{- range (concat .tools.common (index .tools .role) | uniq) }}
 {{ . | quote }} = {{ if hasKey $.tool_versions . }}{{ index $.tool_versions . | quote }}{{ else }}"latest"{{ end }}
 {{- end }}
 

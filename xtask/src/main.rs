@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
+use dotfiles_xtask::tool::Tool;
 use dotfiles_xtask::{
     check_build_dir, export_checks, skill_source_paths, skills, split_frontmatter, validate_tree,
 };
@@ -7,7 +8,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Parser)]
 struct Cli {
@@ -143,7 +143,8 @@ enum Action {
 
 fn cargo(root: &Path, manifest: &Path, args: &[&str]) -> Result<()> {
     let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
-    let status = Command::new("cargo")
+    let status = Tool::Cargo
+        .command()
         .current_dir(root)
         .env(
             "CARGO_TARGET_DIR",
@@ -161,7 +162,8 @@ fn cargo(root: &Path, manifest: &Path, args: &[&str]) -> Result<()> {
 fn check_package(root: &Path, manifest: &Path) -> Result<()> {
     cargo(root, manifest, &["fmt", "--check"])?;
     let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
-    let status = Command::new("cargo")
+    let status = Tool::Cargo
+        .command()
         .current_dir(root)
         .env(
             "CARGO_TARGET_DIR",
@@ -285,7 +287,8 @@ fn run() -> Result<()> {
                 &binary,
                 Path::new(&user_directory),
                 |paths| {
-                    let status = Command::new("chezmoi")
+                    let status = Tool::Chezmoi
+                        .command()
                         .arg("--source")
                         .arg(&cli.root)
                         .args([
@@ -395,7 +398,8 @@ fn run() -> Result<()> {
         Action::Install => {
             let paths = skill_source_paths(&cli.root)?;
             ensure!(!paths.is_empty(), "no skill files to install");
-            let status = Command::new("chezmoi")
+            let status = Tool::Chezmoi
+                .command()
                 .arg("--source")
                 .arg(&cli.root)
                 .args([
@@ -419,7 +423,8 @@ fn run() -> Result<()> {
                 Path::new("xtask/Cargo.toml"),
                 &["build", "--locked", "--release", "--bin", "coderabbit"],
             )?;
-            let status = Command::new("chezmoi")
+            let status = Tool::Chezmoi
+                .command()
                 .arg("--source")
                 .arg(&cli.root)
                 .args([
@@ -465,7 +470,8 @@ fn run() -> Result<()> {
                 &binary,
                 Path::new(&user_directory),
                 |path| {
-                    let status = Command::new("chezmoi")
+                    let status = Tool::Chezmoi
+                        .command()
                         .arg("--source")
                         .arg(&cli.root)
                         .args([

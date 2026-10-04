@@ -1,12 +1,13 @@
 use crate::profile_rules::{Mode, Profile, permitted};
 use crate::runtime::{Native, Runner, args, checked, optional, replace};
+use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, clap::ValueEnum)]
 pub enum Step {
     Runtime,
     Mise,
@@ -98,8 +99,8 @@ pub fn run(source: &Path, config: &Path, step: Step, live: bool) -> Result<()> {
         .push(("KERL_BUILD_DOCS".into(), "no".into()));
     let mut kerl = "--without-javac --without-wx --without-odbc".to_owned();
     if context.profile == Profile::Mac
-        && native.available("brew")
-        && let Ok(prefix) = checked(&mut native, "brew", &args(&["--prefix", "openssl@3"]))
+        && native.available(Tool::Brew)
+        && let Ok(prefix) = checked(&mut native, Tool::Brew, &args(&["--prefix", "openssl@3"]))
     {
         let prefix = String::from_utf8(prefix)?;
         if Path::new(prefix.trim()).is_dir() {
@@ -166,7 +167,7 @@ fn install_crate(
         &context.home.join(".local"),
         binaries,
     );
-    checked(runner, "cargo", &arguments)?;
+    checked(runner, Tool::Cargo, &arguments)?;
     Ok(())
 }
 
@@ -191,10 +192,10 @@ pub(crate) fn vendor_installer(
     ]);
     download.push(script.clone().into());
     download.push(url.into());
-    checked(runner, "curl", &download)?;
+    checked(runner, Tool::Curl, &download)?;
     let mut invocation = vec![script.into()];
     invocation.extend(args(arguments));
-    checked(runner, "sh", &invocation)?;
+    checked(runner, Tool::Sh, &invocation)?;
     Ok(())
 }
 
@@ -233,11 +234,11 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
             crate::skill_install::install(&context.source, &binary, &context.home)?;
         }
         Step::Mise => {
-            if !runner.available("mise") {
+            if !runner.available(Tool::Mise) {
                 if context.profile == Profile::Windows {
                     checked(
                         runner,
-                        "winget",
+                        Tool::Winget,
                         &args(&[
                             "install",
                             "--id",
@@ -254,15 +255,15 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
             }
         }
         Step::Github => {
-            if !runner.available("gh") {
-                checked(runner, "mise", &args(&["install", "gh@latest", "-y"]))?;
-                checked(runner, "mise", &args(&["reshim"]))?;
+            if !runner.available(Tool::Gh) {
+                checked(runner, Tool::Mise, &args(&["install", "gh@latest", "-y"]))?;
+                checked(runner, Tool::Mise, &args(&["reshim"]))?;
             }
-            let reply = runner.run("gh", &args(&["auth", "status"]))?;
+            let reply = runner.run(Tool::Gh, &args(&["auth", "status"]))?;
             if reply.success {
                 checked(
                     runner,
-                    "gh",
+                    Tool::Gh,
                     &args(&["config", "set", "-h", "github.com", "git_protocol", "ssh"]),
                 )?;
             } else {
@@ -272,7 +273,7 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
             }
         }
         Step::Nix => {
-            let nix = "/nix/var/nix/profiles/default/bin/nix";
+            let nix = Tool::Nix;
             if runner.available(nix) {
                 let flake = context.home.join(".config/dotfiles-nix");
                 let listed = checked(runner, nix, &args(&["profile", "list"]))?;
@@ -288,7 +289,7 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
         Step::Tools | Step::Upgrade => tools(context, runner, matches!(step, Step::Upgrade))?,
         Step::Integrations => {
             if context.profile == Profile::Windows {
-                checked(runner, "dotctl", &args(&["setup", "shell"]))?;
+                checked(runner, Tool::Dotctl, &args(&["setup", "shell"]))?;
                 crate::runtime::agent_integrations(runner, true)?;
             } else {
                 let remote = ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"]
@@ -297,7 +298,7 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
                 let gui = !remote
                     && match context.profile {
                         Profile::Mac => Path::new("/Applications/1Password.app").is_dir(),
-                        Profile::Linux => runner.available("1password"),
+                        Profile::Linux => runner.available(Tool::OnePassword),
                         _ => false,
                     };
                 crate::runtime::integrations(&context.home, runner, gui)?;
@@ -319,7 +320,7 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
                     .into_iter()
                     .map(Into::into),
             );
-            checked(runner, "raco", &arguments)?;
+            checked(runner, Tool::Raco, &arguments)?;
         }
         Step::Haskell => haskell(context, runner)?,
         Step::Guard => {
@@ -364,14 +365,14 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
                     .to_string();
                 checked(
                     runner,
-                    "defaults",
+                    Tool::Defaults,
                     &args(&["write", "-g", key, kind, &value]),
                 )?;
             }
         }
         Step::ForgeKeys => forge_keys(runner)?,
         Step::Claude => {
-            if !runner.available("claude") {
+            if !runner.available(Tool::Claude) {
                 vendor_installer(runner, "https://claude.ai/install.sh", &[])?;
             }
         }
@@ -390,17 +391,17 @@ fn tools(context: &ContextData, runner: &mut impl Runner, upgrade: bool) -> Resu
             "--scoop-apps",
             &strings(&context.data, "/scoop/apps")?.join(","),
         ]));
-        checked(runner, "dotctl", &arguments)?;
+        checked(runner, Tool::Dotctl, &arguments)?;
         return Ok(());
     }
     if upgrade {
         if context.profile == Profile::Mac {
-            optional(runner, "brew", &["update", "--quiet"]);
-            optional(runner, "brew", &["upgrade", "--quiet"]);
+            optional(runner, Tool::Brew, &["update", "--quiet"]);
+            optional(runner, Tool::Brew, &["upgrade", "--quiet"]);
         } else {
             optional(
                 runner,
-                "/nix/var/nix/profiles/default/bin/nix",
+                Tool::Nix,
                 &[
                     "flake",
                     "update",
@@ -412,15 +413,11 @@ fn tools(context: &ContextData, runner: &mut impl Runner, upgrade: bool) -> Resu
                         .context("invalid flake path")?,
                 ],
             );
-            optional(
-                runner,
-                "/nix/var/nix/profiles/default/bin/nix",
-                &["profile", "upgrade", "--all"],
-            );
+            optional(runner, Tool::Nix, &["profile", "upgrade", "--all"]);
         }
-        optional(runner, "mise", &["self-update", "-y", "--no-plugins"]);
+        optional(runner, Tool::Mise, &["self-update", "-y", "--no-plugins"]);
     } else {
-        checked(runner, "mise", &args(&["install", "-y"]))?;
+        checked(runner, Tool::Mise, &args(&["install", "-y"]))?;
     }
     let mut arguments = args(&["upgrade", "--bump", "-y"]);
     if context.profile == Profile::Mac {
@@ -433,11 +430,11 @@ fn tools(context: &ContextData, runner: &mut impl Runner, upgrade: bool) -> Resu
             "github:haskell/haskell-language-server",
         ]));
     }
-    checked(runner, "mise", &arguments)?;
+    checked(runner, Tool::Mise, &arguments)?;
     if !context.home.join(".local/share/atuin/history.db").exists() {
-        optional(runner, "atuin", &["import", "auto"]);
+        optional(runner, Tool::Atuin, &["import", "auto"]);
     }
-    optional(runner, "tldr", &["--update"]);
+    optional(runner, Tool::Tldr, &["--update"]);
     execute(context, runner, Step::Integrations)?;
     if !upgrade {
         services(context, runner)?;
@@ -448,11 +445,11 @@ fn tools(context: &ContextData, runner: &mut impl Runner, upgrade: bool) -> Resu
 fn services(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     fs::create_dir_all(context.home.join(".local/state/dotfiles/log"))?;
     if context.profile == Profile::Mac {
-        let uid = String::from_utf8(checked(runner, "id", &args(&["-u"]))?)?;
+        let uid = String::from_utf8(checked(runner, Tool::Id, &args(&["-u"]))?)?;
         let domain = format!("gui/{}", uid.trim());
         optional(
             runner,
-            "launchctl",
+            Tool::Launchctl,
             &["bootout", &format!("{domain}/dev.dotfiles.mise-upgrade")],
         );
         for label in [
@@ -471,25 +468,25 @@ fn services(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
             if plist.is_file() {
                 optional(
                     runner,
-                    "launchctl",
+                    Tool::Launchctl,
                     &["bootout", &format!("{domain}/{label}")],
                 );
                 checked(
                     runner,
-                    "launchctl",
+                    Tool::Launchctl,
                     &["bootstrap".into(), domain.clone().into(), plist.into()],
                 )?;
             }
         }
     } else if context.profile == Profile::Linux
-        && runner.available("systemctl")
+        && runner.available(Tool::Systemctl)
         && runner
-            .run("systemctl", &args(&["--user", "show-environment"]))?
+            .run(Tool::Systemctl, &args(&["--user", "show-environment"]))?
             .success
     {
         optional(
             runner,
-            "systemctl",
+            Tool::Systemctl,
             &["--user", "stop", "mise-upgrade.timer"],
         );
         let obsolete = context
@@ -498,7 +495,7 @@ fn services(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         if fs::symlink_metadata(&obsolete).is_ok() {
             fs::remove_file(obsolete)?;
         }
-        checked(runner, "systemctl", &args(&["--user", "daemon-reload"]))?;
+        checked(runner, Tool::Systemctl, &args(&["--user", "daemon-reload"]))?;
         for unit in [
             "tools-upgrade.timer",
             "session-reaper.timer",
@@ -507,7 +504,7 @@ fn services(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         ] {
             checked(
                 runner,
-                "systemctl",
+                Tool::Systemctl,
                 &args(&["--user", "enable", "--now", unit]),
             )?;
         }
@@ -537,16 +534,16 @@ fn ocaml(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     if context.home.join(".opam/config").is_file() {
         initialization.push("--reinit".into());
     }
-    checked(runner, "opam", &initialization)?;
+    checked(runner, Tool::Opam, &initialization)?;
     let listed = String::from_utf8(checked(
         runner,
-        "opam",
+        Tool::Opam,
         &args(&["switch", "list", "--short"]),
     )?)?;
     if !listed.lines().any(|line| line == switch) {
         checked(
             runner,
-            "opam",
+            Tool::Opam,
             &args(&[
                 "switch",
                 "create",
@@ -556,19 +553,23 @@ fn ocaml(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
             ]),
         )?;
     }
-    checked(runner, "opam", &args(&["switch", "set", &switch, "--yes"]))?;
+    checked(
+        runner,
+        Tool::Opam,
+        &args(&["switch", "set", &switch, "--yes"]),
+    )?;
     let mut installation = args(&["install", "--switch", &switch, "--yes"]);
     installation.extend(
         strings(&context.data, "/ocaml/platform_tools")?
             .into_iter()
             .map(Into::into),
     );
-    checked(runner, "opam", &installation)?;
+    checked(runner, Tool::Opam, &installation)?;
     Ok(())
 }
 
 fn haskell(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
-    checked(runner, "cabal", &args(&["update"]))?;
+    checked(runner, Tool::Cabal, &args(&["update"]))?;
     let config = std::env::var_os("CABAL_CONFIG")
         .map(PathBuf::from)
         .unwrap_or_else(|| context.home.join(".config/cabal/config"));
@@ -630,8 +631,8 @@ fn haskell(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         wrappers += 1;
     }
     ensure!(wrappers > 0, "HLS vendor wrapper templates are missing");
-    if !runner.available("hlint") {
-        checked(runner, "cabal", &args(&["install", "hlint"]))?;
+    if !runner.available(Tool::Hlint) {
+        checked(runner, Tool::Cabal, &args(&["install", "hlint"]))?;
     }
     Ok(())
 }
@@ -682,9 +683,9 @@ impl OwnerSource {
 
 fn source_tool(context: &ContextData, runner: &mut impl Runner, step: Step) -> Result<()> {
     let (source, relative, binary) = match step {
-        Step::Ocomment => (OwnerSource::Ocomment, "rust/ocomment", "ocomment"),
-        Step::Domyjob => (OwnerSource::Domyjob, "crates/domyjob", "domyjob"),
-        Step::Fleet => (OwnerSource::Fleet, "", "fleet"),
+        Step::Ocomment => (OwnerSource::Ocomment, "rust/ocomment", Tool::Ocomment),
+        Step::Domyjob => (OwnerSource::Domyjob, "crates/domyjob", Tool::Domyjob),
+        Step::Fleet => (OwnerSource::Fleet, "", Tool::Fleet),
         _ => unreachable!(),
     };
     let projects = string(&context.data, "/paths/projects")?;
@@ -697,7 +698,7 @@ fn source_tool(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
         .join(source.repository());
     if !checkout.join(".git").exists() {
         fs::create_dir_all(checkout.parent().context("checkout parent is missing")?)?;
-        checked(runner, "git", &source.clone_arguments(&checkout))?;
+        checked(runner, Tool::Git, &source.clone_arguments(&checkout))?;
     }
     let arguments = cargo_install_arguments(
         &checkout.join(relative),
@@ -708,35 +709,59 @@ fn source_tool(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
         }),
         &[],
     );
-    checked(runner, "cargo", &arguments)?;
+    checked(runner, Tool::Cargo, &arguments)?;
     checked(runner, binary, &args(&["--version"]))?;
     Ok(())
 }
 
-const FORGE_FINGERPRINT: &str = "5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23";
+/// GitHub's current web-flow signing key, which signs commits merged through the web interface.
+const FORGE_CURRENT: &str = "968479A1AFF927E37D1A566BB5690EEEBB952194";
+/// The web-flow key GitHub retired in January 2024; its bundle still carries it for older signatures.
+const FORGE_RETIRED: &str = "5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23";
+
+/// Primary-key fingerprints from `gpg --with-colons` output; subkey fingerprints follow `sub` records and are skipped.
+fn primary_fingerprints(records: &str) -> Vec<&str> {
+    let mut primary = false;
+    let mut fingerprints = Vec::new();
+    for line in records.lines() {
+        let mut fields = line.split(':');
+        match fields.next() {
+            Some("pub") => primary = true,
+            Some("sub") => primary = false,
+            Some("fpr") if primary => {
+                fingerprints.push(fields.nth(8).unwrap_or_default());
+                primary = false;
+            }
+            _ => {}
+        }
+    }
+    fingerprints
+}
 
 pub fn verified_forge_key(records: &str) -> bool {
-    let primary: Vec<_> = records
+    let primary_count = records
         .lines()
         .filter(|line| line.starts_with("pub:"))
-        .collect();
-    crate::profile_rules::forge_key_accepted(
-        primary.len(),
-        records
-            .lines()
-            .find(|line| line.starts_with("fpr:"))
-            .and_then(|line| line.split(':').nth(9))
-            == Some(FORGE_FINGERPRINT),
+        .count();
+    let fingerprints = primary_fingerprints(records);
+    crate::profile_rules::forge_bundle_accepted(
+        primary_count.max(fingerprints.len()),
+        fingerprints
+            .iter()
+            .filter(|fingerprint| ![FORGE_CURRENT, FORGE_RETIRED].contains(fingerprint))
+            .count()
+            + primary_count.saturating_sub(fingerprints.len()),
+        fingerprints.contains(&FORGE_CURRENT),
     )
 }
 
 fn forge_keys(runner: &mut impl Runner) -> Result<()> {
-    if !runner.available("gpg") {
+    if !runner.available(Tool::Gpg) {
         eprintln!("Warning: gpg is required to verify forge signatures.");
         return Ok(());
     }
     if runner
-        .run("gpg", &args(&["--list-keys", FORGE_FINGERPRINT]))?
+        .run(Tool::Gpg, &args(&["--list-keys", FORGE_CURRENT]))?
         .success
     {
         return Ok(());
@@ -745,7 +770,7 @@ fn forge_keys(runner: &mut impl Runner) -> Result<()> {
     let key = scope.path().join("web-flow.gpg");
     checked(
         runner,
-        "curl",
+        Tool::Curl,
         &[
             "--proto".into(),
             "=https".into(),
@@ -763,7 +788,7 @@ fn forge_keys(runner: &mut impl Runner) -> Result<()> {
     )?;
     let records = checked(
         runner,
-        "gpg",
+        Tool::Gpg,
         &[
             "--show-keys".into(),
             "--with-colons".into(),
@@ -776,14 +801,14 @@ fn forge_keys(runner: &mut impl Runner) -> Result<()> {
     );
     checked(
         runner,
-        "gpg",
+        Tool::Gpg,
         &["--quiet".into(), "--import".into(), key.into()],
     )?;
     Ok(())
 }
 
 fn fcitx(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
-    if !runner.available("im-config") || !runner.available("fcitx5") {
+    if !runner.available(Tool::ImConfig) || !runner.available(Tool::Fcitx5) {
         return Ok(());
     }
     let source = context.home.join(".xinputrc");
@@ -798,18 +823,18 @@ fn fcitx(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         if source.is_file() && !backup.exists() {
             replace(&backup, content.as_bytes(), false)?;
         }
-        checked(runner, "im-config", &args(&["-n", "fcitx5"]))?;
+        checked(runner, Tool::ImConfig, &args(&["-n", "fcitx5"]))?;
     }
-    if runner.available("fcitx5-remote")
-        && runner.run("fcitx5-remote", &args(&["--check"]))?.success
+    if runner.available(Tool::Fcitx5Remote)
+        && runner.run(Tool::Fcitx5Remote, &args(&["--check"]))?.success
     {
-        optional(runner, "fcitx5-remote", &["-r"]);
+        optional(runner, Tool::Fcitx5Remote, &["-r"]);
     }
     Ok(())
 }
 
 fn retire_tmux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
-    if runner.available("tmux") && runner.run("tmux", &args(&["list-sessions"]))?.success {
+    if runner.available(Tool::Tmux) && runner.run(Tool::Tmux, &args(&["list-sessions"]))?.success {
         return Ok(());
     }
     let config = context.home.join(".config/tmux/tmux.conf");
@@ -822,8 +847,13 @@ fn retire_tmux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         let (_file, destination) = unique.keep()?;
         fs::rename(config, destination)?;
     }
-    if runner.available("mise") && runner.run("mise", &args(&["current", "tmux"]))?.success {
-        checked(runner, "mise", &args(&["uninstall", "--all", "tmux", "-y"]))?;
+    if runner.available(Tool::Mise) && runner.run(Tool::Mise, &args(&["current", "tmux"]))?.success
+    {
+        checked(
+            runner,
+            Tool::Mise,
+            &args(&["uninstall", "--all", "tmux", "-y"]),
+        )?;
     }
     Ok(())
 }
@@ -871,13 +901,23 @@ mod tests {
     }
     use super::*;
 
+    /// The shape GitHub serves at https://github.com/web-flow.gpg since its 2024 key rotation.
+    const PUBLISHED: &str = "pub:e:2048:1:4AEE18F83AFDEB23:1502898241:1705435200::-:::sc::::::23::0:\nfpr:::::::::5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23:\npub:-:4096:1:B5690EEEBB952194:1705428342:::-:::scSC::::::23::0:\nfpr:::::::::968479A1AFF927E37D1A566BB5690EEEBB952194:\n";
+
     #[test]
-    fn a_secondary_fingerprint_or_an_extra_primary_key_cannot_authorize_import() {
-        let expected = format!("pub:::::::::\nfpr:::::::::{FORGE_FINGERPRINT}:\n");
-        assert!(verified_forge_key(&expected));
+    fn the_published_bundle_is_accepted_and_unpinned_or_stale_bundles_are_refused() {
+        assert!(verified_forge_key(PUBLISHED));
+        let current_only = format!("pub:::::::::\nfpr:::::::::{FORGE_CURRENT}:\n");
+        assert!(verified_forge_key(&current_only));
+        let retired_only = format!("pub:::::::::\nfpr:::::::::{FORGE_RETIRED}:\n");
+        assert!(!verified_forge_key(&retired_only));
         assert!(!verified_forge_key(&format!(
-            "pub:::::::::\nfpr:::::::::OTHER:\n{expected}"
+            "pub:::::::::\nfpr:::::::::OTHER:\n{current_only}"
         )));
-        assert!(!verified_forge_key(&format!("{expected}pub:::::::::\n")));
+        assert!(!verified_forge_key(&format!(
+            "{current_only}pub:::::::::\n"
+        )));
+        let subkey = format!("{current_only}sub:::::::::\nfpr:::::::::SUBKEY:\n");
+        assert!(verified_forge_key(&subkey));
     }
 }

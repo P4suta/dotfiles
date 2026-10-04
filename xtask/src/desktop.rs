@@ -1,6 +1,7 @@
 use crate::profile_rules::Profile;
 use crate::runtime::{Runner, args, checked, optional, replace};
 use crate::setup::ContextData;
+use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::fs;
 use std::path::Path;
@@ -18,7 +19,7 @@ pub fn refresh(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         Profile::Mac => mac(context, runner),
         Profile::Linux => linux(context, runner),
         Profile::Windows => {
-            checked(runner, "dotctl", &args(&["setup", "shell"]))?;
+            checked(runner, Tool::Dotctl, &args(&["setup", "shell"]))?;
             Ok(())
         }
         Profile::Wsl => Ok(()),
@@ -53,7 +54,7 @@ pub fn bundle_shim(target: &Path, binary: &Path) -> Result<()> {
 fn mac(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     let brewfile = context.home.join(".config/homebrew/Brewfile");
     ensure!(
-        runner.available("brew") && brewfile.is_file(),
+        runner.available(Tool::Brew) && brewfile.is_file(),
         "Homebrew and the applied Brewfile are required"
     );
     let arguments = vec![
@@ -63,10 +64,10 @@ fn mac(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         "--file".into(),
         brewfile.clone().into(),
     ];
-    if !runner.run("brew", &arguments)?.success {
+    if !runner.run(Tool::Brew, &arguments)?.success {
         checked(
             runner,
-            "brew",
+            Tool::Brew,
             &[
                 "bundle".into(),
                 "install".into(),
@@ -76,27 +77,27 @@ fn mac(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
             ],
         )?;
     }
-    for (name, binary) in [
+    for (tool, binary) in [
         (
-            "ghostty",
+            Tool::Ghostty,
             "/Applications/Ghostty.app/Contents/MacOS/ghostty",
         ),
         (
-            "tailscale",
+            Tool::Tailscale,
             "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
         ),
     ] {
         if Path::new(binary).is_file() {
-            let target = context.home.join(".local/bin").join(name);
-            if !runner.available(name) || target.exists() || fs::symlink_metadata(&target).is_ok() {
+            let target = context.home.join(".local/bin").join(tool.program());
+            if !runner.available(tool) || target.exists() || fs::symlink_metadata(&target).is_ok() {
                 bundle_shim(&target, Path::new(binary))?;
             }
         }
     }
-    if runner.available("ghostty") {
+    if runner.available(Tool::Ghostty) {
         checked(
             runner,
-            "ghostty",
+            Tool::Ghostty,
             &args(&["+show-config", "--default=false"]),
         )?;
     }
@@ -104,8 +105,8 @@ fn mac(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
 }
 
 fn gsetting(runner: &mut impl Runner, schema: &str, key: &str, value: &str) -> Result<()> {
-    if runner.available("gsettings") {
-        let writable = runner.run("gsettings", &args(&["writable", schema, key]))?;
+    if runner.available(Tool::Gsettings) {
+        let writable = runner.run(Tool::Gsettings, &args(&["writable", schema, key]))?;
         if writable.success
             && writable
                 .bytes
@@ -113,7 +114,7 @@ fn gsetting(runner: &mut impl Runner, schema: &str, key: &str, value: &str) -> R
                 .unwrap_or(&writable.bytes)
                 == b"true"
         {
-            checked(runner, "gsettings", &args(&["set", schema, key, value]))?;
+            checked(runner, Tool::Gsettings, &args(&["set", schema, key, value]))?;
         }
     }
     Ok(())
@@ -162,17 +163,14 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     let binary = bundle.join("bin/zed");
     if !binary.is_file()
         || !runner
-            .run(
-                binary.to_str().context("invalid Zed binary path")?,
-                &args(&["--version"]),
-            )?
+            .run_installed(&binary, &args(&["--version"]))?
             .success
     {
         let scope = tempfile::tempdir()?;
         let script = scope.path().join("zed-installer.sh");
         checked(
             runner,
-            "curl",
+            Tool::Curl,
             &[
                 "--proto".into(),
                 "=https".into(),
@@ -187,7 +185,7 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         )?;
         checked(
             runner,
-            "env",
+            Tool::Env,
             &[
                 format!("ZED_CHANNEL={zed_channel}").into(),
                 "sh".into(),
@@ -197,10 +195,7 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         ensure!(
             binary.is_file()
                 && runner
-                    .run(
-                        binary.to_str().context("invalid Zed binary path")?,
-                        &args(&["--version"])
-                    )?
+                    .run_installed(&binary, &args(&["--version"]))?
                     .success,
             "Zed installation is incomplete or unusable"
         );
@@ -234,10 +229,10 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         .join(format!(".local/share/applications/{app_id}.desktop"));
     replace(&desktop_target, desktop.as_bytes(), false)?;
     link(&binary, &context.home.join(".local/bin/zed"))?;
-    if runner.available("desktop-file-validate") {
+    if runner.available(Tool::DesktopFileValidate) {
         checked(
             runner,
-            "desktop-file-validate",
+            Tool::DesktopFileValidate,
             &[desktop_target.clone().into()],
         )?;
     }
@@ -248,11 +243,11 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     if !fs::read_to_string(&stamp).is_ok_and(|version| version.trim() == font_version) {
         let scope = tempfile::tempdir()?;
         let archive = scope.path().join("font.zip");
-        checked(runner, "curl", &["--proto".into(), "=https".into(), "--tlsv1.2".into(), "-fsSL".into(), "--max-time".into(), "300".into(), "-o".into(), archive.clone().into(), format!("https://github.com/ryanoasis/nerd-fonts/releases/download/{font_version}/JetBrainsMono.zip").into()])?;
+        checked(runner, Tool::Curl, &["--proto".into(), "=https".into(), "--tlsv1.2".into(), "-fsSL".into(), "--max-time".into(), "300".into(), "-o".into(), archive.clone().into(), format!("https://github.com/ryanoasis/nerd-fonts/releases/download/{font_version}/JetBrainsMono.zip").into()])?;
         fs::create_dir_all(&fonts)?;
         checked(
             runner,
-            "unzip",
+            Tool::Unzip,
             &[
                 "-jo".into(),
                 archive.into(),
@@ -262,13 +257,13 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
             ],
         )?;
         replace(&stamp, format!("{font_version}\n").as_bytes(), false)?;
-        if runner.available("fc-cache") {
-            checked(runner, "fc-cache", &["-f".into(), fonts.into()])?;
+        if runner.available(Tool::FcCache) {
+            checked(runner, Tool::FcCache, &["-f".into(), fonts.into()])?;
         }
     }
-    if runner.available("gsettings") {
+    if runner.available(Tool::Gsettings) {
         let profile = runner.run(
-            "gsettings",
+            Tool::Gsettings,
             &args(&["get", "org.gnome.Terminal.ProfilesList", "default"]),
         )?;
         if profile.success {
@@ -330,18 +325,18 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     }
     optional(
         runner,
-        "update-desktop-database",
+        Tool::UpdateDesktopDatabase,
         &[context
             .home
             .join(".local/share/applications")
             .to_str()
             .context("invalid applications path")?],
     );
-    if runner.available("xdg-mime") {
+    if runner.available(Tool::XdgMime) {
         for mime in ["text/plain", "text/markdown"] {
             checked(
                 runner,
-                "xdg-mime",
+                Tool::XdgMime,
                 &args(&["default", &format!("{app_id}.desktop"), mime]),
             )?;
         }

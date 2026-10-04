@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_methods,
+    reason = "integration tests spawn the binaries and real tools they verify"
+)]
+
 use anyhow::Result;
 use dotfiles_xtask::skill_ops::{self as ops, Decision, Outcome, Policy, Review};
 use serde_json::{Value, json};

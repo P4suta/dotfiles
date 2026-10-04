@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_methods,
+    reason = "integration tests spawn the binaries and real tools they verify"
+)]
+
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::PathBuf;

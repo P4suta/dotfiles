@@ -1,4 +1,5 @@
 use crate::runtime::{Runner, args, checked, replace};
+use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -53,7 +54,7 @@ pub fn wezterm(home: &Path, runner: &mut impl Runner) -> Result<()> {
     ] {
         checked(
             runner,
-            "curl.exe",
+            Tool::CurlExe,
             &[
                 "--proto".into(),
                 "=https".into(),
@@ -76,14 +77,14 @@ pub fn wezterm(home: &Path, runner: &mut impl Runner) -> Result<()> {
     ensure!(actual == expected, "WezTerm SHA-256 verification failed");
     archive_paths(&String::from_utf8(checked(
         runner,
-        "tar.exe",
+        Tool::TarExe,
         &["-tf".into(), zip.clone().into()],
     )?)?)?;
     let extract = scope.path().join("extract");
     fs::create_dir(&extract)?;
     checked(
         runner,
-        "tar.exe",
+        Tool::TarExe,
         &[
             "-xf".into(),
             zip.into(),
@@ -124,7 +125,7 @@ pub fn wezterm(home: &Path, runner: &mut impl Runner) -> Result<()> {
         )?;
         checked(
             runner,
-            "pwsh",
+            Tool::Pwsh,
             &[
                 "-NoProfile".into(),
                 "-File".into(),
@@ -133,14 +134,12 @@ pub fn wezterm(home: &Path, runner: &mut impl Runner) -> Result<()> {
                 install.clone().into(),
             ],
         )?;
-        checked(
-            runner,
-            install
-                .join("wezterm.exe")
-                .to_str()
-                .context("invalid executable path")?,
-            &args(&["--version"]),
-        )?;
+        ensure!(
+            runner
+                .run_installed(&install.join("wezterm.exe"), &args(&["--version"]))?
+                .success,
+            "installed WezTerm does not run"
+        );
         Ok(())
     })();
     if let Err(error) = result {

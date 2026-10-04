@@ -243,7 +243,7 @@ fn execute(cli: Cli) -> Result<()> {
                 report == current,
                 "analysis changed before triage; analyze the current evidence"
             );
-            let evidence_root = evidence_root.unwrap_or(tree).canonicalize()?;
+            let evidence_root = dotfiles_xtask::canonical(&evidence_root.unwrap_or(tree))?;
             ops::check_review(
                 &ops::hash(&report)?,
                 &report.findings,
