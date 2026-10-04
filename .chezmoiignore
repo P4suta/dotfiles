@@ -1,4 +1,7 @@
 {{- if not (has .profile (list "mac" "linux" "windows" "wsl")) -}}{{ fail "Unknown dotfiles profile" }}{{- end }}
+{{- range (dig "setup" "skip" (list) .) }}
+{{ .script }}
+{{- end }}
 {{ if ne .profile "linux" }}
 .config/dotfiles-nix
 {{ end }}

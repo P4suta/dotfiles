@@ -344,6 +344,41 @@ pub fn native_profile() -> Result<Profile> {
     }
 }
 
+/// A setup script a machine-local configuration deliberately leaves out, with the reason that makes the omission reviewable.
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkippedScript {
+    pub script: String,
+    pub reason: String,
+}
+
+/// `setup.skip` entries, which `.chezmoiignore` removes from application; every entry must name one script target and say why.
+pub fn declared_skips(data: &Value) -> Result<Vec<SkippedScript>> {
+    let Some(entries) = data.pointer("/setup/skip") else {
+        return Ok(Vec::new());
+    };
+    let skips: Vec<SkippedScript> = serde_json::from_value(entries.clone())
+        .context("setup.skip requires a list of script and reason entries")?;
+    for skip in &skips {
+        ensure!(
+            !skip.script.is_empty()
+                && skip
+                    .script
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                && (skip.script.ends_with(".sh") || skip.script.ends_with(".ps1")),
+            "setup.skip names a script target such as install-tools.sh: {}",
+            skip.script
+        );
+        ensure!(
+            !skip.reason.trim().is_empty(),
+            "setup.skip requires a reason for {}",
+            skip.script
+        );
+    }
+    Ok(skips)
+}
+
 pub fn configured_profile(data: &Value) -> Result<Profile> {
     match data["profile"].as_str() {
         Some("mac") => Ok(Profile::Mac),
@@ -380,6 +415,9 @@ pub fn operate(
     .stdout;
     let data: Value = serde_json::from_slice(&bytes)?;
     let profile = configured_profile(&data)?;
+    for skip in declared_skips(&data)? {
+        println!("Skipping setup script {}: {}", skip.script, skip.reason);
+    }
     let mode = if matches!(action, NativeAction::Apply) {
         Mode::Full
     } else {

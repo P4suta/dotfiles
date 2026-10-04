@@ -11,6 +11,7 @@ pub mod pr_workflow;
 pub mod profile_rules;
 pub mod profiles;
 pub mod quality;
+pub mod rehearsal;
 pub mod review_guard;
 pub mod review_rules;
 pub mod runtime;

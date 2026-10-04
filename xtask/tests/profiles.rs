@@ -94,3 +94,114 @@ fn native_verification_ignores_always_run_scripts() {
     assert_eq!(profiles::native_action_arguments("apply"), ["apply"]);
     assert_eq!(profiles::native_action_arguments("diff"), ["diff"]);
 }
+
+#[test]
+fn skipped_setup_scripts_need_a_target_name_and_a_reason() {
+    let accepted = serde_json::json!({"setup": {"skip": [{"script": "setup-ocaml.sh", "reason": "compiles a toolchain"}]}});
+    assert_eq!(profiles::declared_skips(&accepted).unwrap().len(), 1);
+    for rejected in [
+        serde_json::json!({"setup": {"skip": [{"script": "setup-ocaml.sh", "reason": " "}]}}),
+        serde_json::json!({"setup": {"skip": [{"script": "../escape.sh", "reason": "x"}]}}),
+        serde_json::json!({"setup": {"skip": [{"script": "setup-ocaml.sh"}]}}),
+        serde_json::json!({"setup": {"skip": [{"script": "a.sh", "reason": "x", "extra": 1}]}}),
+    ] {
+        assert!(profiles::declared_skips(&rejected).is_err(), "{rejected}");
+    }
+    assert!(
+        profiles::declared_skips(&serde_json::json!({}))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    for profile in Profile::ALL {
+        let scope = tempfile::tempdir().unwrap();
+        let home = scope.path().join("home");
+        fs::create_dir(&home).unwrap();
+        let config = scope.path().join("chezmoi.toml");
+        fs::write(
+            &config,
+            dotfiles_xtask::rehearsal::configuration(profile, &home),
+        )
+        .unwrap();
+        let output = profiles::chezmoi(root, scope.path(), &config, &home)
+            .args(["data", "--format", "json"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let data: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(profiles::configured_profile(&data).unwrap(), profile);
+        assert_eq!(
+            data["platforms"][profile.name()]["tools"]["common"],
+            serde_json::json!(["jq"])
+        );
+        let skips = profiles::declared_skips(&data).unwrap();
+        assert_eq!(skips.is_empty(), profile == Profile::Windows, "{skips:?}");
+        let listed = profiles::chezmoi(root, scope.path(), &config, &home)
+            .args(["managed", "--include", "scripts", "--nul-path-separator"])
+            .output()
+            .unwrap();
+        assert!(
+            listed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&listed.stderr)
+        );
+        let scripts = profiles::managed_paths(&listed.stdout).unwrap();
+        assert!(!scripts.is_empty());
+        for skip in skips {
+            assert!(
+                !scripts.contains(&skip.script),
+                "{} still runs",
+                skip.script
+            );
+        }
+    }
+}
+
+#[test]
+fn public_owner_sources_clone_over_https_despite_a_host_ssh_rewrite() {
+    use dotfiles_xtask::setup::OwnerSource;
+    let scope = tempfile::tempdir().unwrap();
+    let global = scope.path().join("gitconfig");
+    fs::write(
+        &global,
+        "[url \"git@github.com:\"]\n\tinsteadOf = https://github.com/\n",
+    )
+    .unwrap();
+    for (source, expected) in [
+        (
+            OwnerSource::Ocomment,
+            "https://github.com/P4suta/OComment.git",
+        ),
+        (
+            OwnerSource::Domyjob,
+            "https://github.com/P4suta/domyjob.git",
+        ),
+        (OwnerSource::Fleet, "git@github.com:P4suta/fleet"),
+    ] {
+        let mut arguments = source.clone_arguments(&scope.path().join("checkout"));
+        let clone = arguments
+            .iter()
+            .position(|argument| argument == "clone")
+            .unwrap();
+        let url = arguments[clone + 1].clone();
+        arguments.truncate(clone);
+        let resolved = std::process::Command::new("git")
+            .env("GIT_CONFIG_GLOBAL", &global)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .args(&arguments)
+            .args(["ls-remote", "--get-url"])
+            .arg(url)
+            .output()
+            .unwrap();
+        assert!(resolved.status.success());
+        assert_eq!(String::from_utf8(resolved.stdout).unwrap().trim(), expected);
+    }
+}

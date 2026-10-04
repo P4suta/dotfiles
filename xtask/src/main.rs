@@ -117,6 +117,11 @@ enum Action {
         backup: Option<PathBuf>,
     },
     Skills,
+    /// Apply the native profile with its scripts, twice, on a disposable CI host.
+    Rehearse {
+        #[arg(long)]
+        disposable_host: bool,
+    },
     Check,
     Aliases,
     FormatMetadata,
@@ -308,6 +313,9 @@ fn run() -> Result<()> {
                 "Validated {} shared skills, aliases, and current maintenance dispositions",
                 validate_tree(&cli.root)?
             );
+        }
+        Action::Rehearse { disposable_host } => {
+            dotfiles_xtask::rehearsal::run(&cli.root, disposable_host)?
         }
         Action::Check => {
             dotfiles_xtask::skill_ops::check_catalog(&cli.root)?;

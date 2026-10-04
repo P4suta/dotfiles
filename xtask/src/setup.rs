@@ -636,11 +636,55 @@ fn haskell(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     Ok(())
 }
 
+/// A tool the owner builds from one of their own repositories.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum OwnerSource {
+    Ocomment,
+    Domyjob,
+    Fleet,
+}
+
+impl OwnerSource {
+    fn repository(self) -> &'static str {
+        match self {
+            Self::Ocomment => "OComment",
+            Self::Domyjob => "domyjob",
+            Self::Fleet => "fleet",
+        }
+    }
+
+    /// Public sources must clone without credentials, so an unattended or remote application never needs the owner's SSH key for them.
+    fn public(self) -> bool {
+        match self {
+            Self::Ocomment | Self::Domyjob => true,
+            Self::Fleet => false,
+        }
+    }
+
+    /// `git` arguments that clone this source into `checkout`.
+    /// A public URL is mapped onto itself: git applies the longest matching `insteadOf`, so a host-wide HTTPS-to-SSH rewrite cannot turn it into an SSH clone.
+    pub fn clone_arguments(self, checkout: &Path) -> Vec<OsString> {
+        let mut arguments = Vec::new();
+        let url = if self.public() {
+            let url = format!("https://github.com/P4suta/{}.git", self.repository());
+            arguments.push("-c".into());
+            arguments.push(format!("url.{url}.insteadOf={url}").into());
+            url
+        } else {
+            format!("git@github.com:P4suta/{}", self.repository())
+        };
+        arguments.push("clone".into());
+        arguments.push(url.into());
+        arguments.push(checkout.into());
+        arguments
+    }
+}
+
 fn source_tool(context: &ContextData, runner: &mut impl Runner, step: Step) -> Result<()> {
-    let (repository, relative, binary) = match step {
-        Step::Ocomment => ("OComment", "rust/ocomment", "ocomment"),
-        Step::Domyjob => ("domyjob", "crates/domyjob", "domyjob"),
-        Step::Fleet => ("fleet", "", "fleet"),
+    let (source, relative, binary) = match step {
+        Step::Ocomment => (OwnerSource::Ocomment, "rust/ocomment", "ocomment"),
+        Step::Domyjob => (OwnerSource::Domyjob, "crates/domyjob", "domyjob"),
+        Step::Fleet => (OwnerSource::Fleet, "", "fleet"),
         _ => unreachable!(),
     };
     let projects = string(&context.data, "/paths/projects")?;
@@ -650,18 +694,10 @@ fn source_tool(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
     );
     let checkout = Path::new(&projects)
         .join("github.com/P4suta")
-        .join(repository);
+        .join(source.repository());
     if !checkout.join(".git").exists() {
         fs::create_dir_all(checkout.parent().context("checkout parent is missing")?)?;
-        checked(
-            runner,
-            "git",
-            &[
-                "clone".into(),
-                format!("git@github.com:P4suta/{repository}").into(),
-                checkout.clone().into(),
-            ],
-        )?;
+        checked(runner, "git", &source.clone_arguments(&checkout))?;
     }
     let arguments = cargo_install_arguments(
         &checkout.join(relative),
