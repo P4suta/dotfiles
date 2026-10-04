@@ -330,6 +330,79 @@ pub fn comment_scopes(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// `just` invocations that the repository tells a reader to run, written as code, quoted, or after `run:` or `see`, or at the start of a Markdown line.
+/// The adverb in ordinary prose does not take these forms, and a following flag is an option of `just` itself rather than a recipe.
+pub fn recipe_references(text: &str, markdown: bool) -> Vec<(usize, String)> {
+    let mut found = Vec::new();
+    for (number, line) in text.lines().enumerate() {
+        let starts = markdown
+            && line
+                .trim_start()
+                .trim_start_matches("$ ")
+                .starts_with("just ");
+        for (index, _) in line.match_indices("just ") {
+            let before = &line[..index];
+            let command = starts && before.trim_start().trim_start_matches("$ ").is_empty()
+                || before.ends_with(['`', '\'', '"', '('])
+                || before.ends_with("run: ")
+                || before.ends_with("see ");
+            let recipe: String = line[index + 5..]
+                .chars()
+                .take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-')
+                .collect();
+            if command && !recipe.is_empty() && !recipe.starts_with('-') {
+                found.push((number + 1, recipe));
+            }
+        }
+    }
+    found
+}
+
+/// Recipe references that name no recipe in the justfile, so a hint or document sends the reader to a command that does not exist.
+/// Accepted ADRs keep the commands they recorded, and tests state invalid references on purpose.
+pub fn unknown_recipes(root: &Path) -> Result<Vec<String>> {
+    let summary = Tool::Just
+        .command()
+        .current_dir(root)
+        .args(["--summary", "--justfile"])
+        .arg(root.join("justfile"))
+        .output()?;
+    ensure!(summary.status.success(), "just --summary failed");
+    let recipes: std::collections::BTreeSet<String> = String::from_utf8(summary.stdout)?
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
+    ensure!(!recipes.is_empty(), "the justfile defines no recipes");
+    let mut unknown = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(directory) = stack.pop() {
+        for entry in fs::read_dir(&directory)? {
+            let path = entry?.path();
+            let relative = path
+                .strip_prefix(root)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if path.is_dir() {
+                if !matches!(
+                    relative.as_str(),
+                    ".git" | "target" | "node_modules" | "docs/adr" | "xtask/tests"
+                ) && !relative.ends_with("/target")
+                {
+                    stack.push(path);
+                }
+            } else if let Ok(text) = fs::read_to_string(&path) {
+                for (line, recipe) in recipe_references(&text, relative.ends_with(".md")) {
+                    if !recipes.contains(&recipe) {
+                        unknown.push(format!("{relative}:{line}: just {recipe}"));
+                    }
+                }
+            }
+        }
+    }
+    unknown.sort();
+    Ok(unknown)
+}
+
 /// Profile leaves that no template includes: a leaf nothing renders keeps stale behavior that reviewers mistake for live configuration.
 pub fn unreferenced_leaves(root: &Path) -> Result<Vec<String>> {
     let leaves_root = root.join(".chezmoitemplates/profiles");

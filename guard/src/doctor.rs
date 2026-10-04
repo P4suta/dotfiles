@@ -177,7 +177,7 @@ fn system_tier(d: &mut Doctor) {
         let brewfile = home().join(".config/homebrew/Brewfile");
         if brewfile.is_file() && brewfile.metadata().is_ok_and(|m| m.len() > 0) {
             let satisfied = Command::new("brew")
-                .args(["bundle", "check", "--file"])
+                .args(["bundle", "check", "--no-upgrade", "--file"])
                 .arg(&brewfile)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -186,7 +186,10 @@ fn system_tier(d: &mut Doctor) {
             if satisfied {
                 ok("Brewfile", "satisfied");
             } else {
-                d.warn("Brewfile", "drifted; run: just brew");
+                d.warn(
+                    "Brewfile",
+                    "packages missing; run: brew bundle install --no-upgrade --file ~/.config/homebrew/Brewfile",
+                );
             }
         } else {
             d.bad("Brewfile", &format!("missing: {}", brewfile.display()));
@@ -527,7 +530,7 @@ fn repository_guards(d: &mut Doctor) {
     } else {
         d.bad(
             "dotguard",
-            "not built — run 'just apply' (or 'just guard') in the dotfiles repo",
+            "not built — run 'just apply' in the dotfiles repo",
         );
     }
 
@@ -658,7 +661,7 @@ fn apple_platform(d: &mut Doctor) {
 
 fn macos_integration(d: &mut Doctor) {
     section("macOS integration");
-    // /etc/pam.d/sudo_local is Apple's supported hook and survives OS updates, which is why `just touchid` writes there rather than editing /etc/pam.d/sudo — that file is replaced by the next system update and the setting silently reverts.
+    // /etc/pam.d/sudo_local is Apple's supported hook and survives OS updates, which is why `dotfiles-touchid` writes there rather than editing /etc/pam.d/sudo — that file is replaced by the next system update and the setting silently reverts.
     let sudo_local = std::fs::read_to_string("/etc/pam.d/sudo_local").unwrap_or_default();
     let enabled = sudo_local
         .lines()

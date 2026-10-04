@@ -422,3 +422,24 @@ fn forgetting_script_runs_reruns_every_onchange_script() {
     apply();
     assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 2);
 }
+
+#[test]
+fn recipe_references_are_commands_rather_than_prose() {
+    let found = |text: &str, markdown: bool| -> Vec<String> {
+        quality::recipe_references(text, markdown)
+            .into_iter()
+            .map(|(_, recipe)| recipe)
+            .collect()
+    };
+    assert_eq!(found("drifted; run: just brew", false), ["brew"]);
+    assert_eq!(
+        found("run 'just apply' (or `just guard`)", false),
+        ["apply", "guard"]
+    );
+    assert_eq!(found("see just apply", false), ["apply"]);
+    assert_eq!(found("just refresh CONFIG", true), ["refresh"]);
+    assert_eq!(found("$ just verify", true), ["verify"]);
+    assert!(found("This runs just before the hook.", false).is_empty());
+    assert!(found("just refresh CONFIG", false).is_empty());
+    assert!(found("`just --list` prints recipes", true).is_empty());
+}
