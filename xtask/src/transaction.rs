@@ -30,6 +30,47 @@ fn remove(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Whether `current` already matches the captured `saved` tree, so restoring it would change nothing.
+fn unchanged(saved: &Path, current: &Path) -> Result<bool> {
+    let saved_metadata = fs::symlink_metadata(saved)?;
+    let current_metadata = match fs::symlink_metadata(current) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    if saved_metadata.is_symlink() || current_metadata.is_symlink() {
+        return Ok(saved_metadata.is_symlink()
+            && current_metadata.is_symlink()
+            && fs::read_link(saved)? == fs::read_link(current)?);
+    }
+    if saved_metadata.permissions() != current_metadata.permissions() {
+        return Ok(false);
+    }
+    if saved_metadata.is_dir() || current_metadata.is_dir() {
+        if !(saved_metadata.is_dir() && current_metadata.is_dir()) {
+            return Ok(false);
+        }
+        let mut saved_names = fs::read_dir(saved)?
+            .map(|entry| Ok(entry?.file_name()))
+            .collect::<Result<Vec<_>>>()?;
+        let mut current_names = fs::read_dir(current)?
+            .map(|entry| Ok(entry?.file_name()))
+            .collect::<Result<Vec<_>>>()?;
+        saved_names.sort();
+        current_names.sort();
+        if saved_names != current_names {
+            return Ok(false);
+        }
+        for name in saved_names {
+            if !unchanged(&saved.join(&name), &current.join(&name))? {
+                return Ok(false);
+            }
+        }
+        return Ok(true);
+    }
+    Ok(current_metadata.is_file() && fs::read(saved)? == fs::read(current)?)
+}
+
 fn copy(source: &Path, destination: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(source)?;
     fs::create_dir_all(destination.parent().context("backup parent is missing")?)?;
@@ -149,9 +190,14 @@ pub fn restore(destination: &Path, backup: &Path) -> Result<()> {
     }
     for entry in entries {
         let target = destination.join(&entry.path);
-        remove(&target)?;
+        let saved = backup.join("files").join(&entry.path);
+        // Untouched targets stay in place: rewriting them gains nothing and can fail on a file another process holds open.
+        if entry.existed && unchanged(&saved, &target)? {
+            continue;
+        }
+        remove(&target).with_context(|| format!("restore {}", entry.path.display()))?;
         if entry.existed {
-            copy(&backup.join("files").join(entry.path), &target)?;
+            copy(&saved, &target).with_context(|| format!("restore {}", entry.path.display()))?;
         }
     }
     Ok(())
@@ -222,6 +268,40 @@ mod tests {
         }
         capture(&home, &scope.path().join("backup"), &["new".into()]).unwrap();
         assert!(restore(scope.path(), &scope.path().join("backup")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rollback_leaves_untouched_targets_that_cannot_be_rewritten() {
+        use std::os::unix::fs::PermissionsExt;
+        let scope = tempfile::tempdir().unwrap();
+        let destination = scope.path().join("home");
+        fs::create_dir_all(destination.join("held")).unwrap();
+        fs::write(destination.join("held/config"), "kept").unwrap();
+        fs::write(destination.join("changed"), "before").unwrap();
+        let backup = scope.path().join("backup");
+        let result = apply(
+            &destination,
+            &backup,
+            &["held/config".into(), "changed".into()],
+            || {
+                fs::write(destination.join("changed"), "after")?;
+                // The untouched target's directory now refuses removal, as a held file does on Windows.
+                fs::set_permissions(destination.join("held"), fs::Permissions::from_mode(0o500))?;
+                anyhow::bail!("injected apply failure")
+            },
+            || Ok(()),
+        );
+        fs::set_permissions(destination.join("held"), fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.unwrap_err().to_string().contains("restored"));
+        assert_eq!(
+            fs::read_to_string(destination.join("changed")).unwrap(),
+            "before"
+        );
+        assert_eq!(
+            fs::read_to_string(destination.join("held/config")).unwrap(),
+            "kept"
+        );
     }
 
     #[test]

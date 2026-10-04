@@ -84,3 +84,13 @@ fn managed_listings_are_nul_separated_text() {
     assert!(profiles::managed_paths(b"").unwrap().is_empty());
     assert!(profiles::managed_paths(b"\xff\0").is_err());
 }
+
+#[test]
+fn native_verification_ignores_always_run_scripts() {
+    assert_eq!(
+        profiles::native_action_arguments("verify"),
+        ["verify", "--exclude", "scripts"]
+    );
+    assert_eq!(profiles::native_action_arguments("apply"), ["apply"]);
+    assert_eq!(profiles::native_action_arguments("diff"), ["diff"]);
+}

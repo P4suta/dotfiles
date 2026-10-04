@@ -169,6 +169,15 @@ pub fn chezmoi(root: &Path, scope: &Path, config: &Path, destination: &Path) -> 
     command
 }
 
+/// Scripts are actions rather than state, and an always-run `run_` script would make every verification fail.
+pub fn native_action_arguments(name: &str) -> Vec<&str> {
+    if name == "verify" {
+        vec![name, "--exclude", "scripts"]
+    } else {
+        vec![name]
+    }
+}
+
 /// `chezmoi managed --nul-path-separator` output; its `--format` flag does not apply to relative paths, which are always printed as text.
 pub fn managed_paths(stdout: &[u8]) -> Result<Vec<String>> {
     stdout
@@ -397,7 +406,7 @@ pub fn operate(
     };
     let execute = |name: &str| -> Result<()> {
         let status = chezmoi(root, state, config, destination)
-            .arg(name)
+            .args(native_action_arguments(name))
             .status()?;
         ensure!(status.success(), "chezmoi {name} failed with {status}");
         Ok(())
