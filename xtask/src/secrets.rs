@@ -26,7 +26,7 @@ pub fn agent(
     arguments: &[OsString],
 ) -> Result<ExitStatus> {
     ensure!(
-        config.is_absolute() && !config.canonicalize()?.starts_with(root),
+        config.is_absolute() && !crate::canonical(config)?.starts_with(root),
         "agent configuration must be machine-local"
     );
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })

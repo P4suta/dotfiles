@@ -369,7 +369,7 @@ pub fn operate(
         "native paths must be explicit absolute paths"
     );
     ensure!(
-        !config.canonicalize()?.starts_with(root),
+        !crate::canonical(config)?.starts_with(root),
         "machine-local config belongs outside the public source"
     );
     let scope = tempfile::tempdir()?;
@@ -476,7 +476,7 @@ pub fn operate(
 }
 
 fn outside_public(root: &Path, path: &Path) -> Result<()> {
-    let root = root.canonicalize()?;
+    let root = crate::canonical(root)?;
     ensure!(
         path.is_absolute()
             && !path
@@ -489,7 +489,7 @@ fn outside_public(root: &Path, path: &Path) -> Result<()> {
         .find(|path| path.exists())
         .context("private path has no existing ancestor")?;
     ensure!(
-        !existing.canonicalize()?.starts_with(&root) && !path.starts_with(&root),
+        !crate::canonical(existing)?.starts_with(&root) && !path.starts_with(&root),
         "private state and backups belong outside the public source"
     );
     Ok(())

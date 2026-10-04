@@ -172,7 +172,7 @@ fn check_package(root: &Path, manifest: &Path) -> Result<()> {
 
 fn run() -> Result<()> {
     let mut cli = Cli::parse();
-    cli.root = cli.root.canonicalize()?;
+    cli.root = dotfiles_xtask::canonical(&cli.root)?;
     match cli.command {
         Action::Agent {
             agent,

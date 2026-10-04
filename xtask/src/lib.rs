@@ -87,6 +87,24 @@ pub fn split_frontmatter(text: &str) -> Result<(&str, &str)> {
     Ok((header, body))
 }
 
+/// Windows `canonicalize` returns verbatim drive paths (`\\?\C:\...`) that cargo rejects and chezmoi rewrites into `//?/` forms; the same drive path without the prefix is equivalent.
+pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
+    match path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
+        Some(rest)
+            if rest.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+                && rest.as_bytes().get(1) == Some(&b':') =>
+        {
+            PathBuf::from(rest)
+        }
+        _ => path.to_path_buf(),
+    }
+}
+
+/// `canonicalize` without the Windows verbatim drive prefix, so every comparison and every path handed to another tool uses one spelling.
+pub fn canonical(path: &Path) -> Result<PathBuf> {
+    Ok(without_verbatim_prefix(&path.canonicalize()?))
+}
+
 pub fn validate_links(text: &str, file: &Path, root: &Path) -> Result<()> {
     let root = root.canonicalize()?;
     for event in Parser::new(text) {

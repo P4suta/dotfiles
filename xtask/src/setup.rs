@@ -76,7 +76,7 @@ pub fn load(source: &Path, config: &Path, home: &Path) -> Result<ContextData> {
 
 pub fn run(source: &Path, config: &Path, step: Step, live: bool) -> Result<()> {
     ensure!(
-        config.is_absolute() && !config.canonicalize()?.starts_with(source),
+        config.is_absolute() && !crate::canonical(config)?.starts_with(source),
         "setup requires machine-local config outside the public source"
     );
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
@@ -139,19 +139,6 @@ fn strings(data: &Value, pointer: &str) -> Result<Vec<String>> {
         .collect()
 }
 
-/// cargo rejects the Windows verbatim drive paths (`\\?\C:\...`) that `canonicalize` returns; the same drive path without the prefix is equivalent.
-pub(crate) fn without_verbatim_prefix(path: &Path) -> PathBuf {
-    match path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
-        Some(rest)
-            if rest.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
-                && rest.as_bytes().get(1) == Some(&b':') =>
-        {
-            PathBuf::from(rest)
-        }
-        _ => path.to_path_buf(),
-    }
-}
-
 /// `--force` replaces binaries another package or an earlier source path installed, so cutover and reapplication converge on this source.
 pub(crate) fn cargo_install_arguments(
     path: &Path,
@@ -159,9 +146,9 @@ pub(crate) fn cargo_install_arguments(
     binaries: &[&str],
 ) -> Vec<OsString> {
     let mut arguments = args(&["install", "--locked", "--force", "--path"]);
-    arguments.push(without_verbatim_prefix(path).into());
+    arguments.push(crate::without_verbatim_prefix(path).into());
     arguments.push("--root".into());
-    arguments.push(without_verbatim_prefix(root).into());
+    arguments.push(crate::without_verbatim_prefix(root).into());
     for binary in binaries {
         arguments.extend(args(&["--bin", binary]));
     }
@@ -811,15 +798,15 @@ mod tests {
     fn cargo_receives_drive_paths_without_the_verbatim_prefix() {
         use std::path::{Path, PathBuf};
         assert_eq!(
-            super::without_verbatim_prefix(Path::new(r"\\?\C:\Users\fixture\source")),
+            crate::without_verbatim_prefix(Path::new(r"\\?\C:\Users\fixture\source")),
             PathBuf::from(r"C:\Users\fixture\source")
         );
         assert_eq!(
-            super::without_verbatim_prefix(Path::new(r"\\?\UNC\server\share")),
+            crate::without_verbatim_prefix(Path::new(r"\\?\UNC\server\share")),
             PathBuf::from(r"\\?\UNC\server\share")
         );
         assert_eq!(
-            super::without_verbatim_prefix(Path::new("/source/xtask")),
+            crate::without_verbatim_prefix(Path::new("/source/xtask")),
             PathBuf::from("/source/xtask")
         );
     }
