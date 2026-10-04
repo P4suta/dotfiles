@@ -27,6 +27,16 @@ External programs are variants of `xtask::tool::Tool`, each with a declared prov
 `clippy.toml` disallows `Command::new` and path canonicalization outside the registry and `xtask::canonical`, so a new host dependency or path spelling cannot appear without passing through the declared boundary.
 Integration tests may spawn the binaries and real tools they verify, and contract tests run the pinned chezmoi and git rather than fakes.
 
+Setup steps declare what they rely on, and the profile gate checks the declarations against what each profile actually renders.
+`Step::after` names the steps that must run first, and the gate rejects a rendered script order, before scripts and then after scripts by name, that breaks one.
+`Step::requires` names the packaged tools a step invokes and `Tool::package` names the list that installs each one per profile; the gate rejects data that omits a required package, and the rehearsal derives its reduced lists from the same declarations.
+Both matches list every step, so adding a step forces a decision about its order and packages.
+Application renders its scripts first and refuses, before any change, a step whose requirement the session cannot meet, such as a private source without non-interactive credentials.
+After scripts run, files are applied once more without scripts before verification, because templates may probe for programs those scripts installed.
+
+The gate also rejects three structural mistakes that reached a host or a reviewer: a launcher or Git hook that locates its program through the runtime `HOME`, which tools replace when they run Git; a profile leaf that no template includes; and an OComment language override that names a directory pattern or a missing file.
+Repository files that `dotctl` reads are compiled into it.
+
 Defects found this way are fixed in the boundary that owns them: native verification excludes always-run scripts, rollback skips untouched targets and removes Windows directory links correctly, managed listings are read as NUL-separated text, helper installation replaces earlier sources, public owner sources clone over HTTPS despite host rewrites, and the forge bundle is accepted only when every primary key is pinned and the current key is present.
 
 ## Alternatives
@@ -41,3 +51,5 @@ Each pull request spends several hosted runner minutes per platform on rehearsal
 The rehearsal cannot exercise the owner's credentials, 1Password, desktop sessions, Tailscale, or large existing state; those remain native verification, and steps that need them must say so through `setup.skip` on hosts that lack them.
 Disposable hosts run elevated without an interactive desktop, so the rehearsal also covers the remote-session conditions that broke the keyboard and Herdr steps.
 The tool registry and lint establish that every spawned program is declared; they do not prove that a declared provision is present on a given host, which the rehearsal and native preflight checks must still show.
+Step requirements cover packaged tools and private sources; a requirement that is not declared is still found only by the rehearsal or a native host, and should then be declared rather than handled where it failed.
+chezmoi reads ignored build directories in its source, so contract tests read a copy without build outputs, and a concurrent build in a native checkout during application remains an operational hazard.
