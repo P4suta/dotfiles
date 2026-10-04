@@ -330,3 +330,22 @@ mod debsig {
         Ok(())
     }
 }
+
+#[test]
+fn bundle_launchers_written_by_earlier_repositories_are_taken_over() {
+    let scope = tempfile::tempdir().unwrap();
+    let binary = std::path::Path::new("/Applications/Ghostty.app/Contents/MacOS/ghostty");
+    for earlier in dotfiles_xtask::desktop::earlier_bundle_launchers(binary) {
+        let target = scope.path().join("ghostty");
+        std::fs::write(&target, &earlier).unwrap();
+        dotfiles_xtask::desktop::bundle_shim(&target, binary).unwrap();
+        assert!(
+            std::fs::read_to_string(&target)
+                .unwrap()
+                .contains("# dotfiles bundle launcher")
+        );
+    }
+    let foreign = scope.path().join("foreign");
+    std::fs::write(&foreign, "#!/bin/sh\nexec /opt/other \"$@\"\n").unwrap();
+    assert!(dotfiles_xtask::desktop::bundle_shim(&foreign, binary).is_err());
+}

@@ -1,10 +1,10 @@
 //! Native application rehearsal on a disposable host.
 //!
 //! The profile gate renders and applies files in owned fixtures, which cannot exercise setup scripts, native verification, rollback, or the takeover of a machine that earlier repositories provisioned.
-//! This runs the real `profile apply` against the host's own home, twice, after seeding earlier provisioning, so those paths fail in CI instead of on an owner's machine.
+//! This runs the real `profile apply` against the host's own home three times, the second rerunning every script, after seeding earlier provisioning, so those paths fail in CI instead of on an owner's machine.
 
 use crate::profile_rules::Profile;
-use crate::profiles::{NativeAction, native_profile, operate};
+use crate::profiles::{NativeAction, forget_script_runs, native_profile, operate};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::fs;
@@ -230,7 +230,15 @@ pub fn run(root: &Path, disposable_host: bool) -> Result<()> {
     seed_foreign_helpers(&home, scope.path())?;
     let preserved = seed_history(&home)?;
     let state = scope.path().join("state");
-    for round in ["first", "repeated"] {
+    // The middle round runs every script again on the host the first round provisioned, which is how an earlier repository's machine is taken over and how a changed script reruns; the last round changes nothing.
+    for (round, rerun_scripts) in [
+        ("first", false),
+        ("reprovisioning", true),
+        ("repeated", false),
+    ] {
+        if rerun_scripts {
+            forget_script_runs(root, &state, &config, &home)?;
+        }
         operate(
             root,
             NativeAction::Apply,

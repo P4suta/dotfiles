@@ -117,7 +117,7 @@ enum Action {
         backup: Option<PathBuf>,
     },
     Skills,
-    /// Apply the native profile with its scripts, twice, on a disposable CI host.
+    /// Apply the native profile, rerun every script on the provisioned host, and apply again, on a disposable CI host.
     Rehearse {
         #[arg(long)]
         disposable_host: bool,
@@ -323,6 +323,11 @@ fn run() -> Result<()> {
         Action::Check => {
             dotfiles_xtask::skill_ops::check_catalog(&cli.root)?;
             dotfiles_xtask::quality::comment_scopes(&cli.root)?;
+            let unknown = dotfiles_xtask::quality::unknown_recipes(&cli.root)?;
+            anyhow::ensure!(
+                unknown.is_empty(),
+                "references to recipes the justfile does not define: {unknown:#?}"
+            );
             let unreferenced = dotfiles_xtask::quality::unreferenced_leaves(&cli.root)?;
             anyhow::ensure!(
                 unreferenced.is_empty(),

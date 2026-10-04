@@ -384,3 +384,62 @@ fn source_snapshot() -> tempfile::TempDir {
     );
     snapshot
 }
+
+#[test]
+fn forgetting_script_runs_reruns_every_onchange_script() {
+    let scope = tempfile::tempdir().unwrap();
+    let source = scope.path().join("source");
+    let destination = scope.path().join("home");
+    let state = scope.path().join("state");
+    let log = scope.path().join("runs");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&destination).unwrap();
+    let (script, contents) = if cfg!(windows) {
+        (
+            "run_onchange_after_10-record.ps1",
+            format!("Add-Content -LiteralPath '{}' -Value ran\n", log.display()),
+        )
+    } else {
+        (
+            "run_onchange_after_10-record.sh",
+            format!("#!/bin/sh\necho ran >> '{}'\n", log.display()),
+        )
+    };
+    fs::write(source.join(script), contents).unwrap();
+    let config = scope.path().join("chezmoi.toml");
+    fs::write(&config, "").unwrap();
+    let apply = || {
+        let status = dotfiles_xtask::profiles::chezmoi(&source, &state, &config, &destination)
+            .arg("apply")
+            .status()
+            .unwrap();
+        assert!(status.success());
+    };
+    apply();
+    apply();
+    assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 1);
+    dotfiles_xtask::profiles::forget_script_runs(&source, &state, &config, &destination).unwrap();
+    apply();
+    assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 2);
+}
+
+#[test]
+fn recipe_references_are_commands_rather_than_prose() {
+    let found = |text: &str, markdown: bool| -> Vec<String> {
+        quality::recipe_references(text, markdown)
+            .into_iter()
+            .map(|(_, recipe)| recipe)
+            .collect()
+    };
+    assert_eq!(found("drifted; run: just brew", false), ["brew"]);
+    assert_eq!(
+        found("run 'just apply' (or `just guard`)", false),
+        ["apply", "guard"]
+    );
+    assert_eq!(found("see just apply", false), ["apply"]);
+    assert_eq!(found("just refresh CONFIG", true), ["refresh"]);
+    assert_eq!(found("$ just verify", true), ["verify"]);
+    assert!(found("This runs just before the hook.", false).is_empty());
+    assert!(found("just refresh CONFIG", false).is_empty());
+    assert!(found("`just --list` prints recipes", true).is_empty());
+}

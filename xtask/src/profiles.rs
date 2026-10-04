@@ -170,6 +170,33 @@ pub fn chezmoi(root: &Path, scope: &Path, config: &Path, destination: &Path) -> 
     command
 }
 
+/// Forgets which `run_onchange_` and `run_once_` scripts already ran, so the next application runs every script again on the host they provisioned.
+pub fn forget_script_runs(
+    root: &Path,
+    scope: &Path,
+    config: &Path,
+    destination: &Path,
+) -> Result<()> {
+    let dump = output(
+        chezmoi(root, scope, config, destination).args(["state", "dump", "--format", "json"]),
+        "read chezmoi state",
+    )?;
+    let buckets: Value = serde_json::from_slice(&dump.stdout)?;
+    for bucket in ["entryState", "scriptState"] {
+        if buckets.get(bucket).is_some() {
+            output(
+                chezmoi(root, scope, config, destination).args([
+                    "state",
+                    "delete-bucket",
+                    &format!("--bucket={bucket}"),
+                ]),
+                "forget script runs",
+            )?;
+        }
+    }
+    Ok(())
+}
+
 /// Scripts are actions rather than state, and an always-run `run_` script would make every verification fail.
 pub fn native_action_arguments(name: &str) -> Vec<&str> {
     if name == "verify" {

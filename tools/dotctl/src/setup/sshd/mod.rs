@@ -97,7 +97,7 @@ fn elevate(options: &Options) -> Result<i32> {
             }
         }
         eprintln!(
-            "Re-run it with `just sshd` once the cause is fixed; log: {}",
+            "Re-run it with `dotctl setup sshd` once the cause is fixed; log: {}",
             log.display()
         );
     }
