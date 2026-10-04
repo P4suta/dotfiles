@@ -1,0 +1,106 @@
+---
+- name: Require the reviewed Linux host and resource profile
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.hostname == inventory_hostname
+      - oom_resources is defined
+      - oom_resources.user_max_bytes < ansible_facts.memtotal_mb * 1048576
+      - oom_resources.preflight_bytes < oom_resources.user_high_bytes
+      - oom_resources.user_high_bytes < oom_resources.user_max_bytes
+      - oom_resources.domyjob.memory_high_bytes < oom_resources.domyjob.memory_max_bytes
+      - oom_resources.domyjob.memory_max_bytes < oom_resources.user_max_bytes
+      - oom_resources.domyjob.memory_swap_max_bytes <= oom_resources.user_swap_bytes
+      - oom_resources.domyjob.max_concurrent_jobs == 2
+    fail_msg: Define a reviewed oom_resources profile for this host in the private inventory.
+
+- name: Resolve the workspace user UID
+  ansible.builtin.command:
+    argv: [id, -u, "{{ workspace_user }}"]
+  register: oom_uid_result
+  changed_when: false
+  check_mode: false
+
+- name: Require an existing non-root workspace user
+  ansible.builtin.assert:
+    that:
+      - oom_uid_result.stdout | int > 0
+
+- name: Record the workspace resource paths
+  ansible.builtin.set_fact:
+    oom_user_slice: "user-{{ oom_uid_result.stdout }}.slice"
+    oom_user_cgroup: "/sys/fs/cgroup/user.slice/user-{{ oom_uid_result.stdout }}.slice"
+    oom_user_environment:
+      XDG_RUNTIME_DIR: "/run/user/{{ oom_uid_result.stdout }}"
+
+- name: Read available cgroup v2 controllers
+  ansible.builtin.slurp:
+    src: /sys/fs/cgroup/cgroup.controllers
+  register: oom_controllers
+
+- name: Require unified memory control
+  ansible.builtin.assert:
+    that:
+      - "'memory' in (oom_controllers.content | b64decode).split()"
+
+- name: Check for active domyjob workers before deployment
+  ansible.builtin.command:
+    argv: [pgrep, -u, "{{ oom_uid_result.stdout }}", -f, '(^|/)domyjob[^ ]* worker ']
+  register: oom_workers
+  changed_when: false
+  failed_when: oom_workers.rc not in [0, 1]
+  check_mode: false
+
+- name: Refuse to change resource admission during a running workload
+  ansible.builtin.assert:
+    that:
+      - oom_workers.rc == 1
+    fail_msg: Wait for existing domyjob jobs to finish before applying the resource policy.
+
+- name: Read current workspace memory accounting
+  ansible.builtin.slurp:
+    src: "{{ oom_user_cgroup }}/memory.stat"
+  register: oom_memory_stat
+
+- name: Record non-file working memory
+  ansible.builtin.set_fact:
+    oom_working_bytes: >-
+      {{ ((oom_memory_stat.content | b64decode | regex_findall('(?m)^anon ([0-9]+)$'))[0] | int)
+       + ((oom_memory_stat.content | b64decode | regex_findall('(?m)^kernel ([0-9]+)$'))[0] | int)
+       + ((oom_memory_stat.content | b64decode | regex_findall('(?m)^shmem ([0-9]+)$'))[0] | int) }}
+
+- name: Refuse unsafe working memory before requesting cache reclaim
+  ansible.builtin.assert:
+    that:
+      - oom_working_bytes | int < oom_resources.preflight_bytes
+    fail_msg: Stop or finish memory-intensive work before applying this profile; no hard limit has been changed.
+
+- name: Read existing workspace swap usage
+  ansible.builtin.slurp:
+    src: "{{ oom_user_cgroup }}/memory.swap.current"
+  register: oom_existing_swap
+
+- name: Require swap usage below the new workspace budget
+  ansible.builtin.assert:
+    that:
+      - (oom_existing_swap.content | b64decode | trim | int) < oom_resources.user_swap_bytes
+    fail_msg: Finish memory-intensive work before reducing the workspace swap budget.
+
+- name: Capture management service PIDs
+  ansible.builtin.command:
+    argv: [systemctl, show, --property=MainPID, --value, "{{ item }}"]
+  loop: [NetworkManager.service, tailscaled.service]
+  register: oom_pid_results
+  changed_when: false
+  check_mode: false
+
+- name: Require both management services to be running
+  ansible.builtin.assert:
+    that:
+      - item.stdout | int > 0
+  loop: "{{ oom_pid_results.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Record live management processes
+  ansible.builtin.set_fact:
+    oom_management_pids: "{{ oom_pid_results.results | map(attribute='stdout') | list }}"

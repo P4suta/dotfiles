@@ -1,0 +1,3 @@
+#!/bin/sh
+# configuration: {{ . | toJson | sha256sum }}
+exec {{ includeTemplate "sh_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles-xtask") }} --root {{ includeTemplate "sh_quote" .chezmoi.sourceDir }} setup integrations --config {{ includeTemplate "sh_quote" .chezmoi.configFile }} --live

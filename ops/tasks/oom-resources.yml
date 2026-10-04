@@ -1,0 +1,127 @@
+---
+- name: Read the current soft workspace limit
+  ansible.builtin.slurp:
+    src: "{{ oom_user_cgroup }}/memory.high"
+  register: oom_previous_high
+
+- name: Apply only the soft workspace limit before setting any hard limit
+  become: true
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - set-property
+      - --runtime
+      - "{{ oom_user_slice }}"
+      - "MemoryHigh={{ oom_resources.user_high_bytes }}"
+  changed_when: (oom_previous_high.content | b64decode | trim) != (oom_resources.user_high_bytes | string)
+
+- name: Wait for actual cache reclaim into the safe deployment range
+  ansible.builtin.slurp:
+    src: "{{ oom_user_cgroup }}/memory.current"
+  register: oom_current
+  until: (oom_current.content | b64decode | trim | int) < (oom_resources.user_high_bytes + 268435456)
+  retries: 20
+  delay: 1
+  when: not ansible_check_mode
+
+- name: Create the persistent workspace resource directory
+  become: true
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ oom_user_slice }}.d"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Persist the workspace user's complete memory backstop
+  become: true
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ oom_user_slice }}.d/oom.conf"
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Slice]
+      MemoryHigh={{ oom_resources.user_high_bytes }}
+      MemoryMax={{ oom_resources.user_max_bytes }}
+      MemorySwapMax={{ oom_resources.user_swap_bytes }}
+
+- name: Create the system-wide user unit directory
+  become: true
+  ansible.builtin.file:
+    path: /etc/systemd/user
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Persist the aggregate domyjob workload slice
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/systemd/user/domyjob.slice
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Bounded domyjob workloads
+
+      [Slice]
+      MemoryHigh={{ oom_resources.domyjob.memory_high_bytes }}
+      MemoryMax={{ oom_resources.domyjob.memory_max_bytes }}
+      MemorySwapMax={{ oom_resources.domyjob.memory_swap_max_bytes }}
+
+- name: Create the protected domyjob policy directory
+  become: true
+  ansible.builtin.file:
+    path: /etc/domyjob
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Persist the mandatory Linux job admission policy
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/domyjob/resource-policy.json
+    owner: root
+    group: root
+    mode: '0644'
+    content: "{{ oom_resources.domyjob | to_nice_json }}\n"
+
+- name: Reload the persistent workspace slice configuration
+  become: true
+  ansible.builtin.systemd:
+    daemon_reload: true
+  changed_when: false
+
+- name: Apply the verified workspace memory backstop without restarting sessions
+  become: true
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - set-property
+      - --runtime
+      - "{{ oom_user_slice }}"
+      - "MemoryHigh={{ oom_resources.user_high_bytes }}"
+      - "MemoryMax={{ oom_resources.user_max_bytes }}"
+      - "MemorySwapMax={{ oom_resources.user_swap_bytes }}"
+  changed_when: false
+
+- name: Reload the workspace user's systemd manager
+  become: true
+  become_user: "{{ workspace_user }}"
+  environment: "{{ oom_user_environment }}"
+  ansible.builtin.systemd:
+    scope: user
+    daemon_reload: true
+  changed_when: false
+
+- name: Start the empty aggregate workload slice
+  become: true
+  become_user: "{{ workspace_user }}"
+  environment: "{{ oom_user_environment }}"
+  ansible.builtin.systemd:
+    scope: user
+    name: domyjob.slice
+    state: started

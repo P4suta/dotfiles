@@ -1,0 +1,63 @@
+[user]
+	name = {{ .git.name | quote }}
+	email = {{ .git.email | quote }}
+
+[core]
+	pager = delta
+{{- if .signing.enabled }}
+	# Single source that forces the signing hooks on in every repo, existing ones included.
+	# The hooks themselves live in dot_config/git/hooks/. This repo overrides hooksPath back to .git/hooks via run_onchange so lefthook runs.
+	hooksPath = ~/.config/git/hooks
+{{- end }}
+
+[interactive]
+	diffFilter = delta --color-only
+
+[delta]
+	navigate = true
+	line-numbers = true
+	side-by-side = true
+	syntax-theme = Monokai Extended
+
+[diff]
+	colorMoved = default
+
+[pull]
+	rebase = true
+
+[init]
+	defaultBranch = main
+
+[alias]
+	dft = -c diff.external=difft diff
+
+[credential "https://github.com"]
+	# Use gh's stored token for HTTPS GitHub operations.
+	# The empty helper resets inheritance first.
+	# Resolving gh from PATH rather than an absolute path keeps this working across mise upgrades.
+	helper =
+	helper = !gh auth git-credential
+[credential "https://gist.github.com"]
+	helper =
+	helper = !gh auth git-credential
+
+# Rewrite every github.com https URL to ssh so git transport always goes through the forwarded SSH agent (Windows 1Password).
+# Even when gh, clone or remote write https, git rewrites to git@github.com: transparently.
+# Non-git https downloads such as release tarballs never consult git config, so they are unaffected.
+# Same contract as dotfiles-win.
+[url "git@github.com:"]
+	insteadOf = https://github.com/
+
+{{ if .signing.enabled -}}
+[gpg]
+	format = ssh
+[gpg "ssh"]
+	# No program set: use the system ssh-keygen.
+	allowedSignersFile = ~/.config/git/allowed_signers
+[commit]
+	gpgsign = true
+[tag]
+	gpgsign = true
+[user]
+	signingkey = {{ printf "key::%s" (includeTemplate "signing_pubkey" . | trim) | quote }}
+{{- end }}

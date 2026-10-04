@@ -1,0 +1,107 @@
+---
+# Opt-in remote desktop (--tags xrdp), used only to set up the Windows VM on a host with no physical access.
+# Reachable over Tailscale alone: ufw is avoided (it fights Docker), so the listener is pinned to the tailscale0 IP instead of being firewalled.
+# Run this from SSH, never from inside an RDP session, because a config change restarts xrdp and would disconnect you.
+
+- name: Assert tailscale0 is up (its IP is the bind target)
+  ansible.builtin.assert:
+    that: ansible_facts.tailscale0.ipv4.address is defined
+    fail_msg: >-
+      No tailscale0. Join the Tailnet with sudo tailscale up before running --tags xrdp.
+
+- name: Install xrdp + xorgxrdp
+  become: true
+  ansible.builtin.apt:
+    name:
+      - xrdp
+      - xorgxrdp
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Allow xrdp to read the TLS host key
+  become: true
+  ansible.builtin.user:
+    name: xrdp
+    groups: ssl-cert
+    append: true
+  register: xrdp_sslcert
+
+# xrdp.ini carries port= in several sections and the listener is the one under [Globals], so use section-aware ini_file; lineinfile rewrites the last match,
+# breaking another section and never converging.
+# Sockets bind to an IP, so the tailscale0 address is pulled from facts rather than hardcoded.
+- name: Bind xrdp [Globals] listener to the Tailscale interface only
+  become: true
+  community.general.ini_file:
+    path: /etc/xrdp/xrdp.ini
+    mode: "0644"
+    section: Globals
+    option: port
+    value: "tcp://{{ ansible_facts.tailscale0.ipv4.address }}:3389"
+    no_extra_spaces: true
+    backup: true
+  register: xrdp_bind
+
+- name: Keep [neutrinordp-any] port at stock (ask3389)
+  become: true
+  community.general.ini_file:
+    path: /etc/xrdp/xrdp.ini
+    mode: "0644"
+    section: neutrinordp-any
+    option: port
+    value: ask3389
+    no_extra_spaces: true
+  register: xrdp_neutrino
+
+# Closing the RDP window should return to the same desktop instead of logging out.
+# Both values are stock defaults, pinned here to record the intent.
+- name: Pin resume-friendly xrdp session policy (sesman.ini)
+  become: true
+  community.general.ini_file:
+    path: /etc/xrdp/sesman.ini
+    mode: "0644"
+    section: Sessions
+    option: "{{ item.key }}"
+    value: "{{ item.value }}"
+    no_extra_spaces: true
+    backup: true
+  loop:
+    - { key: Policy, value: Default }
+    - { key: KillDisconnected, value: "false" }
+  register: xrdp_sesman
+
+- name: Suppress polkit color-manager popups in the RDP session
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/polkit-1/rules.d/49-xrdp-color.rules
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      // Suppress the "Authentication is required to create a color managed
+      // device" prompt that Cinnamon raises on every RDP login.
+      polkit.addRule(function(action, subject) {
+        if (action.id.indexOf("org.freedesktop.color-manager.") === 0 &&
+            subject.isInGroup("{{ workspace_user }}")) {
+          return polkit.Result.YES;
+        }
+      });
+
+- name: Enable and start xrdp
+  become: true
+  ansible.builtin.systemd:
+    name: xrdp
+    enabled: true
+    state: started
+
+- name: Restart xrdp + xrdp-sesman to apply config changes
+  become: true
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: restarted
+  loop:
+    - xrdp-sesman  # first, xrdp depends on it
+    - xrdp
+  when: >-
+    xrdp_sslcert is changed or xrdp_bind is changed
+    or xrdp_neutrino is changed or xrdp_sesman is changed

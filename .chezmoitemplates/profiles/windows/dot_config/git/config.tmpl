@@ -1,0 +1,71 @@
+# XDG: read as $HOME/.config/git/config, which git merges with ~/.gitconfig
+# (per key, last one wins). ~/.gitconfig is owned by the 1Password app.
+#
+# Signing uses stock ssh-keygen plus the 1Password SSH agent, not op-ssh-sign, so it
+# matches the Linux dotfiles. In the 1Password app, turn off the "Sign Git commits and
+# tags with SSH" integration and enable only "Use the SSH agent" (key storage + named
+# pipe). No private key is kept on the host.
+
+[core]
+	pager = delta
+	# Force LF: cancels autocrlf=true from the Git for Windows system gitconfig so
+	# nothing is converted to CRLF. A repo's own .gitattributes still takes priority.
+	autocrlf = false
+	eol = lf
+
+[interactive]
+	diffFilter = delta --color-only
+
+[delta]
+	navigate = true
+	line-numbers = true
+	side-by-side = true
+	syntax-theme = Monokai Extended
+
+[diff]
+	colorMoved = default
+
+[pull]
+	rebase = true
+
+[init]
+	defaultBranch = main
+	# Hooks here are auto-installed into every new repo on `git init` /
+	# `git clone`. Enforces signed commits client-side; the actual
+	# script lives in dot_config/git/template/hooks/.
+	templateDir = ~/.config/git/template
+
+[alias]
+	dft = -c diff.external=difft diff
+
+[user]
+    name = {{ .git.name | quote }}
+    email = {{ .git.email | quote }}
+
+{{ if .signing.enabled -}}
+[gpg]
+	format = ssh
+
+[gpg "ssh"]
+	# MSYS (Git Bash) ssh-keygen cannot see the 1Password agent's named pipe, so pin
+	# the Windows OpenSSH build, which pulls the signing key from the agent.
+	program = C:/Windows/System32/OpenSSH/ssh-keygen.exe
+	# Without this, verify-commit wrongly reports "No signature".
+	allowedSignersFile = ~/.config/git/allowed_signers
+
+[user]
+	# Public key comes from the machine-local chezmoi config (signing_pubkey partial).
+	signingkey = {{ printf "key::%s" (includeTemplate "signing_pubkey" . | trim) | quote }}
+
+[commit]
+	gpgsign = true
+
+[tag]
+	gpgsign = true
+{{ end -}}
+
+# Force every github.com https URL onto ssh, so git transport always goes through
+# the 1Password SSH agent. gh / clones / remotes may be written as https; git
+# rewrites them to git@github.com: transparently. Keeps https effectively unused.
+[url "git@github.com:"]
+	insteadOf = https://github.com/

@@ -1,0 +1,93 @@
+{{- $signingKey := "" -}}
+{{- if .signing.enabled -}}
+{{-   $signingKey = includeTemplate "signing_pubkey" . | trim -}}
+{{- end -}}
+[user]
+	name = {{ .git.name | quote }}
+	email = {{ .git.email | quote }}
+
+[core]
+	pager = delta
+# Single source that forces the hook dispatchers on in every repo, existing ones included.
+# The hooks themselves live in dot_config/git/hooks/.
+# This repo overrides hooksPath back to .git/hooks via run_onchange so lefthook runs.
+# The signing hooks self-disable when commit.gpgsign is off, so this stays safe before 1Password's agent is enabled.
+	hooksPath = ~/.config/git/hooks
+# macOS-only: the built-in FSEvents monitor turns `git status` in a large worktree from a full scan into a daemon query.
+# Unavailable on the Linux workstation, which is why this section differs from the Linux repo.
+	fsmonitor = true
+	untrackedCache = true
+
+[interactive]
+	diffFilter = delta --color-only
+
+[delta]
+	navigate = true
+	line-numbers = true
+	side-by-side = true
+# `ansi` means: use the terminal's sixteen colours.
+# Those sixteen are rendered from [palette] into the Ghostty config, so a diff is themed by the same definition as everything else and cannot drift from it.
+# bat ships no Tokyo Night theme, and vendoring a .tmTheme plus a `bat cache --build` step would buy richer syntax colours at the price of an asset to maintain and a build that can silently go stale.
+	syntax-theme = ansi
+# Every value below is quoted because `#` opens a comment in git config: an unquoted `normal #3f2d3d` parses as `normal`, and a bare `#f7768e` parses as nothing at all.
+# git reports no error for either — the colour simply is not there.
+	minus-style = "normal {{ .palette.diff_del }}"
+	minus-emph-style = "normal {{ .palette.red }}"
+	plus-style = "normal {{ .palette.diff_add }}"
+	plus-emph-style = "normal {{ .palette.green }}"
+	line-numbers-minus-style = "{{ .palette.red }}"
+	line-numbers-plus-style = "{{ .palette.green }}"
+	line-numbers-zero-style = "{{ .palette.comment }}"
+	hunk-header-style = "file line-number syntax"
+	hunk-header-decoration-style = "{{ .palette.surface }} box ul"
+	file-style = "{{ .palette.blue }} bold"
+	file-decoration-style = "{{ .palette.surface }} ul"
+
+[diff]
+	colorMoved = default
+
+[pull]
+	rebase = true
+
+[init]
+	defaultBranch = main
+
+[ghq]
+# Where `ghq get` puts clones, and therefore where development starts.
+# ghq's own layout (<root>/<host>/<owner>/<repo>) rather than a flat directory: it keeps forks, other owners and non-GitHub hosts from colliding, and `ghq list` stays authoritative about what is checked out.
+# The Nushell `proj` command makes the depth irrelevant in daily use.
+	root = ~/projects
+
+[alias]
+	dft = -c diff.external=difft diff
+
+[credential "https://github.com"]
+# Use gh's stored token for HTTPS GitHub operations.
+# The empty helper resets inheritance first — on macOS that also drops the osxkeychain helper that /usr/share/git-core/gitconfig installs system-wide, which would otherwise answer first with a stale credential.
+# Resolving gh from PATH rather than an absolute path keeps this working across mise upgrades.
+	helper =
+	helper = !gh auth git-credential
+[credential "https://gist.github.com"]
+	helper =
+	helper = !gh auth git-credential
+
+# Rewrite every github.com https URL to ssh so git transport always goes through the 1Password SSH agent.
+# Even when gh, clone or remote write https, git rewrites to git@github.com: transparently.
+# Non-git https downloads such as release tarballs never consult git config, so they are unaffected.
+# Same contract as the Linux and Windows repos.
+[url "git@github.com:"]
+	insteadOf = https://github.com/
+
+{{ if ne $signingKey "" -}}
+[gpg]
+	format = ssh
+[gpg "ssh"]
+# No program set: use the system ssh-keygen from /usr/bin.
+	allowedSignersFile = ~/.config/git/allowed_signers
+[commit]
+	gpgsign = true
+[tag]
+	gpgsign = true
+[user]
+	signingkey = {{ printf "key::%s" $signingKey | quote }}
+{{- end }}

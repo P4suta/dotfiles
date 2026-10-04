@@ -1,0 +1,11 @@
+# ローカル運用。
+# サーバ登録しないので sync は切る。
+auto_sync = false
+update_check = false
+
+# UI
+style = "compact"
+inline_height = 20
+show_preview = true
+search_mode = "fuzzy"
+filter_mode = "global"

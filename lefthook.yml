@@ -1,0 +1,11 @@
+---
+pre-commit:
+  commands:
+    candidate:
+      run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check
+pre-push:
+  commands:
+    candidate:
+      run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check
+    contracts:
+      run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- proofs

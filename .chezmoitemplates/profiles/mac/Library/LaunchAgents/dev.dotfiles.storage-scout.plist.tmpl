@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  storage-scout stays resident and removes build waste the moment it appears: released or landed caches, files rustc never reads again, and duplicate bytes.
+  It acts on filesystem events and released locks, never on a schedule, so it has no interval; git hooks only tell it that ownership may have changed.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.dotfiles.storage-scout</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{ .chezmoi.homeDir }}/.cargo/bin/storage-scout</string>
+    <string>watch</string>
+    <string>--config</string>
+    <string>{{ .chezmoi.homeDir }}/.config/storage-scout/auto.toml</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>Nice</key><integer>10</integer>
+  <key>LowPriorityIO</key><true/>
+  <key>ProcessType</key><string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>{{ .chezmoi.homeDir }}/.local/state/dotfiles/log/storage-scout.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{ .chezmoi.homeDir }}/.local/state/dotfiles/log/storage-scout.log</string>
+</dict>
+</plist>

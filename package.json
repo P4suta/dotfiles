@@ -1,0 +1,13 @@
+{
+  "name": "dotfiles-agent-adapters",
+  "private": true,
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.18.34",
+    "@opencode-ai/sdk": "1.18.34",
+    "@types/bun": "1.4.2",
+    "typescript": "7.0.2"
+  }
+}

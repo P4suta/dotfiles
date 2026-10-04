@@ -1,0 +1,34 @@
+---
+name: required
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  required:
+    name: required (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+      - name: Check shared skills, typed adapters, and Rust helpers
+        run: mise run check:rust
+      - name: Set up the pinned native verifier
+        if: runner.os == 'macOS'
+        run: mise x -- kani setup
+      - name: Prove production maintenance contracts and reject the counterexample
+        if: runner.os == 'macOS'
+        run: mise run check:proofs
+      - name: Check Linux system provisioning syntax
+        if: runner.os == 'Linux'
+        run: mise run check:ops

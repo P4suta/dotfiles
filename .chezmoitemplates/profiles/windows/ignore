@@ -1,0 +1,38 @@
+# Target paths chezmoi never applies to the home directory.
+
+# Machine-local login state, contains tokens.
+# config.yml is expected to hold only portable settings and stays under dotfiles management.
+.config/gh/hosts.yml
+
+# Runtime state
+AppData/Local/mise/**
+AppData/Roaming/atuin/**
+.cache/**
+
+# Claude Code is machine-local where it rewrites its own state; only skills/ is ours to ship.
+.claude/settings.json
+.claude/settings.local.json
+.claude/projects/**
+.claude/todos/**
+.claude/statsig/**
+.claude/shell-snapshots/**
+.claude/history.jsonl
+.claude/file-history/**
+.claude/__store.db
+.claude.json
+
+# Repo documentation: git-tracked only, not applied to the home directory
+README.md
+
+# Repo dev tooling: git-tracked only, not applied to the home directory
+lefthook.yml
+.typos.toml
+PSScriptAnalyzerSettings.psd1
+justfile
+.gitignore
+tools/**
+
+# ~/.gitconfig is left to the 1Password app's Sign Git commits feature;
+# dot_config/git/config.tmpl carries our own Git settings instead.
+# Patterns here are target paths (relative to ~/), so this is `.gitconfig` rather than the source name `dot_gitconfig.tmpl`.
+.gitconfig

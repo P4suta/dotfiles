@@ -1,0 +1,28 @@
+---
+- name: Install base system packages
+  become: true
+  ansible.builtin.apt:
+    name:
+      - autoconf
+      - build-essential  # compiler toolchain for cargo and BEAM builds
+      - bzip2
+      - ca-certificates
+      - clang
+      - curl
+      - gnupg
+      - libclang-dev
+      - libffi-dev
+      - libgmp-dev
+      - libncurses-dev
+      - libreadline-dev
+      - libsqlite3-dev
+      - libssl-dev
+      - m4
+      - pkg-config
+      - unzip
+      - valgrind
+      - xz-utils
+      - zlib1g-dev
+    state: present
+    update_cache: true
+    cache_valid_time: 3600

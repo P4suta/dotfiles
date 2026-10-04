@@ -1,0 +1,10 @@
+{{ if .sshd.enabled -}}
+$ErrorActionPreference = 'Stop'
+& {{ includeTemplate "ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup sshd `
+    --port {{ .sshd.port }} `
+    --default-shell {{ includeTemplate "ps_quote" .sshd.default_shell }} `
+    --password-auth {{ if .sshd.password_auth }}true{{ else }}false{{ end }} `
+    --firewall-profile {{ includeTemplate "ps_quote" .sshd.firewall_profile }} `
+    --authorized-key {{ if and .sshd.authorize_signing_key .signing.enabled }}{{ includeTemplate "ps_quote" (includeTemplate "signing_pubkey" . | trim) }}{{ else }}''{{ end }}
+exit $LASTEXITCODE
+{{ end -}}

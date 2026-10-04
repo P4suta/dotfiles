@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+reviews:
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 5
+    drafts: false
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+    custom_checks:
+      - name: Behavior verification evidence
+        mode: warning
+        instructions: >-
+          Assess verification evidence for substantive changes to observable behavior.
+          Pass for documentation-only, formatting-only, or other behavior-preserving changes.
+          For behavior changes, pass when the PR description or discussion identifies relevant tests, proofs, reference comparisons, or reproducible manual checks and states their commands or procedure and observed result.
+          Existing unchanged tests are acceptable when the evidence explains how they cover the changed behavior; do not require a new test file.
+          Also pass when the author gives a concrete reason why execution is unavailable and identifies the remaining validation needed.
+          Fail when a substantive behavior change has neither relevant verification evidence nor an explicit explanation of the missing validation.
+          Return Inconclusive when the available PR context does not allow the behavior or evidence to be assessed.
+          Cite the changed behavior and available evidence; do not run project code or claim to have executed tests.
+      - name: Public interface compatibility
+        mode: warning
+        instructions: >-
+          Assess disclosure of intentional breaking changes to public APIs, CLI flags and defaults, environment variables, configuration keys, persisted formats, or externally consumed output.
+          Pass when there is no supported evidence of a breaking interface change.
+          When a breaking change is present, pass only when the PR description or discussion states the old and new behavior and a concrete migration step or explicit compatibility decision.
+          Fail when a supported breaking change is omitted or contradicted by the PR's compatibility claim.
+          Return Inconclusive when the public contract or compatibility impact cannot be established from available source and PR context.
+          Cite the relevant interface and disclosure; do not require a new changelog file or invent a public contract for private implementation details.
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: true
+    autofix:
+      enabled: true
+    fix_ci:
+      enabled: true
+knowledge_base:
+  code_guidelines:
+    enabled: true

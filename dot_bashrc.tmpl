@@ -1,0 +1,8 @@
+{{- $context := merge (dict) . (index .platforms .profile) -}}
+{{- if eq .profile "mac" -}}
+{{ include ".chezmoitemplates/profiles/mac/dot_bashrc" }}
+{{- else if eq .profile "linux" -}}
+{{ includeTemplate "profiles/linux/dot_bashrc.tmpl" $context }}
+{{- else if eq .profile "wsl" -}}
+{{ includeTemplate "profiles/wsl/dot_bashrc.tmpl" $context }}
+{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}

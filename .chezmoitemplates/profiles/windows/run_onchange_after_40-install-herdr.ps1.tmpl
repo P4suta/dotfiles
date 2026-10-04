@@ -1,0 +1,10 @@
+{{ if .herdr.enabled -}}
+# revision: {{ .herdr.revision }}
+$ErrorActionPreference = 'Stop'
+& {{ includeTemplate "ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup herdr `
+    --manifest-url {{ includeTemplate "ps_quote" .herdr.manifest_url }} `
+    --channel {{ includeTemplate "ps_quote" .herdr.channel }} `
+    --expected-build-id {{ includeTemplate "ps_quote" .herdr.expected_build_id }} `
+    --retain {{ .herdr.retain }}
+exit $LASTEXITCODE
+{{ end -}}

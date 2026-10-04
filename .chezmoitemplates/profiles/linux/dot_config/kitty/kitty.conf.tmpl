@@ -1,0 +1,52 @@
+include tokyo-night.conf
+
+font_family      family="JetBrainsMono Nerd Font Mono"
+bold_font        auto
+italic_font      auto
+bold_italic_font auto
+font_size 11.5
+disable_ligatures never
+
+background_opacity {{ .desktop.opacity }}
+dynamic_background_opacity yes
+background_blur 24
+dim_opacity 0.85
+
+window_padding_width 9
+window_margin_width 0
+hide_window_decorations titlebar-only
+confirm_os_window_close 0
+remember_window_size yes
+initial_window_width 1280
+initial_window_height 800
+
+cursor_shape beam
+cursor_beam_thickness 1.5
+cursor_blink_interval 0
+cursor_trail 3
+cursor_trail_decay 0.05 0.15
+shell_integration enabled
+copy_on_select clipboard
+strip_trailing_spaces smart
+enable_audio_bell no
+visual_bell_duration 0.08
+
+tab_bar_edge top
+tab_bar_style powerline
+tab_powerline_style slanted
+tab_title_template " {index}: {title} "
+active_tab_font_style bold
+inactive_tab_font_style normal
+
+map ctrl+shift+enter new_window_with_cwd
+map ctrl+shift+t new_tab_with_cwd
+map ctrl+shift+w close_tab
+map ctrl+shift+h neighboring_window left
+map ctrl+shift+j neighboring_window down
+map ctrl+shift+k neighboring_window up
+map ctrl+shift+l neighboring_window right
+map ctrl+shift+f1 set_background_opacity +0.05
+map ctrl+shift+f2 set_background_opacity -0.05
+map ctrl+shift+f3 set_background_opacity default
+
+shell ~/.local/bin/kitty-herdr --child

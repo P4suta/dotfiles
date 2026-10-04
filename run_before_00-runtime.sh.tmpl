@@ -1,0 +1,2 @@
+#!/bin/sh
+exec cargo run --locked --manifest-path '{{ .chezmoi.sourceDir }}/xtask/Cargo.toml' -- --root {{ includeTemplate "sh_quote" .chezmoi.sourceDir }} setup runtime --config {{ includeTemplate "sh_quote" .chezmoi.configFile }} --live

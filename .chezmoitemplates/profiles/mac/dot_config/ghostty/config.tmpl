@@ -1,0 +1,63 @@
+background = {{ .palette.bg }}
+foreground = {{ .palette.fg }}
+cursor-color = {{ .palette.fg }}
+selection-foreground = {{ .palette.fg }}
+selection-background = {{ .palette.selection }}
+palette = 0={{ .palette.bg_dim }}
+palette = 1={{ .palette.red }}
+palette = 2={{ .palette.green }}
+palette = 3={{ .palette.yellow }}
+palette = 4={{ .palette.blue }}
+palette = 5={{ .palette.magenta }}
+palette = 6={{ .palette.cyan }}
+palette = 7={{ .palette.fg_dim }}
+palette = 8={{ .palette.bright_black }}
+palette = 9={{ .palette.red }}
+palette = 10={{ .palette.green }}
+palette = 11={{ .palette.yellow }}
+palette = 12={{ .palette.blue }}
+palette = 13={{ .palette.magenta }}
+palette = 14={{ .palette.cyan }}
+palette = 15={{ .palette.fg }}
+font-family = "{{ .desktop.font_family }}"
+font-size = {{ .desktop.font_size }}
+font-thicken = true
+window-colorspace = display-p3
+
+background-opacity = {{ .desktop.opacity }}
+background-blur = {{ .desktop.blur }}
+unfocused-split-opacity = 0.82
+custom-shader = shaders/cursor_warp.glsl
+
+window-padding-x = 10
+window-padding-y = 8
+window-padding-balance = true
+window-save-state = always
+macos-titlebar-style = tabs
+macos-option-as-alt = left
+
+cursor-style = bar
+cursor-style-blink = false
+mouse-hide-while-typing = true
+copy-on-select = clipboard
+confirm-close-surface = false
+shell-integration = detect
+shell-integration-features = cursor,sudo,title
+scrollback-limit = 100000
+notify-on-command-finish = unfocused
+notify-on-command-finish-after = 10s
+notify-on-command-finish-action = no-bell,notify
+
+keybind = cmd+d=new_split:right
+keybind = cmd+shift+d=new_split:down
+keybind = cmd+shift+h=goto_split:left
+keybind = cmd+shift+j=goto_split:bottom
+keybind = cmd+shift+k=goto_split:top
+keybind = cmd+shift+l=goto_split:right
+keybind = cmd+shift+enter=toggle_split_zoom
+
+quick-terminal-position = top
+quick-terminal-animation-duration = 0.12
+keybind = global:cmd+grave_accent=toggle_quick_terminal
+
+command = {{ includeTemplate "sh_quote" (joinPath .chezmoi.homeDir ".local/bin/ghostty-herdr") }} --child

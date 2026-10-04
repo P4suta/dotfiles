@@ -1,0 +1,188 @@
+---
+# Desktop developer tooling that requires administrator privileges.
+
+- name: Ensure apt keyring directory exists
+  become: true
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+# The Flatpak and Snap builds cannot expose 1Password's SSH agent.
+# The official Debian packages supply ~/.1password/agent.sock, the SSH signing helper, and the `op` CLI's desktop-app authentication bridge.
+- name: Confirm the native 1Password Debian package supports this architecture
+  ansible.builtin.assert:
+    that: apt_arch == 'amd64'
+    fail_msg: The official 1Password apt repository is amd64-only; use its signed tarball on this architecture.
+
+- name: Install the 1Password repository signing key
+  become: true
+  register: onepassword_repository_key
+  ansible.builtin.get_url:
+    url: https://downloads.1password.com/linux/keys/1password.asc
+    dest: /etc/apt/keyrings/1password.asc
+    mode: '0644'
+    owner: root
+    group: root
+
+- name: Read the 1Password repository signing-key fingerprint
+  ansible.builtin.command:
+    argv:
+      - gpg
+      - --batch
+      - --show-keys
+      - --with-colons
+      - /etc/apt/keyrings/1password.asc
+  register: onepassword_signing_key
+  changed_when: false
+
+- name: Confirm the 1Password repository signing key is authentic
+  ansible.builtin.assert:
+    that:
+      - "'3FEF9748469ADBE15DA7CA80AC2D62742012EA22' in onepassword_signing_key.stdout"
+    fail_msg: The downloaded 1Password signing key does not match the fingerprint published by 1Password.
+
+- name: Ensure 1Password debsig directories exist
+  become: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+  loop:
+    - /etc/debsig/policies/AC2D62742012EA22
+    - /usr/share/debsig/keyrings/AC2D62742012EA22
+
+- name: Install the 1Password debsig verification policy
+  become: true
+  ansible.builtin.get_url:
+    url: https://downloads.1password.com/linux/debian/debsig/1password.pol
+    dest: /etc/debsig/policies/AC2D62742012EA22/1password.pol
+    mode: '0644'
+    owner: root
+    group: root
+
+- name: Install the 1Password debsig verification keyring
+  become: true
+  ansible.builtin.command:
+    argv:
+      - gpg
+      - --batch
+      - --yes
+      - --dearmor
+      - --output
+      - /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
+      - /etc/apt/keyrings/1password.asc
+    creates: "{{ omit if onepassword_repository_key.changed else '/usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg' }}"
+
+- name: Register the official 1Password repository
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/1password.sources
+    mode: '0644'
+    owner: root
+    group: root
+    content: |
+      Types: deb
+      URIs: https://downloads.1password.com/linux/debian/amd64
+      Suites: stable
+      Components: main
+      Architectures: amd64
+      Signed-By: /etc/apt/keyrings/1password.asc
+
+- name: Install Microsoft package signing key
+  become: true
+  ansible.builtin.get_url:
+    url: https://packages.microsoft.com/keys/microsoft.asc
+    dest: /etc/apt/keyrings/packages.microsoft.asc
+    mode: '0644'
+    owner: root
+    group: root
+    force: false
+
+- name: Register the official VS Code repository
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/vscode.sources
+    mode: '0644'
+    owner: root
+    group: root
+    content: |
+      Types: deb
+      URIs: https://packages.microsoft.com/repos/code
+      Suites: stable
+      Components: main
+      Architectures: {{ apt_arch }}
+      Signed-By: /etc/apt/keyrings/packages.microsoft.asc
+
+- name: Prefer VS Code from Microsoft's repository
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/code
+    mode: '0644'
+    owner: root
+    group: root
+    content: |
+      Package: code
+      Pin: origin "packages.microsoft.com"
+      Pin-Priority: 9999
+
+- name: Install desktop applications, input method, and runtime dependencies
+  become: true
+  ansible.builtin.apt:
+    name:
+      - 1password
+      - 1password-cli
+      - code
+      - debsig-verify
+      - desktop-file-utils
+      - fcitx5
+      - fcitx5-config-qt
+      - fcitx5-frontend-all
+      - fcitx5-mozc
+      - ffmpeg
+      - fontconfig
+      - im-config
+      - unzip
+      - xdg-utils
+    state: present
+    update_cache: true
+
+# Fcitx 5's Mozc package still uses fcitx-mozc-data, so keep that shared data package while removing the Fcitx 4 runtime and the duplicate IBus Mozc engine.
+- name: Remove legacy input method packages
+  become: true
+  ansible.builtin.apt:
+    name:
+      - fcitx
+      - fcitx-bin
+      - fcitx-config-common
+      - fcitx-config-gtk
+      - fcitx-data
+      - fcitx-frontend-all
+      - fcitx-frontend-fbterm
+      - fcitx-frontend-gtk2
+      - fcitx-frontend-gtk3
+      - fcitx-frontend-qt5
+      - fcitx-frontend-qt6
+      - fcitx-googlepinyin
+      - fcitx-libs
+      - fcitx-module-cloudpinyin
+      - fcitx-module-dbus
+      - fcitx-module-kimpanel
+      - fcitx-module-lua
+      - fcitx-module-quickphrase-editor5
+      - fcitx-module-x11
+      - fcitx-modules
+      - fcitx-mozc
+      - fcitx-pinyin
+      - fcitx-sunpinyin
+      - fcitx-table
+      - fcitx-table-wubi
+      - fcitx-tools
+      - fcitx-ui-classic
+      - ibus-mozc
+    state: absent
+    purge: true

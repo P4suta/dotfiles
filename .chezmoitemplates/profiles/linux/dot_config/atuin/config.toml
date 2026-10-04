@@ -1,0 +1,10 @@
+# Local-only: no server registration, so sync stays off.
+auto_sync = false
+update_check = false
+
+# UI
+style = "compact"
+inline_height = 20
+show_preview = true
+search_mode = "fuzzy"
+filter_mode = "global"

@@ -1,0 +1,18 @@
+---
+# Opt-in (--tags openssh).
+# Mint ships without openssh-server and this host uses Tailscale SSH instead, so site.yml pairs this import with the `never` tag.
+
+- name: Install openssh-server
+  become: true
+  ansible.builtin.apt:
+    name: openssh-server
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable and start ssh.service
+  become: true
+  ansible.builtin.systemd:
+    name: ssh
+    enabled: true
+    state: started

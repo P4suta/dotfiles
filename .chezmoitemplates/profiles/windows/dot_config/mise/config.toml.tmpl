@@ -1,0 +1,10 @@
+[tools]
+{{- range (concat .tools.common (index .tools .role)) }}
+{{ . | quote }} = {{ if eq . "rust" }}"stable"{{ else }}"latest"{{ end }}
+{{- end }}
+
+[settings]
+experimental = true
+# domyjob runs the owner's own projects in this work area, and each new workspace path would otherwise have its mise.toml refused.
+trusted_config_paths = [{{ joinPath (env "LOCALAPPDATA") "domyjob/state/v3/work" | quote }}]
+cargo.binstall = true

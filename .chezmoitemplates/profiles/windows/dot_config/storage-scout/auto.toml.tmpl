@@ -1,0 +1,12 @@
+[select]
+roots = [
+    {{ .paths.projects | quote }},
+{{- if stat (joinPath .chezmoi.homeDir "Downloads" "project") }}
+    {{ joinPath .chezmoi.homeDir "Downloads/project" | quote }},
+{{- end }}
+    {{ joinPath .chezmoi.homeDir "AppData/Local/domyjob" | quote }},
+    {{ joinPath .chezmoi.homeDir "AppData/Local/Temp" | quote }},
+]
+
+[report]
+log_file = {{ joinPath .chezmoi.homeDir ".local/state/storage-scout/auto.jsonl" | quote }}

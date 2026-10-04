@@ -1,0 +1,50 @@
+{{- /*
+  Context7 is declared only on a local workstation with the 1Password app present, mirroring the Linux repo's `lookPath "1password"` check.
+  macOS has no 1password executable on PATH — the app is a bundle — so probe the bundle path instead.
+*/ -}}
+{{- $isLocal := not (or (env "SSH_CONNECTION") (env "SSH_CLIENT") (env "SSH_TTY")) -}}
+{{- $app := default "/Applications/1Password.app" (env "DOTFILES_ONEPASSWORD_APP") -}}
+{{- $hasOnePassword := and (eq .chezmoi.os "darwin") $isLocal (stat $app) -}}
+{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
+  "formatter": true,
+  "lsp": true,
+  "permission": {
+    "*": "allow",
+    "edit": "allow",
+    "bash": {
+      "*": "allow",
+      "sudo *": "deny",
+      "rm -rf /": "deny",
+      "rm -rf /*": "deny",
+      "rm -fr /": "deny",
+      "rm -fr /*": "deny",
+      "rm -rf ~": "deny",
+      "rm -rf ~/*": "deny",
+      "git push --force*": "deny",
+      "git push -f*": "deny",
+      "curl * | sh": "deny",
+      "curl * | bash": "deny",
+      "wget * | sh": "deny",
+      "wget * | bash": "deny"
+    }
+  },
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "command": ["npx", "-y", "@playwright/mcp"],
+      "enabled": true
+    },
+    "github": {
+      "type": "remote",
+      "url": "https://api.githubcopilot.com/mcp/?toolsets=repo,issues,pull_requests,notifications",
+      "headers": {
+        "Authorization": "Bearer {env:GH_MCP_TOKEN}"
+      },
+      "oauth": false,
+      "enabled": true
+    }
+  }{{ if $hasOnePassword }},
+  "plugin": ["@upstash/context7-opencode"]{{ end }}
+}

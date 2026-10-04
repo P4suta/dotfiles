@@ -1,0 +1,10 @@
+[select]
+roots = [
+    "{{ .chezmoi.homeDir }}/projects",
+    "{{ .chezmoi.homeDir }}/.cache",
+    "{{ .chezmoi.homeDir }}/.local/state/domyjob",
+    "/tmp",
+]
+
+[report]
+log_file = "{{ .chezmoi.homeDir }}/.local/state/storage-scout/auto.jsonl"

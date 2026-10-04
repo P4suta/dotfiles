@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.dotfiles.tools-upgrade</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{ .chezmoi.homeDir }}/.local/bin/dotfiles-xtask</string>
+    <string>--root</string>
+    <string>{{ .chezmoi.sourceDir }}</string>
+    <string>setup</string>
+    <string>upgrade</string>
+    <string>--config</string>
+    <string>{{ .chezmoi.configFile }}</string>
+    <string>--live</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>{{ .chezmoi.homeDir }}/.local/share/mise/shims:{{ .chezmoi.homeDir }}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOMEBREW_NO_ENV_HINTS</key>
+    <string>1</string>
+    <key>MISE_JOBS</key>
+    <string>{{ .mise.jobs }}</string>
+    <key>KERL_BUILD_DOCS</key>
+    <string>no</string>
+    <key>KERL_CONFIGURE_OPTIONS</key>
+    <string>--without-javac --without-wx --without-odbc</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key><integer>1</integer>
+    <key>Hour</key><integer>11</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+
+  <key>RunAtLoad</key><false/>
+  <key>Nice</key><integer>10</integer>
+  <key>LowPriorityIO</key><true/>
+  <key>ProcessType</key><string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>{{ .chezmoi.homeDir }}/.local/state/dotfiles/log/tools-upgrade.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{ .chezmoi.homeDir }}/.local/state/dotfiles/log/tools-upgrade.log</string>
+</dict>
+</plist>

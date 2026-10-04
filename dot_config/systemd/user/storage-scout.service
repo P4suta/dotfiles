@@ -1,0 +1,14 @@
+[Unit]
+Description=Remove build waste the moment it appears (storage-scout watch)
+Documentation=https://github.com/P4suta/storage-scout
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/storage-scout watch --config %h/.config/storage-scout/auto.toml
+Restart=always
+SyslogIdentifier=storage-scout
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target

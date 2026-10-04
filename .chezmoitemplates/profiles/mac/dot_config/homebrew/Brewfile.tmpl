@@ -1,0 +1,34 @@
+brew "autoconf"
+brew "automake"
+brew "libtool"
+brew "libmagic"
+brew "openssl@3"
+brew "pkgconf"
+
+brew "terminal-notifier"
+
+cask "ghostty"
+cask "zed"
+cask "visual-studio-code"
+
+cask "orbstack"
+cask "1password-cli"
+
+brew "git"
+
+brew "gnupg"
+
+cask "tailscale-app"
+
+brew "fastlane"
+
+cask "raycast"
+
+cask "font-udev-gothic-nf"
+
+{{ range .brew.formulae -}}
+brew {{ . | quote }}
+{{ end -}}
+{{ range .brew.casks -}}
+cask {{ . | quote }}
+{{ end -}}

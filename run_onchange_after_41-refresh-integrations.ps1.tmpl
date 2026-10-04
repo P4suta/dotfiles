@@ -1,0 +1,4 @@
+{{- $context := merge (dict) . (index .platforms .profile) -}}
+{{- if eq .profile "windows" -}}
+{{ includeTemplate "profiles/windows/run_onchange_after_41-refresh-integrations.ps1.tmpl" $context }}
+{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}

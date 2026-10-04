@@ -1,0 +1,22 @@
+{{- if eq .chezmoi.os "windows" -}}
+[select]
+roots = ['{{ .chezmoi.homeDir }}\projects', '{{ .chezmoi.homeDir }}\AppData\Local\Temp']
+
+[report]
+log_file = '{{ .chezmoi.homeDir }}\.local\state\storage-scout\auto.jsonl'
+{{- else -}}
+[select]
+roots = [
+    "{{ .chezmoi.homeDir }}/projects",
+    "{{ .chezmoi.homeDir }}/.cache",
+{{- if eq .chezmoi.os "darwin" }}
+    {{ dig "paths" "temp" (default "/tmp" (env "TMPDIR")) . | trimSuffix "/" | quote }},
+    "{{ .chezmoi.homeDir }}/Library/Caches/njutest",
+{{- else }}
+    "/tmp",
+{{- end }}
+]
+
+[report]
+log_file = "{{ .chezmoi.homeDir }}/.local/state/storage-scout/auto.jsonl"
+{{- end }}

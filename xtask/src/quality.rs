@@ -1,0 +1,270 @@
+use anyhow::{Context, Result, ensure};
+use serde_json::Value;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+pub fn command(root: &Path, program: &str, arguments: &[&str]) -> Result<()> {
+    let status = Command::new(program)
+        .current_dir(root)
+        .args(arguments)
+        .status()
+        .with_context(|| format!("start required checker {program}"))?;
+    ensure!(status.success(), "{program} failed with {status}");
+    Ok(())
+}
+
+/// Git for Windows ships the POSIX shell beside its `mingw64/libexec/git-core` directory.
+pub fn git_for_windows_shell(exec_path: &Path) -> Option<PathBuf> {
+    Some(exec_path.ancestors().nth(3)?.join("usr/bin/sh.exe"))
+}
+
+/// Native Windows has no `sh` on PATH, and its System32 `bash.exe` enters WSL, so launchers are parsed by Git for Windows' shell.
+fn posix_shell() -> Result<PathBuf> {
+    if !cfg!(windows) {
+        return Ok("sh".into());
+    }
+    let output = Command::new("git")
+        .arg("--exec-path")
+        .output()
+        .context("locate Git for Windows")?;
+    ensure!(output.status.success(), "git --exec-path failed");
+    let exec_path = PathBuf::from(String::from_utf8(output.stdout)?.trim());
+    let shell = git_for_windows_shell(&exec_path).context("unexpected Git for Windows layout")?;
+    ensure!(
+        shell.is_file(),
+        "Git for Windows shell is missing at {}",
+        shell.display()
+    );
+    Ok(shell)
+}
+
+pub fn rendered(dump: &Value, directory: &Path) -> Result<()> {
+    let targets = dump.as_object().context("profile dump must be a mapping")?;
+    fs::create_dir(directory)?;
+    let shell = posix_shell()?;
+    let shell = shell.to_str().context("invalid POSIX shell path")?;
+    for (index, (name, target)) in targets.iter().enumerate() {
+        if target["type"] != "file" && target["type"] != "script" {
+            continue;
+        }
+        let contents = target["contents"]
+            .as_str()
+            .context("rendered content must be text")?;
+        if name.ends_with(".json") {
+            serde_json::from_str::<Value>(contents)
+                .with_context(|| format!("invalid rendered JSON: {name}"))?;
+        }
+        if name.ends_with(".toml") {
+            let file = directory.join(format!("{index}.toml"));
+            fs::write(&file, contents)?;
+            let output = Command::new("taplo")
+                .current_dir(directory)
+                .args(["lint", "--no-schema", "--no-auto-config"])
+                .arg(file)
+                .output()?;
+            ensure!(
+                output.status.success(),
+                "invalid rendered TOML {name}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        if name.ends_with(".nu") {
+            let generated = directory.join("generated");
+            fs::create_dir_all(&generated)?;
+            let mut text = if name.ends_with("/config.nu") {
+                let env = targets
+                    .get(".config/nushell/env.nu")
+                    .and_then(|value| value["contents"].as_str())
+                    .context("Nushell configuration requires its rendered environment")?;
+                format!("{env}\n{contents}")
+            } else {
+                contents.to_owned()
+            };
+            for module in [
+                "mise",
+                "starship",
+                "television",
+                "atuin",
+                "zoxide",
+                "ls-colors",
+            ] {
+                let path = generated.join(format!("{module}.nu"));
+                fs::write(&path, "")?;
+                let source = format!("~/.config/nushell/generated/{module}.nu");
+                text = text.replace(&source, &format!("r#'{}'#", path.display()));
+            }
+            let file = directory.join(format!("{index}.nu"));
+            fs::write(&file, text)?;
+            let output = Command::new("nu")
+                .current_dir(directory)
+                .args([
+                    "--no-config-file",
+                    "--commands",
+                    "if not (nu-check --debug $env.DOTFILES_NU_PARSE_FILE) { exit 1 }",
+                ])
+                .env("DOTFILES_NU_PARSE_FILE", &file)
+                .output()?;
+            ensure!(
+                output.status.success(),
+                "invalid rendered Nushell {name}: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        if contents.starts_with("#!/bin/sh\n") {
+            let file = directory.join(format!("{index}.sh"));
+            fs::write(&file, contents)?;
+            command(
+                directory,
+                shell,
+                &["-n", file.to_str().context("invalid fixture path")?],
+            )?;
+            command(
+                directory,
+                "shellcheck",
+                &[
+                    "--severity=style",
+                    file.to_str().context("invalid fixture path")?,
+                ],
+            )?;
+            if target["type"] == "script" {
+                ensure!(
+                    contents
+                        .lines()
+                        .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+                        .count()
+                        == 1
+                        && contents.lines().any(|line| line.starts_with("exec ")),
+                    "procedural shell setup must move to Rust: {name}"
+                );
+            }
+        }
+        if name.ends_with(".ps1") {
+            if target["type"] == "script" {
+                let mut lines = Vec::new();
+                let mut continued = String::new();
+                for line in contents.lines().map(str::trim) {
+                    if line.is_empty() || line.starts_with('#') {
+                        continue;
+                    }
+                    if let Some(line) = line.strip_suffix('`') {
+                        continued.push_str(line);
+                        continued.push(' ');
+                        continue;
+                    }
+                    continued.push_str(line);
+                    lines.push(std::mem::take(&mut continued));
+                }
+                ensure!(
+                    continued.is_empty(),
+                    "unfinished PowerShell launcher: {name}"
+                );
+                if lines
+                    .first()
+                    .is_some_and(|line| line == "$ErrorActionPreference = 'Stop'")
+                {
+                    lines.remove(0);
+                }
+                ensure!(
+                    lines.is_empty()
+                        || (lines.len() == 2
+                            && lines[0].starts_with("& ")
+                            && lines[1] == "exit $LASTEXITCODE"),
+                    "procedural PowerShell setup must move to Rust: {name}"
+                );
+            }
+            let file = directory.join(format!("{index}.ps1"));
+            fs::write(&file, contents)?;
+            let status = Command::new("pwsh").current_dir(directory).args(["-NoProfile", "-NonInteractive", "-Command",
+                "$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile($env:DOTFILES_PARSE_FILE,[ref]$tokens,[ref]$errors) > $null; if($errors.Count){$errors | Out-String | Write-Error; exit 1}"])
+                .env("DOTFILES_PARSE_FILE", &file).stdin(Stdio::null()).status()?;
+            ensure!(status.success(), "invalid rendered PowerShell: {name}");
+        }
+    }
+    Ok(())
+}
+
+pub fn adapters(root: &Path) -> Result<()> {
+    command(
+        root,
+        "bun",
+        &["install", "--frozen-lockfile", "--ignore-scripts"],
+    )?;
+    command(root, "bun", &["run", "check"])
+}
+
+pub fn ops(root: &Path) -> Result<()> {
+    let owned = tempfile::tempdir()?;
+    let collections = owned.path().join("collections");
+    let command = |program: &str| {
+        let mut command = Command::new(program);
+        command
+            .current_dir(root.join("ops"))
+            .env("ANSIBLE_HOME", owned.path())
+            .env("ANSIBLE_COLLECTIONS_PATH", &collections);
+        command
+    };
+    let status = command("ansible-galaxy")
+        .args([
+            "collection",
+            "install",
+            "--no-deps",
+            "--requirements-file",
+            "requirements.yml",
+            "--collections-path",
+        ])
+        .arg(&collections)
+        .status()?;
+    ensure!(
+        status.success(),
+        "pinned Ansible collection installation failed"
+    );
+    let status = command("ansible-playbook")
+        .args(["--syntax-check", "site.yml"])
+        .status()?;
+    ensure!(status.success(), "Ansible syntax check failed");
+    Ok(())
+}
+
+pub fn secrets(root: &Path) -> Result<()> {
+    crate::profiles::check_public(root)?;
+    let snapshot = tempfile::tempdir()?;
+    let mut files = Vec::new();
+    crate::profiles::source_files(root, &mut files)?;
+    for file in files {
+        let target = snapshot.path().join(file.strip_prefix(root)?);
+        fs::create_dir_all(target.parent().context("snapshot parent is missing")?)?;
+        fs::copy(file, target)?;
+    }
+    let report = tempfile::NamedTempFile::new()?;
+    let output = Command::new("gitleaks")
+        .current_dir(root)
+        .args([
+            "dir",
+            "--redact",
+            "--no-banner",
+            "--report-format",
+            "json",
+            "--report-path",
+        ])
+        .arg(report.path())
+        .arg(snapshot.path())
+        .output()?;
+    if !output.status.success() {
+        if let Ok(findings) = serde_json::from_slice::<Vec<Value>>(&fs::read(report.path())?) {
+            for finding in findings {
+                eprintln!(
+                    "Secret scanner finding: {}:{} / {}",
+                    finding["File"], finding["StartLine"], finding["RuleID"]
+                );
+            }
+        }
+        anyhow::bail!(
+            "required secret scanner failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    println!("Secret scan passed on the publication source snapshot");
+    Ok(())
+}

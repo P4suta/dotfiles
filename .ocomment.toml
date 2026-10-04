@@ -1,0 +1,63 @@
+# NOTE: This repository's own gate.
+# NOTE: `dot_config/ocomment/config.toml` is the rule this machine installs and is the same two settings; they are repeated here rather than referenced because a CI runner has no `~/.config/ocomment`, and a repository whose gate depends on a file it has not applied yet is not gating itself.
+version = 1
+
+# NOTE: Nothing is removed.
+# What a comment says is its author's business; where its lines break is not.
+[policy]
+mode = "none"
+
+# NOTE: One sentence per line, the policy this fleet teaches every agent.
+[style]
+wrap = "sentence"
+
+# NOTE: What a chezmoi source name hides.
+# NOTE: `dot_` stands for a leading dot and `.tmpl` says the file is rendered before it is written, so the format is the extension *before* the suffix and no detector can see it.
+# NOTE: A template is not the language it templates, so naming these is this repository's decision to make rather than a default to change.
+# NOTE: Only the prose partials are Markdown; the profile leaves under `.chezmoitemplates/profiles/` are shell, TOML, and other configuration that a sentence reflow would corrupt.
+[[overrides]]
+paths = [
+  "**/*.md.tmpl",
+  ".chezmoitemplates/agent_policy",
+  ".chezmoitemplates/prose_policy",
+  ".chezmoitemplates/remote_machines",
+  ".chezmoitemplates/signing_pubkey",
+  ".chezmoitemplates/profiles/windows/remote_machines",
+]
+language = "markdown"
+
+[[overrides]]
+paths = ["**/*.toml.tmpl", "dot_gitconfig.tmpl"]
+language = "toml"
+
+[[overrides]]
+paths = ["**/*.yml.tmpl"]
+language = "yaml"
+
+[[overrides]]
+paths = ["**/*.json.tmpl"]
+language = "jsonc"
+
+[[overrides]]
+paths = ["dot_config/dev-reaper/config", "dot_config/session-reaper/config"]
+language = "toml"
+
+# NOTE: `#` to the end of the line, a shell-shaped string, and that is the whole of what these have in common with a shell script.
+# NOTE: It is also the whole of what the prose rules read.
+[[overrides]]
+paths = [
+  "dot_bashrc.tmpl",
+  "dot_profile.tmpl",
+  "**/*.nu",
+  "**/*.nu.tmpl",
+  "justfile",
+  "install-docker-as-admin.sh",
+]
+language = "shell"
+
+# NOTE: Pattern lists, where a `#` opens a comment only as the first byte of a line: `file#name` names a file with one in it.
+# NOTE: The same rule OComment's built-in `hash-line` profile states, for the names this repository adds.
+[profiles.chezmoi-list]
+name = "chezmoi-list"
+filenames = [".chezmoiignore", ".chezmoiremove"]
+line_comments = [{ start = "#", requires_line_start = true, kind = "line" }]

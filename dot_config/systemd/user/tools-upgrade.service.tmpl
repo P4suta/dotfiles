@@ -1,0 +1,12 @@
+[Unit]
+Description=Upgrade the Nix profile and mise-managed runtimes
+
+[Service]
+Type=oneshot
+Environment=MISE_JOBS=2
+Environment=KERL_BUILD_DOCS=no
+Environment="KERL_CONFIGURE_OPTIONS=--without-javac --without-wx --without-odbc"
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=6h
+ExecStart={{ joinPath .chezmoi.homeDir ".local/bin/dotfiles-xtask" | replace "%" "%%" | quote }} --root {{ .chezmoi.sourceDir | replace "%" "%%" | quote }} setup upgrade --config {{ .chezmoi.configFile | replace "%" "%%" | quote }} --live

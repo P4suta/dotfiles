@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "repository": {
+    "allow_squash_merge": true,
+    "allow_merge_commit": false,
+    "allow_rebase_merge": false,
+    "delete_branch_on_merge": true,
+    "allow_auto_merge": true,
+    "allow_update_branch": true,
+    "squash_merge_commit_title": "PR_TITLE",
+    "squash_merge_commit_message": "BLANK",
+    "web_commit_signoff_required": true
+  },
+  "immutable_releases": true,
+  "protected_default_branch": true,
+  "protected_release_tags": true,
+  "environment_admin_bypass": false
+}

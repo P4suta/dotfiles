@@ -1,0 +1,8 @@
+{{- $context := merge (dict) . (index .platforms .profile) -}}
+{{- if eq .profile "mac" -}}
+{{ includeTemplate "profiles/mac/dot_codex/AGENTS.md.tmpl" $context }}
+{{- else if has .profile (list "linux" "wsl") -}}
+{{ includeTemplate "profiles/linux/dot_codex/AGENTS.md.tmpl" $context }}
+{{- else if eq .profile "windows" -}}
+{{ includeTemplate "profiles/windows/dot_codex/AGENTS.md.tmpl" $context }}
+{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}

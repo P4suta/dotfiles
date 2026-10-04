@@ -1,0 +1,6 @@
+{{- $context := merge (dict) . (index .platforms .profile) -}}
+{{- if eq .profile "mac" -}}
+{{ include ".chezmoitemplates/profiles/mac/dot_config/dev-reaper/config" }}
+{{- else if eq .profile "linux" -}}
+{{ include ".chezmoitemplates/profiles/linux/dot_config/dev-reaper/config" }}
+{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}

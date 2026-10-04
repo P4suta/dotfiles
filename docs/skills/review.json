@@ -1,0 +1,457 @@
+{
+  "report_hash": "35f482a30d703ec0b1badf7ccba85811c74d70e990fc6f7e9b7730dffee62d43",
+  "decisions": [
+    {
+      "id": "catalog:adr:23fc1eba2bafa1a21cea24e927b90a8ec48901defc0f5e93cbd490c66d6b0e57",
+      "outcome": "keep",
+      "reason": "Keep durable design rationale separate from executable checks and task history; its narrow trigger selects consequential choices and the current lifecycle decision uses the existing ADR format.",
+      "evidence": [
+        "dot_agents/skills/adr/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:apple-notarization:48bdf2eb4bedb5f3596deff3a297f770a5b25266aca6af0df4de1aa91a94af53",
+      "outcome": "keep",
+      "reason": "Retain the exact submitted-artifact and resumable-receipt workflow separately from certificate setup and packaging, because acceptance, stapling, and publication are distinct transitions.",
+      "evidence": [
+        "dot_agents/skills/apple-notarization/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:apple-signing:ba6603438b5b1d1692c84b8483bd85732aaa0e0138016e6ff5cd6e713a327b6c",
+      "outcome": "keep",
+      "reason": "Retain native signing identity, protected keychain ownership, and final executable verification as a focused platform boundary that routes later stages to their own skills.",
+      "evidence": [
+        "dot_agents/skills/apple-signing/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:approval-boundaries:4fd99d2649887b0b12a7198e32c1be1d5518124726ddf3a5ebbce43e34e26e80",
+      "outcome": "keep",
+      "reason": "Retain exact operation, target, evidence, and existing-authorization checks; automated analysis and a skill load must not create permission to approve or publish.",
+      "evidence": [
+        "dot_agents/skills/approval-boundaries/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:ci-budget:53086629f0e6b28bc87ff5faa40123945f1287245d8f9e909f40975fc1d60d60",
+      "outcome": "keep",
+      "reason": "Retain locally verified coherent publication and explicit machine-local holds independently of the review provider; preserve the verified Windows Git-home resolution and incomplete-hook-coverage boundary.",
+      "evidence": [
+        "dot_agents/skills/ci-budget/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:code-signing:709d7c6ce6a159720c3bfa21d3232febe1788007d4aca7eaa0c757cc1d4d7e29",
+      "outcome": "keep",
+      "reason": "Keep this cross-platform credential and publisher workflow as the common router, with conditional Apple and Windows references rather than merging their distinct native operations.",
+      "evidence": [
+        "dot_agents/skills/code-signing/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:coderabbit-review:c509adc2470eddb6e2f3e45f744dcac59f2177d849a4dedc356e189a85b67764",
+      "outcome": "implemented",
+      "reason": "Apply the owner's layered 90% ceiling and 20% margin once with exact production arithmetic, seven rolling hourly attempts and bounded probes; preserve durable reservations, one executor, owner pauses and separate PR capacity, with full-domain Kani proofs and a deterministic inherited-handle regression for explicit lock release.",
+      "evidence": [
+        "dot_agents/skills/coderabbit-review/SKILL.md",
+        "xtask/tests/review_guard.rs",
+        "xtask/src/review_rules.rs",
+        "docs/adr/0008-layered-review-capacity.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:coderabbit:6ce16b2013d0b83baa8288f3ed66625aba2f6791be2d61187ebdebc67dd1eca7",
+      "outcome": "implemented",
+      "reason": "Connect fixed-fee setup to the layered numeric budget and rolling attempt and probe ceilings without relaxing paid-usage refusal, persistent pauses or the distinct PR, IDE, browser and unmanaged-client boundaries.",
+      "evidence": [
+        "dot_agents/skills/coderabbit/SKILL.md",
+        "xtask/src/review_guard.rs",
+        "docs/adr/0008-layered-review-capacity.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:concise-source:415be92516b5ddf592100ab61f561cede27a14a3e0ed1c7693afec3bdf02bbdc",
+      "outcome": "keep",
+      "reason": "Keep source clarity and narrow lint-exception judgment separate from OComment invocation; executable representation and actual public contracts remain authoritative.",
+      "evidence": [
+        "dot_agents/skills/concise-source/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:development-assurance:dcbf69979f8cadea81c947b472561dede1cb1b2ac353aedcc3b7fa0f356dd284",
+      "outcome": "implemented",
+      "reason": "Require source-bound proofs for supported deterministic contracts and mandatory justified alternatives at genuine semantic or empirical boundaries; keep incomplete stronger claims distinct from scoped completion.",
+      "evidence": [
+        "dot_agents/skills/development-assurance/SKILL.md",
+        "dot_agents/skills/formal-assurance/references/scoping.md",
+        "docs/skills/assurance-scope-evaluation.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:domyjob:4ae1cc4413522f51c949006b532161955e6f04522e8d312fd7d068e9437ac26f",
+      "outcome": "keep",
+      "reason": "Retain a small discovery route to the project-owned current command manual; stable job identities and snapshot execution differ from broader synchronization policy.",
+      "evidence": [
+        "dot_agents/skills/domyjob/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:doppler:e62a09294e708a4d098464f19a2da31e3b49c1b42fa7e7a34df586b05082edd5",
+      "outcome": "keep",
+      "reason": "Retain names-only readiness inspection, protected consuming commands, and scoped CI credential delivery separately from signing and resource-operation authority.",
+      "evidence": [
+        "dot_agents/skills/doppler/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:dotfiles:4c6a50c9e481b93ddc552eceb251400d8cfb5b002c1a2777bd587f2744cdef74",
+      "outcome": "keep",
+      "reason": "Retain native per-host rendering and scoped application, because portable skill content alone does not establish installed behavior or permit runtime-state copying.",
+      "evidence": [
+        "dot_agents/skills/dotfiles/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:executable-policy:75c4ddd1b9cba76bf70e0fd96dd8673abbde44c8e359c5fc0a2a46d813596cb6",
+      "outcome": "implemented",
+      "reason": "Add the missing generic transition from interpretive standards to authoritative typed gates; the actual catalog and proof checks demonstrate nonempty coverage and refusal paths.",
+      "evidence": [
+        "dot_agents/skills/executable-policy/SKILL.md",
+        "docs/adr/0003-local-skill-operations.md",
+        "xtask/tests/skill_ops.rs",
+        "xtask/tests/skill_runtime.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:formal-assurance:06a59fc3fba7200cea4640ca584f7cfefe40d1000757c1a7135309e3f816d8b1",
+      "outcome": "implemented",
+      "reason": "Require source-bound proofs for supported deterministic contracts and mandatory justified alternatives at genuine semantic or empirical boundaries; keep incomplete stronger claims distinct from scoped completion.",
+      "evidence": [
+        "dot_agents/skills/formal-assurance/SKILL.md",
+        "dot_agents/skills/formal-assurance/references/scoping.md",
+        "docs/skills/assurance-scope-evaluation.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:gcp:d501b76b61d91f4787b12e9b716865ba3d9eda37bfbd10dbf1ddcf492f3b0aa9",
+      "outcome": "implemented",
+      "reason": "Bring the existing owner-authored native skill into the canonical catalog unchanged, preserving its conditional client reference, explicit resource identity, and separate paid-resource authorization.",
+      "evidence": [
+        "dot_agents/skills/gcp/SKILL.md",
+        "docs/adr/0003-local-skill-operations.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:github-repository:d0321854ef98e75ab0795fc26d475074794bb449867a23e8dfcf060b9c9c8394",
+      "outcome": "keep",
+      "reason": "Retain the maintained typed governance helper and narrow mutation scopes; its checked repository identities and stronger-protection preservation differ from release workflow design.",
+      "evidence": [
+        "dot_agents/skills/github-repository/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:ideal-first-development:720aee3523768bc5d4a56e9d59634e6639a3cada3beb5709bbb32766506d0d75",
+      "outcome": "implemented",
+      "reason": "Require source-bound proofs for supported deterministic contracts and mandatory justified alternatives at genuine semantic or empirical boundaries; keep incomplete stronger claims distinct from scoped completion.",
+      "evidence": [
+        "dot_agents/skills/ideal-first-development/SKILL.md",
+        "dot_agents/skills/formal-assurance/references/scoping.md",
+        "docs/skills/assurance-scope-evaluation.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:just:c88cb4b7b689a120ddd89962a356bc41ccfaffd023283811aedddc81dc2a1364",
+      "outcome": "keep",
+      "reason": "Retain thin developer command discovery as distinct from procedural Rust xtask logic; the skill explicitly requires actual argument and failure behavior.",
+      "evidence": [
+        "dot_agents/skills/just/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:lefthook:36ece28a9a6e9f791ada99a3dc021b9767d188001e01270418c7cf5ce72e55b5",
+      "outcome": "keep",
+      "reason": "Retain effective-hook discovery, failure propagation, and existing dispatcher preservation; required project commands are shared with CI rather than reimplemented.",
+      "evidence": [
+        "dot_agents/skills/lefthook/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:macos-pkg:b9dc83ad84b2a6c456081f09809ef3875c03a6a5533850b94f4473b344dc3826",
+      "outcome": "keep",
+      "reason": "Retain installer payload, receipt, upgrade, and native distribution checks separately from executable signing and notarization.",
+      "evidence": [
+        "dot_agents/skills/macos-pkg/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:mise:0c9df3021531758d7a61b6cdc069f9ae338fcdc85d826e76e61585640dde16db",
+      "outcome": "keep",
+      "reason": "Retain exact tool selection, precedence, native installation provenance, and project/global separation; it composes with dependency maintenance rather than duplicating it.",
+      "evidence": [
+        "dot_agents/skills/mise/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:multi-machine:54c7c531b6b8d3511421cd2c9ecf080b14e2a70764e6b291ff40e94fc97930a2",
+      "outcome": "keep",
+      "reason": "Retain native validation and source-hub discipline while obtaining host identities and checkout roots from machine-local configuration; removing private topology does not grant permission to operate another host.",
+      "evidence": [
+        "dot_agents/skills/multi-machine/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:mutation-testing:404cd2c8f7ccfaa7cc60be0ab37d47e4f9e52817980b4ba31f7fa2ecc1af2ea7",
+      "outcome": "keep",
+      "reason": "Retain survivor interpretation and test sensitivity as separate assurance work; expensive campaigns and formal proofs have distinct guarantees and authorization.",
+      "evidence": [
+        "dot_agents/skills/mutation-testing/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:nas:083f88b717087ee7cc6edf44a05e6c5d9a4d8fb2ff16a7e5fbacd70ee2c9dc28",
+      "outcome": "implemented",
+      "reason": "Add the requested generic NAS artifact workflow, keeping connection details private and distinguishing local-copy checks, provider upload acknowledgement and independent restore evidence; preserve the last source when remote verification is unavailable.",
+      "evidence": [
+        "dot_agents/skills/nas/SKILL.md",
+        "dot_agents/skills/nas/references/synology-drive.md",
+        "docs/skills/nas-evaluation.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:ocomment:43fb4a49202c814f7af4e4832729103a9625184fed0b04f5f0007b1df42feabe",
+      "outcome": "keep",
+      "reason": "Retain the project-owned command route and preservation of required source prose, while concise-source owns the underlying representation judgment.",
+      "evidence": [
+        "dot_agents/skills/ocomment/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:oss-readme:502ed927df63ed7e7cada6283488f03563498737fc5bcf68b4f25096b31c62d5",
+      "outcome": "keep",
+      "reason": "Retain a narrowly triggered public first-use document standard independently of architecture records and internal operating instructions.",
+      "evidence": [
+        "dot_agents/skills/oss-readme/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:portable-skills:4527dcff9e6a3543c7f9b3f4aaa1411bdef09612763b4fdb04849208478d72d6",
+      "outcome": "implemented",
+      "reason": "Connect canonical authoring and native client discovery to skill-operations without duplicating lifecycle logic or creating a cyclic unconditional dependency.",
+      "evidence": [
+        "dot_agents/skills/portable-skills/SKILL.md",
+        "docs/adr/0003-local-skill-operations.md",
+        "xtask/tests/skill_ops.rs",
+        "xtask/tests/skill_runtime.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:pull-request:ed6e25e531e3645d80364f335aef48fca2bceaa48f86c1e7e02b7f25666e0a7d",
+      "outcome": "implemented",
+      "reason": "Apply the same layered budget to verified separate PR allowance and applicable adaptive thresholds, require current window evidence and preserve the owner pause; retain checked issue scope, draft transitions and official review exclusion with production proofs and native process refusal tests.",
+      "evidence": [
+        "dot_agents/skills/pull-request/SKILL.md",
+        "docs/adr/0004-checked-pull-request-authoring.md",
+        "docs/adr/0006-global-personal-issue-prerequisite.md",
+        "xtask/tests/pr_workflow.rs",
+        "xtask/src/pr_rules.rs",
+        "xtask/src/review_rules.rs",
+        "dot_agents/skills/pull-request/references/workflow.md",
+        "docs/adr/0008-layered-review-capacity.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:registry-publishing:83f98a96dc48687390cb67aea81c83445144e08b441b9a95548355060f8e6e17",
+      "outcome": "keep",
+      "reason": "Retain conditional npm, PyPI, Hex, and OCI identity and authentication differences; common lifecycle and artifact evidence stay in neighboring skills.",
+      "evidence": [
+        "dot_agents/skills/registry-publishing/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:release-evidence:9acaa1f6a71f77d684120813d117506e18481ae8f941b831252f4b8e0807ceff",
+      "outcome": "keep",
+      "reason": "Retain exact distributed-artifact inventory, provenance, SBOM, and consumer checks separately from signing and publication authorization.",
+      "evidence": [
+        "dot_agents/skills/release-evidence/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:release-workflow:5521745940aa69f88bf67a9296e307036eec6b1b1e2feba93941767319e918d5",
+      "outcome": "keep",
+      "reason": "Retain protected lifecycle and credential-bearing stage separation as the common release contract, with registry and platform mechanics loaded conditionally.",
+      "evidence": [
+        "dot_agents/skills/release-workflow/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:reliability:f8cd25a623029ae93a6c8a8707cc5101dd491bf8bf1c6577ac18e411f083e49c",
+      "outcome": "implemented",
+      "reason": "Retain dependency-specific causal guidance and add atomic resource reservation with a repeated-clock regression after a demonstrated native fixture collision; scheduling, persistence, environment, and external boundaries remain separate from generic test planning.",
+      "evidence": [
+        "dot_agents/skills/reliability/SKILL.md",
+        "dot_agents/skills/reliability/references/time-and-randomness.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:renovate:790850af891cfeecaf31b6f665f0c9e73885323dd60f737aa758b371edb716b6",
+      "outcome": "keep",
+      "reason": "Retain upstream-compatible tested dependency updates, shared presets, locks, and immutable pins instead of embedding a stale tool list in skill instructions.",
+      "evidence": [
+        "dot_agents/skills/renovate/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:resource-coordination:6ef26ea7286db5c46a089bcb8cd250c38e3fbafa6968c6317e4420cbe9e86b06",
+      "outcome": "keep",
+      "reason": "Retain bounded ordinary checks and explicit permission for disruptive campaigns, preserving current workload authorization without inferring absence or dispatch rights.",
+      "evidence": [
+        "dot_agents/skills/resource-coordination/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:rust-invariants:4f2a486bbe9b8d54ba48b42c056868cb4cc9f43a300f3e612e79435a2af2764b",
+      "outcome": "keep",
+      "reason": "Retain compiler-enforced Rust representation and transition design independently of language-neutral type contracts and machine-checked algorithm proofs.",
+      "evidence": [
+        "dot_agents/skills/rust-invariants/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:rust-release:bfda29f003338856ccf726be36da4621090ac4775e349ba9c8c9b24d50161ecf",
+      "outcome": "keep",
+      "reason": "Retain crates.io workspace ordering, immutable versions, and proposal/publication separation as conditional Rust release behavior.",
+      "evidence": [
+        "dot_agents/skills/rust-release/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:rust-tooling:47f36d26fc7c74ff1a0156fd4c4158e02694be289e0e9b9462fc6c45232087b8",
+      "outcome": "keep",
+      "reason": "Retain maintained typed procedural automation as the implementation boundary; thin native client adapters and existing tool invocation remain composition code.",
+      "evidence": [
+        "dot_agents/skills/rust-tooling/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:skill-operations:e2e5ce9cd8153f13207ed56a6114afa14c09b805f13bbbc86b2ca4cb6b99a4c3",
+      "outcome": "implemented",
+      "reason": "Implement the full local skill lifecycle with reviewed managed files, pinned gates, and accepted immutable analysis identities; concurrent drafts preserve accepted decisions while new notes and evidence changes still block, ordered installation prevents early adapter activation, and native SDK observation works without PATH, with regression and production proof evidence.",
+      "evidence": [
+        "dot_agents/skills/skill-operations/SKILL.md",
+        "docs/adr/0003-local-skill-operations.md",
+        "xtask/tests/skill_ops.rs",
+        "xtask/tests/skill_runtime.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:sslcom-esigner:4d3f73bbfadefe5a4c7caa12170142b1d761b8eda9eea1e1f3cdde2270469edf",
+      "outcome": "keep",
+      "reason": "Retain provider-specific certificate TOTP and native Authenticode verification without merging account login, generic credentials, or publication authority.",
+      "evidence": [
+        "dot_agents/skills/sslcom-esigner/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:storage-scout:7055fd62c2be464ff04fd36f99e73359cd2027c773b78e8cee7dc59ace25664c",
+      "outcome": "keep",
+      "reason": "Retain the project-owned ownership and byte-identity cleanup procedure rather than reproducing deletion heuristics in a generic maintenance skill.",
+      "evidence": [
+        "dot_agents/skills/storage-scout/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:systematic-fixes:0b36c44731969d8b79f14682b931d2f2874e9a4db46b9c4803b7a0932599b27a",
+      "outcome": "keep",
+      "reason": "Retain demonstrated failure, architectural cause, and affected-family remediation separately from forward planning and dependency-specific reliability techniques.",
+      "evidence": [
+        "dot_agents/skills/systematic-fixes/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:tailscale:e16f78d92c2248499569a866bbf25620c4f6df7d4edfcaa90c158f61bc0c5db9",
+      "outcome": "keep",
+      "reason": "Retain layered connectivity diagnosis and narrow access changes independently of remote command execution, machine synchronization, and SSH key approval.",
+      "evidence": [
+        "dot_agents/skills/tailscale/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:type-contracts:98070bdc34b74fd54db11e1d6cb4083c71cc300f198942310d0e2ac42089250a",
+      "outcome": "implemented",
+      "reason": "Add the missing language-neutral strict typing and dynamic-language annotation contract, with runtime validation and narrow interop boundaries rather than blanket exclusions.",
+      "evidence": [
+        "dot_agents/skills/type-contracts/SKILL.md",
+        "docs/adr/0003-local-skill-operations.md",
+        "tsconfig.json",
+        "package.json",
+        "dot_config/opencode/plugins/skill-ops.ts"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:verification-tools:1c22eaa4c14af1eef91f4a80daebcea1db60c12375605e58db9bb17355ad80ce",
+      "outcome": "implemented",
+      "reason": "Add evolving capability-based tool discovery and proven cross-project adoption instead of a permanent named-tool list, with typing and executable-policy prerequisites.",
+      "evidence": [
+        "dot_agents/skills/verification-tools/SKILL.md",
+        "docs/adr/0003-local-skill-operations.md",
+        "xtask/src/skill_rules.rs",
+        "xtask/src/skill_proofs.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:xtask:16bbdb9b99e2ef8ceebc09f42213d2e391547960c8152350483ba745a7170161",
+      "outcome": "keep",
+      "reason": "Retain repository-specific typed orchestration and child-build isolation as distinct from generic Rust automation policy and thin command surfaces.",
+      "evidence": [
+        "dot_agents/skills/xtask/SKILL.md"
+      ],
+      "revisit": null
+    }
+  ]
+}

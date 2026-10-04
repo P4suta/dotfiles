@@ -1,0 +1,30 @@
+umask = 0o022
+
+[data]
+profile = "linux"
+role = "personal"
+
+[data.git]
+name = "Example User"
+email = "user@example.invalid"
+
+[data.signing]
+enabled = false
+public_key = ""
+pubkey = ""
+key_comment = ""
+
+[data.herdr_agent]
+public_keys = []
+
+[data.doppler]
+project = ""
+config = ""
+
+[data.doppler.secrets]
+codex = []
+claude = []
+opencode = ["GH_MCP_TOKEN"]
+
+[data.paths]
+projects = ""

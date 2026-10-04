@@ -1,0 +1,8 @@
+{{ if .ocomment.enabled -}}
+# sources: {{ if stat (printf "%s/%s/rust/Cargo.toml" .chezmoi.homeDir .ocomment.destination) }}{{ output "git" "-C" (printf "%s/%s" .chezmoi.homeDir .ocomment.destination) "rev-parse" "HEAD" | trim }}{{ else }}none{{ end }} installed: {{ if stat (printf "%s/.local/bin/ocomment.exe" .chezmoi.homeDir) }}yes{{ else }}no{{ end }}
+$ErrorActionPreference = 'Stop'
+& {{ includeTemplate "ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup ocomment `
+    --repo-url {{ includeTemplate "ps_quote" .ocomment.repo_url }} `
+    --destination {{ includeTemplate "ps_quote" .ocomment.destination }}
+exit $LASTEXITCODE
+{{ end -}}

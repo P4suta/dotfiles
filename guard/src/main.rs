@@ -1,0 +1,230 @@
+//! dotguard — the local policy gate.
+//!
+//! One binary behind three entry points, all of them installed globally rather than per-repository:
+//!
+//! ~/.local/bin/git            -> `dotguard git …`         (argv policy, then exec) ~/.config/git/hooks/pre-push   -> `dotguard pre-push`   (force-push gate) ~/.config/git/hooks/commit-msg -> `dotguard commit-msg` (attribution, language) ~/.config/git/hooks/pre-commit -> `dotguard pre-commit` (language, staged diff)
+//!
+//! `core.hooksPath` in ~/.gitconfig points every repository on the machine at that hooks directory, so none of this is something a repository has to opt into — or can forget to.
+//! lefthook still runs per-repo gates underneath; these are the rules that hold everywhere, including in a repository cloned five minutes ago.
+
+use dotguard::{
+    attribution, bypass, doctor, gitargv, lang, lint, postcommit, prepush, realgit, renovate,
+    staged,
+};
+
+use bypass::Category;
+use std::io::Write;
+use std::os::unix::process::CommandExt;
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let Some(cmd) = args.first().map(String::as_str) else {
+        usage();
+        return ExitCode::FAILURE;
+    };
+
+    match cmd {
+        "git" => git_wrapper(&args[1..]),
+        "pre-push" => code(prepush::run(args.get(1).map_or("origin", String::as_str))),
+        "commit-msg" => code(commit_msg(args.get(1).map_or("", String::as_str))),
+        "pre-commit" => code(pre_commit()),
+        "post-commit" => code(postcommit::run()),
+        "renovate-gate" => code(renovate::run(args.get(1).map_or("origin", String::as_str))),
+        "renovate" => code(renovate::dispatch(&args[1..])),
+        "scan" => code(scan_paths(&args[1..])),
+        "lint" => code(lint::dispatch(&args[1..])),
+        "doctor" => code(doctor::run(&args[1..])),
+        "--version" | "-V" | "version" => {
+            println!("dotguard {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+        _ => {
+            usage();
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn code(n: i32) -> ExitCode {
+    ExitCode::from(u8::try_from(n).unwrap_or(1))
+}
+
+fn usage() {
+    eprintln!(
+        "dotguard {}\n\n\
+         usage:\n  \
+         dotguard git <args…>        apply policy, then exec the real git\n  \
+         dotguard pre-push <remote>  refuse deletions and non-fast-forward pushes (reads stdin)\n  \
+         dotguard commit-msg <file>  strip agent attribution, refuse foreign scripts\n  \
+         dotguard pre-commit         refuse foreign scripts in the staged diff\n  \
+         dotguard post-commit        re-sign an unsigned HEAD, or roll it back\n  \
+         dotguard renovate-gate <remote>  refuse a push that leaves a touched dependency stale (reads stdin)\n  \
+         dotguard renovate run         the read-only lookup container, by hand\n  \
+         dotguard scan <path…>       the same language check, on files\n  \
+",
+        env!("CARGO_PKG_VERSION")
+    );
+}
+
+/// `~/.local/bin/git` delegates its whole job here and this never returns on the happy path: it `exec`s the real git in place, so there is no extra process sitting in the tree holding a pipe open.
+fn git_wrapper(argv: &[String]) -> ExitCode {
+    if let Some(denial) = gitargv::inspect(argv) {
+        let full: Vec<String> = std::iter::once("git".to_owned())
+            .chain(argv.iter().cloned())
+            .collect();
+
+        let waiver = denial.category.env();
+        if let Some(env) = waiver.filter(|_| bypass::waived(denial.category)) {
+            bypass::record("BYPASS", denial.category, &denial.reason, &full);
+            eprintln!("::warning:: {env}=1 — allowing {}", denial.reason);
+        } else {
+            bypass::record("REJECT", denial.category, &denial.reason, &full);
+            let hint = waiver.map_or_else(
+                || "Signing and hook checks cannot be bypassed.".to_owned(),
+                |env| format!(
+                    "If this is deliberate, waive it for this one command:\n\n  {env}=1 git {}\n\nThe bypass is recorded in ~/.local/state/git-bypass.log.",
+                    argv.join(" ")
+                ),
+            );
+            eprintln!(
+                "::error:: refusing `{}`.\n\n{}\n\n{hint}",
+                denial.reason, denial.hint
+            );
+            return ExitCode::FAILURE;
+        }
+    }
+
+    let Some(real) = realgit::find() else {
+        eprintln!("::error:: no git found in /opt/homebrew/bin, /usr/local/bin or /usr/bin");
+        return ExitCode::from(127);
+    };
+    // exec() only returns on failure.
+    let err = std::process::Command::new(&real).args(argv).exec();
+    eprintln!("::error:: could not exec {}: {err}", real.display());
+    ExitCode::from(126)
+}
+
+/// The language policy for the repository we are standing in.
+///
+/// `guard.lang` is per repository, and both the value and the off-switch are spelled out in every refusal.
+/// English is the default because that is what this machine's history actually is; `japanese` exists because a repository whose *subject* is Japanese typesetting writes Japanese commit messages and should not have to argue about it; `off` exists because a repository full of i18n fixtures is a legitimate thing to have, and a gate that cannot be removed there is a gate that gets removed everywhere.
+///
+///     git config guard.lang japanese
+///     git config guard.lang off
+fn lang_mode() -> Option<lang::Mode> {
+    lang::Mode::parse(realgit::capture(&["config", "--get", "guard.lang"]).as_deref())
+}
+
+fn comment_char() -> char {
+    realgit::capture(&["config", "--get", "core.commentChar"])
+        .and_then(|v| v.trim().chars().next())
+        .filter(|c| c.is_ascii() && *c != 'a') // "auto" resolves per message; '#' is what it starts from
+        .unwrap_or('#')
+}
+
+fn commit_msg(path: &str) -> i32 {
+    if path.is_empty() {
+        return 0;
+    }
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return 0;
+    };
+
+    // Attribution first, so a Conventional Commits or line-length gate downstream sees the message that will actually be committed.
+    let (cleaned, removed) = attribution::strip(&raw);
+    if removed > 0 {
+        if let Ok(mut f) = std::fs::File::create(path) {
+            let _ = f.write_all(cleaned.as_bytes());
+        }
+        eprintln!(
+            "::notice:: removed {removed} agent attribution line(s) from the commit message."
+        );
+    }
+
+    let Some(mode) = lang_mode() else { return 0 };
+    let body = lang::commit_message_body(&cleaned, comment_char());
+    let hits = lang::scan(&body, mode);
+    if hits.is_empty() {
+        return 0;
+    }
+
+    let expected = match mode {
+        lang::Mode::Japanese => "English or Japanese",
+        _ => "English",
+    };
+    eprintln!("::error:: the commit message is not written in {expected}:\n");
+    lang::report("commit message", &body, &hits);
+    refuse_foreign("git commit")
+}
+
+fn pre_commit() -> i32 {
+    if lang_mode().is_none() {
+        return 0;
+    }
+    let Some(diff) = staged::staged_diff() else {
+        return 0;
+    };
+    let files: Vec<_> = staged::scan_diff(&diff)
+        .into_iter()
+        .filter(|f| !staged::is_exempt(&f.path))
+        .collect();
+    if files.is_empty() {
+        return 0;
+    }
+
+    eprintln!("::error:: staged changes add text in a script this machine does not write:\n");
+    for f in &files {
+        for (lineno, hit) in &f.hits {
+            eprintln!(
+                "  {}:{}:{}  {:?}  U+{:04X}  [{}]",
+                f.path, lineno, hit.col, hit.ch, hit.ch as u32, hit.kind
+            );
+        }
+    }
+    refuse_foreign("git commit")
+}
+
+fn scan_paths(paths: &[String]) -> i32 {
+    let mut bad = 0;
+    for p in paths {
+        let Ok(text) = std::fs::read_to_string(p) else {
+            continue;
+        };
+        if staged::exempts_itself(&text) {
+            continue;
+        }
+        let hits = lang::scan(&text, lang::Mode::Content);
+        if !hits.is_empty() {
+            lang::report(p, &text, &hits);
+            bad += hits.len();
+        }
+    }
+    if bad == 0 {
+        return 0;
+    }
+    eprintln!("\n::error:: {bad} contaminating character(s).");
+    refuse_foreign("this check")
+}
+
+/// Shared tail for every language refusal: the bypass, the per-repo off-switch, and why a single stray character is worth stopping for.
+fn refuse_foreign(what: &str) -> i32 {
+    let argv: Vec<String> = std::env::args().collect();
+    if bypass::waived(Category::Foreign) {
+        bypass::record("BYPASS", Category::Foreign, "foreign script", &argv);
+        eprintln!("\n::warning:: ALLOW_FOREIGN=1 — allowing it.");
+        return 0;
+    }
+    bypass::record("REJECT", Category::Foreign, "foreign script", &argv);
+    eprintln!(
+        "\n\
+         Cyrillic '\u{0441}' and Latin 'c' are indistinguishable on screen, so this is not only\n\
+         language rule: it is the same check that catches a homoglyph in an identifier and a\n\
+         bidi override in a comment.\n\n\
+         If the text is intentional:\n\n  \
+         ALLOW_FOREIGN=1 {what}              once\n  \
+         git config guard.lang japanese      this repository writes Japanese\n  \
+         git config guard.lang off           this repository carries multilingual fixtures\n"
+    );
+    1
+}

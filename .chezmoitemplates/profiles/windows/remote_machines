@@ -1,0 +1,6 @@
+## Remote machines
+
+Work spans a Mac, Linux, and Windows joined over Tailscale.
+The bare-repo hubs under `~/git/` on the Mac are the source of truth, and every SSH key lives in 1Password.
+The `domyjob` client runs on the Mac; this machine receives its jobs.
+Read the `multi-machine` skill before driving another machine or moving repository history between machines.

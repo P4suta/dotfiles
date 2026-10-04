@@ -1,0 +1,82 @@
+# Paths chezmoi does not track: neither applied to $HOME nor kept in git.
+
+# Machine-specific login state, contains tokens.
+# config.yml stays managed on the assumption that it only ever holds portable settings.
+.config/gh/hosts.yml
+
+# Doppler CLI authentication and encrypted fallback secrets are machine-local.
+.doppler
+.doppler/**
+
+# CodeRabbit authentication, review history, and incremental checkpoints are machine-local.
+.coderabbit
+.coderabbit/**
+
+# Runtime state
+.config/git/push-paused
+.local/share/atuin/**
+.local/share/mise/**
+.local/state/**
+.cache/**
+.bash_history
+
+# 1Password application state and its live SSH-agent socket are machine-local.
+.config/1Password/**
+.1password/**
+.var/app/com.onepassword.OnePassword/**
+
+# VS Code is installation-only.
+# Both local settings and Remote SSH server state are machine-local and may contain credentials, extensions, and IPC metadata.
+.config/Code
+.config/Code/**
+.vscode-server
+.vscode-server/**
+
+# Zed is installation-only.
+# Settings and keymaps, extensions, history, logs,
+# AI preferences, and login data remain machine-local; secrets stay in the system keyring rather than in chezmoi.
+.config/zed
+.config/zed/**
+.local/share/zed
+.local/share/zed/**
+
+# Claude Code machine-local data; only CLAUDE.md is tracked
+.claude/projects/**
+.claude/plans/**
+.claude/shell-snapshots/**
+.claude/todos/**
+.claude/history.jsonl
+.claude/settings.local.json
+# Claude Code rewrites settings.json at runtime (model and similar keys drift constantly), so it is left to each machine.
+.claude/settings.json
+.claude.json
+.codex/hooks.json
+.config/skill-ops/approved.json
+
+# Repo docs: tracked in git, never applied to $HOME
+README.md
+docs/**
+
+# Repo dev tooling: tracked in git, never applied to $HOME
+lefthook.yml
+.typos.toml
+justfile
+mise.toml
+package.json
+bun.lock
+tsconfig.json
+node_modules
+node_modules/**
+target
+target/**
+xtask/**
+scripts/**
+.gitignore
+**/skills/**/scripts/**/target
+**/skills/**/scripts/**/target/**
+
+# Ansible playbook run by admin: tracked in git, never applied to $HOME
+ops
+
+# DEPRECATED, superseded by ops/site.yml --tags docker; kept one release
+install-docker-as-admin.sh

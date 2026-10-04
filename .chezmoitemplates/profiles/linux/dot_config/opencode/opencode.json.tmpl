@@ -1,0 +1,7 @@
+{{- $isLocal := not (or (env "SSH_CONNECTION") (env "SSH_CLIENT") (env "SSH_TTY")) -}}
+{{- $hasNativeOnePassword := and (eq .chezmoi.os "linux") $isLocal (ne (lookPath "1password") "") -}}
+{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false{{ if $hasNativeOnePassword }},
+  "plugin": ["@upstash/context7-opencode"]{{ end }}
+}

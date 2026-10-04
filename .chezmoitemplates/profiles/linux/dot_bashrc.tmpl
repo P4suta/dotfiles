@@ -1,0 +1,67 @@
+case $- in
+    *i*) ;;
+      *)
+        if [ -n "${SSH_CONNECTION:-}" ]; then
+          export PATH="${HOME}/.local/bin:${HOME}/.nix-profile/bin:${HOME}/.local/share/mise/shims:${HOME}/.opam/{{ .ocaml.switch }}/bin:${PATH}"
+        fi
+        return;;
+esac
+
+export PATH="${HOME}/.local/bin:${HOME}/.nix-profile/bin:${PATH}"
+
+# shellcheck source=dot_config/shell/ssh-agent.sh
+if [[ -r "${HOME}/.config/shell/ssh-agent.sh" ]]; then
+  . "${HOME}/.config/shell/ssh-agent.sh"
+fi
+
+if [[ -t 0 && -t 1 && -z "${DOTFILES_BASH_ONLY:-}" ]] && command -v nu >/dev/null 2>&1; then
+  exec nu
+fi
+
+HISTCONTROL=ignoreboth
+shopt -s histappend
+HISTSIZE=1000
+HISTFILESIZE=2000
+shopt -s checkwinsize
+
+[ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
+
+if [ -x /usr/bin/dircolors ]; then
+    test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+    alias ls='ls --color=auto'
+    alias grep='grep --color=auto'
+    alias fgrep='fgrep --color=auto'
+    alias egrep='egrep --color=auto'
+fi
+
+alias ll='ls -alF'
+alias la='ls -A'
+alias l='ls -CF'
+
+if [ -f ~/.bash_aliases ]; then
+    . ~/.bash_aliases
+fi
+
+if ! shopt -oq posix; then
+  if [ -f /usr/share/bash-completion/bash_completion ]; then
+    . /usr/share/bash-completion/bash_completion
+  elif [ -f /etc/bash_completion ]; then
+    . /etc/bash_completion
+  fi
+fi
+
+if [ -x "$HOME/.local/bin/mise" ]; then
+  eval "$("$HOME/.local/bin/mise" activate bash)"
+fi
+
+if [ -r "$HOME/.opam/opam-init/init.sh" ]; then
+  . "$HOME/.opam/opam-init/init.sh" >/dev/null 2>&1 || true
+fi
+
+command -v starship >/dev/null && eval "$(starship init bash)"
+command -v zoxide   >/dev/null && eval "$(zoxide init bash)"
+command -v atuin    >/dev/null && eval "$(atuin init bash --disable-up-arrow)"
+command -v fzf      >/dev/null && eval "$(fzf --bash)"
+
+command -v bat   >/dev/null && export MANPAGER="sh -c 'col -bx | bat -l man -p'"
+command -v vivid >/dev/null && export LS_COLORS="$(vivid generate tokyonight-night)"

@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "review_every": 50,
+  "minimum_pair_sessions": 5,
+  "pair_percent": 80,
+  "max_entry_words": 1200,
+  "requirements": [
+    {"skill": "skill-operations", "also": ["portable-skills"]},
+    {"skill": "verification-tools", "also": ["type-contracts", "executable-policy"]},
+    {"skill": "type-contracts", "also": ["executable-policy"]}
+  ],
+  "bundles": {
+    "skill-maintenance": ["portable-skills", "skill-operations"],
+    "implementation-assurance": ["development-assurance", "formal-assurance", "verification-tools"]
+  }
+}

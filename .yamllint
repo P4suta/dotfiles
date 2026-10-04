@@ -1,0 +1,35 @@
+# yamllint configuration for every YAML file in this repository, including the Ansible system tier under ops/.
+#
+# actionlint and zizmor understand workflows deeply.
+# This baseline also reaches Lefthook configuration and reusable release assets.
+# It prevents malformed YAML from being ignored silently by downstream tools.
+extends: default
+
+rules:
+# GitHub workflows have no `---`, and adding one to match a linter's taste is the tail wagging the dog.
+  document-start: disable
+# Comment indentation inside block literals is deliberate (the comment belongs to the key above, not the scalar beside it), and yamllint's rule cannot express that.
+  comments-indentation: disable
+
+# `on:` is the GitHub Actions trigger key, which YAML 1.1 reads as the boolean true.
+# Checking values still catches a real unquoted yes/no; checking keys only ever flags this one, which cannot be spelled any other way.
+  truthy:
+    check-keys: false
+
+# Line length is the prose gate's business now, not this linter's: comments follow the sentence-per-line policy, which allows a line of any length.
+# Value lines here are short commands that never approached the old limit anyway.
+  line-length: disable
+
+# Comment blocks in this repo carry the reasoning, so they are long and frequent.
+# One space before the # is enough.
+  comments:
+    min-spaces-from-content: 1
+
+# Ansible's Jinja expressions are written as `{{ value }}`.
+  braces:
+    max-spaces-inside: 1
+
+# File modes must be quoted strings so YAML 1.1 cannot reinterpret them as octal integers.
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true

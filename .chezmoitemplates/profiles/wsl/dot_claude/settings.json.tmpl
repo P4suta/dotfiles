@@ -1,0 +1,135 @@
+{{- /*
+  Claude Code 全体権限設定 (~/.claude/settings.json)。
+
+  方針: 「お任せ開発」を成立させるため deny は最小限・的を絞った形に。
+  普通の操作は通す。
+  bypass パターンや破壊的アクションだけ落とす。
+
+  deny[] のカテゴリ (entry を grep するときの参考):
+  - Destructive filesystem ─ rm -rf 系、find -delete、xargs rm、rmdir
+  - Privilege escalation ─ sudo
+  - Git: 履歴改ざん ─ force push、hard reset、rebase -i、filter-branch、update-ref -d、clean -fd
+  - Git: 署名 bypass ─ --no-verify、--no-gpg-sign、`-c commit.gpgsign=false`、`-c core.hooksPath=`、`git config commit.gpgsign false` 等
+  - Network code execution ─ curl|sh、wget|sh
+  - Permission tampering ─ chmod 777
+  - Package install ─ brew install (人間 in the loop)
+  - Secret file read/write ─ .env、id_*, *.key, *.pem、.aws/credentials、.netrc、.npmrc、.kube/config、.docker/config.json 等
+  - dotfiles 管理対象 ─ .gitconfig、.bashrc、.profile、.claude/settings.json (この設定ファイル自身) の直接 Write/Edit
+
+  あえて deny に**入れない**もの:
+  - `Bash(git commit:*)` ─ 入れるとお任せ開発で commit 不能になる。
+    署名 bypass flag だけ deny し、normal commit は post-commit hook が裏で signed を保証する。
+  - `Bash(git config *)` ─ 広すぎる。
+    signing 関連のキーだけ的を絞る。
+  - `Bash(git reset:*)` ─ soft/mixed は便利。
+    `--hard` だけ落とす。
+
+  JSON 構造: Claude Code は file を canonical 形式に書き戻すことがある (key 順、空行除去、`/advisor` 等が advisorModel を追加など)。
+  drift を最小化するため、本テンプレも Claude Code が出力する形に合わせてある:
+  1. permissions block を最初
+  2. 他の top-level key (language / advisorModel / theme / skipAutoPermissionPrompt) を最後にまとめる
+  3. deny[] の中に blank line を入れない
+  もし `/advisor` で advisorModel を変えたい場合、`chezmoi edit ~/.claude/settings.json` で本テンプレを編集して `chezmoi apply` する (runtime の `/advisor` 変更は次回 apply で revert されるので注意)。
+
+  permission deny の表記:
+  - `Bash(<prefix>:*)` ─ <prefix> から始まる任意の Bash 起動 (空白以降の引数も含む) を deny する。
+    確実に止めたいものは prefix 形で書く。
+  */ -}}
+{
+  "permissions": {
+    "allow": [],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(rm -r:*)",
+      "Bash(rm -R:*)",
+      "Bash(rm -fr:*)",
+      "Bash(rm -fR:*)",
+      "Bash(rm -f:*)",
+      "Bash(rm --recursive:*)",
+      "Bash(rm --force:*)",
+      "Bash(rmdir:*)",
+      "Bash(sudo rm:*)",
+      "Bash(find * -delete:*)",
+      "Bash(find * -exec rm:*)",
+      "Bash(xargs rm:*)",
+      "Bash(sudo:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git rebase -i:*)",
+      "Bash(git rebase --interactive:*)",
+      "Bash(git filter-branch:*)",
+      "Bash(git filter-repo:*)",
+      "Bash(git update-ref -d:*)",
+      "Bash(git clean -fd:*)",
+      "Bash(git clean -fdx:*)",
+      "Bash(git checkout --:*)",
+      "Bash(git commit --no-verify:*)",
+      "Bash(git commit -n:*)",
+      "Bash(git commit --no-gpg-sign:*)",
+      "Bash(git -c commit.gpgsign=false:*)",
+      "Bash(git -c gpg.format=:*)",
+      "Bash(git -c core.hooksPath=:*)",
+      "Bash(git -c gpg.ssh.program=:*)",
+      "Bash(git push --no-verify:*)",
+      "Bash(git config commit.gpgsign false:*)",
+      "Bash(git config --global commit.gpgsign false:*)",
+      "Bash(git config --unset commit.gpgsign:*)",
+      "Bash(git config --unset gpg.format:*)",
+      "Bash(git config --unset gpg.ssh.allowedSignersFile:*)",
+      "Bash(git config core.hooksPath:*)",
+      "Bash(curl * | sh:*)",
+      "Bash(curl * | bash:*)",
+      "Bash(curl * |sh:*)",
+      "Bash(curl * |bash:*)",
+      "Bash(wget * | sh:*)",
+      "Bash(wget * | bash:*)",
+      "Bash(chmod 777:*)",
+      "Bash(chmod -R 777:*)",
+      "Bash(brew install:*)",
+      "Read(.env*)",
+      "Read(id_rsa*)",
+      "Read(id_ed25519*)",
+      "Read(id_ecdsa*)",
+      "Read(id_dsa*)",
+      "Read(*.key)",
+      "Read(*.pem)",
+      "Read(*.p12)",
+      "Read(*.pfx)",
+      "Read(.aws/credentials)",
+      "Read(.aws/config)",
+      "Read(.netrc)",
+      "Read(.npmrc)",
+      "Read(.kube/config)",
+      "Read(.docker/config.json)",
+      "Read(*.gpg)",
+      "Read(*.kdbx)",
+      "Write(.env*)",
+      "Write(id_rsa*)",
+      "Write(id_ed25519*)",
+      "Write(id_ecdsa*)",
+      "Write(id_dsa*)",
+      "Write(*.key)",
+      "Write(*.pem)",
+      "Write(*.p12)",
+      "Write(*.pfx)",
+      "Write(.gitconfig)",
+      "Write(.bashrc)",
+      "Write(.profile)",
+      "Write(.claude/settings.json)",
+      "Edit(.gitconfig)",
+      "Edit(.bashrc)",
+      "Edit(.profile)",
+      "Edit(.claude/settings.json)"
+    ]
+  },
+  "enabledPlugins": {
+    "rust-analyzer-lsp@claude-plugins-official": true
+  },
+  "language": "日本語",
+  "advisorModel": "opus",
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "auto",
+  "skipAutoPermissionPrompt": true
+}

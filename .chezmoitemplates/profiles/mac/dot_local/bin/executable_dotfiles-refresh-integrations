@@ -1,0 +1,2 @@
+#!/bin/sh
+exec dotfiles-xtask setup integrations --config "$HOME/.config/chezmoi/chezmoi.toml" --live "$@"

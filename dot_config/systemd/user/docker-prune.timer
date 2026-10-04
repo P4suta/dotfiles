@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly prune of unused Docker artifacts
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,17 @@
+---
+- name: Install unattended-upgrades + apt-listchanges
+  become: true
+  ansible.builtin.apt:
+    name:
+      - unattended-upgrades
+      - apt-listchanges
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable unattended-upgrades timer
+  become: true
+  ansible.builtin.systemd:
+    name: unattended-upgrades
+    enabled: true
+    state: started

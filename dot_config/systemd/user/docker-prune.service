@@ -1,0 +1,14 @@
+[Unit]
+Description=Prune unused Docker artifacts (containers, volumes, images, build cache)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker container prune -f
+# Removes any unused volume (named or anonymous) that does NOT carry the
+# `docker-prune.keep=true` label. Opt your project's Gradle/Cargo/etc. caches
+# out by adding that label to the named volume in its docker-compose.yml.
+ExecStart=/usr/bin/docker volume prune -af --filter label!=docker-prune.keep=true
+# Dangling images only (no -a): keep tagged dev images such as *-dev:latest /
+# ghcr.io/...:latest so a stopped container restarts without a re-pull/rebuild.
+ExecStart=/usr/bin/docker image prune -f --filter until=168h
+ExecStart=/usr/bin/docker buildx prune -f --filter until=72h

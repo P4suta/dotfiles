@@ -1,0 +1,46 @@
+# shellcheck shell=bash
+
+case $- in
+  *i*) ;;
+  *) return ;;
+esac
+
+HISTCONTROL=ignoreboth
+HISTSIZE=100000
+HISTFILESIZE=100000
+shopt -s histappend checkwinsize
+
+if [[ -x /opt/homebrew/bin/brew ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv || true)"
+fi
+
+# shellcheck source=dot_config/shell/ssh-agent.sh
+if [[ -r "${HOME}/.config/shell/ssh-agent.sh" ]]; then
+  . "${HOME}/.config/shell/ssh-agent.sh"
+fi
+
+if [[ -t 0 ]] && [[ -t 1 ]] \
+  && [[ -z "${DOTFILES_NO_NU:-}${DOTFILES_BASH_ONLY:-}" ]] \
+  && command -v nu >/dev/null 2>&1; then
+  exec nu
+fi
+
+if [[ -x "${HOME}/.local/bin/mise" ]]; then
+  eval "$("${HOME}/.local/bin/mise" activate bash || true)"
+fi
+
+export PATH="${HOME}/.local/bin:${PATH}"
+
+# shellcheck source=/dev/null
+if [[ -r "${HOME}/.opam/opam-init/init.sh" ]]; then
+  . "${HOME}/.opam/opam-init/init.sh" >/dev/null 2>&1 || true
+fi
+
+command -v starship >/dev/null && eval "$(starship init bash || true)"
+command -v zoxide   >/dev/null && eval "$(zoxide init bash || true)"
+command -v atuin    >/dev/null && eval "$(atuin init bash --disable-up-arrow || true)"
+command -v fzf      >/dev/null && eval "$(fzf --bash || true)"
+export FZF_DEFAULT_OPTS_FILE="${HOME}/.config/fzf/fzfrc"
+
+command -v bat   >/dev/null && export MANPAGER="sh -c 'col -bx | bat -l man -p'"
+command -v vivid >/dev/null && LS_COLORS="$(vivid generate tokyonight-night || true)" && export LS_COLORS

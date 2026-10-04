@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hourly sweep for orphaned, stopped processes left behind by dead terminals.
+  Replaces session-reaper.timer.
+
+  launchd has no EnvironmentFile, so ~/.config/session-reaper/config is sourced by the script itself rather than injected by the supervisor.
+  That also means editing the config takes effect on the next run with no `launchctl` dance.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.dotfiles.session-reaper</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{ .chezmoi.homeDir }}/.local/bin/session-reaper</string>
+    <string>reap</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>{{ .chezmoi.homeDir }}/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>StartInterval</key><integer>3600</integer>
+  <key>ThrottleInterval</key><integer>600</integer>
+  <key>RunAtLoad</key><false/>
+  <key>Nice</key><integer>10</integer>
+  <key>LowPriorityIO</key><true/>
+  <key>ProcessType</key><string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>{{ .chezmoi.homeDir }}/.local/state/dotfiles/log/session-reaper.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{ .chezmoi.homeDir }}/.local/state/dotfiles/log/session-reaper.log</string>
+</dict>
+</plist>

@@ -1,0 +1,6 @@
+---
+- name: Remove retired Orca agent development environment
+  become: true
+  ansible.builtin.apt:
+    name: orca-ide
+    state: absent

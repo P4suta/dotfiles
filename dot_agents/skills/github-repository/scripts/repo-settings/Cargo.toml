@@ -1,0 +1,23 @@
+[package]
+name = "repo-settings"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+description = "Audit, plan, apply, and verify personal GitHub repository governance"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.6", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+unfulfilled_lint_expectations = "deny"
+
+[lints.clippy]
+all = "warn"
+
+[workspace]

@@ -1,0 +1,2 @@
+#!/bin/sh
+exec {{ includeTemplate "sh_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles-xtask") }} --root {{ includeTemplate "sh_quote" .chezmoi.sourceDir }} setup claude --config {{ includeTemplate "sh_quote" .chezmoi.configFile }} --live
