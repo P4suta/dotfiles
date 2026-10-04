@@ -169,6 +169,29 @@ pub fn chezmoi(root: &Path, scope: &Path, config: &Path, destination: &Path) -> 
     command
 }
 
+/// `chezmoi managed --nul-path-separator` output; its `--format` flag does not apply to relative paths, which are always printed as text.
+pub fn managed_paths(stdout: &[u8]) -> Result<Vec<String>> {
+    stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| Ok(std::str::from_utf8(path)?.to_owned()))
+        .collect()
+}
+
+/// Managed directories with no managed file or symlink beneath them: another platform's tree leaking into this profile.
+pub fn empty_directories(directories: &[String], leaves: &[String]) -> Vec<String> {
+    directories
+        .iter()
+        .filter(|directory| {
+            !leaves.iter().any(|leaf| {
+                leaf.strip_prefix(directory.as_str())
+                    .is_some_and(|rest| rest.starts_with('/'))
+            })
+        })
+        .cloned()
+        .collect()
+}
+
 pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
     check_public(root)?;
     if let Some(report) = report {
@@ -222,6 +245,30 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
             );
         }
         crate::quality::rendered(&dump, &scope.join("syntax"))?;
+        let managed = |include: &str| -> Result<Vec<String>> {
+            let listed = output(
+                chezmoi(root, &scope, &config, &destination)
+                    .arg("--override-data")
+                    .arg(&overrides)
+                    .args([
+                        "managed",
+                        "--include",
+                        include,
+                        "--exclude",
+                        "externals",
+                        "--nul-path-separator",
+                    ]),
+                &format!("{} managed {include}", profile.name()),
+            )?;
+            managed_paths(&listed.stdout)
+        };
+        let empty = empty_directories(&managed("dirs")?, &managed("files,symlinks")?);
+        ensure!(
+            empty.is_empty(),
+            "{} profile would create or change directories it manages nothing in: {}",
+            profile.name(),
+            empty.join(", ")
+        );
         fs::write(scope.join("render.json"), &result.stdout)?;
         if let Some(report) = report {
             fs::write(
@@ -371,12 +418,14 @@ pub fn operate(
                 "files,symlinks,remove",
                 "--exclude",
                 "externals",
-                "--format",
-                "json",
+                "--nul-path-separator",
             ]),
             "list backup targets",
         )?;
-        let targets: Vec<PathBuf> = serde_json::from_slice(&listed.stdout)?;
+        let targets: Vec<PathBuf> = managed_paths(&listed.stdout)?
+            .into_iter()
+            .map(PathBuf::from)
+            .collect();
         let result = crate::transaction::apply(
             destination,
             backup,

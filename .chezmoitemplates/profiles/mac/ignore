@@ -69,3 +69,13 @@ scripts/**
 # The dotguard crate: tracked in git, built to ~/.local/bin/dotguard by run_onchange_after_setup-guard.sh, never copied into $HOME as source.
 guard
 guard/**
+
+# Directories that only hold another profile's targets in the unified source; ignoring them keeps this home from gaining empty trees or changed permissions.
+.config/fcitx5
+.config/git/template
+.config/kitty
+.config/systemd
+.config/wezterm
+.local/share
+AppData
+Documents
