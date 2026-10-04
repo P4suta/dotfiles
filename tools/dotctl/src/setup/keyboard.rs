@@ -1,6 +1,8 @@
 #![allow(unsafe_code)]
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
+
+use crate::{env, proc};
 use windows_sys::Win32::UI::Accessibility::FILTERKEYS;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     FKF_AVAILABLE, FKF_FILTERKEYSON, SPI_GETFILTERKEYS, SPI_SETFILTERKEYS, SPI_SETKEYBOARDDELAY,
@@ -10,6 +12,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 const LEGACY_FILTER_KEYS_FLAGS: u32 = FKF_FILTERKEYSON | FKF_AVAILABLE;
 const LEGACY_AUTO_REPEAT_DELAY_MS: u32 = 150;
 const LEGACY_AUTO_REPEAT_RATE_MS: u32 = 15;
+const ERROR_REQUIRES_INTERACTIVE_WINDOWSTATION: i32 = 1459;
 
 #[derive(Debug)]
 pub struct Options {
@@ -40,7 +43,20 @@ pub fn run(options: &Options) -> Result<i32> {
             persist,
         ) == 0
         {
-            bail!("SPI_SETKEYBOARDDELAY: {}", std::io::Error::last_os_error());
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(ERROR_REQUIRES_INTERACTIVE_WINDOWSTATION) {
+                bail!("SPI_SETKEYBOARDDELAY: {error}");
+            }
+            // A remote session has no desktop to notify; the user profile carries the same settings into the next sign-in.
+            for (key, value, data) in
+                registry_values(options, disable_legacy_filter_keys.then_some(keys.dwFlags))
+            {
+                let mut cmd = env::command("reg.exe");
+                cmd.args(["add", key, "/v", value, "/t", "REG_SZ", "/d", &data, "/f"]);
+                proc::capture_ok(&mut cmd).with_context(|| format!("setting {key}\\{value}"))?;
+            }
+            println!("    no interactive desktop: saved for the next sign-in");
+            return Ok(0);
         }
         if SystemParametersInfoW(
             SPI_SETKEYBOARDSPEED,
@@ -63,6 +79,33 @@ pub fn run(options: &Options) -> Result<i32> {
         }
     }
     Ok(0)
+}
+
+/// The per-user registry values `SystemParametersInfoW` would persist for these settings.
+fn registry_values(
+    options: &Options,
+    filter_keys_flags: Option<u32>,
+) -> Vec<(&'static str, &'static str, String)> {
+    let mut values = vec![
+        (
+            r"HKCU\Control Panel\Keyboard",
+            "KeyboardDelay",
+            options.keyboard_delay.to_string(),
+        ),
+        (
+            r"HKCU\Control Panel\Keyboard",
+            "KeyboardSpeed",
+            options.keyboard_speed.to_string(),
+        ),
+    ];
+    if let Some(flags) = filter_keys_flags {
+        values.push((
+            r"HKCU\Control Panel\Accessibility\Keyboard Response",
+            "Flags",
+            flags.to_string(),
+        ));
+    }
+    values
 }
 
 fn get_filter_keys() -> Result<FILTERKEYS> {
@@ -97,6 +140,37 @@ fn disable_managed_filter_keys(keys: &mut FILTERKEYS) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_sessions_persist_the_same_settings_in_the_user_profile() {
+        let options = Options {
+            keyboard_delay: 0,
+            keyboard_speed: 31,
+        };
+        assert_eq!(
+            registry_values(&options, None),
+            [
+                (
+                    r"HKCU\Control Panel\Keyboard",
+                    "KeyboardDelay",
+                    "0".to_owned()
+                ),
+                (
+                    r"HKCU\Control Panel\Keyboard",
+                    "KeyboardSpeed",
+                    "31".to_owned()
+                ),
+            ]
+        );
+        assert_eq!(
+            registry_values(&options, Some(FKF_AVAILABLE)).last(),
+            Some(&(
+                r"HKCU\Control Panel\Accessibility\Keyboard Response",
+                "Flags",
+                FKF_AVAILABLE.to_string()
+            ))
+        );
+    }
     use windows_sys::Win32::UI::WindowsAndMessaging::FKF_HOTKEYACTIVE;
 
     fn legacy_filter_keys() -> FILTERKEYS {
