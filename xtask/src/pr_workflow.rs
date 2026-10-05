@@ -2,6 +2,8 @@ use crate::pr_rules::{
     Checks, Effect, Generation, IssueGate, Operation, api_quota_available, checks_state,
     coderabbit_body_marker_allowed, issue_gate, plan,
 };
+use crate::prose::Publication::{Issue as ISSUE, PullRequest as PULL_REQUEST};
+use crate::prose_rules::standard_applies;
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use clap::{Args, Parser, Subcommand};
@@ -81,6 +83,43 @@ pub enum Action {
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
         pr: u64,
     },
+    /// Check, create, or edit an issue through the same document and writing checks.
+    Issue {
+        #[command(subcommand)]
+        action: IssueAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum IssueAction {
+    /// Check a local issue title and body without mutation.
+    Check {
+        #[command(flatten)]
+        document: IssueDocument,
+    },
+    /// Open an issue with the checked title and body.
+    Create {
+        #[command(flatten)]
+        document: IssueDocument,
+    },
+    /// Replace the title and body of an existing issue.
+    Edit {
+        #[command(flatten)]
+        document: IssueDocument,
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        number: u64,
+    },
+}
+
+#[derive(Args)]
+pub struct IssueDocument {
+    /// Exact GitHub OWNER/REPO; no URL or inferred repository.
+    #[arg(long)]
+    repo: String,
+    #[arg(long)]
+    title: String,
+    #[arg(long)]
+    body_file: PathBuf,
 }
 
 #[derive(Args)]
@@ -180,6 +219,23 @@ struct Github {
 struct Owner {
     login: String,
     id: u64,
+}
+
+#[derive(Clone, Copy)]
+struct Destination {
+    personal: bool,
+    fork: bool,
+}
+
+fn workflow_policy() -> Result<WorkflowPolicy> {
+    let policy: WorkflowPolicy = serde_json::from_str(include_str!(
+        "../../dot_agents/skills/pull-request/assets/workflow-policy.json"
+    ))?;
+    ensure!(
+        policy.schema == 1 && policy.minimum_remaining > 0 && !policy.personal_owners.is_empty(),
+        "invalid global workflow policy"
+    );
+    Ok(policy)
 }
 
 #[derive(Deserialize)]
@@ -419,17 +475,68 @@ pub fn validate(
 fn read_document(document: DocumentArgs, final_check: bool) -> Result<(Target, ValidatedDocument)> {
     let body = fs::read_to_string(&document.body_file).context("read UTF-8 PR body file")?;
     let validated = validate(&document.target, document.title, body, final_check)?;
-    written_to_standard(&validated)?;
     Ok((document.target, validated))
 }
 
-/// Refuses a title or body that fails the installed prose checker.
-fn written_to_standard(document: &ValidatedDocument) -> Result<()> {
+/// Refuses a title or body that fails the installed prose checker when the destination takes the personal writing standard.
+fn written_to_standard(
+    destination: Destination,
+    kind: crate::prose::Publication,
+    document: &ValidatedDocument,
+) -> Result<()> {
+    if !standard_applies(destination.personal, destination.fork) {
+        return Ok(());
+    }
     crate::prose::check_publication(
         &crate::prose::Bundle::installed()?,
+        kind,
         &document.title,
         &document.body,
     )
+}
+
+/// The destination as far as an offline check can see it: its owner login, with fork status unknown.
+fn offline_destination(repo: &str) -> Result<Destination> {
+    let policy = workflow_policy()?;
+    let owner = repo.split('/').next().unwrap_or_default();
+    Ok(Destination {
+        personal: policy
+            .personal_owners
+            .iter()
+            .any(|personal| personal.login.eq_ignore_ascii_case(owner)),
+        fork: false,
+    })
+}
+
+/// Validates an issue title and body with the checks a PR document receives, apart from title syntax.
+fn validate_issue(document: &IssueDocument) -> Result<ValidatedDocument> {
+    let target = Target {
+        repo: document.repo.clone(),
+        generation: Generation::Local,
+        title_policy: None,
+        issue: None,
+    };
+    target.conventional_required()?;
+    let body = fs::read_to_string(&document.body_file).context("read UTF-8 issue body file")?;
+    ensure!(
+        single_line(&document.title)
+            && document.title.trim() == document.title
+            && !unfinished(&document.title),
+        "the issue title must be a finished single line without surrounding whitespace"
+    );
+    let visible = without_comments(&body);
+    ensure!(
+        !visible.trim().is_empty() && !unfinished(&prose(&visible)),
+        "the issue body is empty, holds only comments, or contains an unfinished placeholder"
+    );
+    ensure!(
+        !body.contains(TITLE_REQUEST) && !document.title.contains(TITLE_REQUEST),
+        "an issue cannot request CodeRabbit generation"
+    );
+    Ok(ValidatedDocument {
+        title: document.title.clone(),
+        body,
+    })
 }
 
 fn gh(args: &[OsString]) -> Result<String> {
@@ -451,16 +558,9 @@ fn gh(args: &[OsString]) -> Result<String> {
 impl Github {
     /// Require a live authenticated user without printing or transferring credentials.
     fn connect() -> Result<Self> {
-        let policy: WorkflowPolicy = serde_json::from_str(include_str!(
-            "../../dot_agents/skills/pull-request/assets/workflow-policy.json"
-        ))?;
-        ensure!(
-            policy.schema == 1
-                && policy.minimum_remaining > 0
-                && !policy.personal_owners.is_empty(),
-            "invalid global workflow policy"
-        );
-        let github = Self { policy };
+        let github = Self {
+            policy: workflow_policy()?,
+        };
         let user: Owner = github.read("user").context(
             "authenticated GitHub access is required; use gh auth login --hostname github.com",
         )?;
@@ -558,17 +658,16 @@ fn references_issue(body: &str, repo: &str, issue: u64) -> bool {
     })
 }
 
-/// Establish the global personal scope and validate an explicitly selected issue.
-fn inspect_issue(github: &Github, target: &Target, body: Option<&str>) -> Result<IssueGate> {
-    target.conventional_required()?;
-    let repository: Repository = github.read(&format!("repos/{}", target.repo))?;
+/// Establish the global personal scope and fork status of the live destination.
+fn destination(github: &Github, repo: &str) -> Result<Destination> {
+    let repository: Repository = github.read(&format!("repos/{repo}"))?;
     ensure!(
-        repository.full_name.eq_ignore_ascii_case(&target.repo)
+        repository.full_name.eq_ignore_ascii_case(repo)
             && repository.owner.id != 0
             && repository
                 .owner
                 .login
-                .eq_ignore_ascii_case(target.repo.split('/').next().unwrap()),
+                .eq_ignore_ascii_case(repo.split('/').next().unwrap()),
         "repository identity differs from the requested destination"
     );
     let mut personal = false;
@@ -585,8 +684,22 @@ fn inspect_issue(github: &Github, target: &Target, body: Option<&str>) -> Result
         );
         personal |= id_matches;
     }
+    Ok(Destination {
+        personal,
+        fork: repository.fork,
+    })
+}
+
+/// Check an explicitly selected issue in the live destination.
+fn inspect_issue(
+    github: &Github,
+    target: &Target,
+    destination: Destination,
+    body: Option<&str>,
+) -> Result<IssueGate> {
+    target.conventional_required()?;
     let Some(number) = target.issue else {
-        return Ok(issue_gate(personal, repository.fork, false));
+        return Ok(issue_gate(destination.personal, destination.fork, false));
     };
     let issue: LiveIssue = github.read(&format!("repos/{}/issues/{number}", target.repo))?;
     ensure!(
@@ -617,7 +730,7 @@ fn inspect_issue(github: &Github, target: &Target, body: Option<&str>) -> Result
             "PR body must visibly close the selected issue, for example: Closes #{number}."
         );
     }
-    Ok(issue_gate(personal, repository.fork, true))
+    Ok(issue_gate(destination.personal, destination.fork, true))
 }
 
 fn require_issue(gate: IssueGate) -> Result<()> {
@@ -675,7 +788,8 @@ pub fn run(action: Action) -> Result<()> {
         Action::Start { target } => {
             target.conventional_required()?;
             let github = Github::connect()?;
-            let gate = inspect_issue(&github, &target, None)?;
+            let destination = destination(&github, &target.repo)?;
+            let gate = inspect_issue(&github, &target, destination, None)?;
             require_issue(gate)?;
             println!(
                 "Repository prerequisites accepted ({gate:?}); inspect the destination rules and issue scope before implementation"
@@ -693,10 +807,17 @@ pub fn run(action: Action) -> Result<()> {
                 let github = Github::connect()?;
                 let live = live_document(&github, &target, pr)?;
                 let document = validate(&target, live.title, live.body, r#final)?;
-                written_to_standard(&document)?;
-                require_issue(inspect_issue(&github, &target, Some(&document.body))?)?;
+                let destination = destination(&github, &target.repo)?;
+                written_to_standard(destination, PULL_REQUEST, &document)?;
+                require_issue(inspect_issue(
+                    &github,
+                    &target,
+                    destination,
+                    Some(&document.body),
+                )?)?;
             } else {
-                read_document(
+                let destination = offline_destination(&target.repo)?;
+                let (_, document) = read_document(
                     DocumentArgs {
                         target,
                         title: title.context("title required")?,
@@ -704,6 +825,7 @@ pub fn run(action: Action) -> Result<()> {
                     },
                     r#final,
                 )?;
+                written_to_standard(destination, PULL_REQUEST, &document)?;
             }
             println!(
                 "PR document accepted; local-file checks do not inspect issues and validation claims still require execution evidence"
@@ -721,7 +843,9 @@ pub fn run(action: Action) -> Result<()> {
                 branch(base)?;
             }
             let github = Github::connect()?;
-            let issue = inspect_issue(&github, &target, Some(&document.body))?;
+            let destination = destination(&github, &target.repo)?;
+            written_to_standard(destination, PULL_REQUEST, &document)?;
+            let issue = inspect_issue(&github, &target, destination, Some(&document.body))?;
             require_issue(issue)?;
             let effect = plan(
                 Operation::Create,
@@ -746,7 +870,9 @@ pub fn run(action: Action) -> Result<()> {
         Action::Edit { document, pr } => {
             let (target, document) = read_document(document, false)?;
             let github = Github::connect()?;
-            let issue = inspect_issue(&github, &target, Some(&document.body))?;
+            let destination = destination(&github, &target.repo)?;
+            written_to_standard(destination, PULL_REQUEST, &document)?;
+            let issue = inspect_issue(&github, &target, destination, Some(&document.body))?;
             require_issue(issue)?;
             ensure!(
                 plan(
@@ -775,7 +901,8 @@ pub fn run(action: Action) -> Result<()> {
             let live = live_document(&github, &target, pr)?;
             ensure!(live.state == "OPEN", "only an open PR can become ready");
             let document = validate(&target, live.title, live.body, false)?;
-            let issue = inspect_issue(&github, &target, Some(&document.body))?;
+            let destination = destination(&github, &target.repo)?;
+            let issue = inspect_issue(&github, &target, destination, Some(&document.body))?;
             require_issue(issue)?;
             ensure!(live.is_draft, "only a validated draft can become ready");
             ensure!(
@@ -793,7 +920,33 @@ pub fn run(action: Action) -> Result<()> {
             args.push(pr.to_string().into());
             print!("{}", gh(&args)?);
         }
+        Action::Issue { action } => issue(action)?,
     }
+    Ok(())
+}
+
+fn issue(action: IssueAction) -> Result<()> {
+    let (document, number) = match action {
+        IssueAction::Check { document } => {
+            let validated = validate_issue(&document)?;
+            written_to_standard(offline_destination(&document.repo)?, ISSUE, &validated)?;
+            println!("Issue document accepted");
+            return Ok(());
+        }
+        IssueAction::Create { document } => (document, None),
+        IssueAction::Edit { document, number } => (document, Some(number)),
+    };
+    let validated = validate_issue(&document)?;
+    let github = Github::connect()?;
+    written_to_standard(destination(&github, &document.repo)?, ISSUE, &validated)?;
+    let mut args: Vec<OsString> = vec!["issue".into()];
+    match number {
+        Some(number) => args.extend(["edit".into(), number.to_string().into()]),
+        None => args.push("create".into()),
+    }
+    args.extend(["--repo".into(), OsString::from(&document.repo)]);
+    let _body = write_document(&mut args, &validated)?;
+    print!("{}", gh(&args)?);
     Ok(())
 }
 

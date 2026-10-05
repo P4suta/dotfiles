@@ -70,7 +70,8 @@ impl Fixture {
             .env("GH_FIXTURE_REPOSITORY", serde_json::json!({
                 "full_name":repo,"owner":{"login":repo.split('/').next().unwrap(),"id":1},"fork":false
             }).to_string())
-            .args([operation, "--repo", repo]);
+            .args(operation.split(' '))
+            .args(["--repo", repo]);
         Ok(command)
     }
 
@@ -470,20 +471,153 @@ fn invalid_documents_never_start_gh_and_check_has_no_effects() -> Result<()> {
 }
 
 #[test]
-fn prose_violations_never_start_gh() -> Result<()> {
+fn personal_destinations_refuse_prose_violations_before_publication() -> Result<()> {
     let fixture = Fixture::new(
         "## Why
 As the owner requested, the parser keeps edits.
+
+Closes #23.
 ",
     )?;
     for action in ["check", "create", "edit"] {
-        let output = fixture.document(action, "fix: preserve edits")?;
+        let output = fixture
+            .personal_command(action)?
+            .args(["--title", "fix: preserve edits", "--body-file"])
+            .arg(&fixture.body)
+            .args(match action {
+                "create" => vec!["--issue", "23", "--head", "feature"],
+                "edit" => vec!["--issue", "23", "--pr", "17"],
+                _ => vec![],
+            })
+            .output()?;
         assert!(!output.status.success(), "{action}");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("Dotfiles.Attribution"), "{stderr}");
         assert!(stderr.contains("As the owner requested, the parser keeps edits."));
-        assert!(!fixture.log.try_exists()?);
+        assert!(stderr.contains("pr-workflow check"), "{stderr}");
+        let log = if fixture.log.try_exists()? {
+            fixture.log()?
+        } else {
+            String::new()
+        };
+        assert!(
+            !log.contains("\ncreate\n") && !log.contains("\nedit\n"),
+            "{log}"
+        );
+        if action == "check" {
+            assert!(log.is_empty(), "the local check stays offline");
+        }
     }
+    Ok(())
+}
+
+#[test]
+fn external_destinations_and_forks_keep_their_own_writing_rules() -> Result<()> {
+    let template = "## Checklist\nI have read the contributing guide, and we don't skip tests.\n";
+    let fixture = Fixture::new(template)?;
+    for action in ["check", "create", "edit"] {
+        let output = fixture.document(action, "fix: preserve edits")?;
+        assert!(
+            output.status.success(),
+            "{action}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let fork = serde_json::json!({
+        "full_name":"P4suta/project","owner":{"login":"P4suta","id":42543015},"fork":true
+    });
+    let output = fixture
+        .personal_command("create")?
+        .env("GH_FIXTURE_REPOSITORY", fork.to_string())
+        .args(["--title", "fix: preserve edits", "--body-file"])
+        .arg(&fixture.body)
+        .args(["--head", "feature"])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(fixture.log()?.contains("\ncreate\n"));
+    Ok(())
+}
+
+#[test]
+fn issue_bodies_pass_the_checker_before_gh_publishes_them() -> Result<()> {
+    let refused = Fixture::new("As the owner requested, the parser keeps edits.\n")?;
+    for (action, extra) in [
+        ("check", vec![]),
+        ("create", vec![]),
+        ("edit", vec!["--number", "23"]),
+    ] {
+        let output = refused
+            .personal_command(&format!("issue {action}"))?
+            .args(["--title", "Keep edits", "--body-file"])
+            .arg(&refused.body)
+            .args(&extra)
+            .output()?;
+        assert!(!output.status.success(), "{action}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Dotfiles.Attribution")
+                && stderr.contains("As the owner requested, the parser keeps edits.")
+                && stderr.contains("pr-workflow issue check"),
+            "{stderr}"
+        );
+        let log = if refused.log.try_exists()? {
+            refused.log()?
+        } else {
+            String::new()
+        };
+        assert!(!log.contains("\nissue\n"), "{log}");
+    }
+    let unfinished = Fixture::new("TODO\n")?;
+    let output = unfinished
+        .personal_command("issue create")?
+        .args(["--title", "Keep edits", "--body-file"])
+        .arg(&unfinished.body)
+        .output()?;
+    assert!(!output.status.success());
+    assert!(!unfinished.log.try_exists()?);
+    let accepted = Fixture::new("The parser keeps every edit.\n")?;
+    for (action, extra) in [
+        ("check", vec![]),
+        ("create", vec![]),
+        ("edit", vec!["--number", "23"]),
+    ] {
+        let output = accepted
+            .personal_command(&format!("issue {action}"))?
+            .args(["--title", "Keep edits", "--body-file"])
+            .arg(&accepted.body)
+            .args(&extra)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{action}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let log = accepted.log()?;
+    assert!(
+        log.contains("issue\ncreate\n--repo\nP4suta/project"),
+        "{log}"
+    );
+    assert!(
+        log.contains("issue\nedit\n23\n--repo\nP4suta/project"),
+        "{log}"
+    );
+    assert!(log.contains("body:\nThe parser keeps every edit."), "{log}");
+    let external = Fixture::new("I have read the contributing guide.\n")?;
+    let output = external
+        .command("issue create")?
+        .args(["--title", "Keep edits", "--body-file"])
+        .arg(&external.body)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     Ok(())
 }
 

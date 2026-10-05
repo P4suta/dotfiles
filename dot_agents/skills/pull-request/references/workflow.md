@@ -2,7 +2,7 @@
 
 The dotfiles Rust xtask provides the installed `pr-workflow` executable and the same implementation under its `pr-workflow` subcommand.
 Install through the maintained `mise run install:pr-workflow` task from the reviewed dotfiles checkout.
-The `check`, `create`, and `edit` commands also need the prose checker from `mise run install:prose`.
+For a personal destination, the `check`, `create`, `edit`, and `issue` commands also need the prose checker from `mise run install:prose`.
 Use the installed native executable from any destination repository; it requires the destination host's own authenticated `gh` session.
 The command always takes an exact `OWNER/REPO` and never infers a publication target.
 Its GitHub host is `github.com`, including when another `GH_HOST` is inherited.
@@ -22,8 +22,15 @@ pr-workflow start --repo upstream/project
 Preparation is read-only and checks the issue before implementation.
 Use `gh issue view` to read its problem, scope, and acceptance criteria; the command checks existence, identity, open state, and mechanically incomplete content.
 It does not require fixed issue headings or assess the quality of the prose.
-Issue creation is a separate authorized `gh issue create` operation; the checker never opens an issue automatically.
-Run `prose check --channel issue --title TITLE BODY_FILE` on an issue before creating it.
+Opening an issue takes its own authorization, and preparation never opens one.
+`pr-workflow issue check`, `create`, and `edit` refuse an empty or unfinished issue document before `gh` publishes it.
+For a personal non-fork destination, they also refuse a title or body that fails the prose checker.
+
+```console
+pr-workflow issue check --repo P4suta/project --title "Keep edits" --body-file issue.md
+pr-workflow issue create --repo P4suta/project --title "Keep edits" --body-file issue.md
+pr-workflow issue edit --repo P4suta/project --number 23 --title "Keep edits" --body-file issue.md
+```
 
 For personal non-fork repositories, pass `--issue NUMBER` to create, edit, ready, and live checks, and put `Closes #NUMBER.` or an equivalent GitHub closing reference in the PR body.
 Full issue URLs and Markdown links are accepted only for the selected issue in the exact destination.
@@ -37,6 +44,8 @@ Successful access to a public repository alone does not establish authentication
 Every REST prerequisite response includes headers; missing or invalid quota evidence and a remaining count below the policy's nonzero reserve stop further work.
 These reads run serially, authenticate once per command, and never add a separate quota poll or automatic retry.
 Offline document checks use no API calls or authentication.
+Without fork status, an offline check applies the writing standard to every repository of a personal owner.
+The `create` and `edit` commands and the live check apply it only to a personal non-fork destination.
 
 GitHub's [REST rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) distinguish authenticated usage from the smaller anonymous allowance and also impose secondary limits.
 Use actual response headers and diagnostics rather than assuming an exact account-wide remaining count.

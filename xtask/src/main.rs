@@ -138,7 +138,7 @@ enum Action {
     InstallReviewGuard,
     InstallSkillOps,
     InstallPrWorkflow,
-    /// Install the prose checker, its pinned linters, and the agent reply hooks.
+    /// Install the prose checker, its pinned linters, and the reply hook of each client.
     InstallProse,
     PrWorkflow {
         #[command(subcommand)]

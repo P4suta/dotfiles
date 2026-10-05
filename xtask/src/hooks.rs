@@ -152,6 +152,16 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
         command.arg(hook.name()).args(arguments);
         piped(&mut command, &input)?;
     }
+    if matches!(hook, Hook::CommitMsg) {
+        let message = arguments
+            .first()
+            .context("the commit-msg hook needs the message file")?;
+        crate::prose::commit_gate(
+            &std::env::current_dir()?,
+            Path::new(message),
+            crate::prose::Bundle::installed,
+        )?;
+    }
     if matches!(hook, Hook::PreCommit) {
         let global = native.home.join(".config/lefthook/global.yml");
         if global.is_file() {

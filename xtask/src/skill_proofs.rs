@@ -59,10 +59,12 @@ pub const REVIEW_HARNESSES: [&str; 5] = [
     "rolling_attempts_cannot_exceed_the_layered_local_budget",
 ];
 
-pub const PROSE_HARNESSES: [&str; 4] = [
+pub const PROSE_HARNESSES: [&str; 6] = [
     "a_ledger_never_admits_more_findings_than_it_allows",
+    "a_replaced_sentence_is_never_admitted_by_the_ledger",
     "exemptions_require_a_reason_and_a_match",
     "failing_replies_are_rewritten_once_and_never_allowed",
+    "only_personal_non_fork_destinations_take_the_standard",
     "tightening_never_raises_an_allowance",
 ];
 
@@ -442,12 +444,15 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_a_ledger_that_admits_a_new_finding() {{\n    assert!(production::ledger(3, 2) == production::Ledger::Within);\n}}\n#[kani::proof]\nfn reject_allowing_a_failing_reply() {{\n    assert!(production::reply(false, false) == production::Reply::Allow);\n}}\n"
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_a_ledger_that_admits_a_new_finding() {{\n    assert!(production::ledger(3, 2) == production::Ledger::Within);\n}}\n#[kani::proof]\nfn reject_allowing_a_failing_reply() {{\n    assert!(production::reply(false, false) == production::Reply::Allow);\n}}\n#[kani::proof]\nfn reject_admitting_a_replaced_sentence() {{\n    assert!(production::ledger(production::occurrences(&[2u8], &2), production::occurrences(&[1u8], &2)) == production::Ledger::Within);\n}}\n#[kani::proof]\nfn reject_ending_after_another_hooks_continuation() {{\n    assert!(production::reply(false, production::rewritten_by_this_hook(true, Some(false))) == production::Reply::EndUnchecked);\n}}\n#[kani::proof]\nfn reject_the_standard_on_a_fork() {{\n    assert!(production::standard_applies(true, true));\n}}\n"
         ),
     )?;
     for name in [
         "reject_a_ledger_that_admits_a_new_finding",
         "reject_allowing_a_failing_reply",
+        "reject_admitting_a_replaced_sentence",
+        "reject_ending_after_another_hooks_continuation",
+        "reject_the_standard_on_a_fork",
     ] {
         verify_file(&file, probe.path(), &[name], true)?;
     }

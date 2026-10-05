@@ -42,6 +42,10 @@ paths = ["**/*.json.tmpl"]
 language = "jsonc"
 
 [[overrides]]
+paths = ["**/*.lua.tmpl"]
+language = "lua"
+
+[[overrides]]
 paths = [
   "dot_config/dev-reaper/config.tmpl",
   "dot_config/session-reaper/config.tmpl",
@@ -58,6 +62,13 @@ language = "toml"
 paths = [
   "dot_bashrc.tmpl",
   "dot_profile.tmpl",
+  ".chezmoitemplates/profiles/linux/dot_bashrc.tmpl",
+  ".chezmoitemplates/profiles/linux/dot_profile.tmpl",
+  ".chezmoitemplates/profiles/mac/dot_bashrc",
+  ".chezmoitemplates/profiles/mac/dot_zprofile.tmpl",
+  ".chezmoitemplates/profiles/mac/dot_zshrc.tmpl",
+  ".chezmoitemplates/profiles/wsl/dot_bashrc.tmpl",
+  "**/*.sh.tmpl",
   "**/*.nu",
   "**/*.nu.tmpl",
   "justfile",

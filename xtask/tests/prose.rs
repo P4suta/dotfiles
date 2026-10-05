@@ -235,6 +235,25 @@ fn claude_and_codex_hooks_request_one_rewrite_of_a_failing_reply() -> Result<()>
         let (_, stdout, _) = binary(&arguments, &passing.to_string(), runtime.path())?;
         assert_eq!(serde_json::from_str::<Value>(&stdout)?, json!({}));
     }
+    let session = |active: bool| {
+        json!({"session_id": "session-1", "last_assistant_message": ATTRIBUTED, "stop_hook_active": active})
+            .to_string()
+    };
+    let arguments = ["reply", "--client", "claude"];
+    let (_, stdout, _) = binary(&arguments, &session(true), runtime.path())?;
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout)?["decision"],
+        "block",
+        "another hook's continuation still earns one rewrite request"
+    );
+    let (_, stdout, _) = binary(&arguments, &session(true), runtime.path())?;
+    assert_eq!(serde_json::from_str::<Value>(&stdout)?["continue"], false);
+    let (_, stdout, _) = binary(&arguments, &session(true), runtime.path())?;
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout)?["decision"],
+        "block",
+        "ending the turn clears this hook's mark"
+    );
     let missing = tempfile::tempdir()?;
     let mut command = Command::new(env!("CARGO_BIN_EXE_prose"));
     let output = command
@@ -336,11 +355,11 @@ fn the_opencode_plugin_requests_one_rewrite_through_the_native_checker() -> Resu
     let bun = PathBuf::from(String::from_utf8(runtime.stdout)?.trim());
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/opencode-prose.ts");
     let empty = tempfile::tempdir()?;
-    let run = |reply: &str| -> Result<Vec<String>> {
+    let run_with = |executable: &Path, reply: &str| -> Result<(Vec<String>, Vec<String>)> {
         let output = Command::new(&bun)
             .current_dir(root())
             .arg(&fixture)
-            .arg(env!("CARGO_BIN_EXE_prose"))
+            .arg(executable)
             .arg(reply)
             .env("PROSE_CONFIG", root().join("dot_config/prose"))
             .env("PROSE_RUNTIME", empty.path())
@@ -350,38 +369,61 @@ fn the_opencode_plugin_requests_one_rewrite_through_the_native_checker() -> Resu
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        Ok(serde_json::from_slice(&output.stdout)?)
+        let result: Value = serde_json::from_slice(&output.stdout)?;
+        let list = |name: &str| -> Vec<String> {
+            result[name]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect()
+        };
+        Ok((list("prompts"), list("toasts")))
     };
-    let prompts = run(ATTRIBUTED)?;
+    let run = |reply: &str| run_with(Path::new(env!("CARGO_BIN_EXE_prose")), reply);
+    let (prompts, toasts) = run(ATTRIBUTED)?;
     assert_eq!(prompts.len(), 1, "{prompts:?}");
     assert!(prompts[0].contains("Dotfiles.Attribution") && prompts[0].contains(ATTRIBUTED));
-    assert_eq!(run(COMPLIANT)?, Vec::<String>::new());
+    assert_eq!(
+        toasts.len(),
+        1,
+        "the second failure shows its findings: {toasts:?}"
+    );
+    assert!(toasts[0].contains("Dotfiles.Attribution") && toasts[0].contains(ATTRIBUTED));
+    assert_eq!(run(COMPLIANT)?, (Vec::new(), Vec::new()));
+    let missing = empty.path().join("bin").join("prose");
+    let (prompts, toasts) = run_with(&missing, ATTRIBUTED)?;
+    assert!(prompts.is_empty(), "{prompts:?}");
+    assert_eq!(toasts.len(), 1, "{toasts:?}");
+    assert!(toasts[0].contains("mise run install:prose"));
     Ok(())
 }
 
-fn finding(path: &str, rule: &str) -> Finding {
+fn finding(path: &str, rule: &str, sentence: &str) -> Finding {
     Finding {
         path: path.into(),
         line: 1,
         column: 1,
         rule: rule.into(),
         message: "message".into(),
-        sentence: "Sentence.".into(),
+        sentence: sentence.into(),
     }
 }
 
-fn policy(exempt: Vec<Exempt>, allowed: &[(&str, &str, u32)]) -> Policy {
+fn policy(exempt: Vec<Exempt>, recorded: &[(&str, &str, &str)]) -> Policy {
     let mut ledger = LegacyLedger {
         reason: "Written before the standard.".into(),
         documents: Default::default(),
         comments: Default::default(),
     };
-    for (path, rule, count) in allowed {
+    for (path, rule, sentence) in recorded {
         ledger
             .documents
             .entry((*path).into())
             .or_default()
-            .insert((*rule).into(), *count);
+            .entry((*rule).into())
+            .or_default()
+            .push(prose::fingerprint(sentence));
     }
     Policy {
         exempt,
@@ -390,29 +432,48 @@ fn policy(exempt: Vec<Exempt>, allowed: &[(&str, &str, u32)]) -> Policy {
 }
 
 #[test]
-fn the_ledger_refuses_new_findings_stale_counts_and_unused_exemptions() {
+fn the_ledger_admits_only_the_recorded_sentences() {
     let judge = |findings: Vec<Finding>, mut policy: Policy| {
         let used = vec![false; policy.exempt.len()];
         prose::judge(Scope::Documents, findings, &mut policy, used)
     };
-    let two = vec![
-        finding("a.md", "Google.Passive"),
-        finding("a.md", "Google.Passive"),
+    let old = "The index is read by the parser.";
+    let new = "The cache is filled by the loader.";
+    let recorded = [
+        ("a.md", "Google.Passive", old),
+        ("a.md", "Google.Passive", old),
     ];
+    let two = vec![
+        finding("a.md", "Google.Passive", old),
+        finding("a.md", "Google.Passive", old),
+    ];
+    assert!(judge(two.clone(), policy(vec![], &recorded)).is_empty());
+    let replaced = judge(
+        vec![
+            finding("a.md", "Google.Passive", old),
+            finding("a.md", "Google.Passive", new),
+        ],
+        policy(vec![], &recorded),
+    );
+    assert_eq!(replaced.len(), 2, "{replaced:?}");
     assert!(
-        judge(
-            two.clone(),
-            policy(vec![], &[("a.md", "Google.Passive", 2)])
-        )
-        .is_empty()
+        replaced[0].contains(new)
+            && !replaced[0].contains(old)
+            && replaced[0].contains("just prose"),
+        "{}",
+        replaced[0]
     );
-    let exceeded = judge(
-        two.clone(),
-        policy(vec![], &[("a.md", "Google.Passive", 1)]),
+    assert!(
+        replaced[1].contains(&prose::fingerprint(old))
+            && replaced[1].contains("just prose-tighten")
     );
-    assert!(exceeded[0].contains("allows 1") && exceeded[0].contains("just prose"));
-    let stale = judge(two, policy(vec![], &[("a.md", "Google.Passive", 3)]));
-    assert!(stale[0].contains("just prose-tighten"));
+    let exceeded = judge(two.clone(), policy(vec![], &recorded[..1]));
+    assert!(exceeded[0].contains(old) && exceeded[0].contains("does not record"));
+    let other_rule = judge(
+        vec![finding("a.md", "Google.We", old)],
+        policy(vec![], &recorded[..1]),
+    );
+    assert_eq!(other_rule.len(), 2, "{other_rule:?}");
     let exempt = |reason: &str| Exempt {
         scope: Scope::Documents,
         paths: vec!["vendor/".into()],
@@ -421,7 +482,7 @@ fn the_ledger_refuses_new_findings_stale_counts_and_unused_exemptions() {
     };
     assert!(
         judge(
-            vec![finding("vendor/a.md", "Google.Passive")],
+            vec![finding("vendor/a.md", "Google.Passive", old)],
             policy(vec![exempt("Upstream text.")], &[])
         )
         .is_empty()
@@ -432,7 +493,7 @@ fn the_ledger_refuses_new_findings_stale_counts_and_unused_exemptions() {
     );
     assert_eq!(
         judge(
-            vec![finding("vendor/a.md", "Google.Passive")],
+            vec![finding("vendor/a.md", "Google.Passive", old)],
             policy(vec![exempt(" ")], &[])
         )
         .len(),
@@ -440,7 +501,7 @@ fn the_ledger_refuses_new_findings_stale_counts_and_unused_exemptions() {
     );
     assert_eq!(
         judge(
-            vec![finding("vendor.md", "Google.Passive")],
+            vec![finding("vendor.md", "Google.Passive", old)],
             policy(vec![exempt("Upstream text.")], &[])
         )
         .len(),
@@ -452,6 +513,17 @@ fn the_ledger_refuses_new_findings_stale_counts_and_unused_exemptions() {
 fn the_repository_policy_parses_and_names_reasons() -> Result<()> {
     let policy = prose::read_policy(&root())?;
     assert!(!policy.legacy.reason.trim().is_empty());
+    for entries in [&policy.legacy.documents, &policy.legacy.comments] {
+        for rules in entries.values() {
+            for fingerprints in rules.values() {
+                assert!(
+                    fingerprints
+                        .iter()
+                        .all(|fingerprint| fingerprint.len() == 16)
+                );
+            }
+        }
+    }
     assert!(
         policy
             .exempt
@@ -467,19 +539,7 @@ fn a_changed_style_package_or_a_missing_configuration_is_refused() -> Result<()>
     bundle.verify()?;
     let copy = tempfile::tempdir()?;
     let config = copy.path().join("dot_config/prose");
-    let mut stack = vec![root().join("dot_config/prose")];
-    while let Some(directory) = stack.pop() {
-        for entry in fs::read_dir(&directory)? {
-            let path = entry?.path();
-            let target = config.join(path.strip_prefix(root().join("dot_config/prose"))?);
-            if path.is_dir() {
-                stack.push(path);
-            } else {
-                fs::create_dir_all(target.parent().expect("parent"))?;
-                fs::copy(&path, &target)?;
-            }
-        }
-    }
+    copy_tree(&root().join("dot_config/prose"), &config)?;
     let copied = Bundle::source(copy.path())?;
     copied.verify()?;
     fs::write(config.join("styles/Google/We.yml"), "extends: existence\n")?;
@@ -524,5 +584,339 @@ fn hook_registration_is_idempotent_and_keeps_other_handlers() -> Result<()> {
     );
     assert_eq!(merged["theme"], "auto");
     assert!(prose::merge_hooks(json!({}), Client::Opencode).is_err());
+    Ok(())
+}
+
+fn copy_tree(from: &Path, to: &Path) -> Result<()> {
+    let mut stack = vec![from.to_path_buf()];
+    while let Some(directory) = stack.pop() {
+        for entry in fs::read_dir(&directory)? {
+            let path = entry?.path();
+            let target = to.join(path.strip_prefix(from)?);
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                fs::create_dir_all(target.parent().expect("parent"))?;
+                fs::copy(&path, &target)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn git(directory: &Path, arguments: &[&str]) -> Result<()> {
+    let status = Command::new("git")
+        .current_dir(directory)
+        .args(["-c", "core.hooksPath=", "-c", "commit.gpgsign=false"])
+        .args(arguments)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_WORK_TREE")
+        .stdout(Stdio::null())
+        .status()?;
+    assert!(status.success(), "git {arguments:?}");
+    Ok(())
+}
+
+/// A repository holding the pinned configuration, a policy without legacy entries, and the given files.
+fn repository(files: &[(&str, &str)]) -> Result<tempfile::TempDir> {
+    let directory = tempfile::tempdir()?;
+    copy_tree(
+        &root().join("dot_config/prose"),
+        &directory.path().join("dot_config/prose"),
+    )?;
+    fs::create_dir_all(directory.path().join("policy"))?;
+    fs::write(
+        directory.path().join("policy/prose.toml"),
+        "[[exempt]]\nscope = \"documents\"\npaths = [\"dot_config/prose/styles/\"]\nreason = \"Vendored Vale packages keep their upstream text.\"\n\n[[exempt]]\nscope = \"comments\"\npaths = [\"dot_config/prose/\"]\nreason = \"The pinned configuration is data.\"\n\n[legacy]\nreason = \"Prose that predates the standard.\"\n",
+    )?;
+    for (path, text) in files {
+        let path = directory.path().join(path);
+        fs::create_dir_all(path.parent().expect("parent"))?;
+        fs::write(path, text)?;
+    }
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["add", "--all"])?;
+    Ok(directory)
+}
+
+/// The prose arguments of a command in the repository's `lefthook.yml`.
+fn hook_arguments(hook: &str, command: &str) -> Result<Vec<String>> {
+    let documents =
+        yaml_rust2::YamlLoader::load_from_str(&fs::read_to_string(root().join("lefthook.yml"))?)?;
+    let run = documents[0][hook]["commands"][command]["run"]
+        .as_str()
+        .expect("the hook command")
+        .to_owned();
+    let (_, arguments) = run
+        .split_once(" --bin prose -- ")
+        .expect("the hook runs the prose binary");
+    assert!(run.starts_with("mise x -- cargo run --locked --manifest-path xtask/Cargo.toml"));
+    Ok(arguments.split_whitespace().map(str::to_owned).collect())
+}
+
+fn run_in(directory: &Path, arguments: &[String]) -> Result<(i32, String)> {
+    let output = Command::new(env!("CARGO_BIN_EXE_prose"))
+        .current_dir(directory)
+        .args(arguments)
+        .env("PROSE_RUNTIME", directory.join(".prose-runtime"))
+        .stdin(Stdio::null())
+        .output()?;
+    Ok((
+        output.status.code().unwrap_or(-1),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ),
+    ))
+}
+
+#[test]
+fn the_document_gate_refuses_new_prose_in_a_repository() -> Result<()> {
+    let refused = repository(&[("guide.md", &format!("# Parser\n\n{ATTRIBUTED}\n"))])?;
+    let bundle = Bundle::source(refused.path())?;
+    let error = format!(
+        "{:#}",
+        prose::repository(refused.path(), Scope::Documents, &bundle)
+            .expect_err("an attributing document")
+    );
+    assert!(
+        error.contains("guide.md:3:1: Dotfiles.Attribution")
+            && error.contains(ATTRIBUTED)
+            && error.contains("just prose"),
+        "{error}"
+    );
+    let recorded = refused.path().join("policy/prose.toml");
+    let mut policy = fs::read_to_string(&recorded)?;
+    let fingerprints: Vec<String> = prose::findings(refused.path(), Scope::Documents, &bundle)?
+        .iter()
+        .map(|finding| {
+            format!(
+                "\"{}\" = [\"{}\"]",
+                finding.rule,
+                prose::fingerprint(&finding.sentence)
+            )
+        })
+        .collect();
+    policy.push_str(&format!(
+        "\n[legacy.documents.\"guide.md\"]\n{}\n",
+        fingerprints.join("\n")
+    ));
+    fs::write(&recorded, policy)?;
+    prose::repository(refused.path(), Scope::Documents, &bundle)?;
+    let replacement = "As the owner asked, the parser keeps every edit.";
+    fs::write(
+        refused.path().join("guide.md"),
+        format!("# Parser\n\n{replacement}\n"),
+    )?;
+    let error = format!(
+        "{:#}",
+        prose::repository(refused.path(), Scope::Documents, &bundle)
+            .expect_err("a replaced legacy sentence")
+    );
+    assert!(
+        error.contains(replacement) && error.contains("Dotfiles.Attribution"),
+        "{error}"
+    );
+    let accepted = repository(&[("guide.md", &format!("# Parser\n\n{COMPLIANT}\n"))])?;
+    prose::repository(
+        accepted.path(),
+        Scope::Documents,
+        &Bundle::source(accepted.path())?,
+    )?;
+    Ok(())
+}
+
+#[test]
+fn the_pre_commit_comment_gate_reads_source_comments_through_ocomment() -> Result<()> {
+    let arguments = hook_arguments("pre-commit", "comments")?;
+    assert_eq!(
+        arguments,
+        ["--source", ".", "repository", "--scope", "comments"]
+    );
+    let refused = repository(&[(
+        "src/lib.rs",
+        &format!(
+            "// The cache holds the index. The parser reads it.\n// {ATTRIBUTED}\npub fn parse() {{}}\n"
+        ),
+    )])?;
+    let (code, output) = run_in(refused.path(), &arguments)?;
+    assert_ne!(code, 0, "{output}");
+    assert!(
+        output.contains("src/lib.rs:1:") && output.contains("Dotfiles.SentencePerLine"),
+        "{output}"
+    );
+    assert!(
+        output.contains("src/lib.rs:2:1: Dotfiles.Attribution") && output.contains(ATTRIBUTED),
+        "{output}"
+    );
+    let (code, output) = run_in(
+        refused.path(),
+        &[
+            "--source",
+            ".",
+            "check",
+            "--channel",
+            "comment",
+            "src/lib.rs",
+        ]
+        .map(str::to_owned),
+    )?;
+    assert_eq!(code, 1, "{output}");
+    assert!(output.contains("Dotfiles.SentencePerLine"), "{output}");
+    let accepted = repository(&[(
+        "src/lib.rs",
+        &format!("// The cache holds the index.\n// {COMPLIANT}\npub fn parse() {{}}\n"),
+    )])?;
+    let (code, output) = run_in(accepted.path(), &arguments)?;
+    assert_eq!(code, 0, "{output}");
+    Ok(())
+}
+
+#[test]
+fn the_commit_msg_hook_runs_the_tested_check() -> Result<()> {
+    let arguments = hook_arguments("commit-msg", "prose")?;
+    assert_eq!(
+        arguments,
+        ["--source", ".", "check", "--channel", "commit", "{1}"]
+    );
+    let directory = repository(&[])?;
+    let message = directory.path().join("COMMIT_EDITMSG");
+    let arguments: Vec<String> = arguments
+        .iter()
+        .map(|argument| {
+            if argument == "{1}" {
+                message.to_string_lossy().into_owned()
+            } else {
+                argument.clone()
+            }
+        })
+        .collect();
+    fs::write(
+        &message,
+        format!("fix(parser): keep edits\n\n{ATTRIBUTED}\n"),
+    )?;
+    let (code, output) = run_in(directory.path(), &arguments)?;
+    assert_eq!(code, 1, "{output}");
+    assert!(output.contains("Dotfiles.Attribution") && output.contains(ATTRIBUTED));
+    fs::write(
+        &message,
+        format!("fix(parser): keep edits\n\n{COMPLIANT}\n"),
+    )?;
+    assert_eq!(run_in(directory.path(), &arguments)?.0, 0);
+    Ok(())
+}
+
+#[test]
+fn only_personal_non_fork_remotes_take_the_standard() {
+    let personal = ["P4suta".to_owned()];
+    let remotes = |list: &[(&str, &str)]| -> Vec<(String, String)> {
+        list.iter()
+            .map(|(name, url)| ((*name).to_owned(), (*url).to_owned()))
+            .collect()
+    };
+    for (list, applies) in [
+        (vec![("origin", "git@github.com:P4suta/dotfiles.git")], true),
+        (vec![("origin", "https://github.com/p4suta/dotfiles")], true),
+        (
+            vec![("origin", "ssh://git@github.com/P4suta/dotfiles.git")],
+            true,
+        ),
+        (
+            vec![("origin", "https://github.com/other/project.git")],
+            false,
+        ),
+        (
+            vec![
+                ("origin", "git@github.com:P4suta/project.git"),
+                ("upstream", "https://github.com/other/project.git"),
+            ],
+            false,
+        ),
+        (
+            vec![
+                ("origin", "git@github.com:P4suta/project.git"),
+                ("backup", "git@github.com:P4suta/project-backup.git"),
+            ],
+            true,
+        ),
+        (
+            vec![("upstream", "git@github.com:P4suta/project.git")],
+            false,
+        ),
+        (vec![], false),
+    ] {
+        assert_eq!(
+            prose::remotes_take_the_standard(&remotes(&list), &personal),
+            applies,
+            "{list:?}"
+        );
+    }
+    assert_eq!(prose::github_owner("git@gitlab.com:P4suta/x.git"), None);
+}
+
+#[test]
+fn the_global_commit_msg_hook_checks_personal_repositories() -> Result<()> {
+    let tools = tempfile::tempdir()?;
+    let succeed = tools.path().join("succeed.rs");
+    fs::write(&succeed, "fn main() {}\n")?;
+    let home = tempfile::tempdir()?;
+    let bin = home.path().join(".local/bin");
+    fs::create_dir_all(&bin)?;
+    let status = Command::new("rustc")
+        .arg(&succeed)
+        .arg("-o")
+        .arg(bin.join(format!("dotguard{}", std::env::consts::EXE_SUFFIX)))
+        .status()?;
+    assert!(status.success());
+    let commit = |origin: &str, upstream: Option<&str>, text: &str| -> Result<(bool, String)> {
+        let directory = repository(&[])?;
+        git(directory.path(), &["remote", "add", "origin", origin])?;
+        if let Some(upstream) = upstream {
+            git(directory.path(), &["remote", "add", "upstream", upstream])?;
+        }
+        let message = directory.path().join(".git/COMMIT_EDITMSG");
+        fs::write(&message, text)?;
+        let output = Command::new(env!("CARGO_BIN_EXE_dotfiles-xtask"))
+            .current_dir(directory.path())
+            .args(["hook", "commit-msg", "--"])
+            .arg(&message)
+            .env(
+                if cfg!(windows) { "USERPROFILE" } else { "HOME" },
+                home.path(),
+            )
+            .env("PROSE_CONFIG", root().join("dot_config/prose"))
+            .env("PROSE_RUNTIME", home.path().join("runtime"))
+            .stdin(Stdio::null())
+            .output()?;
+        Ok((
+            output.status.success(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ))
+    };
+    let attributed = format!("fix(parser): keep edits\n\n{ATTRIBUTED}\n");
+    let (accepted, stderr) = commit("git@github.com:P4suta/project.git", None, &attributed)?;
+    assert!(!accepted);
+    assert!(
+        stderr.contains("Dotfiles.Attribution")
+            && stderr.contains(ATTRIBUTED)
+            && stderr.contains("commit again"),
+        "{stderr}"
+    );
+    let compliant = format!("fix(parser): keep edits\n\n{COMPLIANT}\n");
+    let (accepted, stderr) = commit("git@github.com:P4suta/project.git", None, &compliant)?;
+    assert!(accepted, "{stderr}");
+    let (accepted, stderr) = commit("https://github.com/other/project.git", None, &attributed)?;
+    assert!(
+        accepted,
+        "an external destination keeps its own rules: {stderr}"
+    );
+    let (accepted, stderr) = commit(
+        "git@github.com:P4suta/project.git",
+        Some("https://github.com/other/project.git"),
+        &attributed,
+    )?;
+    assert!(accepted, "a fork keeps its upstream rules: {stderr}");
     Ok(())
 }

@@ -29,11 +29,11 @@ enum Action {
     Repository {
         #[arg(long, value_enum, required = true)]
         scope: Vec<Scope>,
-        /// Print the current counts instead of judging them.
+        /// Print each finding that no exemption covers, with its ledger fingerprint, instead of judging them.
         #[arg(long)]
-        counts: bool,
+        findings: bool,
     },
-    /// Lower legacy ledger counts to the findings that remain.
+    /// Remove legacy ledger entries whose findings no longer occur.
     Tighten {
         #[arg(long, value_enum, required = true)]
         scope: Vec<Scope>,
@@ -103,14 +103,23 @@ fn run(cli: Cli) -> Result<i32> {
             );
             Ok(1)
         }
-        Action::Repository { scope, counts } => {
+        Action::Repository { scope, findings } => {
             let bundle = Bundle::source(&root)?;
             for scope in scope {
-                if counts {
-                    println!(
-                        "{}",
-                        toml::to_string(&prose::counts(&root, scope, &bundle)?)?
-                    );
+                if findings {
+                    for finding in prose::findings(&root, scope, &bundle)? {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "scope": scope,
+                                "path": finding.path,
+                                "line": finding.line,
+                                "rule": finding.rule,
+                                "sentence": finding.sentence,
+                                "fingerprint": prose::fingerprint(&finding.sentence),
+                            })
+                        );
+                    }
                 } else {
                     prose::repository(&root, scope, &bundle)?;
                 }

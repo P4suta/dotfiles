@@ -1,7 +1,7 @@
 {
-  "revision": "1be2603a716a3aee53704701db08ee71fabd7c540cee51b9cc9d60196b4bbb7e",
+  "revision": "23d1be6d3d50ca164e89488a15b47107f82b328a8e6a059ac357c4531f6b775c",
   "outcome": "implemented",
-  "reason": "Apply the same layered budget to verified separate PR allowance and applicable adaptive thresholds, require current window evidence and preserve the owner pause; retain checked issue scope, draft transitions and official review exclusion with production proofs and native process refusal tests. Keep PRs as drafts until every reported head check passes, with the check requirement proved in the transition core and refused natively.",
+  "reason": "Point PR authoring at the prose checker that pr-workflow check, create, and edit run for a personal non-fork destination, and route issues through pr-workflow issue check, create, and edit with the same document and writing checks; issue scope, draft transitions, and review budgets stay unchanged.",
   "evidence": [
     "dot_agents/skills/pull-request/SKILL.md",
     "docs/adr/0004-checked-pull-request-authoring.md",
@@ -11,7 +11,10 @@
     "xtask/src/review_rules.rs",
     "dot_agents/skills/pull-request/references/workflow.md",
     "docs/adr/0008-layered-review-capacity.md",
-    "docs/adr/0013-ready-only-after-passing-checks.md"
+    "docs/adr/0013-ready-only-after-passing-checks.md",
+    "docs/adr/0016-one-writing-standard.md",
+    "xtask/src/pr_workflow.rs",
+    "xtask/src/prose_rules.rs"
   ],
   "revisit": null
 }

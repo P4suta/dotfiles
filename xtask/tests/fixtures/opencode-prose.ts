@@ -7,7 +7,14 @@ const reply = Bun.argv[3];
 if (reply === undefined) throw new Error("The reply text is required");
 
 const prompts: string[] = [];
+const toasts: string[] = [];
 const client = {
+  tui: {
+    showToast: async (request: { body: { message: string } }) => {
+      toasts.push(request.body.message);
+      return { data: true };
+    },
+  },
   session: {
     messages: async () => ({
       data: [
@@ -38,4 +45,4 @@ if (!event) throw new Error("The reply check is missing");
 const idle = { event: { type: "session.idle" as const, properties: { sessionID: "fixture" } } };
 await event(idle);
 await event(idle);
-console.log(JSON.stringify(prompts));
+console.log(JSON.stringify({ prompts, toasts }));

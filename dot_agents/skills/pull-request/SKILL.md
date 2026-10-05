@@ -19,6 +19,7 @@ The [global workflow policy](assets/workflow-policy.json) identifies personal ow
 For a personal non-fork repository, select an existing open issue or create one within the authorized GitHub workflow, then run `start` with `--issue NUMBER`.
 Read the issue and record the problem, intended behavior, bounded scope, and observable acceptance criteria before coding.
 Reuse a suitable issue instead of creating duplicates, and avoid adding unrelated work because an issue already exists.
+Write an issue with `pr-workflow issue create` or `pr-workflow issue edit`, which check its document before `gh` publishes it.
 External projects and forks follow their own contribution rules; personal defaults do not require opening an upstream issue.
 An unknown or inconsistent repository response is a failed prerequisite, not permission to apply a different scope.
 Online operations require live authenticated `gh` access and inspect REST quota headers with a nonzero reserve.
@@ -42,7 +43,8 @@ Local creation always starts as a draft; moving it to review is a separate autho
 
 Without destination-specific rules, write an English [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) title: `type(scope)!: description`.
 Scope is optional; include `!` for breaking changes.
-`pr-workflow check` runs the prose checker on the title and body; rewrite every sentence it reports.
+For a personal non-fork destination, `pr-workflow check` runs the prose checker on the title and body.
+Rewrite every sentence it reports.
 Explain why the change is needed, what users or maintainers can now observe, and the actual validation outcome.
 Use `Why`, `Changes`, and `Validation` when no template exists; add migration or other sections only when relevant.
 Rewrite the description around the final change if the scope changed.

@@ -1,4 +1,7 @@
-use crate::prose_rules::{Ledger, Reply, exemption_valid, ledger, reply, tightened};
+use crate::prose_rules::{
+    Ledger, Reply, exemption_valid, ledger, occurrences, reply, rewritten_by_this_hook,
+    standard_applies, tightened,
+};
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
 use dotguard::lang;
@@ -799,16 +802,31 @@ pub fn check(bundle: &Bundle, channel: Channel, path: &str, text: &str) -> Resul
     Ok(findings)
 }
 
-/// Checks a pull request title and body as `pr-workflow` publishes them.
-pub fn check_publication(bundle: &Bundle, title: &str, body: &str) -> Result<()> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Publication {
+    PullRequest,
+    Issue,
+}
+
+/// Checks a pull request or issue title and body as `pr-workflow` publishes them.
+pub fn check_publication(
+    bundle: &Bundle,
+    kind: Publication,
+    title: &str,
+    body: &str,
+) -> Result<()> {
     bundle.verify()?;
-    let input = Input::new("pull request", &publication(Some(title), body), false);
+    let (name, rerun) = match kind {
+        Publication::PullRequest => ("pull request", "pr-workflow check"),
+        Publication::Issue => ("issue", "pr-workflow issue check"),
+    };
+    let input = Input::new(name, &publication(Some(title), body), false);
     let mut findings = language(&input, lang::Mode::English);
     findings.extend(sentence_per_line(&input));
     findings.extend(vale(bundle, std::slice::from_ref(&input))?);
     ensure!(
         findings.is_empty(),
-        "the pull request fails the prose checker:\n{}\nRewrite these sentences, then rerun `pr-workflow check`.",
+        "the {name} fails the prose checker:\n{}\nRewrite these sentences, then rerun `{rerun}`.",
         render(&findings)
     );
     Ok(())
@@ -918,11 +936,15 @@ pub fn scanned_comments(jsonl: &str) -> Result<Vec<Input>> {
     Ok(inputs)
 }
 
-/// Checks comments for language and style.
+/// Checks comments for language, line layout, and style.
 pub fn check_inputs(bundle: &Bundle, inputs: &[Input]) -> Result<Vec<Finding>> {
     let mut findings: Vec<Finding> = inputs
         .iter()
-        .flat_map(|input| language(input, lang::Mode::English))
+        .flat_map(|input| {
+            let mut found = language(input, lang::Mode::English);
+            found.extend(sentence_per_line(input));
+            found
+        })
         .collect();
     findings.extend(vale(bundle, inputs)?);
     Ok(findings)
@@ -952,20 +974,26 @@ pub struct Exempt {
     pub reason: String,
 }
 
-pub type Counts = BTreeMap<String, BTreeMap<String, u32>>;
+/// Legacy findings per file and rule, each named by the fingerprint of its sentence.
+pub type Fingerprints = BTreeMap<String, BTreeMap<String, Vec<String>>>;
+
+/// A short digest of the sentence a finding reports, which an edited sentence no longer matches.
+pub fn fingerprint(sentence: &str) -> String {
+    hex(&Sha256::digest(sentence.trim().as_bytes()))[..16].to_owned()
+}
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LegacyLedger {
     pub reason: String,
     #[serde(default)]
-    pub documents: Counts,
+    pub documents: Fingerprints,
     #[serde(default)]
-    pub comments: Counts,
+    pub comments: Fingerprints,
 }
 
 impl LegacyLedger {
-    fn counts(&mut self, scope: Scope) -> &mut Counts {
+    fn entries(&mut self, scope: Scope) -> &mut Fingerprints {
         match scope {
             Scope::Documents => &mut self.documents,
             Scope::Comments => &mut self.comments,
@@ -1037,7 +1065,7 @@ fn documents(root: &Path, files: &[String]) -> Result<BTreeSet<String>> {
         .collect())
 }
 
-/// Every finding in the repository for one scope before any exemption or ledger count applies.
+/// Every finding in the repository for one scope before any exemption or ledger entry applies.
 fn scan(
     root: &Path,
     scope: Scope,
@@ -1093,16 +1121,23 @@ fn scan(
     }
 }
 
-fn count(findings: &[Finding]) -> Counts {
-    let mut counts = Counts::new();
+/// The ledger entries that would cover `findings`, each list sorted.
+pub fn record(findings: &[Finding]) -> Fingerprints {
+    let mut entries = Fingerprints::new();
     for finding in findings {
-        *counts
+        entries
             .entry(finding.path.clone())
             .or_default()
             .entry(finding.rule.clone())
-            .or_default() += 1;
+            .or_default()
+            .push(fingerprint(&finding.sentence));
     }
-    counts
+    for rules in entries.values_mut() {
+        for list in rules.values_mut() {
+            list.sort();
+        }
+    }
+    entries
 }
 
 /// Findings that no rule-scoped exemption covers.
@@ -1155,40 +1190,53 @@ pub fn judge(
             "{POLICY}: the legacy ledger needs a reason; state why the counted prose remains"
         ));
     }
-    let found = count(&findings);
-    let allowed = policy.legacy.counts(scope).clone();
+    let found = record(&findings);
+    let allowed = policy.legacy.entries(scope).clone();
     let keys: BTreeSet<(String, String)> = found
         .iter()
         .chain(&allowed)
         .flat_map(|(path, rules)| rules.keys().map(|rule| (path.clone(), rule.clone())))
         .collect();
+    let none = Vec::new();
     for (path, rule) in keys {
-        let found_count = found
-            .get(&path)
-            .and_then(|rules| rules.get(&rule))
-            .copied()
-            .unwrap_or(0);
-        let allowed_count = allowed
-            .get(&path)
-            .and_then(|rules| rules.get(&rule))
-            .copied()
-            .unwrap_or(0);
-        match ledger(found_count, allowed_count) {
-            Ledger::Within => {}
-            Ledger::Exceeded => {
-                let listed: Vec<Finding> = findings
-                    .iter()
-                    .filter(|finding| finding.path == path && finding.rule == rule)
-                    .cloned()
-                    .collect();
-                refusals.push(format!(
-                    "{}\n{path}: {found_count} {rule} finding(s) where the legacy ledger allows {allowed_count}; rewrite the sentences above and rerun `just prose`",
-                    render(&listed)
-                ));
+        let lookup = |entries: &Fingerprints| -> Vec<String> {
+            entries
+                .get(&path)
+                .and_then(|rules| rules.get(&rule))
+                .unwrap_or(&none)
+                .clone()
+        };
+        let (present, recorded) = (lookup(&found), lookup(&allowed));
+        let fingerprints: BTreeSet<&String> = present.iter().chain(&recorded).collect();
+        let mut new = Vec::new();
+        let mut stale = Vec::new();
+        for key in fingerprints {
+            match ledger(occurrences(&present, key), occurrences(&recorded, key)) {
+                Ledger::Within => {}
+                Ledger::Exceeded => new.push(key.clone()),
+                Ledger::Stale => stale.push(key.clone()),
             }
-            Ledger::Stale => refusals.push(format!(
-                "{path}: {found_count} {rule} finding(s) remain where the legacy ledger allows {allowed_count}; run `just prose-tighten` to record the fix"
-            )),
+        }
+        if !new.is_empty() {
+            let listed: Vec<Finding> = findings
+                .iter()
+                .filter(|finding| {
+                    finding.path == path
+                        && finding.rule == rule
+                        && new.contains(&fingerprint(&finding.sentence))
+                })
+                .cloned()
+                .collect();
+            refusals.push(format!(
+                "{}\n{path}: the legacy ledger does not record these {rule} findings; rewrite the sentences above and rerun `just prose`",
+                render(&listed)
+            ));
+        }
+        if !stale.is_empty() {
+            refusals.push(format!(
+                "{path}: the legacy ledger records {rule} findings that no longer occur ({}); run `just prose-tighten` to remove them",
+                stale.join(", ")
+            ));
         }
     }
     refusals
@@ -1209,29 +1257,35 @@ pub fn repository(root: &Path, scope: Scope, bundle: &Bundle) -> Result<()> {
     Ok(())
 }
 
-/// Current counts for one scope, for a reviewer who writes ledger entries by hand.
-pub fn counts(root: &Path, scope: Scope, bundle: &Bundle) -> Result<Counts> {
+/// Lists the findings of one scope that no exemption covers.
+pub fn findings(root: &Path, scope: Scope, bundle: &Bundle) -> Result<Vec<Finding>> {
     let policy = read_policy(root)?;
     let mut used = vec![false; policy.exempt.len()];
     let findings = scan(root, scope, bundle, &policy, &mut used)?;
-    Ok(count(&unexempted(scope, findings, &policy, &mut used)))
+    Ok(unexempted(scope, findings, &policy, &mut used))
 }
 
-/// Lowers ledger counts to the findings that remain, and no count rises.
+/// Removes ledger entries whose findings no longer occur, and never adds one.
 pub fn tighten(root: &Path, scope: Scope, bundle: &Bundle) -> Result<()> {
-    let found = counts(root, scope, bundle)?;
+    let found = record(&findings(root, scope, bundle)?);
     let mut policy = read_policy(root)?;
-    let ledger = policy.legacy.counts(scope);
+    let ledger = policy.legacy.entries(scope);
     for (path, rules) in ledger.iter_mut() {
-        for (rule, allowed) in rules.iter_mut() {
-            let current = found
+        for (rule, recorded) in rules.iter_mut() {
+            let present = found
                 .get(path)
                 .and_then(|rules| rules.get(rule))
-                .copied()
-                .unwrap_or(0);
-            *allowed = tightened(*allowed, current);
+                .cloned()
+                .unwrap_or_default();
+            let keys: BTreeSet<String> = recorded.iter().cloned().collect();
+            let mut kept = Vec::new();
+            for key in keys {
+                let count = tightened(occurrences(recorded, &key), occurrences(&present, &key));
+                kept.extend(std::iter::repeat_n(key, count as usize));
+            }
+            *recorded = kept;
         }
-        rules.retain(|_, allowed| *allowed > 0);
+        rules.retain(|_, recorded| !recorded.is_empty());
     }
     ledger.retain(|_, rules| !rules.is_empty());
     fs::write(root.join(POLICY), toml::to_string(&policy)?)?;
@@ -1280,9 +1334,24 @@ pub fn reply_text(input: &Value) -> Result<String> {
     Ok(parts.join("\n\n"))
 }
 
+/// The file that records this hook's rewrite request for one session, when the client names the session.
+fn rewrite_marker(input: &Value) -> Option<PathBuf> {
+    let session = input["session_id"].as_str()?;
+    let valid = !session.is_empty()
+        && session.len() <= 128
+        && session
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'));
+    valid.then(|| Some(runtime_directory().ok()?.join("replies").join(session)))?
+}
+
 /// The hook response for a finished turn, which passes it, requests one rewrite, or ends with the findings.
 pub fn stop(input: &Value, bundle: Result<Bundle>) -> Value {
-    let continued = input["stop_hook_active"] == true;
+    let marker = rewrite_marker(input);
+    let continued = rewritten_by_this_hook(
+        input["stop_hook_active"] == true,
+        marker.as_ref().map(|path| path.is_file()),
+    );
     let checked = bundle.and_then(|bundle| {
         let text = reply_text(input)?;
         if text.trim().is_empty() {
@@ -1298,15 +1367,119 @@ pub fn stop(input: &Value, bundle: Result<Bundle>) -> Value {
         ),
         Err(error) => format!("The prose checker cannot judge the final reply: {error:#}"),
     };
-    match reply(reason.is_empty(), continued) {
-        Reply::Allow => serde_json::json!({}),
-        Reply::Rewrite => serde_json::json!({"decision": "block", "reason": reason}),
-        Reply::EndUnchecked => serde_json::json!({
-            "continue": false,
-            "stopReason": reason,
-            "systemMessage": "The final reply still fails the prose checker after one rewrite."
-        }),
+    let ended = |reason: &str, message: &str| serde_json::json!({"continue": false, "stopReason": reason, "systemMessage": message});
+    let action = reply(reason.is_empty(), continued);
+    if action != Reply::Rewrite
+        && let Some(path) = &marker
+    {
+        let _ = fs::remove_file(path);
     }
+    match action {
+        Reply::Allow => serde_json::json!({}),
+        Reply::Rewrite => {
+            let recorded = marker.as_ref().map_or(Ok(()), |path| {
+                fs::create_dir_all(path.parent().unwrap_or(path)).and_then(|()| fs::write(path, ""))
+            });
+            match recorded {
+                Ok(()) => serde_json::json!({"decision": "block", "reason": reason}),
+                Err(error) => ended(
+                    &reason,
+                    &format!(
+                        "The prose checker cannot record its rewrite request ({error}), so it ends the turn instead of requesting one."
+                    ),
+                ),
+            }
+        }
+        Reply::EndUnchecked => ended(
+            &reason,
+            "The final reply still fails the prose checker after one rewrite.",
+        ),
+    }
+}
+
+/// The GitHub owner that a remote address names, in HTTPS, SSH, or scp-like form.
+pub fn github_owner(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.strip_prefix("http://github.com/"))
+        .or_else(|| url.strip_prefix("ssh://git@github.com/"))
+        .or_else(|| url.strip_prefix("git@github.com:"))?;
+    let owner = rest.split('/').next()?;
+    (!owner.is_empty()).then(|| owner.to_ascii_lowercase())
+}
+
+/// Whether a repository with these remotes takes the personal writing standard.
+/// The `origin` remote must name a personal owner, and another remote with a foreign owner marks a fork.
+pub fn remotes_take_the_standard(remotes: &[(String, String)], personal: &[String]) -> bool {
+    let owner = |url: &str| github_owner(url).filter(|owner| !owner.is_empty());
+    let is_personal = |owner: &str| {
+        personal
+            .iter()
+            .any(|login| login.eq_ignore_ascii_case(owner))
+    };
+    let personal_owner = remotes
+        .iter()
+        .any(|(name, url)| name == "origin" && owner(url).is_some_and(|owner| is_personal(&owner)));
+    let fork = remotes.iter().any(|(name, url)| {
+        name != "origin" && owner(url).is_some_and(|owner| !is_personal(&owner))
+    });
+    standard_applies(personal_owner, fork)
+}
+
+/// The personal owner logins of the global workflow policy.
+pub fn personal_owners() -> Result<Vec<String>> {
+    let policy: Value = serde_json::from_str(include_str!(
+        "../../dot_agents/skills/pull-request/assets/workflow-policy.json"
+    ))?;
+    let owners: Vec<String> = policy["personal_owners"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|owner| owner["login"].as_str().map(str::to_owned))
+        .collect();
+    ensure!(
+        !owners.is_empty(),
+        "the global workflow policy names no personal owner"
+    );
+    Ok(owners)
+}
+
+/// The commit-msg gate every repository on a host runs: it checks the message when the repository takes the personal standard.
+pub fn commit_gate(
+    repository: &Path,
+    message: &Path,
+    bundle: impl FnOnce() -> Result<Bundle>,
+) -> Result<()> {
+    let output = Tool::Git
+        .hook_command()
+        .current_dir(repository)
+        .args(["remote", "-v"])
+        .output()
+        .context("list the repository remotes")?;
+    ensure!(
+        output.status.success(),
+        "git remote failed in {}",
+        repository.display()
+    );
+    let remotes: Vec<(String, String)> = String::from_utf8(output.stdout)?
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            Some((fields.next()?.to_owned(), fields.next()?.to_owned()))
+        })
+        .collect();
+    if !remotes_take_the_standard(&remotes, &personal_owners()?) {
+        return Ok(());
+    }
+    let text = fs::read_to_string(message)
+        .with_context(|| format!("read the commit message {}", message.display()))?;
+    let findings = check(&bundle()?, Channel::Commit, "commit message", &text)?;
+    ensure!(
+        findings.is_empty(),
+        "the commit message fails the prose checker:\n{}\nRewrite these sentences and commit again; `prose check --channel commit MESSAGE_FILE` reports the same findings.",
+        render(&findings)
+    );
+    Ok(())
 }
 
 const HOOK_PREFIX: &str = "prose reply --client ";

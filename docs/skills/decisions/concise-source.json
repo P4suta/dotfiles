@@ -1,10 +1,10 @@
 {
-  "revision": "2b1e215b3dab0d713d34520c32036ddfd87b7c1c18e4a8416e6426a2b56a3b1f",
+  "revision": "9243e22359b7697732c6f234d0e02f63eebf90065aac2781d3a534317b093c4f",
   "outcome": "implemented",
-  "reason": "Replace the inline language and line-layout rule for comments with a pointer to the prose checker, which reads comments through OComment; source clarity and lint-exception judgment stay unchanged.",
+  "reason": "Replace the inline language and line-layout rule for comments with a pointer to the prose checker, which reads comments through OComment and checks their language, line layout, and style; source clarity and lint-exception judgment stay unchanged.",
   "evidence": [
     "dot_agents/skills/concise-source/SKILL.md",
-    "docs/adr/0014-one-writing-standard.md",
+    "docs/adr/0016-one-writing-standard.md",
     "xtask/tests/prose.rs"
   ],
   "revisit": null

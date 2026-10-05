@@ -133,7 +133,7 @@ alias sftp="sftp.exe"
 export GIT_SSH="/mnt/c/WINDOWS/System32/OpenSSH/ssh.exe"
 
 # WezTerm can start the shell in a translated Windows directory under /mnt.
-# The shell returns to the home directory in that case, following the WezTerm guidance to handle it in WSL.
+# The shell then changes to the home folder, as the WezTerm documentation recommends.
 case "$PWD" in /mnt/*) cd ~ ;; esac
 
 # --- mise + modern CLI integrations (managed by chezmoi) ---
@@ -158,7 +158,7 @@ command -v vivid >/dev/null && export LS_COLORS="$(vivid generate molokai)"
 # jj completion.
 command -v jj >/dev/null && source <(jj util completion bash) 2>/dev/null || true
 
-# WSL integration.
+# Windows Subsystem for Linux integration.
 export BROWSER="/mnt/c/Windows/System32/cmd.exe /c start"
 command -v wslview >/dev/null && alias open='wslview'
 
