@@ -4,8 +4,9 @@
 )]
 
 use dotfiles_xtask::review_guard::{
-    DAY_MS, HOUR_MS, Invocation, PROBE_GAP_MS, check_budget, check_usage, classify, execute_probe,
-    execute_reserved, install, reserve, review_directory, usage_query, validate_policy,
+    DAY_MS, HOUR_MS, HOURLY_LIMIT, Invocation, PROBE_GAP_MS, PauseScope, check_budget, check_usage,
+    classify, execute_admitted, execute_probe, execute_reserved, install, reserve,
+    review_directory, usage_query, validate_policy,
 };
 use dotfiles_xtask::review_rules::{capacity_budget, included_allowance};
 use std::fs;
@@ -486,7 +487,7 @@ fn owner_pause_blocks_the_real_entry_point_before_vendor_lookup_and_survives_ins
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("paused true"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("pause all"));
     assert_eq!(fs::read_to_string(state.join("reviews.log")).unwrap(), "");
     assert_eq!(fs::read_to_string(state.join("usage.log")).unwrap(), "");
     install(binary, &home).unwrap();
@@ -494,6 +495,115 @@ fn owner_pause_blocks_the_real_entry_point_before_vendor_lookup_and_survives_ins
         fs::read_to_string(state.join("paused")).unwrap(),
         "owner pause"
     );
+}
+
+#[test]
+fn each_pause_scope_is_reported_and_only_cli_scopes_block_the_guard() {
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_coderabbit"));
+    for (markers, scope, pr, cli) in [
+        (&[][..], "none", "allowed", "allowed"),
+        (&["paused-pr"][..], "pr", "paused", "allowed"),
+        (&["paused-cli"][..], "cli", "allowed", "paused"),
+        (&["paused-pr", "paused-cli"][..], "all", "paused", "paused"),
+        (&["paused"][..], "all", "paused", "paused"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("user");
+        let state = home.join(".local/state/coderabbit-guard");
+        let policy = home.join(".config/coderabbit-guard");
+        fs::create_dir_all(&policy).unwrap();
+        fs::write(
+            policy.join("policy.json"),
+            r#"{"organization":"P4suta","vendor_version":"0.8.2","review_os":"macos"}"#,
+        )
+        .unwrap();
+        install(binary, &home).unwrap();
+        for marker in markers {
+            fs::write(state.join(marker), "owner pause").unwrap();
+        }
+        assert_eq!(
+            dotfiles_xtask::review_guard::pause(&home).unwrap().name(),
+            scope
+        );
+        let run = |args: &[&str]| {
+            std::process::Command::new(binary)
+                .args(args)
+                .env("HOME", &home)
+                .env("USERPROFILE", &home)
+                .output()
+                .unwrap()
+        };
+        let output = run(&["--guard-status", "--json"]);
+        assert!(output.status.success());
+        let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(status["schema"], 1);
+        assert_eq!(status["pause"], scope);
+        assert_eq!(status["reviews"]["pr"], pr);
+        assert_eq!(status["reviews"]["cli"], cli);
+        assert_eq!(status["rolling_hour"]["limit"], HOURLY_LIMIT);
+        let output = run(&["review", "--use-credits"]);
+        assert_eq!(output.status.code(), Some(75));
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            error.contains("paused by the owner"),
+            cli == "paused",
+            "{error}"
+        );
+        assert_eq!(error.contains("paid reviews"), cli == "allowed", "{error}");
+        assert_eq!(fs::read_to_string(state.join("reviews.log")).unwrap(), "");
+        let output = run(&["--json", "--guard-status"]);
+        assert!(output.status.success(), "{markers:?}");
+        let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(status["pause"], scope);
+    }
+}
+
+#[test]
+fn a_pr_pause_admits_a_guarded_review_through_reservation_preflight_and_execution() {
+    for (scope, admitted) in [
+        (PauseScope::None, true),
+        (PauseScope::Pr, true),
+        (PauseScope::Cli, false),
+        (PauseScope::All, false),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = dir.path().join("reviews.log");
+        let probes = dir.path().join("usage.log");
+        fs::write(&ledger, "").unwrap();
+        fs::write(&probes, "").unwrap();
+        let preflight = std::cell::Cell::new(false);
+        let launched = std::cell::Cell::new(false);
+        let result = execute_admitted(
+            scope,
+            &ledger,
+            &probes,
+            100,
+            "P4suta",
+            || {
+                preflight.set(true);
+                Ok(USAGE.into())
+            },
+            || {
+                launched.set(true);
+                Ok(0)
+            },
+        );
+        assert_eq!(result.is_ok(), admitted, "{scope:?}");
+        assert_eq!(preflight.get(), admitted, "{scope:?}");
+        assert_eq!(launched.get(), admitted, "{scope:?}");
+        assert_eq!(
+            fs::read_to_string(&ledger).unwrap(),
+            if admitted { "100\n" } else { "" },
+            "{scope:?}"
+        );
+        if let Err(error) = result {
+            let error = error.to_string();
+            assert!(
+                error.contains("paused by the owner") && error.contains("--guard-status --json"),
+                "{error}"
+            );
+        }
+    }
 }
 
 #[test]

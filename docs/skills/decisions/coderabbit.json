@@ -1,11 +1,13 @@
 {
-  "revision": "6ce16b2013d0b83baa8288f3ed66625aba2f6791be2d61187ebdebc67dd1eca7",
+  "revision": "ba321a22258dedf0fac9f48b1fd1fc4979ea6fee43d70e5fe283f132b6cd84b1",
   "outcome": "implemented",
-  "reason": "Connect fixed-fee setup to the layered numeric budget and rolling attempt and probe ceilings without relaxing paid-usage refusal, persistent pauses or the distinct PR, IDE, browser and unmanaged-client boundaries.",
+  "reason": "Point service operations at the guard's machine-readable pause scope and reduce the restated guard limits to what the guard enforces, keeping the paid-usage and unmanaged-client boundaries.",
   "evidence": [
     "dot_agents/skills/coderabbit/SKILL.md",
     "xtask/src/review_guard.rs",
-    "docs/adr/0008-layered-review-capacity.md"
+    "docs/adr/0008-layered-review-capacity.md",
+    "docs/adr/0015-scoped-coderabbit-pause.md",
+    "xtask/src/review_rules.rs"
   ],
   "revisit": null
 }

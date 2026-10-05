@@ -4,7 +4,7 @@
 //! The session URL is worse than a byline: it points at a private conversation, in the most durable and most widely copied text a project emits, and unlike a credential it cannot be rotated afterwards.
 //!
 //! This is the second line of defence.
-//! `~/.claude/settings.json` carries `includeCoAuthoredBy: false` and empty `attribution.commit` / `attribution.pr`, which stop the lines being written at all — but Claude Code rewrites that file at runtime, so it is machine-local by design, and a setting that does not travel is not a policy.
+//! `~/.claude/settings.json` carries `includeCoAuthoredBy: false` and empty `attribution.commit` / `attribution.pr`, which stop the lines being written at all — but Claude Code rewrites that file at runtime, so the profiles merge only a few keys into it and leave these to each machine, and a setting that does not travel is not a policy.
 //! This hook travels.
 //! (One gap remains and is not closeable from here: a forge composes the message for a squash merge on its own server, where no local hook runs.)
 //!

@@ -13,8 +13,47 @@ pub fn rolling_allowance(hourly: usize, daily: usize) -> bool {
     hourly < HOURLY_LIMIT && daily < DAILY_LIMIT
 }
 
-pub fn service_access(paused: bool, local_status: bool) -> bool {
-    !paused || local_status
+/// The CodeRabbit review pools an owner pause stops.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PauseScope {
+    None,
+    Pr,
+    Cli,
+    All,
+}
+
+impl PauseScope {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Pr => "pr",
+            Self::Cli => "cli",
+            Self::All => "all",
+        }
+    }
+}
+
+/// Combine the all, PR, and CLI pause markers into one scope.
+pub const fn pause_scope(all: bool, pr: bool, cli: bool) -> PauseScope {
+    match (all || pr, all || cli) {
+        (false, false) => PauseScope::None,
+        (true, false) => PauseScope::Pr,
+        (false, true) => PauseScope::Cli,
+        (true, true) => PauseScope::All,
+    }
+}
+
+pub const fn pr_reviews_paused(scope: PauseScope) -> bool {
+    matches!(scope, PauseScope::Pr | PauseScope::All)
+}
+
+pub const fn cli_reviews_paused(scope: PauseScope) -> bool {
+    matches!(scope, PauseScope::Cli | PauseScope::All)
+}
+
+/// Admit a vendor call unless CLI use is paused; the local status stays readable.
+pub fn service_access(scope: PauseScope, local_status: bool) -> bool {
+    !cli_reviews_paused(scope) || local_status
 }
 
 pub fn cooldown_complete(previous: u64, now: u64, gap: u64) -> bool {
@@ -91,11 +130,30 @@ fn cooldown_refuses_rollback_and_every_incomplete_interval() {
 #[cfg(kani)]
 #[kani::proof]
 fn owner_pause_allows_only_local_guard_status() {
-    let paused: bool = kani::any();
+    let all: bool = kani::any();
+    let pr: bool = kani::any();
+    let cli: bool = kani::any();
     let local_status: bool = kani::any();
-    let accepted = service_access(paused, local_status);
-    assert_eq!(accepted, !paused || local_status);
-    assert!(!paused || !accepted || local_status);
-    kani::cover!(accepted && paused && local_status);
-    kani::cover!(!accepted && paused && !local_status);
+    let scope = pause_scope(all, pr, cli);
+    let accepted = service_access(scope, local_status);
+    assert_eq!(accepted, !(all || cli) || local_status);
+    assert!(!cli_reviews_paused(scope) || !accepted || local_status);
+    kani::cover!(accepted && cli_reviews_paused(scope) && local_status);
+    kani::cover!(!accepted && cli_reviews_paused(scope) && !local_status);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn pause_scope_is_the_union_of_its_markers() {
+    let all: bool = kani::any();
+    let pr: bool = kani::any();
+    let cli: bool = kani::any();
+    let scope = pause_scope(all, pr, cli);
+    assert_eq!(pr_reviews_paused(scope), all || pr);
+    assert_eq!(cli_reviews_paused(scope), all || cli);
+    assert!(!all || scope == PauseScope::All);
+    assert!(scope != PauseScope::Pr || service_access(scope, false));
+    kani::cover!(scope == PauseScope::Pr && service_access(scope, false));
+    kani::cover!(scope == PauseScope::Cli && !pr_reviews_paused(scope));
+    kani::cover!(scope == PauseScope::None);
 }

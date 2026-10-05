@@ -13,7 +13,6 @@
 {{ if eq .profile "mac" }}
 {{ includeTemplate "profiles/mac/ignore" (merge (dict) . (index .platforms .profile)) }}
 AppData/Roaming/herdr/config.toml
-.claude/settings.json
 .config/git/config
 .config/git/hooks/renovate-freshness.sh
 .config/kitty/kitty.conf
@@ -84,7 +83,6 @@ Library/LaunchAgents/dev.dotfiles.dev-reaper.plist
 Library/LaunchAgents/dev.dotfiles.session-reaper.plist
 Library/LaunchAgents/dev.dotfiles.storage-scout.plist
 Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
-.claude/settings.json
 .config/bat/config
 .config/fzf/fzfrc
 .config/ghostty/config
@@ -152,7 +150,6 @@ Library/LaunchAgents/dev.dotfiles.storage-scout.plist
 Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .bashrc
 .claude/bashenv.sh
-.claude/settings.json
 .claude/shims/.keep
 .config/atuin/config.toml
 .config/bat/config
@@ -288,7 +285,6 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .config/opencode/commands/commit.md
 .config/opencode/commands/pr.md
 .config/opencode/commands/review.md
-.config/opencode/opencode.json
 .config/opencode/themes/tokyonight.json
 .config/opencode/tui.json
 .config/fcitx5/config

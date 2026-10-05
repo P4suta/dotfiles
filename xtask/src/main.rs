@@ -49,6 +49,10 @@ enum Action {
         #[arg(last = true)]
         arguments: Vec<OsString>,
     },
+    LineEndings {
+        #[command(subcommand)]
+        request: dotfiles_xtask::line_endings::Request,
+    },
     Git {
         #[arg(last = true)]
         arguments: Vec<OsString>,
@@ -212,6 +216,7 @@ fn run() -> Result<()> {
             emulator, session, child, &arguments,
         )?),
         Action::Hook { hook, arguments } => dotfiles_xtask::hooks::run(hook, &arguments)?,
+        Action::LineEndings { request } => dotfiles_xtask::line_endings::run(request)?,
         Action::Git { arguments } => {
             dotfiles_xtask::secrets::exit(dotfiles_xtask::hooks::git(&arguments)?)
         }
@@ -336,6 +341,7 @@ fn run() -> Result<()> {
         Action::Check => {
             dotfiles_xtask::skill_ops::check_catalog(&cli.root)?;
             dotfiles_xtask::quality::comment_scopes(&cli.root)?;
+            dotfiles_xtask::line_endings::check(&cli.root)?;
             let unknown = dotfiles_xtask::quality::unknown_recipes(&cli.root)?;
             anyhow::ensure!(
                 unknown.is_empty(),

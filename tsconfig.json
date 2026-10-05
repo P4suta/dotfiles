@@ -13,5 +13,5 @@
     "types": ["bun"],
     "noEmit": true
   },
-  "include": ["dot_config/opencode/plugins/skill-ops.ts", "xtask/tests/fixtures/*.ts"]
+  "include": ["dot_config/opencode/plugins/skill-ops.ts", "dot_config/opencode/plugins/line-endings.ts", "xtask/tests/fixtures/*.ts"]
 }

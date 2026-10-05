@@ -13,8 +13,7 @@ Do not start a second independent model review or use a cloud coding task merely
 Use automatic GitHub PR review as the normal review path for an existing or authorized PR.
 Request a local CLI review only when explicitly requested or when a substantive, coherent change needs feedback before an authorized PR can be opened.
 Do not run reviews from hooks, watchers, file-save events, or repeated background loops.
-Honor an owner-imposed CodeRabbit pause before any CLI service call, quota inquiry, or PR review request.
-The native guard's local status reports its persistent pause; only explicit owner resumption permits clearing it.
+Read `coderabbit --guard-status --json` first: `reviews.cli` and `reviews.pr` state whether the owner paused each review pool, and only the owner clears a pause.
 
 ## Review local changes
 
@@ -23,12 +22,7 @@ Run the relevant local checks before requesting a service review of a coherent c
 Check `coderabbit --version` and `coderabbit auth status`; inspect the installed `coderabbit review --help` when selecting options.
 Use the existing mise installation and selected paid organization; authentication is machine-local.
 Use only the dotfiles-installed `coderabbit` or `cr` guard, including inside `mise x`.
-Check `coderabbit --guard-status` before a review; the Advanced local ceiling is seven attempts per rolling hour and 168 per rolling day across all repositories and agents on the Mac.
-The guard uses 90% of verified capacity as a ceiling, retains 20% of that ceiling, and admits at most `floor(capacity * 0.9 * 0.8)` consumed reviews with inactive paid usage.
-The Mac is the sole managed service-review executor; the Windows and Linux hosts perform native checks without opening another managed review pool.
-Usage queries have a separate durable limit of seven per rolling hour and 168 per rolling day, with at least one minute between probes, including failures and the review's internal preflight.
-Let the guard perform preflight; do not poll `usage` or treat the end of a cooldown as proof that remote capacity has returned.
-Failed, interrupted, and unverifiable attempts consume the allowance, and simultaneous invocations are refused.
+The guard enforces the rolling local limits, the `floor(capacity * 0.9 * 0.8)` budget, inactive paid usage, and the Mac as the sole review executor, and performs its own preflight.
 Exit code 75 is a guard refusal: report it and continue independent work without another service attempt.
 Do not invoke `coderabbit-vendor`, install another CLI, edit or delete guard state, or raise limits to circumvent a refusal.
 Do not schedule an automatic retry when a window expires.
@@ -68,7 +62,9 @@ Do not stop merely because the PR was created, pushed, or CI became green.
 Use `gh` to identify the exact repository, PR, base, and current head SHA before reading CodeRabbit comments.
 Observe the existing automatic review with bounded read-only polling and meaningful progress updates while it runs.
 Use `gh pr checks` for check state, and inspect the actual bot review and summary for completion at the current head.
-Paused, missing, skipped, stale, failed, and rate-limited reviews are pending; do not replace them with an unrequested CLI review or a manual trigger.
+While `reviews.pr` is paused, no PR review is owed: neither wait for nor request one, and report the pause as the reason none was awaited.
+After resumption, `pr-workflow check --pr` states whether the current-head review is owed again.
+Missing, paused by CodeRabbit, skipped, stale, failed, and rate-limited reviews are pending; do not replace them with an unrequested CLI review or a manual trigger.
 Fetch all pages of reviews, issue comments, and review threads, including `isResolved`, `isOutdated`, paths, and commit identities where available.
 Use [PR evidence](references/pr-evidence.md) for the provider query and freshness checks.
 Read existing CodeRabbit findings before spending a new CLI review on the same unchanged diff.

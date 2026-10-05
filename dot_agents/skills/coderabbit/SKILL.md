@@ -11,7 +11,7 @@ Read the current task, repository instructions, and existing authorization befor
 Use `gh` for GitHub and the authenticated CodeRabbit UI when no supported connector or CLI provides the operation.
 Use the neighboring `coderabbit-review` skill for local analysis and PR findings.
 Keep ordinary implementation with the user's existing coding agent.
-Honor an owner-imposed CodeRabbit pause for service calls, quota inquiries, review requests, and settings changes until explicitly resumed.
+Read `coderabbit --guard-status --json` before a service operation and honor its pause scope, including for settings changes, until the owner resumes.
 
 ## Fixed-fee setup
 
@@ -20,10 +20,7 @@ Keep Usage-based reviews, CodeRabbit Agent, and CodeRabbit Security Scan inactiv
 Do not start a new agent trial, activate paid usage, change the subscription, or add seats as a workaround for review limits.
 Check carryover settings after a trial or plan change and keep automatic seat assignment off for a single-user account.
 Use the included CLI allowance; local implementation still uses the coding agent's normal allowance.
-Keep the dotfiles CLI guard installed and inspect `coderabbit --guard-status` when checking local capacity.
-Its seven-per-hour and 168-per-day rolling limits are shared by all local repositories and agents on the Mac.
-It admits at most `floor(capacity * 0.9 * 0.8)` consumed reviews, using a 90% ceiling with a further 20% margin, and verifies inactive paid billing before analysis.
-Managed service reviews and usage queries are disabled on the other two native hosts, and quota probes have their own persistent frequency limit.
+Keep the dotfiles CLI guard installed; it enforces the local CLI budget and inactive paid usage, and `coderabbit --guard-status --json` reports its capacity and pause scope.
 It does not coordinate GitHub automatic reviews, IDE extensions, browser tasks, or unmanaged clients.
 Do not bypass the guard or reset its ledger when capacity is exhausted or verification fails.
 
