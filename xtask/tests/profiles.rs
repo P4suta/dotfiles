@@ -10,6 +10,10 @@ use dotfiles_xtask::{
 use std::fs;
 use std::path::Path;
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the shared constructor for fixture Git processes"
+)]
 #[path = "../../guard/tests/support/fixture_git.rs"]
 mod fixture_git;
 

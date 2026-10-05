@@ -2,18 +2,28 @@
 //! Windows installs a copy of dotguard named `git.exe`, so the test runs that form everywhere.
 
 use dotguard::refusal::Refusal;
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
+use std::sync::OnceLock;
 
 #[path = "support/fixture_git.rs"]
 mod fixture_git;
 #[path = "support/wrapper.rs"]
 mod wrapper;
 
-/// A scratch directory holding the copied wrapper, an isolated home, and a repository, removed when dropped.
+/// The wrapper every test runs, placed once before this binary starts its first process; every spawn here follows `Wrapper::inheriting`, which waits for it.
+fn wrapper_binary() -> &'static Path {
+    static BINARY: OnceLock<PathBuf> = OnceLock::new();
+    BINARY.get_or_init(|| wrapper::place(&wrapper::preparation("git-wrapper")))
+}
+
+/// A scratch directory holding an isolated home and a repository, removed when dropped.
 struct Wrapper {
     scope: PathBuf,
-    git: PathBuf,
+    git: &'static Path,
+    /// The variables a child starts from as a caller exported them, or `None` for this process's own.
+    environment: Option<Vec<(OsString, OsString)>>,
 }
 
 impl Drop for Wrapper {
@@ -24,13 +34,25 @@ impl Drop for Wrapper {
 
 impl Wrapper {
     fn new(name: &str) -> Self {
+        Self::starting(name, None)
+    }
+
+    /// A wrapper whose children start from `environment` as a caller would export it.
+    fn inheriting(name: &str, environment: impl IntoIterator<Item = (OsString, OsString)>) -> Self {
+        Self::starting(name, Some(environment.into_iter().collect()))
+    }
+
+    fn starting(name: &str, environment: Option<Vec<(OsString, OsString)>>) -> Self {
+        let git = wrapper_binary();
         let scope =
             std::env::temp_dir().join(format!("dotguard-wrapper-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&scope);
         std::fs::create_dir_all(scope.join("repository")).unwrap();
-        let git = scope.join(format!("git{}", std::env::consts::EXE_SUFFIX));
-        wrapper::install(&git);
-        let wrapper = Self { scope, git };
+        let wrapper = Self {
+            scope,
+            git,
+            environment,
+        };
         assert!(wrapper.run(&["init", "-q"], None).status.success());
         wrapper
     }
@@ -46,7 +68,11 @@ impl Wrapper {
     }
 
     fn run_with(&self, arguments: &[&str], input: Option<&[u8]>, waivers: &[&str]) -> Output {
-        let mut command = fixture_git::command(&self.git, &self.scope.join("gitconfig"));
+        let global = self.scope.join("gitconfig");
+        let mut command = match &self.environment {
+            Some(environment) => fixture_git::inheriting(self.git, &global, environment.clone()),
+            None => fixture_git::command(self.git, &global),
+        };
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("ALLOW_") {
                 command.env_remove(name);
@@ -268,28 +294,17 @@ fn a_callers_git_repository_variables_cannot_redirect_the_wrapper() {
     let outer = Wrapper::new("outer-repository");
     let outer_git = outer.scope.join("repository/.git");
     let config_before = std::fs::read(outer_git.join("config")).unwrap();
-    // SAFETY: std serializes its own environment access and nothing in this binary reads the environment outside std; concurrent tests remove these variables from their children too.
-    let saved: Vec<_> = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]
-        .iter()
-        .map(|name| (*name, std::env::var_os(name)))
-        .collect();
-    unsafe {
-        std::env::set_var("GIT_DIR", &outer_git);
-        std::env::set_var("GIT_WORK_TREE", outer.scope.join("repository"));
-        std::env::set_var("GIT_INDEX_FILE", outer_git.join("index"));
-    }
-    let inner = Wrapper::new("inner-repository");
-    let initialized = inner.scope.join("repository/.git").is_dir();
-    for (name, value) in saved {
-        // SAFETY: restores the values captured above.
-        unsafe {
-            match value {
-                Some(value) => std::env::set_var(name, value),
-                None => std::env::remove_var(name),
-            }
-        }
-    }
-    assert!(initialized, "the scratch repository was not initialized");
+    let redirection = [
+        ("GIT_DIR", outer_git.clone()),
+        ("GIT_WORK_TREE", outer.scope.join("repository")),
+        ("GIT_INDEX_FILE", outer_git.join("index")),
+    ]
+    .map(|(name, value)| (OsString::from(name), value.into_os_string()));
+    let inner = Wrapper::inheriting("inner-repository", std::env::vars_os().chain(redirection));
+    assert!(
+        inner.scope.join("repository/.git").is_dir(),
+        "the scratch repository was not initialized"
+    );
     assert_eq!(
         std::fs::read(outer_git.join("config")).unwrap(),
         config_before

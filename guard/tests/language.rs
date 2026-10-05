@@ -1,12 +1,55 @@
 //! The language gate run as installed: a refused scan ends with one complete record.
 
 use dotguard::refusal::{Refusal, words};
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 #[path = "support/fixture_git.rs"]
 mod fixture_git;
 #[path = "support/wrapper.rs"]
 mod wrapper;
+
+/// The executables every test runs, placed once before this binary starts its first process; every spawn here follows `fixtures`.
+struct Fixtures {
+    git: PathBuf,
+    /// A `git init` template whose hooks run the language gates; Git copies them in its own process.
+    template: PathBuf,
+}
+
+fn fixtures() -> &'static Fixtures {
+    static FIXTURES: OnceLock<Fixtures> = OnceLock::new();
+    FIXTURES.get_or_init(|| {
+        let directory = wrapper::preparation("language");
+        let git = wrapper::place(&directory);
+        let hooks = directory.join("template/hooks");
+        std::fs::create_dir_all(&hooks).unwrap();
+        let dotguard = env!("CARGO_BIN_EXE_dotguard").replace('\\', "/");
+        for (hook, arguments) in [("pre-commit", ""), ("commit-msg", " \"$1\"")] {
+            let script = hooks.join(hook);
+            std::fs::write(
+                &script,
+                format!("#!/bin/sh\nexec '{dotguard}' {hook}{arguments}\n"),
+            )
+            .unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+        Fixtures {
+            git,
+            template: directory.join("template"),
+        }
+    })
+}
+
+/// A command for dotguard itself, started only after the fixtures are in place.
+fn dotguard() -> Command {
+    fixtures();
+    Command::new(env!("CARGO_BIN_EXE_dotguard"))
+}
 
 #[test]
 fn a_contaminated_file_is_refused_with_a_rescan_and_a_recorded_waiver() {
@@ -15,7 +58,7 @@ fn a_contaminated_file_is_refused_with_a_rescan_and_a_recorded_waiver() {
     std::fs::create_dir_all(&scope).unwrap();
     let cyrillic = char::from_u32(0x0441).unwrap();
     std::fs::write(scope.join("a.txt"), format!("plain\nmixed {cyrillic}\n")).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_dotguard"))
+    let output = dotguard()
         .current_dir(&scope)
         .env("HOME", &scope)
         .env("USERPROFILE", &scope)
@@ -45,8 +88,8 @@ fn a_contaminated_file_is_refused_with_a_rescan_and_a_recorded_waiver() {
 
 /// A repository whose `git` is a copy of the wrapper and whose commit hooks run the language gates as installed.
 struct Checkout {
-    scope: std::path::PathBuf,
-    git: std::path::PathBuf,
+    scope: PathBuf,
+    git: &'static Path,
 }
 
 impl Drop for Checkout {
@@ -66,30 +109,22 @@ impl Checkout {
             "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
         )
         .unwrap();
-        let git = scope.join(format!("git{}", std::env::consts::EXE_SUFFIX));
-        wrapper::install(&git);
-        let checkout = Self { scope, git };
-        assert!(checkout.run(&["init", "-q"], &[]).status.success());
-        let hooks = checkout.path().join(".git/hooks");
-        std::fs::create_dir_all(&hooks).unwrap();
-        let dotguard = env!("CARGO_BIN_EXE_dotguard").replace('\\', "/");
-        for (hook, arguments) in [("pre-commit", ""), ("commit-msg", " \"$1\"")] {
-            let script = hooks.join(hook);
-            std::fs::write(
-                &script,
-                format!("#!/bin/sh\nexec '{dotguard}' {hook}{arguments}\n"),
-            )
-            .unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-            }
-        }
+        let fixtures = fixtures();
+        let checkout = Self {
+            scope,
+            git: &fixtures.git,
+        };
+        let template = format!("--template={}", fixtures.template.display());
+        assert!(
+            checkout
+                .run(&["init", "-q", &template], &[])
+                .status
+                .success()
+        );
         checkout
     }
 
-    fn path(&self) -> std::path::PathBuf {
+    fn path(&self) -> PathBuf {
         self.scope.join("repository")
     }
 
@@ -110,7 +145,7 @@ impl Checkout {
 
     /// Runs the wrapper copy with each named waiver set.
     fn run(&self, arguments: &[&str], waivers: &[&str]) -> std::process::Output {
-        let mut command = self.command(&self.git);
+        let mut command = self.command(self.git);
         command.args(arguments);
         for waiver in waivers {
             command.env(waiver, "1");
@@ -182,7 +217,7 @@ fn a_foreign_message_is_refused_with_a_retry_that_keeps_the_amend() {
         "the saved message of the refused commit"
     );
     let corrected = checkout
-        .command(&checkout.git)
+        .command(checkout.git)
         .args(&next[1..])
         .env("GIT_EDITOR", "printf 'fix c\\n' >")
         .output()
@@ -264,7 +299,7 @@ fn a_language_refusal_outside_the_wrapper_names_the_override_without_a_waiver() 
 /// Runs `arguments` through the wrapper with an editor that writes `message`.
 fn edited(checkout: &Checkout, arguments: &[&str], message: &str) -> std::process::Output {
     checkout
-        .command(&checkout.git)
+        .command(checkout.git)
         .args(arguments)
         .env("GIT_EDITOR", format!("printf '{message}' >"))
         .output()
