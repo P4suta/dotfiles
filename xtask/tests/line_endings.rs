@@ -51,6 +51,10 @@ impl Isolated {
         command
             .env("GIT_CONFIG_GLOBAL", &self.global)
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env(
+                "XDG_CONFIG_HOME",
+                self.global.parent().expect("scope directory"),
+            )
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .env_remove("GIT_INDEX_FILE");
