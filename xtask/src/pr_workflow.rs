@@ -267,10 +267,61 @@ struct WorkflowPolicy {
     schema: u8,
     minimum_remaining: u64,
     personal_owners: Vec<Owner>,
+    work_in_progress: WorkInProgress,
+}
+
+/// How many open PRs one author may hold in a repository before new work joins an open PR instead.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkInProgress {
+    default: u32,
+    /// Overrides by `owner/name`, each recorded with the reason it differs.
+    #[serde(default)]
+    repositories: std::collections::BTreeMap<String, RepositoryLimit>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RepositoryLimit {
+    limit: u32,
+    reason: String,
+}
+
+impl WorkInProgress {
+    fn limit(&self, repository: &str) -> u32 {
+        crate::wip_rules::limit(
+            self.default,
+            self.repositories
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(repository))
+                .map(|(_, recorded)| recorded.limit),
+        )
+    }
 }
 
 struct Github {
     policy: WorkflowPolicy,
+    login: String,
+}
+
+/// One open PR as the REST list reports it.
+#[derive(Deserialize)]
+struct ListedPr {
+    number: u64,
+    html_url: String,
+    user: ListedUser,
+    head: ListedHead,
+}
+
+#[derive(Deserialize)]
+struct ListedUser {
+    login: String,
+}
+
+#[derive(Deserialize)]
+struct ListedHead {
+    #[serde(rename = "ref")]
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -698,22 +749,32 @@ impl Github {
         require(
             policy.schema == 1
                 && policy.minimum_remaining > 0
-                && !policy.personal_owners.is_empty(),
+                && !policy.personal_owners.is_empty()
+                && policy.work_in_progress.default > 0
+                && policy
+                    .work_in_progress
+                    .repositories
+                    .values()
+                    .all(|recorded| recorded.limit > 0 && single_line(&recorded.reason)),
             || {
                 Refusal::new(
                     "pr.policy",
-                    "the installed workflow policy needs schema 1, a nonzero quota reserve, and at least one personal owner",
+                    "the installed workflow policy needs schema 1, a nonzero quota reserve, at least one personal owner, and nonzero work-in-progress limits that each override states a reason for",
                     "git ls-files dot_agents/skills/pull-request/assets/workflow-policy.json",
                 )
                 .evidence(format!(
-                    "schema {}, reserve {}, {} personal owner(s)",
+                    "schema {}, reserve {}, {} personal owner(s), work-in-progress default {}",
                     policy.schema,
                     policy.minimum_remaining,
-                    policy.personal_owners.len()
+                    policy.personal_owners.len(),
+                    policy.work_in_progress.default
                 ))
             },
         )?;
-        let github = Self { policy };
+        let mut github = Self {
+            policy,
+            login: String::new(),
+        };
         let user: Owner = github.read("user").map_err(|error| {
             if error.downcast_ref::<Refusal>().is_some() {
                 return error;
@@ -737,7 +798,46 @@ impl Github {
                 user.login, user.id
             ))
         })?;
+        github.login = user.login;
         Ok(github)
+    }
+
+    /// Refuses a new PR while the authenticated author already holds the repository's work-in-progress limit of open PRs.
+    fn admit_work_in_progress(&self, target: &Target, head: &str) -> Result<()> {
+        let open: Vec<ListedPr> = self.read(&format!(
+            "repos/{}/pulls?state=open&per_page=100",
+            target.repo
+        ))?;
+        let mine: Vec<&ListedPr> = open
+            .iter()
+            .filter(|pr| pr.user.login.eq_ignore_ascii_case(&self.login) && pr.head.name != head)
+            .collect();
+        let limit = self.policy.work_in_progress.limit(&target.repo);
+        let count = u32::try_from(mine.len()).unwrap_or(u32::MAX);
+        if crate::wip_rules::admits(count, limit) {
+            return Ok(());
+        }
+        let oldest = mine
+            .iter()
+            .min_by_key(|pr| pr.number)
+            .context("a refused limit names an open PR")?;
+        let mut refusal = Refusal::new(
+            "pr.wip",
+            format!(
+                "{} already holds {count} open PR(s) in {}, at its work-in-progress limit of {limit}; add this work to #{} instead of opening another PR",
+                self.login, target.repo, oldest.number
+            ),
+            command(&["git", "switch", &oldest.head.name])
+                + " && "
+                + &command(&["git", "merge", "--no-edit", head])
+                + " && "
+                + &command(&["git", "push"]),
+        );
+        for pr in &mine {
+            refusal =
+                refusal.evidence(format!("#{} {} ({})", pr.number, pr.html_url, pr.head.name));
+        }
+        Err(refusal.into())
     }
 
     /// Inspect live REST quota headers on each serialized prerequisite request.
@@ -1306,6 +1406,7 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 issue,
                 Checks::Incomplete,
             )?;
+            github.admit_work_in_progress(&target, &head)?;
             refuse_dependent(
                 &github,
                 &target,

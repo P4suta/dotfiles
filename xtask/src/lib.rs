@@ -50,6 +50,7 @@ pub mod timeout_rules;
 pub mod tool;
 pub mod transaction;
 pub mod windows_setup;
+pub mod wip_rules;
 pub mod wsl;
 
 /// A failure whose structured refusal a child process already printed, so nothing follows it.

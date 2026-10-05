@@ -30,6 +30,7 @@ Otherwise prefer CodeRabbit title and summary generation where it is enabled, an
 Read [commands and generation](references/workflow.md) for the placeholders, the PR review budget, and the optional configuration example.
 Use local authoring when the service is unavailable or the destination requires a document it cannot produce reliably.
 Local creation always starts as a draft; moving it to review is a separate authorized operation.
+`create` refuses a new PR while its author holds the repository's work-in-progress limit of open PRs, which the workflow policy records; add the work to the PR it names.
 `ready` refuses until every head check passes; run it only when no scoped work remains.
 Open dependent work with `pr-workflow stack create`; `create` refuses a branch sharing commits or paths with another open PR.
 Restack with `pr-workflow stack sync` or `stack rebase`, never a manual rebase or force push, and merge with `pr-workflow merge` or `stack merge` ([stacks and merging](references/workflow.md#stacks-and-merging)).

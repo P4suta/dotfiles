@@ -1,7 +1,7 @@
 {
-  "revision": "95c10b2c0608f835a191da3d68cd92bb8cff65969887e850d79931d61828f939",
+  "revision": "e519de9e0767b9545d4bd3e9a96ce4a7e07978833498cf097ab11845d2fad4f4",
   "outcome": "implemented",
-  "reason": "The skill points at the checked stack and merge commands of pr-workflow, which open dependent work as a stack, restack under dotguard's stack lease, and merge independent PRs by merge-style update, check wait, ready transition, and verified-head merge, so no PR needs a manual rebase or update.",
+  "reason": "The skill points at the checked stack, merge, and create commands of pr-workflow: dependent work opens as a stack, independent PRs merge without manual updates, and create refuses a PR beyond the author's work-in-progress limit, which the workflow policy records with a default of one and reasoned per-repository overrides.",
   "evidence": [
     "dot_agents/skills/pull-request/SKILL.md",
     "docs/adr/0004-checked-pull-request-authoring.md",
@@ -14,7 +14,9 @@
     "docs/adr/0013-ready-only-after-passing-checks.md",
     "docs/adr/0015-scoped-coderabbit-pause.md",
     "xtask/src/pr_workflow.rs",
-    "guard/src/stack.rs"
+    "guard/src/stack.rs",
+    "xtask/src/wip_rules.rs",
+    "dot_agents/skills/pull-request/assets/workflow-policy.json"
   ],
   "revisit": null
 }

@@ -123,6 +123,11 @@ pub const SHELL_WRITE_HARNESSES: [&str; 2] = [
     "file_writing_commands_are_never_admitted",
 ];
 
+pub const WIP_HARNESSES: [&str; 2] = [
+    "a_pr_is_created_only_below_the_limit",
+    "a_recorded_repository_limit_replaces_the_default",
+];
+
 pub const TIMEOUT_HARNESSES: [&str; 3] = [
     "the_percentile_of_a_short_history_is_its_slowest_run",
     "the_timeout_never_falls_below_the_observed_percentile_nor_exceeds_the_limit",
@@ -704,7 +709,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 9] = [
+pub const RULES: [Rules; 10] = [
     Rules {
         source: "xtask/src/target_rules.rs",
         harnesses: &TARGET_HARNESSES,
@@ -770,6 +775,24 @@ fn reject_admitting_a_file_redirect() {
         rejected: &[
             "reject_admitting_an_inline_interpreter",
             "reject_admitting_a_file_redirect",
+        ],
+    },
+    Rules {
+        source: "xtask/src/wip_rules.rs",
+        harnesses: &WIP_HARNESSES,
+        counterexamples: "use production::{admits, limit};
+#[kani::proof]
+fn reject_admitting_a_pr_at_the_limit() {
+    assert!(admits(1, limit(1, None)));
+}
+#[kani::proof]
+fn reject_ignoring_a_repository_override() {
+    assert!(limit(1, Some(3)) == 1);
+}
+",
+        rejected: &[
+            "reject_admitting_a_pr_at_the_limit",
+            "reject_ignoring_a_repository_override",
         ],
     },
     Rules {

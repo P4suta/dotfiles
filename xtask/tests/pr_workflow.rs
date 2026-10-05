@@ -1086,6 +1086,57 @@ fn local_create_is_draft_and_passes_the_checked_body_by_file() -> Result<()> {
     Ok(())
 }
 
+/// An author holding the default limit of one open PR adds new work to it instead of opening another; other authors' PRs and the same branch do not count.
+#[test]
+fn create_refuses_a_second_open_pr_by_the_same_author_and_names_the_first() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let pr = |number: u64, login: &str, head: &str| {
+        serde_json::json!({
+            "number": number,
+            "html_url": format!("https://github.com/owner/project/pull/{number}"),
+            "user": {"login": login},
+            "head": {"ref": head}
+        })
+    };
+    let create = |pulls: &serde_json::Value| -> Result<Output> {
+        Ok(fixture
+            .command("create")?
+            .args(["--title", "fix: preserve edits", "--body-file"])
+            .arg(&fixture.body)
+            .args(["--head", "feature"])
+            .env("GH_FIXTURE_PULLS", pulls.to_string())
+            .output()?)
+    };
+    let output = create(&serde_json::json!([
+        pr(9, "Other", "theirs"),
+        pr(12, "P4suta", "feature")
+    ]))?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_file(&fixture.log)?;
+    let output = create(&serde_json::json!([
+        pr(14, "P4suta", "later"),
+        pr(11, "p4suta", "earlier")
+    ]))?;
+    let record = refusal(&output);
+    assert_eq!(record["rule"], "pr.wip");
+    assert_eq!(
+        record["next"],
+        "git switch earlier && git merge --no-edit feature && git push"
+    );
+    let evidence = record["evidence"].to_string();
+    assert!(
+        evidence.contains("#11 https://github.com/owner/project/pull/11 (earlier)")
+            && evidence.contains("#14"),
+        "{evidence}"
+    );
+    assert!(!fixture.log()?.contains("\ncreate\n"));
+    Ok(())
+}
+
 #[test]
 fn coderabbit_request_is_explicit_and_final_checks_refuse_pending_generation() -> Result<()> {
     let fixture = Fixture::new("@coderabbitai summary\n\n## Validation\nThe regression passed.\n")?;
@@ -1257,10 +1308,10 @@ fn edit_and_gh_failure_preserve_one_attempt_and_report_the_failure() -> Result<(
         let output = command.env("GH_FIXTURE_FAILURE", operation).output()?;
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("42"));
-        // Creation also lists the open PRs it could depend on.
+        // Creation also reads the author's open PRs for the work-in-progress limit and lists the open PRs it could depend on.
         assert_eq!(
             fixture.log()?.matches("invocation\n").count(),
-            if operation == "create" { 4 } else { 3 }
+            if operation == "create" { 5 } else { 3 }
         );
         assert_eq!(
             fixture.log()?.matches(&format!("\n{operation}\n")).count(),

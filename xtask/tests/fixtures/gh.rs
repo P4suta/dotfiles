@@ -34,6 +34,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "GH_FIXTURE_ISSUE"
         } else if endpoint.contains("/compare/") {
             "GH_FIXTURE_COMPARE"
+        } else if endpoint.contains("/pulls?") {
+            "GH_FIXTURE_PULLS"
         } else {
             "GH_FIXTURE_REPOSITORY"
         };
@@ -48,6 +50,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .split(',')
                 .any(|listed| listed == head);
             println!("{{\"behind_by\":{}}}", u8::from(behind));
+        } else if variable == "GH_FIXTURE_PULLS" {
+            println!(
+                "{}",
+                std::env::var(variable).unwrap_or_else(|_| "[]".into())
+            );
         } else {
             println!("{}", std::env::var(variable)?);
         }
