@@ -9,7 +9,7 @@ const PS_MODULES: &[&str] = &["PSFzf", "PSScriptAnalyzer"];
 
 const PSGALLERY_HELPER: &str = include_str!("../../assets/psgallery.ps1");
 
-pub fn run(source: &Path, scoop_apps: &[String]) -> Result<i32> {
+pub fn run(scoop_apps: &[String]) -> Result<i32> {
     let token = github_token();
 
     println!(">>> mise install");
@@ -31,7 +31,6 @@ pub fn run(source: &Path, scoop_apps: &[String]) -> Result<i32> {
     }
 
     install_ps_modules()?;
-    install_lefthook(source)?;
 
     println!(">>> git signing config sanity check");
     report(&signing_problems(&SigningConfig::read()));
@@ -62,16 +61,6 @@ fn install_ps_modules() -> Result<i32> {
         .arg(helper.as_os_str())
         .arg("-Modules")
         .arg(PS_MODULES.join(","));
-    proc::status(&mut cmd)
-}
-
-fn install_lefthook(source: &Path) -> Result<i32> {
-    if !source.join(".git").exists() {
-        return Ok(0);
-    }
-    println!(">>> lefthook install (chezmoi source repo)");
-    let mut cmd = env::command("lefthook");
-    cmd.arg("install").current_dir(source);
     proc::status(&mut cmd)
 }
 

@@ -146,11 +146,9 @@ impl Step {
 impl Step {
     /// Packaged tools this step invokes, beyond those the host or this repository pins.
     /// Owner sources are cloned under the global Git hooks, which run Lefthook for repositories that configure it.
-    /// On Windows the tools step runs `dotctl setup tools`, which installs Lefthook's hooks into the source checkout.
-    pub fn requires(self, profile: Profile) -> &'static [Tool] {
+    pub fn requires(self, _profile: Profile) -> &'static [Tool] {
         match self {
             Self::Ocomment | Self::Domyjob | Self::Fleet => &[Tool::Lefthook],
-            Self::Tools if profile == Profile::Windows => dotctl_requires("tools"),
             Self::Runtime
             | Self::Mise
             | Self::Github
@@ -177,7 +175,6 @@ impl Step {
 /// Packaged tools the Windows `dotctl setup` commands invoke.
 fn dotctl_requires(command: &str) -> &'static [Tool] {
     match command {
-        "tools" => &[Tool::Lefthook],
         "shell" => &[Tool::Starship, Tool::Zoxide],
         _ => &[],
     }
@@ -206,6 +203,7 @@ pub fn scripted_requirements(profile: Profile, scripts: &str) -> Vec<Tool> {
 
 /// Packaged tools that installed entry points run, read from rendered files.
 /// An agent launcher reads the secrets the machine-local configuration selects through Doppler, so it needs Doppler wherever it renders.
+/// A global Git hook runs the Lefthook configuration of the repository it fires in, so it needs Lefthook wherever it renders.
 pub fn entry_requirements(rendered: &str) -> Vec<Tool> {
     let mut tools = Vec::new();
     for words in rendered
@@ -216,8 +214,13 @@ pub fn entry_requirements(rendered: &str) -> Vec<Tool> {
             let program = word.trim_matches(['\'', '"', '^']);
             program.ends_with("dotfiles-xtask") || program.ends_with("dotfiles-xtask.exe")
         });
-        if launcher.is_some_and(|start| words[start..].contains(&"agent")) {
-            tools.push(Tool::Doppler);
+        if let Some(start) = launcher {
+            if words[start..].contains(&"agent") {
+                tools.push(Tool::Doppler);
+            }
+            if words[start..].contains(&"hook") {
+                tools.push(Tool::Lefthook);
+            }
         }
     }
     tools.sort();
