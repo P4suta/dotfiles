@@ -1,5 +1,6 @@
 ---
-description: open a GitHub pull request for the current branch
+description: >-
+  Open a GitHub pull request for the current branch
 agent: build
 ---
 

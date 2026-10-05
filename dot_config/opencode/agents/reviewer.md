@@ -1,5 +1,7 @@
 ---
-description: read-only code reviewer for risky diffs, branches, and pull requests
+description: >-
+  Read-only code reviewer for diffs, branches, and pull requests.
+  Use before committing or merging risky changes.
 mode: subagent
 permission:
   edit: deny

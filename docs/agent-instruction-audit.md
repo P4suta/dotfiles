@@ -174,7 +174,15 @@ This repository's secret scan covers only its own publication snapshot.
 
 Setting: delimits the front matter that OpenCode reads as the agent's configuration.
 
-> description: read-only code reviewer for risky diffs, branches, and pull requests
+> description: >-
+
+Setting: opens the description of the agent.
+
+>   Read-only code reviewer for diffs, branches, and pull requests.
+
+Setting: names the agent's job.
+
+>   Use before committing or merging risky changes.
 
 Setting: states when OpenCode delegates to the agent.
 
@@ -284,7 +292,11 @@ Judgment: whether the change holds up requires reading it.
 
 Setting: delimits the front matter that OpenCode reads as the command's configuration.
 
-> description: commit staged changes with a Conventional Commit message
+> description: >-
+
+Setting: opens the description of the command.
+
+>   Commit staged changes with a Conventional Commit message
 
 Setting: describes the command in the command list.
 
@@ -338,7 +350,11 @@ Judgment: whether the commit holds the intended changes requires reading its con
 
 Setting: delimits the front matter that OpenCode reads as the command's configuration.
 
-> description: open a GitHub pull request for the current branch
+> description: >-
+
+Setting: opens the description of the command.
+
+>   Open a GitHub pull request for the current branch
 
 Setting: describes the command in the command list.
 
@@ -368,7 +384,11 @@ Judgment: which result the reader needs depends on the task.
 
 Setting: delimits the front matter that OpenCode reads as the command's configuration.
 
-> description: review the current branch's changes since its base branch
+> description: >-
+
+Setting: opens the description of the command.
+
+>   Review the current branch's diff from its base branch
 
 Setting: describes the command in the command list.
 

@@ -1,5 +1,6 @@
 ---
-description: commit staged changes with a Conventional Commit message
+description: >-
+  Commit staged changes with a Conventional Commit message
 agent: build
 ---
 
