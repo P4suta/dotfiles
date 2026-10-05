@@ -17,6 +17,7 @@
 
 use crate::locate;
 use crate::realgit;
+use crate::refusal::Refusal;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -118,18 +119,23 @@ fn gate(remote: &str, input: &str) -> i32 {
         return 0;
     }
 
-    eprintln!(
-        "::error:: push refused: this push changes dependencies that are not on their latest non-major release:\n{}\n\n\
-         Bump them to the versions above (SHA-pinned actions: update both the hash and\n\
-         the version comment), then push again. Escape hatches:\n\n  \
-         RENOVATE_LOCAL_SKIP=1 git push          # this push only\n  \
-         git config renovate.localSkip true      # this repo (add --global for the machine)\n  \
-         RENOVATE_LOCAL_GATE_TYPES=\"patch\" ...   # narrow what blocks\n\n\
-         Skipping pre-push hooks entirely is not an option here: the ~/.local/bin/git\n\
-         wrapper refuses the hook-bypass flag without a waiver.",
-        blocked.join("\n")
-    );
+    stale_refusal(&blocked).emit();
     1
+}
+
+/// The opt-outs are not recorded, so the refusal names no waiver; they stay in the cause for the owner to decide.
+fn stale_refusal(blocked: &[String]) -> Refusal {
+    let mut refusal = Refusal::new(
+        "push.dependencies",
+        "this push changes dependencies that are not on their latest non-major release.\n\
+         Bump them to the listed versions (SHA-pinned actions: update both the hash and the version comment), then push again.\n\
+         Unrecorded opt-outs for the owner: RENOVATE_LOCAL_SKIP=1 for one push, git config renovate.localSkip true for this repository, or RENOVATE_LOCAL_GATE_TYPES to narrow what blocks.",
+        "dotguard renovate run",
+    );
+    for dependency in blocked {
+        refusal = refusal.evidence(dependency.trim());
+    }
+    refusal
 }
 
 /// The manifest gate: which manifests the pushed range changes, the lines it adds, and whether the scope had to be assumed total.
@@ -905,6 +911,18 @@ mod tests {
         for p in no {
             assert!(!is_manifest(p), "should not match: {p}");
         }
+    }
+
+    #[test]
+    fn a_stale_dependency_refusal_lists_each_dependency_and_no_waiver() {
+        let refusal = super::stale_refusal(&[
+            "  package.json: lodash 4.17.20 -> 4.17.21 (patch)".to_owned(),
+            "  Cargo.toml: serde 1.0.1 -> 1.0.2 (patch)".to_owned(),
+        ]);
+        assert!(refusal.is_complete(), "{refusal:?}");
+        assert_eq!(refusal.rule, "push.dependencies");
+        assert_eq!(refusal.evidence.len(), 2);
+        assert_eq!(refusal.waiver, None);
     }
 
     #[test]

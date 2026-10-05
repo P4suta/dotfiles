@@ -1,5 +1,6 @@
 //! The post-commit gate against real repositories: an ordinary commit that records no change is rolled back.
 
+use dotguard::refusal::Refusal;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -76,12 +77,16 @@ impl Repository {
     }
 
     fn post_commit(&self, waivers: &[&str]) -> bool {
+        self.post_commit_output(waivers).status.success()
+    }
+
+    fn post_commit_output(&self, waivers: &[&str]) -> std::process::Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_dotguard"));
         self.isolate(&mut command).arg("post-commit");
         for waiver in waivers {
             command.env(waiver, "1");
         }
-        command.status().unwrap().success()
+        command.output().unwrap()
     }
 }
 
@@ -95,7 +100,13 @@ fn an_empty_commit_is_rolled_back_and_its_files_stay_in_the_working_tree() {
     let tree = repository.git(&["write-tree"]);
     let base = repository.commit(&tree, None);
     repository.commit(&tree, Some(&base));
-    assert!(!repository.post_commit(&[]));
+    let refused = repository.post_commit_output(&[]);
+    assert_eq!(refused.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    let refusal = Refusal::parse(stderr.trim_end().lines().last().unwrap_or_default())
+        .unwrap_or_else(|| panic!("the record must be the last line: {stderr}"));
+    assert!(refusal.is_complete(), "{refusal:?}");
+    assert_eq!(refusal.rule, "commit.empty");
     assert_eq!(head(&repository), base);
     assert!(Path::new(&repository.path().join("a.txt")).is_file());
 }

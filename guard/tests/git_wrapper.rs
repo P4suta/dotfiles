@@ -1,6 +1,7 @@
 //! The installed `git` entry point against the real git of the host it runs on.
 //! Windows installs a copy of dotguard named `git.exe`, so the test runs that form everywhere.
 
+use dotguard::refusal::Refusal;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
@@ -76,6 +77,16 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+/// The complete record a refused command printed as the last line of its standard error.
+fn last_record(output: &Output) -> Refusal {
+    let stderr = text(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    let refusal = Refusal::parse(stderr.trim_end().lines().last().unwrap_or_default())
+        .unwrap_or_else(|| panic!("the record must be the last line: {stderr}"));
+    assert!(refusal.is_complete(), "{refusal:?}");
+    refusal
+}
+
 #[test]
 fn a_copy_named_git_refuses_skipped_hooks_and_records_the_refusal() {
     let wrapper = Wrapper::new("no-verify");
@@ -84,7 +95,14 @@ fn a_copy_named_git_refuses_skipped_hooks_and_records_the_refusal() {
         &["push", "--no-verify", "origin", "main"][..],
     ] {
         let refused = wrapper.run(arguments, None);
-        assert_eq!(refused.status.code(), Some(1), "{}", text(&refused.stderr));
+        let refusal = last_record(&refused);
+        assert_eq!(refusal.rule, "git.no-verify");
+        assert_eq!(refusal.waiver, None);
+        let next = refusal.next.unwrap_or_default();
+        assert!(
+            next.starts_with("git ") && !next.contains("--no-verify"),
+            "{next}"
+        );
         assert!(
             text(&refused.stderr).contains("Signing and hook checks cannot be bypassed."),
             "{}",
@@ -101,9 +119,12 @@ fn a_copy_named_git_refuses_skipped_hooks_and_records_the_refusal() {
 #[test]
 fn a_copy_named_git_refuses_destructive_commands_unless_waived() {
     let wrapper = Wrapper::new("force");
-    let refused = wrapper.run(&["reset", "--hard"], None);
-    assert_eq!(refused.status.code(), Some(1), "{}", text(&refused.stderr));
-    assert!(text(&refused.stderr).contains("ALLOW_FORCE=1"));
+    let refusal = last_record(&wrapper.run(&["reset", "--hard"], None));
+    assert_eq!(refusal.rule, "git.force");
+    assert_eq!(
+        refusal.waiver.as_deref(),
+        Some("ALLOW_FORCE=1 git reset --hard")
+    );
     let waived = wrapper.run_with(&["reset", "--hard"], None, &["ALLOW_FORCE"]);
     assert!(
         text(&waived.stderr).contains("ALLOW_FORCE=1 — allowing"),
@@ -112,6 +133,113 @@ fn a_copy_named_git_refuses_destructive_commands_unless_waived() {
     );
     let log = std::fs::read_to_string(wrapper.home().join(".local/state/git-bypass.log")).unwrap();
     assert!(log.lines().any(|line| line.contains("BYPASS")), "{log}");
+}
+
+/// Git reads `--rep` as `--repo` and the next word as its value, so the refusal names only the branch Git deletes.
+#[test]
+fn an_abbreviated_option_value_is_not_a_deleted_branch() {
+    let wrapper = Wrapper::new("push-abbreviation");
+    std::fs::write(
+        wrapper.scope.join("gitconfig"),
+        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+    )
+    .unwrap();
+    let succeeds = |arguments: &[&str]| {
+        let output = wrapper.run(arguments, None);
+        assert!(
+            output.status.success(),
+            "git {arguments:?}: {}",
+            text(&output.stderr)
+        );
+        text(&output.stdout).trim().to_owned()
+    };
+    succeeds(&["init", "-q", "--bare", "../remote.git"]);
+    let tree = succeeds(&["write-tree"]);
+    let commit = succeeds(&["commit-tree", &tree, "-m", "c"]);
+    for branch in ["a", "origin"] {
+        succeeds(&[
+            "push",
+            "-q",
+            "../remote.git",
+            &format!("{commit}:refs/heads/{branch}"),
+        ]);
+    }
+    succeeds(&["remote", "add", "origin", "../remote.git"]);
+    let deletion = ["push", "-q", "--delete", "--rep", "x", "origin", "a"];
+    assert_eq!(
+        last_record(&wrapper.run(&deletion, None))
+            .next
+            .as_deref()
+            .unwrap_or_default(),
+        "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/a'"
+    );
+    let waived = wrapper.run_with(&deletion, None, &["ALLOW_FORCE"]);
+    assert!(waived.status.success(), "{}", text(&waived.stderr));
+    let remote = |branch: &str| {
+        wrapper
+            .run(
+                &[
+                    "--git-dir=../remote.git",
+                    "rev-parse",
+                    "-q",
+                    "--verify",
+                    &format!("refs/heads/{branch}"),
+                ],
+                None,
+            )
+            .status
+            .success()
+    };
+    assert!(!remote("a"), "Git deleted the named branch");
+    assert!(remote("origin"), "Git read origin as the repository");
+}
+
+/// The wrapper lets `push --repo=<remote> :<ref>` through because Git reads `:<ref>` as the repository, not as a deletion.
+#[test]
+fn git_reads_the_first_push_positional_as_the_repository() {
+    let wrapper = Wrapper::new("push-repository");
+    std::fs::write(
+        wrapper.scope.join("gitconfig"),
+        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+    )
+    .unwrap();
+    let succeeds = |arguments: &[&str]| {
+        let output = wrapper.run(arguments, None);
+        assert!(
+            output.status.success(),
+            "git {arguments:?}: {}",
+            text(&output.stderr)
+        );
+        text(&output.stdout).trim().to_owned()
+    };
+    succeeds(&["init", "-q", "--bare", "../remote.git"]);
+    let tree = succeeds(&["write-tree"]);
+    let commit = succeeds(&["commit-tree", &tree, "-m", "c"]);
+    succeeds(&[
+        "push",
+        "-q",
+        "../remote.git",
+        &format!("{commit}:refs/heads/c"),
+    ]);
+    succeeds(&["remote", "add", "origin", "../remote.git"]);
+    for arguments in [
+        &["push", "--repo=origin", ":c"][..],
+        &["push", "--repo", "origin", ":c"][..],
+    ] {
+        let pushed = wrapper.run(arguments, None);
+        assert!(
+            Refusal::find(&text(&pushed.stderr)).is_none(),
+            "{}",
+            text(&pushed.stderr)
+        );
+        assert!(!pushed.status.success(), "git {arguments:?} succeeded");
+        succeeds(&[
+            "--git-dir=../remote.git",
+            "rev-parse",
+            "--verify",
+            "refs/heads/c",
+        ]);
+    }
 }
 
 #[test]
@@ -165,4 +293,60 @@ fn a_callers_git_repository_variables_cannot_redirect_the_wrapper() {
         std::fs::read(outer_git.join("config")).unwrap(),
         config_before
     );
+}
+
+/// Git rejects a push with an option it does not accept, so a refused one suggests no deletion built from its other words.
+#[test]
+fn a_refused_push_with_an_option_git_rejects_suggests_nothing() {
+    let wrapper = Wrapper::new("push-unread");
+    std::fs::write(
+        wrapper.scope.join("gitconfig"),
+        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+    )
+    .unwrap();
+    let succeeds = |arguments: &[&str]| {
+        let output = wrapper.run(arguments, None);
+        assert!(
+            output.status.success(),
+            "git {arguments:?}: {}",
+            text(&output.stderr)
+        );
+        text(&output.stdout).trim().to_owned()
+    };
+    succeeds(&["init", "-q", "--bare", "../remote.git"]);
+    let tree = succeeds(&["write-tree"]);
+    let commit = succeeds(&["commit-tree", &tree, "-m", "c"]);
+    for branch in ["a", "origin", "x"] {
+        succeeds(&[
+            "push",
+            "-q",
+            "../remote.git",
+            &format!("{commit}:refs/heads/{branch}"),
+        ]);
+    }
+    succeeds(&["remote", "add", "origin", "../remote.git"]);
+    for option in ["--re", "--bogus", "--d"] {
+        let deletion = ["push", "--delete", option, "x", "origin", "a"];
+        let refused = last_record(&wrapper.run(&deletion, None));
+        assert_eq!(refused.rule, "git.force");
+        assert_eq!(refused.next, None, "git {deletion:?}");
+        assert!(
+            refused
+                .cause
+                .contains(&format!("Git does not accept `{option}`")),
+            "{}",
+            refused.cause
+        );
+        let waived = wrapper.run_with(&deletion, None, &["ALLOW_FORCE"]);
+        assert!(!waived.status.success(), "Git ran git {deletion:?}");
+    }
+    for branch in ["a", "origin", "x"] {
+        succeeds(&[
+            "--git-dir=../remote.git",
+            "rev-parse",
+            "-q",
+            "--verify",
+            &format!("refs/heads/{branch}"),
+        ]);
+    }
 }
