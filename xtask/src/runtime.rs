@@ -64,6 +64,11 @@ impl Native {
         self.prepare(tool.command(), tool == Tool::Codex)
     }
 
+    /// A Git hook gate, which keeps the hook's repository variables to inspect the commit in progress.
+    pub fn hook_command(&self, tool: Tool) -> Command {
+        self.prepare(tool.hook_command(), tool == Tool::Codex)
+    }
+
     /// A binary this repository installed at a known path, run with the same environment as registered tools.
     pub fn command_installed(&self, program: &Path) -> Command {
         self.prepare(crate::tool::external(program), false)

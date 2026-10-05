@@ -104,7 +104,7 @@ fn delegate(
         native.available(Tool::Lefthook),
         "lefthook is required for configured hook gates"
     );
-    let mut dump = native.command(Tool::Lefthook);
+    let mut dump = native.hook_command(Tool::Lefthook);
     dump.arg("dump");
     if let Some(config) = global {
         dump.env("LEFTHOOK_CONFIG", config);
@@ -118,7 +118,7 @@ fn delegate(
     if !hooks.iter().any(|name| name == hook.name()) {
         return Ok(());
     }
-    let mut command = native.command(Tool::Lefthook);
+    let mut command = native.hook_command(Tool::Lefthook);
     if let Some(config) = global {
         command.env("LEFTHOOK_CONFIG", config);
     }
@@ -147,7 +147,7 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
         hook,
         Hook::PreCommit | Hook::CommitMsg | Hook::PrePush | Hook::PostCommit
     ) {
-        let mut command = native.command(Tool::Dotguard);
+        let mut command = native.hook_command(Tool::Dotguard);
         command.arg(hook.name()).args(arguments);
         piped(&mut command, &input)?;
     }
@@ -163,7 +163,7 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     if matches!(hook, Hook::PrePush) {
         piped(
             native
-                .command(Tool::Dotguard)
+                .hook_command(Tool::Dotguard)
                 .arg("renovate-gate")
                 .args(arguments),
             &input,
