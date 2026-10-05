@@ -4,6 +4,9 @@ use dotguard::refusal::Refusal;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "support/fixture_git.rs"]
+mod fixture_git;
+
 struct Repository {
     scope: PathBuf,
 }
@@ -36,27 +39,22 @@ impl Repository {
         self.scope.join("home")
     }
 
-    fn isolate<'a>(&self, command: &'a mut Command) -> &'a mut Command {
+    fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
+        let mut command = fixture_git::command(program, &self.scope.join("gitconfig"));
         for (name, _) in std::env::vars_os() {
-            let name = name.to_string_lossy().into_owned();
-            if name.starts_with("ALLOW_") || name.starts_with("GIT_") {
+            if name.to_string_lossy().starts_with("ALLOW_") {
                 command.env_remove(name);
             }
         }
         command
             .current_dir(self.path())
             .env("HOME", self.path())
-            .env("USERPROFILE", self.path())
-            .env("GIT_CONFIG_GLOBAL", self.scope.join("gitconfig"))
-            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("USERPROFILE", self.path());
+        command
     }
 
     fn git(&self, arguments: &[&str]) -> String {
-        let output = self
-            .isolate(&mut Command::new("git"))
-            .args(arguments)
-            .output()
-            .unwrap();
+        let output = self.command("git").args(arguments).output().unwrap();
         assert!(
             output.status.success(),
             "git {arguments:?}: {}",
@@ -81,8 +79,8 @@ impl Repository {
     }
 
     fn post_commit_output(&self, waivers: &[&str]) -> std::process::Output {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_dotguard"));
-        self.isolate(&mut command).arg("post-commit");
+        let mut command = self.command(env!("CARGO_BIN_EXE_dotguard"));
+        command.arg("post-commit");
         for waiver in waivers {
             command.env(waiver, "1");
         }

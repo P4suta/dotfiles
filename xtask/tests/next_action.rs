@@ -12,12 +12,14 @@ use dotfiles_xtask::next_action_rules::{
     Checks, Head, Host, Pr, State, Step, Upstream, decide, executable,
 };
 use dotfiles_xtask::skill_ops::catalog;
-use dotfiles_xtask::tool::Tool;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
+
+#[path = "../../guard/tests/support/fixture_git.rs"]
+mod fixture_git;
 
 /// A clean, pushed draft PR with passing checks; each case changes the fields that define its state.
 fn published() -> State {
@@ -509,11 +511,8 @@ impl Fixture {
     }
 
     fn git(&self, directory: &Path, arguments: &[&str]) -> Result<()> {
-        let output = Tool::Git
-            .command()
+        let output = fixture_git::command("git", &self.config)
             .current_dir(directory)
-            .env("GIT_CONFIG_GLOBAL", &self.config)
-            .env("GIT_CONFIG_NOSYSTEM", "1")
             .args(arguments)
             .output()?;
         ensure!(
