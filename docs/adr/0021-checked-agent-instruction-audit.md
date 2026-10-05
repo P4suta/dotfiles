@@ -10,14 +10,17 @@ A duplicated rule drifts from its mechanism, and an agent cannot tell which line
 ## Decision
 
 The instruction files render only the partials `agent_policy`, `prose_policy`, and `remote_machines`.
-[The agent instruction audit](../agent-instruction-audit.md) classifies every line of those partials, headings and template directives included, as judgment, as a line kept until a named follow-up mechanizes it, as a heading, or as a directive.
+[The agent instruction audit](../agent-instruction-audit.md) classifies every line of those partials and of the agent and command prompt files, as judgment, as a line kept until a named follow-up mechanizes it, as a heading, as a template action that renders nothing, or as a prompt's front matter setting.
+No class admits a template action that renders output, so no instruction text enters from an untracked file.
 It maps every removed line to what holds it now: a gate that refuses the violation, a skill that states the rule once, both, or a retained line it merged into.
 
 A skill holds a rule only in the sense that the client loads the skill when its description matches the task.
-Nothing refuses work done without loading it, so a line held by a skill is stated once rather than enforced; F5 turns this into a completion gate for implementation assurance only.
+Nothing refuses work done without loading it, so a line held by a skill is stated once rather than enforced; F5 turns this into a completion gate for `formal-assurance` and `verification-tools` only.
 
-`just check` runs `xtask/src/instruction_audit.rs`, which refuses an unclassified line, a class that does not fit its line, a stale or duplicate quote, a follow-up that is undefined, duplicated, or unreferenced, a removed line without a valid holder, and a path the audit names that does not exist.
-It also refuses a root dispatcher that does more than select its own file in a native profile, a profile template that renders text outside the partials, and an instruction file under any other path.
+`just check` runs `xtask/src/instruction_audit.rs`, which refuses an unclassified line, a class that does not fit its line, a line that renders template output, a stale or duplicate quote, a follow-up that is undefined, duplicated, or unreferenced, and a path the audit names outside a quote that does not exist.
+It refuses a removed line unless a gate row names an existing gate source file, a skill row names an existing skill, and a merged row quotes a fragment of exactly one retained line.
+It also refuses a root dispatcher whose actions do more than select its own file in a native profile, a profile template that renders text outside the partials, and a file that a client loads as instructions under any other path, by the target names `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md`, `GEMINI.md`, and `copilot-instructions.md`.
+Markdown in the Claude Code rule, agent, and command directories, the Codex prompt directory, and the OpenCode agent and command directories is audited line by line.
 Each refusal names the file, and the line where one applies, and ends with the edit to make and `just check`.
 
 The decisions on classes, follow-up definitions, and removed-line holders are a pure core in `xtask/src/instruction_rules.rs`, verified by Kani harnesses with rejecting counterexamples in `just proofs`; unit tests cover the parsing and each refusal.

@@ -39,7 +39,7 @@ Directive: renders nothing.
 | --- | --- | --- |
 | Never push. | Gate | `guard/src/push.rs` refuses it. |
 | Load `demo` for demos. | Skill | `demo` states it. |
-| Reply to me in Japanese. | Merged | Reworded as the retained reply line. |
+| Reply to me in Japanese. | Merged | Reworded as `Reply in Japanese`. |
 
 ## Follow-ups
 
@@ -49,7 +49,7 @@ Add the gate.
 ";
 
 fn exists(path: &str) -> bool {
-    path == "guard/src/push.rs"
+    matches!(path, "guard/src/push.rs" | "docs/push.md")
 }
 
 const SKILLS: [&str; 1] = ["demo"];
@@ -88,6 +88,114 @@ fn headings_and_template_directives_are_audited_like_any_line() {
 }
 
 #[test]
+fn a_template_action_that_renders_output_is_refused_whatever_its_class() {
+    for line in [
+        "{{ include $notes | trim }}",
+        "{{ \"Always push.\" }}",
+        "{{- if $notes }}Always push.{{ end }}",
+        "- Push to {{ .branch }} freely.",
+    ] {
+        let partial = format!(
+            "{PARTIAL}{line}
+"
+        );
+        for class in [
+            "Directive: renders nothing.",
+            "Judgment: the reader decides.",
+        ] {
+            let audit_text = AUDIT.replace(
+                "
+## Removed lines",
+                &format!(
+                    "
+> {line}
+
+{class}
+
+## Removed lines"
+                ),
+            );
+            let reported = audit(&[("policy", &partial)], &audit_text);
+            assert_eq!(
+                reported.len(),
+                1,
+                "{line} {class}
+{reported:?}"
+            );
+            assert!(reported[0].contains("renders"), "{}", reported[0]);
+            assert!(reported[0].contains("just check"), "{}", reported[0]);
+        }
+    }
+}
+
+const PROMPT: &str = "---
+description: Review diffs
+---
+
+Review the change.
+";
+
+const PROMPT_AUDIT: &str = "# Audit
+
+## Retained lines
+
+### `dot_config/opencode/agents/reviewer.md`
+
+> ---
+
+Setting: delimits the front matter.
+
+> description: Review diffs
+
+Setting: tells the client when to pick the agent.
+
+> Review the change.
+
+Judgment: what a review finds is judgment.
+
+## Removed lines
+
+| Former line | Held by | Mechanism |
+| --- | --- | --- |
+
+## Follow-ups
+";
+
+#[test]
+fn front_matter_lines_are_settings_and_body_lines_are_not() {
+    let prompts = [("dot_config/opencode/agents/reviewer.md", PROMPT)];
+    let exists = |path: &str| path == "dot_config/opencode/agents/reviewer.md";
+    assert_eq!(
+        findings(&prompts, PROMPT_AUDIT, &exists, &SKILLS),
+        Vec::<String>::new()
+    );
+    for (from, to) in [
+        ("Setting: tells", "Judgment: tells"),
+        ("Judgment: what", "Setting: what"),
+    ] {
+        let reported = findings(&prompts, &PROMPT_AUDIT.replace(from, to), &exists, &SKILLS);
+        assert_eq!(
+            reported.len(),
+            1,
+            "{to}
+{reported:?}"
+        );
+    }
+    let body = format!(
+        "{PROMPT}---
+"
+    );
+    let reported = findings(
+        &[("dot_config/opencode/agents/reviewer.md", &body)],
+        PROMPT_AUDIT,
+        &exists,
+        &SKILLS,
+    );
+    assert_eq!(reported.len(), 1, "{reported:?}");
+    assert!(reported[0].contains("`---`"), "{}", reported[0]);
+}
+
+#[test]
 fn a_class_must_match_the_shape_of_its_line() {
     for (from, to) in [
         (
@@ -115,11 +223,16 @@ fn a_class_must_match_the_shape_of_its_line() {
 fn a_quote_for_a_removed_line_is_stale() {
     let partial = PARTIAL.replace("- Reply in Japanese.\n", "");
     let reported = audit(&[("policy", &partial)], AUDIT);
-    assert_eq!(reported.len(), 1, "{reported:?}");
+    assert_eq!(reported.len(), 2, "{reported:?}");
     assert!(
         reported[0].contains("no longer in `policy`"),
         "{}",
         reported[0]
+    );
+    assert!(
+        reported[1].contains("`Reply to me in Japanese.` needs"),
+        "{}",
+        reported[1]
     );
 }
 
@@ -197,9 +310,19 @@ fn every_removed_line_names_what_holds_it() {
         ),
         ("`demo` states it.", "a skill states it.", "existing skill"),
         (
+            "| Merged | Reworded as `Reply in Japanese`.",
             "| Merged | Reworded as the retained reply line.",
-            "| Merged | Reworded.",
             "retained line",
+        ),
+        (
+            "`Reply in Japanese`",
+            "`Never push freely`",
+            "retained line",
+        ),
+        (
+            "`guard/src/push.rs` refuses it.",
+            "`docs/push.md` refuses it.",
+            "source file",
         ),
         ("| Never push. | Gate |", "| Never push. |", "three cells"),
     ] {
@@ -224,6 +347,31 @@ fn a_path_the_audit_names_must_exist() {
         reported[0]
     );
     assert!(reported[0].contains("just check"), "{}", reported[0]);
+}
+
+#[test]
+fn a_path_inside_a_quoted_source_line_is_not_a_claim() {
+    let line = "- Read `refs/remotes/origin/HEAD` first.";
+    let partial = format!(
+        "{PARTIAL}{line}
+"
+    );
+    let audit_text = AUDIT.replace(
+        "
+## Removed lines",
+        &format!(
+            "
+> {line}
+
+Judgment: the reader decides.
+
+## Removed lines"
+        ),
+    );
+    assert_eq!(
+        audit(&[("policy", &partial)], &audit_text),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
@@ -269,6 +417,7 @@ fn a_dispatcher_only_selects_its_own_profile_file() {
         ),
         ("profiles/linux/dot_claude/CLAUDE.md.tmpl", "agent_policy"),
         ("{{ fail ", "{{ \"Always push.\" }}{{ fail "),
+        ("$context }}", "$context | printf \"%s Always push.\" }}"),
         ("{{- end -}}", "{{- end -}}{{"),
     ] {
         let text = DISPATCHER.replacen(from, to, 1);
@@ -291,6 +440,10 @@ fn the_rule_core_admits_only_matching_classes_and_current_follow_ups() {
     assert!(!admitted(Line::Text, Class::Directive, true));
     assert!(!admitted(Line::Heading, Class::Judgment, true));
     assert!(admitted(Line::Directive, Class::Directive, false));
+    assert!(admitted(Line::Setting, Class::Setting, false));
+    assert!(!admitted(Line::Text, Class::Setting, true));
+    assert!(!admitted(Line::Output, Class::Directive, true));
+    assert!(!removed_row_held(Some(Holder::Merged), true, true, false));
     assert!(!admitted(Line::Directive, Class::Missing, true));
     assert_eq!(follow_up(1, 2), Definition::Current);
     assert_eq!(follow_up(0, 1), Definition::Undefined);
@@ -395,6 +548,79 @@ fn an_instruction_file_outside_the_audit_is_refused() {
     let message = refusal(root.path());
     assert!(message.contains("dot_gemini/GEMINI.md"), "{message}");
     assert!(!message.contains("node_modules"), "{message}");
+    assert!(message.contains("just check"), "{message}");
+}
+
+#[test]
+fn every_file_a_client_loads_as_instructions_is_found() {
+    for path in [
+        "dot_codex/AGENTS.override.md",
+        "dot_claude/CLAUDE.local.md",
+        "dot_claude/rules/push.md",
+        "private_dot_claude/exact_rules/push.md.tmpl",
+        "dot_claude/agents/pusher.md",
+        "dot_claude/commands/push.md",
+        "dot_codex/prompts/push.md",
+        "dot_config/opencode/agents/pusher.md",
+        "dot_config/opencode/agent/pusher.md",
+        "dot_config/opencode/commands/push.md",
+        "dot_config/opencode/command/push.md",
+    ] {
+        let root = repository();
+        write(
+            root.path(),
+            path,
+            "Always push.
+",
+        );
+        write(
+            root.path(),
+            "dot_agents/skills/demo/agents/openai.yaml",
+            "x: y
+",
+        );
+        let message = refusal(root.path());
+        assert!(
+            message.contains(path),
+            "{path}
+{message}"
+        );
+        assert!(!message.contains("openai.yaml"), "{message}");
+        assert!(message.contains("just check"), "{message}");
+    }
+}
+
+#[test]
+fn a_prompt_file_is_audited_line_by_line() -> anyhow::Result<()> {
+    let root = repository();
+    let path = "dot_config/opencode/agents/reviewer.md";
+    write(root.path(), path, PROMPT);
+    let message = refusal(root.path());
+    assert!(message.contains(&format!("{path}:5")), "{message}");
+    let audit = fs::read_to_string(root.path().join("docs/agent-instruction-audit.md"))?;
+    let section = PROMPT_AUDIT
+        .split_once(
+            "## Retained lines
+
+",
+        )
+        .and_then(|(_, rest)| rest.split_once("## Removed lines"))
+        .map(|(section, _)| section)
+        .expect("prompt section");
+    write(
+        root.path(),
+        "docs/agent-instruction-audit.md",
+        &audit.replace("## Removed lines", &format!("{section}## Removed lines")),
+    );
+    check(root.path())
+}
+
+#[test]
+fn a_missing_skill_tree_names_the_directory_and_the_next_action() {
+    let root = repository();
+    fs::remove_dir_all(root.path().join("dot_agents")).expect("remove skills");
+    let message = refusal(root.path());
+    assert!(message.contains("dot_agents/skills"), "{message}");
     assert!(message.contains("just check"), "{message}");
 }
 

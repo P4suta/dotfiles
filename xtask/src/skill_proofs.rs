@@ -459,6 +459,14 @@ fn reject_a_duplicate_follow_up() {{
 fn reject_a_gate_without_its_source() {{
     assert!(production::removed_row_held(Some(production::Holder::Gate), false, true, true));
 }}
+#[kani::proof]
+fn reject_a_directive_that_renders_output() {{
+    assert!(production::admitted(production::Line::Output, production::Class::Directive, true));
+}}
+#[kani::proof]
+fn reject_a_merge_without_its_retained_line() {{
+    assert!(production::removed_row_held(Some(production::Holder::Merged), true, true, false));
+}}
 "
         ),
     )?;
@@ -467,6 +475,8 @@ fn reject_a_gate_without_its_source() {{
         "reject_an_undefined_follow_up",
         "reject_a_duplicate_follow_up",
         "reject_a_gate_without_its_source",
+        "reject_a_directive_that_renders_output",
+        "reject_a_merge_without_its_retained_line",
     ] {
         verify_file(&file, probe.path(), &[name], true)?;
     }

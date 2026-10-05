@@ -1,9 +1,14 @@
 /// The shape of a partial line, which decides the classes that may describe it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Line {
     Text,
     Heading,
+    /// A sole template action that renders nothing: an assignment, a condition, or a comment.
     Directive,
+    /// A line whose template actions render output that the audit cannot read.
+    Output,
+    /// A line of a prompt file's front matter.
+    Setting,
 }
 
 /// The classification that follows a quoted partial line in the audit.
@@ -14,14 +19,18 @@ pub enum Class {
     FollowUp,
     Heading,
     Directive,
+    Setting,
 }
 
-/// A text line needs judgment or a defined follow-up; a heading or a template directive needs its own class, so neither can carry an unaudited instruction.
+/// A text line needs judgment or a defined follow-up, and every other shape needs its own class, so none can carry an unaudited instruction.
+/// No class admits a line that renders template output.
 pub fn admitted(line: Line, class: Class, follow_up_defined: bool) -> bool {
     match (line, class) {
         (Line::Text, Class::Judgment) => true,
         (Line::Text, Class::FollowUp) => follow_up_defined,
-        (Line::Heading, Class::Heading) | (Line::Directive, Class::Directive) => true,
+        (Line::Heading, Class::Heading)
+        | (Line::Directive, Class::Directive)
+        | (Line::Setting, Class::Setting) => true,
         _ => false,
     }
 }
@@ -53,7 +62,7 @@ pub enum Holder {
     Merged,
 }
 
-/// A removed-line row is held when it names a source file for a gate, an existing skill for a skill, and a retained line for a merge.
+/// A removed-line row is held when it names a gate's source file for a gate, an existing skill for a skill, and exactly one retained line for a merge.
 pub fn removed_row_held(
     holder: Option<Holder>,
     names_source: bool,
@@ -72,24 +81,27 @@ pub fn removed_row_held(
 #[cfg(kani)]
 fn any_line() -> Line {
     let choice: u8 = kani::any();
-    kani::assume(choice < 3);
+    kani::assume(choice < 5);
     match choice {
         0 => Line::Text,
         1 => Line::Heading,
-        _ => Line::Directive,
+        2 => Line::Directive,
+        3 => Line::Output,
+        _ => Line::Setting,
     }
 }
 
 #[cfg(kani)]
 fn any_class() -> Class {
     let choice: u8 = kani::any();
-    kani::assume(choice < 5);
+    kani::assume(choice < 6);
     match choice {
         0 => Class::Missing,
         1 => Class::Judgment,
         2 => Class::FollowUp,
         3 => Class::Heading,
-        _ => Class::Directive,
+        4 => Class::Directive,
+        _ => Class::Setting,
     }
 }
 
@@ -116,6 +128,8 @@ fn every_line_needs_the_class_of_its_shape() {
     assert!(!result || class != Class::Missing);
     assert!(!result || (line == Line::Heading) == (class == Class::Heading));
     assert!(!result || (line == Line::Directive) == (class == Class::Directive));
+    assert!(!result || (line == Line::Setting) == (class == Class::Setting));
+    assert!(!result || line != Line::Output);
     assert!(!result || class != Class::FollowUp || defined);
     assert!(line != Line::Text || class != Class::Judgment || result);
     kani::cover!(result);

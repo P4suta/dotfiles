@@ -1,7 +1,7 @@
-//! Every line of the managed global agent instructions is classified in a tracked audit.
+//! Every line of the managed global agent instructions and agent prompt files is classified in a tracked audit.
 //!
 //! A retained line is either judgment that no mechanism can enforce or a named follow-up that will mechanize it.
-//! The check refuses an unclassified line, a stale entry, a removed line without a named holder, and an instruction file that renders text outside the audited partials.
+//! The check refuses an unclassified line, a stale entry, a removed line without a named holder, and an instruction file that renders text outside the audited sources.
 
 use crate::instruction_rules::{
     Class, Definition, Holder, Line, admitted, follow_up, removed_row_held,
@@ -9,7 +9,7 @@ use crate::instruction_rules::{
 use anyhow::{Context, Result, bail};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The partials that every managed `CLAUDE.md` and `AGENTS.md` renders.
 pub const PARTIALS: [&str; 3] = ["agent_policy", "prose_policy", "remote_machines"];
@@ -24,36 +24,115 @@ pub const PROFILE_FILES: [&str; 3] = [
     "dot_config/opencode/AGENTS.md.tmpl",
 ];
 
-/// File names that agent clients load as instructions; any other location holding one is unaudited.
-const INSTRUCTION_NAMES: [&str; 4] = [
+/// Target file names that agent clients load as instructions.
+const INSTRUCTION_NAMES: [&str; 6] = [
     "CLAUDE.md",
+    "CLAUDE.local.md",
     "AGENTS.md",
+    "AGENTS.override.md",
     "GEMINI.md",
     "copilot-instructions.md",
 ];
+
+/// Target directories whose Markdown files agent clients load as rules, agents, or commands.
+const PROMPT_DIRECTORIES: [[&str; 2]; 8] = [
+    [".claude", "rules"],
+    [".claude", "agents"],
+    [".claude", "commands"],
+    [".codex", "prompts"],
+    ["opencode", "agent"],
+    ["opencode", "agents"],
+    ["opencode", "command"],
+    ["opencode", "commands"],
+];
+
+/// chezmoi source attributes that precede a target name.
+const ATTRIBUTES: [&str; 17] = [
+    "after_",
+    "before_",
+    "create_",
+    "empty_",
+    "encrypted_",
+    "exact_",
+    "executable_",
+    "external_",
+    "literal_",
+    "modify_",
+    "once_",
+    "onchange_",
+    "private_",
+    "readonly_",
+    "remove_",
+    "run_",
+    "symlink_",
+];
+
+/// Extensions of files that can implement a gate.
+const GATE_SOURCES: [&str; 7] = [".rs", ".ts", ".js", ".json", ".toml", ".yml", ".yaml"];
 
 const PROFILES: &str = ".chezmoitemplates/profiles";
 const RETAINED: &str = "## Retained lines";
 const REMOVED: &str = "## Removed lines";
 const FOLLOW_UPS: &str = "## Follow-ups";
 
+/// A template action that renders nothing: an assignment, a condition, or a comment.
+fn control(action: &str) -> bool {
+    let action = action.trim_matches('-').trim();
+    let assignment = action.strip_prefix('$').is_some_and(|rest| {
+        rest.split_once('=').is_some_and(|(name, _)| {
+            let name = name.trim_end_matches(':').trim();
+            !name.is_empty() && name.chars().all(char::is_alphanumeric)
+        })
+    });
+    assignment
+        || action.starts_with("if ")
+        || action.starts_with("else if ")
+        || action == "else"
+        || action == "end"
+        || (action.starts_with("/*") && action.ends_with("*/"))
+}
+
 fn shape(line: &str) -> Line {
-    let start = line.trim_start();
-    if start.starts_with('#') {
+    let line = line.trim();
+    if line.contains("{{") || line.contains("}}") {
+        let sole = line
+            .strip_prefix("{{")
+            .and_then(|rest| rest.strip_suffix("}}"))
+            .filter(|action| !action.contains("{{") && !action.contains("}}"));
+        if sole.is_some_and(control) {
+            Line::Directive
+        } else {
+            Line::Output
+        }
+    } else if line.starts_with('#') {
         Line::Heading
-    } else if start.starts_with("{{") {
-        Line::Directive
     } else {
         Line::Text
     }
 }
 
-/// Every non-blank line with its one-based number.
-fn instruction_lines(text: &str) -> impl Iterator<Item = (usize, &str)> {
-    text.lines().enumerate().filter_map(|(index, line)| {
+/// A source line with its one-based number and shape.
+type Numbered<'a> = (usize, &'a str, Line);
+
+/// Every non-blank line with its one-based number and shape; a leading `---` block is front matter.
+fn instruction_lines(text: &str) -> Vec<Numbered<'_>> {
+    let mut front_matter = text.lines().next().map(str::trim_end) == Some("---");
+    let mut result = Vec::new();
+    for (index, line) in text.lines().enumerate() {
         let line = line.trim_end();
-        (!line.trim().is_empty()).then_some((index + 1, line))
-    })
+        let shape = if front_matter {
+            if index > 0 && line == "---" {
+                front_matter = false;
+            }
+            Line::Setting
+        } else {
+            shape(line)
+        };
+        if !line.trim().is_empty() {
+            result.push((index + 1, line, shape));
+        }
+    }
+    result
 }
 
 struct Entry<'a> {
@@ -87,6 +166,8 @@ fn class_of(class: Option<&str>) -> Class {
         Class::Heading
     } else if reasoned("Directive: ") {
         Class::Directive
+    } else if reasoned("Setting: ") {
+        Class::Setting
     } else {
         Class::Missing
     }
@@ -175,6 +256,10 @@ fn is_path(span: &str) -> bool {
         && !span.contains(|c: char| c.is_whitespace() || "<>*{}:\"".contains(c))
 }
 
+fn gate_source(span: &str, exists: &dyn Fn(&str) -> bool) -> bool {
+    is_path(span) && exists(span) && GATE_SOURCES.iter().any(|end| span.ends_with(end))
+}
+
 fn holder(cell: &str) -> Option<Holder> {
     match cell {
         "Gate" => Some(Holder::Gate),
@@ -185,16 +270,21 @@ fn holder(cell: &str) -> Option<Holder> {
     }
 }
 
-/// Refusals for partial lines the audit does not classify, audit entries that no longer match, and removed lines without a named holder.
+/// Refusals for source lines the audit does not classify, audit entries that no longer match, and removed lines without a named holder.
 ///
+/// `sources` pairs each audited partial name or prompt file path with its text.
 /// `exists` answers whether a repository-relative path exists, and `skills` lists the shared skill names.
 pub fn findings(
-    partials: &[(&str, &str)],
+    sources: &[(&str, &str)],
     audit: &str,
     exists: &dyn Fn(&str) -> bool,
     skills: &[&str],
 ) -> Vec<String> {
     let parsed = parse(audit);
+    let lines: Vec<(&str, Vec<Numbered<'_>>)> = sources
+        .iter()
+        .map(|(path, text)| (*path, instruction_lines(text)))
+        .collect();
     let mut references: BTreeMap<&str, usize> = BTreeMap::new();
     for entry in &parsed.entries {
         if let Some(id) = entry.class.and_then(follow_up_id) {
@@ -213,31 +303,49 @@ pub fn findings(
             ));
             continue;
         }
-        let present = partials.iter().any(|(path, text)| {
-            *path == entry.partial && instruction_lines(text).any(|(_, line)| line == entry.quote)
-        });
-        let defined = entry
-            .class
-            .and_then(follow_up_id)
-            .is_some_and(|id| parsed.definitions.contains_key(id));
-        if !present {
+        let shapes: BTreeSet<Line> = lines
+            .iter()
+            .filter(|(path, _)| *path == entry.partial)
+            .flat_map(|(_, lines)| lines.iter())
+            .filter(|(_, line, _)| *line == entry.quote)
+            .map(|(_, _, shape)| *shape)
+            .collect();
+        if shapes.is_empty() {
             result.push(format!(
                 "{AUDIT}:{}: the quoted line `{}` is no longer in `{}`; remove the quote or restore the line, then run `just check`.",
                 entry.line, entry.quote, entry.partial
             ));
-        } else if !admitted(shape(entry.quote), class_of(entry.class), defined) {
-            let expected = match shape(entry.quote) {
-                Line::Text => format!(
-                    "a following `Judgment: <why no mechanism can enforce it>` line or a `Follow-up F<n>: <what exists now>` line naming a `### F<n>:` entry under `{FOLLOW_UPS}`"
-                ),
-                Line::Heading => "a following `Heading: <what it groups>` line".to_owned(),
-                Line::Directive => "a following `Directive: <what it renders>` line".to_owned(),
-            };
-            result.push(format!(
-                "{AUDIT}:{}: `{}` needs {expected}; add it, then run `just check`.",
-                entry.line, entry.quote
-            ));
+            continue;
         }
+        let defined = entry
+            .class
+            .and_then(follow_up_id)
+            .is_some_and(|id| parsed.definitions.contains_key(id));
+        let Some(shape) = shapes
+            .iter()
+            .copied()
+            .find(|shape| !admitted(*shape, class_of(entry.class), defined))
+        else {
+            continue;
+        };
+        let expected = match shape {
+            Line::Text => format!(
+                "needs a following `Judgment: <why no mechanism can enforce it>` line or a `Follow-up F<n>: <what exists now>` line naming a `### F<n>:` entry under `{FOLLOW_UPS}`; add it"
+            ),
+            Line::Heading => "needs a following `Heading: <what it groups>` line; add it".to_owned(),
+            Line::Directive => {
+                "needs a following `Directive: <what it decides>` line; add it".to_owned()
+            }
+            Line::Setting => {
+                "is front matter and needs a following `Setting: <what it configures>` line; add it"
+                    .to_owned()
+            }
+            Line::Output => "renders template output that the audit cannot read; write the text as plain lines or remove the action".to_owned(),
+        };
+        result.push(format!(
+            "{AUDIT}:{}: `{}` {expected}, then run `just check`.",
+            entry.line, entry.quote
+        ));
     }
     for (id, lines) in &parsed.definitions {
         let referenced = references.get(id).copied().unwrap_or_default();
@@ -261,18 +369,30 @@ pub fn findings(
             ));
             continue;
         };
-        let names_source = code_spans(mechanism).any(|span| is_path(span) && exists(span));
+        let names_source = code_spans(mechanism).any(|span| gate_source(span, exists));
         let names_skill = code_spans(mechanism).any(|span| skills.contains(&span));
-        let names_retained = mechanism.contains("retained");
+        let names_retained = code_spans(mechanism).any(|span| {
+            span.contains(' ')
+                && lines
+                    .iter()
+                    .flat_map(|(_, lines)| lines.iter())
+                    .filter(|(_, line, shape)| *shape == Line::Text && line.contains(span))
+                    .count()
+                    == 1
+        });
         if !removed_row_held(holder(held_by), names_source, names_skill, names_retained) {
             let need = match holder(held_by) {
                 None => "a Held by cell of `Gate`, `Skill`, `Gate and skill`, or `Merged`",
-                Some(Holder::Gate) => "a mechanism cell naming the gate's source file",
+                Some(Holder::Gate) => {
+                    "a mechanism cell naming the gate's source file (`.rs`, `.ts`, `.js`, `.json`, `.toml`, `.yml`, or `.yaml`)"
+                }
                 Some(Holder::Skill) => "a mechanism cell naming an existing skill",
                 Some(Holder::GateAndSkill) => {
                     "a mechanism cell naming the gate's source file and an existing skill"
                 }
-                Some(Holder::Merged) => "a mechanism cell naming the retained line it merged into",
+                Some(Holder::Merged) => {
+                    "a mechanism cell quoting, in a code span with a space, a fragment of exactly one retained line"
+                }
             };
             result.push(format!(
                 "{AUDIT}:{}: the removed line `{}` needs {need}; correct the row, then run `just check`.",
@@ -280,7 +400,12 @@ pub fn findings(
             ));
         }
     }
-    for (index, line) in audit.lines().enumerate() {
+    // A quote reproduces a source line, so its code spans are not claims about this repository.
+    for (index, line) in audit
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| !line.starts_with("> "))
+    {
         for span in code_spans(line).filter(|span| is_path(span) && !exists(span)) {
             result.push(format!(
                 "{AUDIT}:{}: `{span}` does not exist; name the current path, then run `just check`.",
@@ -288,9 +413,9 @@ pub fn findings(
             ));
         }
     }
-    for (path, text) in partials {
-        for (number, line) in instruction_lines(text) {
-            if !quoted.contains_key(&(*path, line)) {
+    for (path, lines) in &lines {
+        for (number, line, _) in lines {
+            if !quoted.contains_key(&(*path, *line)) {
                 result.push(format!(
                     "{path}:{number}: `{line}` has no entry in {AUDIT}; quote it under the `{path}` heading in `{RETAINED}` with its classification, or remove the line, then run `just check`."
                 ));
@@ -323,23 +448,28 @@ pub fn profile_findings(path: &str, text: &str, partials: &[&str]) -> Vec<String
         .collect()
 }
 
-/// A dispatcher action that renders nothing itself or selects its own file in one profile.
+/// A dispatcher action that renders nothing itself or renders exactly its own file in one profile.
 fn dispatcher_action(action: &str, file: &str) -> bool {
     let action = action.trim_matches('-').trim();
     let selects_profile = action
         .strip_prefix("includeTemplate \"profiles/")
         .and_then(|rest| rest.split_once('"'))
-        .and_then(|(target, _)| target.split_once('/'))
-        .is_some_and(|(profile, target)| {
-            !profile.is_empty() && !profile.contains('/') && target == file
+        .and_then(|(target, argument)| Some((target.split_once('/')?, argument.trim())))
+        .is_some_and(|((profile, target), argument)| {
+            let variable = argument
+                .strip_prefix('$')
+                .is_some_and(|name| !name.is_empty() && name.chars().all(char::is_alphanumeric));
+            !profile.is_empty()
+                && !profile.contains('/')
+                && target == file
+                && (argument == "." || variable)
         });
     selects_profile
-        || (action.starts_with('$') && action.contains(":="))
-        || action.starts_with("if ")
-        || action.starts_with("else if ")
-        || action == "else"
-        || action == "end"
-        || action.starts_with("fail \"")
+        || control(action)
+        || action
+            .strip_prefix("fail \"")
+            .and_then(|rest| rest.strip_suffix('"'))
+            .is_some_and(|message| !message.contains('"'))
 }
 
 /// Refusals for a root dispatcher that renders text or includes anything besides its own file in a native profile.
@@ -392,26 +522,64 @@ fn read(root: &Path, relative: &str) -> Result<String> {
     })
 }
 
-/// Instruction files anywhere in the source tree, by the names agent clients load.
-fn instruction_files(root: &Path) -> Result<Vec<String>> {
+/// The entries of a source directory, with one refusal for any listing error.
+fn listing(root: &Path, directory: &Path) -> Result<Vec<PathBuf>> {
+    fs::read_dir(directory)
+        .and_then(|entries| entries.map(|entry| entry.map(|entry| entry.path())).collect())
+        .with_context(|| {
+            format!(
+                "{}: cannot be listed; restore the directory and its read access, then run `just check`",
+                relative(root, directory)
+            )
+        })
+}
+
+/// The target path segments of a chezmoi source path.
+fn target(path: &str) -> Vec<String> {
+    path.split('/')
+        .map(|segment| {
+            let mut name = segment;
+            while let Some(rest) = ATTRIBUTES
+                .iter()
+                .find_map(|prefix| name.strip_prefix(prefix))
+            {
+                name = rest;
+            }
+            let name = name.strip_suffix(".tmpl").unwrap_or(name);
+            name.strip_prefix("dot_")
+                .map_or_else(|| name.to_owned(), |rest| format!(".{rest}"))
+        })
+        .collect()
+}
+
+/// How an agent client loads a source file.
+#[derive(Clone, Copy, PartialEq)]
+enum Loaded {
+    Instructions,
+    Prompt,
+}
+
+fn loaded(path: &str) -> Option<Loaded> {
+    let segments = target(path);
+    let name = segments.last()?;
+    if INSTRUCTION_NAMES.contains(&name.as_str()) {
+        return Some(Loaded::Instructions);
+    }
+    let prompt = name.ends_with(".md")
+        && segments.windows(3).any(|window| {
+            PROMPT_DIRECTORIES
+                .iter()
+                .any(|[parent, directory]| window[0] == *parent && window[1] == *directory)
+        });
+    prompt.then_some(Loaded::Prompt)
+}
+
+/// Files anywhere in the source tree that agent clients load as instructions or prompts.
+fn loaded_files(root: &Path) -> Result<Vec<(String, Loaded)>> {
     let mut found = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(directory) = stack.pop() {
-        let entries = fs::read_dir(&directory).with_context(|| {
-            format!(
-                "{}: cannot be listed; restore read access, then run `just check`",
-                relative(root, &directory)
-            )
-        })?;
-        for entry in entries {
-            let path = entry
-                .with_context(|| {
-                    format!(
-                        "{}: an entry cannot be read; restore read access, then run `just check`",
-                        relative(root, &directory)
-                    )
-                })?
-                .path();
+        for path in listing(root, &directory)? {
             let name = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -420,15 +588,15 @@ fn instruction_files(root: &Path) -> Result<Vec<String>> {
                 if !matches!(name, ".git" | "target" | "node_modules") {
                     stack.push(path);
                 }
-            } else if INSTRUCTION_NAMES
-                .iter()
-                .any(|known| name.strip_suffix(".tmpl").unwrap_or(name).ends_with(known))
-            {
-                found.push(relative(root, &path));
+            } else {
+                let path = relative(root, &path);
+                if let Some(kind) = loaded(&path) {
+                    found.push((path, kind));
+                }
             }
         }
     }
-    found.sort();
+    found.sort_by(|left, right| left.0.cmp(&right.0));
     Ok(found)
 }
 
@@ -440,44 +608,49 @@ fn profile_file(path: &str) -> bool {
 }
 
 fn shared_skills(root: &Path) -> Result<Vec<String>> {
-    let directory = root.join("dot_agents/skills");
-    let mut names = BTreeSet::new();
-    for entry in fs::read_dir(&directory).with_context(|| {
-        "dot_agents/skills: cannot be listed; restore the shared skill tree, then run `just check`"
-    })? {
-        let entry = entry.context(
-            "dot_agents/skills: an entry cannot be read; restore read access, then run `just check`",
-        )?;
-        if entry.path().is_dir()
-            && let Ok(name) = entry.file_name().into_string()
-        {
-            names.insert(name);
-        }
-    }
+    let names: BTreeSet<String> = listing(root, &root.join("dot_agents/skills"))?
+        .into_iter()
+        .filter(|path| path.is_dir())
+        .filter_map(|path| path.file_name()?.to_str().map(str::to_owned))
+        .collect();
     Ok(names.into_iter().collect())
 }
 
-/// Refuse unless every managed instruction line is classified in the audit.
+/// Refuse unless every managed instruction and prompt line is classified in the audit.
 pub fn check(root: &Path) -> Result<()> {
-    let partials = PARTIALS
+    let files = loaded_files(root)?;
+    let mut sources = PARTIALS
         .iter()
-        .map(|name| Ok((*name, read(root, &format!(".chezmoitemplates/{name}"))?)))
+        .map(|name| {
+            Ok((
+                (*name).to_owned(),
+                read(root, &format!(".chezmoitemplates/{name}"))?,
+            ))
+        })
         .collect::<Result<Vec<_>>>()?;
-    let borrowed: Vec<(&str, &str)> = partials
+    for (path, kind) in &files {
+        if *kind == Loaded::Prompt {
+            sources.push((path.clone(), read(root, path)?));
+        }
+    }
+    let borrowed: Vec<(&str, &str)> = sources
         .iter()
-        .map(|(name, text)| (*name, text.as_str()))
+        .map(|(name, text)| (name.as_str(), text.as_str()))
         .collect();
     let skills = shared_skills(root)?;
     let skills: Vec<&str> = skills.iter().map(String::as_str).collect();
     let exists = |path: &str| root.join(path).exists();
     let mut result = findings(&borrowed, &read(root, AUDIT)?, &exists, &skills);
     let mut profiles = 0;
-    for path in instruction_files(root)? {
+    for (path, kind) in &files {
+        if *kind == Loaded::Prompt {
+            continue;
+        }
         if PROFILE_FILES.contains(&path.as_str()) {
-            result.extend(dispatcher_findings(&path, &read(root, &path)?));
-        } else if profile_file(&path) {
+            result.extend(dispatcher_findings(path, &read(root, path)?));
+        } else if profile_file(path) {
             profiles += 1;
-            result.extend(profile_findings(&path, &read(root, &path)?, &PARTIALS));
+            result.extend(profile_findings(path, &read(root, path)?, &PARTIALS));
         } else {
             result.push(format!(
                 "{path}: an agent instruction file outside the audit; render it through a dispatcher from `{PROFILES}/<profile>/` and add it to PROFILE_FILES in xtask/src/instruction_audit.rs, or remove it, then run `just check`."
@@ -494,4 +667,24 @@ pub fn check(root: &Path) -> Result<()> {
         bail!("agent instruction audit refused:\n{}", result.join("\n"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::listing;
+
+    #[test]
+    fn an_unlistable_directory_names_itself_and_the_next_action() {
+        let root = tempfile::tempdir().expect("temporary repository");
+        let message = format!(
+            "{:#}",
+            listing(root.path(), &root.path().join("dot_agents/skills"))
+                .expect_err("a missing directory cannot be listed")
+        );
+        assert!(
+            message.starts_with("dot_agents/skills: cannot be listed"),
+            "{message}"
+        );
+        assert!(message.contains("just check"), "{message}");
+    }
 }
