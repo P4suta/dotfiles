@@ -8,6 +8,8 @@ pub mod agent_memory;
 pub mod desktop;
 pub mod eol_rules;
 pub mod hooks;
+pub mod instruction_audit;
+pub mod instruction_rules;
 pub mod line_endings;
 pub mod next_action;
 pub mod next_action_rules;

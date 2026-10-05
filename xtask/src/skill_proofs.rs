@@ -66,6 +66,12 @@ pub const REVIEW_HARNESSES: [&str; 6] = [
     "rolling_attempts_cannot_exceed_the_layered_local_budget",
 ];
 
+pub const INSTRUCTION_HARNESSES: [&str; 3] = [
+    "every_line_needs_the_class_of_its_shape",
+    "follow_ups_are_defined_once_and_referenced",
+    "removed_lines_name_what_holds_them",
+];
+
 pub const NEXT_ACTION_HARNESSES: [&str; 5] = [
     "executed_steps_run_only_on_their_own_preconditions",
     "host_prerequisites_precede_every_repository_step",
@@ -500,6 +506,64 @@ fn verify_native(root: &Path) -> Result<()> {
         fs::read(source)? == original,
         "production line-ending proof source changed during verification"
     );
+    let source = crate::canonical(&root.join("xtask/src/instruction_rules.rs"))?;
+    let original = fs::read(&source)?;
+    let directory = tempfile::tempdir()?;
+    verify_inventory(&source, directory.path(), &INSTRUCTION_HARNESSES)?;
+    verify_file(&source, directory.path(), &INSTRUCTION_HARNESSES, false)?;
+    let probe = tempfile::tempdir()?;
+    let file = probe.path().join("counterexample.rs");
+    fs::write(
+        &file,
+        format!(
+            "#[path = {source:?}]
+mod production;
+#[kani::proof]
+fn reject_a_directive_classified_as_judgment() {{
+    assert!(production::admitted(production::Line::Directive, production::Class::Judgment, true));
+}}
+#[kani::proof]
+fn reject_an_undefined_follow_up() {{
+    assert!(production::admitted(production::Line::Text, production::Class::FollowUp, false));
+}}
+#[kani::proof]
+fn reject_a_duplicate_follow_up() {{
+    assert!(production::follow_up(2, 1) == production::Definition::Current);
+}}
+#[kani::proof]
+fn reject_a_gate_without_its_source() {{
+    assert!(production::removed_row_held(Some(production::Holder::Gate), false, true, true));
+}}
+#[kani::proof]
+fn reject_a_directive_that_renders_output() {{
+    assert!(production::admitted(production::Line::Output, production::Class::Directive, true));
+}}
+#[kani::proof]
+fn reject_a_merge_without_its_retained_line() {{
+    assert!(production::removed_row_held(Some(production::Holder::Merged), true, true, false));
+}}
+#[kani::proof]
+fn reject_a_contradiction_without_what_it_contradicted() {{
+    assert!(production::removed_row_held(Some(production::Holder::Contradicted), true, false, false));
+}}
+"
+        ),
+    )?;
+    for name in [
+        "reject_a_directive_classified_as_judgment",
+        "reject_an_undefined_follow_up",
+        "reject_a_duplicate_follow_up",
+        "reject_a_gate_without_its_source",
+        "reject_a_directive_that_renders_output",
+        "reject_a_merge_without_its_retained_line",
+        "reject_a_contradiction_without_what_it_contradicted",
+    ] {
+        verify_file(&file, probe.path(), &[name], true)?;
+    }
+    ensure!(
+        fs::read(source)? == original,
+        "production instruction proof source changed during verification"
+    );
     println!(
         "Verified all {} production policy harnesses, reachable outcomes, and the rejecting counterexamples",
         HARNESSES.len()
@@ -507,6 +571,7 @@ fn verify_native(root: &Path) -> Result<()> {
             + PROFILE_HARNESSES.len()
             + REAPER_HARNESSES.len()
             + REVIEW_HARNESSES.len()
+            + INSTRUCTION_HARNESSES.len()
             + NEXT_ACTION_HARNESSES.len()
             + LINE_ENDING_HARNESSES.len()
     );
