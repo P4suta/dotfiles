@@ -148,6 +148,37 @@ fn doctored_path() -> String {
     std::env::join_paths(dirs).map_or_else(|_| String::new(), |s| s.to_string_lossy().into_owned())
 }
 
+/// The directories `path_helper` gives a macOS login shell, from `/etc/paths` and then `/etc/paths.d` in name order.
+fn system_path_dirs() -> Vec<String> {
+    let mut files = vec![PathBuf::from("/etc/paths")];
+    if let Ok(entries) = std::fs::read_dir("/etc/paths.d") {
+        let mut extra: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+        extra.sort();
+        files.extend(extra);
+    }
+    let texts: Vec<String> = files
+        .iter()
+        .filter_map(|f| std::fs::read_to_string(f).ok())
+        .collect();
+    texts
+        .iter()
+        .flat_map(|text| text.lines())
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// System directories that the given PATH lacks, so a program a login shell finds is missing from this shell.
+fn missing_from_path(path: &str, system: &[String]) -> Vec<String> {
+    let present: Vec<PathBuf> = std::env::split_paths(path).collect();
+    system
+        .iter()
+        .filter(|dir| !present.iter().any(|p| p == Path::new(dir.as_str())))
+        .cloned()
+        .collect()
+}
+
 fn which_doctored(name: &str) -> Option<PathBuf> {
     std::env::split_paths(&doctored_path())
         .map(|d| d.join(name))
@@ -172,6 +203,21 @@ fn ssh_auth_sock() -> Option<String> {
 
 fn system_tier(d: &mut Doctor) {
     section("System tier (Homebrew)");
+    let missing = missing_from_path(
+        &std::env::var("PATH").unwrap_or_default(),
+        &system_path_dirs(),
+    );
+    if missing.is_empty() {
+        ok("PATH", "includes the /etc/paths directories");
+    } else {
+        d.warn(
+            "PATH",
+            &format!(
+                "this shell lacks {} from /etc/paths; reload the shell profile",
+                missing.join(", ")
+            ),
+        );
+    }
     d.command("brew", "Homebrew", true);
     if which_doctored("brew").is_some() {
         let brewfile = home().join(".config/homebrew/Brewfile");
@@ -407,9 +453,22 @@ fn agents_and_editors(d: &mut Doctor) {
     d.command("codex", "Codex", false);
     d.command("claude", "Claude Code", false);
     d.command("opencode", "OpenCode", false);
-    // OrbStack generates its CLI shims on first launch, so "app present, docker missing" is a distinct and actionable state from "not installed".
+    // OrbStack generates its CLI shims on first launch, so "app present, docker missing" is a distinct and actionable state from "not installed", and a shim outside PATH is a shell problem rather than either.
+    let installed = [
+        PathBuf::from("/usr/local/bin/docker"),
+        home().join(".orbstack/bin/docker"),
+    ]
+    .into_iter()
+    .find(|p| p.exists());
     match which_doctored("docker") {
         Some(p) => ok("Docker (OrbStack)", &p.display().to_string()),
+        None if installed.is_some() => d.warn(
+            "Docker (OrbStack)",
+            &format!(
+                "{} exists, but this shell's PATH does not include its directory",
+                installed.unwrap_or_default().display()
+            ),
+        ),
         None if Path::new("/Applications/OrbStack.app").is_dir() => d.warn(
             "Docker (OrbStack)",
             "OrbStack.app is installed but has never been launched; open it once to get the docker CLI",
@@ -760,8 +819,22 @@ fn json_field(json: &str, field: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Xcode, classify_xcode_path, clt_update_label, count_marker, json_field, parse_font_family,
+        Xcode, classify_xcode_path, clt_update_label, count_marker, json_field, missing_from_path,
+        parse_font_family,
     };
+
+    #[test]
+    fn a_path_without_system_directories_reports_each_missing_one() {
+        let system = ["/usr/local/bin".to_owned(), "/usr/bin".to_owned()];
+        assert_eq!(
+            missing_from_path("/opt/homebrew/bin:/usr/bin:/bin", &system),
+            ["/usr/local/bin"]
+        );
+        assert_eq!(
+            missing_from_path("/usr/local/bin:/usr/bin", &system),
+            Vec::<String>::new()
+        );
+    }
 
     #[test]
     fn the_first_font_family_line_wins() {
