@@ -174,7 +174,6 @@ pub enum Lifecycle {
 
 /// What GitHub reports about one PR of a merge, read in one response so the checks belong to its head.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct MergeState {
     pub lifecycle: Lifecycle,
     pub conflict: bool,

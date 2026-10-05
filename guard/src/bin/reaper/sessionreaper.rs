@@ -114,7 +114,10 @@ impl SessionReaper {
 }
 
 /// Tier A — stopped and orphaned: kill it after grace, because a stopped process ignores SIGTERM and can never be resumed once its shell is gone.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one observed fact of the process the tier judges"
+)]
 fn tier_a(
     cfg: &SessionConfig,
     p: &Process,

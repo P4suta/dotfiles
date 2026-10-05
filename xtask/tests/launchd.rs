@@ -1,5 +1,5 @@
 #![cfg(target_os = "macos")]
-#![allow(
+#![expect(
     clippy::disallowed_methods,
     reason = "integration tests spawn the binaries and real tools they verify"
 )]

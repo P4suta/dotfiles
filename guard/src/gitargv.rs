@@ -972,7 +972,10 @@ fn judge(argv: &[String], repo: &dyn Repository) -> Option<Denial> {
 ///
 /// One long `match` on purpose: every arm is a rule, each rule is three lines of condition and a paragraph of explanation, and the table reads as the policy document it is.
 /// Splitting it into a dozen two-line functions would scatter the policy without shortening it.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the match is the policy table, one arm per rule"
+)]
 fn subcommand(call: &Invocation) -> Option<Denial> {
     let (sub, args) = (call.sub, call.args);
     let flags = flags_of(args);
@@ -1147,7 +1150,10 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
 }
 
 /// The rules for `git push`, read from `push` as Git reads its options.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the push rules read as one table in the order Git applies its options"
+)]
 fn push(call: &Invocation, push: &Parsed) -> Option<Denial> {
     let args = call.args;
     let refspecs: Vec<&str> = push

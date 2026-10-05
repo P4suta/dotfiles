@@ -1,4 +1,4 @@
-#![allow(
+#![expect(
     clippy::disallowed_methods,
     reason = "integration tests spawn the real Git they verify"
 )]

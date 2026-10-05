@@ -329,7 +329,6 @@ pub enum Fixup {
 
 /// Where the refused commit took its message and authorship from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct Source {
     pub fixup: Fixup,
     /// `-C` or `-c` named a commit.
@@ -342,7 +341,10 @@ pub struct Source {
 
 /// What a retry from the saved message adds so that it makes the commit the refused one would have made.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is one independent option the retry adds"
+)]
 pub struct Retry {
     pub allow_empty: bool,
     pub only: bool,

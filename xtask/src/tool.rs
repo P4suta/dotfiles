@@ -417,7 +417,10 @@ impl Tool {
     }
 
     /// The only place xtask creates a process for a named program; a hook gate keeps the hook's repository to inspect the commit in progress.
-    #[allow(clippy::disallowed_methods)]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the registry's own constructor for a hook gate process"
+    )]
     pub fn hook_command(self) -> Command {
         Command::new(self.program())
     }
@@ -443,7 +446,10 @@ pub const GIT_LOCAL_ENVIRONMENT: [&str; 15] = [
 ];
 
 /// A program chosen at run time rather than from the registry: a consumer command the owner passes through, or a verified vendor installer.
-#[allow(clippy::disallowed_methods)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one constructor for a program chosen at run time"
+)]
 pub fn external(program: impl AsRef<std::ffi::OsStr>) -> Command {
     Command::new(program)
 }

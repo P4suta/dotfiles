@@ -1515,7 +1515,10 @@ fn run(action: Action, rerun: &str) -> Result<()> {
 }
 
 /// Validates a live document and moves the open draft to review, returning the checked body.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one fact of the live PR read in a single response"
+)]
 fn make_ready(
     github: &Github,
     target: &Target,

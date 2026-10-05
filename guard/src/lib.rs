@@ -4,7 +4,10 @@
 //! Everything they share — git location, the hook PATH, the bypass ledger — lives here once.
 //!
 //! This library has no consumers outside the crate (`publish = false`), so `must_use` annotations on every getter would be ceremony without a reader; the binaries are the readers, and they read attentively.
-#![allow(clippy::must_use_candidate)]
+#![expect(
+    clippy::must_use_candidate,
+    reason = "the binaries in this crate are the only readers of its getters"
+)]
 
 pub mod attribution;
 pub mod bypass;

@@ -1,7 +1,7 @@
 {
-  "revision": "d0321854ef98e75ab0795fc26d475074794bb449867a23e8dfcf060b9c9c8394",
+  "revision": "9464323d0c85c7c95125fd1eedd751b64b052f0af8ec5bb27fa25675573c404f",
   "outcome": "keep",
-  "reason": "Retain the maintained typed governance helper and narrow mutation scopes; its checked repository identities and stronger-protection preservation differ from release workflow design.",
+  "reason": "Retain the maintained typed governance helper and narrow mutation scopes; this revision only denies unreasoned lint allowances in the helper's lint policy, as every crate in the repository does.",
   "evidence": [
     "dot_agents/skills/github-repository/SKILL.md"
   ],

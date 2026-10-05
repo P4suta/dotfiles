@@ -150,7 +150,10 @@ pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
 }
 
 /// `canonicalize` without the Windows verbatim drive prefix, so every comparison and every path handed to another tool uses one spelling.
-#[allow(clippy::disallowed_methods)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one place a path is canonicalized, so its verbatim prefix is removed everywhere"
+)]
 pub fn canonical(path: &Path) -> Result<PathBuf> {
     Ok(without_verbatim_prefix(&path.canonicalize()?))
 }

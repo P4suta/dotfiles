@@ -7,7 +7,10 @@ use build_inputs::{content_hash, inputs};
 use std::path::PathBuf;
 
 /// The checkout's commit, or `unknown` where Git or the history is absent, such as a source copy in a container.
-#[allow(clippy::disallowed_methods)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a build script cannot use the crate's tool registry"
+)]
 fn revision(root: &std::path::Path) -> String {
     std::process::Command::new("git")
         .arg("-C")
