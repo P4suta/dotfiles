@@ -1,7 +1,7 @@
 {
-  "revision": "07160fb99e70fbb56c84cb55b36d586e94917af4eff4f52e68bd32294325c6b0",
+  "revision": "652eb9fee92107899988a52f53d0e156ddfea6998df5d28301f037a2bac5461f",
   "outcome": "implemented",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/nas/SKILL.md",
     "dot_agents/skills/nas/references/synology-drive.md",

@@ -16,4 +16,3 @@ Keep unchecked `any`, type assertions, non-null assertions, ignored diagnostics,
 
 For another dynamic language, choose its maintained annotation or signature system, checker, and annotation-presence rules from official sources.
 Test both a valid boundary and an invalid one through the project's real command.
-If the checker misses a construct, redesign or isolate that construct and keep an explicit obligation instead of calling the unchecked code typed.

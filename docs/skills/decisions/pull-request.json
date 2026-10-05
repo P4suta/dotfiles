@@ -1,7 +1,7 @@
 {
-  "revision": "5e943239d8f288afcc38f41cbdfdb87bd72386d8bb4eb2d1d7b099ca9a75812a",
+  "revision": "d32dd5d2bb1b571ca5ab4e63115db1fdbb010aea077e356e654e30091a63b4b3",
   "outcome": "implemented",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/pull-request/SKILL.md",
     "docs/adr/0004-checked-pull-request-authoring.md",

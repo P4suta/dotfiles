@@ -1,4 +1,4 @@
-//! Helpers shared by both reapers: timestamps, the single-instance lock, desktop notifications, and extended regular expression matching through grep.
+//! Helpers shared by both reapers: timestamps, the single-instance lock, desktop notifications, and ERE matching without a regular expression engine.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -11,8 +11,8 @@ pub fn now() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0))
 }
 
-/// Converts a Docker timestamp to Unix seconds, returning 0 for the zero value or a parse error.
-/// Docker reports Coordinated Universal Time.
+/// Converts an RFC 3339 timestamp to Unix seconds, returning 0 for the zero value or a parse error.
+/// Docker reports UTC.
 pub fn epoch_of(ts: &str) -> i64 {
     if ts.is_empty() || ts == "0001-01-01T00:00:00Z" {
         return 0;
@@ -86,7 +86,6 @@ pub fn etime_seconds(raw: &str) -> i64 {
 
 /// Single-instance guard: an atomic `mkdir`, because macOS ships no `flock(1)`.
 /// The run steals a lock older than an hour, which a killed run left behind.
-/// Returns the lock path to remove when the run ends.
 pub struct Lock {
     dir: PathBuf,
 }
@@ -121,7 +120,6 @@ impl Drop for Lock {
 }
 
 /// Sends a desktop notification through terminal-notifier when present, with osascript as the fallback.
-/// The log line on stdout remains the audit record.
 pub fn notify(title: &str, body: &str, enabled: bool) {
     if !enabled {
         return;
@@ -172,7 +170,7 @@ fn which(program: &str) -> Option<PathBuf> {
     dirs.iter().map(|d| d.join(program)).find(|p| p.is_file())
 }
 
-/// Returns the `lines` that match the extended regular expression, through `grep -E`, because both patterns come from user configuration.
+/// Returns the `lines` that match the ERE, through `grep -E`, because both patterns come from user configuration.
 /// `anchor_line` makes the whole line the subject of the match.
 /// `None` means grep failed to answer, from a missing binary, an invalid pattern, or an error, and callers must never treat it as an empty match.
 pub fn grep_matching(pattern: &str, lines: &[String]) -> Option<Vec<usize>> {

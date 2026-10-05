@@ -28,7 +28,7 @@ Keep bootstrap input owner-managed, short-lived, and out of logs and repository 
 Build and verify candidate `.crate` archives before registry authentication.
 Check the publishable workspace set, version, dependency order, package contents, locked dependencies, and source identity.
 Publish dependent workspace packages in a supported order, and wait for registry propagation before verifying consumers.
-Use the native platform for crates that package or verify only there.
+Use the native platform for crates that can't package or verify on another OS.
 Bind provenance and checksums to the exact candidate bytes.
 If Cargo repackages during publication, verify that its output still matches the approved candidate.
 
@@ -41,4 +41,4 @@ Both protect existing version tags from update and deletion without bypass.
 
 Check configuration with the repository's Rust gates and a non-publishing candidate check.
 Valid workflow syntax, App authentication, or `cargo publish --dry-run` proves no registry publication.
-Preserve actual publication authorization, and report the untested boundary explicitly.
+Report the untested boundary explicitly.

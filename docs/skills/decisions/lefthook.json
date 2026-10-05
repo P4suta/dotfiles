@@ -1,7 +1,7 @@
 {
-  "revision": "0e4719719602e5c5a878ff0cf75e0d59ce43c9f03efcfb0ec54c0deae12b0377",
+  "revision": "d0b5ee6dd7834c178e2cf921095b7b01a5d2e1d1aaa85082e383c55db9a95c76",
   "outcome": "keep",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/lefthook/SKILL.md"
   ],

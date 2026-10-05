@@ -1,11 +1,9 @@
 //! A dedicated `ssh-agent` for Herdr that needs one 1Password approval when Herdr starts and none afterward.
 //!
-//! 1Password asks again for every new process tree, and an unattended session spawns many.
 //! `op read` hands each private key to this process, which pipes it into `ssh-add -`, so the key never touches disk.
 //! The keys stay loaded until `herdr-agent lock`, logout, or the death of the process.
 //!
 //! It loads the 1Password SSH keys whose public keys appear in `~/.config/herdr-agent/keys`, which chezmoi renders from `.chezmoidata.toml`.
-//! Inside a Herdr pane, `~/.config/shell/ssh-agent.sh` and the Nushell `env.nu` ask `herdr-agent ready`, and fall back to the 1Password socket on a negative answer.
 
 mod json;
 
@@ -22,7 +20,7 @@ const USAGE: &str = "usage: herdr-agent ensure|ready|status|lock\n\n  \
     lock    remove every key from the agent";
 
 fn main() -> ExitCode {
-    // This binary serves a Unix socket, and Windows provisions the Herdr key service through dotctl.
+    // This binary serves a Unix socket, and Windows provisions the Herdr ssh-agent through dotctl.
     if cfg!(not(unix)) {
         eprintln!("herdr-agent manages a Unix-socket SSH agent and does not run on Windows");
         return ExitCode::from(2);
@@ -44,7 +42,6 @@ fn main() -> ExitCode {
     ExitCode::from(code)
 }
 
-/// What `ssh-add -l` says about the socket.
 #[derive(Debug, PartialEq)]
 enum State {
     Loaded,
@@ -158,7 +155,6 @@ fn load(sock: &Path, keys_file: &Path) -> Result<(), String> {
     for r in &refs {
         let mut key = op(&["read", r], None)?;
         let added = add_key(sock, &key);
-        // Wipe the buffer, the only copy of the key besides the pipe.
         key.fill(0);
         added?;
         loaded += 1;
@@ -176,7 +172,6 @@ fn load(sock: &Path, keys_file: &Path) -> Result<(), String> {
     }
 }
 
-/// Run `op`, with stderr left on the terminal so its own errors and prompts reach the user.
 fn op(args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>, String> {
     let mut child = locate::child("op")
         .args(args)
@@ -217,12 +212,10 @@ fn add_key(sock: &Path, key: &[u8]) -> Result<(), String> {
     }
 }
 
-/// A public key reduced to `type base64`, so trailing comments never break a match.
 fn normalize(key: &str) -> String {
     key.split_whitespace().take(2).collect::<Vec<_>>().join(" ")
 }
 
-/// One key per line, skipping blank lines and `#` comments.
 fn wanted_keys(text: &str) -> Vec<String> {
     text.lines()
         .map(str::trim)

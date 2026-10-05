@@ -13,14 +13,10 @@ Never turn off isolation or borrow checks to make a failing check pass.
 
 When memory or race behavior crosses an interpreter's supported boundary, use [supported sanitizers](https://doc.rust-lang.org/unstable-book/compiler-flags/sanitizer.html) for instrumented native execution.
 Check the exact sanitizer, target, dependencies, linking, and instrumentation coverage before claiming a result.
-For relevant synchronization algorithms, use a concurrency model checker such as [Loom](https://docs.rs/loom/latest/loom/) with faithful primitives and explicit exploration bounds.
-Combine these methods when they establish different properties.
+For synchronization algorithms, use a concurrency model checker such as [Loom](https://docs.rs/loom/latest/loom/) with faithful primitives and explicit exploration bounds.
 
 Check locked dependencies for current vulnerability advisories through maintained [RustSec tooling](https://github.com/rustsec/rustsec).
 Enforce dependency source, license, and version policy when the project's distribution or threat boundary requires it.
 Treat advisory freshness and offline operation as distinct evidence, and never report cached data as a current audit.
 For input-heavy APIs, maintain bounded property or fuzz checks with preserved seeds and minimized regressions.
 Use `mutation-testing` to establish that important assertions detect representative broken behavior.
-
-These mechanisms illustrate coverage and form no closed tool inventory.
-Recheck upstream support, and assess a replacement by the same contract before adoption.

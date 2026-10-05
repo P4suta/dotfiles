@@ -1,10 +1,10 @@
 {{- /*
-  Declare Context7 only on a local workstation with the 1Password app bundle.
+  Declare Context7 only on a local workstation with the 1Password app.
 */ -}}
 {{- $isLocal := not (or (env "SSH_CONNECTION") (env "SSH_CLIENT") (env "SSH_TTY")) -}}
 {{- $app := default "/Applications/1Password.app" (env "DOTFILES_ONEPASSWORD_APP") -}}
 {{- $hasOnePassword := and (eq .chezmoi.os "darwin") $isLocal (stat $app) -}}
-{{- /* Declare the gcloud server only where the gcp skill installed its bundle, and run it with the mise Node. */ -}}
+{{- /* Declare the gcloud MCP server only where the gcp skill installed it. */ -}}
 {{- $gcloudMcp := joinPath .chezmoi.homeDir ".local/share/gcloud-mcp/node_modules/@google-cloud/gcloud-mcp/dist/bundle.js" -}}
 {{- $node := joinPath .chezmoi.homeDir ".local/share/mise/installs/node/latest/bin" -}}
 {

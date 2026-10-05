@@ -27,8 +27,7 @@ pub fn run(options: &Options) -> Result<i32> {
         }
     }
 
-    // Public Scoop repositories must update without interactive 1Password SSH authentication.
-    // Scoop commands ignore the machine-wide HTTPS-to-SSH rewrite, and these repositories use HTTPS remotes.
+    // Public Scoop repositories must update without the interactive 1Password SSH agent.
     configure_public_scoop_https(&root.join("apps").join("scoop").join("current"))?;
     for bucket in &options.buckets {
         configure_public_scoop_https(&root.join("buckets").join(bucket))?;

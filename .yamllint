@@ -4,20 +4,18 @@ extends: default
 rules:
 # GitHub workflows omit `---`.
   document-start: disable
-# Comments inside block literals belong to the preceding key.
   comments-indentation: disable
 
 # YAML 1.1 reads the GitHub Actions `on:` key as true.
   truthy:
     check-keys: false
 
-# Comments follow the sentence-per-line policy.
   line-length: disable
 
   comments:
     min-spaces-from-content: 1
 
-# Ansible writes Jinja expressions as `{{ value }}`.
+# Ansible writes `{{ value }}`.
   braces:
     max-spaces-inside: 1
 

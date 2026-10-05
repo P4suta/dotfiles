@@ -323,7 +323,6 @@ mod tests {
             &["held/config".into(), "changed".into()],
             || {
                 fs::write(destination.join("changed"), "after")?;
-                // The untouched target's directory now refuses removal, as a held file does on Windows.
                 fs::set_permissions(destination.join("held"), fs::Permissions::from_mode(0o500))?;
                 anyhow::bail!("injected apply failure")
             },

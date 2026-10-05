@@ -1,26 +1,24 @@
-# Configuration that the systemd unit loads as an EnvironmentFile.
-# Change a value here and run `chezmoi apply`, which overwrites direct edits to ~/.config/session-reaper/config.
+# Read by the systemd unit as an EnvironmentFile.
+# Change a value here and run `chezmoi apply`, which overwrites direct edits.
 
 # Mode: report or reap.
-# report logs and notifies, and never ends a process.
-# reap ends tier A processes: stopped, orphaned, and confirmed across the grace period.
+# report only logs and notifies.
+# reap ends tier A processes.
 # Tier B, running orphans, stays report-only in every mode.
-# Set `report` and apply again to roll back.
+# Set `report` and apply to roll back.
 SESSION_REAPER_MODE=reap
 
 # Tier A: least age in seconds of a stopped orphan.
 SESSION_REAPER_STOPPED_MIN_AGE=3600
 
-# Tier A: seconds a process must stay a stopped orphan, across a prior run, before the reaper ends it.
-# The wait avoids sampling a process mid-transition.
+# Tier A: seconds a process must stay a stopped orphan, across a prior run, before it ends.
 SESSION_REAPER_GRACE_SECONDS=1800
 
-# Tier B: least age in seconds of a reported running orphan without a controlling terminal.
+# Tier B: least age in seconds of a reported running orphan without a tty.
 SESSION_REAPER_RUNNING_MIN_AGE=259200
 
-# Anchored extended pattern of process names that even tier A never touches.
+# Anchored ERE of process names that tier A never touches.
 SESSION_REAPER_ALLOW_REGEX=^(tmux.*|screen.*|sshd|systemd|systemd-.*|dbus-.*|pipewire.*|wireplumber|pulseaudio|gvfsd.*|ssh-agent|gpg-agent|gnome-keyring-d|code-.*|session-reaper)$
 
 # Desktop notifications: 1 on, 0 off.
-# The audit log goes to journald.
 SESSION_REAPER_NOTIFY=1

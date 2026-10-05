@@ -171,7 +171,6 @@ pub fn chezmoi(root: &Path, scope: &Path, config: &Path, destination: &Path) -> 
 }
 
 /// Targets that `chezmoi status` reports as changed since chezmoi last wrote them, from its first column.
-/// A target chezmoi never wrote, such as a file an earlier repository installed, has no record, so applying the profile takes it over.
 pub fn externally_changed(status: &str) -> Vec<String> {
     status
         .lines()
@@ -180,7 +179,7 @@ pub fn externally_changed(status: &str) -> Vec<String> {
         .collect()
 }
 
-/// Forgets which `run_onchange_` and `run_once_` scripts already ran, so the next apply reruns every script on the host they provisioned.
+/// Forgets which `run_onchange_` and `run_once_` scripts already ran, so the next apply reruns them.
 pub fn forget_script_runs(
     root: &Path,
     scope: &Path,
@@ -207,7 +206,6 @@ pub fn forget_script_runs(
     Ok(())
 }
 
-/// Verification excludes scripts because they act rather than describe state, and an always-run `run_` script would fail every check.
 pub fn native_action_arguments(name: &str) -> Vec<&str> {
     if name == "verify" {
         vec![name, "--exclude", "scripts"]
@@ -274,7 +272,7 @@ pub fn managed_paths(stdout: &[u8]) -> Result<Vec<String>> {
         .collect()
 }
 
-/// Managed directories with no managed file or symlink beneath them: another platform's tree leaking into this profile.
+/// Managed directories with no managed file or symlink beneath them.
 pub fn empty_directories(directories: &[String], leaves: &[String]) -> Vec<String> {
     directories
         .iter()
@@ -492,7 +490,6 @@ pub struct SkippedScript {
 }
 
 /// `setup.skip` entries, which `.chezmoiignore` keeps chezmoi from applying.
-/// Every entry must name one script target and say why.
 pub fn declared_skips(data: &Value) -> Result<Vec<SkippedScript>> {
     let Some(entries) = data.pointer("/setup/skip") else {
         return Ok(Vec::new());
@@ -668,7 +665,6 @@ pub fn operate(
             },
             || {
                 execute("verify").map_err(|error| {
-                    // Name the diverging targets before the transaction restores them and destroys the evidence.
                     let report = |arguments: &[&str]| {
                         chezmoi(root, state, config, destination)
                             .args(arguments)

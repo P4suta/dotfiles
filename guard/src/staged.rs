@@ -3,7 +3,6 @@
 //! `dotguard:allow-foreign` exempts this file, because its tests need real Chinese in a diff.
 //!
 //! The scan reads only *added* lines, so a gate never fires on existing history near an edit.
-//! `git diff --cached` skips binary content, and rename detection keeps a moved file from counting as added lines.
 
 use crate::lang;
 use crate::realgit;
@@ -14,7 +13,6 @@ pub struct FileHits {
 }
 
 /// Parse a unified diff with zero context and scan each added line.
-///
 /// `@@ -a,b +c,d @@` gives the first line number on the new side, and each added line increments it, so a hit reports its line number after the commit.
 pub fn scan_diff(diff: &str) -> Vec<FileHits> {
     let mut out: Vec<FileHits> = Vec::new();
@@ -66,10 +64,7 @@ pub fn scan_diff(diff: &str) -> Vec<FileHits> {
 }
 
 /// A file exempts itself from the content scan by carrying this marker in its header, the first `EXEMPT_SCAN_LINES` lines.
-///
 /// `lang.rs` and its tests must contain the Chinese text they detect, so the gate needs this exemption to commit itself.
-/// The header limit keeps a document that only names the marker from exempting itself.
-/// The check reads the staged blob, the content that the commit records.
 pub const EXEMPT_MARKER: &str = "dotguard:allow-foreign";
 const EXEMPT_SCAN_LINES: usize = 40;
 

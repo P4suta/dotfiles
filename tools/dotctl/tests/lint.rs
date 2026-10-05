@@ -1,6 +1,5 @@
 //! Runs every lint kind on a passing file and a failing file.
 //!
-//! A validator that never fails hides every defect, so the failing case carries the information.
 //! The tests drive the built binary, because lefthook reads its exit code.
 
 use std::path::{Path, PathBuf};
@@ -94,7 +93,7 @@ fn shellcheck_separates_clean_from_suspect() {
 #[test]
 fn powershell_reports_analyzer_findings() {
     assert_verdict("ps1", "ok.ps1", "Write-Output 'hello'\n", true);
-    // A `PSAvoidUsingWriteHost` warning that the repository's exclude list leaves active.
+    // PSAvoidUsingWriteHost, a warning not on the repo's exclude list.
     assert_verdict("ps1", "bad.ps1", "Write-Host 'hello'\n", false);
 }
 
@@ -105,7 +104,7 @@ fn template_requires_a_successful_render() {
     assert_verdict("template", "bad.tmpl", "{{ .does.not.exist }}\n", false);
 }
 
-/// A template that renders to broken `TOML` fails the `TOML` kind, because rendering precedes validation.
+/// A template that renders to broken TOML fails the TOML kind, because rendering precedes validation.
 #[test]
 fn render_happens_before_validation() {
     assert_verdict("toml", "ok.toml.tmpl", "key = {{ \"1\" }}\n", true);

@@ -9,7 +9,6 @@ description: >-
 
 Make correctness depend on explicit inputs, owned state, and verified transitions.
 Find every uncontrolled dependency in the affected behavior, and remove it, give it a clear contract, or control it at a narrow boundary.
-Keep the design proportional to the actual contract.
 Determinism never requires removing legitimate concurrency, deadlines, or production randomness.
 
 ## Design the boundary
@@ -17,7 +16,7 @@ Determinism never requires removing legitimate concurrency, deadlines, or produc
 State the observable invariant, admitted inputs, failure behavior, and assumptions before implementation.
 Separate decision logic from clocks, schedulers, randomness, filesystems, processes, and services.
 Pass the relevant capabilities explicitly instead of adding global mutable test switches.
-Use types, ownership, checked constructors, and exhaustive states to prevent invalid transitions where possible.
+Use types, ownership, checked constructors, and exhaustive states to prevent invalid transitions.
 Bind observations, caches, approval evidence, and completion to the exact operation, revision, resource, and generation they describe.
 
 | Dependency | Guidance |
@@ -28,18 +27,15 @@ Bind observations, caches, approval evidence, and completion to the exact operat
 | APIs, processes, platforms, reproducible inputs | [External boundaries and environment](references/boundaries-and-environment.md) |
 | Reproduction, fault injection, model checking, evidence | [Tests and diagnostics](references/tests-and-diagnostics.md) |
 
-Use one authoritative boundary for a shared invariant.
-Inspect other producers and consumers of that boundary instead of scattering defensive conditionals.
-Read the actual library and operating system contract before relying on scheduling, atomicity, durability, or cancellation behavior.
+Use one authoritative boundary for a shared invariant, and inspect its other producers and consumers instead of scattering defensive conditionals.
+Read the library and OS contract before relying on scheduling, atomicity, durability, or cancellation behavior.
 
 ## Verify the mechanism
 
 For a discovered defect, use `systematic-fixes` to keep a failing reproducer and establish its cause.
-Choose evidence that distinguishes the broken mechanism from a passing coincidence.
 Control the clock, input seed, schedule, resource identity, or injected failure that triggers it.
-When operating system behavior matters, exercise the supported native platforms through `multi-machine`.
+When OS behavior matters, exercise the supported native platforms through `multi-machine`.
 Use `development-assurance`, `rust-invariants`, and fitting proof or model tools for the affected contract.
-Keep operating system and service trust assumptions explicit.
 
 A rerun, extra sleep, larger timeout, extra retry, or serial execution alone fixes nothing.
 Repair the responsible dependency or protocol, then show that the original failure stops and valid behavior still works.

@@ -1,10 +1,5 @@
 //! Render-and-check gates for the files of this repository.
 //!
-//! Each gate renders a chezmoi template first, so it catches a broken Go template and a broken payload alike.
-//! It then hands the bytes to the validator that owns the format.
-//! Static files go straight to the validator, and `taplo fmt --check` also enforces canonical formatting on them.
-//!
-//! The validators stay external: `taplo`, `plutil`, `jq`, `yamllint` through `uvx`, `nu`, `herdr`, and `git config` each provide the parser their ecosystem trusts.
 //! A missing validator downgrades to a note and exit 0, so a missing tool never blocks a commit.
 
 use crate::locate;
@@ -12,7 +7,6 @@ use crate::realgit;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-/// `dotguard lint <kind> <files…>`.
 pub fn dispatch(args: &[String]) -> i32 {
     let Some(kind) = args.first().map(String::as_str) else {
         eprintln!(
@@ -52,7 +46,6 @@ fn existing(files: &[String]) -> Vec<&String> {
         .collect()
 }
 
-/// Compares extensions through `Path::extension`, which settles case sensitivity in one place.
 fn has_ext(path: &str, ext: &str) -> bool {
     Path::new(path)
         .extension()
@@ -84,7 +77,7 @@ fn render(f: &str) -> Result<Vec<u8>, ()> {
     }
 }
 
-/// A private temporary file with the suffix that validators dispatch on, because `mktemp` on macOS lacks `--suffix`.
+/// A private temp file with the suffix that validators dispatch on, because BSD `mktemp` lacks `--suffix`.
 fn temp_file(ext: &str, bytes: &[u8]) -> Option<PathBuf> {
     static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -108,7 +101,6 @@ fn is_init_config(p: &Path) -> bool {
     )
 }
 
-/// Runs the validator, showing its output only when it fails.
 fn run_quiet(cmd: &mut std::process::Command, file: &str, what: &str) -> bool {
     match cmd.output() {
         Ok(o) if o.status.success() => true,
@@ -367,7 +359,6 @@ fn gitconfig(files: &[String]) -> i32 {
         };
 
         // A `#` opens a comment, so an unquoted color literal vanishes and drops the theme without a syntax error.
-        // Every written color must survive into the parsed values.
         for colour in colours(&String::from_utf8_lossy(&bytes)) {
             if !parsed.contains(&colour) {
                 err(

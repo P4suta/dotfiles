@@ -1,7 +1,7 @@
 {
-  "revision": "bb64199cf56e41d576e2d71131e75dd1dc8157fc81c3fe867d1ad9e49afe9095",
+  "revision": "4263a7a1a02e1783301717cf398390d2b0065a1081a147e57b6a0ebbf33f53a6",
   "outcome": "keep",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/xtask/SKILL.md"
   ],

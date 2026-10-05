@@ -1,12 +1,8 @@
-# Bash runs this file for non-login shells.
-
-# Skip noninteractive shells.
 case $- in
     *i*) ;;
       *) return;;
 esac
 
-# Keep duplicates and lines starting with a space out of the history.
 HISTCONTROL=ignoreboth
 
 shopt -s histappend
@@ -14,18 +10,14 @@ shopt -s histappend
 HISTSIZE=1000
 HISTFILESIZE=2000
 
-# Track the window size after each command.
 shopt -s checkwinsize
 
-# Let less read binary files through lesspipe.
 [ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
 
-# Name the Debian chroot in the prompt.
 if [ -z "${debian_chroot:-}" ] && [ -r /etc/debian_chroot ]; then
     debian_chroot=$(cat /etc/debian_chroot)
 fi
 
-# Color the prompt on color-capable terminals.
 case "$TERM" in
     xterm-color|*-256color) color_prompt=yes;;
 esac
@@ -45,7 +37,6 @@ else
 fi
 unset color_prompt force_color_prompt
 
-# Show user@host:dir in the xterm title.
 case "$TERM" in
 xterm*|rxvt*)
     PS1="\[\e]0;${debian_chroot:+($debian_chroot)}\u@\h: \w\a\]$PS1"
@@ -54,7 +45,6 @@ xterm*|rxvt*)
     ;;
 esac
 
-# Color ls and grep output.
 if [ -x /usr/bin/dircolors ]; then
     test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
     alias ls='ls --color=auto'
@@ -64,7 +54,6 @@ if [ -x /usr/bin/dircolors ]; then
     alias egrep='egrep --color=auto'
 fi
 
-# Listing shortcuts.
 alias ll='ls -alF'
 alias la='ls -A'
 alias l='ls -CF'
@@ -76,7 +65,6 @@ if [ -f ~/.bash_aliases ]; then
     . ~/.bash_aliases
 fi
 
-# Programmable completion.
 if ! shopt -oq posix; then
   if [ -f /usr/share/bash-completion/bash_completion ]; then
     . /usr/share/bash-completion/bash_completion
@@ -85,26 +73,21 @@ if ! shopt -oq posix; then
   fi
 fi
 
-# User-installed binaries, including mise itself.
 export PATH="$HOME/.local/bin:$PATH"
 
-# The Windows op.exe reaches the 1Password desktop app.
+# Windows op.exe reaches the 1Password app.
 alias op="op.exe"
 
-# The Windows SSH tools reach the 1Password key pipe.
+# Windows SSH tools reach the 1Password SSH agent.
 alias ssh="ssh.exe"
 alias ssh-add="ssh-add.exe"
 alias ssh-keygen="ssh-keygen.exe"
 alias scp="scp.exe"
 alias sftp="sftp.exe"
-# Git ignores shell aliases, so GIT_SSH names the Windows SSH client.
 export GIT_SSH="/mnt/c/WINDOWS/System32/OpenSSH/ssh.exe"
 
-# Leave a translated Windows directory under /mnt for the home folder, as the WezTerm documentation recommends.
+# WezTerm starts here in a translated Windows directory.
 case "$PWD" in /mnt/*) cd ~ ;; esac
-
-# Tool initialization without interactive aliases.
-# Claude Code gets the same PATH through BASH_ENV.
 
 if [ -x "$HOME/.local/bin/mise" ]; then
   eval "$("$HOME/.local/bin/mise" activate bash)"
@@ -116,15 +99,12 @@ command -v direnv   >/dev/null && eval "$(direnv hook bash)"
 command -v atuin    >/dev/null && eval "$(atuin init bash --disable-up-arrow)"
 command -v fzf      >/dev/null && eval "$(fzf --bash)"
 
-# bat renders manual pages.
 command -v bat   >/dev/null && export MANPAGER="sh -c 'col -bx | bat -l man -p'"
-# vivid generates the ls and eza colors, and ~/.config/vivid/filetypes.yml overrides the theme.
 command -v vivid >/dev/null && export LS_COLORS="$(vivid generate molokai)"
 
-# jj completion.
 command -v jj >/dev/null && source <(jj util completion bash) 2>/dev/null || true
 
-# Windows Subsystem for Linux integration.
+# WSL integration.
 export BROWSER="/mnt/c/Windows/System32/cmd.exe /c start"
 command -v wslview >/dev/null && alias open='wslview'
 

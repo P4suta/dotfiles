@@ -1,32 +1,32 @@
-# Configuration for ~/.local/bin/dev-reaper, which sources this file on each run.
-# Change a value here and run `chezmoi apply`, which overwrites direct edits to ~/.config/dev-reaper/config.
+# Read by ~/.local/bin/dev-reaper on each run.
+# Change a value here and run `chezmoi apply`, which overwrites direct edits.
 
 # Mode: log, stop, or full.
-# log journals detections and never touches a container.
-# stop stops idle containers without removing them.
+# log only journals detections.
+# stop stops idle containers.
 # full also removes long-exited containers and prunes dangling resources.
-# Set `log` and apply again to roll back.
+# Set `log` and apply to roll back.
 DEV_REAPER_MODE=full
 
-# Seconds of continuous idleness before stopping a running container.
+# Seconds of continuous idleness before a container stops.
 DEV_REAPER_IDLE_STOP_SECONDS=7200
 
-# Seconds a development container stays exited before removal.
+# Seconds a dev container stays exited before removal.
 DEV_REAPER_EXITED_REMOVE_SECONDS=604800
 
-# Processor usage percentage below which a reading counts as quiet.
+# CPU% below which a reading counts as quiet.
 DEV_REAPER_THRESHOLD_PCT=3
 
-# Seconds after a start or restart before reaping applies.
+# Seconds after a start before reaping applies.
 DEV_REAPER_MIN_UPTIME_SECONDS=1800
 
 # An exec or attach within this many seconds keeps a container active.
 DEV_REAPER_EXEC_QUIET_SECONDS=7200
 
-# Label that selects development containers.
+# Label that selects dev containers.
 DEV_REAPER_SELECT_LABEL=com.docker.compose.service=dev
 
-# The reaper never stops or removes containers with this label.
+# The reaper skips containers with this label.
 DEV_REAPER_KEEP_LABEL=dev-reaper.keep=true
 
 # Space-separated Compose project names to skip.
@@ -36,5 +36,4 @@ DEV_REAPER_EXCLUDE=""
 DEV_REAPER_BUILDER_RESERVED=10GB
 
 # Desktop notifications: 1 on, 0 off.
-# The audit log goes to ~/.local/state/dotfiles/log/dev-reaper.log.
 DEV_REAPER_NOTIFY=1

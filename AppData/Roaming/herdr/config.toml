@@ -1,5 +1,4 @@
 # Herdr settings for Windows, declaring only the defaults that fail on this host.
-# `herdr --default-config` prints every key with its default.
 
 # The first-run wizard would overwrite this file.
 onboarding = false
@@ -13,5 +12,5 @@ default_shell = "pwsh"
 channel = "preview"
 
 [ui]
-# Japanese input places its candidate window at the native cursor.
+# Japanese input places its IME candidate window at the native cursor.
 host_cursor = "native"

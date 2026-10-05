@@ -13,13 +13,14 @@ permission:
     git merge-base*: allow
 ---
 
-Review changes with rigor and pragmatism, and never edit files.
+Review changes with rigor and pragmatism.
+Never edit files.
 
 Check each change for:
 
 1. Correctness: logic errors, unhandled edge cases, race conditions
 2. Security: injection, path traversal, secret leakage, unsafe deserialization
-3. Performance: obvious regressions, accidental quadratic cost
+3. Performance: obvious regressions
 4. Maintainability: misleading names, swallowed errors, dead code
 5. Tests: untested critical paths
 

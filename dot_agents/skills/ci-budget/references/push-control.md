@@ -2,10 +2,8 @@
 
 The personal Git hook refuses pushes while `~/.config/git/push-paused` exists.
 Inspect the effective `core.hooksPath` and its `pre-push` hook before assuming the guard works.
-Use `dotfiles` to add the hook to a profile that lacks it, and keep that host's signing and project gates.
+Use `dotfiles` to add the hook to a profile that lacks it.
 
-The marker blocks Git pushes from its machine wherever the hook runs, including to remotes outside GitHub.
-It leaves the Actions budget, merges, other machines, the web interface, the API, scheduled workflows, and running jobs untouched.
 Keep the marker machine-local and out of dotfiles deployment.
 Never clear it during setup or verification.
 
@@ -20,7 +18,7 @@ touch "${HOME}/.config/git/push-paused"
 The first command checks the state, and the other two pause pushes.
 Resume only on explicit owner instruction with `rm -- "${HOME}/.config/git/push-paused"`.
 
-For PowerShell on Windows, resolve the Git `HOME` from the environment:
+For PowerShell on Windows, resolve the Git wrapper's home directory from the environment:
 
 ```powershell
 $taskPushHome = $env:HOME
@@ -40,4 +38,3 @@ New-Item -ItemType File -Force -Path $taskPushHold | Out-Null
 
 Only the last two commands pause pushes.
 After explicit resumption, run `Remove-Item -LiteralPath $taskPushHold`.
-Clearing the marker skips none of the signing, hook, CI, or PR review gates.

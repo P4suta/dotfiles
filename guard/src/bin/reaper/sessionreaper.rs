@@ -1,18 +1,15 @@
 //! Reaps abandoned processes of the current user.
 //!
 //! macOS lacks `/proc`, so process ages come from the `etime` column of `ps`.
-//! launchd runs as process 1 and supervises every user app, so `PPID==1` alone proves nothing.
+//! launchd runs as PID 1 and supervises every user app, so `PPID==1` alone proves nothing.
 //!
 //! Tiers:
 //!
 //! * **Tier A** kills a process stopped in state `T` under `PPID==1` and older than the limit, once a grace window confirms it.
 //!   launchd never leaves its jobs in state `T`, so such a process lost its controlling shell, and it ignores `SIGTERM` while stopped, so the reaper sends `SIGKILL`.
-//! * **Tier B** reports a running process under `PPID==1` with no controlling terminal and older than the limit, whose executable lives in user or Homebrew space instead of `/System` or `/usr/lib`.
-//!   The location check keeps Apple processes off the list.
-//!   The reaper never kills this tier.
+//! * **Tier B** reports a running process under `PPID==1` with no controlling tty and older than the limit, whose executable lives in user or Homebrew space instead of `/System` or `/usr/lib`.
 //!
 //! `MODE=report` never kills, and `MODE=reap` kills tier A.
-//! launchd writes the stdout audit lines to `~/.local/state/dotfiles/log/session-reaper.log`.
 
 use super::config;
 use super::util::{self, Lock};
@@ -167,7 +164,7 @@ fn tier_a(
     }
 }
 
-/// Tier B: report a running orphan in user space with no terminal, and never signal it.
+/// Tier B: report a running orphan in user space with no tty, and never signal it.
 fn tier_b(cfg: &SessionConfig, p: &Process, ucomm: &str, age: i64, reported: &mut usize) {
     if !(p.tty == "??" || p.tty == "?") {
         return;
@@ -267,7 +264,6 @@ struct Process {
 }
 
 impl Process {
-    /// Age in seconds, or `Err` when `etime` fails to parse.
     fn etime_digits_check(&self) -> Result<i64, ()> {
         let secs = util::etime_seconds(&self.etime);
         if secs == 0 && !self.etime.starts_with("00") && self.etime != "0:00" && self.etime != "0" {
@@ -329,7 +325,6 @@ fn parse_ps_line(line: &str) -> Option<Process> {
     let state = fields.next()?.to_owned();
     let etime = fields.next()?.to_owned();
     let tty = fields.next()?.to_owned();
-    // `comm` takes the rest of the line, spaces included.
     let comm = line
         .split_once(&format!("{tty} "))
         .map(|(_, c)| c.trim().to_owned())
@@ -517,7 +512,7 @@ mod tests {
 
     #[test]
     fn the_user_path_regex_parses_into_prefixes() {
-        // The default pattern shape: `^(p1|p2|p3)/`
+        // The default regular expression shape: `^(p1|p2|p3)/`
         let text = "^(tmux.*|sshd)$";
         let _ = text;
         // `SessionConfig` integration covers the full path, and this test checks the extraction helper on the real default shape.

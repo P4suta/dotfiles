@@ -1,6 +1,4 @@
 //! Every external program xtask runs, with where each host gets it.
-//!
-//! `clippy.toml` rejects spawning a process anywhere else, so every new dependency on a host tool needs a declared provision.
 
 use crate::profile_rules::Profile;
 use crate::setup::Step;
@@ -378,7 +376,7 @@ impl Tool {
         }
     }
 
-    /// For a tool that a setup step or an installed entry point requires, the platform data pointer and entry of the package list that installs it.
+    /// The package list entry that installs this tool.
     pub fn package(self, profile: Profile) -> Option<(&'static str, &'static str)> {
         let pointer = match profile {
             Profile::Mac => "/brew/formulae",
@@ -390,7 +388,7 @@ impl Tool {
             Self::Lefthook => Some((pointer, "lefthook")),
             Self::Starship => Some((pointer, "starship")),
             Self::Zoxide => Some((pointer, "zoxide")),
-            // mise already installs the Doppler command-line tool from its checksummed release on the Mac and Windows.
+            // mise already installs the Doppler CLI from its release with a checksum on the Mac, and runs the same on Windows.
             Self::Doppler => Some(match profile {
                 Profile::Linux => (pointer, "doppler"),
                 _ => ("/tools/common", "doppler"),
@@ -409,7 +407,6 @@ impl Tool {
     }
 
     /// The only place xtask creates a process for a named program.
-    /// A hook gate keeps the hook's repository so it can inspect the commit in progress.
     #[allow(clippy::disallowed_methods)]
     pub fn hook_command(self) -> Command {
         Command::new(self.program())

@@ -10,28 +10,23 @@ description: >-
 Define the complete experience for end users, library consumers, maintainers, and people diagnosing failures.
 Derive the observable behavior, invariants, transitions, and completion evidence from that experience before optimizing around the current implementation.
 Choose a coherent design within the authorized goal without asking the owner about routine details.
-Keep the promised behavior concrete enough to show working.
 
 Inspect the affected producers, consumers, variants, platforms, and verification mechanisms together.
 Find shared causes and the authoritative boundaries that remove a whole defect family.
 Prepare failing specifications, representative fixtures, compatibility checks, and diagnostic seams before scattering local fixes.
-Batch independent reads and checks, and reuse valid evidence.
 Delegate to other agents only when the current instructions permit it.
 
 Build the common invariant and migrate all affected paths in one coherent reviewable change.
 Use types, exhaustive enums, ownership, private constructors, and state-specific evidence to make prohibited operations unavailable.
 At external boundaries, check exact identities and bytes and fail explicitly when the evidence no longer applies.
-Use test-driven development for behavior changes and `development-assurance` for the verification contract.
-Use `formal-assurance` to assess every implementation change.
-Never split a known necessary correction into many small steps to delay it.
+Use TDD for behavior changes, `development-assurance` for the verification contract, and `formal-assurance` for every implementation change.
 
 Resolve an identified gap instead of stopping at a limitation note, follow-up issue, or handoff document.
 Continue through implementation, project gates, fixable failures, and authorized integration until the outcome works and passes verification.
 When a check fails, fix its cause and rerun the checks the fix affects.
-Rerun a passing check only after an assumption changes or a concern remains open.
 When a missing input, unavailable external service, or authorization boundary blocks completion, finish independent work and ask for the exact missing prerequisite.
 Never fabricate evidence, bypass protections, publish a forbidden release, or expand into unrelated projects to claim completion.
 
 Use `systematic-fixes` when a bug exposes a design or proof gap.
-Record consequential decisions in architecture decision records and keep working notes out of the product.
-Report the achieved outcome and its evidence, and never count a documented unresolved defect as completion.
+Record consequential decisions in ADRs and keep working notes out of the product.
+Never count a documented unresolved defect as completion.

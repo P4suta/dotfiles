@@ -1,5 +1,4 @@
 # Build artifacts.
-# `.chezmoiignore` hides this directory from chezmoi, and this file hides it from git.
 target/
 
 # cargo-mutants writes its report here.

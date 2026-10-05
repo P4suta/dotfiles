@@ -1,7 +1,7 @@
 {
-  "revision": "838524fa327ad5a0798c59d8a49bb623865a2b13b7c682dea84d6afe39493e2c",
+  "revision": "73acbdb747d5676c42a06880f56a4cbab1eb5655ccf34ee4c7e64453a9e001ec",
   "outcome": "keep",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/rust-invariants/SKILL.md"
   ],

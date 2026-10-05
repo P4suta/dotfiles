@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-/// The home folder: `HOME`, or `USERPROFILE` on Windows, where native processes often lack `HOME`.
+/// Reads `HOME`, or `USERPROFILE` on Windows, where native processes often lack `HOME`.
 pub fn home() -> PathBuf {
     std::env::var_os("HOME")
         .or_else(|| {

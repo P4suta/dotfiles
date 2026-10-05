@@ -3,9 +3,8 @@
 //! The hook re-amends each unsigned commit with an explicit signature, even after `commit.gpgsign=false`, `--no-gpg-sign`, or `gpg.format=null`.
 //!
 //! When signing fails, it rolls the commit back and leaves the changes staged, so no unsigned commit sits on `HEAD`.
-//! The GitHub ruleset `Require signed commits` enforces the same rule on the server.
 //!
-//! The hook disables itself on a machine without signing configured, so a fresh Mac without the 1Password key service keeps its commits.
+//! The hook disables itself on a machine without signing configured, so a fresh Mac without the 1Password SSH agent keeps its commits.
 
 use crate::bypass::{self, Category};
 use crate::realgit;
@@ -23,7 +22,6 @@ const MID_OPERATION: [&str; 6] = [
     "BISECT_LOG",
 ];
 
-/// Returns the process exit code.
 pub fn run() -> i32 {
     let in_hook = hook_is_reentrant();
     let mid_operation = mid_operation();
@@ -48,7 +46,6 @@ pub fn run() -> i32 {
     }
 }
 
-/// The cheap facts the decision rests on.
 struct Situation {
     in_hook: bool,
     mid_operation: bool,
@@ -135,7 +132,6 @@ fn resign() -> i32 {
     let pre_head = pre_head.trim().to_owned();
 
     // The re-sign itself, under the lock.
-    // Discard the output, because the rollback message already names the failure.
     let Some(mut amend) = realgit::command() else {
         return 0;
     };
@@ -176,7 +172,6 @@ fn resign() -> i32 {
 }
 
 /// Undoes the unsigned commit by stepping back to its parent, or by deleting the ref for a root commit.
-/// The index keeps the changes, and the reflog keeps the commit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rollback {
     /// `git reset --soft <parent>`, which keeps the changes staged.

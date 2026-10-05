@@ -1,7 +1,7 @@
 {
-  "revision": "feb7c47d555aea921a689b79020d04e52f299ff87508554d1547be8ca3dec5b3",
+  "revision": "b5e0c24b7a7837ff687cb0da7fef9843abb1b7f2677d3f73b788536624050ce3",
   "outcome": "implemented",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/skill-operations/SKILL.md",
     "dot_agents/skills/skill-operations/references/operations.md",

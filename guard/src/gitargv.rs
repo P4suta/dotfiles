@@ -8,7 +8,6 @@
 //!
 //! This layer only handles commands that resolve `git` through `PATH`, so a direct path or a different `PATH` bypasses it.
 //! `dotguard pre-push` runs from `core.hooksPath` and enforces the rule for every push.
-//! This layer refuses before the damage, with a hint that names a safe command for the intent.
 //!
 //! Rules left out:
 //! * `rebase` and `commit --amend`: rewriting unpushed history counts as ordinary work, and pre-push catches pushed history.
@@ -38,7 +37,6 @@ impl Denial {
 }
 
 /// Global options that consume the following argv element as their value.
-/// A wrong entry would mistake a value for the subcommand, so the list names each option.
 /// The list omits `--exec-path`, because its value stays optional and the bare form prints a path and exits.
 const GLOBAL_TAKES_VALUE: [&str; 8] = [
     "-c",
@@ -52,7 +50,6 @@ const GLOBAL_TAKES_VALUE: [&str; 8] = [
 ];
 
 /// Known git subcommands.
-/// A missing entry costs one `git config` lookup, never correctness.
 const BUILTINS: [&str; 46] = [
     "add",
     "am",
@@ -103,8 +100,6 @@ const BUILTINS: [&str; 46] = [
 ];
 
 /// Decide whether this git invocation may proceed.
-///
-/// `argv` holds every argument after the program name, as the wrapper received it.
 pub fn inspect(argv: &[String]) -> Option<Denial> {
     let mut i = 0;
     // Collect `-c` settings first, because the subcommand decides whether one overrides policy.
@@ -185,8 +180,6 @@ pub fn inspect(argv: &[String]) -> Option<Denial> {
 }
 
 /// The per-subcommand rules.
-///
-/// Each arm of the `match` states one rule, so the table reads as the policy.
 #[allow(clippy::too_many_lines)]
 fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
     let flags = flags_of(args);
@@ -391,7 +384,6 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
 }
 
 /// Subcommands that actually run a hook.
-/// `core.hooksPath` affects only these, as `config_override` relies on.
 const RUNS_HOOKS: [&str; 12] = [
     "commit",
     "merge",
@@ -429,7 +421,7 @@ fn is_policy_key(key: &str) -> bool {
 /// `-c key=value` overrides that would change signing or hooks for one command.
 ///
 /// The check depends on the subcommand.
-/// Editors, assistants, and status-line tools run read-only queries such as
+/// Editors, agents, and status-line tools run read-only queries such as
 ///
 /// ```text
 /// git -c core.hooksPath=/dev/null -c core.askPass= … rev-parse HEAD
@@ -437,7 +429,6 @@ fn is_policy_key(key: &str) -> bool {
 ///
 /// so their polling skips your hooks.
 /// `rev-parse`, `status`, `remote get-url`, and `ls-files` run no hooks, so refusing them breaks the tool for no gain.
-/// `core.hooksPath` matters only where a hook would run, and the signing keys matter only where a signable object would appear.
 fn config_override(setting: &str, sub: &str) -> Option<Denial> {
     let (key, value) = setting.split_once('=')?;
     let offends = match key {
@@ -448,7 +439,7 @@ fn config_override(setting: &str, sub: &str) -> Option<Denial> {
         }
         // A per-invocation hooksPath change can replace every gate in ~/.config/git/hooks.
         "core.hooksPath" => RUNS_HOOKS.contains(&sub),
-        // The 1Password SSH key service signs every commit, so any other format names a key this machine lacks.
+        // The SSH agent signs every commit, so any other format names a key this machine lacks.
         "gpg.format" => CREATES_SIGNED_OBJECTS.contains(&sub) && value != "ssh",
         "gpg.ssh.program" => CREATES_SIGNED_OBJECTS.contains(&sub) && value.is_empty(),
         _ => false,
@@ -462,7 +453,7 @@ fn config_override(setting: &str, sub: &str) -> Option<Denial> {
     })
 }
 
-/// Arguments up to `--`, because everything after it forms a pathspec and a file may carry the name `--force`.
+/// argv up to `--`, because everything after it forms a pathspec and a file may carry the name `--force`.
 fn flags_of(args: &[String]) -> Vec<String> {
     args.iter()
         .take_while(|a| a.as_str() != "--")
@@ -559,8 +550,7 @@ mod tests {
         }
     }
 
-    /// Overrides apply per subcommand.
-    /// Editors and assistants run read-only queries with `core.hooksPath=/dev/null`, and refusing those protects nothing.
+    /// Editors and agents run read-only queries with `core.hooksPath=/dev/null`, and refusing those protects nothing.
     #[test]
     fn read_only_queries_may_disable_hooks() {
         for line in [

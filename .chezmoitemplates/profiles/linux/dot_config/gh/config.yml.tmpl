@@ -1,13 +1,11 @@
 {{- /*
   Portable gh settings.
-  The .chezmoiignore file excludes hosts.yml, which holds the token from `gh auth login` on each machine.
-  The template mirrors the shape gh rewrites this file into, so the two never drift.
+  The .chezmoiignore file excludes hosts.yml, which holds the OAuth token.
+  The template mirrors the shape gh rewrites this file into.
 */ -}}
-# Git operations use SSH through the native or forwarded 1Password socket.
+# Git uses SSH through the native or forwarded 1Password SSH agent.
 git_protocol: ssh
-# Keep interactive prompts on.
 prompt: enabled
 aliases:
-    # Shorthand for gh pr checkout.
     co: pr checkout
 version: "1"

@@ -1,0 +1,113 @@
+pattern	source
+(?i)agents?	https://agentskills.io/specification
+(?i)home director(y|ies)	https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/V1_chap08.html
+(?i)validate[sd]?	https://www.merriam-webster.com/dictionary/validate
+1Password	https://developer.1password.com/
+ADRs?	https://adr.github.io/
+APIs?	https://www.rfc-editor.org/rfc/rfc9110
+ASCII	https://www.rfc-editor.org/rfc/rfc20
+AWS	https://docs.aws.amazon.com/
+Alloy	https://alloytools.org/
+App Execution Alias	https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/desktop-to-uwp-extensions
+Application Default Credentials	https://cloud.google.com/docs/authentication/application-default-credentials
+BOM	https://www.unicode.org/faq/utf_bom.html
+BSD	https://www.freebsd.org/copyright/freebsd-license/
+Blast Radius	https://docs.coderabbit.ai/
+CDROM	https://libvirt.org/formatdomain.html#hard-drives-floppy-disks-cdroms
+CI	https://docs.github.com/en/actions
+CJK	https://www.unicode.org/versions/Unicode15.0.0/ch18.pdf
+CLIs?	https://cli.github.com/manual/
+COM	https://learn.microsoft.com/en-us/windows/win32/com/component-object-model--com--portal
+CRLF	https://www.rfc-editor.org/rfc/rfc5198
+CSRs?	https://developer.apple.com/help/account/certificates/create-a-certificate-signing-request/
+Cargo	https://doc.rust-lang.org/cargo/
+Claude	https://docs.claude.com/
+Claude Code	https://code.claude.com/docs
+Cloud CLI	https://docs.cloud.google.com/sdk/use-gcloud-mcp
+CodeRabbit	https://docs.coderabbit.ai/
+Codex	https://developers.openai.com/codex
+DCO	https://developercertificate.org/
+DISM	https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/what-is-dism
+DWORD	https://learn.microsoft.com/en-us/windows/win32/sysinfo/registry-value-types
+Dev Drive	https://learn.microsoft.com/en-us/windows/dev-drive/
+Developer ID( Application)?	https://developer.apple.com/developer-id/
+Doppler	https://docs.doppler.com/
+EREs?	https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/V1_chap09.html
+GCP	https://cloud.google.com/docs
+GHC	https://www.haskell.org/ghc/
+GPG	https://www.gnupg.org/documentation/manuals/gnupg/
+Git	https://git-scm.com/
+GitHub	https://docs.github.com/
+Google Cloud	https://cloud.google.com/
+IAM	https://cloud.google.com/iam/docs/overview
+IMEs?	https://learn.microsoft.com/en-us/windows/win32/intl/input-method-editor
+ISO	https://www.iso.org/standard/81081.html
+JSON	https://www.rfc-editor.org/rfc/rfc8259
+JSSE	https://docs.oracle.com/en/java/javase/11/security/java-secure-socket-extension-jsse-reference-guide.html
+KVM	https://linux-kvm.org/
+Kani	https://model-checking.github.io/kani/
+LF	https://www.rfc-editor.org/rfc/rfc5198
+Lean	https://lean-lang.org/
+MAC	https://www.rfc-editor.org/rfc/rfc7292
+MCP	https://modelcontextprotocol.io/specification
+MFA	https://pages.nist.gov/800-63-3/sp800-63b.html
+MSIX	https://learn.microsoft.com/en-us/windows/msix/overview
+MSRV	https://doc.rust-lang.org/cargo/reference/rust-version.html
+NAS	https://www.synology.com/en-global/knowledgebase
+NAT	https://www.rfc-editor.org/rfc/rfc3022
+NICs?	https://learn.microsoft.com/en-us/windows-hardware/drivers/network/
+NUL	https://www.rfc-editor.org/rfc/rfc20
+OCI	https://opencontainers.org/
+OComment	dot_agents/skills/ocomment/SKILL.md
+OIDC	https://openid.net/specs/openid-connect-core-1_0.html
+OSS	https://opensource.org/osd
+OTP	https://www.rfc-editor.org/rfc/rfc4226
+OVMF	https://github.com/tianocore/tianocore.github.io/wiki/OVMF
+OWNER/REPO	https://docs.github.com/en/rest/repos/repos
+OpenCode	https://opencode.ai/docs
+OrbStack	https://docs.orbstack.dev/
+PIDs?	https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/V1_chap03.html
+PINs?	https://pages.nist.gov/800-63-3/sp800-63b.html
+PKI	https://www.apple.com/certificateauthority/
+PKIX	https://www.rfc-editor.org/rfc/rfc5280
+POSIX	https://pubs.opengroup.org/onlinepubs/9799919799/
+PRs?	https://docs.github.com/en/pull-requests
+QEMU	https://www.qemu.org/docs/master/
+QXL	https://www.spice-space.org/spice-for-newbies.html
+Quint	https://quint-lang.org/
+RDP	https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr
+README	https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes
+REST	https://docs.github.com/en/rest
+RFCs?	https://www.rfc-editor.org/
+RNGs?	https://rust-random.github.io/book/guide-rngs.html
+Rust	https://doc.rust-lang.org/
+SARIF	https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
+SBOM	https://www.cisa.gov/sbom
+SHA(-256)?	https://csrc.nist.gov/pubs/fips/180-4/upd1/final
+SLSA	https://slsa.dev/spec/
+SPDX	https://spdx.dev/
+SPICE	https://www.spice-space.org/
+SSH	https://www.rfc-editor.org/rfc/rfc4251
+Synology Drive	https://www.synology.com/en-global/dsm/feature/drive
+TDD	https://martinfowler.com/bliki/TestDrivenDevelopment.html
+TLA\+	https://lamport.azurewebsites.net/tla/tla.html
+TLS	https://www.rfc-editor.org/rfc/rfc8446
+TOML	https://toml.io/en/v1.0.0
+TOTP	https://www.rfc-editor.org/rfc/rfc6238
+TPM	https://trustedcomputinggroup.org/resource/tpm-library-specification/
+Tailscale	https://tailscale.com/kb
+UEFI	https://uefi.org/specifications
+URLs?	https://url.spec.whatwg.org/
+UTC	https://www.rfc-editor.org/rfc/rfc3339
+WSL	https://learn.microsoft.com/en-us/windows/wsl/
+WezTerm	https://wezterm.org/
+YAML	https://yaml.org/spec/1.2.2/
+[Ll]efthook	https://lefthook.dev/
+chezmoi	https://www.chezmoi.io/
+domyjob	dot_agents/skills/domyjob/SKILL.md
+dotguard	guard/Cargo.toml
+gcloud	https://cloud.google.com/sdk/gcloud
+herdr	https://github.com/ogulcancelik/herdr
+macOS	https://developer.apple.com/macos/
+mise	https://mise.jdx.dev/
+xtask	https://github.com/matklad/cargo-xtask

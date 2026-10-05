@@ -4,8 +4,8 @@ Status: accepted.
 
 ## Context
 
-Every client and development machine needs the same engineering and release contracts.
-Repository settings drift when someone rebuilds their policy by hand.
+Every client and machine needs the same engineering and release contracts.
+Repository settings drift when someone rebuilds policy by hand.
 
 ## Decision
 
@@ -20,6 +20,6 @@ Keep Immutable Releases, and keep signing and publication authorization separate
 
 ## Consequences
 
-A client loads one procedure, and a missing or drifting discovery entry fails a check.
+A missing or drifting discovery entry fails a check.
 A settings failure calls for a fresh audit and plan, not a rollback that weakens protection.
-When a changed contract needs cross-platform checks, they run on the owner's machines through domyjob before push.
+Cross-platform checks run on the owner's machines through domyjob before push.

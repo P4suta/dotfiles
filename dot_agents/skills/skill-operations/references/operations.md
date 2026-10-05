@@ -2,10 +2,9 @@
 
 The dotfiles `install:skill-ops` task installs `skill-ops`, a native Rust executable.
 It reads the managed catalog under `~/.agents/skills` and policy under `~/.config/skill-ops`.
-The reviewed installation manifest declares the managed files, and unrelated legacy helpers and caches stay local and outside the measured catalog.
+The reviewed installation manifest declares the managed files, and unrelated legacy helpers and caches stay local.
 Installation applies policy, checks and installs the native runtime, and only then activates the OpenCode adapter.
-The adapter resolves `~/.local/bin/skill-ops`, or `skill-ops.exe` on Windows, without relying on GUI `PATH` inheritance.
-A custom installation may supply the plugin's absolute `executable` option.
+The adapter resolves `~/.local/bin/skill-ops`, or `skill-ops.exe` on Windows, and a custom installation may supply the plugin's absolute `executable` option.
 Observations, improvement notes, reports, and runtime dispositions stay under `~/.local/state/skill-ops` on each machine.
 Reports and dispositions also keep immutable content-addressed history, and changing a referenced evidence file invalidates its runtime disposition.
 Never synchronize or delete that state to clear a pending gate.
@@ -28,10 +27,9 @@ mise run check:proofs
 Use a fresh report path, and native Windows paths where they apply.
 `analyze` publishes an immutable report, updates the local draft view, and lists the findings that still need triage, without applying recommendations.
 Completion follows the immutable analysis that the accepted disposition names, so another session's draft never replaces its snapshot.
-New notes, changed inputs or evidence, the observation threshold, and disappearing records still invalidate completion.
+New notes, changed inputs or evidence, the observation threshold, and disappearing records invalidate completion.
 Each note takes one of the kinds `missing-skill`, `mechanize`, `failure`, `conflict`, and `evaluation`.
 Keep a note's summary free of private payloads, and give it concrete local evidence.
-The report identifies its catalog, policy, observed events, counts, collection signals, and findings.
 
 A disposition file holds a JSON object with `report_hash` and `decisions` for the listed findings.
 Each decision has the exact finding `id`, an `outcome` of `keep`, `implemented`, `rejected`, or `deferred`, a concrete `reason`, existing relative local `evidence` paths, and `revisit` as a condition or `null`.
@@ -55,11 +53,9 @@ The gate never adopts a deferred decision.
 The engine refuses a manifest without reviewed revisions, and `mise run install:skill-ops` rewrites it.
 The runtime maintenance gate turns pending when content changes, a new demonstrated improvement note arrives, or new observations reach the configured count.
 A pending gate analyzes the current evidence and completes when the gate adopts every finding, without `analyze` or a disposition file.
-Codex and Claude Stop adapters request maintenance before completion and bound automatic continuation instead of looping forever.
-The OpenCode observer supplies the same local data, and the authoritative catalog gate still applies through the project checks.
+Codex and Claude Stop adapters request maintenance before completion and bound automatic continuation.
 OpenCode has no blocking Stop hook in this integration, so honor `skill-ops check` from the shared policy for agents before completion.
 
 Verify registration, native client trust, actual activation, and an observed real read as distinct steps.
 New hook definitions may need the client's normal trust review, and registration alone proves no activation.
-Keep existing hooks, settings, credentials, and approvals intact.
 Use current [Codex hooks](https://learn.chatgpt.com/docs/hooks), [Claude hooks](https://code.claude.com/docs/en/hooks), and [OpenCode plugins](https://opencode.ai/docs/plugins/) for adapter contracts.

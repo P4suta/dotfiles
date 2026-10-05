@@ -1,11 +1,9 @@
 //! Reaper configuration files hold `KEY=VALUE` lines with the semantics of `set -a; . file`: the file overrides the environment, and built-in defaults fill the rest.
-//! The jobs read the files on each run, so an edit takes effect without a launchctl reload.
 
 use std::collections::HashMap;
 use std::path::Path;
 
 /// Parse a config file into a map.
-/// The parser skips comments, blank lines, and lines without `=`.
 pub fn load(path: &Path) -> HashMap<String, String> {
     let mut out = HashMap::new();
     let Ok(text) = std::fs::read_to_string(path) else {
@@ -100,7 +98,6 @@ mod tests {
             "^(/Users/test|/opt/homebrew)/"
         );
         assert_eq!(e("$REAPER_TEST_HOME/bin"), "/Users/test/bin");
-        // Anchors and unknown names stay literal, as in the shell.
         assert_eq!(e("^(a|b)$"), "^(a|b)$");
         assert_eq!(e("$NOT_SET"), "");
         assert_eq!(e("no variables here"), "no variables here");

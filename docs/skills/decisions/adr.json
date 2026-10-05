@@ -1,7 +1,7 @@
 {
-  "revision": "280c0115b521dc1b4137701ed8f04cc42df544bcb6f239f214549ab76f4163d2",
+  "revision": "2e849650d59cdbc34ff582cebab2313a6d2bcf414535758001165fec83dc84d6",
   "outcome": "implemented",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/adr/SKILL.md",
     "docs/adr/0016-one-writing-standard.md",

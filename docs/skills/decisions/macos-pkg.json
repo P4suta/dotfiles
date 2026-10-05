@@ -1,7 +1,7 @@
 {
-  "revision": "125e767553b6f2b3b7d46116db9ecb109f79d1e940be64b6b2d818a894a9a9a5",
+  "revision": "f3aa60e24297fec11e0655802eea8d8110cb4b9b0fc83e2c47dcf53267712ab6",
   "outcome": "keep",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/macos-pkg/SKILL.md"
   ],

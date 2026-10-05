@@ -91,8 +91,7 @@ pub fn split_frontmatter(text: &str) -> Result<(&str, &str)> {
     Ok((header, body))
 }
 
-/// Windows `canonicalize` returns verbatim `\\?\C:\...` drive paths, which cargo rejects and chezmoi rewrites into `//?/` forms.
-/// The drive path without that prefix names the same file.
+/// Windows `canonicalize` returns verbatim drive paths that cargo rejects.
 pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
     match path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
         Some(rest)
@@ -105,7 +104,7 @@ pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
     }
 }
 
-/// `canonicalize` without the Windows verbatim drive prefix, so every comparison and every path handed to another tool uses one spelling.
+/// `canonicalize` without the Windows verbatim drive prefix.
 #[allow(clippy::disallowed_methods)]
 pub fn canonical(path: &Path) -> Result<PathBuf> {
     Ok(without_verbatim_prefix(&path.canonicalize()?))

@@ -1,14 +1,12 @@
-//! Removes the Windows Store `python` App Execution Aliases.
+//! Removes the Windows Store python App Execution Aliases.
 //!
-//! For an uninstalled Store Python, `WindowsApps` holds the empty reparse-point stubs `python.exe` and `python3.exe`, which shadow other `python` entries on PATH and exit with code 9009.
-//! Removing them lets the mise-managed interpreter answer to `python`.
+//! For an uninstalled Store Python, `WindowsApps` holds 0-byte reparse point stubs `python.exe` and `python3.exe` that shadow `python` earlier on PATH and fail with exit code 9009.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
 /// `FILE_ATTRIBUTE_REPARSE_POINT`.
-/// One constant justifies no Windows crate dependency.
 const REPARSE_POINT: u32 = 0x400;
 
 const STUBS: &[&str] = &["python.exe", "python3.exe"];
@@ -74,7 +72,6 @@ mod tests {
         assert!(looks_like_stub(0, REPARSE_POINT | 0x20));
         // A real interpreter: bytes on disk, no reparse point.
         assert!(!looks_like_stub(98_304, 0x20));
-        // Half a signature fails the check.
         assert!(!looks_like_stub(98_304, REPARSE_POINT));
         assert!(!looks_like_stub(0, 0x20));
     }

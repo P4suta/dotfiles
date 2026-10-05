@@ -1,7 +1,7 @@
 {
-  "revision": "21e1842122a4950b7c95c31f63dc3ca42ac756d144c83269e4fde7e95fab4f0c",
+  "revision": "e49086a34f9b096809e0a05fbc5a7a0455f074498c4e7e29ecf76aa3bebe8795",
   "outcome": "keep",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/mutation-testing/SKILL.md"
   ],

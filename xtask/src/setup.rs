@@ -120,7 +120,6 @@ pub fn run(source: &Path, config: &Path, step: Step, live: bool) -> Result<()> {
 
 impl Step {
     /// Steps whose effects this step relies on, which must run first when both run in one apply.
-    /// The match names every step, so adding a step forces a decision about its dependencies.
     pub fn after(self) -> &'static [Step] {
         match self {
             Self::Ocomment | Self::Domyjob | Self::Fleet => &[Self::Tools],
@@ -202,7 +201,7 @@ pub fn scripted_requirements(profile: Profile, scripts: &str) -> Vec<Tool> {
 }
 
 /// Packaged tools that installed entry points run, read from rendered files.
-/// A coding-assistant launcher reads the secrets the machine-local configuration selects through Doppler, so it needs Doppler wherever it renders.
+/// An agent launcher reads the secrets the machine-local configuration selects through Doppler, so it needs Doppler wherever it renders.
 /// A global Git hook runs the Lefthook configuration of the repository it fires in, so it needs Lefthook wherever it renders.
 pub fn entry_requirements(rendered: &str) -> Vec<Tool> {
     let mut tools = Vec::new();
@@ -264,7 +263,7 @@ pub fn scripted_steps(scripts: &str) -> Vec<Step> {
     steps
 }
 
-/// Requirements that must hold before a step starts, checked for every scripted step before apply changes anything.
+/// Requirements checked for every scripted step before apply changes anything.
 pub fn preflight(context: &ContextData, runner: &mut impl Runner, steps: &[Step]) -> Result<()> {
     let mut unmet = Vec::new();
     for &step in steps {
@@ -354,7 +353,6 @@ pub(crate) fn cargo_install_arguments(
 }
 
 /// Windows has no `exec` for a launcher script, so a copy of dotguard named `git.exe` serves as the Git wrapper, and the PowerShell profile places it ahead of Git for Windows.
-/// Windows can rename a running `git.exe` but never overwrite it, so a changed copy moves the old one aside first.
 pub fn git_wrapper(bin: &Path) -> Result<()> {
     let wrapper = bin.join("git.exe");
     let wanted = fs::read(bin.join("dotguard.exe")).context("dotguard.exe is not installed")?;
@@ -372,7 +370,6 @@ pub fn git_wrapper(bin: &Path) -> Result<()> {
         if name.to_string_lossy().starts_with("git.exe.")
             && name.to_string_lossy().ends_with(".old")
         {
-            // A copy that a running git still holds stays until a later apply.
             let _ = fs::remove_file(entry.path());
         }
     }
@@ -668,7 +665,6 @@ fn tools(context: &ContextData, runner: &mut impl Runner, upgrade: bool) -> Resu
 }
 
 /// Launchd stops a running job before it removes it, and `bootout` returns before the job exits, so a bootstrap that follows at once fails with EINPROGRESS.
-/// The wait outlasts launchd's default 20-second exit timeout, after which launchd kills the job.
 const AGENT_REMOVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
 fn agent_loaded(runner: &mut impl Runner, target: &str) -> Result<bool> {
@@ -911,7 +907,7 @@ impl OwnerSource {
         }
     }
 
-    /// Public sources must clone without credentials, so an unattended or remote apply never needs the owner's SSH key for them.
+    /// Public sources must clone without credentials, so an unattended or remote apply never needs the owner's SSH key.
     fn public(self) -> bool {
         match self {
             Self::Ocomment | Self::Domyjob => true,
@@ -936,7 +932,7 @@ impl OwnerSource {
     }
 
     /// `git` arguments that clone this source into `checkout`.
-    /// The arguments map a public address onto itself because git applies the longest matching `insteadOf`, which keeps a host-wide HTTPS-to-SSH rewrite from turning it into an SSH clone.
+    /// Mapping a public URL onto itself beats a host-wide HTTPS-to-SSH rewrite, because git applies the longest matching `insteadOf`.
     pub fn clone_arguments(self, checkout: &Path) -> Vec<OsString> {
         let mut arguments = Vec::new();
         let url = self.clone_url();
@@ -979,10 +975,10 @@ fn source_tool(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
 
 /// GitHub's current web-flow signing key, which signs commits merged through the web interface.
 const FORGE_CURRENT: &str = "968479A1AFF927E37D1A566BB5690EEEBB952194";
-/// The web-flow key GitHub retired in January 2024, which its bundle still carries for older signatures.
+/// The web-flow key GitHub retired in January 2024, which older signatures still need.
 const FORGE_RETIRED: &str = "5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23";
 
-/// Primary-key fingerprints from `gpg --with-colons` output, skipping the subkey fingerprints that follow `sub` records.
+/// Primary-key fingerprints from `gpg --with-colons` output, without the subkeys after `sub` records.
 fn primary_fingerprints(records: &str) -> Vec<&str> {
     let mut primary = false;
     let mut fingerprints = Vec::new();

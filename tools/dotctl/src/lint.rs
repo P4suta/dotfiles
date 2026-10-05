@@ -1,7 +1,6 @@
 //! One validator per file kind, each run on the rendered text.
 //!
-//! lefthook assigns files to each kind through its `glob:` filters.
-//! A kind trusts those paths and skips only a missing path, because a commit can stage a deletion.
+//! A kind trusts the paths lefthook hands it and skips only a missing path, because a commit can stage a deletion.
 
 use std::path::{Path, PathBuf};
 
@@ -11,10 +10,7 @@ use clap::ValueEnum;
 use crate::proc::write_temp;
 use crate::{env, proc, render};
 
-/// PSScriptAnalyzer runs only as a pwsh module, so PowerShell checks PowerShell.
-/// The binary embeds the helper, so the repository keeps no loose wrapper scripts.
 const PSSA_HELPER: &str = include_str!("../assets/psscriptanalyzer.ps1");
-/// The binary compiles in the repository's rules, so a missing file fails the build instead of each lint run.
 const YAMLLINT_CONFIG: &str = include_str!("../../../.yamllint");
 const PSSA_SETTINGS: &str = include_str!("../../../PSScriptAnalyzerSettings.psd1");
 
@@ -24,23 +20,23 @@ pub enum Kind {
     Typos,
     /// bash syntax and style findings at every severity.
     Shellcheck,
-    /// PowerShell through PSScriptAnalyzer.
+    /// PowerShell, via PSScriptAnalyzer.
     Ps1,
-    /// `TOML` syntax through taplo.
+    /// TOML syntax, via taplo.
     Toml,
     /// JSON syntax.
     Json,
-    /// YAML syntax through yamllint.
+    /// YAML syntax, via yamllint.
     Yaml,
     /// git config syntax, which catches bad escapes in section headers.
     Gitconfig,
-    /// The sentence-per-line gate through ocomment.
+    /// The prose gate: one sentence per line, via ocomment.
     Prose,
-    /// Catch-all: every template must render, including extensions that no other validator claims.
+    /// Catch-all: every template must render.
     Template,
 }
 
-/// Runs one kind over `files` and returns the exit code for lefthook, 0 when everything passes.
+/// Runs one kind over `files` and returns the exit code for lefthook.
 pub fn run(kind: Kind, files: &[PathBuf]) -> Result<i32> {
     let present: Vec<&Path> = files
         .iter()
@@ -52,9 +48,8 @@ pub fn run(kind: Kind, files: &[PathBuf]) -> Result<i32> {
     }
 
     match kind {
-        // These take the paths directly and report each file.
         Kind::Typos => whole_batch("typos", &present),
-        // Reads `.ocomment.toml` and skips languages it has no lexer for.
+        // Reads `.ocomment.toml`.
         Kind::Prose => prose(&present),
         Kind::Shellcheck => whole_batch("shellcheck", &present),
         // Renders every file, then checks them together in one pwsh process.
@@ -71,7 +66,7 @@ pub fn run(kind: Kind, files: &[PathBuf]) -> Result<i32> {
     }
 }
 
-/// Exit 1 carries findings, and exit 2 reports unwritable files, which the gate ignores.
+/// ocomment check: exit 1 carries findings, and the gate ignores exit 2.
 fn prose(files: &[&Path]) -> Result<i32> {
     let mut cmd = env::command("ocomment");
     cmd.arg("check").args(files);
@@ -79,14 +74,12 @@ fn prose(files: &[&Path]) -> Result<i32> {
     if code == 2 { Ok(0) } else { Ok(code) }
 }
 
-/// Validators that accept every path in one call.
 fn whole_batch(program: &str, files: &[&Path]) -> Result<i32> {
     let mut cmd = env::command(program);
     cmd.args(files);
     Ok(proc::status(&mut cmd)?.code())
 }
 
-/// Returns false when the validator rejects the file.
 fn check_one(kind: Kind, path: &Path) -> Result<bool> {
     if kind == Kind::Template {
         return template(path);
@@ -111,12 +104,11 @@ fn check_one(kind: Kind, path: &Path) -> Result<bool> {
     }
 }
 
-/// `::error file=...` keeps findings greppable in lefthook output, which interleaves parallel commands.
+/// `::error file=...` keeps findings greppable in lefthook output.
 fn report(path: &Path, message: &str) {
     println!("::error file={}:: {message}", path.display());
 }
 
-/// Writes rendered content to a temporary file for an external validator, because some text exists only after a template renders.
 fn external(
     path: &Path,
     content: &str,
@@ -154,7 +146,6 @@ fn json(path: &Path, content: &str) -> Result<bool> {
 }
 
 /// Importing the analyzer module takes over a second, so every file goes to one pwsh process.
-/// The manifest pairs each rendered temporary file with the source path that the report names.
 fn powershell(files: &[&Path]) -> Result<i32> {
     let mut code = 0;
     let mut rendered: Vec<&Path> = Vec::new();

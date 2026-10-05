@@ -1,7 +1,7 @@
 {
-  "revision": "fbe8d7d7d87cf42aa73420b43bd57423e91344ccd78891b4617045ba2f0eb319",
+  "revision": "4bbdad6a4d97df80cf3b222afba333c1631b599ca9355417d0593e522d782d02",
   "outcome": "keep",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/ci-budget/SKILL.md"
   ],

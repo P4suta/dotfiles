@@ -1,12 +1,11 @@
-# Add a false positive to extend-words, or exclude it with a pattern in extend-identifiers-re.
 
 [files]
 extend-exclude = [".git/"]
-# Check hidden files such as .chezmoi.toml.tmpl.
+# Check hidden files.
 ignore-hidden = false
 
 [default]
-# File names such as tmpl extensions produce false positives.
+# File names produce false positives.
 check-filename = false
 
 [default.extend-words]

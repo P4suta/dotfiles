@@ -1,7 +1,7 @@
 {
-  "revision": "fbcc921d2c370fdc55ccacbc4a4365d9bb2430663fc163842dce15e720665ae7",
+  "revision": "6ebd019fe985b8e6fb2a38a7ea2eb6e1e90aabc23d34be8a69a510f42d47d27b",
   "outcome": "keep",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/approval-boundaries/SKILL.md"
   ],

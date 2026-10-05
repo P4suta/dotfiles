@@ -7,9 +7,10 @@ description: >-
 
 # Rust xtask
 
-Reuse the existing xtask crate, Cargo command shortcut, and command conventions.
-Keep a new crate unpublished and aligned with the workspace's edition, oldest supported Rust version, lint policy, and locked dependencies.
-Keep its command-line surface narrow, and give it explicit typed subcommands and useful errors.
+Reuse the existing xtask crate and command conventions.
+Keep a new crate unpublished and aligned with the workspace's edition, MSRV, lint policy, and locked dependencies.
+Keep its CLI narrow.
+Give it explicit typed subcommands and useful errors.
 Use `rust-tooling`, `rust-invariants`, and `development-assurance` for implementation and verification.
 
 Put deterministic repository checks and nontrivial developer orchestration here instead of in shell, Python, hooks, or copied CI snippets.
@@ -26,4 +27,3 @@ Own temporary resources, and test cleanup on error and interruption where suppor
 
 Expose the command through the existing mise or just surface, and invoke the same code from CI and hooks.
 Test the contract it enforces with realistic success and refusal cases.
-Keep a gate authoritative and focused instead of adding a prose checklist or a second checker with different semantics.

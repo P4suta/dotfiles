@@ -1,7 +1,7 @@
-//! One binary for the two launchd maintenance jobs.
+//! One binary for the two launchd maintenance agents.
 //!
 //! The same file installs as `~/.local/bin/dev-reaper` and `~/.local/bin/session-reaper`, and dispatches on the name that launchd invokes.
-//! Invoked as `reaper`, it takes the job name first: `reaper dev|session [args…]`.
+//! Invoked as `reaper`, it takes the agent name first: `reaper dev|session [args…]`.
 
 use devreaper::DevReaper;
 use sessionreaper::SessionReaper;
@@ -12,7 +12,7 @@ mod sessionreaper;
 mod util;
 
 fn main() -> std::process::ExitCode {
-    // The jobs reap Unix processes through ps, grep, launchd, and systemd, which Windows lacks.
+    // The agents reap Unix processes through ps, grep, launchd, and systemd, which Windows lacks.
     if cfg!(not(unix)) {
         eprintln!("reaper maintains Unix processes and does not run on Windows");
         return std::process::ExitCode::from(2);

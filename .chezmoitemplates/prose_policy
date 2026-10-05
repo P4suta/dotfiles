@@ -1,13 +1,13 @@
 ## Prose
 
 Write one sentence per line.
-Break after the Chinese, Japanese, and Korean full stop `。`, after `！` and `？`, and after the Latin `.`, `!`, and `?`.
-A break after a clause, at `、`, `,`, `;`, `:`, or an em dash, may clarify structure.
-Never wrap prose to a fixed column, and never join a paragraph onto one line.
+Break after `。`, `！`, `？`, `.`, `!`, and `?`.
+A break after `、`, `,`, `;`, `:`, or an em dash may clarify structure.
+Never wrap prose to a column, and never join a paragraph onto one line.
 Lines have no length limit.
 Never use hard line breaks inside a paragraph.
 A blank line separates paragraphs.
 
-The rule covers English and Japanese in Markdown files, source-code comments, commit messages, issue and pull request bodies, and release notes.
-Consecutive comment lines form a paragraph, and a comment trailing after code stands alone.
-When editing a paragraph wrapped to a column, reflow the whole paragraph in the same change.
+The rule covers English and Japanese in Markdown files, code comments, commit messages, issue and PR bodies, and release notes.
+Consecutive comment lines form a paragraph, and a trailing comment stands alone.
+When editing a column-wrapped paragraph, reflow the whole paragraph in the same change.

@@ -6,7 +6,7 @@ Project instructions take precedence on conflict.
 ## Language
 
 - Respond in Japanese.
-- Write commit messages, pull requests, issues, code comments, documentation, and release notes in English.
+- Write commit messages, PRs, issues, code comments, documentation, and release notes in English.
 
 ## Environment
 
@@ -21,23 +21,23 @@ Omit AI attribution footers and session URLs.
 - Before GitHub-bound implementation, load `pull-request` and run `pr-workflow start` for the exact destination.
 Personal non-fork repositories require an issue that states the problem, scope, and acceptance criteria.
 External repositories and forks follow the destination's contribution rules.
-- Use `pr-workflow` to create pull requests, edit their documents, and mark them ready, and keep the diff within the issue's scope.
+- Use `pr-workflow` to create PRs, edit their documents, and mark them ready, and keep the diff within the issue's scope.
 - Verify changes with the project's own lint, typecheck, and test commands.
 - Load `formal-assurance` for every implementation change.
 - Load `verification-tools` and `type-contracts` for implementation work, and turn enforceable rules into required gates with `executable-policy`.
-- Load `ci-budget` before an authorized push or pull request update.
-- For an initial substantive pull request, load `coderabbit-review` after local checks.
+- Load `ci-budget` before an authorized push or PR update.
+- For an initial substantive PR, load `coderabbit-review` after local checks.
 - Honor an owner-imposed CodeRabbit pause until the owner resumes it.
 - Load `reliability` for time, concurrency, persistence, environment dependencies, and intermittent failures.
-- For dotfiles changes, load `dotfiles` and apply the same behavior through each affected Mac, Linux, and Windows host's own profile.
-- Prefer `skill-ops load NAME` or a relevant bundle for shared skills.
-Inspect `skill-ops check` before completion, and use `skill-operations` for pending maintenance or skill changes.
+- For dotfiles changes, load `dotfiles` and apply the same behavior through each affected host's own profile.
+- Load shared skills with `skill-ops load NAME` or a bundle.
+Inspect `skill-ops check` before completion, and use `skill-operations` for pending maintenance.
 - Commit and push only on request.
 
 ## Review findings
 
-On an existing or authorized pull request update, load `coderabbit-review`.
+On an existing or authorized PR update, load `coderabbit-review`.
 Fix supported findings within the authorized task, and answer unsupported findings with concrete evidence.
-Never declare a pull request complete while supported findings, required checks, or a review of the current head remain outstanding.
+Never declare a PR complete while supported findings, required checks, or a review of the current head remain outstanding.
 Paused, skipped, stale, failed, and rate-limited reviews remain pending.
-Commit, push, pull request replies, thread resolution, manual review triggers, and merge each require user authorization.
+Commit, push, PR replies, thread resolution, manual review triggers, and merge each require user authorization.

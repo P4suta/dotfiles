@@ -1,7 +1,7 @@
 {
-  "revision": "90088b073f6712698d364b5201a6f69e1b08811bb0917bceb6d46f96be717d62",
+  "revision": "886172a5ea7bb78819eb970b8f61cf00d33b6ad760b8cb922eeadf73daf16c3e",
   "outcome": "keep",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/domyjob/SKILL.md"
   ],

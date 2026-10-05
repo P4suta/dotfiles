@@ -17,13 +17,13 @@ Never copy a whole preset into a repository or guess at an unsupported custom ma
 Track the toolchains, runtime and package-manager versions, direct dependencies, lockfiles, GitHub Actions, containers, and release tools that the project uses.
 Prefer supported built-in managers, and add a narrow custom manager only for a real untracked declaration.
 For Actions and containers, keep immutable digests with useful version comments, and update them together.
-Before choosing the newest suitable stable version, check the upstream release notes, support policy, compatibility constraints, and oldest supported Rust version.
+Before choosing the newest suitable stable version, check the upstream release notes, support policy, compatibility constraints, and MSRV.
 An untested `latest` reference makes no version policy.
 
 Group updates that must change together, and keep unrelated major migrations reviewable.
 After an update, verify exact resolved dependencies, the relevant project gates, and consumer compatibility.
 Preserve narrow security exceptions, and diagnose newly reported vulnerabilities instead of suppressing the report.
-When changing matching rules, run the supported configuration validator and inspect manager extraction or a non-mutating dry run.
+Validate the configuration with the supported validator and inspect manager extraction or a non-mutating dry run.
 
 Honor protected-branch CI, signed commits, and squash conventions.
 Automatic dependency merges require explicit existing policy and green required checks.

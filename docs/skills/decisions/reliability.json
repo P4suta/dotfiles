@@ -1,7 +1,7 @@
 {
-  "revision": "5a543ec890e31f50c18a54ea7a9346deda7f5ef74084e2dc05cdd10c5253b043",
+  "revision": "10f600a4f960294ad191986635e6266889ee2418fdafb28f61f3edb2c3ded396",
   "outcome": "implemented",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/reliability/SKILL.md",
     "dot_agents/skills/reliability/references/time-and-randomness.md"

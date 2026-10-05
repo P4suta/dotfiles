@@ -8,7 +8,6 @@
 //! - `~/.config/git/hooks/pre-commit` runs `dotguard pre-commit`, the language and staged-diff gates.
 //!
 //! `core.hooksPath` in `~/.gitconfig` points every repository at that hooks directory, so no repository needs to opt in.
-//! Per-repository lefthook gates still run underneath.
 
 use dotguard::{
     attribution, bypass, doctor, gitargv, lang, lint, postcommit, prepush, realgit, renovate,
@@ -124,17 +123,14 @@ fn git_wrapper(argv: &[String]) -> ExitCode {
     delegate(&real, argv)
 }
 
-/// Replaces this process with the real git, so no extra process holds a pipe open.
 #[cfg(unix)]
 fn delegate(real: &Path, argv: &[String]) -> ExitCode {
     use std::os::unix::process::CommandExt;
-    // exec() only returns on failure.
     let err = std::process::Command::new(real).args(argv).exec();
     eprintln!("::error:: could not exec {}: {err}", real.display());
     ExitCode::from(126)
 }
 
-/// Runs the real git and exits with its status, because Windows has no `exec`.
 #[cfg(windows)]
 fn delegate(real: &Path, argv: &[String]) -> ExitCode {
     ignore_console_interrupts();
@@ -192,7 +188,6 @@ fn commit_msg(path: &str) -> i32 {
         return 0;
     };
 
-    // Strip attribution first, so later gates see the final message.
     let (cleaned, removed) = attribution::strip(&raw);
     if removed > 0 {
         if let Ok(mut f) = std::fs::File::create(path) {

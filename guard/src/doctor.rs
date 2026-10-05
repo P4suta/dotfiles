@@ -1,7 +1,4 @@
 //! The readiness report: `dotguard doctor`.
-//!
-//! A diagnostic that always exits 0 unless `--strict`, so it finishes its report when something breaks.
-//! Its output lines form the interface people read.
 
 use crate::realgit;
 use std::path::{Path, PathBuf};
@@ -124,7 +121,6 @@ fn whoami_uid() -> String {
 }
 
 /// The `PATH` for resolving commands: the hook prepend of shims, `~/.local/bin`, and Homebrew, plus the opam switch that holds `ocaml`, `dune`, and `utop`.
-/// `opam env` supplies the switch name.
 fn doctored_path() -> String {
     let h = home();
     let mut dirs: Vec<PathBuf> = vec![
@@ -136,7 +132,6 @@ fn doctored_path() -> String {
     if let Ok(p) = std::env::var("PATH") {
         dirs.extend(std::env::split_paths(&p));
     }
-    // The active switch's bin directory, asked for directly rather than parsed out of `opam env` shell syntax.
     if let Ok(out) = Command::new("opam").args(["var", "bin"]).output()
         && out.status.success()
     {
@@ -185,7 +180,7 @@ fn which_doctored(name: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// The SSH socket selection from `~/.config/shell/ssh-agent.sh`: a local session uses the 1Password app-group socket, and a remote session keeps the socket that sshd forwarded.
+/// The SSH agent selection from `~/.config/shell/ssh-agent.sh`: a local session uses the 1Password app-group socket, and a remote session keeps the socket that sshd forwarded.
 fn ssh_auth_sock() -> Option<String> {
     if let Some(sock) = std::env::var_os("DOTFILES_SSH_AUTH_SOCK")
         && Path::new(&sock).exists()
@@ -318,7 +313,6 @@ fn modern_terminal(d: &mut Doctor) {
     check_platform_config(d, "lazygit", lg_dir, "lazygit");
 
     // Ask whether the configured Ghostty font family resolves, because a file glob in `~/Library/Fonts` passes for an installed font that Ghostty never uses.
-    // Ghostty falls back without warning from a family it fails to resolve.
     let config = std::fs::read_to_string(home().join(".config/ghostty/config")).unwrap_or_default();
     let configured_font = parse_font_family(&config);
     match configured_font {
@@ -355,7 +349,7 @@ fn modern_terminal(d: &mut Doctor) {
 
 fn native_toolchain(d: &mut Doctor) {
     section("Native toolchain");
-    // After a partial Command Line Tools update, `xcrun` picks the newest kit, which can outrun the shipped `ld` and break every link.
+    // After a partial Command Line Tools update, `xcrun` picks the highest installed SDK, which can outrun the shipped `ld` and break every link.
     let probe_dir = std::env::temp_dir().join(format!("doctor-probe.{}", std::process::id()));
     let _ = std::fs::create_dir_all(&probe_dir);
     let src = probe_dir.join("probe.c");
@@ -442,7 +436,7 @@ fn language_toolchains(d: &mut Doctor) {
     d.command("ghc", "GHC", true);
     d.command("cabal", "cabal-install", true);
     d.command("stack", "Stack", true);
-    // The wrapper, because the upstream binary distribution ships only the wrapper plus one binary per compiler version, and editors launch the wrapper.
+    // The wrapper, because the upstream bindist ships only the wrapper plus one binary per GHC version, and editors launch the wrapper.
     d.command("haskell-language-server-wrapper", "HLS", true);
     d.command("bun", "Bun", true);
     d.command("uv", "uv", true);
@@ -453,7 +447,7 @@ fn agents_and_editors(d: &mut Doctor) {
     d.command("codex", "Codex", false);
     d.command("claude", "Claude Code", false);
     d.command("opencode", "OpenCode", false);
-    // OrbStack generates its command shims on first launch, so an installed app without docker differs from a missing app, and a shim outside `PATH` points to a shell problem.
+    // OrbStack generates its CLI shims on first launch, so an installed app without docker differs from a missing app, and a shim outside `PATH` points to a shell problem.
     let installed = [
         PathBuf::from("/usr/local/bin/docker"),
         home().join(".orbstack/bin/docker"),
@@ -608,7 +602,6 @@ fn repository_guards(d: &mut Doctor) {
         );
     }
 
-    // `core.hooksPath` makes the hooks global.
     let hooks_path = realgit::capture(&["config", "--get", "core.hooksPath"])
         .map(|s| s.trim().replace('~', &home().display().to_string()));
     let hooks_ok = hooks_path.as_ref().is_some_and(|p| {
@@ -626,7 +619,6 @@ fn repository_guards(d: &mut Doctor) {
         );
     }
 
-    // The bypass log records every refusal and waiver, and an unfamiliar waiver deserves a look.
     let bypass_log = home().join(".local/state/git-bypass.log");
     if bypass_log.is_file() {
         let text = std::fs::read_to_string(&bypass_log).unwrap_or_default();
@@ -655,7 +647,7 @@ fn repository_guards(d: &mut Doctor) {
 
 fn apple_platform(d: &mut Doctor) {
     section("Apple platform development");
-    // With `xcode-select -p` at CommandLineTools, swiftc builds a Swift package, but the iOS kit, the simulator, and xcodebuild stay missing without any error saying so.
+    // With `xcode-select -p` at CommandLineTools, swiftc builds a Swift package, but the iOS SDK, the simulator, and xcodebuild stay missing without any error saying so.
     let xcode_path = Command::new("xcode-select")
         .arg("-p")
         .output()
@@ -798,7 +790,6 @@ fn clt_update_label(list: &str) -> Option<String> {
     })
 }
 
-/// Count log lines carrying `\t<marker>\t`.
 fn count_marker(text: &str, marker: &str) -> usize {
     text.lines()
         .filter(|l| l.split('\t').any(|f| f == marker))

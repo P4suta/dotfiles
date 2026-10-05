@@ -17,14 +17,10 @@ Read [analysis and improvement](references/analysis.md) when assessing the catal
 
 Select the smallest relevant skill or a matching workflow bundle.
 Run `skill-ops load NAME` to load the configured prerequisites once, before the requested instruction.
-Inspect the plan instead of treating every cross-reference as an unconditional dependency.
-Keep conditional references conditional, and reject unknown names, stale links, and dependency cycles.
-Read current project instructions and preserve the user's actual authorization.
+Keep conditional references conditional, and reject unknown names, stale aliases, and dependency cycles.
 No skill, dependency, analysis result, or previous task grants permanent authority for external mutations.
-
-Keep the canonical instructions, metadata, supporting resources, client adapters, and versioned check contracts together.
 Never duplicate skill bodies across clients or turn project facts into universal standards.
-When available, use `skill-creator` to write and check a changed skill.
+Use `skill-creator` to write and check a changed skill when available.
 
 ## Observe and analyze
 
@@ -36,18 +32,16 @@ Never fabricate retrospective counts or treat a third-party skill with a similar
 Record demonstrated failures, repeated procedures, missing workflows, conflicting instructions, and executable-policy opportunities with `skill-ops note` and concrete local evidence.
 Keep prompts, command bodies, credentials, full transcripts, and runtime state out of shared artifacts.
 Analyze the current catalog and local observations before a skill change and whenever the maintenance gate turns pending.
-Preserve event identities and old decisions, and never let a reinstall reset the history.
+Never let a reinstall reset the history.
 
 ## Decide and improve
 
 Assess every finding with real tasks, observed eligibility, supported platforms, existing checks, and the surrounding skill graph.
-Options include sharpening discovery, adding a missing skill, introducing a workflow bundle, merging overlap, splitting conditional material, retiring obsolete guidance, and moving deterministic behavior into a maintained checker.
 Use `executable-policy` for mechanical enforcement and `verification-tools` for a newly required capability.
-
 Carry out supported accepted improvements within the authorized scope, verify their affected behavior, and record the resulting local evidence.
 Reject unsupported recommendations with a concrete reason and evidence.
-Give a necessary deferral an explicit reconsideration condition, and expect it back at the next analysis.
-Never apply a frequency-based merge unexamined, rubber-stamp findings, or claim that a disposition record proves semantic quality.
+Give a necessary deferral an explicit reconsideration condition.
+Never apply a frequency-based merge unexamined or claim that a disposition record proves semantic quality.
 
 Run the same authoritative catalog, link, resource, decision, lint, test, and proof checks before publication and in required CI.
 Changing a skill or policy invalidates its analysis, so reassess the current content instead of copying an old success receipt.

@@ -1,6 +1,6 @@
 # shellcheck shell=sh
-# A local desktop session uses the native 1Password socket.
-# An SSH session keeps the socket that sshd forwards from Windows.
+# A local session uses the native 1Password SSH agent.
+# A remote session keeps the agent that sshd forwards from Windows.
 onepassword_agent="${HOME}/.1password/agent.sock"
 if [ -n "${DOTFILES_SSH_AUTH_SOCK:-}" ] && [ -S "${DOTFILES_SSH_AUTH_SOCK}" ]; then
   SSH_AUTH_SOCK="${DOTFILES_SSH_AUTH_SOCK}"

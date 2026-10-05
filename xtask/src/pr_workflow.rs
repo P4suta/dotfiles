@@ -32,7 +32,7 @@ pub enum Action {
         #[command(flatten)]
         target: Target,
     },
-    /// Check local files or the current GitHub document without changing them.
+    /// Validate local files or the current GitHub document without mutation.
     Check {
         #[command(flatten)]
         target: Target,
@@ -76,7 +76,7 @@ pub enum Action {
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
         pr: u64,
     },
-    /// Check the current GitHub document and move an open draft to review.
+    /// Validate the current GitHub document and move an open draft to review.
     Ready {
         #[command(flatten)]
         target: Target,
@@ -124,13 +124,13 @@ pub struct IssueDocument {
 
 #[derive(Args)]
 pub struct Target {
-    /// The exact GitHub repository in `owner/name` form instead of a web address or an inferred name.
+    /// The exact GitHub repository rather than a URL or an inferred one.
     #[arg(long)]
     pub repo: String,
     /// CodeRabbit mode permits its standard generation placeholders.
     #[arg(long, value_enum, default_value = "local")]
     pub generation: Generation,
-    /// A repository-scoped JSON exception naming the repository, its source address, and the reason.
+    /// Repository-scoped JSON exception with repository, source URL, and reason.
     #[arg(long)]
     pub title_policy: Option<PathBuf>,
     /// An existing open issue in the destination repository, required for personal non-forks.
@@ -495,7 +495,6 @@ fn written_to_standard(
     )
 }
 
-/// The destination as far as an offline check can see it: its owner login, with fork status unknown.
 fn offline_destination(repo: &str) -> Result<Destination> {
     let policy = workflow_policy()?;
     let owner = repo.split('/').next().unwrap_or_default();
@@ -556,7 +555,6 @@ fn gh(args: &[OsString]) -> Result<String> {
 }
 
 impl Github {
-    /// Require a live authenticated user without printing or transferring credentials.
     fn connect() -> Result<Self> {
         let github = Self {
             policy: workflow_policy()?,
@@ -571,7 +569,7 @@ impl Github {
         Ok(github)
     }
 
-    /// Inspect the live rate-limit headers on each serialized prerequisite request.
+    /// Inspect live REST quota headers on each serialized prerequisite request.
     fn read<T: serde::de::DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
         let args = ["api", endpoint, "--hostname", "github.com", "--include"].map(OsString::from);
         let response = gh(&args)?.replace("\r\n", "\n");
@@ -658,7 +656,6 @@ fn references_issue(body: &str, repo: &str, issue: u64) -> bool {
     })
 }
 
-/// Establish the global personal scope and fork status of the live destination.
 fn destination(github: &Github, repo: &str) -> Result<Destination> {
     let repository: Repository = github.read(&format!("repos/{repo}"))?;
     ensure!(
@@ -690,7 +687,6 @@ fn destination(github: &Github, repo: &str) -> Result<Destination> {
     })
 }
 
-/// Check an explicitly selected issue in the live destination.
 fn inspect_issue(
     github: &Github,
     target: &Target,

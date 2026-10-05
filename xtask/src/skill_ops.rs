@@ -168,7 +168,7 @@ fn check_evidence(evidence: &[String], root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Verifies a runtime disposition, where an adopted finding may carry a decision but needs none.
+/// Verifies a runtime disposition.
 pub fn check_review(
     report_hash: &str,
     findings: &[Finding],
@@ -335,7 +335,6 @@ fn size_draft(previous: Option<&SizeDecision>) -> SizeDecision {
 }
 
 /// Drafts the decision for a changed or new skill, or the size disposition that its bound decision lacks or no longer needs.
-/// A maintainer still writes each reason.
 pub fn draft_decision(
     previous: Option<&SkillDecision>,
     revision: &str,

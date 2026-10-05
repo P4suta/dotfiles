@@ -1,7 +1,7 @@
 {
-  "revision": "555bba7f763f6e4bd1b8351dda242b0fff5f6077a57b5795b246391d14c63631",
+  "revision": "c69f54964112402cee5d6e3c766ef9e5504527352cb04aefb72dff95f90954fa",
   "outcome": "implemented",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/systematic-fixes/SKILL.md",
     "guard/tests/empty_commit.rs",

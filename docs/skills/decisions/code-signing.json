@@ -1,7 +1,7 @@
 {
-  "revision": "01130d22da993b6791a517f9029d9c6d8ed98c8ee2caae76bab138e50c0ba7ec",
+  "revision": "cad5e4766d8afc92a89b335357201089bd6a1504e131d447e142eac4d7daece0",
   "outcome": "keep",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/code-signing/SKILL.md"
   ],

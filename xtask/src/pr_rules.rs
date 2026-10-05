@@ -20,7 +20,6 @@ pub enum Effect {
     Ready,
 }
 
-/// The issue prerequisite established before a PR operation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum IssueGate {
     NotRequired,
@@ -39,7 +38,6 @@ pub fn issue_gate(personal_owner: bool, fork: bool, checked_issue: bool) -> Issu
     }
 }
 
-/// Keep a nonzero reserve before issuing further GitHub operations.
 pub fn api_quota_available(remaining: u64, reserve: u64) -> bool {
     reserve > 0 && remaining >= reserve
 }

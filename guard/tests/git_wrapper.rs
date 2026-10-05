@@ -35,7 +35,6 @@ impl Wrapper {
 
     /// Runs the wrapper with an isolated home and Git configuration, so its audit records stay out of the developer's.
     /// The wrapper drops waivers from the calling shell, such as the one a force push sets for its hooks, so they never decide a refusal.
-    /// It also drops Git variables, because a commit hook in a linked worktree exports `GIT_DIR`, and `git init` would reinitialize that repository instead of the scratch one.
     fn run(&self, arguments: &[&str], input: Option<&[u8]>) -> Output {
         self.run_with(arguments, input, &[])
     }

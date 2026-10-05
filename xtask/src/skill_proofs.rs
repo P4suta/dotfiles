@@ -226,8 +226,7 @@ pub fn container_target_volume(root: &Path) -> String {
 const CONTAINER_GATE: &str = "set -o pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -; exec cargo run --locked --manifest-path xtask/Cargo.toml -- proofs";
 
 pub fn container_run_arguments(root: &Path, image: &str, target_volume: &str) -> Vec<OsString> {
-    // Docker reads `--mount` as one CSV record.
-    // Quoting keeps a comma in the path inside the field, and Windows forbids the quote character in paths.
+    // Docker reads `--mount` as one CSV record, so quoting keeps a comma in the path inside the field, and Windows forbids the quote character in paths.
     let mut mount = OsString::from("type=bind,\"source=");
     mount.push(root);
     mount.push("\",target=/source,readonly");

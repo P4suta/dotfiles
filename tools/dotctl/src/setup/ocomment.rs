@@ -1,8 +1,8 @@
 //! Installs ocomment, the prose gate's binary.
 //!
-//! OComment publishes no crate, so this clones its repository and builds the release binary.
+//! OComment has no crates.io release, so this clones its repository and builds the release binary.
 //! The prose gate's config names this checkout.
-//! After `git pull` there, a chezmoi apply rebuilds the binary, because the checkout's commit feeds the trigger in the script that chezmoi hashes.
+//! After `git pull` there, a chezmoi apply rebuilds the binary.
 
 use std::path::PathBuf;
 

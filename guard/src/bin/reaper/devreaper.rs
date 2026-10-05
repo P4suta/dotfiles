@@ -1,9 +1,8 @@
 //! Stops idle Docker dev containers and cleans up abandoned ones.
 //!
 //! A dev container carries the label `com.docker.compose.service=dev`, and the label `dev-reaper.keep=true` opts any container out.
-//! `MODE` escalates from `log` through `stop` to `full`, and `log` only reports.
 //!
-//! Any of three signals vetoes a stop: recent `exec` or `attach` activity, a running build or server process, or a processor load over the threshold.
+//! Any of three signals vetoes a stop: recent `exec` or `attach` activity, a running build or server process, or an instantaneous CPU reading over the threshold.
 //! A per-container state file accumulates idle time across runs, so a container stops only after `DEV_REAPER_IDLE_STOP_SECONDS` of continuous quiet.
 
 use super::config;
@@ -82,7 +81,6 @@ impl DevReaper {
         }
 
         // Safe prune only in full mode: dangling images + bounded build cache.
-        // Named volumes such as gradle-cache stay untouched.
         if cfg.mode == "full" {
             let img = docker_capture(&docker, &["image", "prune", "-f"]);
             let bld = docker_capture(
@@ -191,7 +189,7 @@ impl DevConfig {
     }
 }
 
-/// The docker binary: `OrbStack` first, then Homebrew and system locations, then `PATH`.
+/// Resolves docker from `OrbStack` first, then Homebrew and system locations, then `PATH`.
 fn resolve_docker() -> Option<PathBuf> {
     if let Some(d) = std::env::var_os("DOCKER") {
         let p = PathBuf::from(d);
@@ -303,7 +301,6 @@ struct InspectLine {
     finished: Option<String>,
 }
 
-/// Per-container idle accounting, persisted across runs.
 /// One `key=value` per line, and `name` keeps spaces because the reader splits on the first `=` only.
 /// The reader decodes `%q` escapes from bash-written files.
 #[derive(Default, Clone)]
@@ -348,7 +345,6 @@ fn write_state(p: &Path, s: &ContainerState) {
     );
 }
 
-/// Decode the `%q` shell quoting a bash-written state file may carry.
 fn unquote(v: &str) -> String {
     let mut out = String::with_capacity(v.len());
     let mut chars = v.chars();
@@ -408,7 +404,6 @@ fn load_activity(cfg: &DevConfig, docker: &Path, now: i64) -> HashMap<String, i6
     map
 }
 
-/// Garbage-collect state files for containers that no longer exist.
 fn gc_state(cfg: &DevConfig, docker: &Path) {
     let live: Vec<String> = docker_capture(docker, &["ps", "-aq", "--no-trunc"])
         .map(|s| s.lines().map(|l| l.chars().take(12).collect()).collect())
@@ -451,7 +446,6 @@ fn reap_one(cfg: &DevConfig, docker: &Path, activity: &HashMap<String, i64>, fid
         return;
     }
 
-    // min-uptime grace
     let started_epoch = util::epoch_of(&info.started);
     if started_epoch == 0 || now - started_epoch < cfg.min_uptime_seconds {
         st.idle_since = 0;
@@ -459,7 +453,6 @@ fn reap_one(cfg: &DevConfig, docker: &Path, activity: &HashMap<String, i64>, fid
         return;
     }
 
-    // activity high-watermark from events
     if let Some(ev) = activity.get(fid) {
         st.last_activity = st.last_activity.max(*ev);
     }
@@ -477,7 +470,7 @@ fn reap_one(cfg: &DevConfig, docker: &Path, activity: &HashMap<String, i64>, fid
                 write_state(&path, &st);
                 return;
             }
-            // Signal 3: the instantaneous processor load.
+            // Signal 3: the instantaneous CPU reading.
             Some(cpu) => cpu >= cfg.threshold_pct,
         }
     };
@@ -530,7 +523,7 @@ fn heavy_process_running(docker: &Path, fid: &str, regex: &str) -> bool {
 }
 
 /// `docker stats --no-stream --format '{{.CPUPerc}}'` → the number without the `%`.
-/// `None` when the measurement fails.
+/// `None` when the CPU reading fails.
 fn cpu_percent(docker: &Path, fid: &str) -> Option<f64> {
     docker_capture(
         docker,

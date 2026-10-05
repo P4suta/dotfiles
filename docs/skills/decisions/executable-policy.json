@@ -1,7 +1,7 @@
 {
-  "revision": "b9fa31a59d975f075bf438f01bdf18968966169aa1f542d61b20aee6966f4600",
+  "revision": "5db48fde131f9523e03ebe1cb32f7eb5763b4c9ef6b94f3e73f5c49166777136",
   "outcome": "implemented",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/executable-policy/SKILL.md",
     "docs/adr/0003-local-skill-operations.md",

@@ -1,12 +1,10 @@
 # Machine-wide prose policy.
-# OComment merges this file under each repository's own `.ocomment.toml`.
 version = 1
 
-# Remove nothing, and enforce only the line breaks that `.chezmoitemplates/prose_policy` sets.
+# Remove nothing, and enforce only the line breaks of `.chezmoitemplates/prose_policy`.
 [policy]
 mode = "none"
 
 # One sentence per line.
-# The fixer joins column wraps, restores breaks after sentences, and keeps breaks after clauses.
 [style]
 wrap = "sentence"

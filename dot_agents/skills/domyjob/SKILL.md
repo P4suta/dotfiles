@@ -5,16 +5,15 @@ description: >-
   Use when a command must run on another machine or survive the client disconnecting.
 ---
 
-# Remote jobs
+# domyjob
 
 The project's [domyjob skill](https://github.com/P4suta/domyjob/blob/main/skills/domyjob/SKILL.md) holds the current command manual.
 Read its local copy before driving another machine, then follow `multi-machine` for synchronization and host boundaries.
 From the source checkout, run `mise x -- cargo run --locked -p domyjob -- COMMAND` or its verified built binary.
-For an installed client, check its version and the relevant `--help` instead of assuming old selectors or short job names.
+For an installed client, check its version and the relevant `--help`.
 
-Use `run` to send the current checkout as a bounded snapshot, and `on` for a command in the remote `HOME`.
+Use `run` to send the current checkout as a bounded snapshot, and `on` for a command in the remote home directory.
 Pass an explicit program after `--`, and keep the remote command's exit status.
-Keep the returned machine and job identity, so a long job stays inspectable without resubmission.
-Resolve an uncertain submission through its identity instead of retrying it as a new job.
-Remote assistant dispatch and message sending each need their own authorization, beyond remote build permission.
+Keep the returned machine and job identity, and resolve an uncertain submission through it instead of retrying as a new job.
+Remote agent dispatch and message sending each need their own authorization, beyond remote build permission.
 Never bypass domyjob with a raw SSH command when a snapshot, job identity, environment boundary, or project instruction depends on domyjob.

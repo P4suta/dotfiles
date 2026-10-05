@@ -1,12 +1,11 @@
-# Mark a pull request ready only after every check passes
+# Mark a PR ready only after every check passes
 
 Status: accepted.
 
 ## Context
 
 `pr-workflow ready` moved any open draft with an accepted document and a linked issue to review.
-Marking a pull request ready starts automatic review, so a draft marked ready while its checks still ran or failed spent review allowance on a head that would change again.
-A pull request leaves draft only when every required check passes and all its work has finished, right before merge.
+Marking a PR ready starts automatic review, so a draft marked ready while its checks still ran or failed spent review allowance on a head that would change again.
 
 ## Decision
 
@@ -26,5 +25,4 @@ Accepting skipped runs lost because a required workflow that skips shows no pass
 
 ## Consequences
 
-A pull request with running checks stays in draft until the final head's results arrive.
-A repository that reports no checks has no way to use `ready`, so such a destination needs a check before its pull requests leave draft.
+A repository that reports no checks has no way to use `ready`, so such a destination needs a check before its PRs leave draft.

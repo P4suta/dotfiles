@@ -8,19 +8,14 @@
 //!
 //! 2. **Simplified Chinese.** Japanese and Chinese share most ideographs, so `日本語` reads the same in both.
 //!    A Chinese sentence of any length contains simplified forms such as `这 个 说 时 门 现`, which Japanese lacks.
-//!    Unicode groups most of them in runs by radical, such as the `讠` block U+8BA0–U+8C36.
-//!    A dozen ranges plus a list of common stragglers cover them without a Unihan table.
 //!
 //! 3. **Invisible characters.** Zero-width spaces, bidirectional overrides, and byte-order marks.
-//!    Bidirectional overrides enable the Trojan Source attack, where a reviewer and a compiler read text in different orders.
 //!
 //! Latin-1 accents pass, as in `naïve`, `Gödel`, and `São`.
 //! Greek passes one letter at a time, so notation such as `λ`, `μs`, and `Σ` passes, but a run of three or more letters counts as a word.
 //!
-//! Cyrillic fails even as a single character, because Cyrillic `а е о р с у х` look identical to Latin `a e o p c y x` and let a homoglyph slip into an identifier, a web address, or a package name.
 
 /// Writing systems with no use here.
-/// Each entry holds an inclusive codepoint range and the name for reports.
 const BLOCKED: &[(u32, u32, &str)] = &[
     (0x0400, 0x052F, "Cyrillic"),
     (0x2DE0, 0x2DFF, "Cyrillic"),
@@ -140,13 +135,9 @@ const fn greek(c: char) -> bool {
 const GREEK_RUN: usize = 3;
 
 /// Which rule set to apply.
-///
-/// Commit messages and file content follow different rules.
-///
 /// *Commit messages* on this machine use English, and their only other characters belong to typography and notation, such as `—`, `§`, `…`, `→`, `×`, `Θ(n)`, and `µs`.
-/// The message rule refuses only *letters* outside Latin, and ignores punctuation, symbols, box drawing, and emoji.
 ///
-/// *File content* includes fixtures, internationalization test cases, and Japanese typesetting code with Cyrillic, Arabic, and kanji, so a language rule would only get switched off.
+/// *File content* includes fixtures, i18n test cases, and Japanese typesetting code with Cyrillic, Arabic, and kanji, so a language rule would only get switched off.
 /// Content gets a contamination filter instead: unused scripts, simplified Chinese forms, and invisible characters.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -166,14 +157,12 @@ impl Mode {
             Some("japanese" | "ja" | "jp") => Some(Self::Japanese),
             Some("off" | "false" | "0") => None,
             // Unset, empty, `english`, and unrecognized values.
-            // A typo never turns checking off.
             _ => Some(Self::English),
         }
     }
 }
 
-/// Basic Latin letters, the Latin-1 accents, and the extended Latin blocks U+0100–U+024F and U+1E00–U+1EFF.
-/// `µ` and the ordinal indicators sit below the Latin-1 letter block, so the function names them one by one.
+/// ASCII letters, the Latin-1 accents, and the extended Latin blocks U+0100–U+024F and U+1E00–U+1EFF.
 const fn latin(c: char) -> bool {
     let n = c as u32;
     c.is_ascii_alphabetic()
@@ -188,9 +177,9 @@ const fn latin(c: char) -> bool {
 const fn japanese(c: char) -> bool {
     let n = c as u32;
     (0x3000 <= n && n <= 0x303F) // `、。「」〜` and the iteration marks
-        || (0x3040 <= n && n <= 0x30FF) // the kana syllabaries
-        || (0x31F0 <= n && n <= 0x31FF) // katakana phonetic extensions
-        || (0x3400 <= n && n <= 0x9FFF) // unified ideographs
+        || (0x3040 <= n && n <= 0x30FF) // hiragana, katakana
+        || (0x31F0 <= n && n <= 0x31FF) // phonetic extensions for Ainu
+        || (0x3400 <= n && n <= 0x9FFF) // CJK ideographs
         || (0xF900 <= n && n <= 0xFAFF) // compatibility ideographs
         || (0xFF00 <= n && n <= 0xFFEF) // halfwidth and fullwidth forms
 }
@@ -323,8 +312,7 @@ mod tests {
     }
     const NONE: Vec<&'static str> = Vec::new();
 
-    /// Every special character found in the real commit messages of this machine, except the stripped attribution.
-    /// None of them counts as a letter, which justifies keying on letters.
+    /// Every non-ASCII character found in the real commit messages of this machine, except the stripped attribution.
     #[test]
     fn real_english_commit_messages_pass() {
         for s in [
@@ -379,7 +367,6 @@ mod tests {
     }
 
     /// The kanji China and Japan simplified the same way.
-    /// Each one looks simplified but reads as ordinary Japanese.
     #[test]
     fn shinjitai_are_not_mistaken_for_simplified_chinese() {
         let shared = "声 壮 双 属 恋 弥 灯 炉 状 独 猫 猪 献 楼 欧 枢 湾 湿 滞 称 窃 胆 担 芦 茎                       莱 蚕 蛮 随 誉 励 厨 惨 碍 礼 耻 痒 谷 赤 辛 阜 缶 長 首 骨 鹵 角 風 飛 龍";

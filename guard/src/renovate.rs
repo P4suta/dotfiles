@@ -1,6 +1,5 @@
 //! The dependency-freshness gate: a push that touches a dependency must leave it on the current non-major release.
 //!
-//! `core.hooksPath` routes every repository through the same hooks, so the check runs before any push whose range touches a manifest that Renovate understands.
 //! The facts come from a pinned read-only Renovate container, which `dotguard renovate run` also starts by hand.
 //!
 //! The gate refuses a push whose range adds or changes a manifest line for a dependency with a non-major update available.
@@ -8,10 +7,8 @@
 //! Everything else only informs:
 //!
 //! * Major updates never block, because deferring them stays a valid decision.
-//! * The gate lists stale dependencies that the push left untouched in the touched manifests, and leaves them to Renovate.
 //!
 //! An opt-out returns 0 without output, and a missing `docker` or `jq` returns 0 with a `::warning::`.
-//! A container failure from the network or an image pull also lets the push through, because the gate blocks only on evidence.
 //!
 //! Opt out with `git config renovate.localSkip true`, adding `--global` for the whole machine, or once with `RENOVATE_LOCAL_SKIP=1 git push`.
 
@@ -24,7 +21,6 @@ use std::process::Stdio;
 const DEFAULT_GATE_TYPES: &str = "minor patch pin pinDigest";
 
 /// One dependency with a blocking update available, as parsed from the jq report.
-/// Fields keep their position, and the unit separator preserves empty ones.
 struct Candidate {
     package_file: String,
     dep_name: String,
@@ -36,7 +32,6 @@ struct Candidate {
     new_digest: String,
 }
 
-/// Route `dotguard renovate <run>`.
 pub fn dispatch(args: &[String]) -> i32 {
     if args.first().map(String::as_str) == Some("run") {
         run_local()
@@ -46,7 +41,6 @@ pub fn dispatch(args: &[String]) -> i32 {
     }
 }
 
-/// `dotguard renovate-gate <remote>` reads the ref list from stdin.
 pub fn run(remote: &str) -> i32 {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
@@ -60,7 +54,6 @@ fn gate(remote: &str, input: &str) -> i32 {
         return 0;
     }
 
-    // Opt-outs first: nobody pays for a container start they opted out of.
     if realgit::capture(&["config", "--type=bool", "--get", "renovate.localSkip"])
         .is_some_and(|v| v.trim() == "true")
     {
@@ -74,7 +67,6 @@ fn gate(remote: &str, input: &str) -> i32 {
         return 0;
     };
 
-    // Prerequisites fail open with a warning.
     for tool in ["docker", "jq"] {
         if locate::which(tool).is_none() {
             eprintln!("::warning:: renovate gate skipped: {tool} not found");
@@ -133,7 +125,6 @@ fn gate(remote: &str, input: &str) -> i32 {
 }
 
 /// The manifest gate: the manifests the pushed range changes, the lines it adds, and whether the scope covers the whole tree.
-/// `None` when the push touches no manifest that Renovate manages, which costs nothing.
 fn scope(remote: &str, input: &str) -> Option<(Vec<String>, String, bool)> {
     let mut changed_files: Vec<String> = Vec::new();
     let mut added_lines = String::new();
@@ -371,8 +362,6 @@ fn parse_candidates(out: &str) -> Vec<Candidate> {
 }
 
 /// Reports whether Renovate manages this path.
-///
-/// The match ignores case and compares path components instead of substrings.
 pub fn is_manifest(path: &str) -> bool {
     let lowered = path.to_lowercase();
     let comps: Vec<&str> = lowered.split('/').collect();
@@ -514,7 +503,6 @@ fn docker_plan(c: &RunConfig) -> (Vec<String>, Vec<&'static str>) {
     ];
 
     // Report destination: the log by default, or a JSON file when a path exists.
-    // The bind mount at `/report` lets the container user write it.
     if let Some(path) = &c.report_file {
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
         let name = path
@@ -584,7 +572,6 @@ fn prepare() -> Option<RunConfig> {
     }
 
     // A staged snapshot of the index keeps the original .git, ignored files, untracked files and the original worktree outside the container boundary.
-    // `checkout-index` writes the content a commit would record, the state a push gate should judge.
     let snapshot = std::env::temp_dir().join(format!(
         "renovate-local.{}.{}",
         std::process::id(),
@@ -631,7 +618,6 @@ fn prepare() -> Option<RunConfig> {
     })
 }
 
-/// `id -u` and `id -g`, because std lacks `getuid`.
 fn uid_gid() -> (u32, u32) {
     let read = |flag: &str| {
         std::process::Command::new("id")
@@ -644,7 +630,6 @@ fn uid_gid() -> (u32, u32) {
     (read("-u"), read("-g"))
 }
 
-/// `dotguard renovate run`: the manual entry point to the same container, without the gate.
 pub fn run_local() -> i32 {
     let Some(cfg) = prepare() else {
         return 1;
@@ -655,8 +640,6 @@ pub fn run_local() -> i32 {
 }
 
 /// Spawn docker per the plan.
-/// `quiet_stdout` keeps the gate's progress on stderr only.
-/// Returns the exit code when docker ran.
 fn run_prepared(cfg: &RunConfig, quiet_stdout: bool) -> Option<i32> {
     let (args, removed) = docker_plan(cfg);
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -665,7 +648,6 @@ fn run_prepared(cfg: &RunConfig, quiet_stdout: bool) -> Option<i32> {
     for r in removed {
         cmd.env_remove(r);
     }
-    // The dedicated token rides the environment, not argv.
     if let Some(token) = &cfg.dedicated_token {
         cmd.env("GITHUB_COM_TOKEN", token);
     }
@@ -755,7 +737,6 @@ mod run_tests {
 
     #[test]
     fn ambient_github_tokens_never_reach_the_container() {
-        // No dedicated token: the run removes both ambient variables, and neither name appears in the arguments.
         let (a, removed) = docker_plan(&cfg(None, None));
         assert!(removed.contains(&"GITHUB_TOKEN"));
         assert!(removed.contains(&"GITHUB_COM_TOKEN"));

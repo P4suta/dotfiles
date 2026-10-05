@@ -1,7 +1,7 @@
 {
-  "revision": "7bf54d2bb79402192d49445095e598ba15c7697746bfac207dea65a3f412f8d7",
+  "revision": "b66a70a5b795a20faeaae2361e7d1e68c9b7eeaea035590f64ca439560601247",
   "outcome": "keep",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/rust-release/SKILL.md"
   ],

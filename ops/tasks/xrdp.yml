@@ -1,7 +1,7 @@
 ---
-# Opt-in remote desktop with `--tags xrdp`, only for setting up the Windows VM on a host without physical access.
-# ufw conflicts with Docker, so the listener binds to the tailscale0 address, and only Tailscale reaches it.
-# Run this over SSH, never inside a remote desktop session, because a configuration change restarts xrdp and ends the session.
+# Opt-in remote desktop with `--tags xrdp`, for setting up the Windows VM on a host without physical access.
+# The listener binds to the tailscale0 address, because ufw conflicts with Docker.
+# Run this over SSH, never inside an RDP session, because a config change restarts xrdp.
 
 - name: Assert tailscale0 is up (its IP is the bind target)
   ansible.builtin.assert:
@@ -27,9 +27,9 @@
     append: true
   register: xrdp_sslcert
 
-# xrdp.ini sets port= in more than one section, and the listener reads the one under [Globals].
-# lineinfile rewrites the last match and never converges, so use the section-aware ini_file.
-# Sockets bind to an IP address, so take the tailscale0 address from facts.
+# xrdp.ini sets port= under more than one section, and the listener reads [Globals].
+# lineinfile rewrites the last match and never converges, so use ini_file.
+# Take the tailscale0 address from facts.
 - name: Bind xrdp [Globals] listener to the Tailscale interface only
   become: true
   community.general.ini_file:
@@ -53,8 +53,7 @@
     no_extra_spaces: true
   register: xrdp_neutrino
 
-# Closing the remote desktop window returns to the same desktop instead of logging out.
-# Both values match the stock defaults and record the intent.
+# Closing the RDP window returns to the same desktop instead of logging out.
 - name: Pin resume-friendly xrdp session policy (sesman.ini)
   become: true
   community.general.ini_file:

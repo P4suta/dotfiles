@@ -1,7 +1,6 @@
-# Pull request evidence
+# GitHub PR evidence
 
 Read repository and PR metadata with `gh pr view <number> --repo <owner/repo> --json number,url,headRefOid,baseRefName,headRefName,statusCheckRollup,reviewDecision`.
-Fill the actual owner, name, and PR number into this query.
 Paginate every connection, because `first: 100` sets only a page size.
 
 ```graphql
@@ -33,9 +32,9 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
 }
 ```
 
-Match the installed CodeRabbit bot identity, normally `coderabbitai` in GraphQL and `coderabbitai[bot]` in the Representational State Transfer (REST) API.
+Match the installed CodeRabbit bot identity, normally `coderabbitai` in GraphQL and `coderabbitai[bot]` in REST.
 Fetch nested comment pages for a thread with more than 100 comments.
-Read `repos/<owner>/<repo>/pulls/<number>/reviews` and `repos/<owner>/<repo>/issues/<number>/comments` with `gh api --paginate` for review commit IDs and summary status.
+Read REST `repos/<owner>/<repo>/pulls/<number>/reviews` and `repos/<owner>/<repo>/issues/<number>/comments` with `gh api --paginate` for review commit IDs and summary status.
 Compare the current head with completed review metadata and the newest bot summary, because an incremental review may report completion only in the summary.
 Never describe an approval, a skipped review, `Review rate limited`, a superseded run, or missing commit evidence as a fresh completed review.
 Read the head again before acting when the branch moves.

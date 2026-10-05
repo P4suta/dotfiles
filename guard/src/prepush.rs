@@ -6,12 +6,9 @@
 //! <local ref> <local sha> <remote ref> <remote sha>
 //! ```
 //!
-//! The line omits whether `--force` applies, and the gate needs no such flag.
 //! A force push moves a remote ref to a commit outside its descendants, so the gate checks whether `local_sha` descends from `remote_sha`.
-//! The answer holds for `--force`, `--force-with-lease`, a `+refspec`, and any graphical client.
 //!
 //! This hook, and not the `~/.local/bin/git` wrapper, enforces the rule, because the wrapper only handles commands that resolve `git` through `PATH`.
-//! `core.hooksPath` runs this hook for every repository and every git invocation on the machine.
 
 use crate::bypass::{self, Category};
 use crate::realgit;
@@ -44,8 +41,6 @@ fn classify(local_sha: &str, remote_sha: &str) -> Verdict {
 }
 
 /// Returns the process exit code: 0 to let the push through, 1 to refuse it.
-///
-/// The history gate for force pushes and deletions runs before the signature gate, so a refused push skips the per-commit `git verify-commit`.
 pub fn run(remote: &str) -> i32 {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
@@ -78,9 +73,7 @@ fn pushed_shas(input: &str) -> Vec<String> {
 /// Refuse a push that would introduce an unsigned commit.
 ///
 /// The backstop for branches from another machine or with mixed signing state, because `post-commit` re-signs only the commits of this machine.
-/// The GitHub ruleset `Require signed commits` enforces the same rule on the server.
-///
-/// Without signing configured on this machine, the gate skips verification, so a fresh Mac without the 1Password key service can still push.
+/// Without signing configured on this machine, the gate skips verification, so a fresh Mac without the 1Password SSH agent can still push.
 fn signatures(remote: &str, input: &str) -> i32 {
     let configured = realgit::capture(&["config", "--get", "commit.gpgsign"])
         .is_some_and(|v| v.trim() == "true");
@@ -95,7 +88,6 @@ fn signatures(remote: &str, input: &str) -> i32 {
     for sha in pushed_shas(input) {
         // Verify what this push introduces: commits reachable from the new tip that no ref on this remote already carries.
         // A new branch and a force push use the same range.
-        // After a rebase, `remote..local` would re-verify base history that a forge signed with its own key.
         let Some(range) =
             realgit::capture(&["rev-list", &sha, "--not", &format!("--remotes={remote}")])
         else {

@@ -31,14 +31,14 @@ Model distinct states and failure variants explicitly.
 Prefer exhaustive variants, validated identifiers and units, ownership, immutable values, and total transformations when they remove a relevant bug family.
 Add no abstraction that protects no actual invariant.
 
-## Check at runtime boundaries
+## Validate at runtime boundaries
 
-Annotations leave JSON, environment variables, configuration, files, database rows, and remote responses unchecked.
-Check their shape, ranges, encoding, invariants, and version before constructing trusted domain values.
+Annotations don't validate JSON, environment variables, configuration, files, database rows, or remote responses.
+Validate their shape, ranges, encoding, invariants, and version before constructing trusted domain values.
 Preserve meaningful typed errors, and reject invalid transitions instead of coercing malformed input into a default.
 Check serialization and schema compatibility with actual consumers.
 
 Use `executable-policy` to make type checking and annotation rules authoritative in local commands, hooks, and required CI.
 Verify that the real gate rejects a missing annotation and a representative type error.
 When strengthening an existing project, block new unchecked code at once, and close the remaining scoped gaps within the authorized work.
-Keep any migration inventory explicit, and never let a baseline of old errors exempt new or changed code.
+A baseline of old errors never exempts new or changed code.

@@ -85,7 +85,7 @@ fn repository_rules_cover_hedging_comparison_lines_and_language() -> Result<()> 
         rules(&document("The cache probably holds the index.\n")?).contains(&"Dotfiles.Hedging")
     );
     assert!(
-        rules(&document("Unlike on macOS, the cache holds the index.\n")?)
+        rules(&document("Unlike on Linux, the cache holds the index.\n")?)
             .contains(&"Dotfiles.Comparison")
     );
     assert!(

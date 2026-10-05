@@ -7,27 +7,21 @@ description: >-
 
 # Architecture decision records
 
-An Architecture Decision Record (ADR) states why the system has an important constraint.
 Read the project's existing decisions before proposing a design.
-Keep the project's location, numbering, status vocabulary, and indexes.
+Keep its location, numbering, status vocabulary, and indexes.
 For a new collection, use `docs/adr/NNNN-short-decision.md`.
 
-Write a record when a choice affects a public contract, dependency direction, state model, trust boundary, persistence, compatibility, or a major operational constraint.
-A bug fix needs an ADR only when it changes such a decision.
+Write an ADR when a choice affects a public contract, dependency direction, state model, trust boundary, persistence, compatibility, or a major operational constraint.
 Routine refactors and implementation details need none.
 
-State the problem, the constraints, the decision, the rejected alternatives with reasons, and the resulting costs and benefits.
-Use `Status`, `Context`, `Decision`, and `Consequences` sections, and add alternatives where they clarify the choice.
-Name the decision, not the work that led to it.
+State the problem, constraints, decision, rejected alternatives with reasons, and costs and benefits, under `Status`, `Context`, `Decision`, and `Consequences`.
+Name the decision, not the work behind it.
 Link to code, invariants, tests, or specifications instead of copying them.
-Distinguish measured evidence, assumptions, proposals, and implemented behavior.
+Separate measured evidence, assumptions, proposals, and implemented behavior.
 
-Land a new decision with the change that relies on it, and check its enforceable claims with types or tests.
-Mark a record accepted only when the user accepts the decision.
+Land a new decision with the change that relies on it.
+Mark it accepted only when the user accepts it.
 Correct factual errors in place.
-Record a changed decision in a new linked ADR, and mark the old record superseded in whole or in part.
-Never rewrite an old record to claim the current design as the original decision.
-
-Keep instructions, reference material, and rationale in their existing homes.
+Record a changed decision in a new linked ADR, and mark the old one superseded or partly superseded.
+Never rewrite an old ADR to claim the current design as the original decision.
 Never write summaries, handoffs, progress logs, or verification narratives that repeat an ADR or the code.
-Give enough reasoning to revisit the choice.

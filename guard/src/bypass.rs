@@ -84,7 +84,7 @@ pub fn record(outcome: &str, category: Category, reason: &str, argv: &[String]) 
     }
 }
 
-/// The current Coordinated Universal Time as `YYYY-MM-DDTHH:MM:SSZ`.
+/// The current time in UTC as `YYYY-MM-DDTHH:MM:SSZ`.
 fn timestamp() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)

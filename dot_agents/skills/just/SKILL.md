@@ -10,7 +10,7 @@ description: >-
 Read the existing justfile and `just --list` before adding an entrypoint.
 Name commands for the result a developer needs, and reuse the repository's verification path.
 Use the configured mise environment for pinned tools.
-Keep one command for each behavior, without duplicate aliases.
+Keep one command for each behavior.
 
 Keep recipes thin, and have them invoke the project's build, lint, test, or typed Rust helper with clear arguments.
 Put parsing, conditional state changes, publication checks, retries, and resource cleanup in `xtask` or another Rust tool.
@@ -18,6 +18,6 @@ Express ordering with recipe dependencies, and run only independent work in para
 Keep mutation and publication commands apart from read-only checks, and make the default recipe safe.
 
 Preserve arguments and filenames on supported platforms, and choose the shell explicitly when needed.
-Check behavior on the installed version with [the manual](https://just.systems/man/en/).
+See [the manual](https://just.systems/man/en/).
 Test the affected recipes and their failure propagation, never the justfile text.
-Document recipes in help and existing contributor instructions, and list only user-facing commands in the README.
+List only user-facing commands in the README.

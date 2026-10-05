@@ -2,13 +2,12 @@
 name = "dotguard"
 version = "0.1.0"
 edition = "2024"
-# ocomment-core requires this Rust version, and guard shares its toolchain.
+# ocomment-core requires this MSRV, and guard shares its toolchain.
 rust-version = "1.88"
 description = "Local policy gate: refuses destructive git operations, foreign-script contamination and agent attribution"
 license = "MIT"
 publish = false
 
-# No dependencies.
 # The prose gate runs the ocomment binary, configured in `dot_config/ocomment/config.toml`.
 [dependencies]
 

@@ -11,27 +11,24 @@ Write a deterministic failing regression for the actual mechanism.
 For a timer, drive the relevant clock across its boundary.
 For a race, control the critical interleaving.
 For persistence, inject a failure at the commit boundary or inspect native syscall ordering.
-For a stale service result, supply distinct operation identities or revision identities to tell results apart.
-Tie assertions to observable contracts, not the implementation's wording or a copied algorithm.
+For a stale service result, give each result its own operation or revision identity.
+Tie assertions to observable contracts, not the implementation's wording.
 
 ## Layer the evidence
 
-Use fast pure specifications for decision rules, faithful adapter contracts for external data, and native integration checks for operating system behavior.
+Use fast pure specifications for decision rules, faithful adapter contracts for external data, and native integration checks for OS behavior.
 Use property-based testing to cover domain boundaries and shrink a failure to a kept regression.
 Record generated seeds, sizes, scheduler bounds, and relevant tool versions.
 Use model checking or formal assurance when it establishes the affected contract, and state bounds, assumptions, and the connection to production.
 Mutation testing checks whether the chosen regressions detect the broken rule.
-A passing sanitizer or model covers its admitted executions and supported semantics, not every external system.
 
 When tests share global state or writable resources, explore order independence and isolation explicitly.
 Give fixtures independent output directories, database identities, bound sockets, and configuration scopes.
 A single-threaded run can help find a sharing defect, but the fix must define legitimate sharing instead of hiding the race.
-Test error propagation, cancellation, retry, restart, and cleanup only where the contract includes those transitions.
 
 Run a bounded repeat or stress check when it answers a remaining uncertainty, and record its scope.
 Green reruns never prove a known intermittent failure fixed.
 Never adopt retries, ignored flaky tests, larger tolerances, or a quarantined gate as a permanent resolution.
-A temporary exception needs a task-specific decision and a clear outstanding defect.
 
 ## Preserve useful diagnostics
 
@@ -41,7 +38,5 @@ Capture cleanup errors without replacing the original failure.
 Bound diagnostic output and redact secrets without suppressing the information that explains the failure.
 Make timeout reports name the condition still pending.
 
-Reuse verified evidence until a changed source, platform, environment, or unresolved concern invalidates it.
 Use existing project gates and native machine commands before publication.
 Use `resource-coordination` for a large shared-machine campaign and `ci-budget` to keep diagnosis off hosted runs.
-Claim a design-level property only with the mechanism and evidence that establish it.

@@ -21,7 +21,6 @@ pub fn candidates() -> Vec<PathBuf> {
 }
 
 /// Git for Windows installs under `%ProgramFiles%` for all users or under `%LOCALAPPDATA%` for one user.
-/// The wrapper lives elsewhere, so neither path resolves back to it.
 #[cfg(windows)]
 pub fn candidates() -> Vec<PathBuf> {
     [
@@ -42,8 +41,6 @@ pub fn find() -> Option<PathBuf> {
 }
 
 /// A `Command` for the real git, for this process's own queries.
-///
-/// The hook entry points degrade a missing git to a warning, because the gated git operation fails without git as well.
 pub fn command() -> Option<Command> {
     find().map(Command::new)
 }

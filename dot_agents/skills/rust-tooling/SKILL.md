@@ -2,7 +2,7 @@
 name: rust-tooling
 description: >-
   Build automation, validation, and developer helpers as maintained Rust tools instead of ad hoc shell, Python, or JavaScript scripts.
-  Use when adding procedural tooling, not when invoking an existing command-line tool.
+  Use when adding procedural tooling, not when invoking an existing CLI.
 ---
 
 # Rust tooling
@@ -14,7 +14,7 @@ A direct call to a maintained tool needs no Rust, but parsing, loops, state chan
 Never leave a shell or Python prototype behind as a second implementation.
 
 Give the tool a scoped Cargo manifest, committed lockfile, explicit arguments, and accurate help.
-Keep private helpers unpublished, and choose dependencies that fit the supported platforms and oldest supported Rust version.
+Keep private helpers unpublished, and choose dependencies that fit the supported platforms and MSRV.
 Use `rust-invariants`, `development-assurance`, and `systematic-fixes` for the important boundaries.
 Separate pure planning and checks from effects, and model permitted operations with exhaustive variants.
 Read configuration and the process environment at the composition root, and pass concrete capabilities inward.
@@ -27,4 +27,3 @@ Keep ownership-based cleanup and causal errors instead of success-shaped fallbac
 Test observable contracts and failed transitions before adding the behavior.
 Exercise the real external boundary for assumptions a fake leaves unproven.
 Wire the helper into the existing project gates and dependency updates.
-An untested or unmaintained Rust file, or one that duplicates a trusted project tool, adds nothing.

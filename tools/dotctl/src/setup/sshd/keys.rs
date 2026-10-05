@@ -1,7 +1,7 @@
 //! Writes `administrators_authorized_keys` and locks it down.
 //!
 //! Windows' stock `sshd_config` ends with `Match Group administrators`, which makes sshd read this file instead of `~/.ssh/authorized_keys` for every administrator account.
-//! StrictModes refuses the file unless SYSTEM and the Administrators group hold the only permissions on it, and the client gets only a failed login.
+//! StrictModes refuses the file unless only SYSTEM and the Administrators group hold permissions on it.
 
 use std::path::Path;
 
@@ -11,7 +11,7 @@ use crate::setup::sshd::config;
 use crate::{env, proc};
 
 /// `NT AUTHORITY\SYSTEM` and `BUILTIN\Administrators`.
-/// Security identifiers, because a renamed or localized group breaks names.
+/// SIDs rather than names, which a renamed or localized group would break.
 const SYSTEM_SID: &str = "*S-1-5-18";
 const ADMINISTRATORS_SID: &str = "*S-1-5-32-544";
 
@@ -47,7 +47,7 @@ pub fn authorize(ssh_dir: &Path, key: &str, sshd_config: &str) -> Result<()> {
 
 /// Keeps every other key and appends this one.
 ///
-/// Compares only type and base64, because a rename in 1Password changes the comment field, and whole-line comparison would add a duplicate on each rename.
+/// Compares only type and base64, because the comment changes on each 1Password rename.
 fn merge(existing: &str, key: &str) -> String {
     let body = material(key);
     let mut lines: Vec<&str> = existing
@@ -68,8 +68,8 @@ fn material(line: &str) -> String {
         .join(" ")
 }
 
-/// `/inheritance:r` drops the inherited access entries, and `/grant:r` replaces instead of adding.
-/// Setting an administrator as owner needs a second call, because icacls rejects `/setowner` together with `/grant` with exit 87.
+/// `/inheritance:r` drops inherited ACEs, and `/grant:r` replaces instead of adding.
+/// The owner needs a second icacls call, because it rejects `/setowner` together with `/grant`, with exit 87.
 fn restrict(path: &Path) -> Result<()> {
     let mut acl = env::command("icacls.exe");
     acl.arg(path)
@@ -107,7 +107,7 @@ mod tests {
         assert_eq!(merge(&once, KEY), once);
     }
 
-    /// The same key with a different comment stays one key, because 1Password renames change only the comment.
+    /// A different comment still names the same key.
     #[test]
     fn a_renamed_key_does_not_duplicate() {
         let existing = format!("{KEY} old-name\r\n");

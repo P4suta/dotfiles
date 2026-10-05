@@ -1,7 +1,7 @@
 {
-  "revision": "c8584a57e2fce8e66fe3ab1ab62ba830f8ef477698d41da7dd41d4b154ded2ef",
+  "revision": "b9cb094cfae4de3c7adbef190eb0ced8e7d64f04f1b191f00c5b2580e6b40e13",
   "outcome": "keep",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/apple-notarization/SKILL.md"
   ],

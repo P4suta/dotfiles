@@ -1,13 +1,9 @@
 //! Strips AI attribution lines from a commit message.
 //!
-//! A session link exposes a private conversation in permanent, widely copied text.
-//! Claude Code rewrites `~/.claude/settings.json` at runtime, so the attribution settings there stay machine-local, and this hook enforces the rule on every machine.
-//! A forge composes a squash-merge message on its server, beyond the reach of any local hook.
-//!
-//! Each pattern anchors to trailer position, so human `Co-authored-by` trailers and prose that mentions Claude survive.
+//! Each pattern anchors to trailer position, so human `Co-authored-by` trailers and prose that mentions CLAUDE.md survive.
 //! The hook strips the lines instead of refusing the commit, and reports the count it removed.
 
-/// Reports whether this line credits an AI assistant.
+/// Reports whether this line credits an AI agent.
 fn is_attribution(line: &str) -> bool {
     let t = line.trim_start();
     let tail = t.trim_end();
@@ -22,7 +18,6 @@ fn is_attribution(line: &str) -> bool {
 
     // Co-Authored-By: <anything> <…@anthropic.com>
     //
-    // Match the address, which stays fixed while the display name changes with each model, so a human trailer never matches.
     if strip_prefix_ci(t, "co-authored-by:").is_some()
         && (tail.ends_with("@anthropic.com") || tail.ends_with("@anthropic.com>"))
     {
@@ -68,7 +63,6 @@ pub fn strip(text: &str) -> (String, usize) {
         return (text.to_owned(), 0);
     }
 
-    // Collapse the blank run that the trailer block leaves behind, so the message ends cleanly.
     while kept.last().is_some_and(|l| l.trim().is_empty()) {
         kept.pop();
     }

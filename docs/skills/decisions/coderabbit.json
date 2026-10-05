@@ -1,7 +1,7 @@
 {
-  "revision": "2b45bb75774326677583573c9a54e5dbdb818553712f78583d955d3337545d37",
+  "revision": "30de861bede912ac2185ea0c867117efda3b0a7c8b5150e2e90dbb1cfba139e3",
   "outcome": "implemented",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/coderabbit/SKILL.md",
     "xtask/src/review_guard.rs",

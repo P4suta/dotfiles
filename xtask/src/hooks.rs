@@ -143,7 +143,6 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
         std::io::stdin().read_to_end(&mut input)?;
     }
     let staged = matches!(hook, Hook::PreCommit).then(|| staged_tree(&native));
-    // Every host runs the same dotguard gates.
     if matches!(
         hook,
         Hook::PreCommit | Hook::CommitMsg | Hook::PrePush | Hook::PostCommit

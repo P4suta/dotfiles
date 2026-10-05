@@ -1,8 +1,7 @@
 //! Native `profile apply` rehearsal on a disposable host.
 //!
-//! The profile gate renders and applies files in owned fixtures and never exercises setup scripts, native verification, rollback, or the takeover of a machine that earlier repositories provisioned.
+//! The profile gate's owned fixtures never exercise setup scripts, native verification, rollback, or the takeover of a machine that earlier repositories provisioned.
 //! This module seeds earlier provisioning and runs the real `profile apply` on the host's own home three times, the second rerunning every script.
-//! Those paths then fail in CI instead of on an owner's machine.
 
 use crate::profile_rules::Profile;
 use crate::profiles::{NativeAction, forget_script_runs, native_profile, operate};
@@ -54,7 +53,6 @@ fn toml_string(value: &str) -> String {
 }
 
 /// The machine-local configuration for the rehearsal: an anonymous identity, no secrets, and one representative entry in each provisioning list.
-/// Lists keep entries that later steps invoke, and the reduction empties maps key by key because configuration data merges into maps rather than replacing them.
 pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<String> {
     let data: serde_json::Value =
         serde_json::from_slice(&fs::read(root.join(".chezmoidata.json"))?)?;
@@ -77,7 +75,6 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
             toml_string(skip.reason)
         ));
     }
-    // The scripts to run decide which packages survive the reduction, so the rehearsal data always matches each step's declared requirements.
     let kept = required_packages(root, profile, home, &identity)?;
     let keep = |pointer: &str| -> Vec<String> {
         kept.iter()
@@ -239,7 +236,6 @@ pub fn run(root: &Path, disposable_host: bool) -> Result<()> {
     let preserved = seed_history(&home)?;
     let state = scope.path().join("state");
     // The middle round reruns every script on the host the first round provisioned, as `profile apply` does when it takes over an earlier repository's machine or a script changes.
-    // The last round changes nothing.
     for (round, rerun_scripts) in [
         ("first", false),
         ("reprovisioning", true),

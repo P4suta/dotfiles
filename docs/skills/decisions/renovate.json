@@ -1,7 +1,7 @@
 {
-  "revision": "b56d0f2e645c58fa7985fdbd5916fd6bdc4f9da659f448564a18142c4ad4d309",
+  "revision": "819d63d845c78cc165ade982ee978bfb10b8e29ff3299474cb748521b3437505",
   "outcome": "keep",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/renovate/SKILL.md"
   ],

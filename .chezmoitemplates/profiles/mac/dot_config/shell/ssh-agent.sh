@@ -1,10 +1,9 @@
 # shellcheck shell=sh
-# Select the socket that holds the commit-signing key.
-# A local session uses the 1Password socket in its app-group container.
-# A remote SSH session keeps the socket that sshd forwards.
-# A Herdr pane uses the Herdr socket while `herdr-agent ready` reports loaded keys, and falls back to 1Password otherwise.
-# GIT_SSH_COMMAND also points Git there, because ~/.ssh/config pins IdentityAgent to 1Password for every host.
-# Turn on the 1Password setting under Developer once.
+# Select the SSH agent that holds the commit-signing key.
+# A local session uses the 1Password SSH agent.
+# A remote session keeps the agent that sshd forwards.
+# A herdr pane uses the herdr-agent socket while `herdr-agent ready` reports loaded keys.
+# GIT_SSH_COMMAND also points Git there, because ~/.ssh/config pins IdentityAgent to 1Password.
 onepassword_agent="${HOME}/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
 herdr_agent=""
 if [ -n "${HERDR_ENV:-}" ] && [ -z "${SSH_CONNECTION:-}" ] && [ -x "${HOME}/.local/bin/herdr-agent" ]; then

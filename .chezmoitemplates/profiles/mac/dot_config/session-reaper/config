@@ -1,32 +1,27 @@
-# Configuration for ~/.local/bin/session-reaper, which sources this file on each run.
-# Change a value here and run `chezmoi apply`, which overwrites direct edits to ~/.config/session-reaper/config.
+# Read by ~/.local/bin/session-reaper on each run.
+# Change a value here and run `chezmoi apply`, which overwrites direct edits.
 
 # Mode: report or reap.
-# report logs and notifies, and never ends a process.
-# reap ends tier A processes: stopped, orphaned, and confirmed across the grace period.
+# report only logs and notifies.
+# reap ends tier A processes.
 # Tier B, running orphans, stays report-only in every mode.
-# Set `report` and apply again to roll back.
+# Set `report` and apply to roll back.
 SESSION_REAPER_MODE=reap
 
 # Tier A: least age in seconds of a stopped orphan.
 SESSION_REAPER_STOPPED_MIN_AGE=3600
 
-# Tier A: seconds a process must stay a stopped orphan, across a prior run, before the reaper ends it.
-# The wait avoids sampling a process mid-transition.
+# Tier A: seconds a process must stay a stopped orphan, across a prior run, before it ends.
 SESSION_REAPER_GRACE_SECONDS=1800
 
-# Tier B: least age in seconds of a reported running orphan without a controlling terminal.
+# Tier B: least age in seconds of a reported running orphan without a tty.
 SESSION_REAPER_RUNNING_MIN_AGE=259200
 
-# Anchored extended pattern of short process names that even tier A never touches.
-# The macOS list adds launchd and the parked Electron helpers of editors such as Visual Studio Code.
+# Anchored ERE of process names that tier A never touches.
 SESSION_REAPER_ALLOW_REGEX=^(tmux.*|screen.*|sshd|launchd|herdr|ssh-agent|gpg-agent|Code Helper.*|Electron|node|session-reaper)$
 
 # Tier B reports only executables under these prefixes.
-# On macOS, launchd parents every user process, so a parent process identifier of 1 says nothing about orphaning.
-# The double quotes let the shell expand the variable when the script sources this file.
 SESSION_REAPER_USER_PATH_REGEX="^(${HOME}|/opt/homebrew|/usr/local)/"
 
 # Desktop notifications: 1 on, 0 off.
-# The audit log goes to ~/.local/state/dotfiles/log/session-reaper.log.
 SESSION_REAPER_NOTIFY=1

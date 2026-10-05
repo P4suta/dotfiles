@@ -1,5 +1,5 @@
 ---
-# Read-only assertions that run only with `--tags verify`, because the import in site.yml carries `never`.
+# Read-only assertions that run only with `--tags verify`.
 
 - name: Check Docker daemon is reachable from workspace user
   become: true
@@ -24,7 +24,7 @@
     fail_msg: |
       tailscale up has not completed. Run `sudo tailscale up --ssh --operator={{ workspace_user }}` by hand.
 
-# mise manages ripgrep under `$HOME`, so the system tier leaves it unchecked.
+# mise manages ripgrep, so this check skips it.
 - name: Gather apt package facts
   become: true
   ansible.builtin.package_facts:

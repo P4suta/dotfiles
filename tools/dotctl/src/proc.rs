@@ -1,7 +1,7 @@
 //! Child process helpers.
 //!
 //! Moves output as bytes, never as text that a shell decoded.
-//! The ja-JP console uses code page 932, and decoding through a shell mangles validator input.
+//! The ja-JP console uses CP932, so a shell decode mangles validator input.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -9,7 +9,6 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result, bail};
 
 /// A child's exit code, or 1 for a signal death.
-/// `?` alone reports only a failure to start, so the lints reject discarding this value.
 #[must_use = "check the exit code with `require` or return it; `?` alone does not"]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Exit(i32);
@@ -24,7 +23,7 @@ impl Exit {
     }
 }
 
-/// Runs a command with its output passed straight to the terminal and returns its exit code.
+/// Runs a command with inherited output and returns its exit code.
 pub fn status(cmd: &mut Command) -> Result<Exit> {
     let status = cmd
         .status()
@@ -32,7 +31,7 @@ pub fn status(cmd: &mut Command) -> Result<Exit> {
     Ok(Exit(status.code().unwrap_or(1)))
 }
 
-/// Runs a command with its output passed straight to the terminal and fails unless it exits with 0.
+/// Runs a command with inherited output and fails unless it exits successfully.
 pub fn run(cmd: &mut Command) -> Result<()> {
     let exit = status(cmd)?;
     if !exit.success() {
@@ -41,7 +40,6 @@ pub fn run(cmd: &mut Command) -> Result<()> {
     Ok(())
 }
 
-/// Output of a captured run.
 #[derive(Debug)]
 pub struct Captured {
     pub code: i32,
@@ -55,7 +53,6 @@ impl Captured {
     }
 
     /// stdout as text, with invalid sequences replaced.
-    /// A validator that prints code page 932 in an error stays readable and never crashes dotctl.
     pub fn stdout_text(&self) -> String {
         String::from_utf8_lossy(&self.stdout).into_owned()
     }
@@ -72,7 +69,6 @@ impl Captured {
     }
 }
 
-/// Runs a command and captures both streams.
 pub fn capture(cmd: &mut Command) -> Result<Captured> {
     let output = cmd
         .stdin(Stdio::null())
@@ -105,7 +101,7 @@ fn describe(cmd: &Command) -> String {
     parts.join(" ")
 }
 
-/// UTF-8 without a byte order mark, which would change what taplo, git config, and PowerShell read on the first line.
+/// UTF-8 without a BOM, which changes what taplo, git config and PowerShell read on the first line.
 ///
 /// Closes the handle and keeps only the path, because Windows refuses a second opener while the handle stays open.
 /// Dropping the returned value deletes the file.

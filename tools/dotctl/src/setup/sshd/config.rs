@@ -8,7 +8,6 @@
 /// Marks directives that this tool appended.
 const MARKER: &str = "# --- managed by dotfiles-win ---";
 
-/// The position of a line relative to one directive name.
 #[derive(Debug, PartialEq, Eq)]
 enum Kind {
     /// `Port 22`, in force.
@@ -44,9 +43,8 @@ fn classify(line: &str, name: &str) -> Kind {
     }
 }
 
-/// Applies `directives` to `original` and returns the new file contents.
+/// Applies `directives` to `original`.
 ///
-/// Every line ends in `CRLF`, like the stock file and the files that OpenSSH for Windows writes.
 pub fn apply(original: &str, directives: &[(&str, String)]) -> String {
     let lines: Vec<&str> = original
         .split('\n')

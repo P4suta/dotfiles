@@ -6,7 +6,6 @@ Status: accepted.
 
 Agents write commit messages, pull request and issue bodies, documentation, comments, and chat replies.
 Only the line layout of comments had a check, so style, language, and hedging varied with each writer.
-Some text named the person who asked for a change instead of the change itself.
 
 ## Decision
 
@@ -44,12 +43,12 @@ An offline `pr-workflow check` has no fork status, so it applies the standard to
 
 `policy/prose.toml` holds the exemptions, each with paths, an optional rule list, and a reason.
 Exemptions cover only text that people in this repository never write, such as the vendored style packages.
+Established terms live in the Vale vocabulary, and a finding gets deletion or restructuring, never a synonym.
 No ledger admits existing findings, so every finding outside an exemption fails.
 Vale skips a document line that holds only a template action.
 Kani proves the exemption, destination, and rewrite rules in `xtask/src/prose_rules.rs`.
 
-A reply hook marks the session when it requests a rewrite.
-A continued turn without that mark, such as a turn that another Stop hook continued, still gets its one rewrite request.
+A continued turn that lacks the rewrite mark, such as one another Stop hook continued, still gets its one rewrite request.
 
 ## Alternatives
 

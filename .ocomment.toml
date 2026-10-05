@@ -1,4 +1,4 @@
-# This repository's gate repeats the two settings of `dot_config/ocomment/config.toml`, because a continuous integration runner has no `~/.config/ocomment`.
+# Repeats `dot_config/ocomment/config.toml`, which a CI runner lacks.
 version = 1
 
 # Remove nothing.
@@ -13,9 +13,9 @@ wrap = "sentence"
 [files]
 exclude = ["dot_config/prose/styles/**"]
 
-# Chezmoi source names hide the format behind `dot_` and `.tmpl`, so these overrides name it.
+# Source names hide the format behind `dot_` and `.tmpl`, so these overrides name it.
 # Only the prose partials hold Markdown.
-# The profile leaves under `.chezmoitemplates/profiles/` hold configuration that a sentence reflow would corrupt.
+# The profile leaves hold configuration that a reflow would corrupt.
 [[overrides]]
 paths = [
   "**/*.md.tmpl",
@@ -53,7 +53,7 @@ paths = [
 ]
 language = "toml"
 
-# These files share only shell comment and string syntax, which suffices for the prose rules.
+# These files share only shell comment and string syntax.
 [[overrides]]
 paths = [
   "dot_bashrc.tmpl",
@@ -71,7 +71,7 @@ paths = [
 ]
 language = "shell"
 
-# In pattern lists, `#` opens a comment only at the start of a line, as in the built-in `hash-line` profile.
+# In pattern lists, `#` opens a comment only at the start of a line.
 [profiles.chezmoi-list]
 name = "chezmoi-list"
 filenames = [".chezmoiignore", ".chezmoiremove"]

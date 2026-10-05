@@ -3,10 +3,9 @@
 //! Windows ships OpenSSH.Server as an uninstalled capability, so this command creates the capability, the service, the host keys, `sshd_config`, the firewall rule, and the login shell.
 //!
 //! # Privilege model
-//! Every step needs an administrator token, and the rest of the apply writes to `$HOME` as the user, so only this command elevates.
+//! Every step needs an administrator token, and only this command elevates.
 //! `dotctl setup sshd` reruns itself elevated through `assets/elevate.ps1` and prints the elevated run's log.
 //! Declining the prompt produces a warning, not a failed apply.
-//! A nonzero exit makes the profile apply restore managed files, and an unanswered User Account Control (UAC) dialog must never roll back unrelated files.
 
 mod config;
 mod keys;
@@ -44,8 +43,7 @@ pub fn run(options: &Options) -> Result<i32> {
 
 /// Re-runs this command elevated and replays its log.
 ///
-/// The command skips detecting an existing administrator token.
-/// `Start-Process -Verb RunAs` from an elevated process raises no prompt, and each detection method needs unsafe code or a localized parse.
+/// No administrator-token detection: `Start-Process -Verb RunAs` from an elevated process raises no prompt.
 fn elevate(options: &Options) -> Result<i32> {
     let exe = std::env::current_exe().context("locating dotctl")?;
     let log = std::env::temp_dir().join("dotctl-sshd.log");
@@ -76,7 +74,6 @@ fn elevate(options: &Options) -> Result<i32> {
         .context("starting the elevation helper")?;
 
     // The elevated window stays hidden, so its output appears only here.
-    // Tailing the log live shows a hanging or throwing step while it happens.
     let mut tail = LogTail::new(&log);
     let status = loop {
         tail.drain();
@@ -104,7 +101,7 @@ fn elevate(options: &Options) -> Result<i32> {
             log.display()
         );
     }
-    // Never fail the apply over this, as the module comment explains.
+    // Never fail the apply over this.
     Ok(0)
 }
 
@@ -224,7 +221,7 @@ fn install(options: &Options) -> Result<i32> {
     );
     let mut config_changed = updated != original;
     if config_changed {
-        // No byte order mark, because sshd would read it as part of the first directive.
+        // sshd would read a BOM as part of the first directive.
         std::fs::write(&config_path, updated.as_bytes())?;
         println!(
             "    sshd_config: port {}, pubkey auth on, password auth {}",
@@ -266,7 +263,7 @@ fn install(options: &Options) -> Result<i32> {
 
 /// Runs the PowerShell effector and parses its JSON.
 ///
-/// Uses Windows PowerShell 5.1, because `DISM` ships as a 5.1 module, and Get-WindowsCapability under an elevated pwsh 7 fails with `Class not registered`.
+/// Uses Windows PowerShell 5.1, because Get-WindowsCapability under an elevated pwsh 7 fails with `Class not registered`.
 /// See the helper's header.
 fn host(args: &[&str]) -> Result<Value> {
     let helper = proc::write_temp(HOST_HELPER, ".ps1")?;
@@ -282,7 +279,6 @@ fn host(args: &[&str]) -> Result<Value> {
     .args(args)
     // stdout carries only the JSON.
     // stderr passes the helper's progress and errors straight through, into the live log under elevation.
-    // A capability install downloads hundreds of megabytes from Windows Update, so live progress matters.
     .stderr(std::process::Stdio::inherit());
     let text = proc::capture_ok(&mut cmd).context("querying the Windows OpenSSH state")?;
     serde_json::from_str(text.trim())
@@ -316,7 +312,7 @@ fn wait_for_config(ssh_dir: &Path) -> Result<PathBuf> {
 }
 
 /// `HKLM\SOFTWARE\OpenSSH\DefaultShell` decides what an inbound session lands in.
-/// Without it, sessions land in cmd.exe, which the remote tooling fails to drive.
+/// Without it, sessions land in cmd.exe.
 fn set_default_shell(choice: &str) -> Result<()> {
     const KEY: &str = r"HKLM\SOFTWARE\OpenSSH";
 
@@ -331,7 +327,7 @@ fn set_default_shell(choice: &str) -> Result<()> {
         eprintln!("Falling back to Windows' default shell. To get pwsh sessions:");
         eprintln!("  winget install Microsoft.PowerShell   # the MSI build, not the Store one");
         eprintln!("  just sshd");
-        // Clear any earlier value, because a DefaultShell that fails to exec breaks every login with `exec request failed on channel 0` and no explanation.
+        // Clear any earlier value, because a DefaultShell that fails to exec breaks every login.
         clear_default_shell(KEY);
         println!("    login shell: Windows default (cmd.exe)");
         return Ok(());
@@ -364,10 +360,8 @@ fn reg_set(key: &str, value: &str, data: &str) -> Result<()> {
 ///
 /// Skips the first pwsh.exe on PATH, because that resolves to a mise shim here, and a shim login shell runs mise resolution before every inbound session.
 ///
-/// Skips the Store build through both of its paths.
-/// sshd fails to exec an `MSIX` binary, whether through its `App Execution Alias` reparse point, which needs app-model resolution, or through the versioned path under WindowsApps.
-/// The client gets only `exec request failed on channel 0`, and the server log stays silent.
-/// This repository's prerequisites list the `MSI` build, which works.
+/// Skips the Store build, because sshd fails to exec an MSIX binary through its App Execution Alias or the versioned path under WindowsApps.
+/// The client gets only `exec request failed on channel 0`.
 fn which_pwsh() -> Option<PathBuf> {
     if let Some(msi) = std::env::var_os("ProgramFiles")
         .map(|dir| PathBuf::from(dir).join("PowerShell/7/pwsh.exe"))
@@ -382,7 +376,7 @@ fn which_pwsh() -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-/// `MSIX` binaries and their aliases, which sshd fails to exec.
+/// MSIX binaries and their aliases, which sshd fails to exec.
 fn is_packaged_dir(dir: &Path) -> bool {
     dir.components()
         .any(|part| part.as_os_str().eq_ignore_ascii_case("WindowsApps"))
@@ -477,7 +471,7 @@ mod tests {
         }
     }
 
-    /// The elevated child parses this again, so a value that fails to round-trip costs a UAC prompt to discover.
+    /// The elevated child parses this again, so it must round-trip.
     #[test]
     fn the_elevated_child_gets_every_knob_and_the_flag() {
         let args = arguments(&options());

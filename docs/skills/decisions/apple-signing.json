@@ -1,7 +1,7 @@
 {
-  "revision": "d5b5640d6b6782babd9a3ecdd990ec7e8789d278fa7d652f3aaea0a6cb3b27c3",
+  "revision": "cbea6f0ec258936cc9cfda170f9412d729ec18216b9eb729177bbc4b9870c51e",
   "outcome": "keep",
-  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/apple-signing/SKILL.md"
   ],

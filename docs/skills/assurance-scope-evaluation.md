@@ -1,8 +1,7 @@
 # Proof-first scope evaluation
 
 Every implementation change needs an assessment, and every supported deterministic property needs a source-bound proof.
-An alternative counts as evidence only at a defined boundary, never as a global opt-out or a new label for a failed proof.
-The shared entry point routes tool-specific material to conditional references and keeps project facts out of the skill.
+An alternative counts as evidence only at a defined boundary.
 
 | Task | Required decision | Regression evidence |
 | --- | --- | --- |
@@ -12,10 +11,8 @@ The shared entry point routes tool-specific material to conditional references a
 | Check an HTTP or cloud adapter | Prove supported decisions, state external semantics, and require native integration and failure checks | Classification refuses a timeout as its reason, and omission, duplicates, empty rationale, and missing controls fail the assessment |
 | Add a theorem about a small abstract graph | Record its model bound and implementation refinement before claiming production coverage | An exploratory four-edge theorem never discharges a required production contract or authorizes complete search |
 
-The companion implementation in cipher-break binds each required result to its production sources and keeps separate scoped-completion and whole-search checks.
-Its targeted refusal regressions and the source-importing admission proof exercise the decisions in the table.
-The catalog checks cover names, frontmatter, references, and shared discovery aliases.
-This record lists observed scenarios and makes no claim that prose checks prove instruction compliance.
+The companion implementation in cipher-break binds each required result to its production sources.
+This record makes no claim that prose checks prove instruction compliance.
 
 ## Native verification and installation
 
@@ -25,5 +22,4 @@ Linux check job `linux:4fac1896412442e3d6ed0f209710d90e` and Windows check job `
 
 Installation finished on the Mac and through `linux:c3dfd674fd0d394e9a5a378bd82a2ab7` and `win:37303eacad6bcc8743a40d143db7e22c`.
 Each host used its own chezmoi profile for the Codex, Claude Code, and OpenCode policy files, and the policy diff changed only the formal-assurance rule.
-The installer refreshed the canonical skills, client discovery, and native skill-ops executable, and kept local observation history and credentials.
-Installing collector definitions establishes no live observation in a client until it runs.
+The installer kept local observation history and credentials.

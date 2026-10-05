@@ -21,7 +21,7 @@ An existing test suite removes no relevant obligation.
 
 Read current official documentation and maintained upstream repositories before choosing or updating a tool.
 Verify supported language versions, target semantics, maintenance, licensing, installation provenance, runtime cost, and compatibility with the project's other checks.
-Reject tools that add no coverage, and replace an obsolete tool only after preserving the properties it established.
+Replace an obsolete tool only after preserving the properties it established.
 Read [Rust verification](references/rust.md) for Rust-specific interpretation and tool constraints.
 
 Install and pin the chosen tools through the project's existing `mise` and locked package conventions.
@@ -42,5 +42,4 @@ When a new tool or configuration proves useful, inventory the owner's active pro
 Carry the proven behavior to compatible projects in small independent changes, and adapt language versions, targets, and check entry points.
 Track adoption, incompatibility with concrete evidence, and pending work instead of assuming every repository migrated.
 New projects inherit the current capability baseline, and an old project's absence from a recent task grants no permanent exemption.
-Reassess discovery when starting a project, changing a language or dependency boundary, or processing a tool update.
 Use `skill-operations` to record adoption evidence and proposals that move repeated assurance work into maintained checks.
