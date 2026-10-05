@@ -14,6 +14,11 @@ mod sessionreaper;
 mod util;
 
 fn main() -> std::process::ExitCode {
+    // The agents reap Unix processes through ps, grep, launchd, and systemd; Windows has no installation of them.
+    if cfg!(not(unix)) {
+        eprintln!("reaper maintains Unix processes and does not run on Windows");
+        return std::process::ExitCode::from(2);
+    }
     let argv0 = std::env::args().next().map_or_else(
         || "reaper".to_owned(),
         |a| a.rsplit('/').next().unwrap_or("reaper").to_owned(),

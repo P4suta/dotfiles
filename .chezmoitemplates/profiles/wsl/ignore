@@ -34,7 +34,6 @@ lefthook.yml
 .config/fcitx5
 .config/fzf
 .config/ghostty
-.config/git/template
 .config/herdr
 .config/herdr-agent
 .config/homebrew

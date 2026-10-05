@@ -57,10 +57,10 @@ pub fn waived(category: Category) -> bool {
 /// Append one line to the bypass log.
 /// Failures are swallowed: not being able to write the audit trail must never be the reason a git command dies.
 pub fn record(outcome: &str, category: Category, reason: &str, argv: &[String]) {
-    let Some(home) = std::env::var_os("HOME") else {
+    let mut path = crate::locate::home();
+    if path.as_os_str().is_empty() {
         return;
-    };
-    let mut path = std::path::PathBuf::from(home);
+    }
     path.push(".local/state");
     let _ = std::fs::create_dir_all(&path);
     path.push("git-bypass.log");

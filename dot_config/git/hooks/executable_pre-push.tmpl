@@ -5,4 +5,6 @@
 {{ includeTemplate "profiles/linux/dot_config/git/hooks/executable_pre-push.tmpl" $context }}
 {{- else if eq .profile "wsl" -}}
 {{ includeTemplate "profiles/wsl/dot_config/git/hooks/executable_pre-push.tmpl" $context }}
+{{- else if eq .profile "windows" -}}
+{{ includeTemplate "profiles/windows/dot_config/git/hooks/executable_pre-push.tmpl" $context }}
 {{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}

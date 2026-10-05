@@ -12,7 +12,6 @@ mod json;
 use dotguard::locate;
 use json::Value;
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{ExitCode, Stdio};
 
@@ -23,6 +22,11 @@ const USAGE: &str = "usage: herdr-agent ensure|ready|status|lock\n\n  \
     lock    remove every key from the agent";
 
 fn main() -> ExitCode {
+    // The agent is a Unix-socket ssh-agent; Windows provisions Herdr's agent through dotctl instead.
+    if cfg!(not(unix)) {
+        eprintln!("herdr-agent manages a Unix-socket SSH agent and does not run on Windows");
+        return ExitCode::from(2);
+    }
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
@@ -106,8 +110,12 @@ fn ensure(sock: &Path, keys_file: &Path) -> u8 {
 fn start(sock: &Path) -> Result<(), String> {
     let dir = sock.parent().ok_or("socket has no parent directory")?;
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
-        .map_err(|e| format!("{}: {e}", dir.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
     // A socket left behind by a dead agent would make ssh-agent refuse to bind.
     let _ = std::fs::remove_file(sock);
     let ok = locate::child("ssh-agent")

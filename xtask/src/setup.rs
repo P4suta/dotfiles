@@ -350,6 +350,32 @@ pub(crate) fn cargo_install_arguments(
     arguments
 }
 
+/// Windows cannot `exec` from a launcher script, so a copy of dotguard named `git.exe` is the Git wrapper, which the PowerShell profile places ahead of Git for Windows.
+/// A running `git.exe` can be renamed but not overwritten, so a changed copy moves the old one aside first.
+pub fn git_wrapper(bin: &Path) -> Result<()> {
+    let wrapper = bin.join("git.exe");
+    let wanted = fs::read(bin.join("dotguard.exe")).context("dotguard.exe is not installed")?;
+    if fs::read(&wrapper).is_ok_and(|current| current == wanted) {
+        return Ok(());
+    }
+    if wrapper.exists() {
+        let aside = bin.join(format!("git.exe.{}.old", std::process::id()));
+        fs::rename(&wrapper, &aside)
+            .with_context(|| format!("move {} aside", wrapper.display()))?;
+    }
+    replace(&wrapper, &wanted, true)?;
+    for entry in fs::read_dir(bin)?.flatten() {
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with("git.exe.")
+            && name.to_string_lossy().ends_with(".old")
+        {
+            // A copy that a running git still holds stays until a later application.
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+    Ok(())
+}
+
 fn install_crate(
     context: &ContextData,
     runner: &mut impl Runner,
@@ -404,6 +430,8 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
             )?;
             if context.profile == Profile::Windows {
                 install_crate(context, runner, "tools/dotctl", &["dotctl"])?;
+                install_crate(context, runner, "guard", &["dotguard"])?;
+                git_wrapper(&context.home.join(".local/bin"))?;
             } else {
                 install_crate(
                     context,

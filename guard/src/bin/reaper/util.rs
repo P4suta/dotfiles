@@ -201,7 +201,7 @@ pub fn grep_matching(pattern: &str, lines: &[String]) -> Option<Vec<usize>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{epoch_of, etime_seconds, grep_matching};
+    use super::{epoch_of, etime_seconds};
 
     #[test]
     fn rfc3339_round_trips_through_known_instants() {
@@ -222,8 +222,11 @@ mod tests {
         assert_eq!(etime_seconds("garbage"), 0);
     }
 
+    /// The adapter runs the host's `/usr/bin/grep`, which exists only on Unix.
+    #[cfg(unix)]
     #[test]
     fn grep_matching_reports_indices() {
+        use super::grep_matching;
         let lines: Vec<String> = vec!["java".into(), "sleep".into(), "gradlew".into()];
         let hits = grep_matching("java|gradle|kotlin", &lines);
         assert_eq!(hits, Some(vec![0, 2]));

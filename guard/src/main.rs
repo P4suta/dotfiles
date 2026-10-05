@@ -2,7 +2,7 @@
 //!
 //! One binary behind three entry points, all of them installed globally rather than per-repository:
 //!
-//! ~/.local/bin/git            -> `dotguard git …`         (argv policy, then exec) ~/.config/git/hooks/pre-push   -> `dotguard pre-push`   (force-push gate) ~/.config/git/hooks/commit-msg -> `dotguard commit-msg` (attribution, language) ~/.config/git/hooks/pre-commit -> `dotguard pre-commit` (language, staged diff)
+//! ~/.local/bin/git            -> `dotguard git …`         (argv policy, then exec; on Windows a copy named git.exe is the wrapper itself) ~/.config/git/hooks/pre-push   -> `dotguard pre-push`   (force-push gate) ~/.config/git/hooks/commit-msg -> `dotguard commit-msg` (attribution, language) ~/.config/git/hooks/pre-commit -> `dotguard pre-commit` (language, staged diff)
 //!
 //! `core.hooksPath` in ~/.gitconfig points every repository on the machine at that hooks directory, so none of this is something a repository has to opt into — or can forget to.
 //! lefthook still runs per-repo gates underneath; these are the rules that hold everywhere, including in a repository cloned five minutes ago.
@@ -14,11 +14,16 @@ use dotguard::{
 
 use bypass::Category;
 use std::io::Write;
-use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut process_args = std::env::args();
+    let invoked = process_args.next().unwrap_or_default();
+    let args: Vec<String> = process_args.collect();
+    if invoked_as_git(&invoked) {
+        return git_wrapper(&args);
+    }
     let Some(cmd) = args.first().map(String::as_str) else {
         usage();
         return ExitCode::FAILURE;
@@ -44,6 +49,13 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Windows cannot `exec` from a shell launcher, so a copy of this binary named `git.exe` stands in front of Git for Windows and applies the policy itself.
+fn invoked_as_git(argv0: &str) -> bool {
+    Path::new(argv0)
+        .file_stem()
+        .is_some_and(|stem| stem.eq_ignore_ascii_case("git"))
 }
 
 fn code(n: i32) -> ExitCode {
@@ -96,13 +108,60 @@ fn git_wrapper(argv: &[String]) -> ExitCode {
     }
 
     let Some(real) = realgit::find() else {
-        eprintln!("::error:: no git found in /opt/homebrew/bin, /usr/local/bin or /usr/bin");
+        eprintln!(
+            "::error:: no git found at {}",
+            realgit::candidates()
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
         return ExitCode::from(127);
     };
+    delegate(&real, argv)
+}
+
+/// Replaces this process with the real git, so no extra process holds a pipe open.
+#[cfg(unix)]
+fn delegate(real: &Path, argv: &[String]) -> ExitCode {
+    use std::os::unix::process::CommandExt;
     // exec() only returns on failure.
-    let err = std::process::Command::new(&real).args(argv).exec();
+    let err = std::process::Command::new(real).args(argv).exec();
     eprintln!("::error:: could not exec {}: {err}", real.display());
     ExitCode::from(126)
+}
+
+/// Runs the real git and exits with its status, because Windows has no `exec`.
+#[cfg(windows)]
+fn delegate(real: &Path, argv: &[String]) -> ExitCode {
+    ignore_console_interrupts();
+    match std::process::Command::new(real).args(argv).status() {
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Err(err) => {
+            eprintln!("::error:: could not run {}: {err}", real.display());
+            ExitCode::from(126)
+        }
+    }
+}
+
+/// The console sends Ctrl+C to every attached process; git handles it itself, and the wrapper waits so the shell returns only after git has exited.
+/// A handler is registered instead of the null handler, because the ignore flag the null handler sets is inherited by git.
+#[cfg(windows)]
+fn ignore_console_interrupts() {
+    unsafe extern "system" fn swallow(_event: u32) -> i32 {
+        1
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn SetConsoleCtrlHandler(
+            handler: Option<unsafe extern "system" fn(u32) -> i32>,
+            add: i32,
+        ) -> i32;
+    }
+    // SAFETY: `swallow` is a valid handler for the life of the process, touches no state, and only reports each control event as handled.
+    unsafe {
+        SetConsoleCtrlHandler(Some(swallow), 1);
+    }
 }
 
 /// The language policy for the repository we are standing in.

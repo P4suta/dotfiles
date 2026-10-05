@@ -16,9 +16,6 @@ AppData/Roaming/herdr/config.toml
 .claude/settings.json
 .config/git/config
 .config/git/hooks/renovate-freshness.sh
-.config/git/template/hooks/commit-msg
-.config/git/template/hooks/post-commit
-.config/git/template/hooks/pre-push
 .config/kitty/kitty.conf
 .config/kitty/tokyo-night.conf
 .config/fcitx5/config
@@ -94,9 +91,6 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .config/git/config
 .config/git/hooks/dotguard-delegate.sh
 .config/git/ignore
-.config/git/template/hooks/commit-msg
-.config/git/template/hooks/post-commit
-.config/git/template/hooks/pre-push
 .config/herdr-agent/keys
 .config/homebrew/Brewfile
 .config/lazygit/config.yml
@@ -167,15 +161,8 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .config/fzf/fzfrc
 .config/gh/config.yml
 .config/ghostty/config
-.config/git/hooks/commit-msg
 .config/git/hooks/dotguard-delegate.sh
 .config/git/hooks/lefthook-delegate.sh
-.config/git/hooks/post-checkout
-.config/git/hooks/post-commit
-.config/git/hooks/post-merge
-.config/git/hooks/pre-commit
-.config/git/hooks/pre-push
-.config/git/hooks/reference-transaction
 .config/git/hooks/renovate-freshness.sh
 .config/git/hooks/storage-scout-delegate.sh
 .config/git/ignore
@@ -286,9 +273,6 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .config/git/hooks/renovate-freshness.sh
 .config/git/hooks/storage-scout-delegate.sh
 .config/git/ignore
-.config/git/template/hooks/commit-msg
-.config/git/template/hooks/post-commit
-.config/git/template/hooks/pre-push
 .config/herdr-agent/keys
 .config/herdr/config.toml
 .config/homebrew/Brewfile

@@ -7,13 +7,29 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+/// The user's home: `HOME`, or `USERPROFILE` on Windows, where native processes usually have no `HOME`.
+pub fn home() -> PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| {
+            if cfg!(windows) {
+                std::env::var_os("USERPROFILE")
+            } else {
+                None
+            }
+        })
+        .map(PathBuf::from)
+        .unwrap_or_default()
+}
+
 /// The PATH children of this gate should see.
 pub fn hook_path() -> String {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default();
+    let home = home();
     let mut dirs: Vec<PathBuf> = Vec::new();
-    let shims = home.join(".local/share/mise/shims");
+    let shims = home.join(if cfg!(windows) {
+        "AppData/Local/mise/shims"
+    } else {
+        ".local/share/mise/shims"
+    });
     if shims.is_dir() {
         dirs.push(shims);
     }
@@ -39,7 +55,12 @@ pub fn child(program: &str) -> Command {
 
 /// The first `program` visible on that PATH.
 pub fn which(program: &str) -> Option<PathBuf> {
+    let names: Vec<String> = if cfg!(windows) {
+        vec![format!("{program}.exe"), program.to_owned()]
+    } else {
+        vec![program.to_owned()]
+    };
     std::env::split_paths(&hook_path())
-        .map(|d| d.join(program))
+        .flat_map(|d| names.iter().map(move |name| d.join(name)))
         .find(|p| p.is_file())
 }

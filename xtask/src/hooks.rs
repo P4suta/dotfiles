@@ -142,31 +142,12 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     if matches!(hook, Hook::PrePush | Hook::ReferenceTransaction) {
         std::io::stdin().read_to_end(&mut input)?;
     }
-    if cfg!(windows) && matches!(hook, Hook::CommitMsg) {
-        let file = arguments
-            .first()
-            .context("commit message path is required")?;
-        let text = fs::read_to_string(file)?;
-        ensure!(
-            !unwanted_attribution(&text),
-            "commit message carries unwanted agent attribution or a session URL"
-        );
-    }
-    if (!cfg!(windows)
-        && matches!(
-            hook,
-            Hook::PreCommit | Hook::CommitMsg | Hook::PrePush | Hook::PostCommit
-        ))
-        || (cfg!(windows) && matches!(hook, Hook::PrePush | Hook::PostCommit))
-    {
-        let mut command = native.command(if cfg!(windows) {
-            Tool::Dotctl
-        } else {
-            Tool::Dotguard
-        });
-        if cfg!(windows) {
-            command.arg("hook");
-        }
+    // Every host runs the same dotguard gates, so a policy holds identically on the Mac, Linux, and Windows.
+    if matches!(
+        hook,
+        Hook::PreCommit | Hook::CommitMsg | Hook::PrePush | Hook::PostCommit
+    ) {
+        let mut command = native.command(Tool::Dotguard);
         command.arg(hook.name()).args(arguments);
         piped(&mut command, &input)?;
     }
@@ -179,7 +160,7 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     if !matches!(hook, Hook::PostCommit | Hook::ReferenceTransaction) {
         delegate(&mut native, hook, arguments, &input, None)?;
     }
-    if matches!(hook, Hook::PrePush) && !cfg!(windows) {
+    if matches!(hook, Hook::PrePush) {
         piped(
             native
                 .command(Tool::Dotguard)
@@ -213,26 +194,13 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     Ok(())
 }
 
-fn unwanted_attribution(text: &str) -> bool {
-    text.lines().any(|line| {
-        let lower = line.to_ascii_lowercase();
-        lower.contains("claude-session:")
-            || lower.contains("claude.ai/code/session")
-            || lower.contains("generated with [claude code]")
-            || lower
-                .split_once("co-authored-by:")
-                .is_some_and(|(_, rest)| rest.contains("claude") || rest.contains("anthropic"))
-    })
-}
-
 pub fn git(arguments: &[OsString]) -> Result<std::process::ExitStatus> {
-    ensure!(!cfg!(windows), "the Unix Git wrapper requires a Unix host");
     Tool::Dotguard
         .command()
         .arg("git")
         .args(arguments)
         .status()
-        .context("start Rust Git guard")
+        .context("start the dotguard Git wrapper")
 }
 
 pub fn audit(root: &Path, fix: bool) -> Result<()> {
@@ -328,18 +296,5 @@ mod tests {
         let input = vec![b'x'; 1 << 20];
         piped(&mut crate::tool::external("true"), &input).unwrap();
         assert!(piped(&mut crate::tool::external("false"), &input).is_err());
-    }
-
-    #[test]
-    fn windows_attribution_gate_keeps_humans_and_checks_comment_lines() {
-        assert!(!unwanted_attribution(
-            "feat: change\nCo-authored-by: Example User <user@example.invalid>\n"
-        ));
-        assert!(unwanted_attribution(
-            "# Co-Authored-By: Claude <agent@example.invalid>\n"
-        ));
-        assert!(unwanted_attribution(
-            "Claude-Session: https://example.invalid/session\n"
-        ));
     }
 }
