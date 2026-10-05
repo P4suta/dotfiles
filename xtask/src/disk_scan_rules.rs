@@ -5,7 +5,7 @@ pub enum Verdict {
     Refuse,
 }
 
-/// A command is refused only when it both walks a tree and reports sizes.
+/// The rule refuses a command only when it both walks a tree and reports sizes.
 pub const fn verdict(recursive: bool, sizes: bool) -> Verdict {
     if recursive && sizes {
         Verdict::Refuse

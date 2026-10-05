@@ -81,6 +81,13 @@ pub const REVIEW_HARNESSES: [&str; 6] = [
     "rolling_attempts_cannot_exceed_the_layered_local_budget",
 ];
 
+pub const PROSE_HARNESSES: [&str; 4] = [
+    "a_declared_standard_wins_and_an_unresolved_destination_is_reported",
+    "exemptions_require_a_reason_and_a_match",
+    "failing_replies_are_rewritten_once_and_never_allowed",
+    "only_personal_non_fork_destinations_take_the_standard",
+];
+
 pub const INSTRUCTION_HARNESSES: [&str; 3] = [
     "every_line_needs_the_class_of_its_shape",
     "follow_ups_are_defined_once_and_referenced",
@@ -317,7 +324,7 @@ pub fn container_target_volume(root: &Path) -> String {
 const CONTAINER_GATE: &str = "set -o pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -; exec cargo run --locked --manifest-path xtask/Cargo.toml -- proofs";
 
 pub fn container_run_arguments(root: &Path, image: &str, target_volume: &str) -> Vec<OsString> {
-    // Docker reads `--mount` as one CSV record; quoting keeps a comma in the path inside the field, and Windows paths cannot contain the quote itself.
+    // Docker reads `--mount` as one CSV record, so quoting keeps a comma in the path inside the field, and Windows forbids the quote character in paths.
     let mut mount = OsString::from("type=bind,\"source=");
     mount.push(root);
     mount.push("\",target=/source,readonly");
@@ -343,7 +350,7 @@ pub fn container_run_arguments(root: &Path, image: &str, target_volume: &str) ->
     arguments
 }
 
-/// Kani has no native build here, so the unchanged proof gate runs on a pinned Linux verification host that sees this checkout read-only.
+/// Kani has no native build here, so the unchanged proof gate runs on a pinned Linux verification host that mounts this checkout read-only.
 fn verify_in_container(root: &Path) -> Result<()> {
     let root = crate::canonical(root)?;
     let engine = Tool::Docker
@@ -571,6 +578,34 @@ fn verify_native(root: &Path) -> Result<()> {
         fs::read(source)? == original,
         "production review proof source changed during verification"
     );
+    let source = crate::canonical(&root.join("xtask/src/prose_rules.rs"))?;
+    let original = fs::read(&source)?;
+    let directory = tempfile::tempdir()?;
+    verify_inventory(&source, directory.path(), &PROSE_HARNESSES)?;
+    verify_file(&source, directory.path(), &PROSE_HARNESSES, false)?;
+    let probe = tempfile::tempdir()?;
+    let file = probe.path().join("counterexample.rs");
+    fs::write(
+        &file,
+        format!(
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_allowing_a_failing_reply() {{\n    assert!(production::reply(false, false) == production::Reply::Allow);\n}}\n#[kani::proof]\nfn reject_ending_after_another_hooks_continuation() {{\n    assert!(production::reply(false, production::rewritten_by_this_hook(true, Some(false))) == production::Reply::EndUnchecked);\n}}\n#[kani::proof]\nfn reject_the_standard_on_a_fork() {{\n    assert!(production::standard_applies(true, true));\n}}\n#[kani::proof]\nfn reject_skipping_an_unresolved_origin_silently() {{\n    assert!(production::repository_standard(None, Some(production::Owner::Unresolved), false, false) == production::Standard::Skips);\n}}\n#[kani::proof]\nfn reject_skipping_a_repository_without_origin_silently() {{\n    assert!(production::repository_standard(None, None, false, false) == production::Standard::Skips);\n}}\n#[kani::proof]\nfn reject_ignoring_a_personal_remote_without_origin() {{\n    assert!(production::repository_standard(None, None, true, false) == production::Standard::Skips);\n}}\n#[kani::proof]\nfn reject_overriding_a_declared_opt_out() {{\n    assert!(production::repository_standard(Some(false), Some(production::Owner::Personal), false, false) == production::Standard::Applies);\n}}\n"
+        ),
+    )?;
+    for name in [
+        "reject_allowing_a_failing_reply",
+        "reject_ending_after_another_hooks_continuation",
+        "reject_the_standard_on_a_fork",
+        "reject_skipping_an_unresolved_origin_silently",
+        "reject_skipping_a_repository_without_origin_silently",
+        "reject_ignoring_a_personal_remote_without_origin",
+        "reject_overriding_a_declared_opt_out",
+    ] {
+        verify_file(&file, probe.path(), &[name], true)?;
+    }
+    ensure!(
+        fs::read(source)? == original,
+        "production prose proof source changed during verification"
+    );
     let source = crate::canonical(&root.join("xtask/src/next_action_rules.rs"))?;
     let original = fs::read(&source)?;
     let directory = tempfile::tempdir()?;
@@ -691,6 +726,7 @@ fn reject_a_contradiction_without_what_it_contradicted() {{
             + REAPER_HARNESSES.len()
             + GATE_HARNESSES.len()
             + REVIEW_HARNESSES.len()
+            + PROSE_HARNESSES.len()
             + INSTRUCTION_HARNESSES.len()
             + NEXT_ACTION_HARNESSES.len()
             + LINE_ENDING_HARNESSES.len()
@@ -699,7 +735,9 @@ fn reject_a_contradiction_without_what_it_contradicted() {{
     Ok(())
 }
 
-/// One pure rule module: its harnesses must all pass, and each counterexample, a harness asserting a rejected rule, must fail against it.
+/// One pure rule module.
+/// Its harnesses must all pass.
+/// Each counterexample, a harness asserting a rejected rule, must fail when it runs on that module.
 pub struct Rules {
     pub source: &'static str,
     pub harnesses: &'static [&'static str],

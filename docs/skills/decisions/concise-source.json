@@ -1,9 +1,11 @@
 {
-  "revision": "415be92516b5ddf592100ab61f561cede27a14a3e0ed1c7693afec3bdf02bbdc",
-  "outcome": "keep",
-  "reason": "Keep source clarity and narrow lint-exception judgment separate from OComment invocation; executable representation and actual public contracts remain authoritative.",
+  "revision": "783a57fe70ff1e7bf1c3570d235c2f30e01968ecbe4e8d11fb0bc55ea421d645",
+  "outcome": "implemented",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
-    "dot_agents/skills/concise-source/SKILL.md"
+    "dot_agents/skills/concise-source/SKILL.md",
+    "docs/adr/0016-one-writing-standard.md",
+    "xtask/tests/prose.rs"
   ],
   "revisit": null
 }

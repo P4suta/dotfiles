@@ -33,7 +33,7 @@ pub fn git_for_windows_shell(exec_path: &Path) -> Option<PathBuf> {
     Some(exec_path.ancestors().nth(3)?.join("usr/bin/sh.exe"))
 }
 
-/// Native Windows has no `sh` on PATH, and its System32 `bash.exe` enters WSL, so launchers are parsed by Git for Windows' shell.
+/// Native Windows has no `sh` on PATH, and its System32 `bash.exe` enters WSL, so Git for Windows' shell parses launchers.
 fn posix_shell() -> Result<Command> {
     if !cfg!(windows) {
         return Ok(Tool::Sh.command());
@@ -302,7 +302,7 @@ struct CommentOverride {
     language: String,
 }
 
-/// OComment language overrides decide how a prose rule rewrites each file; a directory-wide pattern silently captures every file later added beneath it.
+/// OComment language overrides decide how a prose rule rewrites each file.
 /// Patterns must name an existing file or select by extension, as in `**/*.md.tmpl`.
 pub fn comment_scopes(root: &Path) -> Result<()> {
     let config: CommentConfig = toml::from_str(&fs::read_to_string(root.join(".ocomment.toml"))?)
@@ -330,8 +330,7 @@ pub fn comment_scopes(root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `just` invocations that the repository tells a reader to run, written as code, quoted, or after `run:` or `see`, or at the start of a Markdown line.
-/// The adverb in ordinary prose does not take these forms, and a following flag is an option of `just` itself rather than a recipe.
+/// `just` invocations a reader of the repository should run, written as code, quoted, or after `run:` or `see`, or at the start of a Markdown line.
 pub fn recipe_references(text: &str, markdown: bool) -> Vec<(usize, String)> {
     let mut found = Vec::new();
     for (number, line) in text.lines().enumerate() {
@@ -358,8 +357,7 @@ pub fn recipe_references(text: &str, markdown: bool) -> Vec<(usize, String)> {
     found
 }
 
-/// Recipe references that name no recipe in the justfile, so a hint or document sends the reader to a command that does not exist.
-/// Accepted ADRs keep the commands they recorded, and tests state invalid references on purpose.
+/// Recipe references that name no recipe in the justfile, so a hint or document sends the reader to a missing command.
 pub fn unknown_recipes(root: &Path) -> Result<Vec<String>> {
     let summary = Tool::Just
         .command()
@@ -403,7 +401,7 @@ pub fn unknown_recipes(root: &Path) -> Result<Vec<String>> {
     Ok(unknown)
 }
 
-/// Profile leaves that no template includes: a leaf nothing renders keeps stale behavior that reviewers mistake for live configuration.
+/// Profile leaves that no template includes.
 pub fn unreferenced_leaves(root: &Path) -> Result<Vec<String>> {
     let leaves_root = root.join(".chezmoitemplates/profiles");
     let mut leaves = Vec::new();

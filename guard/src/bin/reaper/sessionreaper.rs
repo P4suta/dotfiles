@@ -1,20 +1,15 @@
-//! session-reaper — reap abandoned processes owned by this user.
+//! Reaps abandoned processes of the current user.
 //!
-//! A rewrite rather than a port of the Linux version, because the two facts that one is built on are both false on macOS:
-//!
-//! 1. There is no `/proc`; process state comes from `ps`, so ages arrive as an `etime` string ("2-04:17:30") that has to be parsed.
-//! 2. `PPID==1` does NOT mean "orphaned": on macOS PID 1 is launchd, the legitimate supervisor of every user agent and GUI app.
+//! macOS lacks `/proc`, so process ages come from the `etime` column of `ps`.
+//! launchd runs as PID 1 and supervises every user app, so `PPID==1` alone proves nothing.
 //!
 //! Tiers:
 //!
-//! * **A (auto-kill)** — stopped (state `T`) AND `PPID==1` AND old enough, confirmed across a grace window.
-//!   launchd never leaves its own jobs in state `T`, so this can only be a suspended job whose controlling shell has since died: it can never be resumed and ignores SIGTERM while stopped, so it is SIGKILL'd.
-//! * **B (report)** — running, `PPID==1`, no controlling tty, old enough, AND the executable lives in user/Homebrew space rather than under `/System` or `/usr/lib`.
-//!   That last clause is the macOS substitute for "orphaned" and is what keeps Apple's own agents off the list.
-//!   NEVER killed — only reported.
+//! * **Tier A** kills a process stopped in state `T` under `PPID==1` and older than the limit, once a grace window confirms it.
+//!   launchd never leaves its jobs in state `T`, so such a process lost its controlling shell, and it ignores `SIGTERM` while stopped, so the reaper sends `SIGKILL`.
+//! * **Tier B** reports a running process under `PPID==1` with no controlling tty and older than the limit, whose executable lives in user or Homebrew space instead of `/System` or `/usr/lib`.
 //!
-//! MODE=report never kills; MODE=reap enacts tier A. Tier B is always report-only.
-//! The stdout lines are the audit log (launchd writes them to `~/.local/state/dotfiles/log/session-reaper.log`).
+//! `MODE=report` never kills, and `MODE=reap` kills tier A.
 
 use super::config;
 use super::util::{self, Lock};
@@ -69,7 +64,7 @@ impl SessionReaper {
             };
 
             match p.state.chars().next().unwrap_or(' ') {
-                // tier A: stopped, and launchd is not a plausible supervisor for that.
+                // Tier A: stopped, and launchd never stops its own jobs.
                 'T' | 't' => tier_a(
                     &cfg,
                     &p,
@@ -82,7 +77,7 @@ impl SessionReaper {
                 ),
                 // tier B: report only.
                 'R' | 'S' | 'I' | 'U' | 'D' => tier_b(&cfg, &p, &ucomm, age, &mut reported),
-                // Z (zombie) / X (dead): leave them to the kernel.
+                // Leave zombie `Z` and dead `X` processes to the kernel.
                 _ => {}
             }
         }
@@ -113,7 +108,7 @@ impl SessionReaper {
     }
 }
 
-/// Tier A — stopped and orphaned: kill it after grace, because a stopped process ignores SIGTERM and can never be resumed once its shell is gone.
+/// Tier A: send `SIGKILL` to a stopped orphan after the grace window, because it ignores `SIGTERM` and lost the shell that could resume it.
 #[expect(
     clippy::too_many_arguments,
     reason = "each argument is one observed fact of the process the tier judges"
@@ -172,7 +167,7 @@ fn tier_a(
     }
 }
 
-/// Tier B — running orphan in user space with no tty: report only, never kill.
+/// Tier B: report a running orphan in user space with no tty, and never signal it.
 fn tier_b(cfg: &SessionConfig, p: &Process, ucomm: &str, age: i64, reported: &mut usize) {
     if !(p.tty == "??" || p.tty == "?") {
         return;
@@ -259,8 +254,8 @@ impl SessionConfig {
 }
 
 /// One `ps` row.
-/// `comm` is the full executable path and is the LAST column on purpose: it can contain spaces, so it has to absorb the tail of the line.
-/// `ucomm` is deliberately not requested — it can also contain spaces ("Code Helper (Renderer)"), which would shift every field after it.
+/// `comm` holds the full executable path and comes last, because it can contain spaces and must absorb the tail of the line.
+/// The row omits `ucomm`, which can also contain spaces and would shift every later field.
 struct Process {
     pid: String,
     ppid: String,
@@ -272,7 +267,6 @@ struct Process {
 }
 
 impl Process {
-    /// Age in seconds, or `Err` when etime did not parse.
     fn etime_digits_check(&self) -> Result<i64, ()> {
         let secs = util::etime_seconds(&self.etime);
         if secs == 0 && !self.etime.starts_with("00") && self.etime != "0:00" && self.etime != "0" {
@@ -334,7 +328,6 @@ fn parse_ps_line(line: &str) -> Option<Process> {
     let state = fields.next()?.to_owned();
     let etime = fields.next()?.to_owned();
     let tty = fields.next()?.to_owned();
-    // comm is the rest of the line, spaces included.
     let comm = line
         .split_once(&format!("{tty} "))
         .map(|(_, c)| c.trim().to_owned())
@@ -361,7 +354,7 @@ fn whoami_uid() -> String {
         })
 }
 
-/// An allow-list that cannot be evaluated protects the process rather than exposing it.
+/// A grep error protects the process.
 fn matches_allow(ucomm: &str, allow_regex: &str) -> bool {
     let lines = vec![ucomm.to_owned()];
     util::grep_matching(allow_regex, &lines).is_none_or(|hits| !hits.is_empty())
@@ -522,10 +515,10 @@ mod tests {
 
     #[test]
     fn the_user_path_regex_parses_into_prefixes() {
-        // The default regex shape: ^(p1|p2|p3)/
+        // The default regular expression shape: `^(p1|p2|p3)/`
         let text = "^(tmux.*|sshd)$";
         let _ = text;
-        // exercised through SessionConfig in integration; here we assert the extraction helper on the real default shape.
+        // `SessionConfig` integration covers the full path, and this test checks the extraction helper on the real default shape.
         let regex = "^(/Users/x|/opt/homebrew|/usr/local)/";
         let prefixes: Vec<String> = regex
             .trim_start_matches("^(")

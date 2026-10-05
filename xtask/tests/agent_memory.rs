@@ -144,7 +144,7 @@ fn unparsable_rendered_settings_are_refused() {
     assert!(violations(&dump(Some(CLAUDE_OFF), Some("[features"), Some("{}"))).is_err());
 }
 
-/// Renders a repository `modify_` template for one profile against a host file, as application would.
+/// Renders a repository `modify_` template for one profile over a host file, as an apply would.
 fn render_merged(profile: &str, template: &str, target: &str, host: &str) -> String {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -236,7 +236,8 @@ fn application_turns_off_memory_a_client_turned_back_on() {
     }
 }
 
-/// The timing hook runs before and after every shell call, and an application keeps the post-tool groups other installers added while replacing its own.
+/// The timing hook runs before and after every shell call.
+/// An installer keeps the post-tool groups that other installers added while it replaces its own.
 #[test]
 fn the_timing_hook_joins_the_shell_events_and_keeps_other_post_tool_groups() {
     let host = json!({"hooks": {

@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
-# Claude Code 専用の bash init。
-# 非対話シェルが BASH_ENV 経由で source する。
-# 目的: Claude Code が Bash ツールで投げるコマンドから rg/fd/tokei/hyperfine 等
-#       mise 管理のモダン CLI を *本名で* 呼べるようにする。
-# 副作用: ユーザ自身の対話シェル(~/.bashrc)には影響しない。
+# Bash init for Claude Code, which non-interactive shells source through BASH_ENV.
+# Commands from the Claude Code Bash tool reach mise-managed CLIs such as rg, fd, tokei, and hyperfine by their real names.
+# The interactive shell in ~/.bashrc stays unaffected.
 
-# mise activate — 全ツールの shim を PATH に載せる
+# mise activate puts every tool shim on PATH.
 if [ -x "$HOME/.local/bin/mise" ]; then
   eval "$("$HOME/.local/bin/mise" activate bash)"
 fi
 
-# user-installed binaries を mise shim より優先するため、mise activate の **後** で先頭に追加する。
-# ~/.local/bin/git wrapper (--no-verify 等を拒否) を Claude Code Bash tool から確実に効かせるためにここが必要。
-# 対話シェルでは ~/.bashrc が同じ export を持つ。
+# User-installed binaries go first, after mise activate, so they take precedence over mise shims.
+# The ~/.local/bin/git wrapper, which refuses options such as --no-verify, then applies to the Claude Code Bash tool.
+# Interactive shells get the same export from ~/.bashrc.
 export PATH="$HOME/.local/bin:$PATH"
 
-# Claude Code 専用の shim dir(ユーザの対話シェルには載らない)は、空でも PATH に混ぜておく。
-# 必要になったら ~/.claude/shims/<name> にスクリプトを置く。
+# The Claude Code shim directory joins PATH even when empty, and interactive shells never see it.
+# Put a script at ~/.claude/shims/<name> when a shim becomes necessary.
 if [ -d "$HOME/.claude/shims" ]; then
   export PATH="$HOME/.claude/shims:$PATH"
 fi

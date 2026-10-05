@@ -53,7 +53,8 @@ fn piped(command: &mut Command, input: &[u8]) -> Result<()> {
 }
 
 /// Runs one hook gate with `input` on its standard input and relays its standard error line by line.
-/// A gate that refused with its own record keeps that record last; any other failure becomes a `hook.gate` refusal that names `rerun`.
+/// A gate that refuses with its own record keeps that record last.
+/// Any other failure becomes a `hook.gate` refusal that names `rerun`.
 fn gate(command: &mut Command, input: &[u8], rerun: &str) -> Result<()> {
     let mut child = command
         .stdin(Stdio::piped())
@@ -231,7 +232,6 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
         std::io::stdin().read_to_end(&mut input)?;
     }
     let staged = matches!(hook, Hook::PreCommit).then(|| staged_tree(&native));
-    // Every host runs the same dotguard gates, so a policy holds identically on the Mac, Linux, and Windows.
     if matches!(
         hook,
         Hook::PreCommit | Hook::CommitMsg | Hook::PrePush | Hook::PostCommit
@@ -249,6 +249,16 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     {
         crate::hosts::push_gate(Path::new("."), &url.to_string_lossy(), &input)?;
         crate::ready_push::gate(&url.to_string_lossy(), &input)?;
+    }
+    if matches!(hook, Hook::CommitMsg) {
+        let message = arguments
+            .first()
+            .context("the commit-msg hook needs the message file")?;
+        crate::prose::commit_gate(
+            &std::env::current_dir()?,
+            Path::new(message),
+            crate::prose::Bundle::installed,
+        )?;
     }
     if matches!(hook, Hook::PreCommit) {
         let global = native.home.join(".config/lefthook/global.yml");
@@ -305,7 +315,7 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     Ok(())
 }
 
-/// The machine-local push hold; only an explicit owner instruction lifts it, so the refusal names no waiver.
+/// The machine-local push hold, which only an explicit owner instruction lifts, so the refusal names no waiver.
 pub fn push_paused(marker: &Path) -> Refusal {
     Refusal::new(
         "push.paused",
@@ -315,7 +325,7 @@ pub fn push_paused(marker: &Path) -> Refusal {
     .evidence(format!("marker present: {}", marker.display()))
 }
 
-/// Git records the index as it stands after the pre-commit hook, so a gate that changed what is staged refuses the commit.
+/// Git commits the index that the pre-commit hook leaves, so a gate that changed the staged tree refuses the commit.
 pub fn preserve_staged_tree(before: Option<&str>, after: Option<&str>) -> Result<()> {
     if before == after {
         return Ok(());
@@ -449,7 +459,7 @@ mod tests {
         }
     }
 
-    /// Built here because the fixed tool directories of a host can hold lefthook, so the dispatcher cannot be run without it.
+    /// Built here because a host's fixed tool directories can hold lefthook, which would then run the dispatcher.
     #[test]
     fn a_missing_lefthook_names_its_installation_and_the_configuration() {
         let refusal = lefthook_missing("lefthook.yml", Hook::PrePush);

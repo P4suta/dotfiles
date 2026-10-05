@@ -5,7 +5,7 @@ pub enum Line {
     Heading,
     /// A sole template action that renders nothing: an assignment, a condition, or a comment.
     Directive,
-    /// A line whose template actions render output that the audit cannot read.
+    /// A line whose template actions render output the audit can't read.
     Output,
     /// A line of a prompt file's front matter.
     Setting,
@@ -43,7 +43,7 @@ pub enum Definition {
     Unreferenced,
 }
 
-/// A follow-up is current when it is defined exactly once and at least one retained line refers to it.
+/// A follow-up stays current when one definition exists and a retained line refers to it.
 pub fn follow_up(definitions: usize, references: usize) -> Definition {
     match (definitions, references) {
         (0, _) => Definition::Undefined,
@@ -64,7 +64,8 @@ pub enum Holder {
     Contradicted,
 }
 
-/// A removed-line row is held when it names a gate's source file for a gate, an existing skill for a skill, and exactly one retained line for a merge.
+/// A removed-line row holds when its holder exists.
+/// A gate row names the gate's source file, a skill row names an existing skill, and a merge row names exactly one retained line.
 /// A contradicted line names the retained line or the skill it contradicted.
 pub fn removed_row_held(
     holder: Option<Holder>,

@@ -1,58 +1,74 @@
-# Rehearse native application and declare every external tool
+# Rehearse the native apply and declare every external tool
 
-Status: Accepted.
+Status: accepted.
 
 ## Context
 
-The first native cutover found about fifteen defects that every required gate had passed, and a scoped review found sixteen more in imported helpers.
-[ADR 0009](0009-public-native-profiles.md) verified profiles by rendering them and applying files in owned fixtures, without scripts, outside the native home, session, and machine state.
-Live `profile apply`, its scripts, native verification, rollback, and the takeover of a machine that earlier repositories provisioned had never run before an owner's machine changed.
+The first native cutover found about fifteen defects that every required gate had passed.
+[ADR 0009](0009-public-native-profiles.md) checked profiles by rendering them and applying files in owned fixtures, without scripts, outside the native home, session, and machine state.
+No live `profile apply`, script, native verification, rollback, or takeover of an earlier repository's machine had run before the owner's machines changed.
 
-The defects share five mechanisms rather than five hundred symptoms.
-Native paths were never exercised, so a JSON parse of chezmoi's text listing, an always-failing verification, a helper reinstall conflict, and Windows link removal all reached real machines.
-Contracts with external tools were assumed instead of checked, and fixtures repeated the same assumptions, for example a backslash home path that chezmoi never reports and a single forge key that GitHub had rotated.
-Environment requirements were implicit: tools on PATH, an interactive desktop, an elevated session, and machine-local state such as a Nix lock.
-Bulk migration and configuration scopes ignored references, dropping files that code read and matching files a prose rule then corrupted.
-Paths were untyped strings, so Windows verbatim, forward-slash, and backslash spellings reached tools that accept only some of them.
+The defects share five mechanisms:
+
+- Untested native paths: a JSON parse of a text listing, an always-failing verification, a helper reinstall conflict, and Windows link removal.
+- Fixtures that repeated the code's assumptions, such as a backslash home path that chezmoi never reports and a single forge key that GitHub had rotated.
+- Implicit environment needs: tools on PATH, an interactive desktop, an elevated session, and machine-local state such as a Nix lock.
+- Bulk migration and configuration scopes that ignored references.
+- Untyped path strings that let Windows verbatim, forward-slash, and backslash spellings reach tools that accept only some of them.
 
 ## Decision
 
-Required CI rehearses native application on disposable Linux, macOS, and Windows hosts.
-`xtask rehearse` writes an anonymous machine-local configuration, seeds helper binaries owned by another cargo package and existing review history, then applies the native profile with its scripts and verifies it three times.
-Before the second application it forgets which scripts ran, so every script runs again on the host it provisioned, with services loaded and running, which is the path that takes over an earlier repository's machine; the third application changes nothing.
-It refuses to run unless CI reports a disposable host and `--disposable-host` is given.
-Provisioning lists keep one representative entry and every entry that a later step invokes, so each step's real code path runs with small inputs.
-A script the host cannot run is omitted only through a `setup.skip` entry that names the script and gives a reason; application prints those entries before any change, and the reasons are part of review.
+Required CI rehearses the native apply on disposable Linux, macOS, and Windows hosts.
+`xtask rehearse` writes an anonymous machine-local configuration and seeds existing review history and helper binaries from another cargo package.
+It then applies the native profile with its scripts and verifies it, three times.
+Before the second apply, it forgets which scripts ran, so every script runs again on the host it provisioned with services loaded and running.
+The third apply changes nothing.
+It refuses to run unless CI reports a disposable host and the caller passes `--disposable-host`.
+Provisioning lists keep one representative entry and every entry that a later step invokes.
+The apply omits a script that the host can't run only through a `setup.skip` entry with the script name and a reason, and prints those entries before any change.
 
-External programs are variants of `xtask::tool::Tool`, each with a declared provision: pinned in `mise.toml`, provided by the host, installed by a named setup step, or installed by the owner.
-`clippy.toml` disallows `Command::new` and path canonicalization outside the registry and `xtask::canonical`, so a new host dependency or path spelling cannot appear without passing through the declared boundary.
-Integration tests may spawn the binaries and real tools they verify, and contract tests run the pinned chezmoi and git rather than fakes.
+Each external program has a variant of `xtask::tool::Tool` with a declared provision: pinned in `mise.toml`, provided by the host, installed by a named setup step, or installed by the owner.
+`clippy.toml` disallows `Command::new` and path canonicalization outside the registry and `xtask::canonical`.
+Integration tests may spawn the binaries and real tools they verify, and contract tests run the pinned chezmoi and Git instead of fakes.
 
-Setup steps declare what they rely on, and the profile gate checks the declarations against what each profile actually renders.
-`Step::after` names the steps that must run first, and the gate rejects a rendered script order, before scripts and then after scripts by name, that breaks one.
-`Step::requires` names the packaged tools a step invokes and `Tool::package` names the list that installs each one per profile; the gate rejects data that omits a required package, and the rehearsal derives its reduced lists from the same declarations.
-Installed entry points carry the same obligation: a rendered agent launcher requires Doppler, because it reads the secrets the machine-local configuration selects, so the gate also reads every rendered file.
-Both matches list every step, so adding a step forces a decision about its order and packages.
-Application renders its scripts first and refuses, before any change, a step whose requirement the session cannot meet, such as a private source without non-interactive credentials.
-It also refuses, before any change, while a managed file has changed outside chezmoi since the last application, and names every such file, because an owner's fix made on a host belongs in the source and an overwrite prompt cannot be answered mid-application.
-After scripts run, files are applied once more without scripts before verification, because templates may probe for programs those scripts installed.
+Setup steps declare their dependencies, and the profile gate checks the declarations with what each profile renders.
+`Step::after` names the steps that must run first, and the gate refuses a rendered script order that breaks one.
+`Step::requires` names the packaged tools a step invokes, and `Tool::package` names the list that installs each one per profile.
+The gate refuses data that omits a required package, and the rehearsal derives its reduced lists from the same declarations.
+A rendered launcher that reads the secrets of the machine-local configuration requires Doppler.
+The apply renders its scripts first and refuses any step that the session can't serve, such as a private source without non-interactive credentials.
+It also refuses while a managed file differs from the last apply outside chezmoi, and names every such file.
+Both refusals happen before any change.
+After scripts run, the apply writes files once more without scripts before verification, because templates may probe for programs those scripts installed.
 
-The gate also rejects four structural mistakes that reached a host or a reviewer: a launcher or Git hook that locates its program through the runtime `HOME`, which tools replace when they run Git; a profile leaf that no template includes; an OComment language override that names a directory pattern or a missing file; and a `just` invocation in a hint or document that names no recipe in the justfile.
-Repository files that `dotctl` reads are compiled into it.
+The gate also refuses four structural mistakes:
 
-Defects found this way are fixed in the boundary that owns them: native verification excludes always-run scripts, rollback skips untouched targets and removes Windows directory links correctly, managed listings are read as NUL-separated text, helper installation replaces earlier sources, public owner sources clone over HTTPS despite host rewrites, the forge bundle is accepted only when every primary key is pinned and the current key is present, and a LaunchAgent is bootstrapped only after launchd has removed its running predecessor, which a test checks against the real launchd.
+- A launcher or Git hook that locates its program through the runtime `HOME`, which tools replace when they run Git.
+- A profile leaf that no template includes.
+- An OComment language override that names a directory pattern or a missing file.
+- A `just` invocation in a hint or document that names no recipe in the justfile.
+
+`dotctl` compiles in the repository files it reads.
+
+Each defect gets its fix in the boundary that owns it:
+
+- Native verification excludes always-run scripts.
+- Rollback skips untouched targets and removes Windows directory links.
+- Managed listings parse as NUL-separated text.
+- Helper installation replaces earlier sources.
+- Public owner sources clone over HTTPS despite host rewrites.
+- The forge bundle passes only when every primary key has a pin and the current key appears.
+- A LaunchAgent bootstraps only after launchd has removed its running predecessor.
 
 ## Alternatives
 
-More fixtures were rejected because a fixture encodes the same assumption as the code it checks; the backslash home path and the single forge key both passed fixtures.
-Manual native testing on the owner's machines was rejected as the primary gate because it changes real homes, depends on whoever runs it, and cannot be repeated for every change.
-Full-data rehearsal was rejected because installing every package on every pull request would take hours; representative data keeps every orchestration path while the package lists themselves stay native concerns.
+More fixtures lost because a fixture encodes the same assumption as the code it checks.
+Manual native testing on the owner's machines lost as the primary gate, because it changes real homes and costs too much to repeat per change.
+Full-data rehearsal lost because installing every package on every PR would take hours.
 
 ## Consequences
 
-Each pull request spends several hosted runner minutes per platform on rehearsal, which the public repository receives without charge.
-The rehearsal cannot exercise the owner's credentials, 1Password, desktop sessions, Tailscale, or large existing state; those remain native verification, and steps that need them must say so through `setup.skip` on hosts that lack them.
-Disposable hosts run elevated without an interactive desktop, so the rehearsal also covers the remote-session conditions that broke the keyboard and Herdr steps.
-The tool registry and lint establish that every spawned program is declared; they do not prove that a declared provision is present on a given host, which the rehearsal and native preflight checks must still show.
-Step requirements cover packaged tools and private sources; a requirement that is not declared is still found only by the rehearsal or a native host, and should then be declared rather than handled where it failed.
-chezmoi reads ignored build directories in its source, so contract tests read a copy without build outputs, and a concurrent build in a native checkout during application remains an operational hazard.
+The rehearsal never touches the owner's credentials, 1Password, desktop sessions, Tailscale, or large existing state.
+A step that needs them says so through `setup.skip` on hosts that lack them.
+An undeclared need surfaces only in the rehearsal or on a native host, and then gets a declaration instead of a local workaround.
+Chezmoi reads ignored build directories in its source, so contract tests read a copy without build outputs.

@@ -34,7 +34,8 @@ fn the_cleared_variables_are_exactly_gits_repository_local_variables() {
 
 const FIXTURE_CHILD: &str = "DOTFILES_FIXTURE_GIT_CHILD";
 
-/// Stages CRLF text in a fixture repository whose configuration declares no conversion; it runs only inside the next test.
+/// Stages CRLF text in a fixture repository whose configuration declares no conversion.
+/// It runs only inside the next test.
 #[test]
 fn fixture_git_child() {
     if std::env::var_os(FIXTURE_CHILD).is_none() {
@@ -137,7 +138,7 @@ fn the_bypass_check_finds_every_way_to_start_git() {
     }
 }
 
-/// Every test process that runs Git against a fixture starts from `guard/tests/support/fixture_git.rs`.
+/// Every test process that runs Git on a fixture starts from `guard/tests/support/fixture_git.rs`.
 #[test]
 fn fixture_git_processes_start_from_the_shared_helper() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();

@@ -26,8 +26,8 @@ jobs:
           BASE: origin/${{ github.base_ref }}
         run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- classify --base "$BASE" >> "$GITHUB_OUTPUT"
 
-  # The required checks always run and report, so a change that needs fewer gates still satisfies the ruleset:
-  # each step is guarded by the gates the classify job selected, and a skipped step is a success.
+  # The required checks always run and report, so a change that needs fewer gates still satisfies the ruleset.
+  # Each step runs only for the gates the classify job selected, and a skipped step counts as a success.
   required:
     name: required (${{ matrix.os }})
     needs: classify
@@ -68,7 +68,8 @@ jobs:
         run: mise run check:ops
 
   minimum-git:
-    # Git 2.43 is the oldest Git a managed host runs (Ubuntu 24.04), and the guard reads Git's state through it.
+    # Git 2.43 comes from Ubuntu 24.04 and ranks as the oldest Git on a managed host.
+    # The guard reads the Git state through it.
     name: guard (Git 2.43)
     runs-on: ubuntu-latest
     container: ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55

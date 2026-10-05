@@ -13,8 +13,7 @@ progress-indicator = true
 push-bookmark-prefix = "push-"
 
 [remotes.origin]
-# 旧 git.auto-local-bookmark = true の後継(jj 0.38+)。
-# リモートから取った bookmark を自動でローカル追跡する。
+# Track every fetched remote bookmark locally, which needs jj 0.38 or later.
 auto-track-bookmarks = "*"
 
 [revset-aliases]
@@ -39,7 +38,7 @@ f        = ["git", "fetch", "--all-remotes"]
 behavior = "keep"
 backend = "ssh"
 key = {{ includeTemplate "signing_pubkey" . | trim | quote }}
-# Windows OpenSSH の ssh-keygen で署名検証する (gitconfig と統一)。
+# Verify signatures with the Windows OpenSSH ssh-keygen, matching the Git configuration.
 backends.ssh.program = {{ joinPath .chezmoi.homeDir ".local/bin/dotfiles-wsl-ssh-keygen" | quote }}
 {{- else }}
 behavior = "drop"

@@ -46,7 +46,7 @@ fn write_probe(plist: &Path, label: &str, generation: &str) {
     .unwrap();
 }
 
-/// Runs against the real launchd, because `bootout` returning before a running job exits is launchd's behavior rather than this repository's.
+/// Runs on the real launchd, whose `bootout` returns before a running job exits.
 #[test]
 fn a_running_agent_is_replaced_by_its_new_definition() {
     let uid = Command::new("id").arg("-u").output().unwrap().stdout;

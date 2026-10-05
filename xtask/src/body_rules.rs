@@ -1,4 +1,4 @@
-/// Why a document bound for GitHub is refused.
+/// The reason the checker refuses a document bound for GitHub.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Reason {
     /// A line claims authorship for an agent: a byline trailer, a generated-with footer, or a session URL.
@@ -11,7 +11,7 @@ pub enum Verdict {
     Refuse(Reason),
 }
 
-/// A PR, issue, or comment body that carries an attribution line is never sent.
+/// The checker never sends a PR, issue, or comment body that carries an attribution line.
 pub fn verdict(attributed: bool) -> Verdict {
     if attributed {
         Verdict::Refuse(Reason::Attribution)

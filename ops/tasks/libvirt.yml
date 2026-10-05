@@ -1,20 +1,20 @@
 ---
-# KVM/QEMU + libvirt (qemu:///system), including OVMF and swtpm for Windows 11 guests.
-# Everything comes from noble main/universe, so there is no third-party repo and no dependency on the preflight facts.
+# KVM, QEMU, and libvirt for Windows 11 guests on `qemu:///system`.
+# OVMF and swtpm supply the UEFI firmware and TPM 2.0.
 
 - name: Install KVM / QEMU + libvirt + virt-manager
   become: true
   ansible.builtin.apt:
     name:
-      - qemu-system-x86       # KVM/QEMU x86 hypervisor
-      - qemu-utils            # qemu-img
+      - qemu-system-x86
+      - qemu-utils
       - libvirt-daemon-system
-      - libvirt-clients       # virsh
-      - virtinst              # virt-install
+      - libvirt-clients
+      - virtinst
       - virt-manager
-      - ovmf                  # UEFI firmware, required by Windows 11
-      - swtpm                 # software TPM
-      - swtpm-tools           # swtpm_setup, used by libvirt to start TPM 2.0
+      - ovmf
+      - swtpm
+      - swtpm-tools
     state: present
     update_cache: true
 

@@ -1,11 +1,13 @@
-//! dotguard — the local policy gate.
+//! The local policy gate.
 //!
-//! One binary behind three entry points, all of them installed globally rather than per-repository:
+//! One binary serves four global entry points:
 //!
-//! ~/.local/bin/git            -> `dotguard git …`         (argv policy, then exec; on Windows a copy named git.exe is the wrapper itself) ~/.config/git/hooks/pre-push   -> `dotguard pre-push`   (force-push gate) ~/.config/git/hooks/commit-msg -> `dotguard commit-msg` (attribution, language) ~/.config/git/hooks/pre-commit -> `dotguard pre-commit` (language, staged diff)
+//! - `~/.local/bin/git` runs `dotguard git …`, which applies the argument policy and then executes git, and on Windows a copy named `git.exe` acts as the wrapper.
+//! - `~/.config/git/hooks/pre-push` runs `dotguard pre-push`, the force-push gate.
+//! - `~/.config/git/hooks/commit-msg` runs `dotguard commit-msg`, which strips attribution and checks the language.
+//! - `~/.config/git/hooks/pre-commit` runs `dotguard pre-commit`, the language and staged-diff gates.
 //!
-//! `core.hooksPath` in ~/.gitconfig points every repository on the machine at that hooks directory, so none of this is something a repository has to opt into — or can forget to.
-//! lefthook still runs per-repo gates underneath; these are the rules that hold everywhere, including in a repository cloned five minutes ago.
+//! `core.hooksPath` in `~/.gitconfig` points every repository at that hooks directory, so no repository needs to opt in.
 
 use dotguard::{
     attribution, bypass, doctor, gate_rules, gitargv, lang, lint, postcommit, prepush, realgit,
@@ -52,7 +54,7 @@ fn main() -> ExitCode {
     }
 }
 
-/// Windows cannot `exec` from a shell launcher, so a copy of this binary named `git.exe` stands in front of Git for Windows and applies the policy itself.
+/// Windows lacks `exec` from a shell launcher, so a copy of this binary named `git.exe` stands in front of Git for Windows and applies the policy itself.
 fn invoked_as_git(argv0: &str) -> bool {
     Path::new(argv0)
         .file_stem()
@@ -80,7 +82,7 @@ fn usage() {
     );
 }
 
-/// `~/.local/bin/git` delegates its whole job here and this never returns on the happy path: it `exec`s the real git in place, so there is no extra process sitting in the tree holding a pipe open.
+/// `~/.local/bin/git` delegates here, and on success this function never returns because it replaces the process with the real git.
 fn git_wrapper(argv: &[String]) -> ExitCode {
     if let Some(denial) = gitargv::inspect_in(argv, &stack::Checkout) {
         let full: Vec<String> = std::iter::once("git".to_owned())
@@ -137,17 +139,15 @@ fn foreign_waiver() -> Option<String> {
         .map(|line| format!("ALLOW_FOREIGN=1 {line}"))
 }
 
-/// Replaces this process with the real git, so no extra process holds a pipe open.
 #[cfg(unix)]
 fn delegate(real: &Path, mut git: std::process::Command) -> ExitCode {
     use std::os::unix::process::CommandExt;
-    // exec() only returns on failure.
+    // `exec` returns only on failure.
     let err = git.exec();
     eprintln!("::error:: could not exec {}: {err}", real.display());
     ExitCode::from(126)
 }
 
-/// Runs the real git and exits with its status, because Windows has no `exec`.
 #[cfg(windows)]
 fn delegate(real: &Path, mut git: std::process::Command) -> ExitCode {
     ignore_console_interrupts();
@@ -160,8 +160,8 @@ fn delegate(real: &Path, mut git: std::process::Command) -> ExitCode {
     }
 }
 
-/// The console sends Ctrl+C to every attached process; git handles it itself, and the wrapper waits so the shell returns only after git has exited.
-/// A handler is registered instead of the null handler, because the ignore flag the null handler sets is inherited by git.
+/// The console sends Ctrl+C to every attached process, git handles it, and the wrapper waits so the shell returns only after git exits.
+/// The wrapper registers its own handler, because git inherits the ignore flag that the null handler sets.
 #[cfg(windows)]
 fn ignore_console_interrupts() {
     unsafe extern "system" fn swallow(_event: u32) -> i32 {
@@ -174,16 +174,15 @@ fn ignore_console_interrupts() {
             add: i32,
         ) -> i32;
     }
-    // SAFETY: `swallow` is a valid handler for the life of the process, touches no state, and only reports each control event as handled.
+    // SAFETY: `swallow` stays valid for the life of the process, touches no state, and only reports each control event as handled.
     unsafe {
         SetConsoleCtrlHandler(Some(swallow), 1);
     }
 }
 
-/// The language policy for the repository we are standing in.
+/// The language policy for the current repository.
 ///
-/// `guard.lang` is per repository, and both the value and the off-switch are spelled out in every refusal.
-/// English is the default because that is what this machine's history actually is; `japanese` exists because a repository whose *subject* is Japanese typesetting writes Japanese commit messages and should not have to argue about it; `off` exists because a repository full of i18n fixtures is a legitimate thing to have, and a gate that cannot be removed there is a gate that gets removed everywhere.
+/// `guard.lang` defaults to English and accepts `japanese` and `off`, and every refusal names it.
 ///
 ///     git config guard.lang japanese
 ///     git config guard.lang off
@@ -194,7 +193,7 @@ fn lang_mode() -> Option<lang::Mode> {
 fn comment_char() -> char {
     realgit::capture(&["config", "--get", "core.commentChar"])
         .and_then(|v| v.trim().chars().next())
-        .filter(|c| c.is_ascii() && *c != 'a') // "auto" resolves per message; '#' is what it starts from
+        .filter(|c| c.is_ascii() && *c != 'a') // `auto` resolves per message and starts from `#`.
         .unwrap_or('#')
 }
 
@@ -206,7 +205,6 @@ fn commit_msg(path: &str) -> i32 {
         return 0;
     };
 
-    // Attribution first, so a Conventional Commits or line-length gate downstream sees the message that will actually be committed.
     let (cleaned, removed) = attribution::strip(&raw);
     if removed > 0 {
         if let Ok(mut f) = std::fs::File::create(path) {
@@ -258,7 +256,7 @@ fn commit_msg(path: &str) -> i32 {
     ))
 }
 
-/// The author and date of `revision`, as the refused commit took them from it.
+/// The authorship and date of `revision`, as the refused commit took them from it.
 fn authorship(revision: &str) -> Option<gitargv::Authorship> {
     let peeled = format!("{revision}^{{commit}}");
     let read = realgit::capture(&[
@@ -278,15 +276,16 @@ fn authorship(revision: &str) -> Option<gitargv::Authorship> {
     })
 }
 
-/// Whether a cherry-pick or rebase pick is in progress, as `git commit` decides it, or `None` when Git could not say.
+/// Whether a cherry-pick or rebase pick runs, as `git commit` decides it, or `None` when Git couldn't say.
 fn picking() -> Option<bool> {
-    // A pending merge makes the commit a merge even when a pick was also left behind.
+    // A pending merge makes the commit a merge even when a pick also remains.
     Some(!exists("MERGE_HEAD")? && exists("CHERRY_PICK_HEAD")?)
 }
 
-/// Whether the special reference `name` is present.
-/// Git keeps `MERGE_HEAD` and `CHERRY_PICK_HEAD` as files in the worktree's Git directory under every reference backend, and `git commit` tests those files.
-/// `git show-ref --exists` does not decide this on every supported Git: Git 2.43 reports a missing `MERGE_HEAD` as a lookup error.
+/// Whether the special reference `name` exists.
+/// Git keeps `MERGE_HEAD` and `CHERRY_PICK_HEAD` as files in the Git directory of the worktree under every reference storage format, and `git commit` checks those files.
+/// `git show-ref --exists` doesn't decide this on every supported Git version.
+/// Git 2.43 reports a missing `MERGE_HEAD` as a lookup error.
 fn exists(name: &str) -> Option<bool> {
     let path = realgit::capture(&["rev-parse", "--git-path", name])?;
     std::fs::exists(path.trim_end_matches(['\r', '\n'])).ok()
@@ -365,7 +364,7 @@ fn scan_paths(paths: &[String]) -> i32 {
     ))
 }
 
-/// Shared tail for every language refusal: the recorded override, or the structured refusal.
+/// The shared tail of every language refusal: the recorded override, or the structured refusal.
 fn refuse_foreign(refused: &refusal::Refusal) -> i32 {
     let argv: Vec<String> = std::env::args().collect();
     if bypass::waived(Category::Foreign) {

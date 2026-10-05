@@ -16,7 +16,7 @@ fn repository() -> PathBuf {
         .to_path_buf()
 }
 
-/// A checkout holding only some of the files the tools are built from, enough to hash.
+/// A checkout that holds a subset of the files that produce the tools, enough to hash.
 fn fixture(source: &str) -> Result<tempfile::TempDir> {
     let root = tempfile::tempdir()?;
     fs::create_dir_all(root.path().join("xtask/src/bin"))?;

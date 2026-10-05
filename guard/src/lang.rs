@@ -1,28 +1,21 @@
-//! Text that does not belong in this machine's repositories.
+//! Text that has no place in these repositories.
 //!
-//! dotguard:allow-foreign — this file has to contain the characters it detects, and its tests have to contain Chinese sentences to assert they are caught.
+//! `dotguard:allow-foreign` exempts this file, because it must contain the characters it detects.
 //!
-//! Three separate problems wear the same coat, and all three are things that arrive without anyone typing them — pasted from a search result, produced by a model that slipped language mid-sentence, copied out of a rendered page:
+//! Three problems arrive without anyone typing them, from a search result, a model that drifts between languages, or a rendered page:
 //!
-//! 1. **Another writing system.** Everything here is written in Japanese and English.
-//!    Hangul, Cyrillic, Thai, Devanagari and the rest are, in this context, always contamination rather than content.
+//! 1. **Another writing system.** These repositories use Japanese and English, so Hangul, Cyrillic, Thai, Devanagari, and the rest count as contamination.
 //!
-//! 2. **Simplified Chinese.** The hard case, because Japanese and Chinese share most of their ideographs — 日本語 and 日本語 are the same codepoints in both.
-//!    What is *not* shared is the PRC's simplified forms: a Chinese sentence of any length contains several of 这 个 说 时 门 现, none of which is a Japanese kanji.
-//!    Unicode laid most of them out in contiguous runs by radical (the whole 讠 block U+8BA0–U+8C36, the 钅 block, the 纟 block …)
-//!    , so a dozen ranges plus a list of the common stragglers covers it without shipping a Unihan table.
+//! 2. **Simplified Chinese.** Japanese and Chinese share most ideographs, so `日本語` reads the same in both.
+//!    A Chinese sentence of any length contains simplified forms such as `这 个 说 时 门 现`, which Japanese lacks.
 //!
-//! 3. **Invisible characters.** Zero-width spaces, bidirectional overrides, byte-order marks.
-//!    The bidi ones are the Trojan Source attack: text that a reviewer reads in one order and a compiler reads in another.
-//!    These are never intentional in a commit message or a source file.
+//! 3. **Invisible characters.** Zero-width spaces, bidirectional overrides, and byte-order marks.
 //!
-//! Latin-1 accents pass — `naïve`, `Gödel`, `São` are ordinary English and ordinary names.
-//! Greek passes one letter at a time, because `λ`, `μs` and `Σ` are technical notation, but a run of three or more is a Greek *word*.
+//! Latin-1 accents pass, as in `naïve`, `Gödel`, and `São`.
+//! Greek passes one letter at a time, so notation such as `λ`, `μs`, and `Σ` passes, but a run of three or more letters counts as a word.
 //!
-//! Cyrillic is refused even as a single character, and that rule earns its keep twice over: Cyrillic `а е о р с у х` are pixel-identical to Latin `a e o p c y x`, which is how a homoglyph gets into an identifier, a URL or a package name and survives review.
 
-/// Writing systems that are never in play here.
-/// Each entry is an inclusive codepoint range and the name used when reporting it.
+/// Writing systems with no use here.
 const BLOCKED: &[(u32, u32, &str)] = &[
     (0x0400, 0x052F, "Cyrillic"),
     (0x2DE0, 0x2DFF, "Cyrillic"),
@@ -43,41 +36,41 @@ const BLOCKED: &[(u32, u32, &str)] = &[
     (0x10A0, 0x10FF, "Georgian"),
     (0x1200, 0x137F, "Ethiopic"),
     (0x1780, 0x17FF, "Khmer"),
-    // Hangul: Jamo, Compatibility Jamo, Extended-A, and the syllable block.
-    // U+3190–U+319F, immediately after Compatibility Jamo, is Kanbun — Japanese annotation marks — which is why the range stops at U+318F.
+    // Hangul Jamo, Compatibility Jamo, Extended-A, and syllables.
+    // The range stops at U+318F, because Kanbun, the Japanese annotation marks, follows at U+3190–U+319F.
     (0x1100, 0x11FF, "Hangul"),
     (0x3130, 0x318F, "Hangul"),
     (0xA960, 0xA97F, "Hangul"),
     (0xAC00, 0xD7FF, "Hangul"),
-    // Bopomofo is Mandarin phonetic notation and has no Japanese use at all.
+    // Bopomofo, the Mandarin phonetic notation, has no Japanese use.
     (0x3100, 0x312F, "Bopomofo"),
     (0x31A0, 0x31BF, "Bopomofo"),
 ];
 
 /// Simplified-Chinese ideographs, by radical run.
 ///
-/// Each range ends one codepoint before the first Japanese kanji that follows it, which is why the bounds look arbitrary: U+8C37 谷, U+8D64 赤, U+8F9B 辛, U+961C 阜, U+7F36 缶, U+9577 長, U+9996 首, U+9AA8 骨, U+9E75 鹵, U+89D2 角, U+98A8 風, U+98DB 飛 and U+9F8D 龍 are all in daily Japanese use and all sit directly above one of these runs.
+/// Each range ends one codepoint before a kanji in daily Japanese use.
+/// Those kanji: U+8C37 `谷`, U+8D64 `赤`, U+8F9B `辛`, U+961C `阜`, U+7F36 `缶`, U+9577 `長`, U+9996 `首`, U+9AA8 `骨`, U+9E75 `鹵`, U+89D2 `角`, U+98A8 `風`, U+98DB `飛`, and U+9F8D `龍`.
 const SIMPLIFIED_RANGES: &[(u32, u32)] = &[
-    (0x8BA0, 0x8C36), // 讠 speech
-    (0x8D1D, 0x8D63), // 贝 shell
-    (0x8F66, 0x8F9A), // 车 cart
-    (0x95E8, 0x961B), // 门 gate
-    (0x7EA0, 0x7F35), // 纟 silk
-    (0x9485, 0x9576), // 钅 metal
-    (0x9963, 0x9995), // 饣 food
-    (0x9A6C, 0x9AA7), // 马 horse
-    (0x9C7C, 0x9CE2), // 鱼 fish
-    (0x9E1F, 0x9E74), // 鸟 bird
-    (0x89C1, 0x89D1), // 见 see
-    (0x9875, 0x98A7), // 页 page
-    (0x98CE, 0x98DA), // 风 wind
-    (0x9F7F, 0x9F8C), // 齿 tooth
+    (0x8BA0, 0x8C36), // `讠` speech
+    (0x8D1D, 0x8D63), // `贝` shell
+    (0x8F66, 0x8F9A), // `车` cart
+    (0x95E8, 0x961B), // `门` gate
+    (0x7EA0, 0x7F35), // `纟` silk
+    (0x9485, 0x9576), // `钅` metal
+    (0x9963, 0x9995), // `饣` food
+    (0x9A6C, 0x9AA7), // `马` horse
+    (0x9C7C, 0x9CE2), // `鱼` fish
+    (0x9E1F, 0x9E74), // `鸟` bird
+    (0x89C1, 0x89D1), // `见` see
+    (0x9875, 0x98A7), // `页` page
+    (0x98CE, 0x98DA), // `风` wind
+    (0x9F7F, 0x9F8C), // `齿` tooth
 ];
 
-/// The frequent simplified forms that fall outside those runs.
+/// The frequent simplified forms outside those runs.
 ///
-/// Every character here was checked against Japanese usage individually, and the near-misses are the interesting part: 声 壮 双 属 恋 弥 灯 炉 状 独 猫 猪 献 楼 欧 枢 湾 湿 滞 称 窃 胆 担 芦 茎 莱 蚕 蛮 随 誉 励 厨 惨 碍 礼 耻 痒 and 蚕 all *look* like simplified characters and are all perfectly ordinary Japanese — they are shinjitai, which China and Japan simplified the same way.
-/// None of them are listed below.
+/// Shinjitai that look simplified stay off this list, because Japan simplified them the same way, and `shinjitai_are_not_mistaken_for_simplified_chinese` tests them.
 const SIMPLIFIED_EXTRA: &str = "\
 这过还进远违连迟运迈达边辽迁选逊递逻遗适\
 个们为么义习书买产亲亿从仅仓价众优伟传伤伦伪侧债储\
@@ -138,26 +131,19 @@ const fn greek(c: char) -> bool {
     (0x0370 <= n && n <= 0x03FF) || (0x1F00 <= n && n <= 0x1FFF)
 }
 
-/// How many consecutive Greek letters stop being notation and start being a word.
+/// The count of consecutive Greek letters that turns notation into a word.
 const GREEK_RUN: usize = 3;
 
 /// Which rule set to apply.
+/// *Commit messages* on this machine use English, and their only other characters belong to typography and notation, such as `—`, `§`, `…`, `→`, `×`, `Θ(n)`, and `µs`.
 ///
-/// The two surfaces are deliberately not judged the same way, because the data says they are not the same thing.
-///
-/// *Commit messages* are prose this machine writes, and across 35,834 lines of real history they are English: the only non-ASCII in them is typography and mathematical notation — em dashes, §, …
-/// , →, ×, Θ(n), µs, none of which is a letter in any script.
-/// So the message rule is stated as a language rule and nothing else: a character that is a *letter* outside Latin does not belong.
-/// Punctuation, symbols, box drawing and emoji are none of its business.
-///
-/// *File content* is not prose.
-/// A unicode test fixture, an i18n test case and a Japanese typesetting library all legitimately contain Cyrillic, Arabic and kanji — they do here, in six repositories — and a rule that refused them would be a rule that gets switched off.
-/// Content gets a contamination filter instead: the scripts nobody here writes, the simplified forms that mean a sentence came from the wrong language, and the invisible characters that are never intentional anywhere.
+/// *File content* includes fixtures, i18n test cases, and Japanese typesetting code with Cyrillic, Arabic, and kanji, so a language rule would only get switched off.
+/// Content gets a contamination filter instead: unused scripts, simplified Chinese forms, and invisible characters.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    /// Commit messages: Latin letters only.
+    /// Commit messages with Latin letters only.
     English,
-    /// Commit messages in a repository whose subject is Japanese.
+    /// Commit messages in a repository about Japanese text.
     Japanese,
     /// Staged file content.
     Content,
@@ -165,26 +151,24 @@ pub enum Mode {
 
 impl Mode {
     /// Parse a `guard.lang` value.
-    /// Unset means English; `off` means no gate.
+    /// Unset means English, and `off` turns the gate off.
     pub fn parse(value: Option<&str>) -> Option<Self> {
         match value.map(str::trim) {
             Some("japanese" | "ja" | "jp") => Some(Self::Japanese),
             Some("off" | "false" | "0") => None,
-            // Unset, empty, "english", and anything unrecognised.
-            // A typo in this setting must not quietly mean "no checking".
+            // Unset, empty, `english`, and unrecognized values.
             _ => Some(Self::English),
         }
     }
 }
 
-/// Latin: ASCII letters, the Latin-1 accents, Latin Extended-A/B and Additional.
-/// `µ` and the ordinal indicators are alphabetic and sit below the Latin-1 letter block, so they are named rather than ranged.
+/// ASCII letters, the Latin-1 accents, and the extended Latin blocks U+0100–U+024F and U+1E00–U+1EFF.
 const fn latin(c: char) -> bool {
     let n = c as u32;
     c.is_ascii_alphabetic()
-        || n == 0x00B5 // µ MICRO SIGN, as in µs
-        || n == 0x00AA // ª
-        || n == 0x00BA // º
+        || n == 0x00B5 // `µ` micro sign, as in `µs`
+        || n == 0x00AA // `ª`
+        || n == 0x00BA // `º`
         || (0x00C0 <= n && n <= 0x024F)
         || (0x1E00 <= n && n <= 0x1EFF)
 }
@@ -194,13 +178,13 @@ const fn japanese(c: char) -> bool {
     let n = c as u32;
     (0x3000 <= n && n <= 0x303F) // `、。「」〜` and the iteration marks
         || (0x3040 <= n && n <= 0x30FF) // hiragana, katakana
-        || (0x31F0 <= n && n <= 0x31FF) // katakana phonetic extensions
+        || (0x31F0 <= n && n <= 0x31FF) // phonetic extensions for Ainu
         || (0x3400 <= n && n <= 0x9FFF) // CJK ideographs
         || (0xF900 <= n && n <= 0xFAFF) // compatibility ideographs
         || (0xFF00 <= n && n <= 0xFFEF) // halfwidth and fullwidth forms
 }
 
-/// A name for what was found, for the refusal message.
+/// The script name of a hit, for the refusal message.
 fn script_of(c: char) -> &'static str {
     if let Some(name) = blocked_script(c) {
         return name;
@@ -250,7 +234,7 @@ pub fn scan(text: &str, mode: Mode) -> Vec<Hit> {
             greek_run = None;
             run_len = 0;
 
-            // Never acceptable in either surface: text a reviewer cannot see.
+            // Both surfaces refuse invisible text.
             if let Some(kind) = invisible(c) {
                 hits.push(Hit {
                     line: line_no,
@@ -260,7 +244,7 @@ pub fn scan(text: &str, mode: Mode) -> Vec<Hit> {
                 });
                 continue;
             }
-            // Never acceptable in either surface: a form Japanese does not have, which means the sentence around it came from the wrong language.
+            // Both surfaces refuse a form that Japanese lacks, which marks the sentence as Chinese.
             if simplified(c) {
                 hits.push(Hit {
                     line: line_no,
@@ -291,7 +275,7 @@ pub fn scan(text: &str, mode: Mode) -> Vec<Hit> {
     hits
 }
 
-/// The commit message as the author wrote it: git's own `#` commentary and the `--verbose` diff below the scissors line are not ours to judge, and the diff in particular would re-flag content this gate already let through once.
+/// The commit message body without the `#` commentary of git and the `--verbose` diff below the scissors line, which would re-flag content that the content gate already passed.
 pub fn commit_message_body(raw: &str, comment_char: char) -> String {
     raw.lines()
         .take_while(|l| !l.starts_with(&format!("{comment_char} ------------------------ >8 ")))
@@ -327,11 +311,11 @@ pub fn evidence(label: &str, h: &Hit) -> String {
     )
 }
 
-/// The most hits a refusal lists; the report above it shows every one.
+/// The most hits a refusal lists, while the preceding report shows every one.
 const EVIDENCE_LIMIT: usize = 20;
 
-/// The refusal for text in a script this machine does not write.
-/// `waiver` repeats the refused command with the recorded override, and is `None` when that command is unknown.
+/// The refusal for text in a script this machine doesn't write.
+/// `waiver` repeats the refused command with the recorded override, and stays `None` for an unknown command.
 pub fn refusal(
     rule: &str,
     cause: &str,
@@ -393,8 +377,7 @@ mod tests {
     }
     const NONE: Vec<&'static str> = Vec::new();
 
-    /// Every non-ASCII character that appears in 35,834 lines of this machine's real commit messages, other than the agent attribution the stripper removes.
-    /// None of them is a letter, so none of them is this gate's business — which is the whole argument for keying on letters.
+    /// Every non-ASCII character found in the real commit messages of this machine, except the stripped attribution.
     #[test]
     fn real_english_commit_messages_pass() {
         for s in [
@@ -421,7 +404,7 @@ mod tests {
         assert!(kinds("שלום", Mode::English).contains(&"Hebrew"));
         assert!(kinds("مرحبا", Mode::English).contains(&"Arabic"));
         assert!(kinds("สวัสดี", Mode::English).contains(&"Thai"));
-        // The gap that only closes in English mode: Chinese written entirely in characters Japan also uses is undetectable as *Chinese*, but it is trivially detectable as "not Latin".
+        // Only English mode catches Chinese written in characters that Japanese shares, because those characters fall outside Latin.
         assert!(kinds("添加新的功能", Mode::English).contains(&"Han"));
     }
 
@@ -449,7 +432,6 @@ mod tests {
     }
 
     /// The kanji China and Japan simplified the same way.
-    /// Every one of these is ordinary Japanese and every one of them looks like it should not be.
     #[test]
     fn shinjitai_are_not_mistaken_for_simplified_chinese() {
         let shared = "声 壮 双 属 恋 弥 灯 炉 状 独 猫 猪 献 楼 欧 枢 湾 湿 滞 称 窃 胆 担 芦 茎                       莱 蚕 蛮 随 誉 励 厨 惨 碍 礼 耻 痒 谷 赤 辛 阜 缶 長 首 骨 鹵 角 風 飛 龍";
@@ -459,7 +441,7 @@ mod tests {
 
     #[test]
     fn content_mode_is_a_contamination_filter_not_a_language_rule() {
-        // Fixtures and a Japanese-typesetting crate are legitimate content.
+        // Fixtures and Japanese typesetting count as legitimate content.
         assert_eq!(
             kinds("const SAMPLE: &str = \"日本語のテスト\";", Mode::Content),
             NONE
@@ -468,14 +450,14 @@ mod tests {
             kinds("let x = 1; // ordinary English comment", Mode::Content),
             NONE
         );
-        // Scripts nobody here writes are not.
+        // Unused scripts fail.
         assert!(kinds("// Исправлено", Mode::Content).contains(&"Cyrillic"));
         assert!(kinds("// 这个", Mode::Content).contains(&"simplified Chinese"));
     }
 
     #[test]
     fn a_single_cyrillic_homoglyph_is_caught_in_every_mode() {
-        // 'с' here is U+0441, not the Latin 'c'.
+        // The `с` here, U+0441, differs from the Latin `c`.
         for mode in [Mode::English, Mode::Japanese, Mode::Content] {
             let hits = scan("let sourсe = 1;", mode);
             assert_eq!(hits.len(), 1);
@@ -523,7 +505,7 @@ mod tests {
         ));
         assert!(matches!(Mode::parse(Some(" ja\n")), Some(Mode::Japanese)));
         assert!(Mode::parse(Some("off")).is_none());
-        // A typo must not silently disable the gate.
+        // A typo never turns the gate off.
         assert!(matches!(Mode::parse(Some("englsh")), Some(Mode::English)));
     }
 }

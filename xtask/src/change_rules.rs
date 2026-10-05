@@ -1,4 +1,5 @@
-/// The kind of change a path makes; each class selects the gates that verify it.
+/// The change a path makes.
+/// Each class selects the gates that verify it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Class {
     Prose,
@@ -9,7 +10,8 @@ pub enum Class {
     Everything,
 }
 
-/// A group of checks; CI jobs and local hooks run exactly the gates a change selects.
+/// A group of checks.
+/// CI jobs and local hooks run exactly the gates a change selects.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Gate {
     Prose,
@@ -93,7 +95,8 @@ impl Gates {
 }
 
 /// The gates a class selects: prose checks run for every change, and wider classes add the checks their content can break.
-/// Skills deploy through the native profile, so they also select its rehearsal; the xtask crates validate and apply everything, so Rust selects every gate.
+/// Skills deploy through the native profile, so they also select its rehearsal.
+/// The xtask crates validate and apply everything, so Rust selects every gate.
 pub const fn gates(class: Class) -> Gates {
     let prose = Gates::of(Gate::Prose);
     match class {
@@ -198,7 +201,7 @@ pub fn matched(path: &[u8]) -> Option<Class> {
     None
 }
 
-/// A path no rule names might be anything, so it selects every gate.
+/// A path no rule names could hold anything, so it selects every gate.
 pub const fn resolve(found: Option<Class>) -> Class {
     match found {
         Some(class) => class,

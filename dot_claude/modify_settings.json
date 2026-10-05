@@ -1,15 +1,24 @@
-{{- /* chezmoi:modify-template */ -}}
+{{- $marker := "chezmoi:modify-template" -}}
 {{- /*
-  Claude Code rewrites this file at runtime, so each profile sets the keys here over the current file, an array as one value, and keeps every other key the client wrote.
-  Persistent agent memory stays off; docs/agent-memory-migration.md records where its former content lives.
+  Claude Code rewrites this file at runtime.
+  Each profile sets the keys here over the current file, treats an array as one value, and keeps every other key the client wrote.
+  Persistent agent memory stays off.
+  docs/agent-memory-migration.md records where its former content lives.
 */ -}}
 {{- $current := dict -}}
 {{- if trim .chezmoi.stdin -}}{{- $current = fromJson .chezmoi.stdin -}}{{- end -}}
-{{- /* The shell hook refuses recursive disk-usage scans in Bash and PowerShell, and file writes through inline interpreters, heredocs, and redirects in Bash; it runs the same xtask binary the git hooks use. */ -}}
+{{- /*
+The shell hook refuses recursive disk-usage scans in Bash and PowerShell.
+It also refuses file writes through inline interpreters, heredocs, and redirects in Bash.
+It runs the same xtask binary the git hooks use.
+*/ -}}
 {{- $tool := ".local/bin/dotfiles-xtask" -}}
 {{- if eq .profile "windows" }}{{ $tool = ".local/bin/dotfiles-xtask.exe" }}{{ end -}}
 {{- $hook := dict "type" "command" "command" (printf "%s claude-bash" (includeTemplate "sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
-{{- /* The timing hook sets each shell command's timeout from its measured durations; the post-tool events keep every group another installer added and replace only the timing one. */ -}}
+{{- /*
+The timing hook sets each shell command timeout from its measured durations.
+The post-tool events keep every group another installer added and replace only the timing one.
+*/ -}}
 {{- $timing := dict "type" "command" "command" (printf "%s claude-timing" (includeTemplate "sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
 {{- $hooks := dict "PreToolUse" (list (dict "matcher" "Bash|PowerShell" "hooks" (list $hook $timing))) -}}
 {{- range $event := list "PostToolUse" "PostToolUseFailure" -}}

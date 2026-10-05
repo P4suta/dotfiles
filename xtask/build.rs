@@ -1,4 +1,5 @@
-//! Embeds the revision, checkout, and content hash the installed tools are built from, so a tool can notice that its sources moved on.
+//! Embeds the revision, checkout, and content hash of the sources that produce each installed tool.
+//! A tool can then notice that its sources changed.
 
 #[path = "src/build_inputs.rs"]
 mod build_inputs;
@@ -6,7 +7,7 @@ mod build_inputs;
 use build_inputs::{content_hash, inputs};
 use std::path::PathBuf;
 
-/// The checkout's commit, or `unknown` where Git or the history is absent, such as a source copy in a container.
+/// The commit of the checkout, or `unknown` when the environment lacks Git or the history, such as in a source copy in a container.
 #[expect(
     clippy::disallowed_methods,
     reason = "a build script cannot use the crate's tool registry"

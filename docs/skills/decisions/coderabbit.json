@@ -1,7 +1,7 @@
 {
-  "revision": "ba321a22258dedf0fac9f48b1fd1fc4979ea6fee43d70e5fe283f132b6cd84b1",
+  "revision": "f963a404b048266d53b602212325e901e2b54a0298a8ae737938f904ad2a68a8",
   "outcome": "implemented",
-  "reason": "Point service operations at the guard's machine-readable pause scope and reduce the restated guard limits to what the guard enforces, keeping the paid-usage and unmanaged-client boundaries.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/coderabbit/SKILL.md",
     "xtask/src/review_guard.rs",

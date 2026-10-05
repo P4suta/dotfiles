@@ -1,9 +1,11 @@
 {
-  "revision": "502ed927df63ed7e7cada6283488f03563498737fc5bcf68b4f25096b31c62d5",
-  "outcome": "keep",
-  "reason": "Retain a narrowly triggered public first-use document standard independently of architecture records and internal operating instructions.",
+  "revision": "7313729874cdbefc5667209608dcab7ae7339efd5b92d49d46ed354d92913877",
+  "outcome": "implemented",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
-    "dot_agents/skills/oss-readme/SKILL.md"
+    "dot_agents/skills/oss-readme/SKILL.md",
+    "docs/adr/0016-one-writing-standard.md",
+    "xtask/tests/prose.rs"
   ],
   "revisit": null
 }

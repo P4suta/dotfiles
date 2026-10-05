@@ -34,7 +34,8 @@ pub enum Evidence {
     Passed,
 }
 
-/// Fold the next record in note order: the latest record for the commit's own tree decides, and a record for another tree says nothing.
+/// Fold the next record in note order.
+/// The newest record for the own tree of the commit decides, and a record for another tree says nothing.
 pub const fn record(previous: Evidence, same_tree: bool, passed: bool) -> Evidence {
     match (same_tree, passed) {
         (false, _) => previous,
@@ -58,7 +59,8 @@ const fn verdict(family: Family, required: bool, evidence: Evidence) -> Verdict 
     }
 }
 
-/// Admit only when every required family passed; otherwise name the first one to check.
+/// Admit only when every required family passed.
+/// Otherwise name the first one to check.
 pub const fn admit(required: [bool; 3], evidence: [Evidence; 3]) -> Verdict {
     let linux = verdict(Family::Linux, required[0], evidence[0]);
     if !matches!(linux, Verdict::Admit) {
@@ -71,7 +73,8 @@ pub const fn admit(required: [bool; 3], evidence: [Evidence; 3]) -> Verdict {
     verdict(Family::Windows, required[2], evidence[2])
 }
 
-/// Only a branch update on GitHub is gated; deletions, tags, and pushes to the owner's hubs are not.
+/// The gate covers only a branch update on GitHub.
+/// It skips deletions, tags, and pushes to the hubs of the owner.
 pub const fn gated(github: bool, branch: bool, deletion: bool) -> bool {
     github && branch && !deletion
 }
@@ -99,7 +102,7 @@ pub enum Start {
     Run,
 }
 
-/// Gates run only for a clean tree, and the first required host that is not ready stops the check.
+/// Gates run only for a clean tree, and the first required host that lacks readiness stops the check.
 pub const fn start(clean: bool, required: [bool; 3], ready: [bool; 3]) -> Start {
     if !clean {
         Start::Dirty

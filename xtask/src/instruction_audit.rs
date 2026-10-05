@@ -1,6 +1,6 @@
-//! Every line of the managed global agent instructions and agent prompt files is classified in a tracked audit.
+//! A tracked audit classifies every line of the managed global agent instructions and agent prompt files.
 //!
-//! A retained line is either judgment that no mechanism can enforce or a named follow-up that will mechanize it.
+//! A retained line holds judgment that no mechanism can enforce, or it names the follow-up that mechanizes it.
 //! The check refuses an unclassified line, a stale entry, a removed line without a named holder, and an instruction file that renders text outside the audited sources.
 
 use crate::instruction_rules::{
@@ -24,7 +24,7 @@ pub const PROFILE_FILES: [&str; 3] = [
     "dot_config/opencode/AGENTS.md.tmpl",
 ];
 
-/// Target file names that agent clients load as instructions.
+/// File names that agent clients load as instructions.
 const INSTRUCTION_NAMES: [&str; 6] = [
     "CLAUDE.md",
     "CLAUDE.local.md",
@@ -67,7 +67,7 @@ const ATTRIBUTES: [&str; 17] = [
     "symlink_",
 ];
 
-/// Extensions of files that can implement a gate.
+/// Extensions of files that can hold a gate.
 const GATE_SOURCES: [&str; 7] = [".rs", ".ts", ".js", ".json", ".toml", ".yml", ".yaml"];
 
 const PROFILES: &str = ".chezmoitemplates/profiles";
@@ -114,7 +114,8 @@ fn shape(line: &str) -> Line {
 /// A source line with its one-based number and shape.
 type Numbered<'a> = (usize, &'a str, Line);
 
-/// Every non-blank line with its one-based number and shape; a leading `---` block is front matter.
+/// Every non-blank line with its one-based number and shape.
+/// A leading `---` block counts as front matter.
 fn instruction_lines(text: &str) -> Vec<Numbered<'_>> {
     let mut front_matter = text.lines().next().map(str::trim_end) == Some("---");
     let mut result = Vec::new();
@@ -271,9 +272,9 @@ fn holder(cell: &str) -> Option<Holder> {
     }
 }
 
-/// Refusals for source lines the audit does not classify, audit entries that no longer match, and removed lines without a named holder.
+/// Refusals for source lines the audit doesn't classify, audit entries that no longer match, and removed lines without a named holder.
 ///
-/// `sources` pairs each audited partial name or prompt file path with its text.
+/// `sources` pairs each audited partial name or prompt path with its text.
 /// `exists` answers whether a repository-relative path exists, and `skills` lists the shared skill names.
 pub fn findings(
     sources: &[(&str, &str)],
@@ -406,7 +407,7 @@ pub fn findings(
             ));
         }
     }
-    // A quote reproduces a source line, so its code spans are not claims about this repository.
+    // A quote reproduces a source line, so its code spans make no claim about this repository.
     for (index, line) in audit
         .lines()
         .enumerate()
@@ -622,7 +623,7 @@ fn shared_skills(root: &Path) -> Result<Vec<String>> {
     Ok(names.into_iter().collect())
 }
 
-/// Refuse unless every managed instruction and prompt line is classified in the audit.
+/// Refuses unless the audit classifies every managed instruction and prompt line.
 pub fn check(root: &Path) -> Result<()> {
     let files = loaded_files(root)?;
     let mut sources = PARTIALS

@@ -9,9 +9,8 @@ license = "MIT"
 
 [dependencies]
 anyhow = "1.0"
-# The commit-message gate and the PR/issue/comment body gates judge attribution with one rule, the one in guard.
+clap = { version = "4.6", features = ["derive", "env"] }
 dotguard = { path = "../guard" }
-clap ={ version = "4.6", features = ["derive", "env"] }
 pulldown-cmark = "0.13"
 yaml-rust2 = "0.13"
 serde_json = "1.0"

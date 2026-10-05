@@ -3,8 +3,8 @@
 {{ . | quote }} = "latest"
 {{- end }}
 
-# github backend で単一バイナリアセット `tealdeer-linux-x86_64-musl` をコマンド `tldr` にリネームする。
-# 単一バイナリリリースは `bin`(tarball を展開するときは `rename_exe`)を使う。
+# The GitHub source renames the single binary asset `tealdeer-linux-x86_64-musl` to the command `tldr`.
+# A single binary release takes `bin`, and an extracted tarball takes `rename_exe`.
 "github:tealdeer-rs/tealdeer" = { version = "latest", bin = "tldr" }
 
 [settings]

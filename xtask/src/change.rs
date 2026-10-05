@@ -1,4 +1,5 @@
-//! The gates a change selects, read from Git; CI jobs and local hooks use this one implementation.
+//! The gates a change selects, read from Git.
+//! CI jobs and local hooks use this one implementation.
 
 use crate::change_rules::{Gates, select};
 use crate::tool::Tool;
@@ -42,7 +43,8 @@ impl Scope {
     }
 }
 
-/// Paths changed in the source; a renamed path lists both names, so each is classified.
+/// Paths changed in the source.
+/// A renamed path lists both names, so each gets a class.
 pub fn paths(root: &Path, source: &Source) -> Result<Vec<String>> {
     let mut command = Tool::Git.command();
     command

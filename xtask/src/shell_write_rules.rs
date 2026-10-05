@@ -214,7 +214,8 @@ pub fn segments(command: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// The program a command word names: its file name, lowercased, without `.exe` or a version suffix.
+/// The program a command word names.
+/// It takes the filename, folded to small letters, without `.exe` or a version suffix.
 pub fn program(text: &str) -> String {
     let name = text.rsplit(['/', '\\']).next().unwrap_or(text);
     let lower = name.to_ascii_lowercase();
@@ -283,11 +284,11 @@ fn segment_words(segment: &[Token]) -> Vec<&str> {
 /// Where the text of a body sent to GitHub comes from.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Source {
-    /// The body is written on the command line.
+    /// The command line carries the body.
     Inline(String),
-    /// The body is read from a file named on the command line.
+    /// The command reads the body from a file that the command line names.
     File(String),
-    /// The request payload is a JSON file whose `body` string is sent.
+    /// The request payload comes from a JSON file, and the command sends its `body` string.
     Json(String),
     /// The body arrives on standard input: heredocs and the words of the rest of the command.
     Stdin(String),
@@ -329,7 +330,7 @@ fn file_source(path: &str) -> Source {
     }
 }
 
-/// The value of a `key=value` field when the key is a body.
+/// The value of a `key=value` field when the key names a body.
 fn body_value(field: &str) -> Option<&str> {
     field
         .split_once('=')
@@ -382,7 +383,9 @@ fn command_sources(arguments: &[&str], sources: &mut Vec<Source>) {
 
 /// Every place the bodies of the `gh` writes in a command come from.
 ///
-/// Standard input is resolved here, where the command text is known: it is the heredoc bodies and the words of every other command in the line, so `echo "$text" | gh pr comment --body-file -` is read as well.
+/// This function resolves standard input because it knows the command text.
+/// Standard input covers the heredoc bodies and the words of every other command in the line.
+/// It also covers `echo "$text" | gh pr comment --body-file -`.
 pub fn body_sources(command: &str) -> Vec<Source> {
     let scan = scan(command);
     let segments: Vec<Vec<&str>> = scan
@@ -423,7 +426,8 @@ pub fn body_sources(command: &str) -> Vec<Source> {
     sources
 }
 
-/// The two detections the verdict is made from: an inline interpreter and a file write.
+/// The two detections behind the verdict.
+/// They cover an inline interpreter and a file write.
 pub fn inspect(command: &str) -> Verdict {
     let scan = scan(command);
     let mut interpreter = false;

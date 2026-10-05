@@ -41,7 +41,7 @@ enum Action {
         #[arg(long)]
         output: PathBuf,
     },
-    /// Apply an unchanged plan after checking live settings; record every verified change.
+    /// Apply an unchanged plan after checking live settings, and record every verified change.
     Apply {
         #[arg(long)]
         plan: PathBuf,

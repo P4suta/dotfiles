@@ -21,7 +21,7 @@
     mode: '0644'
     content: |
       # Trigger below 5% mem and 5% swap, report every 60s.
-      # --avoid deprioritizes management and desktop processes; it is not an absolute exemption.
+      # --avoid deprioritizes management and desktop processes.
       EARLYOOM_ARGS="-r 60 -m 5 -s 5 --avoid '(^|/)(NetworkManager|tailscaled|sshd|systemd|systemd-.*|\
       cinnamon|Xorg|mintsystem)$'"
   register: earlyoom_conf
@@ -34,7 +34,7 @@
     state: "{{ 'restarted' if earlyoom_conf is changed else 'started' }}"
 
 # 2 GB -> 8 GB by adding a second file.
-# Keep /swapfile active; swapoff would move its contents back into RAM under memory pressure.
+# Keep /swapfile active, because swapoff would move its contents back into RAM under memory pressure.
 - name: Allocate /swapfile2 (6 GiB)
   become: true
   ansible.builtin.command:

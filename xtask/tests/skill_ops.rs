@@ -911,7 +911,7 @@ fn decide_diffs_from_the_commit_holding_the_assessed_content() -> Result<()> {
     let assessed = git(root.path(), &["rev-parse", "HEAD"])?;
     let skill = root.path().join("dot_agents/skills/beta/SKILL.md");
     fs::write(&skill, skill_text("beta", "Intermediate change."))?;
-    // The decision is first committed with content newer than the content it assessed.
+    // The first commit of the decision holds content newer than the content it assessed.
     git(root.path(), &["add", "--all"])?;
     git(
         root.path(),

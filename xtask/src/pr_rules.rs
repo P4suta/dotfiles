@@ -20,7 +20,6 @@ pub enum Effect {
     Ready,
 }
 
-/// The issue prerequisite established before a PR operation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum IssueGate {
     NotRequired,
@@ -28,7 +27,7 @@ pub enum IssueGate {
     Missing,
 }
 
-/// Apply personal issue rules only to owned repositories that are not forks.
+/// Apply personal issue rules only to owned non-fork repositories.
 pub fn issue_gate(personal_owner: bool, fork: bool, checked_issue: bool) -> IssueGate {
     if !personal_owner || fork {
         IssueGate::NotRequired
@@ -39,7 +38,6 @@ pub fn issue_gate(personal_owner: bool, fork: bool, checked_issue: bool) -> Issu
     }
 }
 
-/// Keep a nonzero reserve before issuing further GitHub operations.
 pub fn api_quota_available(remaining: u64, reserve: u64) -> bool {
     reserve > 0 && remaining >= reserve
 }
@@ -48,7 +46,7 @@ pub fn coderabbit_body_marker_allowed(request: bool, summary: bool, ignore: bool
     ignore || request && summary
 }
 
-/// The head commit's reported checks; an empty report is not a pass.
+/// The head commit's reported checks, where an empty report never passes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Checks {
     Passing,
@@ -146,7 +144,8 @@ pub fn review_requirement(paused: bool, exclusion: Exclusion) -> ReviewRequireme
     }
 }
 
-/// The head commit's reported checks while a merge waits for them; an empty report is pending.
+/// The checks reported for the head commit while a merge waits for them.
+/// An empty report counts as pending.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum HeadChecks {
     Passing,
@@ -180,7 +179,7 @@ pub struct MergeState {
     /// The base branch has commits the head lacks.
     pub behind: bool,
     pub checks: HeadChecks,
-    /// GitHub reports every merge requirement of the base met.
+    /// GitHub reports that the PR meets all merge rules of the base.
     pub clean: bool,
     pub exclusion: Exclusion,
 }
@@ -191,7 +190,8 @@ pub enum Stop {
     Closed,
     Conflict,
     FailedChecks,
-    /// A CodeRabbit review of the head is owed, and only coderabbit-review can establish that its findings are settled.
+    /// The head still needs a CodeRabbit review.
+    /// Only coderabbit-review can establish that the review's findings have a resolution.
     Review,
 }
 
@@ -201,13 +201,14 @@ pub enum Step {
     Done,
     /// Merge the base into an independent PR's head with GitHub's branch update, which GitHub signs.
     Update,
-    /// Rebase a stacked PR onto its parent with the stack tooling; a stack needs a linear history.
+    /// Rebase a stacked PR onto its parent with the stack tooling.
+    /// A stack needs a linear history.
     Restack,
     Wait,
     /// Add the CodeRabbit pause lines before a draft becomes ready during the owner's pause.
     Exclude,
     Ready,
-    /// Merge the head whose checks were read.
+    /// Merge the head whose checks the tool read.
     Merge,
     Stop(Stop),
 }
@@ -250,7 +251,8 @@ pub enum Dependency {
     Paths,
 }
 
-/// A branch that shares commits with another open PR opens only stacked on that PR, and one that shares touched paths does too unless it is declared independent.
+/// A branch that shares commits with another open PR opens only stacked on that PR.
+/// A branch that shares touched paths with another open PR also opens stacked on it, unless the branch carries a declaration of independence.
 pub fn dependency(
     shared_commits: bool,
     shared_paths: bool,

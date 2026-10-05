@@ -27,19 +27,21 @@ pub enum Action {
         /// Choose this tailnet host for its OS family.
         #[arg(long)]
         host: Vec<String>,
-        /// Remote user; defaults to the managed one, then to a hub remote's.
+        /// Remote user.
+        /// Defaults to the managed one, then to the user of a hub remote.
         #[arg(long)]
         user: Option<String>,
         /// Replace this host's pinned key with the one it presents now.
         #[arg(long)]
         accept: Vec<String>,
     },
-    /// Run the gate for the clean HEAD on every OS family in the CI matrix and record each result as a Git note.
+    /// Run the gate for the clean head commit on every operating system family in the continuous integration matrix and record each result as a Git note.
     Check {
         #[arg(long, default_value = DEFAULT_GATE)]
         gate: String,
     },
-    /// Refuse pushed GitHub branches that lack a passing note for an OS family in their CI matrix; reads pre-push input.
+    /// Refuse pushed GitHub branches that lack a passing note for an operating system family in their CI matrix.
+    /// Reads pre-push input.
     Gate { remote: String, url: String },
 }
 
@@ -127,7 +129,8 @@ fn runner_labels(job: &Yaml, name: &str) -> Result<Vec<String>> {
     Ok(resolved)
 }
 
-/// The families the workflows' jobs run on, by family index; reusable-workflow calls have no runner of their own.
+/// The families the workflows' jobs run on, by family index.
+/// Reusable-workflow calls have no runner of their own.
 pub fn required(workflows: &[(String, String)]) -> Result<[bool; 3]> {
     let mut required = [false; 3];
     for (file, text) in workflows {
@@ -536,7 +539,8 @@ pub fn remote_gate(family: Family, gate: &str) -> String {
     }
 }
 
-/// The exit status domyjob reports for a finished job; `None` when the job did not finish or failed to launch.
+/// The exit status domyjob reports for a finished job.
+/// Returns `None` when the job didn't finish or failed to launch.
 pub fn outcome(alias: &str, output: &str) -> Option<i32> {
     let prefix = format!("{alias}:");
     let line = output
@@ -597,7 +601,8 @@ fn fingerprint(native: &Native, key: &str) -> Result<String> {
         .to_owned())
 }
 
-/// The ed25519 key the host presents to the SSH client that later connects, which `ssh-keyscan` cannot always negotiate; no identity is offered, so at most a host that admits anyone runs `true`.
+/// The ed25519 key the host presents to the SSH client that later connects, which `ssh-keyscan` can't always negotiate.
+/// The scan offers no identity, so at most a host that admits anyone runs `true`.
 fn scan(native: &Native, user: &str, address: &str) -> Result<Option<String>> {
     let directory = tempfile::tempdir()?;
     let file = directory.path().join("known_hosts");

@@ -1,7 +1,7 @@
 {
-  "revision": "c70c317435d56dfd2388004649633a16bdaa179a8fc861961b69c14ecd7ddab7",
+  "revision": "fae5963ca938364b020650461b6e9e90f986cd28fab950b355b56b0738e671e1",
   "outcome": "implemented",
-  "reason": "Replace the restated cross-platform run instruction with a pointer at `dotfiles-xtask hosts check`, which the push gates enforce; keep CI-job mapping, hosted-only prerequisites, and push-hold judgment.",
+  "reason": "Point cross-platform verification at `dotfiles-xtask hosts check`, which the push gates enforce, in the minimal prose of the writing standard; keep CI-job mapping, hosted-only prerequisites, and push-hold judgment.",
   "evidence": [
     "dot_agents/skills/ci-budget/SKILL.md",
     "xtask/src/hosts.rs",

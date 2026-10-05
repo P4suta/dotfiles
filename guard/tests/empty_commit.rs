@@ -1,4 +1,4 @@
-//! The post-commit gate against real repositories: an ordinary commit that records no change is rolled back.
+//! Tests that the post-commit gate rolls back an ordinary commit that records no change in a real repository.
 
 use dotguard::refusal::Refusal;
 use std::path::{Path, PathBuf};

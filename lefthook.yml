@@ -3,6 +3,12 @@ pre-commit:
   commands:
     candidate:
       run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check --staged
+    comments:
+      run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml --bin prose -- --source . repository --scope comments
+commit-msg:
+  commands:
+    prose:
+      run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml --bin prose -- --source . check --channel commit {1}
 pre-push:
   commands:
     hosts:

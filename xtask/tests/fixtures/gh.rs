@@ -104,7 +104,7 @@ fn field(view: String, name: &str, value: &str) -> String {
     }
 }
 
-/// The fixture is compiled by rustc alone, so its sequence input is line-based rather than JSON.
+/// Only rustc compiles the fixture, so its sequence input uses lines rather than JSON.
 /// `GH_FIXTURE_VIEWS` lists each read of a PR as `NUMBER=<compact JSON object>`, one per line.
 mod states {
     pub type Map = std::collections::BTreeMap<String, Vec<String>>;

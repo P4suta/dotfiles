@@ -1,36 +1,36 @@
-# Analysis and Improvement Decisions
+# Analysis and improvement decisions
 
-Treat the report as evidence for a judgment, with an explicit collection scope and revision.
+Treat the report, with its explicit collection scope and revision, as evidence for a judgment.
 Compare loader signals, direct reads, shell references, unique sessions, repeated reads, and co-use before drawing conclusions.
-Long sessions, compaction, repeated setup reads, and specialized release work can distort raw frequencies.
-Eligibility and a demonstrated outcome matter more than a popularity ranking.
-An unused release skill may be correct and valuable; a frequently loaded skill may simply have an overly broad trigger.
+Long sessions, compaction, repeated setup reads, and specialized release work distort raw frequencies.
+Eligibility and demonstrated outcomes outweigh popularity.
 
-Review the following dimensions for each changed catalog entry and each demonstrated problem:
+Review these dimensions for each changed catalog entry and each demonstrated problem.
 
-| Dimension | Decision to make |
+| Dimension | Decision |
 | --- | --- |
-| Discovery | Does the description select actual tasks and avoid unrelated work? |
-| Composition | Should a dependency be unconditional, conditional, or part of a named workflow bundle? |
-| Scope | Would one focused skill, conditional references, a merge, or separate skills improve independent use? |
-| Repetition | Is a demonstrated recurring procedure missing a reusable skill or maintained command? |
-| Enforcement | Can a type, parser, schema, lint, or required check replace an interpretive instruction? |
-| Correctness | Does the workflow preserve intent, authorization, current evidence, errors, and supported boundaries? |
-| Evaluation | Which real failure or representative scenario shows that the instruction or checker works? |
-| Portability | Do canonical paths, aliases, client integration, and native targets preserve the same behavior? |
-| Maintenance | Who owns the contract, what invalidates it, and what upstream change warrants reassessment? |
+| Discovery | Make the description select actual tasks and skip unrelated work. |
+| Composition | Make each dependency unconditional, conditional, or part of a named workflow bundle. |
+| Scope | Choose between one focused skill, conditional references, a merge, or separate skills for independent use. |
+| Repetition | Give a demonstrated recurring procedure a reusable skill or maintained command. |
+| Enforcement | Replace interpretive instructions with a type, parser, schema, lint, or required check where possible. |
+| Correctness | Keep intent, authorization, current evidence, errors, and supported boundaries intact. |
+| Evaluation | Name the real failure or representative scenario that shows the instruction or checker works. |
+| Portability | Keep canonical paths, aliases, client integration, and native targets behaving the same. |
+| Maintenance | Name the contract owner, what invalidates the contract, and which upstream change warrants reassessment. |
 
-Co-use creates a composition question; it does not establish that two responsibilities belong in one skill.
-Compare both conditional directions and independent uses, inspect the shared task, and prefer a bundle when distinct responsibilities are commonly needed together.
-Reduce duplication by keeping each rule at its authoritative boundary and routing neighboring skills there.
-When deterministic procedure becomes code, retain the remaining selection, invocation, failure handling, and trust assumptions in the skill.
+Co-use raises a composition question without proving that two responsibilities belong in one skill.
+Prefer a bundle when distinct responsibilities often appear together.
+Keep each rule at its authoritative boundary and route neighboring skills there.
+When deterministic procedure moves into code, keep the remaining selection, invocation, failure handling, and trust assumptions in the skill.
 
-Before accepting an improvement, identify the observable benefit and the evidence that would reject a regression.
-Use actual representative tasks, counterexamples, project checks, and proof obligations proportionate to the behavior.
-Run an independent agent evaluation only when delegation is explicitly authorized; do not create background agent work from a maintenance recommendation.
-Require the relevant current-head review for a published change, while keeping service-specific behavior outside this operating standard.
+Before accepting an improvement, name the observable benefit and the evidence that would reveal a regression.
+Run an independent agent evaluation only with explicit delegation, and never start background work from a maintenance recommendation.
+Require the relevant current-head review for a published change.
 
-The required check binds one evidence-backed decision to each skill revision, and the local gate requires a disposition only for findings that no reviewed revision settles.
-They verify identity, completeness, and local evidence paths, and detect changed content; the agent still owns the quality of the judgment.
-Review thresholds are based on new observations and content changes rather than a sleep, calendar deadline, or presumed quiet period.
-Deferred findings remain in the local history and return in subsequent reports.
+The required check binds one evidence-backed decision to each skill revision.
+The local gate requires a disposition only for findings that no reviewed revision settles.
+Both verify identity, completeness, and local evidence paths, and detect changed content, but the judgment's quality stays the reviewer's responsibility.
+New observations and content changes drive review thresholds.
+Sleeps and calendar deadlines never do.
+Deferred findings stay in the local history and return in later reports.

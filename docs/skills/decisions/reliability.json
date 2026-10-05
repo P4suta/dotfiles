@@ -1,7 +1,7 @@
 {
-  "revision": "f8cd25a623029ae93a6c8a8707cc5101dd491bf8bf1c6577ac18e411f083e49c",
+  "revision": "10f600a4f960294ad191986635e6266889ee2418fdafb28f61f3edb2c3ded396",
   "outcome": "implemented",
-  "reason": "Retain dependency-specific causal guidance and add atomic resource reservation with a repeated-clock regression after a demonstrated native fixture collision; scheduling, persistence, environment, and external boundaries remain separate from generic test planning.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/reliability/SKILL.md",
     "dot_agents/skills/reliability/references/time-and-randomness.md"

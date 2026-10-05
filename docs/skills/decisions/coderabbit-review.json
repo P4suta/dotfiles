@@ -1,7 +1,7 @@
 {
-  "revision": "a0be3a15d4e46a35547cf973f6d8474c02a90cfb7a26fdaf76f9384133459e2a",
+  "revision": "fa847c72ccf0a7b0f54814fd5c3ee0c16e487a24aaa04f7285c75dd44f210234",
   "outcome": "implemented",
-  "reason": "Replace the restated guard limits and pause prose with a pointer at the guard's machine-readable status and keep the refusal and no-bypass judgment. While the owner pauses PR reviews none is owed, reviews CodeRabbit itself paused remain pending, and the live check states when a review is owed again after resumption.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/coderabbit-review/SKILL.md",
     "xtask/tests/review_guard.rs",

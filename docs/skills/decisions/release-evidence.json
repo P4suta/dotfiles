@@ -1,7 +1,7 @@
 {
-  "revision": "9acaa1f6a71f77d684120813d117506e18481ae8f941b831252f4b8e0807ceff",
+  "revision": "2edce60d3bfddcc3f95a81d19b2dc61eca389e71023b81efe4b5962e881cdf25",
   "outcome": "keep",
-  "reason": "Retain exact distributed-artifact inventory, provenance, SBOM, and consumer checks separately from signing and publication authorization.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/release-evidence/SKILL.md"
   ],

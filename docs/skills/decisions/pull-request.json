@@ -1,7 +1,7 @@
 {
-  "revision": "e519de9e0767b9545d4bd3e9a96ce4a7e07978833498cf097ab11845d2fad4f4",
+  "revision": "d6769d5ac1d1a2540132018a6037234b5ed2e0a63779be43daaf328ddcb3a571",
   "outcome": "implemented",
-  "reason": "The skill points at the checked stack, merge, and create commands of pr-workflow: dependent work opens as a stack, independent PRs merge without manual updates, and create refuses a PR beyond the author's work-in-progress limit, which the workflow policy records with a default of one and reasoned per-repository overrides.",
+  "reason": "The skill points at the checked commands of pr-workflow: documents meet the writing standard, dependent work opens as a stack, independent PRs merge without manual updates, and create refuses a PR beyond the author's work-in-progress limit from the workflow policy.",
   "evidence": [
     "dot_agents/skills/pull-request/SKILL.md",
     "docs/adr/0004-checked-pull-request-authoring.md",
@@ -13,7 +13,9 @@
     "docs/adr/0008-layered-review-capacity.md",
     "docs/adr/0013-ready-only-after-passing-checks.md",
     "docs/adr/0015-scoped-coderabbit-pause.md",
+    "docs/adr/0016-one-writing-standard.md",
     "xtask/src/pr_workflow.rs",
+    "xtask/src/prose_rules.rs",
     "guard/src/stack.rs",
     "xtask/src/wip_rules.rs",
     "dot_agents/skills/pull-request/assets/workflow-policy.json"

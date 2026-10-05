@@ -1,5 +1,6 @@
 //! Claude Code shell timeouts set from measured durations.
-//! PreToolUse records when a Bash or PowerShell call starts and sets its timeout from the signature's history; PostToolUse and PostToolUseFailure record how long it took.
+//! PreToolUse records when a Bash or PowerShell call starts and sets its timeout from the signature's history.
+//! PostToolUse and PostToolUseFailure record how long it took.
 
 use crate::shell_write_rules::{program, segments};
 use crate::timeout_rules::{CLIENT_LIMIT_MS, Timeout, WINDOW, overran, percentile, timeout};
@@ -11,10 +12,11 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-/// The history file is rewritten to the latest runs of each signature once it grows past this size.
+/// Once the history file grows past this size, the hook rewrites it to the newest runs of each signature.
 const COMPACT_BYTES: u64 = 1 << 20;
 
-/// Words that only prepare the shell; a command made of them alone has no signature of its own.
+/// Words that only prepare the shell.
+/// A command made of them alone has no signature of its own.
 const PREPARATION: [&str; 12] = [
     "cd",
     "export",
@@ -43,7 +45,8 @@ fn plain(word: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '_' | '-'))
 }
 
-/// The signature of one simple command: its program and up to two subcommand words, with wrappers and arguments dropped.
+/// The signature of one simple command consists of its program and up to two subcommand words.
+/// It drops wrappers and arguments.
 fn simple(words: &[String]) -> Option<String> {
     let mut start = 0;
     while let Some(word) = words.get(start) {
@@ -158,7 +161,8 @@ fn history(home: &Path) -> Vec<Run> {
     runs(&state(home).join("history.jsonl"))
 }
 
-/// The runs recorded in `path`; a missing file or an unreadable line holds none.
+/// The runs recorded in `path`.
+/// A missing file or an unreadable line holds none.
 fn runs(path: &Path) -> Vec<Run> {
     fs::read_to_string(path)
         .unwrap_or_default()
@@ -167,7 +171,7 @@ fn runs(path: &Path) -> Vec<Run> {
         .collect()
 }
 
-/// The latest durations of `signature`, ascending.
+/// The newest durations of `signature`, ascending.
 fn window(runs: &[Run], signature: &str) -> Vec<u64> {
     let mut latest: Vec<u64> = runs
         .iter()
@@ -184,7 +188,8 @@ fn seconds(millis: u64) -> String {
     format!("{:.0} s", millis.div_ceil(1000))
 }
 
-/// The start marker of one tool call; its name is the call's identifier, kept to safe characters.
+/// The start marker of one tool call.
+/// Its name matches the identifier of the call, kept to safe characters.
 fn marker(home: &Path, id: &str) -> Option<PathBuf> {
     let safe = !id.is_empty()
         && id.len() <= 128
@@ -212,7 +217,8 @@ fn record(home: &Path, run: &Run) -> Result<()> {
     Ok(())
 }
 
-/// Keeps the latest window of each signature; a run appended by another hook during the rename is lost, which only thins the statistics.
+/// Keeps the newest window of each signature.
+/// The rename loses a run that another hook appends meanwhile, which only thins the statistics.
 fn compact(directory: &Path, path: &Path) -> Result<()> {
     let runs = runs(path);
     let mut kept: Vec<&Run> = Vec::new();
@@ -239,7 +245,8 @@ fn context(event: &str, text: String) -> Value {
     json!({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}})
 }
 
-/// The hook output for one event at `now` (milliseconds since the epoch), or `None` when the call needs nothing.
+/// The hook output for one event at `now`, given in milliseconds since the epoch.
+/// Returns `None` when the call needs nothing.
 pub fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Value>> {
     if !matches!(event["tool_name"].as_str(), Some("Bash" | "PowerShell")) {
         return Ok(None);

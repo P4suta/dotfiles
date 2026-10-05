@@ -1,7 +1,7 @@
 {
-  "revision": "b9dc83ad84b2a6c456081f09809ef3875c03a6a5533850b94f4473b344dc3826",
+  "revision": "f3aa60e24297fec11e0655802eea8d8110cb4b9b0fc83e2c47dcf53267712ab6",
   "outcome": "keep",
-  "reason": "Retain installer payload, receipt, upgrade, and native distribution checks separately from executable signing and notarization.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/macos-pkg/SKILL.md"
   ],

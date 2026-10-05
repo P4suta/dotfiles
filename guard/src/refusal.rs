@@ -1,28 +1,29 @@
 //! The one refusal format every gate in this repository emits.
 //!
-//! A refusal is printed as readable text followed by exactly one machine-readable line:
+//! A refusal prints readable text followed by exactly one machine-readable line:
 //!
 //! ```text
 //! dotfiles-refusal/1 {"rule":"...","cause":"...","evidence":["..."],"next":"...","waiver":null}
 //! ```
 //!
-//! The line is the prefix and one compact JSON object with these five keys in this order.
-//! `next` is a command to run; `<name>` marks a value only the author can supply.
-//! `next` is `null` when no command repeats the refused intent, and the cause then says why.
-//! `waiver` is the command that overrides the gate once and is recorded, or `null` when the gate cannot be waived.
+//! The line holds the prefix and one compact JSON object with these five keys in this order.
+//! `next` holds a command to run, and `<name>` marks a value only the person at the terminal can supply.
+//! `next` holds `null` when no command repeats the refused intent, and the cause then says why.
+//! `waiver` holds the command that overrides the gate once with a recorded override, or `null` when the gate offers no waiver.
 //!
-//! This file is std-only so `dotguard` and the xtask binaries compile the same source.
+//! This file uses std only, so `dotguard` and the xtask binaries compile the same source.
 
 use std::fmt::{self, Write as _};
 
-/// Starts the machine-readable line; the version changes only with an incompatible format.
+/// Starts the machine-readable line.
+/// The version changes only with an incompatible format.
 pub const PREFIX: &str = "dotfiles-refusal/1 ";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Refusal {
     /// Stable dotted identifier of the gate rule, such as `git.force`.
     pub rule: String,
-    /// Why the operation was refused.
+    /// Why the gate refused the operation.
     pub cause: String,
     /// The observed facts the refusal rests on.
     pub evidence: Vec<String>,
@@ -43,7 +44,7 @@ impl Refusal {
         }
     }
 
-    /// A refusal that suggests no command; `cause` must say why.
+    /// A refusal that suggests no command, so `cause` must say why.
     pub fn without_next(rule: impl Into<String>, cause: impl Into<String>) -> Self {
         Self {
             next: None,
@@ -63,7 +64,8 @@ impl Refusal {
         self
     }
 
-    /// Whether every field an agent needs is present: a dotted rule, a cause, evidence, a one-line next command when there is one, and a one-line waiver when there is one.
+    /// Whether every field an agent needs has a value: a dotted rule, a cause, and evidence.
+    /// Any next command and waiver must fit on one line.
     pub fn is_complete(&self) -> bool {
         let one_line = |text: &str| !text.trim().is_empty() && !text.contains(['\n', '\r']);
         !self.rule.is_empty()
@@ -148,7 +150,7 @@ impl Refusal {
         eprint!("{}", self.render());
     }
 
-    /// Reads a machine-readable line back, or `None` when it is not exactly this format.
+    /// Reads a machine-readable line back, or `None` when the line doesn't match this format exactly.
     pub fn parse(line: &str) -> Option<Self> {
         let mut reader = Reader {
             rest: line.strip_prefix(PREFIX)?,

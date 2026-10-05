@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 
 /// Places dotguard as `git` under `directory`, the name it answers to as the wrapper, the way Windows installs it.
 /// Call it only from the one preparation step a test binary runs before it starts any process.
-/// A child forked on Linux holds every descriptor of this process until it executes, so an executable written while another test spawns can still be open for writing when it runs, and executing it fails with `ETXTBSY`.
+/// A child forked on Linux holds every descriptor of this process until it executes.
+/// An executable written while another test spawns can then stay open for writing when it runs, and executing it fails with `ETXTBSY`.
 ///
 /// # Panics
 ///
-/// Panics when the wrapper cannot be placed.
+/// Panics when placing the wrapper fails.
 pub fn place(directory: &Path) -> PathBuf {
     std::fs::create_dir_all(directory).unwrap();
     let git = directory.join(format!("git{}", std::env::consts::EXE_SUFFIX));
@@ -20,7 +21,7 @@ pub fn place(directory: &Path) -> PathBuf {
 ///
 /// # Panics
 ///
-/// Panics when the directory cannot be emptied.
+/// Panics when emptying the directory fails.
 pub fn preparation(name: &str) -> PathBuf {
     let directory =
         Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}-{}", std::process::id()));

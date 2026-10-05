@@ -151,7 +151,7 @@ enum Action {
         /// Use the last fetched state and skip GitHub.
         #[arg(long)]
         offline: bool,
-        /// Run the next step when it is local and reversible, then report the step after it.
+        /// Run a local, reversible next step, then report the step after it.
         #[arg(long)]
         execute: bool,
     },
@@ -166,6 +166,8 @@ enum Action {
     InstallReviewGuard,
     InstallSkillOps,
     InstallPrWorkflow,
+    /// Install the prose checker, its pinned linters, and the reply hook of each client.
+    InstallProse,
     PrWorkflow {
         #[command(subcommand)]
         command: dotfiles_xtask::pr_workflow::Action,
@@ -175,7 +177,8 @@ enum Action {
         #[command(subcommand)]
         action: dotfiles_xtask::hosts::Action,
     },
-    /// Prove the production contracts; a scope without the Rust gate skips them.
+    /// Prove the production contracts.
+    /// A scope without the Rust gate skips them.
     Proofs {
         #[command(flatten)]
         scope: dotfiles_xtask::change::Scope,
@@ -218,7 +221,8 @@ fn check_package(root: &Path, manifest: &Path) -> Result<()> {
     cargo(root, manifest, &["test", "--locked", "--all-targets"])
 }
 
-/// Runs the checks of each selected gate; a change that selects fewer gates skips only the checks it cannot affect.
+/// Runs the checks of each selected gate.
+/// A change that selects fewer gates skips only the checks it can't affect.
 fn check(root: &Path, gates: Gates) -> Result<()> {
     if gates.contains(Gate::Prose) {
         dotfiles_xtask::quality::comment_scopes(root)?;
@@ -230,6 +234,11 @@ fn check(root: &Path, gates: Gates) -> Result<()> {
             "references to recipes the justfile does not define: {unknown:#?}"
         );
         dotfiles_xtask::quality::secrets(root)?;
+        dotfiles_xtask::prose::repository(
+            root,
+            dotfiles_xtask::prose::Scope::Documents,
+            &dotfiles_xtask::prose::Bundle::source(root)?,
+        )?;
     }
     if gates.contains(Gate::Skills) {
         dotfiles_xtask::skill_ops::check_catalog(root)?;
@@ -407,6 +416,37 @@ fn run() -> Result<()> {
                 &cli.root,
                 Built::PrWorkflow,
             )?;
+        }
+        Action::InstallProse => {
+            cargo(
+                &cli.root,
+                Path::new("xtask/Cargo.toml"),
+                &["build", "--locked", "--release", "--bin", "prose"],
+            )?;
+            let status = Tool::chezmoi_in(&cli.root)
+                .args([
+                    "--force",
+                    "apply",
+                    "--include",
+                    "dirs,files",
+                    "--source-path",
+                    "--parent-dirs",
+                ])
+                .arg(cli.root.join(dotfiles_xtask::prose::SOURCE_CONFIG))
+                .arg(cli.root.join("dot_config/opencode/plugins/prose.ts"))
+                .status()?;
+            ensure!(
+                status.success(),
+                "the prose configuration installation failed with {status}"
+            );
+            let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
+            let binary = check_build_dir(&cli.root, configured.as_deref())
+                .join("release")
+                .join(format!("prose{}", std::env::consts::EXE_SUFFIX));
+            let user_directory =
+                std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+                    .context("user directory is unavailable")?;
+            dotfiles_xtask::prose::install(&cli.root, &binary, Path::new(&user_directory))?;
         }
         Action::Proofs { scope } => {
             if scope.resolve(&cli.root)?.contains(Gate::Rust) {

@@ -10,10 +10,12 @@ mod fixture_git;
 #[path = "support/wrapper.rs"]
 mod wrapper;
 
-/// The executables every test runs, placed once before this binary starts its first process; every spawn here follows `fixtures`.
+/// The executables every test runs, which the binary places once before it starts its first process.
+/// Every spawn here follows `fixtures`.
 struct Fixtures {
     git: PathBuf,
-    /// A `git init` template whose hooks run the language gates; Git copies them in its own process.
+    /// A `git init` template whose hooks run the language gates.
+    /// Git copies them in its own process.
     template: PathBuf,
 }
 
@@ -45,7 +47,7 @@ fn fixtures() -> &'static Fixtures {
     })
 }
 
-/// A command for dotguard itself, started only after the fixtures are in place.
+/// A command for dotguard itself, which starts only after the fixtures stand in place.
 fn dotguard() -> Command {
     fixtures();
     Command::new(env!("CARGO_BIN_EXE_dotguard"))
@@ -86,7 +88,7 @@ fn a_contaminated_file_is_refused_with_a_rescan_and_a_recorded_waiver() {
     );
 }
 
-/// A repository whose `git` is a copy of the wrapper and whose commit hooks run the language gates as installed.
+/// A repository with a copy of the wrapper as `git`, whose commit hooks run the language gates as installed.
 struct Checkout {
     scope: PathBuf,
     git: &'static Path,
@@ -258,7 +260,8 @@ fn a_foreign_message_is_refused_with_a_waiver_that_repeats_the_commit() {
     );
 }
 
-/// A hook run by a Git that did not pass through the wrapper cannot know the refused command, so it names the override in its cause instead of guessing a waiver.
+/// A hook run by a Git that didn't pass through the wrapper can't know the refused command.
+/// It names the override in its cause instead of guessing a waiver.
 #[test]
 fn a_language_refusal_outside_the_wrapper_names_the_override_without_a_waiver() {
     let checkout = Checkout::new("unwrapped");
@@ -322,7 +325,7 @@ fn retried(checkout: &Checkout, refused: &Refusal, message: &str) {
     );
 }
 
-/// `--fixup=amend:` and `--fixup=reword:` commits may be empty, and a reword leaves staged changes out, so the retry makes the same commit.
+/// `--fixup=amend:` and `--fixup=reword:` commits may have no changes, and a reword leaves staged changes out, so the retry makes the same commit.
 #[test]
 fn a_refused_fixup_is_retried_as_the_same_kind_of_commit() {
     for kind in ["amend", "reword"] {
@@ -364,7 +367,7 @@ fn a_refused_fixup_is_retried_as_the_same_kind_of_commit() {
     }
 }
 
-/// `-C` copies the author and date of its commit, so the retry records the same authorship.
+/// `-C` copies the authorship and date of its commit, so the retry records the same authorship.
 #[test]
 fn a_refused_reuse_is_retried_with_the_reused_authorship() {
     let checkout = Checkout::new("reuse");
@@ -398,7 +401,7 @@ fn a_refused_reuse_is_retried_with_the_reused_authorship() {
     );
 }
 
-/// `--reset-author` needs `-C`, `-c`, or `--amend`, so the retry drops it with the reuse and still records the committer as the author.
+/// `--reset-author` needs `-C`, `-c`, or `--amend`, so the retry drops it with the reuse and still records the committer's authorship.
 #[test]
 fn a_refused_reuse_with_a_reset_author_is_retried_as_the_committer() {
     for letter in ["-C", "-c"] {
@@ -434,7 +437,7 @@ fn a_refused_reuse_with_a_reset_author_is_retried_as_the_committer() {
     }
 }
 
-/// During a cherry-pick Git takes the author from the picked commit rather than from `-c`, so the retry does too.
+/// During a cherry-pick Git takes the authorship from the picked commit rather than from `-c`, so the retry does too.
 #[test]
 fn a_refused_reuse_during_a_pick_is_retried_with_the_picked_authorship() {
     let checkout = Checkout::new("pick");

@@ -1,7 +1,7 @@
 {
-  "revision": "e16f78d92c2248499569a866bbf25620c4f6df7d4edfcaa90c158f61bc0c5db9",
+  "revision": "541a427fb2fabd0f2c683ba18313893d3ed70b00faaccf6ef55b61e9e715611f",
   "outcome": "keep",
-  "reason": "Retain layered connectivity diagnosis and narrow access changes independently of remote command execution, machine synchronization, and SSH key approval.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/tailscale/SKILL.md"
   ],

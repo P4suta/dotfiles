@@ -1,10 +1,10 @@
-/// The open PR whose head is the pushed branch, as GitHub reports it.
+/// The open PR with the pushed branch as head, as GitHub reports it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Pr {
     Absent,
     Draft,
     Ready,
-    /// GitHub could not be asked, so nothing shows the branch is free of a ready PR.
+    /// GitHub gave no answer, so nothing shows that the branch lacks a ready PR.
     Unknown,
 }
 
@@ -13,11 +13,12 @@ pub enum Verdict {
     Admit,
     /// A ready PR takes no more pushes until it returns to draft.
     ReturnToDraft,
-    /// The PR state must be established before the push.
+    /// The push must wait until the check establishes the PR state.
     Inspect,
 }
 
-/// A push to a GitHub branch is admitted only when that branch has no ready PR; pushes elsewhere are not judged.
+/// The gate admits a push to a GitHub branch only when that branch has no ready PR.
+/// It doesn't judge pushes elsewhere.
 pub const fn push(gated: bool, pr: Pr) -> Verdict {
     if !gated {
         return Verdict::Admit;

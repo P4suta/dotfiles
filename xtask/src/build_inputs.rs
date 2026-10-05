@@ -1,14 +1,17 @@
-//! The files the installed tools are built from, and one hash over them.
+//! The files that produce the installed tools, and one hash over them.
 //!
-//! The executables share one library whose `include_str!` calls compile every binary's source and the policy files into each of them, so one set of inputs builds all of them.
-//! `build.rs` and the library compile this same file, so the hash a tool embeds when it is built and the hash of a checkout when it runs cannot disagree about which files count.
+//! The executables share one library.
+//! Its `include_str!` calls compile the source of every binary and the policy files into each executable.
+//! The same files feed every executable.
+//! `build.rs` and the library compile this same file.
+//! The hash a tool embeds at build time and the hash of a checkout at run time agree on which files count.
 
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io;
 use std::path::Path;
 
-/// Files outside `xtask/src` that are compiled in or that decide how the tools build.
+/// Files outside `xtask/src` that the compiler includes or that decide how the tools build.
 const SHARED: [&str; 14] = [
     ".chezmoiignore",
     ".github/workflows/required.yml",

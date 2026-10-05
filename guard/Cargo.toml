@@ -2,16 +2,13 @@
 name = "dotguard"
 version = "0.1.0"
 edition = "2024"
-# ocomment-core's MSRV; guard builds with the same toolchain that builds it.
+# ocomment-core requires this MSRV, and guard shares its toolchain.
 rust-version = "1.88"
 description = "Local policy gate: refuses destructive git operations, foreign-script contamination and agent attribution"
 license = "MIT"
 publish = false
 
-# No dependencies, again.
-# The prose gate was the one thing here that needed a lexer, and solving that twice would have been the worse trade — so it borrowed ocomment-core.
-# It no longer needs to borrow anything: the gate *is* ocomment now, run as a binary by the hook, and the rule it applies is a setting in `dot_config/ocomment/config.toml` rather than a second implementation of the same policy living here.
-# Everything left is a few hundred lines of std: argv walking, subprocess, codepoint ranges, byte scanning.
+# The prose gate runs the ocomment binary, configured in `dot_config/ocomment/config.toml`.
 [dependencies]
 
 [profile.release]

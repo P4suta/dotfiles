@@ -1,13 +1,13 @@
-//! Locating tools and building the environment children run in.
+//! Locates tools and builds the environment for child processes.
 //!
-//! Hook processes start from a non-interactive `sh` reached through `core.hooksPath` / lefthook, which may never have run `mise activate`, so the shims, `~/.local/bin` and Homebrew are put back the way `scripts/_common.sh` does for the shell gates — one definition, shared by every module here that spawns a linter or a wrapper.
+//! Hook processes start from a non-interactive `sh` that may never have run `mise activate`, so this module restores the mise shims, `~/.local/bin`, and Homebrew to `PATH` the way `scripts/_common.sh` does for the shell gates.
 //!
-//! `MISE_AUTO_INSTALL=false` rides along: mise otherwise tries to install every missing tool each time a shim runs, which turns a lint into unexpected downloads.
+//! `MISE_AUTO_INSTALL=false` stops each shim run from downloading missing tools.
 
 use std::path::PathBuf;
 use std::process::Command;
 
-/// The user's home: `HOME`, or `USERPROFILE` on Windows, where native processes usually have no `HOME`.
+/// Reads `HOME`, or `USERPROFILE` on Windows, where native processes often lack `HOME`.
 pub fn home() -> PathBuf {
     std::env::var_os("HOME")
         .or_else(|| {
@@ -46,7 +46,7 @@ pub fn hook_path() -> String {
     std::env::join_paths(dirs).map_or_else(|_| String::new(), |s| s.to_string_lossy().into_owned())
 }
 
-/// A `Command` pre-configured with the hook PATH and no mise auto-install.
+/// A `Command` with the hook `PATH` and `MISE_AUTO_INSTALL=false`.
 pub fn child(program: &str) -> Command {
     let mut c = Command::new(program);
     c.env("PATH", hook_path()).env("MISE_AUTO_INSTALL", "false");

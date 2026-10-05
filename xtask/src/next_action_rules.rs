@@ -2,11 +2,11 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Host {
     Ready,
-    /// `TEMP` is not set, so tools fall back to a directory the host did not choose.
+    /// `TEMP` has no value, so tools fall back to a directory the host didn't choose.
     TempUnset,
-    /// The volume that should hold a required directory, such as the Dev Drive, is not mounted.
+    /// The volume that should hold a required directory, such as the Dev Drive, has no mount.
     VolumeMissing,
-    /// The volume is mounted but the temporary directory does not exist.
+    /// The volume has mounted but the temporary directory doesn't exist.
     TempMissing,
 }
 
@@ -20,14 +20,14 @@ pub enum Head {
 /// How `HEAD` relates to the branch it pushes to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Upstream {
-    /// No upstream is configured.
+    /// The branch has no upstream.
     Absent,
     Current,
     /// Only `HEAD` has commits the upstream lacks.
     Ahead,
     /// Only the upstream has commits `HEAD` lacks.
     Behind,
-    /// Both sides have their own commits, and the upstream tip was once on the local branch, as after rebasing or amending a pushed branch.
+    /// Both sides have their own commits and the local branch once held the upstream tip after a rebase or an amend of a pushed branch.
     Rewritten,
     /// Both sides have their own commits, and the upstream holds commits the local branch never had, such as a push from another clone.
     Diverged,
@@ -35,7 +35,7 @@ pub enum Upstream {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pr {
-    /// GitHub was not consulted.
+    /// The inspection didn't consult GitHub.
     Unknown,
     None,
     Draft,
@@ -66,7 +66,7 @@ pub struct State {
     pub push_paused: bool,
     pub pr: Pr,
     pub checks: Checks,
-    /// The repository defines CI workflows, so an empty check rollup means they have not reported yet.
+    /// The repository defines CI workflows, so an empty check rollup means they haven't reported yet.
     pub workflows: bool,
     pub review_paused: bool,
 }
@@ -102,7 +102,8 @@ pub enum Step {
     AwaitReview,
 }
 
-/// The single next step for a state; earlier prerequisites always win over later publication steps.
+/// The single next step for a state.
+/// Earlier prerequisites always win over later publication steps.
 pub fn decide(state: State) -> Step {
     match state.host {
         Host::TempUnset => return Step::SetTemp,
@@ -291,7 +292,7 @@ fn owner_pauses_are_never_bypassed() {
     }
     if state.review_paused {
         assert!(step != Step::MarkReady);
-        // A push starts a review unless the PR is known to be a draft or absent.
+        // A push starts a review unless the PR has a known draft state or no PR exists.
         if matches!(step, Step::Push | Step::ForcePush) {
             assert!(matches!(state.pr, Pr::None | Pr::Draft));
         }
@@ -342,7 +343,7 @@ fn upstream_commits_the_branch_never_held_are_never_overwritten() {
     if state.upstream == Upstream::Diverged {
         assert!(!publishes(step));
     }
-    // Once the branch's own work is committed, foreign upstream commits are integrated before anything else.
+    // Once the branch's own work has a commit, integrate foreign upstream commits before anything else.
     let settled = state.host == Host::Ready
         && state.head == Head::Feature
         && !state.dirty

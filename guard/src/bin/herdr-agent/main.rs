@@ -1,11 +1,9 @@
-//! herdr-agent — Herdr's own ssh-agent: one 1Password approval when Herdr starts, none for each commit or push after that.
+//! A dedicated `ssh-agent` for Herdr that needs one 1Password approval when Herdr starts and none afterward.
 //!
-//! The 1Password agent asks again for every new process tree, which is every agent an unattended session spawns.
-//! This agent is loaded once: `op read` hands each private key to this process, which writes it straight into `ssh-add -`, so the key goes from 1Password to the agent's memory and never touches disk.
-//! There is no lifetime: the keys stay until `herdr-agent lock`, logout, or the agent process dies.
+//! `op read` hands each private key to this process, which pipes it into `ssh-add -`, so the key never touches disk.
+//! The keys stay loaded until `herdr-agent lock`, logout, or the death of the process.
 //!
-//! Which keys: the public keys in `~/.config/herdr-agent/keys` (rendered from `.chezmoidata.toml`), matched against every 1Password "SSH Key" item.
-//! Who uses it: `~/.config/shell/ssh-agent.sh` and Nushell's `env.nu` ask `herdr-agent ready` inside a Herdr pane, and fall back to the 1Password agent whenever it answers no.
+//! It loads the 1Password SSH keys whose public keys appear in `~/.config/herdr-agent/keys`, which chezmoi renders from `.chezmoidata.toml`.
 
 mod json;
 
@@ -22,7 +20,7 @@ const USAGE: &str = "usage: herdr-agent ensure|ready|status|lock\n\n  \
     lock    remove every key from the agent";
 
 fn main() -> ExitCode {
-    // The agent is a Unix-socket ssh-agent; Windows provisions Herdr's agent through dotctl instead.
+    // This binary serves a Unix socket, and Windows provisions the Herdr ssh-agent through dotctl.
     if cfg!(not(unix)) {
         eprintln!("herdr-agent manages a Unix-socket SSH agent and does not run on Windows");
         return ExitCode::from(2);
@@ -44,7 +42,6 @@ fn main() -> ExitCode {
     ExitCode::from(code)
 }
 
-/// What `ssh-add -l` says about the socket.
 #[derive(Debug, PartialEq)]
 enum State {
     Loaded,
@@ -116,7 +113,7 @@ fn start(sock: &Path) -> Result<(), String> {
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
             .map_err(|e| format!("{}: {e}", dir.display()))?;
     }
-    // A socket left behind by a dead agent would make ssh-agent refuse to bind.
+    // `ssh-agent` refuses to bind over a stale socket from a dead process.
     let _ = std::fs::remove_file(sock);
     let ok = locate::child("ssh-agent")
         .arg("-a")
@@ -158,7 +155,6 @@ fn load(sock: &Path, keys_file: &Path) -> Result<(), String> {
     for r in &refs {
         let mut key = op(&["read", r], None)?;
         let added = add_key(sock, &key);
-        // The key is only ever in this buffer and the pipe; do not leave it in freed memory either.
         key.fill(0);
         added?;
         loaded += 1;
@@ -176,7 +172,6 @@ fn load(sock: &Path, keys_file: &Path) -> Result<(), String> {
     }
 }
 
-/// Run `op`, with stderr left on the terminal so its own errors and prompts reach the user.
 fn op(args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>, String> {
     let mut child = locate::child("op")
         .args(args)
@@ -217,12 +212,10 @@ fn add_key(sock: &Path, key: &[u8]) -> Result<(), String> {
     }
 }
 
-/// A public key reduced to `type base64`, so a trailing comment on either side cannot break a match.
 fn normalize(key: &str) -> String {
     key.split_whitespace().take(2).collect::<Vec<_>>().join(" ")
 }
 
-/// One key per line; blank lines and `#` comments skipped.
 fn wanted_keys(text: &str) -> Vec<String> {
     text.lines()
         .map(str::trim)
@@ -231,8 +224,8 @@ fn wanted_keys(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// `op read` references to the private key of every item whose public key is wanted, in OpenSSH format because that is what `ssh-add -` reads.
-/// The field is named by its id, `private_key`, because its label is localized ("秘密鍵" in a Japanese 1Password) and `op read` resolves labels as written.
+/// `op read` references to the private key of each wanted item, in the OpenSSH format that `ssh-add -` reads.
+/// The id `private_key` names the field: its label follows the display language of 1Password, and `op read` resolves each label exactly as it appears.
 fn private_key_refs(items: &[Value], wanted: &[String]) -> Vec<String> {
     items
         .iter()

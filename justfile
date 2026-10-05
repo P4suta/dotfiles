@@ -36,5 +36,8 @@ refresh config:
 doctor:
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- doctor --strict
 
+prose:
+    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml --bin prose -- --source . repository --scope documents --scope comments
+
 ops-check:
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- ops-check

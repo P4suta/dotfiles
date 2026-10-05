@@ -1,6 +1,4 @@
 //! Every external program xtask runs, with where each host gets it.
-//!
-//! Spawning a process anywhere else is a lint error (see `clippy.toml`), so a new dependency on a host tool cannot appear without a declared provision.
 
 use crate::profile_rules::Profile;
 use crate::setup::Step;
@@ -15,7 +13,7 @@ pub enum Provision {
     Host,
     /// Installed by this setup step before any later step relies on it.
     Setup(Step),
-    /// An application the owner installs outside this repository; callers probe for it before use.
+    /// A program the owner installs outside this repository, which callers probe for before use.
     Owner,
 }
 
@@ -98,6 +96,7 @@ pub enum Tool {
     Tmux,
     Unzip,
     UpdateDesktopDatabase,
+    Vale,
     Vivid,
     Winget,
     Wslpath,
@@ -107,7 +106,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 83] = [
+    pub const ALL: [Self; 84] = [
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
         Self::Atuin,
@@ -185,6 +184,7 @@ impl Tool {
         Self::Tmux,
         Self::Unzip,
         Self::UpdateDesktopDatabase,
+        Self::Vale,
         Self::Vivid,
         Self::Winget,
         Self::Wslpath,
@@ -236,18 +236,18 @@ impl Tool {
             Self::Raco => "raco",
             Self::Sh => "sh",
             Self::Shellcheck => "shellcheck",
-            Self::SshKeygen => {
-                if cfg!(windows) {
-                    "ssh-keygen.exe"
-                } else {
-                    "ssh-keygen"
-                }
-            }
             Self::Ssh => {
                 if cfg!(windows) {
                     "ssh.exe"
                 } else {
                     "ssh"
+                }
+            }
+            Self::SshKeygen => {
+                if cfg!(windows) {
+                    "ssh-keygen.exe"
+                } else {
+                    "ssh-keygen"
                 }
             }
             Self::Sudo => "sudo",
@@ -277,6 +277,7 @@ impl Tool {
             Self::Starship => "starship",
             Self::Tailscale => "tailscale",
             Self::Television => "tv",
+            Self::Vale => "vale",
             Self::Vivid => "vivid",
             Self::Zoxide => "zoxide",
             Self::Zsh => "/bin/zsh",
@@ -307,13 +308,14 @@ impl Tool {
             Self::Pwsh => Provision::Pinned("powershell"),
             Self::Shellcheck => Provision::Pinned("shellcheck"),
             Self::Taplo => Provision::Pinned("taplo"),
+            Self::Vale => Provision::Pinned("vale"),
             Self::Curl
             | Self::Defaults
             | Self::Git
             | Self::Id
             | Self::Sh
-            | Self::SshKeygen
             | Self::Ssh
+            | Self::SshKeygen
             | Self::Sudo
             | Self::Systemctl
             | Self::Wslpath => Provision::Host,
@@ -378,7 +380,7 @@ impl Tool {
         }
     }
 
-    /// The package list a profile installs this tool from, as a platform data pointer and entry, for tools a setup step or an installed entry point requires.
+    /// The package list entry that installs this tool.
     pub fn package(self, profile: Profile) -> Option<(&'static str, &'static str)> {
         let pointer = match profile {
             Profile::Mac => "/brew/formulae",
@@ -409,14 +411,14 @@ impl Tool {
     }
 
     /// A chezmoi run that reads the invoking checkout.
-    /// The default source is a bare repository whose head lags, so no installer may fall back to it.
+    /// The default source names a bare repository whose head lags, so no installer may fall back to it.
     pub fn chezmoi_in(root: &std::path::Path) -> Command {
         let mut command = Self::Chezmoi.command();
         command.arg("--source").arg(root);
         command
     }
 
-    /// The only place xtask creates a process for a named program; a hook gate keeps the hook's repository to inspect the commit in progress.
+    /// The only place xtask creates a process for a named program.
     #[expect(
         clippy::disallowed_methods,
         reason = "the registry's own constructor for a hook gate process"

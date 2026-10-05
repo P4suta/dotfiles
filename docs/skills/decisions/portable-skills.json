@@ -1,7 +1,7 @@
 {
-  "revision": "4527dcff9e6a3543c7f9b3f4aaa1411bdef09612763b4fdb04849208478d72d6",
+  "revision": "06a54d320dcc4bccaad35ba4243ffbd6b556519cc041b4b012349e63decdfb7d",
   "outcome": "implemented",
-  "reason": "Connect canonical authoring and native client discovery to skill-operations without duplicating lifecycle logic or creating a cyclic unconditional dependency.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/portable-skills/SKILL.md",
     "docs/adr/0003-local-skill-operations.md",

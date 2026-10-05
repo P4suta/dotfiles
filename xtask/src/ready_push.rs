@@ -28,7 +28,8 @@ struct Listed {
     is_draft: bool,
 }
 
-/// The open PR whose head is `branch` in `repository`, as `gh` reports it; a failed query is `Unknown`.
+/// The open PR with `branch` as head in `repository`, as `gh` reports it.
+/// A failed query yields `Unknown`.
 pub fn lookup(repository: &str, branch: &str) -> (Pr, Option<u64>) {
     let output = Tool::Gh
         .command()

@@ -1,7 +1,7 @@
 {
-  "revision": "98070bdc34b74fd54db11e1d6cb4083c71cc300f198942310d0e2ac42089250a",
+  "revision": "ecb88e9a6d2cebc680099e87627795a5db547802bf2736a959eb5a3b6a02ce83",
   "outcome": "implemented",
-  "reason": "Add the missing language-neutral strict typing and dynamic-language annotation contract, with runtime validation and narrow interop boundaries rather than blanket exclusions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/type-contracts/SKILL.md",
     "docs/adr/0003-local-skill-operations.md",

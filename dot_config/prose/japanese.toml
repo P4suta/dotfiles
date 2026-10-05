@@ -1,0 +1,33 @@
+# Repository rules for Japanese replies, which Vale never reads.
+[rules."Dotfiles.Attribution"]
+message = "State the change itself instead of who asked for it."
+tokens = [
+  "ご依頼",
+  "ご要望",
+  "ご指示",
+  "ご指摘どおり",
+  "ご指摘通り",
+  "依頼どおり",
+  "依頼通り",
+  "指示どおり",
+  "指示通り",
+  "要望どおり",
+  "要望通り",
+  "おっしゃる通り",
+  "仰る通り",
+  "リクエストどおり",
+  "リクエスト通り",
+]
+
+[rules."Dotfiles.Hedging"]
+message = "State the fact or its condition without the hedge."
+tokens = [
+  "かもしれません",
+  "かもしれない",
+  "と思います",
+  "と思われます",
+  "おそらく",
+  "たぶん",
+  "多分",
+  "気がします",
+]

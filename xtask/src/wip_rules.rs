@@ -1,4 +1,5 @@
-/// How many open PRs one author may hold in a repository: the repository's recorded override, else the policy default.
+/// The number of open PRs one person may keep in a repository.
+/// The limit comes from the recorded override of the repository, else the policy default.
 pub const fn limit(default: u32, repository: Option<u32>) -> u32 {
     match repository {
         Some(limit) => limit,
@@ -6,7 +7,8 @@ pub const fn limit(default: u32, repository: Option<u32>) -> u32 {
     }
 }
 
-/// A new PR is created only while the author's open PRs stay below the limit, so work that would exceed it joins an open PR instead.
+/// The rule creates a new PR only while the open PRs of the creator stay below the limit.
+/// Work that would exceed the limit joins an open PR instead.
 pub const fn admits(open: u32, limit: u32) -> bool {
     open < limit
 }

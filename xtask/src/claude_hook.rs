@@ -35,7 +35,8 @@ fn read_body(path: &str, directory: Option<&Path>) -> Option<String> {
     std::fs::read_to_string(path).ok()
 }
 
-/// The text a source sends; a file that cannot be read sends nothing here, and `gh` reports the failure itself.
+/// The text a source sends.
+/// A file that fails to open sends nothing here, and `gh` reports the failure itself.
 fn body_text(source: &Source, directory: Option<&Path>) -> Option<String> {
     match source {
         Source::Inline(text) | Source::Stdin(text) => Some(text.clone()),
@@ -132,8 +133,8 @@ fn disk_scan_refusal(command: &str) -> Option<String> {
     })
 }
 
-/// The refusal for one PreToolUse event, or `None` when the tool call is admitted.
-/// PowerShell commands are checked only for disk scans, because the file-write rules read POSIX shell syntax.
+/// The refusal for one PreToolUse event, or `None` when the hook admits the tool call.
+/// The hook checks PowerShell commands only for disk scans, because the file-write rules read POSIX shell syntax.
 pub fn refusal(event: &str) -> Result<Option<String>> {
     let event: Value = serde_json::from_str(event).context("PreToolUse event is not JSON")?;
     let tool = event["tool_name"].as_str().unwrap_or_default();

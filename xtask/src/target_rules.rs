@@ -3,13 +3,13 @@
 pub enum Target {
     /// The absolute `CARGO_TARGET_DIR` the caller already chose.
     Configured,
-    /// One shared directory on the volume that holds `TEMP`, which is the development drive on Windows.
+    /// One shared directory on the volume that holds `TEMP`, the development drive on Windows.
     Development,
     /// One shared directory in the home directory, for hosts without such a volume.
     Home,
 }
 
-/// A relative `CARGO_TARGET_DIR` resolves against the worktree, so only an absolute one is honored.
+/// A relative `CARGO_TARGET_DIR` resolves relative to the worktree, so the rule honors only an absolute one.
 pub fn target(configured_absolute: bool, temp_volume: bool) -> Target {
     if configured_absolute {
         Target::Configured

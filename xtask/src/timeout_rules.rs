@@ -1,10 +1,11 @@
 /// The largest timeout Claude Code accepts for a shell command, in milliseconds.
 pub const CLIENT_LIMIT_MS: u64 = 600_000;
 
-/// How many of a signature's latest runs decide its expectation.
+/// How many of the newest runs of a signature decide its expectation.
 pub const WINDOW: usize = 20;
 
-/// The nearest-rank 95th percentile of `sorted`, ascending; with fewer than twenty runs it is the slowest one.
+/// The nearest-rank ninety-fifth percentile of `sorted`, ascending.
+/// With fewer than 20 runs it equals the slowest one.
 pub const fn percentile(sorted: &[u64]) -> Option<u64> {
     if sorted.is_empty() {
         return None;
@@ -13,7 +14,7 @@ pub const fn percentile(sorted: &[u64]) -> Option<u64> {
     Some(sorted[rank - 1])
 }
 
-/// The time a run is given beyond its expectation: half again, plus ten seconds for start-up noise.
+/// The time a run gets beyond its expectation: half again, plus ten seconds for start-up noise.
 pub const fn with_margin(expected: u64) -> u64 {
     expected.saturating_add(expected / 2).saturating_add(10_000)
 }
@@ -34,8 +35,8 @@ impl Timeout {
     }
 }
 
-/// The timeout for one call: the observed high percentile with its margin, or the profile default without history, never above the client limit.
-/// A requested timeout is kept when it covers that floor within the limit, and one beyond the limit becomes the limit.
+/// The timeout for one call: the observed high percentile with its margin, or the profile default without history, never over the client limit.
+/// A requested timeout stays when it covers that floor within the limit, and one beyond the limit becomes the limit.
 pub const fn timeout(
     observed: Option<u64>,
     default: u64,
@@ -54,7 +55,7 @@ pub const fn timeout(
     }
 }
 
-/// A run that took longer than its expectation is reported, so the next one can run in the background.
+/// The hook reports a run that took longer than its expectation, so the next one can run in the background.
 pub const fn overran(expected: Option<u64>, took: u64) -> bool {
     match expected {
         Some(expected) => took > expected,

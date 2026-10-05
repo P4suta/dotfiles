@@ -1,29 +1,24 @@
-# session-reaper configuration — read by the systemd unit as an EnvironmentFile.
-# Managed by chezmoi (dot_config/session-reaper/config).
-# Change a value and run `chezmoi apply` (editing ~/.config/session-reaper/config directly works for a quick test, but the next apply restores this managed version).
+# Read by the systemd unit as an EnvironmentFile.
+# Change a value here and run `chezmoi apply`, which overwrites direct edits.
 
-# Operating mode: report | reap
-#   report = detect + journal/notify only; never kill (dry-run)
-#   reap   = auto-kill tier A (stopped + orphaned, grace-confirmed).
-# Tier B (running orphans) is ALWAYS report-only regardless of mode.
-# Roll back any time by setting this to `report` and re-applying.
+# Mode: report or reap.
+# report only logs and notifies.
+# reap ends tier A processes.
+# Tier B, running orphans, stays report-only in every mode.
+# Set `report` and apply to roll back.
 SESSION_REAPER_MODE=reap
 
-# Tier A: a stopped+orphaned process must be at least this old (seconds) before it is eligible at all.
-# Default 1h.
+# Tier A: least age in seconds of a stopped orphan.
 SESSION_REAPER_STOPPED_MIN_AGE=3600
 
-# Tier A: and must have been observed stopped+orphaned for at least this long (i.e. across a prior run) before it is killed — guards against sampling a process mid-transition.
-# Default 30m.
+# Tier A: seconds a process must stay a stopped orphan, across a prior run, before it ends.
 SESSION_REAPER_GRACE_SECONDS=1800
 
-# Tier B: report (never kill) running orphans with no controlling tty that are older than this.
-# Default 3d.
+# Tier B: least age in seconds of a reported running orphan without a tty.
 SESSION_REAPER_RUNNING_MIN_AGE=259200
 
-# comm names never touched, even in tier A (ERE, anchored with ^...$).
+# Anchored ERE of process names that tier A never touches.
 SESSION_REAPER_ALLOW_REGEX=^(tmux.*|screen.*|sshd|systemd|systemd-.*|dbus-.*|pipewire.*|wireplumber|pulseaudio|gvfsd.*|ssh-agent|gpg-agent|gnome-keyring-d|code-.*|session-reaper)$
 
-# Desktop notifications (1=on, 0=off).
-# The audit log always goes to journald.
+# Desktop notifications: 1 on, 0 off.
 SESSION_REAPER_NOTIFY=1

@@ -1,4 +1,4 @@
-//! The installed `git` entry point against the real git of the host it runs on.
+//! Tests the installed `git` wrapper with the real git of the host.
 //! Windows installs a copy of dotguard named `git.exe`, so the test runs that form everywhere.
 
 use dotguard::refusal::Refusal;
@@ -12,7 +12,8 @@ mod fixture_git;
 #[path = "support/wrapper.rs"]
 mod wrapper;
 
-/// The wrapper every test runs, placed once before this binary starts its first process; every spawn here follows `Wrapper::inheriting`, which waits for it.
+/// The wrapper every test runs, which the binary places once before it starts its first process.
+/// Every spawn here follows `Wrapper::inheriting`, which waits for it.
 fn wrapper_binary() -> &'static Path {
     static BINARY: OnceLock<PathBuf> = OnceLock::new();
     BINARY.get_or_init(|| wrapper::place(&wrapper::preparation("git-wrapper")))
@@ -62,7 +63,7 @@ impl Wrapper {
     }
 
     /// Runs the wrapper with an isolated home and Git configuration, so its audit records stay out of the developer's.
-    /// Waivers set in the calling shell, such as the one a force push sets for its hooks, are removed so they cannot decide a refusal.
+    /// The wrapper drops waivers from the calling shell, such as the one a force push sets for its hooks, so they never decide a refusal.
     fn run(&self, arguments: &[&str], input: Option<&[u8]>) -> Output {
         self.run_with(arguments, input, &[])
     }
@@ -72,7 +73,8 @@ impl Wrapper {
         self.run_env(arguments, input, &set)
     }
 
-    /// Runs the wrapper with `variables` set; a stack lease token in the calling shell is removed like a waiver.
+    /// Runs the wrapper with `variables` set.
+    /// The run drops a stack lease token from the calling shell, as it drops a waiver.
     fn run_env(
         &self,
         arguments: &[&str],
@@ -323,7 +325,7 @@ fn a_callers_git_repository_variables_cannot_redirect_the_wrapper() {
     );
 }
 
-/// Git rejects a push with an option it does not accept, so a refused one suggests no deletion built from its other words.
+/// Git rejects a push with an option it doesn't accept, so a refused one suggests no deletion built from its other words.
 #[test]
 fn a_refused_push_with_an_option_git_rejects_suggests_nothing() {
     let wrapper = Wrapper::new("push-unread");

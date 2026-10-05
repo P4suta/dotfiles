@@ -1,4 +1,4 @@
-//! Shared pieces of both reapers: timestamps, the single-instance lock, best-effort desktop notifications, and ERE matching without a regex engine.
+//! Helpers shared by both reapers: timestamps, the single-instance lock, desktop notifications, and ERE matching without a regular expression engine.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -11,8 +11,8 @@ pub fn now() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0))
 }
 
-/// RFC 3339 to unix seconds, 0 on the zero value or a parse error — the same contract the bash versions got from `date -j -f` after trimming the fraction and the zone.
-/// Docker always reports UTC.
+/// Converts an RFC 3339 timestamp to Unix seconds, returning 0 for the zero value or a parse error.
+/// Docker reports UTC.
 pub fn epoch_of(ts: &str) -> i64 {
     if ts.is_empty() || ts == "0001-01-01T00:00:00Z" {
         return 0;
@@ -51,7 +51,7 @@ pub fn epoch_of(ts: &str) -> i64 {
     days * 86_400 + hh * 3_600 + mm * 60 + ss
 }
 
-/// Days since the Unix epoch — Howard Hinnant's `days_from_civil`, the same algorithm `guard/src/bypass.rs` uses for the inverse direction.
+/// Days since the Unix epoch, by the `days_from_civil` algorithm of Howard Hinnant, the inverse of the one in `guard/src/bypass.rs`.
 fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = if y >= 0 { y } else { y - 399 } / 400;
@@ -85,8 +85,7 @@ pub fn etime_seconds(raw: &str) -> i64 {
 }
 
 /// Single-instance guard: an atomic `mkdir`, because macOS ships no `flock(1)`.
-/// A lock older than an hour is assumed to belong to a run that was killed mid-flight and is stolen rather than deadlocking the agent forever.
-/// Returns the lock path to remove when the run ends.
+/// The run steals a lock older than an hour, which a killed run left behind.
 pub struct Lock {
     dir: PathBuf,
 }
@@ -120,8 +119,7 @@ impl Drop for Lock {
     }
 }
 
-/// Best-effort desktop notification: terminal-notifier (Brewfile) when present, osascript as the no-dependency fallback.
-/// The stdout log line is the real audit record; this is garnish on top.
+/// Sends a desktop notification through terminal-notifier when present, with osascript as the fallback.
 pub fn notify(title: &str, body: &str, enabled: bool) {
     if !enabled {
         return;
@@ -154,7 +152,7 @@ pub fn notify(title: &str, body: &str, enabled: bool) {
     let _ = ok;
 }
 
-/// The reapers run from launchd, whose PATH is minimal; resolve tools from the same directories the dotfiles machinery puts on PATH.
+/// The reapers run from launchd with a minimal `PATH`, so tools resolve from the directories the dotfiles add to `PATH`.
 fn which(program: &str) -> Option<PathBuf> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -172,9 +170,9 @@ fn which(program: &str) -> Option<PathBuf> {
     dirs.iter().map(|d| d.join(program)).find(|p| p.is_file())
 }
 
-/// Which of `lines` match the extended regular expression, via `grep -E`: the two patterns this serves are user configuration, and reimplementing ERE without a regex engine would change what a config edit means.
-/// `anchor_line` makes the whole line the subject, like `[[ =~ ]]` did.
-/// `None` means grep could not answer (missing, invalid pattern, or failed), which callers must not read as "no match".
+/// Returns the `lines` that match the ERE, through `grep -E`, because both patterns come from user configuration.
+/// `anchor_line` makes the whole line the subject of the match.
+/// `None` means grep failed to answer, from a missing binary, an invalid pattern, or an error, and callers must never treat it as an empty match.
 pub fn grep_matching(pattern: &str, lines: &[String]) -> Option<Vec<usize>> {
     let mut cmd = Command::new("/usr/bin/grep");
     cmd.args(["-n", "-E", "-e", pattern])

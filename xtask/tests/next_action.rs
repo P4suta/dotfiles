@@ -25,7 +25,8 @@ use std::sync::OnceLock;
 #[path = "../../guard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
-/// A clean, pushed draft PR with passing checks; each case changes the fields that define its state.
+/// A clean, pushed draft PR with passing checks.
+/// Each case changes the fields that define its state.
 fn published() -> State {
     State {
         host: Host::Ready,
@@ -825,7 +826,7 @@ fn gh_directory() -> &'static tempfile::TempDir {
     })
 }
 
-/// The single JSON line on stdout, after checking that nothing else is printed there.
+/// The single JSON line on stdout, after checking that nothing else prints there.
 fn reported(output: &Output) -> Result<Value> {
     let stdout = String::from_utf8(output.stdout.clone())?;
     ensure!(
@@ -885,7 +886,7 @@ fn a_rebased_pushed_branch_is_force_pushed_and_upstream_commits_are_pulled_first
         ))
     );
     assert!(recommendation.summary.contains("git range-diff"));
-    // The origin takes the rebased branch by fetching it, so the fixture does not depend on a host guard against force-pushes.
+    // The origin takes the rebased branch by fetching it, so the fixture doesn't depend on a host guard that blocks force-pushes.
     fixture.git(
         &fixture.scope.path().join("origin.git"),
         &[
@@ -900,7 +901,8 @@ fn a_rebased_pushed_branch_is_force_pushed_and_upstream_commits_are_pulled_first
     Ok(())
 }
 
-/// A commit pushed from elsewhere, then a local commit, must be integrated; a force-push would discard it.
+/// A commit pushed from elsewhere, then a local commit, needs integration.
+/// A force-push would discard it.
 #[test]
 fn an_upstream_commit_the_branch_never_held_is_integrated_not_force_pushed() -> Result<()> {
     let fixture = Fixture::new()?;
@@ -1065,7 +1067,7 @@ fn execute_refuses_host_steps_it_cannot_complete() -> Result<()> {
         "{refusal}"
     );
     assert!(refusal.contains("then rerun `just next`"), "{refusal}");
-    // A temporary directory is created only where the inspection found it missing on a mounted volume.
+    // Create a temporary directory only where the inspection found it missing on a mounted volume.
     let mismatched = Recommendation {
         action: Step::CreateTemp,
         ..recommendation

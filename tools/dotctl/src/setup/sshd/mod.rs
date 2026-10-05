@@ -1,10 +1,11 @@
-//! Turns this box into an SSH target, so the mac and Linux machines can drive it.
+//! Makes this machine an SSH target for the Mac and Linux machines.
 //!
-//! Windows ships OpenSSH.Server as an uninstalled capability, so none of this exists until something asks for it: the capability, the service, the host keys, `sshd_config`, the firewall rule and the login shell.
+//! Windows ships OpenSSH.Server as an uninstalled capability, so this command creates the capability, the service, the host keys, `sshd_config`, the firewall rule, and the login shell.
 //!
-//! Privilege model.
-//! Every step here needs an admin token, while everything else chezmoi does writes into `$HOME` as you, so the elevation is scoped to this command rather than to the whole apply: `dotctl setup sshd` re-runs itself elevated through `assets/elevate.ps1` and prints what the elevated run logged.
-//! Declining the prompt is a warning, never a failed apply: profile application restores managed files on a non-zero exit, and an unanswered UAC dialog must not roll back unrelated files.
+//! # Privilege model
+//! Every step needs an administrator token, and only this command elevates.
+//! `dotctl setup sshd` reruns itself elevated through `assets/elevate.ps1` and prints the elevated run's log.
+//! Declining the prompt produces a warning, not a failed apply.
 
 mod config;
 mod keys;
@@ -28,7 +29,7 @@ pub struct Options {
     pub password_auth: bool,
     pub firewall_profile: String,
     pub authorized_key: String,
-    /// Set on the elevated re-run, so the child does the work instead of asking for elevation again.
+    /// Set on the elevated rerun, so the child does the work instead of elevating again.
     pub elevated: bool,
 }
 
@@ -42,7 +43,7 @@ pub fn run(options: &Options) -> Result<i32> {
 
 /// Re-runs this command elevated and replays its log.
 ///
-/// No attempt is made to detect an existing admin token: `Start-Process -Verb RunAs` from an already-elevated process raises no prompt, so the check would only buy a process hop, and every way of asking needs either unsafe code or a localized parse.
+/// No administrator-token detection: `Start-Process -Verb RunAs` from an elevated process raises no prompt.
 fn elevate(options: &Options) -> Result<i32> {
     let exe = std::env::current_exe().context("locating dotctl")?;
     let log = std::env::temp_dir().join("dotctl-sshd.log");
@@ -56,7 +57,7 @@ fn elevate(options: &Options) -> Result<i32> {
         ".json",
     )?;
     let helper = proc::write_temp(ELEVATE_HELPER, ".ps1")?;
-    // Start from an empty log so the tail below cannot replay a previous run.
+    // Start from an empty log so the tail never replays a previous run.
     let _ = std::fs::remove_file(&log);
 
     println!(">>> sshd setup needs elevation - answer the UAC prompt");
@@ -72,8 +73,7 @@ fn elevate(options: &Options) -> Result<i32> {
         .spawn()
         .context("starting the elevation helper")?;
 
-    // The elevated window is hidden, so this is the only place its output appears.
-    // Tailing it as it is written means a step that hangs or throws shows up here while it happens, rather than after the run is over.
+    // The elevated window stays hidden, so its output appears only here.
     let mut tail = LogTail::new(&log);
     let status = loop {
         tail.drain();
@@ -101,11 +101,11 @@ fn elevate(options: &Options) -> Result<i32> {
             log.display()
         );
     }
-    // Never fail the apply over this: see the module comment.
+    // Never fail the apply over this.
     Ok(0)
 }
 
-/// Prints new complete lines of a file as they are appended.
+/// Prints each new complete line that the file gains.
 #[derive(Debug)]
 struct LogTail {
     path: PathBuf,
@@ -138,7 +138,7 @@ impl LogTail {
         self.offset += chunk.len() as u64;
         self.partial.push_str(&String::from_utf8_lossy(&chunk));
 
-        // Hold back an unterminated line: the child may still be writing it.
+        // Hold back an unterminated line until the child finishes it.
         while let Some(end) = self.partial.find('\n') {
             let line: String = self.partial.drain(..=end).collect();
             println!("    {}", line.trim_end());
@@ -187,7 +187,7 @@ fn install(options: &Options) -> Result<i32> {
         println!("    installing {capability}");
     }
 
-    // The first start is what generates the host keys and the default config, so it has to happen before anything edits that file.
+    // The first start generates the host keys and the default config, so it precedes every edit of that file.
     let applied = host_apply(&json!({
         "installCapability": if installed { Value::Null } else { Value::String(capability) },
         "serviceAutomatic": true,
@@ -201,7 +201,7 @@ fn install(options: &Options) -> Result<i32> {
     let ssh_dir = program_data().join("ssh");
     let config_path = wait_for_config(&ssh_dir)?;
 
-    // Pristine copy, taken once, before this tool has ever edited the file.
+    // Pristine copy, taken once before this tool first edits the file.
     let pristine = config_path.with_extension("orig");
     if !pristine.exists() {
         std::fs::copy(&config_path, &pristine)?;
@@ -221,7 +221,7 @@ fn install(options: &Options) -> Result<i32> {
     );
     let mut config_changed = updated != original;
     if config_changed {
-        // No BOM: sshd would read one as part of the first directive.
+        // sshd would read a BOM as part of the first directive.
         std::fs::write(&config_path, updated.as_bytes())?;
         println!(
             "    sshd_config: port {}, pubkey auth on, password auth {}",
@@ -232,9 +232,8 @@ fn install(options: &Options) -> Result<i32> {
         println!("    sshd_config already says what it should");
     }
 
-    // A run that edited the config and then failed before restarting leaves sshd serving what it read at startup - which is how a "password auth off" config ended up advertising password auth.
-    // Trust the timestamps,
-    // not just what this run did.
+    // A run that edits the config and fails before restarting leaves sshd serving the old config.
+    // Trust the timestamps, not only this run's actions.
     if !config_changed && config_predates_service(&config_path, &state) {
         println!("    sshd_config is newer than the running sshd; restarting it");
         config_changed = true;
@@ -264,8 +263,8 @@ fn install(options: &Options) -> Result<i32> {
 
 /// Runs the PowerShell effector and parses its JSON.
 ///
-/// Windows PowerShell 5.1, deliberately: DISM is a 5.1 module, and Get-WindowsCapability under an elevated pwsh 7 fails with "Class not registered" instead of answering.
-/// See the helper's own header.
+/// Uses Windows PowerShell 5.1, because Get-WindowsCapability under an elevated pwsh 7 fails with `Class not registered`.
+/// See the helper's header.
 fn host(args: &[&str]) -> Result<Value> {
     let helper = proc::write_temp(HOST_HELPER, ".ps1")?;
     let mut cmd = env::command("powershell.exe");
@@ -278,8 +277,8 @@ fn host(args: &[&str]) -> Result<Value> {
     ])
     .arg(helper.as_os_str())
     .args(args)
-    // stdout is the JSON and nothing else; stderr carries the helper's progress and its errors, and goes straight through to ours - which under elevation is the log being tailed live.
-    // A capability install pulls hundreds of megabytes from Windows Update, and saying so while it happens is the difference between waiting and wondering.
+    // stdout carries only the JSON.
+    // stderr passes the helper's progress and errors straight through, into the live log under elevation.
     .stderr(std::process::Stdio::inherit());
     let text = proc::capture_ok(&mut cmd).context("querying the Windows OpenSSH state")?;
     serde_json::from_str(text.trim())
@@ -300,7 +299,7 @@ fn report_done(applied: &Value) {
     }
 }
 
-/// sshd_config appears only once the service has started for the first time.
+/// sshd_config appears only after the service first starts.
 fn wait_for_config(ssh_dir: &Path) -> Result<PathBuf> {
     let path = ssh_dir.join("sshd_config");
     for _ in 0..40 {
@@ -313,7 +312,7 @@ fn wait_for_config(ssh_dir: &Path) -> Result<PathBuf> {
 }
 
 /// `HKLM\SOFTWARE\OpenSSH\DefaultShell` decides what an inbound session lands in.
-/// Without it that is cmd.exe, which makes the whole thing useless for agent work.
+/// Without it, sessions land in cmd.exe.
 fn set_default_shell(choice: &str) -> Result<()> {
     const KEY: &str = r"HKLM\SOFTWARE\OpenSSH";
 
@@ -328,20 +327,20 @@ fn set_default_shell(choice: &str) -> Result<()> {
         eprintln!("Falling back to Windows' default shell. To get pwsh sessions:");
         eprintln!("  winget install Microsoft.PowerShell   # the MSI build, not the Store one");
         eprintln!("  just sshd");
-        // Clear whatever an earlier run wrote: a DefaultShell that cannot be exec'd is worse than none, because every login fails with "exec request failed on channel 0" and nothing says why.
+        // Clear any earlier value, because a DefaultShell that fails to exec breaks every login.
         clear_default_shell(KEY);
         println!("    login shell: Windows default (cmd.exe)");
         return Ok(());
     };
     let shell = shell.to_string_lossy().into_owned();
     reg_set(KEY, "DefaultShell", &shell)?;
-    // sshd passes this when a client runs `ssh host <command>`: cmd.exe takes /c, pwsh takes -c.
+    // sshd passes this for `ssh host <command>`: cmd.exe takes /c, and pwsh takes -c.
     reg_set(KEY, "DefaultShellCommandOption", "-c")?;
     println!("    login shell: {shell}");
     Ok(())
 }
 
-/// Absent already is the desired state, so a failure here is not one.
+/// A value already absent counts as success.
 fn clear_default_shell(key: &str) {
     for value in ["DefaultShell", "DefaultShellCommandOption"] {
         let mut cmd = env::command("reg.exe");
@@ -357,16 +356,12 @@ fn reg_set(key: &str, value: &str, data: &str) -> Result<()> {
     Ok(())
 }
 
-/// Where DefaultShell should point, or None when nothing usable exists.
+/// The DefaultShell target, or None when no usable shell exists.
 ///
-/// Not "the first pwsh.exe on PATH": that is a mise shim here, and a shim as the login shell means every inbound session runs mise's resolution first.
-/// Observed once: an ssh login spent its first seconds reinstalling a Rust toolchain and then failed with access denied.
+/// Skips the first pwsh.exe on PATH, because that resolves to a mise shim here, and a shim login shell runs mise resolution before every inbound session.
 ///
-/// Not the Store build either, by either of its paths.
-/// sshd cannot exec an MSIX-packaged binary - neither the App Execution Alias, which is a reparse point needing app-model resolution, nor the versioned path under WindowsApps.
-/// The client sees only "exec request failed on channel 0",
-/// with nothing in the server log to explain it.
-/// The MSI build is what this repo's own prerequisites list, and it is the one that works.
+/// Skips the Store build, because sshd fails to exec an MSIX binary through its App Execution Alias or the versioned path under WindowsApps.
+/// The client gets only `exec request failed on channel 0`.
 fn which_pwsh() -> Option<PathBuf> {
     if let Some(msi) = std::env::var_os("ProgramFiles")
         .map(|dir| PathBuf::from(dir).join("PowerShell/7/pwsh.exe"))
@@ -381,19 +376,18 @@ fn which_pwsh() -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-/// MSIX-packaged binaries and their aliases, which sshd cannot exec.
+/// MSIX binaries and their aliases, which sshd fails to exec.
 fn is_packaged_dir(dir: &Path) -> bool {
     dir.components()
         .any(|part| part.as_os_str().eq_ignore_ascii_case("WindowsApps"))
 }
 
-/// mise's shim directory, whose entries are launchers rather than binaries.
+/// mise's shim directory, whose entries launch other binaries.
 fn is_shim_dir(dir: &Path) -> bool {
     dir.components().any(|part| part.as_os_str() == "shims")
 }
 
-/// A rule scoped to Private does nothing on a network Windows calls Public,
-/// and that is invisible until a connection times out.
+/// A rule scoped to Private does nothing on a network that Windows calls Public, and only a connection timeout reveals it.
 fn warn_about_network_profiles(state: &Value, profile: &str) {
     if profile.eq_ignore_ascii_case("Any") {
         return;
@@ -416,7 +410,7 @@ fn warn_about_network_profiles(state: &Value, profile: &str) {
     eprintln!("Set the LAN to Private, or widen [sshd].firewall_profile.");
 }
 
-/// The fingerprint is printed so the first connection from the other side can be checked against something seen here, rather than trusted blind.
+/// Prints the fingerprint so the first connection from the other side can verify it instead of trusting it.
 fn summarize(state: &Value, ssh_dir: &Path, port: u16) {
     let keygen = std::path::Path::new(&std::env::var_os("SystemRoot").unwrap_or_default())
         .join("System32")
@@ -441,7 +435,7 @@ fn summarize(state: &Value, ssh_dir: &Path, port: u16) {
     }
 }
 
-/// True when the config on disk was written after sshd started, so the running process cannot have read it.
+/// True when the config on disk postdates the sshd start, so the running process missed it.
 fn config_predates_service(config_path: &Path, state: &Value) -> bool {
     let Some(started) = state
         .pointer("/service/startedAt")
@@ -477,7 +471,7 @@ mod tests {
         }
     }
 
-    /// The elevated child re-parses this, so a value that does not round trip costs a UAC prompt to discover.
+    /// The elevated child parses this again, so it must round-trip.
     #[test]
     fn the_elevated_child_gets_every_knob_and_the_flag() {
         let args = arguments(&options());
@@ -495,7 +489,7 @@ mod tests {
         assert!(args.contains(&"--elevated".to_owned()));
     }
 
-    /// Without this the child would elevate again, forever.
+    /// Without this, the child would elevate forever.
     #[test]
     fn the_elevated_flag_is_the_last_word() {
         assert_eq!(arguments(&options()).last().unwrap(), "--elevated");

@@ -1,13 +1,13 @@
-/// How an installed tool's build compares with the sources of the checkout it runs against.
+/// How the build of an installed tool compares with the sources of the checkout it runs in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Freshness {
     Current,
     Stale,
-    /// No checkout could be found, so nothing says the installation lags.
+    /// The search found no checkout, so nothing shows that the installation lags.
     Unverified,
 }
 
-/// A build is stale only when a checkout was found and the files that build the tool differ from what the tool embeds.
+/// A build lags only when the search found a checkout and the files that build the tool differ from the hash the tool embeds.
 pub const fn freshness(checkout_found: bool, hashes_match: bool) -> Freshness {
     match (checkout_found, hashes_match) {
         (false, _) => Freshness::Unverified,
@@ -16,23 +16,24 @@ pub const fn freshness(checkout_found: bool, hashes_match: bool) -> Freshness {
     }
 }
 
-/// A stale tool refuses to run; every other state runs.
+/// A stale tool refuses to run.
+/// Every other state runs.
 pub const fn runs(freshness: Freshness) -> bool {
     !matches!(freshness, Freshness::Stale)
 }
 
-/// Where the checkout to compare against comes from, most specific first.
+/// The origin of the checkout to compare with, most specific first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Origin {
     /// The owner or a caller named it.
     Explicit,
-    /// The dotfiles checkout the tool was started inside.
+    /// The dotfiles checkout that contains the working directory of the tool.
     WorkingCopy,
-    /// The checkout the tool was built in, while it still exists.
+    /// The checkout that built the tool, while it still exists.
     BuildCheckout,
 }
 
-/// The default chezmoi source is a bare repository whose head lags, so no origin ever names it.
+/// The default chezmoi source forms a bare repository whose head lags, so no origin ever names it.
 pub const fn origin(explicit: bool, working_copy: bool, build_checkout: bool) -> Option<Origin> {
     if explicit {
         Some(Origin::Explicit)
@@ -45,7 +46,8 @@ pub const fn origin(explicit: bool, working_copy: bool, build_checkout: bool) ->
     }
 }
 
-/// The recorded installation is rebuilt only when it exists and no longer matches the sources, so a tool the owner never installed is not installed for them.
+/// The rebuild touches a recorded installation only when it exists and no longer matches the sources.
+/// A tool that the owner never installed stays absent.
 pub const fn reinstalls(recorded: bool, recorded_matches: bool) -> bool {
     recorded && !recorded_matches
 }

@@ -1,12 +1,11 @@
-//! Every lint kind, on a file that should pass and a file that should fail.
+//! Runs every lint kind on a passing file and a failing file.
 //!
-//! A validator that never fails is worse than none, and these ran green against the whole repo on their first try, so the failing half is the half that carries the information.
-//! The tests drive the built binary rather than the modules, because the exit code is what lefthook reads.
+//! The tests drive the built binary, because lefthook reads its exit code.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-/// Repo root: the tests need the real `.yamllint` and `PSScriptAnalyzerSettings.psd1`, and `dotctl` resolves both from there.
+/// The tests need the real `.yamllint` and `PSScriptAnalyzerSettings.psd1`, which `dotctl` resolves from the repository root.
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
@@ -25,7 +24,7 @@ fn lint(kind: &str, files: &[&Path]) -> Output {
         .expect("dotctl runs")
 }
 
-/// Writes one fixture and returns its path; the directory owns the file.
+/// Writes one fixture, owned by the directory, and returns its path.
 fn fixture(dir: &tempfile::TempDir, name: &str, content: &str) -> PathBuf {
     let path = dir.path().join(name);
     std::fs::write(&path, content).expect("fixture written");
@@ -75,8 +74,7 @@ fn yaml_separates_valid_from_broken() {
 #[test]
 fn typos_separates_clean_from_misspelled() {
     assert_verdict("typos", "ok.md", "a sentence with no mistakes\n", true);
-    // Split so the fixture's own misspelling is not a misspelling in this file, which typos also checks.
-    // An extend-words entry would hide the real thing just as effectively.
+    // The split keeps the misspelling out of this file, which typos also checks.
     let misspelled = concat!("t", "eh", " quick brown fox\n");
     assert_verdict("typos", "bad.md", misspelled, false);
 }
@@ -95,25 +93,25 @@ fn shellcheck_separates_clean_from_suspect() {
 #[test]
 fn powershell_reports_analyzer_findings() {
     assert_verdict("ps1", "ok.ps1", "Write-Output 'hello'\n", true);
-    // PSAvoidUsingWriteHost, a Warning, and not on the repo's exclude list.
+    // PSAvoidUsingWriteHost, a warning not on the repo's exclude list.
     assert_verdict("ps1", "bad.ps1", "Write-Host 'hello'\n", false);
 }
 
-/// The catch-all kind: a template that does not render is a failure even when no per-format validator claims its extension.
+/// A template that fails to render fails the catch-all kind, even when no format validator claims its extension.
 #[test]
 fn template_requires_a_successful_render() {
     assert_verdict("template", "ok.tmpl", "plain {{ \"text\" }}\n", true);
     assert_verdict("template", "bad.tmpl", "{{ .does.not.exist }}\n", false);
 }
 
-/// Templates are rendered before validation, so a template that renders to broken TOML fails the TOML kind, not the template kind.
+/// A template that renders to broken TOML fails the TOML kind, because rendering precedes validation.
 #[test]
 fn render_happens_before_validation() {
     assert_verdict("toml", "ok.toml.tmpl", "key = {{ \"1\" }}\n", true);
     assert_verdict("toml", "bad.toml.tmpl", "key = {{ \"\" }}\n", false);
 }
 
-/// A staged file can be deleted in the same commit, so a path that no longer exists is skipped rather than failing the run.
+/// A commit can stage a deletion, so the run skips a missing path instead of failing.
 #[test]
 fn missing_paths_are_skipped() {
     let out = lint("toml", &[Path::new("no/such/file.toml")]);

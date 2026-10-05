@@ -1,4 +1,4 @@
-//! The force-push gate that cannot be walked around.
+//! The force-push gate.
 //!
 //! git hands a pre-push hook one line per ref on stdin:
 //!
@@ -6,15 +6,9 @@
 //! <local ref> <local sha> <remote ref> <remote sha>
 //! ```
 //!
-//! and, crucially, does NOT say whether `--force` was passed.
-//! That turns out not to matter: what `--force` actually buys is permission to move a remote ref to a commit that is not a descendant of where it is now.
-//! So the question "is this a force push?"
-//! is answerable from the shas alone — is `remote_sha` an ancestor of `local_sha`?
-//! — and the answer is the same whether the rewrite came from `--force`, `--force-with-lease`, a `+refspec`, an IDE button, or a GUI client that never looked at PATH.
+//! A force push moves a remote ref to a commit outside its descendants, so the gate checks whether `local_sha` descends from `remote_sha`.
 //!
-//! That is why this, and not the `~/.local/bin/git` wrapper, is the actual guarantee.
-//! The wrapper only sees commands that resolved `git` through PATH.
-//! This hook is reached through `core.hooksPath` for every repository on the machine and every invocation of git in it.
+//! This hook, and not the `~/.local/bin/git` wrapper, enforces the rule, because the wrapper only handles commands that resolve `git` through `PATH`.
 
 use crate::bypass::{self, Category};
 use crate::gate_rules::{self, Admission, History, Reference, Signing};
@@ -26,8 +20,8 @@ enum Verdict {
     Ok,
     Delete,
     Rewrite,
-    /// The remote-tracking commit is not in this clone, so ancestry is not decidable.
-    /// Treated as a rewrite: an undecidable push is exactly the shape a rewrite has after someone else force-pushed.
+    /// This clone lacks the remote-tracking commit, so ancestry stays unknown.
+    /// The gate treats it as a rewrite, the shape a push takes after someone else force-pushed.
     Undecidable,
 }
 
@@ -36,7 +30,7 @@ fn classify(local_sha: &str, remote_sha: &str) -> Verdict {
         return Verdict::Delete;
     }
     if remote_sha.chars().all(|c| c == '0') {
-        return Verdict::Ok; // a branch that does not exist on the remote yet
+        return Verdict::Ok; // A branch new to the remote.
     }
     if !realgit::succeeds(&["cat-file", "-e", &format!("{remote_sha}^{{commit}}")]) {
         return Verdict::Undecidable;
@@ -49,9 +43,6 @@ fn classify(local_sha: &str, remote_sha: &str) -> Verdict {
 }
 
 /// Returns the process exit code: 0 to let the push through, 1 to refuse it.
-///
-/// Two gates, in the order in which being wrong is cheapest to discover: history first (force/deletion), then signatures.
-/// There is no point paying for a `git verify-commit` per commit on a push that is going to be refused anyway.
 pub fn run(remote: &str) -> i32 {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
@@ -64,8 +55,8 @@ pub fn run(remote: &str) -> i32 {
     signatures(remote, &input)
 }
 
-/// The pushed refs that could carry new commits, as `(local ref, sha)`: pushes only, not deletions, and not the empty line a here-string over an empty variable still produces.
-/// An "Everything up-to-date" push sends nothing at all on stdin, and `read` still succeeds with every field empty — without this filter the signing gate below would reach `git rev-list ""`, which fails, which refuses a push that pushes nothing.
+/// The pushed refs that could carry new commits, as `(local ref, sha)`: pushes only, without deletions or the empty line from a here-string over an empty variable.
+/// An up-to-date push sends an empty stdin, and without this filter the signing gate would run `git rev-list ""` and refuse a push that sends nothing.
 fn pushed(input: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for line in input.lines() {
@@ -95,10 +86,8 @@ struct Unsigned {
 
 /// Refuse a push that would introduce an unsigned commit.
 ///
-/// The backstop for branches carried in from another machine or merged with mixed signing state — `post-commit` re-signs what *this* machine commits, this gate is what catches everything else before it leaves.
-/// Best-effort alongside GitHub's "Require signed commits" ruleset, which remains the server-side guarantee.
-///
-/// Verification is skipped entirely when signing is not configured on this machine (`~/.gitconfig` omits the block while the 1Password SSH agent is unavailable): enforcing here would refuse every push on a fresh Mac, which is the failure mode graceful degradation exists to prevent.
+/// The backstop for branches from another machine or with mixed signing state, because `post-commit` re-signs only the commits of this machine.
+/// Without signing configured on this machine, the gate skips verification, so a fresh Mac without the 1Password SSH agent can still push.
 fn signatures(remote: &str, input: &str) -> i32 {
     let configured = realgit::capture(&["config", "--get", "commit.gpgsign"])
         .is_some_and(|v| v.trim() == "true");
@@ -113,7 +102,7 @@ fn signatures(remote: &str, input: &str) -> i32 {
     let mut refs: Vec<Unsigned> = Vec::new();
     for (local_ref, sha) in pushed(input) {
         // Verify what this push introduces: commits reachable from the new tip that no ref on this remote already carries.
-        // Deliberately the same range for a new branch and for a force-push — the narrower-looking `remote..local` is wider after a rebase: it re-verifies the base branch's history, which the remote already accepted under its own ruleset, and that history can be unverifiable here (a forge signs the commits it writes with its own scheme; GitHub uses PGP where this machine signs with SSH).
+        // A new branch and a force push use the same range.
         let Some(range) =
             realgit::capture(&["rev-list", "--topo-order", &sha, "--not", &not_remote])
         else {
@@ -174,7 +163,7 @@ fn signatures(remote: &str, input: &str) -> i32 {
 }
 
 /// Signs exactly the unsigned commits when one command can, and lists them otherwise.
-/// `head` is the ref `HEAD` points at, or `HEAD` itself when detached, and the commit it names.
+/// `head` holds the ref `HEAD` points at, or `HEAD` itself when detached, and the commit it names.
 fn unsigned_refusal(remote: &str, refs: &[Unsigned], head: Option<(&str, &str)>) -> Refusal {
     let first = &refs[0];
     let branch = first.local_ref.strip_prefix("refs/heads/");
@@ -349,7 +338,8 @@ fn judge(remote: &str, input: &str) -> i32 {
     }
 
     let argv: Vec<String> = std::env::args().collect();
-    // The stack tooling rewrites branches and pushes them with explicit leases; it never deletes a ref.
+    // The stack tooling rewrites branches and pushes them with explicit leases.
+    // It never deletes a ref.
     let rewrites = problems
         .iter()
         .all(|p| !matches!(p.verdict, Verdict::Delete));
@@ -464,7 +454,7 @@ mod tests {
                 on("refs/heads/main", "aaa"),
                 "git commit --amend -S --no-edit",
             ),
-            // An amend moves only the checked-out branch, so another ref at the same commit is signed where it points.
+            // An amend moves only the checked-out branch, so another ref at the same commit gets signed where it points.
             (
                 vec![unsigned(topic, &["aaa"], false, Some("base"))],
                 on("refs/heads/main", "aaa"),

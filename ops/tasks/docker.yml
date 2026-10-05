@@ -1,6 +1,6 @@
 ---
-# Docker CE (rootful).
-# Requires the ubuntu_codename / apt_arch facts from preflight.
+# Rootful Docker CE.
+# Requires the ubuntu_codename and apt_arch facts from preflight.
 
 - name: Remove conflicting legacy Docker packages
   become: true

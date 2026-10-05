@@ -1,7 +1,7 @@
 {
-  "revision": "9464323d0c85c7c95125fd1eedd751b64b052f0af8ec5bb27fa25675573c404f",
+  "revision": "d0da0c8f0be8bbaef319d5f8f13535cef1e83660471bdae9712e4cd430902570",
   "outcome": "keep",
-  "reason": "Retain the maintained typed governance helper and narrow mutation scopes; this revision only denies unreasoned lint allowances in the helper's lint policy, as every crate in the repository does.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions, and the helper's lint policy denies unreasoned lint allowances as every crate in the repository does.",
   "evidence": [
     "dot_agents/skills/github-repository/SKILL.md"
   ],

@@ -39,7 +39,8 @@ pub enum Index {
     Other,
 }
 
-/// How Git stages the bytes: `git add` keeps CRLF already in the index under `text=auto`, and `git add --renormalize` does not.
+/// How Git stages the bytes.
+/// `git add` keeps CRLF already in the index under `text=auto`, and `git add --renormalize` doesn't.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Staging {
     Add,
@@ -85,7 +86,8 @@ pub fn action(attributes: Attributes, staging: Staging, index: Index, content: C
     }
 }
 
-/// Classifies bytes as Git's `gather_stats` does; LF and both bytes of a CRLF pair count as neither printable nor nonprintable.
+/// Classifies bytes as Git's `gather_stats` does.
+/// LF and both bytes of a CRLF pair count as neither printable nor nonprintable.
 pub fn content(bytes: &[u8]) -> Content {
     let mut found = Content {
         crlf: false,

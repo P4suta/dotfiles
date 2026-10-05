@@ -1,12 +1,13 @@
 //! Persistent agent memory stays off in every managed client.
-//! A client is managed when a profile renders its instruction file, and that profile must then render the client's own settings with every memory switch disabled.
+//! A profile that renders a client's instruction file must also render that client's settings with every memory switch off.
 
 use crate::profile_rules::{MEMORY_SWITCHES_PROVED, Memory, memory_off};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::Value;
 
-/// Inputs that reach the file OpenCode's prompt tells an agent to keep memories in, at a project root and below it, for each tool that can read or write it.
+/// Inputs that reach the file OpenCode's prompt names for memories.
+/// One probe per tool that can read or write it.
 const OPENCODE_PROBES: [(&str, &str); 6] = [
     ("read", ".github/instructions/memory.instruction.md"),
     ("read", "src/.github/instructions/memory.instruction.md"),
@@ -234,7 +235,7 @@ pub fn violations(dump: &Value) -> Result<Vec<String>> {
 }
 
 /// A host settings file in which the client turned every memory switch back on, for checking that a `modify_` rendering turns it off again.
-/// Contents of any other target are returned unchanged.
+/// Any other target comes back unchanged.
 pub fn reenabled(target: &str, contents: &str) -> Result<String> {
     if target == Client::Claude.settings() {
         let mut value: Value = serde_json::from_str(contents)?;

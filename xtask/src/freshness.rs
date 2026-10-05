@@ -1,6 +1,6 @@
-//! Refuses to run an installed tool whose sources have moved on since it was built.
+//! Refuses to run an installed tool whose sources changed after the build.
 //!
-//! Each tool embeds the revision and content hash of the files that build it (see `build.rs`).
+//! Each tool embeds the revision and content hash of the files that build it, as `build.rs` shows.
 //! A run compares that hash with the same files in the checkout it can find and refuses with the install task when they differ.
 
 use crate::build_inputs::content_hash;
@@ -11,7 +11,8 @@ use anyhow::{Context, Result, ensure};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Names a dotfiles checkout to compare against, for runs outside any checkout and for fixtures.
+/// Names the dotfiles checkout to compare with.
+/// Runs outside any checkout and fixtures use it.
 pub const SOURCE_VARIABLE: &str = "DOTFILES_SOURCE";
 
 /// An executable that an `install:*` task builds and copies into the user's home.
@@ -43,7 +44,7 @@ impl Built {
     }
 }
 
-/// What a tool was built from.
+/// The sources that produced a tool.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Embedded {
     pub revision: String,
@@ -60,7 +61,7 @@ pub fn embedded() -> Embedded {
     }
 }
 
-/// Whether `path` is a dotfiles checkout, which holds the xtask package that builds the tools.
+/// Whether `path` holds the xtask package that builds the tools, which makes it a dotfiles checkout.
 pub fn is_checkout(path: &Path) -> bool {
     fs::read_to_string(path.join("xtask/Cargo.toml"))
         .is_ok_and(|manifest| manifest.contains("name = \"dotfiles-xtask\""))
@@ -74,7 +75,7 @@ pub fn working_copy(start: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-/// The checkout to compare against and why it was chosen.
+/// The checkout to compare with and the reason for the choice.
 pub fn locate(
     explicit: Option<&Path>,
     start: Option<&Path>,
@@ -128,7 +129,8 @@ fn stale(built: Built, build: &Embedded, origin: Origin, root: &Path) -> Refusal
     ))
 }
 
-/// Refuses when `build` is stale against the checkout found from the explicit path, the working directory, or where it was built.
+/// Refuses when `build` lags the checkout.
+/// The search tries the explicit path, the working directory, and the original build location.
 pub fn verify(
     built: Built,
     build: &Embedded,
@@ -159,7 +161,8 @@ fn record_path(home: &Path, built: Built) -> PathBuf {
         .join(built.binary())
 }
 
-/// Records the content hash of the sources `built` was installed from, which a later apply or merge compares with the checkout.
+/// Records the content hash of the sources that produced the installed `built`.
+/// A later apply or merge compares that hash with the checkout.
 pub fn record_installation(home: &Path, root: &Path, built: Built) -> Result<()> {
     let path = record_path(home, built);
     fs::create_dir_all(path.parent().context("record directory")?)?;

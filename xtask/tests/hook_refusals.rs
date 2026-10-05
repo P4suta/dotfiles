@@ -3,7 +3,8 @@
     reason = "integration tests spawn the binaries and real tools they verify"
 )]
 
-//! The hook dispatcher and both pr-workflow entry points, run as installed: each refusal is the last line on standard error.
+//! The hook dispatcher and both pr-workflow entry points, run as installed.
+//! Each refusal comes last on standard error.
 
 use anyhow::{Result, ensure};
 use dotfiles_xtask::refusal::Refusal;
