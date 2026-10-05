@@ -45,6 +45,8 @@ enum Action {
         #[arg(last = true)]
         arguments: Vec<OsString>,
     },
+    /// Claude Code PreToolUse hook for Bash: refuses file writes through inline interpreters, heredocs, and redirects.
+    ClaudeBash,
     Hook {
         hook: dotfiles_xtask::hooks::Hook,
         #[arg(last = true)]
@@ -216,6 +218,7 @@ fn run() -> Result<()> {
         } => dotfiles_xtask::secrets::exit(dotfiles_xtask::terminal::run(
             emulator, session, child, &arguments,
         )?),
+        Action::ClaudeBash => dotfiles_xtask::claude_hook::run()?,
         Action::Hook { hook, arguments } => dotfiles_xtask::hooks::run(hook, &arguments)?,
         Action::LineEndings { request } => dotfiles_xtask::line_endings::run(request)?,
         Action::Git { arguments } => {

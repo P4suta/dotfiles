@@ -5,9 +5,14 @@
 */ -}}
 {{- $current := dict -}}
 {{- if trim .chezmoi.stdin -}}{{- $current = fromJson .chezmoi.stdin -}}{{- end -}}
-{{- $managed := dict "autoMemoryEnabled" false -}}
+{{- /* The Bash hook refuses file writes through inline interpreters, heredocs, and redirects; it runs the same xtask binary the git hooks use. */ -}}
+{{- $tool := ".local/bin/dotfiles-xtask" -}}
+{{- if eq .profile "windows" }}{{ $tool = ".local/bin/dotfiles-xtask.exe" }}{{ end -}}
+{{- $hook := dict "type" "command" "command" (printf "%s claude-bash" (includeTemplate "sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
+{{- $hooks := dict "PreToolUse" (list (dict "matcher" "Bash" "hooks" (list $hook))) -}}
+{{- $managed := dict "autoMemoryEnabled" false "hooks" $hooks -}}
 {{- if eq .profile "wsl" -}}
-{{- $managed = includeTemplate "profiles/wsl/dot_claude/settings.json.tmpl" (merge (dict) . (index .platforms .profile)) | fromJson -}}
+{{- $managed = mergeOverwrite $managed (includeTemplate "profiles/wsl/dot_claude/settings.json.tmpl" (merge (dict) . (index .platforms .profile)) | fromJson) -}}
 {{- end -}}
 {{ mergeOverwrite $current $managed | toPrettyJson "  " | trim }}
 

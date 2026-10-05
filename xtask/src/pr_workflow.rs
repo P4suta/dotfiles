@@ -1,3 +1,4 @@
+use crate::body_rules::{Verdict, next_action as body_next_action, verdict as body_verdict};
 use crate::pr_rules::{
     Blocker, Checks, Effect, Exclusion, Generation, IssueGate, Operation, ReviewRequirement,
     api_quota_available, checks_state, coderabbit_body_marker_allowed, exclusion, issue_gate,
@@ -218,6 +219,25 @@ struct LiveIssue {
 pub struct ValidatedDocument {
     title: String,
     body: String,
+}
+
+/// Refuse a title or body that carries a line claiming authorship for an agent, naming the line and the next action.
+fn refuse_attribution(part: &str, text: &str, recheck: impl FnOnce() -> String) -> Result<()> {
+    let found = dotguard::attribution::find(text);
+    if let Verdict::Refuse(reason) = body_verdict(found.is_some()) {
+        let (number, line) = found.context("a refused document names its attribution line")?;
+        return Err(Refusal::new(
+            "pr.attribution",
+            format!(
+                "{part} line {number} is AI attribution. {}",
+                body_next_action(reason)
+            ),
+            recheck(),
+        )
+        .evidence(format!("{part} line {number}: {line}"))
+        .into());
+    }
+    Ok(())
 }
 
 fn single_line(value: &str) -> bool {
@@ -482,6 +502,8 @@ pub fn validate(
             )
         })?;
     }
+    refuse_attribution("title", &title, || recheck(target, None))?;
+    refuse_attribution("body", &body, || recheck(target, Some(&title)))?;
     let body_refusal = |cause: &str, evidence: String| {
         Refusal::new("pr.body", cause, recheck(target, Some(&title))).evidence(evidence)
     };

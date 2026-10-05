@@ -107,6 +107,16 @@ pub const TARGET_HARNESSES: [&str; 2] = [
     "an_unconfigured_target_is_shared_and_never_inside_the_worktree",
 ];
 
+pub const SHELL_WRITE_HARNESSES: [&str; 2] = [
+    "every_refusal_names_a_next_action",
+    "file_writing_commands_are_never_admitted",
+];
+
+pub const BODY_HARNESSES: [&str; 2] = [
+    "attributed_bodies_are_never_admitted",
+    "every_body_refusal_names_the_deleting_next_action",
+];
+
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
     let summary = &value["verification_results"]["summary"];
     ensure!(
@@ -651,7 +661,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 2] = [
+pub const RULES: [Rules; 4] = [
     Rules {
         source: "xtask/src/target_rules.rs",
         harnesses: &TARGET_HARNESSES,
@@ -700,6 +710,40 @@ fn reject_installing_an_unrecorded_tool() {
             "reject_running_a_stale_build",
             "reject_preferring_the_build_checkout_over_the_working_copy",
             "reject_installing_an_unrecorded_tool",
+        ],
+    },
+    Rules {
+        source: "xtask/src/shell_write_rules.rs",
+        harnesses: &SHELL_WRITE_HARNESSES,
+        counterexamples: "#[kani::proof]
+fn reject_admitting_an_inline_interpreter() {
+    assert!(production::verdict(true, false) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_admitting_a_file_redirect() {
+    assert!(production::verdict(false, true) == production::Verdict::Admit);
+}
+",
+        rejected: &[
+            "reject_admitting_an_inline_interpreter",
+            "reject_admitting_a_file_redirect",
+        ],
+    },
+    Rules {
+        source: "xtask/src/body_rules.rs",
+        harnesses: &BODY_HARNESSES,
+        counterexamples: "#[kani::proof]
+fn reject_admitting_an_attributed_body() {
+    assert!(production::verdict(true) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_an_empty_deleting_next_action() {
+    assert!(production::next_action(production::Reason::Attribution).is_empty());
+}
+",
+        rejected: &[
+            "reject_admitting_an_attributed_body",
+            "reject_an_empty_deleting_next_action",
         ],
     },
 ];

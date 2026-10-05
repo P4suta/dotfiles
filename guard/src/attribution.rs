@@ -60,6 +60,17 @@ fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
         .then(|| &s[prefix.len()..])
 }
 
+/// The first attribution line of a document that must not be edited on the author's behalf, as its one-based line number and text.
+///
+/// Pull request, issue, and comment bodies are refused rather than stripped, because the sender sees the refusal and deletes the line.
+/// `xtask` shares this rule, so a commit message, a PR document, and a `gh` body judge a line identically.
+pub fn find(text: &str) -> Option<(usize, &str)> {
+    text.lines()
+        .enumerate()
+        .find(|(_, line)| is_attribution(line))
+        .map(|(index, line)| (index + 1, line))
+}
+
 /// Returns the cleaned message and how many lines were removed.
 pub fn strip(text: &str) -> (String, usize) {
     let mut kept: Vec<&str> = Vec::new();
@@ -90,7 +101,24 @@ pub fn strip(text: &str) -> (String, usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_attribution, strip};
+    use super::{find, is_attribution, strip};
+
+    #[test]
+    fn the_first_attribution_line_is_found_with_its_number() {
+        let body = "Body.\n\nCloses #1\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Qesu\n";
+        assert_eq!(
+            find(body),
+            Some((
+                5,
+                "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+            ))
+        );
+        assert_eq!(
+            find("Co-authored-by: Example User <example@example.com>\nClaude is mentioned here.\n"),
+            None
+        );
+        assert_eq!(find(""), None);
+    }
 
     #[test]
     fn agent_trailers_are_removed() {

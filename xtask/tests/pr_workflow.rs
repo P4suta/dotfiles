@@ -643,6 +643,41 @@ fn invalid_documents_never_start_gh_and_check_has_no_effects() -> Result<()> {
 }
 
 #[test]
+fn attribution_lines_are_refused_by_name_and_the_authors_own_lines_are_admitted() -> Result<()> {
+    for form in [
+        "Claude-Session: https://claude.ai/code/session_01Qesu",
+        "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>",
+        "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+        "https://claude.ai/code/session_01Qesu",
+    ] {
+        let fixture = Fixture::new(&format!("{BODY}\n{form}\n"))?;
+        for action in ["check", "create", "edit"] {
+            let output = fixture.document(action, "fix: preserve edits")?;
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(!output.status.success(), "{action}: {form}");
+            assert!(
+                stderr.contains("body line 10") && stderr.contains(form),
+                "{action}: {stderr}"
+            );
+            assert!(
+                stderr.contains("pr.attribution refused") && stderr.contains("Delete that line"),
+                "{stderr}"
+            );
+            assert!(!fixture.log.try_exists()?);
+        }
+    }
+    let admitted = format!(
+        "{BODY}\nCo-authored-by: Example User <example@example.com>\nThe CLAUDE.md contract mentions Claude.\n"
+    );
+    let fixture = Fixture::new(&admitted)?;
+    for action in ["check", "create"] {
+        let output = fixture.document(action, "fix: preserve edits")?;
+        assert!(output.status.success(), "{action}");
+    }
+    Ok(())
+}
+
+#[test]
 fn completed_markdown_and_literal_marker_examples_are_accepted() -> Result<()> {
     let body = "## Changes\nSort the todo list and remove obsolete FIXME comments.\n\n<details>\n<summary>Validation results</summary>\nThe regression passed.\n</details>\n\n```yaml\nvalue: ${{ secrets.X }}\nTODO\n{{description}}\n```\n\n~~~text\n[insert description]\n~~~\n\nAn inline example uses `{{title}}` and `TBD`.\nThe Actions expression is ${{ secrets.X }}.\n";
     let fixture = Fixture::new(body)?;
