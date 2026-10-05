@@ -42,7 +42,16 @@ fn the_container_reads_the_checkout_and_runs_the_unchanged_proof_gate() {
         .expect("checkout mount");
     assert_eq!(
         text[mount + 1],
-        r"type=bind,source=C:\Users\fixture\dotfiles,target=/source,readonly"
+        r#"type=bind,"source=C:\Users\fixture\dotfiles",target=/source,readonly"#
+    );
+    let separated = container_run_arguments(
+        Path::new(r"C:\Users\Jane, Doe\dotfiles"),
+        "dotfiles-proofs:fixture",
+        "dotfiles-proofs-target-fixture",
+    );
+    assert_eq!(
+        separated[mount + 1],
+        OsString::from(r#"type=bind,"source=C:\Users\Jane, Doe\dotfiles",target=/source,readonly"#)
     );
     assert!(text.contains(&"--rm".into()));
     assert!(text.contains(&"dotfiles-proofs-target-fixture:/cache".into()));
