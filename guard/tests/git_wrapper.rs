@@ -34,8 +34,22 @@ impl Wrapper {
     }
 
     /// Runs the wrapper with an isolated home and Git configuration, so its audit records stay out of the developer's.
+    /// Waivers set in the calling shell, such as the one a force push sets for its hooks, are removed so they cannot decide a refusal.
     fn run(&self, arguments: &[&str], input: Option<&[u8]>) -> Output {
-        let mut child = Command::new(&self.git)
+        self.run_with(arguments, input, &[])
+    }
+
+    fn run_with(&self, arguments: &[&str], input: Option<&[u8]>, waivers: &[&str]) -> Output {
+        let mut command = Command::new(&self.git);
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("ALLOW_") {
+                command.env_remove(name);
+            }
+        }
+        for waiver in waivers {
+            command.env(waiver, "1");
+        }
+        let mut child = command
             .args(arguments)
             .current_dir(self.scope.join("repository"))
             .env("HOME", self.home())
@@ -88,6 +102,14 @@ fn a_copy_named_git_refuses_destructive_commands_unless_waived() {
     let refused = wrapper.run(&["reset", "--hard"], None);
     assert_eq!(refused.status.code(), Some(1), "{}", text(&refused.stderr));
     assert!(text(&refused.stderr).contains("ALLOW_FORCE=1"));
+    let waived = wrapper.run_with(&["reset", "--hard"], None, &["ALLOW_FORCE"]);
+    assert!(
+        text(&waived.stderr).contains("ALLOW_FORCE=1 — allowing"),
+        "{}",
+        text(&waived.stderr)
+    );
+    let log = std::fs::read_to_string(wrapper.home().join(".local/state/git-bypass.log")).unwrap();
+    assert!(log.lines().any(|line| line.contains("BYPASS")), "{log}");
 }
 
 #[test]
