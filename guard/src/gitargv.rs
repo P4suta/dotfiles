@@ -17,6 +17,7 @@
 //! * `rm -f` — common in scripts, and what it destroys is reachable from the index in every case that matters.
 
 use crate::bypass::Category;
+use crate::gate_rules::{Spelling, spelling};
 use crate::realgit;
 use crate::refusal::{Refusal, command};
 
@@ -141,6 +142,24 @@ impl Invocation<'_> {
         Next::Git(line)
     }
 
+    /// The same command with the argument at `index` replaced by `word`.
+    fn replace(&self, index: usize, word: &str) -> Next {
+        Next::Git(
+            self.globals
+                .iter()
+                .map(String::as_str)
+                .chain([self.sub])
+                .chain(
+                    self.args
+                        .iter()
+                        .enumerate()
+                        .map(|(at, arg)| if at == index { word } else { arg.as_str() }),
+                )
+                .map(str::to_owned)
+                .collect(),
+        )
+    }
+
     /// The same command without the named options.
     fn without(&self, dropped: &[&str]) -> Next {
         self.rerun(|arg| (!dropped.contains(&arg)).then(|| arg.to_owned()))
@@ -180,48 +199,213 @@ fn forge_deletes(references: &[&str]) -> String {
         .join(" && ")
 }
 
-/// `git push` options that take the next word as their value when none is attached.
-const PUSH_TAKES_VALUE: [&str; 5] = [
-    "--push-option",
-    "--repo",
-    "--receive-pack",
-    "--exec",
-    "--recurse-submodules",
-];
-
-/// The words of a `git push` argument list, split as Git splits them.
-struct PushArgs<'a> {
-    /// Options before `--`, without their values.
-    options: Vec<&'a str>,
-    /// Indices into the arguments of the repository followed by each refspec.
-    /// Git takes the first positional as the repository even when `--repo` names one.
-    positionals: Vec<usize>,
+/// How a long option takes its value.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Takes {
+    Nothing,
+    /// Attached with `=`, or else the next word.
+    Word,
+    /// Only attached with `=`.
+    Attached,
 }
 
-impl<'a> PushArgs<'a> {
-    fn parse(args: &'a [String]) -> Self {
-        let mut parsed = Self {
+/// A long option: its name, how it takes a value, and whether `--no-<name>` negates it.
+/// A negatable name that starts with `no-` is also negated by the name without it, as `--verify` negates `--no-verify`.
+struct Long(&'static str, Takes, bool);
+
+/// The options of one subcommand, as `git <subcommand> -h` lists them.
+struct Grammar {
+    long: &'static [Long],
+    /// Short options that take the rest of their word, or else the next word.
+    short_word: &'static str,
+    /// Short options that take only the rest of their word.
+    short_attached: &'static str,
+}
+
+const PUSH: Grammar = Grammar {
+    long: &[
+        Long("verbose", Takes::Nothing, true),
+        Long("quiet", Takes::Nothing, true),
+        Long("repo", Takes::Word, true),
+        Long("all", Takes::Nothing, true),
+        Long("branches", Takes::Nothing, true),
+        Long("mirror", Takes::Nothing, true),
+        Long("delete", Takes::Nothing, true),
+        Long("tags", Takes::Nothing, true),
+        Long("dry-run", Takes::Nothing, true),
+        Long("porcelain", Takes::Nothing, true),
+        Long("force", Takes::Nothing, true),
+        Long("force-with-lease", Takes::Attached, true),
+        Long("force-if-includes", Takes::Nothing, true),
+        Long("recurse-submodules", Takes::Word, true),
+        Long("thin", Takes::Nothing, true),
+        Long("receive-pack", Takes::Word, true),
+        Long("exec", Takes::Word, true),
+        Long("set-upstream", Takes::Nothing, true),
+        Long("progress", Takes::Nothing, true),
+        Long("prune", Takes::Nothing, true),
+        Long("no-verify", Takes::Nothing, true),
+        Long("follow-tags", Takes::Nothing, true),
+        Long("signed", Takes::Attached, true),
+        Long("atomic", Takes::Nothing, true),
+        Long("push-option", Takes::Word, true),
+        Long("ipv4", Takes::Nothing, false),
+        Long("ipv6", Takes::Nothing, false),
+    ],
+    short_word: "o",
+    short_attached: "",
+};
+
+const COMMIT: Grammar = Grammar {
+    long: &[
+        Long("quiet", Takes::Nothing, true),
+        Long("verbose", Takes::Nothing, true),
+        Long("file", Takes::Word, true),
+        Long("author", Takes::Word, true),
+        Long("date", Takes::Word, true),
+        Long("message", Takes::Word, true),
+        Long("reedit-message", Takes::Word, true),
+        Long("reuse-message", Takes::Word, true),
+        Long("fixup", Takes::Word, true),
+        Long("squash", Takes::Word, true),
+        Long("reset-author", Takes::Nothing, true),
+        Long("trailer", Takes::Word, false),
+        Long("signoff", Takes::Nothing, true),
+        Long("template", Takes::Word, true),
+        Long("edit", Takes::Nothing, true),
+        Long("cleanup", Takes::Word, true),
+        Long("status", Takes::Nothing, true),
+        Long("gpg-sign", Takes::Attached, true),
+        Long("all", Takes::Nothing, true),
+        Long("include", Takes::Nothing, true),
+        Long("interactive", Takes::Nothing, true),
+        Long("patch", Takes::Nothing, true),
+        Long("unified", Takes::Word, false),
+        Long("inter-hunk-context", Takes::Word, false),
+        Long("only", Takes::Nothing, true),
+        Long("no-verify", Takes::Nothing, true),
+        Long("dry-run", Takes::Nothing, true),
+        Long("short", Takes::Nothing, true),
+        Long("branch", Takes::Nothing, true),
+        Long("ahead-behind", Takes::Nothing, true),
+        Long("porcelain", Takes::Nothing, true),
+        Long("long", Takes::Nothing, true),
+        Long("null", Takes::Nothing, true),
+        Long("amend", Takes::Nothing, true),
+        Long("no-post-rewrite", Takes::Nothing, true),
+        Long("untracked-files", Takes::Attached, true),
+        Long("pathspec-from-file", Takes::Word, true),
+        Long("pathspec-file-nul", Takes::Nothing, true),
+        Long("allow-empty", Takes::Nothing, true),
+        Long("allow-empty-message", Takes::Nothing, true),
+    ],
+    short_word: "mFCctU",
+    short_attached: "Su",
+};
+
+/// One option as Git reads it.
+enum Opt<'a> {
+    /// A long option by its full name; `negated` for `--no-<name>`.
+    Long { name: &'static str, negated: bool },
+    /// A long option Git refuses as ambiguous or unknown.
+    Unread,
+    /// A cluster of short options, ending with the one that takes `value` when one does.
+    Short {
+        letters: &'a str,
+        value: Option<&'a str>,
+    },
+}
+
+/// An argument list split as Git splits it.
+struct Parsed<'a> {
+    /// Each option with the words it spans, its value included.
+    options: Vec<(std::ops::Range<usize>, Opt<'a>)>,
+    /// The words that are not options, including every word after `--`.
+    positionals: Vec<usize>,
+    /// The `--` that ends the options.
+    separator: Option<usize>,
+}
+
+impl Grammar {
+    /// Reads a long option name as Git does, which accepts any unique prefix of a spelling.
+    fn long(&self, name: &str) -> Option<(&'static Long, bool)> {
+        let mut spellings: Vec<(String, &'static Long, bool)> = Vec::new();
+        for option in self.long {
+            spellings.push((option.0.to_owned(), option, false));
+            if option.2 {
+                spellings.push((format!("no-{}", option.0), option, true));
+                if let Some(positive) = option.0.strip_prefix("no-") {
+                    spellings.push((positive.to_owned(), option, true));
+                }
+            }
+        }
+        let bytes: Vec<&[u8]> = spellings.iter().map(|(text, ..)| text.as_bytes()).collect();
+        match spelling(name.as_bytes(), &bytes) {
+            Spelling::Is(index) => Some((spellings[index].1, spellings[index].2)),
+            Spelling::Ambiguous | Spelling::Unknown => None,
+        }
+    }
+
+    fn parse<'a>(&self, args: &'a [String]) -> Parsed<'a> {
+        let mut parsed = Parsed {
             options: Vec::new(),
             positionals: Vec::new(),
+            separator: None,
         };
         let mut index = 0;
         while index < args.len() {
             let arg = args[index].as_str();
+            let start = index;
             if arg == "--" {
+                parsed.separator = Some(index);
                 parsed.positionals.extend(index + 1..args.len());
                 break;
             }
-            if arg.starts_with('-') && arg.len() > 1 {
-                parsed.options.push(arg);
-                let separate_value = if arg.starts_with("--") {
-                    PUSH_TAKES_VALUE.contains(&arg)
-                } else {
-                    // In a cluster, `o` takes the rest of the word, or the next word when it ends the cluster.
-                    arg.find('o') == Some(arg.len() - 1)
+            if let Some(long) = arg.strip_prefix("--") {
+                let (name, attached) = long
+                    .split_once('=')
+                    .map_or((long, false), |(name, _)| (name, true));
+                let option = match self.long(name) {
+                    Some((option, negated)) => {
+                        if !negated && !attached && option.1 == Takes::Word {
+                            index += 1;
+                        }
+                        Opt::Long {
+                            name: option.0,
+                            negated,
+                        }
+                    }
+                    None => Opt::Unread,
                 };
-                if separate_value {
-                    index += 1;
+                parsed
+                    .options
+                    .push((start..(index + 1).min(args.len()), option));
+            } else if let Some(cluster) = arg.strip_prefix('-').filter(|rest| !rest.is_empty()) {
+                let mut letters = cluster;
+                let mut value = None;
+                for (at, letter) in cluster.char_indices() {
+                    let end = at + letter.len_utf8();
+                    let rest = &cluster[end..];
+                    if self.short_word.contains(letter) {
+                        letters = &cluster[..end];
+                        value = if rest.is_empty() {
+                            index += 1;
+                            args.get(index).map(String::as_str)
+                        } else {
+                            Some(rest)
+                        };
+                        break;
+                    }
+                    if self.short_attached.contains(letter) {
+                        letters = &cluster[..end];
+                        value = (!rest.is_empty()).then_some(rest);
+                        break;
+                    }
                 }
+                parsed.options.push((
+                    start..(index + 1).min(args.len()),
+                    Opt::Short { letters, value },
+                ));
             } else {
                 parsed.positionals.push(index);
             }
@@ -229,15 +413,88 @@ impl<'a> PushArgs<'a> {
         }
         parsed
     }
+}
 
-    /// The refspecs, after the repository.
-    fn refspecs(&self, args: &'a [String]) -> Vec<&'a str> {
-        self.positionals
-            .iter()
-            .skip(1)
-            .map(|&index| args[index].as_str())
-            .collect()
+/// The options that set where a commit's message comes from or whether the editor opens, which a retry from the saved message replaces.
+const MESSAGE_OPTIONS: [&str; 8] = [
+    "message",
+    "file",
+    "reuse-message",
+    "reedit-message",
+    "fixup",
+    "squash",
+    "template",
+    "edit",
+];
+const MESSAGE_LETTERS: &str = "mFCcte";
+
+/// The refused commit again, with its message read from `message` and opened in the editor.
+/// `words` is the command line the wrapper ran, and the result is `None` when that was not `git commit`.
+pub fn commit_retry(words: &[String], message: &str) -> Option<Vec<String>> {
+    let (program, rest) = words.split_first()?;
+    if program != "git" {
+        return None;
     }
+    let (at, _) = globals(rest);
+    if rest.get(at)? != "commit" {
+        return None;
+    }
+    let args = &rest[at + 1..];
+    let parsed = COMMIT.parse(args);
+    let mut replaced: Vec<Option<Vec<String>>> = vec![None; args.len()];
+    for (range, option) in &parsed.options {
+        let kept = match option {
+            Opt::Long { name, .. } if MESSAGE_OPTIONS.contains(name) => Vec::new(),
+            Opt::Short { letters, value } => {
+                let kept: String = letters
+                    .chars()
+                    .filter(|letter| !MESSAGE_LETTERS.contains(*letter))
+                    .collect();
+                if kept.len() == letters.len() {
+                    continue;
+                }
+                // Every message letter that takes a value takes it from the rest of the word or the next one, so dropping it drops that value.
+                let drops_value = letters.ends_with(|letter| {
+                    MESSAGE_LETTERS.contains(letter) && COMMIT.short_word.contains(letter)
+                });
+                let mut words = Vec::new();
+                if drops_value {
+                    if !kept.is_empty() {
+                        words.push(format!("-{kept}"));
+                    }
+                } else {
+                    let attached = &args[range.start][1 + letters.len()..];
+                    if !kept.is_empty() || !attached.is_empty() {
+                        words.push(format!("-{kept}{attached}"));
+                    }
+                    if range.len() > 1 {
+                        words.extend(value.map(str::to_owned));
+                    }
+                }
+                words
+            }
+            _ => continue,
+        };
+        replaced[range.start] = Some(kept);
+        for index in range.clone().skip(1) {
+            replaced[index] = Some(Vec::new());
+        }
+    }
+    let retry = ["--edit", "--file", message].map(str::to_owned);
+    let mut line = words[..at + 2].to_vec();
+    for (index, arg) in args.iter().enumerate() {
+        if parsed.separator == Some(index) {
+            line.extend(retry.clone());
+        }
+        match &replaced[index] {
+            Some(words) => line.extend(words.iter().cloned()),
+            None => line.push(arg.clone()),
+        }
+    }
+    if parsed.separator.is_none() {
+        line.extend(retry);
+    }
+    Some(line)
 }
 
 /// Drops `letters` from a clustered short option, and the option itself once nothing is left.
@@ -335,12 +592,11 @@ pub fn inspect(argv: &[String]) -> Option<Denial> {
     Some(denial)
 }
 
-fn judge(argv: &[String]) -> Option<Denial> {
+/// The index of the subcommand, and each `-c` or `--config-env` setting before it with the words it spans.
+/// Settings are collected rather than judged on sight: whether one of them is a policy override depends on the subcommand.
+fn globals(argv: &[String]) -> (usize, Vec<(String, std::ops::Range<usize>)>) {
     let mut i = 0;
-    // `-c` settings are collected rather than judged on sight: whether one of them is a policy override depends on the subcommand, which we have not reached yet.
-    // Each keeps the argv range it came from, so a refusal can name the command without it.
     let mut settings: Vec<(String, std::ops::Range<usize>)> = Vec::new();
-
     while i < argv.len() {
         let arg = argv[i].as_str();
         if !arg.starts_with('-') {
@@ -380,7 +636,11 @@ fn judge(argv: &[String]) -> Option<Denial> {
         }
         i += 1;
     }
+    (i, settings)
+}
 
+fn judge(argv: &[String]) -> Option<Denial> {
+    let (i, settings) = globals(argv);
     let sub = argv.get(i)?;
     let rest = &argv[i + 1..];
 
@@ -463,14 +723,31 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
     match sub {
         "push" => {
             let integrate = call.git(&["pull", "--rebase"]);
-            let push = PushArgs::parse(args);
-            let refspecs = push.refspecs(args);
-            for a in &push.options {
+            let push = PUSH.parse(args);
+            let refspecs: Vec<&str> = push
+                .positionals
+                .iter()
+                .skip(1)
+                .map(|&index| args[index].as_str())
+                .collect();
+            for (range, option) in &push.options {
                 let deny = |reason: &str, hint: &str, next: Next| {
                     Some(Denial::new(Category::Force, reason, hint, next))
                 };
-                match *a {
-                    "-f" | "--force" => {
+                let name = match option {
+                    Opt::Long {
+                        name,
+                        negated: false,
+                    } => *name,
+                    Opt::Short { letters, .. } => match letters.chars().find(|letter| matches!(letter, 'f' | 'd')) {
+                        Some('f') => "force",
+                        Some(_) => "delete",
+                        None => continue,
+                    },
+                    _ => continue,
+                };
+                match name {
+                    "force" => {
                         return deny(
                             "git push --force",
                             "A force push replaces history other clones already have.\n\
@@ -479,17 +756,17 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
                             integrate,
                         );
                     }
-                    "--force-if-includes" => {
+                    "force-if-includes" => {
                         return deny("git push --force-if-includes", "Still a force push. ALLOW_FORCE=1 to proceed.", integrate);
                     }
-                    "--mirror" => {
+                    "mirror" => {
                         return deny(
                             "git push --mirror",
                             "--mirror makes the remote match this clone exactly, deleting every ref you do not have.",
-                            call.rerun(|arg| Some(if arg == "--mirror" { "--all" } else { arg }.to_owned())),
+                            call.replace(range.start, "--all"),
                         );
                     }
-                    "-d" | "--delete" => {
+                    "delete" => {
                         return deny(
                             "git push --delete",
                             "Deleting a remote ref is not recoverable from here.\n\
@@ -497,7 +774,7 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
                             Next::Shell(forge_deletes(&refspecs)),
                         );
                     }
-                    other if other.starts_with("--force-with-lease") => {
+                    "force-with-lease" => {
                         return deny(
                             "git push --force-with-lease",
                             "Safer than --force and still a rewrite of published history.\n\
@@ -815,7 +1092,7 @@ fn short_cluster(arg: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Next, inspect, refusal};
+    use super::{Next, commit_retry, inspect, refusal};
 
     fn argv(line: &str) -> Vec<String> {
         line.split_whitespace().map(str::to_owned).collect()
@@ -928,6 +1205,13 @@ mod tests {
             "push --delete -uo x origin a",
             "push --delete -ox origin a",
             "push --delete origin -- a",
+            "push --delete --push-opt x origin a",
+            "push --delete --rep x origin a",
+            "push --delete --recu check origin a",
+            "push --delete --receive x origin a",
+            "push --delete --ex x origin a",
+            "push --delete --no-rep origin a",
+            "push --delete --no-push-option origin a",
         ] {
             assert!(refused(line), "should refuse: git {line}");
             assert_eq!(next(line), delete(&["a"]), "git {line}");
@@ -957,6 +1241,44 @@ mod tests {
             "push -o +a:b origin main",
             "push -o :c origin main",
             "push -o --force origin main",
+        ] {
+            assert!(!refused(line), "should allow: git {line}");
+        }
+    }
+
+    /// Git reads a unique prefix of a long option as that option, and each letter of a short cluster as its own option.
+    #[test]
+    fn push_reads_abbreviated_and_clustered_options_as_git_does() {
+        for line in [
+            "push --force-w origin main",
+            "push --force-with=main origin main",
+            "push --force-i origin main",
+            "push --mirr origin",
+            "push --del origin a",
+            "push -uf origin main",
+            "push -qd origin a",
+        ] {
+            assert!(refused(line), "should refuse: git {line}");
+        }
+        assert_eq!(next("push -uf origin main"), "git pull --rebase");
+        assert_eq!(next("push --mirr origin"), "git push --all origin");
+        assert_eq!(
+            next("push --del origin a"),
+            "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/a'"
+        );
+        assert_eq!(
+            next("push -qd origin a"),
+            "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/a'"
+        );
+        for line in [
+            // Ambiguous: Git refuses the command itself.
+            "push --forc origin main",
+            "push --d origin a",
+            // Negations.
+            "push --no-force origin main",
+            "push --no-del origin a",
+            // The value of `-o`, not a cluster of its own.
+            "push -of origin main",
         ] {
             assert!(!refused(line), "should allow: git {line}");
         }
@@ -1074,5 +1396,47 @@ mod tests {
     #[test]
     fn a_pathspec_named_like_a_flag_is_not_a_flag() {
         assert!(!refused("clean -n -- --force"));
+    }
+
+    /// The retry keeps every option of the refused commit and replaces only where its message comes from.
+    #[test]
+    fn a_refused_commit_is_retried_with_its_saved_message() {
+        let retry = |line: &str| {
+            commit_retry(&argv(line), "/r/.git/COMMIT_EDITMSG").map(|words| words.join(" "))
+        };
+        let edited = "--edit --file /r/.git/COMMIT_EDITMSG";
+        for (line, expected) in [
+            ("git commit -q --amend -m x", "git commit -q --amend"),
+            (
+                "git -C sub -c a.b=c commit -am x",
+                "git -C sub -c a.b=c commit -a",
+            ),
+            ("git commit -qam x", "git commit -qa"),
+            ("git commit -mx -a", "git commit -a"),
+            ("git commit --mess x --am", "git commit --am"),
+            ("git commit --message=x -m y --no-edit", "git commit"),
+            ("git commit -e -F msg -t tpl", "git commit"),
+            ("git commit -C HEAD --amend", "git commit --amend"),
+            ("git commit -c HEAD", "git commit"),
+            ("git commit --fixup x", "git commit"),
+            ("git commit --squash=x -m y", "git commit"),
+            ("git commit -m -F", "git commit"),
+            ("git commit --author a -m x", "git commit --author a"),
+            ("git commit -Smkey -m x", "git commit -Smkey"),
+            ("git commit -m x a.txt", "git commit a.txt"),
+        ] {
+            assert_eq!(
+                retry(line).as_deref(),
+                Some(format!("{expected} {edited}").as_str()),
+                "{line}"
+            );
+        }
+        assert_eq!(
+            retry("git commit -m x -- a.txt").as_deref(),
+            Some(format!("git commit {edited} -- a.txt").as_str())
+        );
+        for line in ["git rebase --continue", "git ci -m x", "git", "commit -m x"] {
+            assert_eq!(retry(line), None, "{line}");
+        }
     }
 }

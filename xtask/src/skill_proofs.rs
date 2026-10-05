@@ -52,7 +52,8 @@ pub const REAPER_HARNESSES: [&str; 3] = [
     "tick_conversion_rejects_zero_frequency",
 ];
 
-pub const GATE_HARNESSES: [&str; 2] = [
+pub const GATE_HARNESSES: [&str; 3] = [
+    "a_long_option_is_its_exact_spelling_or_its_only_completion",
     "a_history_refusal_suggests_the_step_for_its_worst_update",
     "a_rebase_signs_one_linear_branch_and_an_amend_only_the_checked_out_tip",
 ];
@@ -416,7 +417,7 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_rebasing_across_several_refs() {{\n    assert!(production::signing(2, production::Reference::Branch, false, false) == production::Signing::Rebase);\n}}\n#[kani::proof]\nfn reject_rebasing_a_range_with_merges() {{\n    assert!(production::signing(1, production::Reference::Branch, true, false) == production::Signing::Rebase);\n}}\n#[kani::proof]\nfn reject_amending_a_ref_that_is_not_checked_out() {{\n    assert!(production::signing(1, production::Reference::Other, false, true) == production::Signing::Amend);\n}}\n#[kani::proof]\nfn reject_deleting_through_the_forge_before_fetching() {{\n    assert!(production::history(true, false) == production::History::ForgeDelete);\n}}\n"
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_rebasing_across_several_refs() {{\n    assert!(production::signing(2, production::Reference::Branch, false, false) == production::Signing::Rebase);\n}}\n#[kani::proof]\nfn reject_rebasing_a_range_with_merges() {{\n    assert!(production::signing(1, production::Reference::Branch, true, false) == production::Signing::Rebase);\n}}\n#[kani::proof]\nfn reject_amending_a_ref_that_is_not_checked_out() {{\n    assert!(production::signing(1, production::Reference::Other, false, true) == production::Signing::Amend);\n}}\n#[kani::proof]\nfn reject_deleting_through_the_forge_before_fetching() {{\n    assert!(production::history(true, false) == production::History::ForgeDelete);\n}}\n#[kani::proof]\nfn reject_completing_a_prefix_of_two_options() {{\n    assert!(production::spelling(b\"a\", &[&b\"ab\"[..], &b\"ac\"[..]]) == production::Spelling::Is(0));\n}}\n#[kani::proof]\nfn reject_completing_over_an_exact_spelling() {{\n    assert!(production::spelling(b\"ab\", &[&b\"abc\"[..], &b\"ab\"[..]]) == production::Spelling::Is(0));\n}}\n#[kani::proof]\nfn reject_ignoring_a_unique_abbreviation() {{\n    assert!(production::spelling(b\"re\", &[&b\"repo\"[..], &b\"force\"[..]]) == production::Spelling::Unknown);\n}}\n"
         ),
     )?;
     for name in [
@@ -424,6 +425,9 @@ fn verify_native(root: &Path) -> Result<()> {
         "reject_rebasing_a_range_with_merges",
         "reject_amending_a_ref_that_is_not_checked_out",
         "reject_deleting_through_the_forge_before_fetching",
+        "reject_completing_a_prefix_of_two_options",
+        "reject_completing_over_an_exact_spelling",
+        "reject_ignoring_a_unique_abbreviation",
     ] {
         verify_file(&file, probe.path(), &[name], true)?;
     }

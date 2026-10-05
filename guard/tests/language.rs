@@ -1,6 +1,6 @@
 //! The language gate run as installed: a refused scan ends with one complete record.
 
-use dotguard::refusal::Refusal;
+use dotguard::refusal::{Refusal, words};
 use std::process::Command;
 
 #[test]
@@ -151,9 +151,9 @@ fn a_foreign_staged_line_is_refused_with_a_waiver_that_repeats_the_commit() {
     assert_eq!(checkout.succeeds(&["log", "--format=%s"], &[]), "add a");
 }
 
-/// The waiver keeps every option of the refused commit, so an amend stays an amend.
+/// The next step keeps every option of the refused commit, so an amend stays an amend.
 #[test]
-fn a_foreign_message_is_refused_with_a_waiver_that_repeats_the_commit() {
+fn a_foreign_message_is_refused_with_a_retry_that_keeps_the_amend() {
     let checkout = Checkout::new("message");
     std::fs::write(checkout.path().join("a.txt"), "plain\n").unwrap();
     checkout.succeeds(&["add", "a.txt"], &[]);
@@ -161,6 +161,46 @@ fn a_foreign_message_is_refused_with_a_waiver_that_repeats_the_commit() {
     let message = format!("fix {}", char::from_u32(0x0441).unwrap());
     let refused = last_record(&checkout.run(&["commit", "-q", "--amend", "-m", &message], &[]));
     assert_eq!(refused.rule, "commit.language");
+    let next = words(&refused.next).expect("a command line");
+    let (file, retry) = next.split_last().unwrap();
+    assert_eq!(
+        retry,
+        ["git", "commit", "-q", "--amend", "--edit", "--file"]
+    );
+    assert!(std::path::Path::new(file).is_absolute(), "{file}");
+    assert_eq!(
+        std::fs::read_to_string(file).unwrap().trim_end(),
+        message,
+        "the saved message of the refused commit"
+    );
+    let mut command = Command::new(&checkout.git);
+    let corrected = checkout
+        .isolate(&mut command)
+        .args(&next[1..])
+        .env("GIT_EDITOR", "printf 'fix c\\n' >")
+        .output()
+        .unwrap();
+    assert!(
+        corrected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&corrected.stderr)
+    );
+    assert_eq!(
+        checkout.succeeds(&["log", "--format=%B"], &[]),
+        "fix c",
+        "the next step amends the one commit with the corrected message"
+    );
+}
+
+/// The waiver repeats the refused amend exactly.
+#[test]
+fn a_foreign_message_is_refused_with_a_waiver_that_repeats_the_commit() {
+    let checkout = Checkout::new("waived");
+    std::fs::write(checkout.path().join("a.txt"), "plain\n").unwrap();
+    checkout.succeeds(&["add", "a.txt"], &[]);
+    checkout.succeeds(&["commit", "-q", "-m", "add a"], &[]);
+    let message = format!("fix {}", char::from_u32(0x0441).unwrap());
+    let refused = last_record(&checkout.run(&["commit", "-q", "--amend", "-m", &message], &[]));
     assert_eq!(
         refused.waiver.as_deref(),
         Some(format!("ALLOW_FOREIGN=1 git commit -q --amend -m '{message}'").as_str())
@@ -200,5 +240,17 @@ fn a_language_refusal_outside_the_wrapper_names_the_override_without_a_waiver() 
         refused.cause.contains("ALLOW_FOREIGN=1"),
         "{}",
         refused.cause
+    );
+    assert_eq!(
+        words(&refused.next).unwrap(),
+        [
+            "git",
+            "commit",
+            "<options>",
+            "--edit",
+            "--file",
+            &message.display().to_string()
+        ],
+        "the options of an unknown commit are left for its author"
     );
 }

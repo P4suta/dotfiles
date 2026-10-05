@@ -115,3 +115,82 @@ fn a_history_refusal_suggests_the_step_for_its_worst_update() {
     kani::cover!(step == History::Integrate);
     kani::cover!(step == History::ForgeDelete);
 }
+
+/// What a long option's name means among the spellings a Git command accepts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Spelling {
+    /// The spelling at this index, written in full or as its only completion.
+    Is(usize),
+    /// A prefix of several spellings and none in full: Git refuses the command.
+    Ambiguous,
+    /// No spelling starts with it.
+    Unknown,
+}
+
+/// Reads `name`, a long option without its `--` and `=value`, as Git does: an exact spelling first, otherwise a unique prefix.
+pub fn spelling(name: &[u8], spellings: &[&[u8]]) -> Spelling {
+    let mut found = Spelling::Unknown;
+    let mut index = 0;
+    while index < spellings.len() {
+        let candidate = spellings[index];
+        if candidate == name {
+            return Spelling::Is(index);
+        }
+        if candidate.starts_with(name) {
+            found = match found {
+                Spelling::Unknown => Spelling::Is(index),
+                _ => Spelling::Ambiguous,
+            };
+        }
+        index += 1;
+    }
+    found
+}
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(4)]
+fn a_long_option_is_its_exact_spelling_or_its_only_completion() {
+    let first = [kani::any(), kani::any()];
+    let second = [kani::any(), kani::any()];
+    let third = [kani::any(), kani::any()];
+    let word: [u8; 2] = [kani::any(), kani::any()];
+    let first_length: usize = kani::any();
+    let second_length: usize = kani::any();
+    let third_length: usize = kani::any();
+    let length: usize = kani::any();
+    kani::assume(length <= 2 && first_length <= 2 && second_length <= 2 && third_length <= 2);
+    let name = &word[..length];
+    let spellings: [&[u8]; 3] = [
+        &first[..first_length],
+        &second[..second_length],
+        &third[..third_length],
+    ];
+    let prefix_0 = spellings[0].starts_with(name);
+    let prefix_1 = spellings[1].starts_with(name);
+    let prefix_2 = spellings[2].starts_with(name);
+    let completions = usize::from(prefix_0) + usize::from(prefix_1) + usize::from(prefix_2);
+    let first_exact = if spellings[0] == name {
+        Some(0)
+    } else if spellings[1] == name {
+        Some(1)
+    } else if spellings[2] == name {
+        Some(2)
+    } else {
+        None
+    };
+    let read = spelling(name, &spellings);
+    match (first_exact, read) {
+        (Some(index), _) => assert_eq!(read, Spelling::Is(index)),
+        (None, Spelling::Is(index)) => assert!(
+            completions == 1
+                && (index == 0 && prefix_0 || index == 1 && prefix_1 || index == 2 && prefix_2)
+        ),
+        (None, Spelling::Ambiguous) => assert!(completions > 1),
+        (None, Spelling::Unknown) => assert_eq!(completions, 0),
+    }
+    kani::cover!(first_exact.is_some() && completions > 1);
+    kani::cover!(first_exact.is_none() && matches!(read, Spelling::Is(_)));
+    kani::cover!(read == Spelling::Ambiguous);
+    kani::cover!(read == Spelling::Unknown);
+}

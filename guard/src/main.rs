@@ -219,7 +219,18 @@ fn commit_msg(path: &str) -> i32 {
         _ => "English",
     };
     lang::report("commit message", &body, &hits);
-    let retry = ["git", "commit", "--edit", "--file", path];
+    // Git runs the hook from the top of the work tree, and the retry may run from anywhere.
+    let message = std::path::absolute(path)
+        .map_or_else(|_| path.to_owned(), |file| file.display().to_string());
+    let retry = std::env::var(INVOKED)
+        .ok()
+        .and_then(|line| refusal::words(&line))
+        .and_then(|words| gitargv::commit_retry(&words, &message))
+        .unwrap_or_else(|| {
+            ["git", "commit", "<options>", "--edit", "--file", &message]
+                .map(str::to_owned)
+                .into()
+        });
     refuse_foreign(&lang::refusal(
         "commit.language",
         &format!("the commit message is not written in {expected}; rewrite it and commit again"),

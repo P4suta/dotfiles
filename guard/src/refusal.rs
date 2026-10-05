@@ -216,6 +216,37 @@ pub fn command<S: AsRef<str>>(arguments: &[S]) -> String {
         .join(" ")
 }
 
+/// Splits a line that `command` wrote back into its arguments, or `None` when `command` would not write that line.
+pub fn words(line: &str) -> Option<Vec<String>> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut started = false;
+    let mut characters = line.chars();
+    while let Some(character) = characters.next() {
+        match character {
+            ' ' => {
+                words.push(std::mem::take(&mut word));
+                started = false;
+                continue;
+            }
+            '\'' => loop {
+                match characters.next()? {
+                    '\'' => break,
+                    quoted => word.push(quoted),
+                }
+            },
+            '\\' => word.push(characters.next().filter(|&next| next == '\'')?),
+            plain => word.push(plain),
+        }
+        started = true;
+    }
+    if !started {
+        return None;
+    }
+    words.push(word);
+    (command(&words) == line).then_some(words)
+}
+
 fn string(out: &mut String, value: &str) {
     out.push('"');
     for character in value.chars() {
@@ -285,7 +316,7 @@ impl Reader<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PREFIX, Refusal, command, quote};
+    use super::{PREFIX, Refusal, command, quote, words};
 
     fn sample() -> Refusal {
         Refusal::new(
@@ -408,5 +439,36 @@ mod tests {
             command(&["git", "commit", "-m", "two words"]),
             "git commit -m 'two words'"
         );
+    }
+
+    #[test]
+    fn a_command_line_splits_back_into_its_arguments() {
+        for arguments in [
+            &["git"][..],
+            &["git", "commit", "-m", "two words"],
+            &[
+                "it's", "", "'", "''", "a\\b", "<file>", "<a b>", "$HOME", "x\ny",
+            ],
+            &["\u{441}", " ", "a'b'c"],
+        ] {
+            assert_eq!(
+                words(&command(arguments)),
+                Some(arguments.iter().map(|word| (*word).to_owned()).collect()),
+                "{arguments:?}"
+            );
+        }
+        for line in [
+            "",
+            " git",
+            "git ",
+            "git  commit",
+            "'open",
+            "a\\'b",
+            "$HOME",
+            "a'b'",
+            "'a b",
+        ] {
+            assert_eq!(words(line), None, "{line:?}");
+        }
     }
 }

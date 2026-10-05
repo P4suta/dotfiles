@@ -15,8 +15,10 @@ The rule is a stable dotted identifier such as `git.force` or `pr.issue`.
 The evidence lists the observed facts the refusal rests on, such as the refused command, a commit, or a marker path.
 The next command is one runnable line; `<name>` marks a value only the author can supply.
 A suggested Git command passes the gate that suggested it, however many refused parts the original line combined.
+The gates read the options of `git push` and `git commit` as Git reads them, including a unique prefix of a long option and a cluster of short options, so a suggested command never takes an option value for a branch.
 The waiver repeats exactly the refused operation with a recorded one-time override, and is absent when the gate cannot be waived, its override is not recorded, or the refused operation is unknown.
-The Git wrapper passes the command it runs to that command's hooks, so a hook's waiver repeats the Git command that triggered it; a hook run by a Git that bypassed the wrapper names the override in its cause instead.
+The Git wrapper passes the command it runs to that command's hooks, so a hook's waiver repeats the Git command that triggered it, and a refused commit message's next step repeats that commit with the saved message opened for editing.
+A hook run by a Git that bypassed the wrapper names the override in its cause instead, and its next step marks the unknown options of the commit with `<options>`.
 A push hold has no waiver, because only the owner lifts it.
 
 A refusal prints readable text followed by exactly one machine-readable line on standard error:
@@ -31,7 +33,7 @@ The format lives once in `guard/src/refusal.rs`, which is std-only so `dotguard`
 The Git wrapper denials, the empty-commit and signing rollbacks of `post-commit`, the history and signature gates of `pre-push`, the language and dependency gates, the push hold, staged-tree, and lefthook gates of the hook dispatcher, and the `pr-workflow` prerequisites emit this record.
 The hook dispatcher relays a child gate's record as the last line, and reports a child that failed without one as `hook.gate`.
 A `pr-workflow` failure that no specific rule describes is reported as `pr.failed` with the subcommand's help as its next step, through the standalone binary and through xtask alike.
-The choices of a signing step and of a history step are pure functions with Kani harnesses.
+The choices of a signing step and of a history step, and the reading of a long option name, are pure functions with Kani harnesses.
 Tests run each adopted gate as installed and require a complete record as the last line of its standard error.
 Two records are tested where they are built, because their condition depends on the host: the dependency gate needs its lookup container, and a missing lefthook cannot be arranged where the fixed tool directories hold one.
 
