@@ -60,6 +60,8 @@ impl Fixture {
         command
             .current_dir(self.directory.path())
             .env("PATH", std::env::join_paths(paths)?)
+            .env("HOME", self.directory.path())
+            .env("USERPROFILE", self.directory.path())
             .env("GH_FIXTURE_LOG", &self.log)
             .env("GH_FIXTURE_USER", r#"{"login":"P4suta","id":42543015}"#)
             .env("GH_FIXTURE_REPOSITORY", serde_json::json!({
@@ -97,10 +99,19 @@ impl Fixture {
             .output()?)
     }
 
+    fn pause(&self, marker: &str) -> Result<()> {
+        let state = self.directory.path().join(".local/state/coderabbit-guard");
+        fs::create_dir_all(&state)?;
+        fs::write(state.join(marker), "owner pause")?;
+        Ok(())
+    }
+
     fn log(&self) -> Result<String> {
         Ok(fs::read_to_string(&self.log)?)
     }
 }
+
+const PAUSE_MARKER: &str = "<!-- coderabbit-pause -->";
 
 const BODY: &str = "## Why\nAvoid losing edits.\n\n## Changes\nPreserve the original input.\n\n## Validation\nThe targeted regression test passed.\n";
 
@@ -527,6 +538,245 @@ fn review_exclusion_is_published_without_allowing_unfinished_generation() -> Res
                     .success()
             );
             assert!(!rejected.log.try_exists()?);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn paused_pr_reviews_are_neither_requested_nor_awaited() -> Result<()> {
+    let excluded = format!("{BODY}\n@coderabbitai ignore\n");
+    let pause_excluded = format!("{excluded}{PAUSE_MARKER}\n");
+    for (marker, paused) in [
+        (None, false),
+        (Some("paused"), true),
+        (Some("paused-pr"), true),
+        (Some("paused-cli"), false),
+    ] {
+        let fixture =
+            Fixture::new("@coderabbitai summary\n\n## Validation\nThe regression passed.\n")?;
+        if let Some(marker) = marker {
+            fixture.pause(marker)?;
+        }
+        for operation in ["create", "edit"] {
+            let mut command = fixture.command(operation)?;
+            command
+                .args(["--title", "@coderabbitai", "--body-file"])
+                .arg(&fixture.body)
+                .args(["--generation", "coderabbit"]);
+            if operation == "create" {
+                command.args(["--head", "feature", "--draft"]);
+            } else {
+                command.args(["--pr", "17"]);
+            }
+            let output = command.output()?;
+            assert_eq!(output.status.success(), !paused, "{marker:?} {operation}");
+            if paused {
+                let error = String::from_utf8_lossy(&output.stderr);
+                assert!(
+                    error.contains("PR reviews are paused") && error.contains("--generation local"),
+                    "{error}"
+                );
+                assert!(!fixture.log.try_exists()?);
+            }
+        }
+        for (body, generation, accepted) in [
+            (BODY.to_owned(), "local", !paused),
+            (excluded.clone(), "local", true),
+            ("@coderabbitai summary\n".to_owned(), "coderabbit", !paused),
+        ] {
+            let fixture = Fixture::new(BODY)?;
+            if let Some(marker) = marker {
+                fixture.pause(marker)?;
+            }
+            let title = if generation == "local" {
+                "fix: preserve edits"
+            } else {
+                "@coderabbitai"
+            };
+            let view = serde_json::json!({"title":title,"body":body,"state":"OPEN","isDraft":true});
+            let output = fixture
+                .command("ready")?
+                .args(["--pr", "17", "--generation", generation])
+                .env("GH_FIXTURE_VIEW", view.to_string())
+                .output()?;
+            assert_eq!(
+                output.status.success(),
+                accepted,
+                "{marker:?} {generation}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(fixture.log()?.contains("\nready\n"), accepted);
+            if !accepted {
+                assert!(String::from_utf8_lossy(&output.stderr).contains("would request one"));
+            }
+        }
+        for (body, expected) in [
+            (
+                BODY.to_owned(),
+                if paused {
+                    "not required while the owner pauses PR reviews"
+                } else {
+                    "required for the current head"
+                },
+            ),
+            (
+                excluded.clone(),
+                if paused {
+                    "not required while the owner pauses PR reviews"
+                } else {
+                    "excluded by the body"
+                },
+            ),
+            (
+                pause_excluded.clone(),
+                if paused {
+                    "not required while the owner pauses PR reviews"
+                } else {
+                    "required again now that PR reviews have resumed"
+                },
+            ),
+        ] {
+            let fixture = Fixture::new(BODY)?;
+            if let Some(marker) = marker {
+                fixture.pause(marker)?;
+            }
+            let view = serde_json::json!({"title":"fix: preserve edits","body":body,"state":"OPEN","isDraft":false});
+            let output = fixture
+                .command("check")?
+                .args(["--pr", "17", "--final"])
+                .env("GH_FIXTURE_VIEW", view.to_string())
+                .output()?;
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains(expected),
+                "{marker:?}"
+            );
+        }
+    }
+    let fixture = Fixture::new(BODY)?;
+    fixture.pause("paused-pr")?;
+    let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true});
+    let ready = |fixture: &Fixture| -> Result<Output> {
+        Ok(fixture
+            .command("ready")?
+            .args(["--pr", "17"])
+            .env("GH_FIXTURE_VIEW", view.to_string())
+            .output()?)
+    };
+    let output = ready(&fixture)?;
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        error.contains("@coderabbitai ignore") && error.contains(PAUSE_MARKER),
+        "{error}"
+    );
+    fs::remove_file(
+        fixture
+            .directory
+            .path()
+            .join(".local/state/coderabbit-guard/paused-pr"),
+    )?;
+    let output = ready(&fixture)?;
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("required for the current head"));
+    Ok(())
+}
+
+#[test]
+fn a_pr_readied_during_the_pause_owes_its_review_after_resumption() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    fixture.pause("paused-pr")?;
+    let body = format!("{BODY}\n@coderabbitai ignore\n{PAUSE_MARKER}\n");
+    let view = |draft: bool| {
+        serde_json::json!({"title":"fix: preserve edits","body":body,"state":"OPEN","isDraft":draft})
+            .to_string()
+    };
+    let output = fixture
+        .command("ready")?
+        .args(["--pr", "17"])
+        .env("GH_FIXTURE_VIEW", view(true))
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("not required while the owner pauses")
+    );
+    fs::remove_file(
+        fixture
+            .directory
+            .path()
+            .join(".local/state/coderabbit-guard/paused-pr"),
+    )?;
+    let output = fixture
+        .command("check")?
+        .args(["--pr", "17", "--final"])
+        .env("GH_FIXTURE_VIEW", view(false))
+        .output()?;
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("required again now that PR reviews have resumed")
+            && stdout.contains("@coderabbitai review"),
+        "{stdout}"
+    );
+    Ok(())
+}
+
+#[test]
+fn an_edit_cannot_restore_review_of_a_ready_pr_during_the_pause() -> Result<()> {
+    let excluded = format!("{BODY}\n@coderabbitai ignore\n");
+    for (marker, draft, live, edited, accepted) in [
+        (Some("paused-pr"), false, excluded.as_str(), BODY, false),
+        (Some("paused"), false, excluded.as_str(), BODY, false),
+        (Some("paused-pr"), true, excluded.as_str(), BODY, true),
+        (
+            Some("paused-pr"),
+            false,
+            excluded.as_str(),
+            excluded.as_str(),
+            true,
+        ),
+        (Some("paused-pr"), false, BODY, BODY, true),
+        (Some("paused-cli"), false, excluded.as_str(), BODY, true),
+        (None, false, excluded.as_str(), BODY, true),
+    ] {
+        let fixture = Fixture::new(edited)?;
+        if let Some(marker) = marker {
+            fixture.pause(marker)?;
+        }
+        let view = serde_json::json!({"title":"fix: preserve edits","body":live,"state":"OPEN","isDraft":draft});
+        let output = fixture
+            .command("edit")?
+            .args(["--title", "fix: preserve edits", "--body-file"])
+            .arg(&fixture.body)
+            .args(["--pr", "17"])
+            .env("GH_FIXTURE_VIEW", view.to_string())
+            .output()?;
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.success(),
+            accepted,
+            "{marker:?} {draft} {error}"
+        );
+        assert_eq!(
+            fs::read_to_string(&fixture.log)
+                .unwrap_or_default()
+                .contains("\nedit\n"),
+            accepted
+        );
+        if !accepted {
+            assert!(
+                error.contains("PR reviews are paused") && error.contains("keep the standalone"),
+                "{error}"
+            );
         }
     }
     Ok(())
