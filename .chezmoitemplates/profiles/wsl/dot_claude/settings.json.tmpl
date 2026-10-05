@@ -24,12 +24,9 @@
   - `Bash(git reset:*)` ─ soft/mixed は便利。
     `--hard` だけ落とす。
 
-  JSON 構造: Claude Code は file を canonical 形式に書き戻すことがある (key 順、空行除去、`/advisor` 等が advisorModel を追加など)。
-  drift を最小化するため、本テンプレも Claude Code が出力する形に合わせてある:
-  1. permissions block を最初
-  2. 他の top-level key (language / advisorModel / theme / skipAutoPermissionPrompt) を最後にまとめる
-  3. deny[] の中に blank line を入れない
-  もし `/advisor` で advisorModel を変えたい場合、`chezmoi edit ~/.claude/settings.json` で本テンプレを編集して `chezmoi apply` する (runtime の `/advisor` 変更は次回 apply で revert されるので注意)。
+  dot_claude/modify_settings.json merges these keys into the file Claude Code last wrote.
+  A runtime change to a key set here, such as `/advisor` changing advisorModel, reverts on the next application; every other key the client wrote is kept.
+  To change one of these keys, edit this template and apply.
 
   permission deny の表記:
   - `Bash(<prefix>:*)` ─ <prefix> から始まる任意の Bash 起動 (空白以降の引数も含む) を deny する。
@@ -131,5 +128,6 @@
   "advisorModel": "opus",
   "skipDangerousModePermissionPrompt": true,
   "theme": "auto",
-  "skipAutoPermissionPrompt": true
+  "skipAutoPermissionPrompt": true,
+  "autoMemoryEnabled": false
 }

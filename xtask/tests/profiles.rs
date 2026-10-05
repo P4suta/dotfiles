@@ -536,3 +536,166 @@ fn only_files_changed_since_the_last_application_are_reported() {
     fs::write(source.join("dot_kept"), "changed in the source\n").unwrap();
     assert_eq!(status(), [".edited"]);
 }
+
+#[test]
+fn a_client_rewriting_a_merged_target_is_not_an_uncommitted_host_edit() {
+    let scope = tempfile::tempdir().unwrap();
+    let source = scope.path().join("source");
+    let destination = scope.path().join("home");
+    let state = scope.path().join("state");
+    fs::create_dir_all(source.join("dot_client")).unwrap();
+    fs::create_dir_all(&destination).unwrap();
+    fs::write(source.join("dot_edited"), "desired\n").unwrap();
+    fs::write(
+        source.join("dot_client/modify_settings.json"),
+        "{{- /* chezmoi:modify-template */ -}}\n{{- $current := dict -}}\n{{- if trim .chezmoi.stdin -}}{{- $current = fromJson .chezmoi.stdin -}}{{- end -}}\n{{ setValueAtPath \"memory\" false $current | toJson }}\n",
+    )
+    .unwrap();
+    let config = scope.path().join("chezmoi.toml");
+    fs::write(&config, "").unwrap();
+    let chezmoi = || profiles::chezmoi(&source, &state, &config, &destination);
+    assert!(
+        chezmoi()
+            .args(["apply", "--force"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    fs::write(
+        destination.join(".client/settings.json"),
+        r#"{"memory":true,"model":"chosen at run time"}"#,
+    )
+    .unwrap();
+    fs::write(destination.join(".edited"), "fixed on the host\n").unwrap();
+    let status = chezmoi()
+        .args(["status", "--exclude", "scripts"])
+        .output()
+        .unwrap();
+    let changed = profiles::externally_changed(&String::from_utf8_lossy(&status.stdout));
+    assert_eq!(changed, [".client/settings.json", ".edited"]);
+    let listing = chezmoi()
+        .args([
+            "managed",
+            "--include",
+            "files",
+            "--path-style",
+            "all",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(listing.status.success());
+    let merged = profiles::merged_targets(&listing.stdout).unwrap();
+    assert_eq!(merged, [".client/settings.json"]);
+    assert_eq!(
+        profiles::uncommitted_host_edits(&source, &state, &config, &destination).unwrap(),
+        [".edited"]
+    );
+    assert!(
+        chezmoi()
+            .args(["apply", "--force"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let applied: serde_json::Value =
+        serde_json::from_slice(&fs::read(destination.join(".client/settings.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        applied,
+        serde_json::json!({"memory": false, "model": "chosen at run time"})
+    );
+    assert!(profiles::merged_targets(br#"{".a":{}}"#).is_err());
+}
+
+#[test]
+fn a_modify_template_that_drops_a_host_key_still_refuses_application() {
+    let scope = tempfile::tempdir().unwrap();
+    let source = scope.path().join("source");
+    let destination = scope.path().join("home");
+    let state = scope.path().join("state");
+    fs::create_dir_all(source.join("dot_client")).unwrap();
+    fs::create_dir_all(&destination).unwrap();
+    fs::write(
+        source.join("dot_client/modify_settings.json"),
+        "{{- /* chezmoi:modify-template */ -}}
+{\"memory\":false}
+",
+    )
+    .unwrap();
+    let config = scope.path().join("chezmoi.toml");
+    fs::write(&config, "").unwrap();
+    let chezmoi = || profiles::chezmoi(&source, &state, &config, &destination);
+    assert!(
+        chezmoi()
+            .args(["apply", "--force"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(
+        profiles::uncommitted_host_edits(&source, &state, &config, &destination)
+            .unwrap()
+            .is_empty()
+    );
+    fs::write(
+        destination.join(".client/settings.json"),
+        r#"{"memory":true,"model":"chosen at run time"}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        profiles::uncommitted_host_edits(&source, &state, &config, &destination).unwrap(),
+        [".client/settings.json"]
+    );
+}
+
+#[test]
+fn a_merge_keeps_host_keys_only_when_every_key_path_survives() {
+    let keeps = |target, current, rendered| profiles::keeps_host_keys(target, current, rendered);
+    assert!(
+        keeps(
+            "a.json",
+            r#"{"a":{"b":1},"c":2}"#,
+            r#"{"a":{"b":3,"d":4},"c":true}"#
+        )
+        .unwrap()
+    );
+    assert!(!keeps("a.json", r#"{"a":{"b":1},"c":2}"#, r#"{"a":{"d":4},"c":2}"#).unwrap());
+    assert!(!keeps("a.json", r#"{"a":1}"#, r#"{}"#).unwrap());
+    assert!(keeps("a.json", "", r#"{"memory":false}"#).unwrap());
+    assert!(
+        keeps(
+            "a.toml",
+            "x = 1
+[t]
+y = 2
+",
+            "x = 1
+z = 0
+[t]
+y = 3
+"
+        )
+        .unwrap()
+    );
+    assert!(
+        !keeps(
+            "a.toml",
+            "x = 1
+[t]
+y = 2
+",
+            "x = 1
+[t]
+"
+        )
+        .unwrap()
+    );
+    assert!(keeps("a.json", "{", "{}").is_err());
+    let unknown = keeps("a.yaml", "a: 1", "a: 1").unwrap_err().to_string();
+    assert!(
+        unknown.contains("a.yaml") && unknown.contains("keeps_host_keys"),
+        "{unknown}"
+    );
+}

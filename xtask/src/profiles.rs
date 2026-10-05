@@ -1,4 +1,4 @@
-use crate::profile_rules::{Mode, Profile, permitted};
+use crate::profile_rules::{Mode, Profile, host_edit_refused, permitted};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
@@ -180,6 +180,138 @@ pub fn externally_changed(status: &str) -> Vec<String> {
         .collect()
 }
 
+/// Targets whose source is a `modify_` template, from `chezmoi managed --path-style all --format json`.
+/// Such a template may merge its keys into whatever the client last wrote, so a change made outside chezmoi can be expected there.
+pub fn merged_targets(listing: &[u8]) -> Result<Vec<String>> {
+    let entries: serde_json::Map<String, Value> = serde_json::from_slice(listing)?;
+    entries
+        .into_iter()
+        .filter_map(|(target, entry)| {
+            let source = match entry["sourceRelative"].as_str() {
+                Some(source) => source,
+                None => {
+                    return Some(Err(anyhow::anyhow!(
+                        "managed entry without a source: {target}"
+                    )));
+                }
+            };
+            let name = source.rsplit('/').next().unwrap_or_default();
+            name.starts_with("modify_").then_some(Ok(target))
+        })
+        .collect()
+}
+
+/// Whether a rendering keeps every key path of the host file, so a merge overwrites only the keys its template sets.
+pub fn keeps_host_keys(target: &str, current: &str, rendered: &str) -> Result<bool> {
+    let toml = match Path::new(target).extension().and_then(|e| e.to_str()) {
+        Some("json") => false,
+        Some("toml") => true,
+        _ => anyhow::bail!(
+            "{target} is a modify_ target in a format whose keys keeps_host_keys in xtask/src/profiles.rs cannot read; add the format there, then run `just profiles`"
+        ),
+    };
+    let parse = |contents: &str| -> Result<Value> {
+        Ok(if contents.trim().is_empty() {
+            json!({})
+        } else if toml {
+            serde_json::to_value(toml::from_str::<toml::Table>(contents)?)?
+        } else {
+            serde_json::from_str(contents)?
+        })
+    };
+    fn kept(current: &Value, rendered: &Value) -> bool {
+        match (current, rendered) {
+            (Value::Object(current), Value::Object(rendered)) => {
+                current.iter().all(|(key, value)| {
+                    rendered
+                        .get(key)
+                        .is_some_and(|rendered| kept(value, rendered))
+                })
+            }
+            (Value::Object(current), _) => current.is_empty(),
+            _ => true,
+        }
+    }
+    let current = parse(current).with_context(|| format!("parse host {target}"))?;
+    let rendered = parse(rendered).with_context(|| format!("parse rendered {target}"))?;
+    Ok(kept(&current, &rendered))
+}
+
+/// A host file with one key no template sets, standing in for a key a client writes at run time.
+fn with_host_key(target: &str, contents: &str) -> Result<String> {
+    match Path::new(target).extension().and_then(|e| e.to_str()) {
+        Some("json") => {
+            let mut value: Value = serde_json::from_str(contents)?;
+            value
+                .as_object_mut()
+                .with_context(|| format!("{target} is not a JSON object"))?
+                .insert("dotfilesHostKey".into(), json!("kept"));
+            Ok(value.to_string())
+        }
+        Some("toml") => Ok(format!(
+            "dotfiles_host_key = \"kept\"
+{contents}"
+        )),
+        _ => keeps_host_keys(target, contents, contents).map(|_| contents.to_owned()),
+    }
+}
+
+/// Targets changed outside chezmoi since the last application that application would overwrite.
+/// A `modify_` target is exempt only when its rendering keeps every key the host file has.
+pub fn uncommitted_host_edits(
+    root: &Path,
+    state: &Path,
+    config: &Path,
+    destination: &Path,
+) -> Result<Vec<String>> {
+    let status = output(
+        chezmoi(root, state, config, destination).args(["status", "--exclude", "scripts"]),
+        "read target status",
+    )?;
+    let merged = merged_targets(
+        &output(
+            chezmoi(root, state, config, destination).args([
+                "managed",
+                "--include",
+                "files",
+                "--path-style",
+                "all",
+                "--format",
+                "json",
+            ]),
+            "list merged targets",
+        )?
+        .stdout,
+    )?;
+    let mut refused = Vec::new();
+    for target in externally_changed(&String::from_utf8_lossy(&status.stdout)) {
+        let is_merged = merged.contains(&target);
+        let keeps = is_merged && {
+            let path = destination.join(&target);
+            let rendered = output(
+                chezmoi(root, state, config, destination)
+                    .arg("cat")
+                    .arg(&path),
+                &format!("render {target}"),
+            )?;
+            let current = match fs::read_to_string(&path) {
+                Ok(contents) => contents,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+                Err(error) => return Err(error).with_context(|| format!("read host {target}")),
+            };
+            keeps_host_keys(
+                &target,
+                &current,
+                &String::from_utf8_lossy(&rendered.stdout),
+            )?
+        };
+        if host_edit_refused(true, is_merged, keeps) {
+            refused.push(target);
+        }
+    }
+    Ok(refused)
+}
+
 /// Forgets which `run_onchange_` and `run_once_` scripts already ran, so the next application runs every script again on the host they provisioned.
 pub fn forget_script_runs(
     root: &Path,
@@ -341,6 +473,12 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
             );
         }
         crate::quality::rendered(&dump, &scope.join("syntax"))?;
+        let memory = crate::agent_memory::violations(&dump)?;
+        ensure!(
+            memory.is_empty(),
+            "{} profile lets an agent client keep persistent memory: {memory:?}\nDisable each listed switch in that client's profile template, as docs/agent-memory-migration.md describes, then run `just profiles`",
+            profile.name()
+        );
         let managed = |include: &str| -> Result<Vec<String>> {
             let listed = output(
                 chezmoi(root, &scope, &config, &destination)
@@ -445,6 +583,43 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
             profile == Profile::Windows || !retired.exists(),
             "obsolete credential exporter was preserved"
         );
+        let merged = merged_targets(
+            &output(
+                chezmoi(root, &scope, &config, &destination)
+                    .arg("--override-data")
+                    .arg(&overrides)
+                    .args([
+                        "managed",
+                        "--include",
+                        "files",
+                        "--path-style",
+                        "all",
+                        "--format",
+                        "json",
+                    ]),
+                &format!("{} merged targets", profile.name()),
+            )?
+            .stdout,
+        )?;
+        for target in merged {
+            let path = destination.join(&target);
+            let host = with_host_key(&target, &fs::read_to_string(&path)?)?;
+            fs::write(&path, &host)?;
+            let rendered = output(
+                chezmoi(root, &scope, &config, &destination)
+                    .arg("--override-data")
+                    .arg(&overrides)
+                    .arg("cat")
+                    .arg(&path),
+                &format!("{} render {target}", profile.name()),
+            )?;
+            ensure!(
+                keeps_host_keys(&target, &host, &String::from_utf8_lossy(&rendered.stdout))?,
+                "{} profile renders {target} from a modify_ template that drops a key the client wrote, so application would refuse every runtime change there
+Merge the template's keys into .chezmoi.stdin, as dot_claude/modify_settings.json does, then run `just profiles`",
+                profile.name()
+            );
+        }
         output(
             Tool::Git
                 .command()
@@ -614,11 +789,7 @@ pub fn operate(
             &mut crate::runtime::Native::new(destination)?,
             &crate::setup::scripted_steps(&contents),
         )?;
-        let status = output(
-            chezmoi(root, state, config, destination).args(["status", "--exclude", "scripts"]),
-            "read target status",
-        )?;
-        let changed = externally_changed(&String::from_utf8_lossy(&status.stdout));
+        let changed = uncommitted_host_edits(root, state, config, destination)?;
         ensure!(
             changed.is_empty(),
             "{} managed files changed outside chezmoi since the last application: {changed:?}\nCarry each change into the source or restore the file, then apply again; nothing has been changed",

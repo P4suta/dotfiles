@@ -35,7 +35,7 @@ pub const PR_HARNESSES: [&str; 7] = [
     "rejected_documents_never_produce_a_pr_mutation",
 ];
 
-pub const PROFILE_HARNESSES: [&str; 7] = [
+pub const PROFILE_HARNESSES: [&str; 9] = [
     "only_available_profiles_are_selected",
     "application_requires_owned_destination_or_native_authorization",
     "concurrent_source_and_local_edits_are_never_overwritten",
@@ -43,6 +43,8 @@ pub const PROFILE_HARNESSES: [&str; 7] = [
     "windows_path_translation_preserves_inline_public_keys",
     "remote_or_installed_context7_never_requires_a_mutation",
     "forge_import_requires_only_pinned_keys_including_the_current_one",
+    "memory_is_off_only_when_every_switch_is_explicitly_disabled",
+    "host_edits_are_overwritten_only_by_a_merge_that_keeps_every_host_key",
 ];
 
 pub const REAPER_HARNESSES: [&str; 3] = [
@@ -377,15 +379,16 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_unapproved_application() {{\n    assert!(production::permitted(production::Mode::Full, true, true, false));\n}}\n"
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_unapproved_application() {{\n    assert!(production::permitted(production::Mode::Full, true, true, false));\n}}\n#[kani::proof]\nfn reject_an_unset_memory_switch() {{\n    assert!(production::memory_off(&[production::Memory::Disabled, production::Memory::Unset]));\n}}\n#[kani::proof]\nfn reject_overwriting_a_merge_that_drops_a_host_key() {{\n    assert!(!production::host_edit_refused(true, true, false));\n}}\n"
         ),
     )?;
-    verify_file(
-        &file,
-        probe.path(),
-        &["reject_unapproved_application"],
-        true,
-    )?;
+    for name in [
+        "reject_unapproved_application",
+        "reject_an_unset_memory_switch",
+        "reject_overwriting_a_merge_that_drops_a_host_key",
+    ] {
+        verify_file(&file, probe.path(), &[name], true)?;
+    }
     ensure!(
         fs::read(source)? == original,
         "production profile proof source changed during verification"
