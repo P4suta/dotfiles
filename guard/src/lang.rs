@@ -303,9 +303,74 @@ pub fn report(label: &str, text: &str, hits: &[Hit]) {
     }
 }
 
+/// The evidence line for one hit, in the same shape as the report.
+pub fn evidence(label: &str, h: &Hit) -> String {
+    format!(
+        "{label}:{}:{}  {:?}  U+{:04X}  [{}]",
+        h.line, h.col, h.ch, h.ch as u32, h.kind
+    )
+}
+
+/// The most hits a refusal lists, while the preceding report shows every one.
+const EVIDENCE_LIMIT: usize = 20;
+
+/// The refusal for text in a script this machine doesn't write.
+/// `waiver` repeats the refused command with the recorded override, and stays `None` for an unknown command.
+pub fn refusal(
+    rule: &str,
+    cause: &str,
+    hits: Vec<String>,
+    next: Option<String>,
+    waiver: Option<String>,
+) -> crate::refusal::Refusal {
+    let mut cause = format!(
+        "{cause}.\n\
+         Cyrillic '\u{0441}' and Latin 'c' are indistinguishable on screen, so this is the same check that catches a homoglyph in an identifier and a bidi override in a comment.\n\
+         A repository that writes Japanese sets `git config guard.lang japanese`; one that carries multilingual fixtures sets `git config guard.lang off`."
+    );
+    if waiver.is_none() {
+        cause.push_str(
+            "\nThe refused Git command did not pass through the git wrapper, so no waiver can repeat it; run that command again with ALLOW_FOREIGN=1 to waive this check once.",
+        );
+    }
+    let mut refusal = match next {
+        Some(next) => crate::refusal::Refusal::new(rule, cause, next),
+        None => crate::refusal::Refusal::without_next(rule, cause),
+    };
+    refusal.waiver = waiver;
+    let total = hits.len();
+    for hit in hits.into_iter().take(EVIDENCE_LIMIT) {
+        refusal = refusal.evidence(hit);
+    }
+    if total > EVIDENCE_LIMIT {
+        refusal = refusal.evidence(format!("{} more", total - EVIDENCE_LIMIT));
+    }
+    refusal
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Mode, commit_message_body, scan};
+    use super::{Mode, commit_message_body, evidence, refusal, scan};
+
+    #[test]
+    fn a_language_refusal_is_complete_and_bounded() {
+        let hits: Vec<String> = scan(&"\u{0441}".repeat(25), Mode::Content)
+            .iter()
+            .map(|hit| evidence("a.txt", hit))
+            .collect();
+        assert_eq!(hits.len(), 25);
+        assert_eq!(hits[0], "a.txt:1:1  '\u{441}'  U+0441  [Cyrillic]");
+        let refused = refusal(
+            "scan.language",
+            "a.txt contains text in a script this machine does not write",
+            hits,
+            Some("dotguard scan a.txt".into()),
+            Some("ALLOW_FOREIGN=1 dotguard scan a.txt".into()),
+        );
+        assert!(refused.is_complete(), "{refused:?}");
+        assert_eq!(refused.evidence.len(), 21);
+        assert_eq!(refused.evidence[20], "5 more");
+    }
 
     fn kinds(s: &str, mode: Mode) -> Vec<&'static str> {
         scan(s, mode).into_iter().map(|h| h.kind).collect()

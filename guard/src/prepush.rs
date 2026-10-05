@@ -11,7 +11,9 @@
 //! This hook, and not the `~/.local/bin/git` wrapper, enforces the rule, because the wrapper only handles commands that resolve `git` through `PATH`.
 
 use crate::bypass::{self, Category};
+use crate::gate_rules::{self, History, Reference, Signing};
 use crate::realgit;
+use crate::refusal::{Refusal, command};
 use std::io::Read;
 
 enum Verdict {
@@ -53,21 +55,33 @@ pub fn run(remote: &str) -> i32 {
     signatures(remote, &input)
 }
 
-/// The shas that could carry new commits: pushes only, without deletions or the empty line from a here-string over an empty variable.
-/// An up-to-date push sends an empty stdin, and without this filter the signing gate would run `git rev-list ""` and refuse the push.
-fn pushed_shas(input: &str) -> Vec<String> {
+/// The pushed refs that could carry new commits, as `(local ref, sha)`: pushes only, without deletions or the empty line from a here-string over an empty variable.
+/// An up-to-date push sends an empty stdin, and without this filter the signing gate would run `git rev-list ""` and refuse a push that sends nothing.
+fn pushed(input: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for line in input.lines() {
         let f: Vec<&str> = line.split_whitespace().collect();
-        let [_local_ref, local_sha, _remote_ref, _remote_sha] = f[..] else {
+        let [local_ref, local_sha, _remote_ref, _remote_sha] = f[..] else {
             continue;
         };
         if local_sha.is_empty() || local_sha.chars().all(|c| c == '0') {
             continue;
         }
-        out.push((*local_sha).to_owned());
+        out.push(((*local_ref).to_owned(), (*local_sha).to_owned()));
     }
     out
+}
+
+/// The unsigned commits one pushed ref would publish.
+struct Unsigned {
+    local_ref: String,
+    tip: String,
+    /// `(sha, summary)` in topological order, newest first.
+    commits: Vec<(String, String)>,
+    /// The pushed range contains a merge, which a rebase would flatten.
+    merges: bool,
+    /// The parent of the oldest unsigned commit, absent for a root commit.
+    base: Option<String>,
 }
 
 /// Refuse a push that would introduce an unsigned commit.
@@ -84,17 +98,21 @@ fn signatures(remote: &str, input: &str) -> i32 {
         return 0;
     }
 
-    let mut unsigned: Vec<(String, String)> = Vec::new(); // sha and summary
-    for sha in pushed_shas(input) {
+    let not_remote = format!("--remotes={remote}");
+    let mut refs: Vec<Unsigned> = Vec::new();
+    for (local_ref, sha) in pushed(input) {
         // Verify what this push introduces: commits reachable from the new tip that no ref on this remote already carries.
         // A new branch and a force push use the same range.
         let Some(range) =
-            realgit::capture(&["rev-list", &sha, "--not", &format!("--remotes={remote}")])
+            realgit::capture(&["rev-list", "--topo-order", &sha, "--not", &not_remote])
         else {
             continue;
         };
-        for commit in range.lines().filter(|l| !l.trim().is_empty()) {
-            if !realgit::succeeds(&["verify-commit", commit]) {
+        let commits: Vec<(String, String)> = range
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter(|commit| !realgit::succeeds(&["verify-commit", commit]))
+            .map(|commit| {
                 let summary = realgit::capture(&[
                     "log",
                     "-1",
@@ -102,35 +120,180 @@ fn signatures(remote: &str, input: &str) -> i32 {
                     commit,
                 ])
                 .map_or_else(|| format!("  {commit}"), |s| s.trim().to_owned());
-                unsigned.push((commit.to_owned(), summary));
-            }
-        }
+                (commit.to_owned(), summary)
+            })
+            .collect();
+        let Some((oldest, _)) = commits.last() else {
+            continue;
+        };
+        let merges = realgit::capture(&[
+            "rev-list",
+            "--merges",
+            "--count",
+            &sha,
+            "--not",
+            &not_remote,
+        ])
+        .is_none_or(|count| count.trim() != "0");
+        let base = realgit::capture(&["rev-parse", "--verify", "--quiet", &format!("{oldest}^")])
+            .map(|parent| parent.trim().to_owned());
+        refs.push(Unsigned {
+            local_ref,
+            tip: sha,
+            commits,
+            merges,
+            base,
+        });
     }
 
-    if unsigned.is_empty() {
+    if refs.is_empty() {
         return 0;
     }
-
-    eprintln!(
-        "::error:: {} commit(s) in this push would be unsigned:\n",
-        unsigned.len()
-    );
-    for (_, summary) in &unsigned {
-        eprintln!("{summary}");
-    }
-    eprintln!(
-        "\n::notice:: push refused. To sign these commits:\n\n  \
-         # last commit only\n  \
-         git commit --amend -S --no-edit\n\n  \
-         # rewrite a range\n  \
-         git rebase --exec 'git commit --amend --no-edit -S' <base>\n\n\
-         The local Git wrapper does not allow skipping verification."
-    );
+    let head = realgit::capture(&["rev-parse", "HEAD"]).map(|head| head.trim().to_owned());
+    let head_ref = realgit::capture(&["symbolic-ref", "-q", "HEAD"])
+        .map(|reference| reference.trim().to_owned());
+    unsigned_refusal(
+        remote,
+        &refs,
+        head.as_deref()
+            .map(|sha| (head_ref.as_deref().unwrap_or("HEAD"), sha)),
+    )
+    .emit();
     1
 }
 
+/// Signs exactly the unsigned commits when one command can, and lists them otherwise.
+/// `head` holds the ref `HEAD` points at, or `HEAD` itself when detached, and the commit it names.
+fn unsigned_refusal(remote: &str, refs: &[Unsigned], head: Option<(&str, &str)>) -> Refusal {
+    let first = &refs[0];
+    let branch = first.local_ref.strip_prefix("refs/heads/");
+    let reference = if first.local_ref == "HEAD" {
+        Reference::Head
+    } else if head.is_some_and(|(reference, _)| first.local_ref == reference) {
+        Reference::CheckedOutBranch
+    } else if branch.is_some() {
+        Reference::Branch
+    } else {
+        Reference::Other
+    };
+    let only_tip =
+        matches!(&first.commits[..], [(only, _)] if head.is_some_and(|(_, sha)| sha == only));
+    let sign = "git commit --amend --no-edit -S";
+    let next = match gate_rules::signing(refs.len(), reference, first.merges, only_tip) {
+        Signing::Amend => "git commit --amend -S --no-edit".to_owned(),
+        Signing::Rebase => command(&[
+            "git",
+            "rebase",
+            "--exec",
+            sign,
+            first.base.as_deref().unwrap_or("--root"),
+            branch.unwrap_or_default(),
+        ]),
+        Signing::Inspect => command(&[
+            "git",
+            "log",
+            "--format=%h %G? %s",
+            &first.tip,
+            "--not",
+            &format!("--remotes={remote}"),
+        ]),
+    };
+    let count: usize = refs.iter().map(|unsigned| unsigned.commits.len()).sum();
+    let mut refusal = Refusal::new(
+        "push.signature",
+        format!(
+            "{count} commit(s) in this push would be unsigned.\n\
+             Sign them and push again; the local Git wrapper does not allow skipping verification."
+        ),
+        next,
+    );
+    for unsigned in refs {
+        for (_, summary) in &unsigned.commits {
+            refusal = refusal.evidence(format!("{}: {summary}", unsigned.local_ref));
+        }
+    }
+    refusal
+}
+
+/// One ref update the history gate refuses.
+struct Problem {
+    verdict: Verdict,
+    local_ref: String,
+    remote_ref: String,
+    detail: String,
+}
+
+/// The branch name a ref update names, for commands that take a branch.
+fn branch(reference: &str) -> &str {
+    reference.strip_prefix("refs/heads/").unwrap_or(reference)
+}
+
+/// Deletions go through the forge, a stale clone fetches first, and a rewrite integrates the remote history instead.
+/// The waiver repeats exactly the refused updates.
+fn history_refusal(remote: &str, problems: &[Problem]) -> Refusal {
+    let rewrite = |p: &&Problem| matches!(p.verdict, Verdict::Rewrite | Verdict::Undecidable);
+    let next = match gate_rules::history(
+        problems
+            .iter()
+            .any(|p| matches!(p.verdict, Verdict::Undecidable)),
+        problems
+            .iter()
+            .any(|p| matches!(p.verdict, Verdict::Rewrite)),
+    ) {
+        History::Fetch => command(&["git", "fetch", remote]),
+        History::Integrate => {
+            let problem = problems.iter().find(rewrite).unwrap_or(&problems[0]);
+            command(&[
+                "git",
+                "pull",
+                "--rebase",
+                remote,
+                branch(&problem.remote_ref),
+            ])
+        }
+        History::ForgeDelete => problems
+            .iter()
+            .map(|p| {
+                command(&[
+                    "gh",
+                    "api",
+                    "-X",
+                    "DELETE",
+                    &format!("repos/{{owner}}/{{repo}}/git/{}", p.remote_ref),
+                ])
+            })
+            .collect::<Vec<_>>()
+            .join(" && "),
+    };
+    let mut waiver = vec!["git".to_owned(), "push".to_owned()];
+    if problems.iter().any(|p| rewrite(&p)) {
+        waiver.push("--force-with-lease".to_owned());
+    }
+    waiver.push(remote.to_owned());
+    waiver.extend(problems.iter().map(|p| match p.verdict {
+        Verdict::Delete => format!(":{}", p.remote_ref),
+        _ => format!("{}:{}", p.local_ref, p.remote_ref),
+    }));
+    let mut refusal = Refusal::new(
+        "push.history",
+        "refusing to push a change that destroys published history.\n\
+         Force-pushing a shared branch is how other people's work disappears: their clone\n\
+         still points at commits the remote no longer has, and the next `git pull` quietly\n\
+         merges the two histories back together.\n\
+         --force-with-lease refuses if someone else pushed since your last fetch, which is\n\
+         the only part of this that plain --force gives up. The waiver is recorded in\n\
+         ~/.local/state/git-bypass.log.",
+        next,
+    )
+    .waiver(format!("ALLOW_FORCE=1 {}", command(&waiver)));
+    for problem in problems {
+        refusal = refusal.evidence(problem.detail.clone());
+    }
+    refusal
+}
+
 fn judge(remote: &str, input: &str) -> i32 {
-    let mut refused: Vec<String> = Vec::new();
+    let mut problems: Vec<Problem> = Vec::new();
 
     for line in input.lines() {
         let f: Vec<&str> = line.split_whitespace().collect();
@@ -138,32 +301,42 @@ fn judge(remote: &str, input: &str) -> i32 {
             continue;
         };
 
-        match classify(local_sha, remote_sha) {
-            Verdict::Ok => {}
-            Verdict::Delete => refused.push(format!(
-                "  {remote_ref} on '{remote}' would be DELETED\n    (nothing on this machine can restore a ref the remote no longer has)"
-            )),
+        let verdict = classify(local_sha, remote_sha);
+        let detail = match verdict {
+            Verdict::Ok => continue,
+            Verdict::Delete => format!(
+                "{remote_ref} on '{remote}' would be DELETED\n  (nothing on this machine can restore a ref the remote no longer has)"
+            ),
             Verdict::Rewrite => {
-                let dropped = realgit::capture(&["rev-list", "--count", &format!("{local_sha}..{remote_sha}")])
-                    .map_or_else(|| "some".to_owned(), |s| s.trim().to_owned());
-                refused.push(format!(
-                    "  {remote_ref} on '{remote}' would be REWRITTEN\n    \
-                     {remote_sha:.12} is not an ancestor of {local_sha:.12} ({local_ref})\n    \
+                let dropped = realgit::capture(&[
+                    "rev-list",
+                    "--count",
+                    &format!("{local_sha}..{remote_sha}"),
+                ])
+                .map_or_else(|| "some".to_owned(), |s| s.trim().to_owned());
+                format!(
+                    "{remote_ref} on '{remote}' would be REWRITTEN\n  \
+                     {remote_sha:.12} is not an ancestor of {local_sha:.12} ({local_ref})\n  \
                      {dropped} commit(s) currently on the remote would stop being reachable"
-                ));
+                )
             }
-            Verdict::Undecidable => refused.push(format!(
-                "  {remote_ref} on '{remote}' cannot be checked\n    \
-                 {remote_sha:.12} is not an object in this clone; run `git fetch {remote}` and try again"
-            )),
-        }
+            Verdict::Undecidable => format!(
+                "{remote_ref} on '{remote}' cannot be checked\n  \
+                 {remote_sha:.12} is not an object in this clone"
+            ),
+        };
+        problems.push(Problem {
+            verdict,
+            local_ref: local_ref.to_owned(),
+            remote_ref: remote_ref.to_owned(),
+            detail,
+        });
     }
 
-    if refused.is_empty() {
+    if problems.is_empty() {
         return 0;
     }
 
-    let summary = refused.join("\n");
     let argv: Vec<String> = std::env::args().collect();
 
     if bypass::waived(Category::Force) {
@@ -173,7 +346,11 @@ fn judge(remote: &str, input: &str) -> i32 {
             "pre-push non-fast-forward",
             &argv,
         );
-        eprintln!("::warning:: ALLOW_FORCE=1 — pushing a rewrite:\n{summary}");
+        let summary: Vec<&str> = problems.iter().map(|p| p.detail.as_str()).collect();
+        eprintln!(
+            "::warning:: ALLOW_FORCE=1 — pushing a rewrite:\n{}",
+            summary.join("\n")
+        );
         return 0;
     }
 
@@ -183,23 +360,145 @@ fn judge(remote: &str, input: &str) -> i32 {
         "pre-push non-fast-forward",
         &argv,
     );
-    eprintln!(
-        "::error:: refusing to push a change that destroys published history.\n\n{summary}\n\n\
-         Force-pushing a shared branch is how other people's work disappears: their clone\n\
-         still points at commits the remote no longer has, and the next `git pull` quietly\n\
-         merges the two histories back together.\n\n\
-         If the branch is yours alone and the rewrite is deliberate:\n\n\
-           ALLOW_FORCE=1 git push --force-with-lease\n\n\
-         --force-with-lease refuses if someone else pushed since your last fetch, which is\n\
-         the only part of this that plain --force gives up. The bypass is recorded in\n\
-         ~/.local/state/git-bypass.log."
-    );
+    history_refusal(remote, &problems).emit();
     1
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Verdict, classify, pushed_shas};
+    use super::{Problem, Unsigned, Verdict, classify, history_refusal, pushed, unsigned_refusal};
+
+    fn problem(verdict: Verdict, name: &str) -> Problem {
+        Problem {
+            verdict,
+            local_ref: format!("refs/heads/{name}"),
+            remote_ref: format!("refs/heads/{name}"),
+            detail: format!("refs/heads/{name} on 'origin'"),
+        }
+    }
+
+    #[test]
+    fn a_history_refusal_names_the_command_for_its_worst_case_and_waives_exactly_the_refused_updates()
+     {
+        let refused = |problems: &[Problem]| {
+            let refusal = history_refusal("origin", problems);
+            assert!(refusal.is_complete(), "{refusal:?}");
+            assert_eq!(refusal.rule, "push.history");
+            (refusal.next.unwrap(), refusal.waiver.unwrap())
+        };
+        assert_eq!(
+            refused(&[problem(Verdict::Delete, "a"), problem(Verdict::Delete, "b")]),
+            (
+                "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/a' && gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/b'".to_owned(),
+                "ALLOW_FORCE=1 git push origin :refs/heads/a :refs/heads/b".to_owned()
+            )
+        );
+        assert_eq!(
+            refused(&[problem(Verdict::Delete, "a"), problem(Verdict::Rewrite, "b")]),
+            (
+                "git pull --rebase origin b".to_owned(),
+                "ALLOW_FORCE=1 git push --force-with-lease origin :refs/heads/a refs/heads/b:refs/heads/b".to_owned()
+            )
+        );
+        assert_eq!(
+            refused(&[
+                problem(Verdict::Rewrite, "a"),
+                problem(Verdict::Undecidable, "b")
+            ])
+            .0,
+            "git fetch origin"
+        );
+    }
+
+    fn unsigned(name: &str, commits: &[&str], merges: bool, base: Option<&str>) -> Unsigned {
+        Unsigned {
+            local_ref: name.to_owned(),
+            tip: commits[0].to_owned(),
+            commits: commits
+                .iter()
+                .map(|sha| ((*sha).to_owned(), format!("  {sha} summary")))
+                .collect(),
+            merges,
+            base: base.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn an_unsigned_push_refusal_signs_exactly_the_unsigned_range_or_lists_it() {
+        let topic = "refs/heads/topic";
+        let inspect = "git log '--format=%h %G? %s' bbb --not --remotes=origin";
+        let on = |reference: &'static str, sha: &'static str| Some((reference, sha));
+        for (refs, head, next) in [
+            (
+                vec![unsigned(topic, &["aaa"], false, Some("base"))],
+                on(topic, "aaa"),
+                "git commit --amend -S --no-edit",
+            ),
+            (
+                vec![unsigned("HEAD", &["aaa"], false, Some("base"))],
+                on("refs/heads/main", "aaa"),
+                "git commit --amend -S --no-edit",
+            ),
+            // An amend moves only the checked-out branch, so another ref at the same commit gets signed where it points.
+            (
+                vec![unsigned(topic, &["aaa"], false, Some("base"))],
+                on("refs/heads/main", "aaa"),
+                "git rebase --exec 'git commit --amend --no-edit -S' base topic",
+            ),
+            (
+                vec![unsigned("refs/tags/v1", &["bbb"], false, Some("base"))],
+                on("refs/heads/main", "bbb"),
+                inspect,
+            ),
+            (
+                vec![unsigned(topic, &["aaa"], false, Some("base"))],
+                on(topic, "ccc"),
+                "git rebase --exec 'git commit --amend --no-edit -S' base topic",
+            ),
+            (
+                vec![unsigned(topic, &["bbb", "aaa"], false, Some("base"))],
+                on(topic, "bbb"),
+                "git rebase --exec 'git commit --amend --no-edit -S' base topic",
+            ),
+            (
+                vec![unsigned(topic, &["bbb", "aaa"], false, None)],
+                on(topic, "bbb"),
+                "git rebase --exec 'git commit --amend --no-edit -S' --root topic",
+            ),
+            (
+                vec![unsigned(topic, &["bbb", "aaa"], true, Some("base"))],
+                on(topic, "bbb"),
+                inspect,
+            ),
+            (
+                vec![
+                    unsigned(topic, &["bbb"], false, Some("base")),
+                    unsigned("refs/heads/other", &["ccc"], false, Some("base")),
+                ],
+                on(topic, "bbb"),
+                inspect,
+            ),
+            (
+                vec![unsigned(
+                    "refs/tags/v1",
+                    &["bbb", "aaa"],
+                    false,
+                    Some("base"),
+                )],
+                on(topic, "ccc"),
+                inspect,
+            ),
+        ] {
+            let refusal = unsigned_refusal("origin", &refs, head);
+            assert!(refusal.is_complete(), "{refusal:?}");
+            assert_eq!(refusal.next.as_deref(), Some(next));
+            assert_eq!(refusal.waiver, None);
+            assert_eq!(
+                refusal.evidence.len(),
+                refs.iter().map(|r| r.commits.len()).sum::<usize>()
+            );
+        }
+    }
 
     const ZERO: &str = "0000000000000000000000000000000000000000";
 
@@ -221,6 +520,9 @@ mod tests {
              refs/heads/x {ZERO} refs/heads/x {ZERO}\n\
              refs/heads/y deadbee refs/heads/y abc123\n"
         );
-        assert_eq!(pushed_shas(&input), vec!["deadbee"]);
+        assert_eq!(
+            pushed(&input),
+            vec![("refs/heads/y".to_owned(), "deadbee".to_owned())]
+        );
     }
 }

@@ -1,0 +1,9 @@
+{
+  "revision": "6704cca07a2e6af1b364abc9d4ccaf145fa2dbed18f512f8a905f6e9b8dcfe2d",
+  "outcome": "implemented",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "evidence": [
+    "dot_agents/skills/ideal-specification/SKILL.md"
+  ],
+  "revisit": null
+}

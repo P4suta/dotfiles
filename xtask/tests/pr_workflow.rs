@@ -117,6 +117,171 @@ impl Fixture {
     }
 }
 
+/// The refusal record a failed run ends with, checked as plain JSON so the format stands on its own.
+fn refusal(output: &Output) -> serde_json::Value {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let line = stderr.lines().last().unwrap_or_default();
+    let json = line
+        .strip_prefix("dotfiles-refusal/1 ")
+        .unwrap_or_else(|| panic!("no refusal record: {stderr}"));
+    let record: serde_json::Value = serde_json::from_str(json).unwrap();
+    let object = record.as_object().unwrap();
+    assert_eq!(
+        object.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["cause", "evidence", "next", "rule", "waiver"],
+        "{line}"
+    );
+    for key in ["rule", "cause", "next"] {
+        assert!(
+            record[key]
+                .as_str()
+                .is_some_and(|text| !text.trim().is_empty()),
+            "{key}: {line}"
+        );
+    }
+    assert!(!record["next"].as_str().unwrap().contains('\n'), "{line}");
+    let evidence = record["evidence"].as_array().unwrap();
+    assert!(
+        !evidence.is_empty()
+            && evidence
+                .iter()
+                .all(|item| item.as_str().is_some_and(|text| !text.trim().is_empty())),
+        "{line}"
+    );
+    assert!(
+        record["waiver"].is_null(),
+        "pr-workflow has no waiver: {line}"
+    );
+    assert!(
+        dotfiles_xtask::refusal::Refusal::find(&stderr).is_some_and(|parsed| parsed.is_complete()),
+        "{line}"
+    );
+    record
+}
+
+#[test]
+fn every_refusal_ends_with_one_complete_record_naming_its_rule() -> Result<()> {
+    let rule = |output: Output| refusal(&output)["rule"].as_str().unwrap().to_owned();
+    let closed = format!("{BODY}\nCloses #23.\n");
+
+    let fixture = Fixture::new(BODY)?;
+    assert_eq!(rule(fixture.document("check", "Repair edits")?), "pr.title");
+    let fixture = Fixture::new(" \n")?;
+    let output = fixture.document("check", "fix: preserve edits")?;
+    let record = refusal(&output);
+    assert_eq!(record["rule"], "pr.body");
+    assert!(
+        record["next"]
+            .as_str()
+            .unwrap()
+            .starts_with("pr-workflow check --repo owner/project --title 'fix: preserve edits'"),
+        "{record}"
+    );
+
+    let fixture = Fixture::new(&closed)?;
+    assert_eq!(
+        rule(fixture.personal_command("start")?.output()?),
+        "pr.issue"
+    );
+    let fixture = Fixture::new(BODY)?;
+    let output = fixture
+        .personal_command("create")?
+        .args([
+            "--issue",
+            "23",
+            "--title",
+            "fix: preserve edits",
+            "--body-file",
+        ])
+        .arg(&fixture.body)
+        .args(["--head", "feature"])
+        .output()?;
+    assert_eq!(rule(output), "pr.body");
+
+    let fixture = Fixture::new(&closed)?;
+    let output = fixture
+        .personal_command("start")?
+        .args(["--issue", "23"])
+        .env(
+            "GH_FIXTURE_HEADERS",
+            "HTTP/2.0 200 OK\nX-Ratelimit-Remaining: 9\nX-Ratelimit-Reset: 1800000000\nX-Ratelimit-Resource: core",
+        )
+        .output()?;
+    assert_eq!(rule(output), "pr.quota");
+    let output = fixture
+        .personal_command("start")?
+        .args(["--issue", "23"])
+        .env("GH_FIXTURE_FAILURE", "user")
+        .output()?;
+    assert_eq!(rule(output), "pr.auth");
+
+    for (state, draft) in [("CLOSED", true), ("OPEN", false)] {
+        let fixture = Fixture::new(BODY)?;
+        let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":state,"isDraft":draft});
+        let output = fixture
+            .command("ready")?
+            .args(["--pr", "17"])
+            .env("GH_FIXTURE_VIEW", view.to_string())
+            .output()?;
+        assert_eq!(rule(output), "pr.state");
+    }
+    let fixture = Fixture::new(BODY)?;
+    let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true,
+        "statusCheckRollup":[{"status":"COMPLETED","conclusion":"FAILURE"}]});
+    let output = fixture
+        .command("ready")?
+        .args(["--pr", "17"])
+        .env("GH_FIXTURE_VIEW", view.to_string())
+        .output()?;
+    let record = refusal(&output);
+    assert_eq!(record["rule"], "pr.checks");
+    assert_eq!(record["next"], "gh pr checks 17 --repo owner/project");
+
+    let output = fixture.command_for_repo("start", "owner")?.output()?;
+    assert_eq!(rule(output), "pr.repository");
+    let output = fixture
+        .command("start")?
+        .args(["--title-policy", "missing.json"])
+        .output()?;
+    assert_eq!(rule(output), "pr.title-policy");
+    let output = fixture
+        .command("start")?
+        .env("GH_FIXTURE_USER", r#"{"login":"P4suta","id":0}"#)
+        .output()?;
+    assert_eq!(rule(output), "pr.auth");
+    let output = fixture
+        .personal_command("start")?
+        .env(
+            "GH_FIXTURE_REPOSITORY",
+            serde_json::json!({
+                "full_name":"P4suta/project","owner":{"login":"P4suta","id":1},"fork":false
+            })
+            .to_string(),
+        )
+        .output()?;
+    assert_eq!(rule(output), "pr.policy");
+
+    let fixture = Fixture::new(BODY)?;
+    let output = fixture
+        .command("create")?
+        .args(["--title", "fix: preserve edits", "--body-file"])
+        .arg(&fixture.body)
+        .args(["--head", "a b"])
+        .output()?;
+    assert_eq!(rule(output), "pr.branch");
+    let output = fixture
+        .command("create")?
+        .args(["--title", "fix: preserve edits", "--body-file"])
+        .arg(&fixture.body)
+        .args(["--head", "feature"])
+        .env("GH_FIXTURE_FAILURE", "create")
+        .output()?;
+    let record = refusal(&output);
+    assert_eq!(record["rule"], "pr.failed");
+    assert_eq!(record["next"], "pr-workflow create --help");
+    Ok(())
+}
+
 const PAUSE_MARKER: &str = "<!-- coderabbit-pause -->";
 
 const BODY: &str = "## Why\nAvoid losing edits.\n\n## Changes\nPreserve the original input.\n\n## Validation\nThe targeted regression test passed.\n";
@@ -402,6 +567,7 @@ fn authentication_quota_and_api_failures_stop_without_retry_or_publication() -> 
             }
             let output = command.output()?;
             assert!(!output.status.success(), "{operation}: {variable}");
+            refusal(&output);
             let log = fixture.log()?;
             for mutation in ["create", "edit", "ready"] {
                 assert!(!log.contains(&format!("\n{mutation}\n")), "{log}");
@@ -465,6 +631,7 @@ fn invalid_documents_never_start_gh_and_check_has_no_effects() -> Result<()> {
         for action in ["check", "create", "edit"] {
             let output = fixture.document(action, title)?;
             assert!(!output.status.success(), "{action}: {title}");
+            refusal(&output);
             assert!(!fixture.log.try_exists()?);
         }
     }
@@ -1380,6 +1547,61 @@ fn scoped_install_preserves_other_managed_skills_policy_and_history() -> Result<
             "must not apply over unrelated changes"
         ))
         .is_err()
+    );
+    Ok(())
+}
+
+/// A body that doesn't close the issue gets a refusal naming the edit that closes it, never the unchanged command.
+#[test]
+fn a_body_without_the_closing_reference_names_the_edit_that_adds_it() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let create = |fixture: &Fixture| -> Result<Output> {
+        Ok(fixture
+            .personal_command("create")?
+            .args([
+                "--issue",
+                "23",
+                "--title",
+                "fix: preserve edits",
+                "--body-file",
+            ])
+            .arg(&fixture.body)
+            .args(["--head", "feature"])
+            .output()?)
+    };
+    let record = refusal(&create(&fixture)?);
+    assert_eq!(record["rule"], "pr.body");
+    let body = fixture.body.to_str().context("UTF-8 path")?;
+    let quoted = dotfiles_xtask::refusal::command(&[body]);
+    let next = record["next"].as_str().unwrap();
+    assert_eq!(
+        next,
+        format!(
+            "printf '\\n\\nCloses #23\\n' >> {quoted} && pr-workflow create --repo P4suta/project --issue 23 --title 'fix: preserve edits' --body-file {quoted} --head feature"
+        )
+    );
+    let mut appended = fs::read_to_string(&fixture.body)?;
+    appended.push_str("\n\nCloses #23\n");
+    fs::write(&fixture.body, appended)?;
+    let output = create(&fixture)?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let fixture = Fixture::new(BODY)?;
+    let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true});
+    let output = fixture
+        .personal_command("ready")?
+        .args(["--issue", "23", "--pr", "17"])
+        .env("GH_FIXTURE_VIEW", view.to_string())
+        .output()?;
+    let record = refusal(&output);
+    assert_eq!(record["rule"], "pr.body");
+    assert_eq!(
+        record["next"],
+        "gh pr edit 17 --repo P4suta/project --body-file <body-file>"
     );
     Ok(())
 }
