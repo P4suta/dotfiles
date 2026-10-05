@@ -123,6 +123,11 @@ pub const SHELL_WRITE_HARNESSES: [&str; 2] = [
     "file_writing_commands_are_never_admitted",
 ];
 
+pub const DISK_SCAN_HARNESSES: [&str; 2] = [
+    "only_a_recursive_size_scan_is_refused",
+    "the_refusal_names_storage_scout",
+];
+
 pub const BODY_HARNESSES: [&str; 2] = [
     "attributed_bodies_are_never_admitted",
     "every_body_refusal_names_the_deleting_next_action",
@@ -688,7 +693,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 6] = [
+pub const RULES: [Rules; 7] = [
     Rules {
         source: "xtask/src/target_rules.rs",
         harnesses: &TARGET_HARNESSES,
@@ -754,6 +759,23 @@ fn reject_admitting_a_file_redirect() {
         rejected: &[
             "reject_admitting_an_inline_interpreter",
             "reject_admitting_a_file_redirect",
+        ],
+    },
+    Rules {
+        source: "xtask/src/disk_scan_rules.rs",
+        harnesses: &DISK_SCAN_HARNESSES,
+        counterexamples: "#[kani::proof]
+fn reject_admitting_a_recursive_size_scan() {
+    assert!(production::verdict(true, true) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_refusing_a_walk_without_sizes() {
+    assert!(production::verdict(true, false) == production::Verdict::Refuse);
+}
+",
+        rejected: &[
+            "reject_admitting_a_recursive_size_scan",
+            "reject_refusing_a_walk_without_sizes",
         ],
     },
     Rules {

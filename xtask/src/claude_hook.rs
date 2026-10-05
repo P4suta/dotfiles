@@ -1,5 +1,8 @@
 use crate::body_rules::{self, Verdict as BodyVerdict};
-use crate::shell_write_rules::{Source, Verdict, body_sources, inspect, next_action};
+use crate::disk_scan_rules;
+use crate::shell_write_rules::{
+    Source, Verdict, body_sources, inspect, next_action, program, segments,
+};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::io::Read;
@@ -62,15 +65,90 @@ fn attribution_refusal(command: &str, directory: Option<&Path>) -> Option<String
     None
 }
 
+/// Whether `command` walks a tree and whether it reports sizes: `du` and its kin, `find` with a size test or size output, or a recursive `Get-ChildItem` measured by length.
+fn disk_scan(command: &str) -> (bool, bool) {
+    let mut recursive = false;
+    let mut sizes = false;
+    for words in segments(command) {
+        let start = words
+            .iter()
+            .position(|word| {
+                !word.contains('=')
+                    && !matches!(
+                        program(word).as_str(),
+                        "env" | "sudo" | "command" | "exec" | "time" | "nohup" | "nice"
+                    )
+            })
+            .unwrap_or(words.len());
+        let Some(first) = words.get(start) else {
+            continue;
+        };
+        let rest = &words[start + 1..];
+        match program(first).as_str() {
+            "du" | "dust" | "ncdu" | "gdu" | "diskus" => {
+                if !rest
+                    .iter()
+                    .any(|word| matches!(word.as_str(), "--help" | "--version"))
+                {
+                    recursive = true;
+                    sizes = true;
+                }
+            }
+            "find" => {
+                recursive = true;
+                let printf_size = rest
+                    .windows(2)
+                    .any(|pair| pair[0].starts_with("-printf") || pair[0] == "-fprintf")
+                    && rest
+                        .iter()
+                        .any(|word| word.contains("%s") || word.contains("%k"));
+                sizes |= rest.iter().any(|word| word == "-size") || printf_size;
+            }
+            "get-childitem" | "gci" | "dir" | "ls" | "childitem" => {
+                recursive |= rest.iter().any(|word| {
+                    let word = word.to_ascii_lowercase();
+                    word.len() >= 2 && "-recurse".starts_with(&word)
+                });
+            }
+            _ => {}
+        }
+    }
+    // PowerShell reports a file's size as its `Length`, whether measured, sorted, or selected.
+    sizes |= command
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '-')
+        .any(|word| {
+            word.eq_ignore_ascii_case("length") || word.eq_ignore_ascii_case("measure-object")
+        });
+    (recursive, sizes)
+}
+
+fn disk_scan_refusal(command: &str) -> Option<String> {
+    let (recursive, sizes) = disk_scan(command);
+    (disk_scan_rules::verdict(recursive, sizes) == disk_scan_rules::Verdict::Refuse).then(|| {
+        format!(
+            "Refused: this command walks a directory tree to measure disk usage.\nNext action: {}",
+            disk_scan_rules::NEXT_ACTION
+        )
+    })
+}
+
 /// The refusal for one PreToolUse event, or `None` when the tool call is admitted.
+/// PowerShell commands are checked only for disk scans, because the file-write rules read POSIX shell syntax.
 pub fn refusal(event: &str) -> Result<Option<String>> {
     let event: Value = serde_json::from_str(event).context("PreToolUse event is not JSON")?;
-    if event["tool_name"] != "Bash" {
+    let tool = event["tool_name"].as_str().unwrap_or_default();
+    if !matches!(tool, "Bash" | "PowerShell") {
         return Ok(None);
     }
     let command = event["tool_input"]["command"]
         .as_str()
-        .context("Bash event has no command")?;
+        .context("shell event has no command")?;
+    if let Some(message) = disk_scan_refusal(command) {
+        return Ok(Some(message));
+    }
+    if tool == "PowerShell" {
+        return Ok(None);
+    }
     if let Verdict::Refuse(reason) = inspect(command) {
         return Ok(Some(format!(
             "Refused: this command writes a file through an inline interpreter, heredoc, or redirect.\nNext action: {}",
@@ -139,6 +217,38 @@ mod tests {
         }
         let write = json!({"tool_name": "Write", "tool_input": {"file_path": "a"}}).to_string();
         assert_eq!(refusal(&write).unwrap(), None);
+    }
+
+    #[test]
+    fn recursive_disk_scans_are_refused_with_storage_scout() {
+        let powershell = |command: &str| {
+            json!({"tool_name": "PowerShell", "tool_input": {"command": command}}).to_string()
+        };
+        for event in [
+            bash("du -sh ~/.cargo"),
+            bash("sudo du -h --max-depth=1 / | sort -h"),
+            bash("find /c/Users -type f -size +100M"),
+            bash("find . -printf '%s %p\\n' | sort -n"),
+            powershell(
+                "Get-ChildItem C:\\Users -Recurse -File | Measure-Object -Property Length -Sum",
+            ),
+            powershell("gci -r D:\\ | Sort-Object Length -Descending"),
+        ] {
+            let message = refusal(&event)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{event}"));
+            assert!(message.contains("storage-scout scan"), "{message}");
+        }
+        for event in [
+            bash("du --version"),
+            bash("find . -name '*.rs'"),
+            bash("ls -la"),
+            powershell("Get-ChildItem C:\\Users"),
+            powershell("git status 2>$null"),
+            powershell("Get-ChildItem -Recurse -Filter *.md"),
+        ] {
+            assert_eq!(refusal(&event).unwrap(), None, "{event}");
+        }
     }
 
     #[test]

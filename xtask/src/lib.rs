@@ -11,6 +11,7 @@ pub mod change;
 pub mod change_rules;
 pub mod claude_hook;
 pub mod desktop;
+pub mod disk_scan_rules;
 pub mod eol_rules;
 pub mod freshness;
 pub mod hooks;

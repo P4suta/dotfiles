@@ -199,7 +199,23 @@ fn scan(command: &str) -> Scan {
     scan
 }
 
-fn program(text: &str) -> String {
+/// The words of each simple command in `command`, in order, each up to its first redirect.
+pub fn segments(command: &str) -> Vec<Vec<String>> {
+    scan(command)
+        .tokens
+        .split(|token| *token == Token::Separator)
+        .map(|segment| {
+            segment_words(segment)
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .filter(|words| !words.is_empty())
+        .collect()
+}
+
+/// The program a command word names: its file name, lowercased, without `.exe` or a version suffix.
+pub fn program(text: &str) -> String {
     let name = text.rsplit(['/', '\\']).next().unwrap_or(text);
     let lower = name.to_ascii_lowercase();
     let stem = lower.strip_suffix(".exe").unwrap_or(&lower);

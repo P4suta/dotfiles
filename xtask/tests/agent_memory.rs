@@ -196,7 +196,7 @@ fn application_turns_off_memory_a_client_turned_back_on() {
         .unwrap();
         assert_eq!(rendered["autoMemoryEnabled"], json!(false), "{profile}");
         let hook = &rendered["hooks"]["PreToolUse"][0];
-        assert_eq!(hook["matcher"], json!("Bash"), "{profile}");
+        assert_eq!(hook["matcher"], json!("Bash|PowerShell"), "{profile}");
         assert!(
             hook["hooks"][0]["command"]
                 .as_str()

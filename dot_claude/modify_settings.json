@@ -5,11 +5,11 @@
 */ -}}
 {{- $current := dict -}}
 {{- if trim .chezmoi.stdin -}}{{- $current = fromJson .chezmoi.stdin -}}{{- end -}}
-{{- /* The Bash hook refuses file writes through inline interpreters, heredocs, and redirects; it runs the same xtask binary the git hooks use. */ -}}
+{{- /* The shell hook refuses recursive disk-usage scans in Bash and PowerShell, and file writes through inline interpreters, heredocs, and redirects in Bash; it runs the same xtask binary the git hooks use. */ -}}
 {{- $tool := ".local/bin/dotfiles-xtask" -}}
 {{- if eq .profile "windows" }}{{ $tool = ".local/bin/dotfiles-xtask.exe" }}{{ end -}}
 {{- $hook := dict "type" "command" "command" (printf "%s claude-bash" (includeTemplate "sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
-{{- $hooks := dict "PreToolUse" (list (dict "matcher" "Bash" "hooks" (list $hook))) -}}
+{{- $hooks := dict "PreToolUse" (list (dict "matcher" "Bash|PowerShell" "hooks" (list $hook))) -}}
 {{- $managed := dict "autoMemoryEnabled" false "hooks" $hooks -}}
 {{- if eq .profile "wsl" -}}
 {{- $managed = mergeOverwrite $managed (includeTemplate "profiles/wsl/dot_claude/settings.json.tmpl" (merge (dict) . (index .platforms .profile)) | fromJson) -}}

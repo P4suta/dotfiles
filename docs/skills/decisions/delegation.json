@@ -1,10 +1,11 @@
 {
-  "revision": "a8d9814b84792a9def5db01e7a362e98e0525aeecf09f47ba1c0440ea66aa5f4",
+  "revision": "b237d1386d32ed72b3f697f00da802de5affe9699b0ba82e9f95dac4f04bdc5f",
   "outcome": "implemented",
-  "reason": "Route routine supervision to the cheapest capable model tier and enforce the no-ad-hoc-script rule with a Claude Code Bash hook that refuses file writes through inline interpreters, heredocs, and redirects.",
+  "reason": "Choose the model tier by difficulty and consequence: implementation, design, and hard-to-reverse work on the top tier, routine supervision on the cheapest; project commands and storage-scout are enforced by the shell hook.",
   "evidence": [
     "dot_agents/skills/delegation/SKILL.md",
-    "xtask/src/shell_write_rules.rs"
+    "xtask/src/shell_write_rules.rs",
+    "xtask/src/disk_scan_rules.rs"
   ],
   "revisit": null
 }
