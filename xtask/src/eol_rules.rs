@@ -32,6 +32,20 @@ pub struct Content {
     pub nonprintable: usize,
 }
 
+/// Whether Git's index entry for the path holds text with CRLF, as `git ls-files --eol` reports `i/crlf` or `i/mixed`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Index {
+    CrlfText,
+    Other,
+}
+
+/// How Git stages the bytes: `git add` keeps CRLF already in the index under `text=auto`, and `git add --renormalize` does not.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Staging {
+    Add,
+    Renormalize,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     Normalize,
@@ -54,13 +68,20 @@ pub fn auto_binary(content: Content) -> bool {
     content.lone_cr || content.nul || (content.printable >> 7) < content.nonprintable
 }
 
-pub fn action(attributes: Attributes, content: Content) -> Action {
+/// Git's `has_crlf_in_index` rule: content detection keeps a path whose index entry already holds CRLF text.
+pub fn index_keeps(staging: Staging, index: Index) -> bool {
+    staging == Staging::Add && index == Index::CrlfText
+}
+
+pub fn action(attributes: Attributes, staging: Staging, index: Index, content: Content) -> Action {
     if declared_exempt(attributes) || !content.crlf {
         Action::Keep
-    } else if forces_text(attributes) || !auto_binary(content) {
+    } else if forces_text(attributes) {
         Action::Normalize
-    } else {
+    } else if auto_binary(content) || index_keeps(staging, index) {
         Action::Keep
+    } else {
+        Action::Normalize
     }
 }
 
@@ -138,6 +159,28 @@ impl kani::Arbitrary for Eol {
 }
 
 #[cfg(kani)]
+impl kani::Arbitrary for Index {
+    fn any() -> Self {
+        if kani::any() {
+            Self::CrlfText
+        } else {
+            Self::Other
+        }
+    }
+}
+
+#[cfg(kani)]
+impl kani::Arbitrary for Staging {
+    fn any() -> Self {
+        if kani::any() {
+            Self::Add
+        } else {
+            Self::Renormalize
+        }
+    }
+}
+
+#[cfg(kani)]
 #[kani::proof]
 fn declared_line_endings_are_never_rewritten() {
     let attributes = Attributes {
@@ -152,7 +195,9 @@ fn declared_line_endings_are_never_rewritten() {
         printable: kani::any(),
         nonprintable: kani::any(),
     };
-    let decided = action(attributes, content);
+    let staging: Staging = kani::any();
+    let index: Index = kani::any();
+    let decided = action(attributes, staging, index, content);
     if attributes.eol == Eol::Crlf || attributes.text == Text::Unset || attributes.binary {
         assert_eq!(decided, Action::Keep);
     }
@@ -163,6 +208,7 @@ fn declared_line_endings_are_never_rewritten() {
     if decided == Action::Normalize && attributes.text != Text::Set && !eol_only {
         assert!(!(content.nul || content.lone_cr));
         assert!(content.nonprintable == 0 || content.printable >= 128);
+        assert!(staging == Staging::Renormalize || index == Index::Other);
     }
     if decided == Action::Keep
         && content.crlf
@@ -171,12 +217,36 @@ fn declared_line_endings_are_never_rewritten() {
         && matches!(attributes.text, Text::Auto | Text::Unspecified)
     {
         assert!(!eol_only);
-        assert!(content.nul || content.lone_cr || content.nonprintable > content.printable / 128);
+        assert!(
+            content.nul
+                || content.lone_cr
+                || content.nonprintable > content.printable / 128
+                || (staging == Staging::Add && index == Index::CrlfText)
+        );
+    }
+    if staging == Staging::Renormalize || index == Index::Other {
+        let other = if staging == Staging::Add {
+            Staging::Renormalize
+        } else {
+            Staging::Add
+        };
+        assert_eq!(decided, action(attributes, other, Index::Other, content));
     }
     kani::cover!(decided == Action::Normalize && attributes.text == Text::Auto);
     kani::cover!(decided == Action::Normalize && content.nul);
     kani::cover!(decided == Action::Keep && content.crlf && attributes.eol == Eol::Crlf);
     kani::cover!(decided == Action::Keep && content.crlf && !content.nul && !content.lone_cr);
+    kani::cover!(
+        decided == Action::Keep
+            && attributes.text == Text::Auto
+            && content.crlf
+            && content.nonprintable == 0
+            && !content.lone_cr
+            && !content.nul
+    );
+    kani::cover!(
+        decided == Action::Normalize && attributes.text == Text::Auto && index == Index::CrlfText
+    );
 }
 
 #[cfg(kani)]

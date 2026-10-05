@@ -441,12 +441,13 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\n#[kani::unwind(5)]\nfn reject_rewriting_declared_crlf() {{\n    let attributes = production::Attributes {{ text: production::Text::Auto, eol: production::Eol::Crlf, binary: false }};\n    assert!(production::action(attributes, production::content(b\"a\\r\\n\")) == production::Action::Normalize);\n}}\n#[kani::proof]\n#[kani::unwind(5)]\nfn reject_rewriting_control_heavy_content() {{\n    let attributes = production::Attributes {{ text: production::Text::Auto, eol: production::Eol::Lf, binary: false }};\n    assert!(production::action(attributes, production::content(b\"\\x01\\x02\\r\\n\")) == production::Action::Normalize);\n}}\n"
+            "#[path = {source:?}]\nmod production;\nuse production::{{Action, Attributes, Eol, Index, Staging, Text, action, content}};\n#[kani::proof]\n#[kani::unwind(5)]\nfn reject_rewriting_declared_crlf() {{\n    let attributes = Attributes {{ text: Text::Auto, eol: Eol::Crlf, binary: false }};\n    assert!(action(attributes, Staging::Add, Index::Other, content(b\"a\\r\\n\")) == Action::Normalize);\n}}\n#[kani::proof]\n#[kani::unwind(5)]\nfn reject_rewriting_control_heavy_content() {{\n    let attributes = Attributes {{ text: Text::Auto, eol: Eol::Lf, binary: false }};\n    assert!(action(attributes, Staging::Add, Index::Other, content(b\"\\x01\\x02\\r\\n\")) == Action::Normalize);\n}}\n#[kani::proof]\n#[kani::unwind(5)]\nfn reject_rewriting_crlf_the_index_keeps() {{\n    let attributes = Attributes {{ text: Text::Auto, eol: Eol::Lf, binary: false }};\n    assert!(action(attributes, Staging::Add, Index::CrlfText, content(b\"a\\r\\n\")) == Action::Normalize);\n}}\n"
         ),
     )?;
     for name in [
         "reject_rewriting_declared_crlf",
         "reject_rewriting_control_heavy_content",
+        "reject_rewriting_crlf_the_index_keeps",
     ] {
         verify_file(&file, probe.path(), &[name], true)?;
     }

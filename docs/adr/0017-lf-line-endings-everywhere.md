@@ -21,11 +21,14 @@ It runs after every tool rather than a list of writing tools, because shell comm
 `git check-attr` decides which paths are exempt: a path whose attributes resolve to `eol=crlf`, `-text`, or `binary` keeps its bytes, and this is the only declared escape hatch.
 Explicit `text`, or `eol=lf` without a `text` value, converts every CRLF, as Git does.
 Otherwise content that Git's `text=auto` detection treats as binary is kept: a lone carriage return, a NUL byte, or more than one nonprintable byte per 128 printable ones, counted as Git's `gather_stats` counts them.
+Content detection also keeps a path whose index entry already holds text with CRLF, which `git ls-files --eol` reports as `i/crlf` or `i/mixed`, because `git add` stages such a file unchanged.
+An edit to a repository that commits CRLF without attributes therefore stays a change to the edited lines.
+`line-endings normalize` and `just check` ignore the index entry, as `git add --renormalize` does, so committed CRLF is still refused and converted on request.
 A file outside every Git work tree is kept, because no attributes can declare an exception for it.
 The decision, the byte statistics, and the conversion live in `xtask/src/eol_rules.rs`.
-Its Kani harnesses check the decision for every attribute combination and every statistic, the statistics and the binary verdict of every four-byte input against Git's byte classes, and the conversion of each byte of every four-byte input.
-Rejecting counterexamples rewrite a declared CRLF path and control-heavy content.
-An integration test compares the hook's result with the blob `git hash-object` stores for the same path, including the 128-byte ratio boundary that the four-byte harness cannot reach.
+Its Kani harnesses check the decision for every attribute combination, index state, staging mode, and statistic, the statistics and the binary verdict of every four-byte input against Git's byte classes, and the conversion of each byte of every four-byte input.
+Rejecting counterexamples rewrite a declared CRLF path, control-heavy content, and CRLF the index keeps.
+Integration tests compare the hook's result with the blob Git stages for the same path, including the 128-byte ratio boundary that the four-byte harness cannot reach and index entries that hold CRLF, mixed, LF, and binary content.
 
 `just check` refuses a tracked text file whose working-tree bytes contain CRLF without such an attribute, and names the command that converts it.
 
@@ -37,7 +40,7 @@ Normalizing every file in the work tree on each call was rejected because unchan
 
 ## Consequences
 
-Each tool call spends a `git ls-files` and a `git check-attr` in the session's repository, and reads every modified and untracked file in full.
+Each tool call spends a `git ls-files --eol` and a `git check-attr` in the session's repository, and reads every modified and untracked file and the index blob of every modified file in full.
 A replacement checks that the file is writable and still holds the bytes the hook read, keeps its permissions, and skips symbolic links, but another writer can still change the file between that check and the rename.
 A read-only file keeps its CRLF and the hook names the command that converts it.
 When Git cannot inspect a directory, for example a removed session directory or an untrusted repository owner, the hook reports the cause and a `git -C` command on standard error and exits successfully, so one broken directory does not fail every tool call; `just check` still refuses tracked CRLF.

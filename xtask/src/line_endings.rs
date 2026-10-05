@@ -1,7 +1,8 @@
-use crate::eol_rules::{Action, Attributes, Eol, Text, action, content, to_lf};
+use crate::eol_rules::{Action, Attributes, Eol, Index, Staging, Text, action, content, to_lf};
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{Read, Write};
 #[cfg(unix)]
@@ -51,7 +52,7 @@ pub fn work_tree(directory: &Path) -> Result<Option<PathBuf>> {
 fn path_from_bytes(bytes: &[u8]) -> Result<PathBuf> {
     #[cfg(unix)]
     {
-        Ok(PathBuf::from(std::ffi::OsStr::from_bytes(bytes)))
+        Ok(PathBuf::from(OsStr::from_bytes(bytes)))
     }
     #[cfg(not(unix))]
     {
@@ -72,9 +73,9 @@ fn path_bytes(path: &Path) -> Result<&[u8]> {
     }
 }
 
-fn listed(directory: &Path, arguments: &[&str]) -> Result<Vec<PathBuf>> {
+fn ls_files(directory: &Path, arguments: &[&OsStr]) -> Result<Vec<u8>> {
     let output = git(directory)
-        .args(["ls-files", "-z"])
+        .args(["--literal-pathspecs", "ls-files", "-z"])
         .args(arguments)
         .stderr(Stdio::inherit())
         .output()
@@ -84,8 +85,11 @@ fn listed(directory: &Path, arguments: &[&str]) -> Result<Vec<PathBuf>> {
         "git ls-files failed in {}",
         directory.display()
     );
-    let mut paths = output
-        .stdout
+    Ok(output.stdout)
+}
+
+fn listed(directory: &Path) -> Result<Vec<PathBuf>> {
+    let mut paths = ls_files(directory, &[])?
         .split(|&byte| byte == 0)
         .filter(|path| !path.is_empty())
         .map(path_from_bytes)
@@ -93,6 +97,36 @@ fn listed(directory: &Path, arguments: &[&str]) -> Result<Vec<PathBuf>> {
     paths.sort();
     paths.dedup();
     Ok(paths)
+}
+
+/// Paths `git ls-files --eol` lists with `arguments`, each with the line endings its index entries hold.
+/// A path with several index entries during a merge counts as CRLF text when any entry is.
+fn listed_with_index(directory: &Path, arguments: &[&OsStr]) -> Result<Vec<(PathBuf, Index)>> {
+    let mut found: Vec<(PathBuf, Index)> = Vec::new();
+    for record in ls_files(directory, &[&[OsStr::new("--eol")], arguments].concat())?
+        .split(|&byte| byte == 0)
+        .filter(|record| !record.is_empty())
+    {
+        let tab = record
+            .iter()
+            .position(|&byte| byte == b'\t')
+            .context("git ls-files --eol returned a record without a path")?;
+        let index = if record.starts_with(b"i/crlf ") || record.starts_with(b"i/mixed ") {
+            Index::CrlfText
+        } else {
+            Index::Other
+        };
+        found.push((path_from_bytes(&record[tab + 1..])?, index));
+    }
+    found.sort_by(|left, right| left.0.cmp(&right.0));
+    found.dedup_by(|next, kept| {
+        let same = next.0 == kept.0;
+        if same && next.1 == Index::CrlfText {
+            kept.1 = Index::CrlfText;
+        }
+        same
+    });
+    Ok(found)
 }
 
 fn text(value: &str) -> Text {
@@ -204,28 +238,38 @@ pub fn replace(path: &Path, expected: &[u8], next: &[u8]) -> Result<bool> {
     Ok(true)
 }
 
-/// Files under `directory` that the attribute rule would rewrite, paired with their current bytes.
-fn pending(directory: &Path, paths: &[PathBuf]) -> Result<Vec<(PathBuf, Vec<u8>)>> {
-    let files: Vec<PathBuf> = paths
+/// Files under `directory` that the attribute rule would rewrite when staged as `staging`, paired with their current bytes.
+fn pending(
+    directory: &Path,
+    staging: Staging,
+    paths: &[(PathBuf, Index)],
+) -> Result<Vec<(PathBuf, Vec<u8>)>> {
+    let files: Vec<&(PathBuf, Index)> = paths
         .iter()
-        .filter(|path| regular(&directory.join(path)))
-        .cloned()
+        .filter(|(path, _)| regular(&directory.join(path)))
         .collect();
-    let resolved = attributes(directory, &files)?;
+    let names: Vec<PathBuf> = files.iter().map(|(path, _)| path.clone()).collect();
+    let resolved = attributes(directory, &names)?;
     let mut found = Vec::new();
-    for (path, attributes) in files.into_iter().zip(resolved) {
-        let bytes = fs::read(directory.join(&path))?;
-        if action(attributes, content(&bytes)) == Action::Normalize {
-            found.push((path, bytes));
+    for ((path, index), attributes) in files.into_iter().zip(resolved) {
+        let bytes = fs::read(directory.join(path))?;
+        if action(attributes, staging, *index, content(&bytes)) == Action::Normalize {
+            found.push((path.clone(), bytes));
         }
     }
     Ok(found)
 }
 
-/// Converts CRLF to LF in `paths`, relative to `directory`, unless their attributes exempt them.
-pub fn normalize(directory: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+fn renormalized(paths: &[PathBuf]) -> Vec<(PathBuf, Index)> {
+    paths
+        .iter()
+        .map(|path| (path.clone(), Index::Other))
+        .collect()
+}
+
+fn rewrite(directory: &Path, staging: Staging, paths: &[(PathBuf, Index)]) -> Result<Vec<PathBuf>> {
     let mut changed = Vec::new();
-    for (path, bytes) in pending(directory, paths)? {
+    for (path, bytes) in pending(directory, staging, paths)? {
         let target = directory.join(&path);
         if replace(&target, &bytes, &to_lf(&bytes))? {
             changed.push(target);
@@ -234,10 +278,15 @@ pub fn normalize(directory: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     Ok(changed)
 }
 
-/// Tracked files whose working-tree bytes contain CRLF that their attributes do not declare.
+/// Converts CRLF to LF in `paths`, relative to `directory`, unless their attributes exempt them, as `git add --renormalize` stages them.
+pub fn normalize(directory: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    rewrite(directory, Staging::Renormalize, &renormalized(paths))
+}
+
+/// Tracked files whose working-tree bytes contain CRLF that their attributes do not declare, including CRLF the index already holds.
 pub fn offending(root: &Path) -> Result<Vec<PathBuf>> {
-    let tracked = listed(root, &[])?;
-    Ok(pending(root, &tracked)?
+    let tracked = renormalized(&listed(root)?);
+    Ok(pending(root, Staging::Renormalize, &tracked)?
         .into_iter()
         .map(|(path, _)| path)
         .collect())
@@ -256,8 +305,9 @@ pub fn check(root: &Path) -> Result<()> {
 fn changed_files(directory: &Path) -> Result<Vec<PathBuf>> {
     match work_tree(directory)? {
         Some(top) => {
-            let paths = listed(&top, &["--modified", "--others", "--exclude-standard"])?;
-            normalize(&top, &paths)
+            let arguments = ["--modified", "--others", "--exclude-standard"].map(OsStr::new);
+            let paths = listed_with_index(&top, &arguments)?;
+            rewrite(&top, Staging::Add, &paths)
         }
         None => Ok(Vec::new()),
     }
@@ -266,7 +316,11 @@ fn changed_files(directory: &Path) -> Result<Vec<PathBuf>> {
 fn named_file(path: &Path) -> Result<Vec<PathBuf>> {
     match (path.parent(), path.file_name()) {
         (Some(parent), Some(name)) if parent.is_dir() && work_tree(parent)?.is_some() => {
-            normalize(parent, &[PathBuf::from(name)])
+            let index = listed_with_index(parent, &[OsStr::new("--"), name])?
+                .into_iter()
+                .find(|(path, _)| path.as_os_str() == name)
+                .map_or(Index::Other, |(_, index)| index);
+            rewrite(parent, Staging::Add, &[(PathBuf::from(name), index)])
         }
         _ => Ok(Vec::new()),
     }

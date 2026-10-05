@@ -72,6 +72,19 @@ impl Isolated {
         Ok(output)
     }
 
+    /// Stages `bytes` at `path` without conversion, as a repository that committed them before normalizing would hold them.
+    fn index_raw(&self, directory: &Path, path: &str, bytes: &[u8]) -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let file = scope.path().join("blob");
+        fs::write(&file, bytes)?;
+        let file = file.to_str().expect("UTF-8 temporary path");
+        let object = self.git(directory, &["hash-object", "-w", "--no-filters", file])?;
+        let object = String::from_utf8(object.stdout)?;
+        let entry = format!("100644,{},{path}", object.trim());
+        self.git(directory, &["update-index", "--add", "--cacheinfo", &entry])?;
+        Ok(())
+    }
+
     fn repository(&self) -> Result<tempfile::TempDir> {
         let directory = tempfile::tempdir()?;
         self.git(directory.path(), &["init", "--quiet"])?;
@@ -185,10 +198,19 @@ fn repository_check_refuses_only_undeclared_tracked_crlf() -> Result<()> {
     git.git(root, &["add", "."])?;
     fs::write(root.join("clean.txt"), CRLF)?;
     fs::write(root.join("untracked.txt"), CRLF)?;
-    assert_eq!(line_endings::offending(root)?, [PathBuf::from("clean.txt")]);
+    git.index_raw(root, "legacy.txt", CRLF)?;
+    fs::write(root.join("legacy.txt"), CRLF)?;
+    assert_eq!(
+        line_endings::offending(root)?,
+        [PathBuf::from("clean.txt"), PathBuf::from("legacy.txt")]
+    );
     let error = line_endings::check(root).unwrap_err().to_string();
     assert!(error.contains("clean.txt") && error.contains("line-endings normalize"));
-    line_endings::normalize(root, &[PathBuf::from("clean.txt")])?;
+    line_endings::normalize(
+        root,
+        &[PathBuf::from("clean.txt"), PathBuf::from("legacy.txt")],
+    )?;
+    assert_eq!(fs::read(root.join("legacy.txt"))?, LF);
     assert!(line_endings::offending(root)?.is_empty());
     line_endings::check(root)?;
     assert_eq!(fs::read(root.join("keep.bat"))?, CRLF);
@@ -316,6 +338,52 @@ fn hook_leaves_the_bytes_git_stages() -> Result<()> {
         assert_eq!(
             unchanged.contains(name),
             &fs::read(root.join(name))? == bytes,
+            "{name}"
+        );
+    }
+    Ok(())
+}
+
+/// Index blobs and edited bytes where Git's `text=auto` decision depends on the CRLF the index already holds.
+fn git_index_cases() -> Vec<(&'static str, &'static [u8], &'static [u8])> {
+    let edited: &[u8] = b"a\r\nb\r\nc\r\n";
+    vec![
+        ("index-crlf.txt", b"a\r\nb\r\n", edited),
+        ("index-mixed.txt", b"a\r\nb\n", edited),
+        ("index-lf.txt", b"a\nb\n", edited),
+        ("index-lone.txt", b"a\rb\r\n", edited),
+        ("index-nul.txt", b"a\0b\r\n", edited),
+        ("forced-index.txt", b"a\r\nb\r\n", edited),
+        ("eol-only-index.txt", b"a\r\nb\r\n", edited),
+    ]
+}
+
+#[test]
+fn hook_keeps_crlf_that_git_keeps_from_the_index() -> Result<()> {
+    let git = Isolated::new(true)?;
+    let repository = git.repository()?;
+    let root = repository.path();
+    fs::write(
+        root.join(".gitattributes"),
+        "forced-* text\neol-only-* !text eol=lf\n",
+    )?;
+    let cases = git_index_cases();
+    let mut staged = Vec::new();
+    for (name, indexed, edited) in &cases {
+        git.index_raw(root, name, indexed)?;
+        fs::write(root.join(name), edited)?;
+        git.git(root, &["add", name])?;
+        let blob = format!(":{name}");
+        staged.push(git.git(root, &["cat-file", "blob", &blob])?.stdout);
+        git.index_raw(root, name, indexed)?;
+    }
+    git.hook(&json!({"cwd": root, "tool_input": {"file_path": "index-crlf.txt"}}))?;
+    for ((name, _, edited), staged) in cases.iter().zip(&staged) {
+        let written = fs::read(root.join(name))?;
+        assert_eq!(&written, staged, "{name}");
+        assert_eq!(
+            ["index-crlf.txt", "index-mixed.txt"].contains(name),
+            written == *edited,
             "{name}"
         );
     }
