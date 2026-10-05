@@ -68,18 +68,30 @@ impl Wrapper {
     }
 
     fn run_with(&self, arguments: &[&str], input: Option<&[u8]>, waivers: &[&str]) -> Output {
+        let set: Vec<(&str, &str)> = waivers.iter().map(|waiver| (*waiver, "1")).collect();
+        self.run_env(arguments, input, &set)
+    }
+
+    /// Runs the wrapper with `variables` set; a stack lease token in the calling shell is removed like a waiver.
+    fn run_env(
+        &self,
+        arguments: &[&str],
+        input: Option<&[u8]>,
+        variables: &[(&str, &str)],
+    ) -> Output {
         let global = self.scope.join("gitconfig");
         let mut command = match &self.environment {
             Some(environment) => fixture_git::inheriting(self.git, &global, environment.clone()),
             None => fixture_git::command(self.git, &global),
         };
         for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("ALLOW_") {
+            let text = name.to_string_lossy();
+            if text.starts_with("ALLOW_") || text.starts_with("DOTGUARD_") {
                 command.env_remove(name);
             }
         }
-        for waiver in waivers {
-            command.env(waiver, "1");
+        for (name, value) in variables {
+            command.env(name, value);
         }
         let mut child = command
             .args(arguments)
@@ -365,4 +377,77 @@ fn a_refused_push_with_an_option_git_rejects_suggests_nothing() {
             &format!("refs/heads/{branch}"),
         ]);
     }
+}
+
+/// A rebase of a published commit runs only through the stack tooling's lease or a recorded waiver, and the refusal names the stack command.
+#[test]
+fn a_rebase_of_a_published_branch_runs_only_through_the_stack_lease() {
+    let wrapper = Wrapper::new("published-rebase");
+    std::fs::write(
+        wrapper.scope.join("gitconfig"),
+        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+    )
+    .unwrap();
+    let succeeds = |arguments: &[&str]| {
+        let output = wrapper.run(arguments, None);
+        assert!(
+            output.status.success(),
+            "git {arguments:?}: {}",
+            text(&output.stderr)
+        );
+        text(&output.stdout).trim().to_owned()
+    };
+    succeeds(&["init", "-q", "--bare", "../remote.git"]);
+    let tree = succeeds(&["write-tree"]);
+    let base = succeeds(&["commit-tree", &tree, "-m", "base"]);
+    let published = succeeds(&["commit-tree", &tree, "-p", &base, "-m", "published"]);
+    let moved = succeeds(&["commit-tree", &tree, "-p", &base, "-m", "moved"]);
+    succeeds(&["update-ref", "refs/heads/main", &moved]);
+    succeeds(&["update-ref", "refs/heads/topic", &published]);
+    succeeds(&["update-ref", "refs/heads/local", &published]);
+    succeeds(&[
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/P4suta/dotfiles.git",
+    ]);
+    succeeds(&["update-ref", "refs/remotes/origin/topic", &published]);
+    succeeds(&["symbolic-ref", "HEAD", "refs/heads/topic"]);
+    succeeds(&["reset", "-q", "--keep", "topic"]);
+
+    let refused = last_record(&wrapper.run(&["rebase", "main"], None));
+    assert_eq!(refused.rule, "git.force");
+    assert_eq!(
+        refused.next.as_deref(),
+        Some("pr-workflow stack sync --repo P4suta/dotfiles")
+    );
+    assert_eq!(
+        refused.waiver.as_deref(),
+        Some("ALLOW_FORCE=1 git rebase main")
+    );
+    let unleased = wrapper.run_env(&["rebase", "main"], None, &[("DOTGUARD_STACK", "token")]);
+    assert_eq!(last_record(&unleased).rule, "git.force");
+    assert!(
+        Refusal::find(&text(
+            &wrapper.run(&["rebase", "main", "local"], None).stderr
+        ))
+        .is_none(),
+        "an unpublished branch rebases freely"
+    );
+    succeeds(&["checkout", "-q", "topic"]);
+
+    std::fs::write(
+        wrapper.scope.join("repository/.git/dotguard-stack.lease"),
+        "token",
+    )
+    .unwrap();
+    let leased = wrapper.run_env(&["rebase", "main"], None, &[("DOTGUARD_STACK", "token")]);
+    assert!(leased.status.success(), "{}", text(&leased.stderr));
+    assert!(Refusal::find(&text(&leased.stderr)).is_none());
+    let log = std::fs::read_to_string(wrapper.home().join(".local/state/git-bypass.log")).unwrap();
+    assert!(
+        log.lines()
+            .any(|line| line.contains("\tSTACK\t") && line.contains("git rebase main")),
+        "{log}"
+    );
 }

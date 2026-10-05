@@ -20,4 +20,5 @@ pub mod realgit;
 pub mod reaper_rules;
 pub mod refusal;
 pub mod renovate;
+pub mod stack;
 pub mod staged;

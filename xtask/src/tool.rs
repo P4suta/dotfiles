@@ -50,6 +50,7 @@ pub enum Tool {
     Fcitx5Remote,
     Fleet,
     Gh,
+    GhStack,
     Ghostty,
     Git,
     Gitleaks,
@@ -106,7 +107,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 82] = [
+    pub const ALL: [Self; 83] = [
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
         Self::Atuin,
@@ -136,6 +137,7 @@ impl Tool {
         Self::Fcitx5Remote,
         Self::Fleet,
         Self::Gh,
+        Self::GhStack,
         Self::Ghostty,
         Self::Git,
         Self::Gitleaks,
@@ -214,6 +216,7 @@ impl Tool {
             Self::Fcitx5 => "fcitx5",
             Self::Fcitx5Remote => "fcitx5-remote",
             Self::Gh => "gh",
+            Self::GhStack => "gh-stack",
             Self::Ghostty => "ghostty",
             Self::Git => "git",
             Self::Gitleaks => "gitleaks",
@@ -297,6 +300,7 @@ impl Tool {
             Self::Bun => Provision::Pinned("bun"),
             Self::Cargo => Provision::Pinned("rust"),
             Self::Chezmoi => Provision::Pinned("chezmoi"),
+            Self::GhStack => Provision::Pinned("github:github/gh-stack"),
             Self::Gitleaks => Provision::Pinned("gitleaks"),
             Self::Kani => Provision::Pinned("cargo:kani-verifier"),
             Self::Nu => Provision::Pinned("nu"),

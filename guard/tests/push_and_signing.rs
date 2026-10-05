@@ -43,7 +43,8 @@ impl Repository {
     fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
         let mut command = fixture_git::command(program, &self.scope.join("gitconfig"));
         for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("ALLOW_") {
+            let text = name.to_string_lossy();
+            if text.starts_with("ALLOW_") || text.starts_with("DOTGUARD_") {
                 command.env_remove(name);
             }
         }
@@ -79,8 +80,20 @@ impl Repository {
 
     /// Runs the gate with `config` added to the repository's configuration through the environment.
     fn dotguard(&self, arguments: &[&str], input: &str, config: &[(&str, &str)]) -> Output {
+        self.dotguard_with(arguments, input, config, &[])
+    }
+
+    fn dotguard_with(
+        &self,
+        arguments: &[&str],
+        input: &str,
+        config: &[(&str, &str)],
+        variables: &[(&str, &str)],
+    ) -> Output {
         let mut command = self.command(env!("CARGO_BIN_EXE_dotguard"));
-        command.env("GIT_CONFIG_COUNT", config.len().to_string());
+        command
+            .envs(variables.iter().copied())
+            .env("GIT_CONFIG_COUNT", config.len().to_string());
         for (index, (key, value)) in config.iter().enumerate() {
             command
                 .env(format!("GIT_CONFIG_KEY_{index}"), key)
@@ -147,6 +160,29 @@ fn a_rewrite_is_refused_with_the_integration_step_and_a_waiver_for_exactly_that_
         refused.waiver.as_deref(),
         Some("ALLOW_FORCE=1 git push --force-with-lease origin refs/heads/main:refs/heads/main")
     );
+}
+
+/// The stack tooling pushes a rewrite while it holds the lease, and never a deletion.
+#[test]
+fn only_the_leased_stack_tooling_pushes_a_rewrite() {
+    let (repository, base) = published("stack-lease");
+    let published = repository.commit("published", &[&base]);
+    repository.git(&["update-ref", "refs/remotes/origin/main", &published]);
+    let local = repository.commit("local", &[&base]);
+    let rewrite = format!("refs/heads/main {local} refs/heads/main {published}\n");
+    let token = [("DOTGUARD_STACK", "token")];
+    let unleased = repository.dotguard_with(&["pre-push", "origin"], &rewrite, &[], &token);
+    assert_eq!(refusal(&unleased).rule, "push.history");
+    std::fs::write(repository.path().join(".git/dotguard-stack.lease"), "token").unwrap();
+    let leased = repository.dotguard_with(&["pre-push", "origin"], &rewrite, &[], &token);
+    assert!(
+        leased.status.success(),
+        "{}",
+        String::from_utf8_lossy(&leased.stderr)
+    );
+    let deletion = format!("(delete) {ZERO} refs/heads/topic {base}\n");
+    let deleted = repository.dotguard_with(&["pre-push", "origin"], &deletion, &[], &token);
+    assert_eq!(refusal(&deleted).rule, "push.history");
 }
 
 #[test]
