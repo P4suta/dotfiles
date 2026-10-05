@@ -521,14 +521,17 @@ pub fn wrap(family: Family, gate: &str) -> Vec<String> {
 }
 
 /// The gate for a domyjob snapshot holding only `head.bundle`: a checkout of exactly the commit, whose project tools mise may load.
+/// Trust covers only that checkout and starts before the clone, because checkout hooks already run mise there.
 pub fn remote_gate(family: Family, gate: &str) -> String {
     const CLONE: &str = "git -c advice.detachedHead=false clone --quiet head.bundle checkout";
     match family {
         Family::Windows => format!(
-            "{CLONE}; if (-not $?) {{ exit 1 }}; Set-Location checkout; $env:MISE_TRUSTED_CONFIG_PATHS = $PWD.Path; {gate}; exit $LASTEXITCODE"
+            "$env:MISE_TRUSTED_CONFIG_PATHS = Join-Path $PWD.Path checkout; {CLONE}; if (-not $?) {{ exit 1 }}; Set-Location checkout; {gate}; exit $LASTEXITCODE"
         ),
         Family::Linux | Family::Mac => {
-            format!("{CLONE} && cd checkout && export MISE_TRUSTED_CONFIG_PATHS=\"$PWD\" && {gate}")
+            format!(
+                "export MISE_TRUSTED_CONFIG_PATHS=\"$PWD/checkout\" && {CLONE} && cd checkout && {gate}"
+            )
         }
     }
 }

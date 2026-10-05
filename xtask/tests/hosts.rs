@@ -248,10 +248,12 @@ fn only_a_finished_job_reports_a_gate_status() {
     assert_eq!(wrap(Family::Windows, "just check")[0], "powershell.exe");
     for family in Family::ALL {
         let gate = remote_gate(family, "just check");
-        assert!(
-            gate.starts_with("git -c advice.detachedHead=false clone --quiet head.bundle checkout")
-        );
-        assert!(gate.contains("MISE_TRUSTED_CONFIG_PATHS") && gate.contains("just check"));
+        let trust = gate.find("MISE_TRUSTED_CONFIG_PATHS").expect("trust");
+        let clone = gate
+            .find("clone --quiet head.bundle checkout")
+            .expect("clone");
+        assert!(trust < clone, "checkout hooks run mise during the clone");
+        assert!(gate.contains("just check"));
     }
 }
 
