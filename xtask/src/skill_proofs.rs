@@ -123,6 +123,11 @@ pub const SHELL_WRITE_HARNESSES: [&str; 2] = [
     "file_writing_commands_are_never_admitted",
 ];
 
+pub const READY_PUSH_HARNESSES: [&str; 2] = [
+    "a_draft_or_absent_pr_and_ungated_pushes_are_admitted",
+    "a_ready_pr_never_takes_a_push",
+];
+
 pub const DISK_SCAN_HARNESSES: [&str; 2] = [
     "only_a_recursive_size_scan_is_refused",
     "the_refusal_names_storage_scout",
@@ -693,7 +698,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 7] = [
+pub const RULES: [Rules; 8] = [
     Rules {
         source: "xtask/src/target_rules.rs",
         harnesses: &TARGET_HARNESSES,
@@ -759,6 +764,29 @@ fn reject_admitting_a_file_redirect() {
         rejected: &[
             "reject_admitting_an_inline_interpreter",
             "reject_admitting_a_file_redirect",
+        ],
+    },
+    Rules {
+        source: "xtask/src/ready_push_rules.rs",
+        harnesses: &READY_PUSH_HARNESSES,
+        counterexamples: "use production::{Pr, Verdict, push};
+#[kani::proof]
+fn reject_admitting_a_push_to_a_ready_pr() {
+    assert!(push(true, Pr::Ready) == Verdict::Admit);
+}
+#[kani::proof]
+fn reject_admitting_an_unknown_pr_state() {
+    assert!(push(true, Pr::Unknown) == Verdict::Admit);
+}
+#[kani::proof]
+fn reject_refusing_a_push_to_a_draft() {
+    assert!(push(true, Pr::Draft) == Verdict::ReturnToDraft);
+}
+",
+        rejected: &[
+            "reject_admitting_a_push_to_a_ready_pr",
+            "reject_admitting_an_unknown_pr_state",
+            "reject_refusing_a_push_to_a_draft",
         ],
     },
     Rules {

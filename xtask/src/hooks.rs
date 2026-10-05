@@ -248,6 +248,7 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
         && let Some(url) = arguments.get(1)
     {
         crate::hosts::push_gate(Path::new("."), &url.to_string_lossy(), &input)?;
+        crate::ready_push::gate(&url.to_string_lossy(), &input)?;
     }
     if matches!(hook, Hook::PreCommit) {
         let global = native.home.join(".config/lefthook/global.yml");
