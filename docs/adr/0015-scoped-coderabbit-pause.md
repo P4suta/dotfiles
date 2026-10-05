@@ -17,9 +17,10 @@ The existing `paused` marker keeps meaning `all`, and the effective scope is the
 The guard refuses vendor calls only under a CLI pause, so a PR-only pause leaves guarded CLI reviews available.
 
 `pr-workflow` reads the same markers through the guard's library function.
-While PR reviews are paused, it refuses CodeRabbit generation in create, edit, and ready, and refuses an edit that removes the `@coderabbitai ignore` line of a ready PR.
-It refuses `ready` unless the body excludes the review, because the transition starts an automatic review.
 An exclusion made for the pause carries the standalone marker `<!-- coderabbit-pause -->` beside the ignore line; an ignore line without it is a standing exclusion.
+While PR reviews are paused, it refuses CodeRabbit generation in create, edit, and ready.
+It refuses `ready` unless the body carries the exclusion made for the pause, because the transition otherwise starts an automatic review or leaves the review unowed after resumption.
+It refuses an edit of a ready PR that removes the ignore line, or that removes the pause marker from an exclusion made for the pause.
 Each refusal names the pause and a runnable next action.
 The live check and `ready` print whether a current-head CodeRabbit PR review is required, excluded, or not required during the pause.
 After resumption, a PR excluded only for the pause reports the review as required again and names the edit and the authorized `@coderabbitai review` comment that restore it.

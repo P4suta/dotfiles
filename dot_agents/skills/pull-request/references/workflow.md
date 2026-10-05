@@ -70,7 +70,7 @@ Create and edit send an owned temporary copy of the checked body with `gh --body
 
 Complete local checks before one budget-qualified CLI review of an initial substantive change.
 `coderabbit --guard-status --json` reports the owner's pause scope: `reviews.pr` and `reviews.cli` are each `paused` or `allowed`.
-While PR reviews are paused, CodeRabbit generation is refused in create, edit, and ready, and an edit cannot remove the `@coderabbitai ignore` line of a ready PR.
+While PR reviews are paused, CodeRabbit generation is refused in create, edit, and ready, and an edit cannot remove the `@coderabbitai ignore` line or the `<!-- coderabbit-pause -->` line of a ready PR.
 `ready` then requires the standalone lines `@coderabbitai ignore` and `<!-- coderabbit-pause -->`, so the transition does not start an automatic review and the review is owed again after resumption.
 An ignore line without the pause marker is a standing exclusion.
 The live check and `ready` print whether a current-head CodeRabbit PR review is required, required again after the pause, excluded, or not required during the pause.

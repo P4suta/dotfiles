@@ -98,6 +98,21 @@ pub fn requests_review(
         }
 }
 
+/// Whether an operation during a PR pause keeps the review owed after resumption.
+/// A PR becomes ready, or stays ready, only with the exclusion made for the pause.
+pub fn keeps_pause_exclusion(
+    operation: Operation,
+    draft: bool,
+    was: Exclusion,
+    now: Exclusion,
+) -> bool {
+    match operation {
+        Operation::Create => true,
+        Operation::Edit => draft || was != Exclusion::Pause || now == Exclusion::Pause,
+        Operation::Ready => now == Exclusion::Pause,
+    }
+}
+
 /// Refuse every review request while the owner pauses CodeRabbit PR reviews.
 pub fn review_request_allowed(paused: bool, request: bool) -> bool {
     !paused || !request
@@ -329,6 +344,31 @@ fn a_paused_edit_never_removes_the_exclusion_of_a_ready_pr() {
     kani::cover!(paused && !accepted);
     kani::cover!(paused && accepted && draft && was_excluded && !excluded);
     kani::cover!(!paused && accepted && !draft && was_excluded && !excluded);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn a_pr_ready_during_the_pause_keeps_its_pause_exclusion() {
+    let (operation, _, _, draft, _, _) = inputs();
+    let was = exclusion(kani::any(), kani::any());
+    let now = exclusion(kani::any(), kani::any());
+    let kept = keeps_pause_exclusion(operation, draft, was, now);
+    assert!(operation != Operation::Ready || kept == (now == Exclusion::Pause));
+    assert!(
+        operation != Operation::Edit
+            || draft
+            || was != Exclusion::Pause
+            || kept == (now == Exclusion::Pause)
+    );
+    assert!(
+        !kept
+            || operation != Operation::Ready
+            || review_requirement(false, now) == ReviewRequirement::Resumed
+    );
+    kani::cover!(!kept && operation == Operation::Ready && now == Exclusion::Owner);
+    kani::cover!(!kept && operation == Operation::Edit && now == Exclusion::Owner);
+    kani::cover!(kept && operation == Operation::Edit && draft && now == Exclusion::None);
+    kani::cover!(kept && operation == Operation::Ready);
 }
 
 #[cfg(kani)]

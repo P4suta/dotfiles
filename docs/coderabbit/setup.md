@@ -81,7 +81,7 @@ Waiting an hour permits reconsideration, not automatic publication or a claim th
 The shared agent policy routes existing PR work and authorized PR updates to `coderabbit-review` in Codex, Claude Code, and OpenCode.
 Wait for the final pushed head's review, inspect CI and unresolved findings, fix supported actionable findings, and rerun affected checks before an authorized update.
 After updating a PR, inspect the automatic review of the new head before reporting completion.
-Explain unsupported findings with concrete code evidence, and report paused, skipped, failed, stale, or rate-limited reviews as pending.
+Explain unsupported findings with concrete code evidence, and report reviews CodeRabbit paused, skipped, failed, left stale, or rate-limited as pending.
 For an explicitly requested local review, request a second run only when substantive fixes justify it and the guard permits it.
 Batch related commits into a meaningful push and wait for the active review before updating the PR again.
 

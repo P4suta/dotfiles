@@ -582,7 +582,8 @@ fn paused_pr_reviews_are_neither_requested_nor_awaited() -> Result<()> {
         }
         for (body, generation, accepted) in [
             (BODY.to_owned(), "local", !paused),
-            (excluded.clone(), "local", true),
+            (excluded.clone(), "local", !paused),
+            (pause_excluded.clone(), "local", true),
             ("@coderabbitai summary\n".to_owned(), "coderabbit", !paused),
         ] {
             let fixture = Fixture::new(BODY)?;
@@ -608,7 +609,11 @@ fn paused_pr_reviews_are_neither_requested_nor_awaited() -> Result<()> {
             );
             assert_eq!(fixture.log()?.contains("\nready\n"), accepted);
             if !accepted {
-                assert!(String::from_utf8_lossy(&output.stderr).contains("would request one"));
+                let error = String::from_utf8_lossy(&output.stderr);
+                assert!(error.contains("PR reviews are paused"), "{error}");
+                if generation == "local" {
+                    assert!(error.contains(PAUSE_MARKER), "{error}");
+                }
             }
         }
         for (body, expected) in [
@@ -733,7 +738,43 @@ fn a_pr_readied_during_the_pause_owes_its_review_after_resumption() -> Result<()
 #[test]
 fn an_edit_cannot_restore_review_of_a_ready_pr_during_the_pause() -> Result<()> {
     let excluded = format!("{BODY}\n@coderabbitai ignore\n");
+    let pause_excluded = format!("{excluded}{PAUSE_MARKER}\n");
     for (marker, draft, live, edited, accepted) in [
+        (
+            Some("paused-pr"),
+            false,
+            pause_excluded.as_str(),
+            excluded.as_str(),
+            false,
+        ),
+        (
+            Some("paused-pr"),
+            true,
+            pause_excluded.as_str(),
+            excluded.as_str(),
+            true,
+        ),
+        (
+            None,
+            false,
+            pause_excluded.as_str(),
+            excluded.as_str(),
+            true,
+        ),
+        (
+            Some("paused-pr"),
+            false,
+            excluded.as_str(),
+            pause_excluded.as_str(),
+            true,
+        ),
+        (
+            Some("paused-pr"),
+            false,
+            pause_excluded.as_str(),
+            pause_excluded.as_str(),
+            true,
+        ),
         (Some("paused-pr"), false, excluded.as_str(), BODY, false),
         (Some("paused"), false, excluded.as_str(), BODY, false),
         (Some("paused-pr"), true, excluded.as_str(), BODY, true),

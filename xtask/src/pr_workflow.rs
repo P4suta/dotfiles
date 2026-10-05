@@ -1,7 +1,7 @@
 use crate::pr_rules::{
     Checks, Effect, Exclusion, Generation, IssueGate, Operation, ReviewRequirement,
-    api_quota_available, checks_state, coderabbit_body_marker_allowed, exclusion, issue_gate, plan,
-    requests_review, review_request_allowed, review_requirement,
+    api_quota_available, checks_state, coderabbit_body_marker_allowed, exclusion, issue_gate,
+    keeps_pause_exclusion, plan, requests_review, review_request_allowed, review_requirement,
 };
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
@@ -645,18 +645,19 @@ fn review_exclusion(body: &str) -> Exclusion {
 }
 
 /// Refuse an operation that would request a CodeRabbit PR review while the owner pauses them.
+/// Also refuse one that would leave the review unowed after the owner resumes them.
 /// `live` yields the PR's current draft state and exclusion; it is read only during a pause.
 fn admit_review_request(
     operation: Operation,
     generation: Generation,
     body: &str,
-    live: impl FnOnce() -> Result<(bool, bool)>,
+    live: impl FnOnce() -> Result<(bool, Exclusion)>,
 ) -> Result<()> {
     if !pr_reviews_paused()? {
         return Ok(());
     }
-    let (draft, was_excluded) = if generation == Generation::Coderabbit {
-        (true, false)
+    let (draft, was) = if generation == Generation::Coderabbit {
+        (true, Exclusion::None)
     } else {
         live()?
     };
@@ -667,7 +668,7 @@ fn admit_review_request(
                 operation,
                 generation,
                 draft,
-                was_excluded,
+                was != Exclusion::None,
                 excludes_review(body)
             )
         ),
@@ -681,6 +682,19 @@ fn admit_review_request(
             _ => format!(
                 "keep the draft until the owner resumes PR reviews, or add the standalone lines `{REVIEW_EXCLUSION}` and `{PAUSE_EXCLUSION}` with pr-workflow edit so the review is owed again after resumption"
             ),
+        }
+    );
+    ensure!(
+        keeps_pause_exclusion(operation, draft, was, review_exclusion(body)),
+        "CodeRabbit PR reviews are paused by the owner (`coderabbit --guard-status --json` reports reviews.pr paused), and without the standalone `{PAUSE_EXCLUSION}` line the review would not be owed after resumption; {}",
+        if operation == Operation::Ready {
+            format!(
+                "add the standalone `{PAUSE_EXCLUSION}` line beside `{REVIEW_EXCLUSION}` with pr-workflow edit, then rerun ready"
+            )
+        } else {
+            format!(
+                "keep the standalone `{PAUSE_EXCLUSION}` line of this ready PR until the owner resumes PR reviews"
+            )
         }
     );
     Ok(())
@@ -798,7 +812,7 @@ pub fn run(action: Action) -> Result<()> {
                 branch(base)?;
             }
             admit_review_request(Operation::Create, target.generation, &document.body, || {
-                Ok((true, false))
+                Ok((true, Exclusion::None))
             })?;
             let github = Github::connect()?;
             let issue = inspect_issue(&github, &target, Some(&document.body))?;
@@ -828,7 +842,7 @@ pub fn run(action: Action) -> Result<()> {
             let mut connected = None;
             admit_review_request(Operation::Edit, target.generation, &document.body, || {
                 let live = live_document(connected.insert(Github::connect()?), &target, pr)?;
-                Ok((live.is_draft, excludes_review(&live.body)))
+                Ok((live.is_draft, review_exclusion(&live.body)))
             })?;
             let github = match connected {
                 Some(github) => github,
@@ -878,7 +892,7 @@ pub fn run(action: Action) -> Result<()> {
                 "a draft becomes ready only when every reported check on its head has passed and no work remains"
             );
             admit_review_request(Operation::Ready, target.generation, &document.body, || {
-                Ok((live.is_draft, excludes_review(&document.body)))
+                Ok((live.is_draft, review_exclusion(&document.body)))
             })?;
             let mut args = arguments("ready", &target.repo);
             args.push(pr.to_string().into());

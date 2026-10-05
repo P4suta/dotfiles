@@ -1,7 +1,7 @@
 {
-  "revision": "6f2b2d91291c073ea5559ceb83edf2d583f4bb62c5a7fb4f400ded6477f15ceb",
+  "revision": "1057236921d29e19bf5ee52a299c5fbb12c685c95e2bb29a4f0fb9a76f067115",
   "outcome": "implemented",
-  "reason": "Point the CodeRabbit section at the guard's machine-readable pause scope and the pr-workflow refusals and requirement line instead of restating pause and budget prose. pr-workflow refuses review requests while PR reviews are paused, including an edit that removes a ready PR's exclusion, and a PR excluded with the pause marker owes its review again after resumption, proved in the request and requirement cores and refused natively. A draft still becomes ready only after every reported head check passes.",
+  "reason": "Point the CodeRabbit section at the guard's machine-readable pause scope and the pr-workflow refusals and requirement line instead of restating pause and budget prose. While PR reviews are paused, pr-workflow refuses review requests, a ready transition without the exclusion made for the pause, and an edit that removes a ready PR's ignore line or pause marker, so a PR readied during the pause owes its review again after resumption; the request, pause-exclusion, and requirement cores are proved and their counterexamples refused natively. A draft still becomes ready only after every reported head check passes.",
   "evidence": [
     "dot_agents/skills/pull-request/SKILL.md",
     "docs/adr/0004-checked-pull-request-authoring.md",
