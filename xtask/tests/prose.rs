@@ -645,9 +645,31 @@ fn hook_arguments(hook: &str, command: &str) -> Result<Vec<String>> {
     Ok(arguments.split_whitespace().map(str::to_owned).collect())
 }
 
+/// The directory holding a stand-in `ocomment`, compiled once, because CI hosts don't install the owner's tool.
+fn ocomment_directory() -> Result<&'static Path> {
+    static DIRECTORY: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    if let Some(directory) = DIRECTORY.get() {
+        return Ok(directory);
+    }
+    let directory = tempfile::tempdir()?.keep();
+    let status = Command::new("rustc")
+        .args(["--edition", "2024"])
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ocomment.rs"))
+        .arg("-o")
+        .arg(directory.join(format!("ocomment{}", std::env::consts::EXE_SUFFIX)))
+        .status()?;
+    anyhow::ensure!(status.success(), "fixture ocomment compilation failed");
+    Ok(DIRECTORY.get_or_init(|| directory))
+}
+
 fn run_in(directory: &Path, arguments: &[String]) -> Result<(i32, String)> {
+    let mut paths = vec![ocomment_directory()?.to_path_buf()];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
     let output = Command::new(env!("CARGO_BIN_EXE_prose"))
         .current_dir(directory)
+        .env("PATH", std::env::join_paths(paths)?)
         .args(arguments)
         .env("PROSE_RUNTIME", directory.join(".prose-runtime"))
         .stdin(Stdio::null())
