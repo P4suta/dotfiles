@@ -5,7 +5,7 @@ roots = [
     {{ joinPath .chezmoi.homeDir "Downloads/project" | quote }},
 {{- end }}
     {{ joinPath .chezmoi.homeDir "AppData/Local/domyjob" | quote }},
-    {{ joinPath .chezmoi.homeDir "AppData/Local/Temp" | quote }},
+    {{ dig "paths" "temp" (default (joinPath .chezmoi.homeDir "AppData/Local/Temp") (env "TEMP")) . | quote }},
 ]
 
 [report]

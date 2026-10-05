@@ -1,10 +1,3 @@
-{{- if eq .chezmoi.os "windows" -}}
-[select]
-roots = ['{{ .chezmoi.homeDir }}\projects', '{{ .chezmoi.homeDir }}\AppData\Local\Temp']
-
-[report]
-log_file = '{{ .chezmoi.homeDir }}\.local\state\storage-scout\auto.jsonl'
-{{- else -}}
 [select]
 roots = [
     "{{ .chezmoi.homeDir }}/projects",
@@ -19,4 +12,3 @@ roots = [
 
 [report]
 log_file = "{{ .chezmoi.homeDir }}/.local/state/storage-scout/auto.jsonl"
-{{- end }}
