@@ -131,6 +131,15 @@ enum Action {
     Decide {
         skill: String,
     },
+    /// Inspect the worktree, branch, PR, checks, pauses, and host, and print the single next step as JSON.
+    Next {
+        /// Use the last fetched state and skip GitHub.
+        #[arg(long)]
+        offline: bool,
+        /// Run the next step when it is local and reversible, then report the step after it.
+        #[arg(long)]
+        execute: bool,
+    },
     Aliases,
     FormatMetadata,
     Snapshot {
@@ -332,6 +341,7 @@ fn run() -> Result<()> {
         Action::Check => {
             dotfiles_xtask::skill_ops::check_catalog(&cli.root)?;
             dotfiles_xtask::quality::comment_scopes(&cli.root)?;
+            dotfiles_xtask::instruction_audit::check(&cli.root)?;
             dotfiles_xtask::line_endings::check(&cli.root)?;
             let unknown = dotfiles_xtask::quality::unknown_recipes(&cli.root)?;
             anyhow::ensure!(
@@ -362,6 +372,9 @@ fn run() -> Result<()> {
         }
         Action::Decide { skill } => {
             println!("{}", dotfiles_xtask::skill_ops::decide(&cli.root, &skill)?);
+        }
+        Action::Next { offline, execute } => {
+            dotfiles_xtask::next_action::run(&cli.root, offline, execute)?
         }
         Action::Aliases => {
             let entries = skills(&cli.root)?;
