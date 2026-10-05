@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use yaml_rust2::YamlLoader;
 
 pub mod agent_memory;
+pub mod change;
+pub mod change_rules;
 pub mod desktop;
 pub mod eol_rules;
 pub mod hooks;

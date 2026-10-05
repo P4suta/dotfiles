@@ -12,6 +12,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+#[path = "../../guard/tests/support/fixture_git.rs"]
+mod fixture_git;
+
 /// An isolated home with stand-ins for dotguard and lefthook, and a repository holding one staged file.
 struct Host {
     scope: tempfile::TempDir,
@@ -57,18 +60,11 @@ impl Host {
     }
 
     fn command(&self, program: &str) -> Command {
-        let mut command = Command::new(program);
-        for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("GIT_") {
-                command.env_remove(name);
-            }
-        }
+        let mut command = fixture_git::command(program, &self.scope.path().join("gitconfig"));
         command
             .current_dir(self.repository())
             .env("HOME", self.home())
-            .env("USERPROFILE", self.home())
-            .env("GIT_CONFIG_GLOBAL", self.scope.path().join("gitconfig"))
-            .env("GIT_CONFIG_NOSYSTEM", "1");
+            .env("USERPROFILE", self.home());
         command
     }
 

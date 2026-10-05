@@ -12,6 +12,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+#[path = "../../guard/tests/support/fixture_git.rs"]
+mod fixture_git;
+
 const ATTRIBUTED: &str = "As requested, the parser keeps every edit.";
 const COMPLIANT: &str = "The parser keeps every edit.";
 
@@ -595,13 +598,10 @@ fn copy_tree(from: &Path, to: &Path) -> Result<()> {
 }
 
 fn git(directory: &Path, arguments: &[&str]) -> Result<()> {
-    let status = Command::new("git")
+    let status = fixture_git::command("git", &directory.join(".fixture-gitconfig"))
         .current_dir(directory)
         .args(["-c", "core.hooksPath=", "-c", "commit.gpgsign=false"])
         .args(arguments)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_INDEX_FILE")
-        .env_remove("GIT_WORK_TREE")
         .stdout(Stdio::null())
         .status()?;
     assert!(status.success(), "git {arguments:?}");

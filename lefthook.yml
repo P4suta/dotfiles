@@ -2,7 +2,7 @@
 pre-commit:
   commands:
     candidate:
-      run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check
+      run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check --staged
     comments:
       run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml --bin prose -- --source . repository --scope comments
 commit-msg:
@@ -12,6 +12,6 @@ commit-msg:
 pre-push:
   commands:
     candidate:
-      run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check
+      run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check --base origin/main
     contracts:
-      run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- proofs
+      run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- proofs --base origin/main

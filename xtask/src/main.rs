@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
+use dotfiles_xtask::change_rules::{Gate, Gates};
 use dotfiles_xtask::tool::Tool;
 use dotfiles_xtask::{
     check_build_dir, export_checks, skill_source_paths, skills, split_frontmatter, validate_tree,
@@ -126,7 +127,16 @@ enum Action {
         #[arg(long)]
         disposable_host: bool,
     },
-    Check,
+    /// Run the gates a change selects, or every gate without a scope.
+    Check {
+        #[command(flatten)]
+        scope: dotfiles_xtask::change::Scope,
+    },
+    /// Print `gates=<names>`: the gates the change set selects, or every gate without a scope.
+    Classify {
+        #[command(flatten)]
+        scope: dotfiles_xtask::change::Scope,
+    },
     /// Draft the tracked decision for a changed or new skill.
     Decide {
         skill: String,
@@ -157,7 +167,12 @@ enum Action {
         #[command(subcommand)]
         command: dotfiles_xtask::pr_workflow::Action,
     },
-    Proofs,
+    /// Prove the production contracts.
+    /// A scope without the Rust gate skips them.
+    Proofs {
+        #[command(flatten)]
+        scope: dotfiles_xtask::change::Scope,
+    },
 }
 
 fn cargo(root: &Path, manifest: &Path, args: &[&str]) -> Result<()> {
@@ -194,6 +209,56 @@ fn check_package(root: &Path, manifest: &Path) -> Result<()> {
         .status()?;
     ensure!(status.success(), "clippy failed with {status}");
     cargo(root, manifest, &["test", "--locked", "--all-targets"])
+}
+
+/// Runs the checks of each selected gate.
+/// A change that selects fewer gates skips only the checks it can't affect.
+fn check(root: &Path, gates: Gates) -> Result<()> {
+    if gates.contains(Gate::Prose) {
+        dotfiles_xtask::quality::comment_scopes(root)?;
+        dotfiles_xtask::instruction_audit::check(root)?;
+        dotfiles_xtask::line_endings::check(root)?;
+        let unknown = dotfiles_xtask::quality::unknown_recipes(root)?;
+        anyhow::ensure!(
+            unknown.is_empty(),
+            "references to recipes the justfile does not define: {unknown:#?}"
+        );
+        dotfiles_xtask::quality::secrets(root)?;
+        dotfiles_xtask::prose::repository(
+            root,
+            dotfiles_xtask::prose::Scope::Documents,
+            &dotfiles_xtask::prose::Bundle::source(root)?,
+        )?;
+    }
+    if gates.contains(Gate::Skills) {
+        dotfiles_xtask::skill_ops::check_catalog(root)?;
+        println!(
+            "Validated {} shared skills and aliases",
+            validate_tree(root)?
+        );
+        dotfiles_xtask::quality::adapters(root)?;
+    }
+    if gates.contains(Gate::Rust) {
+        check_package(root, Path::new("xtask/Cargo.toml"))?;
+        check_package(
+            root,
+            Path::new("dot_agents/skills/github-repository/scripts/repo-settings/Cargo.toml"),
+        )?;
+        check_package(root, Path::new("guard/Cargo.toml"))?;
+        if cfg!(windows) {
+            check_package(root, Path::new("tools/dotctl/Cargo.toml"))?;
+        }
+    }
+    if gates.contains(Gate::Profiles) {
+        let unreferenced = dotfiles_xtask::quality::unreferenced_leaves(root)?;
+        anyhow::ensure!(
+            unreferenced.is_empty(),
+            "profile leaves that no template includes: {unreferenced:?}"
+        );
+        dotfiles_xtask::profiles::check_profiles(root, None)?;
+    }
+    println!("Checked the gates: {}", gates.names());
+    Ok(())
 }
 
 fn run() -> Result<()> {
@@ -371,7 +436,14 @@ fn run() -> Result<()> {
                     .context("user directory is unavailable")?;
             dotfiles_xtask::prose::install(&cli.root, &binary, Path::new(&user_directory))?;
         }
-        Action::Proofs => dotfiles_xtask::skill_proofs::verify(&cli.root)?,
+        Action::Proofs { scope } => {
+            if scope.resolve(&cli.root)?.contains(Gate::Rust) {
+                dotfiles_xtask::skill_proofs::verify(&cli.root)?;
+            } else {
+                println!("Skipped the proofs: the change selects no Rust gate");
+            }
+        }
+        Action::Classify { scope } => dotfiles_xtask::change::run(&cli.root, &scope)?,
         Action::Skills => {
             dotfiles_xtask::skill_ops::check_catalog(&cli.root)?;
             println!(
@@ -382,44 +454,7 @@ fn run() -> Result<()> {
         Action::Rehearse { disposable_host } => {
             dotfiles_xtask::rehearsal::run(&cli.root, disposable_host)?
         }
-        Action::Check => {
-            dotfiles_xtask::skill_ops::check_catalog(&cli.root)?;
-            dotfiles_xtask::quality::comment_scopes(&cli.root)?;
-            dotfiles_xtask::instruction_audit::check(&cli.root)?;
-            dotfiles_xtask::line_endings::check(&cli.root)?;
-            let unknown = dotfiles_xtask::quality::unknown_recipes(&cli.root)?;
-            anyhow::ensure!(
-                unknown.is_empty(),
-                "references to recipes the justfile does not define: {unknown:#?}"
-            );
-            dotfiles_xtask::prose::repository(
-                &cli.root,
-                dotfiles_xtask::prose::Scope::Documents,
-                &dotfiles_xtask::prose::Bundle::source(&cli.root)?,
-            )?;
-            let unreferenced = dotfiles_xtask::quality::unreferenced_leaves(&cli.root)?;
-            anyhow::ensure!(
-                unreferenced.is_empty(),
-                "profile leaves that no template includes: {unreferenced:?}"
-            );
-            println!(
-                "Validated {} shared skills and aliases",
-                validate_tree(&cli.root)?
-            );
-            // The plugin tests import the adapter packages that this step installs.
-            dotfiles_xtask::quality::adapters(&cli.root)?;
-            check_package(&cli.root, Path::new("xtask/Cargo.toml"))?;
-            check_package(
-                &cli.root,
-                Path::new("dot_agents/skills/github-repository/scripts/repo-settings/Cargo.toml"),
-            )?;
-            check_package(&cli.root, Path::new("guard/Cargo.toml"))?;
-            if cfg!(windows) {
-                check_package(&cli.root, Path::new("tools/dotctl/Cargo.toml"))?;
-            }
-            dotfiles_xtask::profiles::check_profiles(&cli.root, None)?;
-            dotfiles_xtask::quality::secrets(&cli.root)?;
-        }
+        Action::Check { scope } => check(&cli.root, scope.resolve(&cli.root)?)?,
         Action::Decide { skill } => {
             println!("{}", dotfiles_xtask::skill_ops::decide(&cli.root, &skill)?);
         }

@@ -8,33 +8,69 @@ permissions:
   contents: read
 
 jobs:
+  classify:
+    name: classify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      gates: ${{ steps.classify.outputs.gates }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
+      - name: Select the gates this change affects
+        id: classify
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- classify --base "$BASE" >> "$GITHUB_OUTPUT"
+
+  # The required checks always run and report, so a change that needs fewer gates still satisfies the ruleset.
+  # Each step runs only for the gates the classify job selected, and a skipped step counts as a success.
   required:
     name: required (${{ matrix.os }})
+    needs: classify
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      GATES: ${{ needs.classify.outputs.gates }}
     steps:
+      - name: Refuse to pass without a classification
+        if: needs.classify.result != 'success'
+        shell: bash
+        run: |
+          echo "the classify job did not succeed, so no gate was selected" >&2
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.classify.outputs.gates != ''
         with:
           persist-credentials: false
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
-      - name: Check shared skills, typed adapters, and Rust helpers
-        run: mise run check:rust
+        if: needs.classify.outputs.gates != ''
+      - name: Check the selected gates
+        if: needs.classify.outputs.gates != ''
+        shell: bash
+        run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check --gates "$GATES"
       - name: Set up the pinned native verifier
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && contains(needs.classify.outputs.gates, 'rust')
         run: mise x -- kani setup
       - name: Prove production maintenance contracts and reject the counterexample
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && contains(needs.classify.outputs.gates, 'rust')
         run: mise run check:proofs
       - name: Check Linux system provisioning syntax
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && contains(needs.classify.outputs.gates, 'profiles')
         run: mise run check:ops
 
   rehearsal:
     name: rehearsal (${{ matrix.os }})
+    needs: classify
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -42,9 +78,18 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:
+      - name: Refuse to pass without a classification
+        if: needs.classify.result != 'success'
+        shell: bash
+        run: |
+          echo "the classify job did not succeed, so no gate was selected" >&2
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: contains(needs.classify.outputs.gates, 'profiles')
         with:
           persist-credentials: false
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
+        if: contains(needs.classify.outputs.gates, 'profiles')
       - name: Apply, reprovision, and reapply the native profile on this disposable host
+        if: contains(needs.classify.outputs.gates, 'profiles')
         run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- rehearse --disposable-host

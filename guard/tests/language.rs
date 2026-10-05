@@ -3,6 +3,11 @@
 use dotguard::refusal::{Refusal, words};
 use std::process::Command;
 
+#[path = "support/fixture_git.rs"]
+mod fixture_git;
+#[path = "support/wrapper.rs"]
+mod wrapper;
+
 #[test]
 fn a_contaminated_file_is_refused_with_a_rescan_and_a_recorded_waiver() {
     let scope = std::env::temp_dir().join(format!("dotguard-language-{}", std::process::id()));
@@ -62,7 +67,7 @@ impl Checkout {
         )
         .unwrap();
         let git = scope.join(format!("git{}", std::env::consts::EXE_SUFFIX));
-        std::fs::copy(env!("CARGO_BIN_EXE_dotguard"), &git).unwrap();
+        wrapper::install(&git);
         let checkout = Self { scope, git };
         assert!(checkout.run(&["init", "-q"], &[]).status.success());
         let hooks = checkout.path().join(".git/hooks");
@@ -88,28 +93,25 @@ impl Checkout {
         self.scope.join("repository")
     }
 
-    fn isolate<'a>(&self, command: &'a mut Command) -> &'a mut Command {
+    fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
+        let mut command = fixture_git::command(program, &self.scope.join("gitconfig"));
         for (name, _) in std::env::vars_os() {
             let text = name.to_string_lossy();
-            if text.starts_with("ALLOW_")
-                || text.starts_with("GIT_")
-                || text.starts_with("DOTGUARD_")
-            {
+            if text.starts_with("ALLOW_") || text.starts_with("DOTGUARD_") {
                 command.env_remove(name);
             }
         }
         command
             .current_dir(self.path())
             .env("HOME", self.scope.join("home"))
-            .env("USERPROFILE", self.scope.join("home"))
-            .env("GIT_CONFIG_GLOBAL", self.scope.join("gitconfig"))
-            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("USERPROFILE", self.scope.join("home"));
+        command
     }
 
     /// Runs the wrapper copy with each named waiver set.
     fn run(&self, arguments: &[&str], waivers: &[&str]) -> std::process::Output {
-        let mut command = Command::new(&self.git);
-        self.isolate(&mut command).args(arguments);
+        let mut command = self.command(&self.git);
+        command.args(arguments);
         for waiver in waivers {
             command.env(waiver, "1");
         }
@@ -179,9 +181,8 @@ fn a_foreign_message_is_refused_with_a_retry_that_keeps_the_amend() {
         message,
         "the saved message of the refused commit"
     );
-    let mut command = Command::new(&checkout.git);
     let corrected = checkout
-        .isolate(&mut command)
+        .command(&checkout.git)
         .args(&next[1..])
         .env("GIT_EDITOR", "printf 'fix c\\n' >")
         .output()
@@ -233,9 +234,8 @@ fn a_language_refusal_outside_the_wrapper_names_the_override_without_a_waiver() 
         format!("fix {}\n", char::from_u32(0x0441).unwrap()),
     )
     .unwrap();
-    let mut command = Command::new(env!("CARGO_BIN_EXE_dotguard"));
     let output = checkout
-        .isolate(&mut command)
+        .command(env!("CARGO_BIN_EXE_dotguard"))
         .arg("commit-msg")
         .arg(&message)
         .output()
@@ -264,9 +264,8 @@ fn a_language_refusal_outside_the_wrapper_names_the_override_without_a_waiver() 
 
 /// Runs `arguments` through the wrapper with an editor that writes `message`.
 fn edited(checkout: &Checkout, arguments: &[&str], message: &str) -> std::process::Output {
-    let mut command = Command::new(&checkout.git);
     checkout
-        .isolate(&mut command)
+        .command(&checkout.git)
         .args(arguments)
         .env("GIT_EDITOR", format!("printf '{message}' >"))
         .output()
