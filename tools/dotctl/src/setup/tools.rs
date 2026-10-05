@@ -13,16 +13,16 @@ pub fn run(scoop_apps: &[String]) -> Result<i32> {
     let token = github_token();
 
     println!(">>> mise install");
-    proc::status(mise(&token).args(["install", "-y"]))?;
+    proc::run(mise(&token).args(["install", "-y"]))?;
 
     println!(">>> mise upgrade --bump");
-    proc::status(mise(&token).args(["upgrade", "--bump", "-y"]))?;
+    proc::run(mise(&token).args(["upgrade", "--bump", "-y"]))?;
 
     let absent = scoop::absent(scoop_apps);
     if absent.is_empty() {
         println!(">>> mise prune");
-        proc::status(mise(&token).args(["prune", "-y"]))?;
-        proc::status(mise(&token).arg("reshim"))?;
+        proc::run(mise(&token).args(["prune", "-y"]))?;
+        proc::run(mise(&token).arg("reshim"))?;
     } else {
         eprintln!(
             "mise prune waits for scoop to install {}",
@@ -54,14 +54,14 @@ fn mise(token: &Option<String>) -> std::process::Command {
     cmd
 }
 
-fn install_ps_modules() -> Result<i32> {
+fn install_ps_modules() -> Result<()> {
     let helper = proc::write_temp(PSGALLERY_HELPER, ".ps1")?;
     let mut cmd = env::command("pwsh");
     cmd.args(["-NoLogo", "-NoProfile", "-File"])
         .arg(helper.as_os_str())
         .arg("-Modules")
         .arg(PS_MODULES.join(","));
-    proc::status(&mut cmd)
+    proc::run(&mut cmd)
 }
 
 #[derive(Debug, Default)]

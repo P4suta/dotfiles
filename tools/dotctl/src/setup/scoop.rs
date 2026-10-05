@@ -130,7 +130,8 @@ fn configure_public_scoop_https(repo: &Path) -> Result<()> {
         "--local",
         "remote.origin.url",
         &https,
-    ]))?;
+    ]))?
+    .code();
     if code != 0 {
         bail!(
             "setting HTTPS access for {} exited with {code}",
@@ -160,7 +161,7 @@ fn install(options: &Options) -> Result<()> {
         .tempfile()?
         .into_temp_path();
     download::download_verified(&url, &options.installer_sha256, &installer)?;
-    let code = proc::status(pwsh().arg("-File").arg(&*installer))?;
+    let code = proc::status(pwsh().arg("-File").arg(&*installer))?.code();
     if code != 0 {
         bail!("the scoop installer exited with {code}");
     }
@@ -168,7 +169,7 @@ fn install(options: &Options) -> Result<()> {
 }
 
 fn scoop(root: &Path, args: &[&str]) -> Result<()> {
-    let code = proc::status(pwsh().arg("-File").arg(script(root)).args(args))?;
+    let code = proc::status(pwsh().arg("-File").arg(script(root)).args(args))?.code();
     if code != 0 {
         bail!("scoop {} exited with {code}", args.join(" "));
     }

@@ -1,4 +1,3 @@
-mod apply;
 mod env;
 mod lint;
 mod proc;
@@ -27,12 +26,6 @@ enum Command {
     Setup {
         #[command(subcommand)]
         what: SetupKind,
-    },
-    Apply {
-        #[arg(long)]
-        yes: bool,
-        #[arg(long)]
-        force: bool,
     },
 }
 
@@ -104,7 +97,6 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Command::Lint { kind, files } => lint::run(kind, &files),
         Command::Preflight => preflight(),
-        Command::Apply { yes, force } => apply::run(yes, force),
         Command::Setup { what } => match what {
             SetupKind::Tools { scoop_apps } => setup::tools::run(&scoop_apps),
             SetupKind::Scoop {
@@ -179,5 +171,5 @@ fn main() -> ExitCode {
 fn preflight() -> anyhow::Result<i32> {
     let mut cmd = env::command("lefthook");
     cmd.args(["run", "preflight", "--all-files"]);
-    proc::status(&mut cmd)
+    Ok(proc::status(&mut cmd)?.code())
 }

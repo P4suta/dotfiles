@@ -75,7 +75,7 @@ pub fn run(kind: Kind, files: &[PathBuf]) -> Result<i32> {
 fn prose(files: &[&Path]) -> Result<i32> {
     let mut cmd = env::command("ocomment");
     cmd.arg("check").args(files);
-    let code = proc::status(&mut cmd)?;
+    let code = proc::status(&mut cmd)?.code();
     if code == 2 { Ok(0) } else { Ok(code) }
 }
 
@@ -83,7 +83,7 @@ fn prose(files: &[&Path]) -> Result<i32> {
 fn whole_batch(program: &str, files: &[&Path]) -> Result<i32> {
     let mut cmd = env::command(program);
     cmd.args(files);
-    proc::status(&mut cmd)
+    Ok(proc::status(&mut cmd)?.code())
 }
 
 /// Returns false when the file failed its validator.
@@ -197,7 +197,7 @@ fn powershell(files: &[&Path]) -> Result<i32> {
         .arg(manifest.as_os_str())
         .arg("-Settings")
         .arg(settings.as_os_str());
-    let analyzer = proc::status(&mut cmd)?;
+    let analyzer = proc::status(&mut cmd)?.code();
     Ok(if analyzer == 0 { code } else { analyzer })
 }
 
