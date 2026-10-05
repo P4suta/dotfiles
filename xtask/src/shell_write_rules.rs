@@ -45,6 +45,8 @@ enum Token {
 struct Scan {
     tokens: Vec<Token>,
     heredoc: bool,
+    /// The text of every heredoc body, in order.
+    heredocs: Vec<String>,
 }
 
 fn flush(word: &mut String, plain: &mut bool, started: &mut bool, tokens: &mut Vec<Token>) {
@@ -58,8 +60,14 @@ fn flush(word: &mut String, plain: &mut bool, started: &mut bool, tokens: &mut V
     *started = false;
 }
 
-fn skip_heredoc_body(chars: &[char], mut index: usize, delimiters: &mut Vec<String>) -> usize {
+fn skip_heredoc_body(
+    chars: &[char],
+    mut index: usize,
+    delimiters: &mut Vec<String>,
+    bodies: &mut Vec<String>,
+) -> usize {
     for delimiter in delimiters.drain(..) {
+        let mut body = String::new();
         loop {
             let end = chars[index..]
                 .iter()
@@ -67,10 +75,16 @@ fn skip_heredoc_body(chars: &[char], mut index: usize, delimiters: &mut Vec<Stri
                 .map_or(chars.len(), |offset| index + offset);
             let line: String = chars[index..end].iter().collect();
             index = (end + 1).min(chars.len());
-            if line.trim_start_matches('\t') == delimiter || end == chars.len() {
+            if line.trim_start_matches('\t') == delimiter {
+                break;
+            }
+            body.push_str(&line);
+            body.push('\n');
+            if end == chars.len() {
                 break;
             }
         }
+        bodies.push(body);
     }
     index
 }
@@ -119,7 +133,7 @@ fn scan(command: &str) -> Scan {
             '\n' => {
                 flush(&mut word, &mut plain, &mut started, &mut scan.tokens);
                 scan.tokens.push(Token::Separator);
-                index = skip_heredoc_body(&chars, index, &mut delimiters);
+                index = skip_heredoc_body(&chars, index, &mut delimiters, &mut scan.heredocs);
             }
             ';' | '|' | '(' | ')' | '{' | '}' => {
                 flush(&mut word, &mut plain, &mut started, &mut scan.tokens);
@@ -238,6 +252,161 @@ fn writes_to(target: Option<&Token>) -> bool {
     }
 }
 
+/// The words of one simple command, up to its first redirect.
+fn segment_words(segment: &[Token]) -> Vec<&str> {
+    segment
+        .iter()
+        .take_while(|token| **token != Token::Redirect)
+        .filter_map(|token| match token {
+            Token::Word { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Where the text of a body sent to GitHub comes from.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Source {
+    /// The body is written on the command line.
+    Inline(String),
+    /// The body is read from a file named on the command line.
+    File(String),
+    /// The request payload is a JSON file whose `body` string is sent.
+    Json(String),
+    /// The body arrives on standard input: heredocs and the words of the rest of the command.
+    Stdin(String),
+}
+
+/// The `gh` subcommands that send a body, as `(group, verb)`.
+const BODY_COMMANDS: [(&str, &str); 7] = [
+    ("pr", "create"),
+    ("pr", "edit"),
+    ("pr", "comment"),
+    ("pr", "review"),
+    ("issue", "create"),
+    ("issue", "edit"),
+    ("issue", "comment"),
+];
+
+fn flag_value<'a>(arguments: &[&'a str], index: usize, names: &[&str]) -> Option<(&'a str, usize)> {
+    let argument = arguments[index];
+    for name in names {
+        if argument == *name {
+            return arguments.get(index + 1).map(|value| (*value, 2));
+        }
+        let joined = argument
+            .strip_prefix(name)
+            .and_then(|rest| rest.strip_prefix('='))
+            .filter(|_| name.starts_with("--"));
+        if let Some(value) = joined {
+            return Some((value, 1));
+        }
+    }
+    None
+}
+
+fn file_source(path: &str) -> Source {
+    if path == "-" {
+        Source::Stdin(String::new())
+    } else {
+        Source::File(path.to_owned())
+    }
+}
+
+/// The value of a `key=value` field when the key is a body.
+fn body_value(field: &str) -> Option<&str> {
+    field
+        .split_once('=')
+        .filter(|(key, _)| *key == "body" || key.ends_with("[body]"))
+        .map(|(_, value)| value)
+}
+
+fn api_sources(arguments: &[&str], sources: &mut Vec<Source>) {
+    let mut index = 0;
+    while index < arguments.len() {
+        if let Some((value, used)) = flag_value(arguments, index, &["-f", "--raw-field"]) {
+            if let Some(text) = body_value(value) {
+                sources.push(Source::Inline(text.to_owned()));
+            }
+            index += used;
+        } else if let Some((value, used)) = flag_value(arguments, index, &["-F", "--field"]) {
+            if let Some(text) = body_value(value) {
+                sources.push(match text.strip_prefix('@') {
+                    Some(path) => file_source(path),
+                    None => Source::Inline(text.to_owned()),
+                });
+            }
+            index += used;
+        } else if let Some((value, used)) = flag_value(arguments, index, &["--input"]) {
+            sources.push(match value {
+                "-" => Source::Stdin(String::new()),
+                path => Source::Json(path.to_owned()),
+            });
+            index += used;
+        } else {
+            index += 1;
+        }
+    }
+}
+
+fn command_sources(arguments: &[&str], sources: &mut Vec<Source>) {
+    let mut index = 0;
+    while index < arguments.len() {
+        if let Some((value, used)) = flag_value(arguments, index, &["-b", "--body"]) {
+            sources.push(Source::Inline(value.to_owned()));
+            index += used;
+        } else if let Some((value, used)) = flag_value(arguments, index, &["-F", "--body-file"]) {
+            sources.push(file_source(value));
+            index += used;
+        } else {
+            index += 1;
+        }
+    }
+}
+
+/// Every place the bodies of the `gh` writes in a command come from.
+///
+/// Standard input is resolved here, where the command text is known: it is the heredoc bodies and the words of every other command in the line, so `echo "$text" | gh pr comment --body-file -` is read as well.
+pub fn body_sources(command: &str) -> Vec<Source> {
+    let scan = scan(command);
+    let segments: Vec<Vec<&str>> = scan
+        .tokens
+        .split(|token| *token == Token::Separator)
+        .map(segment_words)
+        .collect();
+    let mut sources = Vec::new();
+    for (position, words) in segments.iter().enumerate() {
+        let Some(gh) = words.iter().position(|word| program(word) == "gh") else {
+            continue;
+        };
+        let rest = &words[gh + 1..];
+        let before = sources.len();
+        if let Some(api) = rest.iter().position(|word| *word == "api") {
+            api_sources(&rest[api + 1..], &mut sources);
+        } else if BODY_COMMANDS.iter().any(|(group, verb)| {
+            rest.windows(2)
+                .any(|pair| pair[0] == *group && pair[1] == *verb)
+        }) {
+            command_sources(rest, &mut sources);
+        }
+        let mut stdin = scan.heredocs.join("");
+        for (other, words) in segments.iter().enumerate() {
+            if other != position {
+                for word in words {
+                    stdin.push_str(word);
+                    stdin.push('\n');
+                }
+            }
+        }
+        for source in &mut sources[before..] {
+            if matches!(source, Source::Stdin(_)) {
+                *source = Source::Stdin(stdin.clone());
+            }
+        }
+    }
+    sources
+}
+
 /// The two detections the verdict is made from: an inline interpreter and a file write.
 pub fn inspect(command: &str) -> Verdict {
     let scan = scan(command);
@@ -249,14 +418,7 @@ pub fn inspect(command: &str) -> Verdict {
         }
     }
     for segment in scan.tokens.split(|token| *token == Token::Separator) {
-        let words: Vec<&str> = segment
-            .iter()
-            .take_while(|token| **token != Token::Redirect)
-            .filter_map(|token| match token {
-                Token::Word { text, .. } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect();
+        let words = segment_words(segment);
         let mut start = 0;
         while start < words.len() {
             let name = program(words[start]);
@@ -393,6 +555,87 @@ mod tests {
             "",
         ] {
             assert_eq!(inspect(command), Verdict::Admit, "{command}");
+        }
+    }
+
+    fn inline(text: &str) -> Source {
+        Source::Inline(text.to_owned())
+    }
+
+    #[test]
+    fn gh_body_arguments_are_collected_from_every_spelling() {
+        for (command, expected) in [
+            ("gh pr create --title t --body 'a\nb'", vec![inline("a\nb")]),
+            ("gh pr create -b text", vec![inline("text")]),
+            ("gh issue create --body=text", vec![inline("text")]),
+            (
+                "gh pr edit 3 --body-file notes.md",
+                vec![Source::File("notes.md".into())],
+            ),
+            (
+                "env -u SSH_AUTH_SOCK gh -R a/b pr comment 3 -F notes.md",
+                vec![Source::File("notes.md".into())],
+            ),
+            (
+                "gh issue comment 3 --body-file=notes.md",
+                vec![Source::File("notes.md".into())],
+            ),
+            (
+                "gh api repos/a/b/issues/3/comments -f body=text",
+                vec![inline("text")],
+            ),
+            (
+                "gh api repos/a/b/issues/3 -X PATCH -F body=@notes.md",
+                vec![Source::File("notes.md".into())],
+            ),
+            (
+                "gh api repos/a/b/issues -F body=literal@text",
+                vec![inline("literal@text")],
+            ),
+            (
+                "gh api x --raw-field body=@notes.md",
+                vec![inline("@notes.md")],
+            ),
+            (
+                "gh api x --input payload.json",
+                vec![Source::Json("payload.json".into())],
+            ),
+            ("gh api x -f comment[body]=text", vec![inline("text")]),
+        ] {
+            assert_eq!(body_sources(command), expected, "{command}");
+        }
+    }
+
+    #[test]
+    fn standard_input_bodies_include_heredocs_and_piped_words() {
+        assert_eq!(
+            body_sources("gh pr create --body-file - <<'EOF'\nline one\nline two\nEOF"),
+            vec![Source::Stdin("line one\nline two\n".into())]
+        );
+        assert_eq!(
+            body_sources("echo \"hello\" | gh pr comment 3 -F -"),
+            vec![Source::Stdin("echo\nhello\n".into())]
+        );
+        assert_eq!(
+            body_sources("gh api x --input - <<EOF\n{\"body\":\"b\"}\nEOF"),
+            vec![Source::Stdin("{\"body\":\"b\"}\n".into())]
+        );
+    }
+
+    #[test]
+    fn commands_that_send_no_body_have_no_sources() {
+        for command in [
+            "gh pr view 3 --json body",
+            "gh pr create --fill",
+            "gh pr list --search body",
+            "gh issue view 3 --comments",
+            "gh api repos/a/b/issues/3",
+            "gh api x -f title=text",
+            "git commit -F msg.txt",
+            "echo --body text",
+            "",
+        ] {
+            assert!(body_sources(command).is_empty(), "{command}");
         }
     }
 

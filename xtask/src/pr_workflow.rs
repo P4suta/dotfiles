@@ -1,3 +1,4 @@
+use crate::body_rules::{Verdict, next_action as body_next_action, verdict as body_verdict};
 use crate::pr_rules::{
     Checks, Effect, Exclusion, Generation, IssueGate, Operation, ReviewRequirement,
     api_quota_available, checks_state, coderabbit_body_marker_allowed, exclusion, issue_gate,
@@ -207,6 +208,19 @@ pub struct ValidatedDocument {
     body: String,
 }
 
+/// Refuse a title or body that carries a line claiming authorship for an agent, naming the line and the next action.
+fn refuse_attribution(part: &str, text: &str) -> Result<()> {
+    let found = dotguard::attribution::find(text);
+    if let Verdict::Refuse(reason) = body_verdict(found.is_some()) {
+        let (number, line) = found.context("a refused document names its attribution line")?;
+        anyhow::bail!(
+            "{part} line {number} is AI attribution: {line}\nNext action: {}",
+            body_next_action(reason)
+        );
+    }
+    Ok(())
+}
+
 fn single_line(value: &str) -> bool {
     !value.trim().is_empty() && !value.chars().any(char::is_control)
 }
@@ -388,6 +402,8 @@ pub fn validate(
             "title must use type(scope)!: description; scope and ! are optional (or supply a repository-scoped title policy)"
         );
     }
+    refuse_attribution("title", &title)?;
+    refuse_attribution("body", &body)?;
     let visible = without_comments(&body);
     let visible = visible
         .lines()

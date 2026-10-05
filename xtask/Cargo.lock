@@ -172,6 +172,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "dotguard",
  "pulldown-cmark",
  "serde",
  "serde_json",
@@ -180,6 +181,10 @@ dependencies = [
  "toml",
  "yaml-rust2",
 ]
+
+[[package]]
+name = "dotguard"
+version = "0.1.0"
 
 [[package]]
 name = "encoding_rs"
