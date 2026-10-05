@@ -5,6 +5,8 @@
 [core]
 	sshCommand = ssh.exe
 	pager = delta
+	# Every repository normalizes text to LF unless its own attributes say otherwise.
+	attributesFile = ~/.config/git/attributes
 {{- if .signing.enabled }}
 	# 全 repo (既存含む) で署名 hook を強制実行する単一ソース。
 	# The hooks live in dot_config/git/hooks/ and run each repository's own lefthook configuration, so no repository installs lefthook hooks.

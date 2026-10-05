@@ -672,6 +672,26 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
                 .args(["--list"]),
             "parse rendered Git configuration",
         )?;
+        let attributes = output(
+            Tool::Git
+                .command()
+                .args(["config", "--file"])
+                .arg(destination.join(if profile == Profile::Windows {
+                    ".config/git/config"
+                } else {
+                    ".gitconfig"
+                }))
+                .args(["--get", "core.attributesFile"]),
+            "read the rendered global attributes setting",
+        )?;
+        ensure!(
+            String::from_utf8(attributes.stdout)?.trim() == "~/.config/git/attributes"
+                && fs::read_to_string(destination.join(".config/git/attributes"))?
+                    .lines()
+                    .any(|line| line == "* text=auto eol=lf"),
+            "{} does not install the global LF attributes; set core.attributesFile to ~/.config/git/attributes and render dot_config/git/attributes for this profile",
+            profile.name()
+        );
         println!(
             "Rendered, applied twice, and verified {} in an owned fixture",
             profile.name()
