@@ -35,6 +35,7 @@ impl Wrapper {
 
     /// Runs the wrapper with an isolated home and Git configuration, so its audit records stay out of the developer's.
     /// Waivers set in the calling shell, such as the one a force push sets for its hooks, are removed so they cannot decide a refusal.
+    /// Git variables are removed too: a commit hook in a linked worktree exports `GIT_DIR`, and `git init` would reinitialize that repository instead of the scratch one.
     fn run(&self, arguments: &[&str], input: Option<&[u8]>) -> Output {
         self.run_with(arguments, input, &[])
     }
@@ -42,7 +43,8 @@ impl Wrapper {
     fn run_with(&self, arguments: &[&str], input: Option<&[u8]>, waivers: &[&str]) -> Output {
         let mut command = Command::new(&self.git);
         for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("ALLOW_") {
+            let name_text = name.to_string_lossy();
+            if name_text.starts_with("ALLOW_") || name_text.starts_with("GIT_") {
                 command.env_remove(name);
             }
         }
@@ -130,4 +132,37 @@ fn a_copy_named_git_passes_arguments_streams_and_status_through() {
     assert_eq!(missing.status.code(), Some(1));
     let unknown = wrapper.run(&["no-such-command"], None);
     assert_eq!(unknown.status.code(), Some(1));
+}
+
+#[test]
+fn a_callers_git_repository_variables_cannot_redirect_the_wrapper() {
+    let outer = Wrapper::new("outer-repository");
+    let outer_git = outer.scope.join("repository/.git");
+    let config_before = std::fs::read(outer_git.join("config")).unwrap();
+    // SAFETY: std serializes its own environment access and nothing in this binary reads the environment outside std; concurrent tests remove these variables from their children too.
+    let saved: Vec<_> = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]
+        .iter()
+        .map(|name| (*name, std::env::var_os(name)))
+        .collect();
+    unsafe {
+        std::env::set_var("GIT_DIR", &outer_git);
+        std::env::set_var("GIT_WORK_TREE", outer.scope.join("repository"));
+        std::env::set_var("GIT_INDEX_FILE", outer_git.join("index"));
+    }
+    let inner = Wrapper::new("inner-repository");
+    let initialized = inner.scope.join("repository/.git").is_dir();
+    for (name, value) in saved {
+        // SAFETY: restores the values captured above.
+        unsafe {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+    assert!(initialized, "the scratch repository was not initialized");
+    assert_eq!(
+        std::fs::read(outer_git.join("config")).unwrap(),
+        config_before
+    );
 }
