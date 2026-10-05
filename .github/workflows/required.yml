@@ -33,6 +33,26 @@ jobs:
         if: runner.os == 'Linux'
         run: mise run check:ops
 
+  minimum-git:
+    # Git 2.43 is the oldest Git a managed host runs (Ubuntu 24.04), and the guard reads Git's state through it.
+    name: guard (Git 2.43)
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
+    timeout-minutes: 30
+    steps:
+      - name: Install the distribution Git and a linker
+        run: apt-get update && apt-get install --yes --no-install-recommends ca-certificates curl gcc git libc6-dev
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
+        with:
+          install_args: rust
+      - name: Run the guard tests on Git 2.43
+        run: |
+          git --version | grep -Fx 'git version 2.43.0'
+          mise x -- cargo test --locked --manifest-path guard/Cargo.toml
+
   rehearsal:
     name: rehearsal (${{ matrix.os }})
     strategy:

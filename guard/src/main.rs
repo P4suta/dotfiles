@@ -274,18 +274,12 @@ fn picking() -> Option<bool> {
     Some(!exists("MERGE_HEAD")? && exists("CHERRY_PICK_HEAD")?)
 }
 
-fn exists(reference: &str) -> Option<bool> {
-    let status = realgit::command()?
-        .args(["show-ref", "--exists", reference])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .ok()?;
-    match status.code() {
-        Some(0) => Some(true),
-        Some(2) => Some(false),
-        _ => None,
-    }
+/// Whether the special reference `name` is present.
+/// Git keeps `MERGE_HEAD` and `CHERRY_PICK_HEAD` as files in the worktree's Git directory under every reference backend, and `git commit` tests those files.
+/// `git show-ref --exists` does not decide this on every supported Git: Git 2.43 reports a missing `MERGE_HEAD` as a lookup error.
+fn exists(name: &str) -> Option<bool> {
+    let path = realgit::capture(&["rev-parse", "--git-path", name])?;
+    std::fs::exists(path.trim_end_matches(['\r', '\n'])).ok()
 }
 
 fn pre_commit() -> i32 {
