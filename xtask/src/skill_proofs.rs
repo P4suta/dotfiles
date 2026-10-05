@@ -19,12 +19,13 @@ pub const HARNESSES: [&str; 6] = [
     "stale_or_unprocessed_maintenance_never_completes",
 ];
 
-pub const PR_HARNESSES: [&str; 6] = [
+pub const PR_HARNESSES: [&str; 7] = [
     "api_quota_requires_a_nonzero_reserve_and_sufficient_remaining_requests",
     "coderabbit_exclusion_does_not_authorize_unfinished_generation",
     "local_creation_always_starts_as_draft",
     "personal_issue_prerequisites_cannot_be_skipped_by_any_generation_mode",
     "ready_requires_a_validated_draft_transition",
+    "ready_requires_every_reported_check_to_pass",
     "rejected_documents_never_produce_a_pr_mutation",
 ];
 
@@ -339,13 +340,14 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_ready_local_creation() {{\n    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked), Some(production::Effect::CreateReady));\n}}\n#[kani::proof]\nfn reject_creation_without_a_personal_issue() {{\n    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false)).is_some());\n}}\n#[kani::proof]\nfn reject_unfinished_summary_as_review_exclusion() {{\n    assert!(production::coderabbit_body_marker_allowed(false, true, false));\n}}\n"
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_ready_local_creation() {{\n    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Passing), Some(production::Effect::CreateReady));\n}}\n#[kani::proof]\nfn reject_creation_without_a_personal_issue() {{\n    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false), production::Checks::Passing).is_some());\n}}\n#[kani::proof]\nfn reject_unfinished_summary_as_review_exclusion() {{\n    assert!(production::coderabbit_body_marker_allowed(false, true, false));\n}}\n#[kani::proof]\nfn reject_ready_with_unfinished_checks() {{\n    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, true, production::IssueGate::Linked, production::checks_state(3, 1, 0)), Some(production::Effect::Ready));\n}}\n"
         ),
     )?;
     for name in [
         "reject_ready_local_creation",
         "reject_creation_without_a_personal_issue",
         "reject_unfinished_summary_as_review_exclusion",
+        "reject_ready_with_unfinished_checks",
     ] {
         verify_file(&file, probe.path(), &[name], true)?;
     }

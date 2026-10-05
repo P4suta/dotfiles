@@ -1,6 +1,6 @@
 use crate::pr_rules::{
-    Effect, Generation, IssueGate, Operation, api_quota_available, coderabbit_body_marker_allowed,
-    issue_gate, plan,
+    Checks, Effect, Generation, IssueGate, Operation, api_quota_available, checks_state,
+    coderabbit_body_marker_allowed, issue_gate, plan,
 };
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
@@ -124,6 +124,44 @@ struct LiveDocument {
     body: String,
     state: String,
     is_draft: bool,
+    #[serde(default)]
+    status_check_rollup: Vec<ReportedCheck>,
+}
+
+/// One entry of the head commit's check rollup: a check run or a commit status.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReportedCheck {
+    status: Option<String>,
+    conclusion: Option<String>,
+    state: Option<String>,
+}
+
+impl ReportedCheck {
+    fn finished(&self) -> bool {
+        match (&self.status, &self.state) {
+            (Some(status), _) => status == "COMPLETED",
+            (None, Some(state)) => !matches!(state.as_str(), "PENDING" | "EXPECTED"),
+            (None, None) => false,
+        }
+    }
+
+    fn passed(&self) -> bool {
+        match (&self.conclusion, &self.state) {
+            (Some(conclusion), _) => matches!(conclusion.as_str(), "SUCCESS" | "NEUTRAL"),
+            (None, Some(state)) => state == "SUCCESS",
+            (None, None) => false,
+        }
+    }
+}
+
+fn checks(rollup: &[ReportedCheck]) -> Checks {
+    let unfinished = rollup.iter().filter(|check| !check.finished()).count();
+    let failed = rollup
+        .iter()
+        .filter(|check| check.finished() && !check.passed())
+        .count();
+    checks_state(rollup.len(), unfinished, failed)
 }
 
 #[derive(Deserialize)]
@@ -617,7 +655,7 @@ fn live_document(_github: &Github, target: &Target, pr: u64) -> Result<LiveDocum
     args.extend([
         pr.to_string().into(),
         "--json".into(),
-        "title,body,state,isDraft".into(),
+        "title,body,state,isDraft,statusCheckRollup".into(),
     ]);
     serde_json::from_str(&gh(&args)?).context("invalid gh PR document")
 }
@@ -674,8 +712,15 @@ pub fn run(action: Action) -> Result<()> {
             let github = Github::connect()?;
             let issue = inspect_issue(&github, &target, Some(&document.body))?;
             require_issue(issue)?;
-            let effect = plan(Operation::Create, target.generation, true, draft, issue)
-                .context("PR creation refused")?;
+            let effect = plan(
+                Operation::Create,
+                target.generation,
+                true,
+                draft,
+                issue,
+                Checks::Incomplete,
+            )
+            .context("PR creation refused")?;
             let mut args = arguments("create", &target.repo);
             args.extend([OsString::from("--head"), head.into()]);
             if let Some(base) = base {
@@ -693,7 +738,14 @@ pub fn run(action: Action) -> Result<()> {
             let issue = inspect_issue(&github, &target, Some(&document.body))?;
             require_issue(issue)?;
             ensure!(
-                plan(Operation::Edit, target.generation, true, false, issue) == Some(Effect::Edit),
+                plan(
+                    Operation::Edit,
+                    target.generation,
+                    true,
+                    false,
+                    issue,
+                    Checks::Incomplete
+                ) == Some(Effect::Edit),
                 "PR edit refused"
             );
             let mut args = vec![
@@ -714,15 +766,17 @@ pub fn run(action: Action) -> Result<()> {
             let document = validate(&target, live.title, live.body, false)?;
             let issue = inspect_issue(&github, &target, Some(&document.body))?;
             require_issue(issue)?;
+            ensure!(live.is_draft, "only a validated draft can become ready");
             ensure!(
                 plan(
                     Operation::Ready,
                     target.generation,
                     true,
                     live.is_draft,
-                    issue
+                    issue,
+                    checks(&live.status_check_rollup),
                 ) == Some(Effect::Ready),
-                "only a validated draft can become ready"
+                "a draft becomes ready only when every reported check on its head has passed and no work remains"
             );
             let mut args = arguments("ready", &target.repo);
             args.push(pr.to_string().into());
