@@ -116,6 +116,92 @@ fn a_history_refusal_suggests_the_step_for_its_worst_update() {
     kani::cover!(step == History::ForgeDelete);
 }
 
+/// Whether a rebase may rewrite a commit a remote-tracking ref holds.
+/// `control` is a `--continue`, `--abort`, or another step of a rebase already started, and `rewrites` is `None` when the gate could not tell.
+pub fn rebase_refused(control: bool, rewrites: Option<bool>) -> bool {
+    !control && rewrites != Some(false)
+}
+
+/// How a refused rewrite of published history may still run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Admission {
+    /// The stack tooling runs it while it holds the repository's stack lease.
+    Tooling,
+    /// The owner's waiver, recorded in the bypass log.
+    Waived,
+    Refused,
+}
+
+/// `stack_rule` says the refusal is a rebase or a leased force push, the only rewrites the stack tooling makes.
+pub fn admission(stack_rule: bool, tooling: bool, waived: bool) -> Admission {
+    if stack_rule && tooling {
+        Admission::Tooling
+    } else if waived {
+        Admission::Waived
+    } else {
+        Admission::Refused
+    }
+}
+
+/// The stack tooling holds the lease when the token it exported matches the lease file it wrote in the repository.
+pub fn stack_tooling(token: Option<&[u8]>, lease: Option<&[u8]>) -> bool {
+    matches!((token, lease), (Some(token), Some(lease)) if !token.is_empty() && token == lease)
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn a_rebase_is_refused_whenever_it_may_rewrite_a_published_commit() {
+    let control: bool = kani::any();
+    let rewrites: Option<bool> = kani::any();
+    let refused = rebase_refused(control, rewrites);
+    assert_eq!(refused, !control && rewrites != Some(false));
+    assert!(control || rewrites == Some(false) || refused);
+    kani::cover!(refused && rewrites.is_none());
+    kani::cover!(refused && rewrites == Some(true));
+    kani::cover!(!refused && control && rewrites == Some(true));
+    kani::cover!(!refused && rewrites == Some(false));
+}
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(3)]
+fn a_published_rewrite_runs_only_through_the_leased_stack_tooling_or_a_waiver() {
+    let token: [u8; 2] = kani::any();
+    let lease: [u8; 2] = kani::any();
+    let token_length: usize = kani::any();
+    let lease_length: usize = kani::any();
+    kani::assume(token_length <= 2 && lease_length <= 2);
+    let token = if kani::any() {
+        Some(&token[..token_length])
+    } else {
+        None
+    };
+    let lease = if kani::any() {
+        Some(&lease[..lease_length])
+    } else {
+        None
+    };
+    let tooling = stack_tooling(token, lease);
+    assert_eq!(
+        tooling,
+        token.is_some_and(|token| !token.is_empty() && Some(token) == lease)
+    );
+    let stack_rule: bool = kani::any();
+    let waived: bool = kani::any();
+    let admitted = admission(stack_rule, tooling, waived);
+    assert_eq!(admitted == Admission::Tooling, stack_rule && tooling);
+    assert_eq!(
+        admitted == Admission::Refused,
+        !waived && !(stack_rule && tooling)
+    );
+    kani::cover!(admitted == Admission::Tooling);
+    kani::cover!(admitted == Admission::Waived && !stack_rule);
+    kani::cover!(
+        admitted == Admission::Refused && stack_rule && token.is_some() && lease.is_none()
+    );
+    kani::cover!(admitted == Admission::Refused && tooling && !stack_rule);
+}
+
 /// What a long option's name means among the spellings a Git command accepts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Spelling {
@@ -345,4 +431,32 @@ fn a_commit_retry_keeps_what_its_message_source_implied() {
     kani::cover!(retry.is_ok_and(|retry| retry.authorship));
     kani::cover!(retry.is_ok_and(|retry| !retry.reset_author));
     kani::cover!(retry.is_ok_and(|retry| retry.reset_author && source.reuse && source.renew));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Admission, admission, rebase_refused, stack_tooling};
+
+    #[test]
+    fn a_rebase_is_refused_unless_it_continues_or_keeps_published_commits() {
+        assert!(rebase_refused(false, Some(true)));
+        assert!(rebase_refused(false, None));
+        assert!(!rebase_refused(false, Some(false)));
+        assert!(!rebase_refused(true, Some(true)));
+    }
+
+    #[test]
+    fn only_the_leased_stack_tooling_or_a_waiver_admits_a_published_rewrite() {
+        let leased = stack_tooling(Some(b"token"), Some(b"token"));
+        assert!(leased);
+        assert!(!stack_tooling(Some(b"token"), None));
+        assert!(!stack_tooling(None, Some(b"token")));
+        assert!(!stack_tooling(Some(b""), Some(b"")));
+        assert!(!stack_tooling(Some(b"token"), Some(b"other")));
+        assert_eq!(admission(true, leased, false), Admission::Tooling);
+        assert_eq!(admission(false, leased, false), Admission::Refused);
+        assert_eq!(admission(false, leased, true), Admission::Waived);
+        assert_eq!(admission(true, false, true), Admission::Waived);
+        assert_eq!(admission(true, false, false), Admission::Refused);
+    }
 }

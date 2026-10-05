@@ -13,17 +13,22 @@ fn gh_directory() -> &'static tempfile::TempDir {
     static DIRECTORY: OnceLock<tempfile::TempDir> = OnceLock::new();
     DIRECTORY.get_or_init(|| {
         let directory = tempfile::tempdir().unwrap();
-        let result = Command::new("rustc")
-            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/gh.rs"))
-            .arg("-o")
-            .arg(
-                directory
-                    .path()
-                    .join(format!("gh{}", std::env::consts::EXE_SUFFIX)),
-            )
-            .status()
-            .unwrap();
-        assert!(result.success());
+        for program in ["gh", "gh-stack"] {
+            let result = Command::new("rustc")
+                .arg(format!(
+                    "{}/tests/fixtures/{program}.rs",
+                    env!("CARGO_MANIFEST_DIR")
+                ))
+                .arg("-o")
+                .arg(
+                    directory
+                        .path()
+                        .join(format!("{program}{}", std::env::consts::EXE_SUFFIX)),
+                )
+                .status()
+                .unwrap();
+            assert!(result.success());
+        }
         directory
     })
 }
@@ -63,11 +68,17 @@ impl Fixture {
             .env("HOME", self.directory.path())
             .env("USERPROFILE", self.directory.path())
             .env("GH_FIXTURE_LOG", &self.log)
+            .env(
+                "GH_STACK_FIXTURE_LOG",
+                self.directory.path().join("gh-stack.log"),
+            )
+            .env_remove("DOTGUARD_STACK")
             .env("GH_FIXTURE_USER", r#"{"login":"P4suta","id":42543015}"#)
             .env("GH_FIXTURE_REPOSITORY", serde_json::json!({
                 "full_name":repo,"owner":{"login":repo.split('/').next().unwrap(),"id":1},"fork":false
             }).to_string())
-            .args([operation, "--repo", repo]);
+            .args(operation.split_whitespace())
+            .args(["--repo", repo]);
         Ok(command)
     }
 
@@ -1178,7 +1189,11 @@ fn edit_and_gh_failure_preserve_one_attempt_and_report_the_failure() -> Result<(
         let output = command.env("GH_FIXTURE_FAILURE", operation).output()?;
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("42"));
-        assert_eq!(fixture.log()?.matches("invocation\n").count(), 3);
+        // Creation also lists the open PRs it could depend on.
+        assert_eq!(
+            fixture.log()?.matches("invocation\n").count(),
+            if operation == "create" { 4 } else { 3 }
+        );
         assert_eq!(
             fixture.log()?.matches(&format!("\n{operation}\n")).count(),
             1
@@ -1446,5 +1461,450 @@ fn a_body_without_the_closing_reference_names_the_edit_that_adds_it() -> Result<
         record["next"],
         "gh pr edit 17 --repo P4suta/project --body-file <body-file>"
     );
+    Ok(())
+}
+
+const PASSING: &str = r#"[{"status":"COMPLETED","conclusion":"SUCCESS"}]"#;
+const FAILING: &str = r#"[{"status":"COMPLETED","conclusion":"FAILURE"}]"#;
+
+/// One read of a PR for `GH_FIXTURE_VIEWS`; `merge` is GitHub's merge state, or `MERGED` for a merged PR.
+fn read(number: u64, head: &str, draft: bool, body: &str, checks: &str, merge: &str) -> String {
+    let checks: serde_json::Value = serde_json::from_str(checks).unwrap();
+    format!(
+        "{number}={}",
+        serde_json::json!({
+            "title":"fix: preserve edits","body":body,
+            "state":if merge == "MERGED" {"MERGED"} else {"OPEN"},"isDraft":draft,
+            "headRefOid":head,"baseRefName":if number == 17 {"parent"} else {"main"},
+            "mergeable":if merge == "DIRTY" {"CONFLICTING"} else {"MERGEABLE"},
+            "mergeStateStatus":merge,"statusCheckRollup":checks,
+            "closingIssuesReferences":[{"number":23}]
+        })
+    )
+}
+
+/// The PR mutations the log records, in order.
+fn mutations(log: &str) -> Vec<String> {
+    log.split("invocation\n")
+        .filter_map(|call| {
+            let words: Vec<&str> = call.lines().collect();
+            (words.first() == Some(&"pr")
+                && words
+                    .get(1)
+                    .is_some_and(|word| ["update-branch", "edit", "ready", "merge"].contains(word)))
+            .then(|| words[1].to_owned())
+        })
+        .collect()
+}
+
+#[test]
+fn independent_prs_merge_in_order_through_update_checks_ready_and_the_verified_head() -> Result<()>
+{
+    let closed = format!("{BODY}\nCloses #23.\n");
+    let excluded = format!("{closed}\n@coderabbitai ignore\n{PAUSE_MARKER}\n");
+    let fixture = Fixture::new(BODY)?;
+    fixture.pause("paused-pr")?;
+    let views = [
+        read(17, "old", true, &closed, PASSING, "DRAFT"),
+        read(17, "new", true, &closed, "[]", "DRAFT"),
+        read(17, "new", true, &closed, PASSING, "DRAFT"),
+        read(17, "new", true, &excluded, PASSING, "DRAFT"),
+        read(17, "new", false, &excluded, PASSING, "UNKNOWN"),
+        read(17, "new", false, &excluded, PASSING, "CLEAN"),
+        read(17, "new", false, &excluded, PASSING, "MERGED"),
+        read(18, "other", false, &excluded, PASSING, "CLEAN"),
+        read(18, "other", false, &excluded, PASSING, "MERGED"),
+    ]
+    .join("\n");
+    let output = fixture
+        .personal_command("merge")?
+        .args(["--pr", "17", "--pr", "18", "--interval", "0"])
+        .env("GH_FIXTURE_VIEWS", views)
+        .env("GH_FIXTURE_BEHIND", "old")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = fixture.log()?;
+    assert_eq!(
+        mutations(&log),
+        ["update-branch", "edit", "ready", "merge", "merge"]
+    );
+    assert!(log.contains("\nupdate-branch\n--repo\nP4suta/project\n17\n"));
+    assert!(
+        log.contains("\nmerge\n--repo\nP4suta/project\n17\n--squash\n--match-head-commit\nnew\n")
+    );
+    assert!(
+        log.contains("\nmerge\n--repo\nP4suta/project\n18\n--squash\n--match-head-commit\nother\n")
+    );
+    let edited = log.split("\nedit\n").nth(1).unwrap_or_default();
+    assert!(
+        edited.contains("@coderabbitai ignore") && edited.contains(PAUSE_MARKER),
+        "{edited}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_merge_stops_with_a_structured_refusal_and_merges_nothing() -> Result<()> {
+    let closed = format!("{BODY}\nCloses #23.\n");
+    let excluded = format!("{closed}\n@coderabbitai ignore\n{PAUSE_MARKER}\n");
+    for (view, paused, timeout, rule) in [
+        (
+            read(17, "h", false, &excluded, FAILING, "BLOCKED"),
+            true,
+            "120",
+            "pr.checks",
+        ),
+        (
+            read(17, "h", false, &excluded, PASSING, "DIRTY"),
+            true,
+            "120",
+            "pr.conflict",
+        ),
+        (
+            read(17, "h", false, &closed, PASSING, "CLEAN"),
+            false,
+            "120",
+            "pr.review",
+        ),
+        (
+            read(17, "h", false, &excluded, "[]", "BLOCKED"),
+            true,
+            "0",
+            "pr.timeout",
+        ),
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        if paused {
+            fixture.pause("paused-pr")?;
+        }
+        let output = fixture
+            .personal_command("merge")?
+            .args(["--pr", "17", "--interval", "0", "--timeout", timeout])
+            .env("GH_FIXTURE_VIEWS", view)
+            .output()?;
+        assert_eq!(refusal(&output)["rule"], rule);
+        assert!(mutations(&fixture.log()?).is_empty(), "{rule}");
+    }
+    Ok(())
+}
+
+/// Runs Git in `directory` with an isolated configuration, so no hook or signing of the caller applies.
+fn git(directory: &std::path::Path, scope: &std::path::Path, arguments: &[&str]) -> String {
+    let mut command = Command::new("git");
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("GIT_") {
+            command.env_remove(name);
+        }
+    }
+    let output = command
+        .current_dir(directory)
+        .env("GIT_CONFIG_GLOBAL", scope.join("gitconfig"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .args(arguments)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {arguments:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+/// A checkout with an `origin` holding `main` and the branches `a`, `feature` on top of `a`, `solo` touching what `a` touches, and `clean`.
+fn branches(scope: &std::path::Path) -> Result<PathBuf> {
+    fs::write(
+        scope.join("gitconfig"),
+        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+    )?;
+    git(scope, scope, &["init", "-q", "--bare", "remote.git"]);
+    git(scope, scope, &["init", "-q", "-b", "main", "checkout"]);
+    let checkout = scope.join("checkout");
+    let commit = |branch: &str, from: &str, file: &str| -> Result<()> {
+        git(&checkout, scope, &["checkout", "-q", "-B", branch, from]);
+        fs::write(checkout.join(file), branch)?;
+        git(&checkout, scope, &["add", file]);
+        git(&checkout, scope, &["commit", "-q", "-m", branch]);
+        git(&checkout, scope, &["push", "-q", "origin", branch]);
+        Ok(())
+    };
+    git(
+        &checkout,
+        scope,
+        &["remote", "add", "origin", "../remote.git"],
+    );
+    fs::write(checkout.join("README"), "base")?;
+    git(&checkout, scope, &["add", "README"]);
+    git(&checkout, scope, &["commit", "-q", "-m", "base"]);
+    git(&checkout, scope, &["push", "-q", "origin", "main"]);
+    commit("a", "main", "shared.txt")?;
+    commit("feature", "a", "feature.txt")?;
+    commit("solo", "main", "shared.txt")?;
+    commit("clean", "main", "clean.txt")?;
+    Ok(checkout)
+}
+
+#[test]
+fn a_branch_sharing_work_with_an_open_pr_is_refused_with_the_stack_command() -> Result<()> {
+    let closed = format!("{BODY}\nCloses #23.\n");
+    let fixture = Fixture::new(&closed)?;
+    let checkout = branches(fixture.directory.path())?;
+    let create = |head: &str, extra: &[&str]| -> Result<Output> {
+        let mut command = fixture.personal_command("create")?;
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("GIT_") {
+                command.env_remove(name);
+            }
+        }
+        Ok(command
+            .current_dir(&checkout)
+            .env(
+                "GIT_CONFIG_GLOBAL",
+                fixture.directory.path().join("gitconfig"),
+            )
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env(
+                "GH_FIXTURE_LIST",
+                r#"[{"number":5,"headRefName":"a","baseRefName":"main"}]"#,
+            )
+            .args([
+                "--issue",
+                "23",
+                "--title",
+                "fix: preserve edits",
+                "--body-file",
+            ])
+            .arg(&fixture.body)
+            .args(["--head", head, "--base", "main"])
+            .args(extra)
+            .output()?)
+    };
+    let quoted = dotfiles_xtask::refusal::command(&[fixture.body.display().to_string()]);
+    let record = refusal(&create("feature", &["--independent"])?);
+    assert_eq!(record["rule"], "pr.dependency");
+    assert_eq!(
+        record["next"],
+        format!(
+            "pr-workflow stack create --repo P4suta/project --issue 23 --title 'fix: preserve edits' --body-file {quoted} --head feature --base a"
+        )
+    );
+    assert_eq!(refusal(&create("solo", &[])?)["rule"], "pr.dependency");
+    assert!(!fixture.log()?.contains("\ncreate\n"));
+    for (head, extra) in [("solo", &["--independent"][..]), ("clean", &[][..])] {
+        let output = create(head, extra)?;
+        assert!(
+            output.status.success(),
+            "{head}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert_eq!(fixture.log()?.matches("\ncreate\n").count(), 2);
+    Ok(())
+}
+
+impl Fixture {
+    fn stack_log(&self) -> String {
+        fs::read_to_string(self.directory.path().join("gh-stack.log")).unwrap_or_default()
+    }
+
+    /// A checkout of `P4suta/project` on `topic`, whose lease file the gh-stack fixture compares with the token it receives.
+    fn stack_checkout(&self, origin: &str) -> Result<(PathBuf, PathBuf)> {
+        let scope = self.directory.path();
+        fs::write(scope.join("gitconfig"), "")?;
+        git(scope, scope, &["init", "-q", "-b", "topic", "checkout"]);
+        let checkout = scope.join("checkout");
+        git(&checkout, scope, &["remote", "add", "origin", origin]);
+        Ok((checkout.clone(), checkout.join(".git/dotguard-stack.lease")))
+    }
+
+    fn stack_command(
+        &self,
+        checkout: &std::path::Path,
+        lease: &std::path::Path,
+        arguments: &[&str],
+    ) -> Result<Command> {
+        let mut command = self.personal_command(&format!("stack {}", arguments[0]))?;
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("GIT_") {
+                command.env_remove(name);
+            }
+        }
+        command
+            .current_dir(checkout)
+            .env("GIT_CONFIG_GLOBAL", self.directory.path().join("gitconfig"))
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GH_STACK_FIXTURE_LEASE", lease)
+            .args(&arguments[1..]);
+        Ok(command)
+    }
+}
+
+#[test]
+fn a_stacked_pr_is_created_on_its_parent_and_linked_down_to_the_trunk() -> Result<()> {
+    let closed = format!("{BODY}\nCloses #23.\n");
+    let fixture = Fixture::new(&closed)?;
+    let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+    let list = r#"[{"number":4,"headRefName":"bottom","baseRefName":"main"},{"number":5,"headRefName":"parent","baseRefName":"bottom"}]"#;
+    let create = |base: &str| -> Result<Output> {
+        Ok(fixture
+            .stack_command(&checkout, &lease, &["create"])?
+            .env("GH_FIXTURE_LIST", list)
+            .args([
+                "--issue",
+                "23",
+                "--title",
+                "fix: preserve edits",
+                "--body-file",
+            ])
+            .arg(&fixture.body)
+            .args(["--head", "topic", "--base", base])
+            .output()?)
+    };
+    let output = create("parent")?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        fixture
+            .log()?
+            .contains("\ncreate\n--repo\nP4suta/project\n--head\ntopic\n--base\nparent\n--draft\n")
+    );
+    assert_eq!(
+        fixture.stack_log(),
+        "gh-stack link --base main 4 5 17 repo=P4suta/project leased=false notifier=1\n"
+    );
+    let record = refusal(&create("orphan")?);
+    assert_eq!(record["rule"], "pr.stack");
+    assert_eq!(fixture.log()?.matches("\ncreate\n").count(), 1);
+    Ok(())
+}
+
+#[test]
+fn stack_sync_and_rebase_run_gh_stack_under_the_lease_and_release_it() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let (checkout, lease) = fixture.stack_checkout("git@github.com:P4suta/project.git")?;
+    let output = fixture
+        .stack_command(&checkout, &lease, &["sync"])?
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fixture.stack_log(),
+        "gh-stack checkout topic repo=P4suta/project leased=true notifier=1\n\
+         gh-stack sync repo=P4suta/project leased=true notifier=1\n"
+    );
+    assert!(!lease.exists());
+
+    let output = fixture
+        .stack_command(&checkout, &lease, &["rebase"])?
+        .env("GH_STACK_FIXTURE_EXIT", "3")
+        .output()?;
+    let record = refusal(&output);
+    assert_eq!(record["rule"], "pr.conflict");
+    assert_eq!(
+        record["next"],
+        "pr-workflow stack rebase --repo P4suta/project --continue"
+    );
+    assert!(
+        fixture
+            .stack_log()
+            .ends_with("gh-stack rebase repo=P4suta/project leased=true notifier=1\n")
+    );
+    assert!(!lease.exists());
+
+    fs::write(&lease, "held")?;
+    let record = refusal(
+        &fixture
+            .stack_command(&checkout, &lease, &["sync"])?
+            .output()?,
+    );
+    assert_eq!(record["rule"], "pr.stack");
+    assert_eq!(fs::read_to_string(&lease)?, "held");
+
+    let other = Fixture::new(BODY)?;
+    let (checkout, lease) = other.stack_checkout("https://github.com/other/project.git")?;
+    let record = refusal(
+        &other
+            .stack_command(&checkout, &lease, &["sync"])?
+            .output()?,
+    );
+    assert_eq!(record["rule"], "pr.stack");
+    assert!(other.stack_log().is_empty());
+    Ok(())
+}
+
+#[test]
+fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<()> {
+    let closed = format!("{BODY}\nCloses #23.\n");
+    let excluded = format!("{closed}\n@coderabbitai ignore\n{PAUSE_MARKER}\n");
+    let fixture = Fixture::new(BODY)?;
+    fixture.pause("paused-pr")?;
+    let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+    let views = [
+        read(5, "parent-head", false, &excluded, PASSING, "BLOCKED"),
+        read(5, "parent-head", false, &excluded, PASSING, "BLOCKED"),
+        read(5, "parent-head", false, &excluded, PASSING, "MERGED"),
+        read(17, "stale", false, &excluded, PASSING, "BLOCKED"),
+        read(17, "top-head", false, &excluded, PASSING, "BLOCKED"),
+        read(17, "top-head", false, &excluded, PASSING, "MERGED"),
+    ]
+    .join("\n");
+    let output = fixture
+        .stack_command(&checkout, &lease, &["merge", "--pr", "17", "--interval", "0"])?
+        .env(
+            "GH_FIXTURE_LIST",
+            r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":17,"headRefName":"topic","baseRefName":"parent"}]"#,
+        )
+        .env("GH_FIXTURE_VIEWS", views)
+        .env("GH_FIXTURE_BEHIND", "stale")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fixture.stack_log(),
+        "gh-stack checkout topic repo=P4suta/project leased=true notifier=1\n\
+         gh-stack sync repo=P4suta/project leased=true notifier=1\n\
+         gh-stack merge 17 --yes --squash repo=P4suta/project leased=false notifier=1\n"
+    );
+    assert!(mutations(&fixture.log()?).is_empty());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("#5 merged at parent-head") && stdout.contains("#17 merged at top-head"),
+        "{stdout}"
+    );
+    Ok(())
+}
+
+/// pr-workflow and dotguard agree on the variable and file of the stack lease.
+#[test]
+fn the_stack_lease_names_match_dotguard() -> Result<()> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let guard = fs::read_to_string(root.join("guard/src/stack.rs"))?;
+    let workflow = fs::read_to_string(root.join("xtask/src/pr_workflow.rs"))?;
+    for (guard_line, workflow_line) in [
+        (
+            "pub const TOKEN: &str = \"DOTGUARD_STACK\";",
+            "const STACK_TOKEN: &str = \"DOTGUARD_STACK\";",
+        ),
+        (
+            "pub const LEASE: &str = \"dotguard-stack.lease\";",
+            "const STACK_LEASE: &str = \"dotguard-stack.lease\";",
+        ),
+    ] {
+        assert!(guard.contains(guard_line), "{guard_line}");
+        assert!(workflow.contains(workflow_line), "{workflow_line}");
+    }
     Ok(())
 }

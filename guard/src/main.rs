@@ -8,11 +8,12 @@
 //! lefthook still runs per-repo gates underneath; these are the rules that hold everywhere, including in a repository cloned five minutes ago.
 
 use dotguard::{
-    attribution, bypass, doctor, gitargv, lang, lint, postcommit, prepush, realgit, refusal,
-    renovate, staged,
+    attribution, bypass, doctor, gate_rules, gitargv, lang, lint, postcommit, prepush, realgit,
+    refusal, renovate, stack, staged,
 };
 
 use bypass::Category;
+use gate_rules::Admission;
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
@@ -81,19 +82,28 @@ fn usage() {
 
 /// `~/.local/bin/git` delegates its whole job here and this never returns on the happy path: it `exec`s the real git in place, so there is no extra process sitting in the tree holding a pipe open.
 fn git_wrapper(argv: &[String]) -> ExitCode {
-    if let Some(denial) = gitargv::inspect(argv) {
+    if let Some(denial) = gitargv::inspect_in(argv, &stack::Checkout) {
         let full: Vec<String> = std::iter::once("git".to_owned())
             .chain(argv.iter().cloned())
             .collect();
-
-        let waiver = denial.category.env();
-        if let Some(env) = waiver.filter(|_| bypass::waived(denial.category)) {
-            bypass::record("BYPASS", denial.category, &denial.reason, &full);
-            eprintln!("::warning:: {env}=1 — allowing {}", denial.reason);
-        } else {
-            bypass::record("REJECT", denial.category, &denial.reason, &full);
-            gitargv::refusal(&denial, argv).emit();
-            return ExitCode::FAILURE;
+        let tooling = denial.stack && stack::leased(gitargv::global_options(argv));
+        match gate_rules::admission(denial.stack, tooling, bypass::waived(denial.category)) {
+            Admission::Tooling => {
+                bypass::record("STACK", denial.category, &denial.reason, &full);
+            }
+            Admission::Waived => {
+                bypass::record("BYPASS", denial.category, &denial.reason, &full);
+                eprintln!(
+                    "::warning:: {}=1 — allowing {}",
+                    denial.category.env().unwrap_or_default(),
+                    denial.reason
+                );
+            }
+            Admission::Refused => {
+                bypass::record("REJECT", denial.category, &denial.reason, &full);
+                gitargv::refusal(&denial, argv).emit();
+                return ExitCode::FAILURE;
+            }
         }
     }
 

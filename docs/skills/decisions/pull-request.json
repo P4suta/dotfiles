@@ -1,7 +1,7 @@
 {
-  "revision": "1057236921d29e19bf5ee52a299c5fbb12c685c95e2bb29a4f0fb9a76f067115",
+  "revision": "95c10b2c0608f835a191da3d68cd92bb8cff65969887e850d79931d61828f939",
   "outcome": "implemented",
-  "reason": "Point the CodeRabbit section at the guard's machine-readable pause scope and the pr-workflow refusals and requirement line instead of restating pause and budget prose. While PR reviews are paused, pr-workflow refuses review requests, a ready transition without the exclusion made for the pause, and an edit that removes a ready PR's ignore line or pause marker, so a PR readied during the pause owes its review again after resumption; the request, pause-exclusion, and requirement cores are proved and their counterexamples refused natively. A draft still becomes ready only after every reported head check passes.",
+  "reason": "The skill points at the checked stack and merge commands of pr-workflow, which open dependent work as a stack, restack under dotguard's stack lease, and merge independent PRs by merge-style update, check wait, ready transition, and verified-head merge, so no PR needs a manual rebase or update.",
   "evidence": [
     "dot_agents/skills/pull-request/SKILL.md",
     "docs/adr/0004-checked-pull-request-authoring.md",
@@ -13,7 +13,8 @@
     "docs/adr/0008-layered-review-capacity.md",
     "docs/adr/0013-ready-only-after-passing-checks.md",
     "docs/adr/0015-scoped-coderabbit-pause.md",
-    "xtask/src/pr_workflow.rs"
+    "xtask/src/pr_workflow.rs",
+    "guard/src/stack.rs"
   ],
   "revisit": null
 }

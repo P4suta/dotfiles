@@ -13,6 +13,7 @@ nu = "0.116.0"
 powershell = "7.6.6"
 "pypi:ansible-core" = { version = "2.21.4", os = ["linux"] }
 "cargo:kani-verifier" = { version = "0.68.0", os = ["macos", "linux"] }
+"github:github/gh-stack" = { version = "0.2.0", bin = "gh-stack" }
 
 [tasks."check:skills"]
 run = "cargo run --locked --manifest-path xtask/Cargo.toml -- skills"
