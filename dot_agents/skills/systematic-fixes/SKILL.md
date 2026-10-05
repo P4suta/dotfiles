@@ -23,6 +23,7 @@ Prefer making the invalid state or transition unavailable through types, exhaust
 For external state, validate at the boundary and bind the resulting evidence to its exact subject.
 Use a meaningful automated gate or diagnostic where the defect cannot be eliminated by representation alone.
 Avoid spreading local conditionals, fallback values, assertions, allowlists, or reviewer reminders across every caller when one authoritative boundary can enforce the rule.
+A memory, note, or resolution to check more carefully is not a remediation; enforce the invariant in a gate that runs without anyone's attention.
 Do not hide the failure, weaken a gate, or add an unrelated fallback to obtain a passing result.
 
 Apply the correction across the affected family and test its representative cases, edge conditions, and failure transitions.

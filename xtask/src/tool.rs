@@ -385,12 +385,40 @@ impl Tool {
         }
     }
 
-    /// The only place xtask creates a process for a named program.
-    #[allow(clippy::disallowed_methods)]
+    /// A Git hook exports its repository through these variables, and a check's fixture repositories would otherwise write to the hook's real index.
     pub fn command(self) -> Command {
+        let mut command = self.hook_command();
+        for name in GIT_LOCAL_ENVIRONMENT {
+            command.env_remove(name);
+        }
+        command
+    }
+
+    /// The only place xtask creates a process for a named program; a hook gate keeps the hook's repository to inspect the commit in progress.
+    #[allow(clippy::disallowed_methods)]
+    pub fn hook_command(self) -> Command {
         Command::new(self.program())
     }
 }
+
+/// The repository-local variables that `git rev-parse --local-env-vars` lists.
+pub const GIT_LOCAL_ENVIRONMENT: [&str; 15] = [
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+];
 
 /// A program chosen at run time rather than from the registry: a consumer command the owner passes through, or a verified vendor installer.
 #[allow(clippy::disallowed_methods)]

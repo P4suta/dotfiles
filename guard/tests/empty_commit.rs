@@ -1,0 +1,121 @@
+//! The post-commit gate against real repositories: an ordinary commit that records no change is rolled back.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+struct Repository {
+    scope: PathBuf,
+}
+
+impl Drop for Repository {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.scope);
+    }
+}
+
+impl Repository {
+    fn new(name: &str) -> Self {
+        let scope =
+            std::env::temp_dir().join(format!("dotguard-empty-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scope);
+        std::fs::create_dir_all(scope.join("home")).unwrap();
+        std::fs::write(
+            scope.join("gitconfig"),
+            "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+        )
+        .unwrap();
+        let repository = Self { scope };
+        repository.git(&["init", "-q", "-b", "main"]);
+        std::fs::write(repository.path().join("a.txt"), "a\n").unwrap();
+        repository.git(&["add", "a.txt"]);
+        repository
+    }
+
+    fn path(&self) -> PathBuf {
+        self.scope.join("home")
+    }
+
+    fn isolate<'a>(&self, command: &'a mut Command) -> &'a mut Command {
+        for (name, _) in std::env::vars_os() {
+            let name = name.to_string_lossy().into_owned();
+            if name.starts_with("ALLOW_") || name.starts_with("GIT_") {
+                command.env_remove(name);
+            }
+        }
+        command
+            .current_dir(self.path())
+            .env("HOME", self.path())
+            .env("USERPROFILE", self.path())
+            .env("GIT_CONFIG_GLOBAL", self.scope.join("gitconfig"))
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+    }
+
+    fn git(&self, arguments: &[&str]) -> String {
+        let output = self
+            .isolate(&mut Command::new("git"))
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {arguments:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    }
+
+    /// Records a commit with plumbing, so no hook runs before the gate under test.
+    fn commit(&self, tree: &str, parent: Option<&str>) -> String {
+        let mut arguments = vec!["commit-tree", tree, "-m", "commit"];
+        if let Some(parent) = parent {
+            arguments.extend(["-p", parent]);
+        }
+        let commit = self.git(&arguments);
+        self.git(&["update-ref", "HEAD", &commit]);
+        commit
+    }
+
+    fn post_commit(&self, waivers: &[&str]) -> bool {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_dotguard"));
+        self.isolate(&mut command).arg("post-commit");
+        for waiver in waivers {
+            command.env(waiver, "1");
+        }
+        command.status().unwrap().success()
+    }
+}
+
+fn head(repository: &Repository) -> String {
+    repository.git(&["rev-parse", "HEAD"])
+}
+
+#[test]
+fn an_empty_commit_is_rolled_back_and_its_files_stay_in_the_working_tree() {
+    let repository = Repository::new("refused");
+    let tree = repository.git(&["write-tree"]);
+    let base = repository.commit(&tree, None);
+    repository.commit(&tree, Some(&base));
+    assert!(!repository.post_commit(&[]));
+    assert_eq!(head(&repository), base);
+    assert!(Path::new(&repository.path().join("a.txt")).is_file());
+}
+
+#[test]
+fn a_waived_empty_commit_a_change_and_the_root_commit_are_kept() {
+    let repository = Repository::new("kept");
+    let tree = repository.git(&["write-tree"]);
+    let base = repository.commit(&tree, None);
+    assert!(repository.post_commit(&[]));
+    assert_eq!(head(&repository), base);
+
+    let empty = repository.commit(&tree, Some(&base));
+    assert!(repository.post_commit(&["ALLOW_EMPTY"]));
+    assert_eq!(head(&repository), empty);
+
+    std::fs::write(repository.path().join("a.txt"), "b\n").unwrap();
+    repository.git(&["add", "a.txt"]);
+    let changed = repository.git(&["write-tree"]);
+    let change = repository.commit(&changed, Some(&empty));
+    assert!(repository.post_commit(&[]));
+    assert_eq!(head(&repository), change);
+}

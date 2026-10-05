@@ -104,7 +104,7 @@ fn delegate(
         native.available(Tool::Lefthook),
         "lefthook is required for configured hook gates"
     );
-    let mut dump = native.command(Tool::Lefthook);
+    let mut dump = native.hook_command(Tool::Lefthook);
     dump.arg("dump");
     if let Some(config) = global {
         dump.env("LEFTHOOK_CONFIG", config);
@@ -118,7 +118,7 @@ fn delegate(
     if !hooks.iter().any(|name| name == hook.name()) {
         return Ok(());
     }
-    let mut command = native.command(Tool::Lefthook);
+    let mut command = native.hook_command(Tool::Lefthook);
     if let Some(config) = global {
         command.env("LEFTHOOK_CONFIG", config);
     }
@@ -142,12 +142,13 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     if matches!(hook, Hook::PrePush | Hook::ReferenceTransaction) {
         std::io::stdin().read_to_end(&mut input)?;
     }
+    let staged = matches!(hook, Hook::PreCommit).then(|| staged_tree(&native));
     // Every host runs the same dotguard gates, so a policy holds identically on the Mac, Linux, and Windows.
     if matches!(
         hook,
         Hook::PreCommit | Hook::CommitMsg | Hook::PrePush | Hook::PostCommit
     ) {
-        let mut command = native.command(Tool::Dotguard);
+        let mut command = native.hook_command(Tool::Dotguard);
         command.arg(hook.name()).args(arguments);
         piped(&mut command, &input)?;
     }
@@ -160,10 +161,13 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     if !matches!(hook, Hook::PostCommit | Hook::ReferenceTransaction) {
         delegate(&mut native, hook, arguments, &input, None)?;
     }
+    if let Some(before) = staged {
+        preserve_staged_tree(before.as_deref(), staged_tree(&native).as_deref())?;
+    }
     if matches!(hook, Hook::PrePush) {
         piped(
             native
-                .command(Tool::Dotguard)
+                .hook_command(Tool::Dotguard)
                 .arg("renovate-gate")
                 .args(arguments),
             &input,
@@ -194,9 +198,31 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     Ok(())
 }
 
+/// Git records the index as it stands after the pre-commit hook, so a gate that changed what is staged refuses the commit.
+pub fn preserve_staged_tree(before: Option<&str>, after: Option<&str>) -> Result<()> {
+    ensure!(
+        before == after,
+        "a pre-commit gate changed the staged changes; the commit was refused and the working tree still holds your edits"
+    );
+    Ok(())
+}
+
+fn staged_tree(native: &Native) -> Option<String> {
+    let output = native
+        .hook_command(Tool::Git)
+        .arg("write-tree")
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
 pub fn git(arguments: &[OsString]) -> Result<std::process::ExitStatus> {
     Tool::Dotguard
-        .command()
+        .hook_command()
         .arg("git")
         .args(arguments)
         .status()
@@ -280,6 +306,15 @@ pub fn audit(root: &Path, fix: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_gate_that_changes_the_staged_tree_refuses_the_commit() {
+        assert!(preserve_staged_tree(Some("staged"), Some("staged")).is_ok());
+        assert!(preserve_staged_tree(None, None).is_ok());
+        assert!(preserve_staged_tree(Some("staged"), Some("emptied")).is_err());
+        assert!(preserve_staged_tree(Some("staged"), None).is_err());
+        assert!(preserve_staged_tree(None, Some("staged")).is_err());
+    }
+
     #[test]
     fn a_nested_hook_name_does_not_enable_an_unconfigured_global_hook() {
         assert_eq!(
