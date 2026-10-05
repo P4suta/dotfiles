@@ -1,0 +1,9 @@
+{
+  "revision": "ba6603438b5b1d1692c84b8483bd85732aaa0e0138016e6ff5cd6e713a327b6c",
+  "outcome": "keep",
+  "reason": "Retain native signing identity, protected keychain ownership, and final executable verification as a focused platform boundary that routes later stages to their own skills.",
+  "evidence": [
+    "dot_agents/skills/apple-signing/SKILL.md"
+  ],
+  "revisit": null
+}

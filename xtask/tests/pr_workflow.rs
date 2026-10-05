@@ -874,6 +874,7 @@ fn scoped_install_preserves_other_managed_skills_policy_and_history() -> Result<
             catalog,
             policy_hash: ops::hash(&policy)?,
             engine_hash: "existing-native-engine".into(),
+            reviewed: Default::default(),
         },
         false,
     )?;
@@ -897,6 +898,13 @@ fn scoped_install_preserves_other_managed_skills_policy_and_history() -> Result<
     assert!(installed.catalog.skills.contains_key("other-owned"));
     assert!(installed.catalog.skills.contains_key("pull-request"));
     assert_eq!(installed.engine_hash, "existing-native-engine");
+    assert_eq!(
+        installed
+            .reviewed
+            .get("pull-request")
+            .map(|reviewed| &reviewed.revision),
+        Some(&installed.catalog.skills["pull-request"].revision)
+    );
     assert_eq!(installed.policy_hash, ops::hash(&policy)?);
     assert_eq!(
         ops::read_json::<serde_json::Value>(&history)?,

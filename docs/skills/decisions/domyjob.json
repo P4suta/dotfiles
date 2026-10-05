@@ -1,0 +1,9 @@
+{
+  "revision": "4ae1cc4413522f51c949006b532161955e6f04522e8d312fd7d068e9437ac26f",
+  "outcome": "keep",
+  "reason": "Retain a small discovery route to the project-owned current command manual; stable job identities and snapshot execution differ from broader synchronization policy.",
+  "evidence": [
+    "dot_agents/skills/domyjob/SKILL.md"
+  ],
+  "revisit": null
+}

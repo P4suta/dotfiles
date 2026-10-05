@@ -123,6 +123,10 @@ enum Action {
         disposable_host: bool,
     },
     Check,
+    /// Draft the tracked decision for a changed or new skill.
+    Decide {
+        skill: String,
+    },
     Aliases,
     FormatMetadata,
     Snapshot {
@@ -349,6 +353,9 @@ fn run() -> Result<()> {
             dotfiles_xtask::quality::adapters(&cli.root)?;
             dotfiles_xtask::profiles::check_profiles(&cli.root, None)?;
             dotfiles_xtask::quality::secrets(&cli.root)?;
+        }
+        Action::Decide { skill } => {
+            println!("{}", dotfiles_xtask::skill_ops::decide(&cli.root, &skill)?);
         }
         Action::Aliases => {
             let entries = skills(&cli.root)?;

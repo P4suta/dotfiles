@@ -1,0 +1,9 @@
+{
+  "revision": "23fc1eba2bafa1a21cea24e927b90a8ec48901defc0f5e93cbd490c66d6b0e57",
+  "outcome": "keep",
+  "reason": "Keep durable design rationale separate from executable checks and task history; its narrow trigger selects consequential choices and the current lifecycle decision uses the existing ADR format.",
+  "evidence": [
+    "dot_agents/skills/adr/SKILL.md"
+  ],
+  "revisit": null
+}

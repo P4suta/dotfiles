@@ -1,0 +1,9 @@
+{
+  "revision": "5521745940aa69f88bf67a9296e307036eec6b1b1e2feba93941767319e918d5",
+  "outcome": "keep",
+  "reason": "Retain protected lifecycle and credential-bearing stage separation as the common release contract, with registry and platform mechanics loaded conditionally.",
+  "evidence": [
+    "dot_agents/skills/release-workflow/SKILL.md"
+  ],
+  "revisit": null
+}

@@ -1,0 +1,9 @@
+{
+  "revision": "9acaa1f6a71f77d684120813d117506e18481ae8f941b831252f4b8e0807ceff",
+  "outcome": "keep",
+  "reason": "Retain exact distributed-artifact inventory, provenance, SBOM, and consumer checks separately from signing and publication authorization.",
+  "evidence": [
+    "dot_agents/skills/release-evidence/SKILL.md"
+  ],
+  "revisit": null
+}

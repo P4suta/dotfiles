@@ -1,0 +1,9 @@
+{
+  "revision": "43fb4a49202c814f7af4e4832729103a9625184fed0b04f5f0007b1df42feabe",
+  "outcome": "keep",
+  "reason": "Retain the project-owned command route and preservation of required source prose, while concise-source owns the underlying representation judgment.",
+  "evidence": [
+    "dot_agents/skills/ocomment/SKILL.md"
+  ],
+  "revisit": null
+}

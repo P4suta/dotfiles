@@ -43,6 +43,7 @@ fn fixture() -> Result<tempfile::TempDir> {
             catalog_hash: ops::hash(&ops::catalog(&tree)?)?,
             policy_hash: ops::hash(&policy)?,
             engine_hash: ops::engine_hash()?,
+            reviewed: Default::default(),
         },
         false,
     )?;
@@ -344,6 +345,64 @@ fn concurrent_drafts_preserve_accepted_review_but_new_notes_and_lost_events_bloc
 }
 
 #[test]
+fn a_reviewed_installed_catalog_passes_the_gate_without_analysis_or_triage() -> Result<()> {
+    let fixture = fixture()?;
+    let root = fixture.path();
+    let manifest = root.join("approved.json");
+    let mut approved: ops::Approved = ops::read_json(&manifest)?;
+    approved.reviewed = approved
+        .catalog
+        .skills
+        .iter()
+        .map(|(name, skill)| {
+            (
+                name.clone(),
+                ops::Reviewed {
+                    revision: skill.revision.clone(),
+                    size: false,
+                },
+            )
+        })
+        .collect();
+    ops::write_json(&manifest, &approved, true)?;
+    for call in ["first", "second", "third"] {
+        success(run(
+            root,
+            &["observe", "--client", "claude"],
+            Some(
+                &json!({"hook_event_name":"PostToolUse", "session_id":"session", "tool_use_id":call, "tool_name":"Skill", "tool_input":{"skill":"beta"}, "tool_response":{}}),
+            ),
+        )?)?;
+    }
+    success(run(root, &["check"], None)?)?;
+    let analysis = success(run(root, &["analyze", "--out", "report.json"], None)?)?;
+    assert!(String::from_utf8(analysis.stdout)?.contains("No finding needs triage"));
+    success(run(root, &["check"], None)?)?;
+    success(run(
+        root,
+        &[
+            "note",
+            "--kind",
+            "failure",
+            "--skill",
+            "beta",
+            "--summary",
+            "A demonstrated failure still needs a disposition.",
+            "--evidence",
+            "beta/SKILL.md",
+        ],
+        None,
+    )?)?;
+    assert!(!run(root, &["check"], None)?.status.success());
+    let analysis = success(run(root, &["analyze", "--out", "noted.json"], None)?)?;
+    let listed = String::from_utf8(analysis.stdout)?;
+    assert!(listed.contains("Needs triage: observation:"), "{listed}");
+    assert!(!listed.contains("Needs triage: catalog:"), "{listed}");
+    assert!(!run(root, &["check"], None)?.status.success());
+    Ok(())
+}
+
+#[test]
 fn proof_gate_rejects_empty_missing_vacuous_and_failed_results() -> Result<()> {
     let expected = ["actual-production-contract"];
     let valid = json!({"verification_results":{"summary":{"status":"completed","executed":1,"failed":0,"successful":1},"results":[{"harness_id":expected[0],"status":"Success","checks":[{"category":"assertion","status":"Success"},{"category":"cover","status":"Satisfied"},{"category":"cover","status":"Satisfied"}]}]}});
@@ -428,27 +487,25 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
         false,
     )?;
     ops::write_json(&user.join(".config/skill-ops/policy.json"), &policy, false)?;
-    let report = ops::analyze(
-        &ops::catalog(&source.join("dot_agents/skills"))?,
-        &policy,
-        &[],
-        &[],
-    )?;
-    let review = Review {
-        report_hash: ops::hash(&report)?,
-        decisions: report
-            .findings
-            .iter()
-            .map(|finding| Decision {
-                id: finding.id.clone(),
-                outcome: Outcome::Keep,
+    let source_catalog = ops::catalog(&source.join("dot_agents/skills"))?;
+    for (name, skill) in &source_catalog.skills {
+        ops::write_json(
+            &source.join(ops::DECISIONS).join(format!("{name}.json")),
+            &ops::SkillDecision {
+                revision: skill.revision.clone(),
+                outcome: if name == "beta" {
+                    Outcome::Deferred
+                } else {
+                    Outcome::Keep
+                },
                 reason: "The fixture preserves its separately named native contracts.".into(),
                 evidence: vec!["dot_agents/skills/alpha/SKILL.md".into()],
-                revisit: None,
-            })
-            .collect(),
-    };
-    ops::write_json(&source.join("docs/skills/review.json"), &review, false)?;
+                revisit: (name == "beta").then(|| "Reassess once beta is observed.".into()),
+                size: None,
+            },
+            false,
+        )?;
+    }
     let existing = json!({"model":"owner-choice","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"existing-helper session"}]}]}});
     ops::write_json(&user.join(".codex/hooks.json"), &existing, false)?;
     ops::write_json(&user.join(".claude/settings.json"), &existing, false)?;
@@ -492,6 +549,49 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
     fs::write(&native_skill, native_bytes)?;
     dotfiles_xtask::skill_install::deploy(&source, binary, &user, &mut apply)?;
     assert_eq!(applied, [policy_path.clone(), policy_path, adapter_path]);
+    let manifest: ops::Approved = ops::read_json(&user.join(".config/skill-ops/approved.json"))?;
+    assert_eq!(
+        manifest.reviewed,
+        std::collections::BTreeMap::from([(
+            "alpha".to_owned(),
+            ops::Reviewed {
+                revision: source_catalog.skills["alpha"].revision.clone(),
+                size: false,
+            }
+        )])
+    );
+    let native = |arguments: &[&str], input: Option<&Value>| -> Result<Output> {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_skill-ops"))
+            .current_dir(fixture.path())
+            .env("HOME", &user)
+            .env("USERPROFILE", &user)
+            .arg("--state")
+            .arg(fixture.path().join("native-state"))
+            .args(arguments)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let mut stdin = child.stdin.take().expect("piped input");
+        if let Some(input) = input {
+            stdin.write_all(&serde_json::to_vec(input)?)?;
+        }
+        drop(stdin);
+        Ok(child.wait_with_output()?)
+    };
+    for call in ["first", "second", "third"] {
+        success(native(
+            &["observe", "--client", "claude"],
+            Some(
+                &json!({"hook_event_name":"PostToolUse", "session_id":"session", "tool_use_id":call, "tool_name":"Skill", "tool_input":{"skill":"beta"}, "tool_response":{}}),
+            ),
+        )?)?;
+    }
+    assert!(!native(&["check"], None)?.status.success());
+    let analysis = success(native(&["analyze", "--out", "native-report.json"], None)?)?;
+    let listed = String::from_utf8(analysis.stdout)?;
+    assert!(listed.contains("Needs triage: catalog:beta:"), "{listed}");
+    assert!(!listed.contains("Needs triage: catalog:alpha:"), "{listed}");
     assert_eq!(fs::read_to_string(&adapter)?, "native fixture adapter");
     let first: Value = ops::read_json(&user.join(".codex/hooks.json"))?;
     assert_eq!(first["model"], existing["model"]);
@@ -516,5 +616,38 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
         fs::read_to_string(user.join(".agents/skills/alpha/SKILL.md"))?,
         "unrelated native edit"
     );
+    Ok(())
+}
+
+#[test]
+fn analysis_without_a_manifest_requires_triage_of_every_finding() -> Result<()> {
+    let fixture = fixture()?;
+    let root = fixture.path();
+    fs::remove_file(root.join("approved.json"))?;
+    let analysis = success(run(root, &["analyze", "--out", "report.json"], None)?)?;
+    let listed = String::from_utf8(analysis.stdout)?;
+    assert!(listed.contains("Adopted 0 findings"), "{listed}");
+    assert!(listed.contains("Needs triage: catalog:alpha:"), "{listed}");
+    assert!(listed.contains("Needs triage: catalog:beta:"), "{listed}");
+    Ok(())
+}
+
+#[test]
+fn a_manifest_without_reviewed_revisions_is_refused_with_the_install_command() -> Result<()> {
+    let fixture = fixture()?;
+    let root = fixture.path();
+    let manifest = root.join("approved.json");
+    let mut legacy: Value = ops::read_json(&manifest)?;
+    legacy
+        .as_object_mut()
+        .expect("manifest object")
+        .remove("reviewed");
+    ops::write_json(&manifest, &legacy, true)?;
+    for arguments in [&["check"][..], &["analyze", "--out", "report.json"][..]] {
+        let refused = run(root, arguments, None)?;
+        assert!(!refused.status.success());
+        let message = String::from_utf8(refused.stderr)?;
+        assert!(message.contains("mise run install:skill-ops"), "{message}");
+    }
     Ok(())
 }

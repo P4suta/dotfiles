@@ -1,0 +1,9 @@
+{
+  "revision": "4fd99d2649887b0b12a7198e32c1be1d5518124726ddf3a5ebbce43e34e26e80",
+  "outcome": "keep",
+  "reason": "Retain exact operation, target, evidence, and existing-authorization checks; automated analysis and a skill load must not create permission to approve or publish.",
+  "evidence": [
+    "dot_agents/skills/approval-boundaries/SKILL.md"
+  ],
+  "revisit": null
+}

@@ -1,0 +1,9 @@
+{
+  "revision": "bfda29f003338856ccf726be36da4621090ac4775e349ba9c8c9b24d50161ecf",
+  "outcome": "keep",
+  "reason": "Retain crates.io workspace ordering, immutable versions, and proposal/publication separation as conditional Rust release behavior.",
+  "evidence": [
+    "dot_agents/skills/rust-release/SKILL.md"
+  ],
+  "revisit": null
+}

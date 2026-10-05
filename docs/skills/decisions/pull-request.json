@@ -1,0 +1,17 @@
+{
+  "revision": "1be2603a716a3aee53704701db08ee71fabd7c540cee51b9cc9d60196b4bbb7e",
+  "outcome": "implemented",
+  "reason": "Apply the same layered budget to verified separate PR allowance and applicable adaptive thresholds, require current window evidence and preserve the owner pause; retain checked issue scope, draft transitions and official review exclusion with production proofs and native process refusal tests. Keep PRs as drafts until every reported head check passes, with the check requirement proved in the transition core and refused natively.",
+  "evidence": [
+    "dot_agents/skills/pull-request/SKILL.md",
+    "docs/adr/0004-checked-pull-request-authoring.md",
+    "docs/adr/0006-global-personal-issue-prerequisite.md",
+    "xtask/tests/pr_workflow.rs",
+    "xtask/src/pr_rules.rs",
+    "xtask/src/review_rules.rs",
+    "dot_agents/skills/pull-request/references/workflow.md",
+    "docs/adr/0008-layered-review-capacity.md",
+    "docs/adr/0013-ready-only-after-passing-checks.md"
+  ],
+  "revisit": null
+}

@@ -1,0 +1,9 @@
+{
+  "revision": "48bdf2eb4bedb5f3596deff3a297f770a5b25266aca6af0df4de1aa91a94af53",
+  "outcome": "keep",
+  "reason": "Retain the exact submitted-artifact and resumable-receipt workflow separately from certificate setup and packaging, because acceptance, stapling, and publication are distinct transitions.",
+  "evidence": [
+    "dot_agents/skills/apple-notarization/SKILL.md"
+  ],
+  "revisit": null
+}

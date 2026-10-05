@@ -201,7 +201,7 @@ pub fn export_checks(root: &Path, output: &Path) -> Result<()> {
         ".github/workflows/required.yml",
         "dot_config/skill-ops/policy.json",
         "dot_config/opencode/plugins/skill-ops.ts",
-        "docs/skills/review.json",
+        "docs/skills/decisions",
         "package.json",
         "bun.lock",
         "tsconfig.json",

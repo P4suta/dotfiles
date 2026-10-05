@@ -1,0 +1,11 @@
+{
+  "revision": "19aa31e5f90901f0e50d714025e873d31d55063817ce1ada02ad9f33c079bbac",
+  "outcome": "implemented",
+  "reason": "Retain demonstrated failure, architectural cause, and affected-family remediation separately from forward planning and dependency-specific reliability techniques; a note or resolution to check more carefully does not count as a remediation, which the staged-tree and empty-commit gates demonstrate.",
+  "evidence": [
+    "dot_agents/skills/systematic-fixes/SKILL.md",
+    "guard/tests/empty_commit.rs",
+    "xtask/src/hooks.rs"
+  ],
+  "revisit": null
+}

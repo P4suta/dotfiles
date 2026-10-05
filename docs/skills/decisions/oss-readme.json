@@ -1,0 +1,9 @@
+{
+  "revision": "502ed927df63ed7e7cada6283488f03563498737fc5bcf68b4f25096b31c62d5",
+  "outcome": "keep",
+  "reason": "Retain a narrowly triggered public first-use document standard independently of architecture records and internal operating instructions.",
+  "evidence": [
+    "dot_agents/skills/oss-readme/SKILL.md"
+  ],
+  "revisit": null
+}

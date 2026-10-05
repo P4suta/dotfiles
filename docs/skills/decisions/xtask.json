@@ -1,0 +1,9 @@
+{
+  "revision": "16bbdb9b99e2ef8ceebc09f42213d2e391547960c8152350483ba745a7170161",
+  "outcome": "keep",
+  "reason": "Retain repository-specific typed orchestration and child-build isolation as distinct from generic Rust automation policy and thin command surfaces.",
+  "evidence": [
+    "dot_agents/skills/xtask/SKILL.md"
+  ],
+  "revisit": null
+}

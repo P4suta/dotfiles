@@ -806,7 +806,7 @@ pub fn deploy(
     use crate::skill_ops as ops;
     ops::check_catalog(source)?;
     let manifest = user_directory.join(".config/skill-ops/approved.json");
-    let mut approved: ops::Approved = ops::read_json(&manifest)?;
+    let mut approved = ops::read_approved(&manifest)?;
     ensure!(
         ops::hash(&approved.catalog)? == approved.catalog_hash,
         "installed managed catalog is inconsistent"
@@ -832,6 +832,16 @@ pub fn deploy(
             .context("source PR skill is missing")?
             .clone(),
     );
+    let reviewed = ops::adoptable_revisions(
+        &expected,
+        &ops::tracked_decisions(&source.join(ops::DECISIONS))?,
+    );
+    match reviewed.get("pull-request") {
+        Some(skill) => approved
+            .reviewed
+            .insert("pull-request".into(), skill.clone()),
+        None => approved.reviewed.remove("pull-request"),
+    };
     let tree = source.join("dot_agents/skills/pull-request");
     let alias = source.join("dot_claude/skills/symlink_pull-request");
     let paths: Vec<_> = crate::skill_source_paths(source)?

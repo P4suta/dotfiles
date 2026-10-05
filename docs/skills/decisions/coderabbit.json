@@ -1,0 +1,11 @@
+{
+  "revision": "6ce16b2013d0b83baa8288f3ed66625aba2f6791be2d61187ebdebc67dd1eca7",
+  "outcome": "implemented",
+  "reason": "Connect fixed-fee setup to the layered numeric budget and rolling attempt and probe ceilings without relaxing paid-usage refusal, persistent pauses or the distinct PR, IDE, browser and unmanaged-client boundaries.",
+  "evidence": [
+    "dot_agents/skills/coderabbit/SKILL.md",
+    "xtask/src/review_guard.rs",
+    "docs/adr/0008-layered-review-capacity.md"
+  ],
+  "revisit": null
+}
