@@ -41,9 +41,11 @@
     },
     "github": {
       "type": "remote",
-      "url": "https://api.githubcopilot.com/mcp/?toolsets=repo,issues,pull_requests,notifications",
+      "url": "https://api.githubcopilot.com/mcp/",
       "headers": {
-        "Authorization": "Bearer {env:GH_MCP_TOKEN}"
+        "Authorization": "Bearer {env:GH_MCP_TOKEN}",
+        "X-MCP-Toolsets": "repos,issues,pull_requests,notifications",
+        "X-MCP-Readonly": "true"
       },
       "oauth": false,
       "enabled": true

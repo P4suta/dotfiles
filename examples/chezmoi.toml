@@ -24,7 +24,7 @@ config = ""
 [data.doppler.secrets]
 codex = []
 claude = []
-opencode = ["GH_MCP_TOKEN"]
+opencode = []
 
 [data.paths]
 projects = ""
