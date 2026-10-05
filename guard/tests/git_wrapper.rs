@@ -3,7 +3,12 @@
 
 use dotguard::refusal::Refusal;
 use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
+
+#[path = "support/fixture_git.rs"]
+mod fixture_git;
+#[path = "support/wrapper.rs"]
+mod wrapper;
 
 /// A scratch directory holding the copied wrapper, an isolated home, and a repository, removed when dropped.
 struct Wrapper {
@@ -24,7 +29,7 @@ impl Wrapper {
         let _ = std::fs::remove_dir_all(&scope);
         std::fs::create_dir_all(scope.join("repository")).unwrap();
         let git = scope.join(format!("git{}", std::env::consts::EXE_SUFFIX));
-        std::fs::copy(env!("CARGO_BIN_EXE_dotguard"), &git).unwrap();
+        wrapper::install(&git);
         let wrapper = Self { scope, git };
         assert!(wrapper.run(&["init", "-q"], None).status.success());
         wrapper
@@ -36,16 +41,14 @@ impl Wrapper {
 
     /// Runs the wrapper with an isolated home and Git configuration, so its audit records stay out of the developer's.
     /// Waivers set in the calling shell, such as the one a force push sets for its hooks, are removed so they cannot decide a refusal.
-    /// Git variables are removed too: a commit hook in a linked worktree exports `GIT_DIR`, and `git init` would reinitialize that repository instead of the scratch one.
     fn run(&self, arguments: &[&str], input: Option<&[u8]>) -> Output {
         self.run_with(arguments, input, &[])
     }
 
     fn run_with(&self, arguments: &[&str], input: Option<&[u8]>, waivers: &[&str]) -> Output {
-        let mut command = Command::new(&self.git);
+        let mut command = fixture_git::command(&self.git, &self.scope.join("gitconfig"));
         for (name, _) in std::env::vars_os() {
-            let name_text = name.to_string_lossy();
-            if name_text.starts_with("ALLOW_") || name_text.starts_with("GIT_") {
+            if name.to_string_lossy().starts_with("ALLOW_") {
                 command.env_remove(name);
             }
         }
@@ -57,8 +60,6 @@ impl Wrapper {
             .current_dir(self.scope.join("repository"))
             .env("HOME", self.home())
             .env("USERPROFILE", self.home())
-            .env("GIT_CONFIG_GLOBAL", self.scope.join("gitconfig"))
-            .env("GIT_CONFIG_NOSYSTEM", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

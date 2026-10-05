@@ -11,6 +11,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+#[path = "../../guard/tests/support/fixture_git.rs"]
+mod fixture_git;
+
 const CRLF: &[u8] = b"first\r\nsecond\r\n";
 const LF: &[u8] = b"first\nsecond\n";
 
@@ -47,15 +50,7 @@ impl Isolated {
     }
 
     fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
-        let mut command = Command::new(program);
-        command
-            .env("GIT_CONFIG_GLOBAL", &self.global)
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("XDG_CONFIG_HOME", self.global.parent().expect("scope"))
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE");
-        command
+        fixture_git::command(program, &self.global)
     }
 
     fn git(&self, directory: &Path, arguments: &[&str]) -> Result<Output> {

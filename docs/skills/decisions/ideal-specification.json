@@ -1,0 +1,9 @@
+{
+  "revision": "b972da03f403b47caf08d9a5d4a6746e80a4e890bf5b1b7096c71023e67d3c6f",
+  "outcome": "implemented",
+  "reason": "Separate artifact derivation from implementation planning in ideal-first-development; the trigger covers persisted specifications only.",
+  "evidence": [
+    "dot_agents/skills/ideal-specification/SKILL.md"
+  ],
+  "revisit": null
+}

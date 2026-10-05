@@ -1,22 +1,16 @@
-#![allow(
-    clippy::disallowed_methods,
-    reason = "integration tests spawn the real git the classifier reads"
-)]
-
 use anyhow::{Result, ensure};
 use dotfiles_xtask::change::{Source, gates, paths};
 use std::fs;
 use std::path::Path;
-use std::process::Command;
+
+#[path = "../../guard/tests/support/fixture_git.rs"]
+mod fixture_git;
 
 fn git(directory: &Path, arguments: &[&str]) -> Result<()> {
-    let output = Command::new("git")
+    let output = fixture_git::command("git", &directory.with_extension("gitconfig"))
         .arg("-C")
         .arg(directory)
         .args(arguments)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
         .output()?;
     ensure!(
         output.status.success(),
