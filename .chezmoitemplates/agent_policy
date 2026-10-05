@@ -40,6 +40,7 @@ When working on an existing PR or an authorized PR update, load `coderabbit-revi
 Wait for the automatic review of the final pushed head and fix supported findings within the authorized task, then rerun the affected checks.
 Explain unsupported findings with concrete evidence instead of applying them blindly or dismissing them without inspection.
 Do not declare the PR complete while supported findings, required checks, or a current-head review remain outstanding.
-A passing CodeRabbit check or resolved thread alone does not establish a completed review or verified fix; paused, skipped, stale, failed, and rate-limited reviews remain pending.
+A passing CodeRabbit check or resolved thread alone does not establish a completed review or verified fix; reviews CodeRabbit paused, skipped, failed, or rate-limited, and stale reviews, remain pending.
+While `coderabbit --guard-status --json` reports PR reviews paused by the owner, no PR review is owed; `pr-workflow` reports when one is owed again after resumption.
 Use the existing PR review before requesting a CLI review of the same diff, and preserve the CLI's local budget.
 Commit, push, PR replies, thread resolution, manual review triggers, and merge still require the applicable user authorization.
