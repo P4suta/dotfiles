@@ -10,6 +10,9 @@ use dotfiles_xtask::{
 use std::fs;
 use std::path::Path;
 
+#[path = "../../guard/tests/support/fixture_git.rs"]
+mod fixture_git;
+
 #[test]
 fn runtime_credentials_and_personal_values_are_refused() {
     let directory = tempfile::tempdir().unwrap();
@@ -252,9 +255,7 @@ fn public_owner_sources_clone_over_https_despite_a_host_ssh_rewrite() {
             .unwrap();
         let url = arguments[clone + 1].clone();
         arguments.truncate(clone);
-        let resolved = std::process::Command::new("git")
-            .env("GIT_CONFIG_GLOBAL", &global)
-            .env("GIT_CONFIG_NOSYSTEM", "1")
+        let resolved = fixture_git::command("git", &global)
             .args(&arguments)
             .args(["ls-remote", "--get-url"])
             .arg(url)

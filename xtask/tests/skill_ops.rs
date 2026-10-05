@@ -13,6 +13,9 @@ use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 
+#[path = "../../guard/tests/support/fixture_git.rs"]
+mod fixture_git;
+
 fn fixture() -> Result<(tempfile::TempDir, Catalog, Policy)> {
     let root = tempfile::tempdir()?;
     for name in ["alpha", "beta"] {
@@ -831,12 +834,8 @@ fn git(root: &std::path::Path, arguments: &[&str]) -> Result<String> {
     if !config.try_exists()? {
         fs::write(&config, "")?;
     }
-    // The tool command drops the repository variables that a commit hook exports, so the fixture never writes to the hook's repository.
-    let output = dotfiles_xtask::tool::Tool::Git
-        .command()
+    let output = fixture_git::command("git", &config)
         .current_dir(root)
-        .env("GIT_CONFIG_GLOBAL", &config)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
         .args([
             "-c",
             "user.name=Fixture",

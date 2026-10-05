@@ -5,6 +5,9 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
+#[path = "support/fixture_git.rs"]
+mod fixture_git;
+
 const ZERO: &str = "0000000000000000000000000000000000000000";
 
 struct Repository {
@@ -37,27 +40,22 @@ impl Repository {
         self.scope.join("home")
     }
 
-    fn isolate<'a>(&self, command: &'a mut Command) -> &'a mut Command {
+    fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
+        let mut command = fixture_git::command(program, &self.scope.join("gitconfig"));
         for (name, _) in std::env::vars_os() {
-            let name = name.to_string_lossy().into_owned();
-            if name.starts_with("ALLOW_") || name.starts_with("GIT_") {
+            if name.to_string_lossy().starts_with("ALLOW_") {
                 command.env_remove(name);
             }
         }
         command
             .current_dir(self.path())
             .env("HOME", self.path())
-            .env("USERPROFILE", self.path())
-            .env("GIT_CONFIG_GLOBAL", self.scope.join("gitconfig"))
-            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("USERPROFILE", self.path());
+        command
     }
 
     fn git(&self, arguments: &[&str]) -> String {
-        let output = self
-            .isolate(&mut Command::new("git"))
-            .args(arguments)
-            .output()
-            .unwrap();
+        let output = self.command("git").args(arguments).output().unwrap();
         assert!(
             output.status.success(),
             "git {arguments:?}: {}",
@@ -81,9 +79,8 @@ impl Repository {
 
     /// Runs the gate with `config` added to the repository's configuration through the environment.
     fn dotguard(&self, arguments: &[&str], input: &str, config: &[(&str, &str)]) -> Output {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_dotguard"));
-        self.isolate(&mut command)
-            .env("GIT_CONFIG_COUNT", config.len().to_string());
+        let mut command = self.command(env!("CARGO_BIN_EXE_dotguard"));
+        command.env("GIT_CONFIG_COUNT", config.len().to_string());
         for (index, (key, value)) in config.iter().enumerate() {
             command
                 .env(format!("GIT_CONFIG_KEY_{index}"), key)
