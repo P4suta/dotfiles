@@ -63,7 +63,7 @@ pub enum Standard {
 
 /// Whether a repository's commits take the personal standard.
 /// The repository's `prose.standard` setting decides when present.
-/// Otherwise another remote with a foreign owner marks a fork, `origin` names the destination, and a personal GitHub remote stands in for an `origin` that names no GitHub owner.
+/// Otherwise another remote with a foreign owner marks a fork, `origin` names the destination, and a personal GitHub remote stands in for a missing `origin` or one that names no GitHub owner.
 pub fn repository_standard(
     declared: Option<bool>,
     origin: Option<Owner>,
@@ -75,9 +75,9 @@ pub fn repository_standard(
         (Some(false), _) => Standard::Skips,
         (None, _) if other_foreign => Standard::Skips,
         (None, Some(Owner::Personal)) => Standard::Applies,
-        (None, Some(Owner::Unresolved)) if other_personal => Standard::Applies,
-        (None, Some(Owner::Unresolved)) => Standard::Undetermined,
-        (None, Some(Owner::Foreign) | None) => Standard::Skips,
+        (None, Some(Owner::Foreign)) => Standard::Skips,
+        (None, Some(Owner::Unresolved) | None) if other_personal => Standard::Applies,
+        (None, Some(Owner::Unresolved) | None) => Standard::Undetermined,
     }
 }
 
@@ -171,7 +171,7 @@ fn any_owner() -> Option<Owner> {
 
 #[cfg(kani)]
 #[kani::proof]
-fn a_declared_standard_wins_and_an_unresolved_origin_is_reported() {
+fn a_declared_standard_wins_and_an_unresolved_destination_is_reported() {
     let declared: Option<bool> = kani::any();
     let origin = any_owner();
     let personal: bool = kani::any();
@@ -185,8 +185,11 @@ fn a_declared_standard_wins_and_an_unresolved_origin_is_reported() {
         assert!(origin != Some(Owner::Foreign) || standard == Standard::Skips);
         assert_eq!(
             standard == Standard::Undetermined,
-            origin == Some(Owner::Unresolved) && !personal && !foreign
+            matches!(origin, Some(Owner::Unresolved) | None) && !personal && !foreign
         );
+        if origin != Some(Owner::Foreign) && personal && !foreign {
+            assert_eq!(standard, Standard::Applies);
+        }
         if origin == Some(Owner::Personal) {
             assert_eq!(
                 standard == Standard::Applies,
@@ -197,6 +200,8 @@ fn a_declared_standard_wins_and_an_unresolved_origin_is_reported() {
     kani::cover!(standard == Standard::Applies && declared.is_none());
     kani::cover!(standard == Standard::Skips && declared.is_none());
     kani::cover!(standard == Standard::Undetermined);
+    kani::cover!(standard == Standard::Applies && origin.is_none());
+    kani::cover!(standard == Standard::Undetermined && origin.is_none());
 }
 
 #[cfg(kani)]

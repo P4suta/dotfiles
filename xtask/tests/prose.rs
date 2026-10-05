@@ -184,6 +184,9 @@ fn git_generated_messages_pass_and_added_prose_is_checked() -> Result<()> {
         "Revert \"Revert \"feat(prose): enforce one writing standard\"\"\n\nThis reverts commit 39f8a76.\n",
         "Reapply \"feat(prose): enforce one writing standard\"\n\nThis reverts commit 39f8a76d.\n",
         "Revert \"Merge branch 'feat/x'\"\n\nThis reverts commit 39f8a76, reversing\nchanges made to b158608.\n",
+        "Revert \"feat(parser): add file\"\n\nThis reverts commit dbf0602 (feat(parser): add file, 2026-10-05).\n",
+        "revert(parser): drop the file cache\n\n# *** SAY WHY WE ARE REVERTING ON THE TITLE LINE ***\n\nThis reverts commit dbf0602 (feat(parser): add file, 2026-10-05).\n",
+        "revert(parser): drop the merge\n\nThis reverts commit 39f8a76 (Merge branch 'feat/x', 2026-10-04), reversing\nchanges made to b158608 (fix(parser): keep edits, 2026-10-03).\n",
         "fixup! feat(prose): enforce one writing standard\n",
         "fixup! fixup! feat(prose): enforce one writing standard\n",
         "squash! feat(prose): enforce one writing standard\n\nThe gate reads the body.\n",
@@ -197,6 +200,9 @@ fn git_generated_messages_pass_and_added_prose_is_checked() -> Result<()> {
     }
     for raw in [
         format!("Revert \"feat(prose): x\"\n\nThis reverts commit 39f8a76.\n\n{ATTRIBUTED}\n"),
+        format!(
+            "revert(prose): x\n\nThis reverts commit 39f8a76 (feat(prose): x, 2026-10-05).\n\n{ATTRIBUTED}\n"
+        ),
         format!("squash! feat(prose): x\n\n{ATTRIBUTED}\n"),
         format!("amend! feat(prose): x\n\nfix(parser): keep edits\n\n{ATTRIBUTED}\n"),
         format!("Merge branch 'feat/x'\n\n{ATTRIBUTED}\n"),
@@ -215,6 +221,17 @@ fn git_generated_messages_pass_and_added_prose_is_checked() -> Result<()> {
         &format!("Revert the parser cache\n\n{ATTRIBUTED}\n"),
     )?;
     assert!(attribution_reported(&findings, ATTRIBUTED));
+    let undated = format!("This reverts commit 39f8a76 ({ATTRIBUTED}).");
+    let findings = prose::check(
+        &bundle,
+        Channel::Commit,
+        "commit message",
+        &format!("revert(prose): x\n\n{undated}\n"),
+    )?;
+    assert!(
+        attribution_reported(&findings, &undated),
+        "a sentence that only resembles a commit reference is checked: {findings:?}"
+    );
     Ok(())
 }
 
@@ -921,9 +938,33 @@ fn the_destination_decides_which_repositories_take_the_standard() {
         (
             None,
             vec![("upstream", "git@github.com:P4suta/project.git")],
+            Applies,
+        ),
+        (
+            None,
+            vec![("github", "git@github.com:P4suta/project.git")],
+            Applies,
+        ),
+        (
+            None,
+            vec![
+                ("github", "git@github.com:P4suta/project.git"),
+                ("upstream", "https://github.com/other/project.git"),
+            ],
             Skips,
         ),
-        (None, vec![], Skips),
+        (
+            None,
+            vec![("upstream", "https://github.com/other/project.git")],
+            Skips,
+        ),
+        (
+            None,
+            vec![("backup", "hub:repositories/project.git")],
+            Undetermined,
+        ),
+        (None, vec![], Undetermined),
+        (Some(false), vec![], Skips),
         (
             None,
             vec![("origin", "hub:repositories/dotfiles.git")],
@@ -994,38 +1035,40 @@ fn the_global_commit_msg_hook_checks_personal_repositories() -> Result<()> {
         .arg(bin.join(format!("dotguard{}", std::env::consts::EXE_SUFFIX)))
         .status()?;
     assert!(status.success());
-    let declared_commit = |origin: &str,
-                           upstream: Option<&str>,
-                           declared: Option<&str>,
-                           text: &str|
-     -> Result<(bool, String)> {
-        let directory = repository(&[])?;
-        git(directory.path(), &["remote", "add", "origin", origin])?;
-        if let Some(upstream) = upstream {
-            git(directory.path(), &["remote", "add", "upstream", upstream])?;
-        }
-        if let Some(declared) = declared {
-            git(directory.path(), &["config", "prose.standard", declared])?;
-        }
-        let message = directory.path().join(".git/COMMIT_EDITMSG");
-        fs::write(&message, text)?;
-        let output = Command::new(env!("CARGO_BIN_EXE_dotfiles-xtask"))
-            .current_dir(directory.path())
-            .args(["hook", "commit-msg", "--"])
-            .arg(&message)
-            .env(
-                if cfg!(windows) { "USERPROFILE" } else { "HOME" },
-                home.path(),
-            )
-            .env("PROSE_CONFIG", root().join("dot_config/prose"))
-            .env("PROSE_RUNTIME", home.path().join("runtime"))
-            .stdin(Stdio::null())
-            .output()?;
-        Ok((
-            output.status.success(),
-            String::from_utf8_lossy(&output.stderr).into_owned(),
-        ))
-    };
+    let remotes_commit =
+        |remotes: &[(&str, &str)], declared: Option<&str>, text: &str| -> Result<(bool, String)> {
+            let directory = repository(&[])?;
+            for (name, url) in remotes {
+                git(directory.path(), &["remote", "add", name, url])?;
+            }
+            if let Some(declared) = declared {
+                git(directory.path(), &["config", "prose.standard", declared])?;
+            }
+            let message = directory.path().join(".git/COMMIT_EDITMSG");
+            fs::write(&message, text)?;
+            let output = Command::new(env!("CARGO_BIN_EXE_dotfiles-xtask"))
+                .current_dir(directory.path())
+                .args(["hook", "commit-msg", "--"])
+                .arg(&message)
+                .env(
+                    if cfg!(windows) { "USERPROFILE" } else { "HOME" },
+                    home.path(),
+                )
+                .env("PROSE_CONFIG", root().join("dot_config/prose"))
+                .env("PROSE_RUNTIME", home.path().join("runtime"))
+                .stdin(Stdio::null())
+                .output()?;
+            Ok((
+                output.status.success(),
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            ))
+        };
+    let declared_commit =
+        |origin: &str, upstream: Option<&str>, declared: Option<&str>, text: &str| {
+            let mut remotes = vec![("origin", origin)];
+            remotes.extend(upstream.map(|upstream| ("upstream", upstream)));
+            remotes_commit(&remotes, declared, text)
+        };
     let commit = |origin: &str, upstream: Option<&str>, text: &str| {
         declared_commit(origin, upstream, None, text)
     };
@@ -1036,6 +1079,23 @@ fn the_global_commit_msg_hook_checks_personal_repositories() -> Result<()> {
     assert!(
         stderr.contains(hub) && stderr.contains("git config prose.standard true"),
         "an unresolved destination is reported with the setting that decides it: {stderr}"
+    );
+    let personal_remote = ("github", "git@github.com:P4suta/project.git");
+    let (accepted, stderr) = remotes_commit(&[personal_remote], None, &attributed)?;
+    assert!(
+        !accepted && stderr.contains("Dotfiles.Attribution"),
+        "a personal GitHub remote names the destination of a repository without origin: {stderr}"
+    );
+    let (accepted, stderr) = remotes_commit(&[], None, &attributed)?;
+    assert!(accepted, "{stderr}");
+    assert!(
+        stderr.contains("no origin remote") && stderr.contains("git config prose.standard true"),
+        "a repository without remotes reports the setting that decides it: {stderr}"
+    );
+    let (accepted, stderr) = remotes_commit(&[], Some("true"), &attributed)?;
+    assert!(
+        !accepted && stderr.contains("Dotfiles.Attribution"),
+        "{stderr}"
     );
     let (accepted, stderr) = declared_commit(hub, None, Some("true"), &attributed)?;
     assert!(

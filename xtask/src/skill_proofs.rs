@@ -60,7 +60,7 @@ pub const REVIEW_HARNESSES: [&str; 5] = [
 ];
 
 pub const PROSE_HARNESSES: [&str; 7] = [
-    "a_declared_standard_wins_and_an_unresolved_origin_is_reported",
+    "a_declared_standard_wins_and_an_unresolved_destination_is_reported",
     "a_ledger_never_admits_more_findings_than_it_allows",
     "a_replaced_sentence_is_never_admitted_by_the_ledger",
     "exemptions_require_a_reason_and_a_match",
@@ -445,7 +445,7 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_a_ledger_that_admits_a_new_finding() {{\n    assert!(production::ledger(3, 2) == production::Ledger::Within);\n}}\n#[kani::proof]\nfn reject_allowing_a_failing_reply() {{\n    assert!(production::reply(false, false) == production::Reply::Allow);\n}}\n#[kani::proof]\nfn reject_admitting_a_replaced_sentence() {{\n    assert!(production::ledger(production::occurrences(&[2u8], &2), production::occurrences(&[1u8], &2)) == production::Ledger::Within);\n}}\n#[kani::proof]\nfn reject_ending_after_another_hooks_continuation() {{\n    assert!(production::reply(false, production::rewritten_by_this_hook(true, Some(false))) == production::Reply::EndUnchecked);\n}}\n#[kani::proof]\nfn reject_the_standard_on_a_fork() {{\n    assert!(production::standard_applies(true, true));\n}}\n#[kani::proof]\nfn reject_skipping_an_unresolved_origin_silently() {{\n    assert!(production::repository_standard(None, Some(production::Owner::Unresolved), false, false) == production::Standard::Skips);\n}}\n#[kani::proof]\nfn reject_overriding_a_declared_opt_out() {{\n    assert!(production::repository_standard(Some(false), Some(production::Owner::Personal), false, false) == production::Standard::Applies);\n}}\n"
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_a_ledger_that_admits_a_new_finding() {{\n    assert!(production::ledger(3, 2) == production::Ledger::Within);\n}}\n#[kani::proof]\nfn reject_allowing_a_failing_reply() {{\n    assert!(production::reply(false, false) == production::Reply::Allow);\n}}\n#[kani::proof]\nfn reject_admitting_a_replaced_sentence() {{\n    assert!(production::ledger(production::occurrences(&[2u8], &2), production::occurrences(&[1u8], &2)) == production::Ledger::Within);\n}}\n#[kani::proof]\nfn reject_ending_after_another_hooks_continuation() {{\n    assert!(production::reply(false, production::rewritten_by_this_hook(true, Some(false))) == production::Reply::EndUnchecked);\n}}\n#[kani::proof]\nfn reject_the_standard_on_a_fork() {{\n    assert!(production::standard_applies(true, true));\n}}\n#[kani::proof]\nfn reject_skipping_an_unresolved_origin_silently() {{\n    assert!(production::repository_standard(None, Some(production::Owner::Unresolved), false, false) == production::Standard::Skips);\n}}\n#[kani::proof]\nfn reject_skipping_a_repository_without_origin_silently() {{\n    assert!(production::repository_standard(None, None, false, false) == production::Standard::Skips);\n}}\n#[kani::proof]\nfn reject_ignoring_a_personal_remote_without_origin() {{\n    assert!(production::repository_standard(None, None, true, false) == production::Standard::Skips);\n}}\n#[kani::proof]\nfn reject_overriding_a_declared_opt_out() {{\n    assert!(production::repository_standard(Some(false), Some(production::Owner::Personal), false, false) == production::Standard::Applies);\n}}\n"
         ),
     )?;
     for name in [
@@ -455,6 +455,8 @@ fn verify_native(root: &Path) -> Result<()> {
         "reject_ending_after_another_hooks_continuation",
         "reject_the_standard_on_a_fork",
         "reject_skipping_an_unresolved_origin_silently",
+        "reject_skipping_a_repository_without_origin_silently",
+        "reject_ignoring_a_personal_remote_without_origin",
         "reject_overriding_a_declared_opt_out",
     ] {
         verify_file(&file, probe.path(), &[name], true)?;

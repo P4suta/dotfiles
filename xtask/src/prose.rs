@@ -735,9 +735,31 @@ fn quoted_subject(subject: &str) -> bool {
         .any(|prefix| subject.starts_with(prefix))
 }
 
+/// A commit as Git names it in a generated sentence: an abbreviated hash, or with `revert --reference` a hash followed by the subject and short date in parentheses.
+fn commit_reference(text: &str) -> bool {
+    let date = |date: &str| {
+        date.len() == 10
+            && date.bytes().enumerate().all(|(index, byte)| {
+                if index == 4 || index == 7 {
+                    byte == b'-'
+                } else {
+                    byte.is_ascii_digit()
+                }
+            })
+    };
+    hexadecimal(text)
+        || text.split_once(" (").is_some_and(|(hash, rest)| {
+            hexadecimal(hash)
+                && rest
+                    .strip_suffix(')')
+                    .and_then(|rest| rest.rsplit_once(", "))
+                    .is_some_and(|(_, stamp)| date(stamp))
+        })
+}
+
 /// The sentences Git writes into a revert or a recorded cherry-pick, which name commits rather than describe the change.
 fn generated_lines(lines: &mut Vec<&str>) {
-    let commit = |rest: &str, end: &str| rest.strip_suffix(end).is_some_and(hexadecimal);
+    let commit = |rest: &str, end: &str| rest.strip_suffix(end).is_some_and(commit_reference);
     let mut index = 0;
     while index < lines.len() {
         let line = lines[index];
@@ -1619,12 +1641,18 @@ pub fn commit_gate(
         Standard::Applies => {}
         Standard::Skips => return Ok(()),
         Standard::Undetermined => {
-            let origin = remotes
+            let cause = remotes
                 .iter()
                 .find(|(name, _)| name == "origin")
-                .map_or("", |(_, url)| url.as_str());
+                .map_or_else(
+                    || {
+                        "the repository has no origin remote and no personal GitHub remote"
+                            .to_owned()
+                    },
+                    |(_, url)| format!("origin {url} names no GitHub owner"),
+                );
             eprintln!(
-                "The commit message was not checked for the writing standard: origin {origin} names no GitHub owner.\nRun `git config prose.standard true` when this repository publishes to a personal destination, or `git config prose.standard false` when it keeps its own rules."
+                "The commit message was not checked for the writing standard: {cause}.\nRun `git config prose.standard true` when this repository publishes to a personal destination, or `git config prose.standard false` when it keeps its own rules."
             );
             return Ok(());
         }
