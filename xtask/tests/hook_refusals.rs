@@ -136,7 +136,10 @@ fn a_child_refusal_stays_last_and_a_bare_failure_gets_its_own_record() -> Result
     );
     let failed = refusal(&host.hook(&["post-commit"])?);
     assert_eq!(failed.rule, "hook.gate");
-    assert_eq!(failed.next, "dotguard post-commit");
+    assert_eq!(
+        failed.next.as_deref().unwrap_or_default(),
+        "dotguard post-commit"
+    );
     Ok(())
 }
 
@@ -147,7 +150,7 @@ fn a_lefthook_configuration_that_cannot_be_loaded_refuses_the_hook() -> Result<(
     let refused =
         refusal(&host.hook(&["pre-push", "--", "origin", "https://example.invalid/r"])?);
     assert_eq!(refused.rule, "hook.lefthook");
-    assert_eq!(refused.next, "lefthook dump");
+    assert_eq!(refused.next.as_deref().unwrap_or_default(), "lefthook dump");
     assert_eq!(refused.waiver, None);
     assert!(
         refused
@@ -186,7 +189,10 @@ fn both_pr_workflow_entry_points_report_an_unclassified_failure_the_same_way() -
     );
     assert_eq!(standalone, through_xtask);
     assert_eq!(standalone.rule, "pr.failed");
-    assert_eq!(standalone.next, "pr-workflow check --help");
+    assert_eq!(
+        standalone.next.as_deref().unwrap_or_default(),
+        "pr-workflow check --help"
+    );
     assert_eq!(
         standalone.evidence,
         [

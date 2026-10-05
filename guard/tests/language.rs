@@ -24,7 +24,10 @@ fn a_contaminated_file_is_refused_with_a_rescan_and_a_recorded_waiver() {
     let refusal = Refusal::parse(stderr.lines().last().unwrap()).expect("a structured refusal");
     assert!(refusal.is_complete(), "{refusal:?}");
     assert_eq!(refusal.rule, "scan.language");
-    assert_eq!(refusal.next, "dotguard scan a.txt");
+    assert_eq!(
+        refusal.next.as_deref().unwrap_or_default(),
+        "dotguard scan a.txt"
+    );
     assert_eq!(
         refusal.waiver.as_deref(),
         Some("ALLOW_FOREIGN=1 dotguard scan a.txt")
@@ -142,7 +145,10 @@ fn a_foreign_staged_line_is_refused_with_a_waiver_that_repeats_the_commit() {
     checkout.succeeds(&["add", "a.txt"], &[]);
     let refused = last_record(&checkout.run(&["commit", "-q", "-m", "add a"], &[]));
     assert_eq!(refused.rule, "commit.language");
-    assert_eq!(refused.next, "git diff --cached -- a.txt");
+    assert_eq!(
+        refused.next.as_deref().unwrap_or_default(),
+        "git diff --cached -- a.txt"
+    );
     assert_eq!(
         refused.waiver.as_deref(),
         Some("ALLOW_FOREIGN=1 git commit -q -m 'add a'")
@@ -161,7 +167,7 @@ fn a_foreign_message_is_refused_with_a_retry_that_keeps_the_amend() {
     let message = format!("fix {}", char::from_u32(0x0441).unwrap());
     let refused = last_record(&checkout.run(&["commit", "-q", "--amend", "-m", &message], &[]));
     assert_eq!(refused.rule, "commit.language");
-    let next = words(&refused.next).expect("a command line");
+    let next = words(refused.next.as_deref().unwrap_or_default()).expect("a command line");
     let (file, retry) = next.split_last().unwrap();
     assert_eq!(
         retry,
@@ -242,7 +248,7 @@ fn a_language_refusal_outside_the_wrapper_names_the_override_without_a_waiver() 
         refused.cause
     );
     assert_eq!(
-        words(&refused.next).unwrap(),
+        words(refused.next.as_deref().unwrap_or_default()).unwrap(),
         [
             "git",
             "commit",
@@ -252,5 +258,108 @@ fn a_language_refusal_outside_the_wrapper_names_the_override_without_a_waiver() 
             &message.display().to_string()
         ],
         "the options of an unknown commit are left for its author"
+    );
+}
+
+/// Runs `arguments` through the wrapper with an editor that writes `message`.
+fn edited(checkout: &Checkout, arguments: &[&str], message: &str) -> std::process::Output {
+    let mut command = Command::new(&checkout.git);
+    checkout
+        .isolate(&mut command)
+        .args(arguments)
+        .env("GIT_EDITOR", format!("printf '{message}' >"))
+        .output()
+        .unwrap()
+}
+
+/// The suggested retry of a refused commit, run with an editor that writes `message`.
+fn retried(checkout: &Checkout, refused: &Refusal, message: &str) {
+    let next = words(refused.next.as_deref().expect("a retry")).expect("a command line");
+    let output = edited(
+        checkout,
+        &next[1..].iter().map(String::as_str).collect::<Vec<_>>(),
+        message,
+    );
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// `--fixup=amend:` and `--fixup=reword:` commits may be empty, and a reword leaves staged changes out, so the retry makes the same commit.
+#[test]
+fn a_refused_fixup_is_retried_as_the_same_kind_of_commit() {
+    for kind in ["amend", "reword"] {
+        let checkout = Checkout::new(&format!("fixup-{kind}"));
+        std::fs::write(checkout.path().join("a.txt"), "plain\n").unwrap();
+        checkout.succeeds(&["add", "a.txt"], &[]);
+        checkout.succeeds(&["commit", "-q", "-m", "add a"], &[]);
+        std::fs::write(checkout.path().join("b.txt"), "plain\n").unwrap();
+        if kind == "reword" {
+            checkout.succeeds(&["add", "b.txt"], &[]);
+        }
+        let refused = last_record(&edited(
+            &checkout,
+            &["commit", "-q", &format!("--fixup={kind}:HEAD")],
+            r"amend! add a\n\nfix \321\201\n",
+        ));
+        assert_eq!(refused.rule, "commit.language");
+        retried(&checkout, &refused, r"amend! add a\n\nfix c\n");
+        assert_eq!(
+            checkout.succeeds(&["log", "--format=%s"], &[]),
+            "amend! add a\nadd a",
+            "git {kind}: one new commit"
+        );
+        assert_eq!(
+            checkout.succeeds(
+                &["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],
+                &[]
+            ),
+            "",
+            "git {kind}: the commit is empty"
+        );
+        if kind == "reword" {
+            assert_eq!(
+                checkout.succeeds(&["diff", "--cached", "--name-only"], &[]),
+                "b.txt",
+                "a reword leaves the staged change staged"
+            );
+        }
+    }
+}
+
+/// `-C` copies the author and date of its commit, so the retry records the same authorship.
+#[test]
+fn a_refused_reuse_is_retried_with_the_reused_authorship() {
+    let checkout = Checkout::new("reuse");
+    std::fs::write(checkout.path().join("a.txt"), "plain\n").unwrap();
+    checkout.succeeds(&["add", "a.txt"], &[]);
+    let message = format!("fix {}", char::from_u32(0x0441).unwrap());
+    checkout.succeeds(
+        &[
+            "commit",
+            "-q",
+            "--author",
+            "Other <other@example.invalid>",
+            "--date",
+            "1700000000 +0900",
+            "-m",
+            &message,
+        ],
+        &["ALLOW_FOREIGN"],
+    );
+    std::fs::write(checkout.path().join("b.txt"), "plain\n").unwrap();
+    checkout.succeeds(&["add", "b.txt"], &[]);
+    let refused = last_record(&checkout.run(&["commit", "-q", "-C", "HEAD"], &[]));
+    assert_eq!(refused.rule, "commit.language");
+    retried(&checkout, &refused, r"fix c\n");
+    assert_eq!(
+        checkout.succeeds(
+            &["log", "-1", "--date=raw", "--format=%an <%ae> %ad|%s"],
+            &[]
+        ),
+        "Other <other@example.invalid> 1700000000 +0900|fix c"
     );
 }

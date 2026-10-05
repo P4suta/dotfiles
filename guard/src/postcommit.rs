@@ -283,10 +283,13 @@ mod tests {
             Some("ALLOW_EMPTY=1 git commit --allow-empty --reuse-message=abc1234")
         );
         let kept = empty_refusal("abc1234", false);
-        assert_eq!(kept.next, "git reset --soft HEAD^");
+        assert_eq!(kept.next.as_deref(), Some("git reset --soft HEAD^"));
         assert_eq!(kept.waiver, None, "the empty commit is still on HEAD");
         let unsigned = unsigned_refusal("abc1234", Rollback::DropHead, None);
-        assert_eq!(unsigned.next, "git commit --reuse-message=abc1234");
+        assert_eq!(
+            unsigned.next.as_deref(),
+            Some("git commit --reuse-message=abc1234")
+        );
         assert_eq!(unsigned.waiver, None);
     }
 

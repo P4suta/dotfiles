@@ -17,7 +17,7 @@
 //! * `rm -f` — common in scripts, and what it destroys is reachable from the index in every case that matters.
 
 use crate::bypass::Category;
-use crate::gate_rules::{Spelling, spelling};
+use crate::gate_rules::{Fixup, Spelling, Verdict, spelling, verdict};
 use crate::realgit;
 use crate::refusal::{Refusal, command};
 
@@ -39,18 +39,21 @@ pub enum Next {
     Git(Vec<String>),
     /// Any other command line, already quoted.
     Shell(String),
+    /// No command, for the reason given: one rebuilt from the refused line could do something else.
+    Withheld(String),
 }
 
 impl Next {
-    /// The command as one shell line.
-    pub fn line(&self) -> String {
+    /// The command as one shell line, or `None` when it is withheld.
+    pub fn line(&self) -> Option<String> {
         match self {
-            Self::Git(words) => command(
+            Self::Git(words) => Some(command(
                 &std::iter::once("git")
                     .chain(words.iter().map(String::as_str))
                     .collect::<Vec<_>>(),
-            ),
-            Self::Shell(line) => line.clone(),
+            )),
+            Self::Shell(line) => Some(line.clone()),
+            Self::Withheld(_) => None,
         }
     }
 }
@@ -90,11 +93,15 @@ pub fn refusal(denial: &Denial, argv: &[String]) -> Refusal {
     } else {
         "\nSigning and hook checks cannot be bypassed."
     });
-    let refusal = Refusal::new(
-        format!("git.{}", denial.category),
-        cause,
-        denial.next.line(),
-    )
+    if let Next::Withheld(reason) = &denial.next {
+        cause.push_str("\nNo command is suggested: ");
+        cause.push_str(reason);
+    }
+    let rule = format!("git.{}", denial.category);
+    let refusal = match denial.next.line() {
+        Some(next) => Refusal::new(rule, cause, next),
+        None => Refusal::without_next(rule, cause),
+    }
     .evidence(format!("command: {invoked}"));
     match denial.category.env() {
         Some(env) => refusal.waiver(format!("{env}=1 {invoked}")),
@@ -216,6 +223,8 @@ struct Long(&'static str, Takes, bool);
 /// The options of one subcommand, as `git <subcommand> -h` lists them.
 struct Grammar {
     long: &'static [Long],
+    /// Short options that take no value.
+    short_flag: &'static str,
     /// Short options that take the rest of their word, or else the next word.
     short_word: &'static str,
     /// Short options that take only the rest of their word.
@@ -252,6 +261,7 @@ const PUSH: Grammar = Grammar {
         Long("ipv4", Takes::Nothing, false),
         Long("ipv6", Takes::Nothing, false),
     ],
+    short_flag: "vqdnfu46",
     short_word: "o",
     short_attached: "",
 };
@@ -299,6 +309,7 @@ const COMMIT: Grammar = Grammar {
         Long("allow-empty", Takes::Nothing, true),
         Long("allow-empty-message", Takes::Nothing, true),
     ],
+    short_flag: "qvseaipnzo",
     short_word: "mFCctU",
     short_attached: "Su",
 };
@@ -307,7 +318,7 @@ const COMMIT: Grammar = Grammar {
 enum Opt<'a> {
     /// A long option by its full name; `negated` for `--no-<name>`.
     Long { name: &'static str, negated: bool },
-    /// A long option Git refuses as ambiguous or unknown.
+    /// An option Git refuses: an ambiguous or unknown name, an unknown letter, or a value it does not take or lacks.
     Unread,
     /// A cluster of short options, ending with the one that takes `value` when one does.
     Short {
@@ -324,6 +335,23 @@ struct Parsed<'a> {
     positionals: Vec<usize>,
     /// The `--` that ends the options.
     separator: Option<usize>,
+}
+
+impl Parsed<'_> {
+    /// Whether every option is one Git accepts, so the words of the line mean what the gate read.
+    fn read(&self) -> bool {
+        self.options
+            .iter()
+            .all(|(_, option)| !matches!(option, Opt::Unread))
+    }
+}
+
+/// The value of the long option spanning `range` in `args`.
+fn long_value<'a>(range: &std::ops::Range<usize>, args: &'a [String]) -> Option<&'a str> {
+    args[range.start]
+        .split_once('=')
+        .map(|(_, value)| value)
+        .or_else(|| (range.len() > 1).then(|| args[range.end - 1].as_str()))
 }
 
 impl Grammar {
@@ -366,16 +394,23 @@ impl Grammar {
                     .split_once('=')
                     .map_or((long, false), |(name, _)| (name, true));
                 let option = match self.long(name) {
-                    Some((option, negated)) => {
+                    // Git refuses a value on a negation or on an option that takes none, and a missing value.
+                    Some((option, negated))
+                        if !attached || !negated && option.1 != Takes::Nothing =>
+                    {
                         if !negated && !attached && option.1 == Takes::Word {
                             index += 1;
                         }
-                        Opt::Long {
-                            name: option.0,
-                            negated,
+                        if index < args.len() {
+                            Opt::Long {
+                                name: option.0,
+                                negated,
+                            }
+                        } else {
+                            Opt::Unread
                         }
                     }
-                    None => Opt::Unread,
+                    _ => Opt::Unread,
                 };
                 parsed
                     .options
@@ -383,6 +418,7 @@ impl Grammar {
             } else if let Some(cluster) = arg.strip_prefix('-').filter(|rest| !rest.is_empty()) {
                 let mut letters = cluster;
                 let mut value = None;
+                let mut known = true;
                 for (at, letter) in cluster.char_indices() {
                     let end = at + letter.len_utf8();
                     let rest = &cluster[end..];
@@ -394,6 +430,7 @@ impl Grammar {
                         } else {
                             Some(rest)
                         };
+                        known = value.is_some();
                         break;
                     }
                     if self.short_attached.contains(letter) {
@@ -401,10 +438,18 @@ impl Grammar {
                         value = (!rest.is_empty()).then_some(rest);
                         break;
                     }
+                    if !self.short_flag.contains(letter) {
+                        known = false;
+                        break;
+                    }
                 }
                 parsed.options.push((
                     start..(index + 1).min(args.len()),
-                    Opt::Short { letters, value },
+                    if known {
+                        Opt::Short { letters, value }
+                    } else {
+                        Opt::Unread
+                    },
                 ));
             } else {
                 parsed.positionals.push(index);
@@ -428,9 +473,59 @@ const MESSAGE_OPTIONS: [&str; 8] = [
 ];
 const MESSAGE_LETTERS: &str = "mFCcte";
 
+/// How the refused commit's `--fixup` was given, and the commit whose authorship it copied.
+fn message_source<'a>(parsed: &Parsed<'a>, args: &'a [String]) -> (Fixup, Option<&'a str>) {
+    let mut fixup = Fixup::Absent;
+    let mut reused: Option<&str> = None;
+    let mut renew = false;
+    for (range, option) in &parsed.options {
+        match option {
+            Opt::Long {
+                name: "fixup",
+                negated,
+            } => {
+                fixup = match long_value(range, args) {
+                    _ if *negated => Fixup::Absent,
+                    Some(value) if value.starts_with("amend:") => Fixup::Amend,
+                    Some(value) if value.starts_with("reword:") => Fixup::Reword,
+                    _ => Fixup::Plain,
+                };
+            }
+            Opt::Long {
+                name: "reuse-message" | "reedit-message",
+                negated,
+            } => {
+                reused = if *negated {
+                    None
+                } else {
+                    long_value(range, args)
+                }
+            }
+            Opt::Long {
+                name: "reset-author",
+                negated,
+            } => renew = !negated,
+            Opt::Short { letters, value } if letters.ends_with(['C', 'c']) => reused = *value,
+            _ => {}
+        }
+    }
+    (fixup, reused.filter(|_| !renew))
+}
+
+/// The author and date of a commit, as `--author` and `--date` take them.
+pub struct Authorship {
+    pub author: String,
+    pub date: String,
+}
+
 /// The refused commit again, with its message read from `message` and opened in the editor.
-/// `words` is the command line the wrapper ran, and the result is `None` when that was not `git commit`.
-pub fn commit_retry(words: &[String], message: &str) -> Option<Vec<String>> {
+/// `words` is the command line the wrapper ran, and `authorship` reads a commit's authorship.
+/// The result is `None` when that was not `git commit`, and the reason when no command repeats it.
+pub fn commit_retry(
+    words: &[String],
+    message: &str,
+    authorship: impl Fn(&str) -> Option<Authorship>,
+) -> Option<Result<Vec<String>, String>> {
     let (program, rest) = words.split_first()?;
     if program != "git" {
         return None;
@@ -441,6 +536,20 @@ pub fn commit_retry(words: &[String], message: &str) -> Option<Vec<String>> {
     }
     let args = &rest[at + 1..];
     let parsed = COMMIT.parse(args);
+    if !parsed.read() {
+        return Some(Err(
+            "the commit has an option Git does not accept as written, so the gate cannot tell what it meant.".to_owned(),
+        ));
+    }
+    let (fixup, source) = message_source(&parsed, args);
+    let read = source.and_then(&authorship);
+    let Some(plan) = crate::gate_rules::commit_retry(fixup, source.is_some(), read.is_some())
+    else {
+        return Some(Err(format!(
+            "the commit took its author and date from `{}`, which the gate could not read, and a retry without them would record a different author.",
+            source.unwrap_or_default()
+        )));
+    };
     let mut replaced: Vec<Option<Vec<String>>> = vec![None; args.len()];
     for (range, option) in &parsed.options {
         let kept = match option {
@@ -480,8 +589,24 @@ pub fn commit_retry(words: &[String], message: &str) -> Option<Vec<String>> {
             replaced[index] = Some(Vec::new());
         }
     }
-    let retry = ["--edit", "--file", message].map(str::to_owned);
+    let mut retry: Vec<String> = Vec::new();
+    if plan.only {
+        retry.push("--only".to_owned());
+    }
+    if plan.allow_empty {
+        retry.push("--allow-empty".to_owned());
+    }
+    retry.extend(["--edit", "--file", message].map(str::to_owned));
     let mut line = words[..at + 2].to_vec();
+    // Before every kept option, so an explicit `--author` or `--date` still overrides it as it did the reused commit's.
+    if let Some(read) = read.filter(|_| plan.authorship) {
+        line.extend([
+            "--author".to_owned(),
+            read.author,
+            "--date".to_owned(),
+            read.date,
+        ]);
+    }
     for (index, arg) in args.iter().enumerate() {
         if parsed.separator == Some(index) {
             line.extend(retry.clone());
@@ -494,7 +619,7 @@ pub fn commit_retry(words: &[String], message: &str) -> Option<Vec<String>> {
     if parsed.separator.is_none() {
         line.extend(retry);
     }
-    Some(line)
+    Some(Ok(line))
 }
 
 /// Drops `letters` from a clustered short option, and the option itself once nothing is left.
@@ -702,146 +827,29 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
     let (sub, args) = (call.sub, call.args);
     let flags = flags_of(args);
     let has = |f: &str| flags.iter().any(|a| a == f);
-    if has("--no-verify")
-        || (sub == "commit"
-            && flags
-                .iter()
-                .any(|arg| short_cluster(arg).is_some_and(|cluster| cluster.contains('n'))))
-    {
-        let commit = sub == "commit";
+    let grammar = match sub {
+        "push" => Some(&PUSH),
+        "commit" => Some(&COMMIT),
+        _ => None,
+    };
+    if let Some(grammar) = grammar {
+        let parsed = grammar.parse(args);
+        let denial = skips_hooks(call, &parsed).or_else(|| match sub {
+            "push" => push(call, &parsed),
+            _ if has("--no-gpg-sign") => Some(no_gpg_sign(call)),
+            _ => None,
+        });
+        return read_in_full(&parsed, args, denial);
+    }
+    if has("--no-verify") {
         return Some(Denial::new(
             Category::NoVerify,
             "--no-verify",
             "Hook verification cannot be skipped.",
-            call.rerun(|arg| match arg {
-                "--no-verify" => None,
-                _ if commit => drop_letters(arg, &['n']),
-                _ => Some(arg.to_owned()),
-            }),
+            call.without(&["--no-verify"]),
         ));
     }
     match sub {
-        "push" => {
-            let integrate = call.git(&["pull", "--rebase"]);
-            let push = PUSH.parse(args);
-            let refspecs: Vec<&str> = push
-                .positionals
-                .iter()
-                .skip(1)
-                .map(|&index| args[index].as_str())
-                .collect();
-            for (range, option) in &push.options {
-                let deny = |reason: &str, hint: &str, next: Next| {
-                    Some(Denial::new(Category::Force, reason, hint, next))
-                };
-                let name = match option {
-                    Opt::Long {
-                        name,
-                        negated: false,
-                    } => *name,
-                    Opt::Short { letters, .. } => match letters.chars().find(|letter| matches!(letter, 'f' | 'd')) {
-                        Some('f') => "force",
-                        Some(_) => "delete",
-                        None => continue,
-                    },
-                    _ => continue,
-                };
-                match name {
-                    "force" => {
-                        return deny(
-                            "git push --force",
-                            "A force push replaces history other clones already have.\n\
-                             If you rebased on purpose:  ALLOW_FORCE=1 git push --force-with-lease\n\
-                             --force-with-lease at least refuses when someone else has pushed since your last fetch.",
-                            integrate,
-                        );
-                    }
-                    "force-if-includes" => {
-                        return deny("git push --force-if-includes", "Still a force push. ALLOW_FORCE=1 to proceed.", integrate);
-                    }
-                    "mirror" => {
-                        return deny(
-                            "git push --mirror",
-                            "--mirror makes the remote match this clone exactly, deleting every ref you do not have.",
-                            call.replace(range.start, "--all"),
-                        );
-                    }
-                    "delete" => {
-                        return deny(
-                            "git push --delete",
-                            "Deleting a remote ref is not recoverable from here.\n\
-                             Delete merged branches through the forge, where the ref is still in the reflog.",
-                            Next::Shell(forge_deletes(&refspecs)),
-                        );
-                    }
-                    "force-with-lease" => {
-                        return deny(
-                            "git push --force-with-lease",
-                            "Safer than --force and still a rewrite of published history.\n\
-                             ALLOW_FORCE=1 git push --force-with-lease",
-                            integrate,
-                        );
-                    }
-                    _ => {}
-                }
-            }
-            // Refspecs: `+src:dst` forces that one ref, `:dst` deletes it.
-            let forced: Vec<&str> = refspecs
-                .iter()
-                .copied()
-                .filter(|a| a.strip_prefix('+').is_some_and(|s| s.contains(':')))
-                .collect();
-            let deleted: Vec<&str> = refspecs
-                .iter()
-                .filter_map(|a| a.strip_prefix(':'))
-                .filter(|destination| !destination.is_empty())
-                .collect();
-            if forced.is_empty() && deleted.is_empty() {
-                return None;
-            }
-            // The same push without forcing and without the deletions, which go through the forge instead.
-            let unforced = Next::Git(
-                call.globals
-                    .iter()
-                    .map(String::as_str)
-                    .chain([call.sub])
-                    .chain(args.iter().enumerate().filter_map(|(index, arg)| {
-                        if !push.positionals.iter().skip(1).any(|&refspec| refspec == index) {
-                            return Some(arg.as_str());
-                        }
-                        (!(arg.len() > 1 && arg.starts_with(':')))
-                            .then(|| arg.strip_prefix('+').filter(|s| s.contains(':')).unwrap_or(arg))
-                    }))
-                    .map(str::to_owned)
-                    .collect(),
-            );
-            let next = if deleted.is_empty() {
-                unforced
-            } else if refspecs.len() > deleted.len() {
-                Next::Shell(format!("{} && {}", forge_deletes(&deleted), unforced.line()))
-            } else {
-                Next::Shell(forge_deletes(&deleted))
-            };
-            let mut hint = Vec::new();
-            if !forced.is_empty() {
-                hint.push("A leading '+' on a refspec is a force push for that ref.");
-            }
-            if !deleted.is_empty() {
-                hint.push("A refspec with an empty source deletes the remote ref.");
-            }
-            let refused: Vec<&str> = refspecs
-                .iter()
-                .copied()
-                .filter(|a| forced.contains(a) || a.len() > 1 && a.starts_with(':'))
-                .collect();
-            Some(Denial::new(
-                Category::Force,
-                format!("git push refspec {}", refused.join(" ")),
-                hint.join("\n"),
-                next,
-            ))
-        }
-
         "reset" if has("--hard") => Some(Denial::new(
             Category::Force,
             "git reset --hard",
@@ -981,15 +989,234 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
             call.without(&["-f", "--force"]),
         )),
 
-        _ if has("--no-gpg-sign") => Some(Denial::new(
-            Category::NoVerify,
-            "--no-gpg-sign",
-            "Every commit on this machine is signed; an unsigned one is refused by the repository ruleset anyway.",
-            call.without(&["--no-gpg-sign"]),
-        )),
+        _ if has("--no-gpg-sign") => Some(no_gpg_sign(call)),
 
         _ => None,
     }
+}
+
+/// The rules for `git push`, read from `push` as Git reads its options.
+#[allow(clippy::too_many_lines)]
+fn push(call: &Invocation, push: &Parsed) -> Option<Denial> {
+    let args = call.args;
+    let integrate = call.git(&["pull", "--rebase"]);
+    let refspecs: Vec<&str> = push
+        .positionals
+        .iter()
+        .skip(1)
+        .map(|&index| args[index].as_str())
+        .collect();
+    for (range, option) in &push.options {
+        let deny = |reason: &str, hint: &str, next: Next| {
+            Some(Denial::new(Category::Force, reason, hint, next))
+        };
+        let name = match option {
+            Opt::Long {
+                name,
+                negated: false,
+            } => *name,
+            Opt::Short { letters, .. } => {
+                match letters.chars().find(|letter| matches!(letter, 'f' | 'd')) {
+                    Some('f') => "force",
+                    Some(_) => "delete",
+                    None => continue,
+                }
+            }
+            _ => continue,
+        };
+        match name {
+            "force" => {
+                return deny(
+                    "git push --force",
+                    "A force push replaces history other clones already have.\n\
+                     If you rebased on purpose:  ALLOW_FORCE=1 git push --force-with-lease\n\
+                     --force-with-lease at least refuses when someone else has pushed since your last fetch.",
+                    integrate,
+                );
+            }
+            "force-if-includes" => {
+                return deny(
+                    "git push --force-if-includes",
+                    "Still a force push. ALLOW_FORCE=1 to proceed.",
+                    integrate,
+                );
+            }
+            "mirror" => {
+                return deny(
+                    "git push --mirror",
+                    "--mirror makes the remote match this clone exactly, deleting every ref you do not have.",
+                    call.replace(range.start, "--all"),
+                );
+            }
+            "delete" => {
+                return deny(
+                    "git push --delete",
+                    "Deleting a remote ref is not recoverable from here.\n\
+                     Delete merged branches through the forge, where the ref is still in the reflog.",
+                    Next::Shell(forge_deletes(&refspecs)),
+                );
+            }
+            "force-with-lease" => {
+                return deny(
+                    "git push --force-with-lease",
+                    "Safer than --force and still a rewrite of published history.\n\
+                     ALLOW_FORCE=1 git push --force-with-lease",
+                    integrate,
+                );
+            }
+            _ => {}
+        }
+    }
+    // Refspecs: `+src:dst` forces that one ref, `:dst` deletes it.
+    let forced: Vec<&str> = refspecs
+        .iter()
+        .copied()
+        .filter(|a| a.strip_prefix('+').is_some_and(|s| s.contains(':')))
+        .collect();
+    let deleted: Vec<&str> = refspecs
+        .iter()
+        .filter_map(|a| a.strip_prefix(':'))
+        .filter(|destination| !destination.is_empty())
+        .collect();
+    if forced.is_empty() && deleted.is_empty() {
+        return None;
+    }
+    // The same push without forcing and without the deletions, which go through the forge instead.
+    let unforced = Next::Git(
+        call.globals
+            .iter()
+            .map(String::as_str)
+            .chain([call.sub])
+            .chain(args.iter().enumerate().filter_map(|(index, arg)| {
+                if !push
+                    .positionals
+                    .iter()
+                    .skip(1)
+                    .any(|&refspec| refspec == index)
+                {
+                    return Some(arg.as_str());
+                }
+                (!(arg.len() > 1 && arg.starts_with(':'))).then(|| {
+                    arg.strip_prefix('+')
+                        .filter(|s| s.contains(':'))
+                        .unwrap_or(arg)
+                })
+            }))
+            .map(str::to_owned)
+            .collect(),
+    );
+    let next = if deleted.is_empty() {
+        unforced
+    } else if refspecs.len() > deleted.len() {
+        Next::Shell(format!(
+            "{} && {}",
+            forge_deletes(&deleted),
+            unforced.line().unwrap_or_default()
+        ))
+    } else {
+        Next::Shell(forge_deletes(&deleted))
+    };
+    let mut hint = Vec::new();
+    if !forced.is_empty() {
+        hint.push("A leading '+' on a refspec is a force push for that ref.");
+    }
+    if !deleted.is_empty() {
+        hint.push("A refspec with an empty source deletes the remote ref.");
+    }
+    let refused: Vec<&str> = refspecs
+        .iter()
+        .copied()
+        .filter(|a| forced.contains(a) || a.len() > 1 && a.starts_with(':'))
+        .collect();
+    Some(Denial::new(
+        Category::Force,
+        format!("git push refspec {}", refused.join(" ")),
+        hint.join("\n"),
+        next,
+    ))
+}
+
+/// `denial` as a gate may give it for `parsed`: without a suggestion unless every option was read as Git reads it.
+fn read_in_full(parsed: &Parsed, args: &[String], denial: Option<Denial>) -> Option<Denial> {
+    match verdict(denial.is_some(), parsed.read()) {
+        Verdict::Allow => None,
+        Verdict::Suggest => denial,
+        Verdict::Withhold => denial.map(|mut denial| {
+            let unread: Vec<String> = parsed
+                .options
+                .iter()
+                .filter(|(_, option)| matches!(option, Opt::Unread))
+                .map(|(range, _)| command(&args[range.clone()]))
+                .collect();
+            denial.next = Next::Withheld(format!(
+                "Git does not accept `{}` as written, so the gate cannot tell which words are option values, the repository, or refs, and a command rebuilt from them could act on something else.",
+                unread.join("`, `")
+            ));
+            denial
+        }),
+    }
+}
+
+/// `--no-verify`, and for a commit `-n`, as Git reads them, with the same command without them.
+fn skips_hooks(call: &Invocation, parsed: &Parsed) -> Option<Denial> {
+    let commit = call.sub == "commit";
+    let mut replaced: Vec<Option<Vec<String>>> = vec![None; call.args.len()];
+    let mut skips = false;
+    for (range, option) in &parsed.options {
+        match option {
+            Opt::Long {
+                name: "no-verify",
+                negated: false,
+            } => {
+                for index in range.clone() {
+                    replaced[index] = Some(Vec::new());
+                }
+            }
+            Opt::Short { letters, .. } if commit && letters.contains('n') => {
+                let word = &call.args[range.start];
+                let kept: String = letters.chars().filter(|&letter| letter != 'n').collect();
+                let attached = &word[1 + letters.len()..];
+                replaced[range.start] = Some(
+                    if kept.is_empty() && attached.is_empty() && range.len() == 1 {
+                        Vec::new()
+                    } else {
+                        vec![format!("-{kept}{attached}")]
+                    },
+                );
+            }
+            _ => continue,
+        }
+        skips = true;
+    }
+    skips.then(|| {
+        let line = call
+            .globals
+            .iter()
+            .cloned()
+            .chain([call.sub.to_owned()])
+            .chain(
+                call.args
+                    .iter()
+                    .zip(replaced)
+                    .flat_map(|(arg, words)| words.unwrap_or_else(|| vec![arg.clone()])),
+            )
+            .collect();
+        Denial::new(
+            Category::NoVerify,
+            "--no-verify",
+            "Hook verification cannot be skipped.",
+            Next::Git(line),
+        )
+    })
+}
+
+fn no_gpg_sign(call: &Invocation) -> Denial {
+    Denial::new(
+        Category::NoVerify,
+        "--no-gpg-sign",
+        "Every commit on this machine is signed; an unsigned one is refused by the repository ruleset anyway.",
+        call.without(&["--no-gpg-sign"]),
+    )
 }
 
 /// Subcommands that actually run a hook.
@@ -1092,7 +1319,7 @@ fn short_cluster(arg: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Next, commit_retry, inspect, refusal};
+    use super::{Authorship, Next, commit_retry, inspect, refusal};
 
     fn argv(line: &str) -> Vec<String> {
         line.split_whitespace().map(str::to_owned).collect()
@@ -1109,7 +1336,7 @@ mod tests {
             if let Next::Git(words) = &denial.next {
                 assert!(
                     inspect(words).is_none(),
-                    "git {line} suggests a refused command: {}",
+                    "git {line} suggests a refused command: {:?}",
                     denial.next.line()
                 );
             }
@@ -1117,7 +1344,11 @@ mod tests {
         })
     }
     fn next(line: &str) -> String {
-        inspect(&argv(line)).expect(line).next.line()
+        inspect(&argv(line))
+            .expect(line)
+            .next
+            .line()
+            .unwrap_or_else(|| panic!("git {line} suggests no command"))
     }
 
     #[test]
@@ -1284,6 +1515,67 @@ mod tests {
         }
     }
 
+    /// Git rejects a line with an option it does not accept, so the gate cannot know which words are values, the repository, or refs.
+    /// A refused line of that kind gets no suggestion rather than one built from words Git would not read that way.
+    #[test]
+    fn a_refused_line_with_an_option_git_rejects_suggests_nothing() {
+        for line in [
+            "push --delete --re x origin a",
+            "push --delete --bogus x origin a",
+            "push --delete --d x origin a",
+            "push --delete -x origin a",
+            "push --delete -ux origin a",
+            "push --delete --porcelain=x origin a",
+            "push --delete --no-repo=x origin a",
+            "push --force origin main --repo",
+            "push --delete origin a -o",
+            "push --no-verify --bogus origin main",
+            "push origin +a:b --bogus",
+            "commit --no-verify --bogus -m x",
+            "commit -n -x -m x",
+        ] {
+            let words = argv(line);
+            let denial = inspect(&words).unwrap_or_else(|| panic!("should refuse: git {line}"));
+            assert!(
+                matches!(denial.next, Next::Withheld(_)),
+                "git {line} suggests {:?}",
+                denial.next.line()
+            );
+            let refusal = refusal(&denial, &words);
+            assert!(refusal.is_complete(), "{refusal:?}");
+            assert_eq!(refusal.next, None, "git {line}");
+            assert!(
+                refusal
+                    .cause
+                    .contains("No command is suggested: Git does not accept"),
+                "{}",
+                refusal.cause
+            );
+        }
+        for line in [
+            "push --re x origin a",
+            "push --bogus origin main",
+            "push --delete=x origin a",
+        ] {
+            assert!(!refused(line), "should allow: git {line}");
+        }
+    }
+
+    /// `-n` skips hooks only as an option letter, not inside the value of `-m`.
+    #[test]
+    fn commit_reads_n_as_git_does() {
+        assert!(!refused("commit -mnote"));
+        assert!(!refused("commit -m -n"));
+        assert_eq!(next("commit -qn -m x"), "git commit -q -m x");
+        assert_eq!(next("commit -nmx"), "git commit -mx");
+        assert_eq!(next("commit -anm x"), "git commit -am x");
+        assert_eq!(next("commit --no-veri -m x"), "git commit -m x");
+        assert_eq!(
+            next("commit --no-verify --verify -m x"),
+            "git commit --verify -m x"
+        );
+    }
+
     #[test]
     fn only_waivable_rules_carry_a_waiver() {
         let line = argv("reset --hard");
@@ -1398,12 +1690,21 @@ mod tests {
         assert!(!refused("clean -n -- --force"));
     }
 
+    fn other(revision: &str) -> Option<Authorship> {
+        (revision != "unreadable").then(|| Authorship {
+            author: format!("Other <{revision}@e.invalid>"),
+            date: "1700000000 +0900".to_owned(),
+        })
+    }
+
+    fn retry(line: &str) -> Option<Result<String, String>> {
+        commit_retry(&argv(line), "/r/.git/COMMIT_EDITMSG", other)
+            .map(|retry| retry.map(|words| words.join(" ")))
+    }
+
     /// The retry keeps every option of the refused commit and replaces only where its message comes from.
     #[test]
     fn a_refused_commit_is_retried_with_its_saved_message() {
-        let retry = |line: &str| {
-            commit_retry(&argv(line), "/r/.git/COMMIT_EDITMSG").map(|words| words.join(" "))
-        };
         let edited = "--edit --file /r/.git/COMMIT_EDITMSG";
         for (line, expected) in [
             ("git commit -q --amend -m x", "git commit -q --amend"),
@@ -1416,8 +1717,6 @@ mod tests {
             ("git commit --mess x --am", "git commit --am"),
             ("git commit --message=x -m y --no-edit", "git commit"),
             ("git commit -e -F msg -t tpl", "git commit"),
-            ("git commit -C HEAD --amend", "git commit --amend"),
-            ("git commit -c HEAD", "git commit"),
             ("git commit --fixup x", "git commit"),
             ("git commit --squash=x -m y", "git commit"),
             ("git commit -m -F", "git commit"),
@@ -1426,17 +1725,111 @@ mod tests {
             ("git commit -m x a.txt", "git commit a.txt"),
         ] {
             assert_eq!(
-                retry(line).as_deref(),
-                Some(format!("{expected} {edited}").as_str()),
+                retry(line),
+                Some(Ok(format!("{expected} {edited}"))),
                 "{line}"
             );
         }
         assert_eq!(
-            retry("git commit -m x -- a.txt").as_deref(),
-            Some(format!("git commit {edited} -- a.txt").as_str())
+            retry("git commit -m x -- a.txt"),
+            Some(Ok(format!("git commit {edited} -- a.txt")))
         );
         for line in ["git rebase --continue", "git ci -m x", "git", "commit -m x"] {
             assert_eq!(retry(line), None, "{line}");
         }
+    }
+
+    /// An `amend!` commit may be empty and a reword ignores staged changes, so the retry says so itself once `--fixup` is gone.
+    #[test]
+    fn a_retried_fixup_keeps_what_its_kind_implied() {
+        let edited = "--edit --file /r/.git/COMMIT_EDITMSG";
+        for (line, expected) in [
+            ("git commit --fixup=amend:HEAD", "git commit --allow-empty"),
+            (
+                "git commit -q --fixup amend:HEAD",
+                "git commit -q --allow-empty",
+            ),
+            ("git commit --fix=amend:HEAD", "git commit --allow-empty"),
+            (
+                "git commit --fixup=reword:HEAD",
+                "git commit --only --allow-empty",
+            ),
+            (
+                "git commit --fixup reword:HEAD",
+                "git commit --only --allow-empty",
+            ),
+            ("git commit --fixup=HEAD", "git commit"),
+            (
+                "git commit --fixup=amend:HEAD --no-fixup -m x",
+                "git commit",
+            ),
+        ] {
+            assert_eq!(
+                retry(line),
+                Some(Ok(format!("{expected} {edited}"))),
+                "{line}"
+            );
+        }
+    }
+
+    /// `-C` and `-c` copy the author and date of their commit, so the retry names them, before any explicit `--author` or `--date` that overrides them.
+    #[test]
+    fn a_retried_reuse_keeps_the_reused_authorship() {
+        let edited = "--edit --file /r/.git/COMMIT_EDITMSG";
+        let copied = |revision: &str| {
+            format!("--author Other <{revision}@e.invalid> --date 1700000000 +0900")
+        };
+        for (line, expected) in [
+            ("git commit -C X", format!("git commit {}", copied("X"))),
+            (
+                "git commit -c HEAD",
+                format!("git commit {}", copied("HEAD")),
+            ),
+            ("git commit -qCX", format!("git commit {} -q", copied("X"))),
+            (
+                "git commit --reuse-message=X --amend",
+                format!("git commit {} --amend", copied("X")),
+            ),
+            (
+                "git commit --reedit X --author Z",
+                format!("git commit {} --author Z", copied("X")),
+            ),
+            (
+                "git commit --squash=Y -C X",
+                format!("git commit {}", copied("X")),
+            ),
+            (
+                "git commit -C X --reset-author",
+                "git commit --reset-author".to_owned(),
+            ),
+            (
+                "git commit --reset-author -C X --no-reset-author",
+                format!(
+                    "git commit {} --reset-author --no-reset-author",
+                    copied("X")
+                ),
+            ),
+            (
+                "git commit -C X --no-reuse-message -m y",
+                "git commit".to_owned(),
+            ),
+        ] {
+            assert_eq!(
+                retry(line),
+                Some(Ok(format!("{expected} {edited}"))),
+                "{line}"
+            );
+        }
+        let withheld = retry("git commit -C unreadable");
+        assert!(
+            withheld.as_ref().is_some_and(|retry| retry
+                .as_ref()
+                .is_err_and(|reason| reason.contains("`unreadable`"))),
+            "{withheld:?}"
+        );
+        assert_eq!(
+            retry("git commit -C unreadable --reset-author"),
+            Some(Ok(format!("git commit --reset-author {edited}")))
+        );
     }
 }

@@ -52,10 +52,12 @@ pub const REAPER_HARNESSES: [&str; 3] = [
     "tick_conversion_rejects_zero_frequency",
 ];
 
-pub const GATE_HARNESSES: [&str; 3] = [
+pub const GATE_HARNESSES: [&str; 5] = [
+    "a_commit_retry_keeps_what_its_message_source_implied",
     "a_long_option_is_its_exact_spelling_or_its_only_completion",
     "a_history_refusal_suggests_the_step_for_its_worst_update",
     "a_rebase_signs_one_linear_branch_and_an_amend_only_the_checked_out_tip",
+    "a_suggestion_is_rebuilt_only_from_a_line_read_in_full",
 ];
 
 pub const REVIEW_HARNESSES: [&str; 5] = [
@@ -417,7 +419,7 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_rebasing_across_several_refs() {{\n    assert!(production::signing(2, production::Reference::Branch, false, false) == production::Signing::Rebase);\n}}\n#[kani::proof]\nfn reject_rebasing_a_range_with_merges() {{\n    assert!(production::signing(1, production::Reference::Branch, true, false) == production::Signing::Rebase);\n}}\n#[kani::proof]\nfn reject_amending_a_ref_that_is_not_checked_out() {{\n    assert!(production::signing(1, production::Reference::Other, false, true) == production::Signing::Amend);\n}}\n#[kani::proof]\nfn reject_deleting_through_the_forge_before_fetching() {{\n    assert!(production::history(true, false) == production::History::ForgeDelete);\n}}\n#[kani::proof]\nfn reject_completing_a_prefix_of_two_options() {{\n    assert!(production::spelling(b\"a\", &[&b\"ab\"[..], &b\"ac\"[..]]) == production::Spelling::Is(0));\n}}\n#[kani::proof]\nfn reject_completing_over_an_exact_spelling() {{\n    assert!(production::spelling(b\"ab\", &[&b\"abc\"[..], &b\"ab\"[..]]) == production::Spelling::Is(0));\n}}\n#[kani::proof]\nfn reject_ignoring_a_unique_abbreviation() {{\n    assert!(production::spelling(b\"re\", &[&b\"repo\"[..], &b\"force\"[..]]) == production::Spelling::Unknown);\n}}\n"
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_rebasing_across_several_refs() {{\n    assert!(production::signing(2, production::Reference::Branch, false, false) == production::Signing::Rebase);\n}}\n#[kani::proof]\nfn reject_rebasing_a_range_with_merges() {{\n    assert!(production::signing(1, production::Reference::Branch, true, false) == production::Signing::Rebase);\n}}\n#[kani::proof]\nfn reject_amending_a_ref_that_is_not_checked_out() {{\n    assert!(production::signing(1, production::Reference::Other, false, true) == production::Signing::Amend);\n}}\n#[kani::proof]\nfn reject_deleting_through_the_forge_before_fetching() {{\n    assert!(production::history(true, false) == production::History::ForgeDelete);\n}}\n#[kani::proof]\nfn reject_completing_a_prefix_of_two_options() {{\n    assert!(production::spelling(b\"a\", &[&b\"ab\"[..], &b\"ac\"[..]]) == production::Spelling::Is(0));\n}}\n#[kani::proof]\nfn reject_completing_over_an_exact_spelling() {{\n    assert!(production::spelling(b\"ab\", &[&b\"abc\"[..], &b\"ab\"[..]]) == production::Spelling::Is(0));\n}}\n#[kani::proof]\nfn reject_ignoring_a_unique_abbreviation() {{\n    assert!(production::spelling(b\"re\", &[&b\"repo\"[..], &b\"force\"[..]]) == production::Spelling::Unknown);\n}}\n#[kani::proof]\nfn reject_suggesting_from_an_unread_line() {{\n    assert!(production::verdict(true, false) == production::Verdict::Suggest);\n}}\n#[kani::proof]\nfn reject_retrying_a_reword_without_what_it_implied() {{\n    assert!(production::commit_retry(production::Fixup::Reword, false, false) == Some(production::Retry {{ allow_empty: false, only: false, authorship: false }}));\n}}\n#[kani::proof]\nfn reject_retrying_without_the_reused_authorship() {{\n    assert!(production::commit_retry(production::Fixup::Absent, true, false).is_some());\n}}\n"
         ),
     )?;
     for name in [
@@ -428,6 +430,9 @@ fn verify_native(root: &Path) -> Result<()> {
         "reject_completing_a_prefix_of_two_options",
         "reject_completing_over_an_exact_spelling",
         "reject_ignoring_a_unique_abbreviation",
+        "reject_suggesting_from_an_unread_line",
+        "reject_retrying_a_reword_without_what_it_implied",
+        "reject_retrying_without_the_reused_authorship",
     ] {
         verify_file(&file, probe.path(), &[name], true)?;
     }

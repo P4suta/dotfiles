@@ -398,7 +398,7 @@ mod tests {
             let refusal = history_refusal("origin", problems);
             assert!(refusal.is_complete(), "{refusal:?}");
             assert_eq!(refusal.rule, "push.history");
-            (refusal.next, refusal.waiver.unwrap())
+            (refusal.next.unwrap(), refusal.waiver.unwrap())
         };
         assert_eq!(
             refused(&[problem(Verdict::Delete, "a"), problem(Verdict::Delete, "b")]),
@@ -505,7 +505,7 @@ mod tests {
         ] {
             let refusal = unsigned_refusal("origin", &refs, head);
             assert!(refusal.is_complete(), "{refusal:?}");
-            assert_eq!(refusal.next, next);
+            assert_eq!(refusal.next.as_deref(), Some(next));
             assert_eq!(refusal.waiver, None);
             assert_eq!(
                 refusal.evidence.len(),

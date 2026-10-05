@@ -8,6 +8,7 @@
 //!
 //! The line is the prefix and one compact JSON object with these five keys in this order.
 //! `next` is a command to run; `<name>` marks a value only the author can supply.
+//! `next` is `null` when no command repeats the refused intent, and the cause then says why.
 //! `waiver` is the command that overrides the gate once and is recorded, or `null` when the gate cannot be waived.
 //!
 //! This file is std-only so `dotguard` and the xtask binaries compile the same source.
@@ -25,8 +26,8 @@ pub struct Refusal {
     pub cause: String,
     /// The observed facts the refusal rests on.
     pub evidence: Vec<String>,
-    /// The command to run next.
-    pub next: String,
+    /// The command to run next, or `None` when no command repeats the refused intent.
+    pub next: Option<String>,
     /// The recorded one-time override, when the rule has one.
     pub waiver: Option<String>,
 }
@@ -37,8 +38,16 @@ impl Refusal {
             rule: rule.into(),
             cause: cause.into(),
             evidence: Vec::new(),
-            next: next.into(),
+            next: Some(next.into()),
             waiver: None,
+        }
+    }
+
+    /// A refusal that suggests no command; `cause` must say why.
+    pub fn without_next(rule: impl Into<String>, cause: impl Into<String>) -> Self {
+        Self {
+            next: None,
+            ..Self::new(rule, cause, "")
         }
     }
 
@@ -54,7 +63,7 @@ impl Refusal {
         self
     }
 
-    /// Whether every field an agent needs is present: a dotted rule, a cause, evidence, a one-line next command, and a one-line waiver when there is one.
+    /// Whether every field an agent needs is present: a dotted rule, a cause, evidence, a one-line next command when there is one, and a one-line waiver when there is one.
     pub fn is_complete(&self) -> bool {
         let one_line = |text: &str| !text.trim().is_empty() && !text.contains(['\n', '\r']);
         !self.rule.is_empty()
@@ -67,7 +76,7 @@ impl Refusal {
             && !self.cause.trim().is_empty()
             && !self.evidence.is_empty()
             && self.evidence.iter().all(|item| !item.trim().is_empty())
-            && one_line(&self.next)
+            && self.next.as_deref().is_none_or(one_line)
             && self.waiver.as_deref().is_none_or(one_line)
     }
 
@@ -86,7 +95,10 @@ impl Refusal {
             string(&mut out, item);
         }
         out.push_str("],\"next\":");
-        string(&mut out, &self.next);
+        match &self.next {
+            Some(next) => string(&mut out, next),
+            None => out.push_str("null"),
+        }
         out.push_str(",\"waiver\":");
         match &self.waiver {
             Some(waiver) => string(&mut out, waiver),
@@ -112,7 +124,11 @@ impl Refusal {
             }
         }
         out.push_str("\nNext:\n  ");
-        out.push_str(&self.next);
+        out.push_str(
+            self.next
+                .as_deref()
+                .unwrap_or("none; the cause says why no command repeats the refused intent"),
+        );
         out.push('\n');
         if let Some(waiver) = &self.waiver {
             out.push_str("\nWaiver:\n  ");
@@ -153,7 +169,11 @@ impl Refusal {
             }
         }
         reader.literal(",\"next\":")?;
-        let next = reader.string()?;
+        let next = if reader.literal("null").is_some() {
+            None
+        } else {
+            Some(reader.string()?)
+        };
         reader.literal(",\"waiver\":")?;
         let waiver = if reader.literal("null").is_some() {
             None
@@ -368,6 +388,18 @@ mod tests {
     }
 
     #[test]
+    fn a_withheld_next_is_null_and_parses_back() {
+        let refusal = Refusal::without_next("git.force", "unread option").evidence("abc");
+        assert!(refusal.line().ends_with(",\"next\":null,\"waiver\":null}"));
+        assert!(
+            refusal
+                .text()
+                .contains("\nNext:\n  none; the cause says why")
+        );
+        assert_eq!(Refusal::find(&refusal.render()), Some(refusal));
+    }
+
+    #[test]
     fn anything_but_the_exact_format_is_not_a_refusal() {
         let line = sample().line();
         assert_eq!(Refusal::parse(&line[1..]), None);
@@ -405,7 +437,21 @@ mod tests {
         );
         assert!(
             !Refusal {
-                next: "a\nb".into(),
+                next: Some("a\nb".into()),
+                ..sample()
+            }
+            .is_complete()
+        );
+        assert!(
+            !Refusal {
+                next: Some(" ".into()),
+                ..sample()
+            }
+            .is_complete()
+        );
+        assert!(
+            Refusal {
+                next: None,
                 ..sample()
             }
             .is_complete()

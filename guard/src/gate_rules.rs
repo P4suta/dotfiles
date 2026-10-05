@@ -194,3 +194,98 @@ fn a_long_option_is_its_exact_spelling_or_its_only_completion() {
     kani::cover!(read == Spelling::Ambiguous);
     kani::cover!(read == Spelling::Unknown);
 }
+
+/// What a gate does with a command line, given whether a rule refuses it and whether every option was read as Git reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Verdict {
+    Allow,
+    /// Refuse and suggest the same command with the refused part changed.
+    Suggest,
+    /// Refuse without a suggestion: a command rebuilt from words the gate did not read could do something else.
+    Withhold,
+}
+
+pub fn verdict(refused: bool, read: bool) -> Verdict {
+    if !refused {
+        Verdict::Allow
+    } else if read {
+        Verdict::Suggest
+    } else {
+        Verdict::Withhold
+    }
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn a_suggestion_is_rebuilt_only_from_a_line_read_in_full() {
+    let refused: bool = kani::any();
+    let read: bool = kani::any();
+    let verdict = verdict(refused, read);
+    assert_eq!(verdict == Verdict::Allow, !refused);
+    assert_eq!(verdict == Verdict::Suggest, refused && read);
+    assert_eq!(verdict == Verdict::Withhold, refused && !read);
+    kani::cover!(verdict == Verdict::Suggest);
+    kani::cover!(verdict == Verdict::Withhold);
+    kani::cover!(verdict == Verdict::Allow && !read);
+}
+
+/// How `git commit --fixup` was given.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fixup {
+    Absent,
+    /// `--fixup=<commit>`.
+    Plain,
+    /// `--fixup=amend:<commit>`, which may be empty.
+    Amend,
+    /// `--fixup=reword:<commit>`, which ignores staged changes and is empty.
+    Reword,
+}
+
+/// What a retry from the saved message adds so that it makes the commit the refused one would have made.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct Retry {
+    pub allow_empty: bool,
+    pub only: bool,
+    /// The author and date of the commit whose message `-C` or `-c` reused.
+    pub authorship: bool,
+}
+
+/// The retry of a refused commit, or `None` when no retry repeats it.
+/// `reuse` says the commit took its authorship from another commit, through `-C` or `-c` without `--reset-author`, and `known` that the gate read that authorship.
+pub fn commit_retry(fixup: Fixup, reuse: bool, known: bool) -> Option<Retry> {
+    if reuse && !known {
+        return None;
+    }
+    Some(Retry {
+        allow_empty: matches!(fixup, Fixup::Amend | Fixup::Reword),
+        only: fixup == Fixup::Reword,
+        authorship: reuse,
+    })
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn a_commit_retry_keeps_what_its_message_source_implied() {
+    let fixup = match kani::any::<u8>() {
+        0 => Fixup::Absent,
+        1 => Fixup::Plain,
+        2 => Fixup::Amend,
+        _ => Fixup::Reword,
+    };
+    let reuse: bool = kani::any();
+    let known: bool = kani::any();
+    let retry = commit_retry(fixup, reuse, known);
+    assert_eq!(retry.is_none(), reuse && !known);
+    if let Some(retry) = retry {
+        assert_eq!(
+            retry.allow_empty,
+            fixup == Fixup::Amend || fixup == Fixup::Reword
+        );
+        assert_eq!(retry.only, fixup == Fixup::Reword);
+        assert_eq!(retry.authorship, reuse);
+    }
+    kani::cover!(retry.is_none());
+    kani::cover!(retry.is_some_and(|retry| retry.only && retry.allow_empty));
+    kani::cover!(retry.is_some_and(|retry| retry.authorship));
+}

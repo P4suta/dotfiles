@@ -142,7 +142,10 @@ fn a_rewrite_is_refused_with_the_integration_step_and_a_waiver_for_exactly_that_
         &SIGNED,
     ));
     assert_eq!(refused.rule, "push.history");
-    assert_eq!(refused.next, "git pull --rebase origin main");
+    assert_eq!(
+        refused.next.as_deref().unwrap_or_default(),
+        "git pull --rebase origin main"
+    );
     assert_eq!(
         refused.waiver.as_deref(),
         Some("ALLOW_FORCE=1 git push --force-with-lease origin refs/heads/main:refs/heads/main")
@@ -159,7 +162,7 @@ fn a_deletion_is_refused_with_the_forge_step_and_a_waiver_that_repeats_it() {
     ));
     assert_eq!(refused.rule, "push.history");
     assert_eq!(
-        refused.next,
+        refused.next.as_deref().unwrap_or_default(),
         "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/topic'"
     );
     assert_eq!(
@@ -181,7 +184,7 @@ fn one_linear_unsigned_branch_is_rebased_onto_the_parent_of_its_oldest_unsigned_
     ));
     assert_eq!(refused.rule, "push.signature");
     assert_eq!(
-        refused.next,
+        refused.next.as_deref().unwrap_or_default(),
         format!("git rebase --exec 'git commit --amend --no-edit -S' {base} topic")
     );
     assert_eq!(refused.evidence.len(), 2);
@@ -201,7 +204,7 @@ fn an_unsigned_tag_at_the_checked_out_commit_is_listed_instead_of_amended() {
     ));
     assert_eq!(refused.rule, "push.signature");
     assert_eq!(
-        refused.next,
+        refused.next.as_deref().unwrap_or_default(),
         format!("git log '--format=%h %G? %s' {tip} --not --remotes=origin")
     );
     let refused = refusal(&repository.dotguard(
@@ -209,7 +212,10 @@ fn an_unsigned_tag_at_the_checked_out_commit_is_listed_instead_of_amended() {
         &format!("refs/heads/main {tip} refs/heads/main {base}\n"),
         &SIGNED,
     ));
-    assert_eq!(refused.next, "git commit --amend -S --no-edit");
+    assert_eq!(
+        refused.next.as_deref().unwrap_or_default(),
+        "git commit --amend -S --no-edit"
+    );
 }
 
 #[test]
@@ -226,7 +232,7 @@ fn several_refs_or_a_merge_are_listed_instead_of_rebased() {
     ));
     assert_eq!(refused.rule, "push.signature");
     assert_eq!(
-        refused.next,
+        refused.next.as_deref().unwrap_or_default(),
         format!("git log '--format=%h %G? %s' {left} --not --remotes=origin")
     );
     assert_eq!(refused.evidence.len(), 2);
@@ -238,7 +244,7 @@ fn several_refs_or_a_merge_are_listed_instead_of_rebased() {
         &SIGNED,
     ));
     assert_eq!(
-        refused.next,
+        refused.next.as_deref().unwrap_or_default(),
         format!("git log '--format=%h %G? %s' {merge} --not --remotes=origin")
     );
     assert_eq!(refused.evidence.len(), 3);
@@ -264,7 +270,7 @@ fn a_failed_signature_rolls_the_commit_back_and_names_the_commit_to_repeat() {
     ));
     assert_eq!(refused.rule, "commit.signature");
     assert_eq!(
-        refused.next,
+        refused.next.as_deref().unwrap_or_default(),
         format!("git commit --reuse-message={unsigned}")
     );
     assert_eq!(refused.waiver, None);

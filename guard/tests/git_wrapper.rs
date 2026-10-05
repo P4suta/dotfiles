@@ -98,7 +98,11 @@ fn a_copy_named_git_refuses_skipped_hooks_and_records_the_refusal() {
         let refusal = last_record(&refused);
         assert_eq!(refusal.rule, "git.no-verify");
         assert_eq!(refusal.waiver, None);
-        assert!(!refusal.next.contains("--no-verify"), "{}", refusal.next);
+        let next = refusal.next.unwrap_or_default();
+        assert!(
+            next.starts_with("git ") && !next.contains("--no-verify"),
+            "{next}"
+        );
         assert!(
             text(&refused.stderr).contains("Signing and hook checks cannot be bypassed."),
             "{}",
@@ -163,7 +167,10 @@ fn an_abbreviated_option_value_is_not_a_deleted_branch() {
     succeeds(&["remote", "add", "origin", "../remote.git"]);
     let deletion = ["push", "-q", "--delete", "--rep", "x", "origin", "a"];
     assert_eq!(
-        last_record(&wrapper.run(&deletion, None)).next,
+        last_record(&wrapper.run(&deletion, None))
+            .next
+            .as_deref()
+            .unwrap_or_default(),
         "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/a'"
     );
     let waived = wrapper.run_with(&deletion, None, &["ALLOW_FORCE"]);
@@ -286,4 +293,60 @@ fn a_callers_git_repository_variables_cannot_redirect_the_wrapper() {
         std::fs::read(outer_git.join("config")).unwrap(),
         config_before
     );
+}
+
+/// Git rejects a push with an option it does not accept, so a refused one suggests no deletion built from its other words.
+#[test]
+fn a_refused_push_with_an_option_git_rejects_suggests_nothing() {
+    let wrapper = Wrapper::new("push-unread");
+    std::fs::write(
+        wrapper.scope.join("gitconfig"),
+        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+    )
+    .unwrap();
+    let succeeds = |arguments: &[&str]| {
+        let output = wrapper.run(arguments, None);
+        assert!(
+            output.status.success(),
+            "git {arguments:?}: {}",
+            text(&output.stderr)
+        );
+        text(&output.stdout).trim().to_owned()
+    };
+    succeeds(&["init", "-q", "--bare", "../remote.git"]);
+    let tree = succeeds(&["write-tree"]);
+    let commit = succeeds(&["commit-tree", &tree, "-m", "c"]);
+    for branch in ["a", "origin", "x"] {
+        succeeds(&[
+            "push",
+            "-q",
+            "../remote.git",
+            &format!("{commit}:refs/heads/{branch}"),
+        ]);
+    }
+    succeeds(&["remote", "add", "origin", "../remote.git"]);
+    for option in ["--re", "--bogus", "--d"] {
+        let deletion = ["push", "--delete", option, "x", "origin", "a"];
+        let refused = last_record(&wrapper.run(&deletion, None));
+        assert_eq!(refused.rule, "git.force");
+        assert_eq!(refused.next, None, "git {deletion:?}");
+        assert!(
+            refused
+                .cause
+                .contains(&format!("Git does not accept `{option}`")),
+            "{}",
+            refused.cause
+        );
+        let waived = wrapper.run_with(&deletion, None, &["ALLOW_FORCE"]);
+        assert!(!waived.status.success(), "Git ran git {deletion:?}");
+    }
+    for branch in ["a", "origin", "x"] {
+        succeeds(&[
+            "--git-dir=../remote.git",
+            "rev-parse",
+            "-q",
+            "--verify",
+            &format!("refs/heads/{branch}"),
+        ]);
+    }
 }

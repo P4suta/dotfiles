@@ -225,21 +225,47 @@ fn commit_msg(path: &str) -> i32 {
     let retry = std::env::var(INVOKED)
         .ok()
         .and_then(|line| refusal::words(&line))
-        .and_then(|words| gitargv::commit_retry(&words, &message))
+        .and_then(|words| gitargv::commit_retry(&words, &message, authorship))
         .unwrap_or_else(|| {
-            ["git", "commit", "<options>", "--edit", "--file", &message]
+            Ok(["git", "commit", "<options>", "--edit", "--file", &message]
                 .map(str::to_owned)
-                .into()
+                .into())
         });
+    let mut cause =
+        format!("the commit message is not written in {expected}; rewrite it and commit again");
+    if let Err(reason) = &retry {
+        cause.push_str(".\nNo command is suggested: ");
+        cause.push_str(reason.trim_end_matches('.'));
+    }
     refuse_foreign(&lang::refusal(
         "commit.language",
-        &format!("the commit message is not written in {expected}; rewrite it and commit again"),
+        &cause,
         hits.iter()
             .map(|hit| lang::evidence("commit message", hit))
             .collect(),
-        refusal::command(&retry),
+        retry.ok().map(|words| refusal::command(&words)),
         foreign_waiver(),
     ))
+}
+
+/// The author and date of `revision`, as the refused commit took them from it.
+fn authorship(revision: &str) -> Option<gitargv::Authorship> {
+    let peeled = format!("{revision}^{{commit}}");
+    let read = realgit::capture(&[
+        "log",
+        "-1",
+        "--no-show-signature",
+        "--date=raw",
+        "--format=%an <%ae>%x00%ad",
+        "--end-of-options",
+        &peeled,
+        "--",
+    ])?;
+    let (author, date) = read.trim_end_matches('\n').split_once('\0')?;
+    Some(gitargv::Authorship {
+        author: author.to_owned(),
+        date: date.to_owned(),
+    })
 }
 
 fn pre_commit() -> i32 {
@@ -280,7 +306,7 @@ fn pre_commit() -> i32 {
         "commit.language",
         "staged changes add text in a script this machine does not write; remove it, stage the result, and commit again",
         hits,
-        refusal::command(&inspect),
+        Some(refusal::command(&inspect)),
         foreign_waiver(),
     ))
 }
@@ -310,7 +336,7 @@ fn scan_paths(paths: &[String]) -> i32 {
             hits.len()
         ),
         hits,
-        refusal::command(&scan),
+        Some(refusal::command(&scan)),
         Some(format!("ALLOW_FOREIGN=1 {}", refusal::command(&scan))),
     ))
 }

@@ -336,7 +336,7 @@ pub fn refusal(
     rule: &str,
     cause: &str,
     hits: Vec<String>,
-    next: String,
+    next: Option<String>,
     waiver: Option<String>,
 ) -> crate::refusal::Refusal {
     let mut cause = format!(
@@ -349,7 +349,10 @@ pub fn refusal(
             "\nThe refused Git command did not pass through the git wrapper, so no waiver can repeat it; run that command again with ALLOW_FOREIGN=1 to waive this check once.",
         );
     }
-    let mut refusal = crate::refusal::Refusal::new(rule, cause, next);
+    let mut refusal = match next {
+        Some(next) => crate::refusal::Refusal::new(rule, cause, next),
+        None => crate::refusal::Refusal::without_next(rule, cause),
+    };
     refusal.waiver = waiver;
     let total = hits.len();
     for hit in hits.into_iter().take(EVIDENCE_LIMIT) {
@@ -377,7 +380,7 @@ mod tests {
             "scan.language",
             "a.txt contains text in a script this machine does not write",
             hits,
-            "dotguard scan a.txt".into(),
+            Some("dotguard scan a.txt".into()),
             Some("ALLOW_FOREIGN=1 dotguard scan a.txt".into()),
         );
         assert!(refused.is_complete(), "{refused:?}");

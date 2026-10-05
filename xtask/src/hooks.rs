@@ -433,7 +433,10 @@ mod tests {
         let refusal = lefthook_missing("lefthook.yml", Hook::PrePush);
         assert!(refusal.is_complete(), "{refusal:?}");
         assert_eq!(refusal.rule, "hook.lefthook");
-        assert_eq!(refusal.next, install_lefthook());
+        assert_eq!(
+            refusal.next.as_deref().unwrap_or_default(),
+            install_lefthook()
+        );
         assert_eq!(refusal.evidence, ["lefthook.yml configures pre-push"]);
         assert_eq!(refusal.waiver, None);
     }
