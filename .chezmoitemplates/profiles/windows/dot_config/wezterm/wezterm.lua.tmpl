@@ -13,6 +13,8 @@ config.webgpu_power_preference = 'HighPerformance'
 config.max_fps = {{ .terminal.max_fps }}
 config.animation_fps = {{ .terminal.max_fps }}
 config.use_ime = true
+-- Win32-OpenSSH reads only named pipes, so panes keep its default 1Password pipe instead of the mux socket.
+config.mux_enable_ssh_agent = false
 
 config.font = wezterm.font({{ .terminal.font_family | quote }}, { weight = 'Medium' })
 config.font_size = {{ .terminal.font_size }}
