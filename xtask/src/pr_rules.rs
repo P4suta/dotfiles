@@ -63,6 +63,15 @@ pub fn checks_state(total: usize, unfinished: usize, failed: usize) -> Checks {
     }
 }
 
+/// The first unmet condition that refuses an operation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Blocker {
+    Unvalidated,
+    MissingIssue,
+    NotDraft,
+    UnfinishedChecks,
+}
+
 pub fn plan(
     operation: Operation,
     generation: Generation,
@@ -70,18 +79,23 @@ pub fn plan(
     draft: bool,
     issue: IssueGate,
     checks: Checks,
-) -> Option<Effect> {
-    if !validated || issue == IssueGate::Missing {
-        return None;
+) -> Result<Effect, Blocker> {
+    if !validated {
+        return Err(Blocker::Unvalidated);
+    }
+    if issue == IssueGate::Missing {
+        return Err(Blocker::MissingIssue);
     }
     match operation {
-        Operation::Create => Some(if generation == Generation::Local || draft {
+        Operation::Create => Ok(if generation == Generation::Local || draft {
             Effect::CreateDraft
         } else {
             Effect::CreateReady
         }),
-        Operation::Edit => Some(Effect::Edit),
-        Operation::Ready => (draft && checks == Checks::Passing).then_some(Effect::Ready),
+        Operation::Edit => Ok(Effect::Edit),
+        Operation::Ready if !draft => Err(Blocker::NotDraft),
+        Operation::Ready if checks != Checks::Passing => Err(Blocker::UnfinishedChecks),
+        Operation::Ready => Ok(Effect::Ready),
     }
 }
 
@@ -112,15 +126,15 @@ fn inputs() -> (Operation, Generation, bool, bool, IssueGate, Checks) {
 fn rejected_documents_never_produce_a_pr_mutation() {
     let (operation, generation, validated, draft, issue, checks) = inputs();
     let result = plan(operation, generation, validated, draft, issue, checks);
-    assert!(validated || result.is_none());
+    assert!(validated || result.is_err());
     assert_eq!(
-        result.is_some(),
+        result.is_ok(),
         validated
             && issue != IssueGate::Missing
             && (operation != Operation::Ready || draft && checks == Checks::Passing)
     );
-    kani::cover!(result.is_some());
-    kani::cover!(result.is_none());
+    kani::cover!(result.is_ok());
+    kani::cover!(result.is_err());
 }
 
 #[cfg(kani)]
@@ -130,16 +144,16 @@ fn local_creation_always_starts_as_draft() {
     let result = plan(operation, generation, validated, draft, issue, checks);
     if operation == Operation::Create && validated && issue != IssueGate::Missing {
         assert_eq!(
-            result == Some(Effect::CreateDraft),
+            result == Ok(Effect::CreateDraft),
             generation == Generation::Local || draft
         );
         assert_eq!(
-            result == Some(Effect::CreateReady),
+            result == Ok(Effect::CreateReady),
             generation == Generation::Coderabbit && !draft
         );
     }
-    kani::cover!(result == Some(Effect::CreateDraft));
-    kani::cover!(result == Some(Effect::CreateReady));
+    kani::cover!(result == Ok(Effect::CreateDraft));
+    kani::cover!(result == Ok(Effect::CreateReady));
 }
 
 #[cfg(kani)]
@@ -148,17 +162,17 @@ fn ready_requires_a_validated_draft_transition() {
     let (operation, generation, validated, draft, issue, checks) = inputs();
     let result = plan(operation, generation, validated, draft, issue, checks);
     assert_eq!(
-        result == Some(Effect::Ready),
+        result == Ok(Effect::Ready),
         operation == Operation::Ready
             && validated
             && draft
             && issue != IssueGate::Missing
             && checks == Checks::Passing
     );
-    kani::cover!(result == Some(Effect::Ready));
-    kani::cover!(result.is_none());
+    kani::cover!(result == Ok(Effect::Ready));
+    kani::cover!(result.is_err());
     kani::cover!(
-        result.is_none()
+        result.is_err()
             && operation == Operation::Ready
             && validated
             && draft
@@ -197,10 +211,37 @@ fn personal_issue_prerequisites_cannot_be_skipped_by_any_generation_mode() {
     assert_eq!(gate == IssueGate::NotRequired, !personal_owner || fork);
     let (operation, generation, validated, draft, _, checks) = inputs();
     let result = plan(operation, generation, validated, draft, gate, checks);
-    assert!(gate != IssueGate::Missing || result.is_none());
-    kani::cover!(result.is_some() && gate == IssueGate::Linked);
-    kani::cover!(result.is_some() && gate == IssueGate::NotRequired);
-    kani::cover!(result.is_none() && gate == IssueGate::Missing);
+    assert!(gate != IssueGate::Missing || result.is_err());
+    kani::cover!(result.is_ok() && gate == IssueGate::Linked);
+    kani::cover!(result.is_ok() && gate == IssueGate::NotRequired);
+    kani::cover!(result.is_err() && gate == IssueGate::Missing);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn a_refusal_names_the_first_unmet_condition() {
+    let (operation, generation, validated, draft, issue, checks) = inputs();
+    let result = plan(operation, generation, validated, draft, issue, checks);
+    let expected = if !validated {
+        Some(Blocker::Unvalidated)
+    } else if issue == IssueGate::Missing {
+        Some(Blocker::MissingIssue)
+    } else if operation == Operation::Ready && !draft {
+        Some(Blocker::NotDraft)
+    } else if operation == Operation::Ready && checks != Checks::Passing {
+        Some(Blocker::UnfinishedChecks)
+    } else {
+        None
+    };
+    assert_eq!(result.err(), expected);
+    assert!(
+        operation == Operation::Ready
+            || !matches!(result, Err(Blocker::NotDraft | Blocker::UnfinishedChecks))
+    );
+    kani::cover!(result == Err(Blocker::Unvalidated));
+    kani::cover!(result == Err(Blocker::MissingIssue));
+    kani::cover!(result == Err(Blocker::NotDraft));
+    kani::cover!(result == Err(Blocker::UnfinishedChecks));
 }
 
 #[cfg(kani)]

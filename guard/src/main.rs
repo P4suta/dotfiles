@@ -8,8 +8,8 @@
 //! lefthook still runs per-repo gates underneath; these are the rules that hold everywhere, including in a repository cloned five minutes ago.
 
 use dotguard::{
-    attribution, bypass, doctor, gitargv, lang, lint, postcommit, prepush, realgit, renovate,
-    staged,
+    attribution, bypass, doctor, gitargv, lang, lint, postcommit, prepush, realgit, refusal,
+    renovate, staged,
 };
 
 use bypass::Category;
@@ -92,17 +92,7 @@ fn git_wrapper(argv: &[String]) -> ExitCode {
             eprintln!("::warning:: {env}=1 — allowing {}", denial.reason);
         } else {
             bypass::record("REJECT", denial.category, &denial.reason, &full);
-            let hint = waiver.map_or_else(
-                || "Signing and hook checks cannot be bypassed.".to_owned(),
-                |env| format!(
-                    "If this is deliberate, waive it for this one command:\n\n  {env}=1 git {}\n\nThe bypass is recorded in ~/.local/state/git-bypass.log.",
-                    argv.join(" ")
-                ),
-            );
-            eprintln!(
-                "::error:: refusing `{}`.\n\n{}\n\n{hint}",
-                denial.reason, denial.hint
-            );
+            gitargv::refusal(&denial, argv).emit();
             return ExitCode::FAILURE;
         }
     }
@@ -212,9 +202,20 @@ fn commit_msg(path: &str) -> i32 {
         lang::Mode::Japanese => "English or Japanese",
         _ => "English",
     };
-    eprintln!("::error:: the commit message is not written in {expected}:\n");
     lang::report("commit message", &body, &hits);
-    refuse_foreign("git commit")
+    let retry = ["git", "commit", "--edit", "--file", path];
+    refuse_foreign(&lang::refusal(
+        "commit.language",
+        &format!("the commit message is not written in {expected}; rewrite it and commit again"),
+        hits.iter()
+            .map(|hit| lang::evidence("commit message", hit))
+            .collect(),
+        refusal::command(&retry),
+        format!(
+            "ALLOW_FOREIGN=1 {}",
+            refusal::command(&["git", "commit", "--file", path])
+        ),
+    ))
 }
 
 fn pre_commit() -> i32 {
@@ -232,20 +233,36 @@ fn pre_commit() -> i32 {
         return 0;
     }
 
-    eprintln!("::error:: staged changes add text in a script this machine does not write:\n");
-    for f in &files {
-        for (lineno, hit) in &f.hits {
-            eprintln!(
-                "  {}:{}:{}  {:?}  U+{:04X}  [{}]",
-                f.path, lineno, hit.col, hit.ch, hit.ch as u32, hit.kind
-            );
-        }
+    let hits: Vec<String> = files
+        .iter()
+        .flat_map(|f| {
+            f.hits.iter().map(|(line, hit)| {
+                lang::evidence(
+                    &f.path,
+                    &lang::Hit {
+                        line: *line,
+                        ..*hit
+                    },
+                )
+            })
+        })
+        .collect();
+    for hit in &hits {
+        eprintln!("  {hit}");
     }
-    refuse_foreign("git commit")
+    let mut inspect = vec!["git", "diff", "--cached", "--"];
+    inspect.extend(files.iter().map(|f| f.path.as_str()));
+    refuse_foreign(&lang::refusal(
+        "commit.language",
+        "staged changes add text in a script this machine does not write; remove it, stage the result, and commit again",
+        hits,
+        refusal::command(&inspect),
+        "ALLOW_FOREIGN=1 git commit".to_owned(),
+    ))
 }
 
 fn scan_paths(paths: &[String]) -> i32 {
-    let mut bad = 0;
+    let mut hits = Vec::new();
     for p in paths {
         let Ok(text) = std::fs::read_to_string(p) else {
             continue;
@@ -253,21 +270,29 @@ fn scan_paths(paths: &[String]) -> i32 {
         if staged::exempts_itself(&text) {
             continue;
         }
-        let hits = lang::scan(&text, lang::Mode::Content);
-        if !hits.is_empty() {
-            lang::report(p, &text, &hits);
-            bad += hits.len();
-        }
+        let found = lang::scan(&text, lang::Mode::Content);
+        lang::report(p, &text, &found);
+        hits.extend(found.iter().map(|hit| lang::evidence(p, hit)));
     }
-    if bad == 0 {
+    if hits.is_empty() {
         return 0;
     }
-    eprintln!("\n::error:: {bad} contaminating character(s).");
-    refuse_foreign("this check")
+    let mut scan = vec!["dotguard", "scan"];
+    scan.extend(paths.iter().map(String::as_str));
+    refuse_foreign(&lang::refusal(
+        "scan.language",
+        &format!(
+            "{} contaminating character(s); remove them and scan again",
+            hits.len()
+        ),
+        hits,
+        refusal::command(&scan),
+        format!("ALLOW_FOREIGN=1 {}", refusal::command(&scan)),
+    ))
 }
 
-/// Shared tail for every language refusal: the bypass, the per-repo off-switch, and why a single stray character is worth stopping for.
-fn refuse_foreign(what: &str) -> i32 {
+/// Shared tail for every language refusal: the recorded override, or the structured refusal.
+fn refuse_foreign(refused: &refusal::Refusal) -> i32 {
     let argv: Vec<String> = std::env::args().collect();
     if bypass::waived(Category::Foreign) {
         bypass::record("BYPASS", Category::Foreign, "foreign script", &argv);
@@ -275,15 +300,6 @@ fn refuse_foreign(what: &str) -> i32 {
         return 0;
     }
     bypass::record("REJECT", Category::Foreign, "foreign script", &argv);
-    eprintln!(
-        "\n\
-         Cyrillic '\u{0441}' and Latin 'c' are indistinguishable on screen, so this is not only\n\
-         language rule: it is the same check that catches a homoglyph in an identifier and a\n\
-         bidi override in a comment.\n\n\
-         If the text is intentional:\n\n  \
-         ALLOW_FOREIGN=1 {what}              once\n  \
-         git config guard.lang japanese      this repository writes Japanese\n  \
-         git config guard.lang off           this repository carries multilingual fixtures\n"
-    );
+    refused.emit();
     1
 }

@@ -10,6 +10,7 @@
 
 use crate::bypass::{self, Category};
 use crate::realgit;
+use crate::refusal::Refusal;
 
 /// The lock this hook sets around its own `--amend`, so the resulting commit does not re-enter it.
 const LOCK_ENV: &str = "GIT_HOOK_FORCE_SIGN_LOCK";
@@ -94,17 +95,37 @@ fn refuse_empty() -> i32 {
     let short = realgit::capture(&["rev-parse", "--short", "HEAD"])
         .map(|s| s.trim().to_owned())
         .unwrap_or_default();
-    if !realgit::succeeds(&["reset", "--soft", "HEAD^"]) {
-        eprintln!("::error:: {short} records no change and could not be rolled back.");
-        return 1;
-    }
-    eprintln!(
-        "::error:: refused empty commit {short}: it records no change from its parent.\n\n\
-         The staged changes most likely vanished before Git recorded the commit, so it was rolled back.\n\
-         Your working tree is unchanged; stage the changes again and commit.\n\
-         For an intentional empty commit: ALLOW_EMPTY=1 git commit --allow-empty"
-    );
+    let rolled_back = realgit::succeeds(&["reset", "--soft", "HEAD^"]);
+    empty_refusal(&short, rolled_back).emit();
     1
+}
+
+/// Once rolled back, the waiver records the same empty commit again; while it is still on HEAD there is nothing left to waive.
+fn empty_refusal(short: &str, rolled_back: bool) -> Refusal {
+    if rolled_back {
+        Refusal::new(
+            "commit.empty",
+            format!(
+                "commit {short} records no change from its parent.\n\
+                 The staged changes most likely vanished before Git recorded the commit, so it was rolled back.\n\
+                 Your working tree is unchanged; stage the changes again and commit."
+            ),
+            "git status --short",
+        )
+        .evidence(format!("HEAD {short} has the same tree as HEAD^"))
+        .evidence("rolled back with git reset --soft HEAD^")
+        .waiver(format!(
+            "ALLOW_EMPTY=1 git commit --allow-empty --reuse-message={short}"
+        ))
+    } else {
+        Refusal::new(
+            "commit.empty",
+            format!("commit {short} records no change and could not be rolled back."),
+            "git reset --soft HEAD^",
+        )
+        .evidence(format!("HEAD {short} has the same tree as HEAD^"))
+        .evidence("git reset --soft HEAD^ failed")
+    }
 }
 
 fn signing_configured() -> bool {
@@ -136,7 +157,7 @@ fn resign() -> i32 {
     let pre_head = pre_head.trim().to_owned();
 
     // The re-sign itself, under the lock.
-    // Output is swallowed: on failure every word of it is about *why* the agent is unreachable, which the rollback message below already names.
+    // Output is swallowed: on failure every word of it is about *why* the agent is unreachable, which the refusal below already names.
     let Some(mut amend) = realgit::command() else {
         return 0;
     };
@@ -167,13 +188,35 @@ fn resign() -> i32 {
         return 0;
     }
 
-    eprintln!(
-        "::error:: signing failed — refusing to leave an unsigned commit on HEAD.\n\n\
-         Likely cause: 1Password is locked / its SSH agent confirm dialog\n\
-         timed out. Other causes: ssh-keygen missing, signing key not loaded,\n\
-         or gpg.ssh.program misconfigured."
-    );
-    rollback(&pre_head)
+    let target = rollback(&pre_head);
+    let head = realgit::capture(&["rev-parse", "--short", "HEAD"]).map(|s| s.trim().to_owned());
+    unsigned_refusal(&pre_head, target, head.as_deref()).emit();
+    1
+}
+
+/// Signing failed and the commit was undone; the staged changes and the reflog still hold everything needed to commit again.
+fn unsigned_refusal(pre_head: &str, target: Rollback, head: Option<&str>) -> Refusal {
+    let rolled_back = match (target, head) {
+        (Rollback::SoftToParent, Some(head)) => {
+            format!("rolled back to {head}; the changes remain staged")
+        }
+        (Rollback::SoftToParent, None) => {
+            "rolled back to the parent; the changes remain staged".to_owned()
+        }
+        (Rollback::DropHead, _) => {
+            "dropped the root commit; the changes remain staged with no HEAD".to_owned()
+        }
+    };
+    Refusal::new(
+        "commit.signature",
+        "signing failed, so the unsigned commit was not left on HEAD.\n\
+         Likely cause: 1Password is locked or its SSH agent confirmation timed out.\n\
+         Other causes: ssh-keygen is missing, the signing key is not loaded, or gpg.ssh.program is misconfigured.\n\
+         Unlock 1Password or restart the SSH agent, then commit again with the same message.",
+        format!("git commit --reuse-message={pre_head}"),
+    )
+    .evidence(format!("unsigned commit {pre_head} is kept in the reflog"))
+    .evidence(rolled_back)
 }
 
 /// How to undo the unsigned commit: step back to its parent when there is one, or drop the ref entirely when it was the root — the index keeps the user's changes either way, and the reflog keeps the commit.
@@ -193,7 +236,7 @@ fn rollback_target(parent_exists: bool) -> Rollback {
     }
 }
 
-fn rollback(pre_head: &str) -> i32 {
+fn rollback(pre_head: &str) -> Rollback {
     // Defensive: a partial amend is unlikely to leave HEAD elsewhere, but be sure before stepping further.
     let _ = realgit::command().and_then(|mut c| {
         c.args(["reset", "--soft", pre_head])
@@ -204,39 +247,48 @@ fn rollback(pre_head: &str) -> i32 {
     });
 
     let parent_exists = realgit::succeeds(&["rev-parse", "--verify", &format!("{pre_head}^")]);
-    match rollback_target(parent_exists) {
+    let target = rollback_target(parent_exists);
+    match target {
         Rollback::SoftToParent => {
             let _ = realgit::succeeds(&["reset", "--soft", &format!("{pre_head}^")]);
-            let short = realgit::capture(&["rev-parse", "--short", "HEAD"])
-                .map(|s| s.trim().to_owned())
-                .unwrap_or_default();
-            eprintln!(
-                "::notice:: rolled back to {short}; your changes remain staged.\n\n\
-                 To recover:\n  \
-                 1. Unlock 1Password (or restart the SSH agent)\n  \
-                 2. Re-run your original commit; the staged diff is unchanged\n  \
-                 3. The reflog still contains the unsigned commit if you need to inspect it:\n  \
-                 git reflog"
-            );
         }
         Rollback::DropHead => {
             let _ = realgit::succeeds(&["update-ref", "-d", "HEAD"]);
-            eprintln!(
-                "::notice:: rolled back the root commit; your changes remain staged with no HEAD.\n\n\
-                 To recover:\n  \
-                 1. Unlock 1Password (or restart the SSH agent)\n  \
-                 2. Re-run your original commit; the staged diff is unchanged\n  \
-                 3. The reflog still contains the unsigned commit if you need to inspect it:\n  \
-                 git reflog"
-            );
         }
     }
-    1
+    target
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Decision, Rollback, Situation, decide, refuses_empty, rollback_target};
+    use super::{
+        Decision, Rollback, Situation, decide, empty_refusal, refuses_empty, rollback_target,
+        unsigned_refusal,
+    };
+
+    #[test]
+    fn every_refusal_is_a_complete_record() {
+        for refusal in [
+            empty_refusal("abc1234", true),
+            empty_refusal("abc1234", false),
+            unsigned_refusal("abc1234", Rollback::SoftToParent, Some("def5678")),
+            unsigned_refusal("abc1234", Rollback::SoftToParent, None),
+            unsigned_refusal("abc1234", Rollback::DropHead, None),
+        ] {
+            assert!(refusal.is_complete(), "{refusal:?}");
+        }
+        assert_eq!(empty_refusal("a", true).rule, "commit.empty");
+        assert_eq!(
+            empty_refusal("abc1234", true).waiver.as_deref(),
+            Some("ALLOW_EMPTY=1 git commit --allow-empty --reuse-message=abc1234")
+        );
+        let kept = empty_refusal("abc1234", false);
+        assert_eq!(kept.next, "git reset --soft HEAD^");
+        assert_eq!(kept.waiver, None, "the empty commit is still on HEAD");
+        let unsigned = unsigned_refusal("abc1234", Rollback::DropHead, None);
+        assert_eq!(unsigned.next, "git commit --reuse-message=abc1234");
+        assert_eq!(unsigned.waiver, None);
+    }
 
     #[test]
     fn an_empty_commit_is_refused_unless_waived_or_git_is_mid_operation() {

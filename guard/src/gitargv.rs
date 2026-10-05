@@ -18,23 +18,181 @@
 
 use crate::bypass::Category;
 use crate::realgit;
+use crate::refusal::{Refusal, command};
 
 pub struct Denial {
     pub category: Category,
     /// One line, for the audit log.
     pub reason: String,
-    /// What to do instead.
+    /// Why the command is refused and what to consider instead.
     /// Shown to the human, may be several lines.
     pub hint: String,
+    /// The command to run instead.
+    pub next: Next,
+}
+
+/// The command a refusal suggests instead.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Next {
+    /// A Git command, as the words after `git`; the gate judges it again before suggesting it.
+    Git(Vec<String>),
+    /// Any other command line, already quoted.
+    Shell(String),
+}
+
+impl Next {
+    /// The command as one shell line.
+    pub fn line(&self) -> String {
+        match self {
+            Self::Git(words) => command(
+                &std::iter::once("git")
+                    .chain(words.iter().map(String::as_str))
+                    .collect::<Vec<_>>(),
+            ),
+            Self::Shell(line) => line.clone(),
+        }
+    }
+}
+
+impl From<String> for Next {
+    fn from(line: String) -> Self {
+        Self::Shell(line)
+    }
 }
 
 impl Denial {
-    fn new(category: Category, reason: impl Into<String>, hint: impl Into<String>) -> Self {
+    fn new(
+        category: Category,
+        reason: impl Into<String>,
+        hint: impl Into<String>,
+        next: impl Into<Next>,
+    ) -> Self {
         Self {
             category,
             reason: reason.into(),
             hint: hint.into(),
+            next: next.into(),
         }
+    }
+}
+
+/// The structured refusal for a denied invocation; `argv` is everything after the program name.
+pub fn refusal(denial: &Denial, argv: &[String]) -> Refusal {
+    let invoked = command(
+        &std::iter::once("git")
+            .chain(argv.iter().map(String::as_str))
+            .collect::<Vec<_>>(),
+    );
+    let mut cause = format!("refusing `{}`.\n{}", denial.reason, denial.hint);
+    cause.push_str(if denial.category.env().is_some() {
+        "\nA waiver is recorded in ~/.local/state/git-bypass.log."
+    } else {
+        "\nSigning and hook checks cannot be bypassed."
+    });
+    let refusal = Refusal::new(
+        format!("git.{}", denial.category),
+        cause,
+        denial.next.line(),
+    )
+    .evidence(format!("command: {invoked}"));
+    match denial.category.env() {
+        Some(env) => refusal.waiver(format!("{env}=1 {invoked}")),
+        None => refusal,
+    }
+}
+
+/// The invocation being judged, so a refusal can name the same command with the offending part changed.
+struct Invocation<'a> {
+    globals: &'a [String],
+    sub: &'a str,
+    args: &'a [String],
+}
+
+impl Invocation<'_> {
+    /// A different git command run with the same global options.
+    fn git(&self, words: &[&str]) -> Next {
+        Next::Git(
+            self.globals
+                .iter()
+                .map(String::as_str)
+                .chain(words.iter().copied())
+                .map(str::to_owned)
+                .collect(),
+        )
+    }
+
+    /// The same command with each option before `--` kept, rewritten, or dropped by `edit`.
+    fn rerun(&self, edit: impl Fn(&str) -> Option<String>) -> Next {
+        let mut line: Vec<String> = self
+            .globals
+            .iter()
+            .cloned()
+            .chain([self.sub.to_owned()])
+            .collect();
+        let mut literal = false;
+        for arg in self.args {
+            if literal || arg == "--" {
+                literal = true;
+                line.push(arg.clone());
+            } else if let Some(word) = edit(arg) {
+                line.push(word);
+            }
+        }
+        Next::Git(line)
+    }
+
+    /// The same command without the named options.
+    fn without(&self, dropped: &[&str]) -> Next {
+        self.rerun(|arg| (!dropped.contains(&arg)).then(|| arg.to_owned()))
+    }
+
+    /// The non-option words after the subcommand.
+    fn positional(&self, index: usize) -> Option<&str> {
+        self.args
+            .iter()
+            .take_while(|a| a.as_str() != "--")
+            .filter(|a| !a.starts_with('-'))
+            .nth(index)
+            .map(String::as_str)
+    }
+}
+
+/// Deletes remote branches through the forge API rather than a push the gate refuses.
+fn forge_deletes(references: &[&str]) -> String {
+    let references = if references.is_empty() {
+        &["<branch>"][..]
+    } else {
+        references
+    };
+    references
+        .iter()
+        .map(|reference| {
+            let branch = reference.strip_prefix("refs/heads/").unwrap_or(reference);
+            command(&[
+                "gh",
+                "api",
+                "-X",
+                "DELETE",
+                &format!("repos/{{owner}}/{{repo}}/git/refs/heads/{branch}"),
+            ])
+        })
+        .collect::<Vec<_>>()
+        .join(" && ")
+}
+
+/// The branches a `push --delete <remote> <branch>...` names.
+fn deleted_branches<'a>(call: &'a Invocation) -> Vec<&'a str> {
+    (1..).map_while(|index| call.positional(index)).collect()
+}
+
+/// Drops `letters` from a clustered short option, and the option itself once nothing is left.
+fn drop_letters(arg: &str, letters: &[char]) -> Option<String> {
+    match short_cluster(arg) {
+        Some(cluster) => {
+            let kept: String = cluster.chars().filter(|c| !letters.contains(c)).collect();
+            (!kept.is_empty()).then(|| format!("-{kept}"))
+        }
+        None => Some(arg.to_owned()),
     }
 }
 
@@ -106,10 +264,27 @@ const BUILTINS: [&str; 46] = [
 /// Decide whether this git invocation may proceed.
 ///
 /// `argv` is everything after the program name, exactly as the wrapper received it.
+/// A refusal's suggested Git command is judged again, so a line combining several refused parts gets a suggestion with every one of them removed.
 pub fn inspect(argv: &[String]) -> Option<Denial> {
+    let mut denial = judge(argv)?;
+    // Each suggestion removes at least one refused word, so the chain ends within the line's length.
+    for _ in 0..=argv.len() {
+        let Next::Git(words) = &denial.next else {
+            break;
+        };
+        let Some(further) = judge(words) else {
+            break;
+        };
+        denial.next = further.next;
+    }
+    Some(denial)
+}
+
+fn judge(argv: &[String]) -> Option<Denial> {
     let mut i = 0;
     // `-c` settings are collected rather than judged on sight: whether one of them is a policy override depends on the subcommand, which we have not reached yet.
-    let mut settings: Vec<String> = Vec::new();
+    // Each keeps the argv range it came from, so a refusal can name the command without it.
+    let mut settings: Vec<(String, std::ops::Range<usize>)> = Vec::new();
 
     while i < argv.len() {
         let arg = argv[i].as_str();
@@ -120,15 +295,16 @@ pub fn inspect(argv: &[String]) -> Option<Denial> {
             i += 1;
             break;
         }
+        let start = i;
         if let Some(rest) = arg.strip_prefix("-c") {
             // Both `-c key=value` and the attached `-ckey=value` form.
             if rest.is_empty() {
                 i += 1;
                 if let Some(v) = argv.get(i) {
-                    settings.push(v.clone());
+                    settings.push((v.clone(), start..i + 1));
                 }
             } else {
-                settings.push(rest.to_owned());
+                settings.push((rest.to_owned(), start..i + 1));
             }
         } else if arg.starts_with("--config-env") {
             // `--config-env=key=ENVVAR` hides the value in the environment, so the key alone has to decide — recorded as `key=` to mean "set to something we cannot see".
@@ -142,7 +318,7 @@ pub fn inspect(argv: &[String]) -> Option<Denial> {
             if let Some(key) = setting.split('=').next()
                 && is_policy_key(key)
             {
-                settings.push(format!("{key}="));
+                settings.push((format!("{key}="), start..i + 1));
             }
         } else if GLOBAL_TAKES_VALUE.contains(&arg) {
             i += 1;
@@ -153,13 +329,25 @@ pub fn inspect(argv: &[String]) -> Option<Denial> {
     let sub = argv.get(i)?;
     let rest = &argv[i + 1..];
 
-    for setting in &settings {
-        if let Some(denial) = config_override(setting, sub) {
+    for (setting, range) in &settings {
+        if let Some(mut denial) = config_override(setting, sub) {
+            denial.next = Next::Git(
+                argv.iter()
+                    .enumerate()
+                    .filter(|(index, _)| !range.contains(index))
+                    .map(|(_, word)| word.clone())
+                    .collect(),
+            );
             return Some(denial);
         }
     }
 
-    if let Some(denial) = subcommand(sub, rest) {
+    let globals = &argv[..i];
+    if let Some(denial) = subcommand(&Invocation {
+        globals,
+        sub,
+        args: rest,
+    }) {
         return Some(denial);
     }
 
@@ -172,12 +360,17 @@ pub fn inspect(argv: &[String]) -> Option<Denial> {
         // `!sh -c ...` aliases run an arbitrary shell; we cannot reason about those and do not pretend to.
         if let Some(first) = words.first()
             && !first.starts_with('!')
-            && let Some(denial) = subcommand(first, &words[1..])
+            && let Some(denial) = subcommand(&Invocation {
+                globals,
+                sub: first,
+                args: &words[1..],
+            })
         {
             return Some(Denial::new(
                 denial.category,
                 format!("alias {sub} -> {}", expansion.trim()),
                 denial.hint,
+                denial.next,
             ));
         }
     }
@@ -190,7 +383,8 @@ pub fn inspect(argv: &[String]) -> Option<Denial> {
 /// One long `match` on purpose: every arm is a rule, each rule is three lines of condition and a paragraph of explanation, and the table reads as the policy document it is.
 /// Splitting it into a dozen two-line functions would scatter the policy without shortening it.
 #[allow(clippy::too_many_lines)]
-fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
+fn subcommand(call: &Invocation) -> Option<Denial> {
+    let (sub, args) = (call.sub, call.args);
     let flags = flags_of(args);
     let has = |f: &str| flags.iter().any(|a| a == f);
     if has("--no-verify")
@@ -199,16 +393,25 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
                 .iter()
                 .any(|arg| short_cluster(arg).is_some_and(|cluster| cluster.contains('n'))))
     {
+        let commit = sub == "commit";
         return Some(Denial::new(
             Category::NoVerify,
             "--no-verify",
             "Hook verification cannot be skipped.",
+            call.rerun(|arg| match arg {
+                "--no-verify" => None,
+                _ if commit => drop_letters(arg, &['n']),
+                _ => Some(arg.to_owned()),
+            }),
         ));
     }
     match sub {
         "push" => {
+            let integrate = call.git(&["pull", "--rebase"]);
             for a in &flags {
-                let deny = |reason: &str, hint: &str| Some(Denial::new(Category::Force, reason, hint));
+                let deny = |reason: &str, hint: &str, next: Next| {
+                    Some(Denial::new(Category::Force, reason, hint, next))
+                };
                 match a.as_str() {
                     "-f" | "--force" => {
                         return deny(
@@ -216,15 +419,17 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
                             "A force push replaces history other clones already have.\n\
                              If you rebased on purpose:  ALLOW_FORCE=1 git push --force-with-lease\n\
                              --force-with-lease at least refuses when someone else has pushed since your last fetch.",
+                            integrate,
                         );
                     }
                     "--force-if-includes" => {
-                        return deny("git push --force-if-includes", "Still a force push. ALLOW_FORCE=1 to proceed.");
+                        return deny("git push --force-if-includes", "Still a force push. ALLOW_FORCE=1 to proceed.", integrate);
                     }
                     "--mirror" => {
                         return deny(
                             "git push --mirror",
                             "--mirror makes the remote match this clone exactly, deleting every ref you do not have.",
+                            call.rerun(|arg| Some(if arg == "--mirror" { "--all" } else { arg }.to_owned())),
                         );
                     }
                     "-d" | "--delete" => {
@@ -232,6 +437,7 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
                             "git push --delete",
                             "Deleting a remote ref is not recoverable from here.\n\
                              Delete merged branches through the forge, where the ref is still in the reflog.",
+                            Next::Shell(forge_deletes(&deleted_branches(call))),
                         );
                     }
                     other if other.starts_with("--force-with-lease") => {
@@ -239,31 +445,63 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
                             "git push --force-with-lease",
                             "Safer than --force and still a rewrite of published history.\n\
                              ALLOW_FORCE=1 git push --force-with-lease",
+                            integrate,
                         );
                     }
                     _ => {}
                 }
             }
-// Refspecs: `+src:dst` forces that one ref, `:dst` deletes it.
-            for a in args.iter().filter(|a| !a.starts_with('-')) {
-                if let Some(stripped) = a.strip_prefix('+')
-                    && stripped.contains(':')
-                {
-                    return Some(Denial::new(
-                        Category::Force,
-                        format!("git push refspec {a}"),
-                        "A leading '+' on a refspec is a force push for that ref.".to_owned(),
-                    ));
-                }
-                if a.starts_with(':') && a.len() > 1 {
-                    return Some(Denial::new(
-                        Category::Force,
-                        format!("git push refspec {a}"),
-                        "A refspec with an empty source deletes the remote ref.".to_owned(),
-                    ));
-                }
+            // Refspecs: `+src:dst` forces that one ref, `:dst` deletes it.
+            let refspecs: Vec<&str> = args
+                .iter()
+                .take_while(|a| a.as_str() != "--")
+                .filter(|a| !a.starts_with('-'))
+                .skip(1)
+                .map(String::as_str)
+                .collect();
+            let forced: Vec<&str> = refspecs
+                .iter()
+                .copied()
+                .filter(|a| a.strip_prefix('+').is_some_and(|s| s.contains(':')))
+                .collect();
+            let deleted: Vec<&str> = refspecs
+                .iter()
+                .filter_map(|a| a.strip_prefix(':'))
+                .filter(|destination| !destination.is_empty())
+                .collect();
+            if forced.is_empty() && deleted.is_empty() {
+                return None;
             }
-            None
+            // The same push without forcing and without the deletions, which go through the forge instead.
+            let unforced = call.rerun(|arg| {
+                (!(arg.len() > 1 && arg.starts_with(':')))
+                    .then(|| arg.strip_prefix('+').filter(|s| s.contains(':')).unwrap_or(arg).to_owned())
+            });
+            let next = if deleted.is_empty() {
+                unforced
+            } else if refspecs.len() > deleted.len() {
+                Next::Shell(format!("{} && {}", forge_deletes(&deleted), unforced.line()))
+            } else {
+                Next::Shell(forge_deletes(&deleted))
+            };
+            let mut hint = Vec::new();
+            if !forced.is_empty() {
+                hint.push("A leading '+' on a refspec is a force push for that ref.");
+            }
+            if !deleted.is_empty() {
+                hint.push("A refspec with an empty source deletes the remote ref.");
+            }
+            let refused: Vec<&str> = refspecs
+                .iter()
+                .copied()
+                .filter(|a| forced.contains(a) || a.len() > 1 && a.starts_with(':'))
+                .collect();
+            Some(Denial::new(
+                Category::Force,
+                format!("git push refspec {}", refused.join(" ")),
+                hint.join("\n"),
+                next,
+            ))
         }
 
         "reset" if has("--hard") => Some(Denial::new(
@@ -272,6 +510,7 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
             "--hard discards every uncommitted change with no reflog entry to get it back.\n\
              git stash --include-untracked   keeps the work and gives you a clean tree\n\
              git reset --keep <commit>       moves the branch but refuses to clobber local edits",
+            call.git(&["stash", "push", "--include-untracked"]),
         )),
 
         "clean" if flags.iter().any(|a| short_cluster(a).is_some_and(|c| c.contains('f'))) || has("--force") => {
@@ -281,6 +520,7 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
                 "Untracked files are not in git; once removed there is nothing to restore from.\n\
                  git clean -nd                    list exactly what would go\n\
                  git stash push --include-untracked   keep it instead of deleting it",
+                call.git(&["clean", "-nd"]),
             ))
         }
 
@@ -293,6 +533,7 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
                 "--force here means 'overwrite my uncommitted changes'.\n\
                  git stash   first, then switch; the changes come back with `git stash pop`."
                     .to_owned(),
+                call.git(&["stash", "push", "--include-untracked"]),
             ))
         }
 
@@ -301,6 +542,16 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
                 || ((has("-d") || has("--delete")) && (has("-f") || has("--force")));
             let force_move = flags.iter().any(|a| short_cluster(a).is_some_and(|c| c.contains('M')))
                 || ((has("-m") || has("--move")) && (has("-f") || has("--force")));
+            // The same command without forcing: `-D` becomes `-d`, `-M` becomes `-m`, and `-f` goes.
+            let unforced = || {
+                call.rerun(|arg| match arg {
+                    "-f" | "--force" => None,
+                    _ if short_cluster(arg).is_some() => {
+                        drop_letters(&arg.replace('D', "d").replace('M', "m"), &['f'])
+                    }
+                    _ => Some(arg.to_owned()),
+                })
+            };
             if force_delete {
                 Some(Denial::new(
                     Category::Force,
@@ -308,12 +559,14 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
                     "-D deletes a branch whose commits are not merged anywhere.\n\
                      git branch -d <name>   deletes it only if it is merged — if that refuses,\n\
                      the commits really would become unreachable.",
+                    unforced(),
                 ))
             } else if force_move {
                 Some(Denial::new(
                     Category::Force,
                     "git branch -M",
                     "-M overwrites an existing branch of the target name.",
+                    unforced(),
                 ))
             } else {
                 None
@@ -321,13 +574,15 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
         }
 
         "tag" => {
+            let show = || call.git(&["show", "--no-patch", call.positional(0).unwrap_or("<tag>")]);
             if has("-d") || has("--delete") {
-                Some(Denial::new(Category::Force, "git tag --delete", "A deleted tag is gone from this clone's history of releases."))
+                Some(Denial::new(Category::Force, "git tag --delete", "A deleted tag is gone from this clone's history of releases.", show()))
             } else if has("-f") || has("--force") {
                 Some(Denial::new(
                     Category::Force,
                     "git tag --force",
                     "--force moves an existing tag. Anyone who fetched the old one keeps it, and the two disagree forever.",
+                    show(),
                 ))
             } else {
                 None
@@ -340,8 +595,9 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
                 "git stash drop",
                 "The stash has no reflog you are likely to find in time.\n\
                  git stash show -p stash@{0}   look at it first",
+                call.git(&["stash", "show", "-p", call.positional(1).unwrap_or("stash@{0}")]),
             )),
-            Some("clear") => Some(Denial::new(Category::Force, "git stash clear", "This drops every stash entry at once.")),
+            Some("clear") => Some(Denial::new(Category::Force, "git stash clear", "This drops every stash entry at once.", call.git(&["stash", "list"]))),
             _ => None,
         },
 
@@ -349,6 +605,7 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
             Category::Force,
             "git update-ref -d",
             "Deleting a ref by hand bypasses every safety net the porcelain commands have.",
+            call.git(&["log", "--oneline", "-1", call.positional(0).unwrap_or("<ref>")]),
         )),
 
         "reflog" => match first_word(args) {
@@ -358,6 +615,7 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
                 "The reflog is what makes `reset --hard` and a bad rebase recoverable. Expiring it is the one\n\
                  operation that turns a recoverable mistake into a permanent one."
                     .to_owned(),
+                call.git(&["reflog"]),
             )),
             _ => None,
         },
@@ -367,6 +625,7 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
                 Category::Force,
                 "git gc --prune=now",
                 "This deletes unreachable objects immediately, including anything a reflog entry would have found.",
+                call.rerun(|arg| (!arg.starts_with("--prune=")).then(|| arg.to_owned())),
             ))
         }
 
@@ -374,18 +633,21 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
             Category::Force,
             "git filter-branch",
             "Rewrites every commit it touches. git-filter-repo is the maintained replacement and is no less destructive.",
+            call.git(&["filter-repo", "--analyze"]),
         )),
 
         "worktree" if first_word(args) == Some("remove") && (has("-f") || has("--force")) => Some(Denial::new(
             Category::Force,
             "git worktree remove --force",
             "--force removes a worktree that still has uncommitted changes in it.",
+            call.without(&["-f", "--force"]),
         )),
 
         _ if has("--no-gpg-sign") => Some(Denial::new(
             Category::NoVerify,
             "--no-gpg-sign",
             "Every commit on this machine is signed; an unsigned one is refused by the repository ruleset anyway.",
+            call.without(&["--no-gpg-sign"]),
         )),
 
         _ => None,
@@ -428,7 +690,7 @@ fn is_policy_key(key: &str) -> bool {
     )
 }
 
-/// `-c key=value` overrides that would change signing or hooks for one command.
+/// `-c key=value` overrides that would change signing or hooks for one command; the caller fills in the command without the override.
 ///
 /// Scoped to the subcommand, and that scoping is the whole point rather than a refinement.
 /// Editors, agents and status-line tools routinely run their own read-only queries as
@@ -462,6 +724,7 @@ fn config_override(setting: &str, sub: &str) -> Option<Denial> {
             Category::NoVerify,
             format!("-c {setting}"),
             format!("`{key}={value}` overrides signing or hook enforcement for this one command."),
+            Next::Git(Vec::new()),
         )
     })
 }
@@ -491,13 +754,113 @@ fn short_cluster(arg: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::inspect;
+    use super::{Next, inspect, refusal};
 
     fn argv(line: &str) -> Vec<String> {
         line.split_whitespace().map(str::to_owned).collect()
     }
+    /// Whether the line is refused; every refusal must also be a complete record whose suggested Git command passes.
     fn refused(line: &str) -> bool {
-        inspect(&argv(line)).is_some()
+        let argv = argv(line);
+        inspect(&argv).is_some_and(|denial| {
+            let refusal = refusal(&denial, &argv);
+            assert!(
+                refusal.is_complete(),
+                "incomplete refusal for git {line}: {refusal:?}"
+            );
+            if let Next::Git(words) = &denial.next {
+                assert!(
+                    inspect(words).is_none(),
+                    "git {line} suggests a refused command: {}",
+                    denial.next.line()
+                );
+            }
+            true
+        })
+    }
+    fn next(line: &str) -> String {
+        inspect(&argv(line)).expect(line).next.line()
+    }
+
+    #[test]
+    fn each_refusal_names_the_command_to_run_instead() {
+        assert_eq!(next("commit -an -m x"), "git commit -a -m x");
+        assert_eq!(
+            next("-C repo commit --no-verify -m x"),
+            "git -C repo commit -m x"
+        );
+        assert_eq!(next("push origin +main:main"), "git push origin main:main");
+        assert_eq!(next("push -f"), "git pull --rebase");
+        assert_eq!(
+            next("push origin :refs/heads/topic"),
+            "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/topic'"
+        );
+        assert_eq!(
+            next("reset --hard HEAD~1"),
+            "git stash push --include-untracked"
+        );
+        assert_eq!(next("branch -D Topic"), "git branch -d Topic");
+        assert_eq!(next("branch -d -f topic"), "git branch -d topic");
+        assert_eq!(next("worktree remove --force w"), "git worktree remove w");
+        assert_eq!(
+            next("-C repo -c core.hooksPath=/dev/null commit -m x"),
+            "git -C repo commit -m x"
+        );
+        assert_eq!(
+            next("-ccommit.gpgsign=false commit -m x"),
+            "git commit -m x"
+        );
+    }
+
+    /// The suggested Git command must itself pass the gate, however many refused parts the line combines.
+    #[test]
+    fn the_next_command_is_never_refused_again() {
+        for line in [
+            "-c core.hooksPath=/dev/null -c commit.gpgsign=false commit -m x",
+            "-c commit.gpgsign=false commit --no-verify --no-gpg-sign -m x",
+            "push origin +a:b :c",
+            "push origin +a:b +c:d",
+            "push --no-verify --force origin main",
+            "-c core.hooksPath= push --no-verify origin +main:main",
+            "branch -D -f topic",
+            "commit -an --no-gpg-sign -m x",
+        ] {
+            let next = next(line);
+            if let Some(words) = next.strip_prefix("git ") {
+                assert!(
+                    inspect(&argv(words)).is_none(),
+                    "git {line} suggests a refused command: {next}"
+                );
+            }
+        }
+        assert_eq!(
+            next("-c core.hooksPath=/dev/null -c commit.gpgsign=false commit -m x"),
+            "git commit -m x"
+        );
+        assert_eq!(
+            next("push origin +a:b :c"),
+            "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/c' && git push origin a:b"
+        );
+        assert_eq!(next("push origin +a:b +c:d"), "git push origin a:b c:d");
+        assert_eq!(
+            next("push --delete origin a b"),
+            "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/a' && gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/b'"
+        );
+    }
+
+    #[test]
+    fn only_waivable_rules_carry_a_waiver() {
+        let line = argv("reset --hard");
+        let force = refusal(&inspect(&line).unwrap(), &line);
+        assert_eq!(force.rule, "git.force");
+        assert_eq!(
+            force.waiver.as_deref(),
+            Some("ALLOW_FORCE=1 git reset --hard")
+        );
+        let line = argv("commit --no-verify -m 'x y'");
+        let no_verify = refusal(&inspect(&line).unwrap(), &line);
+        assert_eq!(no_verify.rule, "git.no-verify");
+        assert_eq!(no_verify.waiver, None);
     }
 
     #[test]

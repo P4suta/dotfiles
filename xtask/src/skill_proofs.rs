@@ -25,7 +25,8 @@ pub const HARNESSES: [&str; 12] = [
     "triage_is_skipped_only_when_every_finding_is_adopted",
 ];
 
-pub const PR_HARNESSES: [&str; 7] = [
+pub const PR_HARNESSES: [&str; 8] = [
+    "a_refusal_names_the_first_unmet_condition",
     "api_quota_requires_a_nonzero_reserve_and_sufficient_remaining_requests",
     "coderabbit_exclusion_does_not_authorize_unfinished_generation",
     "local_creation_always_starts_as_draft",
@@ -49,6 +50,11 @@ pub const REAPER_HARNESSES: [&str; 3] = [
     "process_age_never_underflows_or_divides_by_zero",
     "running_or_reused_processes_are_never_killable",
     "tick_conversion_rejects_zero_frequency",
+];
+
+pub const GATE_HARNESSES: [&str; 2] = [
+    "a_history_refusal_suggests_the_step_for_its_worst_update",
+    "a_rebase_signs_one_linear_branch_and_an_amend_only_the_checked_out_tip",
 ];
 
 pub const REVIEW_HARNESSES: [&str; 5] = [
@@ -352,7 +358,7 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_ready_local_creation() {{\n    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Passing), Some(production::Effect::CreateReady));\n}}\n#[kani::proof]\nfn reject_creation_without_a_personal_issue() {{\n    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false), production::Checks::Passing).is_some());\n}}\n#[kani::proof]\nfn reject_unfinished_summary_as_review_exclusion() {{\n    assert!(production::coderabbit_body_marker_allowed(false, true, false));\n}}\n#[kani::proof]\nfn reject_ready_with_unfinished_checks() {{\n    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, true, production::IssueGate::Linked, production::checks_state(3, 1, 0)), Some(production::Effect::Ready));\n}}\n"
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_ready_local_creation() {{\n    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Passing), Ok(production::Effect::CreateReady));\n}}\n#[kani::proof]\nfn reject_creation_without_a_personal_issue() {{\n    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false), production::Checks::Passing).is_ok());\n}}\n#[kani::proof]\nfn reject_unfinished_summary_as_review_exclusion() {{\n    assert!(production::coderabbit_body_marker_allowed(false, true, false));\n}}\n#[kani::proof]\nfn reject_ready_with_unfinished_checks() {{\n    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, true, production::IssueGate::Linked, production::checks_state(3, 1, 0)), Ok(production::Effect::Ready));\n}}\n#[kani::proof]\nfn reject_blaming_checks_for_a_published_pr() {{\n    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Incomplete), Err(production::Blocker::UnfinishedChecks));\n}}\n"
         ),
     )?;
     for name in [
@@ -360,6 +366,7 @@ fn verify_native(root: &Path) -> Result<()> {
         "reject_creation_without_a_personal_issue",
         "reject_unfinished_summary_as_review_exclusion",
         "reject_ready_with_unfinished_checks",
+        "reject_blaming_checks_for_a_published_pr",
     ] {
         verify_file(&file, probe.path(), &[name], true)?;
     }
@@ -399,6 +406,30 @@ fn verify_native(root: &Path) -> Result<()> {
         fs::read(source)? == original,
         "production reaper proof source changed during verification"
     );
+    let source = crate::canonical(&root.join("guard/src/gate_rules.rs"))?;
+    let original = fs::read(&source)?;
+    let directory = tempfile::tempdir()?;
+    verify_inventory(&source, directory.path(), &GATE_HARNESSES)?;
+    verify_file(&source, directory.path(), &GATE_HARNESSES, false)?;
+    let probe = tempfile::tempdir()?;
+    let file = probe.path().join("counterexample.rs");
+    fs::write(
+        &file,
+        format!(
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_rebasing_across_several_refs() {{\n    assert!(production::signing(2, true, false, false) == production::Signing::Rebase);\n}}\n#[kani::proof]\nfn reject_rebasing_a_range_with_merges() {{\n    assert!(production::signing(1, true, true, false) == production::Signing::Rebase);\n}}\n#[kani::proof]\nfn reject_deleting_through_the_forge_before_fetching() {{\n    assert!(production::history(true, false) == production::History::ForgeDelete);\n}}\n"
+        ),
+    )?;
+    for name in [
+        "reject_rebasing_across_several_refs",
+        "reject_rebasing_a_range_with_merges",
+        "reject_deleting_through_the_forge_before_fetching",
+    ] {
+        verify_file(&file, probe.path(), &[name], true)?;
+    }
+    ensure!(
+        fs::read(source)? == original,
+        "production gate proof source changed during verification"
+    );
     let source = crate::canonical(&root.join("xtask/src/review_rules.rs"))?;
     let original = fs::read(&source)?;
     let directory = tempfile::tempdir()?;
@@ -431,6 +462,7 @@ fn verify_native(root: &Path) -> Result<()> {
             + PR_HARNESSES.len()
             + PROFILE_HARNESSES.len()
             + REAPER_HARNESSES.len()
+            + GATE_HARNESSES.len()
             + REVIEW_HARNESSES.len()
     );
     Ok(())

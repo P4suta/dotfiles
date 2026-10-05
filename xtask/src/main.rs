@@ -272,7 +272,15 @@ fn run() -> Result<()> {
             &state,
             backup.as_deref(),
         )?,
-        Action::PrWorkflow { command } => dotfiles_xtask::pr_workflow::run(command)?,
+        Action::PrWorkflow { command } => {
+            // The same words the standalone binary receives: everything after this subcommand.
+            let arguments: Vec<String> = std::env::args()
+                .skip(1)
+                .skip_while(|argument| argument != "pr-workflow")
+                .skip(1)
+                .collect();
+            dotfiles_xtask::pr_workflow::execute(command, &arguments)?;
+        }
         Action::InstallPrWorkflow => {
             cargo(
                 &cli.root,
@@ -516,7 +524,7 @@ fn run() -> Result<()> {
 
 fn main() {
     if let Err(error) = run() {
-        eprintln!("Error: {error:#}");
+        dotfiles_xtask::report(&error);
         std::process::exit(1);
     }
 }

@@ -1,6 +1,7 @@
 //! The installed `git` entry point against the real git of the host it runs on.
 //! Windows installs a copy of dotguard named `git.exe`, so the test runs that form everywhere.
 
+use dotguard::refusal::Refusal;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
@@ -85,6 +86,11 @@ fn a_copy_named_git_refuses_skipped_hooks_and_records_the_refusal() {
     ] {
         let refused = wrapper.run(arguments, None);
         assert_eq!(refused.status.code(), Some(1), "{}", text(&refused.stderr));
+        let refusal = Refusal::find(&text(&refused.stderr)).expect("a structured refusal");
+        assert!(refusal.is_complete(), "{refusal:?}");
+        assert_eq!(refusal.rule, "git.no-verify");
+        assert_eq!(refusal.waiver, None);
+        assert!(!refusal.next.contains("--no-verify"), "{}", refusal.next);
         assert!(
             text(&refused.stderr).contains("Signing and hook checks cannot be bypassed."),
             "{}",
@@ -103,7 +109,13 @@ fn a_copy_named_git_refuses_destructive_commands_unless_waived() {
     let wrapper = Wrapper::new("force");
     let refused = wrapper.run(&["reset", "--hard"], None);
     assert_eq!(refused.status.code(), Some(1), "{}", text(&refused.stderr));
-    assert!(text(&refused.stderr).contains("ALLOW_FORCE=1"));
+    let refusal = Refusal::find(&text(&refused.stderr)).expect("a structured refusal");
+    assert!(refusal.is_complete(), "{refusal:?}");
+    assert_eq!(refusal.rule, "git.force");
+    assert_eq!(
+        refusal.waiver.as_deref(),
+        Some("ALLOW_FORCE=1 git reset --hard")
+    );
     let waived = wrapper.run_with(&["reset", "--hard"], None, &["ALLOW_FORCE"]);
     assert!(
         text(&waived.stderr).contains("ALLOW_FORCE=1 — allowing"),

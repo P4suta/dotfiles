@@ -11,6 +11,8 @@ pub mod pr_workflow;
 pub mod profile_rules;
 pub mod profiles;
 pub mod quality;
+#[path = "../../guard/src/refusal.rs"]
+pub mod refusal;
 pub mod rehearsal;
 pub mod review_guard;
 pub mod review_rules;
@@ -26,6 +28,27 @@ pub mod tool;
 pub mod transaction;
 pub mod windows_setup;
 pub mod wsl;
+
+/// A failure whose structured refusal a child process already printed, so nothing follows it.
+#[derive(Debug)]
+pub struct Relayed;
+
+impl std::fmt::Display for Relayed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("refused; the refusal above names the cause")
+    }
+}
+
+impl std::error::Error for Relayed {}
+
+/// Prints a failure: the structured refusal when the error carries one, nothing when a child already printed it, the error chain otherwise.
+pub fn report(error: &anyhow::Error) {
+    if let Some(refusal) = error.downcast_ref::<refusal::Refusal>() {
+        refusal.emit();
+    } else if error.downcast_ref::<Relayed>().is_none() {
+        eprintln!("Error: {error:#}");
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub struct Metadata {
