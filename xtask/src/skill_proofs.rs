@@ -89,6 +89,11 @@ pub const NEXT_ACTION_HARNESSES: [&str; 5] = [
     "upstream_commits_the_branch_never_held_are_never_overwritten",
 ];
 
+pub const CHANGE_HARNESSES: [&str; 2] = [
+    "ci_tooling_lock_files_and_the_classifier_select_everything",
+    "every_path_selects_a_gate_and_unknown_paths_select_all",
+];
+
 pub const LINE_ENDING_HARNESSES: [&str; 3] = [
     "auto_detection_follows_git_byte_classes",
     "conversion_removes_only_carriage_returns_before_line_feeds",
@@ -608,6 +613,30 @@ fn reject_a_contradiction_without_what_it_contradicted() {{
         fs::read(source)? == original,
         "production instruction proof source changed during verification"
     );
+    let source = crate::canonical(&root.join("xtask/src/change_rules.rs"))?;
+    let original = fs::read(&source)?;
+    let directory = tempfile::tempdir()?;
+    verify_inventory(&source, directory.path(), &CHANGE_HARNESSES)?;
+    verify_file(&source, directory.path(), &CHANGE_HARNESSES, false)?;
+    let probe = tempfile::tempdir()?;
+    let file = probe.path().join("counterexample.rs");
+    fs::write(
+        &file,
+        format!(
+            "#[path = {source:?}]\nmod production;\nuse production::{{Class, Gates, classify, gates, matched}};\n#[kani::proof]\n#[kani::unwind(40)]\nfn reject_an_unknown_path_selecting_less_than_everything() {{\n    let bytes: [u8; 24] = kani::any();\n    let path = &bytes[..];\n    kani::assume(matched(path).is_none());
+    assert!(gates(classify(path)) != Gates::ALL);\n}}\n#[kani::proof]\n#[kani::unwind(40)]\nfn reject_a_lock_file_selecting_a_single_class() {{\n    let mut bytes: [u8; 24] = kani::any();\n    bytes[19..].copy_from_slice(b\".lock\");\n    assert!(classify(&bytes) != Class::Everything);\n}}\n"
+        ),
+    )?;
+    for name in [
+        "reject_an_unknown_path_selecting_less_than_everything",
+        "reject_a_lock_file_selecting_a_single_class",
+    ] {
+        verify_file(&file, probe.path(), &[name], true)?;
+    }
+    ensure!(
+        fs::read(source)? == original,
+        "production change-classifier proof source changed during verification"
+    );
     println!(
         "Verified all {} production policy harnesses, reachable outcomes, and the rejecting counterexamples",
         HARNESSES.len()
@@ -619,6 +648,7 @@ fn reject_a_contradiction_without_what_it_contradicted() {{
             + INSTRUCTION_HARNESSES.len()
             + NEXT_ACTION_HARNESSES.len()
             + LINE_ENDING_HARNESSES.len()
+            + CHANGE_HARNESSES.len()
     );
     Ok(())
 }
