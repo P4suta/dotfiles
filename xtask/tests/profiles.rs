@@ -13,6 +13,52 @@ use std::path::Path;
 mod fixture_git;
 
 #[test]
+fn every_profile_holds_what_the_installers_apply() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    for profile in Profile::ALL {
+        let scope = tempfile::tempdir().unwrap();
+        let home = scope.path().join("home");
+        fs::create_dir(&home).unwrap();
+        let config = scope.path().join("chezmoi.toml");
+        fs::write(
+            &config,
+            dotfiles_xtask::rehearsal::configuration(&root, profile, &home).unwrap(),
+        )
+        .unwrap();
+        for (source, targets) in [
+            (
+                true,
+                vec![root.join(dotfiles_xtask::review_guard::SOURCE_POLICY)],
+            ),
+            (
+                false,
+                vec![
+                    home.join(".config/prose"),
+                    home.join(".config/opencode/plugins/prose.ts"),
+                ],
+            ),
+        ] {
+            let mut command = profiles::chezmoi(&root, scope.path(), &config, &home);
+            command.args(["apply", "--dry-run", "--force", "--include", "dirs,files"]);
+            if source {
+                command.arg("--source-path");
+            }
+            let output = command
+                .arg("--parent-dirs")
+                .args(&targets)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{} cannot install {targets:?}: {}",
+                profile.name(),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+}
+
+#[test]
 fn runtime_credentials_and_personal_values_are_refused() {
     let directory = tempfile::tempdir().unwrap();
     fs::write(

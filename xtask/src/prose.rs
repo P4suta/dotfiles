@@ -1,6 +1,7 @@
 use crate::prose_rules::{
     Owner, Reply, Standard, exemption_valid, reply, repository_standard, rewritten_by_this_hook,
 };
+use crate::source_name_rules::{self, Entry};
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
 use dotguard::lang;
@@ -244,21 +245,39 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// A digest over every file below `directory`, keyed by its relative path.
+/// The installed name of one entry, so a checkout and an installation of the same tree share one digest.
+fn target_component(entry: Entry, component: &str) -> Result<String> {
+    Ok(
+        match source_name_rules::target(entry, component.as_bytes()) {
+            Some(found) => format!(
+                "{}{}",
+                if found.dot { "." } else { "" },
+                std::str::from_utf8(found.name)?
+            ),
+            None => component.to_owned(),
+        },
+    )
+}
+
+/// A digest over every file below `directory`, keyed by the relative path it has once installed.
 pub fn tree_digest(directory: &Path) -> Result<String> {
     let mut files = Vec::new();
-    let mut stack = vec![directory.to_path_buf()];
-    while let Some(current) = stack.pop() {
+    let mut stack = vec![(directory.to_path_buf(), String::new())];
+    while let Some((current, prefix)) = stack.pop() {
         for entry in fs::read_dir(&current)? {
             let path = entry?.path();
+            let component = path
+                .file_name()
+                .context("a directory entry without a name")?
+                .to_str()
+                .with_context(|| format!("{} is not UTF-8", path.display()))?
+                .to_owned();
             if path.is_dir() {
-                stack.push(path);
+                let name = target_component(Entry::Directory, &component)?;
+                stack.push((path, format!("{prefix}{name}/")));
             } else {
-                let relative = path
-                    .strip_prefix(directory)?
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                files.push((relative, path));
+                let name = target_component(Entry::File, &component)?;
+                files.push((format!("{prefix}{name}"), path));
             }
         }
     }

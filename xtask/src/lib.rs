@@ -45,6 +45,7 @@ pub mod skill_install;
 pub mod skill_ops;
 pub mod skill_proofs;
 pub mod skill_rules;
+pub mod source_name_rules;
 pub mod stale_rules;
 pub mod target_rules;
 pub mod terminal;

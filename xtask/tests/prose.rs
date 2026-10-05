@@ -551,6 +551,58 @@ fn a_changed_style_package_or_a_missing_configuration_is_refused() -> Result<()>
 }
 
 #[test]
+fn every_profile_applies_the_style_packages_with_their_pinned_digests() -> Result<()> {
+    let lock: toml::Value = toml::from_str(&fs::read_to_string(
+        root().join("dot_config/prose/packages.toml"),
+    )?)?;
+    let packages = lock["package"].as_array().expect("pinned packages");
+    for package in packages {
+        let name = package["name"].as_str().expect("package name");
+        let directory = root().join("dot_config/prose/styles").join(name);
+        assert_eq!(
+            prose::tree_digest(&directory)?,
+            package["tree_sha256"].as_str().expect("tree digest"),
+            "source {name}"
+        );
+    }
+    for profile in dotfiles_xtask::profile_rules::Profile::ALL {
+        let scope = tempfile::tempdir()?;
+        let home = scope.path().join("home");
+        fs::create_dir(&home)?;
+        let config = scope.path().join("chezmoi.toml");
+        fs::write(
+            &config,
+            dotfiles_xtask::rehearsal::configuration(&root(), profile, &home)?,
+        )?;
+        let output = dotfiles_xtask::profiles::chezmoi(&root(), scope.path(), &config, &home)
+            .args([
+                "apply",
+                "--force",
+                "--include",
+                "dirs,files",
+                "--parent-dirs",
+            ])
+            .arg(home.join(".config/prose/styles"))
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for package in packages {
+            let name = package["name"].as_str().expect("package name");
+            assert_eq!(
+                prose::tree_digest(&home.join(".config/prose/styles").join(name))?,
+                package["tree_sha256"].as_str().expect("tree digest"),
+                "{name} applied on {}",
+                profile.name()
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn the_pinned_vale_matches_the_mise_pin() -> Result<()> {
     let mise: toml::Value = toml::from_str(&fs::read_to_string(root().join("mise.toml"))?)?;
     let lock: toml::Value = toml::from_str(&fs::read_to_string(

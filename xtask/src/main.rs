@@ -423,17 +423,23 @@ fn run() -> Result<()> {
                 Path::new("xtask/Cargo.toml"),
                 &["build", "--locked", "--release", "--bin", "prose"],
             )?;
+            let user_directory = PathBuf::from(
+                std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+                    .context("user directory is unavailable")?,
+            );
+            // chezmoi skips the contents of a directory given by its source path, so the installer gives the target tree.
             let status = Tool::chezmoi_in(&cli.root)
+                .arg("--destination")
+                .arg(&user_directory)
                 .args([
                     "--force",
                     "apply",
                     "--include",
                     "dirs,files",
-                    "--source-path",
                     "--parent-dirs",
                 ])
-                .arg(cli.root.join(dotfiles_xtask::prose::SOURCE_CONFIG))
-                .arg(cli.root.join("dot_config/opencode/plugins/prose.ts"))
+                .arg(user_directory.join(".config/prose"))
+                .arg(user_directory.join(".config/opencode/plugins/prose.ts"))
                 .status()?;
             ensure!(
                 status.success(),
@@ -443,10 +449,7 @@ fn run() -> Result<()> {
             let binary = check_build_dir(&cli.root, configured.as_deref())
                 .join("release")
                 .join(format!("prose{}", std::env::consts::EXE_SUFFIX));
-            let user_directory =
-                std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-                    .context("user directory is unavailable")?;
-            dotfiles_xtask::prose::install(&cli.root, &binary, Path::new(&user_directory))?;
+            dotfiles_xtask::prose::install(&cli.root, &binary, &user_directory)?;
         }
         Action::Proofs { scope } => {
             if scope.resolve(&cli.root)?.contains(Gate::Rust) {
@@ -562,10 +565,7 @@ fn run() -> Result<()> {
                     "--source-path",
                     "--parent-dirs",
                 ])
-                .arg(
-                    cli.root
-                        .join("dot_config/coderabbit-guard/policy.json.tmpl"),
-                )
+                .arg(cli.root.join(dotfiles_xtask::review_guard::SOURCE_POLICY))
                 .status()?;
             ensure!(status.success(), "review guard policy installation failed");
             let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);

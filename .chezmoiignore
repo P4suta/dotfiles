@@ -153,7 +153,6 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .claude/shims/.keep
 .config/atuin/config.toml
 .config/bat/config
-.config/coderabbit-guard/policy.json
 .config/dev-reaper/config
 .config/fzf/fzfrc
 .config/gh/config.yml
@@ -255,7 +254,6 @@ Library/LaunchAgents/dev.dotfiles.session-reaper.plist
 Library/LaunchAgents/dev.dotfiles.storage-scout.plist
 Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .config/bat/config
-.config/coderabbit-guard/policy.json
 .config/dev-reaper/config
 .config/fzf/fzfrc
 .config/ghostty/config

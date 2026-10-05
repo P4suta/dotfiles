@@ -40,7 +40,6 @@ tools/**
 .claude/shims
 .config/atuin
 .config/bat
-.config/coderabbit-guard
 .config/dev-reaper
 .config/fcitx5
 .config/fzf

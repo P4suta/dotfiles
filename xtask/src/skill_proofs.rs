@@ -164,6 +164,11 @@ pub const HOSTS_HARNESSES: [&str; 5] = [
     "the_latest_record_for_the_commit_tree_decides_a_family",
 ];
 
+pub const SOURCE_NAME_HARNESSES: [&str; 2] = [
+    "a_target_name_is_a_nonempty_suffix_of_its_source_name",
+    "templates_and_scripts_are_never_copied_targets",
+];
+
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
     let summary = &value["verification_results"]["summary"];
     ensure!(
@@ -747,7 +752,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 10] = [
+pub const RULES: [Rules; 11] = [
     Rules {
         source: "xtask/src/target_rules.rs",
         harnesses: &TARGET_HARNESSES,
@@ -964,6 +969,24 @@ fn reject_a_lock_file_selecting_a_single_class() {
         rejected: &[
             "reject_an_unknown_path_selecting_less_than_everything",
             "reject_a_lock_file_selecting_a_single_class",
+        ],
+    },
+    Rules {
+        source: "xtask/src/source_name_rules.rs",
+        harnesses: &SOURCE_NAME_HARNESSES,
+        counterexamples: "use production::{Entry, target};
+#[kani::proof]
+fn reject_keeping_the_empty_attribute_in_a_target_name() {
+    assert!(target(Entry::File, b\"empty_vocab.txt\").is_some_and(|found| found.name == b\"empty_vocab.txt\"));
+}
+#[kani::proof]
+fn reject_a_template_as_a_verbatim_copy() {
+    assert!(target(Entry::File, b\"policy.json.tmpl\").is_some());
+}
+",
+        rejected: &[
+            "reject_keeping_the_empty_attribute_in_a_target_name",
+            "reject_a_template_as_a_verbatim_copy",
         ],
     },
 ];
