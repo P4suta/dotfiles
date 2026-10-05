@@ -5,6 +5,8 @@
 [core]
 	sshCommand = ssh.exe
 	pager = delta
+	# Every repository normalizes text to LF unless its own attributes say otherwise.
+	attributesFile = ~/.config/git/attributes
 {{- if .signing.enabled }}
 	# One hook directory enforces signing in every repository, including existing clones.
 	# The hooks live in dot_config/git/hooks/ and run each repository's own lefthook configuration, so no repository installs lefthook hooks.

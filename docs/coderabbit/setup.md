@@ -30,11 +30,14 @@ Read-only commands, authentication, and saved findings spend no review attempts.
 The guard refuses paid-credit flags, inline API keys, remote review scopes, cloud coding, and the self-update command.
 To review another repository, use a local checkout and `--dir`.
 
-Inspect local capacity with `coderabbit --guard-status`, which never contacts the service.
-An owner pause lives at `~/.local/state/coderabbit-guard/paused` and blocks every vendor call, including usage probes and authentication status, until the owner resumes.
-Reinstalling the guard keeps the pause.
-The review ledger, the `usage.log` probe ledger, and the initialization markers live under `~/.local/state/coderabbit-guard`.
+Inspect local capacity with `coderabbit --guard-status`, or `coderabbit --guard-status --json` for its machine-readable form.
+`--guard-status` never contacts the service.
+An owner pause lives as a marker in `~/.local/state/coderabbit-guard`: `paused-pr` pauses PR reviews, `paused-cli` pauses CLI use, and `paused` pauses both.
+A CLI pause blocks every vendor call, including usage probes and authentication status, and a PR pause makes `pr-workflow` refuse operations that would request a PR review.
+Reinstalling the guard keeps every marker.
+The review ledger, the `usage.log` probe ledger, and the initialization markers live under `~/.local/state/coderabbit-guard` and stay out of dotfiles synchronization.
 Reinstallation keeps history and refuses to recreate a ledger deleted after initialization.
+First installation synchronizes, locks, and validates the ledger before it publishes the initialization marker, so an interrupted setup can retry without discarding history.
 Never delete state, call the vendor executable directly, create another installation, or retry automatically to bypass a refusal.
 State repair and limit changes need an explicit owner decision.
 

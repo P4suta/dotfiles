@@ -65,26 +65,27 @@ Local-file `check` never contacts GitHub and leaves the live issue prerequisite 
 
 ## CodeRabbit generation
 
-The CLI pause marker stays machine-local across installation, and `coderabbit --guard-status` only reads local state.
-Run reviews through the installed guard on the Mac, and run the heavy native checks on the Windows and Linux hosts.
-The guard rounds down only the final integer of `floor(capacity * 0.9 * 0.8)`, so ten reviews yield seven.
-Its Advanced local ceiling caps attempts at seven per rolling hour and 168 per rolling day.
-Usage queries have matching rolling limits and need at least one minute between queries.
-Failures consume reservations, concurrent invocations refuse, and missing or inconsistent evidence refuses review.
-The guard runs the numeric preflight itself, so never call `usage` in a loop or before each review.
-An unavailable or exhausted CLI allowance counts as a skipped local review with its actual reason, never as a clean review.
+Complete local checks before one budget-qualified CLI review of an initial substantive change.
+`coderabbit --guard-status --json` reports the owner's pause scope: `reviews.pr` and `reviews.cli` each read `paused` or `allowed`.
+When the owner pauses PR reviews, create, edit, and ready refuse CodeRabbit generation, and an edit must keep the `@coderabbitai ignore` line and the `<!-- coderabbit-pause -->` line of a ready PR.
+`ready` then requires the standalone lines `@coderabbitai ignore` and `<!-- coderabbit-pause -->`, so the transition starts no automatic review and the PR needs its review again after resumption.
+An ignore line without the pause marker stands as a permanent exclusion.
+The live check and `ready` print whether the current head needs a CodeRabbit PR review, needs one again after the pause, has an exclusion, or needs none during the pause.
+The guard enforces the CLI budget and pause itself, and an unavailable CLI allowance counts as a skipped local review with its actual reason, never as a clean review.
 
 CLI reviews, IDE reviews, PR reviews, chat, and paid add-ons have separate usage pools.
 Check PR quota with the [official guidance](https://docs.coderabbit.ai/management/rate-limits), including an authorized `@coderabbitai rate limit` comment, which starts no review.
 Request at most one such status per hour and never trigger a review to discover capacity.
-Only a fresh numeric observation for the correct developer, organization, and pool establishes a reserve.
+Only a fresh numeric observation for the correct developer, organization, and pool establishes a reserve, and a response that says reviews exist gives none.
+The Review Usage dashboard shows historical rates, not current capacity.
 The Advanced plan's 0–49-review activity band sets the PR refill rate, not a weekly PR allowance, and excludes the CLI pool.
 Apply the same layered budget to a verified adaptive threshold and the hourly quota.
 A confirmed highest-band threshold of 49 gives 35 events per rolling 168 hours.
-Confirm the applicable window, because the official policy can use 24-hour or seven-day activity.
+Confirm the applicable window and current counts, because the official policy can use 24-hour or seven-day activity.
 Hold ready publication, generation, and pushes that would start an automatic PR review while the required capacity stays unknown, and report the reason and reconsideration time.
 After a one-hour hold, recheck once instead of pushing on a timer.
-Keep paid usage inactive.
+Keep paid usage inactive and honor an owner-imposed pause until the owner resumes.
+The CLI guard enforces its managed entry points, but these publication decisions stay an agent obligation, and ordinary Git and GitHub clients bypass this PR command.
 Other clients can spend capacity after a snapshot, so account-wide limits need service enforcement or a common reservation gateway.
 
 Use the standard placeholders from the [official configuration reference](https://docs.coderabbit.ai/reference/configuration).

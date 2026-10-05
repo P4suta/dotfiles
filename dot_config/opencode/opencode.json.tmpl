@@ -5,4 +5,6 @@
 {{ includeTemplate "profiles/linux/dot_config/opencode/opencode.json.tmpl" $context }}
 {{- else if eq .profile "windows" -}}
 {{ include ".chezmoitemplates/profiles/windows/dot_config/opencode/opencode.json" }}
+{{- else if eq .profile "wsl" -}}
+{{ include ".chezmoitemplates/profiles/wsl/dot_config/opencode/opencode.json" }}
 {{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}

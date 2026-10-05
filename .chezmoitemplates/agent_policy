@@ -1,43 +1,27 @@
 # Global rules
 
-These preferences apply to every project on this machine.
-Project instructions take precedence on conflict.
+These personal preferences apply to every project on this machine.
+A project's own instructions take precedence when they conflict.
 
 ## Language
 
-- Respond in Japanese.
-- Write commit messages, PRs, issues, code comments, documentation, and release notes in English.
+- Reply in Japanese.
+- Write outward-facing artifacts such as commit messages, PRs, issues, code comments, documentation, and release notes in English.
 
 ## Environment
 
-- Run `mise x -- <command>` when a project pins a tool version.
+- Use `mise x -- <command>` when a project pins a specific tool version.
 - Use `gh` for GitHub operations.
 - Follow Conventional Commits.
-Omit AI attribution footers and session URLs.
 
 ## Workflow
 
-- Make the smallest change that accomplishes the task.
-- Before GitHub-bound implementation, load `pull-request` and run `pr-workflow start` for the exact destination.
-Personal non-fork repositories require an issue that states the problem, scope, and acceptance criteria.
-External repositories and forks follow the destination's contribution rules.
-- Use `pr-workflow` to create PRs, edit their documents, and mark them ready, and keep the diff within the issue's scope.
-- Verify changes with the project's own lint, typecheck, and test commands.
-- Load `formal-assurance` for every implementation change.
-- Load `verification-tools` and `type-contracts` for implementation work, and turn enforceable rules into required gates with `executable-policy`.
-- Load `ci-budget` before an authorized push or PR update.
-- For an initial substantive PR, load `coderabbit-review` after local checks.
-- Honor an owner-imposed CodeRabbit pause until the owner resumes it.
-- Load `reliability` for time, concurrency, persistence, environment dependencies, and intermittent failures.
-- For dotfiles changes, load `dotfiles` and apply the same behavior through each affected host's own profile.
-- Load shared skills with `skill-ops load NAME` or a bundle.
-Inspect `skill-ops check` before completion, and use `skill-operations` for pending maintenance.
-- Commit and push only on request.
-
-## Review findings
-
-On an existing or authorized PR update, load `coderabbit-review`.
-Fix supported findings within the authorized task, and answer unsupported findings with concrete evidence.
-Never declare a PR complete while supported findings, required checks, or a review of the current head remain outstanding.
-Paused, skipped, stale, failed, and rate-limited reviews remain pending.
-Commit, push, PR replies, thread resolution, manual review triggers, and merge each require user authorization.
+- Make the smallest change that accomplishes the task, and keep its diff reviewable.
+- Verify changes with a project's own lint, typecheck, and test commands when they exist.
+- Before GitHub-bound implementation, run `pr-workflow start` for the exact destination.
+- Use `pr-workflow` for PR creation, document edits, and ready transitions, and keep the diff within the issue's scope.
+- For every implementation change, run `skill-ops load formal-assurance verification-tools` and meet the obligations of the skills it loads before declaring the change complete.
+- Before declaring work complete, run `skill-ops check` and resolve what it reports.
+- Keep the CodeRabbit CLI and PR review pools separate, apply adaptive thresholds where they apply, and hold a push or PR update while review capacity stays unverified.
+- Never declare a PR complete while supported review findings, required checks, or a review of its current head remain outstanding.
+- Commit, push, reply to or resolve PR threads, request reviews, and merge only when the owner asks.

@@ -1,5 +1,5 @@
 {
-  "revision": "d32dd5d2bb1b571ca5ab4e63115db1fdbb010aea077e356e654e30091a63b4b3",
+  "revision": "1eb69379cf4eacfdca9125422c149ef5c4b5fd46610eed962730499f3f79d81f",
   "outcome": "implemented",
   "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
@@ -12,6 +12,7 @@
     "dot_agents/skills/pull-request/references/workflow.md",
     "docs/adr/0008-layered-review-capacity.md",
     "docs/adr/0013-ready-only-after-passing-checks.md",
+    "docs/adr/0015-scoped-coderabbit-pause.md",
     "docs/adr/0016-one-writing-standard.md",
     "xtask/src/pr_workflow.rs",
     "xtask/src/prose_rules.rs"

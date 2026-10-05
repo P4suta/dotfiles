@@ -6,10 +6,12 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 
 pub use crate::review_rules::{
-    DAILY_LIMIT, DAY_MS, HOUR_MS, HOURLY_LIMIT, PROBE_DAILY_LIMIT, PROBE_GAP_MS,
+    DAILY_LIMIT, DAY_MS, HOUR_MS, HOURLY_LIMIT, PROBE_DAILY_LIMIT, PROBE_GAP_MS, PauseScope,
+    pr_reviews_paused,
 };
 use crate::review_rules::{
-    cooldown_complete, included_allowance, rolling_allowance, service_access,
+    cli_reviews_paused, cooldown_complete, included_allowance, pause_scope, rolling_allowance,
+    service_access,
 };
 
 #[derive(Debug)]
@@ -266,6 +268,29 @@ pub fn usage_query(args: &[String]) -> bool {
             && args.iter().any(|arg| arg == "--usage"))
 }
 
+/// Run a guarded review only while the owner leaves CLI use unpaused CLI use.
+pub fn execute_admitted(
+    scope: PauseScope,
+    ledger: &Path,
+    probes: &Path,
+    now: u64,
+    organization: &str,
+    usage: impl FnOnce() -> Result<String>,
+    review: impl FnOnce() -> Result<i32>,
+) -> Result<i32> {
+    admit(scope, false)?;
+    execute_reserved(ledger, probes, now, organization, usage, review)
+}
+
+fn admit(scope: PauseScope, local_status: bool) -> Result<()> {
+    ensure!(
+        service_access(scope, local_status),
+        "CodeRabbit CLI use is paused by the owner (pause scope {}); run `coderabbit --guard-status --json` and wait for the owner to resume",
+        scope.name()
+    );
+    Ok(())
+}
+
 pub fn execute_reserved(
     ledger: &Path,
     probes: &Path,
@@ -385,6 +410,26 @@ pub fn validate_policy(text: &str) -> Result<(String, String)> {
     Ok((organization.into(), version.into()))
 }
 
+/// Read the owner's persistent pause markers, where `paused` marks every scope.
+pub fn pause(user_directory: &Path) -> Result<PauseScope> {
+    let state = user_directory.join(".local/state/coderabbit-guard");
+    let marker = |name: &str| {
+        state
+            .join(name)
+            .try_exists()
+            .with_context(|| format!("inspect the CodeRabbit pause marker {name}"))
+    };
+    Ok(pause_scope(
+        marker("paused")?,
+        marker("paused-pr")?,
+        marker("paused-cli")?,
+    ))
+}
+
+fn review_state(paused: bool) -> &'static str {
+    if paused { "paused" } else { "allowed" }
+}
+
 pub fn now_ms() -> Result<u64> {
     Ok(std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
@@ -397,27 +442,42 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
         user_directory.join(".config/coderabbit-guard/policy.json"),
     )?)?;
     let ledger = user_directory.join(".local/state/coderabbit-guard/reviews.log");
-    let paused = user_directory
-        .join(".local/state/coderabbit-guard/paused")
-        .try_exists()?;
-    ensure!(
-        service_access(paused, args == ["--guard-status"]),
-        "CodeRabbit use is paused by the owner; explicit resume is required"
-    );
-    if args == ["--guard-status"] {
+    let scope = pause(user_directory)?;
+    let json = args.len() == 2
+        && args.iter().any(|arg| arg == "--guard-status")
+        && args.iter().any(|arg| arg == "--json");
+    let status = json || args == ["--guard-status"];
+    admit(scope, status)?;
+    if status {
         let (_file, history) = lock_ledger(&ledger)?;
         let now = now_ms()?;
         ensure!(
             history.last().is_none_or(|at| *at <= now),
             "clock moved backwards"
         );
-        println!(
-            "CodeRabbit guard: {}/{} in rolling hour; {}/{} in rolling day; organization {organization}; paused {paused}",
-            history.iter().filter(|at| now - **at < HOUR_MS).count(),
-            HOURLY_LIMIT,
-            history.iter().filter(|at| now - **at < DAY_MS).count(),
-            DAILY_LIMIT
-        );
+        let hourly = history.iter().filter(|at| now - **at < HOUR_MS).count();
+        let daily = history.iter().filter(|at| now - **at < DAY_MS).count();
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema": 1,
+                    "organization": organization,
+                    "pause": scope.name(),
+                    "reviews": {
+                        "pr": review_state(pr_reviews_paused(scope)),
+                        "cli": review_state(cli_reviews_paused(scope)),
+                    },
+                    "rolling_hour": {"used": hourly, "limit": HOURLY_LIMIT},
+                    "rolling_day": {"used": daily, "limit": DAILY_LIMIT},
+                })
+            );
+        } else {
+            println!(
+                "CodeRabbit guard: {hourly}/{HOURLY_LIMIT} in rolling hour; {daily}/{DAILY_LIMIT} in rolling day; organization {organization}; pause {}",
+                scope.name()
+            );
+        }
         return Ok(0);
     }
     let kind = classify(&args);
@@ -486,7 +546,8 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
         "CodeRabbit runtime has drifted from its pinned version; review refused"
     );
     let directory = review_directory(&args)?;
-    execute_reserved(
+    execute_admitted(
+        scope,
         &ledger,
         &user_directory.join(".local/state/coderabbit-guard/usage.log"),
         now_ms()?,

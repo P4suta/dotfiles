@@ -14,7 +14,16 @@
   "lsp": true,
   "permission": {
     "*": "allow",
-    "edit": "allow",
+    "read": {
+      "*": "allow",
+      ".github/instructions/memory.instruction.md": "deny",
+      "*/.github/instructions/memory.instruction.md": "deny"
+    },
+    "edit": {
+      "*": "allow",
+      ".github/instructions/memory.instruction.md": "deny",
+      "*/.github/instructions/memory.instruction.md": "deny"
+    },
     "bash": {
       "*": "allow",
       "sudo *": "deny",
@@ -29,7 +38,8 @@
       "curl * | sh": "deny",
       "curl * | bash": "deny",
       "wget * | sh": "deny",
-      "wget * | bash": "deny"
+      "wget * | bash": "deny",
+      "*memory.instruction.md*": "deny"
     }
   },
   "mcp": {

@@ -1,11 +1,13 @@
 {
-  "revision": "30de861bede912ac2185ea0c867117efda3b0a7c8b5150e2e90dbb1cfba139e3",
+  "revision": "f963a404b048266d53b602212325e901e2b54a0298a8ae737938f904ad2a68a8",
   "outcome": "implemented",
   "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/coderabbit/SKILL.md",
     "xtask/src/review_guard.rs",
-    "docs/adr/0008-layered-review-capacity.md"
+    "docs/adr/0008-layered-review-capacity.md",
+    "docs/adr/0015-scoped-coderabbit-pause.md",
+    "xtask/src/review_rules.rs"
   ],
   "revisit": null
 }

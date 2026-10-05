@@ -10,7 +10,7 @@ gitleaks = "8.30.1"
 typos = "1.50.3"
 yamllint = "1.38.0"
 nu = "0.116.0"
-powershell = "7.6.5"
+powershell = "7.6.6"
 "pypi:ansible-core" = { version = "2.21.4", os = ["linux"] }
 "cargo:kani-verifier" = { version = "0.68.0", os = ["macos", "linux"] }
 vale = "3.24.0"

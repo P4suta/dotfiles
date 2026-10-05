@@ -1,0 +1,15 @@
+{{- $marker := "chezmoi:modify-template" -}}
+{{- /*
+  Claude Code rewrites this file at runtime.
+  Each profile sets the keys here over the current file, treats an array as one value, and keeps every other key the client wrote.
+  Persistent agent memory stays off.
+  docs/agent-memory-migration.md records where its former content lives.
+*/ -}}
+{{- $current := dict -}}
+{{- if trim .chezmoi.stdin -}}{{- $current = fromJson .chezmoi.stdin -}}{{- end -}}
+{{- $managed := dict "autoMemoryEnabled" false -}}
+{{- if eq .profile "wsl" -}}
+{{- $managed = includeTemplate "profiles/wsl/dot_claude/settings.json.tmpl" (merge (dict) . (index .platforms .profile)) | fromJson -}}
+{{- end -}}
+{{ mergeOverwrite $current $managed | toPrettyJson "  " | trim }}
+

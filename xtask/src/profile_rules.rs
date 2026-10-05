@@ -102,6 +102,35 @@ pub fn forge_bundle_accepted(
     primary_count > 0 && unpinned == 0 && contains_current
 }
 
+/// How a rendered client profile sets one persistent-memory switch.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Memory {
+    Unset,
+    Enabled,
+    Disabled,
+}
+
+/// The longest switch list the memory proof covers.
+/// Every client's list stays within it.
+pub const MEMORY_SWITCHES_PROVED: usize = 6;
+
+/// Every managed client enables persistent memory by default, so only an explicit `Disabled` on every switch turns it off.
+pub fn memory_off(switches: &[Memory]) -> bool {
+    fn all_disabled(switches: &[Memory]) -> bool {
+        match switches {
+            [] => true,
+            [Memory::Disabled, rest @ ..] => all_disabled(rest),
+            _ => false,
+        }
+    }
+    !switches.is_empty() && all_disabled(switches)
+}
+
+/// A target changed outside chezmoi refuses the apply unless its `modify_` template merges and its rendering keeps every key the host file has.
+pub fn host_edit_refused(changed: bool, merged: bool, keeps_host_keys: bool) -> bool {
+    changed && !(merged && keeps_host_keys)
+}
+
 #[cfg(kani)]
 #[kani::proof]
 fn remote_or_installed_context7_never_requires_a_mutation() {
@@ -162,6 +191,58 @@ fn arbitrary_profile() -> Profile {
         2 => Profile::Windows,
         _ => Profile::Wsl,
     }
+}
+
+#[cfg(kani)]
+fn arbitrary_memory() -> Memory {
+    match kani::any::<u8>() % 3 {
+        0 => Memory::Unset,
+        1 => Memory::Enabled,
+        _ => Memory::Disabled,
+    }
+}
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(8)]
+fn memory_is_off_only_when_every_switch_is_explicitly_disabled() {
+    let switches: [Memory; MEMORY_SWITCHES_PROVED] = [
+        arbitrary_memory(),
+        arbitrary_memory(),
+        arbitrary_memory(),
+        arbitrary_memory(),
+        arbitrary_memory(),
+        arbitrary_memory(),
+    ];
+    let length: usize = kani::any();
+    kani::assume(length <= MEMORY_SWITCHES_PROVED);
+    let listed = &switches[..length];
+    let off = memory_off(listed);
+    let mut every_disabled = true;
+    let mut index = 0;
+    while index < length {
+        every_disabled &= listed[index] == Memory::Disabled;
+        index += 1;
+    }
+    assert_eq!(off, length > 0 && every_disabled);
+    kani::cover!(off && length == 1);
+    kani::cover!(off && length == MEMORY_SWITCHES_PROVED);
+    kani::cover!(!off && length == 0);
+    kani::cover!(!off && length == MEMORY_SWITCHES_PROVED && listed[length - 1] == Memory::Unset);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn host_edits_are_overwritten_only_by_a_merge_that_keeps_every_host_key() {
+    let changed: bool = kani::any();
+    let merged: bool = kani::any();
+    let keeps: bool = kani::any();
+    let refused = host_edit_refused(changed, merged, keeps);
+    assert!(!refused || changed);
+    assert!(refused || !changed || merged && keeps);
+    kani::cover!(refused);
+    kani::cover!(changed && !refused);
+    kani::cover!(refused && merged);
 }
 
 #[cfg(kani)]

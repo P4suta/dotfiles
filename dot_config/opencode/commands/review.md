@@ -1,5 +1,5 @@
 ---
-description: Review the current branch's changes since its base branch
+description: review the current branch's changes since its base branch
 agent: reviewer
 ---
 

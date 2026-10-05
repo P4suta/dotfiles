@@ -4,8 +4,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use yaml_rust2::YamlLoader;
 
+pub mod agent_memory;
 pub mod desktop;
+pub mod eol_rules;
 pub mod hooks;
+pub mod instruction_audit;
+pub mod instruction_rules;
+pub mod line_endings;
+pub mod next_action;
+pub mod next_action_rules;
 pub mod pr_rules;
 pub mod pr_workflow;
 pub mod profile_rules;
@@ -203,6 +210,7 @@ pub fn export_checks(root: &Path, output: &Path) -> Result<()> {
         ".github/workflows/required.yml",
         "dot_config/skill-ops/policy.json",
         "dot_config/opencode/plugins/skill-ops.ts",
+        "dot_config/opencode/plugins/line-endings.ts",
         "docs/skills/decisions",
         "package.json",
         "bun.lock",

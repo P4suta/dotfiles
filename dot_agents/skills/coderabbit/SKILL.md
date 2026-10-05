@@ -10,7 +10,7 @@ description: >-
 Use `gh` for GitHub, and the signed-in CodeRabbit UI when no connector or CLI offers the operation.
 Use `coderabbit-review` for local analysis and PR findings.
 Leave implementation to the user's existing agent.
-Honor an owner-imposed CodeRabbit pause for service calls, quota inquiries, review requests, and settings changes until the owner resumes it.
+Read `coderabbit --guard-status --json` before a service operation and honor its pause scope, including for settings changes, until the owner resumes.
 
 ## Fixed-fee setup
 
@@ -18,10 +18,8 @@ Confirm the selected organization, active plan, assigned seat, and billing perio
 Keep Usage-based reviews, CodeRabbit Agent, and CodeRabbit Security Scan off.
 Never start a trial, turn on paid usage, change the subscription, or add seats to get around review limits.
 Check carryover settings after a trial or plan change, and keep automatic seat assignment off for a single-user account.
-Keep the dotfiles CLI guard installed, and read `coderabbit --guard-status` for local capacity.
-All local repositories and agents on the Mac share its rolling limits of seven per hour and 168 per day.
-It admits at most `floor(capacity * 0.9 * 0.8)` consumed reviews and checks that paid billing stays off before analysis.
-The other two native hosts run no managed service reviews or usage queries.
+Keep the dotfiles CLI guard installed.
+It enforces the local CLI budget and inactive paid usage, and `coderabbit --guard-status --json` reports its capacity and pause scope.
 The guard leaves GitHub automatic reviews, IDE extensions, browser tasks, and unmanaged clients uncoordinated.
 Never bypass the guard or reset its ledger when capacity runs out or verification fails.
 

@@ -1,5 +1,21 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "autoupdate": false,
+  "permission": {
+    "read": {
+      "*": "allow",
+      ".github/instructions/memory.instruction.md": "deny",
+      "*/.github/instructions/memory.instruction.md": "deny"
+    },
+    "edit": {
+      "*": "allow",
+      ".github/instructions/memory.instruction.md": "deny",
+      "*/.github/instructions/memory.instruction.md": "deny"
+    },
+    "bash": {
+      "*": "allow",
+      "*memory.instruction.md*": "deny"
+    }
+  },
   "plugin": ["@upstash/context7-opencode"]
 }

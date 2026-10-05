@@ -61,6 +61,80 @@ pub fn checks_state(total: usize, unfinished: usize, failed: usize) -> Checks {
     }
 }
 
+/// Why a PR body excludes CodeRabbit's automatic review.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Exclusion {
+    None,
+    /// A standing exclusion chosen for the PR.
+    Owner,
+    /// An exclusion that lasts only while the owner pauses PR reviews.
+    Pause,
+}
+
+pub fn exclusion(ignore: bool, pause_marker: bool) -> Exclusion {
+    match (ignore, pause_marker) {
+        (false, _) => Exclusion::None,
+        (true, false) => Exclusion::Owner,
+        (true, true) => Exclusion::Pause,
+    }
+}
+
+/// Whether an operation asks CodeRabbit for a PR review or generation.
+/// An edit requests a review when it removes the exclusion of a ready PR.
+pub fn requests_review(
+    operation: Operation,
+    generation: Generation,
+    draft: bool,
+    was_excluded: bool,
+    excluded: bool,
+) -> bool {
+    generation == Generation::Coderabbit
+        || match operation {
+            Operation::Create => false,
+            Operation::Edit => !draft && was_excluded && !excluded,
+            Operation::Ready => !excluded,
+        }
+}
+
+/// Whether an operation during a PR pause keeps the review owed after resumption.
+/// A PR becomes ready, or stays ready, only with the exclusion made for the pause.
+pub fn keeps_pause_exclusion(
+    operation: Operation,
+    draft: bool,
+    was: Exclusion,
+    now: Exclusion,
+) -> bool {
+    match operation {
+        Operation::Create => true,
+        Operation::Edit => draft || was != Exclusion::Pause || now == Exclusion::Pause,
+        Operation::Ready => now == Exclusion::Pause,
+    }
+}
+
+/// Refuse every review request while the owner pauses CodeRabbit PR reviews.
+pub fn review_request_allowed(paused: bool, request: bool) -> bool {
+    !paused || !request
+}
+
+/// The CodeRabbit PR review a published PR still owes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ReviewRequirement {
+    Required,
+    /// Required, but the body still carries the exclusion added for the pause.
+    Resumed,
+    Excluded,
+    Paused,
+}
+
+pub fn review_requirement(paused: bool, exclusion: Exclusion) -> ReviewRequirement {
+    match (paused, exclusion) {
+        (true, _) => ReviewRequirement::Paused,
+        (false, Exclusion::None) => ReviewRequirement::Required,
+        (false, Exclusion::Pause) => ReviewRequirement::Resumed,
+        (false, Exclusion::Owner) => ReviewRequirement::Excluded,
+    }
+}
+
 pub fn plan(
     operation: Operation,
     generation: Generation,
@@ -227,4 +301,97 @@ fn api_quota_requires_a_nonzero_reserve_and_sufficient_remaining_requests() {
     kani::cover!(accepted);
     kani::cover!(!accepted && remaining < reserve);
     kani::cover!(!accepted && reserve == 0);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn paused_pr_reviews_are_never_requested() {
+    let (operation, generation, _, draft, _, _) = inputs();
+    let paused: bool = kani::any();
+    let was_excluded: bool = kani::any();
+    let excluded: bool = kani::any();
+    let request = requests_review(operation, generation, draft, was_excluded, excluded);
+    let accepted = review_request_allowed(paused, request);
+    assert_eq!(accepted, !paused || !request);
+    assert!(!paused || generation == Generation::Local || !accepted);
+    assert!(!paused || operation != Operation::Ready || excluded || !accepted);
+    assert!(paused || accepted);
+    kani::cover!(paused && accepted && operation == Operation::Ready);
+    kani::cover!(paused && !accepted && generation == Generation::Coderabbit);
+    kani::cover!(paused && !accepted && generation == Generation::Local);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn a_paused_edit_never_removes_the_exclusion_of_a_ready_pr() {
+    let paused: bool = kani::any();
+    let draft: bool = kani::any();
+    let was_excluded: bool = kani::any();
+    let excluded: bool = kani::any();
+    let accepted = review_request_allowed(
+        paused,
+        requests_review(
+            Operation::Edit,
+            Generation::Local,
+            draft,
+            was_excluded,
+            excluded,
+        ),
+    );
+    assert_eq!(accepted, !paused || draft || !was_excluded || excluded);
+    kani::cover!(paused && !accepted);
+    kani::cover!(paused && accepted && draft && was_excluded && !excluded);
+    kani::cover!(!paused && accepted && !draft && was_excluded && !excluded);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn a_pr_ready_during_the_pause_keeps_its_pause_exclusion() {
+    let (operation, _, _, draft, _, _) = inputs();
+    let was = exclusion(kani::any(), kani::any());
+    let now = exclusion(kani::any(), kani::any());
+    let kept = keeps_pause_exclusion(operation, draft, was, now);
+    assert!(operation != Operation::Ready || kept == (now == Exclusion::Pause));
+    assert!(
+        operation != Operation::Edit
+            || draft
+            || was != Exclusion::Pause
+            || kept == (now == Exclusion::Pause)
+    );
+    assert!(
+        !kept
+            || operation != Operation::Ready
+            || review_requirement(false, now) == ReviewRequirement::Resumed
+    );
+    kani::cover!(!kept && operation == Operation::Ready && now == Exclusion::Owner);
+    kani::cover!(!kept && operation == Operation::Edit && now == Exclusion::Owner);
+    kani::cover!(kept && operation == Operation::Edit && draft && now == Exclusion::None);
+    kani::cover!(kept && operation == Operation::Ready);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn pr_review_requirement_returns_after_resumption() {
+    let paused: bool = kani::any();
+    let ignore: bool = kani::any();
+    let marker: bool = kani::any();
+    let kind = exclusion(ignore, marker);
+    let requirement = review_requirement(paused, kind);
+    assert_eq!(requirement == ReviewRequirement::Paused, paused);
+    assert_eq!(
+        matches!(
+            requirement,
+            ReviewRequirement::Required | ReviewRequirement::Resumed
+        ),
+        !paused && (!ignore || marker)
+    );
+    assert_eq!(
+        requirement == ReviewRequirement::Excluded,
+        !paused && ignore && !marker
+    );
+    assert!(kind != Exclusion::Pause || requirement != ReviewRequirement::Excluded);
+    kani::cover!(requirement == ReviewRequirement::Required);
+    kani::cover!(requirement == ReviewRequirement::Resumed);
+    kani::cover!(requirement == ReviewRequirement::Paused && kind == Exclusion::Pause);
+    kani::cover!(requirement == ReviewRequirement::Excluded);
 }

@@ -9,8 +9,7 @@ AppData/Local/mise/**
 AppData/Roaming/atuin/**
 .cache/**
 
-# Claude Code is machine-local where it rewrites its own state; only skills/ is ours to ship.
-.claude/settings.json
+# Claude Code is machine-local where it rewrites its own state; only skills/ and the merged settings keys are ours to ship.
 .claude/settings.local.json
 .claude/projects/**
 .claude/todos/**

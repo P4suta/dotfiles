@@ -8,6 +8,8 @@
 
 [core]
 	pager = delta
+# Every repository normalizes text to LF unless its own attributes say otherwise.
+	attributesFile = ~/.config/git/attributes
 # Single source that forces the hook dispatchers on in every repo, existing ones included.
 # The hooks themselves live in dot_config/git/hooks/.
 # They run each repository's own lefthook configuration, so no repository installs lefthook hooks.

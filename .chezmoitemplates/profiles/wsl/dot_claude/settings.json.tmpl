@@ -24,13 +24,9 @@
   - `Bash(git reset:*)` would block the useful soft and mixed resets.
     Only `--hard` fails.
 
-  On the JSON layout, Claude Code rewrites this file in a canonical form, with its own key order and without blank lines, and `/advisor` adds advisorModel.
-  This template follows that output to keep drift small:
-  1. The permissions block comes first.
-  2. The other top-level keys come last: language, advisorModel, theme, and skipAutoPermissionPrompt.
-  3. The deny array holds no blank lines.
-  To change advisorModel, edit this template with `chezmoi edit ~/.claude/settings.json` and run `chezmoi apply`.
-  The next apply reverts a runtime `/advisor` change.
+  dot_claude/modify_settings.json sets these keys over the file Claude Code last wrote, and an array here, such as permissions.deny, replaces the array the client wrote.
+  A runtime change to a key set here, such as `/advisor` changing advisorModel, reverts on the next apply, and every other key the client wrote stays.
+  Edit this template and apply to change one of these keys.
 
   Deny entry syntax:
   - `Bash(<prefix>:*)` denies any Bash invocation that starts with <prefix>, including the arguments after a space.
@@ -132,5 +128,6 @@
   "advisorModel": "opus",
   "skipDangerousModePermissionPrompt": true,
   "theme": "auto",
-  "skipAutoPermissionPrompt": true
+  "skipAutoPermissionPrompt": true,
+  "autoMemoryEnabled": false
 }

@@ -139,7 +139,12 @@ pub fn dependency_plan(
     Ok(plan)
 }
 
-fn complete(outcome: Outcome, reason: &str, evidence: &[String], revisit: Option<&String>) -> bool {
+pub(crate) fn complete(
+    outcome: Outcome,
+    reason: &str,
+    evidence: &[String],
+    revisit: Option<&String>,
+) -> bool {
     decision_complete(
         outcome,
         !reason.trim().is_empty(),

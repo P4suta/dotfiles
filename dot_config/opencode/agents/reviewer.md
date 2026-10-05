@@ -1,5 +1,5 @@
 ---
-description: Read-only code reviewer for diffs, branches, and pull requests. Use before committing or merging risky changes.
+description: read-only code reviewer for risky diffs, branches, and pull requests
 mode: subagent
 permission:
   edit: deny
@@ -31,4 +31,3 @@ Rules:
 - Tag severity: [blocker], [warn], or [nit].
 - Never invent issues.
 Say so when the change holds up.
-- Write the review in Japanese.

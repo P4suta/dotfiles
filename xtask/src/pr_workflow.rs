@@ -1,6 +1,7 @@
 use crate::pr_rules::{
-    Checks, Effect, Generation, IssueGate, Operation, api_quota_available, checks_state,
-    coderabbit_body_marker_allowed, issue_gate, plan,
+    Checks, Effect, Exclusion, Generation, IssueGate, Operation, ReviewRequirement,
+    api_quota_available, checks_state, coderabbit_body_marker_allowed, exclusion, issue_gate,
+    keeps_pause_exclusion, plan, requests_review, review_request_allowed, review_requirement,
 };
 use crate::prose::Publication::{Issue as ISSUE, PullRequest as PULL_REQUEST};
 use crate::prose_rules::standard_applies;
@@ -17,6 +18,8 @@ use std::path::PathBuf;
 const TITLE_REQUEST: &str = "@coderabbitai";
 const SUMMARY_REQUEST: &str = "@coderabbitai summary";
 const REVIEW_EXCLUSION: &str = "@coderabbitai ignore";
+/// Marks an exclusion that lasts only while the owner pauses CodeRabbit PR reviews.
+const PAUSE_EXCLUSION: &str = "<!-- coderabbit-pause -->";
 
 #[derive(Parser)]
 #[command(about = "Validate PR documents before invoking gh; local creation always uses draft")]
@@ -737,6 +740,104 @@ fn require_issue(gate: IssueGate) -> Result<()> {
     Ok(())
 }
 
+/// Read the owner's CodeRabbit PR review pause from the guard's state.
+fn pr_reviews_paused() -> Result<bool> {
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).context(
+        "the user directory is unavailable; set HOME or USERPROFILE to read the CodeRabbit pause",
+    )?;
+    Ok(crate::review_guard::pr_reviews_paused(
+        crate::review_guard::pause(std::path::Path::new(&home))?,
+    ))
+}
+
+fn excludes_review(body: &str) -> bool {
+    without_comments(body)
+        .lines()
+        .any(|line| line.trim() == REVIEW_EXCLUSION)
+}
+
+fn review_exclusion(body: &str) -> Exclusion {
+    exclusion(
+        excludes_review(body),
+        body.lines().any(|line| line.trim() == PAUSE_EXCLUSION),
+    )
+}
+
+/// Refuse an operation that would request a CodeRabbit PR review while the owner pauses them.
+/// Also refuse one that would leave the review unowed after the owner resumes them.
+/// `live` yields the PR's current draft state and exclusion, and runs only during a pause.
+fn admit_review_request(
+    operation: Operation,
+    generation: Generation,
+    body: &str,
+    live: impl FnOnce() -> Result<(bool, Exclusion)>,
+) -> Result<()> {
+    if !pr_reviews_paused()? {
+        return Ok(());
+    }
+    let (draft, was) = if generation == Generation::Coderabbit {
+        (true, Exclusion::None)
+    } else {
+        live()?
+    };
+    ensure!(
+        review_request_allowed(
+            true,
+            requests_review(
+                operation,
+                generation,
+                draft,
+                was != Exclusion::None,
+                excludes_review(body)
+            )
+        ),
+        "CodeRabbit PR reviews are paused by the owner (`coderabbit --guard-status --json` reports reviews.pr paused), and this operation would request one; {}",
+        match (generation, operation) {
+            (Generation::Coderabbit, _) =>
+                "rerun with --generation local and a completed title and body".to_owned(),
+            (_, Operation::Edit) => format!(
+                "keep the standalone `{REVIEW_EXCLUSION}` line of this ready PR until the owner resumes PR reviews"
+            ),
+            _ => format!(
+                "keep the draft until the owner resumes PR reviews, or add the standalone lines `{REVIEW_EXCLUSION}` and `{PAUSE_EXCLUSION}` with pr-workflow edit so the review is owed again after resumption"
+            ),
+        }
+    );
+    ensure!(
+        keeps_pause_exclusion(operation, draft, was, review_exclusion(body)),
+        "CodeRabbit PR reviews are paused by the owner (`coderabbit --guard-status --json` reports reviews.pr paused), and without the standalone `{PAUSE_EXCLUSION}` line the review would not be owed after resumption; {}",
+        if operation == Operation::Ready {
+            format!(
+                "add the standalone `{PAUSE_EXCLUSION}` line beside `{REVIEW_EXCLUSION}` with pr-workflow edit, then rerun ready"
+            )
+        } else {
+            format!(
+                "keep the standalone `{PAUSE_EXCLUSION}` line of this ready PR until the owner resumes PR reviews"
+            )
+        }
+    );
+    Ok(())
+}
+
+fn report_review_requirement(body: &str) -> Result<()> {
+    println!(
+        "{}",
+        match review_requirement(pr_reviews_paused()?, review_exclusion(body)) {
+            ReviewRequirement::Paused =>
+                "CodeRabbit PR review: not required while the owner pauses PR reviews; do not wait for or request one".to_owned(),
+            ReviewRequirement::Excluded => format!(
+                "CodeRabbit PR review: excluded by the body's `{REVIEW_EXCLUSION}` line; none is owed"
+            ),
+            ReviewRequirement::Resumed => format!(
+                "CodeRabbit PR review: required again now that PR reviews have resumed; remove the `{REVIEW_EXCLUSION}` and `{PAUSE_EXCLUSION}` lines with pr-workflow edit, then request it with an authorized `@coderabbitai review` comment"
+            ),
+            ReviewRequirement::Required =>
+                "CodeRabbit PR review: required for the current head where the destination enables CodeRabbit; complete it with coderabbit-review".to_owned(),
+        }
+    );
+    Ok(())
+}
+
 fn arguments(operation: &str, repo: &str) -> Vec<OsString> {
     ["pr", operation, "--repo", repo]
         .into_iter()
@@ -811,6 +912,7 @@ pub fn run(action: Action) -> Result<()> {
                     destination,
                     Some(&document.body),
                 )?)?;
+                report_review_requirement(&document.body)?;
             } else {
                 let destination = offline_destination(&target.repo)?;
                 let (_, document) = read_document(
@@ -838,6 +940,9 @@ pub fn run(action: Action) -> Result<()> {
             if let Some(base) = &base {
                 branch(base)?;
             }
+            admit_review_request(Operation::Create, target.generation, &document.body, || {
+                Ok((true, Exclusion::None))
+            })?;
             let github = Github::connect()?;
             let destination = destination(&github, &target.repo)?;
             written_to_standard(destination, PULL_REQUEST, &document)?;
@@ -865,7 +970,15 @@ pub fn run(action: Action) -> Result<()> {
         }
         Action::Edit { document, pr } => {
             let (target, document) = read_document(document, false)?;
-            let github = Github::connect()?;
+            let mut connected = None;
+            admit_review_request(Operation::Edit, target.generation, &document.body, || {
+                let live = live_document(connected.insert(Github::connect()?), &target, pr)?;
+                Ok((live.is_draft, review_exclusion(&live.body)))
+            })?;
+            let github = match connected {
+                Some(github) => github,
+                None => Github::connect()?,
+            };
             let destination = destination(&github, &target.repo)?;
             written_to_standard(destination, PULL_REQUEST, &document)?;
             let issue = inspect_issue(&github, &target, destination, Some(&document.body))?;
@@ -912,9 +1025,13 @@ pub fn run(action: Action) -> Result<()> {
                 ) == Some(Effect::Ready),
                 "a draft becomes ready only when every reported check on its head has passed and no work remains"
             );
+            admit_review_request(Operation::Ready, target.generation, &document.body, || {
+                Ok((live.is_draft, review_exclusion(&document.body)))
+            })?;
             let mut args = arguments("ready", &target.repo);
             args.push(pr.to_string().into());
             print!("{}", gh(&args)?);
+            report_review_requirement(&document.body)?;
         }
         Action::Issue { action } => issue(action)?,
     }
