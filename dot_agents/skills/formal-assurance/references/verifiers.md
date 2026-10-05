@@ -10,6 +10,7 @@ Require execution of every expected harness and reachability of the asserted con
 Use cover properties or concrete witnesses to detect contradictory assumptions and unreachable assertions.
 Turn counterexamples into deterministic regressions and repair the common cause.
 Verify the installed toolchain and supported features against [Kani's documentation](https://model-checking.github.io/kani/) before choosing a harness strategy.
+Kani has no native Windows build; run the same pinned gate on a Linux verification host, such as a pinned container over a read-only view of the checkout, rather than skipping it.
 
 ## Lean 4
 

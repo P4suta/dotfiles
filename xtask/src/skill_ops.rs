@@ -217,6 +217,7 @@ pub fn engine_hash() -> Result<String> {
         include_str!("skill_rules.rs"),
         include_str!("skill_install.rs"),
         include_str!("skill_proofs.rs"),
+        include_str!("../proofs/Dockerfile"),
         include_str!("bin/skill-ops.rs"),
         include_str!("../../dot_config/opencode/plugins/skill-ops.ts"),
         include_str!("lib.rs"),

@@ -1,9 +1,14 @@
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
+use std::process::Stdio;
+
+pub const KANI_VERSION: &str = "0.68.0";
 
 pub const HARNESSES: [&str; 6] = [
     "adapter_activation_requires_policy_and_installed_runtime",
@@ -166,7 +171,7 @@ fn verify_inventory(source: &Path, directory: &Path, expected: &[&str]) -> Resul
     ensure!(status.success(), "cannot list required proof harnesses");
     let listed: Value = crate::skill_ops::read_json(&directory.join("kani-list.json"))?;
     ensure!(
-        listed["kani-version"] == "0.68.0",
+        listed["kani-version"] == KANI_VERSION,
         "unexpected proof inventory version"
     );
     let declarations = listed["standard-harnesses"]
@@ -184,15 +189,121 @@ fn verify_inventory(source: &Path, directory: &Path, expected: &[&str]) -> Resul
     Ok(())
 }
 
-pub fn verify(root: &Path) -> Result<()> {
-    ensure!(
-        cfg!(any(target_os = "macos", target_os = "linux")),
-        "Kani is required on a supported Mac or Linux verification host; this native host does not provide that verifier"
+fn short_digest(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+pub fn container_image(definition: &[u8]) -> String {
+    format!("dotfiles-proofs:{}", short_digest(definition))
+}
+
+pub fn container_target_volume(root: &Path) -> String {
+    format!(
+        "dotfiles-proofs-target-{}",
+        short_digest(root.as_os_str().as_encoded_bytes())
+    )
+}
+
+/// Kani writes temporary files beside the source it compiles, so the gate runs on a container-local copy of the read-only checkout.
+const CONTAINER_GATE: &str = "set -o pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -; exec cargo run --locked --manifest-path xtask/Cargo.toml -- proofs";
+
+pub fn container_run_arguments(root: &Path, image: &str, target_volume: &str) -> Vec<OsString> {
+    let mut mount = OsString::from("type=bind,source=");
+    mount.push(root);
+    mount.push(",target=/source,readonly");
+    let mut arguments: Vec<OsString> = ["run", "--rm", "--mount"].map(OsString::from).into();
+    arguments.push(mount);
+    arguments.extend(
+        [
+            "--volume",
+            &format!("{target_volume}:/cache"),
+            "--volume",
+            "dotfiles-proofs-registry:/usr/local/cargo/registry",
+            "--env",
+            "CARGO_TARGET_DIR=/cache/target",
+            "--workdir",
+            "/work",
+            image,
+            "bash",
+            "-ec",
+            CONTAINER_GATE,
+        ]
+        .map(OsString::from),
     );
+    arguments
+}
+
+/// Kani has no native build here, so the unchanged proof gate runs on a pinned Linux verification host that sees this checkout read-only.
+fn verify_in_container(root: &Path) -> Result<()> {
+    let root = crate::canonical(root)?;
+    let engine = Tool::Docker
+        .command()
+        .args(["version", "--format", "{{.Server.Os}}"])
+        .stderr(Stdio::null())
+        .output()
+        .context("Kani proofs on this host run in a Linux container; install Docker")?;
+    ensure!(
+        engine.status.success() && String::from_utf8(engine.stdout)?.trim() == "linux",
+        "Kani proofs on this host need a running Docker engine with Linux containers"
+    );
+    let definition = root.join("xtask/proofs/Dockerfile");
+    let image = container_image(&fs::read(&definition)?);
+    let present = Tool::Docker
+        .command()
+        .args(["image", "inspect"])
+        .arg(&image)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if !present.success() {
+        let status = Tool::Docker
+            .command()
+            .args(["build", "--tag"])
+            .arg(&image)
+            .arg("--file")
+            .arg(&definition)
+            .arg(root.join("xtask/proofs"))
+            .status()
+            .context("build the pinned Kani verification image")?;
+        ensure!(
+            status.success(),
+            "cannot build the pinned Kani verification image: {status}"
+        );
+    }
+    let status = Tool::Docker
+        .command()
+        .args(container_run_arguments(
+            &root,
+            &image,
+            &container_target_volume(&root),
+        ))
+        .status()
+        .context("start the Kani verification container")?;
+    ensure!(
+        status.success(),
+        "the containerized proof gate failed: {status}"
+    );
+    Ok(())
+}
+
+pub fn verify(root: &Path) -> Result<()> {
+    if cfg!(any(target_os = "macos", target_os = "linux")) {
+        verify_native(root)
+    } else {
+        verify_in_container(root)
+    }
+}
+
+fn verify_native(root: &Path) -> Result<()> {
     let version = Tool::Kani.command().arg("--version").output()?;
     ensure!(
         version.status.success()
-            && String::from_utf8(version.stdout)?.contains("Kani Rust Verifier 0.68.0"),
+            && String::from_utf8(version.stdout)?
+                .contains(&format!("Kani Rust Verifier {KANI_VERSION}")),
         "the pinned Kani version is unavailable"
     );
     let source = crate::canonical(&root.join("xtask/src/skill_rules.rs"))?;
