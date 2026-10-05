@@ -825,13 +825,19 @@ mod tests {
 
     #[test]
     fn a_path_without_system_directories_reports_each_missing_one() {
+        let path = |dirs: &[&str]| {
+            std::env::join_paths(dirs)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        };
         let system = ["/usr/local/bin".to_owned(), "/usr/bin".to_owned()];
         assert_eq!(
-            missing_from_path("/opt/homebrew/bin:/usr/bin:/bin", &system),
+            missing_from_path(&path(&["/opt/homebrew/bin", "/usr/bin", "/bin"]), &system),
             ["/usr/local/bin"]
         );
         assert_eq!(
-            missing_from_path("/usr/local/bin:/usr/bin", &system),
+            missing_from_path(&path(&["/usr/local/bin", "/usr/bin"]), &system),
             Vec::<String>::new()
         );
     }
