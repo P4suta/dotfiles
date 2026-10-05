@@ -364,7 +364,7 @@ impl Tool {
         }
     }
 
-    /// The package list a profile installs this tool from, as a platform data pointer and entry, for tools a setup step requires.
+    /// The package list a profile installs this tool from, as a platform data pointer and entry, for tools a setup step or an installed entry point requires.
     pub fn package(self, profile: Profile) -> Option<(&'static str, &'static str)> {
         let pointer = match profile {
             Profile::Mac => "/brew/formulae",
@@ -376,6 +376,11 @@ impl Tool {
             Self::Lefthook => Some((pointer, "lefthook")),
             Self::Starship => Some((pointer, "starship")),
             Self::Zoxide => Some((pointer, "zoxide")),
+            // mise already installs the Doppler CLI from its release with a checksum on the Mac, and runs the same on Windows.
+            Self::Doppler => Some(match profile {
+                Profile::Linux => (pointer, "doppler"),
+                _ => ("/tools/common", "doppler"),
+            }),
             _ => None,
         }
     }

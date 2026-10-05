@@ -93,7 +93,8 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
     let mut text = identity;
     let name = profile.name();
     text.push_str(&format!(
-        "[data.platforms.{name}.tools]\ncommon = [\"jq\"]\npersonal = []\nwork = []\n\n"
+        "[data.platforms.{name}.tools]\ncommon = [{}]\npersonal = []\nwork = []\n\n",
+        list("/tools/common")
     ));
     match profile {
         Profile::Mac => text.push_str(&format!(
@@ -127,7 +128,7 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
     Ok(text)
 }
 
-/// Package-list entries for the tools that this profile's scripts require, read from the scripts rendered with full data.
+/// Package-list entries for the tools that this profile's scripts and installed entry points require, read from the profile rendered with full data.
 fn required_packages(
     root: &Path,
     profile: Profile,
@@ -138,22 +139,28 @@ fn required_packages(
     let config = scope.path().join("chezmoi.toml");
     fs::write(&config, identity)?;
     let rendered = crate::profiles::chezmoi(root, scope.path(), &config, home)
-        .args(["dump", "--include", "scripts", "--format", "json"])
+        .args(["dump", "--include", "files,scripts", "--format", "json"])
         .output()?;
     ensure!(
         rendered.status.success(),
         "render rehearsal scripts: {}",
         String::from_utf8_lossy(&rendered.stderr)
     );
-    let scripts: serde_json::Value = serde_json::from_slice(&rendered.stdout)?;
-    let contents: String = scripts
-        .as_object()
-        .context("script dump must be a mapping")?
-        .values()
-        .filter_map(|script| script["contents"].as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    Ok(crate::setup::scripted_requirements(profile, &contents)
+    let dump: serde_json::Value = serde_json::from_slice(&rendered.stdout)?;
+    let targets = dump.as_object().context("profile dump must be a mapping")?;
+    let contents = |scripts: bool| -> String {
+        targets
+            .values()
+            .filter(|entry| (entry["type"] == "script") == scripts)
+            .filter_map(|entry| entry["contents"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let mut required = crate::setup::scripted_requirements(profile, &contents(true));
+    required.extend(crate::setup::entry_requirements(&contents(false)));
+    required.sort();
+    required.dedup();
+    Ok(required
         .into_iter()
         .filter_map(|tool| tool.package(profile))
         .collect())

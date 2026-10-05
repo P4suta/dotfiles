@@ -144,10 +144,20 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
         );
         let data: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(profiles::configured_profile(&data).unwrap(), profile);
-        assert_eq!(
-            data["platforms"][profile.name()]["tools"]["common"],
-            serde_json::json!(["jq"])
-        );
+        let common = data["platforms"][profile.name()]["tools"]["common"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(common[0], "jq");
+        for kept in &common[1..] {
+            assert!(
+                dotfiles_xtask::tool::Tool::ALL
+                    .iter()
+                    .filter_map(|tool| tool.package(profile))
+                    .any(|(list, entry)| list == "/tools/common" && kept == entry),
+                "the rehearsal keeps only declared requirements: {kept}"
+            );
+        }
         let mise = profiles::chezmoi(root, scope.path(), &config, &home)
             .arg("--override-data")
             .arg(format!(
@@ -171,21 +181,25 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
             "a tool listed twice must render once"
         );
         let platform = &data["platforms"][profile.name()];
-        let scripts = profiles::chezmoi(root, scope.path(), &config, &home)
-            .args(["dump", "--include", "scripts", "--format", "json"])
+        let rendered = profiles::chezmoi(root, scope.path(), &config, &home)
+            .args(["dump", "--include", "files,scripts", "--format", "json"])
             .output()
             .unwrap();
-        let scripts: serde_json::Value = serde_json::from_slice(&scripts.stdout).unwrap();
-        let contents: String = scripts
-            .as_object()
-            .unwrap()
-            .values()
-            .filter_map(|script| script["contents"].as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let rendered: serde_json::Value = serde_json::from_slice(&rendered.stdout).unwrap();
+        let contents = |scripts: bool| -> String {
+            rendered
+                .as_object()
+                .unwrap()
+                .values()
+                .filter(|entry| (entry["type"] == "script") == scripts)
+                .filter_map(|entry| entry["contents"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         assert!(
-            profiles::unprovisioned(profile, platform, &contents).is_empty(),
-            "the rehearsal data must still install what its scripts require"
+            profiles::unprovisioned(profile, platform, &contents(true), &contents(false))
+                .is_empty(),
+            "the rehearsal data must still install what its scripts and entry points require"
         );
         let skips = profiles::declared_skips(&data).unwrap();
         assert_eq!(skips.is_empty(), profile == Profile::Windows, "{skips:?}");
@@ -299,15 +313,15 @@ fn setup_order_rejects_a_step_that_runs_before_its_prerequisite() {
 fn setup_that_needs_a_package_requires_the_profile_to_install_it() {
     let scripts = "exec dotfiles-xtask --root /s setup domyjob --config /c --live\n";
     let provided = serde_json::json!({"brew": {"formulae": ["jq", "lefthook"]}});
-    assert!(profiles::unprovisioned(Profile::Mac, &provided, scripts).is_empty());
+    assert!(profiles::unprovisioned(Profile::Mac, &provided, scripts, "").is_empty());
     let missing = serde_json::json!({"brew": {"formulae": ["jq"]}});
     assert_eq!(
-        profiles::unprovisioned(Profile::Mac, &missing, scripts),
+        profiles::unprovisioned(Profile::Mac, &missing, scripts, ""),
         ["/brew/formulae/lefthook"]
     );
     let disabled = serde_json::json!({"nix": {"packages": {"lefthook": ""}}});
     assert_eq!(
-        profiles::unprovisioned(Profile::Linux, &disabled, "setup ocomment\n").len(),
+        profiles::unprovisioned(Profile::Linux, &disabled, "setup ocomment\n", "").len(),
         1
     );
     let shell = "& 'C:/h/.local/bin/dotctl.exe' setup shell\n";
@@ -315,7 +329,8 @@ fn setup_that_needs_a_package_requires_the_profile_to_install_it() {
         profiles::unprovisioned(
             Profile::Windows,
             &serde_json::json!({"scoop": {"apps": ["starship"]}}),
-            shell
+            shell,
+            ""
         ),
         ["/scoop/apps/zoxide"]
     );
@@ -442,4 +457,35 @@ fn recipe_references_are_commands_rather_than_prose() {
     assert!(found("This runs just before the hook.", false).is_empty());
     assert!(found("just refresh CONFIG", false).is_empty());
     assert!(found("`just --list` prints recipes", true).is_empty());
+}
+
+#[test]
+fn agent_launchers_require_doppler_wherever_they_render() {
+    use dotfiles_xtask::setup::entry_requirements;
+    use dotfiles_xtask::tool::Tool;
+    assert_eq!(
+        entry_requirements(
+            r#"  ^dotfiles-xtask --root "/source" agent opencode --config "/config" -- ...$args"#
+        ),
+        [Tool::Doppler]
+    );
+    assert_eq!(
+        entry_requirements("& 'C:/tools/dotfiles-xtask.exe' agent codex"),
+        [Tool::Doppler]
+    );
+    assert!(entry_requirements("dotfiles-xtask --root /source setup tools --live").is_empty());
+    assert!(entry_requirements("The agent reads its configuration here.").is_empty());
+}
+
+#[test]
+fn a_profile_without_the_package_an_entry_point_needs_is_unprovisioned() {
+    let launcher = "^dotfiles-xtask agent opencode";
+    let without = serde_json::json!({"tools": {"common": ["jq"]}});
+    assert_eq!(
+        profiles::unprovisioned(Profile::Mac, &without, "", launcher),
+        ["/tools/common/doppler"]
+    );
+    let with = serde_json::json!({"tools": {"common": ["jq", "doppler"]}});
+    assert!(profiles::unprovisioned(Profile::Mac, &with, "", launcher).is_empty());
+    assert!(profiles::unprovisioned(Profile::Mac, &without, "", "").is_empty());
 }

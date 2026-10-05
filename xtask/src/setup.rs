@@ -204,6 +204,27 @@ pub fn scripted_requirements(profile: Profile, scripts: &str) -> Vec<Tool> {
     tools
 }
 
+/// Packaged tools that installed entry points run, read from rendered files.
+/// An agent launcher reads the secrets the machine-local configuration selects through Doppler, so it needs Doppler wherever it renders.
+pub fn entry_requirements(rendered: &str) -> Vec<Tool> {
+    let mut tools = Vec::new();
+    for words in rendered
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>())
+    {
+        let launcher = words.iter().position(|word| {
+            let program = word.trim_matches(['\'', '"', '^']);
+            program.ends_with("dotfiles-xtask") || program.ends_with("dotfiles-xtask.exe")
+        });
+        if launcher.is_some_and(|start| words[start..].contains(&"agent")) {
+            tools.push(Tool::Doppler);
+        }
+    }
+    tools.sort();
+    tools.dedup();
+    tools
+}
+
 /// Dependency pairs `(step, prerequisite)` that a run order breaks: the prerequisite runs later, or only later.
 pub fn ordering_violations(sequence: &[Step]) -> Vec<(Step, Step)> {
     let mut violations = Vec::new();
