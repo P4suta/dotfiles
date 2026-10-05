@@ -31,6 +31,7 @@ Integration tests may spawn the binaries and real tools they verify, and contrac
 Setup steps declare what they rely on, and the profile gate checks the declarations against what each profile actually renders.
 `Step::after` names the steps that must run first, and the gate rejects a rendered script order, before scripts and then after scripts by name, that breaks one.
 `Step::requires` names the packaged tools a step invokes and `Tool::package` names the list that installs each one per profile; the gate rejects data that omits a required package, and the rehearsal derives its reduced lists from the same declarations.
+Installed entry points carry the same obligation: a rendered agent launcher requires Doppler, because it reads the secrets the machine-local configuration selects, so the gate also reads every rendered file.
 Both matches list every step, so adding a step forces a decision about its order and packages.
 Application renders its scripts first and refuses, before any change, a step whose requirement the session cannot meet, such as a private source without non-interactive credentials.
 After scripts run, files are applied once more without scripts before verification, because templates may probe for programs those scripts installed.

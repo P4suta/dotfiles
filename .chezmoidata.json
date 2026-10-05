@@ -468,7 +468,8 @@
           "cargo:cargo-semver-checks",
           "mvnd",
           "process-compose",
-          "usql"
+          "usql",
+          "doppler"
         ],
         "personal": [],
         "work": []

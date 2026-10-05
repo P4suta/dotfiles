@@ -206,9 +206,18 @@ pub fn native_action_arguments(name: &str) -> Vec<&str> {
     }
 }
 
-/// Packaged tools the rendered scripts require that the profile's platform data does not install.
-pub fn unprovisioned(profile: Profile, platform: &Value, scripts: &str) -> Vec<String> {
-    crate::setup::scripted_requirements(profile, scripts)
+/// Packaged tools the rendered scripts and installed entry points require that the profile's platform data does not install.
+pub fn unprovisioned(
+    profile: Profile,
+    platform: &Value,
+    scripts: &str,
+    files: &str,
+) -> Vec<String> {
+    let mut required = crate::setup::scripted_requirements(profile, scripts);
+    required.extend(crate::setup::entry_requirements(files));
+    required.sort();
+    required.dedup();
+    required
         .into_iter()
         .filter_map(|tool| tool.package(profile))
         .filter(|(pointer, entry)| {
@@ -368,11 +377,19 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
             .filter_map(|target| dump[target]["contents"].as_str())
             .collect::<Vec<_>>()
             .join("\n");
+        let files: String = dump
+            .as_object()
+            .into_iter()
+            .flat_map(|targets| targets.iter())
+            .filter(|(target, _)| !order.contains(*target))
+            .filter_map(|(_, entry)| entry["contents"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         let platform = &source_data["platforms"][profile.name()];
-        let unprovisioned = unprovisioned(profile, platform, &scripts);
+        let unprovisioned = unprovisioned(profile, platform, &scripts, &files);
         ensure!(
             unprovisioned.is_empty(),
-            "{} profile runs setup that needs packages its data does not install: {unprovisioned:?}",
+            "{} profile runs setup or installs entry points that need packages its data does not install: {unprovisioned:?}",
             profile.name()
         );
         let violations = crate::setup::ordering_violations(&sequence);
