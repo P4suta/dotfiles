@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
+use dotfiles_xtask::freshness::Built;
 use dotfiles_xtask::skill_ops::{self as ops, Catalog, Note, Policy, Report, Review, Runtime};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -376,7 +377,12 @@ fn main() {
             .as_ref()
             .is_ok_and(|input| input["stop_hook_active"] == true);
         cli.command = Action::Check;
-        let checked = input.and_then(|_| execute(cli));
+        let checked = match dotfiles_xtask::freshness::require_current(Built::SkillOps) {
+            Err(error) => Err(error.context(
+                "run `mise run install:skill-ops` in the dotfiles checkout to rebuild the stale hook",
+            )),
+            Ok(()) => input.and_then(|_| execute(cli)),
+        };
         let reason = checked.as_ref().err().map(|error| format!("Skill maintenance remains incomplete: {error:#}. Run skill-ops analyze, assess the findings it lists with skill-operations, implement accepted changes, and run skill-ops triage for them before claiming completion."));
         let response = match completion(checked.is_ok(), continued) {
             Completion::Allow => serde_json::json!({}),
@@ -390,10 +396,10 @@ fn main() {
         println!("{response}");
         Ok(())
     } else {
-        execute(cli)
+        dotfiles_xtask::freshness::require_current(Built::SkillOps).and_then(|()| execute(cli))
     };
     if let Err(error) = result {
-        eprintln!("Error: {error:#}");
+        dotfiles_xtask::report(&error);
         std::process::exit(1);
     }
 }

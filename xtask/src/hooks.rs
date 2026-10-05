@@ -266,6 +266,14 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
             "dotguard renovate run",
         )?;
     }
+    if matches!(hook, Hook::PostMerge)
+        && let Some(root) = std::env::current_dir()
+            .ok()
+            .and_then(|directory| crate::freshness::working_copy(&directory))
+        && let Err(error) = crate::freshness::reinstall_lagging(&native.home, &root)
+    {
+        eprintln!("Warning: reinstalling tools built from changed sources failed: {error:#}");
+    }
     if matches!(hook, Hook::PostCheckout | Hook::PostMerge)
         || (matches!(hook, Hook::ReferenceTransaction)
             && arguments

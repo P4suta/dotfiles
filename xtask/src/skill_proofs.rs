@@ -89,6 +89,13 @@ pub const NEXT_ACTION_HARNESSES: [&str; 5] = [
     "upstream_commits_the_branch_never_held_are_never_overwritten",
 ];
 
+pub const STALE_HARNESSES: [&str; 4] = [
+    "a_stale_build_never_runs",
+    "only_a_found_differing_build_is_stale",
+    "only_a_recorded_lagging_installation_is_rebuilt",
+    "the_nearest_named_checkout_wins",
+];
+
 pub const LINE_ENDING_HARNESSES: [&str; 3] = [
     "auto_detection_follows_git_byte_classes",
     "conversion_removes_only_carriage_returns_before_line_feeds",
@@ -608,6 +615,49 @@ fn reject_a_contradiction_without_what_it_contradicted() {{
         fs::read(source)? == original,
         "production instruction proof source changed during verification"
     );
+    let source = crate::canonical(&root.join("xtask/src/stale_rules.rs"))?;
+    let original = fs::read(&source)?;
+    let directory = tempfile::tempdir()?;
+    verify_inventory(&source, directory.path(), &STALE_HARNESSES)?;
+    verify_file(&source, directory.path(), &STALE_HARNESSES, false)?;
+    let probe = tempfile::tempdir()?;
+    let file = probe.path().join("counterexample.rs");
+    fs::write(
+        &file,
+        format!(
+            "#[path = {source:?}]
+mod production;
+#[kani::proof]
+fn reject_calling_a_matching_build_stale() {{
+    assert!(production::freshness(true, true) == production::Freshness::Stale);
+}}
+#[kani::proof]
+fn reject_running_a_stale_build() {{
+    assert!(production::runs(production::freshness(true, false)));
+}}
+#[kani::proof]
+fn reject_preferring_the_build_checkout_over_the_working_copy() {{
+    assert!(production::origin(false, true, true) == Some(production::Origin::BuildCheckout));
+}}
+#[kani::proof]
+fn reject_installing_an_unrecorded_tool() {{
+    assert!(production::reinstalls(false, false));
+}}
+"
+        ),
+    )?;
+    for name in [
+        "reject_calling_a_matching_build_stale",
+        "reject_running_a_stale_build",
+        "reject_preferring_the_build_checkout_over_the_working_copy",
+        "reject_installing_an_unrecorded_tool",
+    ] {
+        verify_file(&file, probe.path(), &[name], true)?;
+    }
+    ensure!(
+        fs::read(source)? == original,
+        "production stale-build proof source changed during verification"
+    );
     println!(
         "Verified all {} production policy harnesses, reachable outcomes, and the rejecting counterexamples",
         HARNESSES.len()
@@ -619,6 +669,7 @@ fn reject_a_contradiction_without_what_it_contradicted() {{
             + INSTRUCTION_HARNESSES.len()
             + NEXT_ACTION_HARNESSES.len()
             + LINE_ENDING_HARNESSES.len()
+            + STALE_HARNESSES.len()
     );
     Ok(())
 }

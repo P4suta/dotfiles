@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
+use dotfiles_xtask::freshness::Built;
 use dotfiles_xtask::tool::Tool;
 use dotfiles_xtask::{
     check_build_dir, export_checks, skill_source_paths, skills, split_frontmatter, validate_tree,
@@ -313,10 +314,7 @@ fn run() -> Result<()> {
                 &binary,
                 Path::new(&user_directory),
                 |paths| {
-                    let status = Tool::Chezmoi
-                        .command()
-                        .arg("--source")
-                        .arg(&cli.root)
+                    let status = Tool::chezmoi_in(&cli.root)
                         .args([
                             "--force",
                             "apply",
@@ -333,6 +331,11 @@ fn run() -> Result<()> {
                     );
                     Ok(())
                 },
+            )?;
+            dotfiles_xtask::freshness::record_installation(
+                Path::new(&user_directory),
+                &cli.root,
+                Built::PrWorkflow,
             )?;
         }
         Action::Proofs => dotfiles_xtask::skill_proofs::verify(&cli.root)?,
@@ -442,10 +445,7 @@ fn run() -> Result<()> {
         Action::Install => {
             let paths = skill_source_paths(&cli.root)?;
             ensure!(!paths.is_empty(), "no skill files to install");
-            let status = Tool::Chezmoi
-                .command()
-                .arg("--source")
-                .arg(&cli.root)
+            let status = Tool::chezmoi_in(&cli.root)
                 .args([
                     "--force",
                     "apply",
@@ -467,10 +467,7 @@ fn run() -> Result<()> {
                 Path::new("xtask/Cargo.toml"),
                 &["build", "--locked", "--release", "--bin", "coderabbit"],
             )?;
-            let status = Tool::Chezmoi
-                .command()
-                .arg("--source")
-                .arg(&cli.root)
+            let status = Tool::chezmoi_in(&cli.root)
                 .args([
                     "--force",
                     "apply",
@@ -493,6 +490,11 @@ fn run() -> Result<()> {
                 std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
                     .context("user directory is unavailable")?;
             dotfiles_xtask::review_guard::install(&binary, Path::new(&user_directory))?;
+            dotfiles_xtask::freshness::record_installation(
+                Path::new(&user_directory),
+                &cli.root,
+                Built::Coderabbit,
+            )?;
             println!("Installed CodeRabbit guard and cr alias with persistent local limits");
         }
         Action::InstallSkillOps => {
@@ -514,10 +516,7 @@ fn run() -> Result<()> {
                 &binary,
                 Path::new(&user_directory),
                 |path| {
-                    let status = Tool::Chezmoi
-                        .command()
-                        .arg("--source")
-                        .arg(&cli.root)
+                    let status = Tool::chezmoi_in(&cli.root)
                         .args([
                             "--force",
                             "apply",
@@ -535,6 +534,11 @@ fn run() -> Result<()> {
                     );
                     Ok(())
                 },
+            )?;
+            dotfiles_xtask::freshness::record_installation(
+                Path::new(&user_directory),
+                &cli.root,
+                Built::SkillOps,
             )?;
         }
     }
