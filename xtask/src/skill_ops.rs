@@ -395,7 +395,7 @@ fn git_output(root: &Path, arguments: &[&str]) -> Result<String> {
         .to_owned())
 }
 
-/// Hashes a skill tree at a commit as the catalog hashes it, or returns None when the catalog cannot hold that tree.
+/// Hashes a skill tree at a commit as the catalog hashes it, or returns None when that tree lies outside what the catalog can hold.
 fn revision_at(root: &Path, commit: &str, skill: &str) -> Result<Option<String>> {
     let tree = format!("dot_agents/skills/{skill}");
     let listing = String::from_utf8(git_bytes(
@@ -436,7 +436,7 @@ fn revision_at(root: &Path, commit: &str, skill: &str) -> Result<Option<String>>
     Ok(Some(hash(&snapshots)?))
 }
 
-/// Finds the latest commit whose skill tree holds the assessed revision.
+/// Finds the newest commit whose skill tree holds the assessed revision.
 fn assessed_commit(root: &Path, skill: &str, revision: &str) -> Result<Option<String>> {
     let history = git_output(
         root,

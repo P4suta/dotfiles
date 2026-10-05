@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
 
-/// The variable OpenCode's GitHub MCP server reads its bearer token from.
+/// The variable OpenCode's GitHub Model Context Protocol server reads its bearer token from.
 const GITHUB_MCP_TOKEN: &str = "GH_MCP_TOKEN";
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -87,8 +87,9 @@ pub fn agent(
     )
 }
 
-/// OpenCode's GitHub MCP server authenticates with the GitHub CLI's own login, so the credential has one origin that the CLI keeps current; the server's read-only header limits what the agent can do through it.
-/// The token travels only in the agent's environment, and without a CLI login the agent starts without it.
+/// OpenCode's GitHub Model Context Protocol server reuses the login of `gh`, the GitHub command-line tool, so the credential has one origin that `gh` keeps current.
+/// The server's read-only header limits what the assistant can do through it.
+/// The token travels only in the assistant's environment, and without a `gh` login the assistant starts without it.
 fn agent_environment(agent: Agent) -> Vec<(&'static str, OsString)> {
     if !matches!(agent, Agent::Opencode) {
         return Vec::new();
@@ -110,8 +111,9 @@ fn agent_environment(agent: Agent) -> Vec<(&'static str, OsString)> {
     }
 }
 
-/// OpenCode runs MCP servers in a shared background service whose environment was fixed when it started, so the interface and `run` start their own server, which inherits the credentials this launch supplies.
-/// A subcommand comes first on the command line, so any other first word that is not a directory passes through unchanged, as does a launch that already chooses a server.
+/// OpenCode runs Model Context Protocol servers in a shared background service that keeps the environment it started with.
+/// The interface and `run` thus start their own server, which inherits the credentials this launch supplies.
+/// A subcommand comes first on the command line, so any other first word besides a directory passes through unchanged, as does a launch that already chooses a server.
 fn opencode_arguments(arguments: &[OsString]) -> Vec<OsString> {
     let chooses_server = arguments.iter().any(|argument| {
         argument == "--standalone"
@@ -134,7 +136,7 @@ fn opencode_arguments(arguments: &[OsString]) -> Vec<OsString> {
     }
 }
 
-/// A secret the launcher already supplies from another origin must not also be selected from Doppler, so each credential keeps one origin.
+/// A configuration must not also select from Doppler a secret the launcher already supplies from another origin, so each credential keeps one origin.
 fn conflicting_origin(agent: Agent, selected: &[&str]) -> bool {
     matches!(agent, Agent::Opencode) && selected.contains(&GITHUB_MCP_TOKEN)
 }
