@@ -1,4 +1,4 @@
 # hash: {{ include "dot_config/mise/config.toml.tmpl" | sha256sum }}{{ include ".chezmoidata.json" | sha256sum }}
 $ErrorActionPreference = 'Stop'
-& {{ includeTemplate "ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup tools --source {{ includeTemplate "ps_quote" .chezmoi.sourceDir }} --scoop-apps {{ includeTemplate "ps_quote" (join "," .scoop.apps) }}
+& {{ includeTemplate "ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup tools --scoop-apps {{ includeTemplate "ps_quote" (join "," .scoop.apps) }}
 exit $LASTEXITCODE

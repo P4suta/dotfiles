@@ -7,9 +7,7 @@
 	pager = delta
 {{- if .signing.enabled }}
 	# 全 repo (既存含む) で署名 hook を強制実行する単一ソース。
-	# 実体は dot_config/git/hooks/ (chezmoi 管理)。
-	# dotfiles repo 自身は run_onchange で local override し
-	# .git/hooks に戻して lefthook (typos/shellcheck) を生かしている。
+	# The hooks live in dot_config/git/hooks/ and run each repository's own lefthook configuration, so no repository installs lefthook hooks.
 	hooksPath = ~/.config/git/hooks
 {{- end }}
 

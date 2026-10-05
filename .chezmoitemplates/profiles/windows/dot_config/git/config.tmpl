@@ -13,6 +13,7 @@
 	autocrlf = false
 	eol = lf
 	# Every repository runs the same dotguard gates as on the Mac and Linux, including repositories cloned before this setting.
+	# The hooks run each repository's own lefthook configuration, so no repository installs lefthook hooks, which would replace these.
 	hooksPath = ~/.config/git/hooks
 
 [interactive]
