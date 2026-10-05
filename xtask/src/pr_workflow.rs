@@ -419,7 +419,17 @@ pub fn validate(
 fn read_document(document: DocumentArgs, final_check: bool) -> Result<(Target, ValidatedDocument)> {
     let body = fs::read_to_string(&document.body_file).context("read UTF-8 PR body file")?;
     let validated = validate(&document.target, document.title, body, final_check)?;
+    written_to_standard(&validated)?;
     Ok((document.target, validated))
+}
+
+/// Refuses a title or body that fails the installed prose checker.
+fn written_to_standard(document: &ValidatedDocument) -> Result<()> {
+    crate::prose::check_publication(
+        &crate::prose::Bundle::installed()?,
+        &document.title,
+        &document.body,
+    )
 }
 
 fn gh(args: &[OsString]) -> Result<String> {
@@ -683,6 +693,7 @@ pub fn run(action: Action) -> Result<()> {
                 let github = Github::connect()?;
                 let live = live_document(&github, &target, pr)?;
                 let document = validate(&target, live.title, live.body, r#final)?;
+                written_to_standard(&document)?;
                 require_issue(inspect_issue(&github, &target, Some(&document.body))?)?;
             } else {
                 read_document(

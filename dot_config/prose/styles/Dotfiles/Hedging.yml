@@ -1,0 +1,26 @@
+extends: existence
+message: "State the fact or its condition without the hedge '%s'."
+level: error
+ignorecase: true
+tokens:
+  - perhaps
+  - maybe
+  - probably
+  - possibly
+  - presumably
+  - arguably
+  - seemingly
+  - apparently
+  - hopefully
+  - it seems (?:that|to|like)
+  - it appears (?:that|to)
+  - I think
+  - I believe
+  - we think
+  - we believe
+  - sort of
+  - kind of
+  - more or less
+  - to some extent
+  - should work
+  - might work

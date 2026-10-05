@@ -31,4 +31,4 @@ Never silently rewrite an old record to claim the current design was always the 
 
 Keep instructions, reference material, and rationale in their existing authoritative homes.
 Do not create parallel architecture summaries, handoffs, progress logs, or verification narratives that repeat the ADR or code.
-Write outward-facing records in English, one sentence per source line, with enough reasoning to revisit the choice and no fixed length quota.
+Give enough reasoning to revisit the choice, with no fixed length quota, in a record that `prose check --channel document` accepts.

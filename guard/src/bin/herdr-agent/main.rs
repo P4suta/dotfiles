@@ -232,7 +232,7 @@ fn wanted_keys(text: &str) -> Vec<String> {
 }
 
 /// `op read` references to the private key of every item whose public key is wanted, in OpenSSH format because that is what `ssh-add -` reads.
-/// The field is named by its id, `private_key`, because its label is localized ("秘密鍵" in a Japanese 1Password) and `op read` resolves labels as written.
+/// The field is named by its id, `private_key`, because its label follows the display language of 1Password and `op read` resolves labels as written.
 fn private_key_refs(items: &[Value], wanted: &[String]) -> Vec<String> {
     items
         .iter()

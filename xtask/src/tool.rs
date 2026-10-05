@@ -96,6 +96,7 @@ pub enum Tool {
     Tmux,
     Unzip,
     UpdateDesktopDatabase,
+    Vale,
     Vivid,
     Winget,
     Wslpath,
@@ -105,7 +106,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 81] = [
+    pub const ALL: [Self; 82] = [
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
         Self::Atuin,
@@ -181,6 +182,7 @@ impl Tool {
         Self::Tmux,
         Self::Unzip,
         Self::UpdateDesktopDatabase,
+        Self::Vale,
         Self::Vivid,
         Self::Winget,
         Self::Wslpath,
@@ -265,6 +267,7 @@ impl Tool {
             Self::Starship => "starship",
             Self::Tailscale => "tailscale",
             Self::Television => "tv",
+            Self::Vale => "vale",
             Self::Vivid => "vivid",
             Self::Zoxide => "zoxide",
             Self::Zsh => "/bin/zsh",
@@ -294,6 +297,7 @@ impl Tool {
             Self::Pwsh => Provision::Pinned("powershell"),
             Self::Shellcheck => Provision::Pinned("shellcheck"),
             Self::Taplo => Provision::Pinned("taplo"),
+            Self::Vale => Provision::Pinned("vale"),
             Self::Curl
             | Self::Defaults
             | Self::Git

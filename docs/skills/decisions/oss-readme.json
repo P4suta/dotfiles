@@ -1,9 +1,11 @@
 {
-  "revision": "502ed927df63ed7e7cada6283488f03563498737fc5bcf68b4f25096b31c62d5",
-  "outcome": "keep",
-  "reason": "Retain a narrowly triggered public first-use document standard independently of architecture records and internal operating instructions.",
+  "revision": "edec624c8a7af5d1250ac7ab918aa5b4bc77c0fe30627d408d5201fdbbaa499c",
+  "outcome": "implemented",
+  "reason": "Replace the inline language and line-layout rule with a pointer to the prose checker, which enforces the writing standard on every README; the first-use document standard stays unchanged.",
   "evidence": [
-    "dot_agents/skills/oss-readme/SKILL.md"
+    "dot_agents/skills/oss-readme/SKILL.md",
+    "docs/adr/0014-one-writing-standard.md",
+    "xtask/tests/prose.rs"
   ],
   "revisit": null
 }

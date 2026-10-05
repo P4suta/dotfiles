@@ -116,7 +116,7 @@ if ! shopt -oq posix; then
   fi
 fi
 
-# user-installed binaries (mise 本体もここ)
+# User-installed binaries, including mise itself.
 export PATH="$HOME/.local/bin:$PATH"
 
 # 1Password CLI: use Windows op.exe for desktop app integration
@@ -132,14 +132,13 @@ alias sftp="sftp.exe"
 # Git invokes ssh as a subprocess where shell aliases don't apply; GIT_SSH covers it.
 export GIT_SSH="/mnt/c/WINDOWS/System32/OpenSSH/ssh.exe"
 
-# WezTerm から起動されると cwd が /mnt/c/... (Windows 側パスの翻訳) になることがあるため、
-# ホーム配下ではなく /mnt 配下で始まった場合はホームに戻す。(WezTerm 公式の推奨:
-# WSL 側のシェルで吸収する方針)
+# WezTerm can start the shell in a translated Windows directory under /mnt.
+# The shell returns to the home directory in that case, following the WezTerm guidance to handle it in WSL.
 case "$PWD" in /mnt/*) cd ~ ;; esac
 
 # --- mise + modern CLI integrations (managed by chezmoi) ---
-# 各ツールの shell init を流すだけ。対話 alias は貼らない方針
-# (モダン CLI は本名で打つ / Claude Code は BASH_ENV 経由で PATH に揃う)。
+# Only the shell init of each tool runs here, without interactive aliases.
+# Modern CLIs keep their real names, and Claude Code gets the same PATH through BASH_ENV.
 
 if [ -x "$HOME/.local/bin/mise" ]; then
   eval "$("$HOME/.local/bin/mise" activate bash)"
@@ -151,20 +150,20 @@ command -v direnv   >/dev/null && eval "$(direnv hook bash)"
 command -v atuin    >/dev/null && eval "$(atuin init bash --disable-up-arrow)"
 command -v fzf      >/dev/null && eval "$(fzf --bash)"
 
-# bat: man ページを bat で render
+# bat renders manual pages.
 command -v bat   >/dev/null && export MANPAGER="sh -c 'col -bx | bat -l man -p'"
-# vivid: ls / eza のカラーテーマを生成 (テーマは ~/.config/vivid/filetypes.yml で上書き可)
+# vivid generates the ls and eza colors, and ~/.config/vivid/filetypes.yml overrides the theme.
 command -v vivid >/dev/null && export LS_COLORS="$(vivid generate molokai)"
 
-# jj 補完
+# jj completion.
 command -v jj >/dev/null && source <(jj util completion bash) 2>/dev/null || true
 
-# WSL 固有
+# WSL integration.
 export BROWSER="/mnt/c/Windows/System32/cmd.exe /c start"
 command -v wslview >/dev/null && alias open='wslview'
 
 {{ if eq .role "work" -}}
-# work 固有(必要になったら)
+# Work machine settings, when needed.
 # export HTTP_PROXY=...
 {{- end }}
 # --- end managed block ---

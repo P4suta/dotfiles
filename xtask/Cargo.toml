@@ -10,6 +10,7 @@ license = "MIT"
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.6", features = ["derive", "env"] }
+dotguard = { path = "../guard" }
 pulldown-cmark = "0.13"
 yaml-rust2 = "0.13"
 serde_json = "1.0"

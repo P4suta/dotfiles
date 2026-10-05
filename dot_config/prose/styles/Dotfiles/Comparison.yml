@@ -1,0 +1,14 @@
+extends: existence
+message: "Describe the target as it stands, without the comparison '%s'."
+level: error
+ignorecase: true
+tokens:
+  - unlike (?:on )?(?:macOS|Linux|Windows|WSL|the Mac|other platforms|other hosts|other machines)
+  - (?:just |exactly )?like on (?:macOS|Linux|Windows|WSL|the Mac)
+  - (?:same|equivalent) as on (?:macOS|Linux|Windows|WSL|the Mac)
+  - (?:on|for) (?:other|another) (?:platforms?|operating systems?)
+  - (?:was|were|had been) previously
+  - formerly
+  - historically
+  - in the past
+  - (?:the )?former (?:behavior|behaviour|implementation|version|approach|layout|design)

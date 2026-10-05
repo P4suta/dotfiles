@@ -138,6 +138,8 @@ enum Action {
     InstallReviewGuard,
     InstallSkillOps,
     InstallPrWorkflow,
+    /// Install the prose checker, its pinned linters, and the agent reply hooks.
+    InstallProse,
     PrWorkflow {
         #[command(subcommand)]
         command: dotfiles_xtask::pr_workflow::Action,
@@ -313,6 +315,40 @@ fn run() -> Result<()> {
                 },
             )?;
         }
+        Action::InstallProse => {
+            cargo(
+                &cli.root,
+                Path::new("xtask/Cargo.toml"),
+                &["build", "--locked", "--release", "--bin", "prose"],
+            )?;
+            let status = Tool::Chezmoi
+                .command()
+                .arg("--source")
+                .arg(&cli.root)
+                .args([
+                    "--force",
+                    "apply",
+                    "--include",
+                    "dirs,files",
+                    "--source-path",
+                    "--parent-dirs",
+                ])
+                .arg(cli.root.join(dotfiles_xtask::prose::SOURCE_CONFIG))
+                .arg(cli.root.join("dot_config/opencode/plugins/prose.ts"))
+                .status()?;
+            ensure!(
+                status.success(),
+                "the prose configuration installation failed with {status}"
+            );
+            let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
+            let binary = check_build_dir(&cli.root, configured.as_deref())
+                .join("release")
+                .join(format!("prose{}", std::env::consts::EXE_SUFFIX));
+            let user_directory =
+                std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+                    .context("user directory is unavailable")?;
+            dotfiles_xtask::prose::install(&cli.root, &binary, Path::new(&user_directory))?;
+        }
         Action::Proofs => dotfiles_xtask::skill_proofs::verify(&cli.root)?,
         Action::Skills => {
             dotfiles_xtask::skill_ops::check_catalog(&cli.root)?;
@@ -332,6 +368,11 @@ fn run() -> Result<()> {
                 unknown.is_empty(),
                 "references to recipes the justfile does not define: {unknown:#?}"
             );
+            dotfiles_xtask::prose::repository(
+                &cli.root,
+                dotfiles_xtask::prose::Scope::Documents,
+                &dotfiles_xtask::prose::Bundle::source(&cli.root)?,
+            )?;
             let unreferenced = dotfiles_xtask::quality::unreferenced_leaves(&cli.root)?;
             anyhow::ensure!(
                 unreferenced.is_empty(),
@@ -341,6 +382,8 @@ fn run() -> Result<()> {
                 "Validated {} shared skills and aliases",
                 validate_tree(&cli.root)?
             );
+            // The plugin tests import the adapter packages that this step installs.
+            dotfiles_xtask::quality::adapters(&cli.root)?;
             check_package(&cli.root, Path::new("xtask/Cargo.toml"))?;
             check_package(
                 &cli.root,
@@ -350,7 +393,6 @@ fn run() -> Result<()> {
             if cfg!(windows) {
                 check_package(&cli.root, Path::new("tools/dotctl/Cargo.toml"))?;
             }
-            dotfiles_xtask::quality::adapters(&cli.root)?;
             dotfiles_xtask::profiles::check_profiles(&cli.root, None)?;
             dotfiles_xtask::quality::secrets(&cli.root)?;
         }

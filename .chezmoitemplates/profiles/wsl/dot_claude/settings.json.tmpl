@@ -1,39 +1,40 @@
 {{- /*
-  Claude Code 全体権限設定 (~/.claude/settings.json)。
+  Global Claude Code permissions in ~/.claude/settings.json.
 
-  方針: 「お任せ開発」を成立させるため deny は最小限・的を絞った形に。
-  普通の操作は通す。
-  bypass パターンや破壊的アクションだけ落とす。
+  Delegated development needs a small, targeted deny list.
+  Ordinary operations pass.
+  Only bypass patterns and destructive actions fail.
 
-  deny[] のカテゴリ (entry を grep するときの参考):
-  - Destructive filesystem ─ rm -rf 系、find -delete、xargs rm、rmdir
-  - Privilege escalation ─ sudo
-  - Git: 履歴改ざん ─ force push、hard reset、rebase -i、filter-branch、update-ref -d、clean -fd
-  - Git: 署名 bypass ─ --no-verify、--no-gpg-sign、`-c commit.gpgsign=false`、`-c core.hooksPath=`、`git config commit.gpgsign false` 等
-  - Network code execution ─ curl|sh、wget|sh
-  - Permission tampering ─ chmod 777
-  - Package install ─ brew install (人間 in the loop)
-  - Secret file read/write ─ .env、id_*, *.key, *.pem、.aws/credentials、.netrc、.npmrc、.kube/config、.docker/config.json 等
-  - dotfiles 管理対象 ─ .gitconfig、.bashrc、.profile、.claude/settings.json (この設定ファイル自身) の直接 Write/Edit
+  Deny categories, for searching the entries:
+  - Destructive filesystem: rm -rf and its variants, find -delete, xargs rm, rmdir
+  - Privilege escalation: sudo
+  - Git history rewrites: force push, hard reset, rebase -i, filter-branch, update-ref -d, clean -fd
+  - Git signing bypass: --no-verify, --no-gpg-sign, `-c commit.gpgsign=false`, `-c core.hooksPath=`, `git config commit.gpgsign false`, and similar
+  - Network code execution: curl|sh, wget|sh
+  - Permission tampering: chmod 777
+  - Package installation: brew install, which keeps a human in the loop
+  - Secret file reads and writes: .env, id_*, *.key, *.pem, .aws/credentials, .netrc, .npmrc, .kube/config, .docker/config.json, and similar
+  - Files the dotfiles manage: direct Write or Edit of .gitconfig, .bashrc, .profile, and .claude/settings.json itself
 
-  あえて deny に**入れない**もの:
-  - `Bash(git commit:*)` ─ 入れるとお任せ開発で commit 不能になる。
-    署名 bypass flag だけ deny し、normal commit は post-commit hook が裏で signed を保証する。
-  - `Bash(git config *)` ─ 広すぎる。
-    signing 関連のキーだけ的を絞る。
-  - `Bash(git reset:*)` ─ soft/mixed は便利。
-    `--hard` だけ落とす。
+  Left out of the deny list on purpose:
+  - `Bash(git commit:*)` would block every commit in delegated development.
+    Only the signing bypass flags fail, and the post-commit hook signs every commit.
+  - `Bash(git config *)` covers too much.
+    Only the signing keys fail.
+  - `Bash(git reset:*)` would block the useful soft and mixed resets.
+    Only `--hard` fails.
 
-  JSON 構造: Claude Code は file を canonical 形式に書き戻すことがある (key 順、空行除去、`/advisor` 等が advisorModel を追加など)。
-  drift を最小化するため、本テンプレも Claude Code が出力する形に合わせてある:
-  1. permissions block を最初
-  2. 他の top-level key (language / advisorModel / theme / skipAutoPermissionPrompt) を最後にまとめる
-  3. deny[] の中に blank line を入れない
-  もし `/advisor` で advisorModel を変えたい場合、`chezmoi edit ~/.claude/settings.json` で本テンプレを編集して `chezmoi apply` する (runtime の `/advisor` 変更は次回 apply で revert されるので注意)。
+  On the JSON layout, Claude Code rewrites this file in a canonical form, with its own key order and without blank lines, and `/advisor` adds advisorModel.
+  This template follows that output to keep drift small:
+  1. The permissions block comes first.
+  2. The other top-level keys come last: language, advisorModel, theme, and skipAutoPermissionPrompt.
+  3. The deny array holds no blank lines.
+  To change advisorModel, edit this template with `chezmoi edit ~/.claude/settings.json` and run `chezmoi apply`.
+  The next apply reverts a runtime `/advisor` change.
 
-  permission deny の表記:
-  - `Bash(<prefix>:*)` ─ <prefix> から始まる任意の Bash 起動 (空白以降の引数も含む) を deny する。
-    確実に止めたいものは prefix 形で書く。
+  Deny entry syntax:
+  - `Bash(<prefix>:*)` denies any Bash invocation that starts with <prefix>, including the arguments after a space.
+    Write a rule in prefix form when it must hold.
   */ -}}
 {
   "permissions": {

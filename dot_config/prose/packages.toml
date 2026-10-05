@@ -1,0 +1,31 @@
+# Pinned Vale and its vendored style packages.
+# The checker refuses a style tree whose digest differs from this record.
+vale = "3.24.0"
+
+[[package]]
+name = "Google"
+version = "0.7.1"
+source = "https://github.com/errata-ai/Google/releases/download/v0.7.1/Google.zip"
+archive_sha256 = "4b67fca1f2a88595b2a578ab98bbf3017a23af677b04f93e862843f3ea1a9a0b"
+tree_sha256 = "d0bf304a7d705c33c26722b30ba2348d3fd6b122f4259bf9dfd9a7f9e8c04da4"
+
+[[package]]
+name = "Microsoft"
+version = "0.15.1"
+source = "https://github.com/errata-ai/Microsoft/releases/download/v0.15.1/Microsoft.zip"
+archive_sha256 = "0b37660b244a9399d7f10225895773291d27b2967ed0d239a1d379b633e8cd16"
+tree_sha256 = "f23bf2fd6eac2c8f69316db3053141d04abe0b07f9678748150e761582f41ccc"
+
+[[package]]
+name = "write-good"
+version = "0.4.1"
+source = "https://github.com/errata-ai/write-good/releases/download/v0.4.1/write-good.zip"
+archive_sha256 = "2960ef10861ddc7dc76292a4967eb3789bf05ca24f862042f6d15f53332887f0"
+tree_sha256 = "5b70ad12d92886887524c0935ee58c6bacbee103f3b7f8e297fdb857ff876549"
+
+[[package]]
+name = "proselint"
+version = "0.3.4"
+source = "https://github.com/errata-ai/proselint/releases/download/v0.3.4/proselint.zip"
+archive_sha256 = "48b1fb481ba44f6505d44346b283f6cdc74efd234f913bbdb09bf34420fab81c"
+tree_sha256 = "76fee467c229e3f65af661cbe8611af54dc78051a3a94bc716ef4fd8d3a58318"

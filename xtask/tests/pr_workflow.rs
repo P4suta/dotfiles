@@ -60,6 +60,11 @@ impl Fixture {
         command
             .current_dir(self.directory.path())
             .env("PATH", std::env::join_paths(paths)?)
+            .env(
+                "PROSE_CONFIG",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../dot_config/prose"),
+            )
+            .env("PROSE_RUNTIME", self.directory.path().join("prose"))
             .env("GH_FIXTURE_LOG", &self.log)
             .env("GH_FIXTURE_USER", r#"{"login":"P4suta","id":42543015}"#)
             .env("GH_FIXTURE_REPOSITORY", serde_json::json!({
@@ -465,8 +470,26 @@ fn invalid_documents_never_start_gh_and_check_has_no_effects() -> Result<()> {
 }
 
 #[test]
+fn prose_violations_never_start_gh() -> Result<()> {
+    let fixture = Fixture::new(
+        "## Why
+As the owner requested, the parser keeps edits.
+",
+    )?;
+    for action in ["check", "create", "edit"] {
+        let output = fixture.document(action, "fix: preserve edits")?;
+        assert!(!output.status.success(), "{action}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Dotfiles.Attribution"), "{stderr}");
+        assert!(stderr.contains("As the owner requested, the parser keeps edits."));
+        assert!(!fixture.log.try_exists()?);
+    }
+    Ok(())
+}
+
+#[test]
 fn completed_markdown_and_literal_marker_examples_are_accepted() -> Result<()> {
-    let body = "## Changes\nSort the todo list and remove obsolete FIXME comments.\n\n<details>\n<summary>Validation results</summary>\nThe regression passed.\n</details>\n\n```yaml\nvalue: ${{ secrets.X }}\nTODO\n{{description}}\n```\n\n~~~text\n[insert description]\n~~~\n\nAn inline example uses `{{title}}` and `TBD`.\nThe Actions expression is ${{ secrets.X }}.\n";
+    let body = "## Changes\nSort the todo list and remove obsolete `FIXME` comments.\n\n<details>\n<summary>Validation results</summary>\nThe regression passed.\n</details>\n\n```yaml\nvalue: ${{ secrets.X }}\nTODO\n{{description}}\n```\n\n~~~text\n[insert description]\n~~~\n\nAn inline example uses `{{title}}` and `TBD`.\nThe Actions expression ${{ secrets.token }} stays literal.\n";
     let fixture = Fixture::new(body)?;
     for operation in ["check", "create", "edit"] {
         let output = fixture.document(operation, "feat: add todo list sorting")?;

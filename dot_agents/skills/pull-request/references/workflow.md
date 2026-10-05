@@ -2,6 +2,7 @@
 
 The dotfiles Rust xtask provides the installed `pr-workflow` executable and the same implementation under its `pr-workflow` subcommand.
 Install through the maintained `mise run install:pr-workflow` task from the reviewed dotfiles checkout.
+The `check`, `create`, and `edit` commands also need the prose checker from `mise run install:prose`.
 Use the installed native executable from any destination repository; it requires the destination host's own authenticated `gh` session.
 The command always takes an exact `OWNER/REPO` and never infers a publication target.
 Its GitHub host is `github.com`, including when another `GH_HOST` is inherited.
@@ -22,6 +23,7 @@ Preparation is read-only and checks the issue before implementation.
 Use `gh issue view` to read its problem, scope, and acceptance criteria; the command checks existence, identity, open state, and mechanically incomplete content.
 It does not require fixed issue headings or assess the quality of the prose.
 Issue creation is a separate authorized `gh issue create` operation; the checker never opens an issue automatically.
+Run `prose check --channel issue --title TITLE BODY_FILE` on an issue before creating it.
 
 For personal non-fork repositories, pass `--issue NUMBER` to create, edit, ready, and live checks, and put `Closes #NUMBER.` or an equivalent GitHub closing reference in the PR body.
 Full issue URLs and Markdown links are accepted only for the selected issue in the exact destination.

@@ -1,9 +1,11 @@
 {
-  "revision": "415be92516b5ddf592100ab61f561cede27a14a3e0ed1c7693afec3bdf02bbdc",
-  "outcome": "keep",
-  "reason": "Keep source clarity and narrow lint-exception judgment separate from OComment invocation; executable representation and actual public contracts remain authoritative.",
+  "revision": "2b1e215b3dab0d713d34520c32036ddfd87b7c1c18e4a8416e6426a2b56a3b1f",
+  "outcome": "implemented",
+  "reason": "Replace the inline language and line-layout rule for comments with a pointer to the prose checker, which reads comments through OComment; source clarity and lint-exception judgment stay unchanged.",
   "evidence": [
-    "dot_agents/skills/concise-source/SKILL.md"
+    "dot_agents/skills/concise-source/SKILL.md",
+    "docs/adr/0014-one-writing-standard.md",
+    "xtask/tests/prose.rs"
   ],
   "revisit": null
 }

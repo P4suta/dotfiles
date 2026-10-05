@@ -11,6 +11,10 @@ mode = "none"
 [style]
 wrap = "sentence"
 
+# Vendored Vale packages keep their upstream text.
+[files]
+exclude = ["dot_config/prose/styles/**"]
+
 # NOTE: What a chezmoi source name hides.
 # NOTE: `dot_` stands for a leading dot and `.tmpl` says the file is rendered before it is written, so the format is the extension *before* the suffix and no detector can see it.
 # NOTE: A template is not the language it templates, so naming these is this repository's decision to make rather than a default to change.

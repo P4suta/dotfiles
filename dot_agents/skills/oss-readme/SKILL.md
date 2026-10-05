@@ -23,6 +23,6 @@ Keep design rationale in ADRs and contributor-only commands in the existing cont
 Do not create companion documentation merely to move deleted README text somewhere else.
 Preserve necessary security, compatibility, accessibility, and license information.
 
-Use English for outward-facing text and one sentence per source line.
+Write the README so that `prose check --channel document` accepts it.
 Read the rendered result and check its links and commands.
 The reader should be able to understand the purpose and reach a useful first result without scrolling through project history.

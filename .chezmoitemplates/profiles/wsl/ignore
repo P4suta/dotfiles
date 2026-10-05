@@ -1,17 +1,17 @@
-# chezmoi が追跡しない(= 展開も git 追跡もしない)パス
+# Paths chezmoi neither applies nor tracks.
 
-# 機械固有のログイン状態 (token を含む)。
-# config.yml は portable な設定だけが入る前提で dotfiles 管理対象。
+# Machine-local sign-in state, including tokens.
+# The dotfiles manage config.yml because it holds only portable settings.
 .config/gh/hosts.yml
 
-# ランタイム状態
+# Runtime state.
 .local/share/atuin/**
 .local/share/mise/**
 .local/state/**
 .cache/**
 .bash_history
 
-# Claude Code の machine-local データは除外、CLAUDE.md だけ追跡
+# Claude Code machine-local data stays out, and the dotfiles track only CLAUDE.md.
 .claude/projects/**
 .claude/plans/**
 .claude/shell-snapshots/**
@@ -20,10 +20,10 @@
 .claude/settings.local.json
 .claude.json
 
-# リポ内のドキュメント(ホームへは展開しない)
+# Repository documentation, which never reaches the home directory.
 README.md
 
-# repo dev tooling (ホームへは展開しない、git 追跡のみ)
+# Repository tooling, tracked in Git and never applied to the home directory.
 lefthook.yml
 .typos.toml
 

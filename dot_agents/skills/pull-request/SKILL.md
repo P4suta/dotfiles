@@ -42,13 +42,13 @@ Local creation always starts as a draft; moving it to review is a separate autho
 
 Without destination-specific rules, write an English [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) title: `type(scope)!: description`.
 Scope is optional; include `!` for breaking changes.
-Prefer a concise description of the final behavior; length and stylistic preferences are recommendations.
+`pr-workflow check` runs the prose checker on the title and body; rewrite every sentence it reports.
 Explain why the change is needed, what users or maintainers can now observe, and the actual validation outcome.
 Use `Why`, `Changes`, and `Validation` when no template exists; add migration or other sections only when relevant.
-Write each prose sentence on its own source line and rewrite the description around the final change if the scope changed.
+Rewrite the description around the final change if the scope changed.
 
 Use `pr-workflow start/check/create/edit/ready` for preparation, document validation, and publication rather than directly invoking the corresponding `gh` mutation.
-The command enforces title syntax, meaningful body content, known unfinished placeholders, and draft transitions without prescribing body headings.
+The command enforces title syntax, meaningful body content, known unfinished placeholders, the writing standard, and draft transitions without prescribing body headings.
 Personal non-fork publication requires `--issue NUMBER`, a live open issue in the exact destination, and a visible closing reference in the proposed or current body.
 Create, edit, ready, and the live final check recheck this prerequisite; CodeRabbit generation does not exempt it.
 Compare the actual diff with the issue's scope and acceptance criteria before publication, splitting independent changes into separate issues and PRs.

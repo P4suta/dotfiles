@@ -16,7 +16,7 @@ Keep text only when a reader needs information the implementation cannot express
 Keep public API documentation sufficient to use the API correctly, with examples or failure conditions where necessary.
 An unsafe operation still needs its actual safety argument; hiding it to obtain a clean comment report is not a correction.
 Put durable architectural tradeoffs in an ADR instead of repeating them at every call site.
-Use English and one sentence per source line.
+Write comments that `prose check --channel comment` accepts; the checker defines the language, style, and line rules.
 
 Treat `#[allow(...)]`, file-wide disable directives, ignored failures, and exclusions as prohibited by default.
 Fix the representation or behavior that causes the diagnostic rather than reducing the checking surface.

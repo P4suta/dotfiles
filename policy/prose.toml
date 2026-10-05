@@ -1,0 +1,2680 @@
+[[exempt]]
+scope = "documents"
+paths = ["dot_config/prose/styles/"]
+reason = "Vendored Vale packages keep their upstream text."
+
+[[exempt]]
+scope = "comments"
+paths = ["dot_config/prose/styles/"]
+reason = "Vendored Vale packages keep their upstream text."
+
+[[exempt]]
+scope = "comments"
+paths = ["guard/src/lang.rs", "guard/src/staged.rs"]
+rules = ["Dotfiles.English"]
+reason = "The language detector documents and tests the scripts it refuses."
+
+[legacy]
+reason = "Prose written before ADR 0014 adopted the writing standard. Each count only falls, and rewriting that prose removes its entry."
+
+[legacy.documents.".chezmoitemplates/agent_policy"]
+"Google.Contractions" = 5
+"Google.FirstPerson" = 3
+"Google.Headings" = 1
+"Google.Passive" = 3
+"Google.Semicolons" = 7
+"Google.WordList" = 4
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 5
+"Microsoft.FirstPerson" = 3
+"Microsoft.HeadingAcronyms" = 1
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 3
+"Microsoft.Semicolon" = 7
+"Microsoft.SentenceLength" = 1
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 3
+"write-good.Passive" = 3
+"write-good.TooWordy" = 4
+
+[legacy.documents.".chezmoitemplates/prose_policy"]
+"Google.Acronyms" = 2
+"Google.Contractions" = 4
+"Google.EmDash" = 1
+"Google.OxfordComma" = 1
+"Google.Parens" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 1
+"Microsoft.Acronyms" = 2
+"Microsoft.Contractions" = 4
+"Microsoft.Dashes" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 1
+"Microsoft.Wordiness" = 1
+"write-good.E-Prime" = 6
+"write-good.Passive" = 2
+"write-good.TooWordy" = 1
+
+[legacy.documents.".chezmoitemplates/signing_pubkey"]
+"Google.Parens" = 1
+
+[legacy.documents."README.md"]
+"Google.Acronyms" = 1
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Semicolons" = 2
+"Google.WordList" = 1
+"Google.WordListCase" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Semicolon" = 2
+"Microsoft.Terms" = 2
+"Microsoft.Vocab" = 1
+
+[legacy.documents."docs/adr/0001-shared-skills-and-governance.md"]
+"Google.Colons" = 1
+"Google.Headings" = 1
+"Microsoft.Adverbs" = 2
+"Microsoft.Headings" = 1
+"Microsoft.Terms" = 1
+"write-good.E-Prime" = 2
+"write-good.TooWordy" = 1
+
+[legacy.documents."docs/adr/0002-coderabbit-local-review-budget.md"]
+"Google.Colons" = 1
+"Google.Contractions" = 3
+"Google.Headings" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 1
+"Google.WordList" = 3
+"Microsoft.Contractions" = 3
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 4
+"write-good.Passive" = 1
+"write-good.TooWordy" = 1
+
+[legacy.documents."docs/adr/0003-local-skill-operations.md"]
+"Google.Acronyms" = 1
+"Google.Colons" = 1
+"Google.Contractions" = 5
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 4
+"Google.Semicolons" = 3
+"Microsoft.Acronyms" = 1
+"Microsoft.Adverbs" = 2
+"Microsoft.Contractions" = 5
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 4
+"Microsoft.Semicolon" = 3
+"Microsoft.SentenceLength" = 1
+"Microsoft.Terms" = 2
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 4
+"write-good.Passive" = 4
+"write-good.TooWordy" = 4
+
+[legacy.documents."docs/adr/0004-checked-pull-request-authoring.md"]
+"Google.Colons" = 1
+"Google.Contractions" = 3
+"Google.ExcessiveClaims" = 1
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 5
+"Google.WordList" = 1
+"Microsoft.Contractions" = 3
+"Microsoft.GeneralURL" = 1
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 5
+"Microsoft.SentenceLength" = 1
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 6
+"write-good.Passive" = 1
+"write-good.TooWordy" = 2
+
+[legacy.documents."docs/adr/0005-native-desktop-integration-assurance.md"]
+"Google.Acronyms" = 2
+"Google.Colons" = 1
+"Google.Passive" = 3
+"Google.Semicolons" = 1
+"Microsoft.Acronyms" = 2
+"Microsoft.Passive" = 3
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 1
+"write-good.E-Prime" = 6
+"write-good.Passive" = 3
+
+[legacy.documents."docs/adr/0006-global-personal-issue-prerequisite.md"]
+"Google.Acronyms" = 2
+"Google.Colons" = 1
+"Google.Contractions" = 6
+"Google.Headings" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 4
+"Microsoft.Acronyms" = 2
+"Microsoft.Contractions" = 6
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 4
+"write-good.E-Prime" = 5
+"write-good.Passive" = 1
+"write-good.TooWordy" = 2
+
+[legacy.documents."docs/adr/0007-reserved-review-capacity.md"]
+"Google.Acronyms" = 1
+"Google.Colons" = 1
+"Google.Contractions" = 8
+"Google.ExcessiveClaims" = 1
+"Google.Headings" = 1
+"Google.LyHyphens" = 1
+"Google.OxfordComma" = 2
+"Google.Passive" = 2
+"Google.Semicolons" = 2
+"Google.WordList" = 6
+"Microsoft.Acronyms" = 1
+"Microsoft.Adverbs" = 4
+"Microsoft.Contractions" = 8
+"Microsoft.Headings" = 1
+"Microsoft.Hyphens" = 1
+"Microsoft.OxfordComma" = 2
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 2
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 4
+"write-good.E-Prime" = 7
+"write-good.Passive" = 2
+"write-good.TooWordy" = 5
+
+[legacy.documents."docs/adr/0008-layered-review-capacity.md"]
+"Google.Acronyms" = 2
+"Google.Colons" = 1
+"Google.Contractions" = 2
+"Google.ExcessiveClaims" = 1
+"Google.Headings" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 4
+"Google.WordList" = 1
+"Microsoft.Acronyms" = 2
+"Microsoft.Contractions" = 2
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 4
+"Microsoft.SentenceLength" = 1
+"Microsoft.Vocab" = 2
+"proselint.Needless" = 1
+"write-good.E-Prime" = 3
+"write-good.Passive" = 2
+"write-good.TooWordy" = 5
+
+[legacy.documents."docs/adr/0009-public-native-profiles.md"]
+"Google.Acronyms" = 8
+"Google.Contractions" = 4
+"Google.LyHyphens" = 1
+"Google.Parens" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 4
+"Google.WordList" = 2
+"Google.WordListCase" = 5
+"Microsoft.Accessibility" = 1
+"Microsoft.Acronyms" = 8
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 4
+"Microsoft.Hyphens" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 4
+"Microsoft.SentenceLength" = 1
+"Microsoft.Terms" = 1
+"Microsoft.Uppercase" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 5
+"write-good.Passive" = 1
+"write-good.TooWordy" = 2
+
+[legacy.documents."docs/adr/0010-rehearse-native-application.md"]
+"Google.Acronyms" = 2
+"Google.Colons" = 1
+"Google.Contractions" = 8
+"Google.Passive" = 18
+"Google.Semicolons" = 11
+"Google.WordListCase" = 9
+"Microsoft.Acronyms" = 2
+"Microsoft.Contractions" = 8
+"Microsoft.Passive" = 18
+"Microsoft.Semicolon" = 11
+"Microsoft.SentenceLength" = 14
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 27
+"write-good.Passive" = 18
+"write-good.TooWordy" = 2
+"write-good.Weasel" = 1
+
+[legacy.documents."docs/adr/0011-one-git-policy-on-every-host.md"]
+"Google.Colons" = 1
+"Google.Contractions" = 3
+"Google.Passive" = 4
+"Google.Semicolons" = 3
+"Google.WordListCase" = 1
+"Microsoft.Contractions" = 3
+"Microsoft.Passive" = 4
+"Microsoft.Semicolon" = 3
+"Microsoft.SentenceLength" = 5
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 4
+"write-good.Passive" = 4
+"write-good.TooWordy" = 1
+
+[legacy.documents."docs/adr/0012-windows-proofs-in-a-linux-container.md"]
+"Google.Acronyms" = 2
+"Google.Anthropomorphism" = 1
+"Google.Colons" = 1
+"Google.Contractions" = 4
+"Google.Passive" = 9
+"Google.Semicolons" = 1
+"Microsoft.Acronyms" = 2
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 4
+"Microsoft.Passive" = 9
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 3
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 9
+"write-good.Passive" = 9
+"write-good.TooWordy" = 1
+
+[legacy.documents."docs/adr/0013-per-skill-decision-records.md"]
+"Google.Acronyms" = 3
+"Google.Colons" = 1
+"Google.Contractions" = 1
+"Google.Passive" = 3
+"Google.Semicolons" = 1
+"Google.WordListCase" = 2
+"Microsoft.Acronyms" = 3
+"Microsoft.Contractions" = 1
+"Microsoft.Passive" = 3
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 2
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 7
+"write-good.Passive" = 3
+
+[legacy.documents."docs/coderabbit/setup.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 8
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 13
+"Google.Semicolons" = 14
+"Google.WordList" = 7
+"Google.WordListCase" = 2
+"Microsoft.Accessibility" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Adverbs" = 3
+"Microsoft.Contractions" = 8
+"Microsoft.Headings" = 1
+"Microsoft.Militaristic" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 13
+"Microsoft.Semicolon" = 14
+"Microsoft.SentenceLength" = 3
+"Microsoft.Terms" = 5
+"Microsoft.Vocab" = 6
+"write-good.E-Prime" = 24
+"write-good.Passive" = 13
+"write-good.TooWordy" = 5
+
+[legacy.documents."docs/skills/assurance-scope-evaluation.md"]
+"Google.Contractions" = 4
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 6
+"Google.WordListCase" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 4
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 6
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 3
+"write-good.Passive" = 2
+"write-good.TooWordy" = 3
+
+[legacy.documents."docs/skills/nas-evaluation.md"]
+"Google.Acronyms" = 7
+"Google.Contractions" = 2
+"Google.Headings" = 1
+"Google.Passive" = 6
+"Google.Semicolons" = 5
+"Microsoft.Acronyms" = 7
+"Microsoft.Contractions" = 2
+"Microsoft.HeadingAcronyms" = 1
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 6
+"Microsoft.Semicolon" = 5
+"Microsoft.Vocab" = 5
+"write-good.E-Prime" = 10
+"write-good.Passive" = 6
+
+[legacy.documents."dot_agents/skills/adr/SKILL.md"]
+"Google.Acronyms" = 5
+"Google.Contractions" = 2
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 2
+"Microsoft.Acronyms" = 5
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 2
+"write-good.E-Prime" = 4
+"write-good.Passive" = 1
+"write-good.TooWordy" = 3
+
+[legacy.documents."dot_agents/skills/apple-notarization/SKILL.md"]
+"Google.Contractions" = 1
+"Google.Headings" = 1
+"Google.Semicolons" = 3
+"Google.WordList" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 1
+"Microsoft.Headings" = 1
+"Microsoft.Semicolon" = 3
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 3
+"write-good.TooWordy" = 1
+
+[legacy.documents."dot_agents/skills/apple-signing/SKILL.md"]
+"Google.Contractions" = 2
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Semicolons" = 2
+"Google.WordListCase" = 2
+"Microsoft.Contractions" = 2
+"Microsoft.HeadingAcronyms" = 1
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Semicolon" = 2
+"write-good.E-Prime" = 1
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/approval-boundaries/SKILL.md"]
+"Google.Acronyms" = 2
+"Google.Contractions" = 9
+"Google.Headings" = 1
+"Google.Semicolons" = 2
+"Google.WordListCase" = 1
+"Microsoft.Acronyms" = 2
+"Microsoft.Contractions" = 9
+"Microsoft.Headings" = 1
+"Microsoft.Semicolon" = 2
+"write-good.E-Prime" = 4
+"write-good.TooWordy" = 2
+"write-good.Weasel" = 1
+
+[legacy.documents."dot_agents/skills/ci-budget/SKILL.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 7
+"Google.Headings" = 1
+"Google.Passive" = 4
+"Google.Semicolons" = 5
+"Microsoft.Acronyms" = 1
+"Microsoft.Adverbs" = 3
+"Microsoft.Contractions" = 7
+"Microsoft.HeadingAcronyms" = 1
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 4
+"Microsoft.Semicolon" = 5
+"Microsoft.Terms" = 1
+"write-good.E-Prime" = 9
+"write-good.Passive" = 4
+"write-good.TooWordy" = 1
+
+[legacy.documents."dot_agents/skills/ci-budget/references/push-control.md"]
+"Google.Contractions" = 2
+"Google.Headings" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 1
+"Microsoft.Terms" = 1
+"write-good.E-Prime" = 3
+"write-good.Passive" = 2
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/code-signing/SKILL.md"]
+"Google.Acronyms" = 8
+"Google.Contractions" = 15
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 4
+"Google.Semicolons" = 6
+"Google.WordList" = 1
+"Google.WordListCase" = 1
+"Microsoft.Acronyms" = 8
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 15
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 4
+"Microsoft.Semicolon" = 6
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 3
+"write-good.E-Prime" = 10
+"write-good.Passive" = 4
+"write-good.TooWordy" = 5
+
+[legacy.documents."dot_agents/skills/code-signing/references/apple.md"]
+"Google.Acronyms" = 15
+"Google.Colons" = 5
+"Google.Contractions" = 27
+"Google.FirstPerson" = 1
+"Google.OxfordComma" = 2
+"Google.Passive" = 1
+"Google.Semicolons" = 12
+"Google.Timeless" = 1
+"Google.Will" = 1
+"Google.WordList" = 13
+"Google.WordListCase" = 5
+"Microsoft.Acronyms" = 15
+"Microsoft.Adverbs" = 2
+"Microsoft.Contractions" = 27
+"Microsoft.FirstPerson" = 1
+"Microsoft.HeadingAcronyms" = 3
+"Microsoft.OxfordComma" = 2
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 12
+"Microsoft.SentenceLength" = 1
+"Microsoft.Uppercase" = 1
+"Microsoft.Vocab" = 3
+"Microsoft.Wordiness" = 1
+"write-good.E-Prime" = 17
+"write-good.Passive" = 1
+"write-good.TooWordy" = 11
+
+[legacy.documents."dot_agents/skills/code-signing/references/windows.md"]
+"Google.Acronyms" = 19
+"Google.Colons" = 4
+"Google.Contractions" = 15
+"Google.ExcessiveClaims" = 1
+"Google.Headings" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 6
+"Google.Will" = 2
+"Google.WordListCase" = 1
+"Microsoft.Acronyms" = 19
+"Microsoft.Adverbs" = 2
+"Microsoft.Contractions" = 15
+"Microsoft.HeadingAcronyms" = 2
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 6
+"Microsoft.SentenceLength" = 1
+"Microsoft.Terms" = 1
+"Microsoft.Uppercase" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 7
+"write-good.Passive" = 2
+"write-good.TooWordy" = 4
+
+[legacy.documents."dot_agents/skills/coderabbit-review/SKILL.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 12
+"Google.Headings" = 2
+"Google.OxfordComma" = 1
+"Google.Passive" = 7
+"Google.Semicolons" = 13
+"Google.WordList" = 7
+"Microsoft.Acronyms" = 1
+"Microsoft.Adverbs" = 2
+"Microsoft.Contractions" = 12
+"Microsoft.HeadingAcronyms" = 1
+"Microsoft.Headings" = 2
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 7
+"Microsoft.Semicolon" = 13
+"Microsoft.SentenceLength" = 1
+"Microsoft.Terms" = 2
+"Microsoft.Vocab" = 4
+"write-good.E-Prime" = 17
+"write-good.Passive" = 7
+"write-good.TooWordy" = 2
+"write-good.Weasel" = 1
+
+[legacy.documents."dot_agents/skills/coderabbit-review/references/pr-evidence.md"]
+"Google.Acronyms" = 2
+"Google.ExcessiveClaims" = 1
+"Google.Headings" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 2
+"Google.Timeless" = 1
+"Microsoft.Acronyms" = 2
+"Microsoft.Adverbs" = 1
+"Microsoft.HeadingAcronyms" = 1
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 2
+"write-good.E-Prime" = 2
+"write-good.Passive" = 1
+
+[legacy.documents."dot_agents/skills/coderabbit/SKILL.md"]
+"Google.Contractions" = 11
+"Google.FirstPerson" = 1
+"Google.Headings" = 4
+"Google.OxfordComma" = 1
+"Google.Passive" = 6
+"Google.Semicolons" = 5
+"Google.WordList" = 4
+"Google.WordListCase" = 1
+"Microsoft.Accessibility" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 11
+"Microsoft.FirstPerson" = 1
+"Microsoft.HeadingAcronyms" = 2
+"Microsoft.Headings" = 4
+"Microsoft.Militaristic" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 6
+"Microsoft.Semicolon" = 5
+"Microsoft.Terms" = 8
+"Microsoft.Vocab" = 3
+"write-good.E-Prime" = 13
+"write-good.Passive" = 6
+"write-good.TooWordy" = 3
+
+[legacy.documents."dot_agents/skills/coderabbit/references/docs.md"]
+"Google.Headings" = 1
+"Google.WordList" = 1
+"Microsoft.Headings" = 1
+"Microsoft.Terms" = 2
+
+[legacy.documents."dot_agents/skills/coderabbit/references/finishing-touches.md"]
+"Google.Contractions" = 4
+"Google.Headings" = 1
+"Google.Passive" = 5
+"Google.Semicolons" = 2
+"Microsoft.Contractions" = 4
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 5
+"Microsoft.Semicolon" = 2
+"Microsoft.Terms" = 2
+"write-good.E-Prime" = 8
+"write-good.Passive" = 5
+"write-good.TooWordy" = 1
+
+[legacy.documents."dot_agents/skills/concise-source/SKILL.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 7
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 2
+"Google.WordListCase" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Contractions" = 7
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 2
+"write-good.E-Prime" = 4
+"write-good.Passive" = 1
+"write-good.TooWordy" = 4
+
+[legacy.documents."dot_agents/skills/development-assurance/SKILL.md"]
+"Google.Acronyms" = 2
+"Google.Contractions" = 7
+"Google.Headings" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 4
+"Microsoft.Acronyms" = 2
+"Microsoft.Contractions" = 7
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 4
+"Microsoft.SentenceLength" = 1
+"write-good.E-Prime" = 6
+"write-good.Passive" = 2
+"write-good.TooWordy" = 2
+"write-good.Weasel" = 1
+
+[legacy.documents."dot_agents/skills/domyjob/SKILL.md"]
+"Google.Contractions" = 3
+"Google.Headings" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 1
+"Microsoft.Contractions" = 3
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.Terms" = 2
+"write-good.E-Prime" = 2
+"write-good.Passive" = 1
+"write-good.TooWordy" = 1
+
+[legacy.documents."dot_agents/skills/doppler/SKILL.md"]
+"Google.Acronyms" = 3
+"Google.Contractions" = 8
+"Google.OxfordComma" = 1
+"Google.Passive" = 3
+"Google.Semicolons" = 8
+"Google.WordList" = 6
+"Microsoft.Acronyms" = 3
+"Microsoft.Contractions" = 8
+"Microsoft.HeadingAcronyms" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 3
+"Microsoft.Semicolon" = 8
+"Microsoft.Terms" = 2
+"write-good.E-Prime" = 8
+"write-good.Passive" = 3
+"write-good.TooWordy" = 2
+"write-good.Weasel" = 1
+
+[legacy.documents."dot_agents/skills/doppler/references/github-actions.md"]
+"Google.Acronyms" = 8
+"Google.Colons" = 1
+"Google.Contractions" = 7
+"Google.Headings" = 3
+"Google.OxfordComma" = 1
+"Google.Passive" = 4
+"Google.Semicolons" = 7
+"Google.WordList" = 1
+"Google.WordListCase" = 2
+"Microsoft.Acronyms" = 8
+"Microsoft.Adverbs" = 3
+"Microsoft.Contractions" = 7
+"Microsoft.HeadingAcronyms" = 1
+"Microsoft.Headings" = 3
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 4
+"Microsoft.Semicolon" = 7
+"Microsoft.SentenceLength" = 1
+"write-good.E-Prime" = 7
+"write-good.Passive" = 4
+"write-good.TooWordy" = 5
+"write-good.Weasel" = 1
+
+[legacy.documents."dot_agents/skills/dotfiles/SKILL.md"]
+"Google.Contractions" = 3
+"Google.Headings" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 2
+"Microsoft.Contractions" = 3
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 2
+"Microsoft.Terms" = 3
+"write-good.E-Prime" = 1
+"write-good.Passive" = 1
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/executable-policy/SKILL.md"]
+"Google.Contractions" = 4
+"Google.ExcessiveClaims" = 1
+"Google.Headings" = 1
+"Google.Semicolons" = 2
+"Microsoft.Adverbs" = 2
+"Microsoft.Contractions" = 4
+"Microsoft.Headings" = 1
+"Microsoft.Semicolon" = 2
+"Microsoft.Terms" = 3
+"write-good.E-Prime" = 2
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/formal-assurance/SKILL.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 14
+"Google.ExcessiveClaims" = 4
+"Google.Headings" = 1
+"Google.OxfordComma" = 4
+"Google.Semicolons" = 10
+"Google.WordListCase" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Adverbs" = 2
+"Microsoft.Contractions" = 14
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 4
+"Microsoft.Semicolon" = 10
+"Microsoft.SentenceLength" = 1
+"Microsoft.Vocab" = 1
+"Microsoft.Wordiness" = 1
+"write-good.E-Prime" = 5
+"write-good.TooWordy" = 8
+
+[legacy.documents."dot_agents/skills/formal-assurance/references/scoping.md"]
+"Google.Contractions" = 8
+"Google.ExcessiveClaims" = 4
+"Google.Headings" = 1
+"Google.OxfordComma" = 4
+"Google.Passive" = 1
+"Google.Semicolons" = 4
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 8
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 2
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 4
+"write-good.E-Prime" = 5
+"write-good.Passive" = 1
+"write-good.TooWordy" = 3
+
+[legacy.documents."dot_agents/skills/formal-assurance/references/verifiers.md"]
+"Google.Contractions" = 2
+"Google.ExcessiveClaims" = 1
+"Google.Headings" = 1
+"Google.OxfordComma" = 4
+"Google.Semicolons" = 2
+"Microsoft.Adverbs" = 2
+"Microsoft.Contractions" = 2
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 4
+"Microsoft.Semicolon" = 2
+"Microsoft.SentenceLength" = 1
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 2
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/gcp/SKILL.md"]
+"Google.Acronyms" = 9
+"Google.Contractions" = 6
+"Google.Headings" = 1
+"Google.OxfordComma" = 4
+"Google.Passive" = 1
+"Google.Semicolons" = 5
+"Google.WordList" = 10
+"Google.WordListCase" = 2
+"Microsoft.Acronyms" = 9
+"Microsoft.Adverbs" = 1
+"Microsoft.Auto" = 1
+"Microsoft.Contractions" = 6
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 4
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 5
+"Microsoft.Uppercase" = 1
+"write-good.E-Prime" = 11
+"write-good.Passive" = 1
+"write-good.TooWordy" = 1
+
+[legacy.documents."dot_agents/skills/gcp/references/clients.md"]
+"Google.Acronyms" = 5
+"Google.Contractions" = 3
+"Google.DateFormat" = 1
+"Google.Headings" = 2
+"Google.OxfordComma" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 1
+"Google.WordListCase" = 2
+"Microsoft.Acronyms" = 5
+"Microsoft.Contractions" = 3
+"Microsoft.DateFormat" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 4
+"write-good.Passive" = 1
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/github-repository/SKILL.md"]
+"Google.Acronyms" = 2
+"Google.Contractions" = 5
+"Google.Headings" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 4
+"Google.WordList" = 2
+"Google.WordListCase" = 2
+"Microsoft.Acronyms" = 2
+"Microsoft.Adverbs" = 2
+"Microsoft.Contractions" = 5
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 4
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 4
+"write-good.Passive" = 2
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/ideal-first-development/SKILL.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 5
+"Google.ExcessiveClaims" = 1
+"Google.Headings" = 1
+"Google.Semicolons" = 2
+"Microsoft.Acronyms" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 5
+"Microsoft.Headings" = 1
+"Microsoft.Semicolon" = 2
+"Microsoft.Vocab" = 1
+"Microsoft.Wordiness" = 1
+"write-good.E-Prime" = 3
+"write-good.TooWordy" = 6
+"write-good.Weasel" = 1
+
+[legacy.documents."dot_agents/skills/just/SKILL.md"]
+"Google.Headings" = 1
+"Google.Semicolons" = 1
+"Microsoft.Headings" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 1
+"write-good.TooWordy" = 1
+"write-good.Weasel" = 1
+
+[legacy.documents."dot_agents/skills/lefthook/SKILL.md"]
+"Google.Contractions" = 2
+"Google.Headings" = 1
+"Google.Semicolons" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Headings" = 1
+"Microsoft.Semicolon" = 1
+"write-good.E-Prime" = 1
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/macos-pkg/SKILL.md"]
+"Google.Contractions" = 3
+"Google.ExcessiveClaims" = 1
+"Google.Headings" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 1
+"Google.WordListCase" = 1
+"Microsoft.Contractions" = 3
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 2
+"write-good.Passive" = 1
+"write-good.TooWordy" = 1
+
+[legacy.documents."dot_agents/skills/mise/SKILL.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 2
+"Google.Headings" = 1
+"Google.Semicolons" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Avoid" = 2
+"Microsoft.Contractions" = 2
+"Microsoft.Headings" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 2
+
+[legacy.documents."dot_agents/skills/multi-machine/SKILL.md"]
+"Google.Contractions" = 6
+"Google.Headings" = 1
+"Google.Passive" = 3
+"Google.Semicolons" = 4
+"Google.WordListCase" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Auto" = 1
+"Microsoft.Contractions" = 6
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 3
+"Microsoft.Semicolon" = 4
+"Microsoft.Terms" = 7
+"write-good.E-Prime" = 8
+"write-good.Passive" = 3
+"write-good.TooWordy" = 3
+
+[legacy.documents."dot_agents/skills/mutation-testing/SKILL.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 2
+"Google.Headings" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Headings" = 1
+"Microsoft.Vocab" = 1
+"write-good.TooWordy" = 3
+
+[legacy.documents."dot_agents/skills/nas/SKILL.md"]
+"Google.Acronyms" = 9
+"Google.Contractions" = 7
+"Google.Headings" = 1
+"Google.OxfordComma" = 4
+"Google.Passive" = 4
+"Google.Semicolons" = 5
+"Microsoft.Acronyms" = 9
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 7
+"Microsoft.HeadingAcronyms" = 1
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 4
+"Microsoft.Passive" = 4
+"Microsoft.Semicolon" = 5
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 7
+"write-good.Passive" = 4
+"write-good.TooWordy" = 4
+
+[legacy.documents."dot_agents/skills/nas/references/synology-drive.md"]
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 2
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 2
+"write-good.E-Prime" = 3
+"write-good.Passive" = 1
+
+[legacy.documents."dot_agents/skills/ocomment/SKILL.md"]
+"Google.Contractions" = 2
+"Google.Headings" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 2
+"Microsoft.Contractions" = 2
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 2
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 5
+"write-good.Passive" = 2
+"write-good.TooWordy" = 1
+
+[legacy.documents."dot_agents/skills/oss-readme/SKILL.md"]
+"Google.Contractions" = 3
+"Google.ExcessiveClaims" = 1
+"Google.Headings" = 1
+"Google.Semicolons" = 1
+"Google.WordList" = 1
+"Microsoft.Contractions" = 3
+"Microsoft.HeadingAcronyms" = 1
+"Microsoft.Headings" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.Terms" = 2
+"Microsoft.Uppercase" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 3
+"write-good.TooWordy" = 1
+
+[legacy.documents."dot_agents/skills/portable-skills/SKILL.md"]
+"Google.Contractions" = 5
+"Google.Headings" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 4
+"Google.WordList" = 1
+"Google.WordListCase" = 1
+"Microsoft.Contractions" = 5
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 4
+"Microsoft.Terms" = 2
+"Microsoft.Vocab" = 3
+"write-good.E-Prime" = 3
+"write-good.Passive" = 1
+"write-good.TooWordy" = 4
+
+[legacy.documents."dot_agents/skills/pull-request/SKILL.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 12
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 3
+"Google.Semicolons" = 14
+"Google.WordList" = 2
+"Microsoft.Acronyms" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 12
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 3
+"Microsoft.Semicolon" = 14
+"write-good.E-Prime" = 10
+"write-good.Passive" = 3
+"write-good.TooWordy" = 4
+
+[legacy.documents."dot_agents/skills/pull-request/references/workflow.md"]
+"Google.Acronyms" = 3
+"Google.Contractions" = 21
+"Google.ExcessiveClaims" = 2
+"Google.Headings" = 2
+"Google.Passive" = 11
+"Google.Semicolons" = 21
+"Google.WordList" = 7
+"Google.WordListCase" = 1
+"Microsoft.Acronyms" = 3
+"Microsoft.Adverbs" = 3
+"Microsoft.Contractions" = 21
+"Microsoft.HeadingAcronyms" = 1
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 11
+"Microsoft.Semicolon" = 21
+"Microsoft.SentenceLength" = 2
+"Microsoft.Terms" = 2
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 25
+"write-good.Passive" = 11
+"write-good.ThereIs" = 1
+"write-good.TooWordy" = 8
+
+[legacy.documents."dot_agents/skills/registry-publishing/SKILL.md"]
+"Google.Acronyms" = 4
+"Google.Contractions" = 4
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 4
+"Microsoft.Acronyms" = 4
+"Microsoft.Adverbs" = 1
+"Microsoft.Avoid" = 1
+"Microsoft.Contractions" = 4
+"Microsoft.GeneralURL" = 1
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 4
+"write-good.E-Prime" = 3
+"write-good.Passive" = 2
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/release-evidence/SKILL.md"]
+"Google.Acronyms" = 6
+"Google.Contractions" = 6
+"Google.Headings" = 1
+"Google.LyHyphens" = 1
+"Google.OxfordComma" = 1
+"Google.Semicolons" = 5
+"Microsoft.Acronyms" = 6
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 6
+"Microsoft.Headings" = 1
+"Microsoft.Hyphens" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Semicolon" = 5
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 5
+"write-good.TooWordy" = 1
+
+[legacy.documents."dot_agents/skills/release-workflow/SKILL.md"]
+"Google.Acronyms" = 2
+"Google.Contractions" = 4
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 4
+"Microsoft.Acronyms" = 2
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 4
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 4
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 3
+"write-good.Passive" = 1
+"write-good.TooWordy" = 5
+
+[legacy.documents."dot_agents/skills/reliability/SKILL.md"]
+"Google.Contractions" = 2
+"Google.Headings" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 2
+"Google.WordListCase" = 1
+"Microsoft.Accessibility" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 2
+"write-good.E-Prime" = 1
+"write-good.Passive" = 1
+
+[legacy.documents."dot_agents/skills/reliability/references/boundaries-and-environment.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 4
+"Google.Headings" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Auto" = 1
+"Microsoft.Contractions" = 4
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 3
+"write-good.E-Prime" = 3
+"write-good.Passive" = 1
+"write-good.TooWordy" = 5
+
+[legacy.documents."dot_agents/skills/reliability/references/concurrency-and-ordering.md"]
+"Google.Contractions" = 6
+"Google.Headings" = 1
+"Google.LyHyphens" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 2
+"Google.Will" = 1
+"Microsoft.Contractions" = 6
+"Microsoft.Headings" = 1
+"Microsoft.Hyphens" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 2
+"write-good.E-Prime" = 3
+"write-good.Passive" = 1
+"write-good.TooWordy" = 3
+"write-good.Weasel" = 1
+
+[legacy.documents."dot_agents/skills/reliability/references/persistence-and-lifecycle.md"]
+"Google.Contractions" = 3
+"Google.ExcessiveClaims" = 1
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 1
+"Google.WordListCase" = 1
+"Microsoft.Contractions" = 3
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 1
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 5
+"write-good.Passive" = 2
+"write-good.TooWordy" = 5
+"write-good.Weasel" = 1
+
+[legacy.documents."dot_agents/skills/reliability/references/tests-and-diagnostics.md"]
+"Google.Contractions" = 2
+"Google.ExcessiveClaims" = 1
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 2
+"Microsoft.Contractions" = 2
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 2
+"write-good.E-Prime" = 1
+"write-good.Passive" = 1
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/reliability/references/time-and-randomness.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 6
+"Google.Headings" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 5
+"Microsoft.Acronyms" = 1
+"Microsoft.Contractions" = 6
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 5
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 3
+"write-good.Passive" = 2
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/renovate/SKILL.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 3
+"Google.Headings" = 1
+"Google.Semicolons" = 2
+"Microsoft.Acronyms" = 1
+"Microsoft.Contractions" = 3
+"Microsoft.Headings" = 1
+"Microsoft.Semicolon" = 2
+"write-good.E-Prime" = 2
+"write-good.TooWordy" = 3
+
+[legacy.documents."dot_agents/skills/resource-coordination/SKILL.md"]
+"Google.Contractions" = 7
+"Google.Headings" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 2
+"Google.Timeless" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 7
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 2
+"Microsoft.SentenceLength" = 1
+"Microsoft.Terms" = 2
+"write-good.E-Prime" = 6
+"write-good.Passive" = 2
+"write-good.TooWordy" = 5
+
+[legacy.documents."dot_agents/skills/rust-invariants/SKILL.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 5
+"Google.ExcessiveClaims" = 2
+"Google.Headings" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Adverbs" = 2
+"Microsoft.Contractions" = 5
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 1
+"write-good.E-Prime" = 4
+"write-good.Passive" = 2
+
+[legacy.documents."dot_agents/skills/rust-release/SKILL.md"]
+"Google.Contractions" = 4
+"Google.Headings" = 1
+"Google.Semicolons" = 3
+"Microsoft.Adverbs" = 2
+"Microsoft.Contractions" = 4
+"Microsoft.Headings" = 1
+"Microsoft.Semicolon" = 3
+"Microsoft.Vocab" = 3
+"write-good.E-Prime" = 3
+"write-good.TooWordy" = 4
+
+[legacy.documents."dot_agents/skills/rust-tooling/SKILL.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 3
+"Google.Headings" = 1
+"Google.Semicolons" = 1
+"Google.WordList" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Contractions" = 3
+"Microsoft.Headings" = 1
+"Microsoft.Semicolon" = 1
+"write-good.E-Prime" = 2
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/skill-operations/SKILL.md"]
+"Google.Contractions" = 6
+"Google.Headings" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 3
+"Microsoft.Adverbs" = 2
+"Microsoft.Contractions" = 6
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 3
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 4
+"write-good.Passive" = 1
+"write-good.TooWordy" = 1
+
+[legacy.documents."dot_agents/skills/skill-operations/references/analysis.md"]
+"Google.Contractions" = 2
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 4
+"Microsoft.Contractions" = 2
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 1
+"Microsoft.QuestionMarks" = 9
+"Microsoft.Semicolon" = 4
+"Microsoft.Terms" = 3
+"write-good.E-Prime" = 6
+"write-good.Passive" = 1
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/skill-operations/references/operations.md"]
+"Google.Contractions" = 6
+"Google.Headings" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 9
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 6
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 9
+"Microsoft.Terms" = 1
+"Microsoft.Uppercase" = 1
+"write-good.E-Prime" = 7
+"write-good.Passive" = 2
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/sslcom-esigner/SKILL.md"]
+"Google.Acronyms" = 8
+"Google.Contractions" = 1
+"Google.Headings" = 1
+"Google.Semicolons" = 1
+"Microsoft.Acronyms" = 8
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 1
+"Microsoft.HeadingAcronyms" = 1
+"Microsoft.Headings" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.Vocab" = 1
+
+[legacy.documents."dot_agents/skills/storage-scout/SKILL.md"]
+"Google.Contractions" = 1
+"Google.Headings" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 1
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 1
+"write-good.E-Prime" = 4
+"write-good.Passive" = 1
+"write-good.TooWordy" = 1
+
+[legacy.documents."dot_agents/skills/systematic-fixes/SKILL.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 7
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 3
+"Google.Semicolons" = 5
+"Microsoft.Acronyms" = 1
+"Microsoft.Adverbs" = 2
+"Microsoft.Contractions" = 7
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 3
+"Microsoft.Semicolon" = 5
+"Microsoft.Wordiness" = 1
+"write-good.E-Prime" = 5
+"write-good.Passive" = 3
+"write-good.TooWordy" = 5
+
+[legacy.documents."dot_agents/skills/tailscale/SKILL.md"]
+"Google.Contractions" = 2
+"Google.Headings" = 1
+"Google.Semicolons" = 3
+"Google.WordListCase" = 1
+"Microsoft.Accessibility" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Headings" = 1
+"Microsoft.Semicolon" = 3
+"Microsoft.Terms" = 2
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 1
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/type-contracts/SKILL.md"]
+"Google.Contractions" = 4
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 3
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 4
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 3
+"Microsoft.Vocab" = 1
+"Microsoft.Wordiness" = 1
+"write-good.E-Prime" = 2
+"write-good.Passive" = 1
+"write-good.TooWordy" = 6
+
+[legacy.documents."dot_agents/skills/type-contracts/references/dynamic-languages.md"]
+"Google.Contractions" = 2
+"Google.Headings" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Headings" = 1
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/verification-tools/SKILL.md"]
+"Google.Contractions" = 5
+"Google.ExcessiveClaims" = 4
+"Google.Headings" = 1
+"Google.Passive" = 3
+"Google.Semicolons" = 2
+"Microsoft.Contractions" = 5
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 3
+"Microsoft.Semicolon" = 2
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 5
+"write-good.Passive" = 3
+"write-good.TooWordy" = 2
+
+[legacy.documents."dot_agents/skills/verification-tools/references/rust.md"]
+"Google.Contractions" = 3
+"Google.ExcessiveClaims" = 1
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 2
+"Google.WordListCase" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 3
+"Microsoft.Headings" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 2
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 3
+"write-good.Passive" = 2
+"write-good.TooWordy" = 1
+
+[legacy.documents."dot_agents/skills/xtask/SKILL.md"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 1
+"Google.OxfordComma" = 1
+"Google.Semicolons" = 1
+"Google.WordList" = 1
+"Google.WordListCase" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Contractions" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 1
+
+[legacy.documents."dot_claude/CLAUDE.md.tmpl"]
+"Google.Parens" = 3
+"Microsoft.SentenceLength" = 1
+"write-good.E-Prime" = 1
+
+[legacy.documents."dot_codex/AGENTS.md.tmpl"]
+"Google.Parens" = 3
+"Microsoft.SentenceLength" = 1
+"write-good.E-Prime" = 1
+
+[legacy.documents."dot_config/opencode/AGENTS.md.tmpl"]
+"Google.Parens" = 3
+"Microsoft.SentenceLength" = 1
+"write-good.E-Prime" = 1
+
+[legacy.documents."dot_config/opencode/agents/reviewer.md"]
+"Google.Contractions" = 1
+"Google.EmDash" = 5
+"Google.Parens" = 1
+"Google.Semicolons" = 2
+"Microsoft.Contractions" = 1
+"Microsoft.Dashes" = 5
+"Microsoft.Semicolon" = 2
+"write-good.E-Prime" = 2
+"write-good.TooWordy" = 1
+
+[legacy.documents."dot_config/opencode/commands/commit.md"]
+"Google.Contractions" = 1
+"Google.EmDash" = 2
+"Google.FirstPerson" = 2
+"Google.Passive" = 1
+"Google.Timeless" = 1
+"Microsoft.Contractions" = 1
+"Microsoft.Dashes" = 2
+"Microsoft.FirstPerson" = 2
+"Microsoft.Passive" = 1
+"write-good.E-Prime" = 1
+"write-good.Passive" = 1
+
+[legacy.documents."dot_config/opencode/commands/pr.md"]
+"Google.Colons" = 1
+"Google.EmDash" = 3
+"Google.FirstPerson" = 1
+"Google.Semicolons" = 2
+"Microsoft.Dashes" = 3
+"Microsoft.FirstPerson" = 1
+"Microsoft.GeneralURL" = 1
+"Microsoft.Semicolon" = 2
+"Microsoft.Uppercase" = 1
+"write-good.E-Prime" = 2
+"write-good.TooWordy" = 1
+
+[legacy.documents."dot_config/opencode/commands/review.md"]
+"Microsoft.Vocab" = 1
+"write-good.TooWordy" = 1
+
+[legacy.documents."ops/README.md"]
+"Google.Acronyms" = 7
+"Google.Contractions" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 2
+"Google.WordList" = 1
+"Google.WordListCase" = 2
+"Microsoft.Acronyms" = 7
+"Microsoft.Contractions" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 2
+"Microsoft.SentenceLength" = 1
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 1
+"write-good.Passive" = 1
+"write-good.TooWordy" = 1
+
+[legacy.documents."ops/runbooks/windows-vm.md"]
+"Google.Acronyms" = 25
+"Google.Colons" = 2
+"Google.Contractions" = 5
+"Google.EmDash" = 4
+"Google.Headings" = 1
+"Google.OxfordComma" = 1
+"Google.Parens" = 18
+"Google.Passive" = 6
+"Google.Quotes" = 1
+"Google.Semicolons" = 7
+"Google.Units" = 1
+"Google.WordListCase" = 4
+"Microsoft.Accessibility" = 1
+"Microsoft.Acronyms" = 25
+"Microsoft.Auto" = 3
+"Microsoft.Contractions" = 5
+"Microsoft.Dashes" = 4
+"Microsoft.HeadingAcronyms" = 3
+"Microsoft.Headings" = 1
+"Microsoft.Passive" = 6
+"Microsoft.Quotes" = 1
+"Microsoft.Semicolon" = 7
+"Microsoft.Terms" = 1
+"Microsoft.Uppercase" = 1
+"Microsoft.Wordiness" = 2
+"write-good.E-Prime" = 13
+"write-good.Passive" = 6
+"write-good.TooWordy" = 2
+
+[legacy.comments.".chezmoitemplates/profiles/linux/dot_config/dev-reaper/config"]
+"Google.EmDash" = 1
+"Google.Latin" = 1
+"Google.Parens" = 10
+"Google.Passive" = 2
+"Google.Quotes" = 2
+"Google.Semicolons" = 1
+"Google.Units" = 3
+"Google.WordListCase" = 1
+"Microsoft.Dashes" = 1
+"Microsoft.Foreign" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Quotes" = 2
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 5
+"write-good.Passive" = 2
+"write-good.TooWordy" = 1
+
+[legacy.comments.".chezmoitemplates/profiles/linux/dot_config/gh/config.yml.tmpl"]
+"Google.Ellipses" = 1
+"Google.Parens" = 1
+"Google.Semicolons" = 1
+"Microsoft.Ellipses" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.Terms" = 1
+"proselint.Typography" = 1
+
+[legacy.comments.".chezmoitemplates/profiles/linux/dot_config/jj/config.toml.tmpl"]
+"Microsoft.Auto" = 1
+
+[legacy.comments.".chezmoitemplates/profiles/linux/dot_config/session-reaper/config"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 2
+"Google.Ellipses" = 1
+"Google.EmDash" = 2
+"Google.Latin" = 1
+"Google.Parens" = 10
+"Google.Passive" = 2
+"Google.Semicolons" = 1
+"Google.Units" = 2
+"Google.WordListCase" = 2
+"Microsoft.Acronyms" = 1
+"Microsoft.Auto" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Dashes" = 2
+"Microsoft.Ellipses" = 1
+"Microsoft.Foreign" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 1
+"Microsoft.Vocab" = 1
+"proselint.Typography" = 1
+"write-good.E-Prime" = 6
+"write-good.Passive" = 2
+"write-good.TooWordy" = 2
+
+[legacy.comments.".chezmoitemplates/profiles/linux/dot_config/shell/ssh-agent.sh"]
+"Microsoft.Terms" = 2
+
+[legacy.comments.".chezmoitemplates/profiles/mac/dot_claude/executable_bashenv.sh"]
+"Google.Contractions" = 2
+"Google.Ellipses" = 1
+"Google.EmDash" = 1
+"Google.Parens" = 3
+"Google.Passive" = 2
+"Google.Semicolons" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Dashes" = 1
+"Microsoft.Ellipses" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 1
+"Microsoft.Terms" = 4
+"proselint.Typography" = 1
+"write-good.E-Prime" = 4
+"write-good.Passive" = 2
+
+[legacy.comments.".chezmoitemplates/profiles/mac/dot_config/dev-reaper/config"]
+"Google.EmDash" = 2
+"Google.Latin" = 1
+"Google.Parens" = 10
+"Google.Passive" = 2
+"Google.Quotes" = 2
+"Google.Semicolons" = 1
+"Google.Units" = 3
+"Google.WordListCase" = 1
+"Microsoft.Dashes" = 2
+"Microsoft.Foreign" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Quotes" = 2
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 5
+"write-good.Passive" = 2
+"write-good.TooWordy" = 1
+
+[legacy.comments.".chezmoitemplates/profiles/mac/dot_config/gh/config.yml.tmpl"]
+"Google.Ellipses" = 1
+"Google.Parens" = 1
+"Google.Semicolons" = 1
+"Microsoft.Ellipses" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.Terms" = 1
+"proselint.Typography" = 1
+
+[legacy.comments.".chezmoitemplates/profiles/mac/dot_config/herdr/config.toml"]
+"Google.Semicolons" = 1
+"Microsoft.Semicolon" = 1
+
+[legacy.comments.".chezmoitemplates/profiles/mac/dot_config/jj/config.toml.tmpl"]
+"Microsoft.Auto" = 1
+
+[legacy.comments.".chezmoitemplates/profiles/mac/dot_config/lazygit/config.yml.tmpl"]
+"Google.Contractions" = 1
+"Google.Parens" = 1
+"Google.Passive" = 1
+"Google.Semicolons" = 1
+"Google.WordListCase" = 2
+"Microsoft.Contractions" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 1
+"write-good.E-Prime" = 4
+"write-good.Passive" = 1
+"write-good.TooWordy" = 1
+
+[legacy.comments.".chezmoitemplates/profiles/mac/dot_config/opencode/opencode.json.tmpl"]
+"Google.Acronyms" = 1
+"Google.EmDash" = 2
+"Google.Passive" = 1
+"Google.Semicolons" = 1
+"Google.Timeless" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Dashes" = 2
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 1
+"write-good.E-Prime" = 2
+"write-good.Passive" = 1
+
+[legacy.comments.".chezmoitemplates/profiles/mac/dot_config/session-reaper/config"]
+"Google.Acronyms" = 4
+"Google.Contractions" = 2
+"Google.Ellipses" = 1
+"Google.EmDash" = 3
+"Google.Latin" = 1
+"Google.Parens" = 10
+"Google.Passive" = 2
+"Google.Semicolons" = 2
+"Google.Units" = 2
+"Google.WordListCase" = 2
+"Microsoft.Acronyms" = 4
+"Microsoft.Auto" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Dashes" = 3
+"Microsoft.Ellipses" = 1
+"Microsoft.Foreign" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 2
+"Microsoft.SentenceLength" = 2
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 1
+"proselint.Typography" = 1
+"write-good.E-Prime" = 8
+"write-good.Passive" = 2
+"write-good.TooWordy" = 2
+
+[legacy.comments.".chezmoitemplates/profiles/mac/dot_config/shell/ssh-agent.sh"]
+"Google.Colons" = 2
+"Google.Passive" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Terms" = 5
+"write-good.E-Prime" = 4
+"write-good.Passive" = 1
+
+[legacy.comments.".chezmoitemplates/profiles/wsl/dot_config/gh/config.yml.tmpl"]
+"Google.WordList" = 1
+
+[legacy.comments.".gitattributes"]
+"Google.Acronyms" = 2
+"Google.Contractions" = 1
+"Microsoft.Acronyms" = 2
+"Microsoft.Contractions" = 1
+
+[legacy.comments.".ocomment.toml"]
+"Google.Acronyms" = 1
+"Google.Colons" = 8
+"Google.Contractions" = 8
+"Google.Passive" = 4
+"Google.Semicolons" = 3
+"Microsoft.Acronyms" = 1
+"Microsoft.Contractions" = 8
+"Microsoft.Passive" = 4
+"Microsoft.Semicolon" = 3
+"Microsoft.SentenceLength" = 2
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 1
+"proselint.Annotations" = 12
+"write-good.E-Prime" = 16
+"write-good.Passive" = 4
+"write-good.TooWordy" = 2
+
+[legacy.comments.".typos.toml"]
+"Google.Parens" = 4
+"Google.Semicolons" = 1
+"Google.WordListCase" = 1
+"Microsoft.Semicolon" = 1
+
+[legacy.comments.".yamllint"]
+"Google.Contractions" = 4
+"Google.Parens" = 1
+"Google.Passive" = 4
+"Google.Semicolons" = 1
+"Google.WordListCase" = 1
+"Microsoft.Adverbs" = 2
+"Microsoft.Contractions" = 4
+"Microsoft.Passive" = 4
+"Microsoft.Semicolon" = 1
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 11
+"write-good.Passive" = 4
+
+[legacy.comments."AppData/Roaming/herdr/config.toml"]
+"Google.Acronyms" = 2
+"Google.Colons" = 1
+"Google.Passive" = 4
+"Google.Semicolons" = 2
+"Microsoft.Acronyms" = 2
+"Microsoft.Passive" = 4
+"Microsoft.Semicolon" = 2
+"Microsoft.SentenceLength" = 1
+"write-good.E-Prime" = 5
+"write-good.Passive" = 4
+
+[legacy.comments."dot_agents/skills/github-repository/scripts/repo-settings/src/main.rs"]
+"Google.Semicolons" = 1
+"Microsoft.Semicolon" = 1
+
+[legacy.comments."dot_config/lefthook/global.yml"]
+"Google.Passive" = 1
+"Google.Semicolons" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 1
+"write-good.E-Prime" = 1
+"write-good.Passive" = 1
+
+[legacy.comments."dot_config/nushell/login.nu"]
+"Google.Passive" = 1
+"Microsoft.Passive" = 1
+"write-good.E-Prime" = 1
+"write-good.Passive" = 1
+
+[legacy.comments."dot_config/ocomment/config.toml"]
+"Google.Colons" = 5
+"Google.Passive" = 3
+"Microsoft.Passive" = 3
+"Microsoft.SentenceLength" = 2
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 2
+"proselint.Annotations" = 6
+"write-good.E-Prime" = 7
+"write-good.Passive" = 3
+
+[legacy.comments."guard/.gitignore"]
+"Google.Anthropomorphism" = 1
+"Google.Passive" = 1
+"Google.Units" = 1
+"Microsoft.Passive" = 1
+"proselint.Annotations" = 1
+"write-good.E-Prime" = 3
+"write-good.Passive" = 1
+
+[legacy.comments."guard/Cargo.toml"]
+"Google.Acronyms" = 1
+"Google.EmDash" = 1
+"Google.Semicolons" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Dashes" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 1
+"write-good.E-Prime" = 5
+
+[legacy.comments."guard/src/attribution.rs"]
+"Google.Contractions" = 8
+"Google.EmDash" = 2
+"Google.Parens" = 2
+"Google.Passive" = 6
+"Google.Quotes" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 8
+"Microsoft.Dashes" = 2
+"Microsoft.GeneralURL" = 2
+"Microsoft.Passive" = 6
+"Microsoft.QuestionMarks" = 1
+"Microsoft.Quotes" = 1
+"Microsoft.SentenceLength" = 5
+"Microsoft.Terms" = 4
+"Microsoft.Vocab" = 4
+"Microsoft.Wordiness" = 1
+"write-good.E-Prime" = 14
+"write-good.Passive" = 6
+"write-good.TooWordy" = 2
+
+[legacy.comments."guard/src/bin/herdr-agent/main.rs"]
+"Google.Contractions" = 3
+"Google.EmDash" = 1
+"Google.OxfordComma" = 1
+"Google.Parens" = 1
+"Google.Passive" = 3
+"Google.Semicolons" = 3
+"Microsoft.Contractions" = 3
+"Microsoft.Dashes" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 3
+"Microsoft.Semicolon" = 3
+"Microsoft.SentenceLength" = 1
+"Microsoft.Terms" = 13
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 8
+"write-good.Passive" = 3
+"write-good.ThereIs" = 1
+
+[legacy.comments."guard/src/bin/reaper/config.rs"]
+"Google.Contractions" = 2
+"Google.EmDash" = 4
+"Google.Parens" = 2
+"Google.Passive" = 3
+"Google.Semicolons" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Dashes" = 4
+"Microsoft.Passive" = 3
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 1
+"Microsoft.Terms" = 1
+"write-good.E-Prime" = 6
+"write-good.Passive" = 3
+
+[legacy.comments."guard/src/bin/reaper/devreaper.rs"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 4
+"Google.EmDash" = 3
+"Google.Latin" = 1
+"Google.Parens" = 11
+"Google.Passive" = 4
+"Google.Semicolons" = 3
+"Google.WordListCase" = 2
+"Microsoft.Acronyms" = 1
+"Microsoft.Auto" = 1
+"Microsoft.Contractions" = 4
+"Microsoft.Dashes" = 3
+"Microsoft.Foreign" = 1
+"Microsoft.Passive" = 4
+"Microsoft.Semicolon" = 3
+"Microsoft.SentenceLength" = 1
+"Microsoft.Vocab" = 4
+"write-good.E-Prime" = 10
+"write-good.Passive" = 4
+"write-good.TooWordy" = 1
+
+[legacy.comments."guard/src/bin/reaper/main.rs"]
+"Google.Acronyms" = 1
+"Google.Colons" = 1
+"Google.Contractions" = 1
+"Google.EmDash" = 2
+"Google.Parens" = 2
+"Google.Passive" = 1
+"Google.Semicolons" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Contractions" = 1
+"Microsoft.Dashes" = 2
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 1
+"Microsoft.Terms" = 1
+"write-good.E-Prime" = 6
+"write-good.Passive" = 1
+"write-good.Weasel" = 1
+
+[legacy.comments."guard/src/bin/reaper/sessionreaper.rs"]
+"Google.Acronyms" = 9
+"Google.Contractions" = 5
+"Google.EmDash" = 5
+"Google.Parens" = 9
+"Google.Passive" = 6
+"Google.Semicolons" = 3
+"Google.We" = 1
+"Google.WordListCase" = 4
+"Microsoft.Acronyms" = 9
+"Microsoft.Adverbs" = 1
+"Microsoft.Auto" = 1
+"Microsoft.Contractions" = 5
+"Microsoft.Dashes" = 5
+"Microsoft.Passive" = 6
+"Microsoft.Semicolon" = 3
+"Microsoft.SentenceLength" = 1
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 1
+"Microsoft.We" = 1
+"write-good.E-Prime" = 20
+"write-good.Passive" = 6
+"write-good.ThereIs" = 1
+"write-good.TooWordy" = 1
+
+[legacy.comments."guard/src/bin/reaper/util.rs"]
+"Google.Acronyms" = 4
+"Google.Contractions" = 1
+"Google.EmDash" = 2
+"Google.ExcessiveClaims" = 2
+"Google.Parens" = 2
+"Google.Passive" = 3
+"Google.Quotes" = 1
+"Google.Semicolons" = 2
+"Google.WordListCase" = 2
+"Microsoft.Acronyms" = 4
+"Microsoft.Contractions" = 1
+"Microsoft.Dashes" = 2
+"Microsoft.Passive" = 3
+"Microsoft.Quotes" = 1
+"Microsoft.Semicolon" = 2
+"Microsoft.Terms" = 1
+"write-good.E-Prime" = 7
+"write-good.Passive" = 3
+
+[legacy.comments."guard/src/bypass.rs"]
+"Google.Acronyms" = 3
+"Google.Contractions" = 3
+"Google.Passive" = 3
+"Google.Semicolons" = 1
+"Google.We" = 1
+"Google.Will" = 1
+"Microsoft.Acronyms" = 3
+"Microsoft.Contractions" = 3
+"Microsoft.Passive" = 3
+"Microsoft.QuestionMarks" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.We" = 1
+"write-good.E-Prime" = 9
+"write-good.Passive" = 3
+
+[legacy.comments."guard/src/doctor.rs"]
+"Google.Acronyms" = 2
+"Google.Contractions" = 6
+"Google.EmDash" = 4
+"Google.Passive" = 7
+"Google.Quotes" = 1
+"Google.Semicolons" = 4
+"Google.WordList" = 1
+"Google.WordListCase" = 1
+"Microsoft.Acronyms" = 2
+"Microsoft.Adverbs" = 5
+"Microsoft.Contractions" = 6
+"Microsoft.Dashes" = 4
+"Microsoft.Passive" = 7
+"Microsoft.Quotes" = 1
+"Microsoft.Semicolon" = 4
+"Microsoft.SentenceLength" = 7
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 30
+"write-good.Passive" = 7
+"write-good.TooWordy" = 2
+
+[legacy.comments."guard/src/gitargv.rs"]
+"Google.Acronyms" = 1
+"Google.Anthropomorphism" = 2
+"Google.Contractions" = 12
+"Google.EmDash" = 9
+"Google.ExcessiveClaims" = 2
+"Google.Parens" = 1
+"Google.Passive" = 8
+"Google.Quotes" = 2
+"Google.Semicolons" = 3
+"Google.Spelling" = 1
+"Google.We" = 5
+"Google.WordListCase" = 1
+"Microsoft.Accessibility" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Adverbs" = 2
+"Microsoft.Contractions" = 11
+"Microsoft.Dashes" = 9
+"Microsoft.Passive" = 8
+"Microsoft.Quotes" = 2
+"Microsoft.Semicolon" = 3
+"Microsoft.SentenceLength" = 2
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 3
+"Microsoft.We" = 5
+"write-good.E-Prime" = 32
+"write-good.Passive" = 8
+"write-good.So" = 1
+"write-good.TooWordy" = 5
+"write-good.Weasel" = 1
+
+[legacy.comments."guard/src/lang.rs"]
+"Google.Acronyms" = 6
+"Google.Colons" = 5
+"Google.Contractions" = 16
+"Google.EmDash" = 10
+"Google.Parens" = 2
+"Google.Passive" = 8
+"Google.Quotes" = 3
+"Google.Semicolons" = 1
+"Google.Spelling" = 1
+"Google.We" = 1
+"Google.WordListCase" = 2
+"Microsoft.Acronyms" = 6
+"Microsoft.Adverbs" = 4
+"Microsoft.Contractions" = 16
+"Microsoft.Dashes" = 10
+"Microsoft.GeneralURL" = 1
+"Microsoft.Passive" = 8
+"Microsoft.Quotes" = 3
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 9
+"Microsoft.Terms" = 2
+"Microsoft.Uppercase" = 1
+"Microsoft.Vocab" = 4
+"Microsoft.We" = 1
+"write-good.E-Prime" = 57
+"write-good.Illusions" = 1
+"write-good.Passive" = 8
+"write-good.So" = 1
+"write-good.TooWordy" = 2
+"write-good.Weasel" = 1
+
+[legacy.comments."guard/src/lib.rs"]
+"Google.EmDash" = 3
+"Google.Parens" = 4
+"Google.Semicolons" = 1
+"Microsoft.Dashes" = 3
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 1
+"Microsoft.Terms" = 1
+"write-good.E-Prime" = 2
+
+[legacy.comments."guard/src/lint.rs"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 7
+"Google.EmDash" = 5
+"Google.Parens" = 1
+"Google.Passive" = 7
+"Google.Semicolons" = 2
+"Google.Spelling" = 2
+"Microsoft.Acronyms" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 7
+"Microsoft.Dashes" = 5
+"Microsoft.Passive" = 7
+"Microsoft.Semicolon" = 2
+"Microsoft.SentenceLength" = 2
+"Microsoft.Wordiness" = 1
+"write-good.E-Prime" = 17
+"write-good.Passive" = 7
+"write-good.TooWordy" = 3
+
+[legacy.comments."guard/src/locate.rs"]
+"Google.EmDash" = 1
+"Google.Passive" = 1
+"Microsoft.Auto" = 1
+"Microsoft.Dashes" = 1
+"Microsoft.Passive" = 1
+"Microsoft.SentenceLength" = 1
+"write-good.E-Prime" = 1
+"write-good.Passive" = 1
+"write-good.Weasel" = 1
+
+[legacy.comments."guard/src/main.rs"]
+"Google.Anthropomorphism" = 1
+"Google.Contractions" = 5
+"Google.EmDash" = 2
+"Google.Parens" = 4
+"Google.Passive" = 5
+"Google.Semicolons" = 6
+"Google.We" = 1
+"Google.Will" = 1
+"Microsoft.Contractions" = 5
+"Microsoft.Dashes" = 2
+"Microsoft.Passive" = 5
+"Microsoft.Semicolon" = 6
+"Microsoft.SentenceLength" = 3
+"Microsoft.We" = 1
+"Microsoft.Wordiness" = 1
+"write-good.E-Prime" = 20
+"write-good.Passive" = 5
+"write-good.TooWordy" = 1
+
+[legacy.comments."guard/src/postcommit.rs"]
+"Google.Acronyms" = 6
+"Google.Contractions" = 5
+"Google.EmDash" = 4
+"Google.ExcessiveClaims" = 2
+"Google.Parens" = 1
+"Google.Passive" = 8
+"Google.Quotes" = 1
+"Google.Semicolons" = 3
+"Microsoft.Acronyms" = 6
+"Microsoft.Contractions" = 5
+"Microsoft.Dashes" = 4
+"Microsoft.Passive" = 8
+"Microsoft.Quotes" = 1
+"Microsoft.Semicolon" = 3
+"Microsoft.SentenceLength" = 3
+"Microsoft.Terms" = 4
+"write-good.E-Prime" = 23
+"write-good.Passive" = 8
+"write-good.TooWordy" = 3
+
+[legacy.comments."guard/src/prepush.rs"]
+"Google.Acronyms" = 2
+"Google.Anthropomorphism" = 1
+"Google.Contractions" = 10
+"Google.EmDash" = 4
+"Google.ExcessiveClaims" = 3
+"Google.Parens" = 4
+"Google.Passive" = 5
+"Google.Semicolons" = 1
+"Microsoft.Acronyms" = 2
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 10
+"Microsoft.Dashes" = 4
+"Microsoft.Passive" = 5
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 4
+"Microsoft.Terms" = 1
+"write-good.E-Prime" = 27
+"write-good.Passive" = 5
+"write-good.So" = 1
+"write-good.ThereIs" = 1
+"write-good.TooWordy" = 1
+
+[legacy.comments."guard/src/realgit.rs"]
+"Google.Contractions" = 2
+"Google.Parens" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 2
+"Google.We" = 1
+"Google.WordListCase" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 2
+"Microsoft.SentenceLength" = 1
+"Microsoft.We" = 1
+"write-good.E-Prime" = 6
+"write-good.Passive" = 2
+"write-good.TooWordy" = 1
+
+[legacy.comments."guard/src/renovate.rs"]
+"Google.Acronyms" = 2
+"Google.Anthropomorphism" = 1
+"Google.Contractions" = 4
+"Google.EmDash" = 10
+"Google.Parens" = 8
+"Google.Passive" = 6
+"Google.Semicolons" = 7
+"Google.WordListCase" = 4
+"Microsoft.Acronyms" = 2
+"Microsoft.Adverbs" = 4
+"Microsoft.Contractions" = 4
+"Microsoft.Dashes" = 10
+"Microsoft.Passive" = 6
+"Microsoft.QuestionMarks" = 1
+"Microsoft.Semicolon" = 7
+"Microsoft.SentenceLength" = 6
+"Microsoft.Vocab" = 2
+"Microsoft.Wordiness" = 1
+"write-good.E-Prime" = 23
+"write-good.Passive" = 6
+"write-good.TooWordy" = 1
+
+[legacy.comments."guard/src/staged.rs"]
+"Google.Contractions" = 7
+"Google.EmDash" = 3
+"Google.Passive" = 8
+"Google.Semicolons" = 1
+"Google.Will" = 1
+"Google.WordListCase" = 1
+"Microsoft.Contractions" = 7
+"Microsoft.Dashes" = 3
+"Microsoft.Passive" = 8
+"Microsoft.QuestionMarks" = 2
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 3
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 22
+"write-good.Passive" = 8
+"write-good.TooWordy" = 1
+
+[legacy.comments."guard/tests/empty_commit.rs"]
+"Google.Passive" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 1
+"write-good.Passive" = 1
+
+[legacy.comments."guard/tests/git_wrapper.rs"]
+"Google.Contractions" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 1
+"Google.WordListCase" = 1
+"Microsoft.Contractions" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 1
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 2
+"write-good.Passive" = 2
+
+[legacy.comments."ops/tasks/base.yml"]
+"Google.Acronyms" = 1
+"Microsoft.Acronyms" = 1
+
+[legacy.comments."ops/tasks/desktop.yml"]
+"Google.Contractions" = 1
+"Google.WordList" = 1
+"Microsoft.Contractions" = 1
+"Microsoft.Terms" = 2
+
+[legacy.comments."ops/tasks/docker.yml"]
+"Google.Parens" = 1
+
+[legacy.comments."ops/tasks/libvirt.yml"]
+"Google.Acronyms" = 8
+"Google.OxfordComma" = 1
+"Google.Parens" = 1
+"Microsoft.Acronyms" = 8
+"Microsoft.OxfordComma" = 1
+"write-good.E-Prime" = 1
+
+[legacy.comments."ops/tasks/oom.yml"]
+"Google.Semicolons" = 1
+"Microsoft.Semicolon" = 1
+
+[legacy.comments."ops/tasks/openssh.yml"]
+"Google.Parens" = 1
+
+[legacy.comments."ops/tasks/postcheck.yml"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 2
+"Google.Parens" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Uppercase" = 1
+"write-good.E-Prime" = 3
+"write-good.TooWordy" = 1
+
+[legacy.comments."ops/tasks/preflight.yml"]
+"Google.Colons" = 1
+"Google.Units" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 1
+
+[legacy.comments."ops/tasks/sandbox.yml"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 2
+"Google.Parens" = 2
+"Google.Passive" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Passive" = 1
+"write-good.E-Prime" = 4
+"write-good.Passive" = 1
+"write-good.TooWordy" = 1
+
+[legacy.comments."ops/tasks/tailscale.yml"]
+"Google.Parens" = 2
+"write-good.E-Prime" = 2
+
+[legacy.comments."ops/tasks/xrdp.yml"]
+"Google.Acronyms" = 2
+"Google.OxfordComma" = 1
+"Google.Parens" = 2
+"Google.Passive" = 4
+"Google.Semicolons" = 1
+"Microsoft.Acronyms" = 2
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 4
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 1
+"write-good.E-Prime" = 6
+"write-good.Passive" = 4
+"write-good.Weasel" = 1
+
+[legacy.comments."tools/dotctl/src/lint.rs"]
+"Google.Acronyms" = 1
+"Google.Colons" = 1
+"Google.Contractions" = 4
+"Google.Parens" = 3
+"Google.Passive" = 4
+"Google.Semicolons" = 2
+"Google.WordListCase" = 1
+"Microsoft.Acronyms" = 1
+"Microsoft.Contractions" = 4
+"Microsoft.Passive" = 4
+"Microsoft.Semicolon" = 2
+"Microsoft.SentenceLength" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 8
+"write-good.Passive" = 4
+"write-good.TooWordy" = 2
+
+[legacy.comments."tools/dotctl/src/proc.rs"]
+"Google.Acronyms" = 2
+"Google.Colons" = 1
+"Google.Contractions" = 2
+"Google.Passive" = 6
+"Google.We" = 1
+"Microsoft.Acronyms" = 2
+"Microsoft.Contractions" = 2
+"Microsoft.Passive" = 6
+"Microsoft.SentenceLength" = 3
+"Microsoft.We" = 1
+"write-good.E-Prime" = 10
+"write-good.Passive" = 6
+
+[legacy.comments."tools/dotctl/src/render.rs"]
+"Google.Parens" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 1
+"write-good.E-Prime" = 2
+"write-good.Passive" = 2
+"write-good.TooWordy" = 1
+
+[legacy.comments."tools/dotctl/src/setup/herdr.rs"]
+"Google.Contractions" = 1
+"Google.Parens" = 1
+"Google.Semicolons" = 1
+"Microsoft.Contractions" = 1
+"Microsoft.Semicolon" = 1
+
+[legacy.comments."tools/dotctl/src/setup/keyboard.rs"]
+"Google.Semicolons" = 1
+"Microsoft.Semicolon" = 1
+
+[legacy.comments."tools/dotctl/src/setup/ocomment.rs"]
+"Google.Contractions" = 3
+"Google.EmDash" = 1
+"Google.OxfordComma" = 1
+"Google.Passive" = 2
+"Google.Semicolons" = 1
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 3
+"Microsoft.Dashes" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 8
+"write-good.Passive" = 2
+
+[legacy.comments."tools/dotctl/src/setup/python_stub.rs"]
+"Google.Contractions" = 2
+"Google.Parens" = 1
+"Google.Passive" = 1
+"Google.We" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Passive" = 1
+"Microsoft.We" = 1
+"write-good.E-Prime" = 4
+"write-good.Passive" = 1
+
+[legacy.comments."tools/dotctl/src/setup/scoop.rs"]
+"Microsoft.Terms" = 1
+"write-good.E-Prime" = 1
+
+[legacy.comments."tools/dotctl/src/setup/sshd/config.rs"]
+"Google.Acronyms" = 1
+"Google.Contractions" = 5
+"Google.Passive" = 2
+"Google.Semicolons" = 2
+"Google.WordListCase" = 4
+"Microsoft.Acronyms" = 1
+"Microsoft.Contractions" = 5
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 2
+"Microsoft.Vocab" = 2
+"write-good.E-Prime" = 11
+"write-good.Passive" = 2
+"write-good.TooWordy" = 3
+
+[legacy.comments."tools/dotctl/src/setup/sshd/keys.rs"]
+"Google.Contractions" = 1
+"Google.Passive" = 3
+"Google.Semicolons" = 1
+"Google.We" = 1
+"Google.WordListCase" = 1
+"Microsoft.Contractions" = 1
+"Microsoft.Passive" = 3
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 2
+"Microsoft.We" = 1
+"write-good.E-Prime" = 8
+"write-good.Passive" = 3
+
+[legacy.comments."tools/dotctl/src/setup/sshd/mod.rs"]
+"Google.Acronyms" = 7
+"Google.Anthropomorphism" = 1
+"Google.Colons" = 1
+"Google.Contractions" = 13
+"Google.OxfordComma" = 1
+"Google.Passive" = 9
+"Google.Quotes" = 1
+"Google.Semicolons" = 1
+"Google.We" = 1
+"Google.WordListCase" = 3
+"Microsoft.Acronyms" = 7
+"Microsoft.Adverbs" = 1
+"Microsoft.BiasFree" = 1
+"Microsoft.Contractions" = 13
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 9
+"Microsoft.Quotes" = 1
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 7
+"Microsoft.Terms" = 1
+"Microsoft.Vocab" = 2
+"Microsoft.We" = 1
+"write-good.E-Prime" = 30
+"write-good.Passive" = 9
+"write-good.TooWordy" = 2
+
+[legacy.comments."tools/dotctl/src/setup/storage_scout.rs"]
+"Google.Contractions" = 1
+"Google.Semicolons" = 1
+"Microsoft.Contractions" = 1
+"Microsoft.Semicolon" = 1
+"write-good.E-Prime" = 1
+"write-good.TooWordy" = 1
+
+[legacy.comments."tools/dotctl/tests/lint.rs"]
+"Google.Acronyms" = 2
+"Google.Contractions" = 2
+"Google.Passive" = 3
+"Google.Semicolons" = 1
+"Microsoft.Acronyms" = 2
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Passive" = 3
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 1
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 8
+"write-good.Passive" = 3
+
+[legacy.comments."xtask/proofs/Dockerfile"]
+"Google.Semicolons" = 1
+"Microsoft.Semicolon" = 1
+
+[legacy.comments."xtask/src/bin/skill-ops.rs"]
+"Google.Passive" = 1
+"Microsoft.Passive" = 1
+"write-good.E-Prime" = 1
+"write-good.Passive" = 1
+
+[legacy.comments."xtask/src/hooks.rs"]
+"Google.Contractions" = 1
+"Google.Passive" = 1
+"Microsoft.Contractions" = 1
+"Microsoft.Passive" = 1
+"write-good.E-Prime" = 1
+"write-good.Passive" = 1
+
+[legacy.comments."xtask/src/lib.rs"]
+"Google.Parens" = 1
+"Google.Semicolons" = 1
+"Microsoft.Semicolon" = 1
+"write-good.E-Prime" = 1
+"write-good.TooWordy" = 1
+
+[legacy.comments."xtask/src/main.rs"]
+"Microsoft.Terms" = 1
+
+[legacy.comments."xtask/src/pr_rules.rs"]
+"Google.Contractions" = 1
+"Microsoft.Contractions" = 1
+"write-good.E-Prime" = 1
+
+[legacy.comments."xtask/src/pr_workflow.rs"]
+"Google.Acronyms" = 3
+"Google.OxfordComma" = 1
+"Google.Semicolons" = 2
+"Microsoft.Acronyms" = 3
+"Microsoft.GeneralURL" = 2
+"Microsoft.OxfordComma" = 1
+"Microsoft.Semicolon" = 2
+"write-good.TooWordy" = 3
+
+[legacy.comments."xtask/src/profile_rules.rs"]
+"Google.Passive" = 1
+"Google.Semicolons" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 1
+"write-good.E-Prime" = 2
+"write-good.Passive" = 1
+
+[legacy.comments."xtask/src/profiles.rs"]
+"Google.Contractions" = 2
+"Google.Passive" = 3
+"Google.Semicolons" = 2
+"Google.WordListCase" = 2
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Passive" = 3
+"Microsoft.Semicolon" = 2
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 5
+"write-good.Passive" = 3
+
+[legacy.comments."xtask/src/quality.rs"]
+"Google.Acronyms" = 2
+"Google.Anthropomorphism" = 1
+"Google.Contractions" = 2
+"Google.Passive" = 1
+"Google.Semicolons" = 1
+"Microsoft.Acronyms" = 2
+"Microsoft.Adverbs" = 1
+"Microsoft.Contractions" = 2
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 1
+"write-good.E-Prime" = 2
+"write-good.Passive" = 1
+
+[legacy.comments."xtask/src/rehearsal.rs"]
+"Google.Contractions" = 3
+"Google.Passive" = 2
+"Google.Semicolons" = 1
+"Google.Will" = 1
+"Google.WordListCase" = 1
+"Microsoft.Contractions" = 3
+"Microsoft.Passive" = 2
+"Microsoft.Semicolon" = 1
+"Microsoft.SentenceLength" = 2
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 3
+"write-good.Passive" = 2
+
+[legacy.comments."xtask/src/setup.rs"]
+"Google.Contractions" = 5
+"Google.OxfordComma" = 1
+"Google.Passive" = 6
+"Google.Semicolons" = 3
+"Google.WordListCase" = 4
+"Microsoft.Contractions" = 5
+"Microsoft.GeneralURL" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Passive" = 6
+"Microsoft.Semicolon" = 3
+"Microsoft.Terms" = 1
+"write-good.E-Prime" = 8
+"write-good.Passive" = 6
+"write-good.TooWordy" = 2
+
+[legacy.comments."xtask/src/skill_ops.rs"]
+"Google.Contractions" = 1
+"Google.Semicolons" = 2
+"Microsoft.Contractions" = 1
+"Microsoft.Semicolon" = 2
+"Microsoft.Vocab" = 2
+
+[legacy.comments."xtask/src/skill_proofs.rs"]
+"Google.Anthropomorphism" = 1
+
+[legacy.comments."xtask/src/tool.rs"]
+"Google.Contractions" = 1
+"Google.OxfordComma" = 1
+"Google.Parens" = 1
+"Google.Semicolons" = 2
+"Google.WordList" = 1
+"Google.WordListCase" = 1
+"Microsoft.Contractions" = 1
+"Microsoft.OxfordComma" = 1
+"Microsoft.Semicolon" = 2
+"write-good.E-Prime" = 1
+
+[legacy.comments."xtask/src/transaction.rs"]
+"Google.Passive" = 1
+"Google.Semicolons" = 1
+"Microsoft.Passive" = 1
+"Microsoft.Semicolon" = 1
+"write-good.E-Prime" = 1
+"write-good.Passive" = 1
+
+[legacy.comments."xtask/src/wsl.rs"]
+"Microsoft.Terms" = 1
+
+[legacy.comments."xtask/tests/launchd.rs"]
+"Microsoft.Terms" = 2
+"Microsoft.Vocab" = 1
+"write-good.E-Prime" = 1

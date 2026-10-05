@@ -6,7 +6,7 @@
 	sshCommand = ssh.exe
 	pager = delta
 {{- if .signing.enabled }}
-	# 全 repo (既存含む) で署名 hook を強制実行する単一ソース。
+	# One hook directory enforces signing in every repository, including existing clones.
 	# The hooks live in dot_config/git/hooks/ and run each repository's own lefthook configuration, so no repository installs lefthook hooks.
 	hooksPath = ~/.config/git/hooks
 {{- end }}
@@ -37,9 +37,8 @@
 [gpg]
 	format = ssh
 [gpg "ssh"]
-	# Windows OpenSSH の ssh-keygen を呼ぶ。
-	# WSL から 1Password の SSH agent (\\.\pipe\openssh-ssh-agent) と
-	# 整合した動作にするため、署名検証も Windows 側バイナリで統一する。
+	# Signing and verification run the Windows OpenSSH ssh-keygen.
+	# That binary reaches the 1Password SSH agent that WSL shares with Windows.
 	program = {{ joinPath .chezmoi.homeDir ".local/bin/dotfiles-wsl-ssh-keygen" | quote }}
 	allowedSignersFile = ~/.config/git/allowed_signers
 [commit]

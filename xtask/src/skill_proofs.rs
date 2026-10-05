@@ -59,6 +59,13 @@ pub const REVIEW_HARNESSES: [&str; 5] = [
     "rolling_attempts_cannot_exceed_the_layered_local_budget",
 ];
 
+pub const PROSE_HARNESSES: [&str; 4] = [
+    "a_ledger_never_admits_more_findings_than_it_allows",
+    "exemptions_require_a_reason_and_a_match",
+    "failing_replies_are_rewritten_once_and_never_allowed",
+    "tightening_never_raises_an_allowance",
+];
+
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
     let summary = &value["verification_results"]["summary"];
     ensure!(
@@ -425,6 +432,29 @@ fn verify_native(root: &Path) -> Result<()> {
         fs::read(source)? == original,
         "production review proof source changed during verification"
     );
+    let source = crate::canonical(&root.join("xtask/src/prose_rules.rs"))?;
+    let original = fs::read(&source)?;
+    let directory = tempfile::tempdir()?;
+    verify_inventory(&source, directory.path(), &PROSE_HARNESSES)?;
+    verify_file(&source, directory.path(), &PROSE_HARNESSES, false)?;
+    let probe = tempfile::tempdir()?;
+    let file = probe.path().join("counterexample.rs");
+    fs::write(
+        &file,
+        format!(
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_a_ledger_that_admits_a_new_finding() {{\n    assert!(production::ledger(3, 2) == production::Ledger::Within);\n}}\n#[kani::proof]\nfn reject_allowing_a_failing_reply() {{\n    assert!(production::reply(false, false) == production::Reply::Allow);\n}}\n"
+        ),
+    )?;
+    for name in [
+        "reject_a_ledger_that_admits_a_new_finding",
+        "reject_allowing_a_failing_reply",
+    ] {
+        verify_file(&file, probe.path(), &[name], true)?;
+    }
+    ensure!(
+        fs::read(source)? == original,
+        "production prose proof source changed during verification"
+    );
     println!(
         "Verified all {} production policy harnesses, reachable outcomes, and the rejecting counterexamples",
         HARNESSES.len()
@@ -432,6 +462,7 @@ fn verify_native(root: &Path) -> Result<()> {
             + PROFILE_HARNESSES.len()
             + REAPER_HARNESSES.len()
             + REVIEW_HARNESSES.len()
+            + PROSE_HARNESSES.len()
     );
     Ok(())
 }

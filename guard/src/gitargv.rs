@@ -9,7 +9,7 @@
 //! This layer is *convenience*, not the guarantee.
 //! It only sees commands whose `git` resolved through PATH, which excludes an IDE calling `/opt/homebrew/bin/git` directly, a shell alias expanding to something else, and anything running with a different PATH.
 //! The guarantee for the remote side is `dotguard pre-push`, which runs from `core.hooksPath` and therefore sees every push regardless of how git was invoked.
-//! What this layer buys is the refusal arriving *before* the damage rather than after, and a hint that names the non-destructive command you probably wanted.
+//! What this layer buys is the refusal arriving *before* the damage rather than after, and a hint that names the non-destructive command that fits the intent.
 //!
 //! Rules NOT here, deliberately:
 //! * `rebase`, `commit --amend` — rewriting unpushed history is ordinary work, and pre-push catches the case where it was not unpushed.

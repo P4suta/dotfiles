@@ -10,6 +10,8 @@ pub mod pr_rules;
 pub mod pr_workflow;
 pub mod profile_rules;
 pub mod profiles;
+pub mod prose;
+pub mod prose_rules;
 pub mod quality;
 pub mod rehearsal;
 pub mod review_guard;
