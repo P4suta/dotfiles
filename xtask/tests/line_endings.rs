@@ -51,6 +51,8 @@ impl Isolated {
         command
             .env("GIT_CONFIG_GLOBAL", &self.global)
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            // Git reads the default global attributes file from here, which a configured host fills with its own.
+            .env("XDG_CONFIG_HOME", self._scope.path())
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .env_remove("GIT_INDEX_FILE");

@@ -3,9 +3,10 @@ use serde::Deserialize;
 use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::target_rules::{Target, target};
 use crate::tool::Tool;
 
 pub struct Reply {
@@ -66,7 +67,18 @@ impl Native {
 
     /// A Git hook gate, which keeps the hook's repository variables to inspect the commit in progress.
     pub fn hook_command(&self, tool: Tool) -> Command {
-        self.prepare(tool.hook_command(), tool == Tool::Codex)
+        let mut command = self.prepare(tool.hook_command(), tool == Tool::Codex);
+        command.env(
+            "CARGO_TARGET_DIR",
+            hook_target(
+                std::env::var_os("CARGO_TARGET_DIR")
+                    .map(PathBuf::from)
+                    .as_deref(),
+                std::env::var_os("TEMP").map(PathBuf::from).as_deref(),
+                &self.home,
+            ),
+        );
+        command
     }
 
     /// A binary this repository installed at a known path, run with the same environment as registered tools.
@@ -131,6 +143,29 @@ impl Runner for Native {
             success: output.status.success(),
             bytes: output.stdout,
         })
+    }
+}
+
+/// The Cargo target directory every hook gate shares, so a linked worktree never keeps its own build.
+pub fn hook_target(configured: Option<&Path>, temp: Option<&Path>, home: &Path) -> PathBuf {
+    let volume = temp.and_then(|temp| {
+        let mut parts = temp.components();
+        match (parts.next(), parts.next()) {
+            (Some(prefix @ Component::Prefix(_)), Some(root @ Component::RootDir)) => {
+                Some(PathBuf::from_iter([prefix, root]))
+            }
+            _ => None,
+        }
+    });
+    let absolute = configured.filter(|path| path.is_absolute());
+    match (
+        target(absolute.is_some(), volume.is_some()),
+        absolute,
+        volume,
+    ) {
+        (Target::Configured, Some(path), _) => path.to_path_buf(),
+        (Target::Development, _, Some(volume)) => volume.join("cargo/target"),
+        _ => home.join(".cache/dotfiles-target"),
     }
 }
 
