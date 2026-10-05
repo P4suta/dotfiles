@@ -60,7 +60,7 @@ pr-workflow check --repo OWNER/REPO --pr 17 --final
 
 Creation always uses draft in the default `local` mode, even when the document already passes validation.
 There is no local flag to create a ready PR directly.
-`ready` reads the current title, body, and state from GitHub and requires an open draft with an accepted document.
+`ready` reads the current title, body, state, and head check rollup from GitHub and requires an open draft with an accepted document and only passing checks.
 `edit` replaces title and body together; it does not change draft state.
 Local-file `check` never contacts GitHub, and live `check --pr` is read-only.
 An offline document check does not satisfy the live issue prerequisite.
@@ -132,7 +132,7 @@ The agent must check the upstream format itself; the exception does not mechanic
 
 ## Evidence and effects
 
-The shared transition core has source-bound Kani proofs for rejection, local draft creation, and ready eligibility.
+The shared transition core has source-bound Kani proofs for rejection, local draft creation, ready eligibility, and the passing-check requirement.
 Native process tests exercise argument boundaries, checked file copies, invalid documents, custom destination rules, live PR parsing, and failed `gh` operations.
 The production issue-scope and publication decisions have Kani proofs, including refusal in both generation modes and rejection controls.
 Native tests exercise real CLI/process parsing with isolated GitHub fixtures and verify that rejected prerequisites never invoke a PR mutation.

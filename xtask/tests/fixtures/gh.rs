@@ -36,7 +36,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         println!("{}", std::env::var(variable)?);
     } else if args.get(1).is_some_and(|arg| arg == "view") {
-        println!("{}", std::env::var("GH_FIXTURE_VIEW")?);
+        let view = std::env::var("GH_FIXTURE_VIEW")?;
+        let checks = std::env::var("GH_FIXTURE_CHECKS")
+            .unwrap_or_else(|_| r#"[{"status":"COMPLETED","conclusion":"SUCCESS"}]"#.into());
+        match view.strip_suffix('}') {
+            Some(open) if !view.contains("statusCheckRollup") && !open.trim().ends_with('{') => {
+                println!("{open},\"statusCheckRollup\":{checks}}}");
+            }
+            _ => println!("{view}"),
+        }
     } else {
         println!("https://github.com/owner/project/pull/17");
     }
