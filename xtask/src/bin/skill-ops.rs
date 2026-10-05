@@ -74,6 +74,15 @@ fn optional<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     }
 }
 
+/// An absent manifest settles nothing, so every finding needs triage.
+fn reviewed(approved: &Path) -> Result<BTreeMap<String, ops::Reviewed>> {
+    Ok(if approved.try_exists()? {
+        ops::read_approved(approved)?.reviewed
+    } else {
+        BTreeMap::new()
+    })
+}
+
 fn stdin_json() -> Result<serde_json::Value> {
     let mut text = String::new();
     std::io::stdin().take(8_388_609).read_to_string(&mut text)?;
@@ -119,7 +128,7 @@ fn pending(
             "review evidence changed; reassess the current evidence"
         );
     }
-    let baseline: ops::Approved = ops::read_json(approved)?;
+    let baseline = ops::read_approved(approved)?;
     let runtime = Runtime {
         catalog,
         policy,
@@ -132,13 +141,15 @@ fn pending(
             .as_ref()
             .map_or(root, |item| item.evidence_root.as_path()),
     };
-    if draft.is_some() && reviewed.is_some() {
-        // Preserve loss detection for observations captured by newer drafts.
-        ops::runtime_pending(Runtime {
+    // A newer draft keeps loss detection, and it completes alone when every finding is adopted.
+    if draft.is_some()
+        && !ops::runtime_pending(Runtime {
             report: draft.as_ref(),
             review: None,
             ..runtime
-        })?;
+        })?
+    {
+        return Ok(false);
     }
     ops::runtime_pending(runtime)
 }
@@ -162,7 +173,7 @@ fn execute(cli: Cli) -> Result<()> {
         .approved
         .unwrap_or_else(|| user_directory.join(".config/skill-ops/approved.json"));
     let catalog = if cli.tree.is_none() {
-        let baseline: ops::Approved = ops::read_json(&approved)?;
+        let baseline = ops::read_approved(&approved)?;
         ensure!(
             ops::hash(&baseline.catalog)? == baseline.catalog_hash,
             "managed catalog manifest is inconsistent"
@@ -205,6 +216,7 @@ fn execute(cli: Cli) -> Result<()> {
             let events = ops::recorded(&state)?;
             let notes = ops::notes(&state)?;
             let report = ops::analyze(&catalog, &policy, &events, &notes)?;
+            let adopted = ops::adopted_findings(&report, &reviewed(&approved)?);
             ops::write_json(&out, &report, false)?;
             ops::preserve_json(
                 &state
@@ -223,9 +235,25 @@ fn execute(cli: Cli) -> Result<()> {
                 notes.len(),
                 ops::hash(&report)?
             );
+            let open: Vec<_> = report
+                .findings
+                .iter()
+                .filter(|finding| !adopted.contains(&finding.id))
+                .collect();
             println!(
-                "Record every disposition in a Review JSON with report_hash and decisions, then run skill-ops triage --decisions FILE."
+                "Adopted {} findings from the reviewed skill revisions",
+                adopted.len()
             );
+            if open.is_empty() {
+                println!("No finding needs triage");
+            } else {
+                for finding in &open {
+                    println!("Needs triage: {} ({})", finding.id, finding.kind);
+                }
+                println!(
+                    "Record these dispositions in a Review JSON with report_hash and decisions, then run skill-ops triage --decisions FILE."
+                );
+            }
         }
         Action::Triage {
             decisions,
@@ -247,6 +275,7 @@ fn execute(cli: Cli) -> Result<()> {
             ops::check_review(
                 &ops::hash(&report)?,
                 &report.findings,
+                &ops::adopted_findings(&report, &reviewed(&approved)?),
                 &review,
                 &evidence_root,
             )?;
@@ -294,7 +323,7 @@ fn execute(cli: Cli) -> Result<()> {
         }
         Action::Check => ensure!(
             !pending(&catalog, &policy, &state, &approved, &tree)?,
-            "skill maintenance is pending; analyze and triage the current evidence"
+            "skill maintenance is pending; run skill-ops analyze --out FILE and triage the findings it lists with skill-ops triage --decisions FILE"
         ),
         Action::Stop => unreachable!("Stop is translated into a checked completion request"),
         Action::Doctor => {
@@ -348,7 +377,7 @@ fn main() {
             .is_ok_and(|input| input["stop_hook_active"] == true);
         cli.command = Action::Check;
         let checked = input.and_then(|_| execute(cli));
-        let reason = checked.as_ref().err().map(|error| format!("Skill maintenance remains incomplete: {error:#}. Run skill-ops analyze, assess the findings with skill-operations, implement accepted changes, and run skill-ops triage before claiming completion."));
+        let reason = checked.as_ref().err().map(|error| format!("Skill maintenance remains incomplete: {error:#}. Run skill-ops analyze, assess the findings it lists with skill-operations, implement accepted changes, and run skill-ops triage for them before claiming completion."));
         let response = match completion(checked.is_ok(), continued) {
             Completion::Allow => serde_json::json!({}),
             Completion::RequestMaintenance => {

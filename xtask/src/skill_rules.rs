@@ -12,6 +12,58 @@ pub fn decision_complete(outcome: Outcome, reason: bool, evidence: bool, revisit
     reason && evidence && (outcome != Outcome::Deferred || revisit)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Tracked {
+    Current,
+    Missing,
+    Stale,
+    Incomplete,
+}
+
+pub fn tracked_decision(present: bool, bound: bool, complete: bool) -> Tracked {
+    if !present {
+        Tracked::Missing
+    } else if !bound {
+        Tracked::Stale
+    } else if !complete {
+        Tracked::Incomplete
+    } else {
+        Tracked::Current
+    }
+}
+
+pub fn adopted(bound: bool, outcome: Outcome) -> bool {
+    bound && outcome != Outcome::Deferred
+}
+
+pub fn triage_complete(unadopted: usize, review_verified: bool) -> bool {
+    unadopted == 0 || review_verified
+}
+
+/// Settles maintenance by the recorded analysis or by a current analysis with nothing to triage.
+pub fn gate_complete(recorded_current: bool, open_findings: usize) -> bool {
+    recorded_current || open_findings == 0
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Sizing {
+    Within,
+    Settled,
+    Missing,
+    Incomplete,
+    Unexpected,
+}
+
+pub fn size_disposition(over_limit: bool, recorded: bool, complete: bool) -> Sizing {
+    match (over_limit, recorded, complete) {
+        (false, false, _) => Sizing::Within,
+        (false, true, _) => Sizing::Unexpected,
+        (true, false, _) => Sizing::Missing,
+        (true, true, false) => Sizing::Incomplete,
+        (true, true, true) => Sizing::Settled,
+    }
+}
+
 pub fn immutable_identity_valid(length: usize, hexadecimal: bool) -> bool {
     length == 64 && hexadecimal
 }
@@ -131,14 +183,7 @@ fn incomplete_completion_is_refused_and_automatic_continuation_is_bounded() {
 #[cfg(kani)]
 #[kani::proof]
 fn dispositions_require_evidence_and_defined_follow_up() {
-    let choice: u8 = kani::any();
-    kani::assume(choice < 4);
-    let outcome = match choice {
-        0 => Outcome::Keep,
-        1 => Outcome::Implemented,
-        2 => Outcome::Rejected,
-        _ => Outcome::Deferred,
-    };
+    let outcome = any_outcome();
     let reason: bool = kani::any();
     let evidence: bool = kani::any();
     let revisit: bool = kani::any();
@@ -197,5 +242,90 @@ fn stale_or_unprocessed_maintenance_never_completes() {
     );
     assert!(!result || (value.threshold > 0 && value.new_observations < value.threshold));
     kani::cover!(result);
+    kani::cover!(!result);
+}
+
+#[cfg(kani)]
+fn any_outcome() -> Outcome {
+    let choice: u8 = kani::any();
+    kani::assume(choice < 4);
+    match choice {
+        0 => Outcome::Keep,
+        1 => Outcome::Implemented,
+        2 => Outcome::Rejected,
+        _ => Outcome::Deferred,
+    }
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn tracked_decisions_pass_only_when_present_bound_and_complete() {
+    let present: bool = kani::any();
+    let bound: bool = kani::any();
+    let complete: bool = kani::any();
+    let state = tracked_decision(present, bound, complete);
+    assert_eq!(state == Tracked::Current, present && bound && complete);
+    assert!(state != Tracked::Missing || !present);
+    assert!(state != Tracked::Stale || (present && !bound));
+    assert!(state != Tracked::Incomplete || (present && bound && !complete));
+    kani::cover!(state == Tracked::Current);
+    kani::cover!(state == Tracked::Missing);
+    kani::cover!(state == Tracked::Stale);
+    kani::cover!(state == Tracked::Incomplete);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn only_current_settled_decisions_are_adopted() {
+    let bound: bool = kani::any();
+    let outcome = any_outcome();
+    let result = adopted(bound, outcome);
+    assert!(!result || bound);
+    assert!(!result || outcome != Outcome::Deferred);
+    assert!(!bound || outcome == Outcome::Deferred || result);
+    kani::cover!(result);
+    kani::cover!(!result);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn triage_is_skipped_only_when_every_finding_is_adopted() {
+    let unadopted: usize = kani::any();
+    let verified: bool = kani::any();
+    let result = triage_complete(unadopted, verified);
+    assert!(!result || unadopted == 0 || verified);
+    assert!(unadopted == 0 || verified || !result);
+    kani::cover!(result && !verified);
+    kani::cover!(!result);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn oversized_skills_need_a_complete_size_disposition() {
+    let over_limit: bool = kani::any();
+    let recorded: bool = kani::any();
+    let complete: bool = kani::any();
+    let state = size_disposition(over_limit, recorded, complete);
+    let accepted = matches!(state, Sizing::Within | Sizing::Settled);
+    assert_eq!(accepted, recorded == over_limit && (!recorded || complete));
+    assert!(state != Sizing::Missing || (over_limit && !recorded));
+    assert!(state != Sizing::Unexpected || (!over_limit && recorded));
+    assert!(state != Sizing::Incomplete || (over_limit && recorded && !complete));
+    kani::cover!(state == Sizing::Within);
+    kani::cover!(state == Sizing::Settled);
+    kani::cover!(state == Sizing::Missing);
+    kani::cover!(state == Sizing::Incomplete);
+    kani::cover!(state == Sizing::Unexpected);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn the_gate_completes_only_when_nothing_remains_to_triage() {
+    let recorded: bool = kani::any();
+    let open: usize = kani::any();
+    let result = gate_complete(recorded, open);
+    assert!(!result || recorded || open == 0);
+    assert!(result || (!recorded && open > 0));
+    kani::cover!(result && !recorded);
     kani::cover!(!result);
 }

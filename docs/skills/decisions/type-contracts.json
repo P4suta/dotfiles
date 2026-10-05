@@ -1,0 +1,13 @@
+{
+  "revision": "98070bdc34b74fd54db11e1d6cb4083c71cc300f198942310d0e2ac42089250a",
+  "outcome": "implemented",
+  "reason": "Add the missing language-neutral strict typing and dynamic-language annotation contract, with runtime validation and narrow interop boundaries rather than blanket exclusions.",
+  "evidence": [
+    "dot_agents/skills/type-contracts/SKILL.md",
+    "docs/adr/0003-local-skill-operations.md",
+    "tsconfig.json",
+    "package.json",
+    "dot_config/opencode/plugins/skill-ops.ts"
+  ],
+  "revisit": null
+}

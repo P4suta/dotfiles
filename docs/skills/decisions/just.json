@@ -1,0 +1,9 @@
+{
+  "revision": "c88cb4b7b689a120ddd89962a356bc41ccfaffd023283811aedddc81dc2a1364",
+  "outcome": "keep",
+  "reason": "Retain thin developer command discovery as distinct from procedural Rust xtask logic; the skill explicitly requires actual argument and failure behavior.",
+  "evidence": [
+    "dot_agents/skills/just/SKILL.md"
+  ],
+  "revisit": null
+}

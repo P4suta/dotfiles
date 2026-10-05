@@ -51,6 +51,7 @@ Do not blindly apply a frequency-based merge, rubber-stamp every finding, or cla
 
 Run the same authoritative catalog, alias, resource, decision, lint, test, and proof checks before publication and in required CI.
 Changing a skill or policy invalidates the corresponding analysis; reassess the current content instead of copying an old success receipt.
+Draft a changed skill's decision with `just decide NAME` in the dotfiles repository and write the reason the new revision deserves.
 Add a realistic regression scenario for a demonstrated behavioral failure rather than a test that matches prose wording.
 Apply verified changes through each affected host's native profile and check installed discovery and collector definitions.
 Complete applicable repository review and CI before reporting the authorized PR task complete.

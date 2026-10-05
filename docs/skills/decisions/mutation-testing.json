@@ -1,0 +1,9 @@
+{
+  "revision": "404cd2c8f7ccfaa7cc60be0ab37d47e4f9e52817980b4ba31f7fa2ecc1af2ea7",
+  "outcome": "keep",
+  "reason": "Retain survivor interpretation and test sensitivity as separate assurance work; expensive campaigns and formal proofs have distinct guarantees and authorization.",
+  "evidence": [
+    "dot_agents/skills/mutation-testing/SKILL.md"
+  ],
+  "revisit": null
+}

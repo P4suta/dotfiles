@@ -1,0 +1,9 @@
+{
+  "revision": "47f36d26fc7c74ff1a0156fd4c4158e02694be289e0e9b9462fc6c45232087b8",
+  "outcome": "keep",
+  "reason": "Retain maintained typed procedural automation as the implementation boundary; thin native client adapters and existing tool invocation remain composition code.",
+  "evidence": [
+    "dot_agents/skills/rust-tooling/SKILL.md"
+  ],
+  "revisit": null
+}

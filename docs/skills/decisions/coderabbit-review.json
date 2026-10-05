@@ -1,0 +1,12 @@
+{
+  "revision": "c509adc2470eddb6e2f3e45f744dcac59f2177d849a4dedc356e189a85b67764",
+  "outcome": "implemented",
+  "reason": "Apply the owner's layered 90% ceiling and 20% margin once with exact production arithmetic, seven rolling hourly attempts and bounded probes; preserve durable reservations, one executor, owner pauses and separate PR capacity, with full-domain Kani proofs and a deterministic inherited-handle regression for explicit lock release.",
+  "evidence": [
+    "dot_agents/skills/coderabbit-review/SKILL.md",
+    "xtask/tests/review_guard.rs",
+    "xtask/src/review_rules.rs",
+    "docs/adr/0008-layered-review-capacity.md"
+  ],
+  "revisit": null
+}

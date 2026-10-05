@@ -30,7 +30,7 @@ Use actual representative tasks, counterexamples, project checks, and proof obli
 Run an independent agent evaluation only when delegation is explicitly authorized; do not create background agent work from a maintenance recommendation.
 Require the relevant current-head review for a published change, while keeping service-specific behavior outside this operating standard.
 
-The catalog gate requires an evidence-backed disposition for every current finding.
-It verifies identity, completeness, and local evidence paths, and detects changed content; the agent still owns the quality of the judgment.
+The required check binds one evidence-backed decision to each skill revision, and the local gate requires a disposition only for findings that no reviewed revision settles.
+They verify identity, completeness, and local evidence paths, and detect changed content; the agent still owns the quality of the judgment.
 Review thresholds are based on new observations and content changes rather than a sleep, calendar deadline, or presumed quiet period.
 Deferred findings remain in the local history and return in subsequent reports.

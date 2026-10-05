@@ -1,0 +1,9 @@
+{
+  "revision": "790850af891cfeecaf31b6f665f0c9e73885323dd60f737aa758b371edb716b6",
+  "outcome": "keep",
+  "reason": "Retain upstream-compatible tested dependency updates, shared presets, locks, and immutable pins instead of embedding a stale tool list in skill instructions.",
+  "evidence": [
+    "dot_agents/skills/renovate/SKILL.md"
+  ],
+  "revisit": null
+}

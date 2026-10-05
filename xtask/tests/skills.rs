@@ -131,7 +131,7 @@ fn check_snapshots_preserve_sources_and_exclude_builds_and_unrelated_state() -> 
         ".github/workflows/required.yml",
         "dot_config/skill-ops/policy.json",
         "dot_config/opencode/plugins/skill-ops.ts",
-        "docs/skills/review.json",
+        "docs/skills/decisions/alpha.json",
         "package.json",
         "bun.lock",
         "tsconfig.json",
@@ -156,8 +156,8 @@ fn check_snapshots_preserve_sources_and_exclude_builds_and_unrelated_state() -> 
     );
     assert!(!output.join("unrelated-state").try_exists()?);
     assert_eq!(
-        fs::read(output.join("docs/skills/review.json"))?,
-        fs::read(root.path().join("docs/skills/review.json"))?
+        fs::read(output.join("docs/skills/decisions/alpha.json"))?,
+        fs::read(root.path().join("docs/skills/decisions/alpha.json"))?
     );
     assert!(export_checks(root.path(), &output).is_err());
     assert_eq!(validate_tree(&output)?, 1);

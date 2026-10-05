@@ -1,0 +1,9 @@
+{
+  "revision": "4c6a50c9e481b93ddc552eceb251400d8cfb5b002c1a2777bd587f2744cdef74",
+  "outcome": "keep",
+  "reason": "Retain native per-host rendering and scoped application, because portable skill content alone does not establish installed behavior or permit runtime-state copying.",
+  "evidence": [
+    "dot_agents/skills/dotfiles/SKILL.md"
+  ],
+  "revisit": null
+}

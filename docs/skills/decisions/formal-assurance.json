@@ -1,0 +1,13 @@
+{
+  "revision": "6a1b1739b3bb16a466e6b61ced3bc634607bca4ce3c35722f588b7a2bac2e20f",
+  "outcome": "implemented",
+  "reason": "Require source-bound proofs for supported deterministic contracts and mandatory justified alternatives at genuine semantic or empirical boundaries; keep incomplete stronger claims distinct from scoped completion. Run the same pinned Kani gate on a Linux verification host where Kani has no native build instead of skipping it.",
+  "evidence": [
+    "dot_agents/skills/formal-assurance/SKILL.md",
+    "dot_agents/skills/formal-assurance/references/scoping.md",
+    "docs/skills/assurance-scope-evaluation.md",
+    "docs/adr/0012-windows-proofs-in-a-linux-container.md",
+    "xtask/tests/container_proofs.rs"
+  ],
+  "revisit": null
+}

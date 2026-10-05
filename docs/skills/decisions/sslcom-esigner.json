@@ -1,0 +1,9 @@
+{
+  "revision": "4d3f73bbfadefe5a4c7caa12170142b1d761b8eda9eea1e1f3cdde2270469edf",
+  "outcome": "keep",
+  "reason": "Retain provider-specific certificate TOTP and native Authenticode verification without merging account login, generic credentials, or publication authority.",
+  "evidence": [
+    "dot_agents/skills/sslcom-esigner/SKILL.md"
+  ],
+  "revisit": null
+}

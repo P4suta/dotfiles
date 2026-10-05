@@ -1,0 +1,10 @@
+{
+  "revision": "d501b76b61d91f4787b12e9b716865ba3d9eda37bfbd10dbf1ddcf492f3b0aa9",
+  "outcome": "implemented",
+  "reason": "Bring the existing owner-authored native skill into the canonical catalog unchanged, preserving its conditional client reference, explicit resource identity, and separate paid-resource authorization.",
+  "evidence": [
+    "dot_agents/skills/gcp/SKILL.md",
+    "docs/adr/0003-local-skill-operations.md"
+  ],
+  "revisit": null
+}

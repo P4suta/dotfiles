@@ -1,0 +1,9 @@
+{
+  "revision": "415be92516b5ddf592100ab61f561cede27a14a3e0ed1c7693afec3bdf02bbdc",
+  "outcome": "keep",
+  "reason": "Keep source clarity and narrow lint-exception judgment separate from OComment invocation; executable representation and actual public contracts remain authoritative.",
+  "evidence": [
+    "dot_agents/skills/concise-source/SKILL.md"
+  ],
+  "revisit": null
+}

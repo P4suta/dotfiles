@@ -1,6 +1,6 @@
 # Local Shared-Skill Operations
 
-Status: Accepted.
+Status: Accepted; the tracked catalog review is superseded by [ADR 0014](0014-per-skill-decision-records.md).
 
 ## Context
 

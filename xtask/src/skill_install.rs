@@ -84,6 +84,10 @@ pub fn install(source: &Path, binary: &Path, user_directory: &Path) -> Result<()
             catalog_hash: ops::hash(&expected)?,
             policy_hash: ops::hash(&policy)?,
             engine_hash: ops::engine_hash()?,
+            reviewed: ops::adoptable_revisions(
+                &expected,
+                &ops::tracked_decisions(&source.join(ops::DECISIONS))?,
+            ),
             catalog: expected,
         },
         true,

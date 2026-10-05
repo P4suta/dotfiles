@@ -12,6 +12,9 @@ profiles:
 proofs:
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- proofs
 
+decide skill:
+    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- decide {{quote(skill)}}
+
 diff config destination state:
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- profile diff --config {{quote(config)}} --destination {{quote(destination)}} --state {{quote(state)}}
 
