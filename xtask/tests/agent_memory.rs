@@ -143,3 +143,138 @@ fn unparsable_rendered_settings_are_refused() {
     assert!(violations(&dump(Some("{"), Some(CODEX_OFF), Some("{}"))).is_err());
     assert!(violations(&dump(Some(CLAUDE_OFF), Some("[features"), Some("{}"))).is_err());
 }
+
+/// Renders a repository `modify_` template for one profile against a host file, as application would.
+fn render_merged(profile: &str, template: &str, target: &str, host: &str) -> String {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let scope = tempfile::tempdir().unwrap();
+    let source = scope.path().join("source");
+    let destination = scope.path().join("home");
+    for file in [
+        template,
+        ".chezmoitemplates/profiles/wsl/dot_claude/settings.json.tmpl",
+    ] {
+        let copy = source.join(file);
+        std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+        std::fs::copy(root.join(file), copy).unwrap();
+    }
+    let path = destination.join(target);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, host).unwrap();
+    let config = scope.path().join("chezmoi.toml");
+    std::fs::write(
+        &config,
+        format!("[data]\nprofile = {profile:?}\n[data.platforms.{profile}]\n"),
+    )
+    .unwrap();
+    let rendered = dotfiles_xtask::profiles::chezmoi(&source, scope.path(), &config, &destination)
+        .arg("cat")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        rendered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rendered.stderr)
+    );
+    String::from_utf8(rendered.stdout).unwrap()
+}
+
+#[test]
+fn application_turns_off_memory_a_client_turned_back_on() {
+    let host = r#"{"autoMemoryEnabled":true,"model":"opus","permissions":{"allow":["Bash(host)"],"deny":["Bash(host)"],"defaultMode":"auto"}}"#;
+    for profile in ["mac", "linux", "windows", "wsl"] {
+        let rendered: Value = serde_json::from_str(&render_merged(
+            profile,
+            "dot_claude/modify_settings.json",
+            ".claude/settings.json",
+            host,
+        ))
+        .unwrap();
+        assert_eq!(rendered["autoMemoryEnabled"], json!(false), "{profile}");
+        assert_eq!(rendered["model"], json!("opus"), "{profile}");
+        assert_eq!(
+            rendered["permissions"]["defaultMode"],
+            json!("auto"),
+            "{profile}"
+        );
+        let claude = rendered.to_string();
+        assert!(
+            violations(&dump(Some(&claude), Some(CODEX_OFF), Some(&off())))
+                .unwrap()
+                .is_empty(),
+            "{profile}: {claude}"
+        );
+    }
+    let codex_host = "model = \"o3\"\n[features]\nmemories = true\nexternal_agent_memory_import = true\nchronicle = true\n[memories]\ngenerate_memories = true\nuse_memories = true\n";
+    for profile in ["mac", "linux", "windows", "wsl"] {
+        let codex = render_merged(
+            profile,
+            "dot_codex/modify_config.toml",
+            ".codex/config.toml",
+            codex_host,
+        );
+        assert!(
+            violations(&dump(Some(CLAUDE_OFF), Some(&codex), Some(&off())))
+                .unwrap()
+                .is_empty(),
+            "{profile}: {codex}"
+        );
+        assert!(codex.contains("model = \"o3\""), "{codex}");
+    }
+}
+
+/// Every key a profile sets takes the profile's value, an array included as one value, and every other key keeps the host's value.
+#[test]
+fn a_profile_array_replaces_the_host_array_whether_or_not_it_is_empty() {
+    let host =
+        r#"{"permissions":{"allow":["Bash(host)"],"deny":["Bash(host)"],"ask":["Bash(host)"]}}"#;
+    let rendered: Value = serde_json::from_str(&render_merged(
+        "wsl",
+        "dot_claude/modify_settings.json",
+        ".claude/settings.json",
+        host,
+    ))
+    .unwrap();
+    let permissions = &rendered["permissions"];
+    assert_eq!(permissions["allow"], json!([]));
+    let deny = permissions["deny"].as_array().unwrap();
+    assert!(deny.contains(&json!("Bash(sudo:*)")));
+    assert!(!deny.contains(&json!("Bash(host)")));
+    assert_eq!(permissions["ask"], json!(["Bash(host)"]));
+}
+
+#[test]
+fn a_host_file_with_memory_turned_back_on_enables_every_switch() {
+    let claude =
+        dotfiles_xtask::agent_memory::reenabled(".claude/settings.json", CLAUDE_OFF).unwrap();
+    let codex = dotfiles_xtask::agent_memory::reenabled(".codex/config.toml", CODEX_OFF).unwrap();
+    let found = violations(&dump(Some(&claude), Some(&codex), Some(&off()))).unwrap();
+    assert_eq!(found.len(), 6, "{found:?}");
+    assert!(
+        found.iter().all(|line| line.ends_with("is Enabled")),
+        "{found:?}"
+    );
+    assert!(claude.contains("\"model\":\"opus\""), "{claude}");
+    assert!(codex.contains("model = \"o3\""), "{codex}");
+    assert_eq!(
+        dotfiles_xtask::agent_memory::reenabled(".other.json", "{\"a\":1}").unwrap(),
+        "{\"a\":1}"
+    );
+}
+
+#[test]
+fn the_memory_refusal_names_the_cause_and_a_runnable_next_action() {
+    let message = dotfiles_xtask::agent_memory::refusal(
+        "linux",
+        &[".claude/settings.json: autoMemoryEnabled is Unset".into()],
+    );
+    let (cause, action) = message.split_once('\n').unwrap();
+    assert!(
+        cause.contains("linux") && cause.contains("autoMemoryEnabled is Unset"),
+        "{message}"
+    );
+    assert!(action.contains("`just profiles`"), "{message}");
+}

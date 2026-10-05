@@ -24,7 +24,7 @@
   - `Bash(git reset:*)` ─ soft/mixed は便利。
     `--hard` だけ落とす。
 
-  dot_claude/modify_settings.json merges these keys into the file Claude Code last wrote.
+  dot_claude/modify_settings.json sets these keys over the file Claude Code last wrote, and an array here, such as permissions.deny, replaces the array the client wrote.
   A runtime change to a key set here, such as `/advisor` changing advisorModel, reverts on the next application; every other key the client wrote is kept.
   To change one of these keys, edit this template and apply.
 

@@ -19,8 +19,8 @@ Codex sets `features.memories`, `features.external_agent_memory_import`, `featur
 OpenCode denies `read` and `edit` on the prompted memory file at a project root and below any directory, and denies every `bash` command that names it.
 OpenCode applies the last matching rule, so each deny follows the `*` rule it narrows.
 
-The runtime-rewritten files are chezmoi `modify_` templates that parse the current file, merge in the keys the profile sets, and keep every other key the client wrote.
-The Windows Subsystem for Linux profile merges its whole Claude Code settings template the same way.
+The runtime-rewritten files are chezmoi `modify_` templates that parse the current file, set the keys the profile sets over it, and keep every other key the client wrote.
+The Windows Subsystem for Linux profile sets its whole Claude Code settings template the same way.
 
 `just profiles` renders every profile and fails when a managed client's settings are missing or leave a memory switch enabled or unset.
 For OpenCode it evaluates the rendered rules in file order against the memory file's paths and commands.
@@ -29,6 +29,7 @@ The pure rule, that memory is off only when every switch is explicitly disabled,
 Native application still refuses a target changed outside chezmoi, except a `modify_` target whose rendering keeps every key path of the current host file.
 `host_edit_refused` in `xtask/src/profile_rules.rs` holds that rule with a Kani harness and a rejecting counterexample.
 `just profiles` also writes a key no template sets into every rendered `modify_` target and fails unless the rendering keeps it, so a template that replaces the whole file cannot pass as a merge.
+The same host file has every memory switch turned on, and the check fails unless the rendering turns each one off again.
 
 The content of the former memories moves to defaults, commands, gates, and repository documents, mapped in `docs/agent-memory-migration.md`.
 
@@ -50,6 +51,7 @@ A managed policy file in a system directory was rejected because it needs admini
 
 A client adding keys to its settings no longer blocks application, and application restores the memory keys if the client turned them back on.
 A runtime change to a key a profile sets is reverted by the next application.
+An array a profile sets is one value: the host's entries are replaced, also when the profile's array is empty, and the Windows Subsystem for Linux profile's `permissions.allow` and `permissions.deny` therefore discard entries a client added at run time.
 A host edit that a rendering would drop still refuses application.
 The merge re-serializes the Claude Code and Codex files: Claude Code settings are rewritten with sorted keys and two-space indentation, and Codex settings lose comments and formatting, on the first application.
 The Windows Subsystem for Linux profile now renders the whole OpenCode configuration, so its first application replaces an existing machine-local `~/.config/opencode/opencode.json`; the required backup directory keeps the replaced file.

@@ -14,8 +14,8 @@ Each client's profile disables its own memory, and `just profiles` fails when a 
 | Codex | `dot_codex/modify_config.toml` | `[features]` `memories`, `external_agent_memory_import`, `chronicle` and `[memories]` `generate_memories`, `use_memories`, all `false` |
 | OpenCode | `dot_config/opencode/opencode.json.tmpl` | `permission.read` and `permission.edit` deny `.github/instructions/memory.instruction.md` at a project root and below any directory, and `permission.bash` denies every command naming `memory.instruction.md` |
 
-The Claude Code and Codex files are rewritten by the clients at run time, so their `modify_` templates merge these keys into the existing file.
-The Windows Subsystem for Linux profile merges its whole Claude Code settings template the same way, and that template carries the same key.
+The Claude Code and Codex files are rewritten by the clients at run time, so their `modify_` templates set these keys over the existing file and keep every other key.
+The Windows Subsystem for Linux profile sets its whole Claude Code settings template the same way, and that template carries the same key.
 
 ## Former entries
 
@@ -36,7 +36,7 @@ The Windows Subsystem for Linux profile merges its whole Claude Code settings te
 | `feedback_official_first.md` | Judgment | Listed below. |
 | `feedback_simplicity.md` | Judgment | Listed below. |
 | `feedback_docs_no_cross_platform.md` | Judgment | Listed below. |
-| `user_theme_preference.md` | Default | `platforms.mac.palette` and `platforms.windows.palette` in `.chezmoidata.json` are the color definitions those profiles' terminal and tool configurations render, so switching the scheme is one edit of each value. Both are Tokyo Night; the entry's Ayu preference is not carried over, and adopting Ayu is a change to those values. |
+| `user_theme_preference.md` | Default and judgment | `platforms.mac.palette` and `platforms.windows.palette` in `.chezmoidata.json` are the color definitions those profiles' terminal and tool configurations render, so switching the scheme is one edit of each value. The preference for Ayu is listed below. |
 
 ## Judgment preferences
 
@@ -48,3 +48,4 @@ These entries state a preference that no mechanism here can decide, so each has 
 | `feedback_official_first.md` | Look for the upstream documentation, issues, and recommended setup before writing a local workaround, and cite them where the setting is made. | The `systematic-fixes` skill. |
 | `feedback_simplicity.md` | Prefer a minimal configuration near the upstream defaults, add features only when needed, and explain each setting briefly. | The `dotfiles` skill. |
 | `feedback_docs_no_cross_platform.md` | Write each file, comment, and document about its own target only, without comparing it to another platform or an earlier version. | The `concise-source` skill. |
+| `user_theme_preference.md` | Prefer the Ayu color schemes, Ayu Light first, when proposing or choosing colors. | The `dotfiles` skill. |

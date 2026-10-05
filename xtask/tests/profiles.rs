@@ -699,3 +699,34 @@ y = 2
         "{unknown}"
     );
 }
+
+#[test]
+fn the_dropped_host_key_refusal_names_the_cause_and_a_runnable_next_action() {
+    let message = profiles::dropped_host_key_refusal("wsl", ".claude/settings.json");
+    let (cause, action) = message.split_once('\n').unwrap();
+    assert!(
+        cause.contains("wsl") && cause.contains(".claude/settings.json"),
+        "{message}"
+    );
+    assert!(action.contains("`just profiles`"), "{message}");
+}
+
+#[test]
+fn the_host_edit_refusal_names_each_target_and_runnable_commands() {
+    let message = profiles::host_edit_refusal(
+        &[".edited".into()],
+        Path::new("/c/config.toml"),
+        Path::new("/home/user"),
+        Path::new("/s"),
+    );
+    let (cause, action) = message.split_once('\n').unwrap();
+    assert!(
+        cause.contains("1 managed files") && cause.contains(".edited"),
+        "{message}"
+    );
+    assert!(
+        action.contains("`just diff '/c/config.toml' '/home/user' '/s'`")
+            && action.contains("`just apply '/c/config.toml' '/home/user' '/s' "),
+        "{message}"
+    );
+}

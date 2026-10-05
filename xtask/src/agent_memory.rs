@@ -232,3 +232,37 @@ pub fn violations(dump: &Value) -> Result<Vec<String>> {
     }
     Ok(found)
 }
+
+/// A host settings file in which the client turned every memory switch back on, for checking that a `modify_` rendering turns it off again.
+/// Contents of any other target are returned unchanged.
+pub fn reenabled(target: &str, contents: &str) -> Result<String> {
+    if target == Client::Claude.settings() {
+        let mut value: Value = serde_json::from_str(contents)?;
+        value
+            .as_object_mut()
+            .with_context(|| format!("{target} is not a JSON object"))?
+            .insert("autoMemoryEnabled".into(), Value::Bool(true));
+        Ok(value.to_string())
+    } else if target == Client::Codex.settings() {
+        let mut value: toml::Table = toml::from_str(contents)?;
+        for path in CODEX_SWITCHES {
+            let (table, key) = path.split_once('.').unwrap_or_default();
+            value
+                .entry(table)
+                .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+                .as_table_mut()
+                .with_context(|| format!("{target}: {table} is not a table"))?
+                .insert(key.into(), toml::Value::Boolean(true));
+        }
+        Ok(toml::to_string(&value)?)
+    } else {
+        Ok(contents.to_owned())
+    }
+}
+
+/// The refusal for a profile whose rendering leaves the listed memory switches on or unset.
+pub fn refusal(profile: &str, found: &[String]) -> String {
+    format!(
+        "{profile} profile lets an agent client keep persistent memory: {found:?}\nDisable each listed switch in that client's profile template, set over the host file in a modify_ template, as docs/agent-memory-migration.md describes, then run `just profiles`"
+    )
+}

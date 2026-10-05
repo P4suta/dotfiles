@@ -312,6 +312,32 @@ pub fn uncommitted_host_edits(
     Ok(refused)
 }
 
+/// The refusal for a `modify_` template whose rendering drops a key the host file has.
+pub fn dropped_host_key_refusal(profile: &str, target: &str) -> String {
+    format!(
+        "{profile} profile renders {target} from a modify_ template that drops a key the client wrote, so application would refuse every runtime change there\nSet the template's keys over .chezmoi.stdin with mergeOverwrite, as dot_claude/modify_settings.json does, then run `just profiles`"
+    )
+}
+
+/// The refusal for targets changed outside chezmoi that application would overwrite.
+pub fn host_edit_refusal(
+    changed: &[String],
+    config: &Path,
+    destination: &Path,
+    state: &Path,
+) -> String {
+    let paths = format!(
+        "'{}' '{}' '{}'",
+        config.display(),
+        destination.display(),
+        state.display()
+    );
+    format!(
+        "{} managed files changed outside chezmoi since the last application, and nothing has been changed: {changed:?}\nRun `just diff {paths}` to see each change, carry it into the source or undo it on the host, then run `just apply {paths} <fresh backup directory>`",
+        changed.len()
+    )
+}
+
 /// Forgets which `run_onchange_` and `run_once_` scripts already ran, so the next application runs every script again on the host they provisioned.
 pub fn forget_script_runs(
     root: &Path,
@@ -476,8 +502,8 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
         let memory = crate::agent_memory::violations(&dump)?;
         ensure!(
             memory.is_empty(),
-            "{} profile lets an agent client keep persistent memory: {memory:?}\nDisable each listed switch in that client's profile template, as docs/agent-memory-migration.md describes, then run `just profiles`",
-            profile.name()
+            "{}",
+            crate::agent_memory::refusal(profile.name(), &memory)
         );
         let managed = |include: &str| -> Result<Vec<String>> {
             let listed = output(
@@ -603,7 +629,10 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
         )?;
         for target in merged {
             let path = destination.join(&target);
-            let host = with_host_key(&target, &fs::read_to_string(&path)?)?;
+            let host = with_host_key(
+                &target,
+                &crate::agent_memory::reenabled(&target, &fs::read_to_string(&path)?)?,
+            )?;
             fs::write(&path, &host)?;
             let rendered = output(
                 chezmoi(root, &scope, &config, &destination)
@@ -613,11 +642,22 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
                     .arg(&path),
                 &format!("{} render {target}", profile.name()),
             )?;
+            let rendered = String::from_utf8_lossy(&rendered.stdout).into_owned();
             ensure!(
-                keeps_host_keys(&target, &host, &String::from_utf8_lossy(&rendered.stdout))?,
-                "{} profile renders {target} from a modify_ template that drops a key the client wrote, so application would refuse every runtime change there
-Merge the template's keys into .chezmoi.stdin, as dot_claude/modify_settings.json does, then run `just profiles`",
-                profile.name()
+                keeps_host_keys(&target, &host, &rendered)?,
+                "{}",
+                dropped_host_key_refusal(profile.name(), &target)
+            );
+            let mut reapplied = dump.clone();
+            reapplied[&target] = json!({ "contents": rendered });
+            let memory: Vec<String> = crate::agent_memory::violations(&reapplied)?
+                .into_iter()
+                .map(|found| format!("{found} after the host file turned memory back on"))
+                .collect();
+            ensure!(
+                memory.is_empty(),
+                "{}",
+                crate::agent_memory::refusal(profile.name(), &memory)
             );
         }
         output(
@@ -792,8 +832,8 @@ pub fn operate(
         let changed = uncommitted_host_edits(root, state, config, destination)?;
         ensure!(
             changed.is_empty(),
-            "{} managed files changed outside chezmoi since the last application: {changed:?}\nCarry each change into the source or restore the file, then apply again; nothing has been changed",
-            changed.len()
+            "{}",
+            host_edit_refusal(&changed, config, destination, state)
         );
         let state_file = state.join("state.boltdb");
         let previous_state = match fs::read(&state_file) {

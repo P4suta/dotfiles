@@ -1,6 +1,6 @@
 {{- /* chezmoi:modify-template */ -}}
 {{- /*
-  Claude Code rewrites this file at runtime, so each profile owns only the keys set here and keeps every other key the client wrote.
+  Claude Code rewrites this file at runtime, so each profile sets the keys here over the current file, an array as one value, and keeps every other key the client wrote.
   Persistent agent memory stays off; docs/agent-memory-migration.md records where its former content lives.
 */ -}}
 {{- $current := dict -}}
@@ -9,5 +9,5 @@
 {{- if eq .profile "wsl" -}}
 {{- $managed = includeTemplate "profiles/wsl/dot_claude/settings.json.tmpl" (merge (dict) . (index .platforms .profile)) | fromJson -}}
 {{- end -}}
-{{ merge $managed $current | toPrettyJson "  " | trim }}
+{{ mergeOverwrite $current $managed | toPrettyJson "  " | trim }}
 
