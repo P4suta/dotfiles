@@ -1,7 +1,6 @@
 ## Remote machines
 
 Read the machine-local SSH aliases and topology before operating another host.
-Use the `multi-machine` skill and the current `domyjob` manual for remote execution.
 Keep hostnames, addresses, credentials, and private checkout locations in machine-local configuration.
 {{- $notes := joinPath .chezmoi.homeDir ".config/dotfiles/remote-machines.md" }}
 {{- if stat $notes }}

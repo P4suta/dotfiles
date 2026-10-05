@@ -327,6 +327,7 @@ fn run() -> Result<()> {
         Action::Check => {
             dotfiles_xtask::skill_ops::check_catalog(&cli.root)?;
             dotfiles_xtask::quality::comment_scopes(&cli.root)?;
+            dotfiles_xtask::instruction_audit::check(&cli.root)?;
             let unknown = dotfiles_xtask::quality::unknown_recipes(&cli.root)?;
             anyhow::ensure!(
                 unknown.is_empty(),

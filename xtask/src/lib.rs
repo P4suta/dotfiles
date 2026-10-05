@@ -6,6 +6,7 @@ use yaml_rust2::YamlLoader;
 
 pub mod desktop;
 pub mod hooks;
+pub mod instruction_audit;
 pub mod pr_rules;
 pub mod pr_workflow;
 pub mod profile_rules;
