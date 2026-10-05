@@ -34,6 +34,7 @@ Setup steps declare what they rely on, and the profile gate checks the declarati
 Installed entry points carry the same obligation: a rendered agent launcher requires Doppler, because it reads the secrets the machine-local configuration selects, so the gate also reads every rendered file.
 Both matches list every step, so adding a step forces a decision about its order and packages.
 Application renders its scripts first and refuses, before any change, a step whose requirement the session cannot meet, such as a private source without non-interactive credentials.
+It also refuses, before any change, while a managed file has changed outside chezmoi since the last application, and names every such file, because an owner's fix made on a host belongs in the source and an overwrite prompt cannot be answered mid-application.
 After scripts run, files are applied once more without scripts before verification, because templates may probe for programs those scripts installed.
 
 The gate also rejects four structural mistakes that reached a host or a reviewer: a launcher or Git hook that locates its program through the runtime `HOME`, which tools replace when they run Git; a profile leaf that no template includes; an OComment language override that names a directory pattern or a missing file; and a `just` invocation in a hint or document that names no recipe in the justfile.

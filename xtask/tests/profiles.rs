@@ -489,3 +489,44 @@ fn a_profile_without_the_package_an_entry_point_needs_is_unprovisioned() {
     assert!(profiles::unprovisioned(Profile::Mac, &with, "", launcher).is_empty());
     assert!(profiles::unprovisioned(Profile::Mac, &without, "", "").is_empty());
 }
+
+#[test]
+fn only_files_changed_since_the_last_application_are_reported() {
+    assert_eq!(
+        profiles::externally_changed(
+            "MM .config/wezterm/wezterm.lua\n M .config/git/config\n A .b\n"
+        ),
+        [".config/wezterm/wezterm.lua"]
+    );
+    let scope = tempfile::tempdir().unwrap();
+    let source = scope.path().join("source");
+    let destination = scope.path().join("home");
+    let state = scope.path().join("state");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&destination).unwrap();
+    fs::write(source.join("dot_edited"), "desired\n").unwrap();
+    fs::write(source.join("dot_kept"), "desired\n").unwrap();
+    fs::write(destination.join(".edited"), "from an earlier repository\n").unwrap();
+    let config = scope.path().join("chezmoi.toml");
+    fs::write(&config, "").unwrap();
+    let status = || {
+        let output = profiles::chezmoi(&source, &state, &config, &destination)
+            .args(["status", "--exclude", "scripts"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        profiles::externally_changed(&String::from_utf8_lossy(&output.stdout))
+    };
+    assert!(
+        status().is_empty(),
+        "a file chezmoi never wrote is taken over"
+    );
+    let applied = profiles::chezmoi(&source, &state, &config, &destination)
+        .args(["apply", "--force"])
+        .status()
+        .unwrap();
+    assert!(applied.success());
+    fs::write(destination.join(".edited"), "fixed on the host\n").unwrap();
+    fs::write(source.join("dot_kept"), "changed in the source\n").unwrap();
+    assert_eq!(status(), [".edited"]);
+}

@@ -170,6 +170,16 @@ pub fn chezmoi(root: &Path, scope: &Path, config: &Path, destination: &Path) -> 
     command
 }
 
+/// Targets that `chezmoi status` reports as changed since chezmoi last wrote them, from its first column.
+/// A target chezmoi never wrote, such as a file an earlier repository installed, has no record and is taken over instead.
+pub fn externally_changed(status: &str) -> Vec<String> {
+    status
+        .lines()
+        .filter(|line| line.len() > 3 && !line.starts_with(' '))
+        .map(|line| line[3..].to_owned())
+        .collect()
+}
+
 /// Forgets which `run_onchange_` and `run_once_` scripts already ran, so the next application runs every script again on the host they provisioned.
 pub fn forget_script_runs(
     root: &Path,
@@ -604,6 +614,16 @@ pub fn operate(
             &mut crate::runtime::Native::new(destination)?,
             &crate::setup::scripted_steps(&contents),
         )?;
+        let status = output(
+            chezmoi(root, state, config, destination).args(["status", "--exclude", "scripts"]),
+            "read target status",
+        )?;
+        let changed = externally_changed(&String::from_utf8_lossy(&status.stdout));
+        ensure!(
+            changed.is_empty(),
+            "{} managed files changed outside chezmoi since the last application: {changed:?}\nCarry each change into the source or restore the file, then apply again; nothing has been changed",
+            changed.len()
+        );
         let state_file = state.join("state.boltdb");
         let previous_state = match fs::read(&state_file) {
             Ok(bytes) => Some(bytes),
