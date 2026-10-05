@@ -2,7 +2,10 @@ use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::ffi::OsString;
 use std::path::Path;
-use std::process::ExitStatus;
+use std::process::{ExitStatus, Stdio};
+
+/// The variable OpenCode's GitHub MCP server reads its bearer token from.
+const GITHUB_MCP_TOKEN: &str = "GH_MCP_TOKEN";
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub enum Agent {
@@ -36,13 +39,6 @@ pub fn agent(
     let selected = context
         .data
         .pointer(&format!("/doppler/secrets/{}", agent.name()));
-    let defaults = if context.profile == crate::profile_rules::Profile::Mac
-        && matches!(agent, Agent::Opencode)
-    {
-        vec!["GH_MCP_TOKEN"]
-    } else {
-        Vec::new()
-    };
     let selected = if let Some(value) = selected {
         value
             .as_array()
@@ -51,18 +47,30 @@ pub fn agent(
             .map(|name| name.as_str().context("secret selection must contain names"))
             .collect::<Result<Vec<_>>>()?
     } else {
-        defaults
+        Vec::new()
+    };
+    ensure!(
+        !conflicting_origin(agent, &selected),
+        "{GITHUB_MCP_TOKEN} comes from the GitHub CLI login; remove it from doppler.secrets.{}",
+        agent.name()
+    );
+    let arguments = if matches!(agent, Agent::Opencode) {
+        opencode_arguments(arguments)
+    } else {
+        arguments.to_vec()
     };
     let command: Vec<_> = std::iter::once(agent.name().into())
-        .chain(arguments.iter().cloned())
+        .chain(arguments)
         .collect();
+    let environment = agent_environment(agent);
     if selected.is_empty() {
         return crate::tool::external(&command[0])
             .args(&command[1..])
+            .envs(environment)
             .status()
             .context("start agent without API secrets");
     }
-    run(
+    run_with(
         context
             .data
             .pointer("/doppler/project")
@@ -75,7 +83,60 @@ pub fn agent(
             .context("Doppler config missing")?,
         &selected.join(","),
         &command,
+        &environment,
     )
+}
+
+/// OpenCode's GitHub MCP server authenticates with the GitHub CLI's own login, so the credential has one origin that the CLI keeps current; the server's read-only header limits what the agent can do through it.
+/// The token travels only in the agent's environment, and without a CLI login the agent starts without it.
+fn agent_environment(agent: Agent) -> Vec<(&'static str, OsString)> {
+    if !matches!(agent, Agent::Opencode) {
+        return Vec::new();
+    }
+    let token = Tool::Gh
+        .command()
+        .args(["auth", "token"])
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .filter(|token| !token.is_empty());
+    if let Some(token) = token {
+        vec![(GITHUB_MCP_TOKEN, token.into())]
+    } else {
+        eprintln!("Warning: the GitHub MCP server is unavailable until `gh auth login` succeeds");
+        Vec::new()
+    }
+}
+
+/// OpenCode runs MCP servers in a shared background service whose environment was fixed when it started, so the interface and `run` start their own server, which inherits the credentials this launch supplies.
+/// A subcommand comes first on the command line, so any other first word that is not a directory passes through unchanged, as does a launch that already chooses a server.
+fn opencode_arguments(arguments: &[OsString]) -> Vec<OsString> {
+    let chooses_server = arguments.iter().any(|argument| {
+        argument == "--standalone"
+            || argument == "--server"
+            || argument.to_string_lossy().starts_with("--server=")
+    });
+    let standalone = OsString::from("--standalone");
+    match arguments.first() {
+        _ if chooses_server => arguments.to_vec(),
+        Some(word) if word == "run" => std::iter::once(word.clone())
+            .chain(std::iter::once(standalone))
+            .chain(arguments[1..].iter().cloned())
+            .collect(),
+        Some(word) if !word.to_string_lossy().starts_with('-') && !Path::new(word).is_dir() => {
+            arguments.to_vec()
+        }
+        _ => std::iter::once(standalone)
+            .chain(arguments.iter().cloned())
+            .collect(),
+    }
+}
+
+/// A secret the launcher already supplies from another origin must not also be selected from Doppler, so each credential keeps one origin.
+fn conflicting_origin(agent: Agent, selected: &[&str]) -> bool {
+    matches!(agent, Agent::Opencode) && selected.contains(&GITHUB_MCP_TOKEN)
 }
 
 pub fn names(input: &str) -> Result<Vec<&str>> {
@@ -123,6 +184,16 @@ pub fn consume(input: &str, command: &[OsString]) -> Result<ExitStatus> {
 }
 
 pub fn run(project: &str, config: &str, input: &str, command: &[OsString]) -> Result<ExitStatus> {
+    run_with(project, config, input, command, &[])
+}
+
+fn run_with(
+    project: &str,
+    config: &str,
+    input: &str,
+    command: &[OsString],
+    environment: &[(&str, OsString)],
+) -> Result<ExitStatus> {
     names(input)?;
     ensure!(
         !project.trim().is_empty() && !config.trim().is_empty(),
@@ -146,6 +217,7 @@ pub fn run(project: &str, config: &str, input: &str, command: &[OsString]) -> Re
         .arg(executable)
         .args(["require-secrets", "--names", input, "--"])
         .args(command)
+        .envs(environment.iter().map(|(name, value)| (name, value)))
         .status()
         .context("start scoped Doppler consumer")
 }
@@ -166,6 +238,38 @@ pub fn exit(status: ExitStatus) -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opencode_sessions_run_their_own_server_so_they_see_the_credentials() {
+        let shaped = |arguments: &[&str]| -> Vec<String> {
+            opencode_arguments(&arguments.iter().map(OsString::from).collect::<Vec<_>>())
+                .into_iter()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect()
+        };
+        assert_eq!(shaped(&[]), ["--standalone"]);
+        assert_eq!(shaped(&["--continue"]), ["--standalone", "--continue"]);
+        assert_eq!(
+            shaped(&["--log-level", "info"]),
+            ["--standalone", "--log-level", "info"]
+        );
+        let directory = std::env::temp_dir().to_string_lossy().into_owned();
+        assert_eq!(shaped(&[&directory]), ["--standalone", directory.as_str()]);
+        assert_eq!(shaped(&["run", "hello"]), ["run", "--standalone", "hello"]);
+        assert_eq!(shaped(&["mcp", "list"]), ["mcp", "list"]);
+        assert_eq!(
+            shaped(&["--server", "http://127.0.0.1:1"]),
+            ["--server", "http://127.0.0.1:1"]
+        );
+        assert_eq!(shaped(&["--standalone"]), ["--standalone"]);
+    }
+
+    #[test]
+    fn the_github_mcp_token_has_one_origin() {
+        assert!(conflicting_origin(Agent::Opencode, &["GH_MCP_TOKEN"]));
+        assert!(!conflicting_origin(Agent::Opencode, &["OTHER_KEY"]));
+        assert!(!conflicting_origin(Agent::Codex, &["GH_MCP_TOKEN"]));
+    }
 
     #[test]
     fn only_selected_resolved_nonempty_values_are_admitted() {
