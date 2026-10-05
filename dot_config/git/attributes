@@ -1,0 +1,3 @@
+# Git's global attributes file, which core.attributesFile names on every host.
+# Every repository normalizes text to LF unless its own attributes declare eol=crlf, -text, or binary.
+* text=auto eol=lf

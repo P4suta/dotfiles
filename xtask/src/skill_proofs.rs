@@ -25,17 +25,21 @@ pub const HARNESSES: [&str; 12] = [
     "triage_is_skipped_only_when_every_finding_is_adopted",
 ];
 
-pub const PR_HARNESSES: [&str; 7] = [
+pub const PR_HARNESSES: [&str; 11] = [
+    "a_paused_edit_never_removes_the_exclusion_of_a_ready_pr",
+    "a_pr_ready_during_the_pause_keeps_its_pause_exclusion",
     "api_quota_requires_a_nonzero_reserve_and_sufficient_remaining_requests",
     "coderabbit_exclusion_does_not_authorize_unfinished_generation",
     "local_creation_always_starts_as_draft",
+    "paused_pr_reviews_are_never_requested",
     "personal_issue_prerequisites_cannot_be_skipped_by_any_generation_mode",
+    "pr_review_requirement_returns_after_resumption",
     "ready_requires_a_validated_draft_transition",
     "ready_requires_every_reported_check_to_pass",
     "rejected_documents_never_produce_a_pr_mutation",
 ];
 
-pub const PROFILE_HARNESSES: [&str; 7] = [
+pub const PROFILE_HARNESSES: [&str; 9] = [
     "only_available_profiles_are_selected",
     "application_requires_owned_destination_or_native_authorization",
     "concurrent_source_and_local_edits_are_never_overwritten",
@@ -43,6 +47,8 @@ pub const PROFILE_HARNESSES: [&str; 7] = [
     "windows_path_translation_preserves_inline_public_keys",
     "remote_or_installed_context7_never_requires_a_mutation",
     "forge_import_requires_only_pinned_keys_including_the_current_one",
+    "memory_is_off_only_when_every_switch_is_explicitly_disabled",
+    "host_edits_are_overwritten_only_by_a_merge_that_keeps_every_host_key",
 ];
 
 pub const REAPER_HARNESSES: [&str; 3] = [
@@ -51,10 +57,11 @@ pub const REAPER_HARNESSES: [&str; 3] = [
     "tick_conversion_rejects_zero_frequency",
 ];
 
-pub const REVIEW_HARNESSES: [&str; 5] = [
+pub const REVIEW_HARNESSES: [&str; 6] = [
     "cooldown_refuses_rollback_and_every_incomplete_interval",
     "layered_capacity_is_floored_once_without_overflow",
     "owner_pause_allows_only_local_guard_status",
+    "pause_scope_is_the_union_of_its_markers",
     "review_consumption_respects_the_layered_capacity_budget",
     "rolling_attempts_cannot_exceed_the_layered_local_budget",
 ];
@@ -63,6 +70,20 @@ pub const INSTRUCTION_HARNESSES: [&str; 3] = [
     "every_line_needs_the_class_of_its_shape",
     "follow_ups_are_defined_once_and_referenced",
     "removed_lines_name_what_holds_them",
+];
+
+pub const NEXT_ACTION_HARNESSES: [&str; 5] = [
+    "executed_steps_run_only_on_their_own_preconditions",
+    "host_prerequisites_precede_every_repository_step",
+    "owner_pauses_are_never_bypassed",
+    "publication_requires_committed_decided_current_work",
+    "upstream_commits_the_branch_never_held_are_never_overwritten",
+];
+
+pub const LINE_ENDING_HARNESSES: [&str; 3] = [
+    "auto_detection_follows_git_byte_classes",
+    "conversion_removes_only_carriage_returns_before_line_feeds",
+    "declared_line_endings_are_never_rewritten",
 ];
 
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
@@ -358,7 +379,7 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_ready_local_creation() {{\n    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Passing), Some(production::Effect::CreateReady));\n}}\n#[kani::proof]\nfn reject_creation_without_a_personal_issue() {{\n    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false), production::Checks::Passing).is_some());\n}}\n#[kani::proof]\nfn reject_unfinished_summary_as_review_exclusion() {{\n    assert!(production::coderabbit_body_marker_allowed(false, true, false));\n}}\n#[kani::proof]\nfn reject_ready_with_unfinished_checks() {{\n    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, true, production::IssueGate::Linked, production::checks_state(3, 1, 0)), Some(production::Effect::Ready));\n}}\n"
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_ready_local_creation() {{\n    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Passing), Some(production::Effect::CreateReady));\n}}\n#[kani::proof]\nfn reject_creation_without_a_personal_issue() {{\n    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false), production::Checks::Passing).is_some());\n}}\n#[kani::proof]\nfn reject_unfinished_summary_as_review_exclusion() {{\n    assert!(production::coderabbit_body_marker_allowed(false, true, false));\n}}\n#[kani::proof]\nfn reject_ready_with_unfinished_checks() {{\n    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, true, production::IssueGate::Linked, production::checks_state(3, 1, 0)), Some(production::Effect::Ready));\n}}\n#[kani::proof]\nfn reject_paused_review_request() {{\n    assert!(production::review_request_allowed(true, production::requests_review(production::Operation::Ready, production::Generation::Local, true, false, false)));\n}}\n#[kani::proof]\nfn reject_paused_exclusion_removal() {{\n    assert!(production::review_request_allowed(true, production::requests_review(production::Operation::Edit, production::Generation::Local, false, true, false)));\n}}\n#[kani::proof]\nfn reject_pause_exclusion_as_standing() {{\n    assert_eq!(production::review_requirement(false, production::exclusion(true, true)), production::ReviewRequirement::Excluded);\n}}\n#[kani::proof]\nfn reject_standing_exclusion_when_ready_during_the_pause() {{\n    assert!(production::keeps_pause_exclusion(production::Operation::Ready, true, production::Exclusion::None, production::exclusion(true, false)));\n}}\n"
         ),
     )?;
     for name in [
@@ -366,6 +387,10 @@ fn verify_native(root: &Path) -> Result<()> {
         "reject_creation_without_a_personal_issue",
         "reject_unfinished_summary_as_review_exclusion",
         "reject_ready_with_unfinished_checks",
+        "reject_paused_review_request",
+        "reject_paused_exclusion_removal",
+        "reject_pause_exclusion_as_standing",
+        "reject_standing_exclusion_when_ready_during_the_pause",
     ] {
         verify_file(&file, probe.path(), &[name], true)?;
     }
@@ -383,15 +408,16 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_unapproved_application() {{\n    assert!(production::permitted(production::Mode::Full, true, true, false));\n}}\n"
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_unapproved_application() {{\n    assert!(production::permitted(production::Mode::Full, true, true, false));\n}}\n#[kani::proof]\nfn reject_an_unset_memory_switch() {{\n    assert!(production::memory_off(&[production::Memory::Disabled, production::Memory::Unset]));\n}}\n#[kani::proof]\nfn reject_overwriting_a_merge_that_drops_a_host_key() {{\n    assert!(!production::host_edit_refused(true, true, false));\n}}\n"
         ),
     )?;
-    verify_file(
-        &file,
-        probe.path(),
-        &["reject_unapproved_application"],
-        true,
-    )?;
+    for name in [
+        "reject_unapproved_application",
+        "reject_an_unset_memory_switch",
+        "reject_overwriting_a_merge_that_drops_a_host_key",
+    ] {
+        verify_file(&file, probe.path(), &[name], true)?;
+    }
     ensure!(
         fs::read(source)? == original,
         "production profile proof source changed during verification"
@@ -415,7 +441,7 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_eighth_review_of_ten() {{\n    assert!(production::included_allowance(10, 3));\n}}\n#[kani::proof]\nfn reject_rounding_the_layered_budget_up() {{\n    assert_eq!(production::capacity_budget(49), 36);\n}}\n#[kani::proof]\nfn reject_eighth_local_attempt() {{\n    assert!(production::rolling_allowance(7, 7));\n}}\n#[kani::proof]\nfn reject_early_review() {{\n    assert!(production::cooldown_complete(100, 101, production::PROBE_GAP_MS));\n}}\n#[kani::proof]\nfn reject_owner_pause_bypass() {{\n    assert!(production::service_access(true, false));\n}}\n"
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_eighth_review_of_ten() {{\n    assert!(production::included_allowance(10, 3));\n}}\n#[kani::proof]\nfn reject_rounding_the_layered_budget_up() {{\n    assert_eq!(production::capacity_budget(49), 36);\n}}\n#[kani::proof]\nfn reject_eighth_local_attempt() {{\n    assert!(production::rolling_allowance(7, 7));\n}}\n#[kani::proof]\nfn reject_early_review() {{\n    assert!(production::cooldown_complete(100, 101, production::PROBE_GAP_MS));\n}}\n#[kani::proof]\nfn reject_owner_pause_bypass() {{\n    assert!(production::service_access(production::pause_scope(false, false, true), false));\n}}\n"
         ),
     )?;
     for name in [
@@ -430,6 +456,55 @@ fn verify_native(root: &Path) -> Result<()> {
     ensure!(
         fs::read(source)? == original,
         "production review proof source changed during verification"
+    );
+    let source = crate::canonical(&root.join("xtask/src/next_action_rules.rs"))?;
+    let original = fs::read(&source)?;
+    let directory = tempfile::tempdir()?;
+    verify_inventory(&source, directory.path(), &NEXT_ACTION_HARNESSES)?;
+    verify_file(&source, directory.path(), &NEXT_ACTION_HARNESSES, false)?;
+    let probe = tempfile::tempdir()?;
+    let file = probe.path().join("counterexample.rs");
+    fs::write(
+        &file,
+        format!(
+            "#[path = {source:?}]\nmod production;\nuse production::*;\n#[kani::proof]\nfn reject_executing_a_push() {{\n    assert!(executable(Step::Push));\n}}\n#[kani::proof]\nfn reject_pushing_while_paused() {{\n    assert!(decide(State {{ host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Ahead, push_paused: true, pr: Pr::Draft, checks: Checks::Passing, workflows: true, review_paused: false }}) == Step::Push);\n}}\n#[kani::proof]\nfn reject_pushing_to_a_ready_pr_while_review_is_paused() {{\n    assert!(decide(State {{ host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Ahead, push_paused: false, pr: Pr::Ready, checks: Checks::Passing, workflows: true, review_paused: true }}) == Step::Push);\n}}\n#[kani::proof]\nfn reject_force_pushing_over_commits_the_branch_never_held() {{\n    assert!(decide(State {{ host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Diverged, push_paused: false, pr: Pr::Draft, checks: Checks::Passing, workflows: true, review_paused: false }}) == Step::ForcePush);\n}}\n"
+        ),
+    )?;
+    for name in [
+        "reject_executing_a_push",
+        "reject_pushing_while_paused",
+        "reject_pushing_to_a_ready_pr_while_review_is_paused",
+        "reject_force_pushing_over_commits_the_branch_never_held",
+    ] {
+        verify_file(&file, probe.path(), &[name], true)?;
+    }
+    ensure!(
+        fs::read(source)? == original,
+        "production next-action proof source changed during verification"
+    );
+    let source = crate::canonical(&root.join("xtask/src/eol_rules.rs"))?;
+    let original = fs::read(&source)?;
+    let directory = tempfile::tempdir()?;
+    verify_inventory(&source, directory.path(), &LINE_ENDING_HARNESSES)?;
+    verify_file(&source, directory.path(), &LINE_ENDING_HARNESSES, false)?;
+    let probe = tempfile::tempdir()?;
+    let file = probe.path().join("counterexample.rs");
+    fs::write(
+        &file,
+        format!(
+            "#[path = {source:?}]\nmod production;\nuse production::{{Action, Attributes, Eol, Index, Staging, Text, action, content}};\n#[kani::proof]\n#[kani::unwind(5)]\nfn reject_rewriting_declared_crlf() {{\n    let attributes = Attributes {{ text: Text::Auto, eol: Eol::Crlf, binary: false }};\n    assert!(action(attributes, Staging::Add, Index::Other, content(b\"a\\r\\n\")) == Action::Normalize);\n}}\n#[kani::proof]\n#[kani::unwind(5)]\nfn reject_rewriting_control_heavy_content() {{\n    let attributes = Attributes {{ text: Text::Auto, eol: Eol::Lf, binary: false }};\n    assert!(action(attributes, Staging::Add, Index::Other, content(b\"\\x01\\x02\\r\\n\")) == Action::Normalize);\n}}\n#[kani::proof]\n#[kani::unwind(5)]\nfn reject_rewriting_crlf_the_index_keeps() {{\n    let attributes = Attributes {{ text: Text::Auto, eol: Eol::Lf, binary: false }};\n    assert!(action(attributes, Staging::Add, Index::CrlfText, content(b\"a\\r\\n\")) == Action::Normalize);\n}}\n"
+        ),
+    )?;
+    for name in [
+        "reject_rewriting_declared_crlf",
+        "reject_rewriting_control_heavy_content",
+        "reject_rewriting_crlf_the_index_keeps",
+    ] {
+        verify_file(&file, probe.path(), &[name], true)?;
+    }
+    ensure!(
+        fs::read(source)? == original,
+        "production line-ending proof source changed during verification"
     );
     let source = crate::canonical(&root.join("xtask/src/instruction_rules.rs"))?;
     let original = fs::read(&source)?;
@@ -497,6 +572,8 @@ fn reject_a_contradiction_without_what_it_contradicted() {{
             + REAPER_HARNESSES.len()
             + REVIEW_HARNESSES.len()
             + INSTRUCTION_HARNESSES.len()
+            + NEXT_ACTION_HARNESSES.len()
+            + LINE_ENDING_HARNESSES.len()
     );
     Ok(())
 }

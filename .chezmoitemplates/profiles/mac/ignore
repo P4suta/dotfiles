@@ -50,8 +50,6 @@ Library/Application Support/com.mitchellh.ghostty/**
 .claude/todos/**
 .claude/history.jsonl
 .claude/settings.local.json
-# Claude Code rewrites settings.json at runtime (model and similar keys drift constantly), so it is left to each machine.
-.claude/settings.json
 .claude.json
 
 # Repo docs: tracked in git, never applied to $HOME

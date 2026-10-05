@@ -32,9 +32,10 @@ Read-only commands, authentication, and saved findings do not consume review att
 Paid-credit flags, inline API keys, remote review scopes, cloud coding, and the self-update command are refused.
 Use a local checkout and `--dir` when selecting another repository so preflight queries the intended repository.
 
-Inspect local capacity with `coderabbit --guard-status`.
-An owner-imposed pause is recorded as `~/.local/state/coderabbit-guard/paused` and blocks vendor calls, including usage probes and authentication status, until explicitly resumed.
-Local `--guard-status` still reports capacity and pause state without contacting the service, and reinstalling the guard preserves the pause.
+Inspect local capacity with `coderabbit --guard-status`, or `coderabbit --guard-status --json` for its machine-readable form.
+An owner-imposed pause is a marker in `~/.local/state/coderabbit-guard`: `paused-pr` pauses PR reviews, `paused-cli` pauses CLI use, and `paused` pauses both.
+A CLI pause blocks vendor calls, including usage probes and authentication status; a PR pause makes `pr-workflow` refuse operations that would request a PR review.
+Local `--guard-status` still reports capacity and pause scope without contacting the service, and reinstalling the guard preserves every marker.
 The review ledger, separate `usage.log` probe ledger, and initialization markers live under `~/.local/state/coderabbit-guard` and are excluded from dotfiles synchronization.
 Reinstallation preserves history and refuses to recreate a ledger deleted after initialization.
 First installation publishes its initialization marker only after the ledger is synchronized, locked, and validated, so an interrupted setup can retry without discarding an existing history.
@@ -80,7 +81,7 @@ Waiting an hour permits reconsideration, not automatic publication or a claim th
 The shared agent policy routes existing PR work and authorized PR updates to `coderabbit-review` in Codex, Claude Code, and OpenCode.
 Wait for the final pushed head's review, inspect CI and unresolved findings, fix supported actionable findings, and rerun affected checks before an authorized update.
 After updating a PR, inspect the automatic review of the new head before reporting completion.
-Explain unsupported findings with concrete code evidence, and report paused, skipped, failed, stale, or rate-limited reviews as pending.
+Explain unsupported findings with concrete code evidence, and report reviews CodeRabbit paused, skipped, failed, left stale, or rate-limited as pending.
 For an explicitly requested local review, request a second run only when substantive fixes justify it and the guard permits it.
 Batch related commits into a meaningful push and wait for the active review before updating the PR again.
 

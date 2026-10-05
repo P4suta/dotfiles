@@ -1,0 +1,11 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /*
+  Codex records project trust and other machine state in this file, so every profile owns only the keys set here.
+  Persistent agent memory stays off; docs/agent-memory-migration.md records where its former content lives.
+*/ -}}
+{{- $current := dict -}}
+{{- if trim .chezmoi.stdin -}}{{- $current = fromToml .chezmoi.stdin -}}{{- end -}}
+{{- range list "features.memories" "features.external_agent_memory_import" "features.chronicle" "memories.generate_memories" "memories.use_memories" -}}
+{{- $current = setValueAtPath . false $current -}}
+{{- end -}}
+{{ toToml $current | trim }}

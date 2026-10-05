@@ -8,6 +8,8 @@
 
 [core]
 	pager = delta
+	# Every repository normalizes text to LF unless its own attributes say otherwise.
+	attributesFile = ~/.config/git/attributes
 	# Force LF: cancels autocrlf=true from the Git for Windows system gitconfig so
 	# nothing is converted to CRLF. A repo's own .gitattributes still takes priority.
 	autocrlf = false

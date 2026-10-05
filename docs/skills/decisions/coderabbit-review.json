@@ -1,12 +1,14 @@
 {
-  "revision": "c509adc2470eddb6e2f3e45f744dcac59f2177d849a4dedc356e189a85b67764",
+  "revision": "a0be3a15d4e46a35547cf973f6d8474c02a90cfb7a26fdaf76f9384133459e2a",
   "outcome": "implemented",
-  "reason": "Apply the owner's layered 90% ceiling and 20% margin once with exact production arithmetic, seven rolling hourly attempts and bounded probes; preserve durable reservations, one executor, owner pauses and separate PR capacity, with full-domain Kani proofs and a deterministic inherited-handle regression for explicit lock release.",
+  "reason": "Replace the restated guard limits and pause prose with a pointer at the guard's machine-readable status and keep the refusal and no-bypass judgment. While the owner pauses PR reviews none is owed, reviews CodeRabbit itself paused remain pending, and the live check states when a review is owed again after resumption.",
   "evidence": [
     "dot_agents/skills/coderabbit-review/SKILL.md",
     "xtask/tests/review_guard.rs",
     "xtask/src/review_rules.rs",
-    "docs/adr/0008-layered-review-capacity.md"
+    "docs/adr/0008-layered-review-capacity.md",
+    "docs/adr/0015-scoped-coderabbit-pause.md",
+    "xtask/src/review_guard.rs"
   ],
   "revisit": null
 }
