@@ -122,6 +122,20 @@ fn personal_publication_requires_a_real_open_issue_and_visible_reference() -> Re
             (
                 true,
                 None,
+                format!("{BODY}\n- Not run: the stopped engine.\n\nCloses #23.\n"),
+                true,
+            ),
+            (
+                true,
+                None,
+                format!(
+                    "{BODY}\n| Check | Result |\n| --- | --- |\n| proofs | passed |\n\nCloses #23.\n"
+                ),
+                true,
+            ),
+            (
+                true,
+                None,
                 format!("{BODY}\nCloses https://github.com/other/project/issues/23.\n"),
                 false,
             ),

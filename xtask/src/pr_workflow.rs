@@ -522,7 +522,7 @@ fn references_issue(body: &str, repo: &str, issue: u64) -> bool {
                 text.push_str(&dest_url);
                 text.push(' ');
             }
-            Event::SoftBreak | Event::HardBreak | Event::End(TagEnd::Paragraph) => text.push('\n'),
+            Event::SoftBreak | Event::HardBreak | Event::End(_) => text.push('\n'),
             _ => {}
         }
     }
