@@ -17,6 +17,8 @@ pub enum Category {
     NoVerify,
     /// Text that does not belong in this repository's languages.
     Foreign,
+    /// A commit whose tree equals its parent's.
+    Empty,
 }
 
 impl Category {
@@ -26,6 +28,7 @@ impl Category {
             Self::Force => Some("ALLOW_FORCE"),
             Self::NoVerify => None,
             Self::Foreign => Some("ALLOW_FOREIGN"),
+            Self::Empty => Some("ALLOW_EMPTY"),
         }
     }
 
@@ -34,6 +37,7 @@ impl Category {
             Self::Force => "force",
             Self::NoVerify => "no-verify",
             Self::Foreign => "foreign",
+            Self::Empty => "empty",
         }
     }
 }

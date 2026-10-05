@@ -1,5 +1,5 @@
 {
-  "report_hash": "661babc60577f7fe1a26f2ef141fa78d9bf0fcffbc0dc000bab143904830c9ec",
+  "report_hash": "1a5c8ed15ece29823c2d7f9eb2fae0c2710037199c06b57c91c72be9e831d7d8",
   "decisions": [
     {
       "id": "catalog:adr:23fc1eba2bafa1a21cea24e927b90a8ec48901defc0f5e93cbd490c66d6b0e57",
@@ -404,11 +404,13 @@
       "revisit": null
     },
     {
-      "id": "catalog:systematic-fixes:0b36c44731969d8b79f14682b931d2f2874e9a4db46b9c4803b7a0932599b27a",
-      "outcome": "keep",
-      "reason": "Retain demonstrated failure, architectural cause, and affected-family remediation separately from forward planning and dependency-specific reliability techniques.",
+      "id": "catalog:systematic-fixes:19aa31e5f90901f0e50d714025e873d31d55063817ce1ada02ad9f33c079bbac",
+      "outcome": "implemented",
+      "reason": "Retain demonstrated failure, architectural cause, and affected-family remediation separately from forward planning and dependency-specific reliability techniques; a note or resolution to check more carefully does not count as a remediation, which the staged-tree and empty-commit gates demonstrate.",
       "evidence": [
-        "dot_agents/skills/systematic-fixes/SKILL.md"
+        "dot_agents/skills/systematic-fixes/SKILL.md",
+        "guard/tests/empty_commit.rs",
+        "xtask/src/hooks.rs"
       ],
       "revisit": null
     },

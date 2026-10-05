@@ -8,6 +8,7 @@
 //!
 //! Reached through `core.hooksPath` for every repository, which is also why it self-disables when signing is not configured on this machine: a fresh Mac whose 1Password agent is not yet enabled would otherwise roll back every commit it makes.
 
+use crate::bypass::{self, Category};
 use crate::realgit;
 
 /// The lock this hook sets around its own `--amend`, so the resulting commit does not re-enter it.
@@ -25,12 +26,21 @@ const MID_OPERATION: [&str; 6] = [
 
 /// Returns the process exit code.
 pub fn run() -> i32 {
+    let in_hook = hook_is_reentrant();
+    let mid_operation = mid_operation();
+    if refuses_empty(
+        !in_hook && !mid_operation,
+        head_is_empty(),
+        bypass::waived(Category::Empty),
+    ) {
+        return refuse_empty();
+    }
     if !signing_configured() {
         return 0;
     }
     let situation = Situation {
-        in_hook: hook_is_reentrant(),
-        mid_operation: mid_operation(),
+        in_hook,
+        mid_operation,
         head_signed: head_signed(),
     };
     match decide(&situation) {
@@ -61,6 +71,40 @@ fn decide(s: &Situation) -> Decision {
     } else {
         Decision::Resign
     }
+}
+
+/// An ordinary commit that records no change is refused unless waived, because its changes most likely vanished from the index before it was recorded.
+fn refuses_empty(settled: bool, empty: bool, waived: bool) -> bool {
+    settled && empty && !waived
+}
+
+/// HEAD has exactly one parent and the same tree; merges and the root commit are never empty in this sense.
+fn head_is_empty() -> bool {
+    let Some(parents) = realgit::capture(&["rev-list", "--parents", "-n", "1", "HEAD"]) else {
+        return false;
+    };
+    if parents.split_whitespace().count() != 2 {
+        return false;
+    }
+    let tree = |rev: &str| realgit::capture(&["rev-parse", rev]).map(|t| t.trim().to_owned());
+    matches!((tree("HEAD^{tree}"), tree("HEAD^^{tree}")), (Some(a), Some(b)) if a == b)
+}
+
+fn refuse_empty() -> i32 {
+    let short = realgit::capture(&["rev-parse", "--short", "HEAD"])
+        .map(|s| s.trim().to_owned())
+        .unwrap_or_default();
+    if !realgit::succeeds(&["reset", "--soft", "HEAD^"]) {
+        eprintln!("::error:: {short} records no change and could not be rolled back.");
+        return 1;
+    }
+    eprintln!(
+        "::error:: refused empty commit {short}: it records no change from its parent.\n\n\
+         The staged changes most likely vanished before Git recorded the commit, so it was rolled back.\n\
+         Your working tree is unchanged; stage the changes again and commit.\n\
+         For an intentional empty commit: ALLOW_EMPTY=1 git commit --allow-empty"
+    );
+    1
 }
 
 fn signing_configured() -> bool {
@@ -192,7 +236,18 @@ fn rollback(pre_head: &str) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Decision, Rollback, Situation, decide, rollback_target};
+    use super::{Decision, Rollback, Situation, decide, refuses_empty, rollback_target};
+
+    #[test]
+    fn an_empty_commit_is_refused_unless_waived_or_git_is_mid_operation() {
+        assert!(refuses_empty(true, true, false));
+        assert!(!refuses_empty(true, false, false));
+        assert!(!refuses_empty(true, true, true));
+        assert!(
+            !refuses_empty(false, true, false),
+            "re-entrant or mid-operation: Git is not done"
+        );
+    }
 
     #[test]
     fn nothing_happens_without_a_reason_to_act() {
