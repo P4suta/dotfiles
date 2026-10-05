@@ -1,2 +1,0 @@
-#!/bin/sh
-exec {{ includeTemplate "sh_quote" (printf "%s/.local/bin/dotfiles-xtask.exe" .chezmoi.homeDir) }} hook pre-push -- "$@"

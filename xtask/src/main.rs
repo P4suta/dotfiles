@@ -342,10 +342,9 @@ fn run() -> Result<()> {
                 &cli.root,
                 Path::new("dot_agents/skills/github-repository/scripts/repo-settings/Cargo.toml"),
             )?;
+            check_package(&cli.root, Path::new("guard/Cargo.toml"))?;
             if cfg!(windows) {
                 check_package(&cli.root, Path::new("tools/dotctl/Cargo.toml"))?;
-            } else {
-                check_package(&cli.root, Path::new("guard/Cargo.toml"))?;
             }
             dotfiles_xtask::quality::adapters(&cli.root)?;
             dotfiles_xtask::profiles::check_profiles(&cli.root, None)?;

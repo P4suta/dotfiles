@@ -237,11 +237,16 @@ pub fn doctor(strict: bool) -> Result<()> {
                 }
             }
         }
+        if !native.home.join(".local/bin/git.exe").is_file() {
+            println!("git: dotguard wrapper missing");
+            missing += 1;
+        }
         for key in [
             "commit.gpgsign",
             "tag.gpgsign",
             "gpg.format",
             "user.signingkey",
+            "core.hooksPath",
         ] {
             let reply = native.run(Tool::Git, &args(&["config", "--get", key]))?;
             if !reply.success || reply.bytes.is_empty() {

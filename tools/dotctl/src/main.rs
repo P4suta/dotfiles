@@ -1,6 +1,5 @@
 mod apply;
 mod env;
-mod hook;
 mod lint;
 mod proc;
 mod render;
@@ -25,10 +24,6 @@ enum Command {
         files: Vec<PathBuf>,
     },
     Preflight,
-    Hook {
-        #[command(subcommand)]
-        which: HookKind,
-    },
     Setup {
         #[command(subcommand)]
         what: SetupKind,
@@ -106,16 +101,6 @@ enum SetupKind {
     },
 }
 
-#[derive(Debug, Subcommand)]
-enum HookKind {
-    PostCommit,
-    PrePush {
-        remote: String,
-        #[arg(default_value = "")]
-        url: String,
-    },
-}
-
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
@@ -181,10 +166,6 @@ fn main() -> ExitCode {
                 expected_build_id,
                 retain,
             }),
-        },
-        Command::Hook { which } => match which {
-            HookKind::PostCommit => hook::post_commit(),
-            HookKind::PrePush { remote, url: _ } => hook::pre_push(&remote),
         },
     };
 

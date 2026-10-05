@@ -1,2 +1,0 @@
-#!/bin/sh
-exec {{ includeTemplate "sh_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles-xtask.exe") }} --root {{ includeTemplate "sh_quote" .chezmoi.sourceDir }} hook commit-msg -- "$@"

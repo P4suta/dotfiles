@@ -72,7 +72,6 @@ guard/**
 
 # Directories that only hold another profile's targets in the unified source; ignoring them keeps this home from gaining empty trees or changed permissions.
 .config/fcitx5
-.config/git/template
 .config/kitty
 .config/systemd
 .config/wezterm

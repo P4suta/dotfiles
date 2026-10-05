@@ -12,6 +12,8 @@
 	# nothing is converted to CRLF. A repo's own .gitattributes still takes priority.
 	autocrlf = false
 	eol = lf
+	# Every repository runs the same dotguard gates as on the Mac and Linux, including repositories cloned before this setting.
+	hooksPath = ~/.config/git/hooks
 
 [interactive]
 	diffFilter = delta --color-only
@@ -30,10 +32,6 @@
 
 [init]
 	defaultBranch = main
-	# Hooks here are auto-installed into every new repo on `git init` /
-	# `git clone`. Enforces signed commits client-side; the actual
-	# script lives in dot_config/git/template/hooks/.
-	templateDir = ~/.config/git/template
 
 [alias]
 	dft = -c diff.external=difft diff

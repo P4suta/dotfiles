@@ -1,2 +1,2 @@
 #!/bin/sh
-exec {{ includeTemplate "sh_quote" (printf "%s/.local/bin/dotfiles-xtask" .chezmoi.homeDir) }} hook reference-transaction -- "$@"
+exec {{ includeTemplate "sh_quote" (joinPath .chezmoi.homeDir (printf ".local/bin/dotfiles-xtask%s" (ternary ".exe" "" (eq .chezmoi.os "windows")))) }} hook reference-transaction -- "$@"

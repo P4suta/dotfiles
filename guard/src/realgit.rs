@@ -5,22 +5,40 @@
 //!
 //! macOS has two candidates and which one is real depends on how far Homebrew provisioning has got: `/opt/homebrew/bin/git` once Homebrew is installed, `/usr/bin/git` (Apple's shim) on every Mac from the start.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
-const CANDIDATES: [&str; 3] = [
-    "/opt/homebrew/bin/git",
-    "/usr/local/bin/git",
-    "/usr/bin/git",
-];
+/// Where the real git can be, in order of preference.
+#[cfg(unix)]
+pub fn candidates() -> Vec<PathBuf> {
+    [
+        "/opt/homebrew/bin/git",
+        "/usr/local/bin/git",
+        "/usr/bin/git",
+    ]
+    .iter()
+    .map(PathBuf::from)
+    .collect()
+}
+
+/// Git for Windows installs machine-wide under Program Files or per user under the local application data; the wrapper itself lives elsewhere, so neither can resolve back to it.
+#[cfg(windows)]
+pub fn candidates() -> Vec<PathBuf> {
+    [
+        ("ProgramFiles", "Git/cmd/git.exe"),
+        ("ProgramW6432", "Git/cmd/git.exe"),
+        ("LOCALAPPDATA", "Programs/Git/cmd/git.exe"),
+    ]
+    .iter()
+    .filter_map(|(variable, relative)| {
+        std::env::var_os(variable).map(|base| PathBuf::from(base).join(relative))
+    })
+    .collect()
+}
 
 /// The first real git on disk, or `None` on a machine with no git at all.
 pub fn find() -> Option<PathBuf> {
-    CANDIDATES
-        .iter()
-        .map(Path::new)
-        .find(|p| p.is_file())
-        .map(Path::to_path_buf)
+    candidates().into_iter().find(|p| p.is_file())
 }
 
 /// A `Command` for the real git, for this process's own queries.

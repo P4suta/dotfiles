@@ -47,7 +47,6 @@ tools/**
 .config/fzf
 .config/gh
 .config/ghostty
-.config/git/hooks
 .config/herdr
 .config/herdr-agent
 .config/homebrew
