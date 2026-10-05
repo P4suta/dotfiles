@@ -1,8 +1,9 @@
 use crate::pr_rules::{
-    Checks, Effect, Exclusion, Generation, IssueGate, Operation, ReviewRequirement,
+    Blocker, Checks, Effect, Exclusion, Generation, IssueGate, Operation, ReviewRequirement,
     api_quota_available, checks_state, coderabbit_body_marker_allowed, exclusion, issue_gate,
     keeps_pause_exclusion, plan, requests_review, review_request_allowed, review_requirement,
 };
+use crate::refusal::{Refusal, command};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use clap::{Args, Parser, Subcommand};
@@ -11,7 +12,7 @@ use serde::Deserialize;
 use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const TITLE_REQUEST: &str = "@coderabbitai";
 const SUMMARY_REQUEST: &str = "@coderabbitai summary";
@@ -84,6 +85,18 @@ pub enum Action {
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
         pr: u64,
     },
+}
+
+impl Action {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Start { .. } => "start",
+            Self::Check { .. } => "check",
+            Self::Create { .. } => "create",
+            Self::Edit { .. } => "edit",
+            Self::Ready { .. } => "ready",
+        }
+    }
 }
 
 #[derive(Args)]
@@ -322,32 +335,51 @@ fn unfinished(value: &str) -> bool {
 impl Target {
     fn conventional_required(&self) -> Result<bool> {
         let parts: Vec<_> = self.repo.split('/').collect();
-        ensure!(
+        require(
             parts.len() == 2
-                && parts.iter().all(|part| !part.is_empty()
-                    && *part != "."
-                    && *part != ".."
-                    && !part.starts_with('-')
-                    && part
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))),
-            "repository must be an exact OWNER/REPO"
-        );
+                && parts.iter().all(|part| {
+                    !part.is_empty()
+                        && *part != "."
+                        && *part != ".."
+                        && !part.starts_with('-')
+                        && part
+                            .bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+                }),
+            || {
+                Refusal::new(
+                    "pr.repository",
+                    "--repo must be an exact OWNER/REPO",
+                    "gh repo view --json nameWithOwner --jq .nameWithOwner",
+                )
+                .evidence(format!("--repo {:?}", self.repo))
+            },
+        )?;
         let Some(path) = &self.title_policy else {
             return Ok(true);
         };
-        let policy: TitlePolicy =
-            serde_json::from_slice(&fs::read(path).context("read title policy")?)
-                .context("title policy requires repository, source, and reason")?;
-        ensure!(
-            policy.repository.eq_ignore_ascii_case(&self.repo),
-            "title policy belongs to another repository"
-        );
-        let source = policy
-            .source
-            .strip_prefix("https://")
-            .context("title policy source must be an HTTPS rules URL")?;
-        ensure!(
+        let refusal = |cause: &str| {
+            Refusal::new(
+                "pr.title-policy",
+                cause,
+                command(&["cat", "--", &path.display().to_string()]),
+            )
+            .evidence(format!("--title-policy {}", path.display()))
+        };
+        let policy: TitlePolicy = fs::read(path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .ok_or_else(|| {
+                refusal("the title policy must be a readable JSON object with exactly repository, source, and reason")
+            })?;
+        require(policy.repository.eq_ignore_ascii_case(&self.repo), || {
+            refusal("the title policy belongs to another repository").evidence(format!(
+                "policy repository {:?}, --repo {:?}",
+                policy.repository, self.repo
+            ))
+        })?;
+        let source = policy.source.strip_prefix("https://").unwrap_or_default();
+        require(
             single_line(source)
                 && !source.chars().any(char::is_whitespace)
                 && source
@@ -355,10 +387,69 @@ impl Target {
                     .next()
                     .is_some_and(|host| host.contains('.') && !host.starts_with('.'))
                 && single_line(&policy.reason),
-            "title policy needs a rules source and reason"
-        );
+            || {
+                refusal("the title policy needs an HTTPS rules source and a one-line reason")
+                    .evidence(format!("source {:?}", policy.source))
+            },
+        )?;
         Ok(false)
     }
+}
+
+/// Refuses with `refusal` unless `condition` holds.
+fn require(condition: bool, refusal: impl FnOnce() -> Refusal) -> Result<()> {
+    if condition {
+        Ok(())
+    } else {
+        Err(refusal().into())
+    }
+}
+
+/// The local check to run on a corrected document; `title` is kept when it was not the problem.
+fn recheck(target: &Target, title: Option<&str>) -> String {
+    let mut words = vec!["pr-workflow", "check", "--repo", &target.repo];
+    if target.generation == Generation::Coderabbit {
+        words.extend(["--generation", "coderabbit"]);
+    }
+    let policy = target
+        .title_policy
+        .as_ref()
+        .map(|path| path.display().to_string());
+    if let Some(policy) = &policy {
+        words.extend(["--title-policy", policy]);
+    }
+    words.extend([
+        "--title",
+        title.unwrap_or("<title>"),
+        "--body-file",
+        "<body-file>",
+    ]);
+    command(&words)
+}
+
+/// Runs `action` and reports every failure as one refusal.
+/// `arguments` are the words after `pr-workflow`, whichever entry point received them.
+pub fn execute(action: Action, arguments: &[String]) -> Result<()> {
+    let name = action.name();
+    let rerun = command(
+        &std::iter::once("pr-workflow")
+            .chain(arguments.iter().map(String::as_str))
+            .collect::<Vec<_>>(),
+    );
+    run(action, &rerun).map_err(|error| match error.downcast::<Refusal>() {
+        Ok(refusal) => refusal.into(),
+        Err(error) => failure(&error, name, &rerun).into(),
+    })
+}
+
+/// The record for a failure that no specific rule describes.
+fn failure(error: &anyhow::Error, name: &str, rerun: &str) -> Refusal {
+    Refusal::new(
+        "pr.failed",
+        format!("{error:#}"),
+        command(&["pr-workflow", name, "--help"]),
+    )
+    .evidence(format!("command: {rerun}"))
 }
 
 pub fn validate(
@@ -368,53 +459,67 @@ pub fn validate(
     final_check: bool,
 ) -> Result<ValidatedDocument> {
     let required = target.conventional_required()?;
-    ensure!(
-        single_line(&title) && title.trim() == title,
-        "title must be a nonempty single line without surrounding whitespace"
-    );
+    let title_refusal = |cause: &str| {
+        Refusal::new("pr.title", cause, recheck(target, None)).evidence(format!("title: {title:?}"))
+    };
+    require(single_line(&title) && title.trim() == title, || {
+        title_refusal("title must be a nonempty single line without surrounding whitespace")
+    })?;
     let request = target.generation == Generation::Coderabbit && !final_check;
-    ensure!(
-        !unfinished(&title),
-        "title contains an unfinished placeholder"
-    );
+    require(!unfinished(&title), || {
+        title_refusal("title contains an unfinished placeholder")
+    })?;
     if title.contains(TITLE_REQUEST) {
-        ensure!(
-            request && title == TITLE_REQUEST,
-            "CodeRabbit title generation is pending; use explicit coderabbit mode only for a generation request"
-        );
+        require(request && title == TITLE_REQUEST, || {
+            title_refusal(
+                "CodeRabbit title generation is pending; use explicit coderabbit mode only for a generation request",
+            )
+        })?;
     } else {
-        ensure!(
-            !required || conventional(&title),
-            "title must use type(scope)!: description; scope and ! are optional (or supply a repository-scoped title policy)"
-        );
+        require(!required || conventional(&title), || {
+            title_refusal(
+                "title must use type(scope)!: description; scope and ! are optional (or supply a repository-scoped title policy)",
+            )
+        })?;
     }
+    let body_refusal = |cause: &str, evidence: String| {
+        Refusal::new("pr.body", cause, recheck(target, Some(&title))).evidence(evidence)
+    };
     let visible = without_comments(&body);
     let visible = visible
         .lines()
         .filter(|line| line.trim() != REVIEW_EXCLUSION)
         .collect::<Vec<_>>()
         .join("\n");
-    ensure!(
-        !visible.trim().is_empty(),
-        "body is empty or contains only comments"
-    );
-    ensure!(
-        !unfinished(&prose(&visible)),
-        "body contains an unfinished placeholder"
-    );
-    if body.contains(TITLE_REQUEST) {
-        ensure!(
-            body.lines()
-                .filter(|line| line.contains(TITLE_REQUEST))
-                .all(|line| {
-                    coderabbit_body_marker_allowed(
-                        request,
-                        line.trim() == SUMMARY_REQUEST,
-                        line.trim() == REVIEW_EXCLUSION,
-                    )
-                }),
-            "CodeRabbit summary generation is pending or the placeholder is not a standalone standard request"
-        );
+    require(!visible.trim().is_empty(), || {
+        body_refusal(
+            "body is empty or contains only comments",
+            format!("visible body: {:?}", visible.trim()),
+        )
+    })?;
+    require(!unfinished(&prose(&visible)), || {
+        let line = visible
+            .lines()
+            .find(|line| unfinished(&prose(line)))
+            .unwrap_or("a placeholder spanning several lines");
+        body_refusal(
+            "body contains an unfinished placeholder",
+            format!("body line: {line:?}"),
+        )
+    })?;
+    if let Some(line) = body.lines().find(|line| {
+        line.contains(TITLE_REQUEST)
+            && !coderabbit_body_marker_allowed(
+                request,
+                line.trim() == SUMMARY_REQUEST,
+                line.trim() == REVIEW_EXCLUSION,
+            )
+    }) {
+        return Err(body_refusal(
+            "CodeRabbit summary generation is pending or the placeholder is not a standalone standard request",
+            format!("body line: {line:?}"),
+        )
+        .into());
     }
     Ok(ValidatedDocument { title, body })
 }
@@ -447,20 +552,48 @@ impl Github {
         let policy: WorkflowPolicy = serde_json::from_str(include_str!(
             "../../dot_agents/skills/pull-request/assets/workflow-policy.json"
         ))?;
-        ensure!(
+        require(
             policy.schema == 1
                 && policy.minimum_remaining > 0
                 && !policy.personal_owners.is_empty(),
-            "invalid global workflow policy"
-        );
-        let github = Self { policy };
-        let user: Owner = github.read("user").context(
-            "authenticated GitHub access is required; use gh auth login --hostname github.com",
+            || {
+                Refusal::new(
+                    "pr.policy",
+                    "the installed workflow policy needs schema 1, a nonzero quota reserve, and at least one personal owner",
+                    "chezmoi source-path ~/.agents/skills/pull-request/assets/workflow-policy.json",
+                )
+                .evidence(format!(
+                    "schema {}, reserve {}, {} personal owner(s)",
+                    policy.schema,
+                    policy.minimum_remaining,
+                    policy.personal_owners.len()
+                ))
+            },
         )?;
-        ensure!(
-            user.id != 0 && single_line(&user.login),
-            "invalid authenticated GitHub user"
-        );
+        let github = Self { policy };
+        let user: Owner = github.read("user").map_err(|error| {
+            if error.downcast_ref::<Refusal>().is_some() {
+                return error;
+            }
+            Refusal::new(
+                "pr.auth",
+                "authenticated GitHub access is required",
+                "gh auth login --hostname github.com",
+            )
+            .evidence(format!("gh api user: {error:#}"))
+            .into()
+        })?;
+        require(user.id != 0 && single_line(&user.login), || {
+            Refusal::new(
+                "pr.auth",
+                "GitHub reported no valid authenticated user",
+                "gh auth status --hostname github.com",
+            )
+            .evidence(format!(
+                "gh api user: login {:?}, id {}",
+                user.login, user.id
+            ))
+        })?;
         Ok(github)
     }
 
@@ -502,10 +635,22 @@ impl Github {
             header("x-ratelimit-resource")? == "core" && reset > 0,
             "invalid GitHub REST quota resource"
         );
-        ensure!(
+        require(
             api_quota_available(remaining, self.policy.minimum_remaining),
-            "GitHub REST quota is low ({remaining} remaining); stop until reset at UTC epoch {reset}; no automatic retry"
-        );
+            || {
+                Refusal::new(
+                    "pr.quota",
+                    format!(
+                        "GitHub REST quota is low ({remaining} remaining); stop until reset at UTC epoch {reset}; no automatic retry"
+                    ),
+                    "gh api rate_limit --jq .resources.core",
+                )
+                .evidence(format!(
+                    "remaining {remaining}, reserve {}, reset at UTC epoch {reset}",
+                    self.policy.minimum_remaining
+                ))
+            },
+        )?;
         serde_json::from_str(body).context("invalid GitHub prerequisite response")
     }
 }
@@ -551,38 +696,81 @@ fn references_issue(body: &str, repo: &str, issue: u64) -> bool {
     })
 }
 
+/// Where a checked PR body lives, so a refusal names the edit that changes it.
+#[derive(Clone, Copy)]
+enum BodySource<'a> {
+    File(&'a Path),
+    Pr(u64),
+}
+
 /// Establish the global personal scope and validate an explicitly selected issue.
-fn inspect_issue(github: &Github, target: &Target, body: Option<&str>) -> Result<IssueGate> {
+/// `rerun` is the refused command, which a refusal for a body file repeats after the edit.
+fn inspect_issue(
+    github: &Github,
+    target: &Target,
+    body: Option<(&str, BodySource)>,
+    rerun: &str,
+) -> Result<IssueGate> {
     target.conventional_required()?;
     let repository: Repository = github.read(&format!("repos/{}", target.repo))?;
-    ensure!(
+    require(
         repository.full_name.eq_ignore_ascii_case(&target.repo)
             && repository.owner.id != 0
             && repository
                 .owner
                 .login
                 .eq_ignore_ascii_case(target.repo.split('/').next().unwrap()),
-        "repository identity differs from the requested destination"
-    );
+        || {
+            Refusal::new(
+                "pr.repository",
+                "repository identity differs from the requested destination",
+                command(&[
+                    "gh",
+                    "repo",
+                    "view",
+                    &target.repo,
+                    "--json",
+                    "nameWithOwner,owner",
+                ]),
+            )
+            .evidence(format!(
+                "requested {}, GitHub reports {} owned by {} ({})",
+                target.repo, repository.full_name, repository.owner.login, repository.owner.id
+            ))
+        },
+    )?;
     let mut personal = false;
     for owner in &github.policy.personal_owners {
-        ensure!(
-            owner.id != 0 && single_line(&owner.login),
-            "invalid personal owner identity"
-        );
         let name_matches = owner.login.eq_ignore_ascii_case(&repository.owner.login);
         let id_matches = owner.id == repository.owner.id;
-        ensure!(
-            name_matches == id_matches,
-            "personal owner identity has changed; review the global policy"
-        );
+        require(
+            owner.id != 0 && single_line(&owner.login) && name_matches == id_matches,
+            || {
+                Refusal::new(
+                    "pr.policy",
+                    "a personal owner in the workflow policy no longer matches GitHub's login and id; the owner must review the policy",
+                    command(&[
+                        "gh",
+                        "api",
+                        &format!("users/{}", repository.owner.login),
+                        "--jq",
+                        "{login, id}",
+                    ]),
+                )
+                .evidence(format!("policy owner {} ({})", owner.login, owner.id))
+                .evidence(format!(
+                    "repository owner {} ({})",
+                    repository.owner.login, repository.owner.id
+                ))
+            },
+        )?;
         personal |= id_matches;
     }
     let Some(number) = target.issue else {
         return Ok(issue_gate(personal, repository.fork, false));
     };
     let issue: LiveIssue = github.read(&format!("repos/{}/issues/{number}", target.repo))?;
-    ensure!(
+    require(
         issue.number == number
             && issue.html_url.eq_ignore_ascii_case(&format!(
                 "https://github.com/{}/issues/{number}",
@@ -590,35 +778,164 @@ fn inspect_issue(github: &Github, target: &Target, body: Option<&str>) -> Result
             ))
             && issue.state == "open"
             && issue.pull_request.is_none(),
-        "--issue must identify an open issue in the exact destination, not a PR"
-    );
-    let issue_body = issue
-        .body
-        .context("the issue must describe the intended problem and scope")?;
+        || {
+            Refusal::new(
+                "pr.issue",
+                "--issue must identify an open issue in the exact destination, not a PR",
+                command(&[
+                    "gh",
+                    "issue",
+                    "list",
+                    "--repo",
+                    &target.repo,
+                    "--state",
+                    "open",
+                ]),
+            )
+            .evidence(format!(
+                "#{number}: state {}, url {}, pull request {}",
+                issue.state,
+                issue.html_url,
+                issue.pull_request.is_some()
+            ))
+        },
+    )?;
+    let issue_body = issue.body.unwrap_or_default();
     let visible = without_comments(&issue_body);
-    ensure!(
+    require(
         single_line(&issue.title)
             && !unfinished(&issue.title)
             && !visible.trim().is_empty()
             && !unfinished(&prose(&visible))
             && !issue_body.contains(TITLE_REQUEST),
-        "issue content is empty or unfinished"
-    );
-    if let Some(body) = body {
-        ensure!(
-            references_issue(body, &target.repo, number),
-            "PR body must visibly close the selected issue, for example: Closes #{number}."
-        );
+        || {
+            Refusal::new(
+                "pr.issue",
+                "the issue must describe the intended problem and scope; its content is empty or unfinished",
+                command(&[
+                    "gh",
+                    "issue",
+                    "edit",
+                    &number.to_string(),
+                    "--repo",
+                    &target.repo,
+                    "--body-file",
+                    "<body-file>",
+                ]),
+            )
+            .evidence(format!(
+                "#{number}: title {:?}, {} visible body characters",
+                issue.title,
+                visible.trim().chars().count()
+            ))
+        },
+    )?;
+    if let Some((body, source)) = body {
+        require(references_issue(body, &target.repo, number), || {
+            let next = match source {
+                BodySource::File(path) => format!(
+                    "{} >> {} && {rerun}",
+                    command(&["printf", &format!("\\n\\nCloses #{number}\\n")]),
+                    command(&[&path.display().to_string()]),
+                ),
+                BodySource::Pr(pr) => command(&[
+                    "gh",
+                    "pr",
+                    "edit",
+                    &pr.to_string(),
+                    "--repo",
+                    &target.repo,
+                    "--body-file",
+                    "<body-file>",
+                ]),
+            };
+            Refusal::new(
+                "pr.body",
+                format!(
+                    "PR body must visibly close the selected issue, for example: Closes #{number}."
+                ),
+                next,
+            )
+            .evidence(format!(
+                "no closing reference to #{number} in the visible body"
+            ))
+        })?;
     }
     Ok(issue_gate(personal, repository.fork, true))
 }
 
-fn require_issue(gate: IssueGate) -> Result<()> {
-    ensure!(
-        gate != IssueGate::Missing,
-        "personal non-fork repositories require --issue NUMBER; record the problem, scope, and acceptance criteria before starting"
-    );
-    Ok(())
+fn require_issue(gate: IssueGate, target: &Target) -> Result<()> {
+    require(gate != IssueGate::Missing, || missing_issue(target))
+}
+
+fn missing_issue(target: &Target) -> Refusal {
+    Refusal::new(
+        "pr.issue",
+        "personal non-fork repositories require --issue NUMBER; record the problem, scope, and acceptance criteria before starting",
+        command(&[
+            "gh",
+            "issue",
+            "create",
+            "--repo",
+            &target.repo,
+            "--title",
+            "<title>",
+            "--body-file",
+            "<body-file>",
+        ]),
+    )
+    .evidence(format!("{} is a personal non-fork repository and no --issue was given", target.repo))
+}
+
+/// Plans `operation` on a validated document and names the unmet condition when it is refused.
+/// `pr` is the existing PR a ready transition acts on.
+fn planned(
+    operation: Operation,
+    target: &Target,
+    pr: Option<u64>,
+    draft: bool,
+    issue: IssueGate,
+    checks: Checks,
+) -> Result<Effect> {
+    let blocker = match plan(operation, target.generation, true, draft, issue, checks) {
+        Ok(effect) => return Ok(effect),
+        Err(blocker) => blocker,
+    };
+    let pr = pr.map_or_else(|| "<number>".to_owned(), |pr| pr.to_string());
+    let view = |fields: &str| {
+        command(&[
+            "gh",
+            "pr",
+            "view",
+            &pr,
+            "--repo",
+            &target.repo,
+            "--json",
+            fields,
+        ])
+    };
+    Err(match blocker {
+        Blocker::MissingIssue => missing_issue(target),
+        Blocker::Unvalidated => Refusal::new(
+            "pr.body",
+            "the document was not validated",
+            recheck(target, None),
+        )
+        .evidence(format!("{operation:?} without a validated document")),
+        Blocker::NotDraft => Refusal::new(
+            "pr.state",
+            "only a draft can become ready",
+            view("state,isDraft"),
+        )
+        .evidence(format!("#{pr}: not a draft")),
+        Blocker::UnfinishedChecks => Refusal::new(
+            "pr.checks",
+            "a draft becomes ready only when every reported check on its head has passed and no work remains",
+            command(&["gh", "pr", "checks", &pr, "--repo", &target.repo]),
+        )
+        .evidence(format!("#{pr}: head checks {checks:?}")),
+    }
+    .into())
 }
 
 /// Read the owner's CodeRabbit PR review pause from the guard's state.
@@ -743,11 +1060,17 @@ fn write_document(
 }
 
 fn branch(value: &str) -> Result<()> {
-    ensure!(
+    require(
         single_line(value) && !value.starts_with('-') && !value.chars().any(char::is_whitespace),
-        "head and base must be nonempty branch names"
-    );
-    Ok(())
+        || {
+            Refusal::new(
+                "pr.branch",
+                "head and base must be nonempty branch names",
+                "git branch --show-current",
+            )
+            .evidence(format!("branch: {value:?}"))
+        },
+    )
 }
 
 fn live_document(_github: &Github, target: &Target, pr: u64) -> Result<LiveDocument> {
@@ -761,13 +1084,13 @@ fn live_document(_github: &Github, target: &Target, pr: u64) -> Result<LiveDocum
     serde_json::from_str(&gh(&args)?).context("invalid gh PR document")
 }
 
-pub fn run(action: Action) -> Result<()> {
+fn run(action: Action, rerun: &str) -> Result<()> {
     match action {
         Action::Start { target } => {
             target.conventional_required()?;
             let github = Github::connect()?;
-            let gate = inspect_issue(&github, &target, None)?;
-            require_issue(gate)?;
+            let gate = inspect_issue(&github, &target, None, rerun)?;
+            require_issue(gate, &target)?;
             println!(
                 "Repository prerequisites accepted ({gate:?}); inspect the destination rules and issue scope before implementation"
             );
@@ -784,7 +1107,15 @@ pub fn run(action: Action) -> Result<()> {
                 let github = Github::connect()?;
                 let live = live_document(&github, &target, pr)?;
                 let document = validate(&target, live.title, live.body, r#final)?;
-                require_issue(inspect_issue(&github, &target, Some(&document.body))?)?;
+                require_issue(
+                    inspect_issue(
+                        &github,
+                        &target,
+                        Some((&document.body, BodySource::Pr(pr))),
+                        rerun,
+                    )?,
+                    &target,
+                )?;
                 report_review_requirement(&document.body)?;
             } else {
                 read_document(
@@ -806,6 +1137,7 @@ pub fn run(action: Action) -> Result<()> {
             base,
             draft,
         } => {
+            let body_file = document.body_file.clone();
             let (target, document) = read_document(document, false)?;
             branch(&head)?;
             if let Some(base) = &base {
@@ -815,17 +1147,20 @@ pub fn run(action: Action) -> Result<()> {
                 Ok((true, Exclusion::None))
             })?;
             let github = Github::connect()?;
-            let issue = inspect_issue(&github, &target, Some(&document.body))?;
-            require_issue(issue)?;
-            let effect = plan(
+            let issue = inspect_issue(
+                &github,
+                &target,
+                Some((&document.body, BodySource::File(&body_file))),
+                rerun,
+            )?;
+            let effect = planned(
                 Operation::Create,
-                target.generation,
-                true,
+                &target,
+                None,
                 draft,
                 issue,
                 Checks::Incomplete,
-            )
-            .context("PR creation refused")?;
+            )?;
             let mut args = arguments("create", &target.repo);
             args.extend([OsString::from("--head"), head.into()]);
             if let Some(base) = base {
@@ -838,6 +1173,7 @@ pub fn run(action: Action) -> Result<()> {
             print!("{}", gh(&args)?);
         }
         Action::Edit { document, pr } => {
+            let body_file = document.body_file.clone();
             let (target, document) = read_document(document, false)?;
             let mut connected = None;
             admit_review_request(Operation::Edit, target.generation, &document.body, || {
@@ -848,19 +1184,20 @@ pub fn run(action: Action) -> Result<()> {
                 Some(github) => github,
                 None => Github::connect()?,
             };
-            let issue = inspect_issue(&github, &target, Some(&document.body))?;
-            require_issue(issue)?;
-            ensure!(
-                plan(
-                    Operation::Edit,
-                    target.generation,
-                    true,
-                    false,
-                    issue,
-                    Checks::Incomplete
-                ) == Some(Effect::Edit),
-                "PR edit refused"
-            );
+            let issue = inspect_issue(
+                &github,
+                &target,
+                Some((&document.body, BodySource::File(&body_file))),
+                rerun,
+            )?;
+            planned(
+                Operation::Edit,
+                &target,
+                Some(pr),
+                false,
+                issue,
+                Checks::Incomplete,
+            )?;
             let mut args = vec![
                 OsString::from("pr"),
                 "edit".into(),
@@ -875,22 +1212,37 @@ pub fn run(action: Action) -> Result<()> {
             target.conventional_required()?;
             let github = Github::connect()?;
             let live = live_document(&github, &target, pr)?;
-            ensure!(live.state == "OPEN", "only an open PR can become ready");
+            let inspect = || {
+                command(&[
+                    "gh",
+                    "pr",
+                    "view",
+                    &pr.to_string(),
+                    "--repo",
+                    &target.repo,
+                    "--json",
+                    "state,isDraft",
+                ])
+            };
+            require(live.state == "OPEN", || {
+                Refusal::new("pr.state", "only an open PR can become ready", inspect())
+                    .evidence(format!("#{pr}: state {}", live.state))
+            })?;
             let document = validate(&target, live.title, live.body, false)?;
-            let issue = inspect_issue(&github, &target, Some(&document.body))?;
-            require_issue(issue)?;
-            ensure!(live.is_draft, "only a validated draft can become ready");
-            ensure!(
-                plan(
-                    Operation::Ready,
-                    target.generation,
-                    true,
-                    live.is_draft,
-                    issue,
-                    checks(&live.status_check_rollup),
-                ) == Some(Effect::Ready),
-                "a draft becomes ready only when every reported check on its head has passed and no work remains"
-            );
+            let issue = inspect_issue(
+                &github,
+                &target,
+                Some((&document.body, BodySource::Pr(pr))),
+                rerun,
+            )?;
+            planned(
+                Operation::Ready,
+                &target,
+                Some(pr),
+                live.is_draft,
+                issue,
+                checks(&live.status_check_rollup),
+            )?;
             admit_review_request(Operation::Ready, target.generation, &document.body, || {
                 Ok((live.is_draft, review_exclusion(&document.body)))
             })?;
