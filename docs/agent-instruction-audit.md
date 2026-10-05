@@ -12,7 +12,7 @@ No class admits a line whose template action renders output, so a partial cannot
 - a partial or prompt line without an entry here, an entry whose line no longer exists, and an entry whose class does not fit its line;
 - a line whose template action renders output;
 - a follow-up defined more than once, referenced by no retained line, or referenced without a definition;
-- a removed line without a valid holder: a `Gate` row must name an existing gate source file, a `Skill` row an existing skill, and a `Merged` row a code span that occurs in exactly one retained line;
+- a removed line without a valid holder: a `Gate` row must name an existing gate source file, a `Skill` row an existing skill, a `Merged` row a code span that occurs in exactly one retained line, and a `Contradicted` row an existing skill or such a code span;
 - a repository path named outside a quote here that does not exist;
 - a root dispatcher (`dot_claude/CLAUDE.md.tmpl`, `dot_codex/AGENTS.md.tmpl`, `dot_config/opencode/AGENTS.md.tmpl`) whose actions do more than select the same file in a native profile;
 - a profile template that renders anything besides the partials;
@@ -44,7 +44,7 @@ Heading: groups the language lines.
 
 Follow-up F1: no hook reads a final reply yet.
 
-> - Write persisted text, such as commit messages, PRs, issues, code comments, documentation, and release notes, in English.
+> - Write outward-facing artifacts such as commit messages, PRs, issues, code comments, documentation, and release notes in English.
 
 Follow-up F1: dotguard's `commit-msg` gate refuses a non-English commit message when `guard.lang` is unset or `english`; the `pre-commit` content scan only filters contamination such as Cyrillic, simplified Chinese, and invisible characters, and accepts Japanese, so committed comments and documentation are not language-checked, and neither are PR and issue documents.
 
@@ -365,11 +365,11 @@ Each removed line names what holds it now:
   No gate refuses work done without loading it; F5 adds a completion gate for `formal-assurance` and `verification-tools` only.
 - `Gate and skill`: a gate holds part of the line and the named skill states the rest.
 - `Merged`: the retained line that contains the quoted fragment rewords or restates it.
+- `Contradicted`: the line contradicted the named retained line or skill, which states the rule that applies instead.
 
 | Former line | Held by | Mechanism |
 | --- | --- | --- |
 | Respond to me in Japanese. | Merged | Reworded as `Reply in the reader's language`. |
-| Write outward-facing artifacts such as commit messages, PRs, issues, code comments, documentation, and release notes in English. | Merged | Reworded as `Write persisted text`. |
 | Follow Conventional Commits and omit AI co-author footers and session URLs. | Gate | dotguard `commit-msg` strips agent attribution and session URLs (`guard/src/attribution.rs`); the convention is retained as its own line. |
 | Keep diffs reviewable by editing the smallest relevant region. | Merged | Merged into `Make the smallest change`. |
 | Before GitHub-bound implementation, load `pull-request` and run `pr-workflow start` for the exact destination. | Skill | The `pull-request` skill description states the same trigger; the command is retained. |
@@ -396,14 +396,14 @@ Each removed line names what holds it now:
 | The former nine-sentence prose rules and their rationale. | Gate | The global pre-commit hook runs `ocomment fix --tidy --staged`, which reflows a touched paragraph of a committed comment or Markdown file (`dot_config/lefthook/global.yml`); the rules are condensed into the retained prose lines. |
 | Use the `multi-machine` skill and the current `domyjob` manual for remote execution. | Skill | `multi-machine` and `domyjob` state the trigger in their descriptions. |
 | The template actions in `remote_machines` that rendered the untracked machine-local notes file into every instruction file. | Merged | The retained line names the file to read instead: `when it exists, before operating another host`. |
-| `commit.md`: wrap an optional body at 100 chars explaining why, not what | Merged | It contradicted `Never wrap prose to a fixed column`; the reason requirement stays in the command. |
+| `commit.md`: wrap an optional body at 100 chars explaining why, not what | Contradicted | It contradicted `Never wrap prose to a fixed column`; the reason requirement stays in the command. |
 | `commit.md`: Never append attribution footers. | Gate | dotguard `commit-msg` strips agent attribution (`guard/src/attribution.rs`). |
 | `commit.md`: Reply to me in Japanese. | Merged | Restated by `Reply in the reader's language`. |
 | `pr.md`: Open a pull request for the current branch using `gh`. | Merged | Superseded by `for PR creation, document edits, and ready transitions`. |
-| `pr.md`: Title: English, max 72 chars, imperative mood; keep the repo's existing title style if one is apparent. | Gate and skill | `pr-workflow` checks the title syntax (`xtask/src/pr_workflow.rs`); `pull-request` states the title rules and the precedence of the destination's own style. |
-| `pr.md`: Body in English markdown with `## Summary`, `## Changes`, and `## Notes` sections for testing, caveats, and follow-ups. | Skill | `pull-request` states the body sections and the precedence of the destination's template. |
+| `pr.md`: Title: English, max 72 chars, imperative mood; keep the repo's existing title style if one is apparent. | Contradicted | `pull-request` makes length and style recommendations, so the 72-character limit and the imperative mood contradicted it; it requires an English Conventional Commits title unless the destination has its own rules, and `pr-workflow` checks the syntax (`xtask/src/pr_workflow.rs`). |
+| `pr.md`: Body in English markdown with `## Summary`, `## Changes`, and `## Notes` sections for testing, caveats, and follow-ups. | Contradicted | `pull-request` prescribes `Why`, `Changes`, and `Validation` when the destination has no template. |
 | `pr.md`: Run `gh pr create` with the base, title, and body, using a heredoc for the body. | Merged | Replaced by `create the pull request with`. |
-| `pr.md`: Reply to me in Japanese; the PR title and body stay English. | Merged | Restated by `Reply in the reader's language`; the English requirement is the retained persisted-text line. |
+| `pr.md`: Reply to me in Japanese; the PR title and body stay English. | Merged | Restated by `Reply in the reader's language`; the English requirement is the retained outward-facing line. |
 | `reviewer.md`: Write your review in Japanese. | Merged | Restated by `Reply in the reader's language`. |
 
 ## Follow-ups
@@ -414,7 +414,7 @@ The others have no scoped issue yet; each gets its own issue under #42 before it
 ### F1: Writing standard checker
 
 Issue #44 adds one checker and calls it from the `pre-commit` and `commit-msg` gates, `pr-workflow check`, `create`, and `edit`, OComment, and the Claude Code `Stop` hook with the equivalent Codex and OpenCode hooks.
-It refuses persisted text that is not English or not one sentence per line, and it checks a final reply against the reader-language rule.
+It refuses outward-facing text that is not English or not one sentence per line, and it checks a final reply against the reader-language rule.
 
 ### F2: mise activation in every agent shell
 

@@ -467,6 +467,10 @@ fn reject_a_directive_that_renders_output() {{
 fn reject_a_merge_without_its_retained_line() {{
     assert!(production::removed_row_held(Some(production::Holder::Merged), true, true, false));
 }}
+#[kani::proof]
+fn reject_a_contradiction_without_what_it_contradicted() {{
+    assert!(production::removed_row_held(Some(production::Holder::Contradicted), true, false, false));
+}}
 "
         ),
     )?;
@@ -477,6 +481,7 @@ fn reject_a_merge_without_its_retained_line() {{
         "reject_a_gate_without_its_source",
         "reject_a_directive_that_renders_output",
         "reject_a_merge_without_its_retained_line",
+        "reject_a_contradiction_without_what_it_contradicted",
     ] {
         verify_file(&file, probe.path(), &[name], true)?;
     }

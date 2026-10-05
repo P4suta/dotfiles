@@ -40,6 +40,8 @@ Directive: renders nothing.
 | Never push. | Gate | `guard/src/push.rs` refuses it. |
 | Load `demo` for demos. | Skill | `demo` states it. |
 | Reply to me in Japanese. | Merged | Reworded as `Reply in Japanese`. |
+| Write commits in Japanese. | Contradicted | It contradicted `Write commits in English`. |
+| Use the `## Notes` heading. | Contradicted | `demo` prescribes other headings. |
 
 ## Follow-ups
 
@@ -325,6 +327,16 @@ fn every_removed_line_names_what_holds_it() {
             "source file",
         ),
         ("| Never push. | Gate |", "| Never push. |", "three cells"),
+        (
+            "It contradicted `Write commits in English`.",
+            "It contradicted the reply line.",
+            "contradicted",
+        ),
+        (
+            "`demo` prescribes other headings.",
+            "A skill prescribes other headings.",
+            "contradicted",
+        ),
     ] {
         let reported = audit(&[("policy", PARTIAL)], &AUDIT.replace(from, to));
         assert_eq!(reported.len(), 1, "{to}\n{reported:?}");
@@ -462,6 +474,24 @@ fn the_rule_core_admits_only_matching_classes_and_current_follow_ups() {
         false
     ));
     assert!(!removed_row_held(None, true, true, true));
+    assert!(removed_row_held(
+        Some(Holder::Contradicted),
+        false,
+        false,
+        true
+    ));
+    assert!(removed_row_held(
+        Some(Holder::Contradicted),
+        false,
+        true,
+        false
+    ));
+    assert!(!removed_row_held(
+        Some(Holder::Contradicted),
+        true,
+        false,
+        false
+    ));
 }
 
 fn write(root: &Path, relative: &str, text: &str) {

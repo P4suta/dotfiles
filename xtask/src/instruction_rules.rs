@@ -60,9 +60,12 @@ pub enum Holder {
     Skill,
     GateAndSkill,
     Merged,
+    /// The line contradicted a retained line or a skill, which holds the rule that applies instead.
+    Contradicted,
 }
 
 /// A removed-line row is held when it names a gate's source file for a gate, an existing skill for a skill, and exactly one retained line for a merge.
+/// A contradicted line names the retained line or the skill it contradicted.
 pub fn removed_row_held(
     holder: Option<Holder>,
     names_source: bool,
@@ -74,6 +77,7 @@ pub fn removed_row_held(
         Some(Holder::Skill) => names_skill,
         Some(Holder::GateAndSkill) => names_source && names_skill,
         Some(Holder::Merged) => names_retained,
+        Some(Holder::Contradicted) => names_retained || names_skill,
         None => false,
     }
 }
@@ -108,12 +112,13 @@ fn any_class() -> Class {
 #[cfg(kani)]
 fn any_holder() -> Option<Holder> {
     let choice: u8 = kani::any();
-    kani::assume(choice < 5);
+    kani::assume(choice < 6);
     match choice {
         0 => Some(Holder::Gate),
         1 => Some(Holder::Skill),
         2 => Some(Holder::GateAndSkill),
         3 => Some(Holder::Merged),
+        4 => Some(Holder::Contradicted),
         _ => None,
     }
 }
@@ -167,6 +172,7 @@ fn removed_lines_name_what_holds_them() {
     assert!(!result || !matches!(holder, Some(Holder::Gate | Holder::GateAndSkill)) || source);
     assert!(!result || !matches!(holder, Some(Holder::Skill | Holder::GateAndSkill)) || skill);
     assert!(!result || holder != Some(Holder::Merged) || retained);
+    assert!(!result || holder != Some(Holder::Contradicted) || retained || skill);
     kani::cover!(result);
     kani::cover!(!result);
 }

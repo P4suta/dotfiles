@@ -266,6 +266,7 @@ fn holder(cell: &str) -> Option<Holder> {
         "Skill" => Some(Holder::Skill),
         "Gate and skill" => Some(Holder::GateAndSkill),
         "Merged" => Some(Holder::Merged),
+        "Contradicted" => Some(Holder::Contradicted),
         _ => None,
     }
 }
@@ -382,7 +383,9 @@ pub fn findings(
         });
         if !removed_row_held(holder(held_by), names_source, names_skill, names_retained) {
             let need = match holder(held_by) {
-                None => "a Held by cell of `Gate`, `Skill`, `Gate and skill`, or `Merged`",
+                None => {
+                    "a Held by cell of `Gate`, `Skill`, `Gate and skill`, `Merged`, or `Contradicted`"
+                }
                 Some(Holder::Gate) => {
                     "a mechanism cell naming the gate's source file (`.rs`, `.ts`, `.js`, `.json`, `.toml`, `.yml`, or `.yaml`)"
                 }
@@ -392,6 +395,9 @@ pub fn findings(
                 }
                 Some(Holder::Merged) => {
                     "a mechanism cell quoting, in a code span with a space, a fragment of exactly one retained line"
+                }
+                Some(Holder::Contradicted) => {
+                    "a mechanism cell naming what it contradicted: an existing skill, or, in a code span with a space, a fragment of exactly one retained line"
                 }
             };
             result.push(format!(

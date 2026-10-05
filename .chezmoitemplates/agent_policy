@@ -6,7 +6,7 @@ A project's own instructions take precedence when they conflict.
 ## Language
 
 - Reply in the reader's language, which is Japanese for me.
-- Write persisted text, such as commit messages, PRs, issues, code comments, documentation, and release notes, in English.
+- Write outward-facing artifacts such as commit messages, PRs, issues, code comments, documentation, and release notes in English.
 
 ## Environment
 
