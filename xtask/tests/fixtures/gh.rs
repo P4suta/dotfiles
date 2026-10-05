@@ -41,14 +41,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let view = std::env::var("GH_FIXTURE_VIEW")?;
         let checks = std::env::var("GH_FIXTURE_CHECKS")
             .unwrap_or_else(|_| r#"[{"status":"COMPLETED","conclusion":"SUCCESS"}]"#.into());
-        match view.strip_suffix('}') {
-            Some(open) if !view.contains("statusCheckRollup") && !open.trim().ends_with('{') => {
-                println!("{open},\"statusCheckRollup\":{checks}}}");
-            }
-            _ => println!("{view}"),
+        let mut view = view;
+        if !view.contains("statusCheckRollup") {
+            view = field(view, "statusCheckRollup", &checks);
         }
+        if !view.contains("headRefOid") {
+            let head = std::env::var("GH_FIXTURE_HEAD").unwrap_or_default();
+            view = field(view, "headRefOid", &format!("\"{head}\""));
+        }
+        println!("{view}");
     } else {
         println!("https://github.com/owner/project/pull/17");
     }
     Ok(())
+}
+
+fn field(view: String, name: &str, value: &str) -> String {
+    match view.strip_suffix('}') {
+        Some(open) if !open.trim().ends_with('{') => format!("{open},\"{name}\":{value}}}"),
+        _ => view,
+    }
 }

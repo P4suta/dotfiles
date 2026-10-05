@@ -129,6 +129,7 @@ struct LiveDocument {
     is_draft: bool,
     #[serde(default)]
     status_check_rollup: Vec<ReportedCheck>,
+    head_ref_oid: Option<String>,
 }
 
 /// One entry of the head commit's check rollup: a check run or a commit status.
@@ -756,7 +757,7 @@ fn live_document(_github: &Github, target: &Target, pr: u64) -> Result<LiveDocum
     args.extend([
         pr.to_string().into(),
         "--json".into(),
-        "title,body,state,isDraft,statusCheckRollup".into(),
+        "title,body,state,isDraft,statusCheckRollup,headRefOid".into(),
     ]);
     serde_json::from_str(&gh(&args)?).context("invalid gh PR document")
 }
@@ -891,6 +892,12 @@ pub fn run(action: Action) -> Result<()> {
                 ) == Some(Effect::Ready),
                 "a draft becomes ready only when every reported check on its head has passed and no work remains"
             );
+            crate::hosts::require_admission(
+                std::path::Path::new("."),
+                live.head_ref_oid
+                    .as_deref()
+                    .context("GitHub reported no head commit")?,
+            )?;
             admit_review_request(Operation::Ready, target.generation, &document.body, || {
                 Ok((live.is_draft, review_exclusion(&document.body)))
             })?;

@@ -155,6 +155,11 @@ enum Action {
         #[command(subcommand)]
         command: dotfiles_xtask::pr_workflow::Action,
     },
+    /// Keep one host per OS family reachable, run the gate on each, and require their notes before push.
+    Hosts {
+        #[command(subcommand)]
+        action: dotfiles_xtask::hosts::Action,
+    },
     Proofs,
 }
 
@@ -287,6 +292,7 @@ fn run() -> Result<()> {
             backup.as_deref(),
         )?,
         Action::PrWorkflow { command } => dotfiles_xtask::pr_workflow::run(command)?,
+        Action::Hosts { action } => dotfiles_xtask::hosts::run(action)?,
         Action::InstallPrWorkflow => {
             cargo(
                 &cli.root,

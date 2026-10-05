@@ -1,9 +1,11 @@
 {
-  "revision": "53086629f0e6b28bc87ff5faa40123945f1287245d8f9e909f40975fc1d60d60",
-  "outcome": "keep",
-  "reason": "Retain locally verified coherent publication and explicit machine-local holds independently of the review provider; preserve the verified Windows Git-home resolution and incomplete-hook-coverage boundary.",
+  "revision": "c70c317435d56dfd2388004649633a16bdaa179a8fc861961b69c14ecd7ddab7",
+  "outcome": "implemented",
+  "reason": "Replace the restated cross-platform run instruction with a pointer at `dotfiles-xtask hosts check`, which the push gates enforce; keep CI-job mapping, hosted-only prerequisites, and push-hold judgment.",
   "evidence": [
-    "dot_agents/skills/ci-budget/SKILL.md"
+    "dot_agents/skills/ci-budget/SKILL.md",
+    "xtask/src/hosts.rs",
+    "docs/adr/0020-os-family-push-evidence.md"
   ],
   "revisit": null
 }

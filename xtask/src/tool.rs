@@ -84,6 +84,7 @@ pub enum Tool {
     Rustc,
     Sh,
     Shellcheck,
+    Ssh,
     SshKeygen,
     Starship,
     Sudo,
@@ -105,7 +106,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 81] = [
+    pub const ALL: [Self; 82] = [
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
         Self::Atuin,
@@ -169,6 +170,7 @@ impl Tool {
         Self::Rustc,
         Self::Sh,
         Self::Shellcheck,
+        Self::Ssh,
         Self::SshKeygen,
         Self::Starship,
         Self::Sudo,
@@ -238,6 +240,13 @@ impl Tool {
                     "ssh-keygen"
                 }
             }
+            Self::Ssh => {
+                if cfg!(windows) {
+                    "ssh.exe"
+                } else {
+                    "ssh"
+                }
+            }
             Self::Sudo => "sudo",
             Self::Systemctl => "systemctl",
             Self::Taplo => "taplo",
@@ -300,6 +309,7 @@ impl Tool {
             | Self::Id
             | Self::Sh
             | Self::SshKeygen
+            | Self::Ssh
             | Self::Sudo
             | Self::Systemctl
             | Self::Wslpath => Provision::Host,

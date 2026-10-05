@@ -80,6 +80,14 @@ pub const LINE_ENDING_HARNESSES: [&str; 3] = [
     "declared_line_endings_are_never_rewritten",
 ];
 
+pub const HOSTS_HARNESSES: [&str; 5] = [
+    "a_changed_host_key_is_pinned_only_with_acceptance",
+    "a_push_is_admitted_only_when_every_required_family_passed",
+    "checks_start_only_from_a_clean_tree_with_every_required_host_ready",
+    "only_github_branch_updates_are_gated",
+    "the_latest_record_for_the_commit_tree_decides_a_family",
+];
+
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
     let summary = &value["verification_results"]["summary"];
     ensure!(
@@ -500,6 +508,31 @@ fn verify_native(root: &Path) -> Result<()> {
         fs::read(source)? == original,
         "production line-ending proof source changed during verification"
     );
+    let source = crate::canonical(&root.join("xtask/src/hosts_rules.rs"))?;
+    let original = fs::read(&source)?;
+    let directory = tempfile::tempdir()?;
+    verify_inventory(&source, directory.path(), &HOSTS_HARNESSES)?;
+    verify_file(&source, directory.path(), &HOSTS_HARNESSES, false)?;
+    let probe = tempfile::tempdir()?;
+    let file = probe.path().join("counterexample.rs");
+    fs::write(
+        &file,
+        format!(
+            "#[path = {source:?}]\nmod production;\nuse production::*;\n#[kani::proof]\nfn reject_admitting_a_failed_family() {{\n    assert!(admit([true, true, true], [Evidence::Passed, Evidence::Failed, Evidence::Passed]) == Verdict::Admit);\n}}\n#[kani::proof]\nfn reject_a_record_for_another_tree() {{\n    assert!(record(Evidence::Missing, false, true) == Evidence::Passed);\n}}\n#[kani::proof]\nfn reject_silently_accepting_a_changed_key() {{\n    assert!(pin(Key::Changed, false));\n}}\n#[kani::proof]\nfn reject_checking_a_dirty_tree() {{\n    assert!(start(false, [true, true, true], [true, true, true]) == Start::Run);\n}}\n"
+        ),
+    )?;
+    for name in [
+        "reject_admitting_a_failed_family",
+        "reject_a_record_for_another_tree",
+        "reject_silently_accepting_a_changed_key",
+        "reject_checking_a_dirty_tree",
+    ] {
+        verify_file(&file, probe.path(), &[name], true)?;
+    }
+    ensure!(
+        fs::read(source)? == original,
+        "production hosts proof source changed during verification"
+    );
     println!(
         "Verified all {} production policy harnesses, reachable outcomes, and the rejecting counterexamples",
         HARNESSES.len()
@@ -509,6 +542,7 @@ fn verify_native(root: &Path) -> Result<()> {
             + REVIEW_HARNESSES.len()
             + NEXT_ACTION_HARNESSES.len()
             + LINE_ENDING_HARNESSES.len()
+            + HOSTS_HARNESSES.len()
     );
     Ok(())
 }

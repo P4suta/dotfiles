@@ -1,9 +1,13 @@
 {
-  "revision": "54c7c531b6b8d3511421cd2c9ecf080b14e2a70764e6b291ff40e94fc97930a2",
-  "outcome": "keep",
-  "reason": "Retain native validation and source-hub discipline while obtaining host identities and checkout roots from machine-local configuration; removing private topology does not grant permission to operate another host.",
+  "revision": "61d5c9e12198368c8f6b5d013c9f5d92a6cb7a18a5755df8f865e37d064a5b7a",
+  "outcome": "implemented",
+  "reason": "Point host inventory, readiness, and pre-push cross-platform verification at `dotfiles-xtask hosts` sync, doctor, and check, whose notes pre-push and pr-workflow ready require; keep the native-path, job-identity, 1Password, hub, and agent-dispatch judgment.",
   "evidence": [
-    "dot_agents/skills/multi-machine/SKILL.md"
+    "dot_agents/skills/multi-machine/SKILL.md",
+    "xtask/src/hosts.rs",
+    "xtask/src/hosts_rules.rs",
+    "xtask/tests/hosts.rs",
+    "docs/adr/0020-os-family-push-evidence.md"
   ],
   "revisit": null
 }
