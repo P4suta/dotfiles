@@ -14,7 +14,7 @@ Each host's local gate also asked for every catalog decision again once observat
 Track one decision per skill in `docs/skills/decisions/<skill>.json`, bound to that skill's content revision.
 The file name is the skill identity, and the record holds the revision, outcome, reason, evidence, and revisit condition of ADR 0003.
 The required check refuses a skill whose decision is missing, incomplete, or bound to another revision, and a decision file that names no skill.
-Each refusal names the skill and `just decide NAME`, which drafts the decision from the previous one and prints the revision's findings and the content diff since the recorded decision.
+Each refusal names the skill and `just decide NAME`, which drafts the decision from the previous one and prints the revision's findings and the content diff since the latest commit that holds the revision the previous decision assessed, or says that no commit holds it.
 The draft keeps the previous outcome, evidence, and revisit condition and leaves the reason empty, so the check still refuses it until the author writes the reason for the new revision.
 
 While a skill's entrypoint exceeds the policy's word limit, its decision also holds a size disposition with its own outcome, reason, and revisit condition.

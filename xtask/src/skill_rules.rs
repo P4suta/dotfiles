@@ -64,6 +64,22 @@ pub fn size_disposition(over_limit: bool, recorded: bool, complete: bool) -> Siz
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DiffBase {
+    Whole,
+    Assessed,
+    Unavailable,
+}
+
+/// Shows a diff only from a commit that holds the content the previous decision assessed.
+pub fn diff_base(previous: bool, assessed_commit: bool) -> DiffBase {
+    match (previous, assessed_commit) {
+        (false, _) => DiffBase::Whole,
+        (true, true) => DiffBase::Assessed,
+        (true, false) => DiffBase::Unavailable,
+    }
+}
+
 pub fn immutable_identity_valid(length: usize, hexadecimal: bool) -> bool {
     length == 64 && hexadecimal
 }
@@ -328,4 +344,18 @@ fn the_gate_completes_only_when_nothing_remains_to_triage() {
     assert!(result || (!recorded && open > 0));
     kani::cover!(result && !recorded);
     kani::cover!(!result);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn the_decision_diff_starts_only_from_the_assessed_content() {
+    let previous: bool = kani::any();
+    let assessed: bool = kani::any();
+    let base = diff_base(previous, assessed);
+    assert!(base != DiffBase::Assessed || (previous && assessed));
+    assert!(base != DiffBase::Unavailable || (previous && !assessed));
+    assert_eq!(base == DiffBase::Whole, !previous);
+    kani::cover!(base == DiffBase::Whole);
+    kani::cover!(base == DiffBase::Assessed);
+    kani::cover!(base == DiffBase::Unavailable);
 }

@@ -10,7 +10,7 @@ use std::process::Stdio;
 
 pub const KANI_VERSION: &str = "0.68.0";
 
-pub const HARNESSES: [&str; 11] = [
+pub const HARNESSES: [&str; 12] = [
     "adapter_activation_requires_policy_and_installed_runtime",
     "composition_respects_sample_and_ratio_without_overflow",
     "dispositions_require_evidence_and_defined_follow_up",
@@ -19,6 +19,7 @@ pub const HARNESSES: [&str; 11] = [
     "only_current_settled_decisions_are_adopted",
     "oversized_skills_need_a_complete_size_disposition",
     "stale_or_unprocessed_maintenance_never_completes",
+    "the_decision_diff_starts_only_from_the_assessed_content",
     "the_gate_completes_only_when_nothing_remains_to_triage",
     "tracked_decisions_pass_only_when_present_bound_and_complete",
     "triage_is_skipped_only_when_every_finding_is_adopted",
@@ -323,7 +324,7 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_completion_without_evidence() {{\n    assert!(production::decision_complete(production::Outcome::Implemented, true, false, false));\n}}\n#[kani::proof]\nfn reject_adopting_a_changed_skill() {{\n    assert!(production::adopted(false, production::Outcome::Keep));\n}}\n#[kani::proof]\nfn reject_a_stale_tracked_decision() {{\n    assert!(production::tracked_decision(true, false, true) == production::Tracked::Current);\n}}\n#[kani::proof]\nfn reject_skipping_triage_with_open_findings() {{\n    assert!(production::triage_complete(1, false));\n}}\n#[kani::proof]\nfn reject_an_unrecorded_oversized_skill() {{\n    assert!(production::size_disposition(true, false, false) == production::Sizing::Settled);\n}}\n#[kani::proof]\nfn reject_completing_the_gate_with_open_findings() {{\n    assert!(production::gate_complete(false, 1));\n}}\n"
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_completion_without_evidence() {{\n    assert!(production::decision_complete(production::Outcome::Implemented, true, false, false));\n}}\n#[kani::proof]\nfn reject_adopting_a_changed_skill() {{\n    assert!(production::adopted(false, production::Outcome::Keep));\n}}\n#[kani::proof]\nfn reject_a_stale_tracked_decision() {{\n    assert!(production::tracked_decision(true, false, true) == production::Tracked::Current);\n}}\n#[kani::proof]\nfn reject_skipping_triage_with_open_findings() {{\n    assert!(production::triage_complete(1, false));\n}}\n#[kani::proof]\nfn reject_an_unrecorded_oversized_skill() {{\n    assert!(production::size_disposition(true, false, false) == production::Sizing::Settled);\n}}\n#[kani::proof]\nfn reject_completing_the_gate_with_open_findings() {{\n    assert!(production::gate_complete(false, 1));\n}}\n#[kani::proof]\nfn reject_a_diff_from_unassessed_content() {{\n    assert!(production::diff_base(true, false) == production::DiffBase::Assessed);\n}}\n"
         ),
     )?;
     for name in [
@@ -333,6 +334,7 @@ fn verify_native(root: &Path) -> Result<()> {
         "reject_skipping_triage_with_open_findings",
         "reject_an_unrecorded_oversized_skill",
         "reject_completing_the_gate_with_open_findings",
+        "reject_a_diff_from_unassessed_content",
     ] {
         verify_file(&file, probe.path(), &[name], true)?;
     }

@@ -1,6 +1,6 @@
 use crate::skill_rules::{
-    Maintenance, Sizing, Tracked, adopted, composition_candidate, gate_complete,
-    maintenance_current, size_disposition, tracked_decision, triage_complete,
+    DiffBase, Maintenance, Sizing, Tracked, adopted, composition_candidate, diff_base,
+    gate_complete, maintenance_current, size_disposition, tracked_decision, triage_complete,
 };
 pub use crate::skill_rules::{Outcome, decision_complete};
 use anyhow::{Context, Result, ensure};
@@ -374,7 +374,7 @@ pub fn draft_decision(
     })
 }
 
-fn git_output(root: &Path, arguments: &[&str]) -> Result<String> {
+fn git_bytes(root: &Path, arguments: &[&str]) -> Result<Vec<u8>> {
     let output = crate::tool::Tool::Git
         .command()
         .current_dir(root)
@@ -386,7 +386,73 @@ fn git_output(root: &Path, arguments: &[&str]) -> Result<String> {
         arguments.join(" "),
         String::from_utf8_lossy(&output.stderr).trim()
     );
-    Ok(String::from_utf8(output.stdout)?.trim().to_owned())
+    Ok(output.stdout)
+}
+
+fn git_output(root: &Path, arguments: &[&str]) -> Result<String> {
+    Ok(String::from_utf8(git_bytes(root, arguments)?)?
+        .trim()
+        .to_owned())
+}
+
+/// Hashes a skill tree at a commit as the catalog hashes it, or returns None when the catalog cannot hold that tree.
+fn revision_at(root: &Path, commit: &str, skill: &str) -> Result<Option<String>> {
+    let tree = format!("dot_agents/skills/{skill}");
+    let listing = String::from_utf8(git_bytes(
+        root,
+        &["ls-tree", "-r", "-z", commit, "--", &tree],
+    )?)?;
+    let mut files = Vec::new();
+    for entry in listing.split('\0').filter(|entry| !entry.is_empty()) {
+        let (header, path) = entry
+            .split_once('\t')
+            .context("malformed git ls-tree entry")?;
+        let mut fields = header.split(' ');
+        let (Some(mode), Some(object)) = (fields.next(), fields.nth(1)) else {
+            anyhow::bail!("malformed git ls-tree entry");
+        };
+        let relative = path
+            .strip_prefix("dot_agents/skills/")
+            .context("git ls-tree listed a path outside the skill")?;
+        if relative.split('/').any(|part| part == "target") {
+            continue;
+        }
+        if !matches!(mode, "100644" | "100755") {
+            return Ok(None);
+        }
+        files.push((relative.to_owned(), object.to_owned()));
+    }
+    if files.is_empty() {
+        return Ok(None);
+    }
+    files.sort_by(|(left, _), (right, _)| left.split('/').cmp(right.split('/')));
+    let mut snapshots = Vec::new();
+    for (relative, object) in files {
+        snapshots.push((
+            relative,
+            digest(&git_bytes(root, &["cat-file", "blob", &object])?),
+        ));
+    }
+    Ok(Some(hash(&snapshots)?))
+}
+
+/// Finds the latest commit whose skill tree holds the assessed revision.
+fn assessed_commit(root: &Path, skill: &str, revision: &str) -> Result<Option<String>> {
+    let history = git_output(
+        root,
+        &[
+            "log",
+            "--format=%H",
+            "--",
+            &format!("dot_agents/skills/{skill}"),
+        ],
+    )?;
+    for commit in history.lines() {
+        if revision_at(root, commit, skill)?.as_deref() == Some(revision) {
+            return Ok(Some(commit.to_owned()));
+        }
+    }
+    Ok(None)
 }
 
 /// Writes the draft decision for one skill and returns the context its author needs.
@@ -416,29 +482,31 @@ pub fn decide(root: &Path, skill: &str) -> Result<String> {
         .map(|finding| format!("Finding {}: {}", finding.kind, finding.detail))
         .collect();
     let tree = format!("dot_agents/skills/{skill}");
-    match &previous {
-        Some(previous) => {
+    if let Some(previous) = &previous {
+        context.push(format!(
+            "Previous decision ({}): {}",
+            serde_json::to_value(previous.outcome)?,
+            previous.reason
+        ));
+    }
+    let assessed = match &previous {
+        Some(previous) => assessed_commit(root, skill, &previous.revision)?,
+        None => None,
+    };
+    match (diff_base(previous.is_some(), assessed.is_some()), assessed) {
+        (DiffBase::Assessed, Some(commit)) => {
             context.push(format!(
-                "Previous decision ({}): {}",
-                serde_json::to_value(previous.outcome)?,
-                previous.reason
+                "Changes to {tree} since {commit}, the latest commit holding the content the previous decision assessed:"
             ));
-            let recorded = git_output(root, &["log", "-1", "--format=%H", "--", &relative])?;
-            if recorded.is_empty() {
-                context.push(format!(
-                    "The previous decision is uncommitted; compare {tree} with the content it assessed"
-                ));
-            } else {
-                context.push(format!(
-                    "Changes to {tree} since the decision recorded in {recorded}:"
-                ));
-                context.push(git_output(
-                    root,
-                    &["--no-pager", "diff", &recorded, "--", &tree],
-                )?);
-            }
+            context.push(git_output(
+                root,
+                &["--no-pager", "diff", &commit, "--", &tree],
+            )?);
         }
-        None => context.push(format!(
+        (DiffBase::Unavailable | DiffBase::Assessed, _) => context.push(format!(
+            "No commit holds the content the previous decision assessed; assess the whole of {tree} against that decision"
+        )),
+        (DiffBase::Whole, _) => context.push(format!(
             "{skill} has no previous decision; assess the whole skill"
         )),
     }

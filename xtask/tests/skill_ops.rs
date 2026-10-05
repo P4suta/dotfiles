@@ -866,25 +866,12 @@ fn decide_writes_the_draft_and_shows_the_content_diff_since_the_recorded_decisio
     );
     assert!(decide(root.path(), "gamma").is_err());
 
-    let skill = root.path().join("dot_agents/skills/beta/SKILL.md");
-    fs::write(
-        &skill,
-        "---\nname: beta\ndescription: Inspect the beta contract.\n---\n# Contract\nUncommitted change.\n",
-    )?;
     git(root.path(), &["init", "--quiet"])?;
-    git(root.path(), &["add", "dot_agents"])?;
-    git(root.path(), &["commit", "--quiet", "--message", "skills"])?;
-    let uncommitted = decide(root.path(), "beta")?;
-    assert!(uncommitted.contains("uncommitted"), "{uncommitted}");
-    write_json(&path, &previous, true)?;
-
     git(root.path(), &["add", "--all"])?;
     git(root.path(), &["commit", "--quiet", "--message", "record"])?;
     let recorded = git(root.path(), &["rev-parse", "HEAD"])?;
-    fs::write(
-        &skill,
-        "---\nname: beta\ndescription: Inspect the beta contract.\n---\n# Contract\nCommitted change.\n",
-    )?;
+    let skill = root.path().join("dot_agents/skills/beta/SKILL.md");
+    fs::write(&skill, skill_text("beta", "Committed change."))?;
     let context = decide(root.path(), "beta")?;
     assert!(context.contains(recorded.trim()), "{context}");
     assert!(context.contains("+Committed change."), "{context}");
@@ -903,5 +890,137 @@ fn decide_writes_the_draft_and_shows_the_content_diff_since_the_recorded_decisio
         message.contains("decision for beta is incomplete"),
         "{message}"
     );
+    Ok(())
+}
+
+fn skill_text(name: &str, body: &str) -> String {
+    format!(
+        "---\nname: {name}\ndescription: Inspect the {name} contract.\n---\n# Contract\n{body}\n"
+    )
+}
+
+#[test]
+fn decide_diffs_from_the_commit_holding_the_assessed_content() -> Result<()> {
+    let root = repository()?;
+    git(root.path(), &["init", "--quiet"])?;
+    git(root.path(), &["add", "dot_agents"])?;
+    git(root.path(), &["commit", "--quiet", "--message", "assessed"])?;
+    let assessed = git(root.path(), &["rev-parse", "HEAD"])?;
+    let skill = root.path().join("dot_agents/skills/beta/SKILL.md");
+    fs::write(&skill, skill_text("beta", "Intermediate change."))?;
+    // The decision is first committed with content newer than the content it assessed.
+    git(root.path(), &["add", "--all"])?;
+    git(
+        root.path(),
+        &["commit", "--quiet", "--message", "intermediate"],
+    )?;
+    fs::write(&skill, skill_text("beta", "Final change."))?;
+
+    let context = decide(root.path(), "beta")?;
+    assert!(context.contains(assessed.trim()), "{context}");
+    assert!(context.contains("-Check the actual boundary."), "{context}");
+    assert!(context.contains("+Final change."), "{context}");
+    assert!(!context.contains("Intermediate"), "{context}");
+    Ok(())
+}
+
+#[test]
+fn decide_says_when_no_commit_holds_the_assessed_content() -> Result<()> {
+    let root = repository()?;
+    let skill = root.path().join("dot_agents/skills/beta/SKILL.md");
+    fs::write(&skill, skill_text("beta", "Unassessed change."))?;
+    git(root.path(), &["init", "--quiet"])?;
+    git(root.path(), &["add", "--all"])?;
+    git(
+        root.path(),
+        &["commit", "--quiet", "--message", "unassessed"],
+    )?;
+    fs::write(&skill, skill_text("beta", "Final change."))?;
+
+    let context = decide(root.path(), "beta")?;
+    assert!(
+        context.contains("No commit holds the content the previous decision assessed"),
+        "{context}"
+    );
+    assert!(!context.contains("+Final change."), "{context}");
+    Ok(())
+}
+
+fn decide_on_branch(root: &std::path::Path, branch: &str, skill: &str) -> Result<()> {
+    git(root, &["switch", "--quiet", "--create", branch, "main"])?;
+    fs::write(
+        root.join("dot_agents/skills").join(skill).join("SKILL.md"),
+        skill_text(skill, &format!("Changed on {branch}.")),
+    )?;
+    decide(root, skill)?;
+    let path = root
+        .join("docs/skills/decisions")
+        .join(format!("{skill}.json"));
+    let mut draft: SkillDecision = dotfiles_xtask::skill_ops::read_json(&path)?;
+    draft.reason = format!("The {branch} change keeps the contract useful.");
+    write_json(&path, &draft, true)?;
+    check_catalog(root)?;
+    git(root, &["add", "--all"])?;
+    git(root, &["commit", "--quiet", "--message", branch])?;
+    Ok(())
+}
+
+#[test]
+fn decisions_for_different_skills_merge_in_either_order_without_conflict() -> Result<()> {
+    let root = repository()?;
+    git(
+        root.path(),
+        &["init", "--quiet", "--initial-branch", "main"],
+    )?;
+    git(root.path(), &["add", "--all"])?;
+    git(root.path(), &["commit", "--quiet", "--message", "base"])?;
+    check_catalog(root.path())?;
+    decide_on_branch(root.path(), "first", "alpha")?;
+    decide_on_branch(root.path(), "second", "beta")?;
+
+    for (name, order) in [
+        ("forward", ["first", "second"]),
+        ("reverse", ["second", "first"]),
+    ] {
+        git(
+            root.path(),
+            &["switch", "--quiet", "--create", name, "main"],
+        )?;
+        for branch in order {
+            git(root.path(), &["merge", "--quiet", "--no-edit", branch])?;
+            check_catalog(root.path())?;
+        }
+    }
+    assert_eq!(
+        git(root.path(), &["diff", "forward", "reverse"])?,
+        "",
+        "both merge orders reach the same tree"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_assessed_commit_hashes_nested_resources_in_catalog_order() -> Result<()> {
+    let root = repository()?;
+    let tree = root.path().join("dot_agents/skills/beta");
+    fs::create_dir_all(tree.join("guide/target"))?;
+    fs::write(tree.join("guide.md"), "# Guide\n")?;
+    fs::write(tree.join("guide/steps.md"), "# Steps\n")?;
+    fs::write(tree.join("guide/target/ignored.md"), "# Ignored\n")?;
+    let path = root.path().join("docs/skills/decisions/beta.json");
+    let mut decision: SkillDecision = dotfiles_xtask::skill_ops::read_json(&path)?;
+    decision.revision = catalog(&root.path().join("dot_agents/skills"))?.skills["beta"]
+        .revision
+        .clone();
+    write_json(&path, &decision, true)?;
+    git(root.path(), &["init", "--quiet"])?;
+    git(root.path(), &["add", "--all"])?;
+    git(root.path(), &["commit", "--quiet", "--message", "assessed"])?;
+    let assessed = git(root.path(), &["rev-parse", "HEAD"])?;
+    fs::write(tree.join("guide/steps.md"), "# Steps\nChanged.\n")?;
+
+    let context = decide(root.path(), "beta")?;
+    assert!(context.contains(assessed.trim()), "{context}");
+    assert!(context.contains("+Changed."), "{context}");
     Ok(())
 }
