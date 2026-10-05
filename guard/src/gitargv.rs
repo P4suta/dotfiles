@@ -1096,7 +1096,7 @@ fn push(call: &Invocation, push: &Parsed) -> Option<Denial> {
     let forced: Vec<&str> = refspecs
         .iter()
         .copied()
-        .filter(|a| a.strip_prefix('+').is_some_and(|s| s.contains(':')))
+        .filter(|a| a.strip_prefix('+').is_some_and(|s| !s.is_empty()))
         .collect();
     let deleted: Vec<&str> = refspecs
         .iter()
@@ -1123,7 +1123,7 @@ fn push(call: &Invocation, push: &Parsed) -> Option<Denial> {
                 }
                 (!(arg.len() > 1 && arg.starts_with(':'))).then(|| {
                     arg.strip_prefix('+')
-                        .filter(|s| s.contains(':'))
+                        .filter(|s| !s.is_empty())
                         .unwrap_or(arg)
                 })
             }))
@@ -1688,6 +1688,7 @@ mod tests {
             "push --no-verify origin main",
             "commit --no-gpg-sign -m x",
             "commit --no-gpg -m x",
+            "push origin +main",
         ] {
             assert!(refused(line), "should refuse: git {line}");
         }
