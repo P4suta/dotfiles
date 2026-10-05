@@ -22,12 +22,14 @@ pub struct Attributes {
     pub binary: bool,
 }
 
-/// The byte facts Git's `text=auto` detection uses.
+/// The statistics Git's `gather_stats` collects for `text=auto` detection.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Content {
     pub crlf: bool,
     pub lone_cr: bool,
     pub nul: bool,
+    pub printable: usize,
+    pub nonprintable: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -41,32 +43,57 @@ pub fn declared_exempt(attributes: Attributes) -> bool {
     attributes.eol == Eol::Crlf || attributes.text == Text::Unset || attributes.binary
 }
 
-/// Explicit `text` converts every CRLF; otherwise content Git would treat as binary is kept.
+/// Explicit `text`, or `eol=lf` without a `text` value, makes Git convert without content detection.
+pub fn forces_text(attributes: Attributes) -> bool {
+    attributes.text == Text::Set
+        || (attributes.text == Text::Unspecified && attributes.eol == Eol::Lf)
+}
+
+/// Git's `convert_is_binary`: a lone CR, a NUL, or more than one nonprintable byte per 128 printable ones.
+pub fn auto_binary(content: Content) -> bool {
+    content.lone_cr || content.nul || (content.printable >> 7) < content.nonprintable
+}
+
 pub fn action(attributes: Attributes, content: Content) -> Action {
     if declared_exempt(attributes) || !content.crlf {
         Action::Keep
-    } else if attributes.text == Text::Set || !(content.nul || content.lone_cr) {
+    } else if forces_text(attributes) || !auto_binary(content) {
         Action::Normalize
     } else {
         Action::Keep
     }
 }
 
+/// Classifies bytes as Git's `gather_stats` does; LF and both bytes of a CRLF pair count as neither printable nor nonprintable.
 pub fn content(bytes: &[u8]) -> Content {
     let mut found = Content {
         crlf: false,
         lone_cr: false,
         nul: false,
+        printable: 0,
+        nonprintable: 0,
     };
     let mut index = 0;
     while index < bytes.len() {
         match bytes[index] {
-            0 => found.nul = true,
-            b'\r' if !kept(bytes, index) => found.crlf = true,
+            b'\r' if !kept(bytes, index) => {
+                found.crlf = true;
+                index += 1;
+            }
             b'\r' => found.lone_cr = true,
-            _ => {}
+            b'\n' => {}
+            0x08 | b'\t' | 0x0c | 0x1b => found.printable += 1,
+            0 => {
+                found.nul = true;
+                found.nonprintable += 1;
+            }
+            0x7f | 0x01..=0x1f => found.nonprintable += 1,
+            _ => found.printable += 1,
         }
         index += 1;
+    }
+    if bytes.last() == Some(&0x1a) {
+        found.nonprintable -= 1;
     }
     found
 }
@@ -122,19 +149,34 @@ fn declared_line_endings_are_never_rewritten() {
         crlf: kani::any(),
         lone_cr: kani::any(),
         nul: kani::any(),
+        printable: kani::any(),
+        nonprintable: kani::any(),
     };
     let decided = action(attributes, content);
-    let exempt = attributes.eol == Eol::Crlf || attributes.text == Text::Unset || attributes.binary;
-    assert_eq!(declared_exempt(attributes), exempt);
-    if exempt || !content.crlf {
+    if attributes.eol == Eol::Crlf || attributes.text == Text::Unset || attributes.binary {
         assert_eq!(decided, Action::Keep);
     }
-    if decided == Action::Normalize {
-        assert!(attributes.text == Text::Set || !(content.nul || content.lone_cr));
+    if !content.crlf {
+        assert_eq!(decided, Action::Keep);
     }
-    kani::cover!(decided == Action::Normalize && attributes.text != Text::Set);
+    let eol_only = attributes.text == Text::Unspecified && attributes.eol == Eol::Lf;
+    if decided == Action::Normalize && attributes.text != Text::Set && !eol_only {
+        assert!(!(content.nul || content.lone_cr));
+        assert!(content.nonprintable == 0 || content.printable >= 128);
+    }
+    if decided == Action::Keep
+        && content.crlf
+        && !attributes.binary
+        && attributes.eol != Eol::Crlf
+        && matches!(attributes.text, Text::Auto | Text::Unspecified)
+    {
+        assert!(!eol_only);
+        assert!(content.nul || content.lone_cr || content.nonprintable > content.printable / 128);
+    }
+    kani::cover!(decided == Action::Normalize && attributes.text == Text::Auto);
+    kani::cover!(decided == Action::Normalize && content.nul);
     kani::cover!(decided == Action::Keep && content.crlf && attributes.eol == Eol::Crlf);
-    kani::cover!(decided == Action::Keep && content.crlf && !exempt);
+    kani::cover!(decided == Action::Keep && content.crlf && !content.nul && !content.lone_cr);
 }
 
 #[cfg(kani)]
@@ -153,4 +195,35 @@ fn conversion_removes_only_carriage_returns_before_line_feeds() {
     kani::cover!(keep && carriage_return);
     kani::cover!(!keep);
     kani::cover!(keep && index >= 4);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(5)]
+fn auto_detection_follows_git_byte_classes() {
+    let input: [u8; 4] = kani::any();
+    let found = content(&input);
+    let mut lone_cr = false;
+    let mut control = false;
+    let mut crlf = false;
+    let mut nul = false;
+    let mut index = 0;
+    while index < 4 {
+        let byte = input[index];
+        let pair = index < 3 && byte == b'\r' && input[index + 1] == b'\n';
+        crlf |= pair;
+        nul |= byte == 0;
+        lone_cr |= byte == b'\r' && !pair;
+        let class = byte == 0x7f
+            || (byte < 0x20 && !matches!(byte, 0x08 | b'\t' | b'\n' | 0x0c | b'\r' | 0x1b));
+        control |= class && !(index == 3 && byte == 0x1a);
+        index += 1;
+    }
+    assert_eq!(found.crlf, crlf);
+    assert_eq!(found.lone_cr, lone_cr);
+    assert_eq!(found.nul, nul);
+    assert!(found.printable + found.nonprintable <= 4);
+    assert_eq!(auto_binary(found), lone_cr || control);
+    kani::cover!(auto_binary(found) && !found.lone_cr && !found.nul);
+    kani::cover!(!auto_binary(found) && found.crlf && input[3] == 0x1a);
 }

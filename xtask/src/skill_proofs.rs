@@ -59,7 +59,8 @@ pub const REVIEW_HARNESSES: [&str; 5] = [
     "rolling_attempts_cannot_exceed_the_layered_local_budget",
 ];
 
-pub const LINE_ENDING_HARNESSES: [&str; 2] = [
+pub const LINE_ENDING_HARNESSES: [&str; 3] = [
+    "auto_detection_follows_git_byte_classes",
     "conversion_removes_only_carriage_returns_before_line_feeds",
     "declared_line_endings_are_never_rewritten",
 ];
@@ -440,15 +441,15 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_rewriting_declared_crlf() {{\n    let attributes = production::Attributes {{ text: production::Text::Auto, eol: production::Eol::Crlf, binary: false }};\n    let content = production::Content {{ crlf: true, lone_cr: false, nul: false }};\n    assert!(production::action(attributes, content) == production::Action::Normalize);\n}}\n"
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\n#[kani::unwind(5)]\nfn reject_rewriting_declared_crlf() {{\n    let attributes = production::Attributes {{ text: production::Text::Auto, eol: production::Eol::Crlf, binary: false }};\n    assert!(production::action(attributes, production::content(b\"a\\r\\n\")) == production::Action::Normalize);\n}}\n#[kani::proof]\n#[kani::unwind(5)]\nfn reject_rewriting_control_heavy_content() {{\n    let attributes = production::Attributes {{ text: production::Text::Auto, eol: production::Eol::Lf, binary: false }};\n    assert!(production::action(attributes, production::content(b\"\\x01\\x02\\r\\n\")) == production::Action::Normalize);\n}}\n"
         ),
     )?;
-    verify_file(
-        &file,
-        probe.path(),
-        &["reject_rewriting_declared_crlf"],
-        true,
-    )?;
+    for name in [
+        "reject_rewriting_declared_crlf",
+        "reject_rewriting_control_heavy_content",
+    ] {
+        verify_file(&file, probe.path(), &[name], true)?;
+    }
     ensure!(
         fs::read(source)? == original,
         "production line-ending proof source changed during verification"

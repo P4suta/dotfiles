@@ -4,6 +4,8 @@ use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 use std::fs;
 use std::io::{Read, Write};
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -45,6 +47,31 @@ pub fn work_tree(directory: &Path) -> Result<Option<PathBuf>> {
     Ok(Some(PathBuf::from(top.trim_end_matches(['\n', '\r']))))
 }
 
+/// A path from Git's `-z` output, which is UTF-8 on Windows and raw bytes elsewhere.
+fn path_from_bytes(bytes: &[u8]) -> Result<PathBuf> {
+    #[cfg(unix)]
+    {
+        Ok(PathBuf::from(std::ffi::OsStr::from_bytes(bytes)))
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(PathBuf::from(
+            std::str::from_utf8(bytes).context("listed path is not UTF-8")?,
+        ))
+    }
+}
+
+fn path_bytes(path: &Path) -> Result<&[u8]> {
+    #[cfg(unix)]
+    {
+        Ok(path.as_os_str().as_bytes())
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(path.to_str().context("path is not UTF-8")?.as_bytes())
+    }
+}
+
 fn listed(directory: &Path, arguments: &[&str]) -> Result<Vec<PathBuf>> {
     let output = git(directory)
         .args(["ls-files", "-z"])
@@ -61,11 +88,7 @@ fn listed(directory: &Path, arguments: &[&str]) -> Result<Vec<PathBuf>> {
         .stdout
         .split(|&byte| byte == 0)
         .filter(|path| !path.is_empty())
-        .map(|path| {
-            String::from_utf8(path.to_vec())
-                .map(PathBuf::from)
-                .context("listed path is not UTF-8")
-        })
+        .map(path_from_bytes)
         .collect::<Result<Vec<_>>>()?;
     paths.sort();
     paths.dedup();
@@ -96,7 +119,7 @@ pub fn attributes(directory: &Path, paths: &[PathBuf]) -> Result<Vec<Attributes>
     }
     let mut input = Vec::new();
     for path in paths {
-        input.extend_from_slice(path.to_str().context("path is not UTF-8")?.as_bytes());
+        input.extend_from_slice(path_bytes(path)?);
         input.push(0);
     }
     let mut child = git(directory)
@@ -156,10 +179,18 @@ fn regular(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
 }
 
-/// Replaces `path` only while it still holds `expected`, keeping its permissions.
-fn replace(path: &Path, expected: &[u8], next: &[u8]) -> Result<bool> {
+/// Replaces `path` only while it is writable and still holds `expected`, keeping its permissions.
+pub fn replace(path: &Path, expected: &[u8], next: &[u8]) -> Result<bool> {
     let parent = path.parent().context("file has no parent directory")?;
     let permissions = fs::metadata(path)?.permissions();
+    if permissions.readonly() {
+        eprintln!(
+            "Kept CRLF in the read-only file {}; make it writable and run `dotfiles-xtask line-endings normalize {}`",
+            path.display(),
+            path.display()
+        );
+        return Ok(false);
+    }
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     temporary.write_all(next)?;
     temporary.as_file().sync_all()?;
@@ -222,28 +253,53 @@ pub fn check(root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn changed_files(directory: &Path) -> Result<Vec<PathBuf>> {
+    match work_tree(directory)? {
+        Some(top) => {
+            let paths = listed(&top, &["--modified", "--others", "--exclude-standard"])?;
+            normalize(&top, &paths)
+        }
+        None => Ok(Vec::new()),
+    }
+}
+
+fn named_file(path: &Path) -> Result<Vec<PathBuf>> {
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) if parent.is_dir() && work_tree(parent)?.is_some() => {
+            normalize(parent, &[PathBuf::from(name)])
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
 /// Normalizes the changed files of the work tree at the hook's directory and the file the tool names.
+/// A directory Git cannot inspect is reported on standard error and skipped, so one failure does not fail every tool call.
 pub fn hook(input: &Value) -> Result<Vec<PathBuf>> {
     let directory = match input["cwd"].as_str() {
         Some(directory) => PathBuf::from(directory),
         None => std::env::current_dir()?,
     };
-    let mut changed = Vec::new();
-    if let Some(top) = work_tree(&directory)? {
-        let paths = listed(&top, &["--modified", "--others", "--exclude-standard"])?;
-        changed.extend(normalize(&top, &paths)?);
-    }
-    let named = &input["tool_input"];
+    let mut scopes = vec![(directory.clone(), changed_files(&directory))];
     for key in ["file_path", "filePath", "notebook_path"] {
-        let Some(path) = named[key].as_str() else {
-            continue;
-        };
-        let path = directory.join(path);
-        if let (Some(parent), Some(name)) = (path.parent(), path.file_name())
-            && parent.is_dir()
-            && work_tree(parent)?.is_some()
-        {
-            changed.extend(normalize(parent, &[PathBuf::from(name)])?);
+        if let Some(path) = input["tool_input"][key].as_str() {
+            let path = directory.join(path);
+            let result = named_file(&path);
+            scopes.push((path, result));
+        }
+    }
+    let mut changed = Vec::new();
+    for (scope, result) in scopes {
+        match result {
+            Ok(paths) => changed.extend(paths),
+            Err(error) => eprintln!(
+                "Warning: skipped line-ending normalization for {}: {error:#}\nRun `git -C {} status` to see why Git cannot inspect it.",
+                scope.display(),
+                scope
+                    .parent()
+                    .filter(|_| scope != directory)
+                    .unwrap_or(&scope)
+                    .display()
+            ),
         }
     }
     Ok(changed)

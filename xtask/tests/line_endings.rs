@@ -252,3 +252,151 @@ fn opencode_adapter_normalizes_a_written_file() -> Result<()> {
     assert_eq!(fs::read(root.join("written.txt"))?, LF);
     Ok(())
 }
+
+/// Content and attribute cases where the hook must leave exactly the bytes that `git add` stages.
+fn git_detection_cases() -> Vec<(&'static str, Vec<u8>)> {
+    let mut sparse = vec![b'a'; 128];
+    sparse.extend_from_slice(b"\x01\r\n");
+    let mut dense = vec![b'a'; 127];
+    dense.extend_from_slice(b"\x01\r\n");
+    vec![
+        (
+            "control-heavy.txt",
+            b"\x01\x02\x03\x04\x05\r\nab\r\n".to_vec(),
+        ),
+        ("sparse-control.txt", sparse),
+        ("dense-control.txt", dense),
+        ("trailing-eof.txt", b"ab\r\n\x1a".to_vec()),
+        ("leading-eof.txt", b"\x1aab\r\n".to_vec()),
+        ("printable-controls.txt", b"\x1b\t\x08\x0cx\r\n".to_vec()),
+        ("delete.txt", b"a\x7f\r\n".to_vec()),
+        ("lone-before-pair.txt", b"a\r\r\nb\r\n".to_vec()),
+        ("forced-lone.txt", b"a\rb\r\n".to_vec()),
+        ("forced-nul.txt", b"a\0b\r\n".to_vec()),
+        ("forced-control.txt", b"\x01\x02\x03\r\n".to_vec()),
+        ("eol-only-lone.txt", b"a\rb\r\n".to_vec()),
+        ("eol-only-nul.txt", b"a\0b\r\n".to_vec()),
+    ]
+}
+
+#[test]
+fn hook_leaves_the_bytes_git_stages() -> Result<()> {
+    let git = Isolated::new(true)?;
+    let repository = git.repository()?;
+    let root = repository.path();
+    fs::write(
+        root.join(".gitattributes"),
+        "forced-* text\neol-only-* !text eol=lf\n",
+    )?;
+    let originals = tempfile::tempdir()?;
+    let cases = git_detection_cases();
+    let mut staged = Vec::new();
+    for (name, bytes) in &cases {
+        let original = originals.path().join(name);
+        fs::write(&original, bytes)?;
+        fs::write(root.join(name), bytes)?;
+        let path = format!("--path={name}");
+        let original = original.to_str().expect("UTF-8 temporary path");
+        let object = git.git(root, &["hash-object", "-w", &path, original])?;
+        let object = String::from_utf8(object.stdout)?;
+        staged.push(git.git(root, &["cat-file", "blob", object.trim()])?.stdout);
+    }
+    git.hook(&json!({"cwd": root, "tool_input": {}}))?;
+    for ((name, _), staged) in cases.iter().zip(&staged) {
+        assert_eq!(&fs::read(root.join(name))?, staged, "{name}");
+    }
+    let unchanged = [
+        "control-heavy.txt",
+        "dense-control.txt",
+        "leading-eof.txt",
+        "delete.txt",
+        "lone-before-pair.txt",
+    ];
+    for (name, bytes) in &cases {
+        assert_eq!(
+            unchanged.contains(name),
+            &fs::read(root.join(name))? == bytes,
+            "{name}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn hook_keeps_read_only_files_and_files_changed_since_they_were_read() -> Result<()> {
+    let git = Isolated::new(true)?;
+    let repository = git.repository()?;
+    let root = repository.path();
+    let locked = root.join("locked.txt");
+    fs::write(&locked, CRLF)?;
+    let writable = fs::metadata(&locked)?.permissions();
+    let mut permissions = writable.clone();
+    permissions.set_readonly(true);
+    fs::set_permissions(&locked, permissions)?;
+    let output = git.hook(&json!({"cwd": root, "tool_input": {"file_path": "locked.txt"}}))?;
+    assert_eq!(fs::read(&locked)?, CRLF);
+    assert!(!String::from_utf8(output.stdout)?.contains("locked.txt"));
+    fs::set_permissions(&locked, writable)?;
+
+    let raced = root.join("raced.txt");
+    fs::write(&raced, CRLF)?;
+    assert!(!line_endings::replace(&raced, b"other\r\n", LF)?);
+    assert_eq!(fs::read(&raced)?, CRLF);
+    assert!(line_endings::replace(&raced, CRLF, LF)?);
+    assert_eq!(fs::read(&raced)?, LF);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn hook_keeps_permissions_and_skips_symbolic_links() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let git = Isolated::new(true)?;
+    let repository = git.repository()?;
+    let root = repository.path();
+    let script = root.join("script.sh");
+    fs::write(&script, CRLF)?;
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o750))?;
+    let outside = tempfile::tempdir()?;
+    let target = outside.path().join("target.txt");
+    fs::write(&target, CRLF)?;
+    std::os::unix::fs::symlink(&target, root.join("link.txt"))?;
+    git.hook(&json!({"cwd": root, "tool_input": {"file_path": "link.txt"}}))?;
+    assert_eq!(fs::read(&script)?, LF);
+    assert_eq!(fs::metadata(&script)?.permissions().mode() & 0o777, 0o750);
+    assert!(
+        fs::symlink_metadata(root.join("link.txt"))?
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(fs::read(&target)?, CRLF);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn hook_normalizes_a_path_that_is_not_utf8() -> Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let git = Isolated::new(true)?;
+    let repository = git.repository()?;
+    let root = repository.path();
+    let name = std::ffi::OsStr::from_bytes(b"latin-\xe9.txt");
+    fs::write(root.join(name), CRLF)?;
+    git.hook(&json!({"cwd": root, "tool_input": {}}))?;
+    assert_eq!(fs::read(root.join(name))?, LF);
+    Ok(())
+}
+
+#[test]
+fn hook_warns_and_succeeds_when_git_cannot_inspect_the_directory() -> Result<()> {
+    let git = Isolated::new(true)?;
+    let scope = tempfile::tempdir()?;
+    let missing = scope.path().join("removed");
+    let output = git.hook(&json!({"cwd": missing, "tool_input": {"file_path": "notes.txt"}}))?;
+    let diagnostics = String::from_utf8(output.stderr)?;
+    assert!(
+        diagnostics.contains("skipped line-ending normalization") && diagnostics.contains("git -C"),
+        "{diagnostics}"
+    );
+    Ok(())
+}
