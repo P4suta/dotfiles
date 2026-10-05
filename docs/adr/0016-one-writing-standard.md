@@ -34,6 +34,12 @@ The enforcement points cover these channels:
 The standard governs a destination that a personal owner holds, unless that destination forks another repository.
 An external repository or a fork follows its own contribution rules, so its pull requests, issues, and commit messages skip the checker.
 The commit-msg hook reads the destination from the remotes: `origin` must name a personal owner, and another remote with a foreign owner marks a fork.
+It asks OpenSSH for the host name behind each SSH remote, so a host entry in the SSH configuration names GitHub too.
+When `origin` names no GitHub owner, such as a bare-repository hub, a personal GitHub remote names the destination.
+Without such a remote, the hook reports that it skipped the check.
+The repository setting `prose.standard` overrides the remotes in either direction.
+The checker leaves out the text that Git generates.
+That text covers the subject of a revert, a merge, or an autosquash commit, and the sentence that names a reverted or cherry-picked commit.
 An offline `pr-workflow check` has no fork status, so it applies the standard to every repository of a personal owner.
 
 `policy/prose.toml` holds the exemptions, each with paths, an optional rule list, and a reason.

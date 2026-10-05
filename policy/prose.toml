@@ -2624,13 +2624,13 @@ reason = "Prose that predates ADR 0016. Each entry names one finding by its file
 "write-good.E-Prime" = ["8d55a41861bf4102", "ddfb56369f94d7d4"]
 
 [legacy.comments."xtask/src/pr_workflow.rs"]
-"Google.Acronyms" = ["0743834a221ee579", "08e3eaa487f469d0", "08e3eaa487f469d0", "08e3eaa487f469d0", "08e3eaa487f469d0"]
+"Google.Acronyms" = ["0743834a221ee579", "08e3eaa487f469d0", "08e3eaa487f469d0"]
 "Google.OxfordComma" = ["5f601cd395092e9c"]
-"Google.Semicolons" = ["08e3eaa487f469d0", "08e3eaa487f469d0", "bf0e747cedb48090"]
-"Microsoft.Acronyms" = ["0743834a221ee579", "08e3eaa487f469d0", "08e3eaa487f469d0", "08e3eaa487f469d0", "08e3eaa487f469d0"]
-"Microsoft.GeneralURL" = ["08e3eaa487f469d0", "08e3eaa487f469d0", "89c3800b86ca8cd8"]
+"Google.Semicolons" = ["08e3eaa487f469d0", "bf0e747cedb48090"]
+"Microsoft.Acronyms" = ["0743834a221ee579", "08e3eaa487f469d0", "08e3eaa487f469d0"]
+"Microsoft.GeneralURL" = ["08e3eaa487f469d0", "89c3800b86ca8cd8"]
 "Microsoft.OxfordComma" = ["5f601cd395092e9c"]
-"Microsoft.Semicolon" = ["08e3eaa487f469d0", "08e3eaa487f469d0", "bf0e747cedb48090"]
+"Microsoft.Semicolon" = ["08e3eaa487f469d0", "bf0e747cedb48090"]
 "write-good.TooWordy" = ["afc778ae33b1f121", "fa64f7932a2802a3"]
 
 [legacy.comments."xtask/src/profile_rules.rs"]

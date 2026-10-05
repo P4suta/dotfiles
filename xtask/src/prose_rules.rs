@@ -45,6 +45,42 @@ pub fn standard_applies(personal_owner: bool, fork: bool) -> bool {
     personal_owner && !fork
 }
 
+/// The owner a remote names: a personal or foreign GitHub owner, or an address that names no GitHub owner, such as a bare-repository hub.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Owner {
+    Personal,
+    Foreign,
+    Unresolved,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Standard {
+    Applies,
+    Skips,
+    /// The remotes name no destination, so the gate reports the setting that decides it.
+    Undetermined,
+}
+
+/// Whether a repository's commits take the personal standard.
+/// The repository's `prose.standard` setting decides when present.
+/// Otherwise another remote with a foreign owner marks a fork, `origin` names the destination, and a personal GitHub remote stands in for an `origin` that names no GitHub owner.
+pub fn repository_standard(
+    declared: Option<bool>,
+    origin: Option<Owner>,
+    other_personal: bool,
+    other_foreign: bool,
+) -> Standard {
+    match (declared, origin) {
+        (Some(true), _) => Standard::Applies,
+        (Some(false), _) => Standard::Skips,
+        (None, _) if other_foreign => Standard::Skips,
+        (None, Some(Owner::Personal)) => Standard::Applies,
+        (None, Some(Owner::Unresolved)) if other_personal => Standard::Applies,
+        (None, Some(Owner::Unresolved)) => Standard::Undetermined,
+        (None, Some(Owner::Foreign) | None) => Standard::Skips,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Reply {
     Allow,
@@ -119,6 +155,48 @@ fn only_personal_non_fork_destinations_take_the_standard() {
     assert_eq!(applies, personal && !fork);
     kani::cover!(applies);
     kani::cover!(!applies && personal);
+}
+
+#[cfg(kani)]
+fn any_owner() -> Option<Owner> {
+    let choice: u8 = kani::any();
+    kani::assume(choice < 4);
+    match choice {
+        0 => Some(Owner::Personal),
+        1 => Some(Owner::Foreign),
+        2 => Some(Owner::Unresolved),
+        _ => None,
+    }
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn a_declared_standard_wins_and_an_unresolved_origin_is_reported() {
+    let declared: Option<bool> = kani::any();
+    let origin = any_owner();
+    let personal: bool = kani::any();
+    let foreign: bool = kani::any();
+    let standard = repository_standard(declared, origin, personal, foreign);
+    if let Some(declared) = declared {
+        assert_eq!(standard == Standard::Applies, declared);
+        assert!(standard != Standard::Undetermined);
+    } else {
+        assert!(standard != Standard::Applies || !foreign);
+        assert!(origin != Some(Owner::Foreign) || standard == Standard::Skips);
+        assert_eq!(
+            standard == Standard::Undetermined,
+            origin == Some(Owner::Unresolved) && !personal && !foreign
+        );
+        if origin == Some(Owner::Personal) {
+            assert_eq!(
+                standard == Standard::Applies,
+                standard_applies(true, foreign)
+            );
+        }
+    }
+    kani::cover!(standard == Standard::Applies && declared.is_none());
+    kani::cover!(standard == Standard::Skips && declared.is_none());
+    kani::cover!(standard == Standard::Undetermined);
 }
 
 #[cfg(kani)]

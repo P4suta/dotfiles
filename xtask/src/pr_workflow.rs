@@ -113,7 +113,7 @@ pub enum IssueAction {
 
 #[derive(Args)]
 pub struct IssueDocument {
-    /// Exact GitHub OWNER/REPO; no URL or inferred repository.
+    /// The repository in exact owner/name form.
     #[arg(long)]
     repo: String,
     #[arg(long)]

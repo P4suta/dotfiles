@@ -1,6 +1,6 @@
 use crate::prose_rules::{
-    Ledger, Reply, exemption_valid, ledger, occurrences, reply, rewritten_by_this_hook,
-    standard_applies, tightened,
+    Ledger, Owner, Reply, Standard, exemption_valid, ledger, occurrences, reply,
+    repository_standard, rewritten_by_this_hook, tightened,
 };
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
@@ -708,13 +708,85 @@ pub fn without_type(subject: &str) -> &str {
     }
 }
 
-/// The message without Git commentary, the verbose diff, trailers, or the type prefix.
+fn hexadecimal(text: &str) -> bool {
+    text.len() >= 7 && text.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// A subject that Git writes around another commit's subject: an autosquash marker, a revert, a reapply, or a merge.
+fn quoted_subject(subject: &str) -> bool {
+    let quoted = |prefix: &str| {
+        subject
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.len() > 1 && rest.starts_with('"') && rest.ends_with('"'))
+    };
+    ["fixup! ", "squash! ", "amend! "]
+        .iter()
+        .any(|marker| subject.starts_with(marker))
+        || quoted("Revert ")
+        || quoted("Reapply ")
+        || [
+            "Merge branch '",
+            "Merge branches '",
+            "Merge remote-tracking branch '",
+            "Merge tag '",
+            "Merge commit '",
+        ]
+        .iter()
+        .any(|prefix| subject.starts_with(prefix))
+}
+
+/// The sentences Git writes into a revert or a recorded cherry-pick, which name commits rather than describe the change.
+fn generated_lines(lines: &mut Vec<&str>) {
+    let commit = |rest: &str, end: &str| rest.strip_suffix(end).is_some_and(hexadecimal);
+    let mut index = 0;
+    while index < lines.len() {
+        let line = lines[index];
+        let rest = line.strip_prefix("This reverts commit ");
+        if rest.is_some_and(|rest| commit(rest, "."))
+            || line
+                .strip_prefix("(cherry picked from commit ")
+                .is_some_and(|rest| commit(rest, ")"))
+        {
+            lines.remove(index);
+        } else if rest.is_some_and(|rest| commit(rest, ", reversing"))
+            && lines.get(index + 1).is_some_and(|next| {
+                next.strip_prefix("changes made to ")
+                    .is_some_and(|rest| commit(rest, "."))
+            })
+        {
+            lines.drain(index..index + 2);
+        } else {
+            index += 1;
+        }
+    }
+}
+
+/// The message without Git commentary, the verbose diff, trailers, Git-generated subjects and sentences, or the type prefix.
+/// An `amend!` commit carries the replacement message in its body, and the checker reads that body as a message of its own.
 pub fn commit_message(raw: &str) -> String {
     let mut lines: Vec<&str> = raw
         .lines()
         .take_while(|line| !line.starts_with("# ------------------------ >8 "))
         .filter(|line| !line.starts_with('#'))
         .collect();
+    while lines.first().is_some_and(|line| line.trim().is_empty()) {
+        lines.remove(0);
+    }
+    if lines
+        .first()
+        .is_some_and(|subject| subject.starts_with("amend! "))
+    {
+        let body: Vec<&str> = lines[1..].to_vec();
+        return commit_message(&body.join("\n"));
+    }
+    let quoted = lines.first().is_some_and(|subject| quoted_subject(subject));
+    if quoted {
+        lines.remove(0);
+    }
+    generated_lines(&mut lines);
+    while lines.first().is_some_and(|line| line.trim().is_empty()) {
+        lines.remove(0);
+    }
     while lines.last().is_some_and(|line| line.trim().is_empty()) {
         lines.pop();
     }
@@ -741,7 +813,11 @@ pub fn commit_message(raw: &str) -> String {
     }
     let mut text = String::new();
     for (index, line) in lines.iter().enumerate() {
-        text.push_str(if index == 0 { without_type(line) } else { line });
+        text.push_str(if index == 0 && !quoted {
+            without_type(line)
+        } else {
+            line
+        });
         text.push('\n');
     }
     text
@@ -1398,32 +1474,88 @@ pub fn stop(input: &Value, bundle: Result<Bundle>) -> Value {
 }
 
 /// The GitHub owner that a remote address names, in HTTPS, SSH, or scp-like form.
-pub fn github_owner(url: &str) -> Option<String> {
-    let rest = url
-        .strip_prefix("https://github.com/")
-        .or_else(|| url.strip_prefix("http://github.com/"))
-        .or_else(|| url.strip_prefix("ssh://git@github.com/"))
-        .or_else(|| url.strip_prefix("git@github.com:"))?;
-    let owner = rest.split('/').next()?;
+/// `resolve` maps an SSH host to the host name it connects to, so an SSH host entry for github.com names its owner too.
+pub fn github_owner(url: &str, resolve: impl Fn(&str) -> Option<String>) -> Option<String> {
+    let (authority, path, ssh) = if let Some((scheme, rest)) = url.split_once("://") {
+        let (authority, path) = rest.split_once('/')?;
+        let ssh = matches!(scheme, "ssh" | "git+ssh" | "ssh+git");
+        if !ssh && !matches!(scheme, "https" | "http") {
+            return None;
+        }
+        (authority, path, ssh)
+    } else {
+        let (authority, path) = url.split_once(':')?;
+        if authority.len() < 2 || authority.contains('/') || authority.contains('\\') {
+            return None;
+        }
+        (authority, path, true)
+    };
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = host.split_once(':').map_or(host, |(host, _)| host);
+    let github = |host: &str| host.eq_ignore_ascii_case("github.com");
+    if !(github(host) || ssh && resolve(host).is_some_and(|name| github(&name))) {
+        return None;
+    }
+    let owner = path.trim_start_matches('/').split('/').next()?;
     (!owner.is_empty()).then(|| owner.to_ascii_lowercase())
 }
 
-/// Whether a repository with these remotes takes the personal writing standard.
-/// The `origin` remote must name a personal owner, and another remote with a foreign owner marks a fork.
-pub fn remotes_take_the_standard(remotes: &[(String, String)], personal: &[String]) -> bool {
-    let owner = |url: &str| github_owner(url).filter(|owner| !owner.is_empty());
-    let is_personal = |owner: &str| {
-        personal
-            .iter()
-            .any(|login| login.eq_ignore_ascii_case(owner))
+/// Which standard a repository with these remotes takes, as [`repository_standard`] decides.
+pub fn remotes_standard(
+    declared: Option<bool>,
+    remotes: &[(String, String)],
+    personal: &[String],
+    resolve: impl Fn(&str) -> Option<String>,
+) -> Standard {
+    let owner = |url: &str| match github_owner(url, &resolve) {
+        Some(owner)
+            if personal
+                .iter()
+                .any(|login| login.eq_ignore_ascii_case(&owner)) =>
+        {
+            Owner::Personal
+        }
+        Some(_) => Owner::Foreign,
+        None => Owner::Unresolved,
     };
-    let personal_owner = remotes
+    let origin = remotes
         .iter()
-        .any(|(name, url)| name == "origin" && owner(url).is_some_and(|owner| is_personal(&owner)));
-    let fork = remotes.iter().any(|(name, url)| {
-        name != "origin" && owner(url).is_some_and(|owner| !is_personal(&owner))
-    });
-    standard_applies(personal_owner, fork)
+        .find(|(name, _)| name == "origin")
+        .map(|(_, url)| owner(url));
+    let others: Vec<Owner> = remotes
+        .iter()
+        .filter(|(name, _)| name != "origin")
+        .map(|(_, url)| owner(url))
+        .collect();
+    repository_standard(
+        declared,
+        origin,
+        others.contains(&Owner::Personal),
+        others.contains(&Owner::Foreign),
+    )
+}
+
+/// The host name that OpenSSH connects to for `host`, as the SSH configuration resolves it.
+fn ssh_host_name(host: &str) -> Option<String> {
+    let output = Tool::Ssh
+        .hook_command()
+        .args(["-G", "--", host])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("hostname ")
+                .map(|name| name.trim().to_owned())
+        })
 }
 
 /// The personal owner logins of the global workflow policy.
@@ -1468,8 +1600,34 @@ pub fn commit_gate(
             Some((fields.next()?.to_owned(), fields.next()?.to_owned()))
         })
         .collect();
-    if !remotes_take_the_standard(&remotes, &personal_owners()?) {
-        return Ok(());
+    let setting = Tool::Git
+        .hook_command()
+        .current_dir(repository)
+        .args(["config", "--type=bool", "--get", "prose.standard"])
+        .output()
+        .context("read the prose.standard setting")?;
+    let declared = match setting.status.code() {
+        Some(0) => Some(String::from_utf8(setting.stdout)?.trim() == "true"),
+        Some(1) => None,
+        _ => bail!(
+            "prose.standard is not a boolean in {}: {}\nRun `git config prose.standard true` or `git config prose.standard false`.",
+            repository.display(),
+            String::from_utf8_lossy(&setting.stderr).trim()
+        ),
+    };
+    match remotes_standard(declared, &remotes, &personal_owners()?, ssh_host_name) {
+        Standard::Applies => {}
+        Standard::Skips => return Ok(()),
+        Standard::Undetermined => {
+            let origin = remotes
+                .iter()
+                .find(|(name, _)| name == "origin")
+                .map_or("", |(_, url)| url.as_str());
+            eprintln!(
+                "The commit message was not checked for the writing standard: origin {origin} names no GitHub owner.\nRun `git config prose.standard true` when this repository publishes to a personal destination, or `git config prose.standard false` when it keeps its own rules."
+            );
+            return Ok(());
+        }
     }
     let text = fs::read_to_string(message)
         .with_context(|| format!("read the commit message {}", message.display()))?;

@@ -177,6 +177,48 @@ fn commit_messages_are_checked_without_commentary_trailers_or_type() -> Result<(
 }
 
 #[test]
+fn git_generated_messages_pass_and_added_prose_is_checked() -> Result<()> {
+    let bundle = source()?;
+    for raw in [
+        "Revert \"feat(prose): enforce one writing standard\"\n\nThis reverts commit 39f8a76.\n",
+        "Revert \"Revert \"feat(prose): enforce one writing standard\"\"\n\nThis reverts commit 39f8a76.\n",
+        "Reapply \"feat(prose): enforce one writing standard\"\n\nThis reverts commit 39f8a76d.\n",
+        "Revert \"Merge branch 'feat/x'\"\n\nThis reverts commit 39f8a76, reversing\nchanges made to b158608.\n",
+        "fixup! feat(prose): enforce one writing standard\n",
+        "fixup! fixup! feat(prose): enforce one writing standard\n",
+        "squash! feat(prose): enforce one writing standard\n\nThe gate reads the body.\n",
+        "amend! feat(prose): enforce one writing standard\n\nfeat(prose): enforce the writing standard\n\nThe gate reads the body.\n\nRefs #44\n",
+        "Merge branch 'feat/writing-standard' into main\n",
+        "Merge remote-tracking branch 'origin/main' (early part)\n\n# Conflicts:\n#\tREADME.md\n",
+        "fix(parser): keep edits\n\nThe parser keeps every edit.\n\n(cherry picked from commit 39f8a76d0c1e)\n",
+    ] {
+        let findings = prose::check(&bundle, Channel::Commit, "commit message", raw)?;
+        assert!(findings.is_empty(), "{raw:?}: {findings:?}");
+    }
+    for raw in [
+        format!("Revert \"feat(prose): x\"\n\nThis reverts commit 39f8a76.\n\n{ATTRIBUTED}\n"),
+        format!("squash! feat(prose): x\n\n{ATTRIBUTED}\n"),
+        format!("amend! feat(prose): x\n\nfix(parser): keep edits\n\n{ATTRIBUTED}\n"),
+        format!("Merge branch 'feat/x'\n\n{ATTRIBUTED}\n"),
+        format!("fixup! {ATTRIBUTED}\n\n{ATTRIBUTED}\n"),
+    ] {
+        let findings = prose::check(&bundle, Channel::Commit, "commit message", &raw)?;
+        assert!(
+            attribution_reported(&findings, ATTRIBUTED),
+            "{raw:?}: {findings:?}"
+        );
+    }
+    let findings = prose::check(
+        &bundle,
+        Channel::Commit,
+        "commit message",
+        &format!("Revert the parser cache\n\n{ATTRIBUTED}\n"),
+    )?;
+    assert!(attribution_reported(&findings, ATTRIBUTED));
+    Ok(())
+}
+
+#[test]
 fn comments_from_ocomment_map_findings_to_source_lines() -> Result<()> {
     let scan = json!({
         "path": "src\\lib.rs",
@@ -809,51 +851,133 @@ fn the_commit_msg_hook_runs_the_tested_check() -> Result<()> {
 }
 
 #[test]
-fn only_personal_non_fork_remotes_take_the_standard() {
+fn the_destination_decides_which_repositories_take_the_standard() {
+    use dotfiles_xtask::prose_rules::Standard::{Applies, Skips, Undetermined};
     let personal = ["P4suta".to_owned()];
     let remotes = |list: &[(&str, &str)]| -> Vec<(String, String)> {
         list.iter()
             .map(|(name, url)| ((*name).to_owned(), (*url).to_owned()))
             .collect()
     };
-    for (list, applies) in [
-        (vec![("origin", "git@github.com:P4suta/dotfiles.git")], true),
-        (vec![("origin", "https://github.com/p4suta/dotfiles")], true),
+    // OpenSSH resolves the `gh-personal` host entry to github.com.
+    let resolve = |host: &str| (host == "gh-personal").then(|| "github.com".to_owned());
+    for (declared, list, standard) in [
         (
+            None,
+            vec![("origin", "git@github.com:P4suta/dotfiles.git")],
+            Applies,
+        ),
+        (
+            None,
+            vec![("origin", "https://github.com/p4suta/dotfiles")],
+            Applies,
+        ),
+        (
+            None,
             vec![("origin", "ssh://git@github.com/P4suta/dotfiles.git")],
-            true,
+            Applies,
         ),
         (
+            None,
+            vec![("origin", "ssh://git@github.com:22/P4suta/dotfiles.git")],
+            Applies,
+        ),
+        (
+            None,
+            vec![("origin", "gh-personal:P4suta/dotfiles.git")],
+            Applies,
+        ),
+        (
+            None,
+            vec![("origin", "ssh://gh-personal/P4suta/dotfiles.git")],
+            Applies,
+        ),
+        (
+            None,
             vec![("origin", "https://github.com/other/project.git")],
-            false,
+            Skips,
         ),
         (
+            None,
+            vec![("origin", "gh-personal:other/project.git")],
+            Skips,
+        ),
+        (
+            None,
             vec![
                 ("origin", "git@github.com:P4suta/project.git"),
                 ("upstream", "https://github.com/other/project.git"),
             ],
-            false,
+            Skips,
         ),
         (
+            None,
             vec![
                 ("origin", "git@github.com:P4suta/project.git"),
                 ("backup", "git@github.com:P4suta/project-backup.git"),
             ],
-            true,
+            Applies,
         ),
         (
+            None,
             vec![("upstream", "git@github.com:P4suta/project.git")],
-            false,
+            Skips,
         ),
-        (vec![], false),
+        (None, vec![], Skips),
+        (
+            None,
+            vec![("origin", "hub:repositories/dotfiles.git")],
+            Undetermined,
+        ),
+        (
+            None,
+            vec![("origin", "/srv/hub/dotfiles.git")],
+            Undetermined,
+        ),
+        (
+            None,
+            vec![("origin", "git@gitlab.com:P4suta/x.git")],
+            Undetermined,
+        ),
+        (
+            None,
+            vec![
+                ("origin", "hub:repositories/dotfiles.git"),
+                ("github", "git@github.com:P4suta/dotfiles.git"),
+            ],
+            Applies,
+        ),
+        (
+            None,
+            vec![
+                ("origin", "hub:repositories/project.git"),
+                ("upstream", "https://github.com/other/project.git"),
+            ],
+            Skips,
+        ),
+        (
+            Some(true),
+            vec![("origin", "hub:repositories/dotfiles.git")],
+            Applies,
+        ),
+        (
+            Some(false),
+            vec![("origin", "hub:repositories/dotfiles.git")],
+            Skips,
+        ),
+        (
+            Some(false),
+            vec![("origin", "git@github.com:P4suta/dotfiles.git")],
+            Skips,
+        ),
+        (Some(true), vec![], Applies),
     ] {
         assert_eq!(
-            prose::remotes_take_the_standard(&remotes(&list), &personal),
-            applies,
-            "{list:?}"
+            prose::remotes_standard(declared, &remotes(&list), &personal, resolve),
+            standard,
+            "{declared:?} {list:?}"
         );
     }
-    assert_eq!(prose::github_owner("git@gitlab.com:P4suta/x.git"), None);
 }
 
 #[test]
@@ -870,11 +994,18 @@ fn the_global_commit_msg_hook_checks_personal_repositories() -> Result<()> {
         .arg(bin.join(format!("dotguard{}", std::env::consts::EXE_SUFFIX)))
         .status()?;
     assert!(status.success());
-    let commit = |origin: &str, upstream: Option<&str>, text: &str| -> Result<(bool, String)> {
+    let declared_commit = |origin: &str,
+                           upstream: Option<&str>,
+                           declared: Option<&str>,
+                           text: &str|
+     -> Result<(bool, String)> {
         let directory = repository(&[])?;
         git(directory.path(), &["remote", "add", "origin", origin])?;
         if let Some(upstream) = upstream {
             git(directory.path(), &["remote", "add", "upstream", upstream])?;
+        }
+        if let Some(declared) = declared {
+            git(directory.path(), &["config", "prose.standard", declared])?;
         }
         let message = directory.path().join(".git/COMMIT_EDITMSG");
         fs::write(&message, text)?;
@@ -895,7 +1026,29 @@ fn the_global_commit_msg_hook_checks_personal_repositories() -> Result<()> {
             String::from_utf8_lossy(&output.stderr).into_owned(),
         ))
     };
+    let commit = |origin: &str, upstream: Option<&str>, text: &str| {
+        declared_commit(origin, upstream, None, text)
+    };
     let attributed = format!("fix(parser): keep edits\n\n{ATTRIBUTED}\n");
+    let hub = "hub:repositories/project.git";
+    let (accepted, stderr) = commit(hub, None, &attributed)?;
+    assert!(accepted, "{stderr}");
+    assert!(
+        stderr.contains(hub) && stderr.contains("git config prose.standard true"),
+        "an unresolved destination is reported with the setting that decides it: {stderr}"
+    );
+    let (accepted, stderr) = declared_commit(hub, None, Some("true"), &attributed)?;
+    assert!(
+        !accepted && stderr.contains("Dotfiles.Attribution"),
+        "{stderr}"
+    );
+    let (accepted, stderr) = declared_commit(hub, None, Some("false"), &attributed)?;
+    assert!(accepted && stderr.is_empty(), "{stderr}");
+    let (accepted, stderr) = declared_commit(hub, None, Some("maybe"), &attributed)?;
+    assert!(
+        !accepted && stderr.contains("prose.standard"),
+        "an invalid setting is refused: {stderr}"
+    );
     let (accepted, stderr) = commit("git@github.com:P4suta/project.git", None, &attributed)?;
     assert!(!accepted);
     assert!(
@@ -907,6 +1060,14 @@ fn the_global_commit_msg_hook_checks_personal_repositories() -> Result<()> {
     let compliant = format!("fix(parser): keep edits\n\n{COMPLIANT}\n");
     let (accepted, stderr) = commit("git@github.com:P4suta/project.git", None, &compliant)?;
     assert!(accepted, "{stderr}");
+    for generated in [
+        "Revert \"feat(prose): enforce one writing standard\"\n\nThis reverts commit 39f8a76.\n",
+        "fixup! feat(prose): enforce one writing standard\n",
+        "squash! feat(prose): enforce one writing standard\n",
+    ] {
+        let (accepted, stderr) = commit("git@github.com:P4suta/project.git", None, generated)?;
+        assert!(accepted, "Git generated {generated:?}: {stderr}");
+    }
     let (accepted, stderr) = commit("https://github.com/other/project.git", None, &attributed)?;
     assert!(
         accepted,
