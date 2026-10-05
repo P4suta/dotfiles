@@ -86,6 +86,11 @@ pub const LINE_ENDING_HARNESSES: [&str; 3] = [
     "declared_line_endings_are_never_rewritten",
 ];
 
+pub const SHELL_WRITE_HARNESSES: [&str; 2] = [
+    "every_refusal_names_a_next_action",
+    "file_writing_commands_are_never_admitted",
+];
+
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
     let summary = &value["verification_results"]["summary"];
     ensure!(
@@ -564,6 +569,29 @@ fn reject_a_contradiction_without_what_it_contradicted() {{
         fs::read(source)? == original,
         "production instruction proof source changed during verification"
     );
+    let source = crate::canonical(&root.join("xtask/src/shell_write_rules.rs"))?;
+    let original = fs::read(&source)?;
+    let directory = tempfile::tempdir()?;
+    verify_inventory(&source, directory.path(), &SHELL_WRITE_HARNESSES)?;
+    verify_file(&source, directory.path(), &SHELL_WRITE_HARNESSES, false)?;
+    let probe = tempfile::tempdir()?;
+    let file = probe.path().join("counterexample.rs");
+    fs::write(
+        &file,
+        format!(
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_admitting_an_inline_interpreter() {{\n    assert!(production::verdict(true, false) == production::Verdict::Admit);\n}}\n#[kani::proof]\nfn reject_admitting_a_file_redirect() {{\n    assert!(production::verdict(false, true) == production::Verdict::Admit);\n}}\n"
+        ),
+    )?;
+    for name in [
+        "reject_admitting_an_inline_interpreter",
+        "reject_admitting_a_file_redirect",
+    ] {
+        verify_file(&file, probe.path(), &[name], true)?;
+    }
+    ensure!(
+        fs::read(source)? == original,
+        "production shell write proof source changed during verification"
+    );
     println!(
         "Verified all {} production policy harnesses, reachable outcomes, and the rejecting counterexamples",
         HARNESSES.len()
@@ -574,6 +602,7 @@ fn reject_a_contradiction_without_what_it_contradicted() {{
             + INSTRUCTION_HARNESSES.len()
             + NEXT_ACTION_HARNESSES.len()
             + LINE_ENDING_HARNESSES.len()
+            + SHELL_WRITE_HARNESSES.len()
     );
     Ok(())
 }

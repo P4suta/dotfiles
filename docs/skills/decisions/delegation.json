@@ -1,0 +1,10 @@
+{
+  "revision": "a8d9814b84792a9def5db01e7a362e98e0525aeecf09f47ba1c0440ea66aa5f4",
+  "outcome": "implemented",
+  "reason": "Route routine supervision to the cheapest capable model tier and enforce the no-ad-hoc-script rule with a Claude Code Bash hook that refuses file writes through inline interpreters, heredocs, and redirects.",
+  "evidence": [
+    "dot_agents/skills/delegation/SKILL.md",
+    "xtask/src/shell_write_rules.rs"
+  ],
+  "revisit": null
+}

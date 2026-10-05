@@ -154,6 +154,7 @@ fn render_merged(profile: &str, template: &str, target: &str, host: &str) -> Str
     let destination = scope.path().join("home");
     for file in [
         template,
+        ".chezmoitemplates/sh_quote",
         ".chezmoitemplates/profiles/wsl/dot_claude/settings.json.tmpl",
     ] {
         let copy = source.join(file);
@@ -194,6 +195,15 @@ fn application_turns_off_memory_a_client_turned_back_on() {
         ))
         .unwrap();
         assert_eq!(rendered["autoMemoryEnabled"], json!(false), "{profile}");
+        let hook = &rendered["hooks"]["PreToolUse"][0];
+        assert_eq!(hook["matcher"], json!("Bash"), "{profile}");
+        assert!(
+            hook["hooks"][0]["command"]
+                .as_str()
+                .is_some_and(|command| command.ends_with(" claude-bash")
+                    && command.contains("dotfiles-xtask")),
+            "{profile}: {hook}"
+        );
         assert_eq!(rendered["model"], json!("opus"), "{profile}");
         assert_eq!(
             rendered["permissions"]["defaultMode"],

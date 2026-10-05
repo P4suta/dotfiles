@@ -28,6 +28,7 @@ Owner-controlled filesystem concurrency and process identity races are external 
 `xtask/src/profile_rules.rs` supplies the actual profile selection, application eligibility, source reconciliation, secret readiness, Context7 eligibility, WSL path translation, and forge-key admission decisions.
 Its seven Kani harnesses check all finite decision inputs and require reachable acceptance and refusal outcomes.
 `guard/src/reaper_rules.rs` checks the production reaper eligibility conjunction and uptime arithmetic.
+`xtask/src/shell_write_rules.rs` checks that the Claude Code Bash hook never admits a detected inline-interpreter or file-redirect write and always names a next action.
 Existing skill, PR workflow, and layered review-capacity contracts ([ADR 0008](0008-layered-review-capacity.md)) remain part of the required proof gate, which derives its expected harness total from the production inventories.
 The gate rejects missing, duplicate, unsupported, vacuous, failed, and timed-out results and runs deliberately invalid counterexamples.
 
