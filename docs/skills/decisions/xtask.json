@@ -1,7 +1,7 @@
 {
-  "revision": "16bbdb9b99e2ef8ceebc09f42213d2e391547960c8152350483ba745a7170161",
+  "revision": "4263a7a1a02e1783301717cf398390d2b0065a1081a147e57b6a0ebbf33f53a6",
   "outcome": "keep",
-  "reason": "Retain repository-specific typed orchestration and child-build isolation as distinct from generic Rust automation policy and thin command surfaces.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/xtask/SKILL.md"
   ],

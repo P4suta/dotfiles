@@ -1,38 +1,27 @@
-# session-reaper configuration — read by ~/.local/bin/session-reaper.
-#
-# launchd has no EnvironmentFile directive, so the script sources this file itself.
-# A change takes effect on the next run with no launchctl reload.
-# Managed by chezmoi (dot_config/session-reaper/config); editing ~/.config/session-reaper/config directly works for a quick test, but the next `chezmoi apply` restores this managed version.
+# Read by ~/.local/bin/session-reaper on each run.
+# Change a value here and run `chezmoi apply`, which overwrites direct edits.
 
-# Operating mode: report | reap
-#   report = detect + log/notify only; never kill (dry-run)
-#   reap   = auto-kill tier A (stopped + orphaned, grace-confirmed).
-# Tier B (running orphans) is ALWAYS report-only regardless of mode.
-# Roll back any time by setting this to `report` and re-applying.
+# Mode: report or reap.
+# report only logs and notifies.
+# reap ends tier A processes.
+# Tier B, running orphans, stays report-only in every mode.
+# Set `report` and apply to roll back.
 SESSION_REAPER_MODE=reap
 
-# Tier A: a stopped+orphaned process must be at least this old (seconds) before it is eligible at all.
-# Default 1h.
+# Tier A: least age in seconds of a stopped orphan.
 SESSION_REAPER_STOPPED_MIN_AGE=3600
 
-# Tier A: and must have been observed stopped+orphaned for at least this long (i.e. across a prior run) before it is killed — guards against sampling a process mid-transition.
-# Default 30m.
+# Tier A: seconds a process must stay a stopped orphan, across a prior run, before it ends.
 SESSION_REAPER_GRACE_SECONDS=1800
 
-# Tier B: report (never kill) running orphans with no controlling tty that are older than this.
-# Default 3d.
+# Tier B: least age in seconds of a reported running orphan without a tty.
 SESSION_REAPER_RUNNING_MIN_AGE=259200
 
-# Short names never touched, even in tier A (ERE, anchored with ^...$).
-# macOS-specific entries vs the Linux list: launchd (PID 1 itself) and the Electron helper processes VS Code and friends leave parked.
+# Anchored ERE of process names that tier A never touches.
 SESSION_REAPER_ALLOW_REGEX=^(tmux.*|screen.*|sshd|launchd|herdr|ssh-agent|gpg-agent|Code Helper.*|Electron|node|session-reaper)$
 
-# Tier B only: the executable must live under one of these prefixes to be worth reporting.
-# This is the macOS stand-in for "orphaned" — on Linux PPID==1 means the parent died, but on macOS launchd legitimately parents every user agent,
-# so without a path test tier B would list every Apple background service.
-# Double quotes on purpose: the script sources this file, so ${HOME} expands here.
+# Tier B reports only executables under these prefixes.
 SESSION_REAPER_USER_PATH_REGEX="^(${HOME}|/opt/homebrew|/usr/local)/"
 
-# Desktop notifications (1=on, 0=off).
-# The audit log always goes to ~/.local/state/dotfiles/log/session-reaper.log.
+# Desktop notifications: 1 on, 0 off.
 SESSION_REAPER_NOTIFY=1

@@ -1,7 +1,7 @@
 {
-  "revision": "d0321854ef98e75ab0795fc26d475074794bb449867a23e8dfcf060b9c9c8394",
+  "revision": "cee507db6656770e0aa7d2c4a731d2375e4346f4ceb8f5c0c383a465bffb8e72",
   "outcome": "keep",
-  "reason": "Retain the maintained typed governance helper and narrow mutation scopes; its checked repository identities and stronger-protection preservation differ from release workflow design.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/github-repository/SKILL.md"
   ],

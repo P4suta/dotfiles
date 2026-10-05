@@ -3,12 +3,13 @@
 use std::path::Path;
 
 /// Places dotguard at `git`, the name it answers to as the wrapper.
-/// Unix links it instead of copying: a test thread that forks while a copy is still open for writing hands that descriptor to its child, and running the copy then fails with `ETXTBSY`.
+/// Unix links it instead of copying.
+/// A test thread that forks while it holds a copy open for writing hands that descriptor to its child, and running the copy then fails with `ETXTBSY`.
 /// Windows has no such failure, and a copy needs no privilege there.
 ///
 /// # Panics
 ///
-/// Panics when the wrapper cannot be placed.
+/// Panics when placing the wrapper fails.
 pub fn install(git: &Path) {
     #[cfg(unix)]
     std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_dotguard"), git).unwrap();

@@ -268,7 +268,7 @@ pub fn usage_query(args: &[String]) -> bool {
             && args.iter().any(|arg| arg == "--usage"))
 }
 
-/// Run a guarded review only when the owner has not paused CLI use.
+/// Run a guarded review only while the owner leaves CLI use unpaused CLI use.
 pub fn execute_admitted(
     scope: PauseScope,
     ledger: &Path,
@@ -410,7 +410,7 @@ pub fn validate_policy(text: &str) -> Result<(String, String)> {
     Ok((organization.into(), version.into()))
 }
 
-/// Read the owner's persistent pause markers; `paused` is the legacy all-scope marker.
+/// Read the owner's persistent pause markers, where `paused` marks every scope.
 pub fn pause(user_directory: &Path) -> Result<PauseScope> {
     let state = user_directory.join(".local/state/coderabbit-guard");
     let marker = |name: &str| {

@@ -1,13 +1,10 @@
-# NOTE: The prose policy this machine holds every commit to, as a setting rather than as a gate's private opinion.
-# NOTE: OComment merges this under a repository's own `.ocomment.toml`, so a project that has an opinion keeps it and a project that has none is still held to this one.
+# Machine-wide prose policy.
 version = 1
 
-# NOTE: Nothing is removed.
-# NOTE: This file exists for the other axis: what a comment says is its author's business, and where its lines break is the policy `.chezmoitemplates/prose_policy` teaches every agent on this machine.
+# Remove nothing, and enforce only the line breaks of `.chezmoitemplates/prose_policy`.
 [policy]
 mode = "none"
 
-# NOTE: One sentence per line.
-# NOTE: A break that only exists to keep a line short is undone, a break after a sentence is put back, and a break after a clause is left where its writer put it -- the checker allows one, so the fixer may not remove it.
+# One sentence per line.
 [style]
 wrap = "sentence"

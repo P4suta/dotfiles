@@ -1,7 +1,7 @@
 {
-  "revision": "bfda29f003338856ccf726be36da4621090ac4775e349ba9c8c9b24d50161ecf",
+  "revision": "b66a70a5b795a20faeaae2361e7d1e68c9b7eeaea035590f64ca439560601247",
   "outcome": "keep",
-  "reason": "Retain crates.io workspace ordering, immutable versions, and proposal/publication separation as conditional Rust release behavior.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/rust-release/SKILL.md"
   ],

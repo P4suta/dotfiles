@@ -1,46 +1,39 @@
-# dev-reaper configuration — read by the systemd units as an EnvironmentFile.
-# Managed by chezmoi (dot_config/dev-reaper/config).
-# Change a value and run `chezmoi apply`.
-# (Editing ~/.config/dev-reaper/config directly works for a quick test, but the next `chezmoi apply` restores this managed version.)
+# Read by the systemd units as an EnvironmentFile.
+# Change a value here and run `chezmoi apply`, which overwrites direct edits.
 
-# Operating mode: log | stop | full
-#   log  = detect and journal only; never touch a container
-#   stop = stop idle containers (no removal)
-#   full = stop + remove long-exited containers + safe (dangling) prune
-# Roll back at any time by setting this to `log` and re-applying.
+# Mode: log, stop, or full.
+# log only journals detections.
+# stop stops idle containers.
+# full also removes long-exited containers and prunes dangling resources.
+# Set `log` and apply to roll back.
 DEV_REAPER_MODE=full
 
-# Continuous idle before a running container is stopped (seconds).
-# Default 2h.
+# Seconds of continuous idleness before a container stops.
 DEV_REAPER_IDLE_STOP_SECONDS=7200
 
-# Remove dev containers that have been `exited` at least this long (seconds).
-# 7d.
+# Seconds a dev container stays exited before removal.
 DEV_REAPER_EXITED_REMOVE_SECONDS=604800
 
-# CPU% below which a sample counts as "quiet".
+# CPU% below which a reading counts as quiet.
 DEV_REAPER_THRESHOLD_PCT=3
 
-# Grace after (re)start before a container is eligible to be reaped (seconds).
-# 30m.
+# Seconds after a start before reaping applies.
 DEV_REAPER_MIN_UPTIME_SECONDS=1800
 
-# A container counts as active if an exec/attach happened within this window.
-# 2h.
+# An exec or attach within this many seconds keeps a container active.
 DEV_REAPER_EXEC_QUIET_SECONDS=7200
 
-# Which containers count as "dev containers".
+# Label that selects dev containers.
 DEV_REAPER_SELECT_LABEL=com.docker.compose.service=dev
 
-# Opt-out label: containers carrying this are never stopped or removed.
+# The reaper skips containers with this label.
 DEV_REAPER_KEEP_LABEL=dev-reaper.keep=true
 
-# Space-separated compose project names to exclude entirely (e.g. "register foo").
+# Space-separated Compose project names to skip.
 DEV_REAPER_EXCLUDE=""
 
-# Build cache to retain on prune.
+# Build cache that pruning keeps.
 DEV_REAPER_BUILDER_RESERVED=10GB
 
-# Desktop notifications (1=on, 0=off).
-# The audit log always goes to journald.
+# Desktop notifications: 1 on, 0 off.
 DEV_REAPER_NOTIFY=1

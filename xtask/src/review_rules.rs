@@ -51,7 +51,8 @@ pub const fn cli_reviews_paused(scope: PauseScope) -> bool {
     matches!(scope, PauseScope::Cli | PauseScope::All)
 }
 
-/// Admit a vendor call unless CLI use is paused; the local status stays readable.
+/// Admit a vendor call unless the owner paused CLI use.
+/// The local status stays readable.
 pub fn service_access(scope: PauseScope, local_status: bool) -> bool {
     !cli_reviews_paused(scope) || local_status
 }

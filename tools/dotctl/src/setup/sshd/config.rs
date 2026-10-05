@@ -1,25 +1,23 @@
-//! Editing Windows' `sshd_config` in place.
+//! Edits Windows' `sshd_config` in place.
 //!
-//! The file belongs to the OpenSSH capability, not to chezmoi, and it does not exist until sshd has started once, so it is edited rather than rendered from a template.
+//! The OpenSSH capability owns the file and creates it on the first sshd start, so this tool edits it instead of rendering a template.
 //!
-//! The one rule that matters: a directive below a `Match` line belongs to that block.
-//! Windows' stock config ends with `Match Group administrators`,
-//! which is what points admin logins at `administrators_authorized_keys`, so every edit happens above the first `Match`.
+//! A directive after a `Match` line belongs to that block.
+//! The stock config ends with `Match Group administrators`, which routes administrator logins to `administrators_authorized_keys`, so every edit lands before the first `Match`.
 
-/// Marks directives this tool appended rather than found.
+/// Marks directives that this tool appended.
 const MARKER: &str = "# --- managed by dotfiles-win ---";
 
-/// Where a line sits with respect to one directive name.
 #[derive(Debug, PartialEq, Eq)]
 enum Kind {
-    /// `Port 22` - in force.
+    /// `Port 22`, in force.
     Active,
-    /// `#Port 22` - the stock file's commented default.
+    /// `#Port 22`, the stock file's commented default.
     Commented,
     Other,
 }
 
-/// sshd keywords are case-insensitive, and the stock file writes its commented defaults with no space after the `#`.
+/// sshd keywords ignore case, and the stock file writes commented defaults with no space after the `#`.
 fn classify(line: &str, name: &str) -> Kind {
     let trimmed = line.trim_start();
     let (body, commented) = match trimmed.strip_prefix('#') {
@@ -33,7 +31,7 @@ fn classify(line: &str, name: &str) -> Kind {
     if !rest.eq_ignore_ascii_case(name) {
         return Kind::Other;
     }
-    // A keyword needs whitespace and then a value; `PortForwarding` is not `Port`, and a bare `Port` with nothing after it is not a setting.
+    // A keyword needs whitespace and a value, so `PortForwarding` differs from `Port`, and a bare `Port` sets nothing.
     let after = &body[name.len()..];
     if !after.starts_with(char::is_whitespace) || after.trim().is_empty() {
         return Kind::Other;
@@ -45,9 +43,8 @@ fn classify(line: &str, name: &str) -> Kind {
     }
 }
 
-/// Applies `directives` to `original`, returning the new file contents.
+/// Applies `directives` to `original`.
 ///
-/// Every line ending comes out CRLF, which is what the stock file uses and what OpenSSH for Windows writes.
 pub fn apply(original: &str, directives: &[(&str, String)]) -> String {
     let lines: Vec<&str> = original
         .split('\n')
@@ -88,7 +85,7 @@ pub fn apply(original: &str, directives: &[(&str, String)]) -> String {
 
         if let Some(&first) = active.first() {
             head[first] = desired;
-            // sshd honours the first occurrence; later ones are dead weight.
+            // sshd honors the first occurrence, so later ones do nothing.
             for &index in active.iter().skip(1).rev() {
                 head.remove(index);
             }
@@ -99,7 +96,7 @@ pub fn apply(original: &str, directives: &[(&str, String)]) -> String {
             .iter()
             .position(|line| classify(line, name) == Kind::Commented)
         {
-            // Replace the commented-out default in place, keeping its context.
+            // Replace the commented default in place, keeping its context.
             head[index] = desired;
             continue;
         }
@@ -115,8 +112,8 @@ pub fn apply(original: &str, directives: &[(&str, String)]) -> String {
     format!("{}\r\n", out.join("\r\n").trim_end())
 }
 
-/// True when the config still routes admin logins to `administrators_authorized_keys`.
-/// Without this block, keys written there are never read.
+/// True when the config still routes administrator logins to `administrators_authorized_keys`.
+/// Without this block, sshd never reads keys written there.
 pub fn has_admin_match_block(config: &str) -> bool {
     config.lines().any(|line| {
         let mut words = line.split_whitespace();
@@ -184,12 +181,12 @@ Match Group administrators\r
         assert!(out_lines.contains(&"PubkeyAuthentication yes"));
         assert!(out_lines.contains(&"PasswordAuthentication no"));
         assert!(!out_lines.contains(&"#Port 22"));
-        // In place: the comment above PasswordAuthentication still precedes it.
+        // In place, so the comment still precedes PasswordAuthentication.
         assert_eq!(
             out_lines[index_of(&out, "PasswordAuthentication") - 1],
             "# To disable tunneled clear text passwords, change to no here!"
         );
-        // Nothing was appended, so no marker.
+        // Nothing appended, so no marker.
         assert!(!out.contains(MARKER));
     }
 
@@ -224,7 +221,7 @@ Match Group administrators\r
         );
     }
 
-    /// sshd honours the first occurrence, so duplicates are noise - but a duplicate inside the Match block belongs to that block and must stay.
+    /// sshd honors the first occurrence, so duplicates add noise, but a duplicate inside the Match block belongs to that block and must stay.
     #[test]
     fn duplicates_collapse_without_touching_the_match_block() {
         let hostile = "Port 22\r\nPasswordAuthentication yes\r\nPort 2200\r\n\
@@ -267,7 +264,7 @@ Match Group administrators\r
         assert!(lines(&out).contains(&"X11Forwarding no"));
     }
 
-    /// `PortForwarding` starts with `Port`, and a keyword with no value is not a setting.
+    /// `PortForwarding` starts with `Port`, and a keyword with no value sets nothing.
     #[test]
     fn a_longer_keyword_is_not_the_keyword() {
         assert_eq!(classify("PortForwarding yes", "Port"), Kind::Other);

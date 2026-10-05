@@ -1,5 +1,5 @@
-# ローカル運用。
-# サーバ登録しないので sync は切る。
+# Local history only.
+# Sync stays off because no server account exists.
 auto_sync = false
 update_check = false
 

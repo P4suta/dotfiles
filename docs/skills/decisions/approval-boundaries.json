@@ -1,7 +1,7 @@
 {
-  "revision": "4fd99d2649887b0b12a7198e32c1be1d5518124726ddf3a5ebbce43e34e26e80",
+  "revision": "6ebd019fe985b8e6fb2a38a7ea2eb6e1e90aabc23d34be8a69a510f42d47d27b",
   "outcome": "keep",
-  "reason": "Retain exact operation, target, evidence, and existing-authorization checks; automated analysis and a skill load must not create permission to approve or publish.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/approval-boundaries/SKILL.md"
   ],

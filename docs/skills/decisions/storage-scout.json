@@ -1,7 +1,7 @@
 {
-  "revision": "7055fd62c2be464ff04fd36f99e73359cd2027c773b78e8cee7dc59ace25664c",
+  "revision": "5f62dc2e1dd17475279b69a96e1836e3084aa8500ea5f88d83b5b1401358f54a",
   "outcome": "keep",
-  "reason": "Retain the project-owned ownership and byte-identity cleanup procedure rather than reproducing deletion heuristics in a generic maintenance skill.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/storage-scout/SKILL.md"
   ],

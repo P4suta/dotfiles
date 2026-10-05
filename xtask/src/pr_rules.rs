@@ -20,7 +20,6 @@ pub enum Effect {
     Ready,
 }
 
-/// The issue prerequisite established before a PR operation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum IssueGate {
     NotRequired,
@@ -28,7 +27,7 @@ pub enum IssueGate {
     Missing,
 }
 
-/// Apply personal issue rules only to owned repositories that are not forks.
+/// Apply personal issue rules only to owned non-fork repositories.
 pub fn issue_gate(personal_owner: bool, fork: bool, checked_issue: bool) -> IssueGate {
     if !personal_owner || fork {
         IssueGate::NotRequired
@@ -39,7 +38,6 @@ pub fn issue_gate(personal_owner: bool, fork: bool, checked_issue: bool) -> Issu
     }
 }
 
-/// Keep a nonzero reserve before issuing further GitHub operations.
 pub fn api_quota_available(remaining: u64, reserve: u64) -> bool {
     reserve > 0 && remaining >= reserve
 }
@@ -48,7 +46,7 @@ pub fn coderabbit_body_marker_allowed(request: bool, summary: bool, ignore: bool
     ignore || request && summary
 }
 
-/// The head commit's reported checks; an empty report is not a pass.
+/// The head commit's reported checks, where an empty report never passes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Checks {
     Passing,

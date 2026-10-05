@@ -1,6 +1,4 @@
-# Official CodeRabbit References
-
-Read only the references needed for the current operation.
+# Official references
 
 - [Documentation index](https://docs.coderabbit.ai/llms.txt)
 - [CLI overview](https://docs.coderabbit.ai/cli/index) and [command reference](https://docs.coderabbit.ai/cli/reference)

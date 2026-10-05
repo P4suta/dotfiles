@@ -74,7 +74,6 @@ fn optional<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     }
 }
 
-/// An absent manifest settles nothing, so every finding needs triage.
 fn reviewed(approved: &Path) -> Result<BTreeMap<String, ops::Reviewed>> {
     Ok(if approved.try_exists()? {
         ops::read_approved(approved)?.reviewed
@@ -141,7 +140,6 @@ fn pending(
             .as_ref()
             .map_or(root, |item| item.evidence_root.as_path()),
     };
-    // A newer draft keeps loss detection, and it completes alone when every finding is adopted.
     if draft.is_some()
         && !ops::runtime_pending(Runtime {
             report: draft.as_ref(),

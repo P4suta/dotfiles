@@ -59,7 +59,7 @@ pub struct SkillDecision {
     pub size: Option<SizeDecision>,
 }
 
-/// The judgment on an entrypoint over the word limit; it shares the decision's revision and evidence.
+/// The judgment on an entrypoint over the word limit, sharing the decision's revision and evidence.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SizeDecision {
@@ -173,7 +173,7 @@ fn check_evidence(evidence: &[String], root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Verifies a runtime disposition; adopted findings may carry a decision but do not require one.
+/// Verifies a runtime disposition.
 pub fn check_review(
     report_hash: &str,
     findings: &[Finding],
@@ -339,7 +339,7 @@ fn size_draft(previous: Option<&SizeDecision>) -> SizeDecision {
     }
 }
 
-/// Drafts the decision for a changed or new skill, or the size disposition that its bound decision lacks or no longer needs; the author still writes each reason.
+/// Drafts the decision for a changed or new skill, or the size disposition that its bound decision lacks or no longer needs.
 pub fn draft_decision(
     previous: Option<&SkillDecision>,
     revision: &str,
@@ -400,7 +400,7 @@ fn git_output(root: &Path, arguments: &[&str]) -> Result<String> {
         .to_owned())
 }
 
-/// Hashes a skill tree at a commit as the catalog hashes it, or returns None when the catalog cannot hold that tree.
+/// Hashes a skill tree at a commit as the catalog hashes it, or returns None when that tree lies outside what the catalog can hold.
 fn revision_at(root: &Path, commit: &str, skill: &str) -> Result<Option<String>> {
     let tree = format!("dot_agents/skills/{skill}");
     let listing = String::from_utf8(git_bytes(
@@ -441,7 +441,7 @@ fn revision_at(root: &Path, commit: &str, skill: &str) -> Result<Option<String>>
     Ok(Some(hash(&snapshots)?))
 }
 
-/// Finds the latest commit whose skill tree holds the assessed revision.
+/// Finds the newest commit whose skill tree holds the assessed revision.
 fn assessed_commit(root: &Path, skill: &str, revision: &str) -> Result<Option<String>> {
     let history = git_output(
         root,
@@ -460,7 +460,7 @@ fn assessed_commit(root: &Path, skill: &str, revision: &str) -> Result<Option<St
     Ok(None)
 }
 
-/// Writes the draft decision for one skill and returns the context its author needs.
+/// Writes the draft decision for one skill and returns the context its writer needs.
 pub fn decide(root: &Path, skill: &str) -> Result<String> {
     let catalog = catalog(&root.join("dot_agents/skills"))?;
     let current = catalog.skills.get(skill).with_context(|| {

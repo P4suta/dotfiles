@@ -2,19 +2,17 @@
 //!
 //! Two families of rule live here:
 //!
-//! * **force** — operations that throw away committed history or uncommitted work with no undo.
+//! * **force**: operations that discard committed history or uncommitted work with no undo.
 //!   `push --force`, `reset --hard`, `clean -f`, `branch -D`, `stash drop`, `reflog expire`, `filter-branch`.
-//! * **no-verify** — operations that would leave signing or hook enforcement switched off for one command: `--no-verify`, `--no-gpg-sign`, and the `-c key=value` spellings of the same thing.
+//! * **no-verify**: operations that switch off signing or hook enforcement for one command, such as `--no-verify`, `--no-gpg-sign`, and their `-c key=value` forms.
 //!
-//! This layer is *convenience*, not the guarantee.
-//! It only sees commands whose `git` resolved through PATH, which excludes an IDE calling `/opt/homebrew/bin/git` directly, a shell alias expanding to something else, and anything running with a different PATH.
-//! The guarantee for the remote side is `dotguard pre-push`, which runs from `core.hooksPath` and therefore sees every push regardless of how git was invoked.
-//! What this layer buys is the refusal arriving *before* the damage rather than after, and a hint that names the non-destructive command you probably wanted.
+//! This layer only handles commands that resolve `git` through `PATH`, so a direct path or a different `PATH` bypasses it.
+//! `dotguard pre-push` runs from `core.hooksPath` and enforces the rule for every push.
 //!
-//! Rules NOT here, deliberately:
-//! * `rebase`, `commit --amend` — rewriting unpushed history is ordinary work, and pre-push catches the case where it was not unpushed.
-//! * `restore` / `checkout -- <path>` — destroys uncommitted changes with no flag to key on, so refusing it means refusing the command outright.
-//! * `rm -f` — common in scripts, and what it destroys is reachable from the index in every case that matters.
+//! Rules left out:
+//! * `rebase` and `commit --amend`: rewriting unpushed history counts as ordinary work, and pre-push catches pushed history.
+//! * `restore` and `checkout -- <path>`: no flag marks the destruction, so a rule would refuse the whole command.
+//! * `rm -f`: common in scripts, and the index still holds what it removes.
 
 use crate::bypass::Category;
 use crate::gate_rules::{Fixup, Source, Spelling, Verdict, Withheld, spelling, verdict};
@@ -25,8 +23,8 @@ pub struct Denial {
     pub category: Category,
     /// One line, for the audit log.
     pub reason: String,
-    /// Why the command is refused and what to consider instead.
-    /// Shown to the human, may be several lines.
+    /// Why the gate refuses the command and what to consider instead.
+    /// It addresses the human and may span many lines.
     pub hint: String,
     /// The command to run instead.
     pub next: Next,
@@ -35,7 +33,7 @@ pub struct Denial {
 /// The command a refusal suggests instead.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Next {
-    /// A Git command, as the words after `git`; the gate judges it again before suggesting it.
+    /// A Git command, as the words after `git`, which the gate judges again before suggesting it.
     Git(Vec<String>),
     /// Any other command line, already quoted.
     Shell(String),
@@ -44,7 +42,7 @@ pub enum Next {
 }
 
 impl Next {
-    /// The command as one shell line, or `None` when it is withheld.
+    /// The command as one shell line, or `None` when the gate withholds it.
     pub fn line(&self) -> Option<String> {
         match self {
             Self::Git(words) => Some(command(
@@ -80,7 +78,7 @@ impl Denial {
     }
 }
 
-/// The structured refusal for a denied invocation; `argv` is everything after the program name.
+/// The structured refusal for a denied invocation, where `argv` holds everything after the program name.
 pub fn refusal(denial: &Denial, argv: &[String]) -> Refusal {
     let invoked = command(
         &std::iter::once("git")
@@ -109,7 +107,7 @@ pub fn refusal(denial: &Denial, argv: &[String]) -> Refusal {
     }
 }
 
-/// The invocation being judged, so a refusal can name the same command with the offending part changed.
+/// The judged invocation, so a refusal can name the same command with the offending part changed.
 struct Invocation<'a> {
     globals: &'a [String],
     sub: &'a str,
@@ -221,7 +219,7 @@ enum Takes {
 }
 
 /// A long option: its name, how it takes a value, and whether `--no-<name>` negates it.
-/// A negatable name that starts with `no-` is also negated by the name without it, as `--verify` negates `--no-verify`.
+/// A negatable name that starts with `no-` also gets negated by the name without it, as `--verify` negates `--no-verify`.
 struct Long(&'static str, Takes, bool);
 
 /// The options of one subcommand, as `git <subcommand> -h` lists them.
@@ -320,9 +318,9 @@ const COMMIT: Grammar = Grammar {
 
 /// One option as Git reads it.
 enum Opt<'a> {
-    /// A long option by its full name; `negated` for `--no-<name>`.
+    /// A long option by its full name, with `negated` for `--no-<name>`.
     Long { name: &'static str, negated: bool },
-    /// An option Git refuses: an ambiguous or unknown name, an unknown letter, or a value it does not take or lacks.
+    /// An option Git refuses: an ambiguous or unknown name, an unknown letter, or a value it doesn't take or lacks.
     Unread,
     /// A cluster of short options, ending with the one that takes `value` when one does.
     Short {
@@ -335,14 +333,14 @@ enum Opt<'a> {
 struct Parsed<'a> {
     /// Each option with the words it spans, its value included.
     options: Vec<(std::ops::Range<usize>, Opt<'a>)>,
-    /// The words that are not options, including every word after `--`.
+    /// The words outside any option, including every word after `--`.
     positionals: Vec<usize>,
     /// The `--` that ends the options.
     separator: Option<usize>,
 }
 
 impl Parsed<'_> {
-    /// Whether every option is one Git accepts, so the words of the line mean what the gate read.
+    /// Whether Git accepts every option, so the words of the line mean what the gate read.
     fn read(&self) -> bool {
         self.options
             .iter()
@@ -525,7 +523,7 @@ fn message_source<'a>(parsed: &Parsed<'a>, args: &'a [String]) -> (Source, Optio
     (source, reused)
 }
 
-/// The author and date of a commit, as `--author` and `--date` take them.
+/// The authorship and date of a commit, in the form `--author` and `--date` take.
 pub struct Authorship {
     pub author: String,
     pub date: String,
@@ -542,8 +540,8 @@ fn withheld_reason(withheld: Withheld, reused: Option<&str>) -> String {
 }
 
 /// The refused commit again, with its message read from `message` and opened in the editor.
-/// `words` is the command line the wrapper ran, `authorship` reads a commit's authorship, and `picking` says whether a cherry-pick or rebase pick is in progress.
-/// The result is `None` when that was not `git commit`, and the reason when no command repeats it.
+/// `words` holds the command line the wrapper ran, `authorship` reads a commit's authorship, and `picking` says whether a cherry-pick or rebase pick runs.
+/// The result stays `None` for any command except `git commit`, and gives the reason when no command repeats it.
 pub fn commit_retry(
     words: &[String],
     message: &str,
@@ -648,7 +646,7 @@ pub fn commit_retry(
     Some(Ok(line))
 }
 
-/// Drops `letters` from a clustered short option, and the option itself once nothing is left.
+/// Drops `letters` from a clustered short option, and the option itself once nothing remains.
 fn drop_letters(arg: &str, letters: &[char]) -> Option<String> {
     match short_cluster(arg) {
         Some(cluster) => {
@@ -660,8 +658,7 @@ fn drop_letters(arg: &str, letters: &[char]) -> Option<String> {
 }
 
 /// Global options that consume the following argv element as their value.
-/// Getting this list wrong means mistaking a value for the subcommand, so it is spelled out rather than guessed at.
-/// `--exec-path` is absent on purpose: its value is optional, and the valueless form just prints a path and exits.
+/// The list omits `--exec-path`, because its value stays optional and the bare form prints a path and exits.
 const GLOBAL_TAKES_VALUE: [&str; 8] = [
     "-c",
     "-C",
@@ -673,8 +670,7 @@ const GLOBAL_TAKES_VALUE: [&str; 8] = [
     "--attr-source",
 ];
 
-/// Subcommands we recognise as git's own.
-/// Used only to decide whether a token is worth an alias lookup — being incomplete costs one `git config` call, not correctness.
+/// Known git subcommands.
 const BUILTINS: [&str; 46] = [
     "add",
     "am",
@@ -726,8 +722,8 @@ const BUILTINS: [&str; 46] = [
 
 /// Decide whether this git invocation may proceed.
 ///
-/// `argv` is everything after the program name, exactly as the wrapper received it.
-/// A refusal's suggested Git command is judged again, so a line combining several refused parts gets a suggestion with every one of them removed.
+/// `argv` holds everything after the program name, exactly as the wrapper received it.
+/// Each suggested Git command gets judged again, so a line with many refused parts gets a suggestion that removes every one.
 pub fn inspect(argv: &[String]) -> Option<Denial> {
     let mut denial = judge(argv)?;
     // Each suggestion removes at least one refused word, so the chain ends within the line's length.
@@ -744,7 +740,7 @@ pub fn inspect(argv: &[String]) -> Option<Denial> {
 }
 
 /// The index of the subcommand, and each `-c` or `--config-env` setting before it with the words it spans.
-/// Settings are collected rather than judged on sight: whether one of them is a policy override depends on the subcommand.
+/// The gate collects settings instead of judging them on sight, because the subcommand decides whether one overrides policy.
 fn globals(argv: &[String]) -> (usize, Vec<(String, std::ops::Range<usize>)>) {
     let mut i = 0;
     let mut settings: Vec<(String, std::ops::Range<usize>)> = Vec::new();
@@ -769,7 +765,7 @@ fn globals(argv: &[String]) -> (usize, Vec<(String, std::ops::Range<usize>)>) {
                 settings.push((rest.to_owned(), start..i + 1));
             }
         } else if arg.starts_with("--config-env") {
-            // `--config-env=key=ENVVAR` hides the value in the environment, so the key alone has to decide — recorded as `key=` to mean "set to something we cannot see".
+            // `--config-env=key=ENVVAR` hides the value in the environment, so the key decides alone, recorded as `key=` for an unseen value.
             let setting = arg.strip_prefix("--config-env=").map_or_else(
                 || {
                     i += 1;
@@ -817,13 +813,13 @@ fn judge(argv: &[String]) -> Option<Denial> {
         return Some(denial);
     }
 
-    // An alias could expand to anything, including `push --force`.
-    // Resolving every token would put a `git config` call in front of `git status`, so we only ask about tokens git itself does not define.
+    // An `alias.*` entry can expand to anything, including `push --force`.
+    // Resolving every token would put a `git config` call in front of `git status`, so only tokens unknown to git get a lookup.
     if !BUILTINS.contains(&sub.as_str())
         && let Some(expansion) = realgit::capture(&["config", "--get", &format!("alias.{sub}")])
     {
         let words: Vec<String> = expansion.split_whitespace().map(str::to_owned).collect();
-        // `!sh -c ...` aliases run an arbitrary shell; we cannot reason about those and do not pretend to.
+        // `!sh -c ...` aliases run an arbitrary shell, beyond the reach of this policy.
         if let Some(first) = words.first()
             && !first.starts_with('!')
             && let Some(denial) = subcommand(&Invocation {
@@ -845,9 +841,6 @@ fn judge(argv: &[String]) -> Option<Denial> {
 }
 
 /// The per-subcommand rules.
-///
-/// One long `match` on purpose: every arm is a rule, each rule is three lines of condition and a paragraph of explanation, and the table reads as the policy document it is.
-/// Splitting it into a dozen two-line functions would scatter the policy without shortening it.
 #[allow(clippy::too_many_lines)]
 fn subcommand(call: &Invocation) -> Option<Denial> {
     let (sub, args) = (call.sub, call.args);
@@ -1161,7 +1154,7 @@ fn push(call: &Invocation, push: &Parsed) -> Option<Denial> {
     ))
 }
 
-/// `denial` as a gate may give it for `parsed`: without a suggestion unless every option was read as Git reads it.
+/// `denial` as a gate may give it for `parsed`: without a suggestion unless the gate read every option as Git reads it.
 fn read_in_full(parsed: &Parsed, args: &[String], denial: Option<Denial>) -> Option<Denial> {
     match verdict(denial.is_some(), parsed.read()) {
         Verdict::Allow => None,
@@ -1282,7 +1275,6 @@ fn no_gpg_sign(call: &Invocation) -> Denial {
 }
 
 /// Subcommands that actually run a hook.
-/// Nothing else can be affected by `core.hooksPath`, which is the whole reason this list exists — see `config_override`.
 const RUNS_HOOKS: [&str; 12] = [
     "commit",
     "merge",
@@ -1298,7 +1290,7 @@ const RUNS_HOOKS: [&str; 12] = [
     "clone",
 ];
 
-/// Subcommands that create an object which would be signed.
+/// Subcommands that create a signable object.
 const CREATES_SIGNED_OBJECTS: [&str; 7] = [
     "commit",
     "tag",
@@ -1317,31 +1309,29 @@ fn is_policy_key(key: &str) -> bool {
     )
 }
 
-/// `-c key=value` overrides that would change signing or hooks for one command; the caller fills in the command without the override.
+/// `-c key=value` overrides that would change signing or hooks for one command.
+/// The caller fills in the command without the override.
 ///
-/// Scoped to the subcommand, and that scoping is the whole point rather than a refinement.
-/// Editors, agents and status-line tools routinely run their own read-only queries as
+/// The check depends on the subcommand.
+/// Editors, agents, and status-line tools run read-only queries such as
 ///
 /// ```text
 /// git -c core.hooksPath=/dev/null -c core.askPass= … rev-parse HEAD
 /// ```
 ///
-/// precisely so that *their* polling does not fire *your* hooks — which is correct, considerate behaviour on their part.
-/// `rev-parse`, `status`, `remote get-url` and `ls-files` run no hooks, so disabling hooks for them changes nothing and refusing them breaks the tool for no gain.
-/// An earlier version of this policy refused every one: 1,897 of the first 1,959 entries in the bypass log were exactly that, and the tooling behind them had been quietly broken the whole time.
-///
-/// So the rule is: `core.hooksPath` matters only where a hook would run, and the signing keys matter only where a signable object would be created.
+/// so their polling skips your hooks.
+/// `rev-parse`, `status`, `remote get-url`, and `ls-files` run no hooks, so refusing them breaks the tool for no gain.
 fn config_override(setting: &str, sub: &str) -> Option<Denial> {
     let (key, value) = setting.split_once('=')?;
     let offends = match key {
-        // `-c commit.gpgsign=false` is `--no-gpg-sign` wearing a hat.
+        // `-c commit.gpgsign=false` acts as `--no-gpg-sign`.
         "commit.gpgsign" | "tag.gpgsign" => {
             CREATES_SIGNED_OBJECTS.contains(&sub)
                 && matches!(value, "false" | "0" | "no" | "off" | "")
         }
         // A per-invocation hooksPath change can replace every gate in ~/.config/git/hooks.
         "core.hooksPath" => RUNS_HOOKS.contains(&sub),
-        // Signing is delegated to the 1Password SSH agent; any other format means a key this machine does not actually hold.
+        // The SSH agent signs every commit, so any other format names a key this machine lacks.
         "gpg.format" => CREATES_SIGNED_OBJECTS.contains(&sub) && value != "ssh",
         "gpg.ssh.program" => CREATES_SIGNED_OBJECTS.contains(&sub) && value.is_empty(),
         _ => false,
@@ -1356,7 +1346,7 @@ fn config_override(setting: &str, sub: &str) -> Option<Denial> {
     })
 }
 
-/// argv up to `--`, since everything after it is a pathspec and a file may legitimately be named `--force`.
+/// argv up to `--`, because everything after it forms a pathspec and a file may carry the name `--force`.
 fn flags_of(args: &[String]) -> Vec<String> {
     args.iter()
         .take_while(|a| a.as_str() != "--")
@@ -1364,7 +1354,7 @@ fn flags_of(args: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// The first non-flag argument — a subcommand word like `drop` or `expire`.
+/// The first non-flag argument, a subcommand word like `drop` or `expire`.
 fn first_word(args: &[String]) -> Option<&str> {
     args.iter()
         .take_while(|a| a.as_str() != "--")
@@ -1372,7 +1362,7 @@ fn first_word(args: &[String]) -> Option<&str> {
         .map(String::as_str)
 }
 
-/// The letters of a clustered short-option group (`-fdx` -> `fdx`), or `None` for long options and bare `-` / `--`.
+/// The letters of a clustered short-option group, so `-fdx` yields `fdx`, or `None` for long options and bare `-` or `--`.
 fn short_cluster(arg: &str) -> Option<&str> {
     let rest = arg.strip_prefix('-')?;
     (!rest.is_empty() && !rest.starts_with('-') && rest.chars().all(|c| c.is_ascii_alphabetic()))
@@ -1386,7 +1376,7 @@ mod tests {
     fn argv(line: &str) -> Vec<String> {
         line.split_whitespace().map(str::to_owned).collect()
     }
-    /// Whether the line is refused; every refusal must also be a complete record whose suggested Git command passes.
+    /// Whether the gate refuses the line, where every refusal must also form a complete record whose suggested Git command passes.
     fn refused(line: &str) -> bool {
         let argv = argv(line);
         inspect(&argv).is_some_and(|denial| {
@@ -1443,7 +1433,7 @@ mod tests {
         );
     }
 
-    /// The suggested Git command must itself pass the gate, however many refused parts the line combines.
+    /// The suggested Git command must itself pass the gate, even when the line combines more than one refused part.
     #[test]
     fn the_next_command_is_never_refused_again() {
         for line in [
@@ -1481,7 +1471,7 @@ mod tests {
         );
     }
 
-    /// An option value is never a remote or a refspec, and a refspec after `--` is still a refspec.
+    /// An option value never counts as a remote or a refspec, and a refspec after `--` still counts as one.
     #[test]
     fn push_reads_its_positionals_as_git_does() {
         let delete = |branches: &[&str]| {
@@ -1579,7 +1569,7 @@ mod tests {
         }
     }
 
-    /// Git rejects a line with an option it does not accept, so the gate cannot know which words are values, the repository, or refs.
+    /// Git rejects a line with an option it doesn't accept, so the gate can't know which words hold values, the repository, or refs.
     /// A refused line of that kind gets no suggestion rather than one built from words Git would not read that way.
     #[test]
     fn a_refused_line_with_an_option_git_rejects_suggests_nothing() {
@@ -1702,7 +1692,7 @@ mod tests {
             "push",
             "push origin main",
             "push --tags",
-            "add --force ignored.txt", // -f here means "add an ignored file", not "destroy"
+            "add --force ignored.txt", // Here `-f` adds an ignored file.
             "branch -d merged-topic",
             "clean -nd",
             "checkout main",
@@ -1720,8 +1710,7 @@ mod tests {
         }
     }
 
-    /// The regression that motivated scoping config overrides to the subcommand.
-    /// Editors and agents run read-only queries with hooks disabled so their polling does not fire yours; refusing those breaks the tool and protects nothing.
+    /// Editors and agents run read-only queries with `core.hooksPath=/dev/null`, and refusing those protects nothing.
     #[test]
     fn read_only_queries_may_disable_hooks() {
         for line in [
@@ -1805,7 +1794,7 @@ mod tests {
         }
     }
 
-    /// An `amend!` commit may be empty and a reword ignores staged changes, so the retry says so itself once `--fixup` is gone.
+    /// An `amend!` commit may have no changes and a reword ignores staged changes, so the retry says so itself once `--fixup` goes.
     #[test]
     fn a_retried_fixup_keeps_what_its_kind_implied() {
         let edited = "--edit --file /r/.git/COMMIT_EDITMSG";
@@ -1838,7 +1827,7 @@ mod tests {
         }
     }
 
-    /// `-C` and `-c` copy the author and date of their commit, so the retry names them, before any explicit `--author` or `--date` that overrides them.
+    /// `-C` and `-c` copy the authorship and date of their commit, so the retry names them, before any explicit `--author` or `--date` that overrides them.
     #[test]
     fn a_retried_reuse_keeps_the_reused_authorship() {
         let edited = "--edit --file /r/.git/COMMIT_EDITMSG";
@@ -1896,7 +1885,7 @@ mod tests {
     }
 
     /// Git takes `--reset-author` only with `-C`, `-c`, `--amend`, or during a pick, so a retry without the reuse and without `--amend` drops it.
-    /// The commit is the same, because without a reused commit the author is the committer, as `--reset-author` made it.
+    /// The commit stays the same, because without a reused commit the authorship matches the committer, as `--reset-author` made it.
     #[test]
     fn a_retried_reuse_with_a_reset_author_drops_the_reset() {
         let edited = "--edit --file /r/.git/COMMIT_EDITMSG";
@@ -1929,7 +1918,7 @@ mod tests {
         }
     }
 
-    /// During a cherry-pick Git takes the author from the picked commit instead of `-C` or `-c`, and `--reset-author` replaces it with the committer.
+    /// During a cherry-pick Git takes the authorship from the picked commit instead of `-C` or `-c`, and `--reset-author` replaces it with the committer's.
     #[test]
     fn a_retried_reuse_during_a_pick_keeps_the_picked_authorship() {
         let edited = "--edit --file /r/.git/COMMIT_EDITMSG";

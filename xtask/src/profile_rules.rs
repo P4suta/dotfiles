@@ -93,7 +93,7 @@ pub fn context7_needed(local_gui: bool, tool_exists: bool, installed: bool) -> b
     local_gui && tool_exists && !installed
 }
 
-/// GitHub publishes its web-flow signing keys as one bundle; import it only when every primary key is pinned and the current key is among them.
+/// GitHub publishes its web-flow signing keys as one bundle.
 pub fn forge_bundle_accepted(
     primary_count: usize,
     unpinned: usize,
@@ -110,7 +110,8 @@ pub enum Memory {
     Disabled,
 }
 
-/// The longest switch list the memory proof covers; every client's list stays within it.
+/// The longest switch list the memory proof covers.
+/// Every client's list stays within it.
 pub const MEMORY_SWITCHES_PROVED: usize = 6;
 
 /// Every managed client enables persistent memory by default, so only an explicit `Disabled` on every switch turns it off.
@@ -125,7 +126,7 @@ pub fn memory_off(switches: &[Memory]) -> bool {
     !switches.is_empty() && all_disabled(switches)
 }
 
-/// A target changed outside chezmoi refuses application unless its `modify_` template merges and its rendering keeps every key the host file has.
+/// A target changed outside chezmoi refuses the apply unless its `modify_` template merges and its rendering keeps every key the host file has.
 pub fn host_edit_refused(changed: bool, merged: bool, keeps_host_keys: bool) -> bool {
     changed && !(merged && keeps_host_keys)
 }

@@ -3,6 +3,8 @@ use crate::pr_rules::{
     api_quota_available, checks_state, coderabbit_body_marker_allowed, exclusion, issue_gate,
     keeps_pause_exclusion, plan, requests_review, review_request_allowed, review_requirement,
 };
+use crate::prose::Publication::{Issue as ISSUE, PullRequest as PULL_REQUEST};
+use crate::prose_rules::standard_applies;
 use crate::refusal::{Refusal, command};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
@@ -85,6 +87,43 @@ pub enum Action {
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
         pr: u64,
     },
+    /// Check, create, or edit an issue through the same document and writing checks.
+    Issue {
+        #[command(subcommand)]
+        action: IssueAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum IssueAction {
+    /// Check a local issue title and body without mutation.
+    Check {
+        #[command(flatten)]
+        document: IssueDocument,
+    },
+    /// Open an issue with the checked title and body.
+    Create {
+        #[command(flatten)]
+        document: IssueDocument,
+    },
+    /// Replace the title and body of an existing issue.
+    Edit {
+        #[command(flatten)]
+        document: IssueDocument,
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        number: u64,
+    },
+}
+
+#[derive(Args)]
+pub struct IssueDocument {
+    /// The repository in exact owner/name form.
+    #[arg(long)]
+    repo: String,
+    #[arg(long)]
+    title: String,
+    #[arg(long)]
+    body_file: PathBuf,
 }
 
 impl Action {
@@ -95,13 +134,14 @@ impl Action {
             Self::Create { .. } => "create",
             Self::Edit { .. } => "edit",
             Self::Ready { .. } => "ready",
+            Self::Issue { .. } => "issue",
         }
     }
 }
 
 #[derive(Args)]
 pub struct Target {
-    /// Exact GitHub OWNER/REPO; no URL or inferred repository.
+    /// The exact GitHub repository rather than a URL or an inferred one.
     #[arg(long)]
     pub repo: String,
     /// CodeRabbit mode permits its standard generation placeholders.
@@ -110,7 +150,7 @@ pub struct Target {
     /// Repository-scoped JSON exception with repository, source URL, and reason.
     #[arg(long)]
     pub title_policy: Option<PathBuf>,
-    /// Existing open issue in the destination repository; required for personal non-forks.
+    /// An existing open issue in the destination repository, required for personal non-forks.
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     pub issue: Option<u64>,
 }
@@ -196,6 +236,35 @@ struct Github {
 struct Owner {
     login: String,
     id: u64,
+}
+
+#[derive(Clone, Copy)]
+struct Destination {
+    personal: bool,
+    fork: bool,
+}
+
+fn workflow_policy() -> Result<WorkflowPolicy> {
+    let policy: WorkflowPolicy = serde_json::from_str(include_str!(
+        "../../dot_agents/skills/pull-request/assets/workflow-policy.json"
+    ))?;
+    require(
+        policy.schema == 1 && policy.minimum_remaining > 0 && !policy.personal_owners.is_empty(),
+        || {
+            Refusal::new(
+                "pr.policy",
+                "the installed workflow policy needs schema 1, a nonzero quota reserve, and at least one personal owner",
+                "chezmoi source-path ~/.agents/skills/pull-request/assets/workflow-policy.json",
+            )
+            .evidence(format!(
+                "schema {}, reserve {}, {} personal owner(s)",
+                policy.schema,
+                policy.minimum_remaining,
+                policy.personal_owners.len()
+            ))
+        },
+    )?;
+    Ok(policy)
 }
 
 #[derive(Deserialize)]
@@ -405,7 +474,8 @@ fn require(condition: bool, refusal: impl FnOnce() -> Refusal) -> Result<()> {
     }
 }
 
-/// The local check to run on a corrected document; `title` is kept when it was not the problem.
+/// The local check to run on a corrected document.
+/// It keeps `title` unless the title caused the failure.
 fn recheck(target: &Target, title: Option<&str>) -> String {
     let mut words = vec!["pr-workflow", "check", "--repo", &target.repo];
     if target.generation == Generation::Coderabbit {
@@ -428,7 +498,7 @@ fn recheck(target: &Target, title: Option<&str>) -> String {
 }
 
 /// Runs `action` and reports every failure as one refusal.
-/// `arguments` are the words after `pr-workflow`, whichever entry point received them.
+/// `arguments` holds the words after `pr-workflow`, whichever entry point received them.
 pub fn execute(action: Action, arguments: &[String]) -> Result<()> {
     let name = action.name();
     let rerun = command(
@@ -530,6 +600,66 @@ fn read_document(document: DocumentArgs, final_check: bool) -> Result<(Target, V
     Ok((document.target, validated))
 }
 
+/// Refuses a title or body that fails the installed prose checker when the destination takes the personal writing standard.
+fn written_to_standard(
+    destination: Destination,
+    kind: crate::prose::Publication,
+    document: &ValidatedDocument,
+) -> Result<()> {
+    if !standard_applies(destination.personal, destination.fork) {
+        return Ok(());
+    }
+    crate::prose::check_publication(
+        &crate::prose::Bundle::installed()?,
+        kind,
+        &document.title,
+        &document.body,
+    )
+}
+
+fn offline_destination(repo: &str) -> Result<Destination> {
+    let policy = workflow_policy()?;
+    let owner = repo.split('/').next().unwrap_or_default();
+    Ok(Destination {
+        personal: policy
+            .personal_owners
+            .iter()
+            .any(|personal| personal.login.eq_ignore_ascii_case(owner)),
+        fork: false,
+    })
+}
+
+/// Validates an issue title and body with the checks a PR document receives, apart from title syntax.
+fn validate_issue(document: &IssueDocument) -> Result<ValidatedDocument> {
+    let target = Target {
+        repo: document.repo.clone(),
+        generation: Generation::Local,
+        title_policy: None,
+        issue: None,
+    };
+    target.conventional_required()?;
+    let body = fs::read_to_string(&document.body_file).context("read UTF-8 issue body file")?;
+    ensure!(
+        single_line(&document.title)
+            && document.title.trim() == document.title
+            && !unfinished(&document.title),
+        "the issue title must be a finished single line without surrounding whitespace"
+    );
+    let visible = without_comments(&body);
+    ensure!(
+        !visible.trim().is_empty() && !unfinished(&prose(&visible)),
+        "the issue body is empty, holds only comments, or contains an unfinished placeholder"
+    );
+    ensure!(
+        !body.contains(TITLE_REQUEST) && !document.title.contains(TITLE_REQUEST),
+        "an issue cannot request CodeRabbit generation"
+    );
+    Ok(ValidatedDocument {
+        title: document.title.clone(),
+        body,
+    })
+}
+
 fn gh(args: &[OsString]) -> Result<String> {
     let output = Tool::Gh
         .command()
@@ -549,28 +679,9 @@ fn gh(args: &[OsString]) -> Result<String> {
 impl Github {
     /// Require a live authenticated user without printing or transferring credentials.
     fn connect() -> Result<Self> {
-        let policy: WorkflowPolicy = serde_json::from_str(include_str!(
-            "../../dot_agents/skills/pull-request/assets/workflow-policy.json"
-        ))?;
-        require(
-            policy.schema == 1
-                && policy.minimum_remaining > 0
-                && !policy.personal_owners.is_empty(),
-            || {
-                Refusal::new(
-                    "pr.policy",
-                    "the installed workflow policy needs schema 1, a nonzero quota reserve, and at least one personal owner",
-                    "chezmoi source-path ~/.agents/skills/pull-request/assets/workflow-policy.json",
-                )
-                .evidence(format!(
-                    "schema {}, reserve {}, {} personal owner(s)",
-                    policy.schema,
-                    policy.minimum_remaining,
-                    policy.personal_owners.len()
-                ))
-            },
-        )?;
-        let github = Self { policy };
+        let github = Self {
+            policy: workflow_policy()?,
+        };
         let user: Owner = github.read("user").map_err(|error| {
             if error.downcast_ref::<Refusal>().is_some() {
                 return error;
@@ -655,7 +766,7 @@ impl Github {
     }
 }
 
-/// Recognize a closing reference in visible Markdown, excluding examples and comments.
+/// Recognize a closing reference in visible Markdown outside examples and comments.
 fn references_issue(body: &str, repo: &str, issue: u64) -> bool {
     let visible = prose(&without_comments(body));
     let mut text = String::new();
@@ -703,39 +814,25 @@ enum BodySource<'a> {
     Pr(u64),
 }
 
-/// Establish the global personal scope and validate an explicitly selected issue.
-/// `rerun` is the refused command, which a refusal for a body file repeats after the edit.
-fn inspect_issue(
-    github: &Github,
-    target: &Target,
-    body: Option<(&str, BodySource)>,
-    rerun: &str,
-) -> Result<IssueGate> {
-    target.conventional_required()?;
-    let repository: Repository = github.read(&format!("repos/{}", target.repo))?;
+/// Establish the global personal scope of a repository.
+fn destination(github: &Github, repo: &str) -> Result<Destination> {
+    let repository: Repository = github.read(&format!("repos/{repo}"))?;
     require(
-        repository.full_name.eq_ignore_ascii_case(&target.repo)
+        repository.full_name.eq_ignore_ascii_case(repo)
             && repository.owner.id != 0
             && repository
                 .owner
                 .login
-                .eq_ignore_ascii_case(target.repo.split('/').next().unwrap()),
+                .eq_ignore_ascii_case(repo.split('/').next().unwrap()),
         || {
             Refusal::new(
                 "pr.repository",
                 "repository identity differs from the requested destination",
-                command(&[
-                    "gh",
-                    "repo",
-                    "view",
-                    &target.repo,
-                    "--json",
-                    "nameWithOwner,owner",
-                ]),
+                command(&["gh", "repo", "view", repo, "--json", "nameWithOwner,owner"]),
             )
             .evidence(format!(
-                "requested {}, GitHub reports {} owned by {} ({})",
-                target.repo, repository.full_name, repository.owner.login, repository.owner.id
+                "requested {repo}, GitHub reports {} owned by {} ({})",
+                repository.full_name, repository.owner.login, repository.owner.id
             ))
         },
     )?;
@@ -766,8 +863,24 @@ fn inspect_issue(
         )?;
         personal |= id_matches;
     }
+    Ok(Destination {
+        personal,
+        fork: repository.fork,
+    })
+}
+
+/// Validate an explicitly selected issue in a destination with a known personal scope.
+/// `rerun` names the refused command, which a body-file refusal repeats after the edit.
+fn inspect_issue(
+    github: &Github,
+    target: &Target,
+    destination: Destination,
+    body: Option<(&str, BodySource)>,
+    rerun: &str,
+) -> Result<IssueGate> {
+    target.conventional_required()?;
     let Some(number) = target.issue else {
-        return Ok(issue_gate(personal, repository.fork, false));
+        return Ok(issue_gate(destination.personal, destination.fork, false));
     };
     let issue: LiveIssue = github.read(&format!("repos/{}/issues/{number}", target.repo))?;
     require(
@@ -861,7 +974,7 @@ fn inspect_issue(
             ))
         })?;
     }
-    Ok(issue_gate(personal, repository.fork, true))
+    Ok(issue_gate(destination.personal, destination.fork, true))
 }
 
 fn require_issue(gate: IssueGate, target: &Target) -> Result<()> {
@@ -887,8 +1000,8 @@ fn missing_issue(target: &Target) -> Refusal {
     .evidence(format!("{} is a personal non-fork repository and no --issue was given", target.repo))
 }
 
-/// Plans `operation` on a validated document and names the unmet condition when it is refused.
-/// `pr` is the existing PR a ready transition acts on.
+/// Plans `operation` on a validated document, and a refusal names the unmet condition.
+/// `pr` names the existing PR that a ready transition acts on.
 fn planned(
     operation: Operation,
     target: &Target,
@@ -963,7 +1076,7 @@ fn review_exclusion(body: &str) -> Exclusion {
 
 /// Refuse an operation that would request a CodeRabbit PR review while the owner pauses them.
 /// Also refuse one that would leave the review unowed after the owner resumes them.
-/// `live` yields the PR's current draft state and exclusion; it is read only during a pause.
+/// `live` yields the PR's current draft state and exclusion, and runs only during a pause.
 fn admit_review_request(
     operation: Operation,
     generation: Generation,
@@ -1089,7 +1202,8 @@ fn run(action: Action, rerun: &str) -> Result<()> {
         Action::Start { target } => {
             target.conventional_required()?;
             let github = Github::connect()?;
-            let gate = inspect_issue(&github, &target, None, rerun)?;
+            let destination = destination(&github, &target.repo)?;
+            let gate = inspect_issue(&github, &target, destination, None, rerun)?;
             require_issue(gate, &target)?;
             println!(
                 "Repository prerequisites accepted ({gate:?}); inspect the destination rules and issue scope before implementation"
@@ -1107,10 +1221,13 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 let github = Github::connect()?;
                 let live = live_document(&github, &target, pr)?;
                 let document = validate(&target, live.title, live.body, r#final)?;
+                let destination = destination(&github, &target.repo)?;
+                written_to_standard(destination, PULL_REQUEST, &document)?;
                 require_issue(
                     inspect_issue(
                         &github,
                         &target,
+                        destination,
                         Some((&document.body, BodySource::Pr(pr))),
                         rerun,
                     )?,
@@ -1118,7 +1235,8 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 )?;
                 report_review_requirement(&document.body)?;
             } else {
-                read_document(
+                let destination = offline_destination(&target.repo)?;
+                let (_, document) = read_document(
                     DocumentArgs {
                         target,
                         title: title.context("title required")?,
@@ -1126,6 +1244,7 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                     },
                     r#final,
                 )?;
+                written_to_standard(destination, PULL_REQUEST, &document)?;
             }
             println!(
                 "PR document accepted; local-file checks do not inspect issues and validation claims still require execution evidence"
@@ -1147,9 +1266,12 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 Ok((true, Exclusion::None))
             })?;
             let github = Github::connect()?;
+            let destination = destination(&github, &target.repo)?;
+            written_to_standard(destination, PULL_REQUEST, &document)?;
             let issue = inspect_issue(
                 &github,
                 &target,
+                destination,
                 Some((&document.body, BodySource::File(&body_file))),
                 rerun,
             )?;
@@ -1184,9 +1306,12 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 Some(github) => github,
                 None => Github::connect()?,
             };
+            let destination = destination(&github, &target.repo)?;
+            written_to_standard(destination, PULL_REQUEST, &document)?;
             let issue = inspect_issue(
                 &github,
                 &target,
+                destination,
                 Some((&document.body, BodySource::File(&body_file))),
                 rerun,
             )?;
@@ -1229,9 +1354,11 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                     .evidence(format!("#{pr}: state {}", live.state))
             })?;
             let document = validate(&target, live.title, live.body, false)?;
+            let destination = destination(&github, &target.repo)?;
             let issue = inspect_issue(
                 &github,
                 &target,
+                destination,
                 Some((&document.body, BodySource::Pr(pr))),
                 rerun,
             )?;
@@ -1251,7 +1378,33 @@ fn run(action: Action, rerun: &str) -> Result<()> {
             print!("{}", gh(&args)?);
             report_review_requirement(&document.body)?;
         }
+        Action::Issue { action } => issue(action)?,
     }
+    Ok(())
+}
+
+fn issue(action: IssueAction) -> Result<()> {
+    let (document, number) = match action {
+        IssueAction::Check { document } => {
+            let validated = validate_issue(&document)?;
+            written_to_standard(offline_destination(&document.repo)?, ISSUE, &validated)?;
+            println!("Issue document accepted");
+            return Ok(());
+        }
+        IssueAction::Create { document } => (document, None),
+        IssueAction::Edit { document, number } => (document, Some(number)),
+    };
+    let validated = validate_issue(&document)?;
+    let github = Github::connect()?;
+    written_to_standard(destination(&github, &document.repo)?, ISSUE, &validated)?;
+    let mut args: Vec<OsString> = vec!["issue".into()];
+    match number {
+        Some(number) => args.extend(["edit".into(), number.to_string().into()]),
+        None => args.push("create".into()),
+    }
+    args.extend(["--repo".into(), OsString::from(&document.repo)]);
+    let _body = write_document(&mut args, &validated)?;
+    print!("{}", gh(&args)?);
     Ok(())
 }
 

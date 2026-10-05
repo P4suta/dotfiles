@@ -2,7 +2,7 @@
 name: ideal-specification
 description: >-
   Derive issues, ADRs, specifications, and documentation from the ideal and governing standards, not the request's wording.
-  Use when writing any persisted problem, requirement, design, or rationale.
+  Use when writing any persisted problem, design, or rationale.
 ---
 
 # Derive from the Ideal
@@ -19,6 +19,7 @@ Write:
 - Established terms, never the request's words or framing.
 - Requirements and reasons, never who asked.
 - RFC 2119 keywords where levels matter.
-- The fewest words that stay correct. Cut anything the reader can act without.
+- The fewest words that stay correct.
+  Cut anything the reader can act without.
 
 Check: it would read the same had anyone else asked.

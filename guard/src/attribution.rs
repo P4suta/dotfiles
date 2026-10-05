@@ -1,21 +1,9 @@
-//! Removing an agent's byline from a commit message.
+//! Strips AI attribution lines from a commit message.
 //!
-//! Whose name appears on a commit is the author's call, and the answer here is that the tooling does not get one.
-//! The session URL is worse than a byline: it points at a private conversation, in the most durable and most widely copied text a project emits, and unlike a credential it cannot be rotated afterwards.
-//!
-//! This is the second line of defence.
-//! `~/.claude/settings.json` carries `includeCoAuthoredBy: false` and empty `attribution.commit` / `attribution.pr`, which stop the lines being written at all — but Claude Code rewrites that file at runtime, so the profiles merge only a few keys into it and leave these to each machine, and a setting that does not travel is not a policy.
-//! This hook travels.
-//! (One gap remains and is not closeable from here: a forge composes the message for a squash merge on its own server, where no local hook runs.)
-//!
-//! Every pattern is anchored to trailer position, which matters more than it looks.
-//! The rules below were validated against 29,264 lines of real commit messages across ten repositories: they remove 795 attribution lines and leave untouched the author's own `Co-authored-by: Example User <…>`, dependabot's 86, and the prose that merely mentions CLAUDE.md.
-//! "Any line mentioning Claude" would have eaten all of those.
-//!
-//! It strips rather than refuses, because the line was written by an agent and not by the person standing at the terminal — refusing the commit would only punish the wrong party.
-//! It says what it removed, because a hook that edits your commit message silently is worse than the problem it solves.
+//! Each pattern anchors to trailer position, so human `Co-authored-by` trailers and prose that mentions CLAUDE.md survive.
+//! The hook strips the lines instead of refusing the commit, and reports the count it removed.
 
-/// Does this line claim authorship for an agent?
+/// Reports whether this line credits an AI agent.
 fn is_attribution(line: &str) -> bool {
     let t = line.trim_start();
     let tail = t.trim_end();
@@ -30,7 +18,6 @@ fn is_attribution(line: &str) -> bool {
 
     // Co-Authored-By: <anything> <…@anthropic.com>
     //
-    // Keyed on the address rather than the word "Claude": the display name changes with the model ("Claude Fable 5", "Claude Opus 5 (1M context)"), the address does not, and a human co-author must never match.
     if strip_prefix_ci(t, "co-authored-by:").is_some()
         && (tail.ends_with("@anthropic.com") || tail.ends_with("@anthropic.com>"))
     {
@@ -46,7 +33,7 @@ fn is_attribution(line: &str) -> bool {
         return true;
     }
 
-    // A bare session URL on a line of its own.
+    // A bare session link on a line of its own.
     if let Some(rest) = tail.strip_prefix("https://claude.ai/code/") {
         return !rest.is_empty() && !rest.contains(char::is_whitespace);
     }
@@ -60,7 +47,7 @@ fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
         .then(|| &s[prefix.len()..])
 }
 
-/// Returns the cleaned message and how many lines were removed.
+/// Returns the cleaned message and the count of removed lines.
 pub fn strip(text: &str) -> (String, usize) {
     let mut kept: Vec<&str> = Vec::new();
     let mut removed = 0;
@@ -76,7 +63,6 @@ pub fn strip(text: &str) -> (String, usize) {
         return (text.to_owned(), 0);
     }
 
-    // Collapse the blank run the trailer block left behind, so the message does not end in stray whitespace.
     while kept.last().is_some_and(|l| l.trim().is_empty()) {
         kept.pop();
     }

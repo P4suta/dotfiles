@@ -48,7 +48,8 @@ pub fn work_tree(directory: &Path) -> Result<Option<PathBuf>> {
     Ok(Some(PathBuf::from(top.trim_end_matches(['\n', '\r']))))
 }
 
-/// A path from Git's `-z` output, which is UTF-8 on Windows and raw bytes elsewhere.
+/// A path from Git's `-z` output.
+/// Windows decodes it as text, and other hosts keep the raw bytes.
 fn path_from_bytes(bytes: &[u8]) -> Result<PathBuf> {
     #[cfg(unix)]
     {
@@ -100,7 +101,7 @@ fn listed(directory: &Path) -> Result<Vec<PathBuf>> {
 }
 
 /// Paths `git ls-files --eol` lists with `arguments`, each with the line endings its index entries hold.
-/// A path with several index entries during a merge counts as CRLF text when any entry is.
+/// A path with more than one index entry during a merge counts as CRLF text when one entry holds CRLF.
 fn listed_with_index(directory: &Path, arguments: &[&OsStr]) -> Result<Vec<(PathBuf, Index)>> {
     let mut found: Vec<(PathBuf, Index)> = Vec::new();
     for record in ls_files(directory, &[&[OsStr::new("--eol")], arguments].concat())?
@@ -213,7 +214,7 @@ fn regular(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
 }
 
-/// Replaces `path` only while it is writable and still holds `expected`, keeping its permissions.
+/// Replaces `path` and keeps its permissions, but only while `path` stays writable and still holds `expected`.
 pub fn replace(path: &Path, expected: &[u8], next: &[u8]) -> Result<bool> {
     let parent = path.parent().context("file has no parent directory")?;
     let permissions = fs::metadata(path)?.permissions();
@@ -283,7 +284,7 @@ pub fn normalize(directory: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     rewrite(directory, Staging::Renormalize, &renormalized(paths))
 }
 
-/// Tracked files whose working-tree bytes contain CRLF that their attributes do not declare, including CRLF the index already holds.
+/// Tracked files whose working-tree bytes contain CRLF their attributes don't declare, including CRLF the index already holds.
 pub fn offending(root: &Path) -> Result<Vec<PathBuf>> {
     let tracked = renormalized(&listed(root)?);
     Ok(pending(root, Staging::Renormalize, &tracked)?
@@ -327,7 +328,7 @@ fn named_file(path: &Path) -> Result<Vec<PathBuf>> {
 }
 
 /// Normalizes the changed files of the work tree at the hook's directory and the file the tool names.
-/// A directory Git cannot inspect is reported on standard error and skipped, so one failure does not fail every tool call.
+/// A directory Git can't inspect goes to standard error and gets skipped, so one failure doesn't fail every tool call.
 pub fn hook(input: &Value) -> Result<Vec<PathBuf>> {
     let directory = match input["cwd"].as_str() {
         Some(directory) => PathBuf::from(directory),

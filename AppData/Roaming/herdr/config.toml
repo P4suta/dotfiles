@@ -1,28 +1,16 @@
-# herdr config.
-# source: AppData/Roaming/herdr/config.toml
-#   -> %APPDATA%\herdr\config.toml (`herdr --help` prints the resolved path)
-# Targets herdr 0.7.5 preview on Windows.
-# Install is handled by run_onchange_after_install-herdr.ps1.tmpl; see [herdr] in .chezmoidata.toml.
-#
-# Only settings that would otherwise be wrong on this host are declared.
-# Theme and keybindings are left at their defaults on purpose.
-# `herdr --default-config` prints every key with its default, commented out.
+# Herdr settings for Windows, declaring only the defaults that fail on this host.
 
-# Suppress the first-run wizard, which would otherwise write this file itself and put it permanently at odds with chezmoi.
+# The first-run wizard would overwrite this file.
 onboarding = false
 
 [terminal]
-# Defaults to $SHELL then /bin/sh, neither of which exists here.
+# Windows lacks the default shell paths.
 default_shell = "pwsh"
 
 [update]
-# Mirrors [herdr].channel in .chezmoidata.toml so the background version check watches the channel the installer actually pulls from.
-# Both sit on preview for herdrdev/herdr#4284; the reason and the way back are documented there.
+# Matches [herdr].channel in .chezmoidata.toml, which herdrdev/herdr#4284 explains.
 channel = "preview"
 
 [ui]
-# Windows defaults to drawing the cursor as terminal content to avoid flicker,
-# but Windows positions IME candidate windows relative to the *native* cursor,
-# so Japanese input lands its candidate list in the wrong place.
-# Force native.
+# Japanese input places its IME candidate window at the native cursor.
 host_cursor = "native"

@@ -43,7 +43,7 @@ fn a_contaminated_file_is_refused_with_a_rescan_and_a_recorded_waiver() {
     );
 }
 
-/// A repository whose `git` is a copy of the wrapper and whose commit hooks run the language gates as installed.
+/// A repository with a copy of the wrapper as `git`, whose commit hooks run the language gates as installed.
 struct Checkout {
     scope: std::path::PathBuf,
     git: std::path::PathBuf,
@@ -223,7 +223,8 @@ fn a_foreign_message_is_refused_with_a_waiver_that_repeats_the_commit() {
     );
 }
 
-/// A hook run by a Git that did not pass through the wrapper cannot know the refused command, so it names the override in its cause instead of guessing a waiver.
+/// A hook run by a Git that didn't pass through the wrapper can't know the refused command.
+/// It names the override in its cause instead of guessing a waiver.
 #[test]
 fn a_language_refusal_outside_the_wrapper_names_the_override_without_a_waiver() {
     let checkout = Checkout::new("unwrapped");
@@ -287,7 +288,7 @@ fn retried(checkout: &Checkout, refused: &Refusal, message: &str) {
     );
 }
 
-/// `--fixup=amend:` and `--fixup=reword:` commits may be empty, and a reword leaves staged changes out, so the retry makes the same commit.
+/// `--fixup=amend:` and `--fixup=reword:` commits may have no changes, and a reword leaves staged changes out, so the retry makes the same commit.
 #[test]
 fn a_refused_fixup_is_retried_as_the_same_kind_of_commit() {
     for kind in ["amend", "reword"] {
@@ -329,7 +330,7 @@ fn a_refused_fixup_is_retried_as_the_same_kind_of_commit() {
     }
 }
 
-/// `-C` copies the author and date of its commit, so the retry records the same authorship.
+/// `-C` copies the authorship and date of its commit, so the retry records the same authorship.
 #[test]
 fn a_refused_reuse_is_retried_with_the_reused_authorship() {
     let checkout = Checkout::new("reuse");
@@ -363,7 +364,7 @@ fn a_refused_reuse_is_retried_with_the_reused_authorship() {
     );
 }
 
-/// `--reset-author` needs `-C`, `-c`, or `--amend`, so the retry drops it with the reuse and still records the committer as the author.
+/// `--reset-author` needs `-C`, `-c`, or `--amend`, so the retry drops it with the reuse and still records the committer's authorship.
 #[test]
 fn a_refused_reuse_with_a_reset_author_is_retried_as_the_committer() {
     for letter in ["-C", "-c"] {
@@ -399,7 +400,7 @@ fn a_refused_reuse_with_a_reset_author_is_retried_as_the_committer() {
     }
 }
 
-/// During a cherry-pick Git takes the author from the picked commit rather than from `-c`, so the retry does too.
+/// During a cherry-pick Git takes the authorship from the picked commit rather than from `-c`, so the retry does too.
 #[test]
 fn a_refused_reuse_during_a_pick_is_retried_with_the_picked_authorship() {
     let checkout = Checkout::new("pick");

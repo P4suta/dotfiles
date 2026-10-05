@@ -1,7 +1,7 @@
 {
-  "revision": "1057236921d29e19bf5ee52a299c5fbb12c685c95e2bb29a4f0fb9a76f067115",
+  "revision": "1eb69379cf4eacfdca9125422c149ef5c4b5fd46610eed962730499f3f79d81f",
   "outcome": "implemented",
-  "reason": "Point the CodeRabbit section at the guard's machine-readable pause scope and the pr-workflow refusals and requirement line instead of restating pause and budget prose. While PR reviews are paused, pr-workflow refuses review requests, a ready transition without the exclusion made for the pause, and an edit that removes a ready PR's ignore line or pause marker, so a PR readied during the pause owes its review again after resumption; the request, pause-exclusion, and requirement cores are proved and their counterexamples refused natively. A draft still becomes ready only after every reported head check passes.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/pull-request/SKILL.md",
     "docs/adr/0004-checked-pull-request-authoring.md",
@@ -13,7 +13,9 @@
     "docs/adr/0008-layered-review-capacity.md",
     "docs/adr/0013-ready-only-after-passing-checks.md",
     "docs/adr/0015-scoped-coderabbit-pause.md",
-    "xtask/src/pr_workflow.rs"
+    "docs/adr/0016-one-writing-standard.md",
+    "xtask/src/pr_workflow.rs",
+    "xtask/src/prose_rules.rs"
   ],
   "revisit": null
 }

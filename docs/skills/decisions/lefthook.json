@@ -1,7 +1,7 @@
 {
-  "revision": "36ece28a9a6e9f791ada99a3dc021b9767d188001e01270418c7cf5ce72e55b5",
+  "revision": "d0b5ee6dd7834c178e2cf921095b7b01a5d2e1d1aaa85082e383c55db9a95c76",
   "outcome": "keep",
-  "reason": "Retain effective-hook discovery, failure propagation, and existing dispatcher preservation; required project commands are shared with CI rather than reimplemented.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/lefthook/SKILL.md"
   ],

@@ -171,7 +171,6 @@ pub fn chezmoi(root: &Path, scope: &Path, config: &Path, destination: &Path) -> 
 }
 
 /// Targets that `chezmoi status` reports as changed since chezmoi last wrote them, from its first column.
-/// A target chezmoi never wrote, such as a file an earlier repository installed, has no record and is taken over instead.
 pub fn externally_changed(status: &str) -> Vec<String> {
     status
         .lines()
@@ -180,8 +179,8 @@ pub fn externally_changed(status: &str) -> Vec<String> {
         .collect()
 }
 
-/// Targets whose source is a `modify_` template, from `chezmoi managed --path-style all --format json`.
-/// Such a template may merge its keys into whatever the client last wrote, so a change made outside chezmoi can be expected there.
+/// Targets with a `modify_` template source, from `chezmoi managed --path-style all --format json`.
+/// Such a template may merge its keys into whatever the client last wrote, so expect changes made outside chezmoi there.
 pub fn merged_targets(listing: &[u8]) -> Result<Vec<String>> {
     let entries: serde_json::Map<String, Value> = serde_json::from_slice(listing)?;
     entries
@@ -256,8 +255,8 @@ fn with_host_key(target: &str, contents: &str) -> Result<String> {
     }
 }
 
-/// Targets changed outside chezmoi since the last application that application would overwrite.
-/// A `modify_` target is exempt only when its rendering keeps every key the host file has.
+/// Targets changed outside chezmoi since the last apply that the next apply would overwrite.
+/// A `modify_` target passes only when its rendering keeps every key the host file has.
 pub fn uncommitted_host_edits(
     root: &Path,
     state: &Path,
@@ -319,7 +318,7 @@ pub fn dropped_host_key_refusal(profile: &str, target: &str) -> String {
     )
 }
 
-/// The refusal for targets changed outside chezmoi that application would overwrite.
+/// The refusal for targets changed outside chezmoi that the next apply would overwrite.
 pub fn host_edit_refusal(
     changed: &[String],
     config: &Path,
@@ -338,7 +337,7 @@ pub fn host_edit_refusal(
     )
 }
 
-/// Forgets which `run_onchange_` and `run_once_` scripts already ran, so the next application runs every script again on the host they provisioned.
+/// Forgets which `run_onchange_` and `run_once_` scripts already ran, so the next apply reruns them.
 pub fn forget_script_runs(
     root: &Path,
     scope: &Path,
@@ -365,7 +364,6 @@ pub fn forget_script_runs(
     Ok(())
 }
 
-/// Scripts are actions rather than state, and an always-run `run_` script would make every verification fail.
 pub fn native_action_arguments(name: &str) -> Vec<&str> {
     if name == "verify" {
         vec![name, "--exclude", "scripts"]
@@ -374,7 +372,7 @@ pub fn native_action_arguments(name: &str) -> Vec<&str> {
     }
 }
 
-/// Packaged tools the rendered scripts and installed entry points require that the profile's platform data does not install.
+/// Packaged tools the rendered scripts and installed entry points require that the profile's platform data omits.
 pub fn unprovisioned(
     profile: Profile,
     platform: &Value,
@@ -422,7 +420,8 @@ pub fn script_order(listing: &[u8]) -> Result<Vec<String>> {
     Ok(before)
 }
 
-/// `chezmoi managed --nul-path-separator` output; its `--format` flag does not apply to relative paths, which are always printed as text.
+/// `chezmoi managed --nul-path-separator` output.
+/// Its `--format` flag ignores relative paths and always prints them as text.
 pub fn managed_paths(stdout: &[u8]) -> Result<Vec<String>> {
     stdout
         .split(|byte| *byte == 0)
@@ -431,7 +430,7 @@ pub fn managed_paths(stdout: &[u8]) -> Result<Vec<String>> {
         .collect()
 }
 
-/// Managed directories with no managed file or symlink beneath them: another platform's tree leaking into this profile.
+/// Managed directories with no managed file or symlink beneath them.
 pub fn empty_directories(directories: &[String], leaves: &[String]) -> Vec<String> {
     directories
         .iter()
@@ -717,7 +716,7 @@ pub fn native_profile() -> Result<Profile> {
     }
 }
 
-/// A setup script a machine-local configuration deliberately leaves out, with the reason that makes the omission reviewable.
+/// A setup script a machine-local configuration leaves out, with the reason that makes the omission reviewable.
 #[derive(Debug, PartialEq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SkippedScript {
@@ -725,7 +724,7 @@ pub struct SkippedScript {
     pub reason: String,
 }
 
-/// `setup.skip` entries, which `.chezmoiignore` removes from application; every entry must name one script target and say why.
+/// `setup.skip` entries, which `.chezmoiignore` keeps chezmoi from applying.
 pub fn declared_skips(data: &Value) -> Result<Vec<SkippedScript>> {
     let Some(entries) = data.pointer("/setup/skip") else {
         return Ok(Vec::new());
@@ -885,7 +884,7 @@ pub fn operate(
                     fs::write(backup.join("previous-state.boltdb"), bytes)?;
                 }
                 execute("apply")?;
-                // Scripts can install programs that templates probe for, so files are rendered once more against the machine they produced before verification.
+                // Scripts can install programs that templates probe for, so render the files again on the resulting machine before verification.
                 let status = chezmoi(root, state, config, destination)
                     .args(["apply", "--exclude", "scripts"])
                     .status()?;
@@ -897,7 +896,6 @@ pub fn operate(
             },
             || {
                 execute("verify").map_err(|error| {
-                    // Name the diverging targets before the transaction restores them, or the evidence is gone.
                     let report = |arguments: &[&str]| {
                         chezmoi(root, state, config, destination)
                             .args(arguments)

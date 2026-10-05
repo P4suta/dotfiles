@@ -1,0 +1,112 @@
+(?i)agents?
+(?i)home director(y|ies)
+(?i)validate[sd]?
+1Password
+ADRs?
+APIs?
+ASCII
+AWS
+Alloy
+App Execution Alias
+Application Default Credentials
+BOM
+BSD
+Blast Radius
+CDROM
+CI
+CJK
+CLIs?
+COM
+CRLF
+CSRs?
+Cargo
+Claude
+Claude Code
+Cloud CLI
+CodeRabbit
+Codex
+DCO
+DISM
+DWORD
+Dev Drive
+Developer ID( Application)?
+Doppler
+EREs?
+GCP
+GHC
+GPG
+Git
+GitHub
+Google Cloud
+IAM
+IMEs?
+ISO
+JSON
+JSSE
+KVM
+Kani
+LF
+Lean
+MAC
+MCP
+MFA
+MSIX
+MSRV
+NAS
+NAT
+NICs?
+NUL
+OCI
+OComment
+OIDC
+OSS
+OTP
+OVMF
+OWNER/REPO
+OpenCode
+OrbStack
+PIDs?
+PINs?
+PKI
+PKIX
+POSIX
+PRs?
+QEMU
+QXL
+Quint
+RDP
+README
+REST
+RFCs?
+RNGs?
+Rust
+SARIF
+SBOM
+SHA(-256)?
+SLSA
+SPDX
+SPICE
+SSH
+Synology Drive
+TDD
+TLA\+
+TLS
+TOML
+TOTP
+TPM
+Tailscale
+UEFI
+URLs?
+UTC
+WSL
+WezTerm
+YAML
+[Ll]efthook
+chezmoi
+domyjob
+dotguard
+gcloud
+herdr
+macOS
+mise
+xtask

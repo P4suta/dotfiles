@@ -26,8 +26,8 @@ jobs:
           BASE: origin/${{ github.base_ref }}
         run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- classify --base "$BASE" >> "$GITHUB_OUTPUT"
 
-  # The required checks always run and report, so a change that needs fewer gates still satisfies the ruleset:
-  # each step is guarded by the gates the classify job selected, and a skipped step is a success.
+  # The required checks always run and report, so a change that needs fewer gates still satisfies the ruleset.
+  # Each step runs only for the gates the classify job selected, and a skipped step counts as a success.
   required:
     name: required (${{ matrix.os }})
     needs: classify

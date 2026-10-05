@@ -3,7 +3,7 @@
 /// How to sign the unsigned commits a push would publish.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Signing {
-    /// The pushed ref is the checked-out one and its only unsigned commit is the tip: amend it.
+    /// The pushed ref has the checked-out commit as its only unsigned commit: amend it.
     Amend,
     /// One branch carries a linear unsigned range: rebase that branch onto the range's base and sign each commit.
     Rebase,
@@ -11,7 +11,7 @@ pub enum Signing {
     Inspect,
 }
 
-/// What a pushed ref is, as far as signing its commits is concerned.
+/// The facts about a pushed ref that decide how to sign its commits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reference {
     /// The local branch `HEAD` points at.
@@ -37,7 +37,7 @@ impl Reference {
 }
 
 /// `refs` counts the pushed refs that carry unsigned commits.
-/// `reference` is that ref, `merges` says its pushed range contains a merge, and `only_tip` that its only unsigned commit is the checked-out commit.
+/// `reference` names that ref, `merges` says its pushed range contains a merge, and `only_tip` says its only unsigned commit sits at the checked-out commit.
 pub fn signing(refs: usize, reference: Reference, merges: bool, only_tip: bool) -> Signing {
     if refs != 1 {
         Signing::Inspect
@@ -53,7 +53,7 @@ pub fn signing(refs: usize, reference: Reference, merges: bool, only_tip: bool) 
 /// The step a refused history change suggests, chosen by the worst refused update.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum History {
-    /// The remote commit is not in this clone: fetch before anything else can be judged.
+    /// This clone lacks the remote commit, so fetch before judging anything else.
     Fetch,
     /// A rewrite: integrate the remote history instead of replacing it.
     Integrate,
@@ -119,9 +119,9 @@ fn a_history_refusal_suggests_the_step_for_its_worst_update() {
 /// What a long option's name means among the spellings a Git command accepts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Spelling {
-    /// The spelling at this index, written in full or as its only completion.
+    /// The spelling at this index, written in full, or as its only completion.
     Is(usize),
-    /// A prefix of several spellings and none in full: Git refuses the command.
+    /// A prefix of more than one spelling and none in full: Git refuses the command.
     Ambiguous,
     /// No spelling starts with it.
     Unknown,
@@ -195,13 +195,13 @@ fn a_long_option_is_its_exact_spelling_or_its_only_completion() {
     kani::cover!(read == Spelling::Unknown);
 }
 
-/// What a gate does with a command line, given whether a rule refuses it and whether every option was read as Git reads it.
+/// What a gate does with a command line, given whether a rule refuses it and whether the gate read every option as Git reads it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {
     Allow,
     /// Refuse and suggest the same command with the refused part changed.
     Suggest,
-    /// Refuse without a suggestion: a command rebuilt from words the gate did not read could do something else.
+    /// Refuse without a suggestion, because a command rebuilt from words the gate didn't read could do something else.
     Withhold,
 }
 
@@ -229,15 +229,15 @@ fn a_suggestion_is_rebuilt_only_from_a_line_read_in_full() {
     kani::cover!(verdict == Verdict::Allow && !read);
 }
 
-/// How `git commit --fixup` was given.
+/// How the command line gave `git commit --fixup`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fixup {
     Absent,
     /// `--fixup=<commit>`.
     Plain,
-    /// `--fixup=amend:<commit>`, which may be empty.
+    /// `--fixup=amend:<commit>`, which may have no changes.
     Amend,
-    /// `--fixup=reword:<commit>`, which ignores staged changes and is empty.
+    /// `--fixup=reword:<commit>`, which ignores staged changes and has none of its own.
     Reword,
 }
 
@@ -248,9 +248,9 @@ pub struct Source {
     pub fixup: Fixup,
     /// `-C` or `-c` named a commit.
     pub reuse: bool,
-    /// `--reset-author` was in effect.
+    /// The command line carried `--reset-author`.
     pub renew: bool,
-    /// `--amend` was in effect.
+    /// The command line carried `--amend`.
     pub amend: bool,
 }
 
@@ -260,7 +260,7 @@ pub struct Source {
 pub struct Retry {
     pub allow_empty: bool,
     pub only: bool,
-    /// The author and date of the commit whose message `-C` or `-c` reused.
+    /// The authorship and date of the commit whose message `-C` or `-c` reused.
     pub authorship: bool,
     /// The `--reset-author` options stay, which Git accepts only with `-C`, `-c`, `--amend`, or during a pick.
     pub reset_author: bool,
@@ -269,19 +269,19 @@ pub struct Retry {
 /// Why no retry repeats a refused commit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Withheld {
-    /// The reused commit's authorship could not be read.
+    /// The gate couldn't read the reused commit's authorship.
     Authorship,
-    /// Whether a pick was in progress, which decides whose authorship a reuse takes, could not be read.
+    /// The gate couldn't tell whether a pick ran, which decides whose authorship a reuse takes.
     Picking,
 }
 
 /// The retry of a refused commit.
-/// `picking` says a cherry-pick or rebase pick was in progress, when the gate could tell, and `known` that the gate read the reused commit's authorship.
-/// During a pick Git takes the authorship from the picked commit unless `--reset-author` is given, whatever `-C` or `-c` named.
+/// `picking` says a cherry-pick or rebase pick ran, when the gate could tell, and `known` says the gate read the reused commit's authorship.
+/// During a pick Git takes the authorship from the picked commit unless the line has `--reset-author`, whatever `-C` or `-c` named.
 ///
 /// # Errors
 ///
-/// The authorship a retry must name, or whether a pick decides it, is unknown.
+/// The gate doesn't know the authorship a retry must name, or whether a pick decides it.
 pub fn commit_retry(source: Source, picking: Option<bool>, known: bool) -> Result<Retry, Withheld> {
     let picking = match picking {
         Some(picking) => picking,
@@ -296,7 +296,7 @@ pub fn commit_retry(source: Source, picking: Option<bool>, known: bool) -> Resul
         allow_empty: matches!(source.fixup, Fixup::Amend | Fixup::Reword),
         only: source.fixup == Fixup::Reword,
         authorship,
-        // Without the reuse and `--amend` the author is the committer, which is what the reset made it.
+        // Without the reuse and `--amend` the authorship already matches the committer, as the reset made it.
         reset_author: !source.reuse || !source.renew || source.amend || picking,
     })
 }
@@ -331,7 +331,7 @@ fn a_commit_retry_keeps_what_its_message_source_implied() {
         );
         assert_eq!(retry.only, fixup == Fixup::Reword);
         assert_eq!(retry.authorship, takes);
-        // A kept reset is one Git accepts, and a dropped one leaves the committer as the author.
+        // Git accepts a kept reset, and a dropped one leaves the committer's authorship.
         if retry.reset_author && source.renew {
             assert!(source.amend || picking == Some(true) || !source.reuse);
         }

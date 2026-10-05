@@ -2,45 +2,39 @@
 name: ci-budget
 description: >-
   Reduce avoidable GitHub Actions runs by verifying coherent changes locally and managing an explicit push hold.
-  Use before authorized pushes or PR updates, when Actions allowance is constrained, or when mapping CI checks to the owner's native machines.
+  Use before authorized pushes or PR updates, when Actions allowance runs low, or when mapping CI checks to the owner's native machines.
 ---
 
-# Local Verification and CI Budget
+# Local verification before pushing
 
-Use local verification to find and fix problems before publishing a coherent change.
-Keep required hosted checks and current-head PR review as the final gates.
-An existing push authorization remains applicable; an active owner-imposed hold is a separate stop that must be explicitly resumed.
+Required hosted checks and the current-head PR review stay the final gates.
+An active owner-imposed push hold overrides any push authorization until the owner explicitly resumes pushes.
 
 ## Prepare locally
 
-Read the repository instructions, current diff, workflow triggers, required jobs, and project check entry points.
-Map each affected CI job to its authoritative local command and required OS, architecture, environment, or service.
-Run the available equivalents on the Mac, Linux, and Windows through `multi-machine` and `domyjob` when those platforms are affected.
-Use pinned versions and the existing build caches.
-Report hosted-only prerequisites such as GitHub event permissions, OIDC, environment approval, and publication separately; a local build does not exercise them.
-Local verification does not authorize signing, publication, paid service calls, or registering these machines as self-hosted runners.
+Read the diff, workflow triggers, required jobs, and project check entry points.
+Map each affected CI job to its local command and its required OS, architecture, environment, or service.
+Run the equivalents on the affected Mac, Linux, and Windows hosts through `multi-machine` and `domyjob`.
+Report hosted-only prerequisites as unverified locally, such as GitHub event permissions, OIDC, environment approval, and publication.
+Local verification grants no signing, publication, paid service calls, or self-hosted runner registration.
 
-Fix related findings in one coherent update and rerun the affected checks.
-Reuse successful evidence for the same source and environment until a new change or unresolved failure invalidates it.
-Run cheap relevant checks first, and use `resource-coordination` before an expensive campaign.
-Use `reliability` for intermittent failures; preserve their evidence instead of repeatedly pushing until CI passes.
+Reuse passing evidence for the same source and environment until a change or failure invalidates it.
+Run cheap checks first, and use `resource-coordination` before an expensive campaign.
+Use `reliability` for intermittent failures instead of pushing until CI passes.
 
 ## Control publication
 
-Before every push, inspect the effective hooks and the machine-local hold described in [push control](references/push-control.md).
-Agent workflows must honor the marker even when a native Git client or existing repository has incomplete hook coverage; do not claim such a client is mechanically protected.
-Do not remove a hold, bypass hooks, change CI requirements, or add skip directives to make a push succeed.
-A calendar change, an old notification, or broad prior push permission does not resume an active hold.
-If allowance is genuinely uncertain after a budget warning, inspect current owner billing evidence before a costly hosted run rather than guessing from repository visibility.
+Before every push, inspect the effective hooks and the machine-local hold in [push control](references/push-control.md).
+Honor the marker even where a Git client lacks the hook.
+Never remove a hold, bypass hooks, change CI requirements, or add skip directives to make a push succeed.
+Only the owner's explicit instruction resumes a hold.
+Before a costly hosted run with uncertain allowance, check the owner's [Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
 
-Continue local work, validation, and authorized commits during a hold.
-Fetch before integration and publication, inspect divergence, and keep changes in small logical branches or PRs.
-Avoid accumulating unrelated work into one large PR while publication is delayed.
-A local commit does not imply an immediate push.
-Publish a complete reviewable update after local checks and applicable authorization, then observe its existing run instead of launching duplicates.
-Inspect push, pull_request, tag, and merge triggers so one publication's full hosted effects are understood.
+Continue local work, verification, and authorized commits during a hold.
+A local commit implies no push.
+Fetch before publishing, then publish one complete reviewable update and follow its run instead of launching duplicates.
+Inspect push, `pull_request`, tag, and merge triggers for the hosted effects of one publication.
 
-Complete the repository's enabled automatic reviews of the final pushed head under its review policy.
-An unresolved hold or hosted gate remains pending; report the verified local result and the specific blocked publication step.
-Check current [Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions) when allowance or runner costs matter.
-[Skipped required workflows can remain pending](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs), so skipping is not a substitute for passing them.
+Wait for the automatic reviews of the final pushed head.
+Report an unresolved hold or hosted gate as pending with the local result and the blocked step.
+[Skipped required workflows stay pending](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs).

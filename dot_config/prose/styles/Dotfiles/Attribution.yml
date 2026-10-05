@@ -1,0 +1,10 @@
+extends: existence
+message: "State the change itself instead of who asked for it: '%s'."
+level: error
+ignorecase: true
+tokens:
+  - as (?:you |the user |the owner |the maintainer |the reviewer )?(?:requested|asked|instructed|suggested|directed)
+  - (?:per|at|on) (?:your|the user's|the owner's|the maintainer's|the reviewer's) (?:request|instructions?|suggestion|direction|behalf)
+  - (?:you|the user|the owner|the maintainer|the reviewer) (?:asked|requested|wanted|instructed|suggested)
+  - (?:requested|asked for|suggested) by (?:you|the user|the owner|the maintainer|the reviewer)
+  - (?:following|after) (?:your|the user's|the owner's|the maintainer's|the reviewer's) (?:request|feedback|instructions?|suggestion)

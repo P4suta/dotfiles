@@ -12,14 +12,14 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-/// The base for the default branch, and for a branch whose PR is unknown.
+/// The base for the default branch and for a branch with no known PR.
 pub const BASE: &str = "origin/main";
 pub const DEFAULT_BRANCH: &str = "main";
 
 /// Where this host keeps the state that the inspection reads.
 pub struct Environment {
     pub home: PathBuf,
-    /// `TEMP` on Windows, `None` when it is unset; the system temporary directory on other hosts.
+    /// `TEMP` on Windows, `None` when unset, and the system temporary directory on other hosts.
     pub temp: Option<PathBuf>,
     pub cargo_target: Option<PathBuf>,
     pub offline: bool,
@@ -68,14 +68,14 @@ pub struct Observed {
     pub host: HostStatus,
     pub branch: Option<String>,
     pub changed_files: usize,
-    /// The ref the branch is compared with: the PR's base branch when a PR exists, otherwise `origin/main`.
+    /// The ref to compare the branch with: the PR's base branch when a PR exists, otherwise `origin/main`.
     pub base: String,
     pub behind_base: u64,
     pub ahead_base: u64,
     pub upstream: Option<String>,
     /// The upstream commit the inspection saw, which a force-push leases.
     pub upstream_commit: Option<String>,
-    /// The upstream tip was once on the local branch, so every upstream commit passed through it.
+    /// The local branch once held the upstream tip, so every upstream commit passed through it.
     pub upstream_held: bool,
     pub unpushed: u64,
     /// Commits on the upstream that `HEAD` lacks.
@@ -148,7 +148,7 @@ pub struct Recommendation {
 }
 
 /// An unset `TEMP` comes first, then a required directory on an unmounted volume such as the Dev Drive, then a missing temporary directory.
-/// The volume is the path's root, so only a Windows drive letter can be missing.
+/// The volume names the path's root, so only a Windows drive letter can go missing.
 pub fn host_status(temp: Option<&Path>, cargo_target: Option<&Path>) -> HostStatus {
     let Some(temp) = temp else {
         return HostStatus::TempUnset;
@@ -216,7 +216,7 @@ pub fn github_repository(url: &str) -> Option<String> {
     (!owner.is_empty() && !name.is_empty() && !name.contains('/')).then(|| path.to_owned())
 }
 
-/// Skills whose tracked decision is missing or bound to another revision, and those whose current decision lacks its reason or evidence.
+/// Skills whose tracked decision has no entry or binds another revision, and those whose current decision lacks its reason or evidence.
 pub fn decision_backlog(root: &Path) -> Result<(Vec<String>, Vec<String>)> {
     let tree = root.join("dot_agents/skills");
     if !tree.is_dir() {
@@ -362,7 +362,7 @@ fn divergence(root: &Path, other: &str, next: &str) -> Result<(u64, u64)> {
     Ok((count(behind)?, count(ahead)?))
 }
 
-/// Whether `commit` is reachable from an entry of the branch's reflog, that is, whether the branch once held it.
+/// Whether an entry of the branch's reflog reaches `commit`, which means the branch once held it.
 fn held_by_branch(root: &Path, branch: &str, commit: &str) -> Result<bool> {
     let reflog = git(
         root,
@@ -706,7 +706,8 @@ pub fn recommend(state: Observed) -> Recommendation {
     }
 }
 
-/// Runs an executable step and returns what it printed; any other step is refused with its summary and command.
+/// Runs an executable step and returns what it printed.
+/// Any other step gets a refusal with its summary and command.
 pub fn perform(root: &Path, recommendation: &Recommendation) -> Result<Option<String>> {
     let state = &recommendation.state;
     match (recommendation.action, &state.host) {
@@ -747,7 +748,8 @@ fn report(recommendation: &Recommendation) -> Result<()> {
     Ok(())
 }
 
-/// Prints the recommendation as one JSON line on stdout and a summary on stderr; `--execute` first runs an executable step and then reports the step after it.
+/// Prints the recommendation as one JSON line on stdout and a summary on stderr.
+/// `--execute` first runs an executable step and then reports the step after it.
 pub fn run(root: &Path, offline: bool, execute: bool) -> Result<()> {
     let environment = Environment::current(offline)?;
     let recommendation = recommend(inspect(root, &environment)?);

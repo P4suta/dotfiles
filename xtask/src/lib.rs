@@ -19,6 +19,8 @@ pub mod pr_rules;
 pub mod pr_workflow;
 pub mod profile_rules;
 pub mod profiles;
+pub mod prose;
+pub mod prose_rules;
 pub mod quality;
 #[path = "../../guard/src/refusal.rs"]
 pub mod refusal;
@@ -121,7 +123,7 @@ pub fn split_frontmatter(text: &str) -> Result<(&str, &str)> {
     Ok((header, body))
 }
 
-/// Windows `canonicalize` returns verbatim drive paths (`\\?\C:\...`) that cargo rejects and chezmoi rewrites into `//?/` forms; the same drive path without the prefix is equivalent.
+/// Windows `canonicalize` returns verbatim drive paths that cargo rejects.
 pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
     match path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
         Some(rest)
@@ -134,7 +136,7 @@ pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
     }
 }
 
-/// `canonicalize` without the Windows verbatim drive prefix, so every comparison and every path handed to another tool uses one spelling.
+/// `canonicalize` without the Windows verbatim drive prefix.
 #[allow(clippy::disallowed_methods)]
 pub fn canonical(path: &Path) -> Result<PathBuf> {
     Ok(without_verbatim_prefix(&path.canonicalize()?))

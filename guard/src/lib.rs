@@ -1,9 +1,9 @@
-//! dotguard — the local policy gate, as a library.
+//! The library behind the dotguard binaries.
 //!
-//! The crate builds three binaries: `dotguard` (the git policy gate behind the global hooks and the `~/.local/bin/git` wrapper), `reaper` (the two launchd maintenance agents, installed under their historical names so the plists never notice the migration), and `herdr-agent` (Herdr's own ssh-agent, loaded from 1Password once).
-//! Everything they share — git location, the hook PATH, the bypass ledger — lives here once.
+//! The crate builds `dotguard`, the git policy gate behind the global hooks and the `~/.local/bin/git` wrapper.
+//! It also builds `reaper`, the two launchd maintenance agents, and `herdr-agent`, the ssh-agent for Herdr that loads SSH keys from 1Password.
 //!
-//! This library has no consumers outside the crate (`publish = false`), so `must_use` annotations on every getter would be ceremony without a reader; the binaries are the readers, and they read attentively.
+//! Only the binaries of this crate consume the library, so getters skip `must_use`.
 #![allow(clippy::must_use_candidate)]
 
 pub mod attribution;

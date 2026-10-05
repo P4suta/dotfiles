@@ -1,54 +1,54 @@
-# Commands and Generation
+# Commands and generation
 
-The dotfiles Rust xtask provides the installed `pr-workflow` executable and the same implementation under its `pr-workflow` subcommand.
-Install through the maintained `mise run install:pr-workflow` task from the reviewed dotfiles checkout.
-Use the installed native executable from any destination repository; it requires the destination host's own authenticated `gh` session.
-The command always takes an exact `OWNER/REPO` and never infers a publication target.
-Its GitHub host is `github.com`, including when another `GH_HOST` is inherited.
+The dotfiles Rust xtask provides the installed `pr-workflow` executable.
+Install it with `mise run install:pr-workflow`.
+`check`, `create`, `edit`, and `issue` also need `mise run install:prose` for a personal destination.
+The command always takes an exact `OWNER/REPO` and uses `github.com` even under an inherited `GH_HOST`.
 
 ## Issue-first preparation
 
-The [global policy](../assets/workflow-policy.json) is compiled into the maintained executable, so its ownership rule applies across repositories without a repo-local override.
-Changing the personal owners requires reviewing that dotfiles source and reinstalling the executable.
-The destination's live owner login and numeric ID must agree with the policy; fork status keeps personal forks under upstream contribution rules.
-Admin or collaborator permissions do not make a repository personal.
+The executable compiles in the [global policy](../assets/workflow-policy.json), so changing personal owners means reviewing that source and reinstalling.
+The destination's live owner login and numeric ID must match the policy.
+Personal forks follow upstream contribution rules, and collaborator permissions never make a repository personal.
 
 ```console
 pr-workflow start --repo P4suta/project --issue 23
 pr-workflow start --repo upstream/project
 ```
 
-Preparation is read-only and checks the issue before implementation.
-Use `gh issue view` to read its problem, scope, and acceptance criteria; the command checks existence, identity, open state, and mechanically incomplete content.
-It does not require fixed issue headings or assess the quality of the prose.
-Issue creation is a separate authorized `gh issue create` operation; the checker never opens an issue automatically.
+`start` only reads and never opens an issue.
+`issue check`, `create`, and `edit` refuse an empty or unfinished document, and for a personal non-fork destination a title or body that fails the prose checker.
 
-For personal non-fork repositories, pass `--issue NUMBER` to create, edit, ready, and live checks, and put `Closes #NUMBER.` or an equivalent GitHub closing reference in the PR body.
-Full issue URLs and Markdown links are accepted only for the selected issue in the exact destination.
-Comments, code examples, quoted instructions, PR numbers, closed issues, and another repository's issue do not satisfy the prerequisite.
-An external repository needs no personal issue prerequisite; if `--issue` is supplied, that selected open issue and closing reference are still checked.
+```console
+pr-workflow issue check --repo P4suta/project --title "Keep edits" --body-file issue.md
+pr-workflow issue create --repo P4suta/project --title "Keep edits" --body-file issue.md
+pr-workflow issue edit --repo P4suta/project --number 23 --title "Keep edits" --body-file issue.md
+```
 
-## Authentication and API budget
+For personal non-fork repositories, pass `--issue NUMBER` to create, edit, ready, and live checks, and put `Closes #NUMBER.` or another GitHub closing reference in the PR body.
+Full issue URLs and Markdown links count only for the selected issue in the exact destination.
+Comments, code examples, quoted instructions, PR numbers, closed issues, and other repositories' issues fail the prerequisite.
+An external repository needs no personal issue, but the command still checks a supplied `--issue`.
 
-Online operations first read the authenticated `user` endpoint through the host's existing `gh` session.
-Successful access to a public repository alone does not establish authentication.
-Every REST prerequisite response includes headers; missing or invalid quota evidence and a remaining count below the policy's nonzero reserve stop further work.
-These reads run serially, authenticate once per command, and never add a separate quota poll or automatic retry.
-Offline document checks use no API calls or authentication.
+## Authentication and quota
 
-GitHub's [REST rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) distinguish authenticated usage from the smaller anonymous allowance and also impose secondary limits.
-Use actual response headers and diagnostics rather than assuming an exact account-wide remaining count.
-The reserve protects this command's REST preflight; `gh` may also use GraphQL, and other consumers or concurrent operations can exhaust either resource afterward.
-The command does not promise immunity from rate limits, intercept other tools, or replay an uncertain mutation.
-Stop on `403`, `429`, `Retry-After`, or exhausted quota, and follow the provider's indicated wait before a deliberate later attempt.
+Online operations first read the authenticated `user` endpoint.
+Missing or invalid quota headers, or a remaining count below the policy's nonzero reserve, stop further work.
+Reads run serially with no quota poll or automatic retry.
+Offline document checks need no authentication.
+Without fork status, an offline check applies the writing standard to every repository of a personal owner.
+`create`, `edit`, and the live check apply it only to a personal non-fork destination.
+
+GitHub [REST rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) include secondary limits.
+Trust response headers, never an assumed remaining count.
+The reserve protects only this command's preflight, and the command never replays an uncertain mutation.
+Stop on `403`, `429`, `Retry-After`, or exhausted quota, and wait as the provider directs.
 
 ## Local authoring
 
-Prepare a UTF-8 body file following the destination template or the default `Why`, `Changes`, and `Validation` structure.
-The body must contain actual content outside HTML comments.
-Known unfinished markers such as standalone or labelled `TODO`, `TBD`, and `FIXME`, named fields such as `{{description}}`, `[insert ...]`, and `<description>` are refused; fill them in before publishing.
-The scanner identifies these markers mechanically and does not assess natural-language completeness.
-Fenced and inline code examples, ordinary mentions of these words, collapsible HTML sections, and GitHub Actions expressions remain valid.
+Prepare a UTF-8 body file that follows the destination template or the default `Why`, `Changes`, and `Validation` structure.
+The command refuses `TODO`, `TBD`, and `FIXME` markers and named fields such as `{{description}}`, `[insert ...]`, and `<description>`.
+Code, ordinary mentions, collapsible HTML sections, and GitHub Actions expressions stay valid.
 
 ```console
 pr-workflow check --repo OWNER/REPO --title "fix: preserve edits" --body-file body.md
@@ -58,41 +58,38 @@ pr-workflow ready --repo OWNER/REPO --pr 17
 pr-workflow check --repo OWNER/REPO --pr 17 --final
 ```
 
-Creation always uses draft in the default `local` mode, even when the document already passes validation.
-There is no local flag to create a ready PR directly.
-`ready` reads the current title, body, state, and head check rollup from GitHub and requires an open draft with an accepted document and only passing checks.
-`edit` replaces title and body together; it does not change draft state.
-Local-file `check` never contacts GitHub, and live `check --pr` is read-only.
-An offline document check does not satisfy the live issue prerequisite.
-Create and edit send an owned temporary copy of the checked body with `gh --body-file`, so a later change to the input file cannot alter the published bytes.
+The default `local` mode always creates a draft.
+`ready` requires an open draft with an accepted document and only passing head checks.
+`edit` replaces title and body together and leaves draft state unchanged.
+Local-file `check` never contacts GitHub and leaves the live issue prerequisite unmet, and `check --pr` only reads.
 
 ## CodeRabbit generation
 
 Complete local checks before one budget-qualified CLI review of an initial substantive change.
-`coderabbit --guard-status --json` reports the owner's pause scope: `reviews.pr` and `reviews.cli` are each `paused` or `allowed`.
-While PR reviews are paused, CodeRabbit generation is refused in create, edit, and ready, and an edit cannot remove the `@coderabbitai ignore` line or the `<!-- coderabbit-pause -->` line of a ready PR.
-`ready` then requires the standalone lines `@coderabbitai ignore` and `<!-- coderabbit-pause -->`, so the transition does not start an automatic review and the review is owed again after resumption.
-An ignore line without the pause marker is a standing exclusion.
-The live check and `ready` print whether a current-head CodeRabbit PR review is required, required again after the pause, excluded, or not required during the pause.
-The guard enforces the CLI budget and pause itself; an unavailable CLI allowance is a skipped local review with its actual reason, not a clean review.
+`coderabbit --guard-status --json` reports the owner's pause scope: `reviews.pr` and `reviews.cli` each read `paused` or `allowed`.
+When the owner pauses PR reviews, create, edit, and ready refuse CodeRabbit generation, and an edit must keep the `@coderabbitai ignore` line and the `<!-- coderabbit-pause -->` line of a ready PR.
+`ready` then requires the standalone lines `@coderabbitai ignore` and `<!-- coderabbit-pause -->`, so the transition starts no automatic review and the PR needs its review again after resumption.
+An ignore line without the pause marker stands as a permanent exclusion.
+The live check and `ready` print whether the current head needs a CodeRabbit PR review, needs one again after the pause, has an exclusion, or needs none during the pause.
+The guard enforces the CLI budget and pause itself, and an unavailable CLI allowance counts as a skipped local review with its actual reason, never as a clean review.
 
-CLI, IDE, PR reviews, chat, and paid add-ons have separate usage boundaries.
-Use [official PR quota guidance](https://docs.coderabbit.ai/management/rate-limits), including an authorized `@coderabbitai rate limit` comment which does not start a review.
-Request at most one such status per hour, inspect the existing response with bounded reads, and never trigger a review to discover capacity.
-Only a fresh numeric observation for the correct developer, organization, and pool can establish a reserve; a response saying reviews are available does not provide it.
-The documented Review Usage dashboard contains observed historical rates and is not a reservation of current capacity.
-The Advanced plan's 0–49-review activity band determines the PR refill rate, not a weekly PR allowance, and does not include the separate CLI pool.
-Apply the same layered budget to a verified adaptive threshold as well as the hourly quota: a confirmed highest-band threshold of 49 gives a budget of 35 events per rolling 168 hours.
-Confirm the actual applicable window and current counts; the official policy can use 24-hour or seven-day activity, so the seven-day calculation alone cannot guarantee an unchanged refill rate.
-Hold ready publication, generation, and pushes that would start an automatic PR review when the required numeric capacity is unknown.
-Report the reason and reconsideration time; after a one-hour hold, recheck once rather than assuming that the allowance has refilled or automatically pushing.
+CLI reviews, IDE reviews, PR reviews, chat, and paid add-ons have separate usage pools.
+Check PR quota with the [official guidance](https://docs.coderabbit.ai/management/rate-limits), including an authorized `@coderabbitai rate limit` comment, which starts no review.
+Request at most one such status per hour and never trigger a review to discover capacity.
+Only a fresh numeric observation for the correct developer, organization, and pool establishes a reserve, and a response that says reviews exist gives none.
+The Review Usage dashboard shows historical rates, not current capacity.
+The Advanced plan's 0–49-review activity band sets the PR refill rate, not a weekly PR allowance, and excludes the CLI pool.
+Apply the same layered budget to a verified adaptive threshold and the hourly quota.
+A confirmed highest-band threshold of 49 gives 35 events per rolling 168 hours.
+Confirm the applicable window and current counts, because the official policy can use 24-hour or seven-day activity.
+Hold ready publication, generation, and pushes that would start an automatic PR review while the required capacity stays unknown, and report the reason and reconsideration time.
+After a one-hour hold, recheck once instead of pushing on a timer.
 Keep paid usage inactive and honor an owner-imposed pause until the owner resumes.
-The CLI guard enforces its managed entry points, while these publication decisions remain an agent obligation; ordinary Git and GitHub clients are not intercepted by this PR command.
-Other clients can spend service capacity after a snapshot, so account-wide guarantees require service-enforced limits or a common reservation gateway.
+The CLI guard enforces its managed entry points, but these publication decisions stay an agent obligation, and ordinary Git and GitHub clients bypass this PR command.
+Other clients can spend capacity after a snapshot, so account-wide limits need service enforcement or a common reservation gateway.
 
-Use the standard placeholders documented in the [official configuration reference](https://docs.coderabbit.ai/reference/configuration).
-Prepare the summary request as its own line and retain the required template fields and factual validation results.
-The explicit mode permits only the exact title placeholder and standard standalone summary request, alongside otherwise completed content.
+Use the standard placeholders from the [official configuration reference](https://docs.coderabbit.ai/reference/configuration).
+Put the summary request on its own line beside otherwise completed content.
 
 ```console
 pr-workflow check --repo OWNER/REPO --generation coderabbit --title "@coderabbitai" --body-file generation.md
@@ -101,22 +98,20 @@ pr-workflow ready --repo OWNER/REPO --generation coderabbit --pr 17
 pr-workflow check --repo OWNER/REPO --pr 17 --final
 ```
 
-CodeRabbit creation normally opens the PR for review and generation; use `--draft` if the authorized task requires a draft.
-For an existing draft containing the standard requests, explicit CodeRabbit `ready` permits the requests to initiate the normal review workflow.
-It is a generation transition, not final validation.
-The final check rejects remaining placeholders, including with `--generation coderabbit --final`.
-Inspect the generated document for destination rules, intent, and truthful validation results, then use checked `edit` for authorized corrections.
-Use [the configuration example](../assets/coderabbit.yaml) only when configuration work is authorized, merging it with the destination's existing rules.
-Publishing the PR or installing this skill does not authorize changing organization or account settings.
-The example places the summary in the description.
-If the destination instead places it in the walkthrough comment, inspect that generated summary and transfer it into the body with checked `edit` before final validation.
+CodeRabbit creation opens the PR for review.
+Pass `--draft` when the task requires a draft.
+Explicit CodeRabbit `ready` on a draft starts generation and skips final validation.
+The final check rejects remaining placeholders.
+Check the generated document for destination rules, intent, and truthful validation results, then correct it with `edit` when authorized.
+Use [the configuration example](../assets/coderabbit.yaml) only for authorized configuration work, merged with the destination's existing rules.
+The example puts the summary in the description.
+If the destination uses the walkthrough comment, copy that summary into the body with `edit` before final validation.
 
 ## Destination title exception
 
 When an upstream project requires another format, pass `--title-policy policy.json` to every relevant command.
-The JSON is limited to the named repository and cites the rules that justify disabling the Conventional Commits check.
-Nonempty single-line titles and unfinished-placeholder checks remain required.
-The agent must check the upstream format itself; the exception does not mechanically enforce a replacement grammar.
+The JSON names one repository and cites the rules that justify turning off the Conventional Commits check.
+Nonempty single-line titles and placeholder checks still apply.
 
 ```json
 {
@@ -126,13 +121,7 @@ The agent must check the upstream format itself; the exception does not mechanic
 }
 ```
 
-## Evidence and effects
+## Boundaries
 
-The shared transition core has source-bound Kani proofs for rejection, local draft creation, ready eligibility, and the passing-check requirement.
-Native process tests exercise argument boundaries, checked file copies, invalid documents, custom destination rules, live PR parsing, and failed `gh` operations.
-The production issue-scope and publication decisions have Kani proofs, including refusal in both generation modes and rejection controls.
-Native tests exercise real CLI/process parsing with isolated GitHub fixtures and verify that rejected prerequisites never invoke a PR mutation.
-GitHub authorization, remote concurrency, service generation, and validation-claim truth remain external boundaries.
-Live metadata is inspected immediately before a mutation; GitHub can still change an issue or repository afterward, so read back the result and do not claim a remote atomic transaction.
-Avoid concurrent document edits during `ready`; `gh` and GitHub do not provide a compare-and-swap transition for the inspected title and body.
-Read back the result and report any divergence or incomplete generation.
+GitHub can change an issue or repository after the pre-mutation inspection, so read back the result and claim no remote atomic transaction.
+Avoid concurrent document edits during `ready`, because GitHub offers no compare-and-swap for the inspected title and body.

@@ -1,4 +1,4 @@
-//! The pre-push and post-commit gates against real repositories: each refusal reaches standard error as one complete record.
+//! The pre-push and post-commit gates in real repositories: each refusal reaches standard error as one complete record.
 
 use dotguard::refusal::Refusal;
 use std::io::Write;
@@ -65,7 +65,7 @@ impl Repository {
     }
 
     /// Records an unsigned commit with plumbing, so no hook runs before the gate under test.
-    /// Signing is configured only for the gate, so the fixture commits stay unsigned.
+    /// Only the gate has signing configured, so the fixture commits stay unsigned.
     fn commit(&self, file: &str, parents: &[&str]) -> String {
         std::fs::write(self.path().join(file), file).unwrap();
         self.git(&["add", file]);
@@ -187,7 +187,7 @@ fn one_linear_unsigned_branch_is_rebased_onto_the_parent_of_its_oldest_unsigned_
     assert_eq!(refused.evidence.len(), 2);
 }
 
-/// An amend moves only the checked-out branch, so a tag at the checked-out commit is listed rather than amended.
+/// An amend moves only the checked-out branch, so the refusal lists a tag at the checked-out commit instead of amending it.
 #[test]
 fn an_unsigned_tag_at_the_checked_out_commit_is_listed_instead_of_amended() {
     let (repository, base) = published("tag");

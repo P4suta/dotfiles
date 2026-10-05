@@ -1,36 +1,36 @@
-# Global Personal Issue Prerequisite
+# Global personal issue prerequisite
 
-Status: Accepted.
+Status: accepted.
 
 ## Context
 
-Personal PRs need a recorded problem and bounded scope before implementation.
-Per-repository rules duplicate this personal requirement, while service review alone does not prevent local publication without an issue.
-External repositories and personal forks must retain the destination project's contribution policy.
+A personal PR needs a recorded problem and a bounded scope before implementation.
+External repositories and personal forks keep the destination project's contribution policy.
 
 ## Decision
 
 Compile one reviewed owner policy into the shared `pr-workflow` executable.
-Read exact GitHub repository metadata and require the configured login and numeric owner identity to agree.
-Apply the personal prerequisite only to owned repositories that are not forks, independently of administrative permissions.
-Before personal PR creation, editing, ready transitions, or a live final check, require a selected open issue in that destination and a visible closing reference.
-Keep local-file document checks offline, and provide a read-only `start` command for issue-first preparation.
-Require a live authenticated user, inspect quota headers on serialized REST reads, preserve a nonzero reserve, and avoid automatic retries or stale publication caches.
-Connect the shared skill and global client instructions to preparation and evidence-based scope review.
+Read exact GitHub repository metadata, and require the configured login and the numeric owner identity to agree.
+Apply the prerequisite only to owned repositories that fork nothing, whatever the administrative permissions.
+Before a personal PR's creation, edit, ready transition, or live final check, require a selected open issue in that destination and a visible closing reference.
+Keep local-file document checks offline, and offer a read-only `start` command to prepare from an issue.
+Require a live authenticated user, read quota headers on serialized REST reads, keep a nonzero reserve, and never retry automatically or publish from a stale cache.
+Point the shared skill and global client instructions at preparation and evidence-based scope review.
 
 ## Assurance and boundaries
 
-The production `issue_gate` and `plan` functions are verified by required source-bound Kani harnesses, with reachable accepted and refused cases and an intentionally false issue-bypass claim.
-Native required process tests verify GitHub response parsing, exact issue identity, fork handling, visible Markdown references, and absence of PR mutations on rejection.
-The required quota proof covers the production reserve predicate; native tests cover authentication refusal, invalid or low quota headers, API failures, and one authentication attempt per command.
-These tests use isolated API responses; authenticated GitHub metadata truth, authorization, and concurrent remote changes remain external assumptions.
-Read live prerequisites immediately before publication and inspect the published result; the API does not provide a combined issue-validation and PR-publication transaction.
-The checker does not prove issue timing, issue quality, scope compliance, or validation-claim truth.
-The shared skill verifies those properties from the issue, actual diff, and execution evidence.
-The dedicated command is the enforcement boundary; direct `gh` invocation is not intercepted.
-REST preflight reserves do not prove future GraphQL capacity or prevent other consumers and secondary limits from exhausting the account budget.
+Required source-bound Kani harnesses prove the production `issue_gate` and `plan` functions, with reachable accepted and refused cases and a false issue-bypass control.
+The quota proof covers the production reserve predicate.
+Required native process tests cover GitHub response parsing, exact issue identity, fork handling, and visible Markdown references.
+They also cover authentication refusal, invalid or low quota headers, API failures, and the absence of mutations on refusal.
+These tests use isolated API responses, so the truth of authenticated GitHub metadata, authorization, and concurrent remote changes stay external assumptions.
+The API offers no transaction that joins issue checks and publication, so the command reads live prerequisites right before publishing and inspects the result.
+The checker proves nothing about issue timing, issue quality, scope compliance, or the truth of validation claims.
+The shared skill checks those from the issue, the diff, and execution evidence.
+The dedicated command forms the enforcement boundary, and a direct `gh` call bypasses it.
+A REST preflight reserve neither proves future GraphQL capacity nor stops other consumers and secondary limits from exhausting the account budget.
 
 ## Reconsideration
 
-Revisit the owner policy when account identity changes or another personal owner is explicitly added.
-Revisit the boundary when a supported native client hook can enforce the same command without parsing shell text or altering unrelated GitHub operations.
+Revisit the owner policy when the account identity changes or another personal owner joins.
+Revisit the boundary when a native client hook can enforce the same command without parsing shell text or altering unrelated GitHub operations.

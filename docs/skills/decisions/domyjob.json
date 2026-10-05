@@ -1,7 +1,7 @@
 {
-  "revision": "4ae1cc4413522f51c949006b532161955e6f04522e8d312fd7d068e9437ac26f",
+  "revision": "886172a5ea7bb78819eb970b8f61cf00d33b6ad760b8cb922eeadf73daf16c3e",
   "outcome": "keep",
-  "reason": "Retain a small discovery route to the project-owned current command manual; stable job identities and snapshot execution differ from broader synchronization policy.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/domyjob/SKILL.md"
   ],

@@ -1,7 +1,7 @@
 {
-  "revision": "47f36d26fc7c74ff1a0156fd4c4158e02694be289e0e9b9462fc6c45232087b8",
+  "revision": "1bdb81b72101db03b54625b38a4635f742e183f2da9ddc7b27f65668e824dae9",
   "outcome": "keep",
-  "reason": "Retain maintained typed procedural automation as the implementation boundary; thin native client adapters and existing tool invocation remain composition code.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/rust-tooling/SKILL.md"
   ],

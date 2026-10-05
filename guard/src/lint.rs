@@ -1,19 +1,12 @@
-//! The repository's own render-then-validate gates, formerly `scripts/lint-*.sh`.
+//! Render-and-check gates for the files of this repository.
 //!
-//! Every gate follows one shape: a chezmoi template is rendered first — so a broken Go template is caught by the same gate that catches a broken payload — and the rendered bytes are handed to the validator that owns the format.
-//! Static files go to the validator directly, and `taplo fmt --check` additionally holds them to a canonical formatting, which a Go template cannot be kept to.
-//!
-//! Validators stay external on purpose: `taplo`, `plutil`, `jq`, `yamllint` (via `uvx`), `nu`, `herdr` and `git config` each *are* the parser their ecosystem trusts.
-//! What moved into Rust is the dispatch — which files render, which init templates need `--init`, where the temp file lives — because that is where the shell versions were subtle and untested.
-//!
-//! Bootstrap-safe, all of them: a validator that is not installed yet downgrades to a note and exit 0, the same contract the shell gates kept — a missing dev tool must never block a commit.
+//! A missing validator downgrades to a note and exit 0, so a missing tool never blocks a commit.
 
 use crate::locate;
 use crate::realgit;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-/// `dotguard lint <kind> <files…>`.
 pub fn dispatch(args: &[String]) -> i32 {
     let Some(kind) = args.first().map(String::as_str) else {
         eprintln!(
@@ -53,14 +46,13 @@ fn existing(files: &[String]) -> Vec<&String> {
         .collect()
 }
 
-/// Extension comparison through `Path::extension`, so the case-sensitivity question is answered once, in one place.
 fn has_ext(path: &str, ext: &str) -> bool {
     Path::new(path)
         .extension()
         .is_some_and(|e| e.to_string_lossy() == ext)
 }
 
-/// Render `f` with chezmoi and return the bytes; non-templates pass through.
+/// Renders `f` with chezmoi and returns the bytes, passing other files through.
 fn render(f: &str) -> Result<Vec<u8>, ()> {
     if !has_ext(f, "tmpl") {
         return std::fs::read(f).map_err(|_| ());
@@ -85,7 +77,7 @@ fn render(f: &str) -> Result<Vec<u8>, ()> {
     }
 }
 
-/// A private temp file with a load-bearing suffix: validators dispatch on the extension, and BSD `mktemp` has no `--suffix`.
+/// A private temp file with the suffix that validators dispatch on, because BSD `mktemp` lacks `--suffix`.
 fn temp_file(ext: &str, bytes: &[u8]) -> Option<PathBuf> {
     static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -109,7 +101,6 @@ fn is_init_config(p: &Path) -> bool {
     )
 }
 
-/// Runs the validator, showing its output only when it fails.
 fn run_quiet(cmd: &mut std::process::Command, file: &str, what: &str) -> bool {
     match cmd.output() {
         Ok(o) if o.status.success() => true,
@@ -141,7 +132,7 @@ fn toml(files: &[String]) -> i32 {
                 rc = 1;
                 continue;
             };
-            // A Go template cannot be kept to taplo's canonical formatting, so rendered files get lint only.
+            // A Go template never matches the canonical formatting of taplo, so rendered files get lint only.
             if !run_quiet(
                 locate::child("taplo").arg("lint").arg(&tmp),
                 f,
@@ -180,7 +171,7 @@ fn plist(files: &[String]) -> i32 {
             rc = 1;
             continue;
         };
-        // plutil is the same parser launchd uses: a plist it rejects would fail `launchctl bootstrap` with a generic I/O error and no line number.
+        // launchd uses the plutil parser, and a plist that fails here would fail `launchctl bootstrap` with a generic error and no line number.
         let Some(tmp) = temp_file("plist", &bytes) else {
             err(f, "temp file creation failed");
             rc = 1;
@@ -193,7 +184,7 @@ fn plist(files: &[String]) -> i32 {
         ) {
             rc = 1;
         }
-        // A LaunchAgent without a Label cannot be booted out by name, which makes it undeletable without knowing its path.
+        // `launchctl bootout` needs the `Label` to remove a job by name.
         if !locate::child("plutil")
             .args(["-extract", "Label", "raw", "-o", "/dev/null"])
             .arg(&tmp)
@@ -253,7 +244,7 @@ fn yaml(files: &[String]) -> i32 {
         note("uvx is not installed; skipping YAML validation");
         return 0;
     }
-    // yamllint stays behind uvx rather than joining the mise tool list: it is a gate dependency, not something wanted on PATH.
+    // yamllint runs through uvx to stay off `PATH` as a gate-only dependency.
     let config = realgit::capture(&["rev-parse", "--show-toplevel"]).map_or_else(
         || ".yamllint".to_owned(),
         |root| {
@@ -367,8 +358,7 @@ fn gitconfig(files: &[String]) -> i32 {
             continue;
         };
 
-        // Syntactic validity is not enough: `#` opens a comment, so an unquoted colour literal is silently swallowed and the theme is just gone.
-        // Every colour written must survive into the parsed values.
+        // A `#` opens a comment, so an unquoted color literal vanishes and drops the theme without a syntax error.
         for colour in colours(&String::from_utf8_lossy(&bytes)) {
             if !parsed.contains(&colour) {
                 err(
@@ -410,7 +400,7 @@ fn colours(text: &str) -> Vec<String> {
 fn template(files: &[String]) -> i32 {
     let mut rc = 0;
     for f in existing(files).into_iter().filter(|f| has_ext(f, "tmpl")) {
-        // The init configs render with prompt-capable functions; the toml gate and chezmoi doctor cover them elsewhere.
+        // The init configs render with prompt functions, and the toml gate and chezmoi doctor cover them.
         if is_init_config(Path::new(f)) {
             continue;
         }

@@ -1,7 +1,7 @@
 {
-  "revision": "75c4ddd1b9cba76bf70e0fd96dd8673abbde44c8e359c5fc0a2a46d813596cb6",
+  "revision": "5db48fde131f9523e03ebe1cb32f7eb5763b4c9ef6b94f3e73f5c49166777136",
   "outcome": "implemented",
-  "reason": "Add the missing generic transition from interpretive standards to authoritative typed gates; the actual catalog and proof checks demonstrate nonempty coverage and refusal paths.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/executable-policy/SKILL.md",
     "docs/adr/0003-local-skill-operations.md",

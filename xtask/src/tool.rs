@@ -1,6 +1,4 @@
 //! Every external program xtask runs, with where each host gets it.
-//!
-//! Spawning a process anywhere else is a lint error (see `clippy.toml`), so a new dependency on a host tool cannot appear without a declared provision.
 
 use crate::profile_rules::Profile;
 use crate::setup::Step;
@@ -15,7 +13,7 @@ pub enum Provision {
     Host,
     /// Installed by this setup step before any later step relies on it.
     Setup(Step),
-    /// An application the owner installs outside this repository; callers probe for it before use.
+    /// A program the owner installs outside this repository, which callers probe for before use.
     Owner,
 }
 
@@ -84,6 +82,7 @@ pub enum Tool {
     Rustc,
     Sh,
     Shellcheck,
+    Ssh,
     SshKeygen,
     Starship,
     Sudo,
@@ -96,6 +95,7 @@ pub enum Tool {
     Tmux,
     Unzip,
     UpdateDesktopDatabase,
+    Vale,
     Vivid,
     Winget,
     Wslpath,
@@ -105,7 +105,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 81] = [
+    pub const ALL: [Self; 83] = [
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
         Self::Atuin,
@@ -169,6 +169,7 @@ impl Tool {
         Self::Rustc,
         Self::Sh,
         Self::Shellcheck,
+        Self::Ssh,
         Self::SshKeygen,
         Self::Starship,
         Self::Sudo,
@@ -181,6 +182,7 @@ impl Tool {
         Self::Tmux,
         Self::Unzip,
         Self::UpdateDesktopDatabase,
+        Self::Vale,
         Self::Vivid,
         Self::Winget,
         Self::Wslpath,
@@ -231,6 +233,13 @@ impl Tool {
             Self::Raco => "raco",
             Self::Sh => "sh",
             Self::Shellcheck => "shellcheck",
+            Self::Ssh => {
+                if cfg!(windows) {
+                    "ssh.exe"
+                } else {
+                    "ssh"
+                }
+            }
             Self::SshKeygen => {
                 if cfg!(windows) {
                     "ssh-keygen.exe"
@@ -265,6 +274,7 @@ impl Tool {
             Self::Starship => "starship",
             Self::Tailscale => "tailscale",
             Self::Television => "tv",
+            Self::Vale => "vale",
             Self::Vivid => "vivid",
             Self::Zoxide => "zoxide",
             Self::Zsh => "/bin/zsh",
@@ -294,11 +304,13 @@ impl Tool {
             Self::Pwsh => Provision::Pinned("powershell"),
             Self::Shellcheck => Provision::Pinned("shellcheck"),
             Self::Taplo => Provision::Pinned("taplo"),
+            Self::Vale => Provision::Pinned("vale"),
             Self::Curl
             | Self::Defaults
             | Self::Git
             | Self::Id
             | Self::Sh
+            | Self::Ssh
             | Self::SshKeygen
             | Self::Sudo
             | Self::Systemctl
@@ -364,7 +376,7 @@ impl Tool {
         }
     }
 
-    /// The package list a profile installs this tool from, as a platform data pointer and entry, for tools a setup step or an installed entry point requires.
+    /// The package list entry that installs this tool.
     pub fn package(self, profile: Profile) -> Option<(&'static str, &'static str)> {
         let pointer = match profile {
             Profile::Mac => "/brew/formulae",
@@ -394,7 +406,7 @@ impl Tool {
         command
     }
 
-    /// The only place xtask creates a process for a named program; a hook gate keeps the hook's repository to inspect the commit in progress.
+    /// The only place xtask creates a process for a named program.
     #[allow(clippy::disallowed_methods)]
     pub fn hook_command(self) -> Command {
         Command::new(self.program())

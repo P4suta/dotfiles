@@ -1,7 +1,7 @@
 {
-  "revision": "6ef26ea7286db5c46a089bcb8cd250c38e3fbafa6968c6317e4420cbe9e86b06",
+  "revision": "c3676fd1b7c0acea63bca3c2d848e46bba26cabe892f4d4cd18f998e18185110",
   "outcome": "keep",
-  "reason": "Retain bounded ordinary checks and explicit permission for disruptive campaigns, preserving current workload authorization without inferring absence or dispatch rights.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/resource-coordination/SKILL.md"
   ],

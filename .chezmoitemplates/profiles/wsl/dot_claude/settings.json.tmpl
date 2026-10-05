@@ -1,36 +1,36 @@
 {{- /*
-  Claude Code 全体権限設定 (~/.claude/settings.json)。
+  Global Claude Code permissions in ~/.claude/settings.json.
 
-  方針: 「お任せ開発」を成立させるため deny は最小限・的を絞った形に。
-  普通の操作は通す。
-  bypass パターンや破壊的アクションだけ落とす。
+  Delegated development needs a small, targeted deny list.
+  Ordinary operations pass.
+  Only bypass patterns and destructive actions fail.
 
-  deny[] のカテゴリ (entry を grep するときの参考):
-  - Destructive filesystem ─ rm -rf 系、find -delete、xargs rm、rmdir
-  - Privilege escalation ─ sudo
-  - Git: 履歴改ざん ─ force push、hard reset、rebase -i、filter-branch、update-ref -d、clean -fd
-  - Git: 署名 bypass ─ --no-verify、--no-gpg-sign、`-c commit.gpgsign=false`、`-c core.hooksPath=`、`git config commit.gpgsign false` 等
-  - Network code execution ─ curl|sh、wget|sh
-  - Permission tampering ─ chmod 777
-  - Package install ─ brew install (人間 in the loop)
-  - Secret file read/write ─ .env、id_*, *.key, *.pem、.aws/credentials、.netrc、.npmrc、.kube/config、.docker/config.json 等
-  - dotfiles 管理対象 ─ .gitconfig、.bashrc、.profile、.claude/settings.json (この設定ファイル自身) の直接 Write/Edit
+  Deny categories, for searching the entries:
+  - Destructive filesystem: rm -rf and its variants, find -delete, xargs rm, rmdir
+  - Privilege escalation: sudo
+  - Git history rewrites: force push, hard reset, rebase -i, filter-branch, update-ref -d, clean -fd
+  - Git signing bypass: --no-verify, --no-gpg-sign, `-c commit.gpgsign=false`, `-c core.hooksPath=`, `git config commit.gpgsign false`, and similar
+  - Network code execution: curl|sh, wget|sh
+  - Permission tampering: chmod 777
+  - Package installation: brew install, which keeps a human in the loop
+  - Secret file reads and writes: .env, id_*, *.key, *.pem, .aws/credentials, .netrc, .npmrc, .kube/config, .docker/config.json, and similar
+  - Files the dotfiles manage: direct Write or Edit of .gitconfig, .bashrc, .profile, and .claude/settings.json itself
 
-  あえて deny に**入れない**もの:
-  - `Bash(git commit:*)` ─ 入れるとお任せ開発で commit 不能になる。
-    署名 bypass flag だけ deny し、normal commit は post-commit hook が裏で signed を保証する。
-  - `Bash(git config *)` ─ 広すぎる。
-    signing 関連のキーだけ的を絞る。
-  - `Bash(git reset:*)` ─ soft/mixed は便利。
-    `--hard` だけ落とす。
+  Left out of the deny list on purpose:
+  - `Bash(git commit:*)` would block every commit in delegated development.
+    Only the signing bypass flags fail, and the post-commit hook signs every commit.
+  - `Bash(git config *)` covers too much.
+    Only the signing keys fail.
+  - `Bash(git reset:*)` would block the useful soft and mixed resets.
+    Only `--hard` fails.
 
   dot_claude/modify_settings.json sets these keys over the file Claude Code last wrote, and an array here, such as permissions.deny, replaces the array the client wrote.
-  A runtime change to a key set here, such as `/advisor` changing advisorModel, reverts on the next application; every other key the client wrote is kept.
-  To change one of these keys, edit this template and apply.
+  A runtime change to a key set here, such as `/advisor` changing advisorModel, reverts on the next apply, and every other key the client wrote stays.
+  Edit this template and apply to change one of these keys.
 
-  permission deny の表記:
-  - `Bash(<prefix>:*)` ─ <prefix> から始まる任意の Bash 起動 (空白以降の引数も含む) を deny する。
-    確実に止めたいものは prefix 形で書く。
+  Deny entry syntax:
+  - `Bash(<prefix>:*)` denies any Bash invocation that starts with <prefix>, including the arguments after a space.
+    Write a rule in prefix form when it must hold.
   */ -}}
 {
   "permissions": {

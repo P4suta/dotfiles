@@ -1,6 +1,6 @@
 ---
-# Mint trap: VERSION_CODENAME=zena is Mint-specific and 404s against the Docker and Tailscale apt repos, so resolve UBUNTU_CODENAME=noble instead.
-# ansible_facts.lsb.codename returns zena, hence reading /etc/os-release directly.
+# Mint's VERSION_CODENAME=zena breaks the Docker and Tailscale apt repositories, so resolve UBUNTU_CODENAME=noble.
+# ansible_facts.lsb.codename returns zena too, so read /etc/os-release.
 
 - name: Read /etc/os-release
   ansible.builtin.slurp:

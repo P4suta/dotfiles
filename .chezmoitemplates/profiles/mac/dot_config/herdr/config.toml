@@ -1,4 +1,4 @@
-# Herdr owns interactive terminal sessions; Bash remains the OS login shell.
+# Herdr owns interactive terminal sessions.
 onboarding = false
 
 [terminal]

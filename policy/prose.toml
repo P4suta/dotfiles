@@ -1,0 +1,9 @@
+[[exempt]]
+scope = "documents"
+paths = ["dot_config/prose/styles/"]
+reason = "Vendored Vale packages keep their upstream text."
+
+[[exempt]]
+scope = "comments"
+paths = ["dot_config/prose/styles/"]
+reason = "Vendored Vale packages keep their upstream text."

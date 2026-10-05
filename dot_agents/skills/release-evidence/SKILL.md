@@ -2,41 +2,42 @@
 name: release-evidence
 description: >-
   Produce and verify release checksums, build provenance, SBOMs, dependency assurance, and installation evidence for the exact distributed artifacts.
-  Use for release completeness and supply-chain evidence, not authorization to publish.
+  Use for release completeness and supply chain evidence, not authorization to publish.
 ---
 
-# Release Evidence
+# Release evidence
 
 Use `release-workflow` for stage boundaries and inspect the actual distribution contract.
-Cover every shipped executable, package, architecture, registry archive, installer, and container image that users can obtain.
-Keep an explicit typed candidate manifest with source SHA, version, target, artifact name, digest, builder identity, run and attempt, and required verification outcomes.
-An artifact absent from that inventory is not implicitly verified.
+Cover every shipped executable, package, architecture, registry archive, installer, and container image that users can download.
+Keep a typed candidate manifest with source SHA, version, target, artifact name, digest, builder identity, run and attempt, and required verification outcomes.
+An artifact missing from that inventory counts as unverified.
 
 Build from the selected protected source with pinned toolchains and locked dependencies.
-Verify version consistency, supported targets, licensing, declared MSRV or runtime support, and the actual package contents.
-Run appropriate tests, security and license gates, and consumer installation or upgrade checks.
-Keep vulnerability exceptions narrow, reasoned, and visible; a generated report without an assessed result is not a passing gate.
-Use `renovate` for maintained version updates, not an unreviewed last-minute upgrade during publication.
+Verify version consistency, supported targets, licensing, the declared MSRV or runtime support, and the actual package contents.
+Run fitting tests, security and license gates, and consumer installation or upgrade checks.
+Keep vulnerability exceptions narrow, reasoned, and visible.
+A generated report without an assessed result never passes a gate.
+Use `renovate` for version updates instead of a last-minute upgrade during publication.
 
 Generate checksums over final distribution bytes after packaging, signing, and stapling.
-Generate a machine-readable SPDX or CycloneDX SBOM from the actual resolved and shipped dependency set.
-Account for embedded native libraries and bundled runtimes as well as language packages.
-Verify the SBOM parses, names the right product and version, and matches the candidate rather than a later rebuild.
-Use `cargo-deny`, `cargo-audit`, or other project-appropriate maintained tools to assess license and vulnerability policy, including the relevant non-Rust components.
+Generate a machine-readable SPDX or CycloneDX SBOM from the resolved and shipped dependency set.
+Include embedded native libraries and bundled runtimes.
+Verify that it parses, names the right product and version, and matches the candidate rather than a later rebuild.
+Assess license and vulnerability policy with `cargo-deny`, `cargo-audit`, or another maintained tool that fits the project, including non-Rust components.
 
 Create build provenance with a reviewed pinned attestation action or the repository's verified builder.
-Bind the attestation subject to the artifact digest and check the expected repository, source revision, workflow identity, event and ref policy.
-Use [GitHub's attestation verification](https://docs.github.com/en/actions/concepts/security/artifact-attestations) or the registry's supported verification against actual downloaded bytes.
-Provenance establishes origin and build claims; it does not establish that the source is correct or vulnerability-free.
-An SBOM attestation binds an inventory to a subject; it does not replace inventory accuracy or vulnerability assessment.
+Bind the attestation subject to the artifact digest, and check the expected repository, source revision, workflow identity, and event and ref policy.
+Verify downloaded bytes with [GitHub's attestation verification](https://docs.github.com/en/actions/concepts/security/artifact-attestations) or the registry's supported verification.
+Provenance establishes origin and build claims, not correct or vulnerability-free source.
+An SBOM attestation binds an inventory to a subject without proving the inventory accurate.
 
 Signing and packaging can change bytes after the original build.
-Keep the original provenance and bind the transformation's inputs and outputs explicitly; attest the final distribution where supported.
-Do not attribute an old artifact to newer source code merely because a later job finalized it.
-Preserve attestation bundles and required receipts with the release so verification survives CI artifact retention.
-Use the supported offline verification path and current trusted roots when offline consumers are part of the distribution contract.
+Keep the original provenance, bind the transformation's inputs and outputs, and attest the final distribution where supported.
+Never attribute an old artifact to newer source because a later job finalized it.
+Store attestation bundles and required receipts with the release so verification outlives CI artifact retention.
+For offline consumers, use the supported offline verification path and current trusted roots.
 
-Check native signatures, notarization and stapling through `code-signing`, then exercise the installable product on its supported native platform.
-Check fresh installation, version reporting, an actual useful invocation, upgrades, and cleanup when they are part of the public promise.
+Check native signatures, notarization, and stapling through `code-signing`, then exercise the installable product on its supported native platform.
+When the public promise covers them, check fresh installation, version reporting, a useful invocation, upgrades, and cleanup.
 Keep SBOMs, checksums, provenance, release notes, and binaries complete before publishing an immutable GitHub draft.
-Verify the published download or registry bytes only after a separately authorized publication; never publish as a verification shortcut.
+Verify the published download or registry bytes only after its own authorized publication, and never publish as a verification shortcut.
