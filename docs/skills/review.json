@@ -1,5 +1,5 @@
 {
-  "report_hash": "244f16c83b8fa05f32c6a20731a71f49d1894c355d84fe6bb5de3e744f867d83",
+  "report_hash": "661babc60577f7fe1a26f2ef141fa78d9bf0fcffbc0dc000bab143904830c9ec",
   "decisions": [
     {
       "id": "catalog:adr:23fc1eba2bafa1a21cea24e927b90a8ec48901defc0f5e93cbd490c66d6b0e57",
@@ -138,13 +138,15 @@
       "revisit": null
     },
     {
-      "id": "catalog:formal-assurance:06a59fc3fba7200cea4640ca584f7cfefe40d1000757c1a7135309e3f816d8b1",
+      "id": "catalog:formal-assurance:6a1b1739b3bb16a466e6b61ced3bc634607bca4ce3c35722f588b7a2bac2e20f",
       "outcome": "implemented",
-      "reason": "Require source-bound proofs for supported deterministic contracts and mandatory justified alternatives at genuine semantic or empirical boundaries; keep incomplete stronger claims distinct from scoped completion.",
+      "reason": "Require source-bound proofs for supported deterministic contracts and mandatory justified alternatives at genuine semantic or empirical boundaries; keep incomplete stronger claims distinct from scoped completion. Run the same pinned Kani gate on a Linux verification host where Kani has no native build instead of skipping it.",
       "evidence": [
         "dot_agents/skills/formal-assurance/SKILL.md",
         "dot_agents/skills/formal-assurance/references/scoping.md",
-        "docs/skills/assurance-scope-evaluation.md"
+        "docs/skills/assurance-scope-evaluation.md",
+        "docs/adr/0012-windows-proofs-in-a-linux-container.md",
+        "xtask/tests/container_proofs.rs"
       ],
       "revisit": null
     },
