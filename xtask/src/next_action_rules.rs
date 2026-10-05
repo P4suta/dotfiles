@@ -27,7 +27,9 @@ pub enum Upstream {
     Ahead,
     /// Only the upstream has commits `HEAD` lacks.
     Behind,
-    /// Both sides have their own commits, as after rebasing a pushed branch.
+    /// Both sides have their own commits, and the upstream tip was once on the local branch, as after rebasing or amending a pushed branch.
+    Rewritten,
+    /// Both sides have their own commits, and the upstream holds commits the local branch never had, such as a push from another clone.
     Diverged,
 }
 
@@ -85,6 +87,7 @@ pub enum Step {
     Finished,
     Reopen,
     SyncUpstream,
+    IntegrateUpstream,
     Rebase,
     StartWork,
     AwaitPushResume,
@@ -128,8 +131,10 @@ pub fn decide(state: State) -> Step {
         Pr::Closed => return Step::Reopen,
         _ => {}
     }
-    if state.upstream == Upstream::Behind {
-        return Step::SyncUpstream;
+    match state.upstream {
+        Upstream::Behind => return Step::SyncUpstream,
+        Upstream::Diverged => return Step::IntegrateUpstream,
+        _ => {}
     }
     if state.behind_base {
         return Step::Rebase;
@@ -143,7 +148,7 @@ pub fn decide(state: State) -> Step {
             (true, _, _) => Step::AwaitPushResume,
             (false, true, Pr::Unknown) => Step::InspectGithub,
             (false, true, Pr::Ready) => Step::AwaitReviewResume,
-            _ if state.upstream == Upstream::Diverged => Step::ForcePush,
+            _ if state.upstream == Upstream::Rewritten => Step::ForcePush,
             _ => Step::Push,
         };
     }
@@ -185,7 +190,7 @@ fn any_state() -> State {
     let pr: u8 = kani::any();
     let checks: u8 = kani::any();
     let upstream: u8 = kani::any();
-    kani::assume(host < 4 && head < 3 && pr < 6 && checks < 4 && upstream < 5);
+    kani::assume(host < 4 && head < 3 && pr < 6 && checks < 4 && upstream < 6);
     State {
         host: match host {
             0 => Host::Ready,
@@ -208,6 +213,7 @@ fn any_state() -> State {
             1 => Upstream::Current,
             2 => Upstream::Ahead,
             3 => Upstream::Behind,
+            4 => Upstream::Rewritten,
             _ => Upstream::Diverged,
         },
         push_paused: kani::any(),
@@ -309,7 +315,7 @@ fn publication_requires_committed_decided_current_work() {
         assert!(matches!(state.upstream, Upstream::Absent | Upstream::Ahead));
     }
     if step == Step::ForcePush {
-        assert!(state.upstream == Upstream::Diverged);
+        assert!(state.upstream == Upstream::Rewritten);
     }
     if matches!(step, Step::CreatePr | Step::MarkReady | Step::AwaitReview) {
         assert!(state.upstream == Upstream::Current);
@@ -323,4 +329,32 @@ fn publication_requires_committed_decided_current_work() {
     kani::cover!(step == Step::MarkReady);
     kani::cover!(step == Step::ForcePush);
     kani::cover!(state.dirty && step == Step::Commit);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn upstream_commits_the_branch_never_held_are_never_overwritten() {
+    let state = any_state();
+    let step = decide(state);
+    if step == Step::ForcePush {
+        assert!(state.upstream == Upstream::Rewritten);
+    }
+    if state.upstream == Upstream::Diverged {
+        assert!(!publishes(step));
+    }
+    // Once the branch's own work is committed, foreign upstream commits are integrated before anything else.
+    let settled = state.host == Host::Ready
+        && state.head == Head::Feature
+        && !state.dirty
+        && !state.undecided
+        && !state.incomplete
+        && !matches!(state.pr, Pr::Merged | Pr::Closed);
+    if settled {
+        assert_eq!(
+            state.upstream == Upstream::Diverged,
+            step == Step::IntegrateUpstream
+        );
+    }
+    kani::cover!(state.upstream == Upstream::Diverged && step == Step::IntegrateUpstream);
+    kani::cover!(state.upstream == Upstream::Rewritten && step == Step::ForcePush);
 }

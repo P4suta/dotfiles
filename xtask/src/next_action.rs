@@ -8,7 +8,9 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 /// The base for the default branch, and for a branch whose PR is unknown.
 pub const BASE: &str = "origin/main";
@@ -17,7 +19,7 @@ pub const DEFAULT_BRANCH: &str = "main";
 /// Where this host keeps the state that the inspection reads.
 pub struct Environment {
     pub home: PathBuf,
-    /// `None` when the variable that names the temporary directory is unset.
+    /// `TEMP` on Windows, `None` when it is unset; the system temporary directory on other hosts.
     pub temp: Option<PathBuf>,
     pub cargo_target: Option<PathBuf>,
     pub offline: bool,
@@ -71,6 +73,10 @@ pub struct Observed {
     pub behind_base: u64,
     pub ahead_base: u64,
     pub upstream: Option<String>,
+    /// The upstream commit the inspection saw, which a force-push leases.
+    pub upstream_commit: Option<String>,
+    /// The upstream tip was once on the local branch, so every upstream commit passed through it.
+    pub upstream_held: bool,
     pub unpushed: u64,
     /// Commits on the upstream that `HEAD` lacks.
     pub unpulled: u64,
@@ -108,6 +114,7 @@ impl Observed {
                 (Some(_), false, false) => Upstream::Current,
                 (Some(_), true, false) => Upstream::Ahead,
                 (Some(_), false, true) => Upstream::Behind,
+                (Some(_), true, true) if self.upstream_held => Upstream::Rewritten,
                 (Some(_), true, true) => Upstream::Diverged,
             },
             push_paused: self.push_paused,
@@ -141,6 +148,7 @@ pub struct Recommendation {
 }
 
 /// An unset `TEMP` comes first, then a required directory on an unmounted volume such as the Dev Drive, then a missing temporary directory.
+/// The volume is the path's root, so only a Windows drive letter can be missing.
 pub fn host_status(temp: Option<&Path>, cargo_target: Option<&Path>) -> HostStatus {
     let Some(temp) = temp else {
         return HostStatus::TempUnset;
@@ -354,6 +362,60 @@ fn divergence(root: &Path, other: &str, next: &str) -> Result<(u64, u64)> {
     Ok((count(behind)?, count(ahead)?))
 }
 
+/// Whether `commit` is reachable from an entry of the branch's reflog, that is, whether the branch once held it.
+fn held_by_branch(root: &Path, branch: &str, commit: &str) -> Result<bool> {
+    let reflog = git(
+        root,
+        &[
+            "log",
+            "--walk-reflogs",
+            "--format=%H",
+            &format!("refs/heads/{branch}"),
+        ],
+        "inspect the branch reflog with `git reflog show`",
+    )?;
+    let mut revisions = format!("{commit}\n");
+    for entry in reflog.lines() {
+        revisions.push_str(&format!("^{entry}\n"));
+    }
+    let mut child = Tool::Git
+        .command()
+        .current_dir(root)
+        .args(["rev-list", "--count", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("start git")?;
+    child
+        .stdin
+        .take()
+        .context("git rev-list stdin")?
+        .write_all(revisions.as_bytes())?;
+    let output = child.wait_with_output()?;
+    ensure!(
+        output.status.success(),
+        "git rev-list --stdin failed: {}; inspect the branch reflog with `git reflog show`",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(count(&String::from_utf8_lossy(&output.stdout))? == 0)
+}
+
+/// Whether the owner paused CodeRabbit PR reviews: the all-scope `paused` marker or the PR-scope `paused-pr` marker.
+pub fn pr_reviews_paused(home: &Path) -> Result<bool> {
+    let state = home.join(".local/state/coderabbit-guard");
+    for marker in ["paused", "paused-pr"] {
+        if state
+            .join(marker)
+            .try_exists()
+            .with_context(|| format!("inspect the CodeRabbit pause marker {marker}"))?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Whether the repository defines GitHub Actions workflows that report checks on a PR.
 fn workflows(root: &Path) -> Result<bool> {
     let directory = root.join(".github/workflows");
@@ -425,6 +487,20 @@ pub fn inspect(root: &Path, environment: &Environment) -> Result<Observed> {
         Some(_) => divergence(root, "@{upstream}", "fetch the upstream branch")?,
         None => (0, ahead_base),
     };
+    let upstream_commit = match upstream {
+        Some(_) => Some(git(
+            root,
+            &["rev-parse", "@{upstream}"],
+            "fetch the upstream branch",
+        )?),
+        None => None,
+    };
+    let upstream_held = match (&branch, &upstream_commit) {
+        (Some(branch), Some(commit)) if unpushed > 0 && unpulled > 0 => {
+            held_by_branch(root, branch, commit)?
+        }
+        _ => false,
+    };
     let (undecided_skills, incomplete_decisions) = decision_backlog(root)?;
     Ok(Observed {
         host,
@@ -434,15 +510,14 @@ pub fn inspect(root: &Path, environment: &Environment) -> Result<Observed> {
         behind_base,
         ahead_base,
         upstream,
+        upstream_commit,
+        upstream_held,
         unpushed,
         unpulled,
         undecided_skills,
         incomplete_decisions,
         push_paused: environment.home.join(".config/git/push-paused").exists(),
-        review_paused: environment
-            .home
-            .join(".local/state/coderabbit-guard/paused")
-            .exists(),
+        review_paused: pr_reviews_paused(&environment.home)?,
         repository,
         workflows: workflows(root)?,
         github_inspected: !environment.offline,
@@ -539,6 +614,13 @@ pub fn recommend(state: Observed) -> Recommendation {
             ),
             Some("git merge --ff-only @{upstream}".into()),
         ),
+        Step::IntegrateUpstream => (
+            format!(
+                "{upstream} has {} commits that {branch} never held, such as a push from another clone; rebase the {} local commits onto them so a push keeps them",
+                state.unpulled, state.unpushed
+            ),
+            Some("git rebase @{upstream}".into()),
+        ),
         Step::Rebase => (
             format!(
                 "{branch} is {} commits behind {base}; rebase it before publishing",
@@ -566,10 +648,13 @@ pub fn recommend(state: Observed) -> Recommendation {
         ),
         Step::ForcePush => (
             format!(
-                "{branch} and {upstream} have diverged ({} local and {} upstream commits), as after a rebase; confirm with `git range-diff @{{upstream}}...HEAD` that the upstream commits are replaced, then force-push when authorized",
-                state.unpushed, state.unpulled
+                "{branch} rewrote the {} upstream commits it once held into {} local commits; confirm the replacement with `git range-diff @{{upstream}}...HEAD`, then force-push when authorized",
+                state.unpulled, state.unpushed
             ),
-            Some(format!("git push --force-with-lease origin {branch}")),
+            Some(format!(
+                "ALLOW_FORCE=1 git push --force-with-lease={branch}:{} origin {branch}",
+                state.upstream_commit.as_deref().unwrap_or("<upstream commit>")
+            )),
         ),
         Step::InspectGithub => (
             "The next step depends on the PR, but GitHub was not inspected; rerun without --offline".into(),

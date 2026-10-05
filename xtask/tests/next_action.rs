@@ -157,7 +157,7 @@ fn every_state_maps_to_its_single_next_step() {
         (
             State {
                 behind_base: true,
-                upstream: Upstream::Diverged,
+                upstream: Upstream::Rewritten,
                 ..base
             },
             Step::Rebase,
@@ -172,7 +172,7 @@ fn every_state_maps_to_its_single_next_step() {
         ),
         (
             State {
-                upstream: Upstream::Diverged,
+                upstream: Upstream::Rewritten,
                 push_paused: true,
                 review_paused: true,
                 ..base
@@ -213,7 +213,7 @@ fn every_state_maps_to_its_single_next_step() {
         ),
         (
             State {
-                upstream: Upstream::Diverged,
+                upstream: Upstream::Rewritten,
                 review_paused: true,
                 pr: Pr::Unknown,
                 ..base
@@ -222,10 +222,28 @@ fn every_state_maps_to_its_single_next_step() {
         ),
         (
             State {
-                upstream: Upstream::Diverged,
+                upstream: Upstream::Rewritten,
                 ..base
             },
             Step::ForcePush,
+        ),
+        (
+            State {
+                upstream: Upstream::Diverged,
+                ..base
+            },
+            Step::IntegrateUpstream,
+        ),
+        (
+            State {
+                upstream: Upstream::Diverged,
+                behind_base: true,
+                push_paused: true,
+                review_paused: true,
+                pr: Pr::Ready,
+                ..base
+            },
+            Step::IntegrateUpstream,
         ),
         (
             State {
@@ -315,6 +333,7 @@ fn only_local_reversible_steps_are_executable() {
         Step::MountVolume,
         Step::Commit,
         Step::Rebase,
+        Step::IntegrateUpstream,
         Step::Push,
         Step::ForcePush,
         Step::CreatePr,
@@ -625,6 +644,8 @@ fn on_github(pr: Option<(&str, bool, Checks)>, review_paused: bool) -> Observed 
         behind_base: 0,
         ahead_base: 2,
         upstream: Some("origin/feat/topic".into()),
+        upstream_commit: Some("0123456789abcdef0123456789abcdef01234567".into()),
+        upstream_held: true,
         unpushed: 0,
         unpulled: 0,
         undecided_skills: vec![],
@@ -849,9 +870,16 @@ fn a_rebased_pushed_branch_is_force_pushed_and_upstream_commits_are_pulled_first
         (recommendation.state.unpushed, recommendation.state.unpulled),
         (3, 2)
     );
+    let lease = recommendation
+        .state
+        .upstream_commit
+        .clone()
+        .context("upstream commit")?;
     assert_eq!(
-        recommendation.command.as_deref(),
-        Some("git push --force-with-lease origin feat/topic")
+        recommendation.command,
+        Some(format!(
+            "ALLOW_FORCE=1 git push --force-with-lease=feat/topic:{lease} origin feat/topic"
+        ))
     );
     assert!(recommendation.summary.contains("git range-diff"));
     // The origin takes the rebased branch by fetching it, so the fixture does not depend on a host guard against force-pushes.
@@ -866,6 +894,93 @@ fn a_rebased_pushed_branch_is_force_pushed_and_upstream_commits_are_pulled_first
     )?;
     fixture.git(&fixture.clone, &["fetch", "--quiet", "origin"])?;
     assert_eq!(fixture.step()?, Step::InspectGithub);
+    Ok(())
+}
+
+/// A commit pushed from elsewhere, then a local commit, must be integrated; a force-push would discard it.
+#[test]
+fn an_upstream_commit_the_branch_never_held_is_integrated_not_force_pushed() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.git(&fixture.clone, &["switch", "--quiet", "-c", "feat/topic"])?;
+    fixture.commit("change")?;
+    fixture.git(
+        &fixture.clone,
+        &["push", "--quiet", "-u", "origin", "feat/topic"],
+    )?;
+    fixture.advance_upstream("feat/topic")?;
+    fs::write(fixture.clone.join("draft"), "draft")?;
+    assert_eq!(fixture.step()?, Step::Commit);
+    fixture.git(&fixture.clone, &["add", "draft"])?;
+    fixture.git(&fixture.clone, &["commit", "--quiet", "-m", "draft"])?;
+    let recommendation = recommend(fixture.next()?);
+    assert!(!recommendation.state.upstream_held);
+    assert_eq!(recommendation.action, Step::IntegrateUpstream);
+    assert!(!recommendation.executable);
+    assert_eq!(
+        recommendation.command.as_deref(),
+        Some("git rebase @{upstream}")
+    );
+    assert!(
+        perform(&fixture.clone, &recommendation)
+            .unwrap_err()
+            .to_string()
+            .contains("`integrate-upstream` is not a local, reversible step")
+    );
+    fixture.git(&fixture.clone, &["rebase", "--quiet", "@{upstream}"])?;
+    let recommendation = recommend(fixture.next()?);
+    assert_eq!(recommendation.action, Step::Push);
+    assert_eq!(
+        (recommendation.state.unpushed, recommendation.state.unpulled),
+        (1, 0)
+    );
+    Ok(())
+}
+
+#[test]
+fn an_amended_pushed_commit_is_force_pushed_with_a_lease_on_the_inspected_upstream() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.git(&fixture.clone, &["switch", "--quiet", "-c", "feat/topic"])?;
+    fixture.commit("change")?;
+    fixture.git(
+        &fixture.clone,
+        &["push", "--quiet", "-u", "origin", "feat/topic"],
+    )?;
+    fixture.git(
+        &fixture.clone,
+        &["commit", "--quiet", "--amend", "-m", "change, amended"],
+    )?;
+    let recommendation = recommend(fixture.next()?);
+    assert!(recommendation.state.upstream_held);
+    assert_eq!(recommendation.action, Step::ForcePush);
+    let lease = recommendation
+        .state
+        .upstream_commit
+        .clone()
+        .context("upstream commit")?;
+    assert_eq!(lease.len(), 40);
+    assert_eq!(
+        recommendation.command,
+        Some(format!(
+            "ALLOW_FORCE=1 git push --force-with-lease=feat/topic:{lease} origin feat/topic"
+        ))
+    );
+    Ok(())
+}
+
+#[test]
+fn a_pr_scoped_coderabbit_pause_holds_a_push_and_a_cli_scoped_one_does_not() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.git(&fixture.clone, &["switch", "--quiet", "-c", "feat/topic"])?;
+    fixture.commit("change")?;
+    let state = fixture.home().join(".local/state/coderabbit-guard");
+    fs::create_dir_all(&state)?;
+    fs::write(state.join("paused-cli"), "")?;
+    assert!(!fixture.next()?.review_paused);
+    assert_eq!(fixture.step()?, Step::Push);
+    fs::write(state.join("paused-pr"), "")?;
+    let observed = fixture.next()?;
+    assert!(observed.review_paused);
+    assert_eq!(recommend(observed).action, Step::InspectGithub);
     Ok(())
 }
 

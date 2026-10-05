@@ -10,17 +10,24 @@ A refused gate names its own cause but not where the work stands in that order, 
 ## Decision
 
 `just next` (`dotfiles-xtask next`) inspects the current state and prints the single recommended next step.
-It first checks the host: an unset `TEMP`, then an unmounted volume under the temporary directory or `CARGO_TARGET_DIR`, such as the Dev Drive, then a missing temporary directory.
+It first checks the host.
+On Windows, it reports an unset `TEMP`, then an unmounted drive under `TEMP` or `CARGO_TARGET_DIR`, such as the Dev Drive, then a missing `TEMP` directory.
+On other hosts, it reports only a missing system temporary directory.
 It does not check which volume `TEMP` should be on, because the repository does not define that location.
-It reads the branch, uncommitted changes, divergence from the base, divergence from the upstream in both directions, the skill decisions that `just check` requires, the push pause in `~/.config/git/push-paused`, and the CodeRabbit pause in `~/.local/state/coderabbit-guard/paused`.
+It reads the branch, uncommitted changes, divergence from the base, divergence from the upstream in both directions, the skill decisions that `just check` requires, the push pause in `~/.config/git/push-paused`, and the CodeRabbit PR review pause.
+The PR review pause is the union of the `paused` and `paused-pr` markers under `~/.local/state/coderabbit-guard`; the `paused-cli` marker pauses only CLI reviews and does not hold a push.
 It fetches `origin` and reads the branch's PR, its base branch, its draft state, and its check rollup from GitHub unless `--offline` is given.
 The base is the open PR's base branch; without an open PR, and with `--offline`, it is `origin/main`, so a stacked branch inspected offline reports the commits of the branch below it.
 
 The output is one JSON line on stdout with the action, whether it is executable, a summary, a command, and the observed state, followed by a one-line summary on stderr.
 The pure function in `xtask/src/next_action_rules.rs` orders the steps.
-Kani harnesses prove that host prerequisites come first, that neither pause is bypassed, that publication requires committed, decided, current work, and that each executable step is chosen only on its own preconditions.
+Kani harnesses prove that host prerequisites come first, that neither pause is bypassed, that publication requires committed, decided, current work, that a force-push replaces only upstream commits the branch once held, and that each executable step is chosen only on its own preconditions.
 A push to a PR in review starts a CodeRabbit review, so the CodeRabbit pause holds such a push as well as the move to review.
-A branch whose upstream has diverged, as after rebasing a pushed branch, is recommended a force-push with a lease after a range-diff, not a plain push that the remote would reject.
+When both the branch and its upstream have their own commits, the branch's reflog decides between them.
+If the upstream tip was once on the branch, as after rebasing or amending a pushed branch, the step is a force-push leased on the inspected upstream commit, after a range-diff.
+The command sets `ALLOW_FORCE=1`, because the repository's git guard and pre-push gate refuse a rewrite of published history without it.
+Otherwise the upstream holds commits the branch never had, such as a push from another clone, and the step is to rebase onto the upstream, so no recommendation discards them.
+An expired or missing reflog yields the rebase, never the force-push.
 An empty check rollup means the checks have not reported yet, unless the repository defines no workflows.
 
 `--execute` runs only a step that writes local state a single command restores: creating the temporary directory, fast-forwarding the default branch or a branch to its upstream, or drafting a skill decision.

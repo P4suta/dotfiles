@@ -59,11 +59,12 @@ pub const REVIEW_HARNESSES: [&str; 5] = [
     "rolling_attempts_cannot_exceed_the_layered_local_budget",
 ];
 
-pub const NEXT_ACTION_HARNESSES: [&str; 4] = [
+pub const NEXT_ACTION_HARNESSES: [&str; 5] = [
     "executed_steps_run_only_on_their_own_preconditions",
     "host_prerequisites_precede_every_repository_step",
     "owner_pauses_are_never_bypassed",
     "publication_requires_committed_decided_current_work",
+    "upstream_commits_the_branch_never_held_are_never_overwritten",
 ];
 
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
@@ -442,13 +443,14 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\nuse production::*;\n#[kani::proof]\nfn reject_executing_a_push() {{\n    assert!(executable(Step::Push));\n}}\n#[kani::proof]\nfn reject_pushing_while_paused() {{\n    assert!(decide(State {{ host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Ahead, push_paused: true, pr: Pr::Draft, checks: Checks::Passing, workflows: true, review_paused: false }}) == Step::Push);\n}}\n#[kani::proof]\nfn reject_pushing_to_a_ready_pr_while_review_is_paused() {{\n    assert!(decide(State {{ host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Ahead, push_paused: false, pr: Pr::Ready, checks: Checks::Passing, workflows: true, review_paused: true }}) == Step::Push);\n}}\n"
+            "#[path = {source:?}]\nmod production;\nuse production::*;\n#[kani::proof]\nfn reject_executing_a_push() {{\n    assert!(executable(Step::Push));\n}}\n#[kani::proof]\nfn reject_pushing_while_paused() {{\n    assert!(decide(State {{ host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Ahead, push_paused: true, pr: Pr::Draft, checks: Checks::Passing, workflows: true, review_paused: false }}) == Step::Push);\n}}\n#[kani::proof]\nfn reject_pushing_to_a_ready_pr_while_review_is_paused() {{\n    assert!(decide(State {{ host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Ahead, push_paused: false, pr: Pr::Ready, checks: Checks::Passing, workflows: true, review_paused: true }}) == Step::Push);\n}}\n#[kani::proof]\nfn reject_force_pushing_over_commits_the_branch_never_held() {{\n    assert!(decide(State {{ host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Diverged, push_paused: false, pr: Pr::Draft, checks: Checks::Passing, workflows: true, review_paused: false }}) == Step::ForcePush);\n}}\n"
         ),
     )?;
     for name in [
         "reject_executing_a_push",
         "reject_pushing_while_paused",
         "reject_pushing_to_a_ready_pr_while_review_is_paused",
+        "reject_force_pushing_over_commits_the_branch_never_held",
     ] {
         verify_file(&file, probe.path(), &[name], true)?;
     }
