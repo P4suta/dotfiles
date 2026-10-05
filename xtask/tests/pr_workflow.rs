@@ -645,6 +645,37 @@ fn ready_checks_live_contents_and_draft_state_before_mutation() -> Result<()> {
         );
         assert_eq!(fixture.log()?.contains("\nready\n"), accepted);
     }
+    for (checks, accepted) in [
+        (
+            r#"[{"status":"COMPLETED","conclusion":"SUCCESS"},{"state":"SUCCESS"}]"#,
+            true,
+        ),
+        (r#"[{"status":"COMPLETED","conclusion":"NEUTRAL"}]"#, true),
+        ("[]", false),
+        (
+            r#"[{"status":"COMPLETED","conclusion":"SUCCESS"},{"status":"IN_PROGRESS","conclusion":null}]"#,
+            false,
+        ),
+        (r#"[{"status":"COMPLETED","conclusion":"FAILURE"}]"#, false),
+        (
+            r#"[{"status":"COMPLETED","conclusion":"CANCELLED"}]"#,
+            false,
+        ),
+        (r#"[{"status":"COMPLETED","conclusion":"SKIPPED"}]"#, false),
+        (r#"[{"state":"PENDING"}]"#, false),
+        (r#"[{"state":"ERROR"}]"#, false),
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true});
+        let output = fixture
+            .command("ready")?
+            .args(["--pr", "17"])
+            .env("GH_FIXTURE_VIEW", view.to_string())
+            .env("GH_FIXTURE_CHECKS", checks)
+            .output()?;
+        assert_eq!(output.status.success(), accepted, "{checks}");
+        assert_eq!(fixture.log()?.contains("\nready\n"), accepted, "{checks}");
+    }
     let fixture = Fixture::new(BODY)?;
     let view = serde_json::json!({"title":"@coderabbitai","body":"@coderabbitai summary","state":"OPEN","isDraft":true});
     assert!(

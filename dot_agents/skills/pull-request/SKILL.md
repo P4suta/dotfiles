@@ -38,6 +38,7 @@ Keep required template content and actual validation results around the summary 
 Read [commands and generation](references/workflow.md) for the local and CodeRabbit paths and the optional configuration example.
 Use local authoring when the service is unavailable or the destination requires a document it cannot produce reliably.
 Local creation always starts as a draft; moving it to review is a separate authorized operation.
+`ready` refuses until every head check passes; run it only when no scoped work remains.
 
 Without destination-specific rules, write an English [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) title: `type(scope)!: description`.
 Scope is optional; include `!` for breaking changes.

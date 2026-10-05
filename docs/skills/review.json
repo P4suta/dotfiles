@@ -1,5 +1,5 @@
 {
-  "report_hash": "cae3d9318d9922b2205379b1bba4beeb35684334e134c992d17c49ae3048f090",
+  "report_hash": "84dc506b4e37d7c1cb12c5f69f086597733e57cfab4a664b6bf668bc79e672f4",
   "decisions": [
     {
       "id": "catalog:adr:23fc1eba2bafa1a21cea24e927b90a8ec48901defc0f5e93cbd490c66d6b0e57",
@@ -276,9 +276,9 @@
       "revisit": null
     },
     {
-      "id": "catalog:pull-request:ed6e25e531e3645d80364f335aef48fca2bceaa48f86c1e7e02b7f25666e0a7d",
+      "id": "catalog:pull-request:1be2603a716a3aee53704701db08ee71fabd7c540cee51b9cc9d60196b4bbb7e",
       "outcome": "implemented",
-      "reason": "Apply the same layered budget to verified separate PR allowance and applicable adaptive thresholds, require current window evidence and preserve the owner pause; retain checked issue scope, draft transitions and official review exclusion with production proofs and native process refusal tests.",
+      "reason": "Apply the same layered budget to verified separate PR allowance and applicable adaptive thresholds, require current window evidence and preserve the owner pause; retain checked issue scope, draft transitions and official review exclusion with production proofs and native process refusal tests. Keep PRs as drafts until every reported head check passes, with the check requirement proved in the transition core and refused natively.",
       "evidence": [
         "dot_agents/skills/pull-request/SKILL.md",
         "docs/adr/0004-checked-pull-request-authoring.md",
@@ -287,7 +287,8 @@
         "xtask/src/pr_rules.rs",
         "xtask/src/review_rules.rs",
         "dot_agents/skills/pull-request/references/workflow.md",
-        "docs/adr/0008-layered-review-capacity.md"
+        "docs/adr/0008-layered-review-capacity.md",
+        "docs/adr/0013-ready-only-after-passing-checks.md"
       ],
       "revisit": null
     },

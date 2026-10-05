@@ -48,12 +48,28 @@ pub fn coderabbit_body_marker_allowed(request: bool, summary: bool, ignore: bool
     ignore || request && summary
 }
 
+/// The head commit's reported checks; an empty report is not a pass.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Checks {
+    Passing,
+    Incomplete,
+}
+
+pub fn checks_state(total: usize, unfinished: usize, failed: usize) -> Checks {
+    if total > 0 && unfinished == 0 && failed == 0 {
+        Checks::Passing
+    } else {
+        Checks::Incomplete
+    }
+}
+
 pub fn plan(
     operation: Operation,
     generation: Generation,
     validated: bool,
     draft: bool,
     issue: IssueGate,
+    checks: Checks,
 ) -> Option<Effect> {
     if !validated || issue == IssueGate::Missing {
         return None;
@@ -65,12 +81,12 @@ pub fn plan(
             Effect::CreateReady
         }),
         Operation::Edit => Some(Effect::Edit),
-        Operation::Ready => draft.then_some(Effect::Ready),
+        Operation::Ready => (draft && checks == Checks::Passing).then_some(Effect::Ready),
     }
 }
 
 #[cfg(kani)]
-fn inputs() -> (Operation, Generation, bool, bool, IssueGate) {
+fn inputs() -> (Operation, Generation, bool, bool, IssueGate, Checks) {
     let choice: u8 = kani::any();
     kani::assume(choice < 3);
     (
@@ -87,18 +103,21 @@ fn inputs() -> (Operation, Generation, bool, bool, IssueGate) {
         kani::any(),
         kani::any(),
         issue_gate(kani::any(), kani::any(), kani::any()),
+        checks_state(kani::any(), kani::any(), kani::any()),
     )
 }
 
 #[cfg(kani)]
 #[kani::proof]
 fn rejected_documents_never_produce_a_pr_mutation() {
-    let (operation, generation, validated, draft, issue) = inputs();
-    let result = plan(operation, generation, validated, draft, issue);
+    let (operation, generation, validated, draft, issue, checks) = inputs();
+    let result = plan(operation, generation, validated, draft, issue, checks);
     assert!(validated || result.is_none());
     assert_eq!(
         result.is_some(),
-        validated && issue != IssueGate::Missing && (operation != Operation::Ready || draft)
+        validated
+            && issue != IssueGate::Missing
+            && (operation != Operation::Ready || draft && checks == Checks::Passing)
     );
     kani::cover!(result.is_some());
     kani::cover!(result.is_none());
@@ -107,8 +126,8 @@ fn rejected_documents_never_produce_a_pr_mutation() {
 #[cfg(kani)]
 #[kani::proof]
 fn local_creation_always_starts_as_draft() {
-    let (operation, generation, validated, draft, issue) = inputs();
-    let result = plan(operation, generation, validated, draft, issue);
+    let (operation, generation, validated, draft, issue, checks) = inputs();
+    let result = plan(operation, generation, validated, draft, issue, checks);
     if operation == Operation::Create && validated && issue != IssueGate::Missing {
         assert_eq!(
             result == Some(Effect::CreateDraft),
@@ -126,14 +145,42 @@ fn local_creation_always_starts_as_draft() {
 #[cfg(kani)]
 #[kani::proof]
 fn ready_requires_a_validated_draft_transition() {
-    let (operation, generation, validated, draft, issue) = inputs();
-    let result = plan(operation, generation, validated, draft, issue);
+    let (operation, generation, validated, draft, issue, checks) = inputs();
+    let result = plan(operation, generation, validated, draft, issue, checks);
     assert_eq!(
         result == Some(Effect::Ready),
-        operation == Operation::Ready && validated && draft && issue != IssueGate::Missing
+        operation == Operation::Ready
+            && validated
+            && draft
+            && issue != IssueGate::Missing
+            && checks == Checks::Passing
     );
     kani::cover!(result == Some(Effect::Ready));
     kani::cover!(result.is_none());
+    kani::cover!(
+        result.is_none()
+            && operation == Operation::Ready
+            && validated
+            && draft
+            && issue != IssueGate::Missing
+    );
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn ready_requires_every_reported_check_to_pass() {
+    let total: usize = kani::any();
+    let unfinished: usize = kani::any();
+    let failed: usize = kani::any();
+    let state = checks_state(total, unfinished, failed);
+    assert_eq!(
+        state == Checks::Passing,
+        total != 0 && unfinished == 0 && failed == 0
+    );
+    kani::cover!(state == Checks::Passing);
+    kani::cover!(state == Checks::Incomplete && total == 0);
+    kani::cover!(state == Checks::Incomplete && unfinished != 0);
+    kani::cover!(state == Checks::Incomplete && failed != 0);
 }
 
 #[cfg(kani)]
@@ -148,8 +195,8 @@ fn personal_issue_prerequisites_cannot_be_skipped_by_any_generation_mode() {
         personal_owner && !fork && !checked_issue
     );
     assert_eq!(gate == IssueGate::NotRequired, !personal_owner || fork);
-    let (operation, generation, validated, draft, _) = inputs();
-    let result = plan(operation, generation, validated, draft, gate);
+    let (operation, generation, validated, draft, _, checks) = inputs();
+    let result = plan(operation, generation, validated, draft, gate, checks);
     assert!(gate != IssueGate::Missing || result.is_none());
     kani::cover!(result.is_some() && gate == IssueGate::Linked);
     kani::cover!(result.is_some() && gate == IssueGate::NotRequired);
