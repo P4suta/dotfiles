@@ -452,6 +452,7 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
             }
         }
         Step::Adapters => {
+            crate::line_endings::install(&context.home)?;
             let binary = context.home.join(format!(
                 ".local/bin/skill-ops{}",
                 std::env::consts::EXE_SUFFIX

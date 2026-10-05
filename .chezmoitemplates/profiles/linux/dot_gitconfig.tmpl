@@ -4,6 +4,8 @@
 
 [core]
 	pager = delta
+	# Every repository normalizes text to LF unless its own attributes say otherwise.
+	attributesFile = ~/.config/git/attributes
 {{- if .signing.enabled }}
 	# Single source that forces the signing hooks on in every repo, existing ones included.
 	# The hooks themselves live in dot_config/git/hooks/ and run each repository's own lefthook configuration, so no repository installs lefthook hooks.
