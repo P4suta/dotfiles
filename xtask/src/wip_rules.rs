@@ -18,7 +18,8 @@ fn a_recorded_repository_limit_replaces_the_default() {
     let repository: u32 = kani::any();
     assert_eq!(limit(default, Some(repository)), repository);
     assert_eq!(limit(default, None), default);
-    kani::cover!(default != repository);
+    kani::cover!(repository < default);
+    kani::cover!(repository > default);
 }
 
 #[cfg(kani)]

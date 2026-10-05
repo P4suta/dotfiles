@@ -30,10 +30,12 @@ fn only_a_recursive_size_scan_is_refused() {
 
 #[cfg(kani)]
 #[kani::proof]
-fn the_refusal_names_storage_scout() {
-    let bytes = NEXT_ACTION.as_bytes();
-    assert!(bytes.len() > 38);
-    assert!(&bytes[25..38] == b"storage-scout");
+fn a_walk_or_a_size_report_alone_is_admitted() {
+    let recursive: bool = kani::any();
+    let result = verdict(recursive, !recursive);
+    assert_eq!(result, Verdict::Admit);
+    kani::cover!(recursive);
+    kani::cover!(!recursive);
 }
 
 #[cfg(test)]

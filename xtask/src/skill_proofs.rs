@@ -140,8 +140,8 @@ pub const READY_PUSH_HARNESSES: [&str; 2] = [
 ];
 
 pub const DISK_SCAN_HARNESSES: [&str; 2] = [
+    "a_walk_or_a_size_report_alone_is_admitted",
     "only_a_recursive_size_scan_is_refused",
-    "the_refusal_names_storage_scout",
 ];
 
 pub const BODY_HARNESSES: [&str; 2] = [

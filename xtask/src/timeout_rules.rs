@@ -86,14 +86,18 @@ fn the_timeout_never_falls_below_the_observed_percentile_nor_exceeds_the_limit()
 #[cfg(kani)]
 #[kani::proof]
 fn without_history_the_profile_default_decides() {
+    let observed: Option<u64> = kani::any();
     let default: u64 = kani::any();
     let limit: u64 = kani::any();
-    let decided = timeout(None, default, None, limit);
-    assert_eq!(
-        decided,
-        Timeout::Set(if default < limit { default } else { limit })
-    );
-    kani::cover!(default < limit);
+    let decided = timeout(observed, default, None, limit);
+    if observed.is_none() {
+        assert_eq!(
+            decided,
+            Timeout::Set(if default < limit { default } else { limit })
+        );
+    }
+    kani::cover!(observed.is_none() && default < limit);
+    kani::cover!(observed.is_none() && default > limit);
 }
 
 #[cfg(kani)]
@@ -103,6 +107,8 @@ fn the_percentile_of_a_short_history_is_its_slowest_run() {
     kani::assume(runs[0] <= runs[1] && runs[1] <= runs[2]);
     assert_eq!(percentile(&runs), Some(runs[2]));
     assert_eq!(percentile(&runs[..0]), None);
+    kani::cover!(runs[1] < runs[2]);
+    kani::cover!(runs[0] == runs[2]);
     runs[2] = runs[1];
     assert_eq!(percentile(&runs), Some(runs[1]));
 }
