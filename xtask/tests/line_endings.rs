@@ -441,7 +441,7 @@ fn hook_keeps_permissions_and_skips_symbolic_links() -> Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn hook_normalizes_a_path_that_is_not_utf8() -> Result<()> {
     use std::os::unix::ffi::OsStrExt;
