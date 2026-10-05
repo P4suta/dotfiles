@@ -5,8 +5,10 @@ use std::path::{Path, PathBuf};
 use yaml_rust2::YamlLoader;
 
 pub mod agent_memory;
+pub mod build_inputs;
 pub mod desktop;
 pub mod eol_rules;
+pub mod freshness;
 pub mod hooks;
 pub mod instruction_audit;
 pub mod instruction_rules;
@@ -30,6 +32,7 @@ pub mod skill_install;
 pub mod skill_ops;
 pub mod skill_proofs;
 pub mod skill_rules;
+pub mod stale_rules;
 pub mod target_rules;
 pub mod terminal;
 pub mod tool;

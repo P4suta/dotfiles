@@ -560,7 +560,7 @@ impl Github {
                 Refusal::new(
                     "pr.policy",
                     "the installed workflow policy needs schema 1, a nonzero quota reserve, and at least one personal owner",
-                    "chezmoi source-path ~/.agents/skills/pull-request/assets/workflow-policy.json",
+                    "git ls-files dot_agents/skills/pull-request/assets/workflow-policy.json",
                 )
                 .evidence(format!(
                     "schema {}, reserve {}, {} personal owner(s)",

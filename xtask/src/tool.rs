@@ -394,6 +394,14 @@ impl Tool {
         command
     }
 
+    /// A chezmoi run that reads the invoking checkout.
+    /// The default source is a bare repository whose head lags, so no installer may fall back to it.
+    pub fn chezmoi_in(root: &std::path::Path) -> Command {
+        let mut command = Self::Chezmoi.command();
+        command.arg("--source").arg(root);
+        command
+    }
+
     /// The only place xtask creates a process for a named program; a hook gate keeps the hook's repository to inspect the commit in progress.
     #[allow(clippy::disallowed_methods)]
     pub fn hook_command(self) -> Command {
