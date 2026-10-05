@@ -9,6 +9,9 @@ use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::OnceLock;
 
+#[path = "../../guard/tests/support/fixture_git.rs"]
+mod fixture_git;
+
 fn gh_directory() -> &'static tempfile::TempDir {
     static DIRECTORY: OnceLock<tempfile::TempDir> = OnceLock::new();
     DIRECTORY.get_or_init(|| {
@@ -32,18 +35,43 @@ struct Fixture {
     directory: tempfile::TempDir,
     body: PathBuf,
     log: PathBuf,
+    head: String,
+}
+
+/// Run Git in a fixture checkout without the host's global hooks or identity.
+fn git(directory: &std::path::Path, arguments: &[&str]) -> Result<String> {
+    let output = fixture_git::command("git", &directory.join("gitconfig"))
+        .current_dir(directory)
+        .args(arguments)
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "git {arguments:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(String::from_utf8(output.stdout)?.trim().to_owned())
 }
 
 impl Fixture {
+    /// A checkout whose head commit is the PR head, with no CI matrix unless a test commits one.
     fn new(body: &str) -> Result<Self> {
         let directory = tempfile::tempdir()?;
         let file = directory.path().join("body.md");
         fs::write(&file, body)?;
         let log = directory.path().join("gh.log");
+        fs::write(
+            directory.path().join("gitconfig"),
+            "[user]\n\tname = Fixture\n\temail = fixture@example.com\n[commit]\n\tgpgsign = false\n",
+        )?;
+        git(directory.path(), &["init", "--quiet"])?;
+        git(directory.path(), &["add", "body.md"])?;
+        git(directory.path(), &["commit", "--quiet", "-m", "head"])?;
+        let head = git(directory.path(), &["rev-parse", "HEAD"])?;
         Ok(Self {
             directory,
             body: file,
             log,
+            head,
         })
     }
 
@@ -63,6 +91,7 @@ impl Fixture {
             .env("HOME", self.directory.path())
             .env("USERPROFILE", self.directory.path())
             .env("GH_FIXTURE_LOG", &self.log)
+            .env("GH_FIXTURE_HEAD", &self.head)
             .env("GH_FIXTURE_USER", r#"{"login":"P4suta","id":42543015}"#)
             .env("GH_FIXTURE_REPOSITORY", serde_json::json!({
                 "full_name":repo,"owner":{"login":repo.split('/').next().unwrap(),"id":1},"fork":false
@@ -1481,5 +1510,70 @@ fn a_body_without_the_closing_reference_names_the_edit_that_adds_it() -> Result<
         record["next"],
         "gh pr edit 17 --repo P4suta/project --body-file <body-file>"
     );
+    Ok(())
+}
+
+#[test]
+fn ready_requires_a_passing_note_for_every_os_family_in_the_ci_matrix() -> Result<()> {
+    let mut fixture = Fixture::new(BODY)?;
+    let root = fixture.directory.path().to_path_buf();
+    fs::create_dir_all(root.join(".github/workflows"))?;
+    fs::write(
+        root.join(".github/workflows/ci.yml"),
+        "on: pull_request\njobs:\n  test:\n    strategy:\n      matrix:\n        os: [ubuntu-latest, windows-latest]\n    runs-on: ${{ matrix.os }}\n    steps: []\n",
+    )?;
+    git(&root, &["add", ".github"])?;
+    git(&root, &["commit", "--quiet", "-m", "ci"])?;
+    fixture.head = git(&root, &["rev-parse", "HEAD"])?;
+    let tree = git(&root, &["rev-parse", "HEAD^{tree}"])?;
+    let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true});
+    let ready = || -> Result<Output> {
+        Ok(fixture
+            .command("ready")?
+            .args(["--pr", "17"])
+            .env("GH_FIXTURE_VIEW", view.to_string())
+            .output()?)
+    };
+    let note = |os: &str, status: i32| -> Result<()> {
+        let record = serde_json::json!({"host":"fixture","os":os,"tree":tree,"status":status,"gate":"just check"});
+        git(
+            &root,
+            &[
+                "notes",
+                "--ref",
+                "refs/notes/hosts",
+                "append",
+                "-m",
+                &record.to_string(),
+                "HEAD",
+            ],
+        )?;
+        Ok(())
+    };
+    for (os, status, refusal) in [
+        (None, 0, "no linux gate result"),
+        (Some("linux"), 0, "no windows gate result"),
+        (Some("windows"), 1, "the windows gate failed"),
+    ] {
+        if let Some(os) = os {
+            note(os, status)?;
+        }
+        let output = ready()?;
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains(refusal) && error.contains("hosts check"),
+            "{error}"
+        );
+        assert!(!fixture.log()?.contains("\nready\n"));
+    }
+    note("windows", 0)?;
+    let output = ready()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(fixture.log()?.contains("\nready\n"));
     Ok(())
 }

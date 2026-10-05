@@ -7,7 +7,9 @@ description: >-
 
 # Multi-machine Development
 
-Read the owner's machine-local SSH aliases, host identities, repository roots, and hub location before operating another machine.
+`dotfiles-xtask hosts sync` generates the machine-local SSH aliases and pinned host keys for one host per OS family from the tailnet.
+`dotfiles-xtask hosts doctor` checks each host and prints the next action for any that is not ready.
+Read the owner's machine-local repository roots and hub location before operating another machine.
 Bare repositories under `~/git/` on the Mac are the synchronization source of truth.
 Read the current `domyjob` project skill and installed command help before driving another machine.
 Keep machine-specific paths and service configuration in dotfiles and existing inventories rather than copying current runtime state into this skill.
@@ -15,22 +17,18 @@ Use `dotfiles` for configuration changes that must be rendered, applied, and ver
 
 Run builds, tests, and remote commands through domyjob from the intended local checkout.
 Use `run` when the command needs the current files, including uncommitted work, and `on` for an explicit command in the remote home directory.
-Check host readiness with `domyjob doctor MACHINE` before relying on it.
 Each invocation selects one actual host and returns a durable machine/job identity.
 Pass a real executable and arguments after `--`; use an explicit host shell only when the requested expression needs it.
 Follow the current snapshot size, filename, link, and environment rules rather than assuming the client sends an arbitrary home directory.
 
-Before push, run the checks affected by the change on the local Mac and the owner's Linux and Windows hosts when the project supports them.
+Before a push, run `dotfiles-xtask hosts check` on the clean commit; pre-push and `pr-workflow ready` refuse a GitHub branch until every OS family in its CI matrix has a passing note.
 Exercise actual native paths and failure behavior; cross-compilation alone does not establish operating-system behavior.
-Reuse the project's maintained tasks and persistent build-cache conventions.
-Keep CI as confirmation of already exercised behavior while retaining its required checks and any hosted capabilities the local machines cannot reproduce.
-An unavailable host is a prerequisite to restore when its behavior is required, not a reason to submit a known unverified platform change.
+Keep CI as confirmation of already exercised behavior and of hosted capabilities the local machines cannot reproduce.
 Do not run signing, notarization, publication, privileged installation, or destructive cleanup merely to verify ordinary code.
 
 For a long run, retain its job identity and inspect its status or logs without resubmitting it.
 Preserve exit status and the primary failure, and distinguish a transport interruption from the job's actual result.
 Use the submission identity to resolve an uncertain start instead of launching a duplicate operation.
-Diagnose network reachability through `tailscale` and authentication through the configured SSH-agent boundary.
 The owner handles 1Password approval and private keys directly; do not open the vault, relax approval settings, or disable the agent's protections.
 
 Preserve the hub workflow, machine branches, signatures, hooks, line endings, and current local work when synchronization is needed.

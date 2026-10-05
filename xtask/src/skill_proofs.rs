@@ -117,6 +117,14 @@ pub const BODY_HARNESSES: [&str; 2] = [
     "every_body_refusal_names_the_deleting_next_action",
 ];
 
+pub const HOSTS_HARNESSES: [&str; 5] = [
+    "a_changed_host_key_is_pinned_only_with_acceptance",
+    "a_push_is_admitted_only_when_every_required_family_passed",
+    "checks_start_only_from_a_clean_tree_with_every_required_host_ready",
+    "only_github_branch_updates_are_gated",
+    "the_latest_record_for_the_commit_tree_decides_a_family",
+];
+
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
     let summary = &value["verification_results"]["summary"];
     ensure!(
@@ -661,7 +669,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 4] = [
+pub const RULES: [Rules; 5] = [
     Rules {
         source: "xtask/src/target_rules.rs",
         harnesses: &TARGET_HARNESSES,
@@ -744,6 +752,34 @@ fn reject_an_empty_deleting_next_action() {
         rejected: &[
             "reject_admitting_an_attributed_body",
             "reject_an_empty_deleting_next_action",
+        ],
+    },
+    Rules {
+        source: "xtask/src/hosts_rules.rs",
+        harnesses: &HOSTS_HARNESSES,
+        counterexamples: "use production::*;
+#[kani::proof]
+fn reject_admitting_a_failed_family() {
+    assert!(admit([true, true, true], [Evidence::Passed, Evidence::Failed, Evidence::Passed]) == Verdict::Admit);
+}
+#[kani::proof]
+fn reject_a_record_for_another_tree() {
+    assert!(record(Evidence::Missing, false, true) == Evidence::Passed);
+}
+#[kani::proof]
+fn reject_silently_accepting_a_changed_key() {
+    assert!(pin(Key::Changed, false));
+}
+#[kani::proof]
+fn reject_checking_a_dirty_tree() {
+    assert!(start(false, [true, true, true], [true, true, true]) == Start::Run);
+}
+",
+        rejected: &[
+            "reject_admitting_a_failed_family",
+            "reject_a_record_for_another_tree",
+            "reject_silently_accepting_a_changed_key",
+            "reject_checking_a_dirty_tree",
         ],
     },
 ];

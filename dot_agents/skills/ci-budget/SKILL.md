@@ -15,8 +15,7 @@ An existing push authorization remains applicable; an active owner-imposed hold 
 
 Read the repository instructions, current diff, workflow triggers, required jobs, and project check entry points.
 Map each affected CI job to its authoritative local command and required OS, architecture, environment, or service.
-Run the available equivalents on the Mac, Linux, and Windows through `multi-machine` and `domyjob` when those platforms are affected.
-Use pinned versions and the existing build caches.
+`dotfiles-xtask hosts check` runs the project gate on every OS family in the CI matrix; see `multi-machine`.
 Report hosted-only prerequisites such as GitHub event permissions, OIDC, environment approval, and publication separately; a local build does not exercise them.
 Local verification does not authorize signing, publication, paid service calls, or registering these machines as self-hosted runners.
 

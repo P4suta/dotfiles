@@ -244,6 +244,11 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
             &crate::refusal::command(&["dotguard", hook.name()]),
         )?;
     }
+    if matches!(hook, Hook::PrePush)
+        && let Some(url) = arguments.get(1)
+    {
+        crate::hosts::push_gate(Path::new("."), &url.to_string_lossy(), &input)?;
+    }
     if matches!(hook, Hook::PreCommit) {
         let global = native.home.join(".config/lefthook/global.yml");
         if global.is_file() {

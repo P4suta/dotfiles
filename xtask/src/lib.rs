@@ -12,6 +12,8 @@ pub mod desktop;
 pub mod eol_rules;
 pub mod freshness;
 pub mod hooks;
+pub mod hosts;
+pub mod hosts_rules;
 pub mod instruction_audit;
 pub mod instruction_rules;
 pub mod line_endings;
