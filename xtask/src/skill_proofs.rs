@@ -59,6 +59,11 @@ pub const REVIEW_HARNESSES: [&str; 5] = [
     "rolling_attempts_cannot_exceed_the_layered_local_budget",
 ];
 
+pub const LINE_ENDING_HARNESSES: [&str; 2] = [
+    "conversion_removes_only_carriage_returns_before_line_feeds",
+    "declared_line_endings_are_never_rewritten",
+];
+
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
     let summary = &value["verification_results"]["summary"];
     ensure!(
@@ -425,6 +430,29 @@ fn verify_native(root: &Path) -> Result<()> {
         fs::read(source)? == original,
         "production review proof source changed during verification"
     );
+    let source = crate::canonical(&root.join("xtask/src/eol_rules.rs"))?;
+    let original = fs::read(&source)?;
+    let directory = tempfile::tempdir()?;
+    verify_inventory(&source, directory.path(), &LINE_ENDING_HARNESSES)?;
+    verify_file(&source, directory.path(), &LINE_ENDING_HARNESSES, false)?;
+    let probe = tempfile::tempdir()?;
+    let file = probe.path().join("counterexample.rs");
+    fs::write(
+        &file,
+        format!(
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_rewriting_declared_crlf() {{\n    let attributes = production::Attributes {{ text: production::Text::Auto, eol: production::Eol::Crlf, binary: false }};\n    let content = production::Content {{ crlf: true, lone_cr: false, nul: false }};\n    assert!(production::action(attributes, content) == production::Action::Normalize);\n}}\n"
+        ),
+    )?;
+    verify_file(
+        &file,
+        probe.path(),
+        &["reject_rewriting_declared_crlf"],
+        true,
+    )?;
+    ensure!(
+        fs::read(source)? == original,
+        "production line-ending proof source changed during verification"
+    );
     println!(
         "Verified all {} production policy harnesses, reachable outcomes, and the rejecting counterexamples",
         HARNESSES.len()
@@ -432,6 +460,7 @@ fn verify_native(root: &Path) -> Result<()> {
             + PROFILE_HARNESSES.len()
             + REAPER_HARNESSES.len()
             + REVIEW_HARNESSES.len()
+            + LINE_ENDING_HARNESSES.len()
     );
     Ok(())
 }
