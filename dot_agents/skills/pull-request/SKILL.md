@@ -12,7 +12,6 @@ Include applicable organization templates when the repository inherits them.
 Those rules take precedence over personal defaults, including title format and required sections.
 Identify the exact repository, base, head, and authorized operation; preserve existing commit, push, comment, and review-request boundaries.
 An authoring request does not authorize unrelated publication or account changes.
-Honor an owner-imposed CodeRabbit pause before generation, quota inquiries, or review requests; keep its required review pending until explicit resumption.
 
 Before implementation, run `pr-workflow start --repo OWNER/REPO` to inspect the destination's scope.
 The [global workflow policy](assets/workflow-policy.json) identifies personal owners by GitHub login and numeric identity, and the command checks live repository identity and fork status.
@@ -25,17 +24,10 @@ Online operations require live authenticated `gh` access and inspect REST quota 
 Keep requests bounded and serialized; authentication failure, low quota, and rate-limit responses stop the operation without an automatic retry.
 Use the host's normal `gh auth login` when needed; do not transfer tokens between machines or use stale prerequisite caches for publication.
 
-Prefer CodeRabbit title and summary generation when it is enabled and confirmed operational for the destination repository.
-After CI-equivalent local checks and before publishing an initial substantive PR, load `coderabbit-review` for one guarded CLI review when verified included allowance permits.
-Address supported findings and rerun affected local checks before a coherent publication; use an existing PR's current review first and skip duplicate CLI analysis of the same unchanged diff.
-Check the intended publication's separate service pools through their official supported usage methods.
-Admit at most `floor(capacity * 0.9 * 0.8)` consumed reviews for each verified allowance and applicable adaptive activity threshold, retaining 20% of a 90% ceiling without intermediate rounding.
-An availability message or elapsed cooldown does not establish this numeric budget.
-Hold an operation that would start a PR review when its numeric capacity or inactive paid usage cannot be established.
-Report the specific missing evidence and earliest permitted reconsideration time without scheduling automatic publication or repeatedly querying the service.
-Use its standard `@coderabbitai` title and standalone `@coderabbitai summary` body placeholder with `--generation coderabbit`.
-Keep required template content and actual validation results around the summary request.
-Read [commands and generation](references/workflow.md) for the local and CodeRabbit paths and the optional configuration example.
+`coderabbit --guard-status --json` reports whether CodeRabbit PR and CLI reviews are paused.
+While PR reviews are paused, `pr-workflow` refuses an operation that would request one and reports that no review is awaited; follow its stated next action.
+Otherwise prefer CodeRabbit title and summary generation where it is enabled, and load `coderabbit-review` for one guarded CLI review before an initial substantive PR.
+Read [commands and generation](references/workflow.md) for the placeholders, the PR review budget, and the optional configuration example.
 Use local authoring when the service is unavailable or the destination requires a document it cannot produce reliably.
 Local creation always starts as a draft; moving it to review is a separate authorized operation.
 `ready` refuses until every head check passes; run it only when no scoped work remains.
@@ -59,7 +51,6 @@ The checker cannot establish their truth or prove that a description is useful.
 It also cannot prove that the issue preceded implementation or that the diff meets its scope; the skill must verify those facts from the work and execution evidence.
 
 Read back the published document and draft state with `gh`, and run the final live-document check.
-For CodeRabbit generation, observe the existing automatic review with bounded read-only polling and inspect the generated title and summary before completing the PR task.
-Pending, skipped, paused, stale, failed, or rate-limited generation remains incomplete; do not treat publishing a placeholder as a finished PR.
-Load `coderabbit-review` for the current-head review and supported findings, and `ci-budget` before an authorized push or PR update.
+Its CodeRabbit line states whether a current-head PR review is still owed; when it is, load `coderabbit-review` for that review and its findings.
+Load `ci-budget` before an authorized push or PR update.
 When `gh` fails, retain its diagnostic and inspect the remote state before retrying an uncertain mutation.

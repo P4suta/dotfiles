@@ -2,6 +2,22 @@
 {{- $hasNativeOnePassword := and (eq .chezmoi.os "linux") $isLocal (ne (lookPath "1password") "") -}}
 {
   "$schema": "https://opencode.ai/config.json",
-  "autoupdate": false{{ if $hasNativeOnePassword }},
+  "autoupdate": false,
+  "permission": {
+    "read": {
+      "*": "allow",
+      ".github/instructions/memory.instruction.md": "deny",
+      "*/.github/instructions/memory.instruction.md": "deny"
+    },
+    "edit": {
+      "*": "allow",
+      ".github/instructions/memory.instruction.md": "deny",
+      "*/.github/instructions/memory.instruction.md": "deny"
+    },
+    "bash": {
+      "*": "allow",
+      "*memory.instruction.md*": "deny"
+    }
+  }{{ if $hasNativeOnePassword }},
   "plugin": ["@upstash/context7-opencode"]{{ end }}
 }

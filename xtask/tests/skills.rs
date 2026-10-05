@@ -131,6 +131,7 @@ fn check_snapshots_preserve_sources_and_exclude_builds_and_unrelated_state() -> 
         ".github/workflows/required.yml",
         "dot_config/skill-ops/policy.json",
         "dot_config/opencode/plugins/skill-ops.ts",
+        "dot_config/opencode/plugins/line-endings.ts",
         "docs/skills/decisions/alpha.json",
         "package.json",
         "bun.lock",

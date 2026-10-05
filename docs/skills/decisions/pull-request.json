@@ -1,7 +1,7 @@
 {
-  "revision": "1be2603a716a3aee53704701db08ee71fabd7c540cee51b9cc9d60196b4bbb7e",
+  "revision": "1057236921d29e19bf5ee52a299c5fbb12c685c95e2bb29a4f0fb9a76f067115",
   "outcome": "implemented",
-  "reason": "Apply the same layered budget to verified separate PR allowance and applicable adaptive thresholds, require current window evidence and preserve the owner pause; retain checked issue scope, draft transitions and official review exclusion with production proofs and native process refusal tests. Keep PRs as drafts until every reported head check passes, with the check requirement proved in the transition core and refused natively.",
+  "reason": "Point the CodeRabbit section at the guard's machine-readable pause scope and the pr-workflow refusals and requirement line instead of restating pause and budget prose. While PR reviews are paused, pr-workflow refuses review requests, a ready transition without the exclusion made for the pause, and an edit that removes a ready PR's ignore line or pause marker, so a PR readied during the pause owes its review again after resumption; the request, pause-exclusion, and requirement cores are proved and their counterexamples refused natively. A draft still becomes ready only after every reported head check passes.",
   "evidence": [
     "dot_agents/skills/pull-request/SKILL.md",
     "docs/adr/0004-checked-pull-request-authoring.md",
@@ -11,7 +11,9 @@
     "xtask/src/review_rules.rs",
     "dot_agents/skills/pull-request/references/workflow.md",
     "docs/adr/0008-layered-review-capacity.md",
-    "docs/adr/0013-ready-only-after-passing-checks.md"
+    "docs/adr/0013-ready-only-after-passing-checks.md",
+    "docs/adr/0015-scoped-coderabbit-pause.md",
+    "xtask/src/pr_workflow.rs"
   ],
   "revisit": null
 }

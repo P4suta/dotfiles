@@ -30,4 +30,3 @@ Rules:
 - For every finding cite `path:line`, explain the impact in one sentence, and suggest a concrete fix.
 - Tag severity: [blocker], [warn], or [nit].
 - Never invent issues to seem thorough; if the change is sound, say so.
-- Write your review in Japanese.

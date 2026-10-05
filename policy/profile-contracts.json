@@ -23,5 +23,8 @@
   ".config/shell/github-token.sh": 0,
   ".claude/CLAUDE.md": 15,
   ".codex/AGENTS.md": 15,
-  ".config/opencode/AGENTS.md": 15
+  ".config/opencode/AGENTS.md": 15,
+  ".claude/settings.json": 15,
+  ".codex/config.toml": 15,
+  ".config/opencode/opencode.json": 15
 }

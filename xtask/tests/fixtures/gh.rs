@@ -35,6 +35,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{headers}\n");
         }
         println!("{}", std::env::var(variable)?);
+    } else if args.get(1).is_some_and(|arg| arg == "list") {
+        println!("{}", std::env::var("GH_FIXTURE_LIST")?);
     } else if args.get(1).is_some_and(|arg| arg == "view") {
         let view = std::env::var("GH_FIXTURE_VIEW")?;
         let checks = std::env::var("GH_FIXTURE_CHECKS")
