@@ -696,8 +696,6 @@ fn references_issue(body: &str, repo: &str, issue: u64) -> bool {
     })
 }
 
-/// Establish the global personal scope and validate an explicitly selected issue.
-/// `rerun` is the refused command, to run again once the PR body is corrected.
 /// Where a checked PR body lives, so a refusal names the edit that changes it.
 #[derive(Clone, Copy)]
 enum BodySource<'a> {
@@ -705,6 +703,7 @@ enum BodySource<'a> {
     Pr(u64),
 }
 
+/// Establish the global personal scope and validate an explicitly selected issue.
 /// `rerun` is the refused command, which a refusal for a body file repeats after the edit.
 fn inspect_issue(
     github: &Github,

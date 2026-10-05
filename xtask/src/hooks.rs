@@ -81,7 +81,9 @@ fn gate(command: &mut Command, input: &[u8], rerun: &str) -> Result<()> {
     let status = child.wait()?;
     let output = relay.join().unwrap_or_default();
     if !status.success() {
-        if Refusal::find(&String::from_utf8_lossy(&output)).is_some() {
+        let output = String::from_utf8_lossy(&output);
+        let last = output.lines().rev().find(|line| !line.trim().is_empty());
+        if last.is_some_and(|line| Refusal::find(line).is_some()) {
             return Err(crate::Relayed.into());
         }
         return Err(Refusal::new(
@@ -181,13 +183,19 @@ fn delegate(
     }
     let output = dump.output()?;
     if !output.status.success() {
-        return Err(Refusal::new(
+        let refusal = Refusal::new(
             "hook.lefthook",
             "the lefthook configuration could not be loaded; correct it and commit again",
             "lefthook dump",
         )
-        .evidence(format!("{configuration}: {}", output.status))
-        .evidence(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+        .evidence(format!("{configuration}: {}", output.status));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim();
+        return Err(if stderr.is_empty() {
+            refusal
+        } else {
+            refusal.evidence(stderr.to_owned())
+        }
         .into());
     }
     let hooks = configured_hooks(&output.stdout)?;

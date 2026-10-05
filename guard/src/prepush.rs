@@ -270,10 +270,7 @@ fn history_refusal(remote: &str, problems: &[Problem]) -> Refusal {
                     "api",
                     "-X",
                     "DELETE",
-                    &format!(
-                        "repos/{{owner}}/{{repo}}/git/refs/heads/{}",
-                        branch(&p.remote_ref)
-                    ),
+                    &format!("repos/{{owner}}/{{repo}}/git/{}", p.remote_ref),
                 ])
             })
             .collect::<Vec<_>>()

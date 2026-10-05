@@ -193,13 +193,17 @@ fn forge_deletes(references: &[&str]) -> String {
     references
         .iter()
         .map(|reference| {
-            let branch = reference.strip_prefix("refs/heads/").unwrap_or(reference);
+            let path = if reference.starts_with("refs/") {
+                (*reference).to_owned()
+            } else {
+                format!("refs/heads/{reference}")
+            };
             command(&[
                 "gh",
                 "api",
                 "-X",
                 "DELETE",
-                &format!("repos/{{owner}}/{{repo}}/git/refs/heads/{branch}"),
+                &format!("repos/{{owner}}/{{repo}}/git/{path}"),
             ])
         })
         .collect::<Vec<_>>()
@@ -858,8 +862,7 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
         let parsed = grammar.parse(args);
         let denial = skips_hooks(call, &parsed).or_else(|| match sub {
             "push" => push(call, &parsed),
-            _ if has("--no-gpg-sign") => Some(no_gpg_sign(call)),
-            _ => None,
+            _ => negated_signing(call, &parsed),
         });
         return read_in_full(&parsed, args, denial);
     }
@@ -1232,6 +1235,43 @@ fn skips_hooks(call: &Invocation, parsed: &Parsed) -> Option<Denial> {
     })
 }
 
+/// A commit option that negates `--gpg-sign` under any spelling Git reads, such as `--no-gpg`.
+fn negated_signing(call: &Invocation, parsed: &Parsed) -> Option<Denial> {
+    let mut dropped = vec![false; call.args.len()];
+    for (range, option) in &parsed.options {
+        if matches!(
+            option,
+            Opt::Long {
+                name: "gpg-sign",
+                negated: true
+            }
+        ) {
+            dropped[range.clone()].fill(true);
+        }
+    }
+    dropped.contains(&true).then(|| {
+        let line = call
+            .globals
+            .iter()
+            .cloned()
+            .chain([call.sub.to_owned()])
+            .chain(
+                call.args
+                    .iter()
+                    .zip(dropped)
+                    .filter(|(_, dropped)| !dropped)
+                    .map(|(arg, _)| arg.clone()),
+            )
+            .collect();
+        Denial::new(
+            Category::NoVerify,
+            "--no-gpg-sign",
+            "Every commit on this machine is signed; an unsigned one is refused by the repository ruleset anyway.",
+            Next::Git(line),
+        )
+    })
+}
+
 fn no_gpg_sign(call: &Invocation) -> Denial {
     Denial::new(
         Category::NoVerify,
@@ -1415,6 +1455,7 @@ mod tests {
             "-c core.hooksPath= push --no-verify origin +main:main",
             "branch -D -f topic",
             "commit -an --no-gpg-sign -m x",
+            "commit --no-gpg -m x",
         ] {
             let next = next(line);
             if let Some(words) = next.strip_prefix("git ") {
@@ -1428,6 +1469,7 @@ mod tests {
             next("-c core.hooksPath=/dev/null -c commit.gpgsign=false commit -m x"),
             "git commit -m x"
         );
+        assert_eq!(next("commit --no-gpg -m x"), "git commit -m x");
         assert_eq!(
             next("push origin +a:b :c"),
             "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/c' && git push origin a:b"
@@ -1645,6 +1687,7 @@ mod tests {
             "commit -an -m x",
             "push --no-verify origin main",
             "commit --no-gpg-sign -m x",
+            "commit --no-gpg -m x",
         ] {
             assert!(refused(line), "should refuse: git {line}");
         }
