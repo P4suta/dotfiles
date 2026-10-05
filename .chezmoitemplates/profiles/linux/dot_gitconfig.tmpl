@@ -6,7 +6,7 @@
 	pager = delta
 {{- if .signing.enabled }}
 	# Single source that forces the signing hooks on in every repo, existing ones included.
-	# The hooks themselves live in dot_config/git/hooks/. This repo overrides hooksPath back to .git/hooks via run_onchange so lefthook runs.
+	# The hooks themselves live in dot_config/git/hooks/ and run each repository's own lefthook configuration, so no repository installs lefthook hooks.
 	hooksPath = ~/.config/git/hooks
 {{- end }}
 

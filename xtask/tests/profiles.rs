@@ -474,6 +474,12 @@ fn agent_launchers_require_doppler_wherever_they_render() {
         [Tool::Doppler]
     );
     assert!(entry_requirements("dotfiles-xtask --root /source setup tools --live").is_empty());
+    assert_eq!(
+        entry_requirements(
+            r#"exec 'C:/Users/owner/.local/bin/dotfiles-xtask.exe' hook pre-commit -- "$@""#
+        ),
+        [Tool::Lefthook]
+    );
     assert!(entry_requirements("The agent reads its configuration here.").is_empty());
 }
 

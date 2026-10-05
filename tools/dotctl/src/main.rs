@@ -39,8 +39,6 @@ enum Command {
 #[derive(Debug, Subcommand)]
 enum SetupKind {
     Tools {
-        #[arg(long)]
-        source: PathBuf,
         #[arg(long, value_delimiter = ',')]
         scoop_apps: Vec<String>,
     },
@@ -108,7 +106,7 @@ fn main() -> ExitCode {
         Command::Preflight => preflight(),
         Command::Apply { yes, force } => apply::run(yes, force),
         Command::Setup { what } => match what {
-            SetupKind::Tools { source, scoop_apps } => setup::tools::run(&source, &scoop_apps),
+            SetupKind::Tools { scoop_apps } => setup::tools::run(&scoop_apps),
             SetupKind::Scoop {
                 installer_commit,
                 installer_sha256,

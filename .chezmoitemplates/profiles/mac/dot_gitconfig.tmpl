@@ -10,7 +10,7 @@
 	pager = delta
 # Single source that forces the hook dispatchers on in every repo, existing ones included.
 # The hooks themselves live in dot_config/git/hooks/.
-# This repo overrides hooksPath back to .git/hooks via run_onchange so lefthook runs.
+# They run each repository's own lefthook configuration, so no repository installs lefthook hooks.
 # The signing hooks self-disable when commit.gpgsign is off, so this stays safe before 1Password's agent is enabled.
 	hooksPath = ~/.config/git/hooks
 # macOS-only: the built-in FSEvents monitor turns `git status` in a large worktree from a full scan into a daemon query.
