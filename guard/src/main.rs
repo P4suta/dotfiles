@@ -108,24 +108,40 @@ fn git_wrapper(argv: &[String]) -> ExitCode {
         );
         return ExitCode::from(127);
     };
-    delegate(&real, argv)
+    let invoked: Vec<&str> = std::iter::once("git")
+        .chain(argv.iter().map(String::as_str))
+        .collect();
+    let mut git = std::process::Command::new(&real);
+    git.args(argv).env(INVOKED, refusal::command(&invoked));
+    delegate(&real, git)
+}
+
+/// Carries the command the wrapper ran to the hooks of that command, so a hook's waiver can repeat it.
+const INVOKED: &str = "DOTGUARD_COMMAND";
+
+/// `ALLOW_FOREIGN=1` before the Git command whose hook refused, when that command passed through the wrapper.
+fn foreign_waiver() -> Option<String> {
+    std::env::var(INVOKED)
+        .ok()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| format!("ALLOW_FOREIGN=1 {line}"))
 }
 
 /// Replaces this process with the real git, so no extra process holds a pipe open.
 #[cfg(unix)]
-fn delegate(real: &Path, argv: &[String]) -> ExitCode {
+fn delegate(real: &Path, mut git: std::process::Command) -> ExitCode {
     use std::os::unix::process::CommandExt;
     // exec() only returns on failure.
-    let err = std::process::Command::new(real).args(argv).exec();
+    let err = git.exec();
     eprintln!("::error:: could not exec {}: {err}", real.display());
     ExitCode::from(126)
 }
 
 /// Runs the real git and exits with its status, because Windows has no `exec`.
 #[cfg(windows)]
-fn delegate(real: &Path, argv: &[String]) -> ExitCode {
+fn delegate(real: &Path, mut git: std::process::Command) -> ExitCode {
     ignore_console_interrupts();
-    match std::process::Command::new(real).args(argv).status() {
+    match git.status() {
         Ok(status) => std::process::exit(status.code().unwrap_or(1)),
         Err(err) => {
             eprintln!("::error:: could not run {}: {err}", real.display());
@@ -211,10 +227,7 @@ fn commit_msg(path: &str) -> i32 {
             .map(|hit| lang::evidence("commit message", hit))
             .collect(),
         refusal::command(&retry),
-        format!(
-            "ALLOW_FOREIGN=1 {}",
-            refusal::command(&["git", "commit", "--file", path])
-        ),
+        foreign_waiver(),
     ))
 }
 
@@ -257,7 +270,7 @@ fn pre_commit() -> i32 {
         "staged changes add text in a script this machine does not write; remove it, stage the result, and commit again",
         hits,
         refusal::command(&inspect),
-        "ALLOW_FOREIGN=1 git commit".to_owned(),
+        foreign_waiver(),
     ))
 }
 
@@ -287,7 +300,7 @@ fn scan_paths(paths: &[String]) -> i32 {
         ),
         hits,
         refusal::command(&scan),
-        format!("ALLOW_FOREIGN=1 {}", refusal::command(&scan)),
+        Some(format!("ALLOW_FOREIGN=1 {}", refusal::command(&scan))),
     ))
 }
 

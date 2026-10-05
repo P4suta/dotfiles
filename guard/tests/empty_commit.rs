@@ -101,8 +101,10 @@ fn an_empty_commit_is_rolled_back_and_its_files_stay_in_the_working_tree() {
     let base = repository.commit(&tree, None);
     repository.commit(&tree, Some(&base));
     let refused = repository.post_commit_output(&[]);
-    assert!(!refused.status.success());
-    let refusal = Refusal::find(&String::from_utf8_lossy(&refused.stderr)).expect("a refusal");
+    assert_eq!(refused.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    let refusal = Refusal::parse(stderr.trim_end().lines().last().unwrap_or_default())
+        .unwrap_or_else(|| panic!("the record must be the last line: {stderr}"));
     assert!(refusal.is_complete(), "{refusal:?}");
     assert_eq!(refusal.rule, "commit.empty");
     assert_eq!(head(&repository), base);

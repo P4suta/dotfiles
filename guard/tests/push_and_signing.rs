@@ -187,6 +187,31 @@ fn one_linear_unsigned_branch_is_rebased_onto_the_parent_of_its_oldest_unsigned_
     assert_eq!(refused.evidence.len(), 2);
 }
 
+/// An amend moves only the checked-out branch, so a tag at the checked-out commit is listed rather than amended.
+#[test]
+fn an_unsigned_tag_at_the_checked_out_commit_is_listed_instead_of_amended() {
+    let (repository, base) = published("tag");
+    let tip = repository.commit("tip", &[&base]);
+    repository.git(&["update-ref", "HEAD", &tip]);
+    repository.git(&["tag", "v1", &tip]);
+    let refused = refusal(&repository.dotguard(
+        &["pre-push", "origin"],
+        &format!("refs/tags/v1 {tip} refs/tags/v1 {ZERO}\n"),
+        &SIGNED,
+    ));
+    assert_eq!(refused.rule, "push.signature");
+    assert_eq!(
+        refused.next,
+        format!("git log '--format=%h %G? %s' {tip} --not --remotes=origin")
+    );
+    let refused = refusal(&repository.dotguard(
+        &["pre-push", "origin"],
+        &format!("refs/heads/main {tip} refs/heads/main {base}\n"),
+        &SIGNED,
+    ));
+    assert_eq!(refused.next, "git commit --amend -S --no-edit");
+}
+
 #[test]
 fn several_refs_or_a_merge_are_listed_instead_of_rebased() {
     let (repository, base) = published("several");

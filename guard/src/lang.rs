@@ -330,24 +330,27 @@ pub fn evidence(label: &str, h: &Hit) -> String {
 /// The most hits a refusal lists; the report above it shows every one.
 const EVIDENCE_LIMIT: usize = 20;
 
-/// The refusal for text in a script this machine does not write; `waiver` repeats the refused command with the recorded override.
+/// The refusal for text in a script this machine does not write.
+/// `waiver` repeats the refused command with the recorded override, and is `None` when that command is unknown.
 pub fn refusal(
     rule: &str,
     cause: &str,
     hits: Vec<String>,
     next: String,
-    waiver: String,
+    waiver: Option<String>,
 ) -> crate::refusal::Refusal {
-    let mut refusal = crate::refusal::Refusal::new(
-        rule,
-        format!(
-            "{cause}.\n\
-             Cyrillic '\u{0441}' and Latin 'c' are indistinguishable on screen, so this is the same check that catches a homoglyph in an identifier and a bidi override in a comment.\n\
-             A repository that writes Japanese sets `git config guard.lang japanese`; one that carries multilingual fixtures sets `git config guard.lang off`."
-        ),
-        next,
-    )
-    .waiver(waiver);
+    let mut cause = format!(
+        "{cause}.\n\
+         Cyrillic '\u{0441}' and Latin 'c' are indistinguishable on screen, so this is the same check that catches a homoglyph in an identifier and a bidi override in a comment.\n\
+         A repository that writes Japanese sets `git config guard.lang japanese`; one that carries multilingual fixtures sets `git config guard.lang off`."
+    );
+    if waiver.is_none() {
+        cause.push_str(
+            "\nThe refused Git command did not pass through the git wrapper, so no waiver can repeat it; run that command again with ALLOW_FOREIGN=1 to waive this check once.",
+        );
+    }
+    let mut refusal = crate::refusal::Refusal::new(rule, cause, next);
+    refusal.waiver = waiver;
     let total = hits.len();
     for hit in hits.into_iter().take(EVIDENCE_LIMIT) {
         refusal = refusal.evidence(hit);
@@ -375,7 +378,7 @@ mod tests {
             "a.txt contains text in a script this machine does not write",
             hits,
             "dotguard scan a.txt".into(),
-            "ALLOW_FOREIGN=1 dotguard scan a.txt".into(),
+            Some("ALLOW_FOREIGN=1 dotguard scan a.txt".into()),
         );
         assert!(refused.is_complete(), "{refused:?}");
         assert_eq!(refused.evidence.len(), 21);

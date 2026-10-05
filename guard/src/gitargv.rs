@@ -180,9 +180,64 @@ fn forge_deletes(references: &[&str]) -> String {
         .join(" && ")
 }
 
-/// The branches a `push --delete <remote> <branch>...` names.
-fn deleted_branches<'a>(call: &'a Invocation) -> Vec<&'a str> {
-    (1..).map_while(|index| call.positional(index)).collect()
+/// `git push` options that take the next word as their value when none is attached.
+const PUSH_TAKES_VALUE: [&str; 5] = [
+    "--push-option",
+    "--repo",
+    "--receive-pack",
+    "--exec",
+    "--recurse-submodules",
+];
+
+/// The words of a `git push` argument list, split as Git splits them.
+struct PushArgs<'a> {
+    /// Options before `--`, without their values.
+    options: Vec<&'a str>,
+    /// Indices into the arguments of the repository followed by each refspec.
+    /// Git takes the first positional as the repository even when `--repo` names one.
+    positionals: Vec<usize>,
+}
+
+impl<'a> PushArgs<'a> {
+    fn parse(args: &'a [String]) -> Self {
+        let mut parsed = Self {
+            options: Vec::new(),
+            positionals: Vec::new(),
+        };
+        let mut index = 0;
+        while index < args.len() {
+            let arg = args[index].as_str();
+            if arg == "--" {
+                parsed.positionals.extend(index + 1..args.len());
+                break;
+            }
+            if arg.starts_with('-') && arg.len() > 1 {
+                parsed.options.push(arg);
+                let separate_value = if arg.starts_with("--") {
+                    PUSH_TAKES_VALUE.contains(&arg)
+                } else {
+                    // In a cluster, `o` takes the rest of the word, or the next word when it ends the cluster.
+                    arg.find('o') == Some(arg.len() - 1)
+                };
+                if separate_value {
+                    index += 1;
+                }
+            } else {
+                parsed.positionals.push(index);
+            }
+            index += 1;
+        }
+        parsed
+    }
+
+    /// The refspecs, after the repository.
+    fn refspecs(&self, args: &'a [String]) -> Vec<&'a str> {
+        self.positionals
+            .iter()
+            .skip(1)
+            .map(|&index| args[index].as_str())
+            .collect()
+    }
 }
 
 /// Drops `letters` from a clustered short option, and the option itself once nothing is left.
@@ -408,11 +463,13 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
     match sub {
         "push" => {
             let integrate = call.git(&["pull", "--rebase"]);
-            for a in &flags {
+            let push = PushArgs::parse(args);
+            let refspecs = push.refspecs(args);
+            for a in &push.options {
                 let deny = |reason: &str, hint: &str, next: Next| {
                     Some(Denial::new(Category::Force, reason, hint, next))
                 };
-                match a.as_str() {
+                match *a {
                     "-f" | "--force" => {
                         return deny(
                             "git push --force",
@@ -437,7 +494,7 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
                             "git push --delete",
                             "Deleting a remote ref is not recoverable from here.\n\
                              Delete merged branches through the forge, where the ref is still in the reflog.",
-                            Next::Shell(forge_deletes(&deleted_branches(call))),
+                            Next::Shell(forge_deletes(&refspecs)),
                         );
                     }
                     other if other.starts_with("--force-with-lease") => {
@@ -452,13 +509,6 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
                 }
             }
             // Refspecs: `+src:dst` forces that one ref, `:dst` deletes it.
-            let refspecs: Vec<&str> = args
-                .iter()
-                .take_while(|a| a.as_str() != "--")
-                .filter(|a| !a.starts_with('-'))
-                .skip(1)
-                .map(String::as_str)
-                .collect();
             let forced: Vec<&str> = refspecs
                 .iter()
                 .copied()
@@ -473,10 +523,21 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
                 return None;
             }
             // The same push without forcing and without the deletions, which go through the forge instead.
-            let unforced = call.rerun(|arg| {
-                (!(arg.len() > 1 && arg.starts_with(':')))
-                    .then(|| arg.strip_prefix('+').filter(|s| s.contains(':')).unwrap_or(arg).to_owned())
-            });
+            let unforced = Next::Git(
+                call.globals
+                    .iter()
+                    .map(String::as_str)
+                    .chain([call.sub])
+                    .chain(args.iter().enumerate().filter_map(|(index, arg)| {
+                        if !push.positionals.iter().skip(1).any(|&refspec| refspec == index) {
+                            return Some(arg.as_str());
+                        }
+                        (!(arg.len() > 1 && arg.starts_with(':')))
+                            .then(|| arg.strip_prefix('+').filter(|s| s.contains(':')).unwrap_or(arg))
+                    }))
+                    .map(str::to_owned)
+                    .collect(),
+            );
             let next = if deleted.is_empty() {
                 unforced
             } else if refspecs.len() > deleted.len() {
@@ -846,6 +907,59 @@ mod tests {
             next("push --delete origin a b"),
             "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/a' && gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/b'"
         );
+    }
+
+    /// An option value is never a remote or a refspec, and a refspec after `--` is still a refspec.
+    #[test]
+    fn push_reads_its_positionals_as_git_does() {
+        let delete = |branches: &[&str]| {
+            branches
+                .iter()
+                .map(|b| format!("gh api -X DELETE 'repos/{{owner}}/{{repo}}/git/refs/heads/{b}'"))
+                .collect::<Vec<_>>()
+                .join(" && ")
+        };
+        for line in [
+            "push --delete -o x origin a",
+            "push --delete --push-option x origin a",
+            "push --delete --receive-pack x origin a",
+            "push --delete --exec x origin a",
+            "push --delete --recurse-submodules check origin a",
+            "push --delete -uo x origin a",
+            "push --delete -ox origin a",
+            "push --delete origin -- a",
+        ] {
+            assert!(refused(line), "should refuse: git {line}");
+            assert_eq!(next(line), delete(&["a"]), "git {line}");
+        }
+        // Git takes the first positional as the repository even when --repo names one.
+        assert_eq!(next("push --delete --repo=origin a"), delete(&["<branch>"]));
+        assert_eq!(next("push --delete --repo origin a"), delete(&["<branch>"]));
+        for line in [
+            "push origin -- +main:main",
+            "push origin -- :c",
+            "push -- origin :c",
+            "push -o x origin +a:b",
+            "push --repo=origin origin +a:b",
+        ] {
+            assert!(refused(line), "should refuse: git {line}");
+        }
+        assert_eq!(
+            next("push origin -- +main:main"),
+            "git push origin -- main:main"
+        );
+        assert_eq!(next("push origin -- :c"), delete(&["c"]));
+        assert_eq!(next("push -o x origin +a:b"), "git push -o x origin a:b");
+        for line in [
+            "push --repo=origin :c",
+            "push --repo origin :c",
+            "push --repo=origin +a:b",
+            "push -o +a:b origin main",
+            "push -o :c origin main",
+            "push -o --force origin main",
+        ] {
+            assert!(!refused(line), "should allow: git {line}");
+        }
     }
 
     #[test]

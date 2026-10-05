@@ -3,7 +3,7 @@
 /// How to sign the unsigned commits a push would publish.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Signing {
-    /// The checked-out tip is the only unsigned commit: amend it.
+    /// The pushed ref is the checked-out one and its only unsigned commit is the tip: amend it.
     Amend,
     /// One branch carries a linear unsigned range: rebase that branch onto the range's base and sign each commit.
     Rebase,
@@ -11,14 +11,39 @@ pub enum Signing {
     Inspect,
 }
 
+/// What a pushed ref is, as far as signing its commits is concerned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reference {
+    /// The local branch `HEAD` points at.
+    CheckedOutBranch,
+    /// `HEAD` itself.
+    Head,
+    /// Another local branch.
+    Branch,
+    /// A tag or any other ref.
+    Other,
+}
+
+impl Reference {
+    /// An amend moves only the checked-out ref.
+    pub fn checked_out(self) -> bool {
+        matches!(self, Self::CheckedOutBranch | Self::Head)
+    }
+
+    /// A rebase needs a branch to rewrite.
+    pub fn branch(self) -> bool {
+        matches!(self, Self::CheckedOutBranch | Self::Branch)
+    }
+}
+
 /// `refs` counts the pushed refs that carry unsigned commits.
-/// `branch` says that ref is a local branch, `merges` that its pushed range contains a merge, and `only_tip` that its only unsigned commit is the checked-out tip.
-pub fn signing(refs: usize, branch: bool, merges: bool, only_tip: bool) -> Signing {
+/// `reference` is that ref, `merges` says its pushed range contains a merge, and `only_tip` that its only unsigned commit is the checked-out commit.
+pub fn signing(refs: usize, reference: Reference, merges: bool, only_tip: bool) -> Signing {
     if refs != 1 {
         Signing::Inspect
-    } else if only_tip {
+    } else if reference.checked_out() && only_tip {
         Signing::Amend
-    } else if branch && !merges {
+    } else if reference.branch() && !merges {
         Signing::Rebase
     } else {
         Signing::Inspect
@@ -50,17 +75,28 @@ pub fn history(undecidable: bool, rewrite: bool) -> History {
 #[kani::proof]
 fn a_rebase_signs_one_linear_branch_and_an_amend_only_the_checked_out_tip() {
     let refs: usize = kani::any();
-    let branch: bool = kani::any();
+    let reference = match kani::any::<u8>() {
+        0 => Reference::CheckedOutBranch,
+        1 => Reference::Head,
+        2 => Reference::Branch,
+        _ => Reference::Other,
+    };
+    let checked_out = matches!(reference, Reference::CheckedOutBranch | Reference::Head);
+    let branch = matches!(reference, Reference::CheckedOutBranch | Reference::Branch);
     let merges: bool = kani::any();
     let only_tip: bool = kani::any();
-    let plan = signing(refs, branch, merges, only_tip);
-    assert_eq!(plan == Signing::Amend, refs == 1 && only_tip);
+    let plan = signing(refs, reference, merges, only_tip);
+    assert_eq!(plan == Signing::Amend, refs == 1 && checked_out && only_tip);
     assert_eq!(
         plan == Signing::Rebase,
-        refs == 1 && !only_tip && branch && !merges
+        refs == 1 && !(checked_out && only_tip) && branch && !merges
     );
     assert!(refs == 1 || plan == Signing::Inspect);
     kani::cover!(plan == Signing::Amend);
+    kani::cover!(plan == Signing::Rebase && only_tip && !checked_out);
+    kani::cover!(
+        plan == Signing::Inspect && refs == 1 && only_tip && reference == Reference::Other
+    );
     kani::cover!(plan == Signing::Rebase);
     kani::cover!(plan == Signing::Inspect && refs == 1 && merges);
     kani::cover!(plan == Signing::Inspect && refs > 1);

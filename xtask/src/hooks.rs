@@ -109,6 +109,15 @@ fn install_lefthook() -> &'static str {
     }
 }
 
+fn lefthook_missing(configuration: &str, hook: Hook) -> Refusal {
+    Refusal::new(
+        "hook.lefthook",
+        "lefthook runs the configured hook gates and is not installed",
+        install_lefthook(),
+    )
+    .evidence(format!("{configuration} configures {}", hook.name()))
+}
+
 pub fn configured_hooks(bytes: &[u8]) -> Result<Vec<String>> {
     let text = std::str::from_utf8(bytes)?;
     let documents = yaml_rust2::YamlLoader::load_from_str(text)?;
@@ -163,13 +172,7 @@ fn delegate(
         |config| config.display().to_string(),
     );
     if !native.available(Tool::Lefthook) {
-        return Err(Refusal::new(
-            "hook.lefthook",
-            "lefthook runs the configured hook gates and is not installed",
-            install_lefthook(),
-        )
-        .evidence(format!("{} configures {}", configuration, hook.name()))
-        .into());
+        return Err(lefthook_missing(&configuration, hook).into());
     }
     let mut dump = native.hook_command(Tool::Lefthook);
     dump.arg("dump");
@@ -422,6 +425,17 @@ mod tests {
             assert_eq!(refusal.rule, "commit.staged-tree");
             assert_eq!(refusal.waiver, None);
         }
+    }
+
+    /// Built here because the fixed tool directories of a host can hold lefthook, so the dispatcher cannot be run without it.
+    #[test]
+    fn a_missing_lefthook_names_its_installation_and_the_configuration() {
+        let refusal = lefthook_missing("lefthook.yml", Hook::PrePush);
+        assert!(refusal.is_complete(), "{refusal:?}");
+        assert_eq!(refusal.rule, "hook.lefthook");
+        assert_eq!(refusal.next, install_lefthook());
+        assert_eq!(refusal.evidence, ["lefthook.yml configures pre-push"]);
+        assert_eq!(refusal.waiver, None);
     }
 
     #[test]

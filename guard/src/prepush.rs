@@ -17,7 +17,7 @@
 //! This hook is reached through `core.hooksPath` for every repository on the machine and every invocation of git in it.
 
 use crate::bypass::{self, Category};
-use crate::gate_rules::{self, History, Signing};
+use crate::gate_rules::{self, History, Reference, Signing};
 use crate::realgit;
 use crate::refusal::{Refusal, command};
 use std::io::Read;
@@ -161,17 +161,36 @@ fn signatures(remote: &str, input: &str) -> i32 {
         return 0;
     }
     let head = realgit::capture(&["rev-parse", "HEAD"]).map(|head| head.trim().to_owned());
-    unsigned_refusal(remote, &refs, head.as_deref()).emit();
+    let head_ref = realgit::capture(&["symbolic-ref", "-q", "HEAD"])
+        .map(|reference| reference.trim().to_owned());
+    unsigned_refusal(
+        remote,
+        &refs,
+        head.as_deref()
+            .map(|sha| (head_ref.as_deref().unwrap_or("HEAD"), sha)),
+    )
+    .emit();
     1
 }
 
 /// Signs exactly the unsigned commits when one command can, and lists them otherwise.
-fn unsigned_refusal(remote: &str, refs: &[Unsigned], head: Option<&str>) -> Refusal {
+/// `head` is the ref `HEAD` points at, or `HEAD` itself when detached, and the commit it names.
+fn unsigned_refusal(remote: &str, refs: &[Unsigned], head: Option<(&str, &str)>) -> Refusal {
     let first = &refs[0];
     let branch = first.local_ref.strip_prefix("refs/heads/");
-    let only_tip = matches!(&first.commits[..], [(only, _)] if Some(only.as_str()) == head);
+    let reference = if first.local_ref == "HEAD" {
+        Reference::Head
+    } else if head.is_some_and(|(reference, _)| first.local_ref == reference) {
+        Reference::CheckedOutBranch
+    } else if branch.is_some() {
+        Reference::Branch
+    } else {
+        Reference::Other
+    };
+    let only_tip =
+        matches!(&first.commits[..], [(only, _)] if head.is_some_and(|(_, sha)| sha == only));
     let sign = "git commit --amend --no-edit -S";
-    let next = match gate_rules::signing(refs.len(), branch.is_some(), first.merges, only_tip) {
+    let next = match gate_rules::signing(refs.len(), reference, first.merges, only_tip) {
         Signing::Amend => "git commit --amend -S --no-edit".to_owned(),
         Signing::Rebase => command(&[
             "git",
@@ -422,30 +441,47 @@ mod tests {
     fn an_unsigned_push_refusal_signs_exactly_the_unsigned_range_or_lists_it() {
         let topic = "refs/heads/topic";
         let inspect = "git log '--format=%h %G? %s' bbb --not --remotes=origin";
+        let on = |reference: &'static str, sha: &'static str| Some((reference, sha));
         for (refs, head, next) in [
             (
                 vec![unsigned(topic, &["aaa"], false, Some("base"))],
-                Some("aaa"),
+                on(topic, "aaa"),
                 "git commit --amend -S --no-edit",
             ),
             (
+                vec![unsigned("HEAD", &["aaa"], false, Some("base"))],
+                on("refs/heads/main", "aaa"),
+                "git commit --amend -S --no-edit",
+            ),
+            // An amend moves only the checked-out branch, so another ref at the same commit is signed where it points.
+            (
                 vec![unsigned(topic, &["aaa"], false, Some("base"))],
-                Some("ccc"),
+                on("refs/heads/main", "aaa"),
+                "git rebase --exec 'git commit --amend --no-edit -S' base topic",
+            ),
+            (
+                vec![unsigned("refs/tags/v1", &["bbb"], false, Some("base"))],
+                on("refs/heads/main", "bbb"),
+                inspect,
+            ),
+            (
+                vec![unsigned(topic, &["aaa"], false, Some("base"))],
+                on(topic, "ccc"),
                 "git rebase --exec 'git commit --amend --no-edit -S' base topic",
             ),
             (
                 vec![unsigned(topic, &["bbb", "aaa"], false, Some("base"))],
-                Some("bbb"),
+                on(topic, "bbb"),
                 "git rebase --exec 'git commit --amend --no-edit -S' base topic",
             ),
             (
                 vec![unsigned(topic, &["bbb", "aaa"], false, None)],
-                Some("bbb"),
+                on(topic, "bbb"),
                 "git rebase --exec 'git commit --amend --no-edit -S' --root topic",
             ),
             (
                 vec![unsigned(topic, &["bbb", "aaa"], true, Some("base"))],
-                Some("bbb"),
+                on(topic, "bbb"),
                 inspect,
             ),
             (
@@ -453,7 +489,7 @@ mod tests {
                     unsigned(topic, &["bbb"], false, Some("base")),
                     unsigned("refs/heads/other", &["ccc"], false, Some("base")),
                 ],
-                Some("bbb"),
+                on(topic, "bbb"),
                 inspect,
             ),
             (
@@ -463,7 +499,7 @@ mod tests {
                     false,
                     Some("base"),
                 )],
-                Some("ccc"),
+                on(topic, "ccc"),
                 inspect,
             ),
         ] {

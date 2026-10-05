@@ -11,7 +11,7 @@ use serde::Deserialize;
 use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const TITLE_REQUEST: &str = "@coderabbitai";
 const SUMMARY_REQUEST: &str = "@coderabbitai summary";
@@ -695,10 +695,18 @@ fn references_issue(body: &str, repo: &str, issue: u64) -> bool {
 
 /// Establish the global personal scope and validate an explicitly selected issue.
 /// `rerun` is the refused command, to run again once the PR body is corrected.
+/// Where a checked PR body lives, so a refusal names the edit that changes it.
+#[derive(Clone, Copy)]
+enum BodySource<'a> {
+    File(&'a Path),
+    Pr(u64),
+}
+
+/// `rerun` is the refused command, which a refusal for a body file repeats after the edit.
 fn inspect_issue(
     github: &Github,
     target: &Target,
-    body: Option<&str>,
+    body: Option<(&str, BodySource)>,
     rerun: &str,
 ) -> Result<IssueGate> {
     target.conventional_required()?;
@@ -820,14 +828,31 @@ fn inspect_issue(
             ))
         },
     )?;
-    if let Some(body) = body {
+    if let Some((body, source)) = body {
         require(references_issue(body, &target.repo, number), || {
+            let next = match source {
+                BodySource::File(path) => format!(
+                    "{} >> {} && {rerun}",
+                    command(&["printf", &format!("\\n\\nCloses #{number}\\n")]),
+                    command(&[&path.display().to_string()]),
+                ),
+                BodySource::Pr(pr) => command(&[
+                    "gh",
+                    "pr",
+                    "edit",
+                    &pr.to_string(),
+                    "--repo",
+                    &target.repo,
+                    "--body-file",
+                    "<body-file>",
+                ]),
+            };
             Refusal::new(
                 "pr.body",
                 format!(
                     "PR body must visibly close the selected issue, for example: Closes #{number}."
                 ),
-                rerun,
+                next,
             )
             .evidence(format!(
                 "no closing reference to #{number} in the visible body"
@@ -983,7 +1008,12 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 let live = live_document(&github, &target, pr)?;
                 let document = validate(&target, live.title, live.body, r#final)?;
                 require_issue(
-                    inspect_issue(&github, &target, Some(&document.body), rerun)?,
+                    inspect_issue(
+                        &github,
+                        &target,
+                        Some((&document.body, BodySource::Pr(pr))),
+                        rerun,
+                    )?,
                     &target,
                 )?;
             } else {
@@ -1006,13 +1036,19 @@ fn run(action: Action, rerun: &str) -> Result<()> {
             base,
             draft,
         } => {
+            let body_file = document.body_file.clone();
             let (target, document) = read_document(document, false)?;
             branch(&head)?;
             if let Some(base) = &base {
                 branch(base)?;
             }
             let github = Github::connect()?;
-            let issue = inspect_issue(&github, &target, Some(&document.body), rerun)?;
+            let issue = inspect_issue(
+                &github,
+                &target,
+                Some((&document.body, BodySource::File(&body_file))),
+                rerun,
+            )?;
             let effect = planned(
                 Operation::Create,
                 &target,
@@ -1033,9 +1069,15 @@ fn run(action: Action, rerun: &str) -> Result<()> {
             print!("{}", gh(&args)?);
         }
         Action::Edit { document, pr } => {
+            let body_file = document.body_file.clone();
             let (target, document) = read_document(document, false)?;
             let github = Github::connect()?;
-            let issue = inspect_issue(&github, &target, Some(&document.body), rerun)?;
+            let issue = inspect_issue(
+                &github,
+                &target,
+                Some((&document.body, BodySource::File(&body_file))),
+                rerun,
+            )?;
             planned(
                 Operation::Edit,
                 &target,
@@ -1075,7 +1117,12 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                     .evidence(format!("#{pr}: state {}", live.state))
             })?;
             let document = validate(&target, live.title, live.body, false)?;
-            let issue = inspect_issue(&github, &target, Some(&document.body), rerun)?;
+            let issue = inspect_issue(
+                &github,
+                &target,
+                Some((&document.body, BodySource::Pr(pr))),
+                rerun,
+            )?;
             planned(
                 Operation::Ready,
                 &target,

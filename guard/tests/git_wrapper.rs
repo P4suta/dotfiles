@@ -126,6 +126,54 @@ fn a_copy_named_git_refuses_destructive_commands_unless_waived() {
     assert!(log.lines().any(|line| line.contains("BYPASS")), "{log}");
 }
 
+/// The wrapper lets `push --repo=<remote> :<ref>` through because Git reads `:<ref>` as the repository, not as a deletion.
+#[test]
+fn git_reads_the_first_push_positional_as_the_repository() {
+    let wrapper = Wrapper::new("push-repository");
+    std::fs::write(
+        wrapper.scope.join("gitconfig"),
+        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+    )
+    .unwrap();
+    let succeeds = |arguments: &[&str]| {
+        let output = wrapper.run(arguments, None);
+        assert!(
+            output.status.success(),
+            "git {arguments:?}: {}",
+            text(&output.stderr)
+        );
+        text(&output.stdout).trim().to_owned()
+    };
+    succeeds(&["init", "-q", "--bare", "../remote.git"]);
+    let tree = succeeds(&["write-tree"]);
+    let commit = succeeds(&["commit-tree", &tree, "-m", "c"]);
+    succeeds(&[
+        "push",
+        "-q",
+        "../remote.git",
+        &format!("{commit}:refs/heads/c"),
+    ]);
+    succeeds(&["remote", "add", "origin", "../remote.git"]);
+    for arguments in [
+        &["push", "--repo=origin", ":c"][..],
+        &["push", "--repo", "origin", ":c"][..],
+    ] {
+        let pushed = wrapper.run(arguments, None);
+        assert!(
+            Refusal::find(&text(&pushed.stderr)).is_none(),
+            "{}",
+            text(&pushed.stderr)
+        );
+        assert!(!pushed.status.success(), "git {arguments:?} succeeded");
+        succeeds(&[
+            "--git-dir=../remote.git",
+            "rev-parse",
+            "--verify",
+            "refs/heads/c",
+        ]);
+    }
+}
+
 #[test]
 fn a_copy_named_git_passes_arguments_streams_and_status_through() {
     let wrapper = Wrapper::new("passthrough");

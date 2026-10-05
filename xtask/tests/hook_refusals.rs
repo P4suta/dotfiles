@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-/// An isolated home with a stand-in dotguard and a repository holding one staged file.
+/// An isolated home with stand-ins for dotguard and lefthook, and a repository holding one staged file.
 struct Host {
     scope: tempfile::TempDir,
 }
@@ -33,6 +33,13 @@ impl Host {
             .arg(bin.join(format!("dotguard{}", std::env::consts::EXE_SUFFIX)))
             .status()?;
         ensure!(status.success(), "fixture dotguard compilation failed");
+        let status = Command::new("rustc")
+            .args(["--edition", "2024"])
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lefthook.rs"))
+            .arg("-o")
+            .arg(bin.join(format!("lefthook{}", std::env::consts::EXE_SUFFIX)))
+            .status()?;
+        ensure!(status.success(), "fixture lefthook compilation failed");
         let host = Self { scope };
         host.run("git", &["init", "-q"])?;
         fs::write(host.repository().join("a.txt"), "a\n")?;
@@ -130,6 +137,25 @@ fn a_child_refusal_stays_last_and_a_bare_failure_gets_its_own_record() -> Result
     let failed = refusal(&host.hook(&["post-commit"])?);
     assert_eq!(failed.rule, "hook.gate");
     assert_eq!(failed.next, "dotguard post-commit");
+    Ok(())
+}
+
+#[test]
+fn a_lefthook_configuration_that_cannot_be_loaded_refuses_the_hook() -> Result<()> {
+    let host = Host::new()?;
+    fs::write(host.repository().join("lefthook.yml"), "pre-push: {}\n")?;
+    let refused =
+        refusal(&host.hook(&["pre-push", "--", "origin", "https://example.invalid/r"])?);
+    assert_eq!(refused.rule, "hook.lefthook");
+    assert_eq!(refused.next, "lefthook dump");
+    assert_eq!(refused.waiver, None);
+    assert!(
+        refused
+            .evidence
+            .iter()
+            .any(|item| item.contains("invalid lefthook configuration")),
+        "{refused:?}"
+    );
     Ok(())
 }
 

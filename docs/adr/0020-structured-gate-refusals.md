@@ -15,7 +15,8 @@ The rule is a stable dotted identifier such as `git.force` or `pr.issue`.
 The evidence lists the observed facts the refusal rests on, such as the refused command, a commit, or a marker path.
 The next command is one runnable line; `<name>` marks a value only the author can supply.
 A suggested Git command passes the gate that suggested it, however many refused parts the original line combined.
-The waiver repeats exactly the refused operation with a recorded one-time override, and is absent when the gate cannot be waived or its override is not recorded.
+The waiver repeats exactly the refused operation with a recorded one-time override, and is absent when the gate cannot be waived, its override is not recorded, or the refused operation is unknown.
+The Git wrapper passes the command it runs to that command's hooks, so a hook's waiver repeats the Git command that triggered it; a hook run by a Git that bypassed the wrapper names the override in its cause instead.
 A push hold has no waiver, because only the owner lifts it.
 
 A refusal prints readable text followed by exactly one machine-readable line on standard error:
@@ -31,7 +32,8 @@ The Git wrapper denials, the empty-commit and signing rollbacks of `post-commit`
 The hook dispatcher relays a child gate's record as the last line, and reports a child that failed without one as `hook.gate`.
 A `pr-workflow` failure that no specific rule describes is reported as `pr.failed` with the subcommand's help as its next step, through the standalone binary and through xtask alike.
 The choices of a signing step and of a history step are pure functions with Kani harnesses.
-Tests run each adopted gate as installed and require a complete record as the last line of its standard error; the dependency gate needs its lookup container, so its record is tested where it is built.
+Tests run each adopted gate as installed and require a complete record as the last line of its standard error.
+Two records are tested where they are built, because their condition depends on the host: the dependency gate needs its lookup container, and a missing lefthook cannot be arranged where the fixed tool directories hold one.
 
 ## Alternatives
 

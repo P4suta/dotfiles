@@ -1102,3 +1102,58 @@ fn scoped_install_preserves_other_managed_skills_policy_and_history() -> Result<
     );
     Ok(())
 }
+
+/// A body that does not close the issue is refused with the edit that closes it, never the unchanged command.
+#[test]
+fn a_body_without_the_closing_reference_names_the_edit_that_adds_it() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let create = |fixture: &Fixture| -> Result<Output> {
+        Ok(fixture
+            .personal_command("create")?
+            .args([
+                "--issue",
+                "23",
+                "--title",
+                "fix: preserve edits",
+                "--body-file",
+            ])
+            .arg(&fixture.body)
+            .args(["--head", "feature"])
+            .output()?)
+    };
+    let record = refusal(&create(&fixture)?);
+    assert_eq!(record["rule"], "pr.body");
+    let body = fixture.body.to_str().context("UTF-8 path")?;
+    let quoted = dotfiles_xtask::refusal::command(&[body]);
+    let next = record["next"].as_str().unwrap();
+    assert_eq!(
+        next,
+        format!(
+            "printf '\\n\\nCloses #23\\n' >> {quoted} && pr-workflow create --repo P4suta/project --issue 23 --title 'fix: preserve edits' --body-file {quoted} --head feature"
+        )
+    );
+    let mut appended = fs::read_to_string(&fixture.body)?;
+    appended.push_str("\n\nCloses #23\n");
+    fs::write(&fixture.body, appended)?;
+    let output = create(&fixture)?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let fixture = Fixture::new(BODY)?;
+    let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true});
+    let output = fixture
+        .personal_command("ready")?
+        .args(["--issue", "23", "--pr", "17"])
+        .env("GH_FIXTURE_VIEW", view.to_string())
+        .output()?;
+    let record = refusal(&output);
+    assert_eq!(record["rule"], "pr.body");
+    assert_eq!(
+        record["next"],
+        "gh pr edit 17 --repo P4suta/project --body-file <body-file>"
+    );
+    Ok(())
+}
