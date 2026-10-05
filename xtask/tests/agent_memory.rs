@@ -236,6 +236,59 @@ fn application_turns_off_memory_a_client_turned_back_on() {
     }
 }
 
+/// The timing hook runs before and after every shell call, and an application keeps the post-tool groups other installers added while replacing its own.
+#[test]
+fn the_timing_hook_joins_the_shell_events_and_keeps_other_post_tool_groups() {
+    let host = json!({"hooks": {
+        "PostToolUse": [
+            {"matcher": "Write", "hooks": [{"type": "command", "command": "dotfiles-xtask line-endings hook"}]},
+            {"matcher": "Bash|PowerShell", "hooks": [{"type": "command", "command": "/old/dotfiles-xtask claude-timing"}]}
+        ]
+    }})
+    .to_string();
+    for profile in ["mac", "linux", "windows", "wsl"] {
+        let rendered: Value = serde_json::from_str(&render_merged(
+            profile,
+            "dot_claude/modify_settings.json",
+            ".claude/settings.json",
+            &host,
+        ))
+        .unwrap();
+        let timing = |group: &Value| {
+            group["matcher"] == json!("Bash|PowerShell")
+                && group["hooks"].as_array().is_some_and(|hooks| {
+                    hooks.iter().any(|hook| {
+                        hook["command"].as_str().is_some_and(|command| {
+                            command.ends_with(" claude-timing")
+                                && command.contains("dotfiles-xtask")
+                        })
+                    })
+                })
+        };
+        assert!(
+            timing(&rendered["hooks"]["PreToolUse"][0]),
+            "{profile}: {rendered}"
+        );
+        for event in ["PostToolUse", "PostToolUseFailure"] {
+            let groups = rendered["hooks"][event].as_array().unwrap();
+            assert_eq!(
+                groups.iter().filter(|group| timing(group)).count(),
+                1,
+                "{profile} {event}"
+            );
+            assert!(
+                !rendered.to_string().contains("/old/dotfiles-xtask"),
+                "{profile}"
+            );
+        }
+        assert_eq!(
+            rendered["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
+            json!("dotfiles-xtask line-endings hook"),
+            "{profile}"
+        );
+    }
+}
+
 /// Every key a profile sets takes the profile's value, an array included as one value, and every other key keeps the host's value.
 #[test]
 fn a_profile_array_replaces_the_host_array_whether_or_not_it_is_empty() {

@@ -123,6 +123,12 @@ pub const SHELL_WRITE_HARNESSES: [&str; 2] = [
     "file_writing_commands_are_never_admitted",
 ];
 
+pub const TIMEOUT_HARNESSES: [&str; 3] = [
+    "the_percentile_of_a_short_history_is_its_slowest_run",
+    "the_timeout_never_falls_below_the_observed_percentile_nor_exceeds_the_limit",
+    "without_history_the_profile_default_decides",
+];
+
 pub const READY_PUSH_HARNESSES: [&str; 2] = [
     "a_draft_or_absent_pr_and_ungated_pushes_are_admitted",
     "a_ready_pr_never_takes_a_push",
@@ -698,7 +704,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 8] = [
+pub const RULES: [Rules; 9] = [
     Rules {
         source: "xtask/src/target_rules.rs",
         harnesses: &TARGET_HARNESSES,
@@ -764,6 +770,29 @@ fn reject_admitting_a_file_redirect() {
         rejected: &[
             "reject_admitting_an_inline_interpreter",
             "reject_admitting_a_file_redirect",
+        ],
+    },
+    Rules {
+        source: "xtask/src/timeout_rules.rs",
+        harnesses: &TIMEOUT_HARNESSES,
+        counterexamples: "use production::{Timeout, percentile, timeout};
+#[kani::proof]
+fn reject_keeping_a_timeout_below_the_observed_percentile() {
+    assert!(timeout(Some(100_000), 0, Some(60_000), 600_000) == Timeout::Keep(60_000));
+}
+#[kani::proof]
+fn reject_a_timeout_above_the_client_limit() {
+    assert!(timeout(Some(590_000), 0, None, 600_000).millis() > 600_000);
+}
+#[kani::proof]
+fn reject_the_median_as_the_high_percentile() {
+    assert!(percentile(&[1, 2, 3]) == Some(2));
+}
+",
+        rejected: &[
+            "reject_keeping_a_timeout_below_the_observed_percentile",
+            "reject_a_timeout_above_the_client_limit",
+            "reject_the_median_as_the_high_percentile",
         ],
     },
     Rules {
