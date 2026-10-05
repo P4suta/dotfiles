@@ -12,7 +12,7 @@ A project's own instructions take precedence when they conflict.
 
 - Use `mise x -- <command>` when a project pins a specific tool version.
 - Use `gh` for GitHub operations.
-- Follow the destination's commit message convention, and Conventional Commits when it states none.
+- Follow Conventional Commits.
 
 ## Workflow
 
@@ -22,5 +22,6 @@ A project's own instructions take precedence when they conflict.
 - Use `pr-workflow` for PR creation, document edits, and ready transitions, and keep the diff within the issue's scope.
 - For every implementation change, run `skill-ops load --bundle implementation-assurance` and meet the obligations it loads before declaring the change complete.
 - Before declaring work complete, run `skill-ops check` and resolve what it reports.
+- Keep the CodeRabbit CLI and PR review pools separate, apply adaptive thresholds where they apply, and hold a push or PR update when the required review capacity cannot be verified; elapsed time alone does not authorize a push.
 - Do not declare a PR complete while supported review findings, required checks, or a review of its current head remain outstanding.
 - Commit, push, reply to or resolve PR threads, request reviews, and merge only when I authorize that action.
