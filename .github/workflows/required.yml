@@ -70,23 +70,29 @@ jobs:
   minimum-git:
     # Git 2.43 comes from Ubuntu 24.04 and ranks as the oldest Git on a managed host.
     # The guard reads the Git state through it.
+    # The runner builds the tests, and an Ubuntu 24.04 container with the same C library runs them with its own Git.
     name: guard (Git 2.43)
-    runs-on: ubuntu-latest
-    container: ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - name: Install the distribution Git and a linker
-        run: apt-get update && apt-get install --yes --no-install-recommends ca-certificates curl gcc git libc6-dev
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
         with:
           install_args: rust
+      - name: Build the guard tests
+        run: |
+          mise x -- cargo test --locked --manifest-path guard/Cargo.toml --no-run --message-format=json \
+            | jq -r 'select(.profile.test == true and .executable != null) | .executable' > guard-tests.txt
+          test -s guard-tests.txt
       - name: Run the guard tests on Git 2.43
         run: |
-          git --version | grep -Fx 'git version 2.43.0'
-          mise x -- cargo test --locked --manifest-path guard/Cargo.toml
+          docker run --rm --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE/guard" \
+            ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55 \
+            bash -euc 'apt-get update -qq && apt-get install --yes --no-install-recommends -qq git openssh-client > /dev/null
+              git --version | grep -Fx "git version 2.43.0"
+              while read -r test; do "$test"; done < ../guard-tests.txt'
 
   rehearsal:
     name: rehearsal (${{ matrix.os }})
