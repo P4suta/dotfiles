@@ -35,7 +35,7 @@ pub fn run() -> Result<i32> {
     let mut pwsh = env::command("pwsh");
     pwsh.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
         .arg(script);
-    let code = proc::status(&mut pwsh)?;
+    let code = proc::status(&mut pwsh)?.code();
     if code != 0 {
         bail!("registering the {TASK} task exited with {code}");
     }

@@ -4,7 +4,7 @@
 //!
 //! Privilege model.
 //! Every step here needs an admin token, while everything else chezmoi does writes into `$HOME` as you, so the elevation is scoped to this command rather than to the whole apply: `dotctl setup sshd` re-runs itself elevated through `assets/elevate.ps1` and prints what the elevated run logged.
-//! Declining the prompt is a warning, never a failed apply - `dotctl apply` restores its backups on a non-zero exit, and an unanswered UAC dialog must not roll back `alacritty.toml`.
+//! Declining the prompt is a warning, never a failed apply: profile application restores managed files on a non-zero exit, and an unanswered UAC dialog must not roll back unrelated files.
 
 mod config;
 mod keys;

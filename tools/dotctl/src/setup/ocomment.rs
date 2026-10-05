@@ -35,7 +35,7 @@ fn install(options: &Options) -> Result<()> {
         let mut clone = env::command("git");
         clone.args(["clone", &options.repo_url]);
         clone.arg(&checkout);
-        proc::status(&mut clone).context("cloning OComment")?;
+        proc::run(&mut clone).context("cloning OComment")?;
     }
 
     // --locked: the lockfile is committed, and a build that quietly resolves something else is a build that is not the one the tests ran against.
@@ -45,7 +45,7 @@ fn install(options: &Options) -> Result<()> {
         .args(["build", "--release", "--locked", "-p", "ocomment"])
         .arg("--manifest-path")
         .arg(&manifest);
-    proc::status(&mut build).context("building ocomment")?;
+    proc::run(&mut build).context("building ocomment")?;
 
     let built = checkout
         .join("rust")
@@ -58,6 +58,6 @@ fn install(options: &Options) -> Result<()> {
 
     let mut version = env::command(&dest.display().to_string());
     version.arg("--version");
-    let _ = proc::status(&mut version);
+    proc::run(&mut version).context("running the installed ocomment")?;
     Ok(())
 }

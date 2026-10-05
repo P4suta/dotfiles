@@ -9,14 +9,37 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 
-/// Runs a command, letting its output reach the terminal untouched.
-///
-/// Returns the exit code, or 1 for a signal death, so a caller can aggregate exit codes the way the shell wrappers did.
-pub fn status(cmd: &mut Command) -> Result<i32> {
+/// A child's exit code, or 1 for a signal death.
+/// It must be checked or handed to the caller: discarding it after `?` is an unused value that the lints reject, because `?` alone reports only a failure to start.
+#[must_use = "check the exit code with `require` or return it; `?` alone does not"]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Exit(i32);
+
+impl Exit {
+    pub fn code(self) -> i32 {
+        self.0
+    }
+
+    pub fn success(self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// Runs a command, letting its output reach the terminal untouched, and returns its exit code for the caller to decide on.
+pub fn status(cmd: &mut Command) -> Result<Exit> {
     let status = cmd
         .status()
         .with_context(|| format!("failed to run {}", describe(cmd)))?;
-    Ok(status.code().unwrap_or(1))
+    Ok(Exit(status.code().unwrap_or(1)))
+}
+
+/// Runs a command, letting its output reach the terminal untouched, and fails unless it exits successfully.
+pub fn run(cmd: &mut Command) -> Result<()> {
+    let exit = status(cmd)?;
+    if !exit.success() {
+        bail!("{} exited with {}", describe(cmd), exit.code());
+    }
+    Ok(())
 }
 
 /// Output of a captured run.
@@ -96,4 +119,30 @@ pub fn write_temp(content: &str, suffix: &str) -> Result<tempfile::TempPath> {
     file.write_all(content.as_bytes())?;
     file.flush()?;
     Ok(file.into_temp_path())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{run, status};
+    use std::process::Command;
+
+    fn exiting(code: i32) -> Command {
+        if cfg!(windows) {
+            let mut command = Command::new("cmd");
+            command.args(["/C", &format!("exit {code}")]);
+            command
+        } else {
+            let mut command = Command::new("sh");
+            command.args(["-c", &format!("exit {code}")]);
+            command
+        }
+    }
+
+    #[test]
+    fn a_failing_child_fails_run_and_reports_its_code() {
+        assert!(run(&mut exiting(0)).is_ok());
+        let error = run(&mut exiting(3)).unwrap_err().to_string();
+        assert!(error.contains("exited with 3"), "{error}");
+        assert_eq!(status(&mut exiting(3)).unwrap().code(), 3);
+    }
 }

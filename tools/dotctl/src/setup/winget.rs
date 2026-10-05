@@ -11,7 +11,7 @@ pub fn run(apps: &[String]) -> Result<i32> {
         let mut cmd = winget("install");
         cmd.args(["--id", id, "--exact", "--silent"])
             .args(["--accept-source-agreements", "--accept-package-agreements"]);
-        let code = proc::status(&mut cmd)?;
+        let code = proc::status(&mut cmd)?.code();
         if code != 0 {
             bail!("winget install {id} exited with {code}");
         }
@@ -31,7 +31,7 @@ pub fn installed(id: &str) -> bool {
 pub fn uninstall(id: &str) -> Result<()> {
     let mut cmd = winget("uninstall");
     cmd.args(["--id", id, "--exact", "--silent"]);
-    let code = proc::status(&mut cmd)?;
+    let code = proc::status(&mut cmd)?.code();
     if code != 0 {
         bail!("winget uninstall {id} exited with {code}");
     }
