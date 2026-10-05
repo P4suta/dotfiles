@@ -1,4 +1,4 @@
-#![allow(
+#![expect(
     clippy::disallowed_methods,
     reason = "integration tests spawn the binaries and real tools they verify"
 )]
@@ -11,6 +11,10 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the shared constructor for fixture Git processes"
+)]
 #[path = "../../guard/tests/support/fixture_git.rs"]
 mod fixture_git;
 

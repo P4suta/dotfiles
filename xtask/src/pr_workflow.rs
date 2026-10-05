@@ -1,20 +1,27 @@
+use crate::body_rules::{Verdict, next_action as body_next_action, verdict as body_verdict};
 use crate::pr_rules::{
-    Blocker, Checks, Effect, Exclusion, Generation, IssueGate, Operation, ReviewRequirement,
-    api_quota_available, checks_state, coderabbit_body_marker_allowed, exclusion, issue_gate,
-    keeps_pause_exclusion, plan, requests_review, review_request_allowed, review_requirement,
+    Blocker, Checks, Dependency, Effect, Exclusion, Generation, IssueGate, Lifecycle, MergeState,
+    Operation, ReviewRequirement, Step, Stop, api_quota_available, checks_state,
+    coderabbit_body_marker_allowed, dependency, exclusion, head_checks, issue_gate,
+    keeps_pause_exclusion, merge_step, plan, requests_review, review_request_allowed,
+    review_requirement,
 };
 use crate::prose::Publication::{Issue as ISSUE, PullRequest as PULL_REQUEST};
 use crate::prose_rules::standard_applies;
 use crate::refusal::{Refusal, command};
 use crate::tool::Tool;
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use clap::{Args, Parser, Subcommand};
 use pulldown_cmark::{Event, Tag, TagEnd};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::{Duration, Instant};
 
 const TITLE_REQUEST: &str = "@coderabbitai";
 const SUMMARY_REQUEST: &str = "@coderabbitai summary";
@@ -72,6 +79,10 @@ pub enum Action {
         /// Also keep CodeRabbit-created PRs as drafts.
         #[arg(long)]
         draft: bool,
+        /// Open the PR although it touches paths another open PR touches.
+        /// Shared commits still refuse.
+        #[arg(long)]
+        independent: bool,
     },
     /// Replace both title and body with one checked document.
     Edit {
@@ -87,11 +98,73 @@ pub enum Action {
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
         pr: u64,
     },
+    /// Merge independent PRs in order: update a behind head by merge, wait for its checks, mark it ready, and merge the verified head.
+    Merge {
+        #[command(flatten)]
+        target: Target,
+        /// A PR to merge, repeated in merge order.
+        #[arg(long = "pr", required = true, value_parser = clap::value_parser!(u64).range(1..))]
+        prs: Vec<u64>,
+        #[command(flatten)]
+        polling: Polling,
+    },
+    /// Create, sync, rebase, and merge stacked PRs through the pinned gh-stack.
+    Stack {
+        #[command(subcommand)]
+        action: StackAction,
+    },
     /// Check, create, or edit an issue through the same document and writing checks.
     Issue {
         #[command(subcommand)]
         action: IssueAction,
     },
+}
+
+#[derive(Subcommand)]
+pub enum StackAction {
+    /// Create a draft PR for the head on top of the open PR of the base branch, and link the chain as one stack.
+    Create {
+        #[command(flatten)]
+        document: DocumentArgs,
+        #[arg(long)]
+        head: String,
+        /// The parent PR's head branch.
+        #[arg(long)]
+        base: String,
+    },
+    /// Restack the checked-out stack on its updated parents, push it with explicit leases, and sync its PRs.
+    Sync {
+        #[command(flatten)]
+        target: Target,
+    },
+    /// Rebase the stack in the current checkout to resolve a conflict, then continue or stop that rebase.
+    Rebase {
+        #[command(flatten)]
+        target: Target,
+        #[arg(long = "continue", conflicts_with = "abort")]
+        resume: bool,
+        #[arg(long)]
+        abort: bool,
+    },
+    /// Merge the stack up to a PR: restack, wait for every check, mark each ready, and merge them together.
+    Merge {
+        #[command(flatten)]
+        target: Target,
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        pr: u64,
+        #[command(flatten)]
+        polling: Polling,
+    },
+}
+
+#[derive(Args, Clone, Copy)]
+pub struct Polling {
+    /// Seconds between reads while checks run.
+    #[arg(long, default_value_t = 30)]
+    interval: u64,
+    /// Minutes to wait for each PR before refusing.
+    #[arg(long, default_value_t = 120)]
+    timeout: u64,
 }
 
 #[derive(Subcommand)]
@@ -134,12 +207,14 @@ impl Action {
             Self::Create { .. } => "create",
             Self::Edit { .. } => "edit",
             Self::Ready { .. } => "ready",
+            Self::Merge { .. } => "merge",
+            Self::Stack { .. } => "stack",
             Self::Issue { .. } => "issue",
         }
     }
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct Target {
     /// The exact GitHub repository rather than a URL or an inferred one.
     #[arg(long)]
@@ -182,6 +257,7 @@ struct LiveDocument {
     is_draft: bool,
     #[serde(default)]
     status_check_rollup: Vec<ReportedCheck>,
+    head_ref_oid: Option<String>,
 }
 
 /// One entry of the head commit's check rollup: a check run or a commit status.
@@ -211,13 +287,19 @@ impl ReportedCheck {
     }
 }
 
-fn checks(rollup: &[ReportedCheck]) -> Checks {
+/// The total, unfinished, and failed checks of a rollup.
+fn tally(rollup: &[ReportedCheck]) -> (usize, usize, usize) {
     let unfinished = rollup.iter().filter(|check| !check.finished()).count();
     let failed = rollup
         .iter()
         .filter(|check| check.finished() && !check.passed())
         .count();
-    checks_state(rollup.len(), unfinished, failed)
+    (rollup.len(), unfinished, failed)
+}
+
+fn checks(rollup: &[ReportedCheck]) -> Checks {
+    let (total, unfinished, failed) = tally(rollup);
+    checks_state(total, unfinished, failed)
 }
 
 #[derive(Deserialize)]
@@ -226,10 +308,61 @@ struct WorkflowPolicy {
     schema: u8,
     minimum_remaining: u64,
     personal_owners: Vec<Owner>,
+    work_in_progress: WorkInProgress,
+}
+
+/// The number of open PRs one person may keep in a repository before new work joins an open PR instead.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkInProgress {
+    default: u32,
+    /// Overrides by `owner/name`, each recorded with the reason it differs.
+    #[serde(default)]
+    repositories: std::collections::BTreeMap<String, RepositoryLimit>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RepositoryLimit {
+    limit: u32,
+    reason: String,
+}
+
+impl WorkInProgress {
+    fn limit(&self, repository: &str) -> u32 {
+        crate::wip_rules::limit(
+            self.default,
+            self.repositories
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(repository))
+                .map(|(_, recorded)| recorded.limit),
+        )
+    }
 }
 
 struct Github {
     policy: WorkflowPolicy,
+    login: String,
+}
+
+/// One open PR as the REST list reports it.
+#[derive(Deserialize)]
+struct ListedPr {
+    number: u64,
+    html_url: String,
+    user: ListedUser,
+    head: ListedHead,
+}
+
+#[derive(Deserialize)]
+struct ListedUser {
+    login: String,
+}
+
+#[derive(Deserialize)]
+struct ListedHead {
+    #[serde(rename = "ref")]
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -249,18 +382,27 @@ fn workflow_policy() -> Result<WorkflowPolicy> {
         "../../dot_agents/skills/pull-request/assets/workflow-policy.json"
     ))?;
     require(
-        policy.schema == 1 && policy.minimum_remaining > 0 && !policy.personal_owners.is_empty(),
+        policy.schema == 1
+            && policy.minimum_remaining > 0
+            && !policy.personal_owners.is_empty()
+            && policy.work_in_progress.default > 0
+            && policy
+                .work_in_progress
+                .repositories
+                .values()
+                .all(|recorded| recorded.limit > 0 && single_line(&recorded.reason)),
         || {
             Refusal::new(
                 "pr.policy",
-                "the installed workflow policy needs schema 1, a nonzero quota reserve, and at least one personal owner",
-                "chezmoi source-path ~/.agents/skills/pull-request/assets/workflow-policy.json",
+                "the installed workflow policy needs schema 1, a nonzero quota reserve, at least one personal owner, and nonzero work-in-progress limits whose overrides each state a reason",
+                "git ls-files dot_agents/skills/pull-request/assets/workflow-policy.json",
             )
             .evidence(format!(
-                "schema {}, reserve {}, {} personal owner(s)",
+                "schema {}, reserve {}, {} personal owner(s), work-in-progress default {}",
                 policy.schema,
                 policy.minimum_remaining,
-                policy.personal_owners.len()
+                policy.personal_owners.len(),
+                policy.work_in_progress.default
             ))
         },
     )?;
@@ -272,6 +414,47 @@ struct Repository {
     full_name: String,
     owner: Owner,
     fork: bool,
+    #[serde(default)]
+    default_branch: Option<String>,
+}
+
+/// An open PR as `gh pr list` reports it.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenPr {
+    number: u64,
+    head_ref_name: String,
+    base_ref_name: String,
+    #[serde(default)]
+    is_cross_repository: bool,
+}
+
+/// One PR of a merge, read in one response so its checks belong to its head.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MergeView {
+    title: String,
+    body: String,
+    state: String,
+    is_draft: bool,
+    head_ref_oid: String,
+    base_ref_name: String,
+    mergeable: String,
+    merge_state_status: String,
+    #[serde(default)]
+    status_check_rollup: Vec<ReportedCheck>,
+    #[serde(default)]
+    closing_issues_references: Vec<ClosingIssue>,
+}
+
+#[derive(Deserialize)]
+struct ClosingIssue {
+    number: u64,
+}
+
+#[derive(Deserialize)]
+struct Comparison {
+    behind_by: u64,
 }
 
 #[derive(Deserialize)]
@@ -287,6 +470,26 @@ struct LiveIssue {
 pub struct ValidatedDocument {
     title: String,
     body: String,
+}
+
+/// Refuse a title or body that carries a line claiming authorship for an agent.
+/// The refusal names the line and the next action.
+fn refuse_attribution(part: &str, text: &str, recheck: impl FnOnce() -> String) -> Result<()> {
+    let found = dotguard::attribution::find(text);
+    if let Verdict::Refuse(reason) = body_verdict(found.is_some()) {
+        let (number, line) = found.context("a refused document names its attribution line")?;
+        return Err(Refusal::new(
+            "pr.attribution",
+            format!(
+                "{part} line {number} is AI attribution. {}",
+                body_next_action(reason)
+            ),
+            recheck(),
+        )
+        .evidence(format!("{part} line {number}: {line}"))
+        .into());
+    }
+    Ok(())
 }
 
 fn single_line(value: &str) -> bool {
@@ -552,6 +755,8 @@ pub fn validate(
             )
         })?;
     }
+    refuse_attribution("title", &title, || recheck(target, None))?;
+    refuse_attribution("body", &body, || recheck(target, Some(&title)))?;
     let body_refusal = |cause: &str, evidence: String| {
         Refusal::new("pr.body", cause, recheck(target, Some(&title))).evidence(evidence)
     };
@@ -679,8 +884,9 @@ fn gh(args: &[OsString]) -> Result<String> {
 impl Github {
     /// Require a live authenticated user without printing or transferring credentials.
     fn connect() -> Result<Self> {
-        let github = Self {
+        let mut github = Self {
             policy: workflow_policy()?,
+            login: String::new(),
         };
         let user: Owner = github.read("user").map_err(|error| {
             if error.downcast_ref::<Refusal>().is_some() {
@@ -705,7 +911,46 @@ impl Github {
                 user.login, user.id
             ))
         })?;
+        github.login = user.login;
         Ok(github)
+    }
+
+    /// Refuses a new PR while the authenticated user already has as many open PRs as the work-in-progress limit of the repository permits.
+    fn admit_work_in_progress(&self, target: &Target, head: &str) -> Result<()> {
+        let open: Vec<ListedPr> = self.read(&format!(
+            "repos/{}/pulls?state=open&per_page=100",
+            target.repo
+        ))?;
+        let mine: Vec<&ListedPr> = open
+            .iter()
+            .filter(|pr| pr.user.login.eq_ignore_ascii_case(&self.login) && pr.head.name != head)
+            .collect();
+        let limit = self.policy.work_in_progress.limit(&target.repo);
+        let count = u32::try_from(mine.len()).unwrap_or(u32::MAX);
+        if crate::wip_rules::admits(count, limit) {
+            return Ok(());
+        }
+        let oldest = mine
+            .iter()
+            .min_by_key(|pr| pr.number)
+            .context("a refused limit names an open PR")?;
+        let mut refusal = Refusal::new(
+            "pr.wip",
+            format!(
+                "{} already holds {count} open PR(s) in {}, at its work-in-progress limit of {limit}; add this work to #{} instead of opening another PR",
+                self.login, target.repo, oldest.number
+            ),
+            command(&["git", "switch", &oldest.head.name])
+                + " && "
+                + &command(&["git", "merge", "--no-edit", head])
+                + " && "
+                + &command(&["git", "push"]),
+        );
+        for pr in &mine {
+            refusal =
+                refusal.evidence(format!("#{} {} ({})", pr.number, pr.html_url, pr.head.name));
+        }
+        Err(refusal.into())
     }
 
     /// Inspect live REST quota headers on each serialized prerequisite request.
@@ -1192,7 +1437,7 @@ fn live_document(_github: &Github, target: &Target, pr: u64) -> Result<LiveDocum
     args.extend([
         pr.to_string().into(),
         "--json".into(),
-        "title,body,state,isDraft,statusCheckRollup".into(),
+        "title,body,state,isDraft,statusCheckRollup,headRefOid".into(),
     ]);
     serde_json::from_str(&gh(&args)?).context("invalid gh PR document")
 }
@@ -1255,8 +1500,10 @@ fn run(action: Action, rerun: &str) -> Result<()> {
             head,
             base,
             draft,
+            independent,
         } => {
             let body_file = document.body_file.clone();
+            let title = document.title.clone();
             let (target, document) = read_document(document, false)?;
             branch(&head)?;
             if let Some(base) = &base {
@@ -1282,6 +1529,16 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 draft,
                 issue,
                 Checks::Incomplete,
+            )?;
+            github.admit_work_in_progress(&target, &head)?;
+            refuse_dependent(
+                &github,
+                &target,
+                &head,
+                base.as_deref(),
+                independent,
+                &title,
+                &body_file,
             )?;
             let mut args = arguments("create", &target.repo);
             args.extend([OsString::from("--head"), head.into()]);
@@ -1353,32 +1610,748 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 Refusal::new("pr.state", "only an open PR can become ready", inspect())
                     .evidence(format!("#{pr}: state {}", live.state))
             })?;
-            let document = validate(&target, live.title, live.body, false)?;
+            let body = make_ready(
+                &github,
+                &target,
+                pr,
+                live.title,
+                live.body,
+                live.is_draft,
+                checks(&live.status_check_rollup),
+                live.head_ref_oid
+                    .as_deref()
+                    .context("GitHub reported no head commit")?,
+                rerun,
+            )?;
+            report_review_requirement(&body)?;
+        }
+        Action::Merge {
+            target,
+            prs,
+            polling,
+        } => {
+            target.conventional_required()?;
+            let github = Github::connect()?;
+            for pr in prs {
+                merge_independent(&github, &target, pr, polling, rerun)?;
+            }
+        }
+        Action::Stack { action } => stack(action, rerun)?,
+        Action::Issue { action } => issue(action)?,
+    }
+    Ok(())
+}
+
+/// Validates a live document and moves the open draft to review, returning the checked body.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one fact of the live PR read in a single response"
+)]
+fn make_ready(
+    github: &Github,
+    target: &Target,
+    pr: u64,
+    title: String,
+    body: String,
+    draft: bool,
+    checks: Checks,
+    head: &str,
+    rerun: &str,
+) -> Result<String> {
+    let document = validate(target, title, body, false)?;
+    let destination = destination(github, &target.repo)?;
+    let issue = inspect_issue(
+        github,
+        target,
+        destination,
+        Some((&document.body, BodySource::Pr(pr))),
+        rerun,
+    )?;
+    planned(Operation::Ready, target, Some(pr), draft, issue, checks)?;
+    crate::hosts::require_admission(Path::new("."), head)?;
+    admit_review_request(Operation::Ready, target.generation, &document.body, || {
+        Ok((draft, review_exclusion(&document.body)))
+    })?;
+    let mut args = arguments("ready", &target.repo);
+    args.push(pr.to_string().into());
+    print!("{}", gh(&args)?);
+    Ok(document.body)
+}
+
+fn open_prs(target: &Target) -> Result<Vec<OpenPr>> {
+    let mut args = arguments("list", &target.repo);
+    args.extend(
+        [
+            "--state",
+            "open",
+            "--limit",
+            "500",
+            "--json",
+            "number,headRefName,baseRefName,isCrossRepository",
+        ]
+        .map(OsString::from),
+    );
+    let listed: Vec<OpenPr> = serde_json::from_str(&gh(&args)?).context("invalid gh PR list")?;
+    Ok(listed
+        .into_iter()
+        .filter(|pr| !pr.is_cross_repository)
+        .collect())
+}
+
+/// Returns the open PRs from the trunk up to the one whose head matches `head`, bottom first, and the trunk below them.
+fn chain(open: &[OpenPr], head: &str) -> (Vec<u64>, String) {
+    let mut numbers = Vec::new();
+    let mut branch = head.to_owned();
+    // The walk takes each PR at most once, so a cycle of bases ends it.
+    while let Some(pr) = open
+        .iter()
+        .find(|pr| pr.head_ref_name == branch && !numbers.contains(&pr.number))
+    {
+        numbers.push(pr.number);
+        branch.clone_from(&pr.base_ref_name);
+    }
+    numbers.reverse();
+    (numbers, branch)
+}
+
+fn merge_view(target: &Target, pr: u64) -> Result<MergeView> {
+    let mut args = arguments("view", &target.repo);
+    args.extend([
+        pr.to_string().into(),
+        "--json".into(),
+        "title,body,state,isDraft,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,closingIssuesReferences".into(),
+    ]);
+    serde_json::from_str(&gh(&args)?).context("invalid gh PR merge state")
+}
+
+/// The merge state of `view`.
+/// GitHub evaluates the merge requirements of a stacked PR when the stack merges.
+fn merge_state(
+    github: &Github,
+    target: &Target,
+    view: &MergeView,
+    stacked: bool,
+) -> Result<MergeState> {
+    let lifecycle = match (view.state.as_str(), view.is_draft) {
+        ("MERGED", _) => Lifecycle::Merged,
+        ("CLOSED", _) => Lifecycle::Closed,
+        (_, true) => Lifecycle::Draft,
+        _ => Lifecycle::Ready,
+    };
+    let behind = if matches!(lifecycle, Lifecycle::Draft | Lifecycle::Ready) {
+        let comparison: Comparison = github.read(&format!(
+            "repos/{}/compare/{}...{}",
+            target.repo, view.base_ref_name, view.head_ref_oid
+        ))?;
+        comparison.behind_by > 0
+    } else {
+        false
+    };
+    let (total, unfinished, failed) = tally(&view.status_check_rollup);
+    Ok(MergeState {
+        lifecycle,
+        conflict: view.mergeable == "CONFLICTING",
+        behind,
+        checks: head_checks(total, unfinished, failed),
+        clean: stacked || matches!(view.merge_state_status.as_str(), "CLEAN" | "HAS_HOOKS"),
+        exclusion: review_exclusion(&view.body),
+    })
+}
+
+/// The structured refusal for a merge that stops at `pr`.
+fn stop_refusal(target: &Target, pr: u64, stop: Stop, stacked: bool, view: &MergeView) -> Refusal {
+    let number = pr.to_string();
+    let evidence = format!(
+        "#{pr}: head {}, mergeable {}, merge state {}",
+        view.head_ref_oid, view.mergeable, view.merge_state_status
+    );
+    let (rule, cause, next) = match stop {
+        Stop::Closed => (
+            "pr.state",
+            "a closed PR cannot merge; reopen it or leave it out of the merge".to_owned(),
+            command(&["gh", "pr", "view", &number, "--repo", &target.repo]),
+        ),
+        Stop::Conflict if stacked => (
+            "pr.conflict",
+            "the stack conflicts with its parent; resolve the conflict in the stack rebase, then merge again".to_owned(),
+            command(&["pr-workflow", "stack", "rebase", "--repo", &target.repo]),
+        ),
+        Stop::Conflict => (
+            "pr.conflict",
+            format!(
+                "the head conflicts with {}; merge {} into it, resolve the conflict, push, and merge again",
+                view.base_ref_name, view.base_ref_name
+            ),
+            command(&["gh", "pr", "checkout", &number, "--repo", &target.repo]),
+        ),
+        Stop::FailedChecks => (
+            "pr.checks",
+            "a check on the head failed; fix it, push, and merge again".to_owned(),
+            command(&["gh", "pr", "checks", &number, "--repo", &target.repo]),
+        ),
+        Stop::Review => (
+            "pr.review",
+            "a CodeRabbit PR review of the head is owed; complete it and its supported findings with coderabbit-review, which this command cannot verify, then merge the PR yourself".to_owned(),
+            command(&["gh", "pr", "view", &number, "--repo", &target.repo, "--comments"]),
+        ),
+    };
+    Refusal::new(rule, cause, next).evidence(evidence)
+}
+
+/// Waits one interval, or refuses once the PR has waited longer than the timeout.
+fn wait(target: &Target, pr: u64, polling: Polling, started: Instant) -> Result<()> {
+    require(
+        started.elapsed() < Duration::from_secs(polling.timeout.saturating_mul(60)),
+        || {
+            Refusal::new(
+                "pr.timeout",
+                format!(
+                    "#{pr} did not reach a mergeable state within {} minutes; inspect its checks and merge requirements, then merge again",
+                    polling.timeout
+                ),
+                command(&["gh", "pr", "checks", &pr.to_string(), "--repo", &target.repo]),
+            )
+            .evidence(format!("waited {} seconds", started.elapsed().as_secs()))
+        },
+    )?;
+    std::thread::sleep(Duration::from_secs(polling.interval));
+    Ok(())
+}
+
+/// Adds the CodeRabbit pause lines, so the draft becomes ready during the pause of the owner.
+/// After resumption, the PR needs the review again.
+fn add_pause_lines(target: &Target, pr: u64, view: &MergeView) -> Result<()> {
+    let mut body = view.body.trim_end().to_owned();
+    body.push('\n');
+    if !excludes_review(&view.body) {
+        body.push('\n');
+        body.push_str(REVIEW_EXCLUSION);
+    }
+    body.push('\n');
+    body.push_str(PAUSE_EXCLUSION);
+    body.push('\n');
+    let document = validate(target, view.title.clone(), body, false)?;
+    let mut args = vec![
+        OsString::from("pr"),
+        "edit".into(),
+        pr.to_string().into(),
+        "--repo".into(),
+        target.repo.clone().into(),
+    ];
+    let _body = write_document(&mut args, &document)?;
+    print!("{}", gh(&args)?);
+    Ok(())
+}
+
+/// The target of one PR's ready transition: its own closing issue unless the command named one.
+fn ready_target(target: &Target, view: &MergeView) -> Target {
+    let mut target = target.clone();
+    target.issue = target.issue.or_else(|| {
+        view.closing_issues_references
+            .first()
+            .map(|issue| issue.number)
+    });
+    target
+}
+
+/// Merges one independent PR, updating it, waiting for its checks, and marking it ready on the way.
+fn merge_independent(
+    github: &Github,
+    target: &Target,
+    pr: u64,
+    polling: Polling,
+    rerun: &str,
+) -> Result<()> {
+    let paused = pr_reviews_paused()?;
+    let started = Instant::now();
+    loop {
+        let view = merge_view(target, pr)?;
+        match merge_step(merge_state(github, target, &view, false)?, false, paused) {
+            Step::Done => {
+                println!("#{pr} merged at {}", view.head_ref_oid);
+                return Ok(());
+            }
+            Step::Update => {
+                let mut args = arguments("update-branch", &target.repo);
+                args.push(pr.to_string().into());
+                print!("{}", gh(&args)?);
+                wait(target, pr, polling, started)?;
+            }
+            Step::Restack => bail!("an independent PR is never restacked"),
+            Step::Wait => wait(target, pr, polling, started)?,
+            Step::Exclude => add_pause_lines(target, pr, &view)?,
+            Step::Ready => {
+                make_ready(
+                    github,
+                    &ready_target(target, &view),
+                    pr,
+                    view.title,
+                    view.body,
+                    true,
+                    checks(&view.status_check_rollup),
+                    &view.head_ref_oid,
+                    rerun,
+                )?;
+            }
+            Step::Merge => {
+                let mut args = arguments("merge", &target.repo);
+                args.extend(
+                    [
+                        &pr.to_string(),
+                        "--squash",
+                        "--match-head-commit",
+                        &view.head_ref_oid,
+                    ]
+                    .map(OsString::from),
+                );
+                print!("{}", gh(&args)?);
+                wait(target, pr, polling, started)?;
+            }
+            Step::Stop(stop) => return Err(stop_refusal(target, pr, stop, false, &view).into()),
+        }
+    }
+}
+
+/// The variable and file through which dotguard admits the rewrites of the stack tooling.
+/// The `stack` module of dotguard reads the same names.
+const STACK_TOKEN: &str = "DOTGUARD_STACK";
+const STACK_LEASE: &str = "dotguard-stack.lease";
+
+/// The repository's stack lease, held while gh-stack rewrites and pushes branches and removed when dropped.
+struct Lease {
+    path: PathBuf,
+    token: String,
+}
+
+impl Lease {
+    fn acquire() -> Result<Self> {
+        let directory = git_output(&["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+        let path = Path::new(directory.trim()).join(STACK_LEASE);
+        let probe = tempfile::NamedTempFile::new()?;
+        let mut seed = Sha256::new();
+        seed.update(std::process::id().to_le_bytes());
+        seed.update(format!("{:?}", std::time::SystemTime::now()));
+        seed.update(probe.path().as_os_str().as_encoded_bytes());
+        let token: String = seed
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|error| {
+                Refusal::new(
+                    "pr.stack",
+                    "another stack command holds the lease, or one was interrupted; wait for it, or remove the lease once no stack command runs",
+                    command(&["rm", "--", &path.display().to_string()]),
+                )
+                .evidence(format!("{}: {error}", path.display()))
+            })?;
+        file.write_all(token.as_bytes())?;
+        file.sync_all()?;
+        Ok(Self { path, token })
+    }
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn git_output(args: &[&str]) -> Result<String> {
+    let output = Tool::Git
+        .command()
+        .args(args)
+        .output()
+        .context("start git")?;
+    ensure!(
+        output.status.success(),
+        "git {} failed with {}: {}",
+        args.join(" "),
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    String::from_utf8(output.stdout).context("git returned non-UTF-8 output")
+}
+
+fn git_set(args: &[&str]) -> Result<BTreeSet<String>> {
+    Ok(git_output(args)?
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+/// The `OWNER/REPO` a GitHub remote URL names.
+fn github_slug(url: &str) -> Option<String> {
+    let path = [
+        "https://github.com/",
+        "ssh://git@github.com/",
+        "git@github.com:",
+    ]
+    .iter()
+    .find_map(|prefix| url.strip_prefix(prefix))?;
+    let path = path.strip_suffix('/').unwrap_or(path);
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let (owner, repository) = path.split_once('/')?;
+    (!owner.is_empty() && !repository.is_empty() && !repository.contains('/'))
+        .then(|| format!("{owner}/{repository}"))
+}
+
+/// Requires a current directory that holds a checkout whose `origin` matches the target repository.
+fn require_checkout(target: &Target) -> Result<()> {
+    let url = git_output(&["remote", "get-url", "origin"]).unwrap_or_default();
+    let slug = github_slug(url.trim());
+    require(
+        slug.as_deref()
+            .is_some_and(|slug| slug.eq_ignore_ascii_case(&target.repo)),
+        || {
+            Refusal::new(
+                "pr.stack",
+                "stack commands run in a checkout whose origin is the target repository",
+                command(&["gh", "repo", "clone", &target.repo]),
+            )
+            .evidence(format!("origin: {:?}", url.trim()))
+        },
+    )
+}
+
+/// Runs the pinned gh-stack on the target repository and takes the lease when it rewrites or pushes branches.
+fn gh_stack(target: &Target, lease: Option<&Lease>, args: &[&str]) -> Result<()> {
+    let mut process = Tool::GhStack.command();
+    process
+        .args(args)
+        .env("GH_HOST", "github.com")
+        .env("GH_REPO", &target.repo)
+        .env("GH_STACK_NO_UPDATE_NOTIFIER", "1")
+        .env_remove(STACK_TOKEN)
+        .stdin(Stdio::null());
+    if let Some(lease) = lease {
+        process.env(STACK_TOKEN, &lease.token);
+    }
+    let status = process
+        .status()
+        .context("start the pinned gh-stack; run `mise install` in the repository")?;
+    let rebase = || command(&["pr-workflow", "stack", "rebase", "--repo", &target.repo]);
+    match status.code() {
+        Some(0) => Ok(()),
+        // gh-stack reports a rebase conflict with exit status 3.
+        Some(3) if args.first() == Some(&"rebase") => Err(Refusal::new(
+            "pr.conflict",
+            "the stack rebase stopped at a conflict; resolve the listed files, stage them, and continue",
+            format!("{} --continue", rebase()),
+        )
+        .evidence(format!("gh-stack {} exited with {status}", args.join(" ")))
+        .into()),
+        Some(3) => Err(Refusal::new(
+            "pr.conflict",
+            "the stack conflicts with its updated parent; gh-stack restored every branch, so rebase the stack to resolve it",
+            rebase(),
+        )
+        .evidence(format!("gh-stack {} exited with {status}", args.join(" ")))
+        .into()),
+        _ => bail!("gh-stack {} failed with {status}", args.join(" ")),
+    }
+}
+
+/// Restacks the checked-out stack under the lease, pushing it with explicit leases.
+fn sync_stack(target: &Target) -> Result<()> {
+    require_checkout(target)?;
+    let branch = git_output(&["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    let lease = Lease::acquire()?;
+    // Checking out the current branch adopts the stack that GitHub records for it while this clone still lacks tracking for it.
+    gh_stack(target, Some(&lease), &["checkout", branch.trim()])?;
+    gh_stack(target, Some(&lease), &["sync"])
+}
+
+/// Merges the stack up to `top` once every PR in it can merge.
+fn merge_stack(
+    github: &Github,
+    target: &Target,
+    top: u64,
+    polling: Polling,
+    rerun: &str,
+) -> Result<()> {
+    let paused = pr_reviews_paused()?;
+    let started = Instant::now();
+    'restart: loop {
+        let open = open_prs(target)?;
+        let Some(top_head) = open
+            .iter()
+            .find(|pr| pr.number == top)
+            .map(|pr| pr.head_ref_name.clone())
+        else {
+            let view = merge_view(target, top)?;
+            if view.state == "MERGED" {
+                println!("#{top} and the PRs below it are merged");
+                return Ok(());
+            }
+            return Err(stop_refusal(target, top, Stop::Closed, true, &view).into());
+        };
+        let (numbers, _) = chain(&open, &top_head);
+        let mut verified = Vec::new();
+        for &pr in &numbers {
+            let view = merge_view(target, pr)?;
+            match merge_step(merge_state(github, target, &view, true)?, true, paused) {
+                Step::Merge => verified.push((pr, view.head_ref_oid)),
+                Step::Done => {}
+                Step::Restack => {
+                    sync_stack(target)?;
+                    continue 'restart;
+                }
+                Step::Wait => {
+                    wait(target, pr, polling, started)?;
+                    continue 'restart;
+                }
+                Step::Exclude => {
+                    add_pause_lines(target, pr, &view)?;
+                    continue 'restart;
+                }
+                Step::Ready => {
+                    make_ready(
+                        github,
+                        &ready_target(target, &view),
+                        pr,
+                        view.title,
+                        view.body,
+                        true,
+                        checks(&view.status_check_rollup),
+                        &view.head_ref_oid,
+                        rerun,
+                    )?;
+                    continue 'restart;
+                }
+                Step::Update => bail!("a stacked PR is restacked, never updated by merge"),
+                Step::Stop(stop) => return Err(stop_refusal(target, pr, stop, true, &view).into()),
+            }
+        }
+        if verified.is_empty() {
+            println!("#{top} and the PRs below it are merged");
+            return Ok(());
+        }
+        gh_stack(
+            target,
+            None,
+            &["merge", &top.to_string(), "--yes", "--squash"],
+        )?;
+        for (pr, oid) in verified {
+            let view = merge_view(target, pr)?;
+            require(view.state == "MERGED" && view.head_ref_oid == oid, || {
+                Refusal::new(
+                    "pr.merge",
+                    "a PR of the stack did not merge at the head whose checks were verified",
+                    command(&["gh", "pr", "view", &pr.to_string(), "--repo", &target.repo]),
+                )
+                .evidence(format!(
+                    "#{pr}: state {}, head {}, verified {oid}",
+                    view.state, view.head_ref_oid
+                ))
+            })?;
+            println!("#{pr} merged at {oid}");
+        }
+        return Ok(());
+    }
+}
+
+/// Refuses an independent PR whose head shares commits, or unless declared independent touched paths, with another open PR.
+fn refuse_dependent(
+    github: &Github,
+    target: &Target,
+    head: &str,
+    base: Option<&str>,
+    independent: bool,
+    title: &str,
+    body_file: &Path,
+) -> Result<()> {
+    let open = open_prs(target)?;
+    let others: Vec<&OpenPr> = open.iter().filter(|pr| pr.head_ref_name != head).collect();
+    if others.is_empty() {
+        return Ok(());
+    }
+    let trunk = match base {
+        Some(base) => base.to_owned(),
+        None => {
+            let repository: Repository = github.read(&format!("repos/{}", target.repo))?;
+            repository
+                .default_branch
+                .context("GitHub reported no default branch")?
+        }
+    };
+    git_output(&["fetch", "--quiet", "origin"])?;
+    let trunk = format!("refs/remotes/origin/{trunk}");
+    let remote_head = format!("refs/remotes/origin/{head}");
+    let tip = if git_output(&["rev-parse", "--verify", "--quiet", &remote_head]).is_ok() {
+        remote_head
+    } else {
+        format!("refs/heads/{head}")
+    };
+    let commits = |tip: &str| git_set(&["rev-list", &format!("{trunk}..{tip}")]);
+    let paths = |tip: &str| git_set(&["diff", "--name-only", &format!("{trunk}...{tip}")]);
+    let (own_commits, own_paths) = (commits(&tip)?, paths(&tip)?);
+    for other in others {
+        let theirs = format!("refs/remotes/origin/{}", other.head_ref_name);
+        let shared_commits = !own_commits.is_disjoint(&commits(&theirs)?);
+        let shared_paths = !own_paths.is_disjoint(&paths(&theirs)?);
+        let Some(found) = dependency(shared_commits, shared_paths, independent) else {
+            continue;
+        };
+        let mut next = vec!["pr-workflow", "stack", "create", "--repo", &target.repo];
+        let issue = target.issue.map(|issue| issue.to_string());
+        if let Some(issue) = &issue {
+            next.extend(["--issue", issue]);
+        }
+        let body_file = body_file.display().to_string();
+        next.extend([
+            "--title",
+            title,
+            "--body-file",
+            &body_file,
+            "--head",
+            head,
+            "--base",
+            &other.head_ref_name,
+        ]);
+        return Err(Refusal::new(
+            "pr.dependency",
+            match found {
+                Dependency::Commits => format!(
+                    "{head} contains commits of #{}, so it depends on that PR; open it as a stack on top of it",
+                    other.number
+                ),
+                Dependency::Paths => format!(
+                    "{head} touches paths #{} touches; open it as a stack on top of that PR, or pass --independent when the changes do not depend on each other",
+                    other.number
+                ),
+            },
+            command(&next),
+        )
+        .evidence(format!(
+            "#{} ({}) shares {}",
+            other.number,
+            other.head_ref_name,
+            match found {
+                Dependency::Commits => "commits",
+                Dependency::Paths => "touched paths",
+            }
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+/// The PR number at the end of the URL that `gh pr create` printed.
+fn created_number(output: &str) -> Result<u64> {
+    output
+        .trim()
+        .rsplit('/')
+        .next()
+        .and_then(|number| number.parse().ok())
+        .context("gh pr create printed no PR URL")
+}
+
+fn stack(action: StackAction, rerun: &str) -> Result<()> {
+    match action {
+        StackAction::Create {
+            document,
+            head,
+            base,
+        } => {
+            let body_file = document.body_file.clone();
+            let (target, document) = read_document(document, false)?;
+            branch(&head)?;
+            branch(&base)?;
+            admit_review_request(Operation::Create, target.generation, &document.body, || {
+                Ok((true, Exclusion::None))
+            })?;
+            let github = Github::connect()?;
             let destination = destination(&github, &target.repo)?;
+            written_to_standard(destination, PULL_REQUEST, &document)?;
             let issue = inspect_issue(
                 &github,
                 &target,
                 destination,
-                Some((&document.body, BodySource::Pr(pr))),
+                Some((&document.body, BodySource::File(&body_file))),
                 rerun,
             )?;
             planned(
-                Operation::Ready,
+                Operation::Create,
                 &target,
-                Some(pr),
-                live.is_draft,
+                None,
+                true,
                 issue,
-                checks(&live.status_check_rollup),
+                Checks::Incomplete,
             )?;
-            admit_review_request(Operation::Ready, target.generation, &document.body, || {
-                Ok((live.is_draft, review_exclusion(&document.body)))
+            let (below, trunk) = chain(&open_prs(&target)?, &base);
+            require(!below.is_empty(), || {
+                Refusal::new(
+                    "pr.stack",
+                    format!("{base} has no open PR to stack on; open the parent PR first"),
+                    command(&[
+                        "pr-workflow",
+                        "create",
+                        "--repo",
+                        &target.repo,
+                        "--head",
+                        &base,
+                        "--title",
+                        "<title>",
+                        "--body-file",
+                        "<body-file>",
+                    ]),
+                )
+                .evidence(format!("no open PR has the head {base}"))
             })?;
-            let mut args = arguments("ready", &target.repo);
-            args.push(pr.to_string().into());
-            print!("{}", gh(&args)?);
-            report_review_requirement(&document.body)?;
+            let mut args = arguments("create", &target.repo);
+            args.extend(["--head", &head, "--base", &base, "--draft"].map(OsString::from));
+            let _body = write_document(&mut args, &document)?;
+            let created = gh(&args)?;
+            print!("{created}");
+            let mut link = vec!["link".to_owned(), "--base".to_owned(), trunk];
+            link.extend(below.iter().map(u64::to_string));
+            link.push(created_number(&created)?.to_string());
+            gh_stack(
+                &target,
+                None,
+                &link.iter().map(String::as_str).collect::<Vec<_>>(),
+            )?;
         }
-        Action::Issue { action } => issue(action)?,
+        StackAction::Sync { target } => {
+            target.conventional_required()?;
+            sync_stack(&target)?;
+        }
+        StackAction::Rebase {
+            target,
+            resume,
+            abort,
+        } => {
+            target.conventional_required()?;
+            require_checkout(&target)?;
+            let lease = Lease::acquire()?;
+            let mut args = vec!["rebase"];
+            if resume {
+                args.push("--continue");
+            }
+            if abort {
+                args.push("--abort");
+            }
+            gh_stack(&target, Some(&lease), &args)?;
+            if !abort {
+                drop(lease);
+                sync_stack(&target)?;
+            }
+        }
+        StackAction::Merge {
+            target,
+            pr,
+            polling,
+        } => {
+            target.conventional_required()?;
+            let github = Github::connect()?;
+            merge_stack(&github, &target, pr, polling, rerun)?;
+        }
     }
     Ok(())
 }

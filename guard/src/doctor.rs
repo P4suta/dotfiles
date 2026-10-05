@@ -267,7 +267,7 @@ fn modern_terminal(d: &mut Doctor) {
             return;
         };
         let expected = home().join(".config").join(leaf);
-        #[allow(
+        #[expect(
             clippy::disallowed_methods,
             reason = "Unix paths have no verbatim spelling, and the doctor compares a resolved binary with PATH resolution"
         )]

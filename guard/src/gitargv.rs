@@ -9,8 +9,11 @@
 //! This layer only handles commands that resolve `git` through `PATH`, so a direct path or a different `PATH` bypasses it.
 //! `dotguard pre-push` runs from `core.hooksPath` and enforces the rule for every push.
 //!
+//! * **published rewrites**: a `rebase` that rewrites a commit a remote-tracking ref holds, and `push --force-with-lease`.
+//!   The stack tooling runs both while it holds the repository's stack lease.
+//!
 //! Rules left out:
-//! * `rebase` and `commit --amend`: rewriting unpushed history counts as ordinary work, and pre-push catches pushed history.
+//! * `commit --amend` and a `rebase` of unpushed commits: rewriting unpushed history counts as ordinary work, and pre-push catches pushed history.
 //! * `restore` and `checkout -- <path>`: no flag marks the destruction, so a rule would refuse the whole command.
 //! * `rm -f`: common in scripts, and the index still holds what it removes.
 
@@ -28,6 +31,53 @@ pub struct Denial {
     pub hint: String,
     /// The command to run instead.
     pub next: Next,
+    /// A rewrite of published history that the leased stack tooling may run.
+    pub stack: bool,
+}
+
+/// What the rebase rule reads from the repository a command runs in.
+/// `globals` holds the Git options before the subcommand, which can name another repository.
+pub trait Repository {
+    /// The `OWNER/REPO` the `origin` remote names on GitHub.
+    fn slug(&self, globals: &[String]) -> Option<String>;
+    /// The branch `HEAD` points at.
+    fn current_branch(&self, globals: &[String]) -> Option<String>;
+    /// Whether rebasing `branch` onto `upstream`, or from its root when `None`, rewrites a commit a remote-tracking ref holds.
+    /// Returns `None` when the repository state gives no answer.
+    fn rewrites_published(
+        &self,
+        globals: &[String],
+        branch: &str,
+        upstream: Option<&str>,
+    ) -> Option<bool>;
+}
+
+/// No repository: the gate judges every command on its words alone, and permits a rebase without a named branch.
+pub struct Unread;
+
+impl Repository for Unread {
+    fn slug(&self, _: &[String]) -> Option<String> {
+        None
+    }
+
+    fn current_branch(&self, _: &[String]) -> Option<String> {
+        None
+    }
+
+    fn rewrites_published(&self, _: &[String], _: &str, _: Option<&str>) -> Option<bool> {
+        None
+    }
+}
+
+/// The stack command that rewrites and pushes published branches in this repository.
+pub fn stack_command(slug: Option<&str>) -> String {
+    command(&[
+        "pr-workflow",
+        "stack",
+        "sync",
+        "--repo",
+        slug.unwrap_or("<OWNER/REPO>"),
+    ])
 }
 
 /// The command a refusal suggests instead.
@@ -74,7 +124,13 @@ impl Denial {
             reason: reason.into(),
             hint: hint.into(),
             next: next.into(),
+            stack: false,
         }
+    }
+
+    fn stack(mut self) -> Self {
+        self.stack = true;
+        self
     }
 }
 
@@ -112,9 +168,15 @@ struct Invocation<'a> {
     globals: &'a [String],
     sub: &'a str,
     args: &'a [String],
+    repo: &'a dyn Repository,
 }
 
 impl Invocation<'_> {
+    /// The stack command, for a refused rewrite of published history.
+    fn stack(&self) -> Next {
+        Next::Shell(stack_command(self.repo.slug(self.globals).as_deref()))
+    }
+
     /// A different git command run with the same global options.
     fn git(&self, words: &[&str]) -> Next {
         Next::Git(
@@ -315,6 +377,60 @@ const COMMIT: Grammar = Grammar {
     short_word: "mFCctU",
     short_attached: "Su",
 };
+
+const REBASE: Grammar = Grammar {
+    long: &[
+        Long("onto", Takes::Word, true),
+        Long("keep-base", Takes::Nothing, true),
+        Long("no-verify", Takes::Nothing, true),
+        Long("quiet", Takes::Nothing, true),
+        Long("verbose", Takes::Nothing, true),
+        Long("no-stat", Takes::Nothing, true),
+        Long("signoff", Takes::Nothing, true),
+        Long("committer-date-is-author-date", Takes::Nothing, true),
+        Long("reset-author-date", Takes::Nothing, true),
+        Long("ignore-whitespace", Takes::Nothing, true),
+        Long("whitespace", Takes::Word, true),
+        Long("force-rebase", Takes::Nothing, true),
+        Long("no-ff", Takes::Nothing, true),
+        Long("continue", Takes::Nothing, false),
+        Long("skip", Takes::Nothing, false),
+        Long("abort", Takes::Nothing, false),
+        Long("quit", Takes::Nothing, false),
+        Long("edit-todo", Takes::Nothing, false),
+        Long("show-current-patch", Takes::Nothing, false),
+        Long("apply", Takes::Nothing, false),
+        Long("merge", Takes::Nothing, false),
+        Long("interactive", Takes::Nothing, false),
+        Long("rerere-autoupdate", Takes::Nothing, true),
+        Long("empty", Takes::Word, false),
+        Long("autosquash", Takes::Nothing, true),
+        Long("update-refs", Takes::Nothing, true),
+        Long("gpg-sign", Takes::Attached, true),
+        Long("autostash", Takes::Nothing, true),
+        Long("exec", Takes::Word, true),
+        Long("rebase-merges", Takes::Attached, true),
+        Long("fork-point", Takes::Nothing, true),
+        Long("strategy", Takes::Word, true),
+        Long("strategy-option", Takes::Word, true),
+        Long("root", Takes::Nothing, true),
+        Long("reschedule-failed-exec", Takes::Nothing, true),
+        Long("reapply-cherry-picks", Takes::Nothing, true),
+    ],
+    short_flag: "qvnfmi",
+    short_word: "CxsX",
+    short_attached: "rS",
+};
+
+/// The rebase steps that continue or end a rebase already started, which rewrite nothing the start didn't rewrite.
+const REBASE_CONTROL: [&str; 6] = [
+    "continue",
+    "skip",
+    "abort",
+    "quit",
+    "edit-todo",
+    "show-current-patch",
+];
 
 /// One option as Git reads it.
 enum Opt<'a> {
@@ -725,18 +841,28 @@ const BUILTINS: [&str; 46] = [
 /// `argv` holds everything after the program name, exactly as the wrapper received it.
 /// Each suggested Git command gets judged again, so a line with many refused parts gets a suggestion that removes every one.
 pub fn inspect(argv: &[String]) -> Option<Denial> {
-    let mut denial = judge(argv)?;
+    inspect_in(argv, &Unread)
+}
+
+/// [`inspect`], with the rebase rule reading `repo`.
+pub fn inspect_in(argv: &[String], repo: &dyn Repository) -> Option<Denial> {
+    let mut denial = judge(argv, repo)?;
     // Each suggestion removes at least one refused word, so the chain ends within the line's length.
     for _ in 0..=argv.len() {
         let Next::Git(words) = &denial.next else {
             break;
         };
-        let Some(further) = judge(words) else {
+        let Some(further) = judge(words, repo) else {
             break;
         };
         denial.next = further.next;
     }
     Some(denial)
+}
+
+/// The Git options before the subcommand.
+pub fn global_options(argv: &[String]) -> &[String] {
+    &argv[..globals(argv).0.min(argv.len())]
 }
 
 /// The index of the subcommand, and each `-c` or `--config-env` setting before it with the words it spans.
@@ -786,7 +912,7 @@ fn globals(argv: &[String]) -> (usize, Vec<(String, std::ops::Range<usize>)>) {
     (i, settings)
 }
 
-fn judge(argv: &[String]) -> Option<Denial> {
+fn judge(argv: &[String], repo: &dyn Repository) -> Option<Denial> {
     let (i, settings) = globals(argv);
     let sub = argv.get(i)?;
     let rest = &argv[i + 1..];
@@ -809,6 +935,7 @@ fn judge(argv: &[String]) -> Option<Denial> {
         globals,
         sub,
         args: rest,
+        repo,
     }) {
         return Some(denial);
     }
@@ -826,14 +953,13 @@ fn judge(argv: &[String]) -> Option<Denial> {
                 globals,
                 sub: first,
                 args: &words[1..],
+                repo,
             })
         {
-            return Some(Denial::new(
-                denial.category,
-                format!("alias {sub} -> {}", expansion.trim()),
-                denial.hint,
-                denial.next,
-            ));
+            return Some(Denial {
+                reason: format!("alias {sub} -> {}", expansion.trim()),
+                ..denial
+            });
         }
     }
 
@@ -841,7 +967,10 @@ fn judge(argv: &[String]) -> Option<Denial> {
 }
 
 /// The per-subcommand rules.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the match is the policy table, one arm per rule"
+)]
 fn subcommand(call: &Invocation) -> Option<Denial> {
     let (sub, args) = (call.sub, call.args);
     let flags = flags_of(args);
@@ -849,12 +978,14 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
     let grammar = match sub {
         "push" => Some(&PUSH),
         "commit" => Some(&COMMIT),
+        "rebase" => Some(&REBASE),
         _ => None,
     };
     if let Some(grammar) = grammar {
         let parsed = grammar.parse(args);
         let denial = skips_hooks(call, &parsed).or_else(|| match sub {
             "push" => push(call, &parsed),
+            "rebase" => negated_signing(call, &parsed).or_else(|| rebase(call, &parsed)),
             _ => negated_signing(call, &parsed),
         });
         return read_in_full(&parsed, args, denial);
@@ -1014,10 +1145,12 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
 }
 
 /// The rules for `git push`, read from `push` as Git reads its options.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the push rules read as one table in the order Git applies its options"
+)]
 fn push(call: &Invocation, push: &Parsed) -> Option<Denial> {
     let args = call.args;
-    let integrate = call.git(&["pull", "--rebase"]);
     let refspecs: Vec<&str> = push
         .positionals
         .iter()
@@ -1047,16 +1180,15 @@ fn push(call: &Invocation, push: &Parsed) -> Option<Denial> {
                 return deny(
                     "git push --force",
                     "A force push replaces history other clones already have.\n\
-                     If you rebased on purpose:  ALLOW_FORCE=1 git push --force-with-lease\n\
-                     --force-with-lease at least refuses when someone else has pushed since your last fetch.",
-                    integrate,
+                     The stack tooling restacks dependent branches and pushes them with explicit leases.",
+                    call.stack(),
                 );
             }
             "force-if-includes" => {
                 return deny(
                     "git push --force-if-includes",
-                    "Still a force push. ALLOW_FORCE=1 to proceed.",
-                    integrate,
+                    "Still a force push. The stack tooling pushes rewritten branches with explicit leases.",
+                    call.stack(),
                 );
             }
             "mirror" => {
@@ -1078,9 +1210,16 @@ fn push(call: &Invocation, push: &Parsed) -> Option<Denial> {
                 return deny(
                     "git push --force-with-lease",
                     "Safer than --force and still a rewrite of published history.\n\
-                     ALLOW_FORCE=1 git push --force-with-lease",
-                    integrate,
-                );
+                     The stack tooling restacks dependent branches and pushes them with explicit leases.",
+                    call.stack(),
+                )
+                .map(|denial| {
+                    if leased_only(push, &refspecs) {
+                        denial.stack()
+                    } else {
+                        denial
+                    }
+                });
             }
             _ => {}
         }
@@ -1152,6 +1291,74 @@ fn push(call: &Invocation, push: &Parsed) -> Option<Denial> {
         hint.join("\n"),
         next,
     ))
+}
+
+/// Whether a push forces only through `--force-with-lease`: no other force, deletion, or mirror option and no forced or deleting refspec.
+fn leased_only(push: &Parsed, refspecs: &[&str]) -> bool {
+    push.options.iter().all(|(_, option)| match option {
+        Opt::Long {
+            name,
+            negated: false,
+        } => !matches!(*name, "force" | "force-if-includes" | "mirror" | "delete"),
+        Opt::Short { letters, .. } => !letters.contains(['f', 'd']),
+        _ => true,
+    }) && refspecs
+        .iter()
+        .all(|refspec| !refspec.starts_with(['+', ':']))
+}
+
+/// A rebase that may rewrite a commit a remote-tracking ref holds.
+/// The rebase rewrites the commits of the branch that its upstream doesn't hold, whatever `--onto` names.
+fn rebase(call: &Invocation, parsed: &Parsed) -> Option<Denial> {
+    let mut control = false;
+    let mut root = false;
+    for (_, option) in &parsed.options {
+        match option {
+            Opt::Long { name, .. } if REBASE_CONTROL.contains(name) => control = true,
+            Opt::Long {
+                name: "root",
+                negated,
+            } => root = !negated,
+            _ => {}
+        }
+    }
+    let positional = |index: usize| {
+        parsed
+            .positionals
+            .get(index)
+            .map(|&at| call.args[at].as_str())
+    };
+    let (upstream, named) = if root {
+        (None, positional(0))
+    } else {
+        (Some(positional(0)), positional(1))
+    };
+    let branch = named
+        .map(str::to_owned)
+        .or_else(|| call.repo.current_branch(call.globals));
+    let rewrites = match &branch {
+        _ if control => Some(false),
+        // A detached `HEAD` names no branch anyone fetched.
+        None => Some(false),
+        Some(branch) => {
+            let tracked = format!("{branch}@{{upstream}}");
+            call.repo.rewrites_published(
+                call.globals,
+                branch,
+                upstream.map(|named| named.unwrap_or(&tracked)),
+            )
+        }
+    };
+    crate::gate_rules::rebase_refused(control, rewrites).then(|| {
+        Denial::new(
+            Category::Force,
+            format!("git rebase of published {}", branch.as_deref().unwrap_or("HEAD")),
+            "This rebase rewrites commits a remote already has, and pushing it needs a force push.\n\
+             The stack tooling restacks dependent branches and pushes them with explicit leases.",
+            call.stack(),
+        )
+        .stack()
+    })
 }
 
 /// `denial` as a gate may give it for `parsed`: without a suggestion unless the gate read every option as Git reads it.
@@ -1371,10 +1578,115 @@ fn short_cluster(arg: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Authorship, Next, commit_retry, inspect, refusal};
+    use super::{Authorship, Next, Repository, commit_retry, inspect, inspect_in, refusal};
+
+    const STACK: &str = "pr-workflow stack sync --repo '<OWNER/REPO>'";
 
     fn argv(line: &str) -> Vec<String> {
         line.split_whitespace().map(str::to_owned).collect()
+    }
+
+    /// A checkout on `topic`, with `origin/topic` at the commit `published` over `main`.
+    /// A rebase rewrites a published commit unless its upstream already holds `published`.
+    struct Published;
+
+    impl Repository for Published {
+        fn slug(&self, _: &[String]) -> Option<String> {
+            Some("P4suta/dotfiles".to_owned())
+        }
+
+        fn current_branch(&self, _: &[String]) -> Option<String> {
+            Some("topic".to_owned())
+        }
+
+        fn rewrites_published(
+            &self,
+            _: &[String],
+            branch: &str,
+            upstream: Option<&str>,
+        ) -> Option<bool> {
+            match (branch, upstream) {
+                ("local", _)
+                | ("topic", Some("published" | "origin/topic" | "topic@{upstream}")) => Some(false),
+                ("topic", _) => Some(true),
+                _ => None,
+            }
+        }
+    }
+
+    #[test]
+    fn a_rebase_that_rewrites_a_published_commit_is_refused_with_the_stack_command() {
+        let stack = "pr-workflow stack sync --repo P4suta/dotfiles";
+        for line in [
+            "rebase main",
+            "rebase -i main",
+            "rebase --onto main published~1",
+            "rebase --root",
+            "rebase -x true main topic",
+            "rebase --exec true main",
+            "rebase --onto main main",
+            "-C . rebase main",
+            "rebase main unknown",
+        ] {
+            let words = argv(line);
+            let denial =
+                inspect_in(&words, &Published).unwrap_or_else(|| panic!("should refuse: {line}"));
+            assert!(denial.stack, "{line}");
+            assert_eq!(denial.next.line().as_deref(), Some(stack), "{line}");
+            let refusal = refusal(&denial, &words);
+            assert!(refusal.is_complete(), "{refusal:?}");
+            assert_eq!(refusal.rule, "git.force");
+            let invoked: Vec<&str> = std::iter::once("git")
+                .chain(words.iter().map(String::as_str))
+                .collect();
+            assert_eq!(
+                refusal.waiver,
+                Some(format!("ALLOW_FORCE=1 {}", super::command(&invoked)))
+            );
+        }
+        for line in [
+            "rebase",
+            "rebase published",
+            "rebase origin/topic",
+            "rebase -x main published",
+            "rebase main local",
+            "rebase --continue",
+            "rebase --abort",
+            "rebase --cont",
+            "rebase --skip",
+            "rebase --quit",
+            "rebase --edit-todo",
+        ] {
+            assert!(
+                inspect_in(&argv(line), &Published).is_none(),
+                "should allow: git {line}"
+            );
+        }
+        assert!(
+            !inspect_in(&argv("rebase --no-gpg-sign main"), &Published)
+                .unwrap()
+                .stack
+        );
+    }
+
+    #[test]
+    fn only_a_force_push_through_explicit_leases_is_left_to_the_stack_tooling() {
+        let stack = |line: &str| inspect_in(&argv(line), &Published).unwrap().stack;
+        assert!(stack(
+            "push origin --force-with-lease=refs/heads/a:abc --atomic refs/heads/a:refs/heads/a"
+        ));
+        assert!(stack("push --force-with-lease"));
+        for line in [
+            "push --force-with-lease --force origin a",
+            "push --force-with-lease -f origin a",
+            "push --force-with-lease --delete origin a",
+            "push --force-with-lease origin +a:a",
+            "push --force-with-lease origin :a",
+            "push --force-with-lease --mirror origin",
+            "push --force origin a",
+        ] {
+            assert!(!stack(line), "{line}");
+        }
     }
     /// Whether the gate refuses the line, where every refusal must also form a complete record whose suggested Git command passes.
     fn refused(line: &str) -> bool {
@@ -1411,7 +1723,7 @@ mod tests {
             "git -C repo commit -m x"
         );
         assert_eq!(next("push origin +main:main"), "git push origin main:main");
-        assert_eq!(next("push -f"), "git pull --rebase");
+        assert_eq!(next("push -f"), STACK);
         assert_eq!(
             next("push origin :refs/heads/topic"),
             "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/topic'"
@@ -1545,7 +1857,7 @@ mod tests {
         ] {
             assert!(refused(line), "should refuse: git {line}");
         }
-        assert_eq!(next("push -uf origin main"), "git pull --rebase");
+        assert_eq!(next("push -uf origin main"), STACK);
         assert_eq!(next("push --mirr origin"), "git push --all origin");
         assert_eq!(
             next("push --del origin a"),

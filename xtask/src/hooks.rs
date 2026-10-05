@@ -244,6 +244,12 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
             &crate::refusal::command(&["dotguard", hook.name()]),
         )?;
     }
+    if matches!(hook, Hook::PrePush)
+        && let Some(url) = arguments.get(1)
+    {
+        crate::hosts::push_gate(Path::new("."), &url.to_string_lossy(), &input)?;
+        crate::ready_push::gate(&url.to_string_lossy(), &input)?;
+    }
     if matches!(hook, Hook::CommitMsg) {
         let message = arguments
             .first()
@@ -275,6 +281,14 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
             &input,
             "dotguard renovate run",
         )?;
+    }
+    if matches!(hook, Hook::PostMerge)
+        && let Some(root) = std::env::current_dir()
+            .ok()
+            .and_then(|directory| crate::freshness::working_copy(&directory))
+        && let Err(error) = crate::freshness::reinstall_lagging(&native.home, &root)
+    {
+        eprintln!("Warning: reinstalling tools built from changed sources failed: {error:#}");
     }
     if matches!(hook, Hook::PostCheckout | Hook::PostMerge)
         || (matches!(hook, Hook::ReferenceTransaction)

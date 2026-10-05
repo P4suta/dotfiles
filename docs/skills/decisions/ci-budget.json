@@ -1,9 +1,11 @@
 {
-  "revision": "4bbdad6a4d97df80cf3b222afba333c1631b599ca9355417d0593e522d782d02",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "fae5963ca938364b020650461b6e9e90f986cd28fab950b355b56b0738e671e1",
+  "outcome": "implemented",
+  "reason": "Point cross-platform verification at `dotfiles-xtask hosts check`, which the push gates enforce, in the minimal prose of the writing standard; keep CI-job mapping, hosted-only prerequisites, and push-hold judgment.",
   "evidence": [
-    "dot_agents/skills/ci-budget/SKILL.md"
+    "dot_agents/skills/ci-budget/SKILL.md",
+    "xtask/src/hosts.rs",
+    "docs/adr/0020-os-family-push-evidence.md"
   ],
   "revisit": null
 }

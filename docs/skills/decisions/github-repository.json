@@ -1,7 +1,7 @@
 {
-  "revision": "cee507db6656770e0aa7d2c4a731d2375e4346f4ceb8f5c0c383a465bffb8e72",
+  "revision": "d0da0c8f0be8bbaef319d5f8f13535cef1e83660471bdae9712e4cd430902570",
   "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Prose cut to the minimum without changing the skill's instructions, and the helper's lint policy denies unreasoned lint allowances as every crate in the repository does.",
   "evidence": [
     "dot_agents/skills/github-repository/SKILL.md"
   ],

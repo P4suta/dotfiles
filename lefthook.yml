@@ -11,6 +11,9 @@ commit-msg:
       run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml --bin prose -- --source . check --channel commit {1}
 pre-push:
   commands:
+    hosts:
+      use_stdin: true
+      run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- hosts gate {1} {2}
     candidate:
       run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check --base origin/main
     contracts:

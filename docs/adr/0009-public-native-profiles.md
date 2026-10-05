@@ -25,6 +25,7 @@ Package installs, service operations, OS settings, and external installer effect
 `xtask/src/profile_rules.rs` holds the production profile selection, apply eligibility, source reconciliation, secret readiness, Context7 eligibility, WSL path translation, and forge-key admission decisions.
 Its seven Kani harnesses check all finite decision inputs and require reachable acceptance and refusal outcomes.
 `guard/src/reaper_rules.rs` checks the production reaper eligibility conjunction and uptime arithmetic.
+`xtask/src/shell_write_rules.rs` checks that the Claude Code Bash hook never admits a detected inline-interpreter or file-redirect write and always names a next action.
 The skill, PR workflow, and [layered review-capacity](0008-layered-review-capacity.md) contracts stay in the required proof gate, which derives its expected harness total from the production inventories.
 The gate refuses missing, duplicate, unsupported, vacuous, failed, and timed-out results, and runs invalid counterexamples as controls.
 

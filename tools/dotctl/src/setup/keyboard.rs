@@ -1,4 +1,7 @@
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "SystemParametersInfoW is the only interface to the keyboard settings"
+)]
 
 use anyhow::{Context, Result, bail};
 

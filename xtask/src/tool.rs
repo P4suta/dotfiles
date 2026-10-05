@@ -48,6 +48,7 @@ pub enum Tool {
     Fcitx5Remote,
     Fleet,
     Gh,
+    GhStack,
     Ghostty,
     Git,
     Gitleaks,
@@ -105,7 +106,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 83] = [
+    pub const ALL: [Self; 84] = [
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
         Self::Atuin,
@@ -135,6 +136,7 @@ impl Tool {
         Self::Fcitx5Remote,
         Self::Fleet,
         Self::Gh,
+        Self::GhStack,
         Self::Ghostty,
         Self::Git,
         Self::Gitleaks,
@@ -214,6 +216,7 @@ impl Tool {
             Self::Fcitx5 => "fcitx5",
             Self::Fcitx5Remote => "fcitx5-remote",
             Self::Gh => "gh",
+            Self::GhStack => "gh-stack",
             Self::Ghostty => "ghostty",
             Self::Git => "git",
             Self::Gitleaks => "gitleaks",
@@ -298,6 +301,7 @@ impl Tool {
             Self::Bun => Provision::Pinned("bun"),
             Self::Cargo => Provision::Pinned("rust"),
             Self::Chezmoi => Provision::Pinned("chezmoi"),
+            Self::GhStack => Provision::Pinned("github:github/gh-stack"),
             Self::Gitleaks => Provision::Pinned("gitleaks"),
             Self::Kani => Provision::Pinned("cargo:kani-verifier"),
             Self::Nu => Provision::Pinned("nu"),
@@ -406,8 +410,19 @@ impl Tool {
         command
     }
 
+    /// A chezmoi run that reads the invoking checkout.
+    /// The default source names a bare repository whose head lags, so no installer may fall back to it.
+    pub fn chezmoi_in(root: &std::path::Path) -> Command {
+        let mut command = Self::Chezmoi.command();
+        command.arg("--source").arg(root);
+        command
+    }
+
     /// The only place xtask creates a process for a named program.
-    #[allow(clippy::disallowed_methods)]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the registry's own constructor for a hook gate process"
+    )]
     pub fn hook_command(self) -> Command {
         Command::new(self.program())
     }
@@ -433,7 +448,10 @@ pub const GIT_LOCAL_ENVIRONMENT: [&str; 15] = [
 ];
 
 /// A program chosen at run time rather than from the registry: a consumer command the owner passes through, or a verified vendor installer.
-#[allow(clippy::disallowed_methods)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one constructor for a program chosen at run time"
+)]
 pub fn external(program: impl AsRef<std::ffi::OsStr>) -> Command {
     Command::new(program)
 }

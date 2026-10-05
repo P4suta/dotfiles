@@ -14,7 +14,7 @@ An active owner-imposed push hold overrides any push authorization until the own
 
 Read the diff, workflow triggers, required jobs, and project check entry points.
 Map each affected CI job to its local command and its required OS, architecture, environment, or service.
-Run the equivalents on the affected Mac, Linux, and Windows hosts through `multi-machine` and `domyjob`.
+`dotfiles-xtask hosts check` runs the project gate on every OS family in the CI matrix, as `multi-machine` describes.
 Report hosted-only prerequisites as unverified locally, such as GitHub event permissions, OIDC, environment approval, and publication.
 Local verification grants no signing, publication, paid service calls, or self-hosted runner registration.
 

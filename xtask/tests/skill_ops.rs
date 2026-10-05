@@ -13,6 +13,10 @@ use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the shared constructor for fixture Git processes"
+)]
 #[path = "../../guard/tests/support/fixture_git.rs"]
 mod fixture_git;
 

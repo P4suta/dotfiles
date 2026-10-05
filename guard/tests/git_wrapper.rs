@@ -2,18 +2,29 @@
 //! Windows installs a copy of dotguard named `git.exe`, so the test runs that form everywhere.
 
 use dotguard::refusal::Refusal;
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
+use std::sync::OnceLock;
 
 #[path = "support/fixture_git.rs"]
 mod fixture_git;
 #[path = "support/wrapper.rs"]
 mod wrapper;
 
-/// A scratch directory holding the copied wrapper, an isolated home, and a repository, removed when dropped.
+/// The wrapper every test runs, which the binary places once before it starts its first process.
+/// Every spawn here follows `Wrapper::inheriting`, which waits for it.
+fn wrapper_binary() -> &'static Path {
+    static BINARY: OnceLock<PathBuf> = OnceLock::new();
+    BINARY.get_or_init(|| wrapper::place(&wrapper::preparation("git-wrapper")))
+}
+
+/// A scratch directory holding an isolated home and a repository, removed when dropped.
 struct Wrapper {
     scope: PathBuf,
-    git: PathBuf,
+    git: &'static Path,
+    /// The variables a child starts from as a caller exported them, or `None` for this process's own.
+    environment: Option<Vec<(OsString, OsString)>>,
 }
 
 impl Drop for Wrapper {
@@ -24,13 +35,25 @@ impl Drop for Wrapper {
 
 impl Wrapper {
     fn new(name: &str) -> Self {
+        Self::starting(name, None)
+    }
+
+    /// A wrapper whose children start from `environment` as a caller would export it.
+    fn inheriting(name: &str, environment: impl IntoIterator<Item = (OsString, OsString)>) -> Self {
+        Self::starting(name, Some(environment.into_iter().collect()))
+    }
+
+    fn starting(name: &str, environment: Option<Vec<(OsString, OsString)>>) -> Self {
+        let git = wrapper_binary();
         let scope =
             std::env::temp_dir().join(format!("dotguard-wrapper-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&scope);
         std::fs::create_dir_all(scope.join("repository")).unwrap();
-        let git = scope.join(format!("git{}", std::env::consts::EXE_SUFFIX));
-        wrapper::install(&git);
-        let wrapper = Self { scope, git };
+        let wrapper = Self {
+            scope,
+            git,
+            environment,
+        };
         assert!(wrapper.run(&["init", "-q"], None).status.success());
         wrapper
     }
@@ -46,14 +69,31 @@ impl Wrapper {
     }
 
     fn run_with(&self, arguments: &[&str], input: Option<&[u8]>, waivers: &[&str]) -> Output {
-        let mut command = fixture_git::command(&self.git, &self.scope.join("gitconfig"));
+        let set: Vec<(&str, &str)> = waivers.iter().map(|waiver| (*waiver, "1")).collect();
+        self.run_env(arguments, input, &set)
+    }
+
+    /// Runs the wrapper with `variables` set.
+    /// The run drops a stack lease token from the calling shell, as it drops a waiver.
+    fn run_env(
+        &self,
+        arguments: &[&str],
+        input: Option<&[u8]>,
+        variables: &[(&str, &str)],
+    ) -> Output {
+        let global = self.scope.join("gitconfig");
+        let mut command = match &self.environment {
+            Some(environment) => fixture_git::inheriting(self.git, &global, environment.clone()),
+            None => fixture_git::command(self.git, &global),
+        };
         for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("ALLOW_") {
+            let text = name.to_string_lossy();
+            if text.starts_with("ALLOW_") || text.starts_with("DOTGUARD_") {
                 command.env_remove(name);
             }
         }
-        for waiver in waivers {
-            command.env(waiver, "1");
+        for (name, value) in variables {
+            command.env(name, value);
         }
         let mut child = command
             .args(arguments)
@@ -268,28 +308,17 @@ fn a_callers_git_repository_variables_cannot_redirect_the_wrapper() {
     let outer = Wrapper::new("outer-repository");
     let outer_git = outer.scope.join("repository/.git");
     let config_before = std::fs::read(outer_git.join("config")).unwrap();
-    // SAFETY: std serializes its own environment access, and nothing in this binary reads the environment outside std.
-    let saved: Vec<_> = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]
-        .iter()
-        .map(|name| (*name, std::env::var_os(name)))
-        .collect();
-    unsafe {
-        std::env::set_var("GIT_DIR", &outer_git);
-        std::env::set_var("GIT_WORK_TREE", outer.scope.join("repository"));
-        std::env::set_var("GIT_INDEX_FILE", outer_git.join("index"));
-    }
-    let inner = Wrapper::new("inner-repository");
-    let initialized = inner.scope.join("repository/.git").is_dir();
-    for (name, value) in saved {
-        // SAFETY: this restores the saved values.
-        unsafe {
-            match value {
-                Some(value) => std::env::set_var(name, value),
-                None => std::env::remove_var(name),
-            }
-        }
-    }
-    assert!(initialized, "the scratch repository was not initialized");
+    let redirection = [
+        ("GIT_DIR", outer_git.clone()),
+        ("GIT_WORK_TREE", outer.scope.join("repository")),
+        ("GIT_INDEX_FILE", outer_git.join("index")),
+    ]
+    .map(|(name, value)| (OsString::from(name), value.into_os_string()));
+    let inner = Wrapper::inheriting("inner-repository", std::env::vars_os().chain(redirection));
+    assert!(
+        inner.scope.join("repository/.git").is_dir(),
+        "the scratch repository was not initialized"
+    );
     assert_eq!(
         std::fs::read(outer_git.join("config")).unwrap(),
         config_before
@@ -350,4 +379,77 @@ fn a_refused_push_with_an_option_git_rejects_suggests_nothing() {
             &format!("refs/heads/{branch}"),
         ]);
     }
+}
+
+/// A rebase of a published commit runs only through the stack tooling's lease or a recorded waiver, and the refusal names the stack command.
+#[test]
+fn a_rebase_of_a_published_branch_runs_only_through_the_stack_lease() {
+    let wrapper = Wrapper::new("published-rebase");
+    std::fs::write(
+        wrapper.scope.join("gitconfig"),
+        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+    )
+    .unwrap();
+    let succeeds = |arguments: &[&str]| {
+        let output = wrapper.run(arguments, None);
+        assert!(
+            output.status.success(),
+            "git {arguments:?}: {}",
+            text(&output.stderr)
+        );
+        text(&output.stdout).trim().to_owned()
+    };
+    succeeds(&["init", "-q", "--bare", "../remote.git"]);
+    let tree = succeeds(&["write-tree"]);
+    let base = succeeds(&["commit-tree", &tree, "-m", "base"]);
+    let published = succeeds(&["commit-tree", &tree, "-p", &base, "-m", "published"]);
+    let moved = succeeds(&["commit-tree", &tree, "-p", &base, "-m", "moved"]);
+    succeeds(&["update-ref", "refs/heads/main", &moved]);
+    succeeds(&["update-ref", "refs/heads/topic", &published]);
+    succeeds(&["update-ref", "refs/heads/local", &published]);
+    succeeds(&[
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/P4suta/dotfiles.git",
+    ]);
+    succeeds(&["update-ref", "refs/remotes/origin/topic", &published]);
+    succeeds(&["symbolic-ref", "HEAD", "refs/heads/topic"]);
+    succeeds(&["reset", "-q", "--keep", "topic"]);
+
+    let refused = last_record(&wrapper.run(&["rebase", "main"], None));
+    assert_eq!(refused.rule, "git.force");
+    assert_eq!(
+        refused.next.as_deref(),
+        Some("pr-workflow stack sync --repo P4suta/dotfiles")
+    );
+    assert_eq!(
+        refused.waiver.as_deref(),
+        Some("ALLOW_FORCE=1 git rebase main")
+    );
+    let unleased = wrapper.run_env(&["rebase", "main"], None, &[("DOTGUARD_STACK", "token")]);
+    assert_eq!(last_record(&unleased).rule, "git.force");
+    assert!(
+        Refusal::find(&text(
+            &wrapper.run(&["rebase", "main", "local"], None).stderr
+        ))
+        .is_none(),
+        "an unpublished branch rebases freely"
+    );
+    succeeds(&["checkout", "-q", "topic"]);
+
+    std::fs::write(
+        wrapper.scope.join("repository/.git/dotguard-stack.lease"),
+        "token",
+    )
+    .unwrap();
+    let leased = wrapper.run_env(&["rebase", "main"], None, &[("DOTGUARD_STACK", "token")]);
+    assert!(leased.status.success(), "{}", text(&leased.stderr));
+    assert!(Refusal::find(&text(&leased.stderr)).is_none());
+    let log = std::fs::read_to_string(wrapper.home().join(".local/state/git-bypass.log")).unwrap();
+    assert!(
+        log.lines()
+            .any(|line| line.contains("\tSTACK\t") && line.contains("git rebase main")),
+        "{log}"
+    );
 }

@@ -63,6 +63,28 @@ The default `local` mode always creates a draft.
 `edit` replaces title and body together and leaves draft state unchanged.
 Local-file `check` never contacts GitHub and leaves the live issue prerequisite unmet, and `check --pr` only reads.
 
+## Stacks and merging
+
+The repository pins `gh-stack` through mise.
+The stack commands run it in a checkout whose `origin` matches the target.
+
+```console
+pr-workflow stack create --repo OWNER/REPO --issue 23 --head feature --base parent --title "feat: ..." --body-file body.md
+pr-workflow stack sync --repo OWNER/REPO
+pr-workflow stack rebase --repo OWNER/REPO [--continue | --abort]
+pr-workflow stack merge --repo OWNER/REPO --pr 18
+pr-workflow merge --repo OWNER/REPO --pr 17 --pr 19
+```
+
+`create` refuses a head that shares commits with another open PR, or touched paths unless `--independent`, and names `stack create` on that PR.
+`stack create` opens a draft on the parent's open PR and links the chain down to the trunk.
+`stack sync` and `stack rebase` hold the repository's stack lease, the only way dotguard admits a rebase or leased force push of a published branch besides an `ALLOW_FORCE` waiver.
+`merge` takes independent PRs in order.
+It updates a behind head by merge and waits for every head check.
+It adds the pause lines, marks a draft ready, and merges the verified head with `--match-head-commit`.
+`stack merge` restacks instead of updating and merges the stack up to the PR together.
+Both stop with a structured refusal on a failed check, conflict, timeout, or an owed CodeRabbit review, which only `coderabbit-review` can settle.
+
 ## CodeRabbit generation
 
 Complete local checks before one budget-qualified CLI review of an initial substantive change.

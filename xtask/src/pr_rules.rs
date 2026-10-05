@@ -144,6 +144,129 @@ pub fn review_requirement(paused: bool, exclusion: Exclusion) -> ReviewRequireme
     }
 }
 
+/// The checks reported for the head commit while a merge waits for them.
+/// An empty report counts as pending.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HeadChecks {
+    Passing,
+    Pending,
+    Failed,
+}
+
+pub fn head_checks(total: usize, unfinished: usize, failed: usize) -> HeadChecks {
+    if failed > 0 {
+        HeadChecks::Failed
+    } else if total == 0 || unfinished > 0 {
+        HeadChecks::Pending
+    } else {
+        HeadChecks::Passing
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Lifecycle {
+    Draft,
+    Ready,
+    Merged,
+    Closed,
+}
+
+/// What GitHub reports about one PR of a merge, read in one response so the checks belong to its head.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MergeState {
+    pub lifecycle: Lifecycle,
+    pub conflict: bool,
+    /// The base branch has commits the head lacks.
+    pub behind: bool,
+    pub checks: HeadChecks,
+    /// GitHub reports that the PR meets all merge rules of the base.
+    pub clean: bool,
+    pub exclusion: Exclusion,
+}
+
+/// Why a merge stops before it lands a PR.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Stop {
+    Closed,
+    Conflict,
+    FailedChecks,
+    /// The head still needs a CodeRabbit review.
+    /// Only coderabbit-review can establish that the review's findings have a resolution.
+    Review,
+}
+
+/// The next step of a merge for one PR.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Step {
+    Done,
+    /// Merge the base into an independent PR's head with GitHub's branch update, which GitHub signs.
+    Update,
+    /// Rebase a stacked PR onto its parent with the stack tooling.
+    /// A stack needs a linear history.
+    Restack,
+    Wait,
+    /// Add the CodeRabbit pause lines before a draft becomes ready during the owner's pause.
+    Exclude,
+    Ready,
+    /// Merge the head whose checks the tool read.
+    Merge,
+    Stop(Stop),
+}
+
+pub fn merge_step(state: MergeState, stacked: bool, paused: bool) -> Step {
+    match state.lifecycle {
+        Lifecycle::Merged => return Step::Done,
+        Lifecycle::Closed => return Step::Stop(Stop::Closed),
+        Lifecycle::Draft | Lifecycle::Ready => {}
+    }
+    if state.conflict {
+        return Step::Stop(Stop::Conflict);
+    }
+    if state.behind {
+        return if stacked { Step::Restack } else { Step::Update };
+    }
+    match state.checks {
+        HeadChecks::Failed => return Step::Stop(Stop::FailedChecks),
+        HeadChecks::Pending => return Step::Wait,
+        HeadChecks::Passing => {}
+    }
+    if state.lifecycle == Lifecycle::Draft {
+        return if paused && state.exclusion != Exclusion::Pause {
+            Step::Exclude
+        } else {
+            Step::Ready
+        };
+    }
+    match review_requirement(paused, state.exclusion) {
+        ReviewRequirement::Required | ReviewRequirement::Resumed => Step::Stop(Stop::Review),
+        ReviewRequirement::Paused | ReviewRequirement::Excluded if !state.clean => Step::Wait,
+        ReviewRequirement::Paused | ReviewRequirement::Excluded => Step::Merge,
+    }
+}
+
+/// What a new branch shares with another open PR's branch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Dependency {
+    Commits,
+    Paths,
+}
+
+/// A branch that shares commits with another open PR opens only stacked on that PR.
+/// A branch that shares touched paths with another open PR also opens stacked on it, unless the branch carries a declaration of independence.
+pub fn dependency(
+    shared_commits: bool,
+    shared_paths: bool,
+    independent: bool,
+) -> Option<Dependency> {
+    if shared_commits {
+        Some(Dependency::Commits)
+    } else if shared_paths && !independent {
+        Some(Dependency::Paths)
+    } else {
+        None
+    }
+}
+
 pub fn plan(
     operation: Operation,
     generation: Generation,
@@ -435,4 +558,202 @@ fn pr_review_requirement_returns_after_resumption() {
     kani::cover!(requirement == ReviewRequirement::Resumed);
     kani::cover!(requirement == ReviewRequirement::Paused && kind == Exclusion::Pause);
     kani::cover!(requirement == ReviewRequirement::Excluded);
+}
+
+#[cfg(kani)]
+fn merge_state() -> MergeState {
+    MergeState {
+        lifecycle: match kani::any::<u8>() {
+            0 => Lifecycle::Draft,
+            1 => Lifecycle::Ready,
+            2 => Lifecycle::Merged,
+            _ => Lifecycle::Closed,
+        },
+        conflict: kani::any(),
+        behind: kani::any(),
+        checks: head_checks(kani::any(), kani::any(), kani::any()),
+        clean: kani::any(),
+        exclusion: exclusion(kani::any(), kani::any()),
+    }
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn a_pr_merges_only_ready_current_passing_clean_and_without_an_owed_review() {
+    let state = merge_state();
+    let stacked: bool = kani::any();
+    let paused: bool = kani::any();
+    let step = merge_step(state, stacked, paused);
+    assert_eq!(
+        step == Step::Merge,
+        state.lifecycle == Lifecycle::Ready
+            && !state.conflict
+            && !state.behind
+            && state.checks == HeadChecks::Passing
+            && state.clean
+            && matches!(
+                review_requirement(paused, state.exclusion),
+                ReviewRequirement::Paused | ReviewRequirement::Excluded
+            )
+    );
+    assert!(
+        state.checks != HeadChecks::Failed
+            || state.behind
+            || !matches!(step, Step::Merge | Step::Ready | Step::Wait)
+    );
+    kani::cover!(step == Step::Merge && paused);
+    kani::cover!(step == Step::Merge && !paused);
+    kani::cover!(step == Step::Stop(Stop::Review));
+    kani::cover!(step == Step::Stop(Stop::FailedChecks));
+    kani::cover!(step == Step::Stop(Stop::Conflict));
+    kani::cover!(step == Step::Wait && state.checks == HeadChecks::Passing);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn a_behind_stacked_pr_is_restacked_and_an_independent_one_updated_by_merge() {
+    let state = merge_state();
+    let stacked: bool = kani::any();
+    let step = merge_step(state, stacked, kani::any());
+    let open = matches!(state.lifecycle, Lifecycle::Draft | Lifecycle::Ready);
+    assert_eq!(
+        step == Step::Restack,
+        open && !state.conflict && state.behind && stacked
+    );
+    assert_eq!(
+        step == Step::Update,
+        open && !state.conflict && state.behind && !stacked
+    );
+    assert!(!stacked || step != Step::Update);
+    kani::cover!(step == Step::Restack);
+    kani::cover!(step == Step::Update);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn a_draft_becomes_ready_during_the_pause_only_with_the_pause_lines() {
+    let state = merge_state();
+    let paused: bool = kani::any();
+    let step = merge_step(state, kani::any(), paused);
+    if step == Step::Ready {
+        assert!(state.lifecycle == Lifecycle::Draft && state.checks == HeadChecks::Passing);
+        assert!(!paused || state.exclusion == Exclusion::Pause);
+        assert!(
+            keeps_pause_exclusion(Operation::Ready, true, state.exclusion, state.exclusion)
+                || !paused
+        );
+    }
+    assert_eq!(
+        step == Step::Exclude,
+        state.lifecycle == Lifecycle::Draft
+            && !state.conflict
+            && !state.behind
+            && state.checks == HeadChecks::Passing
+            && paused
+            && state.exclusion != Exclusion::Pause
+    );
+    kani::cover!(step == Step::Ready && paused);
+    kani::cover!(step == Step::Ready && !paused);
+    kani::cover!(step == Step::Exclude);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn a_branch_sharing_work_with_another_open_pr_opens_only_on_top_of_it() {
+    let shared_commits: bool = kani::any();
+    let shared_paths: bool = kani::any();
+    let independent: bool = kani::any();
+    let found = dependency(shared_commits, shared_paths, independent);
+    assert_eq!(
+        found.is_some(),
+        shared_commits || shared_paths && !independent
+    );
+    assert_eq!(found == Some(Dependency::Commits), shared_commits);
+    assert!(!shared_commits || found.is_some());
+    kani::cover!(found == Some(Dependency::Commits) && independent);
+    kani::cover!(found == Some(Dependency::Paths));
+    kani::cover!(found.is_none() && shared_paths);
+    kani::cover!(found.is_none() && !shared_paths);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        Dependency, Exclusion, HeadChecks, Lifecycle, MergeState, Step, Stop, dependency,
+        head_checks, merge_step,
+    };
+
+    const READY: MergeState = MergeState {
+        lifecycle: Lifecycle::Ready,
+        conflict: false,
+        behind: false,
+        checks: HeadChecks::Passing,
+        clean: true,
+        exclusion: Exclusion::Pause,
+    };
+
+    #[test]
+    fn an_empty_or_unfinished_check_report_is_pending_and_any_failure_fails() {
+        assert_eq!(head_checks(0, 0, 0), HeadChecks::Pending);
+        assert_eq!(head_checks(3, 1, 0), HeadChecks::Pending);
+        assert_eq!(head_checks(3, 1, 1), HeadChecks::Failed);
+        assert_eq!(head_checks(3, 0, 0), HeadChecks::Passing);
+    }
+
+    #[test]
+    fn each_merge_state_has_one_next_step() {
+        let with = |change: fn(&mut MergeState)| {
+            let mut state = READY;
+            change(&mut state);
+            state
+        };
+        assert_eq!(merge_step(READY, false, true), Step::Merge);
+        assert_eq!(merge_step(READY, true, true), Step::Merge);
+        let behind = with(|state| state.behind = true);
+        assert_eq!(merge_step(behind, false, true), Step::Update);
+        assert_eq!(merge_step(behind, true, true), Step::Restack);
+        let conflict = with(|state| {
+            state.behind = true;
+            state.conflict = true;
+        });
+        assert_eq!(
+            merge_step(conflict, false, true),
+            Step::Stop(Stop::Conflict)
+        );
+        let failed = with(|state| state.checks = HeadChecks::Failed);
+        assert_eq!(
+            merge_step(failed, false, true),
+            Step::Stop(Stop::FailedChecks)
+        );
+        let pending = with(|state| state.checks = HeadChecks::Pending);
+        assert_eq!(merge_step(pending, false, true), Step::Wait);
+        let blocked = with(|state| state.clean = false);
+        assert_eq!(merge_step(blocked, false, true), Step::Wait);
+        let draft = with(|state| {
+            state.lifecycle = Lifecycle::Draft;
+            state.exclusion = Exclusion::None;
+        });
+        assert_eq!(merge_step(draft, false, true), Step::Exclude);
+        assert_eq!(merge_step(draft, false, false), Step::Ready);
+        let excluded = with(|state| state.lifecycle = Lifecycle::Draft);
+        assert_eq!(merge_step(excluded, false, true), Step::Ready);
+        let reviewed = with(|state| state.exclusion = Exclusion::None);
+        assert_eq!(merge_step(reviewed, false, false), Step::Stop(Stop::Review));
+        assert_eq!(merge_step(READY, false, false), Step::Stop(Stop::Review));
+        let standing = with(|state| state.exclusion = Exclusion::Owner);
+        assert_eq!(merge_step(standing, false, false), Step::Merge);
+        let merged = with(|state| state.lifecycle = Lifecycle::Merged);
+        assert_eq!(merge_step(merged, false, true), Step::Done);
+        let closed = with(|state| state.lifecycle = Lifecycle::Closed);
+        assert_eq!(merge_step(closed, false, true), Step::Stop(Stop::Closed));
+    }
+
+    #[test]
+    fn shared_commits_or_paths_make_a_branch_dependent() {
+        assert_eq!(dependency(true, true, false), Some(Dependency::Commits));
+        assert_eq!(dependency(true, false, true), Some(Dependency::Commits));
+        assert_eq!(dependency(false, true, false), Some(Dependency::Paths));
+        assert_eq!(dependency(false, true, true), None);
+        assert_eq!(dependency(false, false, false), None);
+    }
 }

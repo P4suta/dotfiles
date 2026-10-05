@@ -7,9 +7,30 @@
 */ -}}
 {{- $current := dict -}}
 {{- if trim .chezmoi.stdin -}}{{- $current = fromJson .chezmoi.stdin -}}{{- end -}}
-{{- $managed := dict "autoMemoryEnabled" false -}}
+{{- /*
+The shell hook refuses recursive disk-usage scans in Bash and PowerShell.
+It also refuses file writes through inline interpreters, heredocs, and redirects in Bash.
+It runs the same xtask binary the git hooks use.
+*/ -}}
+{{- $tool := ".local/bin/dotfiles-xtask" -}}
+{{- if eq .profile "windows" }}{{ $tool = ".local/bin/dotfiles-xtask.exe" }}{{ end -}}
+{{- $hook := dict "type" "command" "command" (printf "%s claude-bash" (includeTemplate "sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
+{{- /*
+The timing hook sets each shell command timeout from its measured durations.
+The post-tool events keep every group another installer added and replace only the timing one.
+*/ -}}
+{{- $timing := dict "type" "command" "command" (printf "%s claude-timing" (includeTemplate "sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
+{{- $hooks := dict "PreToolUse" (list (dict "matcher" "Bash|PowerShell" "hooks" (list $hook $timing))) -}}
+{{- range $event := list "PostToolUse" "PostToolUseFailure" -}}
+{{-   $groups := list -}}
+{{-   range (dig "hooks" $event (list) $current) -}}
+{{-     if not (contains " claude-timing" (toJson .)) -}}{{- $groups = append $groups . -}}{{- end -}}
+{{-   end -}}
+{{-   $_ := set $hooks $event (append $groups (dict "matcher" "Bash|PowerShell" "hooks" (list $timing))) -}}
+{{- end -}}
+{{- $managed := dict "autoMemoryEnabled" false "hooks" $hooks -}}
 {{- if eq .profile "wsl" -}}
-{{- $managed = includeTemplate "profiles/wsl/dot_claude/settings.json.tmpl" (merge (dict) . (index .platforms .profile)) | fromJson -}}
+{{- $managed = mergeOverwrite $managed (includeTemplate "profiles/wsl/dot_claude/settings.json.tmpl" (merge (dict) . (index .platforms .profile)) | fromJson) -}}
 {{- end -}}
 {{ mergeOverwrite $current $managed | toPrettyJson "  " | trim }}
 

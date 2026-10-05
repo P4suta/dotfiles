@@ -154,6 +154,7 @@ fn render_merged(profile: &str, template: &str, target: &str, host: &str) -> Str
     let destination = scope.path().join("home");
     for file in [
         template,
+        ".chezmoitemplates/sh_quote",
         ".chezmoitemplates/profiles/wsl/dot_claude/settings.json.tmpl",
     ] {
         let copy = source.join(file);
@@ -194,6 +195,15 @@ fn application_turns_off_memory_a_client_turned_back_on() {
         ))
         .unwrap();
         assert_eq!(rendered["autoMemoryEnabled"], json!(false), "{profile}");
+        let hook = &rendered["hooks"]["PreToolUse"][0];
+        assert_eq!(hook["matcher"], json!("Bash|PowerShell"), "{profile}");
+        assert!(
+            hook["hooks"][0]["command"]
+                .as_str()
+                .is_some_and(|command| command.ends_with(" claude-bash")
+                    && command.contains("dotfiles-xtask")),
+            "{profile}: {hook}"
+        );
         assert_eq!(rendered["model"], json!("opus"), "{profile}");
         assert_eq!(
             rendered["permissions"]["defaultMode"],
@@ -223,6 +233,60 @@ fn application_turns_off_memory_a_client_turned_back_on() {
             "{profile}: {codex}"
         );
         assert!(codex.contains("model = \"o3\""), "{codex}");
+    }
+}
+
+/// The timing hook runs before and after every shell call.
+/// An installer keeps the post-tool groups that other installers added while it replaces its own.
+#[test]
+fn the_timing_hook_joins_the_shell_events_and_keeps_other_post_tool_groups() {
+    let host = json!({"hooks": {
+        "PostToolUse": [
+            {"matcher": "Write", "hooks": [{"type": "command", "command": "dotfiles-xtask line-endings hook"}]},
+            {"matcher": "Bash|PowerShell", "hooks": [{"type": "command", "command": "/old/dotfiles-xtask claude-timing"}]}
+        ]
+    }})
+    .to_string();
+    for profile in ["mac", "linux", "windows", "wsl"] {
+        let rendered: Value = serde_json::from_str(&render_merged(
+            profile,
+            "dot_claude/modify_settings.json",
+            ".claude/settings.json",
+            &host,
+        ))
+        .unwrap();
+        let timing = |group: &Value| {
+            group["matcher"] == json!("Bash|PowerShell")
+                && group["hooks"].as_array().is_some_and(|hooks| {
+                    hooks.iter().any(|hook| {
+                        hook["command"].as_str().is_some_and(|command| {
+                            command.ends_with(" claude-timing")
+                                && command.contains("dotfiles-xtask")
+                        })
+                    })
+                })
+        };
+        assert!(
+            timing(&rendered["hooks"]["PreToolUse"][0]),
+            "{profile}: {rendered}"
+        );
+        for event in ["PostToolUse", "PostToolUseFailure"] {
+            let groups = rendered["hooks"][event].as_array().unwrap();
+            assert_eq!(
+                groups.iter().filter(|group| timing(group)).count(),
+                1,
+                "{profile} {event}"
+            );
+            assert!(
+                !rendered.to_string().contains("/old/dotfiles-xtask"),
+                "{profile}"
+            );
+        }
+        assert_eq!(
+            rendered["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
+            json!("dotfiles-xtask line-endings hook"),
+            "{profile}"
+        );
     }
 }
 

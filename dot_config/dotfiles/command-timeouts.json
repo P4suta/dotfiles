@@ -1,0 +1,16 @@
+{
+  "default_ms": 120000,
+  "signatures": {
+    "cargo build": 600000,
+    "cargo clippy": 600000,
+    "cargo run": 600000,
+    "cargo test": 600000,
+    "chezmoi apply": 600000,
+    "git commit": 600000,
+    "git merge": 600000,
+    "git push": 600000,
+    "just check": 600000,
+    "just proofs": 600000,
+    "mise run": 600000
+  }
+}

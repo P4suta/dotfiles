@@ -15,6 +15,9 @@ proofs:
 decide skill:
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- decide {{quote(skill)}}
 
+hosts *args:
+    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- hosts {{args}}
+
 next *flags:
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- next {{flags}}
 

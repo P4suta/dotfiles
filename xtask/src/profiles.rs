@@ -154,10 +154,8 @@ fn output(command: &mut Command, phase: &str) -> Result<Output> {
 }
 
 pub fn chezmoi(root: &Path, scope: &Path, config: &Path, destination: &Path) -> Command {
-    let mut command = Tool::Chezmoi.command();
+    let mut command = Tool::chezmoi_in(root);
     command
-        .arg("--source")
-        .arg(root)
         .arg("--config")
         .arg(config)
         .arg("--destination")
@@ -926,6 +924,7 @@ pub fn operate(
             "Application verified; managed-file backup retained at {}",
             backup.display()
         );
+        crate::freshness::reinstall_lagging(destination, root)?;
     } else {
         execute(action.name())?;
     }

@@ -109,7 +109,10 @@ impl SessionReaper {
 }
 
 /// Tier A: send `SIGKILL` to a stopped orphan after the grace window, because it ignores `SIGTERM` and lost the shell that could resume it.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one observed fact of the process the tier judges"
+)]
 fn tier_a(
     cfg: &SessionConfig,
     p: &Process,

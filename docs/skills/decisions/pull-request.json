@@ -1,7 +1,7 @@
 {
-  "revision": "1eb69379cf4eacfdca9125422c149ef5c4b5fd46610eed962730499f3f79d81f",
+  "revision": "d6769d5ac1d1a2540132018a6037234b5ed2e0a63779be43daaf328ddcb3a571",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "The skill points at the checked commands of pr-workflow: documents meet the writing standard, dependent work opens as a stack, independent PRs merge without manual updates, and create refuses a PR beyond the author's work-in-progress limit from the workflow policy.",
   "evidence": [
     "dot_agents/skills/pull-request/SKILL.md",
     "docs/adr/0004-checked-pull-request-authoring.md",
@@ -15,7 +15,10 @@
     "docs/adr/0015-scoped-coderabbit-pause.md",
     "docs/adr/0016-one-writing-standard.md",
     "xtask/src/pr_workflow.rs",
-    "xtask/src/prose_rules.rs"
+    "xtask/src/prose_rules.rs",
+    "guard/src/stack.rs",
+    "xtask/src/wip_rules.rs",
+    "dot_agents/skills/pull-request/assets/workflow-policy.json"
   ],
   "revisit": null
 }

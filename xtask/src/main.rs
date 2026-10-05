@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 use dotfiles_xtask::change_rules::{Gate, Gates};
+use dotfiles_xtask::freshness::Built;
 use dotfiles_xtask::tool::Tool;
 use dotfiles_xtask::{
     check_build_dir, export_checks, skill_source_paths, skills, split_frontmatter, validate_tree,
@@ -45,6 +46,10 @@ enum Action {
         #[arg(last = true)]
         arguments: Vec<OsString>,
     },
+    /// Claude Code PreToolUse hook for Bash and PowerShell: refuses recursive disk scans and file writes through inline interpreters, heredocs, and redirects.
+    ClaudeBash,
+    /// Claude Code PreToolUse and PostToolUse hook for Bash and PowerShell: sets each command's timeout from its measured durations.
+    ClaudeTiming,
     Hook {
         hook: dotfiles_xtask::hooks::Hook,
         #[arg(last = true)]
@@ -167,6 +172,11 @@ enum Action {
         #[command(subcommand)]
         command: dotfiles_xtask::pr_workflow::Action,
     },
+    /// Keep one host per OS family reachable, run the gate on each, and require their notes before push.
+    Hosts {
+        #[command(subcommand)]
+        action: dotfiles_xtask::hosts::Action,
+    },
     /// Prove the production contracts.
     /// A scope without the Rust gate skips them.
     Proofs {
@@ -282,6 +292,8 @@ fn run() -> Result<()> {
         } => dotfiles_xtask::secrets::exit(dotfiles_xtask::terminal::run(
             emulator, session, child, &arguments,
         )?),
+        Action::ClaudeBash => dotfiles_xtask::claude_hook::run()?,
+        Action::ClaudeTiming => dotfiles_xtask::claude_timing::run()?,
         Action::Hook { hook, arguments } => dotfiles_xtask::hooks::run(hook, &arguments)?,
         Action::LineEndings { request } => dotfiles_xtask::line_endings::run(request)?,
         Action::Git { arguments } => {
@@ -362,6 +374,7 @@ fn run() -> Result<()> {
                 .collect();
             dotfiles_xtask::pr_workflow::execute(command, &arguments)?;
         }
+        Action::Hosts { action } => dotfiles_xtask::hosts::run(action)?,
         Action::InstallPrWorkflow => {
             cargo(
                 &cli.root,
@@ -380,10 +393,7 @@ fn run() -> Result<()> {
                 &binary,
                 Path::new(&user_directory),
                 |paths| {
-                    let status = Tool::Chezmoi
-                        .command()
-                        .arg("--source")
-                        .arg(&cli.root)
+                    let status = Tool::chezmoi_in(&cli.root)
                         .args([
                             "--force",
                             "apply",
@@ -401,6 +411,11 @@ fn run() -> Result<()> {
                     Ok(())
                 },
             )?;
+            dotfiles_xtask::freshness::record_installation(
+                Path::new(&user_directory),
+                &cli.root,
+                Built::PrWorkflow,
+            )?;
         }
         Action::InstallProse => {
             cargo(
@@ -408,10 +423,7 @@ fn run() -> Result<()> {
                 Path::new("xtask/Cargo.toml"),
                 &["build", "--locked", "--release", "--bin", "prose"],
             )?;
-            let status = Tool::Chezmoi
-                .command()
-                .arg("--source")
-                .arg(&cli.root)
+            let status = Tool::chezmoi_in(&cli.root)
                 .args([
                     "--force",
                     "apply",
@@ -519,10 +531,7 @@ fn run() -> Result<()> {
         Action::Install => {
             let paths = skill_source_paths(&cli.root)?;
             ensure!(!paths.is_empty(), "no skill files to install");
-            let status = Tool::Chezmoi
-                .command()
-                .arg("--source")
-                .arg(&cli.root)
+            let status = Tool::chezmoi_in(&cli.root)
                 .args([
                     "--force",
                     "apply",
@@ -544,10 +553,7 @@ fn run() -> Result<()> {
                 Path::new("xtask/Cargo.toml"),
                 &["build", "--locked", "--release", "--bin", "coderabbit"],
             )?;
-            let status = Tool::Chezmoi
-                .command()
-                .arg("--source")
-                .arg(&cli.root)
+            let status = Tool::chezmoi_in(&cli.root)
                 .args([
                     "--force",
                     "apply",
@@ -570,6 +576,11 @@ fn run() -> Result<()> {
                 std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
                     .context("user directory is unavailable")?;
             dotfiles_xtask::review_guard::install(&binary, Path::new(&user_directory))?;
+            dotfiles_xtask::freshness::record_installation(
+                Path::new(&user_directory),
+                &cli.root,
+                Built::Coderabbit,
+            )?;
             println!("Installed CodeRabbit guard and cr alias with persistent local limits");
         }
         Action::InstallSkillOps => {
@@ -591,10 +602,7 @@ fn run() -> Result<()> {
                 &binary,
                 Path::new(&user_directory),
                 |path| {
-                    let status = Tool::Chezmoi
-                        .command()
-                        .arg("--source")
-                        .arg(&cli.root)
+                    let status = Tool::chezmoi_in(&cli.root)
                         .args([
                             "--force",
                             "apply",
@@ -612,6 +620,11 @@ fn run() -> Result<()> {
                     );
                     Ok(())
                 },
+            )?;
+            dotfiles_xtask::freshness::record_installation(
+                Path::new(&user_directory),
+                &cli.root,
+                Built::SkillOps,
             )?;
         }
     }

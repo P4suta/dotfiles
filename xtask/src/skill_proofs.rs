@@ -25,8 +25,12 @@ pub const HARNESSES: [&str; 12] = [
     "triage_is_skipped_only_when_every_finding_is_adopted",
 ];
 
-pub const PR_HARNESSES: [&str; 12] = [
+pub const PR_HARNESSES: [&str; 16] = [
+    "a_behind_stacked_pr_is_restacked_and_an_independent_one_updated_by_merge",
+    "a_branch_sharing_work_with_another_open_pr_opens_only_on_top_of_it",
+    "a_draft_becomes_ready_during_the_pause_only_with_the_pause_lines",
     "a_paused_edit_never_removes_the_exclusion_of_a_ready_pr",
+    "a_pr_merges_only_ready_current_passing_clean_and_without_an_owed_review",
     "a_pr_ready_during_the_pause_keeps_its_pause_exclusion",
     "a_refusal_names_the_first_unmet_condition",
     "api_quota_requires_a_nonzero_reserve_and_sufficient_remaining_requests",
@@ -58,10 +62,12 @@ pub const REAPER_HARNESSES: [&str; 3] = [
     "tick_conversion_rejects_zero_frequency",
 ];
 
-pub const GATE_HARNESSES: [&str; 5] = [
+pub const GATE_HARNESSES: [&str; 7] = [
     "a_commit_retry_keeps_what_its_message_source_implied",
     "a_long_option_is_its_exact_spelling_or_its_only_completion",
     "a_history_refusal_suggests_the_step_for_its_worst_update",
+    "a_published_rewrite_runs_only_through_the_leased_stack_tooling_or_a_waiver",
+    "a_rebase_is_refused_whenever_it_may_rewrite_a_published_commit",
     "a_rebase_signs_one_linear_branch_and_an_amend_only_the_checked_out_tip",
     "a_suggestion_is_rebuilt_only_from_a_line_read_in_full",
 ];
@@ -96,6 +102,13 @@ pub const NEXT_ACTION_HARNESSES: [&str; 5] = [
     "upstream_commits_the_branch_never_held_are_never_overwritten",
 ];
 
+pub const STALE_HARNESSES: [&str; 4] = [
+    "a_stale_build_never_runs",
+    "only_a_found_differing_build_is_stale",
+    "only_a_recorded_lagging_installation_is_rebuilt",
+    "the_nearest_named_checkout_wins",
+];
+
 pub const CHANGE_HARNESSES: [&str; 2] = [
     "ci_tooling_lock_files_and_the_classifier_select_everything",
     "every_path_selects_a_gate_and_unknown_paths_select_all",
@@ -105,6 +118,50 @@ pub const LINE_ENDING_HARNESSES: [&str; 3] = [
     "auto_detection_follows_git_byte_classes",
     "conversion_removes_only_carriage_returns_before_line_feeds",
     "declared_line_endings_are_never_rewritten",
+];
+
+pub const TARGET_HARNESSES: [&str; 2] = [
+    "an_absolute_configured_target_is_always_honored",
+    "an_unconfigured_target_is_shared_and_never_inside_the_worktree",
+];
+
+pub const SHELL_WRITE_HARNESSES: [&str; 2] = [
+    "every_refusal_names_a_next_action",
+    "file_writing_commands_are_never_admitted",
+];
+
+pub const WIP_HARNESSES: [&str; 2] = [
+    "a_pr_is_created_only_below_the_limit",
+    "a_recorded_repository_limit_replaces_the_default",
+];
+
+pub const TIMEOUT_HARNESSES: [&str; 3] = [
+    "the_percentile_of_a_short_history_is_its_slowest_run",
+    "the_timeout_never_falls_below_the_observed_percentile_nor_exceeds_the_limit",
+    "without_history_the_profile_default_decides",
+];
+
+pub const READY_PUSH_HARNESSES: [&str; 2] = [
+    "a_draft_or_absent_pr_and_ungated_pushes_are_admitted",
+    "a_ready_pr_never_takes_a_push",
+];
+
+pub const DISK_SCAN_HARNESSES: [&str; 2] = [
+    "a_walk_or_a_size_report_alone_is_admitted",
+    "only_a_recursive_size_scan_is_refused",
+];
+
+pub const BODY_HARNESSES: [&str; 2] = [
+    "attributed_bodies_are_never_admitted",
+    "every_body_refusal_names_the_deleting_next_action",
+];
+
+pub const HOSTS_HARNESSES: [&str; 5] = [
+    "a_changed_host_key_is_pinned_only_with_acceptance",
+    "a_push_is_admitted_only_when_every_required_family_passed",
+    "checks_start_only_from_a_clean_tree_with_every_required_host_ready",
+    "only_github_branch_updates_are_gated",
+    "the_latest_record_for_the_commit_tree_decides_a_family",
 ];
 
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
@@ -400,7 +457,7 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_ready_local_creation() {{\n    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Passing), Ok(production::Effect::CreateReady));\n}}\n#[kani::proof]\nfn reject_creation_without_a_personal_issue() {{\n    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false), production::Checks::Passing).is_ok());\n}}\n#[kani::proof]\nfn reject_unfinished_summary_as_review_exclusion() {{\n    assert!(production::coderabbit_body_marker_allowed(false, true, false));\n}}\n#[kani::proof]\nfn reject_ready_with_unfinished_checks() {{\n    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, true, production::IssueGate::Linked, production::checks_state(3, 1, 0)), Ok(production::Effect::Ready));\n}}\n#[kani::proof]\nfn reject_blaming_checks_for_a_published_pr() {{\n    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Incomplete), Err(production::Blocker::UnfinishedChecks));\n}}\n#[kani::proof]\nfn reject_paused_review_request() {{\n    assert!(production::review_request_allowed(true, production::requests_review(production::Operation::Ready, production::Generation::Local, true, false, false)));\n}}\n#[kani::proof]\nfn reject_paused_exclusion_removal() {{\n    assert!(production::review_request_allowed(true, production::requests_review(production::Operation::Edit, production::Generation::Local, false, true, false)));\n}}\n#[kani::proof]\nfn reject_pause_exclusion_as_standing() {{\n    assert_eq!(production::review_requirement(false, production::exclusion(true, true)), production::ReviewRequirement::Excluded);\n}}\n#[kani::proof]\nfn reject_standing_exclusion_when_ready_during_the_pause() {{\n    assert!(production::keeps_pause_exclusion(production::Operation::Ready, true, production::Exclusion::None, production::exclusion(true, false)));\n}}\n"
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_ready_local_creation() {{\n    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Passing), Ok(production::Effect::CreateReady));\n}}\n#[kani::proof]\nfn reject_creation_without_a_personal_issue() {{\n    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false), production::Checks::Passing).is_ok());\n}}\n#[kani::proof]\nfn reject_unfinished_summary_as_review_exclusion() {{\n    assert!(production::coderabbit_body_marker_allowed(false, true, false));\n}}\n#[kani::proof]\nfn reject_ready_with_unfinished_checks() {{\n    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, true, production::IssueGate::Linked, production::checks_state(3, 1, 0)), Ok(production::Effect::Ready));\n}}\n#[kani::proof]\nfn reject_blaming_checks_for_a_published_pr() {{\n    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Incomplete), Err(production::Blocker::UnfinishedChecks));\n}}\n#[kani::proof]\nfn reject_paused_review_request() {{\n    assert!(production::review_request_allowed(true, production::requests_review(production::Operation::Ready, production::Generation::Local, true, false, false)));\n}}\n#[kani::proof]\nfn reject_paused_exclusion_removal() {{\n    assert!(production::review_request_allowed(true, production::requests_review(production::Operation::Edit, production::Generation::Local, false, true, false)));\n}}\n#[kani::proof]\nfn reject_pause_exclusion_as_standing() {{\n    assert_eq!(production::review_requirement(false, production::exclusion(true, true)), production::ReviewRequirement::Excluded);\n}}\n#[kani::proof]\nfn reject_standing_exclusion_when_ready_during_the_pause() {{\n    assert!(production::keeps_pause_exclusion(production::Operation::Ready, true, production::Exclusion::None, production::exclusion(true, false)));\n}}\nfn state(lifecycle: production::Lifecycle, behind: bool, checks: production::HeadChecks, exclusion: production::Exclusion) -> production::MergeState {{\n    production::MergeState {{ lifecycle, conflict: false, behind, checks, clean: true, exclusion }}\n}}\n#[kani::proof]\nfn reject_merging_a_behind_pr() {{\n    assert!(production::merge_step(state(production::Lifecycle::Ready, true, production::HeadChecks::Passing, production::Exclusion::Pause), false, true) == production::Step::Merge);\n}}\n#[kani::proof]\nfn reject_updating_a_stacked_pr_by_merge() {{\n    assert!(production::merge_step(state(production::Lifecycle::Ready, true, production::HeadChecks::Passing, production::Exclusion::Pause), true, true) == production::Step::Update);\n}}\n#[kani::proof]\nfn reject_merging_with_a_failed_check() {{\n    assert!(production::merge_step(state(production::Lifecycle::Ready, false, production::HeadChecks::Failed, production::Exclusion::Pause), false, true) == production::Step::Merge);\n}}\n#[kani::proof]\nfn reject_readying_without_the_pause_lines() {{\n    assert!(production::merge_step(state(production::Lifecycle::Draft, false, production::HeadChecks::Passing, production::Exclusion::None), false, true) == production::Step::Ready);\n}}\n#[kani::proof]\nfn reject_opening_a_dependent_branch_independently() {{\n    assert!(production::dependency(true, false, true).is_none());\n}}\n"
         ),
     )?;
     for name in [
@@ -413,6 +470,11 @@ fn verify_native(root: &Path) -> Result<()> {
         "reject_paused_exclusion_removal",
         "reject_pause_exclusion_as_standing",
         "reject_standing_exclusion_when_ready_during_the_pause",
+        "reject_merging_a_behind_pr",
+        "reject_updating_a_stacked_pr_by_merge",
+        "reject_merging_with_a_failed_check",
+        "reject_readying_without_the_pause_lines",
+        "reject_opening_a_dependent_branch_independently",
     ] {
         verify_file(&file, probe.path(), &[name], true)?;
     }
@@ -463,7 +525,7 @@ fn verify_native(root: &Path) -> Result<()> {
     fs::write(
         &file,
         format!(
-            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_rebasing_across_several_refs() {{\n    assert!(production::signing(2, production::Reference::Branch, false, false) == production::Signing::Rebase);\n}}\n#[kani::proof]\nfn reject_rebasing_a_range_with_merges() {{\n    assert!(production::signing(1, production::Reference::Branch, true, false) == production::Signing::Rebase);\n}}\n#[kani::proof]\nfn reject_amending_a_ref_that_is_not_checked_out() {{\n    assert!(production::signing(1, production::Reference::Other, false, true) == production::Signing::Amend);\n}}\n#[kani::proof]\nfn reject_deleting_through_the_forge_before_fetching() {{\n    assert!(production::history(true, false) == production::History::ForgeDelete);\n}}\n#[kani::proof]\nfn reject_completing_a_prefix_of_two_options() {{\n    assert!(production::spelling(b\"a\", &[&b\"ab\"[..], &b\"ac\"[..]]) == production::Spelling::Is(0));\n}}\n#[kani::proof]\nfn reject_completing_over_an_exact_spelling() {{\n    assert!(production::spelling(b\"ab\", &[&b\"abc\"[..], &b\"ab\"[..]]) == production::Spelling::Is(0));\n}}\n#[kani::proof]\nfn reject_ignoring_a_unique_abbreviation() {{\n    assert!(production::spelling(b\"re\", &[&b\"repo\"[..], &b\"force\"[..]]) == production::Spelling::Unknown);\n}}\n#[kani::proof]\nfn reject_suggesting_from_an_unread_line() {{\n    assert!(production::verdict(true, false) == production::Verdict::Suggest);\n}}\n#[kani::proof]\nfn reject_retrying_a_reword_without_what_it_implied() {{\n    assert!(production::commit_retry(production::Source {{ fixup: production::Fixup::Reword, reuse: false, renew: false, amend: false }}, Some(false), false) == Ok(production::Retry {{ allow_empty: false, only: false, authorship: false, reset_author: true }}));\n}}\n#[kani::proof]\nfn reject_retrying_without_the_reused_authorship() {{\n    assert!(production::commit_retry(production::Source {{ fixup: production::Fixup::Absent, reuse: true, renew: false, amend: false }}, Some(false), false).is_ok());\n}}\n#[kani::proof]\nfn reject_keeping_a_reset_author_without_its_reuse() {{\n    assert!(production::commit_retry(production::Source {{ fixup: production::Fixup::Absent, reuse: true, renew: true, amend: false }}, Some(false), true).is_ok_and(|retry| retry.reset_author));\n}}\n#[kani::proof]\nfn reject_the_reused_authorship_during_a_pick() {{\n    assert!(production::commit_retry(production::Source {{ fixup: production::Fixup::Absent, reuse: true, renew: false, amend: false }}, Some(true), true).is_ok_and(|retry| retry.authorship));\n}}\n#[kani::proof]\nfn reject_retrying_a_reuse_without_knowing_of_a_pick() {{\n    assert!(production::commit_retry(production::Source {{ fixup: production::Fixup::Absent, reuse: true, renew: true, amend: false }}, None, true).is_ok());\n}}\n"
+            "#[path = {source:?}]\nmod production;\n#[kani::proof]\nfn reject_rebasing_across_several_refs() {{\n    assert!(production::signing(2, production::Reference::Branch, false, false) == production::Signing::Rebase);\n}}\n#[kani::proof]\nfn reject_rebasing_a_range_with_merges() {{\n    assert!(production::signing(1, production::Reference::Branch, true, false) == production::Signing::Rebase);\n}}\n#[kani::proof]\nfn reject_amending_a_ref_that_is_not_checked_out() {{\n    assert!(production::signing(1, production::Reference::Other, false, true) == production::Signing::Amend);\n}}\n#[kani::proof]\nfn reject_deleting_through_the_forge_before_fetching() {{\n    assert!(production::history(true, false) == production::History::ForgeDelete);\n}}\n#[kani::proof]\nfn reject_completing_a_prefix_of_two_options() {{\n    assert!(production::spelling(b\"a\", &[&b\"ab\"[..], &b\"ac\"[..]]) == production::Spelling::Is(0));\n}}\n#[kani::proof]\nfn reject_completing_over_an_exact_spelling() {{\n    assert!(production::spelling(b\"ab\", &[&b\"abc\"[..], &b\"ab\"[..]]) == production::Spelling::Is(0));\n}}\n#[kani::proof]\nfn reject_ignoring_a_unique_abbreviation() {{\n    assert!(production::spelling(b\"re\", &[&b\"repo\"[..], &b\"force\"[..]]) == production::Spelling::Unknown);\n}}\n#[kani::proof]\nfn reject_suggesting_from_an_unread_line() {{\n    assert!(production::verdict(true, false) == production::Verdict::Suggest);\n}}\n#[kani::proof]\nfn reject_retrying_a_reword_without_what_it_implied() {{\n    assert!(production::commit_retry(production::Source {{ fixup: production::Fixup::Reword, reuse: false, renew: false, amend: false }}, Some(false), false) == Ok(production::Retry {{ allow_empty: false, only: false, authorship: false, reset_author: true }}));\n}}\n#[kani::proof]\nfn reject_retrying_without_the_reused_authorship() {{\n    assert!(production::commit_retry(production::Source {{ fixup: production::Fixup::Absent, reuse: true, renew: false, amend: false }}, Some(false), false).is_ok());\n}}\n#[kani::proof]\nfn reject_keeping_a_reset_author_without_its_reuse() {{\n    assert!(production::commit_retry(production::Source {{ fixup: production::Fixup::Absent, reuse: true, renew: true, amend: false }}, Some(false), true).is_ok_and(|retry| retry.reset_author));\n}}\n#[kani::proof]\nfn reject_the_reused_authorship_during_a_pick() {{\n    assert!(production::commit_retry(production::Source {{ fixup: production::Fixup::Absent, reuse: true, renew: false, amend: false }}, Some(true), true).is_ok_and(|retry| retry.authorship));\n}}\n#[kani::proof]\nfn reject_retrying_a_reuse_without_knowing_of_a_pick() {{\n    assert!(production::commit_retry(production::Source {{ fixup: production::Fixup::Absent, reuse: true, renew: true, amend: false }}, None, true).is_ok());\n}}\n#[kani::proof]\nfn reject_a_manual_rebase_of_a_published_branch() {{\n    assert!(!production::rebase_refused(false, Some(true)));\n}}\n#[kani::proof]\nfn reject_an_unleased_stack_marker() {{\n    assert!(production::stack_tooling(Some(b\"t\"), None));\n}}\n#[kani::proof]\nfn reject_the_lease_admitting_a_plain_force_push() {{\n    assert!(production::admission(false, true, false) == production::Admission::Tooling);\n}}\n"
         ),
     )?;
     for name in [
@@ -480,6 +542,9 @@ fn verify_native(root: &Path) -> Result<()> {
         "reject_keeping_a_reset_author_without_its_reuse",
         "reject_the_reused_authorship_during_a_pick",
         "reject_retrying_a_reuse_without_knowing_of_a_pick",
+        "reject_a_manual_rebase_of_a_published_branch",
+        "reject_an_unleased_stack_marker",
+        "reject_the_lease_admitting_a_plain_force_push",
     ] {
         verify_file(&file, probe.path(), &[name], true)?;
     }
@@ -648,30 +713,11 @@ fn reject_a_contradiction_without_what_it_contradicted() {{
         fs::read(source)? == original,
         "production instruction proof source changed during verification"
     );
-    let source = crate::canonical(&root.join("xtask/src/change_rules.rs"))?;
-    let original = fs::read(&source)?;
-    let directory = tempfile::tempdir()?;
-    verify_inventory(&source, directory.path(), &CHANGE_HARNESSES)?;
-    verify_file(&source, directory.path(), &CHANGE_HARNESSES, false)?;
-    let probe = tempfile::tempdir()?;
-    let file = probe.path().join("counterexample.rs");
-    fs::write(
-        &file,
-        format!(
-            "#[path = {source:?}]\nmod production;\nuse production::{{Class, Gates, classify, gates, matched}};\n#[kani::proof]\n#[kani::unwind(40)]\nfn reject_an_unknown_path_selecting_less_than_everything() {{\n    let bytes: [u8; 24] = kani::any();\n    let path = &bytes[..];\n    kani::assume(matched(path).is_none());
-    assert!(gates(classify(path)) != Gates::ALL);\n}}\n#[kani::proof]\n#[kani::unwind(40)]\nfn reject_a_lock_file_selecting_a_single_class() {{\n    let mut bytes: [u8; 24] = kani::any();\n    bytes[19..].copy_from_slice(b\".lock\");\n    assert!(classify(&bytes) != Class::Everything);\n}}\n"
-        ),
-    )?;
-    for name in [
-        "reject_an_unknown_path_selecting_less_than_everything",
-        "reject_a_lock_file_selecting_a_single_class",
-    ] {
-        verify_file(&file, probe.path(), &[name], true)?;
+    let mut verified = 0;
+    for rules in &RULES {
+        verify_rules(root, rules)?;
+        verified += rules.harnesses.len();
     }
-    ensure!(
-        fs::read(source)? == original,
-        "production change-classifier proof source changed during verification"
-    );
     println!(
         "Verified all {} production policy harnesses, reachable outcomes, and the rejecting counterexamples",
         HARNESSES.len()
@@ -684,7 +730,266 @@ fn reject_a_contradiction_without_what_it_contradicted() {{
             + INSTRUCTION_HARNESSES.len()
             + NEXT_ACTION_HARNESSES.len()
             + LINE_ENDING_HARNESSES.len()
-            + CHANGE_HARNESSES.len()
+            + verified
+    );
+    Ok(())
+}
+
+/// One pure rule module.
+/// Its harnesses must all pass.
+/// Each counterexample, a harness asserting a rejected rule, must fail when it runs on that module.
+pub struct Rules {
+    pub source: &'static str,
+    pub harnesses: &'static [&'static str],
+    /// Harness definitions placed after `mod production;`, which names the module under proof.
+    pub counterexamples: &'static str,
+    pub rejected: &'static [&'static str],
+}
+
+/// Every rule module registered with the shared verification, in source order.
+pub const RULES: [Rules; 10] = [
+    Rules {
+        source: "xtask/src/target_rules.rs",
+        harnesses: &TARGET_HARNESSES,
+        counterexamples: "use production::{Target, target};
+#[kani::proof]
+fn reject_ignoring_an_absolute_target() {
+    assert!(target(true, true) == Target::Development);
+}
+#[kani::proof]
+fn reject_adopting_a_relative_target() {
+    assert!(target(false, true) == Target::Configured);
+}
+#[kani::proof]
+fn reject_the_home_target_beside_a_development_volume() {
+    assert!(target(false, true) == Target::Home);
+}
+",
+        rejected: &[
+            "reject_ignoring_an_absolute_target",
+            "reject_adopting_a_relative_target",
+            "reject_the_home_target_beside_a_development_volume",
+        ],
+    },
+    Rules {
+        source: "xtask/src/stale_rules.rs",
+        harnesses: &STALE_HARNESSES,
+        counterexamples: "#[kani::proof]
+fn reject_calling_a_matching_build_stale() {
+    assert!(production::freshness(true, true) == production::Freshness::Stale);
+}
+#[kani::proof]
+fn reject_running_a_stale_build() {
+    assert!(production::runs(production::freshness(true, false)));
+}
+#[kani::proof]
+fn reject_preferring_the_build_checkout_over_the_working_copy() {
+    assert!(production::origin(false, true, true) == Some(production::Origin::BuildCheckout));
+}
+#[kani::proof]
+fn reject_installing_an_unrecorded_tool() {
+    assert!(production::reinstalls(false, false));
+}
+",
+        rejected: &[
+            "reject_calling_a_matching_build_stale",
+            "reject_running_a_stale_build",
+            "reject_preferring_the_build_checkout_over_the_working_copy",
+            "reject_installing_an_unrecorded_tool",
+        ],
+    },
+    Rules {
+        source: "xtask/src/shell_write_rules.rs",
+        harnesses: &SHELL_WRITE_HARNESSES,
+        counterexamples: "#[kani::proof]
+fn reject_admitting_an_inline_interpreter() {
+    assert!(production::verdict(true, false) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_admitting_a_file_redirect() {
+    assert!(production::verdict(false, true) == production::Verdict::Admit);
+}
+",
+        rejected: &[
+            "reject_admitting_an_inline_interpreter",
+            "reject_admitting_a_file_redirect",
+        ],
+    },
+    Rules {
+        source: "xtask/src/wip_rules.rs",
+        harnesses: &WIP_HARNESSES,
+        counterexamples: "use production::{admits, limit};
+#[kani::proof]
+fn reject_admitting_a_pr_at_the_limit() {
+    assert!(admits(1, limit(1, None)));
+}
+#[kani::proof]
+fn reject_ignoring_a_repository_override() {
+    assert!(limit(1, Some(3)) == 1);
+}
+",
+        rejected: &[
+            "reject_admitting_a_pr_at_the_limit",
+            "reject_ignoring_a_repository_override",
+        ],
+    },
+    Rules {
+        source: "xtask/src/timeout_rules.rs",
+        harnesses: &TIMEOUT_HARNESSES,
+        counterexamples: "use production::{Timeout, percentile, timeout};
+#[kani::proof]
+fn reject_keeping_a_timeout_below_the_observed_percentile() {
+    assert!(timeout(Some(100_000), 0, Some(60_000), 600_000) == Timeout::Keep(60_000));
+}
+#[kani::proof]
+fn reject_a_timeout_above_the_client_limit() {
+    assert!(timeout(Some(590_000), 0, None, 600_000).millis() > 600_000);
+}
+#[kani::proof]
+fn reject_the_median_as_the_high_percentile() {
+    assert!(percentile(&[1, 2, 3]) == Some(2));
+}
+",
+        rejected: &[
+            "reject_keeping_a_timeout_below_the_observed_percentile",
+            "reject_a_timeout_above_the_client_limit",
+            "reject_the_median_as_the_high_percentile",
+        ],
+    },
+    Rules {
+        source: "xtask/src/ready_push_rules.rs",
+        harnesses: &READY_PUSH_HARNESSES,
+        counterexamples: "use production::{Pr, Verdict, push};
+#[kani::proof]
+fn reject_admitting_a_push_to_a_ready_pr() {
+    assert!(push(true, Pr::Ready) == Verdict::Admit);
+}
+#[kani::proof]
+fn reject_admitting_an_unknown_pr_state() {
+    assert!(push(true, Pr::Unknown) == Verdict::Admit);
+}
+#[kani::proof]
+fn reject_refusing_a_push_to_a_draft() {
+    assert!(push(true, Pr::Draft) == Verdict::ReturnToDraft);
+}
+",
+        rejected: &[
+            "reject_admitting_a_push_to_a_ready_pr",
+            "reject_admitting_an_unknown_pr_state",
+            "reject_refusing_a_push_to_a_draft",
+        ],
+    },
+    Rules {
+        source: "xtask/src/disk_scan_rules.rs",
+        harnesses: &DISK_SCAN_HARNESSES,
+        counterexamples: "#[kani::proof]
+fn reject_admitting_a_recursive_size_scan() {
+    assert!(production::verdict(true, true) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_refusing_a_walk_without_sizes() {
+    assert!(production::verdict(true, false) == production::Verdict::Refuse);
+}
+",
+        rejected: &[
+            "reject_admitting_a_recursive_size_scan",
+            "reject_refusing_a_walk_without_sizes",
+        ],
+    },
+    Rules {
+        source: "xtask/src/body_rules.rs",
+        harnesses: &BODY_HARNESSES,
+        counterexamples: "#[kani::proof]
+fn reject_admitting_an_attributed_body() {
+    assert!(production::verdict(true) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_an_empty_deleting_next_action() {
+    assert!(production::next_action(production::Reason::Attribution).is_empty());
+}
+",
+        rejected: &[
+            "reject_admitting_an_attributed_body",
+            "reject_an_empty_deleting_next_action",
+        ],
+    },
+    Rules {
+        source: "xtask/src/hosts_rules.rs",
+        harnesses: &HOSTS_HARNESSES,
+        counterexamples: "use production::*;
+#[kani::proof]
+fn reject_admitting_a_failed_family() {
+    assert!(admit([true, true, true], [Evidence::Passed, Evidence::Failed, Evidence::Passed]) == Verdict::Admit);
+}
+#[kani::proof]
+fn reject_a_record_for_another_tree() {
+    assert!(record(Evidence::Missing, false, true) == Evidence::Passed);
+}
+#[kani::proof]
+fn reject_silently_accepting_a_changed_key() {
+    assert!(pin(Key::Changed, false));
+}
+#[kani::proof]
+fn reject_checking_a_dirty_tree() {
+    assert!(start(false, [true, true, true], [true, true, true]) == Start::Run);
+}
+",
+        rejected: &[
+            "reject_admitting_a_failed_family",
+            "reject_a_record_for_another_tree",
+            "reject_silently_accepting_a_changed_key",
+            "reject_checking_a_dirty_tree",
+        ],
+    },
+    Rules {
+        source: "xtask/src/change_rules.rs",
+        harnesses: &CHANGE_HARNESSES,
+        counterexamples: "use production::{Class, Gates, classify, gates, matched};
+#[kani::proof]
+#[kani::unwind(40)]
+fn reject_an_unknown_path_selecting_less_than_everything() {
+    let bytes: [u8; 24] = kani::any();
+    let path = &bytes[..];
+    kani::assume(matched(path).is_none());
+    assert!(gates(classify(path)) != Gates::ALL);
+}
+#[kani::proof]
+#[kani::unwind(40)]
+fn reject_a_lock_file_selecting_a_single_class() {
+    let mut bytes: [u8; 24] = kani::any();
+    bytes[19..].copy_from_slice(b\".lock\");
+    assert!(classify(&bytes) != Class::Everything);
+}
+",
+        rejected: &[
+            "reject_an_unknown_path_selecting_less_than_everything",
+            "reject_a_lock_file_selecting_a_single_class",
+        ],
+    },
+];
+
+fn verify_rules(root: &Path, rules: &Rules) -> Result<()> {
+    let source = crate::canonical(&root.join(rules.source))?;
+    let original = fs::read(&source)?;
+    let directory = tempfile::tempdir()?;
+    verify_inventory(&source, directory.path(), rules.harnesses)?;
+    verify_file(&source, directory.path(), rules.harnesses, false)?;
+    let probe = tempfile::tempdir()?;
+    let file = probe.path().join("counterexample.rs");
+    fs::write(
+        &file,
+        format!(
+            "#[path = {source:?}]\nmod production;\n{}",
+            rules.counterexamples
+        ),
+    )?;
+    for name in rules.rejected {
+        verify_file(&file, probe.path(), &[name], true)?;
+    }
+    ensure!(
+        fs::read(&source)? == original,
+        "production proof source {} changed during verification",
+        rules.source
     );
     Ok(())
 }

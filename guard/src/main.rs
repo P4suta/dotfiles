@@ -10,11 +10,12 @@
 //! `core.hooksPath` in `~/.gitconfig` points every repository at that hooks directory, so no repository needs to opt in.
 
 use dotguard::{
-    attribution, bypass, doctor, gitargv, lang, lint, postcommit, prepush, realgit, refusal,
-    renovate, staged,
+    attribution, bypass, doctor, gate_rules, gitargv, lang, lint, postcommit, prepush, realgit,
+    refusal, renovate, stack, staged,
 };
 
 use bypass::Category;
+use gate_rules::Admission;
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
@@ -83,19 +84,28 @@ fn usage() {
 
 /// `~/.local/bin/git` delegates here, and on success this function never returns because it replaces the process with the real git.
 fn git_wrapper(argv: &[String]) -> ExitCode {
-    if let Some(denial) = gitargv::inspect(argv) {
+    if let Some(denial) = gitargv::inspect_in(argv, &stack::Checkout) {
         let full: Vec<String> = std::iter::once("git".to_owned())
             .chain(argv.iter().cloned())
             .collect();
-
-        let waiver = denial.category.env();
-        if let Some(env) = waiver.filter(|_| bypass::waived(denial.category)) {
-            bypass::record("BYPASS", denial.category, &denial.reason, &full);
-            eprintln!("::warning:: {env}=1 — allowing {}", denial.reason);
-        } else {
-            bypass::record("REJECT", denial.category, &denial.reason, &full);
-            gitargv::refusal(&denial, argv).emit();
-            return ExitCode::FAILURE;
+        let tooling = denial.stack && stack::leased(gitargv::global_options(argv));
+        match gate_rules::admission(denial.stack, tooling, bypass::waived(denial.category)) {
+            Admission::Tooling => {
+                bypass::record("STACK", denial.category, &denial.reason, &full);
+            }
+            Admission::Waived => {
+                bypass::record("BYPASS", denial.category, &denial.reason, &full);
+                eprintln!(
+                    "::warning:: {}=1 — allowing {}",
+                    denial.category.env().unwrap_or_default(),
+                    denial.reason
+                );
+            }
+            Admission::Refused => {
+                bypass::record("REJECT", denial.category, &denial.reason, &full);
+                gitargv::refusal(&denial, argv).emit();
+                return ExitCode::FAILURE;
+            }
         }
     }
 
@@ -272,18 +282,13 @@ fn picking() -> Option<bool> {
     Some(!exists("MERGE_HEAD")? && exists("CHERRY_PICK_HEAD")?)
 }
 
-fn exists(reference: &str) -> Option<bool> {
-    let status = realgit::command()?
-        .args(["show-ref", "--exists", reference])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .ok()?;
-    match status.code() {
-        Some(0) => Some(true),
-        Some(2) => Some(false),
-        _ => None,
-    }
+/// Whether the special reference `name` exists.
+/// Git keeps `MERGE_HEAD` and `CHERRY_PICK_HEAD` as files in the Git directory of the worktree under every reference storage format, and `git commit` checks those files.
+/// `git show-ref --exists` doesn't decide this on every supported Git version.
+/// Git 2.43 reports a missing `MERGE_HEAD` as a lookup error.
+fn exists(name: &str) -> Option<bool> {
+    let path = realgit::capture(&["rev-parse", "--git-path", name])?;
+    std::fs::exists(path.trim_end_matches(['\r', '\n'])).ok()
 }
 
 fn pre_commit() -> i32 {

@@ -1,0 +1,11 @@
+{
+  "revision": "888f5ede6c7d3a7ad9a1e7f1b9fac40e711b48ff03fb8355e698e1a0609cac12",
+  "outcome": "implemented",
+  "reason": "Choose the model tier by difficulty and consequence: implementation, design, and hard-to-reverse work on the top tier, routine supervision on the cheapest; project commands and storage-scout are enforced by the shell hook.",
+  "evidence": [
+    "dot_agents/skills/delegation/SKILL.md",
+    "xtask/src/shell_write_rules.rs",
+    "xtask/src/disk_scan_rules.rs"
+  ],
+  "revisit": null
+}

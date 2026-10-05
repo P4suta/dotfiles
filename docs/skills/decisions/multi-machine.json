@@ -1,9 +1,13 @@
 {
-  "revision": "c6b2c251a661c37b4d535e8177caf9ada83d38a2aa9159ab8d928a31f2e9ec2a",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "5f8cc127443406d51a9a9a024807c6bedfb9e4b8a848e455d47eb75332522d63",
+  "outcome": "implemented",
+  "reason": "Point host inventory, readiness, and pre-push cross-platform verification at `dotfiles-xtask hosts` sync, doctor, and check, whose notes pre-push and pr-workflow ready require, in the minimal prose of the writing standard; keep the native-path, job-identity, 1Password, hub, and agent-dispatch judgment.",
   "evidence": [
-    "dot_agents/skills/multi-machine/SKILL.md"
+    "dot_agents/skills/multi-machine/SKILL.md",
+    "xtask/src/hosts.rs",
+    "xtask/src/hosts_rules.rs",
+    "xtask/tests/hosts.rs",
+    "docs/adr/0020-os-family-push-evidence.md"
   ],
   "revisit": null
 }

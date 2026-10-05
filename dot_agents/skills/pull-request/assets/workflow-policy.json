@@ -3,5 +3,9 @@
   "minimum_remaining": 10,
   "personal_owners": [
     { "login": "P4suta", "id": 42543015 }
-  ]
+  ],
+  "work_in_progress": {
+    "default": 1,
+    "repositories": {}
+  }
 }

@@ -5,11 +5,19 @@ use std::path::{Path, PathBuf};
 use yaml_rust2::YamlLoader;
 
 pub mod agent_memory;
+pub mod body_rules;
+pub mod build_inputs;
 pub mod change;
 pub mod change_rules;
+pub mod claude_hook;
+pub mod claude_timing;
 pub mod desktop;
+pub mod disk_scan_rules;
 pub mod eol_rules;
+pub mod freshness;
 pub mod hooks;
+pub mod hosts;
+pub mod hosts_rules;
 pub mod instruction_audit;
 pub mod instruction_rules;
 pub mod line_endings;
@@ -22,6 +30,8 @@ pub mod profiles;
 pub mod prose;
 pub mod prose_rules;
 pub mod quality;
+pub mod ready_push;
+pub mod ready_push_rules;
 #[path = "../../guard/src/refusal.rs"]
 pub mod refusal;
 pub mod rehearsal;
@@ -30,14 +40,19 @@ pub mod review_rules;
 pub mod runtime;
 pub mod secrets;
 pub mod setup;
+pub mod shell_write_rules;
 pub mod skill_install;
 pub mod skill_ops;
 pub mod skill_proofs;
 pub mod skill_rules;
+pub mod stale_rules;
+pub mod target_rules;
 pub mod terminal;
+pub mod timeout_rules;
 pub mod tool;
 pub mod transaction;
 pub mod windows_setup;
+pub mod wip_rules;
 pub mod wsl;
 
 /// A failure whose structured refusal a child process already printed, so nothing follows it.
@@ -137,7 +152,10 @@ pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
 }
 
 /// `canonicalize` without the Windows verbatim drive prefix.
-#[allow(clippy::disallowed_methods)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one place that canonicalizes a path, so every caller gets the spelling without the verbatim prefix"
+)]
 pub fn canonical(path: &Path) -> Result<PathBuf> {
     Ok(without_verbatim_prefix(&path.canonicalize()?))
 }

@@ -11,7 +11,7 @@
 //! This hook, and not the `~/.local/bin/git` wrapper, enforces the rule, because the wrapper only handles commands that resolve `git` through `PATH`.
 
 use crate::bypass::{self, Category};
-use crate::gate_rules::{self, History, Reference, Signing};
+use crate::gate_rules::{self, Admission, History, Reference, Signing};
 use crate::realgit;
 use crate::refusal::{Refusal, command};
 use std::io::Read;
@@ -338,20 +338,35 @@ fn judge(remote: &str, input: &str) -> i32 {
     }
 
     let argv: Vec<String> = std::env::args().collect();
-
-    if bypass::waived(Category::Force) {
-        bypass::record(
-            "BYPASS",
-            Category::Force,
-            "pre-push non-fast-forward",
-            &argv,
-        );
-        let summary: Vec<&str> = problems.iter().map(|p| p.detail.as_str()).collect();
-        eprintln!(
-            "::warning:: ALLOW_FORCE=1 — pushing a rewrite:\n{}",
-            summary.join("\n")
-        );
-        return 0;
+    // The stack tooling rewrites branches and pushes them with explicit leases.
+    // It never deletes a ref.
+    let rewrites = problems
+        .iter()
+        .all(|p| !matches!(p.verdict, Verdict::Delete));
+    match gate_rules::admission(
+        rewrites,
+        rewrites && crate::stack::leased(&[]),
+        bypass::waived(Category::Force),
+    ) {
+        Admission::Tooling => {
+            bypass::record("STACK", Category::Force, "pre-push non-fast-forward", &argv);
+            return 0;
+        }
+        Admission::Waived => {
+            bypass::record(
+                "BYPASS",
+                Category::Force,
+                "pre-push non-fast-forward",
+                &argv,
+            );
+            let summary: Vec<&str> = problems.iter().map(|p| p.detail.as_str()).collect();
+            eprintln!(
+                "::warning:: ALLOW_FORCE=1 — pushing a rewrite:\n{}",
+                summary.join("\n")
+            );
+            return 0;
+        }
+        Admission::Refused => {}
     }
 
     bypass::record(

@@ -29,7 +29,14 @@ For an existing PR, use its current review and skip a duplicate CLI review of th
 Read [commands and generation](references/workflow.md) for the placeholders, the PR review budget, and the optional configuration example.
 Write the document locally when the service fails or the destination requires a document it fails to produce.
 Local creation always starts as a draft, and moving it to review needs separate authorization.
+The workflow policy caps how many PRs one person may keep open.
+`create` refuses a new PR once that person reaches the cap, so add the work to the PR it names.
 `ready` refuses until every head check passes, so run it only when no scoped work remains.
+Open dependent work with `pr-workflow stack create`, because `create` refuses a branch sharing commits or paths with another open PR.
+Restack with `pr-workflow stack sync` or `stack rebase`.
+Never use a manual rebase or force push.
+Merge with `pr-workflow merge` or `stack merge`.
+The section [stacks and merging](references/workflow.md#stacks-and-merging) describes both.
 
 Without destination-specific rules, write an English [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) title: `type(scope)!: description`.
 `pr-workflow check` runs the prose checker on the title and body of a personal non-fork destination.
