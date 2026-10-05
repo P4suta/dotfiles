@@ -7,6 +7,8 @@ use yaml_rust2::YamlLoader;
 pub mod agent_memory;
 pub mod body_rules;
 pub mod build_inputs;
+pub mod change;
+pub mod change_rules;
 pub mod claude_hook;
 pub mod desktop;
 pub mod eol_rules;

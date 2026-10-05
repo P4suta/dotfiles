@@ -96,6 +96,11 @@ pub const STALE_HARNESSES: [&str; 4] = [
     "the_nearest_named_checkout_wins",
 ];
 
+pub const CHANGE_HARNESSES: [&str; 2] = [
+    "ci_tooling_lock_files_and_the_classifier_select_everything",
+    "every_path_selects_a_gate_and_unknown_paths_select_all",
+];
+
 pub const LINE_ENDING_HARNESSES: [&str; 3] = [
     "auto_detection_follows_git_byte_classes",
     "conversion_removes_only_carriage_returns_before_line_feeds",
@@ -669,7 +674,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 5] = [
+pub const RULES: [Rules; 6] = [
     Rules {
         source: "xtask/src/target_rules.rs",
         harnesses: &TARGET_HARNESSES,
@@ -780,6 +785,31 @@ fn reject_checking_a_dirty_tree() {
             "reject_a_record_for_another_tree",
             "reject_silently_accepting_a_changed_key",
             "reject_checking_a_dirty_tree",
+        ],
+    },
+    Rules {
+        source: "xtask/src/change_rules.rs",
+        harnesses: &CHANGE_HARNESSES,
+        counterexamples: "use production::{Class, Gates, classify, gates, matched};
+#[kani::proof]
+#[kani::unwind(40)]
+fn reject_an_unknown_path_selecting_less_than_everything() {
+    let bytes: [u8; 24] = kani::any();
+    let path = &bytes[..];
+    kani::assume(matched(path).is_none());
+    assert!(gates(classify(path)) != Gates::ALL);
+}
+#[kani::proof]
+#[kani::unwind(40)]
+fn reject_a_lock_file_selecting_a_single_class() {
+    let mut bytes: [u8; 24] = kani::any();
+    bytes[19..].copy_from_slice(b\".lock\");
+    assert!(classify(&bytes) != Class::Everything);
+}
+",
+        rejected: &[
+            "reject_an_unknown_path_selecting_less_than_everything",
+            "reject_a_lock_file_selecting_a_single_class",
         ],
     },
 ];
