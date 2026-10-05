@@ -241,6 +241,19 @@ pub enum Fixup {
     Reword,
 }
 
+/// Where the refused commit took its message and authorship from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct Source {
+    pub fixup: Fixup,
+    /// `-C` or `-c` named a commit.
+    pub reuse: bool,
+    /// `--reset-author` was in effect.
+    pub renew: bool,
+    /// `--amend` was in effect.
+    pub amend: bool,
+}
+
 /// What a retry from the saved message adds so that it makes the commit the refused one would have made.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)]
@@ -249,18 +262,42 @@ pub struct Retry {
     pub only: bool,
     /// The author and date of the commit whose message `-C` or `-c` reused.
     pub authorship: bool,
+    /// The `--reset-author` options stay, which Git accepts only with `-C`, `-c`, `--amend`, or during a pick.
+    pub reset_author: bool,
 }
 
-/// The retry of a refused commit, or `None` when no retry repeats it.
-/// `reuse` says the commit took its authorship from another commit, through `-C` or `-c` without `--reset-author`, and `known` that the gate read that authorship.
-pub fn commit_retry(fixup: Fixup, reuse: bool, known: bool) -> Option<Retry> {
-    if reuse && !known {
-        return None;
+/// Why no retry repeats a refused commit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Withheld {
+    /// The reused commit's authorship could not be read.
+    Authorship,
+    /// Whether a pick was in progress, which decides whose authorship a reuse takes, could not be read.
+    Picking,
+}
+
+/// The retry of a refused commit.
+/// `picking` says a cherry-pick or rebase pick was in progress, when the gate could tell, and `known` that the gate read the reused commit's authorship.
+/// During a pick Git takes the authorship from the picked commit unless `--reset-author` is given, whatever `-C` or `-c` named.
+///
+/// # Errors
+///
+/// The authorship a retry must name, or whether a pick decides it, is unknown.
+pub fn commit_retry(source: Source, picking: Option<bool>, known: bool) -> Result<Retry, Withheld> {
+    let picking = match picking {
+        Some(picking) => picking,
+        None if source.reuse => return Err(Withheld::Picking),
+        None => false,
+    };
+    let authorship = source.reuse && !source.renew && !picking;
+    if authorship && !known {
+        return Err(Withheld::Authorship);
     }
-    Some(Retry {
-        allow_empty: matches!(fixup, Fixup::Amend | Fixup::Reword),
-        only: fixup == Fixup::Reword,
-        authorship: reuse,
+    Ok(Retry {
+        allow_empty: matches!(source.fixup, Fixup::Amend | Fixup::Reword),
+        only: source.fixup == Fixup::Reword,
+        authorship,
+        // Without the reuse and `--amend` the author is the committer, which is what the reset made it.
+        reset_author: !source.reuse || !source.renew || source.amend || picking,
     })
 }
 
@@ -273,19 +310,39 @@ fn a_commit_retry_keeps_what_its_message_source_implied() {
         2 => Fixup::Amend,
         _ => Fixup::Reword,
     };
-    let reuse: bool = kani::any();
+    let source = Source {
+        fixup,
+        reuse: kani::any(),
+        renew: kani::any(),
+        amend: kani::any(),
+    };
+    let picking: Option<bool> = kani::any();
     let known: bool = kani::any();
-    let retry = commit_retry(fixup, reuse, known);
-    assert_eq!(retry.is_none(), reuse && !known);
-    if let Some(retry) = retry {
+    let retry = commit_retry(source, picking, known);
+    if source.reuse && picking.is_none() {
+        assert_eq!(retry, Err(Withheld::Picking));
+    }
+    let takes = source.reuse && !source.renew && picking == Some(false);
+    assert_eq!(retry == Err(Withheld::Authorship), takes && !known);
+    if let Ok(retry) = retry {
         assert_eq!(
             retry.allow_empty,
             fixup == Fixup::Amend || fixup == Fixup::Reword
         );
         assert_eq!(retry.only, fixup == Fixup::Reword);
-        assert_eq!(retry.authorship, reuse);
+        assert_eq!(retry.authorship, takes);
+        // A kept reset is one Git accepts, and a dropped one leaves the committer as the author.
+        if retry.reset_author && source.renew {
+            assert!(source.amend || picking == Some(true) || !source.reuse);
+        }
+        if !retry.reset_author {
+            assert!(source.renew && !source.amend && !retry.authorship);
+        }
     }
-    kani::cover!(retry.is_none());
-    kani::cover!(retry.is_some_and(|retry| retry.only && retry.allow_empty));
-    kani::cover!(retry.is_some_and(|retry| retry.authorship));
+    kani::cover!(retry == Err(Withheld::Picking));
+    kani::cover!(retry == Err(Withheld::Authorship));
+    kani::cover!(retry.is_ok_and(|retry| retry.only && retry.allow_empty));
+    kani::cover!(retry.is_ok_and(|retry| retry.authorship));
+    kani::cover!(retry.is_ok_and(|retry| !retry.reset_author));
+    kani::cover!(retry.is_ok_and(|retry| retry.reset_author && source.reuse && source.renew));
 }

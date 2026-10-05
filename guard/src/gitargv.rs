@@ -17,7 +17,7 @@
 //! * `rm -f` — common in scripts, and what it destroys is reachable from the index in every case that matters.
 
 use crate::bypass::Category;
-use crate::gate_rules::{Fixup, Spelling, Verdict, spelling, verdict};
+use crate::gate_rules::{Fixup, Source, Spelling, Verdict, Withheld, spelling, verdict};
 use crate::realgit;
 use crate::refusal::{Refusal, command};
 
@@ -473,18 +473,22 @@ const MESSAGE_OPTIONS: [&str; 8] = [
 ];
 const MESSAGE_LETTERS: &str = "mFCcte";
 
-/// How the refused commit's `--fixup` was given, and the commit whose authorship it copied.
-fn message_source<'a>(parsed: &Parsed<'a>, args: &'a [String]) -> (Fixup, Option<&'a str>) {
-    let mut fixup = Fixup::Absent;
+/// Where the refused commit took its message and authorship from, and the commit `-C` or `-c` named.
+fn message_source<'a>(parsed: &Parsed<'a>, args: &'a [String]) -> (Source, Option<&'a str>) {
+    let mut source = Source {
+        fixup: Fixup::Absent,
+        reuse: false,
+        renew: false,
+        amend: false,
+    };
     let mut reused: Option<&str> = None;
-    let mut renew = false;
     for (range, option) in &parsed.options {
         match option {
             Opt::Long {
                 name: "fixup",
                 negated,
             } => {
-                fixup = match long_value(range, args) {
+                source.fixup = match long_value(range, args) {
                     _ if *negated => Fixup::Absent,
                     Some(value) if value.starts_with("amend:") => Fixup::Amend,
                     Some(value) if value.starts_with("reword:") => Fixup::Reword,
@@ -504,12 +508,17 @@ fn message_source<'a>(parsed: &Parsed<'a>, args: &'a [String]) -> (Fixup, Option
             Opt::Long {
                 name: "reset-author",
                 negated,
-            } => renew = !negated,
+            } => source.renew = !negated,
+            Opt::Long {
+                name: "amend",
+                negated,
+            } => source.amend = !negated,
             Opt::Short { letters, value } if letters.ends_with(['C', 'c']) => reused = *value,
             _ => {}
         }
     }
-    (fixup, reused.filter(|_| !renew))
+    source.reuse = reused.is_some();
+    (source, reused)
 }
 
 /// The author and date of a commit, as `--author` and `--date` take them.
@@ -518,13 +527,24 @@ pub struct Authorship {
     pub date: String,
 }
 
+fn withheld_reason(withheld: Withheld, reused: Option<&str>) -> String {
+    match withheld {
+        Withheld::Authorship => format!(
+            "the commit took its author and date from `{}`, which the gate could not read, and a retry without them would record a different author.",
+            reused.unwrap_or_default()
+        ),
+        Withheld::Picking => "the gate could not tell whether a cherry-pick is in progress, which decides whose author and date the commit records.".to_owned(),
+    }
+}
+
 /// The refused commit again, with its message read from `message` and opened in the editor.
-/// `words` is the command line the wrapper ran, and `authorship` reads a commit's authorship.
+/// `words` is the command line the wrapper ran, `authorship` reads a commit's authorship, and `picking` says whether a cherry-pick or rebase pick is in progress.
 /// The result is `None` when that was not `git commit`, and the reason when no command repeats it.
 pub fn commit_retry(
     words: &[String],
     message: &str,
     authorship: impl Fn(&str) -> Option<Authorship>,
+    picking: impl Fn() -> Option<bool>,
 ) -> Option<Result<Vec<String>, String>> {
     let (program, rest) = words.split_first()?;
     if program != "git" {
@@ -541,19 +561,21 @@ pub fn commit_retry(
             "the commit has an option Git does not accept as written, so the gate cannot tell what it meant.".to_owned(),
         ));
     }
-    let (fixup, source) = message_source(&parsed, args);
-    let read = source.and_then(&authorship);
-    let Some(plan) = crate::gate_rules::commit_retry(fixup, source.is_some(), read.is_some())
-    else {
-        return Some(Err(format!(
-            "the commit took its author and date from `{}`, which the gate could not read, and a retry without them would record a different author.",
-            source.unwrap_or_default()
-        )));
+    let (source, reused) = message_source(&parsed, args);
+    let read = reused.filter(|_| !source.renew).and_then(&authorship);
+    let progress = if source.reuse { picking() } else { Some(false) };
+    let plan = match crate::gate_rules::commit_retry(source, progress, read.is_some()) {
+        Ok(plan) => plan,
+        Err(withheld) => return Some(Err(withheld_reason(withheld, reused))),
     };
     let mut replaced: Vec<Option<Vec<String>>> = vec![None; args.len()];
     for (range, option) in &parsed.options {
         let kept = match option {
             Opt::Long { name, .. } if MESSAGE_OPTIONS.contains(name) => Vec::new(),
+            Opt::Long {
+                name: "reset-author",
+                ..
+            } if !plan.reset_author => Vec::new(),
             Opt::Short { letters, value } => {
                 let kept: String = letters
                     .chars()
@@ -1698,7 +1720,7 @@ mod tests {
     }
 
     fn retry(line: &str) -> Option<Result<String, String>> {
-        commit_retry(&argv(line), "/r/.git/COMMIT_EDITMSG", other)
+        commit_retry(&argv(line), "/r/.git/COMMIT_EDITMSG", other, || Some(false))
             .map(|retry| retry.map(|words| words.join(" ")))
     }
 
@@ -1799,8 +1821,8 @@ mod tests {
                 format!("git commit {}", copied("X")),
             ),
             (
-                "git commit -C X --reset-author",
-                "git commit --reset-author".to_owned(),
+                "git commit -C X --reset-author --amend",
+                "git commit --reset-author --amend".to_owned(),
             ),
             (
                 "git commit --reset-author -C X --no-reset-author",
@@ -1827,9 +1849,75 @@ mod tests {
                 .is_err_and(|reason| reason.contains("`unreadable`"))),
             "{withheld:?}"
         );
+    }
+
+    /// Git takes `--reset-author` only with `-C`, `-c`, `--amend`, or during a pick, so a retry without the reuse and without `--amend` drops it.
+    /// The commit is the same, because without a reused commit the author is the committer, as `--reset-author` made it.
+    #[test]
+    fn a_retried_reuse_with_a_reset_author_drops_the_reset() {
+        let edited = "--edit --file /r/.git/COMMIT_EDITMSG";
+        for (line, expected) in [
+            ("git commit -q -C HEAD --reset-author", "git commit -q"),
+            ("git commit -q -c HEAD --reset-author", "git commit -q"),
+            ("git commit -C unreadable --reset-au", "git commit"),
+            (
+                "git commit --reset-author -C X --no-reset-author --reset-author",
+                "git commit",
+            ),
+            (
+                "git commit -C X --reset-author --amend --no-amend",
+                "git commit --amend --no-amend",
+            ),
+            (
+                "git commit -C X --reset-author --no-amend --amend",
+                "git commit --reset-author --no-amend --amend",
+            ),
+            (
+                "git commit --reset-author --amend",
+                "git commit --reset-author --amend",
+            ),
+        ] {
+            assert_eq!(
+                retry(line),
+                Some(Ok(format!("{expected} {edited}"))),
+                "{line}"
+            );
+        }
+    }
+
+    /// During a cherry-pick Git takes the author from the picked commit instead of `-C` or `-c`, and `--reset-author` replaces it with the committer.
+    #[test]
+    fn a_retried_reuse_during_a_pick_keeps_the_picked_authorship() {
+        let edited = "--edit --file /r/.git/COMMIT_EDITMSG";
+        let during = |line: &str, picking: Option<bool>| {
+            commit_retry(&argv(line), "/r/.git/COMMIT_EDITMSG", other, || picking)
+                .map(|retry| retry.map(|words| words.join(" ")))
+        };
+        for (line, expected) in [
+            ("git commit -C X", "git commit"),
+            ("git commit -C unreadable", "git commit"),
+            (
+                "git commit -C X --reset-author",
+                "git commit --reset-author",
+            ),
+            ("git commit --reset-author", "git commit --reset-author"),
+        ] {
+            assert_eq!(
+                during(line, Some(true)),
+                Some(Ok(format!("{expected} {edited}"))),
+                "{line}"
+            );
+        }
+        let unknown = during("git commit -C X --reset-author", None);
+        assert!(
+            unknown.as_ref().is_some_and(|retry| retry
+                .as_ref()
+                .is_err_and(|reason| reason.contains("cherry-pick"))),
+            "{unknown:?}"
+        );
         assert_eq!(
-            retry("git commit -C unreadable --reset-author"),
-            Some(Ok(format!("git commit --reset-author {edited}")))
+            during("git commit -q -m x", None),
+            Some(Ok(format!("git commit -q {edited}")))
         );
     }
 }

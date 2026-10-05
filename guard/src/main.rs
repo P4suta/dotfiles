@@ -225,7 +225,7 @@ fn commit_msg(path: &str) -> i32 {
     let retry = std::env::var(INVOKED)
         .ok()
         .and_then(|line| refusal::words(&line))
-        .and_then(|words| gitargv::commit_retry(&words, &message, authorship))
+        .and_then(|words| gitargv::commit_retry(&words, &message, authorship, picking))
         .unwrap_or_else(|| {
             Ok(["git", "commit", "<options>", "--edit", "--file", &message]
                 .map(str::to_owned)
@@ -266,6 +266,26 @@ fn authorship(revision: &str) -> Option<gitargv::Authorship> {
         author: author.to_owned(),
         date: date.to_owned(),
     })
+}
+
+/// Whether a cherry-pick or rebase pick is in progress, as `git commit` decides it, or `None` when Git could not say.
+fn picking() -> Option<bool> {
+    // A pending merge makes the commit a merge even when a pick was also left behind.
+    Some(!exists("MERGE_HEAD")? && exists("CHERRY_PICK_HEAD")?)
+}
+
+fn exists(reference: &str) -> Option<bool> {
+    let status = realgit::command()?
+        .args(["show-ref", "--exists", reference])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok()?;
+    match status.code() {
+        Some(0) => Some(true),
+        Some(2) => Some(false),
+        _ => None,
+    }
 }
 
 fn pre_commit() -> i32 {

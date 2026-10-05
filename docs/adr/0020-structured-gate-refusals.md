@@ -21,7 +21,8 @@ A refused line with an option Git rejects as written gets no suggestion, because
 The waiver repeats exactly the refused operation with a recorded one-time override, and is absent when the gate cannot be waived, its override is not recorded, or the refused operation is unknown.
 The Git wrapper passes the command it runs to that command's hooks, so a hook's waiver repeats the Git command that triggered it, and a refused commit message's next step repeats that commit with the saved message opened for editing.
 That retry keeps what the dropped message options implied: an `amend:` or `reword:` fixup may be empty, a reword leaves staged changes out, and `-C` or `-c` copies the author and date of the reused commit.
-When the gate cannot read that authorship, the step suggests no command.
+During a pick Git takes the author from the picked commit instead, and `--reset-author` from the committer; without the reuse and `--amend` the committer is already the author, so the retry drops `--reset-author`, which Git would reject there.
+When the gate cannot read that authorship or tell whether a pick is in progress, the step suggests no command.
 A hook run by a Git that bypassed the wrapper names the override in its cause instead, and its next step marks the unknown options of the commit with `<options>`.
 A push hold has no waiver, because only the owner lifts it.
 

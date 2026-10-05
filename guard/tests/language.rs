@@ -363,3 +363,69 @@ fn a_refused_reuse_is_retried_with_the_reused_authorship() {
         "Other <other@example.invalid> 1700000000 +0900|fix c"
     );
 }
+
+/// `--reset-author` needs `-C`, `-c`, or `--amend`, so the retry drops it with the reuse and still records the committer as the author.
+#[test]
+fn a_refused_reuse_with_a_reset_author_is_retried_as_the_committer() {
+    for letter in ["-C", "-c"] {
+        let checkout = Checkout::new(&format!("reset-author{letter}"));
+        std::fs::write(checkout.path().join("a.txt"), "plain\n").unwrap();
+        checkout.succeeds(&["add", "a.txt"], &[]);
+        let message = format!("fix {}", char::from_u32(0x0441).unwrap());
+        checkout.succeeds(
+            &[
+                "commit",
+                "-q",
+                "--author",
+                "Other <other@example.invalid>",
+                "-m",
+                &message,
+            ],
+            &["ALLOW_FOREIGN"],
+        );
+        std::fs::write(checkout.path().join("b.txt"), "plain\n").unwrap();
+        checkout.succeeds(&["add", "b.txt"], &[]);
+        let refused = last_record(&edited(
+            &checkout,
+            &["commit", "-q", letter, "HEAD", "--reset-author"],
+            &message,
+        ));
+        assert_eq!(refused.rule, "commit.language");
+        retried(&checkout, &refused, r"fix c\n");
+        assert_eq!(
+            checkout.succeeds(&["log", "--format=%an <%ae>|%s"], &[]),
+            "Fixture <fixture@example.invalid>|fix c\nOther <other@example.invalid>|fix \u{441}",
+            "git commit {letter} HEAD --reset-author"
+        );
+    }
+}
+
+/// During a cherry-pick Git takes the author from the picked commit rather than from `-c`, so the retry does too.
+#[test]
+fn a_refused_reuse_during_a_pick_is_retried_with_the_picked_authorship() {
+    let checkout = Checkout::new("pick");
+    let commit = |content: &str, author: &str| {
+        std::fs::write(checkout.path().join("a.txt"), content).unwrap();
+        checkout.succeeds(&["add", "a.txt"], &[]);
+        checkout.succeeds(&["commit", "-q", "--author", author, "-m", content], &[]);
+    };
+    commit("base\n", "Fixture <fixture@example.invalid>");
+    checkout.succeeds(&["checkout", "-q", "-b", "side"], &[]);
+    commit("side\n", "Picked <picked@example.invalid>");
+    checkout.succeeds(&["checkout", "-q", "-"], &[]);
+    commit("main\n", "Other <other@example.invalid>");
+    assert!(!checkout.run(&["cherry-pick", "side"], &[]).status.success());
+    std::fs::write(checkout.path().join("a.txt"), "both\n").unwrap();
+    checkout.succeeds(&["add", "a.txt"], &[]);
+    let refused = last_record(&edited(
+        &checkout,
+        &["commit", "-q", "-c", "HEAD"],
+        &format!("both {}", char::from_u32(0x0441).unwrap()),
+    ));
+    assert_eq!(refused.rule, "commit.language");
+    retried(&checkout, &refused, r"both\n");
+    assert_eq!(
+        checkout.succeeds(&["log", "-1", "--format=%an|%s"], &[]),
+        "Picked|both"
+    );
+}
