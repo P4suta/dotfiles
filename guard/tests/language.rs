@@ -5,6 +5,8 @@ use std::process::Command;
 
 #[path = "support/fixture_git.rs"]
 mod fixture_git;
+#[path = "support/wrapper.rs"]
+mod wrapper;
 
 #[test]
 fn a_contaminated_file_is_refused_with_a_rescan_and_a_recorded_waiver() {
@@ -65,7 +67,7 @@ impl Checkout {
         )
         .unwrap();
         let git = scope.join(format!("git{}", std::env::consts::EXE_SUFFIX));
-        std::fs::copy(env!("CARGO_BIN_EXE_dotguard"), &git).unwrap();
+        wrapper::install(&git);
         let checkout = Self { scope, git };
         assert!(checkout.run(&["init", "-q"], &[]).status.success());
         let hooks = checkout.path().join(".git/hooks");
