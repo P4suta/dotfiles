@@ -43,25 +43,23 @@ That text covers the subject of a revert, a merge, or an autosquash commit, and 
 An offline `pr-workflow check` has no fork status, so it applies the standard to every repository of a personal owner.
 
 `policy/prose.toml` holds the exemptions, each with paths, an optional rule list, and a reason.
-Its legacy ledger names each finding in prose that predates this decision by file, rule, and a fingerprint of the offending sentence.
-A new or edited sentence matches no fingerprint, so its findings fail until the sentence meets the standard.
-A ledger entry whose finding no longer occurs also fails until `just prose-tighten` removes it, and no command adds an entry.
-Kani proves the ledger, exemption, destination, and rewrite rules in `xtask/src/prose_rules.rs`.
+Exemptions cover only text that people in this repository never write, such as the vendored style packages.
+No ledger admits existing findings, so every finding outside an exemption fails.
+Vale skips a document line that holds only a template action.
+Kani proves the exemption, destination, and rewrite rules in `xtask/src/prose_rules.rs`.
 
 A reply hook marks the session when it requests a rewrite.
 A continued turn without that mark, such as a turn that another Stop hook continued, still gets its one rewrite request.
 
 ## Alternatives
 
-Rewriting about 6,800 existing findings across 186 files in this change would bury the checker in a diff that no reviewer could follow.
-The ledger instead names each existing finding, and each later edit of a sentence brings that sentence to the standard.
-A ledger of counts per file and rule would admit a new finding that replaces a fixed one, so each entry names one sentence.
+A ledger of existing findings would keep prose that adds nothing, so this decision deletes or rewrites every existing sentence instead.
 Lowering rule levels or disabling rules per file would let new prose drift, so exemptions name paths, rules, and reasons.
 Downloading the packages with `vale sync` on each run depends on the network at check time, so the repository vendors them.
 
 ## Consequences
 
-Every new or edited sentence meets the full standard, and the ledger shrinks with each rewrite.
+Every sentence in the repository meets the full standard.
 A reply that fails the checker gets one rewrite request, and the hook then ends the turn with the findings.
 OpenCode shows those findings in a notification, and it reports a missing checker with the `mise run install:prose` remedy.
 The commit-msg hook refuses a commit to a personal repository until `mise run install:prose` installs the checker.

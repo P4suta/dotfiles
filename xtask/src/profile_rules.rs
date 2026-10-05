@@ -93,7 +93,8 @@ pub fn context7_needed(local_gui: bool, tool_exists: bool, installed: bool) -> b
     local_gui && tool_exists && !installed
 }
 
-/// GitHub publishes its web-flow signing keys as one bundle; import it only when every primary key is pinned and the current key is among them.
+/// GitHub publishes its web-flow signing keys as one bundle.
+/// Import it only when the pins cover every primary key and include the current key.
 pub fn forge_bundle_accepted(
     primary_count: usize,
     unpinned: usize,

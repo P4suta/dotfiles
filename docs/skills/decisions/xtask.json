@@ -1,7 +1,7 @@
 {
-  "revision": "16bbdb9b99e2ef8ceebc09f42213d2e391547960c8152350483ba745a7170161",
+  "revision": "bb64199cf56e41d576e2d71131e75dd1dc8157fc81c3fe867d1ad9e49afe9095",
   "outcome": "keep",
-  "reason": "Retain repository-specific typed orchestration and child-build isolation as distinct from generic Rust automation policy and thin command surfaces.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/xtask/SKILL.md"
   ],

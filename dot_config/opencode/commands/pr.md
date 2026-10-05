@@ -3,15 +3,15 @@ description: Open a GitHub pull request for the current branch
 agent: build
 ---
 
-Open a pull request for the current branch using `gh`.
+Open a pull request for the current branch with `gh`.
 
-1. Check `git status` and `git log <base>..HEAD` to understand the branch, where base is the repository's default branch.
-2. Title: English, max 72 chars, imperative mood; keep the repo's existing title style if one is apparent.
-3. Body in English markdown:
-- `## Summary` — one paragraph
-- `## Changes` — bullet list
-- `## Notes` — testing done, caveats, follow-ups
-4. Run `gh pr create --base <base> --title <title> --body <body>` using a heredoc for the body.
-5. Print the resulting PR URL.
+1. Read `git status` and `git log <base>..HEAD`, where base names the repository's default branch.
+2. Write an English title of at most 72 characters in imperative mood, following the repository's existing title style.
+3. Write an English Markdown body:
+- `## Summary`: one paragraph
+- `## Changes`: a bullet list
+- `## Notes`: testing, caveats, follow-ups
+4. Run `gh pr create --base <base> --title <title> --body <body>`, passing the body through a heredoc.
+5. Print the pull request link.
 
-Reply to me in Japanese; the PR title and body stay English.
+Reply in Japanese.

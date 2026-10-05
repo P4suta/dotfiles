@@ -1,19 +1,19 @@
-//! The dependency-freshness gate — the counterpart to the language gate for versions: a push that touches a dependency must not leave it on a stale non-major release.
+//! The dependency-freshness gate: a push that touches a dependency must leave it on the current non-major release.
 //!
-//! Since `core.hooksPath` routes every repository through the same hooks, the check runs just before a push in any repo whose pushed range touches a manifest Renovate understands, with zero per-repo config.
-//! The staleness facts themselves come from the pinned read-only renovate container this module runs; the same run is reachable by hand as `dotguard renovate run`.
+//! `core.hooksPath` routes every repository through the same hooks, so the check runs before any push whose range touches a manifest that Renovate understands.
+//! The facts come from a pinned read-only Renovate container, which `dotguard renovate run` also starts by hand.
 //!
-//! The rule: refuse the push when its range adds or changes a manifest line for a dependency that has a non-major update available (minor / patch / pin / pinDigest by default; override with `RENOVATE_LOCAL_GATE_TYPES`).
-//! Everything else is informational:
+//! The gate refuses a push whose range adds or changes a manifest line for a dependency with a non-major update available.
+//! The default update types cover minor, patch, pin, and `pinDigest`, and `RENOVATE_LOCAL_GATE_TYPES` overrides them.
+//! Everything else only informs:
 //!
-//! * major updates never block — deferring them is a legitimate decision, and "you touched it, so use the current release" is the whole point;
-//! * stale dependencies the push did not touch remain Renovate's job: listed for the touched manifests, never blocking.
+//! * Major updates never block, because deferring them stays a valid decision.
+//! * The gate lists stale dependencies that the push left untouched in the touched manifests, and leaves them to Renovate.
 //!
-//! It runs only when all of the following hold, otherwise it returns 0 — quietly for opt-outs, with a `::warning::` when a prerequisite is missing, so a missing dev tool never blocks a push.
-//! A container failure (network, image pull, …)
-//! is also fail-open: the gate blocks on evidence, not on the absence of it.
+//! An opt-out returns 0 without output, and a missing `docker` or `jq` returns 0 with a `::warning::`.
+//! A container failure from the network or an image pull also lets the push through, because the gate blocks only on evidence.
 //!
-//! Opt-outs: `git config renovate.localSkip true` (add `--global` for a machine-wide kill switch), or a one-shot `RENOVATE_LOCAL_SKIP=1 git push`.
+//! Opt out with `git config renovate.localSkip true`, adding `--global` for the whole machine, or once with `RENOVATE_LOCAL_SKIP=1 git push`.
 
 use crate::locate;
 use crate::realgit;
@@ -24,7 +24,7 @@ use std::process::Stdio;
 const DEFAULT_GATE_TYPES: &str = "minor patch pin pinDigest";
 
 /// One dependency with a blocking update available, as parsed from the jq report.
-/// Fields are positional; the unit separator keeps empty ones alive.
+/// Fields keep their position, and the unit separator preserves empty ones.
 struct Candidate {
     package_file: String,
     dep_name: String,
@@ -46,7 +46,7 @@ pub fn dispatch(args: &[String]) -> i32 {
     }
 }
 
-/// `dotguard renovate-gate <remote>` — read the ref list from stdin.
+/// `dotguard renovate-gate <remote>` reads the ref list from stdin.
 pub fn run(remote: &str) -> i32 {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
@@ -74,7 +74,7 @@ fn gate(remote: &str, input: &str) -> i32 {
         return 0;
     };
 
-    // Prerequisites, fail-open but loudly.
+    // Prerequisites fail open with a warning.
     for tool in ["docker", "jq"] {
         if locate::which(tool).is_none() {
             eprintln!("::warning:: renovate gate skipped: {tool} not found");
@@ -132,8 +132,8 @@ fn gate(remote: &str, input: &str) -> i32 {
     1
 }
 
-/// The manifest gate: which manifests the pushed range changes, the lines it adds, and whether the scope had to be assumed total.
-/// `None` when the push touches nothing Renovate manages — the common case, and the one that must cost nothing.
+/// The manifest gate: the manifests the pushed range changes, the lines it adds, and whether the scope covers the whole tree.
+/// `None` when the push touches no manifest that Renovate manages, which costs nothing.
 fn scope(remote: &str, input: &str) -> Option<(Vec<String>, String, bool)> {
     let mut changed_files: Vec<String> = Vec::new();
     let mut added_lines = String::new();
@@ -151,7 +151,7 @@ fn scope(remote: &str, input: &str) -> Option<(Vec<String>, String, bool)> {
         let files: Vec<String> = if let Some(b) = &base {
             diff_names(b, local_sha)
         } else {
-            // Nothing to diff against: every manifest in the tree is in scope and every dependency in it counts as touched.
+            // Without a base commit, every manifest in the tree counts as in scope and every dependency as touched.
             scope_unknown = true;
             ls_tree_manifests(local_sha)
         };
@@ -171,7 +171,7 @@ fn scope(remote: &str, input: &str) -> Option<(Vec<String>, String, bool)> {
     Some((changed_files, added_lines, scope_unknown))
 }
 
-/// Split the candidates into blocking (touched by this push) and stale (Renovate's department).
+/// Splits the candidates into blocking ones, which this push touched, and stale ones, which stay with Renovate.
 fn classify(
     candidates: &[Candidate],
     changed_files: &[String],
@@ -201,7 +201,7 @@ fn classify(
     (blocked, stale)
 }
 
-/// The commit to diff one pushed ref against: the remote tip it updates, or the fork point from the remote's default branch for a brand-new branch.
+/// The diff base for one pushed ref: the remote tip it updates, or the fork point from the default remote branch for a new branch.
 fn range_base(remote: &str, local_sha: &str, remote_sha: &str) -> Option<String> {
     if !remote_sha.is_empty() && !remote_sha.chars().all(|c| c == '0') {
         return Some(remote_sha.to_owned());
@@ -262,7 +262,7 @@ fn diff_added_lines(base: &str, tip: &str, files: &[String]) -> String {
         .unwrap_or_default()
 }
 
-/// A dependency is "touched" when an added line carries its exact replaceString, or names it together with its current value or digest.
+/// An added line touches a dependency when it carries its exact `replaceString`, or names it with its current value or digest.
 fn touched(c: &Candidate, added_lines: &str, scope_unknown: bool) -> bool {
     if scope_unknown {
         return true;
@@ -320,7 +320,7 @@ fn renovate_report() -> Option<PathBuf> {
     }
 }
 
-/// The jq program that flattens the report into candidate lines joined by the unit separator (U+001F): unlike a tab it survives empty fields.
+/// The jq program that flattens the report into candidate lines joined by the unit separator `U+001F`, which keeps empty fields intact.
 const JQ_CANDIDATES: &str = r#"
     ($types | split(" ") | map(select(length > 0))) as $blocking
     | (.repositories.local.packageFiles // {}) | to_entries[] | .value[]
@@ -370,10 +370,9 @@ fn parse_candidates(out: &str) -> Vec<Candidate> {
     v
 }
 
-/// Is this path a manifest Renovate manages?
+/// Reports whether Renovate manages this path.
 ///
-/// A hand-written reading of the manifest list the shell gate spelled as one ERE — same intent, now with a test table instead of a regex nobody can read.
-/// Judged case-insensitively (macOS and every ecosystem here already are) and component-wise rather than substring, with two deliberate narrowings of the old regex's unanchored slop: `commise.toml` and `notebook/DockerfileReadme.md` no longer count, and nothing real ever depended on their counting.
+/// The match ignores case and compares path components instead of substrings.
 pub fn is_manifest(path: &str) -> bool {
     let lowered = path.to_lowercase();
     let comps: Vec<&str> = lowered.split('/').collect();
@@ -420,7 +419,7 @@ pub fn is_manifest(path: &str) -> bool {
     if ext == "gradle" || (ext == "kts" && stem_ext == "gradle") {
         return true;
     }
-    // `Dockerfile` and its suffixed variants (Dockerfile.prod), but not words that merely begin with the string.
+    // `Dockerfile` and suffixed variants such as `Dockerfile.prod`, but no other word that starts with it.
     if comps.iter().any(|c| {
         *c == "dockerfile"
             || c.strip_prefix("dockerfile")
@@ -452,7 +451,7 @@ pub fn is_manifest(path: &str) -> bool {
 // The container run itself: `dotguard renovate run`
 // ---------------------------------------------------------------------------
 
-/// Everything one `docker run` needs, gathered so the argv is built by a pure function the tests can inspect — this is the security boundary, and a flag nobody can test is a flag that quietly disappears.
+/// Everything one `docker run` needs, so a pure function builds the arguments and tests can inspect this security boundary.
 pub struct RunConfig {
     pub image: String,
     pub snapshot: PathBuf,
@@ -467,7 +466,7 @@ pub struct RunConfig {
 
 const DEFAULT_IMAGE: &str = "renovate/renovate:44.52.0@sha256:778ff1b404d79ef7763f0c904ebb279a4138ffc1017181ad076b1648e37f6dbd";
 
-/// The image reference must be an exact renovate/renovate version with a sha256 digest: a caller cannot silently downgrade the immutable boundary to `:latest`.
+/// The image reference must name an exact `renovate/renovate` version with a sha256 digest, so no caller can fall back to `:latest`.
 fn image_is_pinned(image: &str) -> bool {
     let Some(rest) = image.strip_prefix("renovate/renovate:") else {
         return false;
@@ -485,8 +484,9 @@ fn image_is_pinned(image: &str) -> bool {
 
 /// The `docker` argv and the environment removals for one run.
 ///
-/// The process gets no Linux capabilities, cannot gain privileges, sees a read-only root and repository, and gets only isolated tmpfs for writable state.
-/// Ambient `GITHUB_TOKEN` / `GITHUB_COM_TOKEN` are stripped; a caller may opt in to a dedicated, least-privilege `RENOVATE_GITHUB_COM_TOKEN`, handed to the container through the environment — never as a command-line argument, where `ps` could read it.
+/// The process gets no Linux capabilities and no privilege escalation, a read-only root and repository, and isolated tmpfs mounts for writable state.
+/// The run strips ambient `GITHUB_TOKEN` and `GITHUB_COM_TOKEN`.
+/// A caller may opt in to a dedicated, least-privilege `RENOVATE_GITHUB_COM_TOKEN`, passed through the environment and never as an argument visible to `ps`.
 fn docker_plan(c: &RunConfig) -> (Vec<String>, Vec<&'static str>) {
     let mut args: Vec<String> = vec![
         "run".into(),
@@ -513,8 +513,8 @@ fn docker_plan(c: &RunConfig) -> (Vec<String>, Vec<&'static str>) {
         "RENOVATE_REQUIRE_CONFIG=optional".into(),
     ];
 
-    // Report destination: log by default, JSON file when a path is set.
-    // The directory is bind-mounted at /report so the container uid can write it.
+    // Report destination: the log by default, or a JSON file when a path exists.
+    // The bind mount at `/report` lets the container user write it.
     if let Some(path) = &c.report_file {
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
         let name = path
@@ -536,7 +536,7 @@ fn docker_plan(c: &RunConfig) -> (Vec<String>, Vec<&'static str>) {
         args.push("--env".into());
         args.push(format!("LOG_LEVEL={level}"));
     }
-    // Per-repo override; the non-default filename keeps future bots from mistaking it for their own config.
+    // Per-repository override, with a filename that no other bot reads as its own config.
     if c.config_present {
         args.push("--env".into());
         args.push("RENOVATE_CONFIG_FILE=/repo/renovate.local.json5".into());
@@ -549,7 +549,7 @@ fn docker_plan(c: &RunConfig) -> (Vec<String>, Vec<&'static str>) {
 
     let mut removed: Vec<&'static str> = vec!["GITHUB_TOKEN"];
     if c.dedicated_token.is_some() {
-        // docker's --env NAME form marks the variable for inheritance; the value travels through this process's own environment, set by prepare(), and never through argv.
+        // `--env NAME` passes the variable by name, so its value travels through the environment that `prepare()` sets and never through the arguments.
         args.push("--env".into());
         args.push("GITHUB_COM_TOKEN".into());
     } else {
@@ -584,7 +584,7 @@ fn prepare() -> Option<RunConfig> {
     }
 
     // A staged snapshot of the index keeps the original .git, ignored files, untracked files and the original worktree outside the container boundary.
-    // checkout-index writes what would be committed — exactly what a push-based freshness gate should be judging.
+    // `checkout-index` writes the content a commit would record, the state a push gate should judge.
     let snapshot = std::env::temp_dir().join(format!(
         "renovate-local.{}.{}",
         std::process::id(),
@@ -631,7 +631,7 @@ fn prepare() -> Option<RunConfig> {
     })
 }
 
-/// `id -u` / `id -g`: std has no getuid, and two invocations per container run is nothing.
+/// `id -u` and `id -g`, because std lacks `getuid`.
 fn uid_gid() -> (u32, u32) {
     let read = |flag: &str| {
         std::process::Command::new("id")
@@ -644,7 +644,7 @@ fn uid_gid() -> (u32, u32) {
     (read("-u"), read("-g"))
 }
 
-/// `dotguard renovate run` — the manual entry point, same container, no gate.
+/// `dotguard renovate run`: the manual entry point to the same container, without the gate.
 pub fn run_local() -> i32 {
     let Some(cfg) = prepare() else {
         return 1;
@@ -755,7 +755,7 @@ mod run_tests {
 
     #[test]
     fn ambient_github_tokens_never_reach_the_container() {
-        // No dedicated token: both ambient variables are removed, and neither name appears anywhere in argv.
+        // No dedicated token: the run removes both ambient variables, and neither name appears in the arguments.
         let (a, removed) = docker_plan(&cfg(None, None));
         assert!(removed.contains(&"GITHUB_TOKEN"));
         assert!(removed.contains(&"GITHUB_COM_TOKEN"));
@@ -787,7 +787,7 @@ mod run_tests {
     }
 }
 
-/// The credential boundary this repository keeps around the personal gh token, ported from the integration test that used to stub `docker`: nothing that shapes a general shell may read it, and the one script allowed to read it may only do so in a shape that cannot become ambient.
+/// The credential boundary around the personal gh token: no general shell setup may read it, and the one allowed script reads it only in a form that never becomes ambient.
 #[cfg(test)]
 mod credential_boundary {
     use std::path::PathBuf;

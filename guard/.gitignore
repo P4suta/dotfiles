@@ -1,7 +1,6 @@
 # Build artifacts.
-# This directory is excluded from chezmoi via .chezmoiignore,
-# but git still sees it, and a release build is ~1MB of churn per rebuild.
+# `.chezmoiignore` hides this directory from chezmoi, and this file hides it from git.
 target/
 
-# NOTE: cargo-mutants writes its report here, which is a run's output rather than a record.
+# cargo-mutants writes its report here.
 mutants.out/

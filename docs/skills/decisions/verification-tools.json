@@ -1,7 +1,7 @@
 {
-  "revision": "1c22eaa4c14af1eef91f4a80daebcea1db60c12375605e58db9bb17355ad80ce",
+  "revision": "35345509e34498ed6628062d376df6bc6eb7ebaa5713f64476b72465834abf93",
   "outcome": "implemented",
-  "reason": "Add evolving capability-based tool discovery and proven cross-project adoption instead of a permanent named-tool list, with typing and executable-policy prerequisites.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/verification-tools/SKILL.md",
     "docs/adr/0003-local-skill-operations.md",

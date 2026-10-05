@@ -20,7 +20,7 @@ pub fn relative(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Windows removes a directory symlink or junction with `remove_dir`; `remove_file` is denied for it.
+/// Windows removes a directory symlink or junction with `remove_dir` and denies `remove_file` on it.
 fn is_directory_link(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {

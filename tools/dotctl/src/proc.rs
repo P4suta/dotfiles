@@ -1,8 +1,7 @@
 //! Child process helpers.
 //!
-//! Output is moved as bytes, never as text decoded by an intermediate shell.
-//! The ja-JP console code page is CP932, and the PowerShell pipeline this crate replaces had to force UTF-8 on decode, encode and file defaults to stop validators receiving mangled input.
-//! Writing bytes straight through removes the class of bug rather than configuring around it.
+//! Moves output as bytes, never as text that a shell decoded.
+//! The ja-JP console uses code page 932, and decoding through a shell mangles validator input.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -10,7 +9,7 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result, bail};
 
 /// A child's exit code, or 1 for a signal death.
-/// It must be checked or handed to the caller: discarding it after `?` is an unused value that the lints reject, because `?` alone reports only a failure to start.
+/// `?` alone reports only a failure to start, so the lints reject discarding this value.
 #[must_use = "check the exit code with `require` or return it; `?` alone does not"]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Exit(i32);
@@ -25,7 +24,7 @@ impl Exit {
     }
 }
 
-/// Runs a command, letting its output reach the terminal untouched, and returns its exit code for the caller to decide on.
+/// Runs a command with its output passed straight to the terminal and returns its exit code.
 pub fn status(cmd: &mut Command) -> Result<Exit> {
     let status = cmd
         .status()
@@ -33,7 +32,7 @@ pub fn status(cmd: &mut Command) -> Result<Exit> {
     Ok(Exit(status.code().unwrap_or(1)))
 }
 
-/// Runs a command, letting its output reach the terminal untouched, and fails unless it exits successfully.
+/// Runs a command with its output passed straight to the terminal and fails unless it exits with 0.
 pub fn run(cmd: &mut Command) -> Result<()> {
     let exit = status(cmd)?;
     if !exit.success() {
@@ -55,8 +54,8 @@ impl Captured {
         self.code == 0
     }
 
-    /// stdout as text, with invalid sequences replaced rather than rejected:
-    /// a validator that emits CP932 in an error message should still be readable, and should not turn into a dotctl crash.
+    /// stdout as text, with invalid sequences replaced.
+    /// A validator that prints code page 932 in an error stays readable and never crashes dotctl.
     pub fn stdout_text(&self) -> String {
         String::from_utf8_lossy(&self.stdout).into_owned()
     }
@@ -86,7 +85,7 @@ pub fn capture(cmd: &mut Command) -> Result<Captured> {
     })
 }
 
-/// Runs a command that is expected to succeed, returning its stdout as text.
+/// Runs a command that must succeed and returns its stdout as text.
 pub fn capture_ok(cmd: &mut Command) -> Result<String> {
     let described = describe(cmd);
     let out = capture(cmd)?;
@@ -106,9 +105,9 @@ fn describe(cmd: &Command) -> String {
     parts.join(" ")
 }
 
-/// UTF-8, no BOM: a BOM changes what taplo, git config and PowerShell see on the first line.
+/// UTF-8 without a byte order mark, which would change what taplo, git config, and PowerShell read on the first line.
 ///
-/// The handle is closed before the path is handed out, and only the path is kept: Windows refuses a second opener while we hold the file, which shows up as PSScriptAnalyzer reporting that the file is in use by another process.
+/// Closes the handle and keeps only the path, because Windows refuses a second opener while the handle stays open.
 /// Dropping the returned value deletes the file.
 pub fn write_temp(content: &str, suffix: &str) -> Result<tempfile::TempPath> {
     let mut file = tempfile::Builder::new()

@@ -1,7 +1,8 @@
 //! Installs ocomment, the prose gate's binary.
 //!
-//! OComment is not on crates.io yet; its source is the release, exactly as the Linux and Mac dotfiles build it.
-//! The checkout this writes is the one the prose gate's config names, and `git pull` there plus a chezmoi apply rebuilds the binary — the commit the checkout sits at rides in the shim's trigger, which is rendered into the script chezmoi hashes.
+//! OComment publishes no crate, so this clones its repository and builds the release binary.
+//! The prose gate's config names this checkout.
+//! After `git pull` there, a chezmoi apply rebuilds the binary, because the checkout's commit feeds the trigger in the script that chezmoi hashes.
 
 use std::path::PathBuf;
 
@@ -15,7 +16,7 @@ pub struct Options {
     pub destination: String,
 }
 
-/// A failure here is a warning, never a failed apply: a gate that did not update must not roll back everything else chezmoi just did.
+/// Reports a failure as a warning, so a stale gate never rolls back the rest of the apply.
 pub fn run(options: &Options) -> Result<i32> {
     println!(">>> ocomment install");
     if let Err(err) = install(options) {
@@ -38,7 +39,7 @@ fn install(options: &Options) -> Result<()> {
         proc::run(&mut clone).context("cloning OComment")?;
     }
 
-    // --locked: the lockfile is committed, and a build that quietly resolves something else is a build that is not the one the tests ran against.
+    // `--locked` builds the committed lockfile, the same one the tests used.
     let manifest = checkout.join("rust").join("Cargo.toml");
     let mut build = env::command("cargo");
     build

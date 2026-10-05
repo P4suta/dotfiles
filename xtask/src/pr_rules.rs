@@ -28,7 +28,7 @@ pub enum IssueGate {
     Missing,
 }
 
-/// Apply personal issue rules only to owned repositories that are not forks.
+/// Apply personal issue rules only to owned non-fork repositories.
 pub fn issue_gate(personal_owner: bool, fork: bool, checked_issue: bool) -> IssueGate {
     if !personal_owner || fork {
         IssueGate::NotRequired
@@ -48,7 +48,7 @@ pub fn coderabbit_body_marker_allowed(request: bool, summary: bool, ignore: bool
     ignore || request && summary
 }
 
-/// The head commit's reported checks; an empty report is not a pass.
+/// The head commit's reported checks, where an empty report never passes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Checks {
     Passing,

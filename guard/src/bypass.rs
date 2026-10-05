@@ -1,8 +1,8 @@
-//! Escape hatches and the audit trail behind them.
+//! Escape hatches and their audit trail.
 //!
 //! Destructive-operation and language gates have per-invocation overrides.
-//! Signing and hook enforcement cannot be waived.
-//! Overrides are recorded in ~/.local/state/git-bypass.log for review.
+//! Signing and hook enforcement have none.
+//! Each override appends a line to `~/.local/state/git-bypass.log`.
 
 use std::fmt;
 use std::fs::OpenOptions;
@@ -15,7 +15,7 @@ pub enum Category {
     Force,
     /// Operations that would skip signing or hook enforcement.
     NoVerify,
-    /// Text that does not belong in this repository's languages.
+    /// Text outside the languages of this repository.
     Foreign,
     /// A commit whose tree equals its parent's.
     Empty,
@@ -48,10 +48,9 @@ impl fmt::Display for Category {
     }
 }
 
-/// Is this category waived for the current invocation?
+/// Reports whether this category has a waiver for the current invocation.
 ///
 /// Any non-empty value counts.
-/// Insisting on `=1` would only mean someone who typed `ALLOW_FORCE=true` gets a refusal they will read as a bug in us.
 pub fn waived(category: Category) -> bool {
     category
         .env()
@@ -59,7 +58,7 @@ pub fn waived(category: Category) -> bool {
 }
 
 /// Append one line to the bypass log.
-/// Failures are swallowed: not being able to write the audit trail must never be the reason a git command dies.
+/// A failure to write the log never stops the git command.
 pub fn record(outcome: &str, category: Category, reason: &str, argv: &[String]) {
     let mut path = crate::locate::home();
     if path.as_os_str().is_empty() {
@@ -85,10 +84,7 @@ pub fn record(outcome: &str, category: Category, reason: &str, argv: &[String]) 
     }
 }
 
-/// RFC 3339 in UTC.
-///
-/// UTC rather than local time because std has no timezone database and reaching for `chrono` to print one field is not a trade this crate makes.
-/// A `Z` is unambiguous; a bare local timestamp with no offset would not be.
+/// The current Coordinated Universal Time as `YYYY-MM-DDTHH:MM:SSZ`.
 fn timestamp() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -103,7 +99,7 @@ fn timestamp() -> String {
     )
 }
 
-/// Howard Hinnant's `civil_from_days`: days since the Unix epoch to a proleptic-Gregorian date, with no lookup tables and no leap-second lies.
+/// The `civil_from_days` algorithm of Howard Hinnant: days since the Unix epoch to a proleptic-Gregorian date.
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;

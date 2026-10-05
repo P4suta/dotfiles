@@ -47,7 +47,7 @@ pub fn run(options: &Options) -> Result<i32> {
             if error.raw_os_error() != Some(ERROR_REQUIRES_INTERACTIVE_WINDOWSTATION) {
                 bail!("SPI_SETKEYBOARDDELAY: {error}");
             }
-            // A remote session has no desktop to notify; the user profile carries the same settings into the next sign-in.
+            // A remote session has no desktop to notify, and the user profile carries the settings into the next sign-in.
             for (key, value, data) in
                 registry_values(options, disable_legacy_filter_keys.then_some(keys.dwFlags))
             {

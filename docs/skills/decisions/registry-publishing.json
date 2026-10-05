@@ -1,7 +1,7 @@
 {
-  "revision": "83f98a96dc48687390cb67aea81c83445144e08b441b9a95548355060f8e6e17",
+  "revision": "45ad9fe7210fa25a5efe7bca3c80e1352737cd28c0bc87d2789249f3f67e9907",
   "outcome": "keep",
-  "reason": "Retain conditional npm, PyPI, Hex, and OCI identity and authentication differences; common lifecycle and artifact evidence stay in neighboring skills.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/registry-publishing/SKILL.md"
   ],

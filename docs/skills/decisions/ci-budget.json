@@ -1,7 +1,7 @@
 {
-  "revision": "53086629f0e6b28bc87ff5faa40123945f1287245d8f9e909f40975fc1d60d60",
+  "revision": "fbe8d7d7d87cf42aa73420b43bd57423e91344ccd78891b4617045ba2f0eb319",
   "outcome": "keep",
-  "reason": "Retain locally verified coherent publication and explicit machine-local holds independently of the review provider; preserve the verified Windows Git-home resolution and incomplete-hook-coverage boundary.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/ci-budget/SKILL.md"
   ],

@@ -1,7 +1,7 @@
 {
-  "revision": "9acaa1f6a71f77d684120813d117506e18481ae8f941b831252f4b8e0807ceff",
+  "revision": "92d8f9082395a7c8d424412d70bd6e3e2873141a0df9e3c92cf684cb71174e16",
   "outcome": "keep",
-  "reason": "Retain exact distributed-artifact inventory, provenance, SBOM, and consumer checks separately from signing and publication authorization.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/release-evidence/SKILL.md"
   ],

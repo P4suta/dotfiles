@@ -91,7 +91,8 @@ pub fn split_frontmatter(text: &str) -> Result<(&str, &str)> {
     Ok((header, body))
 }
 
-/// Windows `canonicalize` returns verbatim drive paths (`\\?\C:\...`) that cargo rejects and chezmoi rewrites into `//?/` forms; the same drive path without the prefix is equivalent.
+/// Windows `canonicalize` returns verbatim `\\?\C:\...` drive paths, which cargo rejects and chezmoi rewrites into `//?/` forms.
+/// The drive path without that prefix names the same file.
 pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
     match path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
         Some(rest)

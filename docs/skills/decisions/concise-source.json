@@ -1,7 +1,7 @@
 {
-  "revision": "9243e22359b7697732c6f234d0e02f63eebf90065aac2781d3a534317b093c4f",
+  "revision": "e6545db16721d8d8b60dbe69fcad594581b15d718aa7a70eac7ab150b06dea2d",
   "outcome": "implemented",
-  "reason": "Replace the inline language and line-layout rule for comments with a pointer to the prose checker, which reads comments through OComment and checks their language, line layout, and style; source clarity and lint-exception judgment stay unchanged.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/concise-source/SKILL.md",
     "docs/adr/0016-one-writing-standard.md",

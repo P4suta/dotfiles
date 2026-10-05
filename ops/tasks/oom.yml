@@ -34,7 +34,7 @@
     state: "{{ 'restarted' if earlyoom_conf is changed else 'started' }}"
 
 # 2 GB -> 8 GB by adding a second file.
-# Keep /swapfile active; swapoff would move its contents back into RAM under memory pressure.
+# Keep /swapfile active, because swapoff would move its contents back into RAM under memory pressure.
 - name: Allocate /swapfile2 (6 GiB)
   become: true
   ansible.builtin.command:

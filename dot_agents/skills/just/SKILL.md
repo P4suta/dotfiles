@@ -5,19 +5,19 @@ description: >-
   Use for just recipes and developer entrypoints, not to move procedural code into shell recipes.
 ---
 
-# just Command Surface
+# Command surface with `just`
 
 Read the existing justfile and `just --list` before adding an entrypoint.
-Keep commands named for the result a developer needs and reuse the repository's current verification path.
+Name commands for the result a developer needs, and reuse the repository's verification path.
 Use the configured mise environment for pinned tools.
-Prefer one discoverable command surface rather than several aliases implementing the same behavior.
+Keep one command for each behavior, without duplicate aliases.
 
-Keep recipes thin: invoke the project's build, lint, test, or typed Rust helper with clear arguments.
+Keep recipes thin, and have them invoke the project's build, lint, test, or typed Rust helper with clear arguments.
 Put parsing, conditional state changes, publication checks, retries, and resource cleanup in `xtask` or another Rust tool.
-Use recipe dependencies to express ordering and explicit parallel execution only for independent work.
-Keep mutation and publication commands distinct from read-only checks; a default recipe should be safe and helpful.
+Express ordering with recipe dependencies, and run only independent work in parallel.
+Keep mutation and publication commands apart from read-only checks, and make the default recipe safe.
 
-Preserve arguments and filenames correctly on supported platforms and choose the supported shell explicitly when needed.
-Validate against the installed version and [just's manual](https://just.systems/man/en/).
-Check the affected recipes and their failure propagation instead of adding tests that only match justfile text.
-Keep recipe documentation in help and existing contributor instructions, with only user-facing commands in the minimal README.
+Preserve arguments and filenames on supported platforms, and choose the shell explicitly when needed.
+Check behavior on the installed version with [the manual](https://just.systems/man/en/).
+Test the affected recipes and their failure propagation, never the justfile text.
+Document recipes in help and existing contributor instructions, and list only user-facing commands in the README.

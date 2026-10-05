@@ -20,7 +20,7 @@ pub fn translate(
     let mut index = 2;
     while index < arguments.len() {
         let argument = &arguments[index];
-        // Git passes `-U` for a literal signing key held by the agent and `-Overify-time=...` as one attached option.
+        // Git passes `-U` for a literal signing key that `ssh-agent` holds, and `-Overify-time=...` as one attached option.
         if argument == "-q"
             || argument == "-U"
             || argument

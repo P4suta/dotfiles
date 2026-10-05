@@ -1,6 +1,6 @@
 ---
 # Repo + tailscaled install/enable, plus persistent IP forwarding for exit-node and subnet-router use.
-# `tailscale up` and `tailscale set --advertise-*` stay manual (see ops/README.md): they need web auth or change live state.
+# `tailscale up` and `tailscale set --advertise-*` stay manual, because they need web authentication or change live state.
 
 - name: Install Tailscale apt keyring
   become: true
@@ -43,8 +43,8 @@
         sudo tailscale up --ssh --operator={{ workspace_user }}
       Already joined: nothing to do.
 
-# Docker only sets net.ipv4.ip_forward=1 as a side effect at startup, which is neither guaranteed to persist nor IPv6-aware.
-# Declaring it in sysctl.d (the file Tailscale recommends) restarts no service, so live sessions are safe.
+# Docker sets net.ipv4.ip_forward=1 only at startup and neither persists it nor covers IPv6.
+# The sysctl.d file that Tailscale recommends restarts no service, so live sessions survive.
 - name: Persist IP forwarding for Tailscale exit node / subnet router
   become: true
   ansible.builtin.copy:

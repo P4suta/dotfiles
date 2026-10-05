@@ -32,7 +32,7 @@ pub enum Action {
         #[command(flatten)]
         target: Target,
     },
-    /// Validate local files or the current GitHub document without mutation.
+    /// Check local files or the current GitHub document without changing them.
     Check {
         #[command(flatten)]
         target: Target,
@@ -76,7 +76,7 @@ pub enum Action {
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
         pr: u64,
     },
-    /// Validate the current GitHub document and move an open draft to review.
+    /// Check the current GitHub document and move an open draft to review.
     Ready {
         #[command(flatten)]
         target: Target,
@@ -124,16 +124,16 @@ pub struct IssueDocument {
 
 #[derive(Args)]
 pub struct Target {
-    /// Exact GitHub OWNER/REPO; no URL or inferred repository.
+    /// The exact GitHub repository in `owner/name` form instead of a web address or an inferred name.
     #[arg(long)]
     pub repo: String,
     /// CodeRabbit mode permits its standard generation placeholders.
     #[arg(long, value_enum, default_value = "local")]
     pub generation: Generation,
-    /// Repository-scoped JSON exception with repository, source URL, and reason.
+    /// A repository-scoped JSON exception naming the repository, its source address, and the reason.
     #[arg(long)]
     pub title_policy: Option<PathBuf>,
-    /// Existing open issue in the destination repository; required for personal non-forks.
+    /// An existing open issue in the destination repository, required for personal non-forks.
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     pub issue: Option<u64>,
 }
@@ -571,7 +571,7 @@ impl Github {
         Ok(github)
     }
 
-    /// Inspect live REST quota headers on each serialized prerequisite request.
+    /// Inspect the live rate-limit headers on each serialized prerequisite request.
     fn read<T: serde::de::DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
         let args = ["api", endpoint, "--hostname", "github.com", "--include"].map(OsString::from);
         let response = gh(&args)?.replace("\r\n", "\n");
@@ -617,7 +617,7 @@ impl Github {
     }
 }
 
-/// Recognize a closing reference in visible Markdown, excluding examples and comments.
+/// Recognize a closing reference in visible Markdown outside examples and comments.
 fn references_issue(body: &str, repo: &str, issue: u64) -> bool {
     let visible = prose(&without_comments(body));
     let mut text = String::new();

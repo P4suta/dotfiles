@@ -3,16 +3,16 @@ description: Commit staged changes with a Conventional Commit message
 agent: build
 ---
 
-Create one commit from the currently staged changes.
+Create one commit from the staged changes.
 
-1. Inspect the staged changes with `git diff --staged --stat` followed by `git diff --staged`.
-   If nothing is staged, show `git status` and ask me what to stage — do not stage anything yourself.
+1. Inspect them with `git diff --staged --stat`, then `git diff --staged`.
+   With nothing staged, show `git status` and ask what to stage, without staging anything.
 2. Write an English Conventional Commit message:
-- `type(scope): summary` — include the scope only when it clarifies
-- imperative mood, all-lowercase summary, no trailing period, max 72 chars
-- wrap an optional body at 100 chars explaining why, not what
-3. Commit with `git commit` using a heredoc for the message.
+- `type(scope): summary`, with the scope only when it clarifies
+- imperative mood, all-lowercase summary, no trailing period, at most 72 characters
+- an optional body explaining why, not what
+3. Commit with `git commit`, passing the message through a heredoc.
    Never append attribution footers.
 4. Show `git log -1 --stat` to confirm.
 
-Reply to me in Japanese.
+Reply in Japanese.

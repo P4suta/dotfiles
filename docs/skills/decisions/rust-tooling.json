@@ -1,7 +1,7 @@
 {
-  "revision": "47f36d26fc7c74ff1a0156fd4c4158e02694be289e0e9b9462fc6c45232087b8",
+  "revision": "ab5dab9e19918470bd3c10616ce13ca63264f823a6465b412ea2c53c49eceef8",
   "outcome": "keep",
-  "reason": "Retain maintained typed procedural automation as the implementation boundary; thin native client adapters and existing tool invocation remain composition code.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/rust-tooling/SKILL.md"
   ],

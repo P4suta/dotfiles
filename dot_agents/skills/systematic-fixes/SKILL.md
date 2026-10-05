@@ -5,36 +5,37 @@ description: >-
   Use for bug investigation and remediation, not speculative wholesale rewrites.
 ---
 
-# Fix the Problem Family
+# Fix the problem family
 
-Start with an observed failure and a regression test or a deterministic reproducer that fails for the right reason.
-Preserve useful evidence before modifying the code.
-Explain both the immediate cause and the design or verification gap that allowed the defect to exist.
-Trace why the existing compiler checks, proofs, schemas, test generators, or boundary validators failed to cover the violated invariant.
-Check whether the verification mechanism omitted a variant, shared the implementation's mistaken assumption, accepted stale evidence, or lacked a real boundary check.
-Do not treat a symptom disappearing as evidence that its cause has been removed.
+Start from an observed failure and a regression test or deterministic reproducer that fails for the right reason.
+Preserve useful evidence before changing the code.
+Explain both the immediate cause and the design or verification gap that let the defect exist.
+Trace why the existing compiler checks, proofs, schemas, test generators, or boundary validators missed the violated invariant.
+Check whether the verification omitted a variant, shared the implementation's mistaken assumption, accepted stale evidence, or lacked a real boundary check.
+A vanished symptom proves no removed cause.
 
-Identify the invariant that should have held and the actual boundary responsible for it.
-Search other producers, consumers, variants, and transitions governed by that same invariant.
-Define the affected family from a shared mechanism, not a resemblance in names or formatting.
-Use the search to establish scope; do not rewrite unrelated systems merely because a stronger design is imaginable.
+Name the invariant that should have held and the boundary responsible for it.
+Search other producers, consumers, variants, and transitions under that invariant.
+Define the affected family by a shared mechanism instead of similar names or formatting.
+Use the search to set scope, and leave unrelated systems alone even when a stronger design comes to mind.
 
-Prefer making the invalid state or transition unavailable through types, exhaustive variants, ownership, or checked constructors.
-For external state, validate at the boundary and bind the resulting evidence to its exact subject.
-Use a meaningful automated gate or diagnostic where the defect cannot be eliminated by representation alone.
-Avoid spreading local conditionals, fallback values, assertions, allowlists, or reviewer reminders across every caller when one authoritative boundary can enforce the rule.
-A memory, note, or resolution to check more carefully is not a remediation; enforce the invariant in a gate that runs without anyone's attention.
-Do not hide the failure, weaken a gate, or add an unrelated fallback to obtain a passing result.
+Prefer making the invalid state or transition unrepresentable through types, exhaustive variants, ownership, or checked constructors.
+For external state, check at the boundary and bind the resulting evidence to its exact subject.
+When representation alone leaves the defect possible, add a meaningful automated gate or diagnostic.
+When one authoritative boundary can enforce the rule, avoid spreading local conditionals, fallback values, assertions, allowlists, or reviewer reminders across callers.
+A memory, note, or resolution to look harder fixes nothing, so enforce the invariant in a gate that runs unattended.
+Never hide the failure, weaken a gate, or add an unrelated fallback to get a passing result.
 
-Apply the correction across the affected family and test its representative cases, edge conditions, and failure transitions.
-Demonstrate that the original failure is prevented and previously valid behavior remains valid.
+Apply the correction across the affected family, and test its representative cases, edge conditions, and failure transitions.
+Show that the original failure stops and that valid behavior still works.
 Add compile-fail, property, concurrency, fault-injection, or integration tests when they establish the missing invariant.
-Make coverage of domain variants and enforcement boundaries exhaustive or self-checking so a future addition cannot silently escape the mechanism.
-Use an independent specification or real-system evidence when two implementations could agree on the same incorrect assumption.
-Improve the trace or reproducer when the original investigation depended on guessing.
-Record a changed durable design in an ADR; keep routine debugging history out of permanent documentation.
+Make coverage of domain variants and enforcement boundaries exhaustive or self-checking, so a future addition stays inside the mechanism.
+When two implementations could share the same wrong assumption, use an independent specification or real-system evidence.
+Improve the trace or reproducer when the investigation depended on guessing.
+Record a changed durable design in an architecture decision record, and keep routine debugging history out of permanent documentation.
 
-Complete the authorized fix and run the appropriate project gates.
-Resolve discovered gaps instead of treating a written limitation or follow-up as completion; use `ideal-first-development` for a larger coordinated correction.
+Complete the authorized fix and run the fitting project gates.
+Resolve discovered gaps instead of treating a written limitation or follow-up as completion.
+Use `ideal-first-development` for a larger coordinated correction.
 A claim of root-cause prevention must name the mechanism that now enforces it and the evidence that checks that mechanism.
-Bind that claim to the identified invariant and supported boundary; do not claim that ordinary tests eliminate every possible future bug.
+Bind that claim to the identified invariant and supported boundary, and never claim that ordinary tests rule out every future bug.

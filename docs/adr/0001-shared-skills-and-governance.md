@@ -1,25 +1,25 @@
-# Shared Skills and Typed Repository Governance
+# Shared skills and typed repository governance
 
-Status: Accepted.
+Status: accepted.
 
 ## Context
 
-The same engineering and release contracts must be available across agent clients and development machines.
-Repository settings drift when their policy is repeatedly reconstructed by hand.
+Every client and development machine needs the same engineering and release contracts.
+Repository settings drift when someone rebuilds their policy by hand.
 
 ## Decision
 
 Keep reusable procedures in the dotfiles-managed `.agents/skills` tree with thin client discovery entries.
-Keep personal tool manuals in their owning projects and use shared skills to route to those manuals.
-Use Rust for executable automation, with locked dependencies and the same checks before push and in required CI.
-Validate portable metadata, resource links, and client aliases mechanically.
+Keep personal tool manuals in their owning projects, and route to them from shared skills.
+Write automation in Rust with locked dependencies, and run the same checks before push and in required CI.
+Check portable metadata, resource links, and client aliases in code.
 
-Model governance writes as explicit operation variants and recompute a plan from its captured state before applying it.
-Bind every write to the live numeric repository identity and verify that existing checks, reviewers, timers, ref restrictions, and stronger rules survive.
-Preserve Immutable Releases and separate code integration from signing and publication authorization.
+Model governance writes as explicit operation variants, and recompute a plan from its captured state before applying it.
+Bind every write to the live numeric repository identity, and verify that existing checks, reviewers, timers, ref restrictions, and stronger rules survive.
+Keep Immutable Releases, and keep signing and publication authorization separate from code integration.
 
 ## Consequences
 
-A client integration has one procedure to load, and a missing or drifting discovery entry fails a check.
-A settings failure requires a fresh audit and plan rather than a rollback that weakens protection.
-Cross-platform checks run on the owner's actual machines through domyjob before push when the changed contract requires them.
+A client loads one procedure, and a missing or drifting discovery entry fails a check.
+A settings failure calls for a fresh audit and plan, not a rollback that weakens protection.
+When a changed contract needs cross-platform checks, they run on the owner's machines through domyjob before push.

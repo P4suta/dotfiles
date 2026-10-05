@@ -1,7 +1,7 @@
-//! The lint layer: one validator per file kind, all render-then-validate.
+//! One validator per file kind, each run on the rendered text.
 //!
-//! lefthook decides which kind gets which files through its `glob:` filters,
-//! so a kind here trusts the paths it is handed and only skips ones that no longer exist (a staged file can be deleted in the same commit).
+//! lefthook assigns files to each kind through its `glob:` filters.
+//! A kind trusts those paths and skips only a missing path, because a commit can stage a deletion.
 
 use std::path::{Path, PathBuf};
 
@@ -11,36 +11,36 @@ use clap::ValueEnum;
 use crate::proc::write_temp;
 use crate::{env, proc, render};
 
-/// PowerShell has to check PowerShell: PSScriptAnalyzer is a pwsh module with no other interface.
-/// Embedded so the repo keeps no loose wrapper scripts.
+/// PSScriptAnalyzer runs only as a pwsh module, so PowerShell checks PowerShell.
+/// The binary embeds the helper, so the repository keeps no loose wrapper scripts.
 const PSSA_HELPER: &str = include_str!("../assets/psscriptanalyzer.ps1");
-/// The repository's rules are compiled in, so a missing file fails the build instead of every lint run.
+/// The binary compiles in the repository's rules, so a missing file fails the build instead of each lint run.
 const YAMLLINT_CONFIG: &str = include_str!("../../../.yamllint");
 const PSSA_SETTINGS: &str = include_str!("../../../PSScriptAnalyzerSettings.psd1");
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Kind {
-    /// Spell checker over any text file.
+    /// Spell checker for any text file.
     Typos,
-    /// bash syntax plus style findings at every severity.
+    /// bash syntax and style findings at every severity.
     Shellcheck,
-    /// PowerShell, via PSScriptAnalyzer.
+    /// PowerShell through PSScriptAnalyzer.
     Ps1,
-    /// TOML syntax, via taplo.
+    /// `TOML` syntax through taplo.
     Toml,
     /// JSON syntax.
     Json,
-    /// YAML syntax, via yamllint.
+    /// YAML syntax through yamllint.
     Yaml,
     /// git config syntax, which catches bad escapes in section headers.
     Gitconfig,
-    /// The prose gate: one sentence per line, via ocomment.
+    /// The sentence-per-line gate through ocomment.
     Prose,
-    /// Catch-all: every template must render, including the extensions no validator above claims.
+    /// Catch-all: every template must render, including extensions that no other validator claims.
     Template,
 }
 
-/// Runs one kind over `files`, returning the exit code to hand back to lefthook: 0 when everything passed.
+/// Runs one kind over `files` and returns the exit code for lefthook, 0 when everything passes.
 pub fn run(kind: Kind, files: &[PathBuf]) -> Result<i32> {
     let present: Vec<&Path> = files
         .iter()
@@ -52,12 +52,12 @@ pub fn run(kind: Kind, files: &[PathBuf]) -> Result<i32> {
     }
 
     match kind {
-        // These take the paths themselves, and report per file already.
+        // These take the paths directly and report each file.
         Kind::Typos => whole_batch("typos", &present),
-        // Discovers its own configuration (.ocomment.toml) and skips languages it cannot lex.
+        // Reads `.ocomment.toml` and skips languages it has no lexer for.
         Kind::Prose => prose(&present),
         Kind::Shellcheck => whole_batch("shellcheck", &present),
-        // Renders every file first, then checks them in one pwsh process.
+        // Renders every file, then checks them together in one pwsh process.
         Kind::Ps1 => powershell(&present),
         _ => {
             let mut code = 0;
@@ -71,7 +71,7 @@ pub fn run(kind: Kind, files: &[PathBuf]) -> Result<i32> {
     }
 }
 
-/// ocomment check: exit 1 carries findings; exit 2 only says some files were unwritable, which the gate does not judge.
+/// Exit 1 carries findings, and exit 2 reports unwritable files, which the gate ignores.
 fn prose(files: &[&Path]) -> Result<i32> {
     let mut cmd = env::command("ocomment");
     cmd.arg("check").args(files);
@@ -79,14 +79,14 @@ fn prose(files: &[&Path]) -> Result<i32> {
     if code == 2 { Ok(0) } else { Ok(code) }
 }
 
-/// Validators that accept every path in one invocation.
+/// Validators that accept every path in one call.
 fn whole_batch(program: &str, files: &[&Path]) -> Result<i32> {
     let mut cmd = env::command(program);
     cmd.args(files);
     Ok(proc::status(&mut cmd)?.code())
 }
 
-/// Returns false when the file failed its validator.
+/// Returns false when the validator rejects the file.
 fn check_one(kind: Kind, path: &Path) -> Result<bool> {
     if kind == Kind::Template {
         return template(path);
@@ -111,12 +111,12 @@ fn check_one(kind: Kind, path: &Path) -> Result<bool> {
     }
 }
 
-/// `::error file=...` keeps the findings greppable in a lefthook run, which interleaves the output of parallel commands.
+/// `::error file=...` keeps findings greppable in lefthook output, which interleaves parallel commands.
 fn report(path: &Path, message: &str) {
     println!("::error file={}:: {message}", path.display());
 }
 
-/// Writes rendered content to a temp file and hands it to an external validator, which is the only way to check text that only exists after a template renders.
+/// Writes rendered content to a temporary file for an external validator, because some text exists only after a template renders.
 fn external(
     path: &Path,
     content: &str,
@@ -136,8 +136,7 @@ fn external(
     Ok(false)
 }
 
-/// yamllint is a global mise tool (.chezmoidata.toml), so the shim answers it from any directory.
-/// Going through `uvx` instead made every run re-resolve a Python interpreter, which a stale `uv` earlier on PATH could break.
+/// yamllint comes from mise as a global tool, so the shim resolves it from any directory.
 fn yaml(path: &Path, content: &str) -> Result<bool> {
     let config = write_temp(YAMLLINT_CONFIG, ".yaml")?;
     let config = config.to_string_lossy().into_owned();
@@ -154,8 +153,8 @@ fn json(path: &Path, content: &str) -> Result<bool> {
     }
 }
 
-/// Importing the analyzer module costs over a second, so every file goes to one pwsh process.
-/// The manifest pairs each rendered temp file with the source path the report should name.
+/// Importing the analyzer module takes over a second, so every file goes to one pwsh process.
+/// The manifest pairs each rendered temporary file with the source path that the report names.
 fn powershell(files: &[&Path]) -> Result<i32> {
     let mut code = 0;
     let mut rendered: Vec<&Path> = Vec::new();
@@ -202,8 +201,8 @@ fn powershell(files: &[&Path]) -> Result<i32> {
 }
 
 fn template(path: &Path) -> Result<bool> {
-    // The bootstrap config's syntax is covered by taplo and chezmoi doctor;
-    // rendering it here would need an init context it cannot have.
+    // taplo and chezmoi doctor check the bootstrap config's syntax.
+    // Rendering it here would need an init context that this check lacks.
     if render::is_chezmoi_config(path) {
         return Ok(true);
     }

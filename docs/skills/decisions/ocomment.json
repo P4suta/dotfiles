@@ -1,7 +1,7 @@
 {
-  "revision": "43fb4a49202c814f7af4e4832729103a9625184fed0b04f5f0007b1df42feabe",
+  "revision": "05d6dd712b996c3508aa42abebe69f1a5f13ddb1c71920c94a7b7c065db325cf",
   "outcome": "keep",
-  "reason": "Retain the project-owned command route and preservation of required source prose, while concise-source owns the underlying representation judgment.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/ocomment/SKILL.md"
   ],

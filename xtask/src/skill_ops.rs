@@ -59,7 +59,7 @@ pub struct SkillDecision {
     pub size: Option<SizeDecision>,
 }
 
-/// The judgment on an entrypoint over the word limit; it shares the decision's revision and evidence.
+/// The judgment on an entrypoint over the word limit, sharing the decision's revision and evidence.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SizeDecision {
@@ -168,7 +168,7 @@ fn check_evidence(evidence: &[String], root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Verifies a runtime disposition; adopted findings may carry a decision but do not require one.
+/// Verifies a runtime disposition, where an adopted finding may carry a decision but needs none.
 pub fn check_review(
     report_hash: &str,
     findings: &[Finding],
@@ -334,7 +334,8 @@ fn size_draft(previous: Option<&SizeDecision>) -> SizeDecision {
     }
 }
 
-/// Drafts the decision for a changed or new skill, or the size disposition that its bound decision lacks or no longer needs; the author still writes each reason.
+/// Drafts the decision for a changed or new skill, or the size disposition that its bound decision lacks or no longer needs.
+/// A maintainer still writes each reason.
 pub fn draft_decision(
     previous: Option<&SkillDecision>,
     revision: &str,
@@ -455,7 +456,7 @@ fn assessed_commit(root: &Path, skill: &str, revision: &str) -> Result<Option<St
     Ok(None)
 }
 
-/// Writes the draft decision for one skill and returns the context its author needs.
+/// Writes the draft decision for one skill and returns the context its writer needs.
 pub fn decide(root: &Path, skill: &str) -> Result<String> {
     let catalog = catalog(&root.join("dot_agents/skills"))?;
     let current = catalog.skills.get(skill).with_context(|| {

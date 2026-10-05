@@ -4,7 +4,7 @@
   ansible.builtin.apt:
     name:
       - autoconf
-      - build-essential  # compiler toolchain for cargo and BEAM builds
+      - build-essential  # C toolchain for cargo and Erlang builds
       - bzip2
       - ca-certificates
       - clang

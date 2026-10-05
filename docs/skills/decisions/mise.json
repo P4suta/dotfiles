@@ -1,7 +1,7 @@
 {
-  "revision": "0c9df3021531758d7a61b6cdc069f9ae338fcdc85d826e76e61585640dde16db",
+  "revision": "1719bb4efda64bcc9cabf27cd92a96deccc13b8fea905de0979ce2487318b99f",
   "outcome": "keep",
-  "reason": "Retain exact tool selection, precedence, native installation provenance, and project/global separation; it composes with dependency maintenance rather than duplicating it.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/mise/SKILL.md"
   ],

@@ -1,7 +1,7 @@
 {
-  "revision": "4c6a50c9e481b93ddc552eceb251400d8cfb5b002c1a2777bd587f2744cdef74",
+  "revision": "bcccb0125375123d70774e7d23f74d03ff75de96e69ea8c46118c29a106f6c3f",
   "outcome": "keep",
-  "reason": "Retain native per-host rendering and scoped application, because portable skill content alone does not establish installed behavior or permit runtime-state copying.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/dotfiles/SKILL.md"
   ],

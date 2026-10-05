@@ -1,7 +1,7 @@
 //! Keeps `storage-scout watch` running from logon.
 //!
 //! storage-scout removes build waste the moment it appears: caches whose owner let go or whose work has landed, files rustc never reads again, and duplicate bytes.
-//! It has no schedule, because the watcher reacts to filesystem events and released locks; a logon task that restarts it is all it needs.
+//! The watcher reacts to filesystem events and released locks, so it needs only a logon task that restarts it, not a schedule.
 //! `conhost --headless` keeps a console window from opening, and the watcher's lines go to the dotfiles log.
 //! Stopping the task ends only conhost, so a restart also stops the watcher it started, which then rereads the policy.
 

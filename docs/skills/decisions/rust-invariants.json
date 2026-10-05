@@ -1,7 +1,7 @@
 {
-  "revision": "4f2a486bbe9b8d54ba48b42c056868cb4cc9f43a300f3e612e79435a2af2764b",
+  "revision": "838524fa327ad5a0798c59d8a49bb623865a2b13b7c682dea84d6afe39493e2c",
   "outcome": "keep",
-  "reason": "Retain compiler-enforced Rust representation and transition design independently of language-neutral type contracts and machine-checked algorithm proofs.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/rust-invariants/SKILL.md"
   ],

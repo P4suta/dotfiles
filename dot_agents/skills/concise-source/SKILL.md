@@ -5,31 +5,29 @@ description: >-
   Use for code comments, API documentation, lint suppressions, and unnecessary explanatory text.
 ---
 
-# Concise Source
+# Concise source
 
-Prefer names, domain types, exhaustive variants, checked constructors, and executable contracts to prose describing how code should behave.
-If a comment explains a missing invariant, implement that invariant through `rust-invariants` or `systematic-fixes` before deciding whether the comment is still necessary.
-Do not add commentary about intentions, diligence, personal preferences, past fixes, or the conversation.
-Remove redundant narration and commented-out code rather than preserving a development diary.
+Express behavior in names, domain types, exhaustive variants, checked constructors, and executable contracts instead of prose.
+When a comment explains a missing invariant, enforce the invariant through `rust-invariants` or `systematic-fixes`, then decide whether the comment still earns its place.
+Write no commentary about intentions, diligence, preferences, past fixes, or the conversation.
+Delete redundant narration and commented-out code.
 
-Keep text only when a reader needs information the implementation cannot express: a public usage contract, legal notice, required tool directive, safety argument, or a consequential external constraint.
-Keep public API documentation sufficient to use the API correctly, with examples or failure conditions where necessary.
-An unsafe operation still needs its actual safety argument; hiding it to obtain a clean comment report is not a correction.
-Put durable architectural tradeoffs in an ADR instead of repeating them at every call site.
+Keep text only for what the code leaves unsaid: a public usage contract, a legal notice, a required tool directive, a safety argument, or a consequential external constraint.
+Give public API documentation enough detail, examples, and failure conditions to use the API correctly.
+An unsafe operation keeps its safety argument.
+Record durable architectural tradeoffs in an Architecture Decision Record (ADR) instead of repeating them at call sites.
 Write comments that `prose check --channel comment` accepts.
-The checker defines the language, style, and line rules.
 
-Treat `#[allow(...)]`, file-wide disable directives, ignored failures, and exclusions as prohibited by default.
-Fix the representation or behavior that causes the diagnostic rather than reducing the checking surface.
-Use `#[expect(..., reason = "...")]` only for a narrowly scoped, demonstrably necessary exception when redesign cannot remove the diagnostic without violating the contract.
-Keep the reason specific to the enforced invariant or external requirement, and check unfulfilled lint expectations so an obsolete exception fails.
-Do not suppress a new warning merely to preserve the old implementation or finish sooner.
+Treat `#[allow(...)]`, file-wide suppression directives, ignored failures, and exclusions as prohibited by default.
+Fix the representation or behavior behind a diagnostic instead of shrinking the checked surface.
+Use `#[expect(..., reason = "...")]` only for a narrow, necessary exception that no redesign can remove without breaking the contract.
+Tie the reason to the enforced invariant or external rule, and check unfulfilled lint expectations so an obsolete exception fails.
+Never suppress a new warning to keep the old implementation or to finish sooner.
 
-Rust's lint `#[expect]` is different from `Result::expect` and `Option::expect`.
-Propagate or represent failures at input, I/O, configuration, cleanup, and concurrent boundaries.
-Do not use a panic to replace a recoverable error or call a fallible operation infallible because its usual input works.
-A narrowly justified assertion about an invariant must already be enforced by construction and checked by the relevant tests.
+The lint attribute `#[expect]` differs from `Result::expect` and `Option::expect`.
+Propagate or represent failures at input, I/O, configuration, cleanup, and concurrency boundaries.
+Never use a panic in place of a recoverable error, or call a fallible operation infallible because its usual input works.
+An assertion about an invariant needs that invariant enforced by construction and checked by tests.
 
-Use `ocomment` for the repository's actual comment policy and preserve necessary legal, safety, documentation, and language directives.
+Use `ocomment` for the repository's comment policy, and keep necessary legal, safety, documentation, and language directives.
 Use `oss-readme` for a project's public introduction and `adr` for consequential reasoning.
-Passing a prose checker does not establish the behavior or soundness of the code.

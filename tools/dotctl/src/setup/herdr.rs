@@ -299,7 +299,7 @@ fn prune(releases: &Path, retain: usize, current: &str) {
     }
 }
 
-/// Releases beyond the newest `retain` by installation time; version names do not sort numerically (`0.10` < `0.9` as text).
+/// Releases beyond the newest `retain` by installation time, because version names sort as text and put `0.10` before `0.9`.
 fn stale_releases(
     releases: &[(String, std::time::SystemTime)],
     retain: usize,

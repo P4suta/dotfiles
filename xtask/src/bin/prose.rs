@@ -25,18 +25,13 @@ enum Action {
         title: Option<String>,
         paths: Vec<PathBuf>,
     },
-    /// Check the repository with its exemptions and legacy ledger.
+    /// Check the repository with its exemptions.
     Repository {
         #[arg(long, value_enum, required = true)]
         scope: Vec<Scope>,
-        /// Print each finding that no exemption covers, with its ledger fingerprint, instead of judging them.
+        /// Print each finding that no exemption covers instead of judging them.
         #[arg(long)]
         findings: bool,
-    },
-    /// Remove legacy ledger entries whose findings no longer occur.
-    Tighten {
-        #[arg(long, value_enum, required = true)]
-        scope: Vec<Scope>,
     },
     /// Answer a client's end-of-turn hook for its final reply.
     Reply {
@@ -116,20 +111,12 @@ fn run(cli: Cli) -> Result<i32> {
                                 "line": finding.line,
                                 "rule": finding.rule,
                                 "sentence": finding.sentence,
-                                "fingerprint": prose::fingerprint(&finding.sentence),
                             })
                         );
                     }
                 } else {
                     prose::repository(&root, scope, &bundle)?;
                 }
-            }
-            Ok(0)
-        }
-        Action::Tighten { scope } => {
-            let bundle = Bundle::source(&root)?;
-            for scope in scope {
-                prose::tighten(&root, scope, &bundle)?;
             }
             Ok(0)
         }

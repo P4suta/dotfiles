@@ -5,30 +5,29 @@ description: >-
   Use when choosing or changing a durable design, not for routine edits, task notes, or duplicate system documentation.
 ---
 
-# Architecture Decision Records
+# Architecture decision records
 
-Use ADRs as the durable record of why the system has its important constraints.
-Read the project's existing decisions before proposing a design or introducing another architecture document.
-Keep the project's location, numbering, status vocabulary, and indexes when they already work.
-For a new collection, use `docs/adr/NNNN-short-decision.md` and add an index only when it materially helps discovery.
+An Architecture Decision Record (ADR) states why the system has an important constraint.
+Read the project's existing decisions before proposing a design.
+Keep the project's location, numbering, status vocabulary, and indexes.
+For a new collection, use `docs/adr/NNNN-short-decision.md`.
 
-Write a record when a choice affects a public contract, dependency direction, state model, trust boundary, persistence, compatibility, or a substantial operational constraint.
+Write a record when a choice affects a public contract, dependency direction, state model, trust boundary, persistence, compatibility, or a major operational constraint.
 A bug fix needs an ADR only when it changes such a decision.
-Do not make every PR, refactor, or implementation detail an ADR.
-Existing projects are examples of useful reasoning, not mandatory architectures or templates for other projects.
+Routine refactors and implementation details need none.
 
-State the actual problem and constraints, the selected decision, why plausible alternatives were rejected, and the resulting benefits and costs.
-Use `Status`, `Context`, `Decision`, and `Consequences` as the small default structure; include alternatives where they clarify the choice.
-Name the decision concretely rather than describing the work that led to it.
-Link to the relevant code, invariant, test, or public specification instead of copying it.
+State the problem, the constraints, the decision, the rejected alternatives with reasons, and the resulting costs and benefits.
+Use `Status`, `Context`, `Decision`, and `Consequences` sections, and add alternatives where they clarify the choice.
+Name the decision, not the work that led to it.
+Link to code, invariants, tests, or specifications instead of copying them.
 Distinguish measured evidence, assumptions, proposals, and implemented behavior.
 
-Implement a new decision with the change that relies on it, and validate its enforceable claims with types or meaningful checks.
-Record acceptance only when that decision is actually accepted within the user's authorized scope.
-An accepted ADR preserves historical reasoning.
-Correct factual errors explicitly, and use a new linked ADR when the decision changes; mark the older record superseded, including partial supersession when appropriate.
-Never silently rewrite an old record to claim the current design was always the original decision.
+Land a new decision with the change that relies on it, and check its enforceable claims with types or tests.
+Mark a record accepted only when the user accepts the decision.
+Correct factual errors in place.
+Record a changed decision in a new linked ADR, and mark the old record superseded in whole or in part.
+Never rewrite an old record to claim the current design as the original decision.
 
-Keep instructions, reference material, and rationale in their existing authoritative homes.
-Do not create parallel architecture summaries, handoffs, progress logs, or verification narratives that repeat the ADR or code.
-Give enough reasoning to revisit the choice, with no fixed length quota, in a record that `prose check --channel document` accepts.
+Keep instructions, reference material, and rationale in their existing homes.
+Never write summaries, handoffs, progress logs, or verification narratives that repeat an ADR or the code.
+Give enough reasoning to revisit the choice.

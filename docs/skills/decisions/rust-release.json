@@ -1,7 +1,7 @@
 {
-  "revision": "bfda29f003338856ccf726be36da4621090ac4775e349ba9c8c9b24d50161ecf",
+  "revision": "7bf54d2bb79402192d49445095e598ba15c7697746bfac207dea65a3f412f8d7",
   "outcome": "keep",
-  "reason": "Retain crates.io workspace ordering, immutable versions, and proposal/publication separation as conditional Rust release behavior.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/rust-release/SKILL.md"
   ],

@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-/// Boots the probe out even when an assertion fails, so a failed run leaves no agent behind.
+/// Boots the probe out even when an assertion fails, so a failed run leaves no LaunchAgent behind.
 struct Loaded(String);
 
 impl Drop for Loaded {
@@ -27,7 +27,7 @@ fn describe(target: &str) -> String {
     String::from_utf8_lossy(&printed.stdout).into_owned()
 }
 
-/// The probe keeps running and takes seconds to exit after SIGTERM, as a busy agent such as storage-scout does.
+/// The probe keeps running and takes seconds to exit after SIGTERM, as a busy LaunchAgent such as storage-scout does.
 fn write_probe(plist: &Path, label: &str, generation: &str) {
     std::fs::write(
         plist,
@@ -46,7 +46,7 @@ fn write_probe(plist: &Path, label: &str, generation: &str) {
     .unwrap();
 }
 
-/// Runs against the real launchd, because `bootout` returning before a running job exits is launchd's behavior rather than this repository's.
+/// Runs on the real launchd, because `bootout` returning before a running job exits comes from launchd rather than this repository.
 #[test]
 fn a_running_agent_is_replaced_by_its_new_definition() {
     let uid = Command::new("id").arg("-u").output().unwrap().stdout;

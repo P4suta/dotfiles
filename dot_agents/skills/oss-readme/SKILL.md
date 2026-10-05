@@ -1,28 +1,27 @@
 ---
 name: oss-readme
 description: >-
-  Write or simplify an OSS project's README to the minimum needed to understand, install, and use it.
+  Write or simplify an OSS project's README to the least needed to understand, install, and use it.
   Use for README changes, not architecture records or a full documentation site.
 ---
 
-# Minimal OSS README
+# Minimal project readme
 
 Write for someone deciding whether to use the project and trying it for the first time.
 Keep only the project name, a concrete purpose, a supported installation command, the smallest useful example, essential prerequisites or limitations, and the license.
-Include a link only when the reader needs it to complete those steps.
-A library's useful example is its smallest consumer-facing API call; a CLI's is a real invocation.
-Do not force headings or a section for a subject that needs no explanation.
+Link only what the reader needs to complete those steps.
+For a library, show the smallest consumer-facing API call, and for a command-line tool, show a real invocation.
+Skip headings and sections for subjects that need no explanation.
 
-Verify commands, package names, platform support, and licenses against the repository and current distribution before writing them.
-Prefer the recommended installation path and one working example over a catalogue of alternatives.
-Mention a limitation only when omitting it would make the first attempt misleading or fail.
-Do not invent installation methods, features, or maintenance guarantees.
+Verify commands, package names, platform support, and licenses in the repository and current distribution before writing them.
+Show the recommended installation path and one working example, never a catalog of alternatives.
+Mention a limitation only when the first attempt would otherwise mislead or fail.
+Never invent installation methods, features, or maintenance promises.
 
-Remove badges, feature inventories, comparisons, roadmaps, implementation tours, release procedures, agent instructions, and development diaries unless the owner specifically asks for them.
-Keep design rationale in ADRs and contributor-only commands in the existing contributor or agent instructions.
-Do not create companion documentation merely to move deleted README text somewhere else.
+Remove badges, feature inventories, comparisons, roadmaps, implementation tours, release procedures, `AGENTS.md` instructions, and development diaries unless the owner asks for them.
+Keep design rationale in architecture decision records and contributor-only commands in the existing contributor instructions or `AGENTS.md`.
+Never create companion documentation to hold deleted README text.
 Preserve necessary security, compatibility, accessibility, and license information.
 
 Write the README so that `prose check --channel document` accepts it.
 Read the rendered result and check its links and commands.
-The reader should be able to understand the purpose and reach a useful first result without scrolling through project history.

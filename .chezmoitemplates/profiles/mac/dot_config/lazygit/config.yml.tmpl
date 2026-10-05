@@ -1,7 +1,4 @@
-# lazygit, themed from [palette].
-#
-# Deployed to ~/.config/lazygit even though lazygit itself looks in ~/Library/Application Support/lazygit: the platform path is a symlink back here (Library/Application Support/symlink_lazygit.tmpl), the same arrangement Nushell needs.
-# Keeping every config under ~/.config is the invariant; the symlink is what makes a platform-convention tool honour it.
+# Lazygit reads its macOS support folder, which links back to this file under ~/.config.
 gui:
   nerdFontsVersion: "3"
   showDivergenceFromBaseBranch: arrowAndNumber
@@ -19,8 +16,7 @@ gui:
     defaultFgColor: ["{{ .palette.fg }}"]
 
 git:
-# The same pager as `git diff`, so a diff looks identical whether it is read in lazygit or in the shell.
-# Without this lazygit falls back to plain git output and the two disagree about what a diff looks like.
+# Match the `git diff` pager.
   paging:
     colorArg: always
     pager: delta --dark --paging=never

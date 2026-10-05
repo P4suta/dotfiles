@@ -1,7 +1,7 @@
 //! The readiness report: `dotguard doctor`.
 //!
-//! A diagnostic, not a gate: exit 0 always, unless `--strict` — a doctor that refuses to finish its report is useless precisely when you need it.
-//! Ported from `dot_local/bin/executable_dotfiles-doctor`, output line for output line, because the output *is* the interface people read.
+//! A diagnostic that always exits 0 unless `--strict`, so it finishes its report when something breaks.
+//! Its output lines form the interface people read.
 
 use crate::realgit;
 use std::path::{Path, PathBuf};
@@ -123,8 +123,8 @@ fn whoami_uid() -> String {
         )
 }
 
-/// The PATH the doctor resolves commands against: the hook-style prepend of shims, ~/.local/bin and Homebrew, plus the opam switch — the OCaml Platform lives there rather than in a mise shim, so without it `ocaml`, `dune` and `utop` all read as missing even on a healthy machine.
-/// Asked of `opam env` rather than hardcoded, because the switch name is data.
+/// The `PATH` for resolving commands: the hook prepend of shims, `~/.local/bin`, and Homebrew, plus the opam switch that holds `ocaml`, `dune`, and `utop`.
+/// `opam env` supplies the switch name.
 fn doctored_path() -> String {
     let h = home();
     let mut dirs: Vec<PathBuf> = vec![
@@ -169,7 +169,7 @@ fn system_path_dirs() -> Vec<String> {
         .collect()
 }
 
-/// System directories that the given PATH lacks, so a program a login shell finds is missing from this shell.
+/// System directories missing from the given `PATH`, which hide programs that a login shell finds.
 fn missing_from_path(path: &str, system: &[String]) -> Vec<String> {
     let present: Vec<PathBuf> = std::env::split_paths(path).collect();
     system
@@ -185,7 +185,7 @@ fn which_doctored(name: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// The SSH agent selection from `~/.config/shell/ssh-agent.sh`: a local session uses the 1Password app-group socket; a remote session preserves the socket sshd forwarded.
+/// The SSH socket selection from `~/.config/shell/ssh-agent.sh`: a local session uses the 1Password app-group socket, and a remote session keeps the socket that sshd forwarded.
 fn ssh_auth_sock() -> Option<String> {
     if let Some(sock) = std::env::var_os("DOTFILES_SSH_AUTH_SOCK")
         && Path::new(&sock).exists()
@@ -258,8 +258,8 @@ fn modern_terminal(d: &mut Doctor) {
         "mise.nu integration",
     );
 
-    // Some tools follow the macOS platform convention instead of XDG and read ~/Library/Application Support/<tool>.
-    // Ask each tool where it actually looks and resolve the answer physically: a symlink can be present and still point somewhere wrong, and getting that wrong fails in the worst possible way — the tool starts fine, writes fresh defaults at the platform path, and every setting here quietly does not apply.
+    // Some tools follow the macOS convention and read `~/Library/Application Support/<tool>`.
+    // Ask each tool where it looks and resolve the real path, because a wrong symlink makes the tool write fresh defaults and ignore every setting here.
     let check_platform_config = |d: &mut Doctor,
                                  label: &str,
                                  reported: Option<String>,
@@ -317,8 +317,8 @@ fn modern_terminal(d: &mut Doctor) {
     });
     check_platform_config(d, "lazygit", lg_dir, "lazygit");
 
-    // Ask whether the family Ghostty is *configured* with actually resolves, rather than globbing a filename in ~/Library/Fonts: a glob passes for a font that is installed but not the one in use.
-    // A family Ghostty cannot resolve silently falls back, and the terminal quietly stops being the one that was configured.
+    // Ask whether the configured Ghostty font family resolves, because a file glob in `~/Library/Fonts` passes for an installed font that Ghostty never uses.
+    // Ghostty falls back without warning from a family it fails to resolve.
     let config = std::fs::read_to_string(home().join(".config/ghostty/config")).unwrap_or_default();
     let configured_font = parse_font_family(&config);
     match configured_font {
@@ -355,7 +355,7 @@ fn modern_terminal(d: &mut Doctor) {
 
 fn native_toolchain(d: &mut Doctor) {
     section("Native toolchain");
-    // The cause worth catching is SDK/linker skew: `xcrun` resolves to the HIGHEST installed SDK, which after a partial Command Line Tools update can be newer than the `ld` that shipped with them, and then nothing on the machine can link at all.
+    // After a partial Command Line Tools update, `xcrun` picks the newest kit, which can outrun the shipped `ld` and break every link.
     let probe_dir = std::env::temp_dir().join(format!("doctor-probe.{}", std::process::id()));
     let _ = std::fs::create_dir_all(&probe_dir);
     let src = probe_dir.join("probe.c");
@@ -442,7 +442,7 @@ fn language_toolchains(d: &mut Doctor) {
     d.command("ghc", "GHC", true);
     d.command("cabal", "cabal-install", true);
     d.command("stack", "Stack", true);
-    // The wrapper, not `haskell-language-server`: upstream's bindist ships only the wrapper plus one binary per GHC version, and the wrapper is what every editor integration launches anyway.
+    // The wrapper, because the upstream binary distribution ships only the wrapper plus one binary per compiler version, and editors launch the wrapper.
     d.command("haskell-language-server-wrapper", "HLS", true);
     d.command("bun", "Bun", true);
     d.command("uv", "uv", true);
@@ -453,7 +453,7 @@ fn agents_and_editors(d: &mut Doctor) {
     d.command("codex", "Codex", false);
     d.command("claude", "Claude Code", false);
     d.command("opencode", "OpenCode", false);
-    // OrbStack generates its CLI shims on first launch, so "app present, docker missing" is a distinct and actionable state from "not installed", and a shim outside PATH is a shell problem rather than either.
+    // OrbStack generates its command shims on first launch, so an installed app without docker differs from a missing app, and a shim outside `PATH` points to a shell problem.
     let installed = [
         PathBuf::from("/usr/local/bin/docker"),
         home().join(".orbstack/bin/docker"),
@@ -485,7 +485,7 @@ fn network(d: &mut Doctor) {
     section("Network");
     d.app("Tailscale.app", "Tailscale", false);
     if let Some(ts) = which_doctored("tailscale") {
-        // `tailscale status` exits non-zero when logged out, which is the state worth distinguishing: the app being installed says nothing about tailnet membership.
+        // `tailscale status` exits non-zero when logged out, and an installed app says nothing about tailnet membership.
         let up = Command::new(&ts)
             .arg("status")
             .stdout(Stdio::null())
@@ -593,7 +593,7 @@ fn repository_guards(d: &mut Doctor) {
         );
     }
 
-    // The wrapper only enforces anything if it is the git that PATH resolves to; being shadowed by Homebrew's or Apple's git is silent.
+    // The wrapper enforces policy only when `PATH` resolves `git` to it, and the Homebrew or Apple git can shadow it without warning.
     let resolved_git = which_doctored("git").map(|p| p.display().to_string());
     if resolved_git.as_deref() == Some(home().join(".local/bin/git").display().to_string().as_str())
     {
@@ -608,7 +608,7 @@ fn repository_guards(d: &mut Doctor) {
         );
     }
 
-    // core.hooksPath is what makes any of the hooks global rather than per-repo.
+    // `core.hooksPath` makes the hooks global.
     let hooks_path = realgit::capture(&["config", "--get", "core.hooksPath"])
         .map(|s| s.trim().replace('~', &home().display().to_string()));
     let hooks_ok = hooks_path.as_ref().is_some_and(|p| {
@@ -626,7 +626,7 @@ fn repository_guards(d: &mut Doctor) {
         );
     }
 
-    // Every refusal and every waiver is appended to the bypass log; a waiver you cannot remember making is the one worth reading.
+    // The bypass log records every refusal and waiver, and an unfamiliar waiver deserves a look.
     let bypass_log = home().join(".local/state/git-bypass.log");
     if bypass_log.is_file() {
         let text = std::fs::read_to_string(&bypass_log).unwrap_or_default();
@@ -655,7 +655,7 @@ fn repository_guards(d: &mut Doctor) {
 
 fn apple_platform(d: &mut Doctor) {
     section("Apple platform development");
-    // `xcode-select -p` pointing at CommandLineTools is the state that matters: swiftc exists, so a Swift package builds, but there is no iOS SDK, no simulator and no xcodebuild — and the error says none of that.
+    // With `xcode-select -p` at CommandLineTools, swiftc builds a Swift package, but the iOS kit, the simulator, and xcodebuild stay missing without any error saying so.
     let xcode_path = Command::new("xcode-select")
         .arg("-p")
         .output()
@@ -679,7 +679,7 @@ fn apple_platform(d: &mut Doctor) {
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| xcode_path.clone());
             ok("Xcode", &version);
-// Since Xcode 16 the simulator runtimes are a separate download; an Xcode with none installed has no device to build for and says nothing about why.
+// Xcode 16 and later download simulator runtimes on their own, and an Xcode without one has no device to build for.
             let runtimes = Command::new("xcrun")
                 .args(["simctl", "list", "runtimes"])
                 .output()
@@ -704,7 +704,7 @@ fn apple_platform(d: &mut Doctor) {
     d.command("xcbeautify", "xcbeautify", false);
     d.command("fastlane", "fastlane", false);
     d.command("mas", "mas (App Store CLI)", false);
-    // Apple's formatter ships inside the toolchain rather than as its own binary, so `which swift-format` finds nothing even when it is perfectly available.
+    // The Apple formatter ships inside the toolchain, so `which swift-format` finds nothing even when available.
     let swift_format = Command::new("swift")
         .args(["format", "--version"])
         .stdout(Stdio::null())
@@ -720,7 +720,7 @@ fn apple_platform(d: &mut Doctor) {
 
 fn macos_integration(d: &mut Doctor) {
     section("macOS integration");
-    // /etc/pam.d/sudo_local is Apple's supported hook and survives OS updates, which is why `dotfiles-touchid` writes there rather than editing /etc/pam.d/sudo — that file is replaced by the next system update and the setting silently reverts.
+    // `dotfiles-touchid` writes `/etc/pam.d/sudo_local`, the supported Apple hook that survives system updates, because each update replaces `/etc/pam.d/sudo`.
     let sudo_local = std::fs::read_to_string("/etc/pam.d/sudo_local").unwrap_or_default();
     let enabled = sudo_local
         .lines()
@@ -805,7 +805,7 @@ fn count_marker(text: &str, marker: &str) -> usize {
         .count()
 }
 
-/// One string field out of flat JSON, without a parser: tailscale's `"DNSName": "machine.tailnet."` is the only consumer.
+/// Extracts one string field from flat JSON, such as the `"DNSName": "machine.tailnet."` field of tailscale.
 fn json_field(json: &str, field: &str) -> Option<String> {
     let needle = format!("\"{field}\":");
     let start = json.find(&needle)? + needle.len();

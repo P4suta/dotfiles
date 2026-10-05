@@ -1,4 +1,4 @@
-//! The installed `git` entry point against the real git of the host it runs on.
+//! Tests the installed `git` wrapper with the real git of the host.
 //! Windows installs a copy of dotguard named `git.exe`, so the test runs that form everywhere.
 
 use std::path::PathBuf;
@@ -34,8 +34,8 @@ impl Wrapper {
     }
 
     /// Runs the wrapper with an isolated home and Git configuration, so its audit records stay out of the developer's.
-    /// Waivers set in the calling shell, such as the one a force push sets for its hooks, are removed so they cannot decide a refusal.
-    /// Git variables are removed too: a commit hook in a linked worktree exports `GIT_DIR`, and `git init` would reinitialize that repository instead of the scratch one.
+    /// The wrapper drops waivers from the calling shell, such as the one a force push sets for its hooks, so they never decide a refusal.
+    /// It also drops Git variables, because a commit hook in a linked worktree exports `GIT_DIR`, and `git init` would reinitialize that repository instead of the scratch one.
     fn run(&self, arguments: &[&str], input: Option<&[u8]>) -> Output {
         self.run_with(arguments, input, &[])
     }
@@ -139,7 +139,7 @@ fn a_callers_git_repository_variables_cannot_redirect_the_wrapper() {
     let outer = Wrapper::new("outer-repository");
     let outer_git = outer.scope.join("repository/.git");
     let config_before = std::fs::read(outer_git.join("config")).unwrap();
-    // SAFETY: std serializes its own environment access and nothing in this binary reads the environment outside std; concurrent tests remove these variables from their children too.
+    // SAFETY: std serializes its own environment access, and nothing in this binary reads the environment outside std.
     let saved: Vec<_> = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]
         .iter()
         .map(|name| (*name, std::env::var_os(name)))
@@ -152,7 +152,7 @@ fn a_callers_git_repository_variables_cannot_redirect_the_wrapper() {
     let inner = Wrapper::new("inner-repository");
     let initialized = inner.scope.join("repository/.git").is_dir();
     for (name, value) in saved {
-        // SAFETY: restores the values captured above.
+        // SAFETY: this restores the saved values.
         unsafe {
             match value {
                 Some(value) => std::env::set_var(name, value),

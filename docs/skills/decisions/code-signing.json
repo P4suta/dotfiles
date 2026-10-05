@@ -1,7 +1,7 @@
 {
-  "revision": "709d7c6ce6a159720c3bfa21d3232febe1788007d4aca7eaa0c757cc1d4d7e29",
+  "revision": "01130d22da993b6791a517f9029d9c6d8ed98c8ee2caae76bab138e50c0ba7ec",
   "outcome": "keep",
-  "reason": "Keep this cross-platform credential and publisher workflow as the common router, with conditional Apple and Windows references rather than merging their distinct native operations.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/code-signing/SKILL.md"
   ],

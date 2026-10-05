@@ -1,4 +1,4 @@
-//! The force-push gate that cannot be walked around.
+//! The force-push gate.
 //!
 //! git hands a pre-push hook one line per ref on stdin:
 //!
@@ -6,15 +6,12 @@
 //! <local ref> <local sha> <remote ref> <remote sha>
 //! ```
 //!
-//! and, crucially, does NOT say whether `--force` was passed.
-//! That turns out not to matter: what `--force` actually buys is permission to move a remote ref to a commit that is not a descendant of where it is now.
-//! So the question "is this a force push?"
-//! is answerable from the shas alone — is `remote_sha` an ancestor of `local_sha`?
-//! — and the answer is the same whether the rewrite came from `--force`, `--force-with-lease`, a `+refspec`, an IDE button, or a GUI client that never looked at PATH.
+//! The line omits whether `--force` applies, and the gate needs no such flag.
+//! A force push moves a remote ref to a commit outside its descendants, so the gate checks whether `local_sha` descends from `remote_sha`.
+//! The answer holds for `--force`, `--force-with-lease`, a `+refspec`, and any graphical client.
 //!
-//! That is why this, and not the `~/.local/bin/git` wrapper, is the actual guarantee.
-//! The wrapper only sees commands that resolved `git` through PATH.
-//! This hook is reached through `core.hooksPath` for every repository on the machine and every invocation of git in it.
+//! This hook, and not the `~/.local/bin/git` wrapper, enforces the rule, because the wrapper only handles commands that resolve `git` through `PATH`.
+//! `core.hooksPath` runs this hook for every repository and every git invocation on the machine.
 
 use crate::bypass::{self, Category};
 use crate::realgit;
@@ -24,8 +21,8 @@ enum Verdict {
     Ok,
     Delete,
     Rewrite,
-    /// The remote-tracking commit is not in this clone, so ancestry is not decidable.
-    /// Treated as a rewrite: an undecidable push is exactly the shape a rewrite has after someone else force-pushed.
+    /// This clone lacks the remote-tracking commit, so ancestry stays unknown.
+    /// The gate treats it as a rewrite, the shape a push takes after someone else force-pushed.
     Undecidable,
 }
 
@@ -34,7 +31,7 @@ fn classify(local_sha: &str, remote_sha: &str) -> Verdict {
         return Verdict::Delete;
     }
     if remote_sha.chars().all(|c| c == '0') {
-        return Verdict::Ok; // a branch that does not exist on the remote yet
+        return Verdict::Ok; // A branch new to the remote.
     }
     if !realgit::succeeds(&["cat-file", "-e", &format!("{remote_sha}^{{commit}}")]) {
         return Verdict::Undecidable;
@@ -48,8 +45,7 @@ fn classify(local_sha: &str, remote_sha: &str) -> Verdict {
 
 /// Returns the process exit code: 0 to let the push through, 1 to refuse it.
 ///
-/// Two gates, in the order in which being wrong is cheapest to discover: history first (force/deletion), then signatures.
-/// There is no point paying for a `git verify-commit` per commit on a push that is going to be refused anyway.
+/// The history gate for force pushes and deletions runs before the signature gate, so a refused push skips the per-commit `git verify-commit`.
 pub fn run(remote: &str) -> i32 {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
@@ -62,8 +58,8 @@ pub fn run(remote: &str) -> i32 {
     signatures(remote, &input)
 }
 
-/// The shas that could carry new commits: pushes only, not deletions, and not the empty line a here-string over an empty variable still produces.
-/// An "Everything up-to-date" push sends nothing at all on stdin, and `read` still succeeds with every field empty — without this filter the signing gate below would reach `git rev-list ""`, which fails, which refuses a push that pushes nothing.
+/// The shas that could carry new commits: pushes only, without deletions or the empty line from a here-string over an empty variable.
+/// An up-to-date push sends an empty stdin, and without this filter the signing gate would run `git rev-list ""` and refuse the push.
 fn pushed_shas(input: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in input.lines() {
@@ -81,10 +77,10 @@ fn pushed_shas(input: &str) -> Vec<String> {
 
 /// Refuse a push that would introduce an unsigned commit.
 ///
-/// The backstop for branches carried in from another machine or merged with mixed signing state — `post-commit` re-signs what *this* machine commits, this gate is what catches everything else before it leaves.
-/// Best-effort alongside GitHub's "Require signed commits" ruleset, which remains the server-side guarantee.
+/// The backstop for branches from another machine or with mixed signing state, because `post-commit` re-signs only the commits of this machine.
+/// The GitHub ruleset `Require signed commits` enforces the same rule on the server.
 ///
-/// Verification is skipped entirely when signing is not configured on this machine (`~/.gitconfig` omits the block while the 1Password SSH agent is unavailable): enforcing here would refuse every push on a fresh Mac, which is the failure mode graceful degradation exists to prevent.
+/// Without signing configured on this machine, the gate skips verification, so a fresh Mac without the 1Password key service can still push.
 fn signatures(remote: &str, input: &str) -> i32 {
     let configured = realgit::capture(&["config", "--get", "commit.gpgsign"])
         .is_some_and(|v| v.trim() == "true");
@@ -95,10 +91,11 @@ fn signatures(remote: &str, input: &str) -> i32 {
         return 0;
     }
 
-    let mut unsigned: Vec<(String, String)> = Vec::new(); // (sha, summary)
+    let mut unsigned: Vec<(String, String)> = Vec::new(); // sha and summary
     for sha in pushed_shas(input) {
         // Verify what this push introduces: commits reachable from the new tip that no ref on this remote already carries.
-        // Deliberately the same range for a new branch and for a force-push — the narrower-looking `remote..local` is wider after a rebase: it re-verifies the base branch's history, which the remote already accepted under its own ruleset, and that history can be unverifiable here (a forge signs the commits it writes with its own scheme; GitHub uses PGP where this machine signs with SSH).
+        // A new branch and a force push use the same range.
+        // After a rebase, `remote..local` would re-verify base history that a forge signed with its own key.
         let Some(range) =
             realgit::capture(&["rev-list", &sha, "--not", &format!("--remotes={remote}")])
         else {

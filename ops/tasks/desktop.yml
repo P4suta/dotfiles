@@ -10,8 +10,8 @@
     owner: root
     group: root
 
-# The Flatpak and Snap builds cannot expose 1Password's SSH agent.
-# The official Debian packages supply ~/.1password/agent.sock, the SSH signing helper, and the `op` CLI's desktop-app authentication bridge.
+# The Flatpak and Snap builds hide 1Password's SSH socket from the host.
+# The official Debian packages supply `~/.1password/agent.sock`, the SSH signing helper, and desktop authentication for `op`.
 - name: Confirm the native 1Password Debian package supports this architecture
   ansible.builtin.assert:
     that: apt_arch == 'amd64'

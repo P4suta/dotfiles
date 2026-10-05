@@ -1,7 +1,7 @@
 {
-  "revision": "19aa31e5f90901f0e50d714025e873d31d55063817ce1ada02ad9f33c079bbac",
+  "revision": "555bba7f763f6e4bd1b8351dda242b0fff5f6077a57b5795b246391d14c63631",
   "outcome": "implemented",
-  "reason": "Retain demonstrated failure, architectural cause, and affected-family remediation separately from forward planning and dependency-specific reliability techniques; a note or resolution to check more carefully does not count as a remediation, which the staged-tree and empty-commit gates demonstrate.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/systematic-fixes/SKILL.md",
     "guard/tests/empty_commit.rs",

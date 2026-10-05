@@ -1,10 +1,10 @@
-//! dev-reaper — stop idle Docker dev containers and clean up abandoned ones.
+//! Stops idle Docker dev containers and cleans up abandoned ones.
 //!
-//! A container is a "dev container" iff it carries the select label (`com.docker.compose.service=dev`); any container opts out with the keep label (`dev-reaper.keep=true`).
-//! MODE controls how far it goes (`log` -> `stop`/`full`); `log` never touches a container — it only reports what it *would* do.
+//! A dev container carries the label `com.docker.compose.service=dev`, and the label `dev-reaper.keep=true` opts any container out.
+//! `MODE` escalates from `log` through `stop` to `full`, and `log` only reports.
 //!
-//! Idleness is three signals, any one of which vetoes a stop: recent exec/attach activity, a heavyweight build/server process running right now, or an instantaneous CPU sample above the threshold.
-//! Idle time accumulates across runs in a per-container state file, so a container must be continuously quiet for `DEV_REAPER_IDLE_STOP_SECONDS` before it is stopped.
+//! Any of three signals vetoes a stop: recent `exec` or `attach` activity, a running build or server process, or a processor load over the threshold.
+//! A per-container state file accumulates idle time across runs, so a container stops only after `DEV_REAPER_IDLE_STOP_SECONDS` of continuous quiet.
 
 use super::config;
 use super::util::{self, Lock};
@@ -82,7 +82,7 @@ impl DevReaper {
         }
 
         // Safe prune only in full mode: dangling images + bounded build cache.
-        // Named volumes (gradle-cache et al.) are never touched here.
+        // Named volumes such as gradle-cache stay untouched.
         if cfg.mode == "full" {
             let img = docker_capture(&docker, &["image", "prune", "-f"]);
             let bld = docker_capture(
@@ -191,7 +191,7 @@ impl DevConfig {
     }
 }
 
-/// The docker binary, resolved the way the bash version resolved it: `OrbStack` first (the runtime this machine actually runs), Homebrew and system locations after, PATH last.
+/// The docker binary: `OrbStack` first, then Homebrew and system locations, then `PATH`.
 fn resolve_docker() -> Option<PathBuf> {
     if let Some(d) = std::env::var_os("DOCKER") {
         let p = PathBuf::from(d);
@@ -304,8 +304,8 @@ struct InspectLine {
 }
 
 /// Per-container idle accounting, persisted across runs.
-/// Written plainly (`key=value` a line); `name` keeps whatever the container was called, spaces included, because the reader splits on the first `=` only.
-/// The `%q` escapes a bash predecessor could have left behind are decoded on read, so the migration is seamless.
+/// One `key=value` per line, and `name` keeps spaces because the reader splits on the first `=` only.
+/// The reader decodes `%q` escapes from bash-written files.
 #[derive(Default, Clone)]
 struct ContainerState {
     idle_since: i64,
@@ -369,7 +369,7 @@ fn load_activity(cfg: &DevConfig, docker: &Path, now: i64) -> HashMap<String, i6
         .ok()
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(now - cfg.exec_quiet_seconds - 60);
-    // clamp absurd cursors (clock jump / daemon restart) to a sane lookback
+    // Clamp absurd cursors from a clock jump or daemon restart to a sane lookback.
     if cursor > now || now - cursor > 86_400 {
         cursor = now - cfg.exec_quiet_seconds - 60;
     }
@@ -435,13 +435,13 @@ fn reap_one(cfg: &DevConfig, docker: &Path, activity: &HashMap<String, i64>, fid
     };
     st.name.clone_from(&info.name);
 
-    // explicit opt-out label (e.g. dev-reaper.keep=true)
+    // Explicit opt-out label, such as `dev-reaper.keep=true`.
     if info.keep == cfg.keep_val {
         st.idle_since = 0;
         write_state(&path, &st);
         return;
     }
-    // never touch auto-restarting (resident) containers
+    // Skip resident containers that restart on their own.
     if !info.restart.is_empty() && info.restart != "no" {
         return;
     }
@@ -468,16 +468,16 @@ fn reap_one(cfg: &DevConfig, docker: &Path, activity: &HashMap<String, i64>, fid
     let active = if st.last_activity > 0 && now - st.last_activity < cfg.exec_quiet_seconds {
         true
     } else if heavy_process_running(docker, fid, &cfg.heavy_regex) {
-        // signal 2 (veto): a heavyweight build/server process is running
+        // Signal 2 vetoes: a heavy build or server process runs.
         true
     } else {
         match cpu_percent(docker, fid) {
-            // sampling miss: do not advance and do not reset — wait
+            // Sampling miss: keep the counter and wait.
             None => {
                 write_state(&path, &st);
                 return;
             }
-            // signal 3: instantaneous CPU sample
+            // Signal 3: the instantaneous processor load.
             Some(cpu) => cpu >= cfg.threshold_pct,
         }
     };
@@ -530,7 +530,7 @@ fn heavy_process_running(docker: &Path, fid: &str, regex: &str) -> bool {
 }
 
 /// `docker stats --no-stream --format '{{.CPUPerc}}'` → the number without the `%`.
-/// `None` when the sample could not be taken.
+/// `None` when the measurement fails.
 fn cpu_percent(docker: &Path, fid: &str) -> Option<f64> {
     docker_capture(
         docker,
@@ -621,7 +621,7 @@ mod tests {
         assert_eq!(read_state(&p).name, "dev box");
         assert_eq!(read_state(&p).idle_since, 42);
 
-        // A file the bash version wrote (%q escapes) reads back clean.
+        // A bash-written file with `%q` escapes reads back clean.
         std::fs::write(&p, "idle_since=0\nlast_activity=0\nname=my\\-dev\\ box\n").unwrap();
         s = read_state(&p);
         assert_eq!(unquote("my\\-dev"), "my-dev");

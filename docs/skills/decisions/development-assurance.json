@@ -1,7 +1,7 @@
 {
-  "revision": "dcbf69979f8cadea81c947b472561dede1cb1b2ac353aedcc3b7fa0f356dd284",
+  "revision": "108030121b24df05add186535047bfe34421029202468b9cbb32e0a969f9e4bb",
   "outcome": "implemented",
-  "reason": "Require source-bound proofs for supported deterministic contracts and mandatory justified alternatives at genuine semantic or empirical boundaries; keep incomplete stronger claims distinct from scoped completion.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/development-assurance/SKILL.md",
     "dot_agents/skills/formal-assurance/references/scoping.md",

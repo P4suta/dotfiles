@@ -5,22 +5,22 @@ description: >-
   Use for approval actions and protected release gates, not ordinary read-only code review.
 ---
 
-# Explicit Approval Boundaries
+# Explicit approval boundaries
 
-A review recommendation and a submitted approval are separate actions.
-Without strong explicit user permission for the relevant scope, prepare the concrete review and leave the actual approval to the user.
-Requests to review, investigate, configure CI, or make a workflow pass do not by themselves authorize a production approval.
-Do not derive signing, registry publication, or Release publication permission from commit, push, PR, or merge permission.
-An explicit prohibition always limits a broader delegation.
-Keep existing authorization throughout the session and do not ask again for an action that is already clearly authorized.
+A review recommendation and a submitted approval differ.
+Without explicit user permission for the scope, prepare the review and leave the approval to the user.
+A request to review, investigate, configure continuous integration, or make a workflow pass grants no production approval.
+Commit, push, pull request, or merge permission grants no signing, registry publication, or release publication permission.
+An explicit prohibition limits any broader delegation.
+Keep existing authorization for the session, and never ask again for an authorized action.
 
-Before a submitted approval, bind the decision to the exact repository, PR head SHA or workflow run and attempt, environment, and operation.
-For signing or publication, also bind it to the verified candidate identity, version, source SHA, and artifact hashes.
-Check the current target immediately before approving; a changed head, new attempt, or different candidate needs a fresh assessment within the actual authorized scope.
+Bind an approval to the exact repository, pull request head commit or workflow run and attempt, environment, and operation.
+For signing or publication, also bind it to the verified candidate identity, version, source commit, and artifact hashes.
+Check the target immediately before approving, and reassess after a changed head, a new attempt, or a different candidate.
 Read the job that uses the environment, including called workflows, instead of inferring its effects from the environment name.
-A credential-verification job and a production release job can share an environment while authorizing different effects.
+A credential-verification job and a production release job can share an environment and still grant different effects.
 
-Use a short English approval record with these fields:
+Write a short English approval record with these fields:
 
 ```text
 Decision: APPROVE | REQUEST_CHANGES | COMMENT | HOLD
@@ -30,13 +30,13 @@ Evidence: the relevant successful checks and any unresolved finding
 Authorization: the user's explicit permitted operation and applicable limits
 ```
 
-Replace the alternatives with the actual values; do not post an incomplete template.
-State that the assessment is AI-assisted when submitting it through the owner's authenticated account.
-Do not claim a human independently reviewed the change or use another identity to approve the owner's own PR.
-For a GitHub deployment approval, use its comment to record the same concise scope and evidence.
-Write no credentials or private payloads in an approval record.
+Replace each set of alternatives with the actual value, and never post an incomplete template.
+Mark the assessment as AI-assisted when submitting it through the owner's account.
+Never claim an independent human review, and never use another identity to approve the owner's own pull request.
+Record the same scope and evidence in the comment of a GitHub deployment approval.
+Keep credentials and private payloads out of an approval record.
 
-Do not approve while relevant checks fail, blocking findings remain, required evidence is missing, or the operation exceeds the permission.
-Do not use administrator bypass, change reviewers, weaken rulesets, or disable immutability to make an approval possible.
-Complete all permitted preparation and verification before requesting any genuinely missing final authorization.
-An approval does not authorize publishing through another route, removing a protected gate, or reusing a different candidate.
+Never approve while relevant checks fail, blocking findings remain, required evidence goes missing, or the operation exceeds the permission.
+Never use administrator bypass, change reviewers, weaken rulesets, or turn off immutability to make an approval possible.
+Finish all permitted preparation and verification before requesting a missing final authorization.
+An approval grants no other publication route, no removal of a protected gate, and no reuse for a different candidate.

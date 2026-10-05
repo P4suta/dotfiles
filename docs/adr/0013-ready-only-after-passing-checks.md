@@ -1,28 +1,30 @@
-# Mark a PR ready only after every check passes
+# Mark a pull request ready only after every check passes
 
-Status: Accepted.
+Status: accepted.
 
 ## Context
 
 `pr-workflow ready` moved any open draft with an accepted document and a linked issue to review.
-Marking a PR ready starts automatic review, so a draft marked ready while its checks were still running or failing spent review allowance on a head that would change again.
-A PR leaves draft only when every required check passes and all of its work is finished, immediately before merge.
+Marking a pull request ready starts automatic review, so a draft marked ready while its checks still ran or failed spent review allowance on a head that would change again.
+A pull request leaves draft only when every required check passes and all its work has finished, right before merge.
 
 ## Decision
 
-`ready` reads the head commit's check rollup together with the title, body, and state in the same `gh pr view` request.
-A check run counts as passing only when it completed with a `SUCCESS` or `NEUTRAL` conclusion, and a commit status only when its state is `SUCCESS`.
-The transition is refused when the rollup is empty or any entry is unfinished or did not pass, including cancelled and skipped runs.
-The decision is part of the proved transition core: `checks_state` and `plan` carry the requirement, a Kani harness proves the classification and the ready condition, and a counterexample that marks a draft with an unfinished check ready must fail.
+`ready` reads the head commit's check rollup with the title, body, and state in one `gh pr view` request.
+A check run passes only when it completed with a `SUCCESS` or `NEUTRAL` conclusion, and a commit status only when its state reads `SUCCESS`.
+The command refuses the transition when the rollup holds no entries or any entry lacks a pass.
+A cancelled or skipped run lacks a pass.
+The proved transition core holds this decision in `checks_state` and `plan`.
+A Kani harness proves the classification and the ready condition, and a counterexample that marks a draft with an unfinished check ready must fail.
 
-Completion of the remaining work, such as addressed review findings, cannot be observed from GitHub alone, so the pull-request skill keeps that part of the rule as an instruction.
+GitHub shows no sign of finished remaining work, such as addressed review findings, so the pull-request skill keeps that part of the rule as an instruction.
 
 ## Alternatives
 
-Reading `gh pr checks` was rejected because it exits unsuccessfully while checks are pending or failing, which the command runner reports as a GitHub failure rather than a refused transition.
-Accepting skipped runs was rejected because a required workflow that skips does not establish a passing result.
+Reading `gh pr checks` lost because it exits with failure while checks run or fail, which the command runner reports as a GitHub failure instead of a refused transition.
+Accepting skipped runs lost because a required workflow that skips shows no passing result.
 
 ## Consequences
 
-A PR whose checks are still running cannot be marked ready, so the transition waits for the final head's results.
-A repository without any reported check cannot use `ready`; such a destination needs a check before its PRs leave draft.
+A pull request with running checks stays in draft until the final head's results arrive.
+A repository that reports no checks has no way to use `ready`, so such a destination needs a check before its pull requests leave draft.

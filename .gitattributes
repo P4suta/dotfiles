@@ -1,3 +1,2 @@
-# Force LF on text so editing this repo from Windows cannot introduce CRLF.
-# Bash scripts, git hooks, chezmoi templates and config files break on Linux with CRLF, and chezmoi diff would drift forever.
+# Scripts, hooks, and templates break on Linux with Windows line endings.
 * text=auto eol=lf

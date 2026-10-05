@@ -1,7 +1,7 @@
 {
-  "revision": "36ece28a9a6e9f791ada99a3dc021b9767d188001e01270418c7cf5ce72e55b5",
+  "revision": "0e4719719602e5c5a878ff0cf75e0d59ce43c9f03efcfb0ec54c0deae12b0377",
   "outcome": "keep",
-  "reason": "Retain effective-hook discovery, failure propagation, and existing dispatcher preservation; required project commands are shared with CI rather than reimplemented.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/lefthook/SKILL.md"
   ],

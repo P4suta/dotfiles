@@ -1,7 +1,7 @@
 {
-  "revision": "7bb19c9541fea9560172bd79fc1ac338fbf595fb298270fdb7067ad326d5ca5c",
+  "revision": "feb7c47d555aea921a689b79020d04e52f299ff87508554d1547be8ca3dec5b3",
   "outcome": "implemented",
-  "reason": "Implement the full local skill lifecycle with reviewed managed files, pinned gates, and accepted immutable analysis identities; concurrent drafts preserve accepted decisions while new notes and evidence changes still block, ordered installation prevents early adapter activation, and native SDK observation works without PATH, with regression and production proof evidence. Bind tracked decisions to each skill revision: the skill routes a changed skill to the decision draft command, requires a separate size disposition while an entrypoint exceeds the word limit, and lets a reviewed host pass the gate when the current analysis has no unadopted finding, with revision binding, size coverage, adoption, and refusal guidance enforced by regression and production proof evidence.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/skill-operations/SKILL.md",
     "dot_agents/skills/skill-operations/references/operations.md",

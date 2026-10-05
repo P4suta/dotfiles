@@ -1,7 +1,7 @@
 {
-  "revision": "e62a09294e708a4d098464f19a2da31e3b49c1b42fa7e7a34df586b05082edd5",
+  "revision": "e827aac50fc715f81a9800bdfaeed65fff7e9c13e69372a738a99b0ece402d64",
   "outcome": "keep",
-  "reason": "Retain names-only readiness inspection, protected consuming commands, and scoped CI credential delivery separately from signing and resource-operation authority.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/doppler/SKILL.md"
   ],

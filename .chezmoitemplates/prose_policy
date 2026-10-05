@@ -1,16 +1,13 @@
 ## Prose
 
-Line breaks in prose carry meaning; they are not visual.
-Write one sentence per line: break after the CJK full stop `。`, the CJK `！`/`？`, and the Latin `.`, `!`, `?`.
-You may also break after a clause — `、`, `,`, `;`, `:`, an em dash — when that clarifies structure.
-Never wrap prose to a fixed column width, and do not merge a whole paragraph onto one line either: the sentence is the unit.
-A line may be any length.
-Do not use hard line breaks (two trailing spaces or a trailing backslash) inside a paragraph.
+Write one sentence per line.
+Break after the Chinese, Japanese, and Korean full stop `。`, after `！` and `？`, and after the Latin `.`, `!`, and `?`.
+A break after a clause, at `、`, `,`, `;`, `:`, or an em dash, may clarify structure.
+Never wrap prose to a fixed column, and never join a paragraph onto one line.
+Lines have no length limit.
+Never use hard line breaks inside a paragraph.
 A blank line separates paragraphs.
-Rendering is unchanged by all of this, because Markdown joins consecutive lines with a space.
 
-This applies to Markdown files, prose in source-code comments, commit messages, issue and pull-request bodies, and release notes, in English and in Japanese.
-In comments, the sentence is still the unit: consecutive comment lines form a paragraph, and a comment trailing after code stands alone.
-When you edit a paragraph that is wrapped to a column, reflow the whole paragraph to sentence-per-line in the same change.
-
-The point: rendered output stays identical, while a diff reviews one sentence at a time and a line break means something.
+The rule covers English and Japanese in Markdown files, source-code comments, commit messages, issue and pull request bodies, and release notes.
+Consecutive comment lines form a paragraph, and a comment trailing after code stands alone.
+When editing a paragraph wrapped to a column, reflow the whole paragraph in the same change.

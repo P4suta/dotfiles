@@ -1,7 +1,7 @@
 {
-  "revision": "5521745940aa69f88bf67a9296e307036eec6b1b1e2feba93941767319e918d5",
+  "revision": "83e7fdecbaa63b7aabd4c63255f95676eb329087318d49bf7cb3f828167ee2b0",
   "outcome": "keep",
-  "reason": "Retain protected lifecycle and credential-bearing stage separation as the common release contract, with registry and platform mechanics loaded conditionally.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/release-workflow/SKILL.md"
   ],

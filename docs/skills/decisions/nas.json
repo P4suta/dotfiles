@@ -1,7 +1,7 @@
 {
-  "revision": "083f88b717087ee7cc6edf44a05e6c5d9a4d8fb2ff16a7e5fbacd70ee2c9dc28",
+  "revision": "07160fb99e70fbb56c84cb55b36d586e94917af4eff4f52e68bd32294325c6b0",
   "outcome": "implemented",
-  "reason": "Add the requested generic NAS artifact workflow, keeping connection details private and distinguishing local-copy checks, provider upload acknowledgement and independent restore evidence; preserve the last source when remote verification is unavailable.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/nas/SKILL.md",
     "dot_agents/skills/nas/references/synology-drive.md",

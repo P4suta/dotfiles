@@ -5,9 +5,7 @@
 )]
 
 use anyhow::Result;
-use dotfiles_xtask::prose::{
-    self, Bundle, Channel, Client, Exempt, Finding, LegacyLedger, Policy, Scope,
-};
+use dotfiles_xtask::prose::{self, Bundle, Channel, Client, Exempt, Finding, Policy, Scope};
 use serde_json::{Value, json};
 use std::fs;
 use std::io::Write;
@@ -469,70 +467,18 @@ fn finding(path: &str, rule: &str, sentence: &str) -> Finding {
     }
 }
 
-fn policy(exempt: Vec<Exempt>, recorded: &[(&str, &str, &str)]) -> Policy {
-    let mut ledger = LegacyLedger {
-        reason: "Written before the standard.".into(),
-        documents: Default::default(),
-        comments: Default::default(),
-    };
-    for (path, rule, sentence) in recorded {
-        ledger
-            .documents
-            .entry((*path).into())
-            .or_default()
-            .entry((*rule).into())
-            .or_default()
-            .push(prose::fingerprint(sentence));
-    }
-    Policy {
-        exempt,
-        legacy: ledger,
-    }
-}
-
 #[test]
-fn the_ledger_admits_only_the_recorded_sentences() {
-    let judge = |findings: Vec<Finding>, mut policy: Policy| {
+fn every_unexempted_finding_is_refused() {
+    let judge = |findings: Vec<Finding>, exempt: Vec<Exempt>| {
+        let policy = Policy { exempt };
         let used = vec![false; policy.exempt.len()];
-        prose::judge(Scope::Documents, findings, &mut policy, used)
+        prose::judge(Scope::Documents, findings, &policy, used)
     };
     let old = "The index is read by the parser.";
-    let new = "The cache is filled by the loader.";
-    let recorded = [
-        ("a.md", "Google.Passive", old),
-        ("a.md", "Google.Passive", old),
-    ];
-    let two = vec![
-        finding("a.md", "Google.Passive", old),
-        finding("a.md", "Google.Passive", old),
-    ];
-    assert!(judge(two.clone(), policy(vec![], &recorded)).is_empty());
-    let replaced = judge(
-        vec![
-            finding("a.md", "Google.Passive", old),
-            finding("a.md", "Google.Passive", new),
-        ],
-        policy(vec![], &recorded),
-    );
-    assert_eq!(replaced.len(), 2, "{replaced:?}");
-    assert!(
-        replaced[0].contains(new)
-            && !replaced[0].contains(old)
-            && replaced[0].contains("just prose"),
-        "{}",
-        replaced[0]
-    );
-    assert!(
-        replaced[1].contains(&prose::fingerprint(old))
-            && replaced[1].contains("just prose-tighten")
-    );
-    let exceeded = judge(two.clone(), policy(vec![], &recorded[..1]));
-    assert!(exceeded[0].contains(old) && exceeded[0].contains("does not record"));
-    let other_rule = judge(
-        vec![finding("a.md", "Google.We", old)],
-        policy(vec![], &recorded[..1]),
-    );
-    assert_eq!(other_rule.len(), 2, "{other_rule:?}");
+    let refused = judge(vec![finding("a.md", "Google.Passive", old)], vec![]);
+    assert_eq!(refused.len(), 1, "{refused:?}");
+    assert!(refused[0].contains(old) && refused[0].contains("just prose"));
+    assert!(judge(vec![], vec![]).is_empty());
     let exempt = |reason: &str| Exempt {
         scope: Scope::Documents,
         paths: vec!["vendor/".into()],
@@ -542,18 +488,15 @@ fn the_ledger_admits_only_the_recorded_sentences() {
     assert!(
         judge(
             vec![finding("vendor/a.md", "Google.Passive", old)],
-            policy(vec![exempt("Upstream text.")], &[])
+            vec![exempt("Upstream text.")]
         )
         .is_empty()
     );
-    assert_eq!(
-        judge(vec![], policy(vec![exempt("Upstream text.")], &[])).len(),
-        1
-    );
+    assert_eq!(judge(vec![], vec![exempt("Upstream text.")]).len(), 1);
     assert_eq!(
         judge(
             vec![finding("vendor/a.md", "Google.Passive", old)],
-            policy(vec![exempt(" ")], &[])
+            vec![exempt(" ")]
         )
         .len(),
         1
@@ -561,7 +504,7 @@ fn the_ledger_admits_only_the_recorded_sentences() {
     assert_eq!(
         judge(
             vec![finding("vendor.md", "Google.Passive", old)],
-            policy(vec![exempt("Upstream text.")], &[])
+            vec![exempt("Upstream text.")]
         )
         .len(),
         2
@@ -571,18 +514,6 @@ fn the_ledger_admits_only_the_recorded_sentences() {
 #[test]
 fn the_repository_policy_parses_and_names_reasons() -> Result<()> {
     let policy = prose::read_policy(&root())?;
-    assert!(!policy.legacy.reason.trim().is_empty());
-    for entries in [&policy.legacy.documents, &policy.legacy.comments] {
-        for rules in entries.values() {
-            for fingerprints in rules.values() {
-                assert!(
-                    fingerprints
-                        .iter()
-                        .all(|fingerprint| fingerprint.len() == 16)
-                );
-            }
-        }
-    }
     assert!(
         policy
             .exempt
@@ -677,7 +608,7 @@ fn git(directory: &Path, arguments: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// A repository holding the pinned configuration, a policy without legacy entries, and the given files.
+/// A repository holding the pinned configuration, its exemptions, and the given files.
 fn repository(files: &[(&str, &str)]) -> Result<tempfile::TempDir> {
     let directory = tempfile::tempdir()?;
     copy_tree(
@@ -687,7 +618,7 @@ fn repository(files: &[(&str, &str)]) -> Result<tempfile::TempDir> {
     fs::create_dir_all(directory.path().join("policy"))?;
     fs::write(
         directory.path().join("policy/prose.toml"),
-        "[[exempt]]\nscope = \"documents\"\npaths = [\"dot_config/prose/styles/\"]\nreason = \"Vendored Vale packages keep their upstream text.\"\n\n[[exempt]]\nscope = \"comments\"\npaths = [\"dot_config/prose/\"]\nreason = \"The pinned configuration is data.\"\n\n[legacy]\nreason = \"Prose that predates the standard.\"\n",
+        "[[exempt]]\nscope = \"documents\"\npaths = [\"dot_config/prose/styles/\"]\nreason = \"Vendored Vale packages keep their upstream text.\"\n\n[[exempt]]\nscope = \"comments\"\npaths = [\"dot_config/prose/\"]\nreason = \"The pinned configuration is data.\"\n",
     )?;
     for (path, text) in files {
         let path = directory.path().join(path);
@@ -744,38 +675,6 @@ fn the_document_gate_refuses_new_prose_in_a_repository() -> Result<()> {
         error.contains("guide.md:3:1: Dotfiles.Attribution")
             && error.contains(ATTRIBUTED)
             && error.contains("just prose"),
-        "{error}"
-    );
-    let recorded = refused.path().join("policy/prose.toml");
-    let mut policy = fs::read_to_string(&recorded)?;
-    let fingerprints: Vec<String> = prose::findings(refused.path(), Scope::Documents, &bundle)?
-        .iter()
-        .map(|finding| {
-            format!(
-                "\"{}\" = [\"{}\"]",
-                finding.rule,
-                prose::fingerprint(&finding.sentence)
-            )
-        })
-        .collect();
-    policy.push_str(&format!(
-        "\n[legacy.documents.\"guide.md\"]\n{}\n",
-        fingerprints.join("\n")
-    ));
-    fs::write(&recorded, policy)?;
-    prose::repository(refused.path(), Scope::Documents, &bundle)?;
-    let replacement = "As the owner asked, the parser keeps every edit.";
-    fs::write(
-        refused.path().join("guide.md"),
-        format!("# Parser\n\n{replacement}\n"),
-    )?;
-    let error = format!(
-        "{:#}",
-        prose::repository(refused.path(), Scope::Documents, &bundle)
-            .expect_err("a replaced legacy sentence")
-    );
-    assert!(
-        error.contains(replacement) && error.contains("Dotfiles.Attribution"),
         "{error}"
     );
     let accepted = repository(&[("guide.md", &format!("# Parser\n\n{COMPLIANT}\n"))])?;

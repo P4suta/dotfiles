@@ -1,6 +1,6 @@
 //! Every external program xtask runs, with where each host gets it.
 //!
-//! Spawning a process anywhere else is a lint error (see `clippy.toml`), so a new dependency on a host tool cannot appear without a declared provision.
+//! `clippy.toml` rejects spawning a process anywhere else, so every new dependency on a host tool needs a declared provision.
 
 use crate::profile_rules::Profile;
 use crate::setup::Step;
@@ -15,7 +15,7 @@ pub enum Provision {
     Host,
     /// Installed by this setup step before any later step relies on it.
     Setup(Step),
-    /// An application the owner installs outside this repository; callers probe for it before use.
+    /// A program the owner installs outside this repository, which callers probe for before use.
     Owner,
 }
 
@@ -378,7 +378,7 @@ impl Tool {
         }
     }
 
-    /// The package list a profile installs this tool from, as a platform data pointer and entry, for tools a setup step or an installed entry point requires.
+    /// For a tool that a setup step or an installed entry point requires, the platform data pointer and entry of the package list that installs it.
     pub fn package(self, profile: Profile) -> Option<(&'static str, &'static str)> {
         let pointer = match profile {
             Profile::Mac => "/brew/formulae",
@@ -390,7 +390,7 @@ impl Tool {
             Self::Lefthook => Some((pointer, "lefthook")),
             Self::Starship => Some((pointer, "starship")),
             Self::Zoxide => Some((pointer, "zoxide")),
-            // mise already installs the Doppler CLI from its release with a checksum on the Mac, and runs the same on Windows.
+            // mise already installs the Doppler command-line tool from its checksummed release on the Mac and Windows.
             Self::Doppler => Some(match profile {
                 Profile::Linux => (pointer, "doppler"),
                 _ => ("/tools/common", "doppler"),
@@ -408,7 +408,8 @@ impl Tool {
         command
     }
 
-    /// The only place xtask creates a process for a named program; a hook gate keeps the hook's repository to inspect the commit in progress.
+    /// The only place xtask creates a process for a named program.
+    /// A hook gate keeps the hook's repository so it can inspect the commit in progress.
     #[allow(clippy::disallowed_methods)]
     pub fn hook_command(self) -> Command {
         Command::new(self.program())

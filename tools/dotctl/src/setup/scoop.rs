@@ -27,7 +27,7 @@ pub fn run(options: &Options) -> Result<i32> {
         }
     }
 
-    // Public Scoop repositories must update without the interactive 1Password SSH agent.
+    // Public Scoop repositories must update without interactive 1Password SSH authentication.
     // Scoop commands ignore the machine-wide HTTPS-to-SSH rewrite, and these repositories use HTTPS remotes.
     configure_public_scoop_https(&root.join("apps").join("scoop").join("current"))?;
     for bucket in &options.buckets {
@@ -113,7 +113,7 @@ fn configure_public_scoop_https(repo: &Path) -> Result<()> {
         "--get",
         "remote.origin.url",
     ]))?;
-    // `git config --get` exits 1 when the key is unset: no origin, nothing to rewrite.
+    // `git config --get` exits 1 for an unset key, which means no origin to rewrite.
     if out.code == 1 {
         return Ok(());
     }

@@ -1,7 +1,7 @@
 {
-  "revision": "790850af891cfeecaf31b6f665f0c9e73885323dd60f737aa758b371edb716b6",
+  "revision": "b56d0f2e645c58fa7985fdbd5916fd6bdc4f9da659f448564a18142c4ad4d309",
   "outcome": "keep",
-  "reason": "Retain upstream-compatible tested dependency updates, shared presets, locks, and immutable pins instead of embedding a stale tool list in skill instructions.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/renovate/SKILL.md"
   ],

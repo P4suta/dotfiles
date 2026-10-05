@@ -1,13 +1,10 @@
 # shellcheck shell=sh
-# Select the SSH agent that holds the commit-signing key.
-#
-# Local Mac session : the 1Password app publishes a stable socket inside its signed app-group container.
-# That path is the macOS counterpart of ~/.1password/agent.sock on Linux.
-# Remote SSH session: SSH_CONNECTION is set, so sshd's forwarded socket is already authoritative and must not be overwritten.
-# Herdr pane        : herdr-agent's socket, but only while `herdr-agent ready` says it holds keys, so an unloaded or locked agent falls back to 1Password.
-# GIT_SSH_COMMAND points git's ssh at it too, because ~/.ssh/config pins IdentityAgent to 1Password for every host and beats SSH_AUTH_SOCK.
-#
-# Enable it once in 1Password: Settings -> Developer -> Use the SSH agent.
+# Select the socket that holds the commit-signing key.
+# A local session uses the 1Password socket in its app-group container.
+# A remote SSH session keeps the socket that sshd forwards.
+# A Herdr pane uses the Herdr socket while `herdr-agent ready` reports loaded keys, and falls back to 1Password otherwise.
+# GIT_SSH_COMMAND also points Git there, because ~/.ssh/config pins IdentityAgent to 1Password for every host.
+# Turn on the 1Password setting under Developer once.
 onepassword_agent="${HOME}/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
 herdr_agent=""
 if [ -n "${HERDR_ENV:-}" ] && [ -z "${SSH_CONNECTION:-}" ] && [ -x "${HOME}/.local/bin/herdr-agent" ]; then

@@ -1,7 +1,7 @@
 {
-  "revision": "4ae1cc4413522f51c949006b532161955e6f04522e8d312fd7d068e9437ac26f",
+  "revision": "90088b073f6712698d364b5201a6f69e1b08811bb0917bceb6d46f96be717d62",
   "outcome": "keep",
-  "reason": "Retain a small discovery route to the project-owned current command manual; stable job identities and snapshot execution differ from broader synchronization policy.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/domyjob/SKILL.md"
   ],

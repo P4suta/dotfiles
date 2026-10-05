@@ -33,8 +33,5 @@ doctor:
 prose:
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml --bin prose -- --source . repository --scope documents --scope comments
 
-prose-tighten:
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml --bin prose -- --source . tighten --scope documents --scope comments
-
 ops-check:
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- ops-check

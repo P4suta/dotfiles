@@ -1,6 +1,5 @@
 use crate::prose_rules::{
-    Ledger, Owner, Reply, Standard, exemption_valid, ledger, occurrences, reply,
-    repository_standard, rewritten_by_this_hook, tightened,
+    Owner, Reply, Standard, exemption_valid, reply, repository_standard, rewritten_by_this_hook,
 };
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
@@ -1059,7 +1058,6 @@ pub fn check_comments(bundle: &Bundle, root: &Path, paths: &[String]) -> Result<
 pub struct Policy {
     #[serde(default)]
     pub exempt: Vec<Exempt>,
-    pub legacy: LegacyLedger,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1070,33 +1068,6 @@ pub struct Exempt {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<String>,
     pub reason: String,
-}
-
-/// Legacy findings per file and rule, each named by the fingerprint of its sentence.
-pub type Fingerprints = BTreeMap<String, BTreeMap<String, Vec<String>>>;
-
-/// A short digest of the sentence a finding reports, which an edited sentence no longer matches.
-pub fn fingerprint(sentence: &str) -> String {
-    hex(&Sha256::digest(sentence.trim().as_bytes()))[..16].to_owned()
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct LegacyLedger {
-    pub reason: String,
-    #[serde(default)]
-    pub documents: Fingerprints,
-    #[serde(default)]
-    pub comments: Fingerprints,
-}
-
-impl LegacyLedger {
-    fn entries(&mut self, scope: Scope) -> &mut Fingerprints {
-        match scope {
-            Scope::Documents => &mut self.documents,
-            Scope::Comments => &mut self.comments,
-        }
-    }
 }
 
 fn matches_path(pattern: &str, path: &str) -> bool {
@@ -1163,7 +1134,7 @@ fn documents(root: &Path, files: &[String]) -> Result<BTreeSet<String>> {
         .collect())
 }
 
-/// Every finding in the repository for one scope before any exemption or ledger entry applies.
+/// Every finding in the repository for one scope before any exemption applies.
 fn scan(
     root: &Path,
     scope: Scope,
@@ -1219,25 +1190,6 @@ fn scan(
     }
 }
 
-/// The ledger entries that would cover `findings`, each list sorted.
-pub fn record(findings: &[Finding]) -> Fingerprints {
-    let mut entries = Fingerprints::new();
-    for finding in findings {
-        entries
-            .entry(finding.path.clone())
-            .or_default()
-            .entry(finding.rule.clone())
-            .or_default()
-            .push(fingerprint(&finding.sentence));
-    }
-    for rules in entries.values_mut() {
-        for list in rules.values_mut() {
-            list.sort();
-        }
-    }
-    entries
-}
-
 /// Findings that no rule-scoped exemption covers.
 fn unexempted(
     scope: Scope,
@@ -1266,11 +1218,11 @@ fn unexempted(
         .collect()
 }
 
-/// Judges findings with the exemptions and the legacy ledger and lists every refusal with its next action.
+/// Judges findings with the exemptions and lists every refusal with its next action.
 pub fn judge(
     scope: Scope,
     findings: Vec<Finding>,
-    policy: &mut Policy,
+    policy: &Policy,
     mut used: Vec<bool>,
 ) -> Vec<String> {
     let findings = unexempted(scope, findings, policy, &mut used);
@@ -1283,69 +1235,23 @@ pub fn judge(
             ));
         }
     }
-    if policy.legacy.reason.trim().is_empty() {
+    if !findings.is_empty() {
         refusals.push(format!(
-            "{POLICY}: the legacy ledger needs a reason; state why the counted prose remains"
+            "{}
+
+Rewrite these sentences and rerun `just prose`.",
+            render(&findings)
         ));
-    }
-    let found = record(&findings);
-    let allowed = policy.legacy.entries(scope).clone();
-    let keys: BTreeSet<(String, String)> = found
-        .iter()
-        .chain(&allowed)
-        .flat_map(|(path, rules)| rules.keys().map(|rule| (path.clone(), rule.clone())))
-        .collect();
-    let none = Vec::new();
-    for (path, rule) in keys {
-        let lookup = |entries: &Fingerprints| -> Vec<String> {
-            entries
-                .get(&path)
-                .and_then(|rules| rules.get(&rule))
-                .unwrap_or(&none)
-                .clone()
-        };
-        let (present, recorded) = (lookup(&found), lookup(&allowed));
-        let fingerprints: BTreeSet<&String> = present.iter().chain(&recorded).collect();
-        let mut new = Vec::new();
-        let mut stale = Vec::new();
-        for key in fingerprints {
-            match ledger(occurrences(&present, key), occurrences(&recorded, key)) {
-                Ledger::Within => {}
-                Ledger::Exceeded => new.push(key.clone()),
-                Ledger::Stale => stale.push(key.clone()),
-            }
-        }
-        if !new.is_empty() {
-            let listed: Vec<Finding> = findings
-                .iter()
-                .filter(|finding| {
-                    finding.path == path
-                        && finding.rule == rule
-                        && new.contains(&fingerprint(&finding.sentence))
-                })
-                .cloned()
-                .collect();
-            refusals.push(format!(
-                "{}\n{path}: the legacy ledger does not record these {rule} findings; rewrite the sentences above and rerun `just prose`",
-                render(&listed)
-            ));
-        }
-        if !stale.is_empty() {
-            refusals.push(format!(
-                "{path}: the legacy ledger records {rule} findings that no longer occur ({}); run `just prose-tighten` to remove them",
-                stale.join(", ")
-            ));
-        }
     }
     refusals
 }
 
 /// Checks the repository for one scope with `policy/prose.toml`.
 pub fn repository(root: &Path, scope: Scope, bundle: &Bundle) -> Result<()> {
-    let mut policy = read_policy(root)?;
+    let policy = read_policy(root)?;
     let mut used = vec![false; policy.exempt.len()];
     let findings = scan(root, scope, bundle, &policy, &mut used)?;
-    let refusals = judge(scope, findings, &mut policy, used);
+    let refusals = judge(scope, findings, &policy, used);
     ensure!(
         refusals.is_empty(),
         "the {scope:?} prose check failed:\n\n{}",
@@ -1361,34 +1267,6 @@ pub fn findings(root: &Path, scope: Scope, bundle: &Bundle) -> Result<Vec<Findin
     let mut used = vec![false; policy.exempt.len()];
     let findings = scan(root, scope, bundle, &policy, &mut used)?;
     Ok(unexempted(scope, findings, &policy, &mut used))
-}
-
-/// Removes ledger entries whose findings no longer occur, and never adds one.
-pub fn tighten(root: &Path, scope: Scope, bundle: &Bundle) -> Result<()> {
-    let found = record(&findings(root, scope, bundle)?);
-    let mut policy = read_policy(root)?;
-    let ledger = policy.legacy.entries(scope);
-    for (path, rules) in ledger.iter_mut() {
-        for (rule, recorded) in rules.iter_mut() {
-            let present = found
-                .get(path)
-                .and_then(|rules| rules.get(rule))
-                .cloned()
-                .unwrap_or_default();
-            let keys: BTreeSet<String> = recorded.iter().cloned().collect();
-            let mut kept = Vec::new();
-            for key in keys {
-                let count = tightened(occurrences(recorded, &key), occurrences(&present, &key));
-                kept.extend(std::iter::repeat_n(key, count as usize));
-            }
-            *recorded = kept;
-        }
-        rules.retain(|_, recorded| !recorded.is_empty());
-    }
-    ledger.retain(|_, rules| !rules.is_empty());
-    fs::write(root.join(POLICY), toml::to_string(&policy)?)?;
-    println!("Tightened the {scope:?} legacy ledger in {POLICY}");
-    Ok(())
 }
 
 /// The final reply text from a Stop hook input, falling back to the transcript.

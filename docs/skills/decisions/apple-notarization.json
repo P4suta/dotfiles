@@ -1,7 +1,7 @@
 {
-  "revision": "48bdf2eb4bedb5f3596deff3a297f770a5b25266aca6af0df4de1aa91a94af53",
+  "revision": "c8584a57e2fce8e66fe3ab1ab62ba830f8ef477698d41da7dd41d4b154ded2ef",
   "outcome": "keep",
-  "reason": "Retain the exact submitted-artifact and resumable-receipt workflow separately from certificate setup and packaging, because acceptance, stapling, and publication are distinct transitions.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/apple-notarization/SKILL.md"
   ],

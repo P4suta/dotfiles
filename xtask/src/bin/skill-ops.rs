@@ -141,7 +141,7 @@ fn pending(
             .as_ref()
             .map_or(root, |item| item.evidence_root.as_path()),
     };
-    // A newer draft keeps loss detection, and it completes alone when every finding is adopted.
+    // A newer draft keeps loss detection and completes alone once the host adopts every finding.
     if draft.is_some()
         && !ops::runtime_pending(Runtime {
             report: draft.as_ref(),

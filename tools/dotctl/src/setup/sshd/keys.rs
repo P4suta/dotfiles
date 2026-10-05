@@ -1,9 +1,7 @@
-//! Writing `administrators_authorized_keys`, and locking it down.
+//! Writes `administrators_authorized_keys` and locks it down.
 //!
-//! Windows' stock `sshd_config` ends with `Match Group administrators`,
-//! which redirects every admin account's lookup to this file:
-//! `~/.ssh/authorized_keys` is simply never read for those accounts.
-//! sshd's StrictModes then refuses the file unless SYSTEM and the Administrators group are the only principals on it, and says so nowhere the client can see - the login just fails.
+//! Windows' stock `sshd_config` ends with `Match Group administrators`, which makes sshd read this file instead of `~/.ssh/authorized_keys` for every administrator account.
+//! StrictModes refuses the file unless SYSTEM and the Administrators group hold the only permissions on it, and the client gets only a failed login.
 
 use std::path::Path;
 
@@ -13,7 +11,7 @@ use crate::setup::sshd::config;
 use crate::{env, proc};
 
 /// `NT AUTHORITY\SYSTEM` and `BUILTIN\Administrators`.
-/// SIDs rather than names, which a renamed or localized group would break.
+/// Security identifiers, because a renamed or localized group breaks names.
 const SYSTEM_SID: &str = "*S-1-5-18";
 const ADMINISTRATORS_SID: &str = "*S-1-5-32-544";
 
@@ -27,7 +25,7 @@ pub fn authorize(ssh_dir: &Path, key: &str, sshd_config: &str) -> Result<()> {
         eprintln!("  {}", path.display());
     }
 
-    // Only a missing file starts empty; an unreadable one must not be replaced with just this key.
+    // Only a missing file starts empty, so an unreadable file never loses its other keys.
     let existing = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -47,9 +45,9 @@ pub fn authorize(ssh_dir: &Path, key: &str, sshd_config: &str) -> Result<()> {
     restrict(&path)
 }
 
-/// Keeps every other key and puts ours at the end.
+/// Keeps every other key and appends this one.
 ///
-/// Keys are compared on type and base64 only: the comment field changes whenever the key is renamed in 1Password, and comparing whole lines would pile up duplicates of the same key on every rename.
+/// Compares only type and base64, because a rename in 1Password changes the comment field, and whole-line comparison would add a duplicate on each rename.
 fn merge(existing: &str, key: &str) -> String {
     let body = material(key);
     let mut lines: Vec<&str> = existing
@@ -70,8 +68,8 @@ fn material(line: &str) -> String {
         .join(" ")
 }
 
-/// `/inheritance:r` drops the inherited ACEs and `/grant:r` replaces rather than adds.
-/// The owner has to be an administrator as well, and that is a second invocation: icacls rejects `/setowner` on a command line that also carries `/grant`, with "Invalid parameter" and exit 87.
+/// `/inheritance:r` drops the inherited access entries, and `/grant:r` replaces instead of adding.
+/// Setting an administrator as owner needs a second call, because icacls rejects `/setowner` together with `/grant` with exit 87.
 fn restrict(path: &Path) -> Result<()> {
     let mut acl = env::command("icacls.exe");
     acl.arg(path)
@@ -109,7 +107,7 @@ mod tests {
         assert_eq!(merge(&once, KEY), once);
     }
 
-    /// The same key with a different comment is the same key, not a second one: 1Password renames change only the comment.
+    /// The same key with a different comment stays one key, because 1Password renames change only the comment.
     #[test]
     fn a_renamed_key_does_not_duplicate() {
         let existing = format!("{KEY} old-name\r\n");

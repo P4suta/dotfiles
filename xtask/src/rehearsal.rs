@@ -1,7 +1,8 @@
-//! Native application rehearsal on a disposable host.
+//! Native `profile apply` rehearsal on a disposable host.
 //!
-//! The profile gate renders and applies files in owned fixtures, which cannot exercise setup scripts, native verification, rollback, or the takeover of a machine that earlier repositories provisioned.
-//! This runs the real `profile apply` against the host's own home three times, the second rerunning every script, after seeding earlier provisioning, so those paths fail in CI instead of on an owner's machine.
+//! The profile gate renders and applies files in owned fixtures and never exercises setup scripts, native verification, rollback, or the takeover of a machine that earlier repositories provisioned.
+//! This module seeds earlier provisioning and runs the real `profile apply` on the host's own home three times, the second rerunning every script.
+//! Those paths then fail in CI instead of on an owner's machine.
 
 use crate::profile_rules::Profile;
 use crate::profiles::{NativeAction, forget_script_runs, native_profile, operate};
@@ -11,7 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// A setup script the rehearsal host cannot run, with the reason recorded in the generated configuration.
+/// A setup script the rehearsal host skips, with the reason recorded in the generated configuration.
 struct Omitted {
     script: &'static str,
     reason: &'static str,
@@ -53,7 +54,7 @@ fn toml_string(value: &str) -> String {
 }
 
 /// The machine-local configuration for the rehearsal: an anonymous identity, no secrets, and one representative entry in each provisioning list.
-/// Lists keep entries that later steps invoke, and maps are emptied key by key because configuration data merges into maps rather than replacing them.
+/// Lists keep entries that later steps invoke, and the reduction empties maps key by key because configuration data merges into maps rather than replacing them.
 pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<String> {
     let data: serde_json::Value =
         serde_json::from_slice(&fs::read(root.join(".chezmoidata.json"))?)?;
@@ -76,7 +77,7 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
             toml_string(skip.reason)
         ));
     }
-    // The scripts that will run decide which packages must survive the reduction, so a step's declared requirements cannot drift from the rehearsal data.
+    // The scripts to run decide which packages survive the reduction, so the rehearsal data always matches each step's declared requirements.
     let kept = required_packages(root, profile, home, &identity)?;
     let keep = |pointer: &str| -> Vec<String> {
         kept.iter()
@@ -237,7 +238,8 @@ pub fn run(root: &Path, disposable_host: bool) -> Result<()> {
     seed_foreign_helpers(&home, scope.path())?;
     let preserved = seed_history(&home)?;
     let state = scope.path().join("state");
-    // The middle round runs every script again on the host the first round provisioned, which is how an earlier repository's machine is taken over and how a changed script reruns; the last round changes nothing.
+    // The middle round reruns every script on the host the first round provisioned, as `profile apply` does when it takes over an earlier repository's machine or a script changes.
+    // The last round changes nothing.
     for (round, rerun_scripts) in [
         ("first", false),
         ("reprovisioning", true),

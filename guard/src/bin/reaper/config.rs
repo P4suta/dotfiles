@@ -1,11 +1,11 @@
-//! Config files for the reapers: `KEY=VALUE` lines, sourced the way the bash versions sourced them (`set -a; . file`) — the file overrides the environment, and built-in defaults apply to whatever is still unset.
-//! launchd has no `EnvironmentFile` directive, which is why the agents read their knobs themselves and a config edit takes effect on the next run with no launchctl reload.
+//! Reaper configuration files hold `KEY=VALUE` lines with the semantics of `set -a; . file`: the file overrides the environment, and built-in defaults fill the rest.
+//! The jobs read the files on each run, so an edit takes effect without a launchctl reload.
 
 use std::collections::HashMap;
 use std::path::Path;
 
 /// Parse a config file into a map.
-/// Comments (`#`) and blank lines are skipped; a line without `=` is skipped too — a config file is not a place to fail an agent over.
+/// The parser skips comments, blank lines, and lines without `=`.
 pub fn load(path: &Path) -> HashMap<String, String> {
     let mut out = HashMap::new();
     let Ok(text) = std::fs::read_to_string(path) else {
@@ -23,7 +23,7 @@ pub fn load(path: &Path) -> HashMap<String, String> {
     out
 }
 
-/// Look a key up with the sourcing semantics: file first, then environment, then the default — with `$VAR`/`${VAR}` expanded either way.
+/// Looks a key up in the file, then the environment, then the default, and expands `$VAR` and `${VAR}` in the result.
 pub fn get(file: &HashMap<String, String>, key: &str, default: &str) -> String {
     let raw = file
         .get(key)
@@ -34,7 +34,7 @@ pub fn get(file: &HashMap<String, String>, key: &str, default: &str) -> String {
 }
 
 /// Expand `$NAME` and `${NAME}` from the environment, the way a sourced shell file would.
-/// These config files were written for `set -a; . file` semantics — `SESSION_REAPER_USER_PATH_REGEX="^(${HOME}|…)"` only ever worked because the shell expanded it at source time — so a reader that does not expand quietly changes what the config means.
+/// Existing values such as `SESSION_REAPER_USER_PATH_REGEX="^(${HOME}|…)"` depend on this expansion.
 fn expand(value: &str) -> String {
     expand_with(value, |name| std::env::var(name).ok())
 }

@@ -143,7 +143,7 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
         std::io::stdin().read_to_end(&mut input)?;
     }
     let staged = matches!(hook, Hook::PreCommit).then(|| staged_tree(&native));
-    // Every host runs the same dotguard gates, so a policy holds identically on the Mac, Linux, and Windows.
+    // Every host runs the same dotguard gates.
     if matches!(
         hook,
         Hook::PreCommit | Hook::CommitMsg | Hook::PrePush | Hook::PostCommit
@@ -208,7 +208,7 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     Ok(())
 }
 
-/// Git records the index as it stands after the pre-commit hook, so a gate that changed what is staged refuses the commit.
+/// Git commits the index that the pre-commit hook leaves, so a gate that changed the staged tree refuses the commit.
 pub fn preserve_staged_tree(before: Option<&str>, after: Option<&str>) -> Result<()> {
     ensure!(
         before == after,

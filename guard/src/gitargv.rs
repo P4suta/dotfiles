@@ -2,19 +2,18 @@
 //!
 //! Two families of rule live here:
 //!
-//! * **force** — operations that throw away committed history or uncommitted work with no undo.
+//! * **force**: operations that discard committed history or uncommitted work with no undo.
 //!   `push --force`, `reset --hard`, `clean -f`, `branch -D`, `stash drop`, `reflog expire`, `filter-branch`.
-//! * **no-verify** — operations that would leave signing or hook enforcement switched off for one command: `--no-verify`, `--no-gpg-sign`, and the `-c key=value` spellings of the same thing.
+//! * **no-verify**: operations that switch off signing or hook enforcement for one command, such as `--no-verify`, `--no-gpg-sign`, and their `-c key=value` forms.
 //!
-//! This layer is *convenience*, not the guarantee.
-//! It only sees commands whose `git` resolved through PATH, which excludes an IDE calling `/opt/homebrew/bin/git` directly, a shell alias expanding to something else, and anything running with a different PATH.
-//! The guarantee for the remote side is `dotguard pre-push`, which runs from `core.hooksPath` and therefore sees every push regardless of how git was invoked.
-//! This layer delivers the refusal *before* the damage rather than after, with a hint that names the non-destructive command that fits the intent.
+//! This layer only handles commands that resolve `git` through `PATH`, so a direct path or a different `PATH` bypasses it.
+//! `dotguard pre-push` runs from `core.hooksPath` and enforces the rule for every push.
+//! This layer refuses before the damage, with a hint that names a safe command for the intent.
 //!
-//! Rules NOT here, deliberately:
-//! * `rebase`, `commit --amend` — rewriting unpushed history is ordinary work, and pre-push catches the case where it was not unpushed.
-//! * `restore` / `checkout -- <path>` — destroys uncommitted changes with no flag to key on, so refusing it means refusing the command outright.
-//! * `rm -f` — common in scripts, and what it destroys is reachable from the index in every case that matters.
+//! Rules left out:
+//! * `rebase` and `commit --amend`: rewriting unpushed history counts as ordinary work, and pre-push catches pushed history.
+//! * `restore` and `checkout -- <path>`: no flag marks the destruction, so a rule would refuse the whole command.
+//! * `rm -f`: common in scripts, and the index still holds what it removes.
 
 use crate::bypass::Category;
 use crate::realgit;
@@ -24,7 +23,7 @@ pub struct Denial {
     /// One line, for the audit log.
     pub reason: String,
     /// What to do instead.
-    /// Shown to the human, may be several lines.
+    /// The hint for the human, which can span lines.
     pub hint: String,
 }
 
@@ -39,8 +38,8 @@ impl Denial {
 }
 
 /// Global options that consume the following argv element as their value.
-/// Getting this list wrong means mistaking a value for the subcommand, so it is spelled out rather than guessed at.
-/// `--exec-path` is absent on purpose: its value is optional, and the valueless form just prints a path and exits.
+/// A wrong entry would mistake a value for the subcommand, so the list names each option.
+/// The list omits `--exec-path`, because its value stays optional and the bare form prints a path and exits.
 const GLOBAL_TAKES_VALUE: [&str; 8] = [
     "-c",
     "-C",
@@ -52,8 +51,8 @@ const GLOBAL_TAKES_VALUE: [&str; 8] = [
     "--attr-source",
 ];
 
-/// Subcommands we recognise as git's own.
-/// Used only to decide whether a token is worth an alias lookup — being incomplete costs one `git config` call, not correctness.
+/// Known git subcommands.
+/// A missing entry costs one `git config` lookup, never correctness.
 const BUILTINS: [&str; 46] = [
     "add",
     "am",
@@ -105,10 +104,10 @@ const BUILTINS: [&str; 46] = [
 
 /// Decide whether this git invocation may proceed.
 ///
-/// `argv` is everything after the program name, exactly as the wrapper received it.
+/// `argv` holds every argument after the program name, as the wrapper received it.
 pub fn inspect(argv: &[String]) -> Option<Denial> {
     let mut i = 0;
-    // `-c` settings are collected rather than judged on sight: whether one of them is a policy override depends on the subcommand, which we have not reached yet.
+    // Collect `-c` settings first, because the subcommand decides whether one overrides policy.
     let mut settings: Vec<String> = Vec::new();
 
     while i < argv.len() {
@@ -131,7 +130,7 @@ pub fn inspect(argv: &[String]) -> Option<Denial> {
                 settings.push(rest.to_owned());
             }
         } else if arg.starts_with("--config-env") {
-            // `--config-env=key=ENVVAR` hides the value in the environment, so the key alone has to decide — recorded as `key=` to mean "set to something we cannot see".
+            // `--config-env=key=ENVVAR` hides the value in the environment, so the key decides alone, recorded as `key=` for an unseen value.
             let setting = arg.strip_prefix("--config-env=").map_or_else(
                 || {
                     i += 1;
@@ -163,13 +162,13 @@ pub fn inspect(argv: &[String]) -> Option<Denial> {
         return Some(denial);
     }
 
-    // An alias could expand to anything, including `push --force`.
-    // Resolving every token would put a `git config` call in front of `git status`, so we only ask about tokens git itself does not define.
+    // An `alias.*` entry can expand to anything, including `push --force`.
+    // Resolving every token would put a `git config` call in front of `git status`, so only tokens unknown to git get a lookup.
     if !BUILTINS.contains(&sub.as_str())
         && let Some(expansion) = realgit::capture(&["config", "--get", &format!("alias.{sub}")])
     {
         let words: Vec<String> = expansion.split_whitespace().map(str::to_owned).collect();
-        // `!sh -c ...` aliases run an arbitrary shell; we cannot reason about those and do not pretend to.
+        // `!sh -c ...` aliases run an arbitrary shell, beyond the reach of this policy.
         if let Some(first) = words.first()
             && !first.starts_with('!')
             && let Some(denial) = subcommand(first, &words[1..])
@@ -187,8 +186,7 @@ pub fn inspect(argv: &[String]) -> Option<Denial> {
 
 /// The per-subcommand rules.
 ///
-/// One long `match` on purpose: every arm is a rule, each rule is three lines of condition and a paragraph of explanation, and the table reads as the policy document it is.
-/// Splitting it into a dozen two-line functions would scatter the policy without shortening it.
+/// Each arm of the `match` states one rule, so the table reads as the policy.
 #[allow(clippy::too_many_lines)]
 fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
     let flags = flags_of(args);
@@ -393,7 +391,7 @@ fn subcommand(sub: &str, args: &[String]) -> Option<Denial> {
 }
 
 /// Subcommands that actually run a hook.
-/// Nothing else can be affected by `core.hooksPath`, which is the whole reason this list exists — see `config_override`.
+/// `core.hooksPath` affects only these, as `config_override` relies on.
 const RUNS_HOOKS: [&str; 12] = [
     "commit",
     "merge",
@@ -409,7 +407,7 @@ const RUNS_HOOKS: [&str; 12] = [
     "clone",
 ];
 
-/// Subcommands that create an object which would be signed.
+/// Subcommands that create a signable object.
 const CREATES_SIGNED_OBJECTS: [&str; 7] = [
     "commit",
     "tag",
@@ -430,29 +428,27 @@ fn is_policy_key(key: &str) -> bool {
 
 /// `-c key=value` overrides that would change signing or hooks for one command.
 ///
-/// Scoped to the subcommand, and that scoping is the whole point rather than a refinement.
-/// Editors, agents and status-line tools routinely run their own read-only queries as
+/// The check depends on the subcommand.
+/// Editors, assistants, and status-line tools run read-only queries such as
 ///
 /// ```text
 /// git -c core.hooksPath=/dev/null -c core.askPass= … rev-parse HEAD
 /// ```
 ///
-/// precisely so that *their* polling does not fire *your* hooks — which is correct, considerate behaviour on their part.
-/// `rev-parse`, `status`, `remote get-url` and `ls-files` run no hooks, so disabling hooks for them changes nothing and refusing them breaks the tool for no gain.
-/// An earlier version of this policy refused every one: 1,897 of the first 1,959 entries in the bypass log were exactly that, and the tooling behind them had been quietly broken the whole time.
-///
-/// So the rule is: `core.hooksPath` matters only where a hook would run, and the signing keys matter only where a signable object would be created.
+/// so their polling skips your hooks.
+/// `rev-parse`, `status`, `remote get-url`, and `ls-files` run no hooks, so refusing them breaks the tool for no gain.
+/// `core.hooksPath` matters only where a hook would run, and the signing keys matter only where a signable object would appear.
 fn config_override(setting: &str, sub: &str) -> Option<Denial> {
     let (key, value) = setting.split_once('=')?;
     let offends = match key {
-        // `-c commit.gpgsign=false` is `--no-gpg-sign` wearing a hat.
+        // `-c commit.gpgsign=false` acts as `--no-gpg-sign`.
         "commit.gpgsign" | "tag.gpgsign" => {
             CREATES_SIGNED_OBJECTS.contains(&sub)
                 && matches!(value, "false" | "0" | "no" | "off" | "")
         }
         // A per-invocation hooksPath change can replace every gate in ~/.config/git/hooks.
         "core.hooksPath" => RUNS_HOOKS.contains(&sub),
-        // Signing is delegated to the 1Password SSH agent; any other format means a key this machine does not actually hold.
+        // The 1Password SSH key service signs every commit, so any other format names a key this machine lacks.
         "gpg.format" => CREATES_SIGNED_OBJECTS.contains(&sub) && value != "ssh",
         "gpg.ssh.program" => CREATES_SIGNED_OBJECTS.contains(&sub) && value.is_empty(),
         _ => false,
@@ -466,7 +462,7 @@ fn config_override(setting: &str, sub: &str) -> Option<Denial> {
     })
 }
 
-/// argv up to `--`, since everything after it is a pathspec and a file may legitimately be named `--force`.
+/// Arguments up to `--`, because everything after it forms a pathspec and a file may carry the name `--force`.
 fn flags_of(args: &[String]) -> Vec<String> {
     args.iter()
         .take_while(|a| a.as_str() != "--")
@@ -474,7 +470,7 @@ fn flags_of(args: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// The first non-flag argument — a subcommand word like `drop` or `expire`.
+/// The first non-flag argument, a subcommand word like `drop` or `expire`.
 fn first_word(args: &[String]) -> Option<&str> {
     args.iter()
         .take_while(|a| a.as_str() != "--")
@@ -482,7 +478,7 @@ fn first_word(args: &[String]) -> Option<&str> {
         .map(String::as_str)
 }
 
-/// The letters of a clustered short-option group (`-fdx` -> `fdx`), or `None` for long options and bare `-` / `--`.
+/// The letters of a clustered short-option group, so `-fdx` yields `fdx`, or `None` for long options and bare `-` or `--`.
 fn short_cluster(arg: &str) -> Option<&str> {
     let rest = arg.strip_prefix('-')?;
     (!rest.is_empty() && !rest.starts_with('-') && rest.chars().all(|c| c.is_ascii_alphabetic()))
@@ -545,7 +541,7 @@ mod tests {
             "push",
             "push origin main",
             "push --tags",
-            "add --force ignored.txt", // -f here means "add an ignored file", not "destroy"
+            "add --force ignored.txt", // Here `-f` adds an ignored file.
             "branch -d merged-topic",
             "clean -nd",
             "checkout main",
@@ -563,8 +559,8 @@ mod tests {
         }
     }
 
-    /// The regression that motivated scoping config overrides to the subcommand.
-    /// Editors and agents run read-only queries with hooks disabled so their polling does not fire yours; refusing those breaks the tool and protects nothing.
+    /// Overrides apply per subcommand.
+    /// Editors and assistants run read-only queries with `core.hooksPath=/dev/null`, and refusing those protects nothing.
     #[test]
     fn read_only_queries_may_disable_hooks() {
         for line in [

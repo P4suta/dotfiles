@@ -1,7 +1,7 @@
 {
-  "revision": "4d3f73bbfadefe5a4c7caa12170142b1d761b8eda9eea1e1f3cdde2270469edf",
+  "revision": "b714633123ffffc2fbd2a7a3b53b7ee30899a2a4983d390923fb91a04f1b6533",
   "outcome": "keep",
-  "reason": "Retain provider-specific certificate TOTP and native Authenticode verification without merging account login, generic credentials, or publication authority.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/sslcom-esigner/SKILL.md"
   ],

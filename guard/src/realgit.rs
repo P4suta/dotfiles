@@ -1,14 +1,13 @@
-//! Locating the real git.
+//! Locates the real git.
 //!
-//! `~/.local/bin/git` is on PATH ahead of everything else, so resolving "git" through PATH from inside this binary would re-enter the wrapper.
-//! Every git invocation here therefore goes through an absolute path.
+//! `~/.local/bin/git` precedes everything else on `PATH`, so this binary calls git through an absolute path to avoid re-entering the wrapper.
 //!
-//! macOS has two candidates and which one is real depends on how far Homebrew provisioning has got: `/opt/homebrew/bin/git` once Homebrew is installed, `/usr/bin/git` (Apple's shim) on every Mac from the start.
+//! On macOS, `/opt/homebrew/bin/git` exists once Homebrew installs it, and the Apple shim `/usr/bin/git` exists from the start.
 
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Where the real git can be, in order of preference.
+/// Candidate locations of the real git, in order of preference.
 #[cfg(unix)]
 pub fn candidates() -> Vec<PathBuf> {
     [
@@ -21,7 +20,8 @@ pub fn candidates() -> Vec<PathBuf> {
     .collect()
 }
 
-/// Git for Windows installs machine-wide under Program Files or per user under the local application data; the wrapper itself lives elsewhere, so neither can resolve back to it.
+/// Git for Windows installs under `%ProgramFiles%` for all users or under `%LOCALAPPDATA%` for one user.
+/// The wrapper lives elsewhere, so neither path resolves back to it.
 #[cfg(windows)]
 pub fn candidates() -> Vec<PathBuf> {
     [
@@ -43,7 +43,7 @@ pub fn find() -> Option<PathBuf> {
 
 /// A `Command` for the real git, for this process's own queries.
 ///
-/// Callers that cannot continue without git should treat `None` as fatal; the hook entry points instead degrade to a warning, because a missing git means the git operation we were asked to gate is not happening either.
+/// The hook entry points degrade a missing git to a warning, because the gated git operation fails without git as well.
 pub fn command() -> Option<Command> {
     find().map(Command::new)
 }

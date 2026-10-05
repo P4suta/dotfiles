@@ -1,20 +1,19 @@
-//! Force every commit on this machine to end up signed.
+//! Forces every commit on this machine to end up signed.
 //!
-//! Even if the operator ran `git -c commit.gpgsign=false commit`, or `git commit --no-gpg-sign`, or `git -c gpg.format=null commit`, this hook re-amends the resulting commit with an explicit signature.
+//! The hook re-amends each unsigned commit with an explicit signature, even after `commit.gpgsign=false`, `--no-gpg-sign`, or `gpg.format=null`.
 //!
-//! Failure mode (1Password locked / SSH agent timeout / signer missing): roll the unsigned commit back so the working state lands as "staged but not committed" — never as "unsigned commit sitting on HEAD".
-//! The user's diff is preserved while a poisoned state is refused to an overnight agent push.
-//! Paired with a GitHub repository ruleset enforcing `Require signed commits` server-side; that is the actual guarantee and this is best-effort defense-in-depth.
+//! When signing fails, it rolls the commit back and leaves the changes staged, so no unsigned commit sits on `HEAD`.
+//! The GitHub ruleset `Require signed commits` enforces the same rule on the server.
 //!
-//! Reached through `core.hooksPath` for every repository, which is also why it self-disables when signing is not configured on this machine: a fresh Mac whose 1Password agent is not yet enabled would otherwise roll back every commit it makes.
+//! The hook disables itself on a machine without signing configured, so a fresh Mac without the 1Password key service keeps its commits.
 
 use crate::bypass::{self, Category};
 use crate::realgit;
 
-/// The lock this hook sets around its own `--amend`, so the resulting commit does not re-enter it.
+/// The lock this hook sets around its own `--amend`, so the amended commit skips the hook.
 const LOCK_ENV: &str = "GIT_HOOK_FORCE_SIGN_LOCK";
 
-/// Files in `.git` whose presence means git itself is mid-operation; amending now would corrupt the in-progress rebase / merge / cherry-pick / revert / bisect, so signing is left to git.
+/// Files in `.git` that mark a rebase, merge, cherry-pick, revert, or bisect in progress, which an amend would corrupt.
 const MID_OPERATION: [&str; 6] = [
     "rebase-merge",
     "rebase-apply",
@@ -56,12 +55,12 @@ struct Situation {
     head_signed: bool,
 }
 
-/// What the hook should do once the cheap facts are known.
+/// The action of the hook, decided from the cheap facts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {
-    /// Nothing to do: unconfigured, re-entrant, mid-operation, already signed, or no HEAD at all.
+    /// Nothing to do: unconfigured, re-entrant, mid-operation, already signed, or no `HEAD`.
     Done,
-    /// HEAD is unsigned and this hook is the one that should fix that.
+    /// `HEAD` lacks a signature, and this hook owns the fix.
     Resign,
 }
 
@@ -73,12 +72,12 @@ fn decide(s: &Situation) -> Decision {
     }
 }
 
-/// An ordinary commit that records no change is refused unless waived, because its changes most likely vanished from the index before it was recorded.
+/// Refuses an ordinary commit that records no change unless waived, because its changes most likely vanished from the index.
 fn refuses_empty(settled: bool, empty: bool, waived: bool) -> bool {
     settled && empty && !waived
 }
 
-/// HEAD has exactly one parent and the same tree; merges and the root commit are never empty in this sense.
+/// `HEAD` has one parent and the same tree, so merges and the root commit never count as empty.
 fn head_is_empty() -> bool {
     let Some(parents) = realgit::capture(&["rev-list", "--parents", "-n", "1", "HEAD"]) else {
         return false;
@@ -136,7 +135,7 @@ fn resign() -> i32 {
     let pre_head = pre_head.trim().to_owned();
 
     // The re-sign itself, under the lock.
-    // Output is swallowed: on failure every word of it is about *why* the agent is unreachable, which the rollback message below already names.
+    // Discard the output, because the rollback message already names the failure.
     let Some(mut amend) = realgit::command() else {
         return 0;
     };
@@ -176,12 +175,13 @@ fn resign() -> i32 {
     rollback(&pre_head)
 }
 
-/// How to undo the unsigned commit: step back to its parent when there is one, or drop the ref entirely when it was the root — the index keeps the user's changes either way, and the reflog keeps the commit.
+/// Undoes the unsigned commit by stepping back to its parent, or by deleting the ref for a root commit.
+/// The index keeps the changes, and the reflog keeps the commit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rollback {
-    /// `git reset --soft <parent>` — staged tree retains the changes.
+    /// `git reset --soft <parent>`, which keeps the changes staged.
     SoftToParent,
-    /// `git update-ref -d HEAD` — the repo behaves as if the commit was never made, with no HEAD to hang anything from.
+    /// `git update-ref -d HEAD`, which leaves the repository without a `HEAD`.
     DropHead,
 }
 
@@ -194,7 +194,7 @@ fn rollback_target(parent_exists: bool) -> Rollback {
 }
 
 fn rollback(pre_head: &str) -> i32 {
-    // Defensive: a partial amend is unlikely to leave HEAD elsewhere, but be sure before stepping further.
+    // Confirm `HEAD` before stepping further, in case a partial amend moved it.
     let _ = realgit::command().and_then(|mut c| {
         c.args(["reset", "--soft", pre_head])
             .stdout(std::process::Stdio::null())

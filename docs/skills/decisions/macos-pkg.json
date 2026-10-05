@@ -1,7 +1,7 @@
 {
-  "revision": "b9dc83ad84b2a6c456081f09809ef3875c03a6a5533850b94f4473b344dc3826",
+  "revision": "125e767553b6f2b3b7d46116db9ecb109f79d1e940be64b6b2d818a894a9a9a5",
   "outcome": "keep",
-  "reason": "Retain installer payload, receipt, upgrade, and native distribution checks separately from executable signing and notarization.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/macos-pkg/SKILL.md"
   ],

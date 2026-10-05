@@ -1,6 +1,6 @@
 # shellcheck shell=sh
-# Prefer the native Linux 1Password agent for a local desktop session.
-# An SSH session keeps the socket injected by sshd, so Windows agent forwarding remains authoritative when connecting over Tailscale/SSH.
+# A local desktop session uses the native 1Password socket.
+# An SSH session keeps the socket that sshd forwards from Windows.
 onepassword_agent="${HOME}/.1password/agent.sock"
 if [ -n "${DOTFILES_SSH_AUTH_SOCK:-}" ] && [ -S "${DOTFILES_SSH_AUTH_SOCK}" ]; then
   SSH_AUTH_SOCK="${DOTFILES_SSH_AUTH_SOCK}"

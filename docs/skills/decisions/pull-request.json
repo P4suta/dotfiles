@@ -1,7 +1,7 @@
 {
-  "revision": "23d1be6d3d50ca164e89488a15b47107f82b328a8e6a059ac357c4531f6b775c",
+  "revision": "5e943239d8f288afcc38f41cbdfdb87bd72386d8bb4eb2d1d7b099ca9a75812a",
   "outcome": "implemented",
-  "reason": "Point PR authoring at the prose checker that pr-workflow check, create, and edit run for a personal non-fork destination, and route issues through pr-workflow issue check, create, and edit with the same document and writing checks; issue scope, draft transitions, and review budgets stay unchanged.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/pull-request/SKILL.md",
     "docs/adr/0004-checked-pull-request-authoring.md",

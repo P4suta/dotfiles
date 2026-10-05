@@ -1,7 +1,7 @@
 {
-  "revision": "6ce16b2013d0b83baa8288f3ed66625aba2f6791be2d61187ebdebc67dd1eca7",
+  "revision": "2b45bb75774326677583573c9a54e5dbdb818553712f78583d955d3337545d37",
   "outcome": "implemented",
-  "reason": "Connect fixed-fee setup to the layered numeric budget and rolling attempt and probe ceilings without relaxing paid-usage refusal, persistent pauses or the distinct PR, IDE, browser and unmanaged-client boundaries.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/coderabbit/SKILL.md",
     "xtask/src/review_guard.rs",

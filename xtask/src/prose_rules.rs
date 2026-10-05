@@ -1,39 +1,3 @@
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Ledger {
-    Within,
-    Exceeded,
-    Stale,
-}
-
-/// Compares how often one finding occurs with how often its legacy ledger entry records it.
-pub fn ledger(found: u32, allowed: u32) -> Ledger {
-    if found > allowed {
-        Ledger::Exceeded
-    } else if found < allowed {
-        Ledger::Stale
-    } else {
-        Ledger::Within
-    }
-}
-
-/// How often `key` occurs in `items`, which counts one fingerprint in a multiset of findings or ledger entries.
-pub fn occurrences<T: PartialEq>(items: &[T], key: &T) -> u32 {
-    let mut count: u32 = 0;
-    let mut index = 0;
-    while index < items.len() {
-        if items[index] == *key {
-            count += 1;
-        }
-        index += 1;
-    }
-    count
-}
-
-/// The count a ledger entry keeps after a fix: it falls with the findings and never rises.
-pub fn tightened(allowed: u32, found: u32) -> u32 {
-    allowed.min(found)
-}
-
 /// An exemption needs a stated reason, and an exemption that matches nothing fails as stale.
 pub fn exemption_valid(reason_present: bool, used: bool) -> bool {
     reason_present && used
@@ -108,44 +72,6 @@ pub fn reply(passed: bool, already_continued: bool) -> Reply {
 
 #[cfg(kani)]
 #[kani::proof]
-fn a_ledger_never_admits_more_findings_than_it_allows() {
-    let found: u32 = kani::any();
-    let allowed: u32 = kani::any();
-    let verdict = ledger(found, allowed);
-    assert_eq!(verdict == Ledger::Within, found == allowed);
-    assert!(verdict != Ledger::Exceeded || found > allowed);
-    assert!(verdict != Ledger::Within || found <= allowed);
-    kani::cover!(verdict == Ledger::Within);
-    kani::cover!(verdict == Ledger::Exceeded);
-    kani::cover!(verdict == Ledger::Stale);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn a_replaced_sentence_is_never_admitted_by_the_ledger() {
-    let found: [u8; 2] = kani::any();
-    let allowed: [u8; 2] = kani::any();
-    let key: u8 = kani::any();
-    let verdict = ledger(occurrences(&found, &key), occurrences(&allowed, &key));
-    let in_found = found[0] == key || found[1] == key;
-    let in_allowed = allowed[0] == key || allowed[1] == key;
-    if in_found && !in_allowed {
-        assert_eq!(verdict, Ledger::Exceeded);
-    }
-    if !in_found && in_allowed {
-        assert_eq!(verdict, Ledger::Stale);
-    }
-    if verdict == Ledger::Within {
-        assert_eq!(occurrences(&found, &key), occurrences(&allowed, &key));
-    }
-    assert!(occurrences(&found, &key) <= 2);
-    kani::cover!(verdict == Ledger::Within && in_found);
-    kani::cover!(verdict == Ledger::Exceeded);
-    kani::cover!(verdict == Ledger::Stale);
-}
-
-#[cfg(kani)]
-#[kani::proof]
 fn only_personal_non_fork_destinations_take_the_standard() {
     let personal: bool = kani::any();
     let fork: bool = kani::any();
@@ -202,20 +128,6 @@ fn a_declared_standard_wins_and_an_unresolved_destination_is_reported() {
     kani::cover!(standard == Standard::Undetermined);
     kani::cover!(standard == Standard::Applies && origin.is_none());
     kani::cover!(standard == Standard::Undetermined && origin.is_none());
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn tightening_never_raises_an_allowance() {
-    let allowed: u32 = kani::any();
-    let found: u32 = kani::any();
-    let next = tightened(allowed, found);
-    assert!(next <= allowed);
-    assert!(next <= found);
-    assert!(next == allowed || next == found);
-    assert_eq!(ledger(found, next) == Ledger::Exceeded, found > allowed);
-    kani::cover!(next < allowed);
-    kani::cover!(next == allowed);
 }
 
 #[cfg(kani)]

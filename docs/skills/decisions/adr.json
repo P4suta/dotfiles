@@ -1,7 +1,7 @@
 {
-  "revision": "fd86a7fd5dae57514f0860872d3dac105ae6b290579345859b0f665057a4ddf6",
+  "revision": "280c0115b521dc1b4137701ed8f04cc42df544bcb6f239f214549ab76f4163d2",
   "outcome": "implemented",
-  "reason": "Replace the inline language and line-layout rules with a pointer to the prose checker, which enforces the writing standard on every record; the narrow trigger and lifecycle guidance stay unchanged.",
+  "reason": "Prose pruned to the writing standard without changing the skill's instructions.",
   "evidence": [
     "dot_agents/skills/adr/SKILL.md",
     "docs/adr/0016-one-writing-standard.md",

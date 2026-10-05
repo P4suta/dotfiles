@@ -171,7 +171,7 @@ pub fn chezmoi(root: &Path, scope: &Path, config: &Path, destination: &Path) -> 
 }
 
 /// Targets that `chezmoi status` reports as changed since chezmoi last wrote them, from its first column.
-/// A target chezmoi never wrote, such as a file an earlier repository installed, has no record and is taken over instead.
+/// A target chezmoi never wrote, such as a file an earlier repository installed, has no record, so applying the profile takes it over.
 pub fn externally_changed(status: &str) -> Vec<String> {
     status
         .lines()
@@ -180,7 +180,7 @@ pub fn externally_changed(status: &str) -> Vec<String> {
         .collect()
 }
 
-/// Forgets which `run_onchange_` and `run_once_` scripts already ran, so the next application runs every script again on the host they provisioned.
+/// Forgets which `run_onchange_` and `run_once_` scripts already ran, so the next apply reruns every script on the host they provisioned.
 pub fn forget_script_runs(
     root: &Path,
     scope: &Path,
@@ -207,7 +207,7 @@ pub fn forget_script_runs(
     Ok(())
 }
 
-/// Scripts are actions rather than state, and an always-run `run_` script would make every verification fail.
+/// Verification excludes scripts because they act rather than describe state, and an always-run `run_` script would fail every check.
 pub fn native_action_arguments(name: &str) -> Vec<&str> {
     if name == "verify" {
         vec![name, "--exclude", "scripts"]
@@ -216,7 +216,7 @@ pub fn native_action_arguments(name: &str) -> Vec<&str> {
     }
 }
 
-/// Packaged tools the rendered scripts and installed entry points require that the profile's platform data does not install.
+/// Packaged tools the rendered scripts and installed entry points require that the profile's platform data omits.
 pub fn unprovisioned(
     profile: Profile,
     platform: &Value,
@@ -264,7 +264,8 @@ pub fn script_order(listing: &[u8]) -> Result<Vec<String>> {
     Ok(before)
 }
 
-/// `chezmoi managed --nul-path-separator` output; its `--format` flag does not apply to relative paths, which are always printed as text.
+/// `chezmoi managed --nul-path-separator` output.
+/// Its `--format` flag ignores relative paths and always prints them as text.
 pub fn managed_paths(stdout: &[u8]) -> Result<Vec<String>> {
     stdout
         .split(|byte| *byte == 0)
@@ -482,7 +483,7 @@ pub fn native_profile() -> Result<Profile> {
     }
 }
 
-/// A setup script a machine-local configuration deliberately leaves out, with the reason that makes the omission reviewable.
+/// A setup script a machine-local configuration leaves out, with the reason that makes the omission reviewable.
 #[derive(Debug, PartialEq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SkippedScript {
@@ -490,7 +491,8 @@ pub struct SkippedScript {
     pub reason: String,
 }
 
-/// `setup.skip` entries, which `.chezmoiignore` removes from application; every entry must name one script target and say why.
+/// `setup.skip` entries, which `.chezmoiignore` keeps chezmoi from applying.
+/// Every entry must name one script target and say why.
 pub fn declared_skips(data: &Value) -> Result<Vec<SkippedScript>> {
     let Some(entries) = data.pointer("/setup/skip") else {
         return Ok(Vec::new());
@@ -654,7 +656,7 @@ pub fn operate(
                     fs::write(backup.join("previous-state.boltdb"), bytes)?;
                 }
                 execute("apply")?;
-                // Scripts can install programs that templates probe for, so files are rendered once more against the machine they produced before verification.
+                // Scripts can install programs that templates probe for, so render the files again on the resulting machine before verification.
                 let status = chezmoi(root, state, config, destination)
                     .args(["apply", "--exclude", "scripts"])
                     .status()?;
@@ -666,7 +668,7 @@ pub fn operate(
             },
             || {
                 execute("verify").map_err(|error| {
-                    // Name the diverging targets before the transaction restores them, or the evidence is gone.
+                    // Name the diverging targets before the transaction restores them and destroys the evidence.
                     let report = |arguments: &[&str]| {
                         chezmoi(root, state, config, destination)
                             .args(arguments)
