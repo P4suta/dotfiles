@@ -46,10 +46,10 @@ fn file_name(step: Step, family: Family, position: usize) -> String {
 fn inputs_call(terms: &[&str]) -> String {
     format!(
         "{{{{ includeTemplate \"partials/inputs\" (list{}) }}}}",
-        terms.iter().fold(String::new(), |mut text, term| {
-            let _ = write!(text, " {term}");
-            text
-        })
+        terms
+            .iter()
+            .flat_map(|term| [" ", term])
+            .collect::<String>()
     )
 }
 
@@ -68,18 +68,19 @@ fn inputs(step: Step, family: Family) -> String {
     {
         return format!("{}\n", inputs_call(first));
     }
-    let mut text = String::new();
-    for (index, profile) in profiles.iter().enumerate() {
-        let keyword = if index == 0 { "if" } else { "else if" };
-        let _ = write!(
-            text,
-            "{{{{ {keyword} eq .profile \"{}\" }}}}{}",
-            profile.name(),
-            inputs_call(step.inputs(*profile))
-        );
-    }
-    text.push_str("{{ end }}\n");
-    text
+    let branches: Vec<String> = profiles
+        .iter()
+        .enumerate()
+        .map(|(index, profile)| {
+            let keyword = if index == 0 { "if" } else { "else if" };
+            format!(
+                "{{{{ {keyword} eq .profile \"{}\" }}}}{}",
+                profile.name(),
+                inputs_call(step.inputs(*profile))
+            )
+        })
+        .collect();
+    format!("{}{{{{ end }}}}\n", branches.concat())
 }
 
 fn unix(step: Step) -> String {
@@ -94,13 +95,11 @@ fn unix(step: Step) -> String {
             "\"$mise\" trust --quiet \"$CHEZMOI_WORKING_TREE/mise.toml\"\n",
             "exec \"$mise\" -C \"$CHEZMOI_WORKING_TREE\" x -- cargo run --locked --manifest-path \"$CHEZMOI_WORKING_TREE/crates/dotfiles/Cargo.toml\" -- --root \"$CHEZMOI_WORKING_TREE\" setup runtime --config \"$CHEZMOI_CONFIG_FILE\" --live\n",
         )),
-        Launch::InstalledRuntime => {
-            let _ = writeln!(
-                text,
-                "exec \"$HOME/.local/bin/dotfiles\" --root \"$CHEZMOI_WORKING_TREE\" setup {} --config \"$CHEZMOI_CONFIG_FILE\" --live",
-                step.name()
-            );
-        }
+        Launch::InstalledRuntime => text.extend([
+            "exec \"$HOME/.local/bin/dotfiles\" --root \"$CHEZMOI_WORKING_TREE\" setup ",
+            step.name(),
+            " --config \"$CHEZMOI_CONFIG_FILE\" --live\n",
+        ]),
     }
     text
 }
@@ -121,14 +120,12 @@ fn windows(step: Step) -> String {
             "& $mise -C $env:CHEZMOI_WORKING_TREE x -- cargo run --locked --manifest-path (Join-Path $env:CHEZMOI_WORKING_TREE 'crates\\dotfiles\\Cargo.toml') -- --root $env:CHEZMOI_WORKING_TREE setup runtime --config $env:CHEZMOI_CONFIG_FILE --live\n",
             "exit $LASTEXITCODE\n",
         )),
-        Launch::InstalledRuntime => {
-            let _ = writeln!(
-                text,
-                "& (Join-Path $env:USERPROFILE '.local\\bin\\dotfiles.exe') --root $env:CHEZMOI_WORKING_TREE setup {} --config $env:CHEZMOI_CONFIG_FILE --live",
-                step.name()
-            );
-            text.push_str("exit $LASTEXITCODE\n");
-        }
+        Launch::InstalledRuntime => text.extend([
+            "& (Join-Path $env:USERPROFILE '.local\\bin\\dotfiles.exe') --root $env:CHEZMOI_WORKING_TREE setup ",
+            step.name(),
+            " --config $env:CHEZMOI_CONFIG_FILE --live\n",
+            "exit $LASTEXITCODE\n",
+        ]),
     }
     text
 }
@@ -221,7 +218,7 @@ pub fn scripts(profiles: &Value, launchers: &[Launcher]) -> Result<String> {
         "# `just gen` writes this file from the setup steps in crates/platform/src/step.rs.\n# Each launcher runs only on the profiles of the named set of profiles.toml.\n\n[scripts]\n",
     );
     for (target, set) in entries {
-        let _ = writeln!(text, "{target:?} = {set:?}");
+        writeln!(text, "{target:?} = {set:?}")?;
     }
     Ok(text)
 }

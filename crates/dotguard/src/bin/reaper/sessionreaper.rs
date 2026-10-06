@@ -17,6 +17,30 @@ use platform::process::command;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
+use util::{SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE};
+
+/// The exit status of an invocation the reaper doesn't serve.
+const USAGE_ERROR: i32 = 2;
+/// The defaults the configuration file and the environment override.
+const STOPPED_MIN_AGE: i64 = SECONDS_PER_HOUR;
+const GRACE_SECONDS: i64 = 30 * SECONDS_PER_MINUTE;
+const RUNNING_MIN_AGE: i64 = 3 * SECONDS_PER_DAY;
+/// The system tools at fixed paths, so a user's `PATH` can't substitute another.
+#[cfg(not(target_os = "linux"))]
+const PS: &str = "/bin/ps";
+const ID: &str = "/usr/bin/id";
+const KILL: &str = "/bin/kill";
+/// The proc file system and its fields after a process's command name, which start at the state, field 3 of `proc_pid_stat(5)`.
+#[cfg(target_os = "linux")]
+const PROC: &str = "/proc";
+#[cfg(target_os = "linux")]
+const PROC_UPTIME: &str = "/proc/uptime";
+#[cfg(target_os = "linux")]
+const STAT_PARENT: usize = 1;
+#[cfg(target_os = "linux")]
+const STAT_TTY: usize = 4;
+#[cfg(target_os = "linux")]
+const STAT_START_TIME: usize = 19;
 
 pub struct SessionReaper;
 
@@ -26,14 +50,14 @@ impl SessionReaper {
             Self::run(sub)
         } else {
             eprintln!("usage: session-reaper {{reap}}");
-            2
+            USAGE_ERROR
         }
     }
 
     pub fn run(sub: &str) -> i32 {
         if sub != "reap" {
             eprintln!("usage: session-reaper {{reap}}");
-            return 2;
+            return USAGE_ERROR;
         }
         let cfg = SessionConfig::load();
         let now = util::now();
@@ -90,7 +114,13 @@ impl SessionReaper {
             seen_out.push_str(&t.to_string());
             seen_out.push('\n');
         }
-        let _ = std::fs::write(&cfg.seen_file, seen_out);
+        platform::cleanup::report(
+            std::fs::write(&cfg.seen_file, seen_out),
+            format_args!(
+                "record the reported processes in {}",
+                cfg.seen_file.display()
+            ),
+        );
 
         if reported > 0 {
             util::notify(
@@ -183,7 +213,7 @@ fn tier_b(cfg: &SessionConfig, p: &Process, ucomm: &str, age: i64, reported: &mu
     println!(
         "report: {ucomm}({}) running orphan, no tty, age {}d, exe {} — review manually",
         p.pid,
-        age / 86_400,
+        age / SECONDS_PER_DAY,
         p.comm
     );
 }
@@ -218,7 +248,10 @@ impl SessionConfig {
             "SESSION_REAPER_STATE_DIR",
             &state_base.join("session-reaper").to_string_lossy(),
         ));
-        let _ = std::fs::create_dir_all(&state_dir);
+        platform::cleanup::report(
+            std::fs::create_dir_all(&state_dir),
+            format_args!("create the state directory {}", state_dir.display()),
+        );
 
         let default_prefixes = format!("^({}|/opt/homebrew|/usr/local)/", home.to_string_lossy());
         let user_path_regex = config::get(&f, "SESSION_REAPER_USER_PATH_REGEX", &default_prefixes);
@@ -232,15 +265,9 @@ impl SessionConfig {
 
         Self {
             mode: config::get(&f, "SESSION_REAPER_MODE", "report"),
-            stopped_min_age: config::get(&f, "SESSION_REAPER_STOPPED_MIN_AGE", "3600")
-                .parse()
-                .unwrap_or(3600),
-            grace_seconds: config::get(&f, "SESSION_REAPER_GRACE_SECONDS", "1800")
-                .parse()
-                .unwrap_or(1800),
-            running_min_age: config::get(&f, "SESSION_REAPER_RUNNING_MIN_AGE", "259200")
-                .parse()
-                .unwrap_or(259_200),
+            stopped_min_age: config::number(&f, "SESSION_REAPER_STOPPED_MIN_AGE", STOPPED_MIN_AGE),
+            grace_seconds: config::number(&f, "SESSION_REAPER_GRACE_SECONDS", GRACE_SECONDS),
+            running_min_age: config::number(&f, "SESSION_REAPER_RUNNING_MIN_AGE", RUNNING_MIN_AGE),
             allow_regex: config::get(
                 &f,
                 "SESSION_REAPER_ALLOW_REGEX",
@@ -294,7 +321,7 @@ fn mac_processes() -> Vec<Process> {
     if uid.parse::<u32>().is_err() {
         return Vec::new();
     }
-    let out = command("/bin/ps")
+    let out = command(PS)
         .args([
             "-x",
             &format!("-U{uid}"),
@@ -345,7 +372,7 @@ fn parse_ps_line(line: &str) -> Option<Process> {
 }
 
 fn whoami_uid() -> String {
-    command("/usr/bin/id")
+    command(ID)
         .arg("-u")
         .output()
         .ok()
@@ -370,7 +397,7 @@ fn kill_kill(pid: &str, identity: &str) -> bool {
     if identity.is_empty() || native_identity(pid).as_deref() != Some(identity) {
         return false;
     }
-    command("/bin/kill")
+    command(KILL)
         .args(["-KILL", pid])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -381,18 +408,19 @@ fn kill_kill(pid: &str, identity: &str) -> bool {
 fn native_identity(pid: &str) -> Option<String> {
     #[cfg(target_os = "linux")]
     {
-        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let stat =
+            std::fs::read_to_string(std::path::Path::new(PROC).join(pid).join("stat")).ok()?;
         Some(
             stat.rsplit_once(") ")?
                 .1
                 .split_whitespace()
-                .nth(19)?
+                .nth(STAT_START_TIME)?
                 .to_owned(),
         )
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let output = command("/bin/ps")
+        let output = command(PS)
             .args(["-p", pid, "-o", "lstart="])
             .output()
             .ok()?;
@@ -416,7 +444,7 @@ fn linux_processes() -> Vec<Process> {
     if !clock.status.success() || hz == 0 {
         return Vec::new();
     }
-    let Ok(uptime) = std::fs::read_to_string("/proc/uptime") else {
+    let Ok(uptime) = std::fs::read_to_string(PROC_UPTIME) else {
         return Vec::new();
     };
     let Some(uptime) = uptime
@@ -426,7 +454,7 @@ fn linux_processes() -> Vec<Process> {
     else {
         return Vec::new();
     };
-    let Ok(entries) = std::fs::read_dir("/proc") else {
+    let Ok(entries) = std::fs::read_dir(PROC) else {
         return Vec::new();
     };
     entries
@@ -439,17 +467,17 @@ fn linux_processes() -> Vec<Process> {
             }
             let stat = std::fs::read_to_string(entry.path().join("stat")).ok()?;
             let fields: Vec<_> = stat.rsplit_once(") ")?.1.split_whitespace().collect();
-            let birth_ticks = fields.get(19)?.parse::<u64>().ok()?;
+            let birth_ticks = fields.get(STAT_START_TIME)?.parse::<u64>().ok()?;
             let age = dotguard::reaper_rules::age(uptime, birth_ticks, hz)?;
             Some(Process {
                 pid,
-                ppid: fields.get(1)?.to_string(),
+                ppid: fields.get(STAT_PARENT)?.to_string(),
                 state: fields.first()?.to_string(),
                 etime: age.to_string(),
-                tty: if *fields.get(4)? == "0" {
+                tty: if *fields.get(STAT_TTY)? == "0" {
                     "?".into()
                 } else {
-                    fields.get(4)?.to_string()
+                    fields.get(STAT_TTY)?.to_string()
                 },
                 comm: std::fs::read_to_string(entry.path().join("comm"))
                     .ok()?

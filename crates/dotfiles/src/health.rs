@@ -18,6 +18,9 @@ pub const PROBE_VARIABLE: &str = "DOTFILES_START_PROBE";
 
 const LIMIT: Duration = Duration::from_millis(STALL_MILLIS);
 
+/// How often the probe checks whether its process exited.
+const POLL_INTERVAL: Duration = Duration::from_millis(20);
+
 /// The probe this host runs: the configured fixture, a trivial Windows process, or none elsewhere.
 #[must_use]
 pub fn configured_probe() -> Option<Command> {
@@ -29,7 +32,8 @@ pub fn configured_probe() -> Option<Command> {
         return Some(command);
     }
     if cfg!(windows) {
-        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        let root = std::env::var_os("SystemRoot")
+            .unwrap_or_else(|| platform::home::DEFAULT_SYSTEM_ROOT.into());
         let mut command = crate::tool::external(PathBuf::from(root).join("System32/cmd.exe"));
         command.args(["/d", "/c", "exit 0"]);
         return Some(command);
@@ -52,7 +56,11 @@ pub(crate) fn timed(mut command: Command, limit: Duration) -> Result<(Start, Vec
     let started = Instant::now();
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
-        let _ = sender.send(command.spawn());
+        // A start that outlasted the limit finds the receiver gone, so its process stops here.
+        if let Err(std::sync::mpsc::SendError(Ok(mut late))) = sender.send(command.spawn()) {
+            platform::cleanup::report(late.kill(), "stop a process-start probe that started late");
+            platform::cleanup::report(late.wait(), "reap a process-start probe that started late");
+        }
     });
     let mut child = match receiver.recv_timeout(limit) {
         Ok(spawned) => spawned.context("start the process-start probe")?,
@@ -61,7 +69,10 @@ pub(crate) fn timed(mut command: Command, limit: Duration) -> Result<(Start, Vec
     let mut stdout = child.stdout.take().context("probe output is unavailable")?;
     let reader = std::thread::spawn(move || {
         let mut bytes = Vec::new();
-        let _ = std::io::Read::read_to_end(&mut stdout, &mut bytes);
+        platform::cleanup::report(
+            std::io::Read::read_to_end(&mut stdout, &mut bytes),
+            "read the process-start probe's output",
+        );
         bytes
     });
     loop {
@@ -73,11 +84,11 @@ pub(crate) fn timed(mut command: Command, limit: Duration) -> Result<(Start, Vec
             ));
         }
         if started.elapsed() >= limit {
-            let _ = child.kill();
-            let _ = child.wait();
+            platform::cleanup::report(child.kill(), "stop the stalled process-start probe");
+            platform::cleanup::report(child.wait(), "reap the stalled process-start probe");
             return Ok((Start::TimedOut, Vec::new()));
         }
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(POLL_INTERVAL);
     }
 }
 

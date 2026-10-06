@@ -3,6 +3,9 @@
 //! Each pattern anchors to trailer position, so human `Co-authored-by` trailers and prose that mentions CLAUDE.md survive.
 //! The hook strips the lines instead of refusing the commit, and reports the count it removed.
 
+/// The session links Claude Code adds to a message.
+const SESSION_LINK: &str = "https://claude.ai/code/";
+
 /// Reports whether this line credits an AI agent.
 fn is_attribution(line: &str) -> bool {
     let t = line.trim_start();
@@ -34,7 +37,7 @@ fn is_attribution(line: &str) -> bool {
     }
 
     // A bare session link on a line of its own.
-    if let Some(rest) = tail.strip_prefix("https://claude.ai/code/") {
+    if let Some(rest) = tail.strip_prefix(SESSION_LINK) {
         return !rest.is_empty() && !rest.contains(char::is_whitespace);
     }
 

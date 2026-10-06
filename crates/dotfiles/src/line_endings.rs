@@ -13,6 +13,15 @@ use std::process::{Command, Stdio};
 /// The command agent clients run after every tool call.
 pub const HOOK_COMMAND: &str = "dotfiles line-endings hook";
 
+/// The seconds a client waits for the line-ending hook.
+const HOOK_TIMEOUT_SECONDS: u64 = 30;
+
+/// `git check-attr -z` writes each attribute as its path, its name, and its value.
+const FIELDS_PER_ATTRIBUTE: usize = 3;
+/// The attributes the check asks for: `text`, `eol`, and `binary`.
+const ATTRIBUTES: usize = 3;
+const FIELDS_PER_PATH: usize = FIELDS_PER_ATTRIBUTE * ATTRIBUTES;
+
 /// Earlier spellings of [`HOOK_COMMAND`], which the merge removes so each client runs the hook once.
 pub const RETIRED_HOOK_COMMANDS: &[&str] = &["dotfiles-xtask line-endings hook"];
 
@@ -200,19 +209,19 @@ pub(crate) fn attributes(directory: &Path, paths: &[PathBuf]) -> Result<Vec<Attr
     );
     let fields: Vec<&[u8]> = output.split(|&byte| byte == 0).collect();
     ensure!(
-        fields.len() == paths.len() * 9 + 1 && fields.last() == Some(&&b""[..]),
+        fields.len() == paths.len() * FIELDS_PER_PATH + 1 && fields.last() == Some(&&b""[..]),
         "git check-attr returned an unexpected record count"
     );
     let mut resolved = Vec::with_capacity(paths.len());
-    for record in fields.as_chunks::<9>().0 {
+    for record in fields.as_chunks::<FIELDS_PER_PATH>().0 {
         let mut found = Attributes {
             text: Text::Unspecified,
             eol: Eol::Unspecified,
             binary: false,
         };
-        for triple in record.as_chunks::<3>().0 {
-            let value = std::str::from_utf8(triple[2])?;
-            match triple[1] {
+        for [_, name, value] in record.as_chunks::<FIELDS_PER_ATTRIBUTE>().0 {
+            let value = std::str::from_utf8(value)?;
+            match *name {
                 b"text" => found.text = text(value),
                 b"eol" => found.eol = eol(value),
                 b"binary" => found.binary = value == "set",
@@ -423,7 +432,8 @@ pub fn run(request: Request) -> Result<()> {
 ///
 /// Returns an error when the settings or `hooks` hold something other than an object, `PostToolUse` holds something other than an array, or a group lacks a handler array.
 pub fn merge_hooks(mut value: Value) -> Result<Value> {
-    let expected = json!({"hooks":[{"type":"command","command":HOOK_COMMAND,"timeout":30}]});
+    let expected =
+        json!({"hooks":[{"type":"command","command":HOOK_COMMAND,"timeout":HOOK_TIMEOUT_SECONDS}]});
     let entries = value
         .as_object_mut()
         .context("client settings must be a JSON object")?

@@ -26,6 +26,24 @@ pub const POLICY: &str = "policy/prose.toml";
 pub const SOURCE_CONFIG: &str = "home/dot_config/prose";
 const INSTALL: &str = "just install-prose";
 
+/// The digest digits that name a cached textlint installation.
+const CACHE_DIGEST_DIGITS: usize = 16;
+/// Git's shortest default abbreviation of a commit hash.
+const MIN_ABBREVIATED_HASH: usize = 7;
+/// An ISO 8601 date, `YYYY-MM-DD`, and the positions of its hyphens.
+const DATE_LENGTH: usize = 10;
+const DATE_SEPARATORS: [usize; 2] = [4, 7];
+/// The Hiragana and Katakana blocks.
+const KANA: std::ops::RangeInclusive<u32> = 0x3040..=0x30FF;
+/// `OComment` exits with this status when it found comments to report, and with a higher one when it failed.
+const OCOMMENT_FINDINGS: i32 = 1;
+/// The longest session identifier a client sends.
+const MAX_SESSION_ID: usize = 128;
+/// A remote with a one-letter authority names a Windows drive letter, not an SSH host.
+const MIN_SSH_AUTHORITY: usize = 2;
+/// The seconds a client waits for the reply hook.
+const REPLY_HOOK_TIMEOUT_SECONDS: u64 = 120;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum Channel {
     Document,
@@ -152,8 +170,10 @@ impl Bundle {
             .context("read the pinned textlint lockfile")?;
         let digest = hex(&Sha256::digest(&lock));
         Ok(Self {
-            textlint: std::env::temp_dir()
-                .join(format!("dotfiles-prose-textlint-{}", &digest[..16])),
+            textlint: std::env::temp_dir().join(format!(
+                "dotfiles-prose-textlint-{}",
+                &digest[..CACHE_DIGEST_DIGITS]
+            )),
             config,
             vale: None,
             bun: None,
@@ -227,7 +247,7 @@ impl Bundle {
             ensure!(
                 !package.version.is_empty()
                     && package.source.starts_with("https://")
-                    && package.archive_sha256.len() == 64,
+                    && package.archive_sha256.len() == rules::skill_rules::DIGEST_LENGTH,
                 "the pin for the {} style package is incomplete in packages.toml",
                 package.name
             );
@@ -372,9 +392,9 @@ pub fn sentence_starts(line: &str) -> Vec<usize> {
                 .iter()
                 .position(|c| !matches!(c, '」' | '』' | '）' | ')' | '"'));
             if let Some(offset) = rest {
-                let next = chars[index + 1 + offset];
-                if !next.is_whitespace() {
-                    starts.push(index + offset + 2);
+                let next = index + 1 + offset;
+                if !chars[next].is_whitespace() {
+                    starts.push(next + 1);
                 }
             }
             continue;
@@ -651,9 +671,9 @@ pub(crate) fn install_textlint(package: &Path, target: &Path, bun: Command) -> R
         ));
         fs::rename(target, &replaced)?;
         fs::rename(&staged, target)?;
-        let _ = fs::remove_dir_all(replaced);
+        platform::cleanup::remove_dir_all(&replaced);
     } else if fs::rename(&staged, target).is_err() {
-        let _ = fs::remove_dir_all(&staged);
+        platform::cleanup::remove_dir_all(&staged);
         ensure!(
             target
                 .join("node_modules/textlint/bin/textlint.js")
@@ -752,7 +772,7 @@ pub fn without_type(subject: &str) -> &str {
 }
 
 fn hexadecimal(text: &str) -> bool {
-    text.len() >= 7 && text.bytes().all(|byte| byte.is_ascii_hexdigit())
+    text.len() >= MIN_ABBREVIATED_HASH && text.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 /// A subject that Git writes around another commit's subject: an autosquash marker, a revert, a reapply, or a merge.
@@ -781,9 +801,9 @@ fn quoted_subject(subject: &str) -> bool {
 /// A commit as Git names it in a generated sentence: an abbreviated hash, or with `revert --reference` a hash followed by the subject and short date in parentheses.
 fn commit_reference(text: &str) -> bool {
     let date = |date: &str| {
-        date.len() == 10
+        date.len() == DATE_LENGTH
             && date.bytes().enumerate().all(|(index, byte)| {
-                if index == 4 || index == 7 {
+                if DATE_SEPARATORS.contains(&index) {
                     byte == b'-'
                 } else {
                     byte.is_ascii_digit()
@@ -819,7 +839,7 @@ fn generated_lines(lines: &mut Vec<&str>) {
                     .is_some_and(|rest| commit(rest, "."))
             })
         {
-            lines.drain(index..index + 2);
+            lines.drain(index..=index + 1);
         } else {
             index += 1;
         }
@@ -908,7 +928,7 @@ pub fn publication(title: Option<&str>, body: &str) -> String {
 
 #[must_use]
 pub fn japanese(text: &str) -> bool {
-    text.chars().any(|c| matches!(c as u32, 0x3040..=0x30FF))
+    text.chars().any(|c| KANA.contains(&u32::from(c)))
 }
 
 /// Checks one text for one channel and returns every finding.
@@ -1041,7 +1061,10 @@ pub(crate) fn comment_inputs(root: &Path, paths: &[String]) -> Result<Vec<Input>
         .output()
         .context("OComment is required to read comments; install it with the dotfiles `ocomment` setup step (`cargo run --package dotfiles -- setup ocomment --live`)")?;
     ensure!(
-        output.status.code().is_some_and(|code| code < 2),
+        output
+            .status
+            .code()
+            .is_some_and(|code| code <= OCOMMENT_FINDINGS),
         "OComment could not scan the comments: {}",
         String::from_utf8_lossy(&output.stderr).trim()
     );
@@ -1403,7 +1426,7 @@ pub fn reply_text(input: &Value) -> Result<String> {
 fn rewrite_marker(input: &Value) -> Option<PathBuf> {
     let session = input["session_id"].as_str()?;
     let valid = !session.is_empty()
-        && session.len() <= 128
+        && session.len() <= MAX_SESSION_ID
         && session
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'));
@@ -1438,7 +1461,7 @@ pub fn stop(input: &Value, bundle: Result<Bundle>) -> Value {
     if action != Reply::Rewrite
         && let Some(path) = &marker
     {
-        let _ = fs::remove_file(path);
+        platform::cleanup::remove_file(path);
     }
     match action {
         Reply::Allow => serde_json::json!({}),
@@ -1475,7 +1498,10 @@ pub fn github_owner(url: &str, resolve: impl Fn(&str) -> Option<String>) -> Opti
         (authority, path, ssh)
     } else {
         let (authority, path) = url.split_once(':')?;
-        if authority.len() < 2 || authority.contains('/') || authority.contains('\\') {
+        if authority.len() < MIN_SSH_AUTHORITY
+            || authority.contains('/')
+            || authority.contains('\\')
+        {
             return None;
         }
         (authority, path, true)
@@ -1687,7 +1713,7 @@ pub fn merge_hooks(mut value: Value, client: Client) -> Result<Value> {
             retained.push(entry);
         }
     }
-    retained.push(serde_json::json!({"hooks": [{"type": "command", "command": format!("{HOOK_PREFIX}{name}"), "timeout": 120}]}));
+    retained.push(serde_json::json!({"hooks": [{"type": "command", "command": format!("{HOOK_PREFIX}{name}"), "timeout": REPLY_HOOK_TIMEOUT_SECONDS}]}));
     *entries = retained;
     Ok(value)
 }

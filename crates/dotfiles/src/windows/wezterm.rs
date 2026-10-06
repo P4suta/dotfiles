@@ -6,17 +6,20 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const ARCHIVE: &str = "WezTerm-windows-nightly.zip";
+const NIGHTLY_RELEASE: &str = "https://github.com/wezterm/wezterm/releases/download/nightly";
 
 fn checksum(text: &str) -> Result<String> {
     let parts: Vec<_> = text.split_whitespace().collect();
+    let [digest, name] = parts.as_slice() else {
+        anyhow::bail!("unexpected WezTerm checksum format");
+    };
     ensure!(
-        parts.len() == 2
-            && parts[1] == ARCHIVE
-            && parts[0].len() == 64
-            && parts[0].bytes().all(|byte| byte.is_ascii_hexdigit()),
+        *name == ARCHIVE
+            && digest.len() == rules::skill_rules::DIGEST_LENGTH
+            && digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
         "unexpected WezTerm checksum format"
     );
-    Ok(parts[0].to_ascii_lowercase())
+    Ok(digest.to_ascii_lowercase())
 }
 
 fn archive_paths(text: &str) -> Result<()> {
@@ -51,8 +54,7 @@ fn download(runner: &mut impl Runner, scope: &Path, zip: &Path) -> Result<String
                 "300".into(),
                 "-o".into(),
                 path.into(),
-                format!("https://github.com/wezterm/wezterm/releases/download/nightly/{name}")
-                    .into(),
+                format!("{NIGHTLY_RELEASE}/{name}").into(),
             ],
         )?;
     }

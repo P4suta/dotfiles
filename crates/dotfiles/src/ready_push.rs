@@ -7,14 +7,20 @@ use crate::tool::Tool;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+/// The URL prefixes of a GitHub remote, in the short `git@host:path` SSH form, over SSH, and over HTTP.
+const GITHUB_REMOTE_PREFIXES: [&str; 4] = [
+    "git@github.com:",
+    "ssh://git@github.com/",
+    "https://github.com/",
+    "http://github.com/",
+];
+
 /// The `owner/name` of a GitHub remote URL, or `None` for any other remote.
 #[must_use]
 pub fn repository(url: &str) -> Option<String> {
-    let path = url
-        .strip_prefix("git@github.com:")
-        .or_else(|| url.strip_prefix("ssh://git@github.com/"))
-        .or_else(|| url.strip_prefix("https://github.com/"))
-        .or_else(|| url.strip_prefix("http://github.com/"))?;
+    let path = GITHUB_REMOTE_PREFIXES
+        .iter()
+        .find_map(|prefix| url.strip_prefix(prefix))?;
     let path = path.trim_end_matches('/');
     let path = path.strip_suffix(".git").unwrap_or(path);
     let (owner, name) = path.split_once('/')?;

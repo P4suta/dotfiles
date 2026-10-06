@@ -3,29 +3,37 @@ use anyhow::{Context, Result, ensure};
 use std::ffi::{OsStr, OsString};
 use std::process::ExitStatus;
 
+/// The words an `ssh-keygen` option and its separate value take.
+const OPTION_WITH_VALUE: usize = 2;
+
 pub(crate) fn translate(
     arguments: &[OsString],
     mut convert: impl FnMut(&OsStr) -> Result<OsString>,
 ) -> Result<Vec<OsString>> {
+    let [flag, operation, options @ ..] = arguments else {
+        anyhow::bail!("the WSL bridge supports SSH signing and verification only");
+    };
     ensure!(
-        arguments.len() >= 2
-            && arguments[0] == "-Y"
+        flag == "-Y"
             && matches!(
-                arguments[1].to_str(),
+                operation.to_str(),
                 Some("sign" | "verify" | "find-principals" | "check-novalidate")
             ),
         "the WSL bridge supports SSH signing and verification only"
     );
-    let mut result = arguments[..2].to_vec();
-    let mut index = 2;
+    let mut result = vec![flag.clone(), operation.clone()];
+    let arguments = options;
+    let mut index = 0;
     while index < arguments.len() {
         let argument = &arguments[index];
         // Git passes `-U` for a literal signing key held by the agent and `-Overify-time=...` as one attached option.
         if argument == "-q"
             || argument == "-U"
-            || argument
-                .to_str()
-                .is_some_and(|value| value.len() > 2 && value.starts_with("-O"))
+            || argument.to_str().is_some_and(|value| {
+                value
+                    .strip_prefix("-O")
+                    .is_some_and(|option| !option.is_empty())
+            })
         {
             result.push(argument.clone());
             index += 1;
@@ -45,7 +53,7 @@ pub(crate) fn translate(
             } else {
                 value.clone()
             });
-            index += 2;
+            index += OPTION_WITH_VALUE;
         } else {
             ensure!(
                 !argument

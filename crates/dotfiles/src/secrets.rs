@@ -245,9 +245,11 @@ pub fn exit(status: ExitStatus) -> ! {
     #[cfg(unix)]
     let code = {
         use std::os::unix::process::ExitStatusExt;
+        // A shell reports a process a signal ended as this base plus the signal's number.
+        const SIGNALED: i32 = 128;
         status
             .code()
-            .unwrap_or_else(|| 128 + status.signal().unwrap_or(1))
+            .unwrap_or_else(|| SIGNALED + status.signal().unwrap_or(1))
     };
     #[cfg(not(unix))]
     let code = status.code().unwrap_or(1);

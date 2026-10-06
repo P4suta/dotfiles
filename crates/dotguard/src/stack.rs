@@ -13,6 +13,13 @@ pub const TOKEN: &str = "DOTGUARD_STACK";
 /// The lease file the stack tooling writes in the repository's common Git directory while it runs.
 pub const LEASE: &str = "dotguard-stack.lease";
 
+/// The URL prefixes of a GitHub remote, over HTTPS, SSH, and the short `git@host:path` SSH form.
+const GITHUB_REMOTE_PREFIXES: [&str; 3] = [
+    "https://github.com/",
+    "ssh://git@github.com/",
+    "git@github.com:",
+];
+
 /// The global options that choose the repository, so the gate reads the repository the command acts on.
 fn locating(globals: &[String]) -> Vec<String> {
     let mut kept = Vec::new();
@@ -51,13 +58,9 @@ pub fn leased(globals: &[String]) -> bool {
 
 /// The `OWNER/REPO` a GitHub remote URL names.
 pub fn github_slug(url: &str) -> Option<String> {
-    let path = [
-        "https://github.com/",
-        "ssh://git@github.com/",
-        "git@github.com:",
-    ]
-    .iter()
-    .find_map(|prefix| url.strip_prefix(prefix))?;
+    let path = GITHUB_REMOTE_PREFIXES
+        .iter()
+        .find_map(|prefix| url.strip_prefix(prefix))?;
     let path = path.strip_suffix('/').unwrap_or(path);
     let path = path.strip_suffix(".git").unwrap_or(path);
     let (owner, repository) = path.split_once('/')?;

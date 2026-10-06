@@ -21,6 +21,18 @@ use std::process::Stdio;
 
 const DEFAULT_GATE_TYPES: &str = "minor patch pin pinDigest";
 
+/// The exit status of a subcommand the gate doesn't serve.
+const USAGE_ERROR: i32 = 2;
+/// The digest digits a candidate shows when it names no version.
+const SHORT_DIGEST: usize = 12;
+/// The image's tool directory, which Renovate writes inside its read-only container.
+const CONTAINERBASE: &str = "/tmp/containerbase";
+/// `dotguard renovate run` precedes the arguments that pass through to Renovate.
+const PASSTHROUGH_AFTER: usize = 3;
+/// The first user's and the `staff` group's identifiers on macOS, when `id` can't tell.
+const DEFAULT_UID: u32 = 501;
+const DEFAULT_GID: u32 = 20;
+
 /// One dependency with a blocking update available, as parsed from the jq report.
 struct Candidate {
     package_file: String,
@@ -38,7 +50,7 @@ pub fn dispatch(args: &[String]) -> i32 {
         run_local()
     } else {
         eprintln!("usage: dotguard renovate run");
-        2
+        USAGE_ERROR
     }
 }
 
@@ -88,7 +100,7 @@ fn gate(remote: &str, input: &str) -> i32 {
         .unwrap_or_else(|_| DEFAULT_GATE_TYPES.to_owned());
     let out = jq_candidates(&types, &report);
     if let Some(dir) = report.parent() {
-        let _ = std::fs::remove_dir_all(dir);
+        platform::cleanup::remove_dir_all(dir);
     }
     let Some(out) = out else {
         return 0; // jq failed: fail-open, same contract as a missing report
@@ -284,7 +296,7 @@ fn touched(c: &Candidate, added_lines: &str, scope_unknown: bool) -> bool {
 
 fn display_current(c: &Candidate) -> String {
     if c.current_value.is_empty() {
-        c.current_digest.chars().take(12).collect()
+        c.current_digest.chars().take(SHORT_DIGEST).collect()
     } else {
         c.current_value.clone()
     }
@@ -292,7 +304,7 @@ fn display_current(c: &Candidate) -> String {
 
 fn display_new(c: &Candidate) -> String {
     if c.new_value.is_empty() {
-        c.new_digest.chars().take(12).collect()
+        c.new_digest.chars().take(SHORT_DIGEST).collect()
     } else {
         c.new_value.clone()
     }
@@ -310,11 +322,11 @@ fn renovate_report() -> Option<PathBuf> {
         Some(std::env::var("RENOVATE_LOCAL_LOG_LEVEL").unwrap_or_else(|_| "warn".into()));
     let ok = run_prepared(&cfg, true).is_some_and(|code| code == 0)
         && report.metadata().is_ok_and(|m| m.len() > 0);
-    let _ = std::fs::remove_dir_all(&cfg.snapshot);
+    platform::cleanup::remove_dir_all(&cfg.snapshot);
     if ok {
         Some(report)
     } else {
-        let _ = std::fs::remove_dir_all(&dir);
+        platform::cleanup::remove_dir_all(&dir);
         None
     }
 }
@@ -350,20 +362,32 @@ fn jq_candidates(types: &str, report: &Path) -> Option<String> {
 fn parse_candidates(out: &str) -> Vec<Candidate> {
     let mut v = Vec::new();
     for line in out.lines() {
-        let f: Vec<&str> = line.split('\u{1f}').collect();
-        if f.len() != 8 || f[0].is_empty() {
+        let fields: Vec<&str> = line.split('\u{1f}').collect();
+        let [
+            package_file,
+            dep_name,
+            current_value,
+            current_digest,
+            replace_string,
+            update_type,
+            new_value,
+            new_digest,
+        ] = fields[..]
+        else {
+            continue;
+        };
+        if package_file.is_empty() {
             continue;
         }
-        let mk = |i: usize| f.get(i).unwrap_or(&"").to_string();
         v.push(Candidate {
-            package_file: mk(0),
-            dep_name: mk(1),
-            current_value: mk(2),
-            current_digest: mk(3),
-            replace_string: mk(4),
-            update_type: mk(5),
-            new_value: mk(6),
-            new_digest: mk(7),
+            package_file: package_file.to_owned(),
+            dep_name: dep_name.to_owned(),
+            current_value: current_value.to_owned(),
+            current_digest: current_digest.to_owned(),
+            replace_string: replace_string.to_owned(),
+            update_type: update_type.to_owned(),
+            new_value: new_value.to_owned(),
+            new_digest: new_digest.to_owned(),
         });
     }
     v
@@ -432,13 +456,18 @@ pub fn is_manifest(path: &str) -> bool {
     {
         return true;
     }
-    if ext == "yml" || ext == "yaml" {
-        let n = comps.len();
-        if n >= 2 && comps[n - 2] == "workflows" && comps.contains(&".github") {
-            return true;
-        }
+    if (ext == "yml" || ext == "yaml")
+        && matches!(comps.as_slice(), [.., "workflows", _])
+        && comps.contains(&".github")
+    {
+        return true;
     }
-    if ext == "toml" && comps.windows(2).any(|w| w == [".config", "mise"]) {
+    if ext == "toml"
+        && comps
+            .iter()
+            .zip(comps.iter().skip(1))
+            .any(|pair| pair == (&".config", &"mise"))
+    {
         return true;
     }
     false
@@ -477,7 +506,9 @@ fn image_is_pinned(image: &str) -> bool {
         .iter()
         .all(|p| p.is_some_and(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())))
         && parts.next().is_none();
-    ok_version && digest.len() == 64 && digest.chars().all(|c| c.is_ascii_hexdigit())
+    ok_version
+        && digest.len() == rules::skill_rules::DIGEST_LENGTH
+        && digest.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// The `docker` argv and the environment removals for one run.
@@ -498,7 +529,7 @@ fn docker_plan(c: &RunConfig) -> (Vec<String>, Vec<&'static str>) {
         "/tmp:rw,nodev,nosuid,size=512m".into(),
         "--tmpfs".into(),
         format!(
-            "/tmp/containerbase:rw,nodev,nosuid,size=64m,uid={},gid={},mode=0700",
+            "{CONTAINERBASE}:rw,nodev,nosuid,size=64m,uid={},gid={},mode=0700",
             c.uid, c.gid
         ),
         "--env".into(),
@@ -606,7 +637,7 @@ fn prepare() -> Option<RunConfig> {
         "--template=",
     ]) && realgit::succeeds(&["-C", &prefix, "add", "--all"]);
     if !ok {
-        let _ = std::fs::remove_dir_all(&snapshot);
+        platform::cleanup::remove_dir_all(&snapshot);
         return None;
     }
 
@@ -623,7 +654,7 @@ fn prepare() -> Option<RunConfig> {
         dedicated_token: std::env::var("RENOVATE_GITHUB_COM_TOKEN")
             .ok()
             .filter(|s| !s.is_empty()),
-        passthrough: std::env::args().skip(3).collect(),
+        passthrough: std::env::args().skip(PASSTHROUGH_AFTER).collect(),
     })
 }
 
@@ -634,7 +665,11 @@ fn uid_gid() -> (u32, u32) {
             .output()
             .ok()
             .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
-            .unwrap_or(if flag == "-u" { 501 } else { 20 })
+            .unwrap_or(if flag == "-u" {
+                DEFAULT_UID
+            } else {
+                DEFAULT_GID
+            })
     };
     (read("-u"), read("-g"))
 }
@@ -644,7 +679,7 @@ pub fn run_local() -> i32 {
         return 1;
     };
     let code = run_prepared(&cfg, false).unwrap_or(1);
-    let _ = std::fs::remove_dir_all(&cfg.snapshot);
+    platform::cleanup::remove_dir_all(&cfg.snapshot);
     code
 }
 

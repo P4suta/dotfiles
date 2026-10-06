@@ -4,6 +4,16 @@ use crate::step::Step;
 use model::profile_rules::Profile;
 use std::process::Command;
 
+/// The Nix installer's default profile, which a login shell may not have on its `PATH` yet.
+const NIX: &str = "/nix/var/nix/profiles/default/bin/nix";
+
+/// The shells at their fixed system paths, so a user's `PATH` can't substitute another.
+const BASH: &str = "/bin/bash";
+const ZSH: &str = "/bin/zsh";
+
+/// The JSON pointer of the Nix package list in the chezmoi data.
+pub const NIX_PACKAGES: &str = "/nix/packages";
+
 /// How a host obtains a program before something runs it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Provision {
@@ -244,7 +254,7 @@ impl Tool {
             Self::ImConfig => "im-config",
             Self::Kani => "kani",
             Self::Mise => "mise",
-            Self::Nix => "/nix/var/nix/profiles/default/bin/nix",
+            Self::Nix => NIX,
             Self::Nu => "nu",
             Self::OnePassword => "1password",
             Self::Opam => "opam",
@@ -273,7 +283,7 @@ impl Tool {
             Self::Just => "just",
             Self::Ocaml => "ocaml",
             Self::Rustc => "rustc",
-            Self::Bash => "/bin/bash",
+            Self::Bash => BASH,
             Self::Carapace => "carapace",
             Self::Code => "code",
             Self::Docker => "docker",
@@ -289,7 +299,7 @@ impl Tool {
             Self::Vale => "vale",
             Self::Vivid => "vivid",
             Self::Zoxide => "zoxide",
-            Self::Zsh => "/bin/zsh",
+            Self::Zsh => ZSH,
             Self::CurlExe => "curl.exe",
             Self::Env => "env",
             Self::GnomeTerminal => "gnome-terminal",
@@ -403,7 +413,7 @@ impl Tool {
     pub fn package(self, profile: Profile) -> Option<(&'static str, &'static str)> {
         let pointer = match profile {
             Profile::Mac => "/brew/formulae",
-            Profile::Linux => "/nix/packages",
+            Profile::Linux => NIX_PACKAGES,
             Profile::Windows => "/scoop/apps",
             Profile::Wsl => return None,
         };

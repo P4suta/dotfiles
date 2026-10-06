@@ -1,6 +1,13 @@
 //! Just enough JSON to read `op`'s output, because the crate takes no dependencies.
 //! `op item get -` prints one pretty-printed object per item, back to back, so the entry point reads a stream of values rather than one document.
 
+/// A `\u` escape and its four hexadecimal digits, RFC 8259 section 7.
+const UNICODE_ESCAPE: &[u8] = b"\\u";
+const HEX_DIGITS: usize = 4;
+const HEX_RADIX: u32 = 16;
+/// The UTF-16 code units that start a surrogate pair.
+const HIGH_SURROGATES: std::ops::Range<u16> = 0xD800..0xDC00;
+
 #[derive(Debug, PartialEq)]
 pub enum Value {
     Null,
@@ -177,8 +184,8 @@ impl Parser<'_> {
                         b'n' => out.push(b'\n'),
                         b't' => out.push(b'\t'),
                         b'r' => out.push(b'\r'),
-                        b'b' => out.push(0x08),
-                        b'f' => out.push(0x0c),
+                        b'b' => out.push(b'\x08'),
+                        b'f' => out.push(b'\x0c'),
                         b'u' => {
                             let c = self.unicode()?;
                             out.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
@@ -193,26 +200,33 @@ impl Parser<'_> {
 
     /// The four hex digits after `\u`, joining a surrogate pair when one follows.
     fn unicode(&mut self) -> Result<char, String> {
-        let hi = self.hex4()?;
-        let code = if (0xD800..0xDC00).contains(&hi) && self.s[self.i..].starts_with(b"\\u") {
-            self.i += 2;
-            let lo = self.hex4()?;
-            0x10000 + ((hi - 0xD800) << 10) + (lo.wrapping_sub(0xDC00) & 0x3FF)
+        let high = self.hex4()?;
+        let low = if HIGH_SURROGATES.contains(&high)
+            && self
+                .s
+                .get(self.i..)
+                .is_some_and(|rest| rest.starts_with(UNICODE_ESCAPE))
+        {
+            self.i += UNICODE_ESCAPE.len();
+            Some(self.hex4()?)
         } else {
-            hi
+            None
         };
-        Ok(char::from_u32(code).unwrap_or('\u{FFFD}'))
+        Ok(char::decode_utf16(std::iter::once(high).chain(low))
+            .next()
+            .and_then(Result::ok)
+            .unwrap_or(char::REPLACEMENT_CHARACTER))
     }
 
-    fn hex4(&mut self) -> Result<u32, String> {
+    fn hex4(&mut self) -> Result<u16, String> {
         let digits = self
             .s
-            .get(self.i..self.i + 4)
+            .get(self.i..self.i + HEX_DIGITS)
             .and_then(|d| std::str::from_utf8(d).ok());
-        let Some(n) = digits.and_then(|d| u32::from_str_radix(d, 16).ok()) else {
+        let Some(n) = digits.and_then(|d| u16::from_str_radix(d, HEX_RADIX).ok()) else {
             return self.err("bad \\u escape");
         };
-        self.i += 4;
+        self.i += HEX_DIGITS;
         Ok(n)
     }
 }

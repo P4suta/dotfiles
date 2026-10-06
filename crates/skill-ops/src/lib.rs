@@ -946,8 +946,8 @@ pub fn validate_policy(policy: &Policy, catalog: &Catalog) -> Result<()> {
     ensure!(
         policy.schema == 1
             && policy.review_every > 0
-            && policy.minimum_pair_sessions >= 2
-            && (1..=100).contains(&policy.pair_percent)
+            && policy.minimum_pair_sessions >= skill_rules::MINIMUM_PAIR_FLOOR
+            && (1..=skill_rules::PERCENT).contains(&policy.pair_percent)
             && policy.max_entry_words > 0,
         "invalid skill operations policy"
     );
@@ -1166,7 +1166,7 @@ pub fn write_json(path: &Path, value: &impl Serialize, replace: bool) -> Result<
 pub fn record(state: &Path, observation: &Observation) -> Result<bool> {
     ensure!(
         observation.schema == 1
-            && observation.id.len() == 64
+            && observation.id.len() == skill_rules::DIGEST_LENGTH
             && observation.id.bytes().all(|byte| byte.is_ascii_hexdigit()),
         "invalid skill observation identity"
     );
@@ -1201,6 +1201,9 @@ pub fn record(state: &Path, observation: &Observation) -> Result<bool> {
     }
 }
 
+/// The largest JSON file the engine reads, 16 MiB.
+const JSON_INPUT_LIMIT: u64 = 16 * 1024 * 1024;
+
 /// Reads and deserializes a JSON file of at most 16 MiB.
 ///
 /// # Errors
@@ -1208,7 +1211,7 @@ pub fn record(state: &Path, observation: &Observation) -> Result<bool> {
 /// Returns an error when reading the file fails, the file exceeds 16 MiB, or it doesn't deserialize into `T`.
 pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     ensure!(
-        fs::metadata(path)?.len() <= 16_777_216,
+        fs::metadata(path)?.len() <= JSON_INPUT_LIMIT,
         "skill operations input exceeds its size bound"
     );
     serde_json::from_slice(&fs::read(path)?)

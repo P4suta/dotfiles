@@ -9,10 +9,19 @@ use serde_json::Value;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+/// A Git Bash drive path's parts: the empty root, the drive letter, and the rest.
+const DRIVE_PATH_PARTS: usize = 3;
+
+/// The shortest unambiguous abbreviation of a PowerShell switch: its dash and one letter.
+const MIN_SWITCH_ABBREVIATION: usize = 2;
+
+/// Claude Code blocks the tool call and shows standard error to the model on this exit status.
+const BLOCK: i32 = 2;
+
 /// A Git Bash path such as `/c/Users/x` names `C:/Users/x` to Windows programs.
 fn native_path(path: &str) -> PathBuf {
     if cfg!(windows) {
-        let mut parts = path.splitn(3, '/');
+        let mut parts = path.splitn(DRIVE_PATH_PARTS, '/');
         if let (Some(""), Some(drive), rest) = (parts.next(), parts.next(), parts.next())
             && drive.len() == 1
             && drive.chars().all(|c| c.is_ascii_alphabetic())
@@ -98,18 +107,20 @@ fn disk_scan(command: &str) -> (bool, bool) {
             }
             "find" => {
                 recursive = true;
-                let printf_size = rest
-                    .windows(2)
-                    .any(|pair| pair[0].starts_with("-printf") || pair[0] == "-fprintf")
-                    && rest
+                // A format option counts only when a format follows it.
+                let printf_size = rest.split_last().is_some_and(|(_, options)| {
+                    options
                         .iter()
-                        .any(|word| word.contains("%s") || word.contains("%k"));
+                        .any(|word| word.starts_with("-printf") || word == "-fprintf")
+                }) && rest
+                    .iter()
+                    .any(|word| word.contains("%s") || word.contains("%k"));
                 sizes |= rest.iter().any(|word| word == "-size") || printf_size;
             }
             "get-childitem" | "gci" | "dir" | "ls" | "childitem" => {
                 recursive |= rest.iter().any(|word| {
                     let word = word.to_ascii_lowercase();
-                    word.len() >= 2 && "-recurse".starts_with(&word)
+                    word.len() >= MIN_SWITCH_ABBREVIATION && "-recurse".starts_with(&word)
                 });
             }
             _ => {}
@@ -220,7 +231,7 @@ pub fn run() -> Result<()> {
     std::io::stdin().read_to_string(&mut event)?;
     if let Some(message) = refusal(&event)? {
         eprintln!("{message}");
-        std::process::exit(2);
+        std::process::exit(BLOCK);
     }
     Ok(())
 }

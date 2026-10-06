@@ -43,7 +43,7 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | Shared data and tool versions | `home/.chezmoidata/`, typed in `crates/model/src/data.rs`, `mise.toml`, and `mise.lock` |
 | A gate | `xtask/src/` with its tests in `xtask/tests/`, or the crate of the tool that runs it |
 | A rule a gate decides | a `*_rules.rs` module in `crates/rules/src/`, re-exported by its caller's crate, and its entry in `xtask/src/skill_proofs.rs` |
-| A structural rule for every repository | `home/dot_config/assure/rules/` with its fixtures in `rule-tests/` |
+| A structural rule for every repository | `home/dot_config/assure/rules/` with its fixtures in `rule-tests/` and its entry in `catalog.toml` |
 | A shared skill | `home/dot_agents/skills/<skill>/` and `docs/skills/decisions/<skill>.json` |
 | A durable design decision | a new record in `docs/adr/`, then `just gen` |
 
@@ -53,4 +53,5 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 - A rule module receives every fact as a value and returns its decision as a value, and the compiler and the structural gate refuse anything else.
 - A change that alters what a host receives updates both manifest sets in `xtask/tests/snapshots/` and explains the difference.
 - Lint exceptions use `#[expect]` with a reason.
+- A number, URL, or system path with a meaning gets a named constant, and a cleanup failure goes through `platform::cleanup`, as the catalog in `home/dot_config/assure/` requires.
 - The baselines in `policy/lint-baselines/` only shrink: fix a new finding instead of admitting it.

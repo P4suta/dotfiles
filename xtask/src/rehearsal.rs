@@ -73,12 +73,12 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
     let mut identity = crate::profiles::configuration(root, &answers)?;
     identity.push_str("\n\n");
     for skip in omitted(profile) {
-        let _ = write!(
+        write!(
             identity,
             "[[data.setup.skip]]\nscript = {}\nreason = {}\n\n",
             toml_string(skip.script),
             toml_string(skip.reason)
-        );
+        )?;
     }
     let kept = required_packages(root, profile, home, &identity)?;
     let keep = |pointer: &str| -> Vec<String> {
@@ -95,18 +95,18 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
     };
     let mut text = identity;
     let name = profile.name();
-    let _ = write!(
+    write!(
         text,
         "[data.platforms.{name}.tools]\ncommon = [{}]\npersonal = []\nwork = []\n\n",
         list("/tools/common")
-    );
+    )?;
     match profile {
         Profile::Mac => {
-            let _ = write!(
+            write!(
                 text,
                 "[data.platforms.mac.brew]\nformulae = [{}]\ncasks = []\n\n[data.platforms.mac.racket]\ncollections = []\n\n[data.ocaml]\nplatform_tools = []\n\n",
                 list("/brew/formulae")
-            );
+            )?;
         }
         Profile::Linux => {
             text.push_str("[data.ocaml]\nplatform_tools = []\n\n");
@@ -115,23 +115,23 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
                 .pointer("/platforms/linux/nix/packages")
                 .and_then(serde_json::Value::as_object)
                 .context("Linux Nix packages are missing")?;
-            let required = keep("/nix/packages");
+            let required = keep(crate::tool::NIX_PACKAGES);
             for (package, spec) in packages {
                 let spec = if required.contains(&toml_string(package)) {
                     spec.as_str().unwrap_or_default()
                 } else {
                     ""
                 };
-                let _ = writeln!(text, "{} = {}", toml_string(package), toml_string(spec));
+                writeln!(text, "{} = {}", toml_string(package), toml_string(spec))?;
             }
             text.push('\n');
         }
         Profile::Windows => {
-            let _ = write!(
+            write!(
                 text,
                 "[data.platforms.windows.scoop]\napps = [{}]\nwinget_duplicates = []\n\n[data.platforms.windows.winget]\napps = []\n\n",
                 list("/scoop/apps")
-            );
+            )?;
         }
         Profile::Wsl => {}
     }

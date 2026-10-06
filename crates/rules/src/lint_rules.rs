@@ -19,19 +19,49 @@ impl Fault {
     }
 }
 
+/// The UTF-8 encoding forms of RFC 3629: each lead byte's mask, marker, payload bits, sequence length, and least scalar value.
+const ASCII_END: u8 = 0x80;
+const TWO_MASK: u8 = 0xE0;
+const TWO_MARKER: u8 = 0xC0;
+const TWO_PAYLOAD: u8 = 0x1F;
+const TWO_LENGTH: usize = 2;
+const TWO_LEAST: u32 = 0x80;
+const THREE_MASK: u8 = 0xF0;
+const THREE_MARKER: u8 = 0xE0;
+const THREE_PAYLOAD: u8 = 0x0F;
+const THREE_LENGTH: usize = 3;
+const THREE_LEAST: u32 = 0x800;
+const FOUR_MASK: u8 = 0xF8;
+const FOUR_MARKER: u8 = 0xF0;
+const FOUR_PAYLOAD: u8 = 0x07;
+const FOUR_LENGTH: usize = 4;
+const FOUR_LEAST: u32 = 0x1_0000;
+const CONTINUATION_MASK: u8 = 0xC0;
+const CONTINUATION_MARKER: u8 = 0x80;
+const CONTINUATION_PAYLOAD: u8 = 0x3F;
+const CONTINUATION_BITS: u32 = 6;
+const MAX_SCALAR: u32 = 0x10_FFFF;
+const FIRST_SURROGATE: u32 = 0xD800;
+const LAST_SURROGATE: u32 = 0xDFFF;
+
+/// The UTF-8 byte order mark.
+const MARK_FIRST: u8 = 0xEF;
+const MARK_SECOND: u8 = 0xBB;
+const MARK_THIRD: u8 = 0xBF;
+
 /// Whether `bytes` hold well-formed UTF-8: shortest forms only, no surrogates, and nothing past U+10FFFF.
 #[must_use]
 pub fn is_utf8(bytes: &[u8]) -> bool {
     let mut index = 0;
     while let Some(&lead) = bytes.get(index) {
-        let (length, least, mut point) = if lead < 0x80 {
+        let (length, least, mut point) = if lead < ASCII_END {
             (1, 0, u32::from(lead))
-        } else if lead & 0xE0 == 0xC0 {
-            (2, 0x80, u32::from(lead & 0x1F))
-        } else if lead & 0xF0 == 0xE0 {
-            (3, 0x800, u32::from(lead & 0x0F))
-        } else if lead & 0xF8 == 0xF0 {
-            (4, 0x1_0000, u32::from(lead & 0x07))
+        } else if lead & TWO_MASK == TWO_MARKER {
+            (TWO_LENGTH, TWO_LEAST, u32::from(lead & TWO_PAYLOAD))
+        } else if lead & THREE_MASK == THREE_MARKER {
+            (THREE_LENGTH, THREE_LEAST, u32::from(lead & THREE_PAYLOAD))
+        } else if lead & FOUR_MASK == FOUR_MARKER {
+            (FOUR_LENGTH, FOUR_LEAST, u32::from(lead & FOUR_PAYLOAD))
         } else {
             return false;
         };
@@ -43,13 +73,16 @@ pub fn is_utf8(bytes: &[u8]) -> bool {
             let Some(&next) = bytes.get(index + offset) else {
                 return false;
             };
-            if next & 0xC0 != 0x80 {
+            if next & CONTINUATION_MASK != CONTINUATION_MARKER {
                 return false;
             }
-            point = (point << 6) | u32::from(next & 0x3F);
+            point = (point << CONTINUATION_BITS) | u32::from(next & CONTINUATION_PAYLOAD);
             offset += 1;
         }
-        if point < least || point > 0x10_FFFF || (0xD800..=0xDFFF).contains(&point) {
+        if point < least
+            || point > MAX_SCALAR
+            || (FIRST_SURROGATE..=LAST_SURROGATE).contains(&point)
+        {
             return false;
         }
         index += length;
@@ -60,7 +93,7 @@ pub fn is_utf8(bytes: &[u8]) -> bool {
 /// The first fault of a text file's bytes, or `None` for an empty file or one that keeps the encoding.
 #[must_use]
 pub fn fault(bytes: &[u8]) -> Option<Fault> {
-    if matches!(bytes, [0xEF, 0xBB, 0xBF, ..]) {
+    if matches!(bytes, [MARK_FIRST, MARK_SECOND, MARK_THIRD, ..]) {
         Some(Fault::ByteOrderMark)
     } else if !is_utf8(bytes) {
         Some(Fault::NotUtf8)

@@ -7,6 +7,9 @@ use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+/// The repositories one capture reads at once, which keeps the GitHub API's secondary rate limit away.
+const CONCURRENT_REPOSITORIES: usize = 8;
+
 #[derive(Parser)]
 #[command(
     version,
@@ -85,7 +88,7 @@ fn capture(names: BTreeSet<String>) -> Result<Snapshot> {
     ensure!(!names.is_empty(), "specify --owner or at least one --repo");
     let mut repositories = Vec::new();
     let names: Vec<_> = names.into_iter().collect();
-    for batch in names.chunks(8) {
+    for batch in names.chunks(CONCURRENT_REPOSITORIES) {
         let captured = std::thread::scope(|scope| -> Result<Vec<_>> {
             let handles: Vec<_> = batch
                 .iter()

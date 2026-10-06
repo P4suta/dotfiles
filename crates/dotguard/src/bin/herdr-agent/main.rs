@@ -20,11 +20,21 @@ const USAGE: &str = "usage: herdr-agent ensure|ready|status|lock\n\n  \
     status  list the loaded keys\n  \
     lock    remove every key from the agent";
 
+/// The exit status of a command the agent doesn't serve.
+const USAGE_ERROR: u8 = 2;
+
+/// `rwx------`: the socket directory admits only its owner.
+#[cfg(unix)]
+const OWNER_ONLY: u32 = 0o700;
+
+/// An `authorized_keys` key's material: its type and its base64 body.
+const KEY_MATERIAL_FIELDS: usize = 2;
+
 fn main() -> ExitCode {
     // This binary serves a Unix socket, and Windows provisions the Herdr ssh-agent through the runtime's Windows setup.
     if cfg!(not(unix)) {
         eprintln!("herdr-agent manages a Unix-socket SSH agent and does not run on Windows");
-        return ExitCode::from(2);
+        return ExitCode::from(USAGE_ERROR);
     }
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -37,7 +47,7 @@ fn main() -> ExitCode {
         Some("lock") => ssh_add(&sock, "-D"),
         _ => {
             eprintln!("{USAGE}");
-            2
+            USAGE_ERROR
         }
     };
     ExitCode::from(code)
@@ -111,11 +121,11 @@ fn start(sock: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(OWNER_ONLY))
             .map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     // `ssh-agent` refuses to bind over a stale socket from a dead process.
-    let _ = std::fs::remove_file(sock);
+    platform::cleanup::remove_file(sock);
     let ok = locate::child("ssh-agent")
         .arg("-a")
         .arg(sock)
@@ -222,7 +232,10 @@ fn add_key(sock: &Path, key: &[u8]) -> Result<(), String> {
 }
 
 fn normalize(key: &str) -> String {
-    key.split_whitespace().take(2).collect::<Vec<_>>().join(" ")
+    key.split_whitespace()
+        .take(KEY_MATERIAL_FIELDS)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn wanted_keys(text: &str) -> Vec<String> {

@@ -13,7 +13,13 @@
 //!
 //! This module uses std only, so `dotguard` takes it without the platform crate's tools feature.
 
-use std::fmt::{self, Write as _};
+use std::fmt;
+
+/// JSON escapes every character below the space, RFC 8259 section 7.
+const FIRST_UNESCAPED: u32 = 0x20;
+/// A `\u` escape holds four hexadecimal digits.
+const UNICODE_ESCAPE_DIGITS: u32 = 4;
+const HEX_RADIX: u32 = 16;
 
 /// Starts the machine-readable line.
 /// The version changes only with an incompatible format.
@@ -285,8 +291,13 @@ fn string(out: &mut String, value: &str) {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            control if u32::from(control) < 0x20 => {
-                let _ = write!(out, "\\u{:04x}", u32::from(control));
+            control if u32::from(control) < FIRST_UNESCAPED => {
+                out.push_str("\\u");
+                let code = u32::from(control);
+                for place in (0..UNICODE_ESCAPE_DIGITS).rev() {
+                    let digit = code / HEX_RADIX.pow(place) % HEX_RADIX;
+                    out.extend(char::from_digit(digit, HEX_RADIX));
+                }
             }
             other => out.push(other),
         }
@@ -327,15 +338,16 @@ impl Reader<'_> {
                         'f' => '\u{c}',
                         'u' => {
                             let mut code = 0;
-                            for _ in 0..4 {
-                                code = code * 16 + characters.next()?.1.to_digit(16)?;
+                            for _ in 0..UNICODE_ESCAPE_DIGITS {
+                                code =
+                                    code * HEX_RADIX + characters.next()?.1.to_digit(HEX_RADIX)?;
                             }
                             char::from_u32(code)?
                         }
                         _ => return None,
                     });
                 }
-                control if u32::from(control) < 0x20 => return None,
+                control if u32::from(control) < FIRST_UNESCAPED => return None,
                 other => out.push(other),
             }
         }

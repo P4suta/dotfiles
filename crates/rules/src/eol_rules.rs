@@ -69,10 +69,25 @@ pub fn forces_text(attributes: Attributes) -> bool {
         || (attributes.text == Text::Unspecified && attributes.eol == Eol::Lf)
 }
 
+/// Git's `convert_is_binary` admits one nonprintable byte per this many printable ones, as a shift.
+const PRINTABLE_PER_NONPRINTABLE_SHIFT: u32 = 7;
+
+/// Control bytes that Git's `gather_stats` counts as printable.
+const BACKSPACE: u8 = 0x08;
+const FORM_FEED: u8 = 0x0c;
+const ESCAPE: u8 = 0x1b;
+const DELETE: u8 = 0x7f;
+const FIRST_CONTROL: u8 = 0x01;
+const LAST_CONTROL: u8 = 0x1f;
+/// The `Ctrl-Z` end-of-file byte, which Git doesn't count when it ends the content.
+const END_OF_FILE: u8 = 0x1a;
+
 /// Git's `convert_is_binary`: a lone CR, a NUL, or more than one nonprintable byte per 128 printable ones.
 #[must_use]
 pub fn auto_binary(content: Content) -> bool {
-    content.lone_cr || content.nul || (content.printable >> 7) < content.nonprintable
+    content.lone_cr
+        || content.nul
+        || (content.printable >> PRINTABLE_PER_NONPRINTABLE_SHIFT) < content.nonprintable
 }
 
 /// Git's `has_crlf_in_index` rule: content detection keeps a path whose index entry already holds CRLF text.
@@ -114,17 +129,17 @@ pub fn content(bytes: &[u8]) -> Content {
             }
             b'\r' => found.lone_cr = true,
             b'\n' => {}
-            0x08 | b'\t' | 0x0c | 0x1b => found.printable += 1,
+            BACKSPACE | b'\t' | FORM_FEED | ESCAPE => found.printable += 1,
             0 => {
                 found.nul = true;
                 found.nonprintable += 1;
             }
-            0x7f | 0x01..=0x1f => found.nonprintable += 1,
+            DELETE | FIRST_CONTROL..=LAST_CONTROL => found.nonprintable += 1,
             _ => found.printable += 1,
         }
         index += 1;
     }
-    if bytes.last() == Some(&0x1a) {
+    if bytes.last() == Some(&END_OF_FILE) {
         found.nonprintable -= 1;
     }
     found

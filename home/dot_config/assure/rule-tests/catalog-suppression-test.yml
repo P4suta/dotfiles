@@ -1,0 +1,6 @@
+id: catalog-suppression
+valid:
+  - "// The retry count comes from the protocol.\nconst RETRIES: u32 = 3;"
+invalid:
+  - "// ast-grep-ignore: magic-number\nfn retries() -> u32 { 3 }"
+  - "/* ast-grep-ignore */\nfn retries() -> u32 { 3 }"

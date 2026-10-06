@@ -6,6 +6,15 @@ use anyhow::{Context, Result, ensure};
 use std::fs;
 use std::path::Path;
 
+/// The binaries inside the Mac app bundles, which the bundles keep off `PATH`.
+pub const GHOSTTY_BUNDLE_BINARY: &str = "/Applications/Ghostty.app/Contents/MacOS/ghostty";
+const TAILSCALE_BUNDLE_BINARY: &str = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
+
+/// The vendors' installers and release downloads.
+const KITTY_INSTALLER: &str = "https://sw.kovidgoyal.net/kitty/installer.sh";
+const ZED_INSTALLER: &str = "https://zed.dev/install.sh";
+const NERD_FONTS_RELEASES: &str = "https://github.com/ryanoasis/nerd-fonts/releases/download";
+
 fn text(data: &serde_json::Value, pointer: &str) -> Result<String> {
     Ok(data
         .pointer(pointer)
@@ -95,14 +104,8 @@ fn mac(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         )?;
     }
     for (tool, binary) in [
-        (
-            Tool::Ghostty,
-            "/Applications/Ghostty.app/Contents/MacOS/ghostty",
-        ),
-        (
-            Tool::Tailscale,
-            "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
-        ),
+        (Tool::Ghostty, GHOSTTY_BUNDLE_BINARY),
+        (Tool::Tailscale, TAILSCALE_BUNDLE_BINARY),
     ] {
         if Path::new(binary).is_file() {
             let target = context.home.join(".local/bin").join(tool.program());
@@ -196,11 +199,7 @@ fn kitty(context: &ContextData, runner: &mut impl Runner, kitty_channel: &str) -
     if kitty_channel != "stable" {
         arguments.push(&channel);
     }
-    crate::setup::vendor_installer(
-        runner,
-        "https://sw.kovidgoyal.net/kitty/installer.sh",
-        &arguments,
-    )?;
+    crate::setup::vendor_installer(runner, KITTY_INSTALLER, &arguments)?;
     for name in ["kitty", "kitten"] {
         link(
             &context.home.join(".local/kitty.app/bin").join(name),
@@ -236,7 +235,7 @@ fn zed(
                 "-fsSL".into(),
                 "--max-time".into(),
                 "300".into(),
-                "https://zed.dev/install.sh".into(),
+                ZED_INSTALLER.into(),
                 "-o".into(),
                 script.clone().into(),
             ],
@@ -305,7 +304,21 @@ fn nerd_font(context: &ContextData, runner: &mut impl Runner, font_version: &str
     if !fs::read_to_string(&stamp).is_ok_and(|version| version.trim() == font_version) {
         let scope = tempfile::tempdir()?;
         let archive = scope.path().join("font.zip");
-        checked(runner, Tool::Curl, &["--proto".into(), "=https".into(), "--tlsv1.2".into(), "-fsSL".into(), "--max-time".into(), "300".into(), "-o".into(), archive.clone().into(), format!("https://github.com/ryanoasis/nerd-fonts/releases/download/{font_version}/JetBrainsMono.zip").into()])?;
+        checked(
+            runner,
+            Tool::Curl,
+            &[
+                "--proto".into(),
+                "=https".into(),
+                "--tlsv1.2".into(),
+                "-fsSL".into(),
+                "--max-time".into(),
+                "300".into(),
+                "-o".into(),
+                archive.clone().into(),
+                format!("{NERD_FONTS_RELEASES}/{font_version}/JetBrainsMono.zip").into(),
+            ],
+        )?;
         fs::create_dir_all(&fonts)?;
         checked(
             runner,

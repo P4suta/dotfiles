@@ -126,9 +126,9 @@ fn simplified(c: char) -> bool {
     in_ranges(c, SIMPLIFIED_RANGES) || SIMPLIFIED_EXTRA.contains(c)
 }
 
+/// The Greek and Coptic block and the Greek Extended block.
 const fn greek(c: char) -> bool {
-    let n = c as u32;
-    (0x0370 <= n && n <= 0x03FF) || (0x1F00 <= n && n <= 0x1FFF)
+    matches!(c, '\u{0370}'..='\u{03FF}' | '\u{1F00}'..='\u{1FFF}')
 }
 
 /// The count of consecutive Greek letters that turns notation into a word.
@@ -164,24 +164,28 @@ impl Mode {
 
 /// ASCII letters, the Latin-1 accents, and the extended Latin blocks U+0100–U+024F and U+1E00–U+1EFF.
 const fn latin(c: char) -> bool {
-    let n = c as u32;
     c.is_ascii_alphabetic()
-        || n == 0x00B5 // `µ` micro sign, as in `µs`
-        || n == 0x00AA // `ª`
-        || n == 0x00BA // `º`
-        || (0x00C0 <= n && n <= 0x024F)
-        || (0x1E00 <= n && n <= 0x1EFF)
+        || matches!(
+            c,
+            'µ' // the micro sign, as in `µs`
+            | 'ª'
+            | 'º'
+            | '\u{00C0}'..='\u{024F}'
+            | '\u{1E00}'..='\u{1EFF}'
+        )
 }
 
 /// Kana, kanji, and the punctuation and fullwidth forms that come with them.
 const fn japanese(c: char) -> bool {
-    let n = c as u32;
-    (0x3000 <= n && n <= 0x303F) // `、。「」〜` and the iteration marks
-        || (0x3040 <= n && n <= 0x30FF) // hiragana, katakana
-        || (0x31F0 <= n && n <= 0x31FF) // phonetic extensions for Ainu
-        || (0x3400 <= n && n <= 0x9FFF) // CJK ideographs
-        || (0xF900 <= n && n <= 0xFAFF) // compatibility ideographs
-        || (0xFF00 <= n && n <= 0xFFEF) // halfwidth and fullwidth forms
+    matches!(
+        c,
+        '\u{3000}'..='\u{303F}' // `、。「」〜` and the iteration marks
+        | '\u{3040}'..='\u{30FF}' // hiragana, katakana
+        | '\u{31F0}'..='\u{31FF}' // phonetic extensions for Ainu
+        | '\u{3400}'..='\u{9FFF}' // CJK ideographs
+        | '\u{F900}'..='\u{FAFF}' // compatibility ideographs
+        | '\u{FF00}'..='\u{FFEF}' // halfwidth and fullwidth forms
+    )
 }
 
 /// The script name of a hit, for the refusal message.
@@ -189,11 +193,11 @@ fn script_of(c: char) -> &'static str {
     if let Some(name) = blocked_script(c) {
         return name;
     }
-    match c as u32 {
-        0x3040..=0x309F => "Hiragana",
-        0x30A0..=0x30FF | 0x31F0..=0x31FF => "Katakana",
-        0x3400..=0x9FFF | 0xF900..=0xFAFF => "Han",
-        0x0370..=0x03FF | 0x1F00..=0x1FFF => "Greek",
+    match c {
+        '\u{3040}'..='\u{309F}' => "Hiragana",
+        '\u{30A0}'..='\u{30FF}' | '\u{31F0}'..='\u{31FF}' => "Katakana",
+        '\u{3400}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}' => "Han",
+        '\u{0370}'..='\u{03FF}' | '\u{1F00}'..='\u{1FFF}' => "Greek",
         _ => "non-Latin letter",
     }
 }
@@ -296,7 +300,7 @@ pub fn report(label: &str, text: &str, hits: &[Hit]) {
         if h.line != last_line
             && let Some(src) = lines.get(h.line - 1)
         {
-            let shown: String = src.chars().take(160).collect();
+            let shown: String = src.chars().take(QUOTED_LINE).collect();
             eprintln!("      | {shown}");
             last_line = h.line;
         }
@@ -313,6 +317,9 @@ pub fn evidence(label: &str, h: &Hit) -> String {
 
 /// The most hits a refusal lists, while the preceding report shows every one.
 const EVIDENCE_LIMIT: usize = 20;
+
+/// The characters of a source line that a refusal quotes.
+const QUOTED_LINE: usize = 160;
 
 /// The refusal for text in a script this machine doesn't write.
 /// `waiver` repeats the refused command with the recorded override, and stays `None` for an unknown command.

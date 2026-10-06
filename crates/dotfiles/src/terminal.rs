@@ -5,6 +5,18 @@ use std::ffi::OsString;
 use std::io::IsTerminal;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
+use std::time::Duration;
+
+/// How long the Herdr server gets to report that it runs: fifty checks a tenth of a second apart.
+const SERVER_CHECKS: u32 = 50;
+const SERVER_CHECK_INTERVAL: Duration = Duration::from_millis(100);
+
+/// The local sudo authentication file macOS reads beside its own, and the fingerprint module it names.
+const SUDO_LOCAL: &str = "/etc/pam.d/sudo_local";
+const TOUCH_ID_MODULE: &str = "/usr/lib/pam/pam_tid.so.2";
+/// `r--r--r--`, as macOS ships its authentication files.
+#[cfg(unix)]
+const PAM_FILE_MODE: u32 = 0o444;
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub enum Session {
@@ -59,7 +71,10 @@ fn child_command(native: &mut Native, session: Session, arguments: &[OsString]) 
 /// Starts the Herdr server with its SSH agent unless it already runs, waiting up to five seconds for it.
 fn start_herdr_server(native: &mut Native) -> Result<()> {
     if native.available(Tool::HerdrAgent) {
-        let _ = native.run(Tool::HerdrAgent, &args(&["ensure"]));
+        platform::cleanup::report(
+            native.run(Tool::HerdrAgent, &args(&["ensure"])),
+            "start the Herdr SSH agent",
+        );
     }
     let running = |native: &mut Native| -> Result<bool> {
         let server = native.run(Tool::Herdr, &args(&["status", "server"]))?;
@@ -75,11 +90,11 @@ fn start_herdr_server(native: &mut Native) -> Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
-    for _ in 0..50 {
+    for _ in 0..SERVER_CHECKS {
         if running(native)? {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(SERVER_CHECK_INTERVAL);
     }
     Ok(())
 }
@@ -134,9 +149,7 @@ pub fn run(
         let mut command = if native.available(Tool::Ghostty) {
             native.command(Tool::Ghostty)
         } else {
-            native.command_installed(Path::new(
-                "/Applications/Ghostty.app/Contents/MacOS/ghostty",
-            ))
+            native.command_installed(Path::new(crate::desktop::GHOSTTY_BUNDLE_BINARY))
         };
         let path = bridge
             .to_str()
@@ -320,7 +333,7 @@ pub fn touchid(live: bool, elevated: bool) -> Result<()> {
         std::io::stdin().is_terminal(),
         "Touch ID setup requires an interactive terminal"
     );
-    let target = Path::new("/etc/pam.d/sudo_local");
+    let target = Path::new(SUDO_LOCAL);
     if let Ok(content) = std::fs::read_to_string(target) {
         ensure!(
             content
@@ -332,7 +345,7 @@ pub fn touchid(live: bool, elevated: bool) -> Result<()> {
         return Ok(());
     }
     ensure!(
-        Path::new("/usr/lib/pam/pam_tid.so.2").is_file(),
+        Path::new(TOUCH_ID_MODULE).is_file(),
         "the Touch ID PAM module is missing"
     );
     if elevated {
@@ -345,7 +358,7 @@ pub fn touchid(live: bool, elevated: bool) -> Result<()> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            file.set_permissions(std::fs::Permissions::from_mode(0o444))?;
+            file.set_permissions(std::fs::Permissions::from_mode(PAM_FILE_MODE))?;
         }
     } else {
         let status = Tool::Sudo

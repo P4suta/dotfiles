@@ -249,8 +249,18 @@ fn parse(audit: &str) -> Audit<'_> {
     parsed
 }
 
+/// Pieces between backticks alternate between prose and code, so every second one holds a code span.
+const CODE_SPAN_STRIDE: usize = 2;
+
+/// The delimiters of a template action.
+const ACTION_OPEN: &str = "{{";
+const ACTION_CLOSE: &str = "}}";
+
+/// A prompt file's path ends in its parent directory, its prompt directory, and its name.
+const PROMPT_PATH_SEGMENTS: usize = 3;
+
 fn code_spans(text: &str) -> impl Iterator<Item = &str> {
-    text.split('`').skip(1).step_by(2)
+    text.split('`').skip(1).step_by(CODE_SPAN_STRIDE)
 }
 
 fn is_path(span: &str) -> bool {
@@ -511,13 +521,13 @@ pub fn dispatcher_findings(path: &str, text: &str) -> Vec<String> {
             ));
         };
         let mut rest = line;
-        while let Some(start) = rest.find("{{") {
+        while let Some(start) = rest.find(ACTION_OPEN) {
             if !rest[..start].trim().is_empty() {
                 refuse(&format!("`{}` renders text", rest[..start].trim()));
                 continue 'lines;
             }
-            let after = &rest[start + 2..];
-            let Some(end) = after.find("}}") else {
+            let after = &rest[start + ACTION_OPEN.len()..];
+            let Some(end) = after.find(ACTION_CLOSE) else {
                 refuse("an action is not closed");
                 continue 'lines;
             };
@@ -528,7 +538,7 @@ pub fn dispatcher_findings(path: &str, text: &str) -> Vec<String> {
                 ));
                 continue 'lines;
             }
-            rest = &after[end + 2..];
+            rest = &after[end + ACTION_CLOSE.len()..];
         }
         if !rest.trim().is_empty() {
             refuse(&format!("`{}` renders text", rest.trim()));
@@ -594,7 +604,7 @@ fn loaded(path: &str) -> Option<Loaded> {
         return Some(Loaded::Instructions);
     }
     let prompt = crate::has_extension(name, "md")
-        && segments.windows(3).any(|window| {
+        && segments.windows(PROMPT_PATH_SEGMENTS).any(|window| {
             PROMPT_DIRECTORIES
                 .iter()
                 .any(|[parent, directory]| window[0] == *parent && window[1] == *directory)

@@ -10,7 +10,6 @@ pub use dotfiles::profiles::{
     pending_onchange_scripts, script_order, source_data, uncommitted_host_edits,
 };
 use serde_json::{Value, json};
-use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -454,7 +453,7 @@ pub fn targets_reference(data: &Value) -> String {
     let rows = |text: &mut String, listing: &str| {
         for (target, set) in data[listing].as_object().into_iter().flatten() {
             let set = set.as_str().unwrap_or_default();
-            let _ = writeln!(text, "| `{target}` | {set} | {} |", members(set));
+            text.extend(["| `", target, "` | ", set, " | ", &members(set), " |\n"]);
         }
     };
     rows(&mut text, "targets");

@@ -6,6 +6,16 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use dotguard::clock::{
+    LAST_DAY_OF_MONTH, LAST_HOUR, LAST_MINUTE, LAST_SECOND, MONTHS_PER_YEAR, days_from_civil,
+};
+pub use dotguard::clock::{SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE};
+
+/// The system directories, from Homebrew on Apple silicon to the base system, where launchd's minimal `PATH` misses tools.
+const SYSTEM_BIN: [&str; 4] = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
+/// The system grep, which every Mac and Linux host has.
+const GREP: &str = "/usr/bin/grep";
+
 pub fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -32,7 +42,7 @@ pub fn epoch_of(ts: &str) -> i64 {
     let (Ok(y), Ok(m), Ok(day)) = (y.parse::<i64>(), m.parse::<i64>(), day.parse::<i64>()) else {
         return 0;
     };
-    if !(1..=12).contains(&m) || !(1..=31).contains(&day) {
+    if !(1..=MONTHS_PER_YEAR).contains(&m) || !(1..=LAST_DAY_OF_MONTH).contains(&day) {
         return 0;
     }
     let mut parts = time.split(':');
@@ -44,23 +54,15 @@ pub fn epoch_of(ts: &str) -> i64 {
     let (Ok(hh), Ok(mm), Ok(ss)) = (hh.parse::<i64>(), mm.parse::<i64>(), ss.parse::<i64>()) else {
         return 0;
     };
-    if !(0..=23).contains(&hh) || !(0..=59).contains(&mm) || !(0..=60).contains(&ss) {
+    if !(0..=LAST_HOUR).contains(&hh)
+        || !(0..=LAST_MINUTE).contains(&mm)
+        || !(0..=LAST_SECOND).contains(&ss)
+    {
         return 0;
     }
 
     let days = days_from_civil(y, m, day);
-    days * 86_400 + hh * 3_600 + mm * 60 + ss
-}
-
-/// Days since the Unix epoch, by the `days_from_civil` algorithm of Howard Hinnant, the inverse of the one in `crates/dotguard/src/bypass.rs`.
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let mp = (m + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
+    days * SECONDS_PER_DAY + hh * SECONDS_PER_HOUR + mm * SECONDS_PER_MINUTE + ss
 }
 
 /// `[[DD-]HH:]MM:SS`, as `ps -o etime=` prints it, to seconds.
@@ -73,16 +75,17 @@ pub fn etime_seconds(raw: &str) -> i64 {
     let secs = match fields.as_slice() {
         [only] => only.parse::<i64>().unwrap_or(0),
         [minutes, seconds] => {
-            minutes.parse::<i64>().unwrap_or(0) * 60 + seconds.parse::<i64>().unwrap_or(0)
+            minutes.parse::<i64>().unwrap_or(0) * SECONDS_PER_MINUTE
+                + seconds.parse::<i64>().unwrap_or(0)
         }
         [hours, minutes, seconds] => {
-            hours.parse::<i64>().unwrap_or(0) * 3_600
-                + minutes.parse::<i64>().unwrap_or(0) * 60
+            hours.parse::<i64>().unwrap_or(0) * SECONDS_PER_HOUR
+                + minutes.parse::<i64>().unwrap_or(0) * SECONDS_PER_MINUTE
                 + seconds.parse::<i64>().unwrap_or(0)
         }
         _ => 0,
     };
-    days * 86_400 + secs
+    days * SECONDS_PER_DAY + secs
 }
 
 /// Single-instance guard: an atomic `mkdir`, because macOS ships no `flock(1)`.
@@ -102,9 +105,9 @@ impl Lock {
             .ok()
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map_or(now, |d| now - i64::try_from(d.as_secs()).unwrap_or(0));
-        if stale > 3600 {
+        if stale > SECONDS_PER_HOUR {
             log("stealing a stale lock (older than 1h)");
-            let _ = std::fs::remove_dir_all(&dir);
+            platform::cleanup::remove_dir_all(&dir);
             if std::fs::create_dir(&dir).is_ok() {
                 return Some(Lock { dir });
             }
@@ -116,7 +119,7 @@ impl Lock {
 
 impl Drop for Lock {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
+        platform::cleanup::remove_dir_all(&self.dir);
     }
 }
 
@@ -150,7 +153,9 @@ pub fn notify(title: &str, body: &str, enabled: bool) {
             .status()
             .is_ok_and(|s| s.success())
     };
-    let _ = ok;
+    if !ok {
+        eprintln!("warning: could not show the notification {title:?}");
+    }
 }
 
 /// The reapers run from launchd with a minimal `PATH`, so tools resolve from the directories the dotfiles add to `PATH`.
@@ -158,13 +163,8 @@ fn which(program: &str) -> Option<PathBuf> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
-    let mut dirs: Vec<PathBuf> = vec![
-        home.join(".local/bin"),
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-        PathBuf::from("/usr/bin"),
-        PathBuf::from("/bin"),
-    ];
+    let mut dirs: Vec<PathBuf> = vec![home.join(".local/bin")];
+    dirs.extend(SYSTEM_BIN.iter().map(PathBuf::from));
     if let Ok(p) = std::env::var("PATH") {
         dirs.extend(std::env::split_paths(&p));
     }
@@ -175,14 +175,15 @@ fn which(program: &str) -> Option<PathBuf> {
 /// `anchor_line` makes the whole line the subject of the match.
 /// `None` means grep failed to answer, from a missing binary, an invalid pattern, or an error, and callers must never treat it as an empty match.
 pub fn grep_matching(pattern: &str, lines: &[String]) -> Option<Vec<usize>> {
-    let mut cmd = command("/usr/bin/grep");
+    let mut cmd = command(GREP);
     cmd.args(["-n", "-E", "-e", pattern])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     let mut child = cmd.spawn().ok()?;
+    // grep answers about what it read, so a short write leaves no answer rather than one that misses lines.
     if let Some(mut si) = child.stdin.take() {
-        let _ = si.write_all(lines.join("\n").as_bytes());
+        si.write_all(lines.join("\n").as_bytes()).ok()?;
     }
     let output = child.wait_with_output().ok()?;
     match output.status.code() {

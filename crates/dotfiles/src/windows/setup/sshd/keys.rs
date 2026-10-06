@@ -14,6 +14,8 @@ use crate::windows::{env, proc};
 /// SIDs rather than names, which a renamed or localized group would break.
 const SYSTEM_SID: &str = "*S-1-5-18";
 const ADMINISTRATORS_SID: &str = "*S-1-5-32-544";
+/// An `authorized_keys` key's material: its type and its base64 body.
+const KEY_MATERIAL_FIELDS: usize = 2;
 
 pub fn authorize(ssh_dir: &Path, key: &str, sshd_config: &str) -> Result<()> {
     let path = ssh_dir.join("administrators_authorized_keys");
@@ -63,7 +65,7 @@ fn merge(existing: &str, key: &str) -> String {
 /// The `<type> <base64>` half of an `authorized_keys` line, without the trailing comment.
 fn material(line: &str) -> String {
     line.split_whitespace()
-        .take(2)
+        .take(KEY_MATERIAL_FIELDS)
         .collect::<Vec<_>>()
         .join(" ")
 }

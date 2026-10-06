@@ -114,9 +114,17 @@ pub fn diff_base(previous: bool, assessed_commit: bool) -> DiffBase {
     }
 }
 
+/// The hexadecimal digits of a SHA-256 digest.
+pub const DIGEST_LENGTH: usize = 64;
+
+/// A pair composes only when it shares at least this many sessions.
+pub const MINIMUM_PAIR_FLOOR: usize = 2;
+
+pub const PERCENT: usize = 100;
+
 #[must_use]
 pub fn immutable_identity_valid(length: usize, hexadecimal: bool) -> bool {
-    length == 64 && hexadecimal
+    length == DIGEST_LENGTH && hexadecimal
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -147,10 +155,10 @@ pub fn composition_candidate(
 ) -> bool {
     shared <= first
         && shared <= second
-        && minimum >= 2
-        && (1..=100).contains(&percent)
+        && minimum >= MINIMUM_PAIR_FLOOR
+        && (1..=PERCENT).contains(&percent)
         && shared >= minimum
-        && (shared as u128) * 100 >= (first.min(second) as u128) * (percent as u128)
+        && (shared as u128) * (PERCENT as u128) >= (first.min(second) as u128) * (percent as u128)
 }
 
 #[derive(Clone, Copy, Debug)]

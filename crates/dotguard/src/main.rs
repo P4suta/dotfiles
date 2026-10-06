@@ -116,7 +116,7 @@ fn git_wrapper(argv: &[String]) -> ExitCode {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
-        return ExitCode::from(127);
+        return ExitCode::from(COMMAND_NOT_FOUND);
     };
     let invoked: Vec<&str> = std::iter::once("git")
         .chain(argv.iter().map(String::as_str))
@@ -128,6 +128,10 @@ fn git_wrapper(argv: &[String]) -> ExitCode {
 
 /// Carries the command the wrapper ran to the hooks of that command, so a hook's waiver can repeat it.
 const INVOKED: &str = "DOTGUARD_COMMAND";
+
+/// The shell's statuses for a command it couldn't find and for one it found but couldn't run.
+const COMMAND_NOT_FOUND: u8 = 127;
+const COMMAND_NOT_EXECUTABLE: u8 = 126;
 
 /// `ALLOW_FOREIGN=1` before the Git command whose hook refused, when that command passed through the wrapper.
 fn foreign_waiver() -> Option<String> {
@@ -143,7 +147,7 @@ fn delegate(real: &Path, mut git: std::process::Command) -> ExitCode {
     // `exec` returns only on failure.
     let err = git.exec();
     eprintln!("::error:: could not exec {}: {err}", real.display());
-    ExitCode::from(126)
+    ExitCode::from(COMMAND_NOT_EXECUTABLE)
 }
 
 #[cfg(windows)]
@@ -153,7 +157,7 @@ fn delegate(real: &Path, mut git: std::process::Command) -> ExitCode {
         Ok(status) => std::process::exit(status.code().unwrap_or(1)),
         Err(err) => {
             eprintln!("::error:: could not run {}: {err}", real.display());
-            ExitCode::from(126)
+            ExitCode::from(COMMAND_NOT_EXECUTABLE)
         }
     }
 }
@@ -209,9 +213,10 @@ fn commit_msg(path: &str) -> i32 {
 
     let (cleaned, removed) = attribution::strip(&raw);
     if removed > 0 {
-        if let Ok(mut f) = std::fs::File::create(path) {
-            let _ = f.write_all(cleaned.as_bytes());
-        }
+        platform::cleanup::report(
+            std::fs::File::create(path).and_then(|mut f| f.write_all(cleaned.as_bytes())),
+            format_args!("rewrite {path} without the attribution"),
+        );
         eprintln!(
             "::notice:: removed {removed} agent attribution line(s) from the commit message."
         );

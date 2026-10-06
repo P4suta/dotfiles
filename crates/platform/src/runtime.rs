@@ -171,6 +171,15 @@ pub fn args(values: &[&str]) -> Vec<OsString> {
     values.iter().map(OsString::from).collect()
 }
 
+/// The execute bits for the owner, the group, and others.
+#[cfg(unix)]
+const ANY_EXECUTE: u32 = 0o111;
+/// `rwxr-xr-x` for an executable and `rw-r--r--` for any other generated file.
+#[cfg(unix)]
+const EXECUTABLE_MODE: u32 = 0o755;
+#[cfg(unix)]
+const FILE_MODE: u32 = 0o644;
+
 fn executable(path: &Path) -> bool {
     let Ok(metadata) = path.metadata() else {
         return false;
@@ -181,7 +190,7 @@ fn executable(path: &Path) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
+        metadata.permissions().mode() & ANY_EXECUTE != 0
     }
     #[cfg(not(unix))]
     {
@@ -227,9 +236,9 @@ pub fn replace(path: &Path, bytes: &[u8], executable: bool) -> Result<()> {
         candidate
             .as_file()
             .set_permissions(fs::Permissions::from_mode(if executable {
-                0o755
+                EXECUTABLE_MODE
             } else {
-                0o644
+                FILE_MODE
             }))?;
     }
     #[cfg(not(unix))]

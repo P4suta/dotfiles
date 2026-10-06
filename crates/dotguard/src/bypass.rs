@@ -65,7 +65,10 @@ pub fn record(outcome: &str, category: Category, reason: &str, argv: &[String]) 
         return;
     }
     path.push(".local/state");
-    let _ = std::fs::create_dir_all(&path);
+    platform::cleanup::report(
+        std::fs::create_dir_all(&path),
+        format_args!("create {} for the bypass log", path.display()),
+    );
     path.push("git-bypass.log");
 
     let cwd = std::env::current_dir().map_or_else(|_| "?".into(), |p| p.display().to_string());
@@ -79,47 +82,39 @@ pub fn record(outcome: &str, category: Category, reason: &str, argv: &[String]) 
         argv.join(" ")
     );
 
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
-        let _ = f.write_all(line.as_bytes());
-    }
+    platform::cleanup::report(
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .and_then(|mut log| log.write_all(line.as_bytes())),
+        format_args!("append to {}", path.display()),
+    );
 }
 
 /// The current time in UTC as `YYYY-MM-DDTHH:MM:SSZ`.
 fn timestamp() -> String {
+    use crate::clock::{SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, civil_from_days};
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    let (days, rem) = (secs / 86_400, secs % 86_400);
-    let (y, m, d) = civil_from_days(i64::try_from(days).unwrap_or(0));
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0));
+    let (days, rem) = (
+        secs.div_euclid(SECONDS_PER_DAY),
+        secs.rem_euclid(SECONDS_PER_DAY),
+    );
+    let (y, m, d) = civil_from_days(days);
     format!(
         "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
-        rem / 3600,
-        (rem % 3600) / 60,
-        rem % 60
-    )
-}
-
-/// The `civil_from_days` algorithm of Howard Hinnant: days since the Unix epoch to a proleptic-Gregorian date.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    (
-        if m <= 2 { y + 1 } else { y },
-        u32::try_from(m).unwrap_or(1),
-        u32::try_from(d).unwrap_or(1),
+        rem / SECONDS_PER_HOUR,
+        (rem % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE,
+        rem % SECONDS_PER_MINUTE
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Category, civil_from_days, waived};
+    use super::{Category, waived};
+    use crate::clock::civil_from_days;
 
     #[test]
     fn hook_and_signing_checks_have_no_waiver() {

@@ -123,6 +123,122 @@ fn a_core_with_a_dependency_std_an_undenied_lint_or_a_stray_rule_breaks_its_boun
 }
 
 #[test]
+fn each_generic_anti_pattern_is_refused_with_its_rule_and_fix_and_admitted_once_fixed() -> Result<()>
+{
+    let violating = [
+        (
+            "src/retry.rs",
+            "pub fn wait(attempt: u64) -> u64 { attempt * 1500 }\n",
+            "magic-number",
+            "Name the value in a const",
+        ),
+        (
+            "src/remote.rs",
+            "pub fn releases() -> String { format!(\"https://example.com/{}\", 1) }\n",
+            "hard-coded-location",
+            "Name it in a const",
+        ),
+        (
+            "src/clean.rs",
+            "pub fn clean(path: &std::path::Path) { let _ = std::fs::remove_file(path); }\n",
+            "swallowed-error",
+            "Return the error, report it",
+        ),
+        (
+            "scripts/setup.sh",
+            "#!/bin/sh\nmise install || true\n",
+            "shell-swallowed-error",
+            "Test the command in an if",
+        ),
+        (
+            "plugins/hook.ts",
+            "export function run(): void { try { start(); } catch (error) {} }\n",
+            "empty-catch",
+            "Rethrow the error",
+        ),
+    ];
+    for (path, text, rule, next) in violating {
+        let (passed, report) = scan(&[(path, text)])?;
+        assert!(!passed, "{rule}: {report}");
+        assert!(report.contains(&format!("error[{rule}]")), "{report}");
+        assert!(report.contains(next), "{report}");
+    }
+    let fixed = [
+        (
+            "src/retry.rs",
+            "const BACKOFF_MS: u64 = 1500;\npub fn wait(attempt: u64) -> u64 { attempt * BACKOFF_MS }\n",
+        ),
+        (
+            "src/remote.rs",
+            "const RELEASES: &str = \"https://example.com\";\npub fn releases() -> String { format!(\"{RELEASES}/{}\", 1) }\n",
+        ),
+        (
+            "src/clean.rs",
+            "pub fn clean(path: &std::path::Path) -> std::io::Result<()> { std::fs::remove_file(path) }\n",
+        ),
+        (
+            "scripts/setup.sh",
+            "#!/bin/sh\nif ! mise install; then echo 'mise install failed' >&2; exit 1; fi\n",
+        ),
+        (
+            "plugins/hook.ts",
+            "export function run(): void { try { start(); } catch (error) { console.error('start failed', error); throw error; } }\n",
+        ),
+    ];
+    let (passed, report) = scan(&fixed)?;
+    assert!(passed, "{report}");
+    Ok(())
+}
+
+#[test]
+fn the_catalog_refuses_an_unexplained_language_and_a_rule_no_pattern_names() -> Result<()> {
+    let fixture = tempfile::tempdir()?;
+    let catalog = fixture.path();
+    fs::create_dir_all(catalog.join("rules"))?;
+    fs::create_dir_all(catalog.join("rule-tests"))?;
+    fs::write(
+        catalog.join("catalog.toml"),
+        "languages = [\"rust\", \"shell\"]\n[[pattern]]\nid = \"magic-number\"\nweakness = \"CWE-1106\"\nrust = \"ast-grep:magic-number\"\n",
+    )?;
+    fs::write(
+        catalog.join("rules/magic-number.yml"),
+        "id: magic-number\nlanguage: rust\nnote: Name it.\nmetadata:\n  cwe: CWE-1106\nrule:\n  kind: integer_literal\n",
+    )?;
+    fs::write(
+        catalog.join("rules/orphan.yml"),
+        "id: orphan\nlanguage: rust\nrule:\n  kind: integer_literal\n",
+    )?;
+    fs::write(
+        catalog.join("rule-tests/magic-number-test.yml"),
+        "id: magic-number\n",
+    )?;
+    let findings = xtask::structure::catalog_findings(catalog)?;
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.contains("magic-number neither checks shell")),
+        "{findings:?}"
+    );
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.contains("no catalog pattern names the rule orphan")),
+        "{findings:?}"
+    );
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.contains("the rule orphan lacks its next action")),
+        "{findings:?}"
+    );
+    assert_eq!(
+        xtask::structure::catalog_findings(&root().join(CATALOG))?,
+        Vec::<String>::new()
+    );
+    Ok(())
+}
+
+#[test]
 fn this_repository_keeps_its_core_boundary() -> Result<()> {
     assert_eq!(breach(core(&root())?), None);
     Ok(())

@@ -11,6 +11,9 @@ use std::process::Stdio;
 
 pub const KANI_VERSION: &str = "0.68.0";
 
+/// Every proof covers a reachable acceptance and a reachable refusal.
+const WITNESSES: usize = 2;
+
 /// Compares a Kani results document with the expected harnesses and the proof budget.
 ///
 /// # Errors
@@ -97,7 +100,7 @@ pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) 
                     .iter()
                     .filter(|check| check["category"] == "cover" && check["status"] == "Satisfied")
                     .count()
-                    >= 2,
+                    >= WITNESSES,
                 "proof lacks reachable acceptance and refusal witnesses"
             );
             ensure!(
@@ -184,8 +187,11 @@ fn verify_inventory(source: &Path, directory: &Path) -> Result<BTreeSet<String>>
     Ok(names)
 }
 
+/// The digest bytes an image or volume name carries.
+const SHORT_DIGEST_BYTES: usize = 8;
+
 fn short_digest(bytes: &[u8]) -> String {
-    crate::build_inputs::hex(&Sha256::digest(bytes)[..8])
+    crate::build_inputs::hex(&Sha256::digest(bytes)[..SHORT_DIGEST_BYTES])
 }
 
 #[must_use]

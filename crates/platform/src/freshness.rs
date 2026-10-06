@@ -103,8 +103,11 @@ fn describe(origin: Origin) -> &'static str {
     }
 }
 
+/// The hash digits a refusal shows, as many as a short Git revision.
+const SHORT_HASH: usize = 12;
+
 fn short(hash: &str) -> String {
-    hash.chars().take(12).collect()
+    hash.chars().take(SHORT_HASH).collect()
 }
 
 fn stale(built: Built, stamp: &Embedded, origin: Origin, root: &Path) -> Refusal {

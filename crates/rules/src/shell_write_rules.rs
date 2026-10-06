@@ -297,11 +297,23 @@ fn runs_inline(name: &str, arguments: &[&str], heredoc: bool) -> bool {
     heredoc || !script
 }
 
+/// The device files a write may target without writing a file.
+const DISCARD: &str = "/dev/null";
+const STDOUT: &str = "/dev/stdout";
+const STDERR: &str = "/dev/stderr";
+
+/// The words a flag and its separate value take.
+const FLAG_WITH_VALUE: usize = 2;
+
+/// The words of a `gh` subcommand: its group and its verb.
+const SUBCOMMAND_WORDS: usize = 2;
+
+/// The words of `mise x` or `mise exec` before the wrapped command.
+const MISE_EXEC_WORDS: usize = 2;
+
 fn writes_to(target: Option<&Token>) -> bool {
     match target {
-        Some(Token::Word { text, .. }) => {
-            !matches!(text.as_str(), "/dev/null" | "/dev/stdout" | "/dev/stderr")
-        }
+        Some(Token::Word { text, .. }) => !matches!(text.as_str(), DISCARD | STDOUT | STDERR),
         _ => false,
     }
 }
@@ -346,7 +358,9 @@ fn flag_value<'a>(arguments: &[&'a str], index: usize, names: &[&str]) -> Option
     let argument = *arguments.get(index)?;
     for name in names {
         if argument == *name {
-            return arguments.get(index + 1).map(|value| (*value, 2));
+            return arguments
+                .get(index + 1)
+                .map(|value| (*value, FLAG_WITH_VALUE));
         }
         let joined = argument
             .strip_prefix(name)
@@ -439,10 +453,10 @@ pub fn body_sources(command: &str) -> Vec<Source> {
         let before = sources.len();
         if let Some(api) = rest.iter().position(|word| *word == "api") {
             api_sources(rest.get(api + 1..).unwrap_or_default(), &mut sources);
-        } else if BODY_COMMANDS
-            .iter()
-            .any(|(group, verb)| rest.windows(2).any(|pair| pair == [*group, *verb]))
-        {
+        } else if BODY_COMMANDS.iter().any(|(group, verb)| {
+            rest.windows(SUBCOMMAND_WORDS)
+                .any(|pair| pair == [*group, *verb])
+        }) {
             command_sources(rest, &mut sources);
         }
         let mut stdin = scan.heredocs.join("");
@@ -488,7 +502,7 @@ pub fn inspect(command: &str) -> Verdict {
             {
                 start += 1;
             } else if name == "mise" && matches!(words.get(start + 1), Some(&"x" | &"exec")) {
-                start += 2;
+                start += MISE_EXEC_WORDS;
                 if words.get(start) == Some(&"--") {
                     start += 1;
                 }
@@ -507,7 +521,7 @@ pub fn inspect(command: &str) -> Verdict {
         if name == "tee"
             && rest
                 .iter()
-                .any(|a| !a.starts_with('-') && !matches!(*a, "/dev/null" | "/dev/stdout"))
+                .any(|a| !a.starts_with('-') && !matches!(*a, DISCARD | STDOUT))
         {
             file_write = true;
         }

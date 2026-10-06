@@ -8,6 +8,10 @@ use yaml_rust2::YamlLoader;
 
 use crate::canonical;
 
+/// The Agent Skills specification's limits on a skill's name and description.
+const MAX_NAME_LENGTH: usize = 64;
+const MAX_DESCRIPTION_CHARACTERS: usize = 1024;
+
 #[derive(Debug, PartialEq)]
 pub struct Metadata {
     pub name: String,
@@ -44,7 +48,7 @@ pub fn metadata(text: &str, directory: &str) -> Result<Metadata> {
     ensure!(name == directory, "name must match directory {directory}");
     ensure!(
         !name.is_empty()
-            && name.len() <= 64
+            && name.len() <= MAX_NAME_LENGTH
             && name != "synced"
             && name.split('-').all(|part| !part.is_empty()
                 && part
@@ -56,8 +60,8 @@ pub fn metadata(text: &str, directory: &str) -> Result<Metadata> {
         .as_str()
         .context("description must be a string")?;
     ensure!(
-        !description.trim().is_empty() && description.chars().count() <= 1024,
-        "description must contain 1 to 1024 characters"
+        !description.trim().is_empty() && description.chars().count() <= MAX_DESCRIPTION_CHARACTERS,
+        "description must contain 1 to {MAX_DESCRIPTION_CHARACTERS} characters"
     );
     ensure!(!body.trim().is_empty(), "skill body must not be empty");
     Ok(Metadata {

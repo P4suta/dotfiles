@@ -328,7 +328,8 @@ fn native(home: &Path) -> Result<Native> {
     let mut native = Native::new(home)?;
     if cfg!(windows) {
         // Only the system OpenSSH reaches the 1Password agent pipe.
-        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        let root = std::env::var_os("SystemRoot")
+            .unwrap_or_else(|| platform::home::DEFAULT_SYSTEM_ROOT.into());
         let mut paths = vec![Path::new(&root).join("System32/OpenSSH")];
         paths.extend(std::env::split_paths(&native.path));
         native.path = std::env::join_paths(paths)?;
@@ -725,7 +726,7 @@ pub(crate) fn sync(
             fingerprint(&native, &key)?,
             peer.alias
         );
-        let _ = writeln!(lines, "{},{},{} {key}", peer.alias, peer.dns, peer.address);
+        writeln!(lines, "{},{},{} {key}", peer.alias, peer.dns, peer.address)?;
     }
     crate::runtime::replace(&known, lines.as_bytes(), false)?;
     crate::runtime::replace(&config, render(&aliases, &user, &known).as_bytes(), false)?;

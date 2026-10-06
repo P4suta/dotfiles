@@ -7,7 +7,10 @@
 onepassword_agent="${HOME}/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
 herdr_agent=""
 if [ -n "${HERDR_ENV:-}" ] && [ -z "${SSH_CONNECTION:-}" ] && [ -x "${HOME}/.local/bin/herdr-agent" ]; then
-  herdr_agent="$("${HOME}/.local/bin/herdr-agent" ready 2>/dev/null || true)"
+  # `ready` exits nonzero while the agent holds no keys, which leaves the other agents in charge.
+  if ! herdr_agent="$("${HOME}/.local/bin/herdr-agent" ready 2>/dev/null)"; then
+    herdr_agent=""
+  fi
 fi
 if [ -n "${DOTFILES_SSH_AUTH_SOCK:-}" ] && [ -S "${DOTFILES_SSH_AUTH_SOCK}" ]; then
   SSH_AUTH_SOCK="${DOTFILES_SSH_AUTH_SOCK}"

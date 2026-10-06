@@ -65,11 +65,13 @@ fn gate(command: &mut Command, input: &[u8], rerun: &str) -> Result<()> {
     let relay = std::thread::spawn(move || {
         let mut seen = Vec::new();
         let mut chunk = [0; 8192];
+        // A closed standard error stops the relay, and the gate's errors still reach the caller through `seen`.
+        let mut relaying = true;
         while let Ok(count) = stderr.read(&mut chunk) {
             if count == 0 {
                 break;
             }
-            let _ = std::io::stderr().write_all(&chunk[..count]);
+            relaying = relaying && std::io::stderr().write_all(&chunk[..count]).is_ok();
             seen.extend_from_slice(&chunk[..count]);
         }
         seen

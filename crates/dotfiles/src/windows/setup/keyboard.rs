@@ -11,6 +11,9 @@ const LEGACY_FILTER_KEYS_FLAGS: u32 = FKF_FILTERKEYSON | FKF_AVAILABLE;
 const LEGACY_AUTO_REPEAT_DELAY_MS: u32 = 150;
 const LEGACY_AUTO_REPEAT_RATE_MS: u32 = 15;
 const ERROR_REQUIRES_INTERACTIVE_WINDOWSTATION: i32 = 1459;
+/// The ranges `SPI_SETKEYBOARDDELAY` and `SPI_SETKEYBOARDSPEED` accept.
+const MAX_KEYBOARD_DELAY: u32 = 3;
+const MAX_KEYBOARD_SPEED: u32 = 31;
 
 #[derive(Debug)]
 pub struct Options {
@@ -23,11 +26,11 @@ pub fn run(options: &Options) -> Result<i32> {
         ">>> keyboard delay {}, repeat speed {}",
         options.keyboard_delay, options.keyboard_speed
     );
-    if options.keyboard_delay > 3 {
-        bail!("keyboard delay must be between 0 and 3");
+    if options.keyboard_delay > MAX_KEYBOARD_DELAY {
+        bail!("keyboard delay must be between 0 and {MAX_KEYBOARD_DELAY}");
     }
-    if options.keyboard_speed > 31 {
-        bail!("keyboard speed must be between 0 and 31");
+    if options.keyboard_speed > MAX_KEYBOARD_SPEED {
+        bail!("keyboard speed must be between 0 and {MAX_KEYBOARD_SPEED}");
     }
 
     let persist = SPIF_UPDATEINIFILE | SPIF_SENDCHANGE;

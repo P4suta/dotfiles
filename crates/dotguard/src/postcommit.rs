@@ -13,6 +13,9 @@ use crate::refusal::Refusal;
 /// The lock this hook sets around its own `--amend`, so the amended commit skips the hook.
 const LOCK_ENV: &str = "GIT_HOOK_FORCE_SIGN_LOCK";
 
+/// The hash digits a notice shows when `git rev-parse --short` can't.
+const SHORT_HASH: usize = 12;
+
 /// Files in `.git` that mark a rebase, merge, cherry-pick, revert, or bisect in progress, which an amend would corrupt.
 const MID_OPERATION: [&str; 6] = [
     "rebase-merge",
@@ -80,9 +83,10 @@ fn head_is_empty() -> bool {
     let Some(parents) = realgit::capture(&["rev-list", "--parents", "-n", "1", "HEAD"]) else {
         return false;
     };
-    if parents.split_whitespace().count() != 2 {
+    // `rev-list --parents` prints the commit and then its parents, so one parent gives two words.
+    let [_, _] = parents.split_whitespace().collect::<Vec<_>>()[..] else {
         return false;
-    }
+    };
     let tree = |rev: &str| realgit::capture(&["rev-parse", rev]).map(|t| t.trim().to_owned());
     matches!((tree("HEAD^{tree}"), tree("HEAD^^{tree}")), (Some(a), Some(b)) if a == b)
 }
@@ -178,7 +182,7 @@ fn resign() -> i32 {
 
     if amended && realgit::succeeds(&["verify-commit", "HEAD"]) {
         let short = realgit::capture(&["rev-parse", "--short", "HEAD"]).map_or_else(
-            || pre_head[..12.min(pre_head.len())].to_owned(),
+            || pre_head.chars().take(SHORT_HASH).collect(),
             |s| s.trim().to_owned(),
         );
         eprintln!("::notice:: HEAD was unsigned; re-signed automatically: {short}");
@@ -236,23 +240,29 @@ fn rollback_target(parent_exists: bool) -> Rollback {
 
 fn rollback(pre_head: &str) -> Rollback {
     // Confirm `HEAD` before stepping further, in case a partial amend moved it.
-    let _ = realgit::command().and_then(|mut c| {
-        c.args(["reset", "--soft", pre_head])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .ok()
-    });
+    let confirmed = realgit::command()
+        .and_then(|mut c| {
+            c.args(["reset", "--soft", pre_head])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .ok()
+        })
+        .is_some_and(|status| status.success());
+    if !confirmed {
+        eprintln!("warning: could not move HEAD back to {pre_head} before the rollback");
+    }
 
     let parent_exists = realgit::succeeds(&["rev-parse", "--verify", &format!("{pre_head}^")]);
     let target = rollback_target(parent_exists);
-    match target {
-        Rollback::SoftToParent => {
-            let _ = realgit::succeeds(&["reset", "--soft", &format!("{pre_head}^")]);
-        }
-        Rollback::DropHead => {
-            let _ = realgit::succeeds(&["update-ref", "-d", "HEAD"]);
-        }
+    let rolled_back = match target {
+        Rollback::SoftToParent => realgit::succeeds(&["reset", "--soft", &format!("{pre_head}^")]),
+        Rollback::DropHead => realgit::succeeds(&["update-ref", "-d", "HEAD"]),
+    };
+    if !rolled_back {
+        eprintln!(
+            "warning: could not roll back the commit at {pre_head}; inspect `git log -1` before retrying"
+        );
     }
     target
 }

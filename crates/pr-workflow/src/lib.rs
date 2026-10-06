@@ -34,6 +34,26 @@ const REVIEW_EXCLUSION: &str = "@coderabbitai ignore";
 /// Marks an exclusion that lasts only while the owner pauses `CodeRabbit` PR reviews.
 const PAUSE_EXCLUSION: &str = "<!-- coderabbit-pause -->";
 
+/// The delimiters of a generation placeholder.
+const PLACEHOLDER_OPEN: &str = "{{";
+const PLACEHOLDER_CLOSE: &str = "}}";
+/// A repository's parts: `OWNER/REPO`.
+const REPOSITORY_PARTS: usize = 2;
+const GITHUB: &str = "https://github.com";
+/// The URL prefixes of a GitHub remote, over HTTPS, SSH, and the short `git@host:path` SSH form.
+const GITHUB_REMOTE_PREFIXES: [&str; 3] = [
+    "https://github.com/",
+    "ssh://git@github.com/",
+    "git@github.com:",
+];
+/// A closing reference: a keyword such as `closes`, then the issue.
+const CLOSING_REFERENCE_WORDS: usize = 2;
+const SECONDS_PER_MINUTE: u64 = 60;
+/// gh-stack reports a rebase conflict with this exit status.
+const STACK_CONFLICT: i32 = 3;
+/// A scoped skill installation holds the skill's tree and its Claude link at least.
+const SKILL_WITH_ALIAS: usize = 2;
+
 /// Reads `--generation` as one of the names its rule module gives.
 fn generation_parser() -> impl clap::builder::TypedValueParser<Value = Generation> {
     use clap::builder::TypedValueParser as _;
@@ -579,10 +599,10 @@ fn unfinished(value: &str) -> bool {
                     .split_once(": ")
                     .is_some_and(|(_, description)| description.trim() == *marker)
         })
-    }) || lower.match_indices("{{").any(|(start, _)| {
+    }) || lower.match_indices(PLACEHOLDER_OPEN).any(|(start, _)| {
         !lower[..start].ends_with('$')
-            && lower[start + 2..]
-                .split_once("}}")
+            && lower[start + PLACEHOLDER_OPEN.len()..]
+                .split_once(PLACEHOLDER_CLOSE)
                 .is_some_and(|(label, _)| {
                     matches!(
                         label.trim(),
@@ -622,7 +642,7 @@ impl Target {
     fn conventional_required(&self) -> Result<bool> {
         let parts: Vec<_> = self.repo.split('/').collect();
         require(
-            parts.len() == 2
+            parts.len() == REPOSITORY_PARTS
                 && parts.iter().all(|part| {
                     !part.is_empty()
                         && *part != "."
@@ -1049,12 +1069,12 @@ fn references_issue(body: &str, repo: &str, issue: u64) -> bool {
         }
     }
     let short = format!("#{issue}");
-    let url = format!("https://github.com/{repo}/issues/{issue}");
+    let url = format!("{GITHUB}/{repo}/issues/{issue}");
     let words: Vec<_> = text
         .split_whitespace()
         .map(|word| word.trim_matches([',', '.', ':', ';', '!', '(', ')', '[', ']']))
         .collect();
-    words.windows(2).any(|pair| {
+    words.windows(CLOSING_REFERENCE_WORDS).any(|pair| {
         matches!(
             pair[0].to_ascii_lowercase().as_str(),
             "close"
@@ -1148,10 +1168,9 @@ fn inspect_issue(
     let issue: LiveIssue = github.read(&format!("repos/{}/issues/{number}", target.repo))?;
     require(
         issue.number == number
-            && issue.html_url.eq_ignore_ascii_case(&format!(
-                "https://github.com/{}/issues/{number}",
-                target.repo
-            ))
+            && issue
+                .html_url
+                .eq_ignore_ascii_case(&format!("{GITHUB}/{}/issues/{number}", target.repo))
             && issue.state == "open"
             && issue.pull_request.is_none(),
         || {
@@ -1837,7 +1856,7 @@ fn stop_refusal(target: &Target, pr: u64, stop: Stop, stacked: bool, view: &Merg
 /// Waits one interval, or refuses once the PR has waited longer than the timeout.
 fn wait(target: &Target, pr: u64, polling: Polling, started: Instant) -> Result<()> {
     require(
-        started.elapsed() < Duration::from_secs(polling.timeout.saturating_mul(60)),
+        started.elapsed() < Duration::from_secs(polling.timeout.saturating_mul(SECONDS_PER_MINUTE)),
         || {
             Refusal::new(
                 "pr.timeout",
@@ -1989,7 +2008,7 @@ impl Lease {
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        platform::cleanup::remove_file(&self.path);
     }
 }
 
@@ -2019,13 +2038,9 @@ fn git_set(args: &[&str]) -> Result<BTreeSet<String>> {
 
 /// The `OWNER/REPO` a GitHub remote URL names.
 fn github_slug(url: &str) -> Option<String> {
-    let path = [
-        "https://github.com/",
-        "ssh://git@github.com/",
-        "git@github.com:",
-    ]
-    .iter()
-    .find_map(|prefix| url.strip_prefix(prefix))?;
+    let path = GITHUB_REMOTE_PREFIXES
+        .iter()
+        .find_map(|prefix| url.strip_prefix(prefix))?;
     let path = path.strip_suffix('/').unwrap_or(path);
     let path = path.strip_suffix(".git").unwrap_or(path);
     let (owner, repository) = path.split_once('/')?;
@@ -2070,15 +2085,14 @@ fn gh_stack(target: &Target, lease: Option<&Lease>, args: &[&str]) -> Result<()>
     let rebase = || command(&["pr-workflow", "stack", "rebase", "--repo", &target.repo]);
     match status.code() {
         Some(0) => Ok(()),
-        // gh-stack reports a rebase conflict with exit status 3.
-        Some(3) if args.first() == Some(&"rebase") => Err(Refusal::new(
+        Some(STACK_CONFLICT) if args.first() == Some(&"rebase") => Err(Refusal::new(
             "pr.conflict",
             "the stack rebase stopped at a conflict; resolve the listed files, stage them, and continue",
             format!("{} --continue", rebase()),
         )
         .evidence(format!("gh-stack {} exited with {status}", args.join(" ")))
         .into()),
-        Some(3) => Err(Refusal::new(
+        Some(STACK_CONFLICT) => Err(Refusal::new(
             "pr.conflict",
             "the stack conflicts with its updated parent; gh-stack restored every branch, so rebase the stack to resolve it",
             rebase(),
@@ -2487,7 +2501,10 @@ pub fn deploy(
         .into_iter()
         .filter(|path| path.starts_with(&tree) || *path == alias)
         .collect();
-    ensure!(paths.len() >= 2, "scoped PR skill installation is empty");
+    ensure!(
+        paths.len() >= SKILL_WITH_ALIAS,
+        "scoped PR skill installation is empty"
+    );
     apply(&paths)?;
     ensure!(
         ops::catalog_owned(&user_directory.join(".agents/skills"), &approved.catalog)?

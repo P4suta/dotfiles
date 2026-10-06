@@ -3,11 +3,19 @@
 
 # Shells that skip ~/.zprofile need Homebrew first.
 if [[ -x /opt/homebrew/bin/brew ]]; then
-  eval "$(/opt/homebrew/bin/brew shellenv || true)"
+  if shell_env="$(/opt/homebrew/bin/brew shellenv)"; then
+    eval "${shell_env}"
+  else
+    echo "bashenv: brew shellenv failed, so Homebrew tools stay off PATH" >&2
+  fi
 fi
 
 if [[ -x "${HOME}/.local/bin/mise" ]]; then
-  eval "$("${HOME}/.local/bin/mise" activate bash || true)"
+  if shell_env="$("${HOME}/.local/bin/mise" activate bash)"; then
+    eval "${shell_env}"
+  else
+    echo "bashenv: mise activate failed, so mise tools stay off PATH" >&2
+  fi
 fi
 
 # Prepend after mise so the ~/.local/bin git wrapper wins over the shims.
@@ -18,8 +26,13 @@ export PATH="${HOME}/.local/bin:${PATH}"
 
 # Load the opam switch.
 if command -v opam >/dev/null 2>&1 && [[ -d "${HOME}/.opam" ]]; then
-  eval "$(opam env --shell=bash 2>/dev/null || true)"
+  if shell_env="$(opam env --shell=bash 2>/dev/null)"; then
+    eval "${shell_env}"
+  else
+    echo "bashenv: opam env failed, so the opam switch stays off PATH" >&2
+  fi
 fi
+unset shell_env
 
 # Shims for Claude Code only.
 if [[ -d "${HOME}/.claude/shims" ]]; then

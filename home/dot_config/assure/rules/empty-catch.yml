@@ -1,0 +1,22 @@
+id: empty-catch
+language: typescript
+severity: error
+message: An empty catch block discards a failure.
+note: Rethrow the error, report it with what failed, or catch only the one failure that is expected.
+metadata:
+  cwe: CWE-1069
+  ruleset: ESLint no-empty
+rule:
+  kind: catch_clause
+  has:
+    field: body
+    kind: statement_block
+    not:
+      has:
+        any:
+          - kind: expression_statement
+          - kind: return_statement
+          - kind: throw_statement
+          - kind: lexical_declaration
+          - kind: if_statement
+          - kind: variable_declaration

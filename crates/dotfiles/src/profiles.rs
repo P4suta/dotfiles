@@ -110,10 +110,25 @@ pub fn chezmoi_with(root: &Path, store: &Store, config: &Path, destination: &Pat
 pub fn externally_changed(status: &str) -> Vec<String> {
     status
         .lines()
-        .filter(|line| line.len() > 3 && !line.starts_with(' '))
-        .map(|line| line[3..].to_owned())
+        .filter(|line| !line.starts_with(' '))
+        .filter_map(status_target)
         .collect()
 }
+
+/// `chezmoi status` starts each line with its two status columns and a space.
+const STATUS_COLUMNS: usize = 3;
+
+fn status_target(line: &str) -> Option<String> {
+    line.get(STATUS_COLUMNS..)
+        .filter(|target| !target.is_empty())
+        .map(str::to_owned)
+}
+
+/// The lines of a chezmoi report that a refusal shows.
+const REPORT_LINES: usize = 200;
+
+/// The kernel release, which names Microsoft on WSL.
+const OS_RELEASE: &str = "/proc/sys/kernel/osrelease";
 
 /// Targets with a `modify_` template source, from `chezmoi managed --path-style all --format json`.
 /// Such a template may merge its keys into whatever the client last wrote, so expect changes made outside chezmoi there.
@@ -311,8 +326,7 @@ pub fn pending_onchange_scripts(
     )?;
     Ok(String::from_utf8_lossy(&status.stdout)
         .lines()
-        .filter(|line| line.len() > 3)
-        .map(|line| line[3..].to_owned())
+        .filter_map(status_target)
         .filter(|target| {
             listing
                 .get(target)
@@ -397,8 +411,7 @@ pub fn native_profile() -> Result<Profile> {
         _ => anyhow::bail!("unsupported native operating system"),
     };
     let microsoft = system == System::Linux
-        && fs::read_to_string("/proc/sys/kernel/osrelease")
-            .is_ok_and(|release| microsoft_kernel(&release));
+        && fs::read_to_string(OS_RELEASE).is_ok_and(|release| microsoft_kernel(&release));
     Ok(detected(system, microsoft))
 }
 
@@ -647,7 +660,10 @@ fn apply_live(
                         .output()
                         .map(|output| {
                             let text = String::from_utf8_lossy(&output.stdout);
-                            text.lines().take(200).collect::<Vec<_>>().join("\n")
+                            text.lines()
+                                .take(REPORT_LINES)
+                                .collect::<Vec<_>>()
+                                .join("\n")
                         })
                         .unwrap_or_default()
                 };
@@ -706,7 +722,7 @@ impl StateLock {
 }
 impl Drop for StateLock {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
+        platform::cleanup::remove_file(&self.0);
     }
 }
 

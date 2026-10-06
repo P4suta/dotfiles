@@ -463,13 +463,16 @@ fn aliases(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The frontmatter keys a portable skill carries: its name and its description.
+const PORTABLE_KEYS: usize = 2;
+
 fn format_metadata(root: &Path) -> Result<()> {
     for (path, skill) in skills(root)? {
         let text = fs::read_to_string(&path)?;
         let (header, body) = split_frontmatter(&text)?;
         let documents = yaml_rust2::YamlLoader::load_from_str(header)?;
         ensure!(
-            documents[0].as_hash().context("mapping required")?.len() == 2,
+            documents[0].as_hash().context("mapping required")?.len() == PORTABLE_KEYS,
             "formatting must preserve optional metadata; format this skill manually"
         );
         let description = skill.description.replace(". ", ".\n  ");

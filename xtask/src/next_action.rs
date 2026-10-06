@@ -7,7 +7,6 @@ use serde::Serialize;
 use serde_json::Value;
 use skill_ops::skill_rules::{Tracked, tracked_decision};
 use skill_ops::{DECISIONS, catalog, complete, tracked_decisions};
-use std::fmt::Write as _;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -408,7 +407,7 @@ fn held_by_branch(root: &Path, branch: &str, commit: &str) -> Result<bool> {
     )?;
     let mut revisions = format!("{commit}\n");
     for entry in reflog.lines() {
-        let _ = writeln!(revisions, "^{entry}");
+        revisions.extend(["^", entry, "\n"]);
     }
     let mut child = Tool::Git
         .command()

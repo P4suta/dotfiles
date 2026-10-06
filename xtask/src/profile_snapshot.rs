@@ -153,6 +153,9 @@ fn virtual_host(real: &Value, combination: Combination, args: Option<&Value>) ->
     Value::Object(host)
 }
 
+/// The umask every rendering assumes, so the modes in a manifest don't depend on the host's.
+const UMASK: u32 = 0o022;
+
 struct Scope {
     _directory: tempfile::TempDir,
     root: PathBuf,
@@ -169,7 +172,7 @@ impl Scope {
         let config = root.join("chezmoi.json");
         fs::write(
             &config,
-            serde_json::to_vec(&json!({"umask": 0o022, "data": data}))?,
+            serde_json::to_vec(&json!({"umask": UMASK, "data": data}))?,
         )?;
         Ok(Self {
             _directory: directory,
@@ -325,7 +328,7 @@ fn text(manifest: &Value) -> Result<String> {
             .flatten()
             .map(|entry| Ok(format!("    {}", serde_json::to_string(entry)?)))
             .collect::<Result<Vec<_>>>()?;
-        let _ = write!(text, ",\n  \"{section}\": [\n{}\n  ]", entries.join(",\n"));
+        write!(text, ",\n  \"{section}\": [\n{}\n  ]", entries.join(",\n"))?;
     }
     text.push_str("\n}\n");
     Ok(text)

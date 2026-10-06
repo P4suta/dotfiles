@@ -20,7 +20,7 @@ pub fn sweep(target: &Path) {
             name.as_encoded_bytes(),
             entry.file_name().as_encoded_bytes(),
         ) {
-            let _ = fs::remove_file(entry.path());
+            crate::cleanup::remove_file(&entry.path());
         }
     }
 }
@@ -49,7 +49,10 @@ pub fn restore(target: &Path, aside: Option<PathBuf>) {
     if let Some(aside) = aside
         && fs::symlink_metadata(target).is_err()
     {
-        let _ = fs::rename(aside, target);
+        crate::cleanup::report(
+            fs::rename(&aside, target),
+            format_args!("restore {} from {}", target.display(), aside.display()),
+        );
     }
 }
 

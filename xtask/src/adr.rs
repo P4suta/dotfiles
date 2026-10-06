@@ -3,7 +3,6 @@
 
 use crate::adr_rules::{Status, Verdict, verdict};
 use anyhow::{Context, Result, bail, ensure};
-use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
@@ -122,26 +121,28 @@ fn number(file: &str) -> &str {
 /// The index the records produce.
 #[must_use]
 pub fn index(records: &[Record]) -> String {
-    let mut text = String::from(
-        "# Architecture decisions\n\n`just gen` writes this index from the front matter of each record.\n\n| Record | Status | Changed by |\n| --- | --- | --- |\n",
-    );
-    for record in records {
-        let changed: Vec<String> = record
-            .changed_by
-            .iter()
-            .map(|file| format!("[{}]({file})", number(file)))
-            .collect();
-        let _ = writeln!(
-            text,
-            "| [{} {}]({}) | {} | {} |",
-            number(&record.file),
-            record.title,
-            record.file,
-            record.status.name(),
-            changed.join(", ")
-        );
-    }
-    text
+    let rows: Vec<String> = records
+        .iter()
+        .map(|record| {
+            let changed: Vec<String> = record
+                .changed_by
+                .iter()
+                .map(|file| format!("[{}]({file})", number(file)))
+                .collect();
+            format!(
+                "| [{} {}]({}) | {} | {} |\n",
+                number(&record.file),
+                record.title,
+                record.file,
+                record.status.name(),
+                changed.join(", ")
+            )
+        })
+        .collect();
+    format!(
+        "# Architecture decisions\n\n`just gen` writes this index from the front matter of each record.\n\n| Record | Status | Changed by |\n| --- | --- | --- |\n{}",
+        rows.concat()
+    )
 }
 
 /// Writes the index, or with `check` refuses a stale one, after refusing records whose status disagrees with their links.

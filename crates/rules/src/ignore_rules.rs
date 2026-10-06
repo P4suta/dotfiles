@@ -92,8 +92,13 @@ fn segment_end(text: &[u8], start: usize) -> usize {
     index
 }
 
+/// The bytes of `**`.
+const GLOBSTAR_LENGTH: usize = 2;
+
 fn globstar(pattern: &[u8], start: usize, end: usize) -> bool {
-    end == start + 2 && pattern.get(start) == Some(&b'*') && pattern.get(start + 1) == Some(&b'*')
+    end == start + GLOBSTAR_LENGTH
+        && pattern.get(start) == Some(&b'*')
+        && pattern.get(start + 1) == Some(&b'*')
 }
 
 /// A pattern stays only when its listing's justification holds and no earlier line already lists it.

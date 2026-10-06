@@ -5,6 +5,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+/// Git for Windows' exec path sits three levels inside its installation: `mingw64/libexec/git-core`.
+const GIT_EXEC_PATH_DEPTH: usize = 3;
+
+/// The word that starts a recipe reference.
+const JUST: &str = "just ";
+
 pub(crate) fn command(root: &Path, tool: Tool, arguments: &[&str]) -> Result<()> {
     run(tool.command(), root, tool.program(), arguments)
 }
@@ -144,7 +150,12 @@ pub fn launcher_resolves_through_home(name: &str, contents: &str) -> bool {
 /// Git for Windows ships the POSIX shell beside its `mingw64/libexec/git-core` directory.
 #[must_use]
 pub fn git_for_windows_shell(exec_path: &Path) -> Option<PathBuf> {
-    Some(exec_path.ancestors().nth(3)?.join("usr/bin/sh.exe"))
+    Some(
+        exec_path
+            .ancestors()
+            .nth(GIT_EXEC_PATH_DEPTH)?
+            .join("usr/bin/sh.exe"),
+    )
 }
 
 /// Native Windows has no `sh` on PATH, and its System32 `bash.exe` enters WSL, so Git for Windows' shell parses launchers.
@@ -335,10 +346,11 @@ fn powershell_file(
             lines.remove(0);
         }
         ensure!(
-            lines.is_empty()
-                || (lines.len() == 2
-                    && lines[0].starts_with("& ")
-                    && lines[1] == "exit $LASTEXITCODE"),
+            match lines.as_slice() {
+                [] => true,
+                [call, exit] => call.starts_with("& ") && exit == "exit $LASTEXITCODE",
+                _ => false,
+            },
             "procedural PowerShell setup must move to Rust: {name}"
         );
     }
@@ -499,18 +511,14 @@ pub fn comment_scopes(root: &Path) -> Result<()> {
 pub fn recipe_references(text: &str, markdown: bool) -> Vec<(usize, String)> {
     let mut found = Vec::new();
     for (number, line) in text.lines().enumerate() {
-        let starts = markdown
-            && line
-                .trim_start()
-                .trim_start_matches("$ ")
-                .starts_with("just ");
-        for (index, _) in line.match_indices("just ") {
+        let starts = markdown && line.trim_start().trim_start_matches("$ ").starts_with(JUST);
+        for (index, _) in line.match_indices(JUST) {
             let before = &line[..index];
             let command = starts && before.trim_start().trim_start_matches("$ ").is_empty()
                 || before.ends_with(['`', '\'', '"', '('])
                 || before.ends_with("run: ")
                 || before.ends_with("see ");
-            let recipe: String = line[index + 5..]
+            let recipe: String = line[index + JUST.len()..]
                 .chars()
                 .take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-')
                 .collect();

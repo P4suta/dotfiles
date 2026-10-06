@@ -18,6 +18,12 @@ pub const SCRIPT_ANALYZER_VERSION: &str = "1.25.0";
 /// Paths per linter process, which keeps a Windows command line under its length limit.
 const CHUNK: usize = 200;
 
+/// A linter record's parts: its path, line, column, and the rest.
+const LOCATED_PARTS: usize = 4;
+
+/// The bytes that hold a shebang line.
+const HEAD_BYTES: usize = 32;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Stage {
     Encoding,
@@ -178,7 +184,7 @@ fn relative(root: &Path, printed: &str) -> String {
 
 /// Splits a `path:line:column: rest` record.
 fn located(line: &str) -> Option<(&str, &str)> {
-    let mut parts = line.splitn(4, ':');
+    let mut parts = line.splitn(LOCATED_PARTS, ':');
     let path = parts.next()?;
     let row = parts.next()?;
     let column = parts.next()?;
@@ -336,7 +342,7 @@ fn symlinks(root: &Path, paths: &[String]) -> Result<Vec<String>> {
 fn head(root: &Path, path: &str) -> Vec<u8> {
     fs::read(root.join(path))
         .map(|mut bytes| {
-            bytes.truncate(32);
+            bytes.truncate(HEAD_BYTES);
             bytes
         })
         .unwrap_or_default()

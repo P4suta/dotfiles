@@ -5,6 +5,10 @@ use anyhow::{Result, bail};
 use super::{download, winget};
 use crate::windows::{env, proc};
 
+/// Scoop's GitHub organization, and the raw files of its installer repository.
+const SCOOP_ORGANIZATION: &str = "https://github.com/ScoopInstaller";
+const SCOOP_INSTALLER: &str = "https://raw.githubusercontent.com/ScoopInstaller/Install";
+
 #[derive(Debug)]
 pub struct Options {
     pub installer_commit: String,
@@ -123,7 +127,7 @@ fn configure_public_scoop_https(repo: &Path) -> Result<()> {
     let Some(suffix) = url.trim().strip_prefix("git@github.com:ScoopInstaller/") else {
         return Ok(());
     };
-    let https = format!("https://github.com/ScoopInstaller/{suffix}");
+    let https = format!("{SCOOP_ORGANIZATION}/{suffix}");
     let code = proc::status(env::command("git").arg("-C").arg(repo).args([
         "config",
         "--local",
@@ -149,10 +153,7 @@ fn script(root: &Path) -> PathBuf {
 }
 
 fn install(options: &Options) -> Result<()> {
-    let url = format!(
-        "https://raw.githubusercontent.com/ScoopInstaller/Install/{}/install.ps1",
-        options.installer_commit
-    );
+    let url = format!("{SCOOP_INSTALLER}/{}/install.ps1", options.installer_commit);
     println!(">>> installing scoop from {url}");
     let installer = tempfile::Builder::new()
         .prefix("scoop-install-")

@@ -4,6 +4,9 @@ import { isAbsolute, join } from "node:path";
 
 type AfterTool = NonNullable<Hooks["tool.execute.after"]>;
 
+/** How long the line-ending hook may run before the plugin stops waiting on it. */
+const HOOK_TIMEOUT_MS = 25000;
+
 export const LineEndings: Plugin = async (
   input: Parameters<Plugin>[0],
   options: Parameters<Plugin>[1] = {},
@@ -35,7 +38,7 @@ export const LineEndings: Plugin = async (
         ]),
         stdout: "ignore",
         stderr: "pipe",
-        timeout: 25000,
+        timeout: HOOK_TIMEOUT_MS,
       });
       const [code, diagnostics] = await Promise.all([
         child.exited,

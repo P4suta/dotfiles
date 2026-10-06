@@ -11,11 +11,14 @@ mod devreaper;
 mod sessionreaper;
 mod util;
 
+/// The exit status of an invocation the reaper doesn't serve.
+const USAGE_ERROR: u8 = 2;
+
 fn main() -> std::process::ExitCode {
     // The agents reap Unix processes through ps, grep, launchd, and systemd, which Windows lacks.
     if cfg!(not(unix)) {
         eprintln!("reaper maintains Unix processes and does not run on Windows");
-        return std::process::ExitCode::from(2);
+        return std::process::ExitCode::from(USAGE_ERROR);
     }
     let argv0 = std::env::args().next().map_or_else(
         || "reaper".to_owned(),
@@ -37,7 +40,7 @@ fn main() -> std::process::ExitCode {
                     eprintln!(
                         "usage: reaper dev|session {{reap|cleanup}}  (or invoke as dev-reaper / session-reaper)"
                     );
-                    code(2)
+                    code(i32::from(USAGE_ERROR))
                 }
             }
         }

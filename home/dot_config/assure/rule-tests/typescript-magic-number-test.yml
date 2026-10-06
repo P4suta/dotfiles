@@ -1,0 +1,9 @@
+id: typescript-magic-number
+valid:
+  - "const TIMEOUT_MS = 30000;\nexport function wait(): number { return TIMEOUT_MS; }"
+  - "export function next(index: number): number { return index + 1; }"
+invalid:
+  - "export function wait(): number { return 30000; }"
+  - "const NAME = 'x';\nexport function wait(): number { const delay = 30000; return delay; }"
+  - "export const plugin = async () => ({ timeout: 25000 });"
+  - "export function half(value: number): number { return value / 2; }"

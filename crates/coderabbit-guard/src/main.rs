@@ -1,3 +1,6 @@
+/// `EX_TEMPFAIL` from `sysexits.h`: the guard couldn't decide, so a caller may retry later.
+const TEMPORARY_FAILURE: i32 = 75;
+
 fn main() {
     let result = platform::home::home()
         .ok_or_else(|| anyhow::anyhow!("user directory is unavailable"))
@@ -25,7 +28,7 @@ fn main() {
             } else {
                 eprintln!("CodeRabbit guard: {error:#}");
             }
-            std::process::exit(75);
+            std::process::exit(TEMPORARY_FAILURE);
         }
     }
 }

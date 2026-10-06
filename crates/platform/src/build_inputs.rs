@@ -6,7 +6,6 @@
 //! The hash a tool embeds at build time and the hash of a checkout at run time agree on which files count.
 
 use sha2::{Digest, Sha256};
-use std::fmt::Write as _;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -108,13 +107,14 @@ pub fn content_hash(root: &Path) -> io::Result<String> {
     Ok(hex(&hasher.finalize()))
 }
 
+const HEX_RADIX: u8 = 16;
+
 /// Lowercase hexadecimal, two digits per byte.
 #[must_use]
 pub fn hex(bytes: &[u8]) -> String {
     bytes
         .iter()
-        .fold(String::with_capacity(bytes.len() * 2), |mut text, byte| {
-            let _ = write!(text, "{byte:02x}");
-            text
-        })
+        .flat_map(|byte| [byte / HEX_RADIX, byte % HEX_RADIX])
+        .filter_map(|digit| char::from_digit(u32::from(digit), u32::from(HEX_RADIX)))
+        .collect()
 }

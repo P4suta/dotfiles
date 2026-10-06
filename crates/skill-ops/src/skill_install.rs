@@ -3,6 +3,9 @@ use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
 
+/// The seconds a client waits for a skill-ops hook before it gives up on it.
+const HOOK_TIMEOUT_SECONDS: u64 = 10;
+
 /// Registers the skill-ops observe and stop hooks in a Codex or Claude settings value, replacing earlier skill-ops handlers.
 ///
 /// # Errors
@@ -28,9 +31,9 @@ pub fn merge_hooks(mut value: Value, client: &str) -> Result<Value> {
             .as_array_mut()
             .context("native hook event must be an array")?;
         let expected = if event == "PostToolUse" {
-            json!({"matcher":"Read|read|Skill|skill|Bash|bash|exec_command", "hooks":[{"type":"command", "command":format!("skill-ops {action}"),"timeout":10}]})
+            json!({"matcher":"Read|read|Skill|skill|Bash|bash|exec_command", "hooks":[{"type":"command", "command":format!("skill-ops {action}"),"timeout":HOOK_TIMEOUT_SECONDS}]})
         } else {
-            json!({"hooks":[{"type":"command", "command":format!("skill-ops {action}"),"timeout":10}]})
+            json!({"hooks":[{"type":"command", "command":format!("skill-ops {action}"),"timeout":HOOK_TIMEOUT_SECONDS}]})
         };
         let mut retained = Vec::new();
         for mut entry in std::mem::take(entries) {

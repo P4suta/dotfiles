@@ -7,17 +7,18 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+/// Where Homebrew on Apple silicon, Homebrew on Intel and other local installs, and the system put git.
+#[cfg(unix)]
+const UNIX_GIT: [&str; 3] = [
+    "/opt/homebrew/bin/git",
+    "/usr/local/bin/git",
+    "/usr/bin/git",
+];
+
 /// Candidate locations of the real git, in order of preference.
 #[cfg(unix)]
 pub fn candidates() -> Vec<PathBuf> {
-    [
-        "/opt/homebrew/bin/git",
-        "/usr/local/bin/git",
-        "/usr/bin/git",
-    ]
-    .iter()
-    .map(PathBuf::from)
-    .collect()
+    UNIX_GIT.iter().map(PathBuf::from).collect()
 }
 
 /// Git for Windows installs under `%ProgramFiles%` for all users or under `%LOCALAPPDATA%` for one user.

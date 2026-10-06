@@ -27,14 +27,17 @@ pub fn run(options: &Options) {
     if let Err(err) = install(options) {
         eprintln!("herdr install failed: {err:#}");
         eprintln!("Fall back to the official installer if this keeps failing:");
-        eprintln!(
-            "  powershell -ExecutionPolicy Bypass -c \"irm https://herdr.dev/install.ps1 | iex\""
-        );
+        eprintln!("  powershell -ExecutionPolicy Bypass -c \"irm {OFFICIAL_INSTALLER} | iex\"");
     }
 }
 
 #[cfg(windows)]
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+const OFFICIAL_INSTALLER: &str = "https://herdr.dev/install.ps1";
+
+/// A zip archive starts with the local file header signature `PK\x03\x04`.
+const ZIP_SIGNATURE: [u8; 4] = [b'P', b'K', 0x03, 0x04];
 
 fn manifest_url(options: &Options) -> String {
     const STABLE: &str = "latest.json";
@@ -96,15 +99,15 @@ fn install(options: &Options) -> Result<()> {
 
 fn install_into(releases: &Path, manifest: &Manifest) -> Result<()> {
     let staging = releases.join(format!(".staging.{}", manifest.identity));
-    let _ = std::fs::remove_dir_all(&staging);
+    platform::cleanup::remove_dir_all(&staging);
     std::fs::create_dir_all(&staging)?;
     let staged = std::env::temp_dir().join(format!("herdr-{}.download", manifest.identity));
     download::download(&manifest.url, &staged)?;
 
     let got = download::sha256_of(&staged)?;
     if !got.eq_ignore_ascii_case(&manifest.sha256) {
-        let _ = std::fs::remove_file(&staged);
-        let _ = std::fs::remove_dir_all(&staging);
+        platform::cleanup::remove_file(&staged);
+        platform::cleanup::remove_dir_all(&staging);
         bail!(
             "sha256 mismatch for {}: manifest says {}, got {got}",
             manifest.url,
@@ -113,7 +116,7 @@ fn install_into(releases: &Path, manifest: &Manifest) -> Result<()> {
     }
 
     place(&staged, &staging)?;
-    let _ = std::fs::remove_file(&staged);
+    platform::cleanup::remove_file(&staged);
     let release_dir = releases.join(&manifest.identity);
     if !staging.join("herdr.exe").is_file() {
         bail!("the asset produced no herdr.exe in {}", staging.display());
@@ -133,11 +136,18 @@ fn install_into(releases: &Path, manifest: &Manifest) -> Result<()> {
     };
     std::fs::rename(&staging, &release_dir).inspect_err(|_| {
         if let Some(backup) = &backup {
-            let _ = std::fs::rename(backup, &release_dir);
+            platform::cleanup::report(
+                std::fs::rename(backup, &release_dir),
+                format_args!(
+                    "restore {} from {}",
+                    release_dir.display(),
+                    backup.display()
+                ),
+            );
         }
     })?;
     if let Some(backup) = backup {
-        let _ = std::fs::remove_dir_all(backup);
+        platform::cleanup::remove_dir_all(&backup);
     }
     std::fs::write(stamp_path(&release_dir), &manifest.sha256)?;
     Ok(())
@@ -225,9 +235,9 @@ fn place(staged: &Path, release_dir: &Path) -> Result<()> {
 fn is_zip(path: &Path) -> Result<bool> {
     use std::io::Read;
 
-    let mut magic = [0u8; 4];
+    let mut magic = [0u8; ZIP_SIGNATURE.len()];
     let read = std::fs::File::open(path)?.read(&mut magic)?;
-    Ok(read == 4 && magic == [b'P', b'K', 0x03, 0x04])
+    Ok(read == magic.len() && magic == ZIP_SIGNATURE)
 }
 
 fn stamp_path(release_dir: &Path) -> std::path::PathBuf {
@@ -262,7 +272,8 @@ fn link(link_path: &Path, target: &Path) -> Result<()> {
     match link_target(link_path) {
         Ok(current) if current == target => return Ok(()),
         Ok(_) => std::fs::remove_file(link_path)?,
-        Err(_) if std::fs::symlink_metadata(link_path).is_ok() => {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => {
             if !is_empty_dir(link_path) {
                 bail!(
                     "{} exists and is not a link; refusing to replace it",
@@ -271,7 +282,6 @@ fn link(link_path: &Path, target: &Path) -> Result<()> {
             }
             std::fs::remove_dir(link_path)?;
         }
-        Err(_) => {}
     }
     std::os::unix::fs::symlink(target, link_path)
         .with_context(|| format!("linking {} -> {}", link_path.display(), target.display()))
@@ -331,7 +341,7 @@ fn prune(releases: &Path, retain: usize, current: &str) {
         .collect();
 
     for name in stale_releases(&installed, retain, current) {
-        let _ = std::fs::remove_dir_all(releases.join(name));
+        platform::cleanup::remove_dir_all(&releases.join(name));
     }
 }
 

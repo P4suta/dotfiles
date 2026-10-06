@@ -1,4 +1,3 @@
-use std::fmt::Write as _;
 use std::io::Read;
 use std::path::Path;
 
@@ -32,7 +31,7 @@ pub fn download_verified(url: &str, sha256: &str, to: &Path) -> Result<()> {
     download(url, to)?;
     let got = sha256_of(to)?;
     if !got.eq_ignore_ascii_case(sha256) {
-        let _ = std::fs::remove_file(to);
+        platform::cleanup::remove_file(to);
         bail!("sha256 mismatch for {url}: expected {sha256}, got {got}");
     }
     Ok(())
@@ -49,11 +48,5 @@ pub fn sha256_of(path: &Path) -> Result<String> {
         }
         hasher.update(&buf[..n]);
     }
-    Ok(hasher
-        .finalize()
-        .iter()
-        .fold(String::with_capacity(64), |mut hex, byte| {
-            let _ = write!(hex, "{byte:02x}");
-            hex
-        }))
+    Ok(platform::build_inputs::hex(&hasher.finalize()))
 }

@@ -24,6 +24,10 @@ fn revision(root: &std::path::Path) -> String {
         .map_or_else(|| "unknown".into(), |text| text.trim().to_owned())
 }
 
+/// The levels from the platform crate's manifest directory up to its checkout: `crates/platform`.
+#[cfg(feature = "tools")]
+const CHECKOUT_DEPTH: usize = 2;
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     #[cfg(feature = "tools")]
@@ -33,7 +37,7 @@ fn main() {
         );
         let root = manifest
             .ancestors()
-            .nth(2)
+            .nth(CHECKOUT_DEPTH)
             .expect("the platform crate sits two levels inside its checkout");
         for krate in build_inputs::CRATES {
             println!(

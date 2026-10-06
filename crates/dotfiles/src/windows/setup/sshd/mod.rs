@@ -21,6 +21,11 @@ const HOST_HELPER: &str = include_str!("../../../../assets/sshd-host.ps1");
 const ELEVATE_HELPER: &str = include_str!("../../../../assets/elevate.ps1");
 
 const FIREWALL_RULE: &str = "OpenSSH-Server-In-TCP";
+/// How often the setup reads the elevated helper's log while the helper runs.
+const LOG_POLL: std::time::Duration = std::time::Duration::from_millis(150);
+/// How long the service gets to write its first `sshd_config`: forty checks a quarter second apart.
+const CONFIG_CHECKS: u32 = 40;
+const CONFIG_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 
 #[derive(Debug)]
 pub struct Options {
@@ -61,7 +66,7 @@ fn elevate(options: &Options) -> Result<i32> {
     )?;
     let helper = proc::write_temp(ELEVATE_HELPER, ".ps1")?;
     // Start from an empty log so the tail never replays a previous run.
-    let _ = std::fs::remove_file(&log);
+    platform::cleanup::remove_file(&log);
 
     println!(">>> sshd setup needs elevation - answer the UAC prompt");
     let mut cmd = env::command("pwsh");
@@ -83,7 +88,7 @@ fn elevate(options: &Options) -> Result<i32> {
         if let Some(status) = child.try_wait()? {
             break status;
         }
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        std::thread::sleep(LOG_POLL);
     };
     tail.drain();
     tail.flush();
@@ -94,7 +99,10 @@ fn elevate(options: &Options) -> Result<i32> {
         if let Some(mut stderr) = child.stderr.take() {
             use std::io::Read;
             let mut text = String::new();
-            let _ = stderr.read_to_string(&mut text);
+            platform::cleanup::report(
+                stderr.read_to_string(&mut text),
+                "read the elevation helper's errors",
+            );
             if !text.trim().is_empty() {
                 eprintln!("{}", text.trim_end());
             }
@@ -305,11 +313,11 @@ fn report_done(applied: &Value) {
 /// `sshd_config` appears only after the service first starts.
 fn wait_for_config(ssh_dir: &Path) -> Result<PathBuf> {
     let path = ssh_dir.join("sshd_config");
-    for _ in 0..40 {
+    for _ in 0..CONFIG_CHECKS {
         if path.is_file() {
             return Ok(path);
         }
-        std::thread::sleep(std::time::Duration::from_millis(250));
+        std::thread::sleep(CONFIG_CHECK_INTERVAL);
     }
     bail!("sshd is running but {} never appeared", path.display())
 }
@@ -348,7 +356,10 @@ fn clear_default_shell(key: &str) {
     for value in ["DefaultShell", "DefaultShellCommandOption"] {
         let mut cmd = env::command("reg.exe");
         cmd.args(["delete", key, "/v", value, "/f"]);
-        let _ = proc::capture(&mut cmd);
+        platform::cleanup::report(
+            proc::capture(&mut cmd),
+            format_args!("remove {value} from {key}"),
+        );
     }
 }
 

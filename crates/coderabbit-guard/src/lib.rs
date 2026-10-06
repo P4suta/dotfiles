@@ -22,6 +22,18 @@ use crate::review_rules::{
 /// The guard policy that `just install-review-guard` applies from the invoking checkout on every profile.
 pub const SOURCE_POLICY: &str = "home/dot_config/coderabbit-guard/policy.json.tmpl";
 
+/// The largest review ledger the guard reads, 1 MiB, far beyond a year of reviews.
+const LEDGER_LIMIT: u64 = 1024 * 1024;
+
+/// The policy's fields: the organization, the vendor version, and the review OS.
+const POLICY_FIELDS: usize = 3;
+
+/// A vendor version's numeric parts: major, minor, and patch.
+const VERSION_PARTS: usize = 3;
+
+/// `--guard-status --json`, in either order.
+const JSON_STATUS_ARGUMENTS: usize = 2;
+
 #[derive(Debug)]
 pub struct LedgerLock(File);
 
@@ -41,7 +53,7 @@ impl DerefMut for LedgerLock {
 
 impl Drop for LedgerLock {
     fn drop(&mut self) {
-        let _ = self.0.unlock();
+        platform::cleanup::report(self.0.unlock(), "unlock the review ledger");
     }
 }
 
@@ -221,7 +233,7 @@ pub(crate) fn records(text: &str) -> Result<Vec<u64>> {
         .collect::<std::result::Result<_, _>>()
         .context("corrupt review ledger; refusing to reset allowance")?;
     ensure!(
-        records.windows(2).all(|pair| pair[0] <= pair[1]),
+        records.is_sorted(),
         "unsorted review ledger; review refused"
     );
     Ok(records)
@@ -236,7 +248,7 @@ pub(crate) fn lock_ledger(path: &Path) -> Result<(LedgerLock, Vec<u64>)> {
         "review ledger must be a regular file"
     );
     ensure!(
-        metadata.len() <= 1_048_576,
+        metadata.len() <= LEDGER_LIMIT,
         "review ledger exceeds its size bound; operator maintenance is required"
     );
     let file = File::options().read(true).append(true).open(path)?;
@@ -422,7 +434,7 @@ pub fn install(binary: &Path, user_directory: &Path) -> Result<()> {
             Ok(())
         })();
         if result.is_err() {
-            let _ = fs::remove_file(&temporary);
+            platform::cleanup::remove_file(&temporary);
         }
         result?;
     }
@@ -446,7 +458,10 @@ pub fn validate_policy(text: &str) -> Result<(String, String)> {
     let object = value
         .as_object()
         .context("review guard policy must be an object")?;
-    ensure!(object.len() == 3, "unknown review guard policy field");
+    ensure!(
+        object.len() == POLICY_FIELDS,
+        "unknown review guard policy field"
+    );
     ensure!(
         value["review_os"] == "macos",
         "the managed review executor must be macOS"
@@ -459,7 +474,7 @@ pub fn validate_policy(text: &str) -> Result<(String, String)> {
         .context("vendor version is required")?;
     ensure!(
         !organization.is_empty()
-            && version.split('.').count() == 3
+            && version.split('.').count() == VERSION_PARTS
             && version
                 .split('.')
                 .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())),
@@ -576,7 +591,7 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
     )?)?;
     let ledger = user_directory.join(".local/state/coderabbit-guard/reviews.log");
     let scope = pause(user_directory)?;
-    let json = args.len() == 2
+    let json = args.len() == JSON_STATUS_ARGUMENTS
         && args.iter().any(|arg| arg == "--guard-status")
         && args.iter().any(|arg| arg == "--json");
     let status = json || args == ["--guard-status"];

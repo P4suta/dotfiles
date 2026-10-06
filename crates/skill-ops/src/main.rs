@@ -8,6 +8,9 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+/// The largest native hook input the engine reads, 8 MiB.
+const HOOK_INPUT_LIMIT: usize = 8 * 1024 * 1024;
+
 #[derive(Parser)]
 #[command(about = "Load, observe, analyze, and verify the owner's shared skills locally")]
 struct Cli {
@@ -85,8 +88,13 @@ fn reviewed(approved: &Path) -> Result<BTreeMap<String, ops::Reviewed>> {
 
 fn stdin_json() -> Result<serde_json::Value> {
     let mut text = String::new();
-    std::io::stdin().take(8_388_609).read_to_string(&mut text)?;
-    ensure!(text.len() <= 8_388_608, "hook input exceeds its size bound");
+    std::io::stdin()
+        .take(HOOK_INPUT_LIMIT as u64 + 1)
+        .read_to_string(&mut text)?;
+    ensure!(
+        text.len() <= HOOK_INPUT_LIMIT,
+        "hook input exceeds its size bound"
+    );
     serde_json::from_str(&text).context("invalid native hook input")
 }
 

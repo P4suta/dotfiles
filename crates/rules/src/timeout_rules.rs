@@ -4,11 +4,21 @@ pub const CLIENT_LIMIT_MS: u64 = 600_000;
 /// How many of the newest runs of a signature decide its expectation.
 pub const WINDOW: usize = 20;
 
+/// The percentile of the recent runs that sets how long the next run should take.
+const PERCENTILE: usize = 95;
+const PERCENT: usize = 100;
+
+/// A run gets its expectation again divided by this, so half again.
+const MARGIN_DIVISOR: u64 = 2;
+
+/// The start-up noise a run gets beyond its expectation, in milliseconds.
+const START_UP_MS: u64 = 10_000;
+
 /// The nearest-rank ninety-fifth percentile of `sorted`, ascending.
 /// With fewer than 20 runs it equals the slowest one.
 #[must_use]
 pub fn percentile(sorted: &[u64]) -> Option<u64> {
-    let rank = (sorted.len() * 95).div_ceil(100);
+    let rank = (sorted.len() * PERCENTILE).div_ceil(PERCENT);
     rank.checked_sub(1)
         .and_then(|index| sorted.get(index))
         .copied()
@@ -17,7 +27,9 @@ pub fn percentile(sorted: &[u64]) -> Option<u64> {
 /// The time a run gets beyond its expectation: half again, plus ten seconds for start-up noise.
 #[must_use]
 pub const fn with_margin(expected: u64) -> u64 {
-    expected.saturating_add(expected / 2).saturating_add(10_000)
+    expected
+        .saturating_add(expected / MARGIN_DIVISOR)
+        .saturating_add(START_UP_MS)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

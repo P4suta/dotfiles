@@ -740,7 +740,8 @@ pub fn commit_retry(
         retry.push("--allow-empty".to_owned());
     }
     retry.extend(["--edit", "--file", message].map(str::to_owned));
-    let mut line = words[..at + 2].to_vec();
+    // `words` starts with `git`, so the subcommand at `at` in the arguments sits one word later.
+    let mut line = words[..=at + 1].to_vec();
     // Before every kept option, so an explicit `--author` or `--date` still overrides it as it did the reused commit's.
     if let Some(read) = read.filter(|_| plan.authorship) {
         line.extend([

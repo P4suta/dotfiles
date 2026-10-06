@@ -11,6 +11,26 @@ use platform::process::command;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use util::{SECONDS_PER_DAY, SECONDS_PER_MINUTE};
+
+/// The exit status of an invocation the reaper doesn't serve.
+const USAGE_ERROR: i32 = 2;
+/// The defaults the configuration file and the environment override.
+const IDLE_STOP_SECONDS: i64 = 2 * 60 * 60;
+const EXITED_REMOVE_SECONDS: i64 = 7 * 24 * 60 * 60;
+const THRESHOLD_PERCENT: f64 = 3.0;
+const MIN_UPTIME_SECONDS: i64 = 30 * 60;
+const EXEC_QUIET_SECONDS: i64 = 2 * 60 * 60;
+/// The fields of `docker inspect`'s line before the optional finish time.
+const INSPECT_FIELDS: usize = 5;
+/// The digits of Docker's short container ID, which names a state file.
+const SHORT_ID: usize = 12;
+/// Where Docker Desktop, Homebrew on Apple silicon, and the system install `docker`.
+const SYSTEM_DOCKER: [&str; 3] = [
+    "/usr/local/bin/docker",
+    "/opt/homebrew/bin/docker",
+    "/usr/bin/docker",
+];
 
 pub struct DevReaper;
 
@@ -20,7 +40,7 @@ impl DevReaper {
             Self::run(sub)
         } else {
             eprintln!("usage: dev-reaper {{reap|cleanup}}");
-            2
+            USAGE_ERROR
         }
     }
 
@@ -31,7 +51,7 @@ impl DevReaper {
             "cleanup" => Self::cleanup(&cfg),
             _ => {
                 eprintln!("usage: dev-reaper {{reap|cleanup}}");
-                2
+                USAGE_ERROR
             }
         }
     }
@@ -138,7 +158,10 @@ impl DevConfig {
             "DEV_REAPER_STATE_DIR",
             &state_base.join("dev-reaper").to_string_lossy(),
         ));
-        let _ = std::fs::create_dir_all(&state_dir);
+        platform::cleanup::report(
+            std::fs::create_dir_all(&state_dir),
+            format_args!("create the state directory {}", state_dir.display()),
+        );
 
         let keep_label = config::get(&f, "DEV_REAPER_KEEP_LABEL", "dev-reaper.keep=true");
         let (keep_key, keep_val) = keep_label
@@ -158,21 +181,27 @@ impl DevConfig {
                 .split_whitespace()
                 .map(str::to_owned)
                 .collect(),
-            idle_stop_seconds: config::get(&f, "DEV_REAPER_IDLE_STOP_SECONDS", "7200")
-                .parse()
-                .unwrap_or(7200),
-            exited_remove_seconds: config::get(&f, "DEV_REAPER_EXITED_REMOVE_SECONDS", "604800")
-                .parse()
-                .unwrap_or(604_800),
-            threshold_pct: config::get(&f, "DEV_REAPER_THRESHOLD_PCT", "3")
-                .parse()
-                .unwrap_or(3.0),
-            min_uptime_seconds: config::get(&f, "DEV_REAPER_MIN_UPTIME_SECONDS", "1800")
-                .parse()
-                .unwrap_or(1800),
-            exec_quiet_seconds: config::get(&f, "DEV_REAPER_EXEC_QUIET_SECONDS", "7200")
-                .parse()
-                .unwrap_or(7200),
+            idle_stop_seconds: config::number(
+                &f,
+                "DEV_REAPER_IDLE_STOP_SECONDS",
+                IDLE_STOP_SECONDS,
+            ),
+            exited_remove_seconds: config::number(
+                &f,
+                "DEV_REAPER_EXITED_REMOVE_SECONDS",
+                EXITED_REMOVE_SECONDS,
+            ),
+            threshold_pct: config::number(&f, "DEV_REAPER_THRESHOLD_PCT", THRESHOLD_PERCENT),
+            min_uptime_seconds: config::number(
+                &f,
+                "DEV_REAPER_MIN_UPTIME_SECONDS",
+                MIN_UPTIME_SECONDS,
+            ),
+            exec_quiet_seconds: config::number(
+                &f,
+                "DEV_REAPER_EXEC_QUIET_SECONDS",
+                EXEC_QUIET_SECONDS,
+            ),
             stop_timeout: config::get(&f, "DEV_REAPER_STOP_TIMEOUT", "30"),
             builder_reserved: config::get(&f, "DEV_REAPER_BUILDER_RESERVED", "10GB"),
             heavy_regex: config::get(
@@ -201,12 +230,9 @@ fn resolve_docker() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
-    let candidates = [
-        home.join(".orbstack/bin/docker"),
-        PathBuf::from("/usr/local/bin/docker"),
-        PathBuf::from("/opt/homebrew/bin/docker"),
-        PathBuf::from("/usr/bin/docker"),
-    ];
+    let candidates: Vec<PathBuf> = std::iter::once(home.join(".orbstack/bin/docker"))
+        .chain(SYSTEM_DOCKER.iter().map(PathBuf::from))
+        .collect();
     candidates
         .iter()
         .find(|p| p.is_file())
@@ -279,17 +305,16 @@ fn inspect(docker: &Path, keep_key: &str, fid: &str, extra: bool) -> Option<Insp
         )
     };
     let out = docker_capture(docker, &["inspect", "-f", &format, fid])?;
-    let f: Vec<&str> = out.split('|').collect();
-    if f.len() < 5 {
-        return None;
-    }
+    let fields: Vec<&str> = out.split('|').collect();
+    let (&[project, restart, started, keep, name], rest) =
+        fields.split_first_chunk::<INSPECT_FIELDS>()?;
     Some(InspectLine {
-        project: f[0].to_owned(),
-        restart: f[1].to_owned(),
-        started: f[2].to_owned(),
-        keep: f[3].to_owned(),
-        name: f[4].trim_start_matches('/').to_owned(),
-        finished: f.get(5).map(|s| (*s).to_owned()),
+        project: project.to_owned(),
+        restart: restart.to_owned(),
+        started: started.to_owned(),
+        keep: keep.to_owned(),
+        name: name.trim_start_matches('/').to_owned(),
+        finished: rest.first().map(|s| (*s).to_owned()),
     })
 }
 
@@ -312,7 +337,7 @@ struct ContainerState {
 }
 
 fn state_path(cfg: &DevConfig, fid: &str) -> PathBuf {
-    let sid: String = fid.chars().take(12).collect();
+    let sid: String = fid.chars().take(SHORT_ID).collect();
     cfg.state_dir.join(format!("{sid}.state"))
 }
 
@@ -337,12 +362,15 @@ fn read_state(p: &Path) -> ContainerState {
 }
 
 fn write_state(p: &Path, s: &ContainerState) {
-    let _ = std::fs::write(
-        p,
-        format!(
-            "idle_since={}\nlast_activity={}\nname={}\n",
-            s.idle_since, s.last_activity, s.name
+    platform::cleanup::report(
+        std::fs::write(
+            p,
+            format!(
+                "idle_since={}\nlast_activity={}\nname={}\n",
+                s.idle_since, s.last_activity, s.name
+            ),
         ),
+        format_args!("record the container state in {}", p.display()),
     );
 }
 
@@ -365,10 +393,10 @@ fn load_activity(cfg: &DevConfig, docker: &Path, now: i64) -> HashMap<String, i6
     let mut cursor: i64 = std::fs::read_to_string(&cursor_file)
         .ok()
         .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(now - cfg.exec_quiet_seconds - 60);
+        .unwrap_or(now - cfg.exec_quiet_seconds - SECONDS_PER_MINUTE);
     // Clamp absurd cursors from a clock jump or daemon restart to a sane lookback.
-    if cursor > now || now - cursor > 86_400 {
-        cursor = now - cfg.exec_quiet_seconds - 60;
+    if cursor > now || now - cursor > SECONDS_PER_DAY {
+        cursor = now - cfg.exec_quiet_seconds - SECONDS_PER_MINUTE;
     }
 
     let mut map: HashMap<String, i64> = HashMap::new();
@@ -401,13 +429,20 @@ fn load_activity(cfg: &DevConfig, docker: &Path, now: i64) -> HashMap<String, i6
             }
         }
     }
-    let _ = std::fs::write(&cursor_file, format!("{now}\n"));
+    platform::cleanup::report(
+        std::fs::write(&cursor_file, format!("{now}\n")),
+        format_args!("record the event cursor in {}", cursor_file.display()),
+    );
     map
 }
 
 fn gc_state(cfg: &DevConfig, docker: &Path) {
     let live: Vec<String> = docker_capture(docker, &["ps", "-aq", "--no-trunc"])
-        .map(|s| s.lines().map(|l| l.chars().take(12).collect()).collect())
+        .map(|s| {
+            s.lines()
+                .map(|l| l.chars().take(SHORT_ID).collect())
+                .collect()
+        })
         .unwrap_or_default();
     let Ok(entries) = std::fs::read_dir(&cfg.state_dir) else {
         return;
@@ -417,7 +452,7 @@ fn gc_state(cfg: &DevConfig, docker: &Path) {
         if let Some(sid) = name.strip_suffix(".state")
             && !live.iter().any(|l| l == sid)
         {
-            let _ = std::fs::remove_file(e.path());
+            platform::cleanup::remove_file(&e.path());
         }
     }
 }
@@ -567,18 +602,18 @@ fn cleanup_one(cfg: &DevConfig, docker: &Path, fid: &str, now: i64) {
             .status()
             .is_ok_and(|s| s.success());
         if removed {
-            let _ = std::fs::remove_file(state_path(cfg, fid));
+            platform::cleanup::remove_file(&state_path(cfg, fid));
             println!(
                 "dev-reaper: removed | removed {} after {} days abandoned",
                 info.name,
-                age / 86_400
+                age / SECONDS_PER_DAY
             );
             util::notify(
                 "dev-reaper: removed",
                 &format!(
                     "removed {} after {} days abandoned",
                     info.name,
-                    age / 86_400
+                    age / SECONDS_PER_DAY
                 ),
                 cfg.notify,
             );
@@ -589,7 +624,7 @@ fn cleanup_one(cfg: &DevConfig, docker: &Path, fid: &str, now: i64) {
         println!(
             "would remove {} (exited {}d, mode={})",
             info.name,
-            age / 86_400,
+            age / SECONDS_PER_DAY,
             cfg.mode
         );
     }

@@ -3,6 +3,13 @@
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
+/// Where Windows lives when `SystemRoot` names no directory.
+pub const DEFAULT_SYSTEM_ROOT: &str = "C:\\Windows";
+
+/// Where Homebrew installs on Apple silicon.
+const HOMEBREW_BIN: &str = "/opt/homebrew/bin";
+const HOMEBREW_SBIN: &str = "/opt/homebrew/sbin";
+
 /// The user's home: `USERPROFILE` on Windows, where native processes often lack `HOME`, and `HOME` elsewhere.
 /// Windows falls back to `HOME`, which Git Bash sets.
 #[must_use]
@@ -53,7 +60,7 @@ pub fn tool_directories(home: &Path) -> Vec<PathBuf> {
         mise_shims(home),
     ];
     if cfg!(target_os = "macos") {
-        directories.extend(["/opt/homebrew/bin".into(), "/opt/homebrew/sbin".into()]);
+        directories.extend([HOMEBREW_BIN.into(), HOMEBREW_SBIN.into()]);
     }
     if cfg!(windows) {
         directories.extend([

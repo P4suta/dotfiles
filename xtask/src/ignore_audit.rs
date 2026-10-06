@@ -12,6 +12,9 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+/// The source paths one `chezmoi target-path` call takes, which keeps its command line under the Windows limit.
+const PATHS_PER_CALL: usize = 200;
+
 /// Build outputs that exist in a working checkout but never in Git, which host-state-ignore keeps out of a home directory.
 const BUILD_OUTPUTS: [&str; 2] = ["node_modules", "target"];
 
@@ -56,7 +59,7 @@ pub(crate) fn source_targets(root: &Path, scope: &Path) -> Result<BTreeSet<Strin
     let prefix = format!("{}/", chezmoi_path(&destination));
     let mut targets = BTreeSet::new();
     let source = crate::source_state(root);
-    for batch in source_paths(&source)?.chunks(200) {
+    for batch in source_paths(&source)?.chunks(PATHS_PER_CALL) {
         let output = chezmoi(root, scope, &config, &destination)
             .current_dir(&source)
             .args(["target-path", "--source-path"])

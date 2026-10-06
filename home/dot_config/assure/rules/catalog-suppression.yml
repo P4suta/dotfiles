@@ -1,0 +1,13 @@
+id: catalog-suppression
+language: rust
+severity: error
+message: A comment suppresses a catalog rule, which has no expiring exemption.
+note: Fix the code the rule names; an exemption lives only in the language's expiring form beside the code, such as `#[expect(..., reason = "...")]`.
+metadata:
+  cwe: CWE-1164
+  ruleset: catalog policy
+rule:
+  any:
+    - kind: line_comment
+    - kind: block_comment
+  regex: 'ast-grep-ignore'

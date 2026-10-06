@@ -5,6 +5,9 @@ import { isAbsolute, join } from "node:path";
 
 type EventHook = NonNullable<Hooks["event"]>;
 
+/** How long the reply check may run before the plugin stops waiting on it. */
+const REPLY_TIMEOUT_MS = 120000;
+
 type Verdict =
   | { kind: "allow" }
   | { kind: "rewrite"; reason: string }
@@ -62,7 +65,7 @@ export const ProseReply: Plugin = async (
       ]),
       stdout: "pipe",
       stderr: "pipe",
-      timeout: 120000,
+      timeout: REPLY_TIMEOUT_MS,
     });
     const [code, output, diagnostics] = await Promise.all([
       child.exited,

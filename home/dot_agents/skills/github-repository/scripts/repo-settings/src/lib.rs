@@ -6,6 +6,11 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 const BASELINE: &str = include_str!("../../../assets/baseline.json");
+/// A repository's parts: `OWNER/REPO`.
+const REPOSITORY_PARTS: usize = 2;
+/// The largest page of the GitHub API, and the pages a listing may take before the tool gives up.
+const PAGE_SIZE: usize = 100;
+const MAX_PAGES: usize = 1000;
 const REPOSITORY_KEYS: &[&str] = &[
     "allow_squash_merge",
     "allow_merge_commit",
@@ -202,7 +207,7 @@ pub enum Operation {
 pub fn validate_repo_name(name: &str) -> Result<()> {
     let parts: Vec<_> = name.split('/').collect();
     ensure!(
-        parts.len() == 2
+        parts.len() == REPOSITORY_PARTS
             && parts.iter().all(|part| !part.is_empty()
                 && *part != "."
                 && *part != ".."
@@ -805,15 +810,17 @@ pub fn audit(api: &impl Api, name: &str) -> Result<State> {
 
 pub fn paged_array(api: &impl Api, endpoint: &str, key: Option<&str>) -> Result<Vec<Value>> {
     let mut values = Vec::new();
-    for page in 1..=1000 {
+    for page in 1..=MAX_PAGES {
         let separator = if endpoint.contains('?') { '&' } else { '?' };
-        let response = api.read(&format!("{endpoint}{separator}per_page=100&page={page}"))?;
+        let response = api.read(&format!(
+            "{endpoint}{separator}per_page={PAGE_SIZE}&page={page}"
+        ))?;
         let array = key
             .map_or(&response, |key| &response[key])
             .as_array()
             .context("expected paginated API array")?;
         values.extend(array.iter().cloned());
-        if array.len() < 100 {
+        if array.len() < PAGE_SIZE {
             return Ok(values);
         }
     }

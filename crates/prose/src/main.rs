@@ -4,6 +4,12 @@ use prose::{self, Bundle, Channel, Client, Scope};
 use std::io::Read;
 use std::path::PathBuf;
 
+/// One byte past the largest native hook input the checker reads, 8 MiB, so a longer input fails to parse.
+const HOOK_INPUT_READ: u64 = 8 * 1024 * 1024 + 1;
+
+/// The exit status of a run that failed before it could check anything, distinct from a refusal.
+const FAILED: i32 = 2;
+
 #[derive(Parser)]
 #[command(about = "Check persisted prose and final replies against the pinned writing standard")]
 struct Cli {
@@ -122,7 +128,9 @@ fn run(cli: Cli) -> Result<i32> {
         }
         Action::Reply { client: _ } => {
             let mut text = String::new();
-            std::io::stdin().take(8_388_609).read_to_string(&mut text)?;
+            std::io::stdin()
+                .take(HOOK_INPUT_READ)
+                .read_to_string(&mut text)?;
             let input = serde_json::from_str(&text).context("invalid native hook input")?;
             println!("{}", prose::stop(&input, bundle()));
             Ok(0)
@@ -135,7 +143,7 @@ fn main() {
         Ok(code) => std::process::exit(code),
         Err(error) => {
             eprintln!("Error: {error:#}");
-            std::process::exit(2);
+            std::process::exit(FAILED);
         }
     }
 }

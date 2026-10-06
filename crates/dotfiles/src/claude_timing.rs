@@ -15,6 +15,24 @@ use std::path::{Path, PathBuf};
 /// Once the history file grows past this size, the hook rewrites it to the newest runs of each signature.
 const COMPACT_BYTES: u64 = 1 << 20;
 
+/// Git's shortest default abbreviation of a commit hash, which a signature drops as a value.
+const MIN_ABBREVIATED_HASH: usize = 7;
+/// The longest word a signature keeps as a subcommand.
+const MAX_SUBCOMMAND: usize = 32;
+/// The words a wrapper option and its value take, such as `env -u NAME` or `timeout 30`.
+const OPTION_WITH_VALUE: usize = 2;
+/// The words of `mise x` before the wrapped command.
+const MISE_EXEC_WORDS: usize = 2;
+/// A simple command's signature: its program and up to two subcommand words.
+const SIGNATURE_WORDS: usize = 3;
+/// A command's signature joins those of its first three simple commands.
+const SIGNATURE_COMMANDS: usize = 3;
+/// The timeout a signature without history and without a configured default gets.
+const DEFAULT_TIMEOUT_MS: u64 = 120_000;
+const MILLIS_PER_SECOND: u64 = 1000;
+/// The longest tool call identifier a start marker takes as its name.
+const MAX_CALL_ID: usize = 128;
+
 /// Words that only prepare the shell.
 /// A command made of them alone has no signature of its own.
 const PREPARATION: [&str; 12] = [
@@ -34,9 +52,9 @@ const PREPARATION: [&str; 12] = [
 
 /// A word that names a subcommand or recipe rather than a path, an identifier, or a value.
 fn plain(word: &str) -> bool {
-    let hex = word.len() >= 7 && word.chars().all(|c| c.is_ascii_hexdigit());
+    let hex = word.len() >= MIN_ABBREVIATED_HASH && word.chars().all(|c| c.is_ascii_hexdigit());
     !word.is_empty()
-        && word.len() <= 32
+        && word.len() <= MAX_SUBCOMMAND
         && !word.starts_with('-')
         && !hex
         && !word.chars().all(|c| c.is_ascii_digit())
@@ -65,17 +83,17 @@ fn simple(words: &[String]) -> Option<String> {
             start += 1;
             while let Some(option) = words.get(start).filter(|word| word.starts_with('-')) {
                 start += if matches!(option.as_str(), "-u" | "-C" | "--unset" | "--chdir") {
-                    2
+                    OPTION_WITH_VALUE
                 } else {
                     1
                 };
             }
         } else if name == "timeout" {
-            start += 2;
+            start += OPTION_WITH_VALUE;
         } else if name == "mise"
             && matches!(words.get(start + 1).map(String::as_str), Some("x" | "exec"))
         {
-            start += 2;
+            start += MISE_EXEC_WORDS;
             if words.get(start).is_some_and(|word| word == "--") {
                 start += 1;
             }
@@ -89,10 +107,10 @@ fn simple(words: &[String]) -> Option<String> {
     }
     let mut signature = vec![name.as_str().to_owned()];
     let mut index = start + 1;
-    while signature.len() < 3 {
+    while signature.len() < SIGNATURE_WORDS {
         let Some(word) = words.get(index) else { break };
         if name == "git" && matches!(word.as_str(), "-C" | "-c") {
-            index += 2;
+            index += OPTION_WITH_VALUE;
             continue;
         }
         if !plain(word) {
@@ -110,7 +128,7 @@ pub fn signature(command: &str) -> String {
     let parts: Vec<String> = segments(command)
         .iter()
         .filter_map(|words| simple(words))
-        .take(3)
+        .take(SIGNATURE_COMMANDS)
         .collect();
     if parts.is_empty() {
         "shell".to_owned()
@@ -141,7 +159,7 @@ impl Defaults {
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or(Self {
-                default_ms: 120_000,
+                default_ms: DEFAULT_TIMEOUT_MS,
                 signatures: BTreeMap::new(),
             })
     }
@@ -186,14 +204,14 @@ fn window(runs: &[Run], signature: &str) -> Vec<u64> {
 }
 
 fn seconds(millis: u64) -> String {
-    format!("{:.0} s", millis.div_ceil(1000))
+    format!("{:.0} s", millis.div_ceil(MILLIS_PER_SECOND))
 }
 
 /// The start marker of one tool call.
 /// Its name matches the identifier of the call, kept to safe characters.
 fn marker(home: &Path, id: &str) -> Option<PathBuf> {
     let safe = !id.is_empty()
-        && id.len() <= 128
+        && id.len() <= MAX_CALL_ID
         && id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'));
@@ -315,7 +333,7 @@ pub(crate) fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Valu
             else {
                 return Ok(None);
             };
-            let _ = fs::remove_file(&path);
+            platform::cleanup::remove_file(&path);
             let millis = now.saturating_sub(started);
             record(
                 home,

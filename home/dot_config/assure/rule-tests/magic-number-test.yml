@@ -1,0 +1,15 @@
+id: magic-number
+valid:
+  - "const RETRIES: u32 = 3;\nfn retries() -> u32 { RETRIES }"
+  - "fn next(index: usize) -> usize { index + 1 }"
+  - "fn empty() -> usize { 0 }"
+  - "fn buffer() -> [u8; 16] { [0; 16] }"
+  - "#[kani::unwind(10)]\nfn harness() {}"
+  - "#[cfg(test)]\nmod tests { #[test] fn three() { assert_eq!(1 + 2, 3); } }"
+  - "enum Code { Missing = 2 }"
+  - "fn third(tuple: (u8, u8, u8)) -> u8 { tuple.2 }"
+invalid:
+  - "fn retries() -> u32 { 3 }"
+  - "fn wait(seconds: u64) -> u64 { seconds * 1000 }"
+  - "fn ratio(value: f64) -> f64 { value * 0.8 }"
+  - "fn lead(byte: u8) -> bool { byte & 0xC0 == 0x80 }"

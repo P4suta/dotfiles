@@ -26,6 +26,9 @@ pub enum Verdict {
     WholeContext,
 }
 
+/// How many terms before the context argument `includeTemplate` stands, with the partial's name between them.
+const CONTEXT_AFTER_RENDER: usize = 2;
+
 /// A host-reading term refuses the expression outright.
 /// The whole context passes only as the context argument of a rendered partial, as in `includeTemplate "name" .`.
 #[must_use]
@@ -37,7 +40,9 @@ pub fn verdict(terms: &[Term]) -> Verdict {
             Term::Chezmoi | Term::HostRead => return Verdict::HostState,
             Term::Context
                 if !matches!(
-                    index.checked_sub(2).and_then(|render| terms.get(render)),
+                    index
+                        .checked_sub(CONTEXT_AFTER_RENDER)
+                        .and_then(|render| terms.get(render)),
                     Some(Term::Render)
                 ) =>
             {

@@ -51,7 +51,7 @@ fn install(built: &Path, dest: &Path) -> Result<()> {
         .into_owned();
     for entry in std::fs::read_dir(bin)?.flatten() {
         if is_aside(name.as_bytes(), entry.file_name().as_encoded_bytes()) {
-            let _ = std::fs::remove_file(entry.path());
+            platform::cleanup::remove_file(&entry.path());
         }
     }
     let staged = tempfile::NamedTempFile::new_in(bin)?;
@@ -64,7 +64,10 @@ fn install(built: &Path, dest: &Path) -> Result<()> {
     }
     if let Err(error) = std::fs::rename(&staged, dest) {
         if moved {
-            let _ = std::fs::rename(&aside, dest);
+            platform::cleanup::report(
+                std::fs::rename(&aside, dest),
+                format_args!("restore {} from {}", dest.display(), aside.display()),
+            );
         }
         return Err(error).context("installing ocomment.exe");
     }

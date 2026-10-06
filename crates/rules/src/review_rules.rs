@@ -9,6 +9,10 @@ pub const HOURLY_LIMIT: usize = capacity_budget(10) as usize;
 pub const DAILY_LIMIT: usize = HOURLY_LIMIT * 24;
 pub const PROBE_DAILY_LIMIT: usize = DAILY_LIMIT;
 
+/// The share of included capacity a budget may use: 72 percent, the 90 percent service margin times the 80 percent reserve.
+pub const BUDGET_NUMERATOR: u128 = 18;
+pub const BUDGET_DENOMINATOR: u128 = 25;
+
 /// 72 percent of `capacity`, rounded down.
 #[must_use]
 #[expect(
@@ -16,7 +20,7 @@ pub const PROBE_DAILY_LIMIT: usize = DAILY_LIMIT;
     reason = "72 percent of a u64 is at most the u64 itself, so the narrowing keeps every value"
 )]
 pub const fn capacity_budget(capacity: u64) -> u64 {
-    (capacity as u128 * 18 / 25) as u64
+    (capacity as u128 * BUDGET_NUMERATOR / BUDGET_DENOMINATOR) as u64
 }
 
 #[must_use]
@@ -80,7 +84,9 @@ pub fn cooldown_complete(previous: u64, now: u64, gap: u64) -> bool {
 
 #[must_use]
 pub fn included_allowance(limit: u64, remaining: u64) -> bool {
-    remaining <= limit && (u128::from(limit - remaining) + 1) * 25 <= u128::from(limit) * 18
+    remaining <= limit
+        && (u128::from(limit - remaining) + 1) * BUDGET_DENOMINATOR
+            <= u128::from(limit) * BUDGET_NUMERATOR
 }
 
 #[cfg(kani)]

@@ -101,6 +101,97 @@ pub fn core(root: &Path) -> Result<Core> {
     })
 }
 
+/// The ways the anti-pattern catalog in `catalog` disagrees with its rules.
+/// It finds a language a pattern neither checks nor explains, a check naming a missing rule, and a rule without fixtures.
+/// It also finds a rule no pattern names and a rule without its weakness or next action.
+///
+/// # Errors
+///
+/// Returns an error when the catalog or a rule fails to read or parse.
+pub fn catalog_findings(catalog: &Path) -> Result<Vec<String>> {
+    use yaml_rust2::YamlLoader;
+    let data: toml::Table = toml::from_str(&fs::read_to_string(catalog.join("catalog.toml"))?)?;
+    let languages: Vec<&str> = data
+        .get("languages")
+        .and_then(toml::Value::as_array)
+        .context("the catalog lists no languages")?
+        .iter()
+        .filter_map(toml::Value::as_str)
+        .collect();
+    let mut found = Vec::new();
+    let mut named = std::collections::BTreeSet::new();
+    for pattern in data
+        .get("pattern")
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let id = pattern
+            .get("id")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("?");
+        if pattern
+            .get("weakness")
+            .and_then(toml::Value::as_str)
+            .is_none()
+        {
+            found.push(format!("{id} names no weakness"));
+        }
+        let uncovered = pattern.get("uncovered").and_then(toml::Value::as_table);
+        for language in &languages {
+            let check = pattern.get(*language).and_then(toml::Value::as_str);
+            let explained = uncovered.is_some_and(|table| table.contains_key(*language));
+            match (check, explained) {
+                (Some(_), true) => found.push(format!(
+                    "{id} both checks {language} and lists it as uncovered"
+                )),
+                (None, false) => found.push(format!(
+                    "{id} neither checks {language} nor says why it can't; add a check or an `uncovered` reason"
+                )),
+                (Some(check), false) => {
+                    if let Some(rule) = check.strip_prefix("ast-grep:") {
+                        named.insert(rule.to_owned());
+                        if !catalog.join("rules").join(format!("{rule}.yml")).is_file() {
+                            found.push(format!("{id} names the missing rule {rule}"));
+                        }
+                        if !catalog
+                            .join("rule-tests")
+                            .join(format!("{rule}-test.yml"))
+                            .is_file()
+                        {
+                            found.push(format!("the rule {rule} has no fixtures in rule-tests"));
+                        }
+                    }
+                }
+                (None, true) => {}
+            }
+        }
+    }
+    for entry in fs::read_dir(catalog.join("rules"))? {
+        let path = entry?.path();
+        let text = fs::read_to_string(&path)?;
+        let rule = YamlLoader::load_from_str(&text)?
+            .into_iter()
+            .next()
+            .context("an empty rule file")?;
+        let id = rule["id"].as_str().unwrap_or_default().to_owned();
+        if path.file_stem().and_then(|stem| stem.to_str()) != Some(id.as_str()) {
+            found.push(format!("{} holds the rule {id}", path.display()));
+        }
+        if !named.contains(&id) {
+            found.push(format!("no catalog pattern names the rule {id}"));
+        }
+        if rule["note"].as_str().is_none_or(str::is_empty)
+            || (rule["metadata"]["cwe"].is_badvalue() && rule["metadata"]["basis"].is_badvalue())
+        {
+            found.push(format!(
+                "the rule {id} lacks its next action in `note` or its weakness in `metadata`"
+            ));
+        }
+    }
+    Ok(found)
+}
+
 /// Refuses a core that breaks its boundary, a catalog rule that no longer rejects its violating fixtures, and code that the catalog refuses.
 ///
 /// # Errors
@@ -128,6 +219,12 @@ pub fn check(root: &Path) -> Result<()> {
         );
     }
     let catalog = root.join(CATALOG);
+    let findings = catalog_findings(&catalog)?;
+    ensure!(
+        findings.is_empty(),
+        "the anti-pattern catalog in {CATALOG}/catalog.toml is inconsistent:\n{}",
+        findings.join("\n")
+    );
     let status = Tool::AstGrep
         .command()
         .current_dir(&catalog)
@@ -144,7 +241,8 @@ pub fn check(root: &Path) -> Result<()> {
         .arg("scan")
         .arg("--config")
         .arg(catalog.join("sgconfig.yml"))
-        .args(["xtask", "crates"])
+        // The source state keeps its shared shell partials under the hidden `.chezmoitemplates`.
+        .args(["--no-ignore", "hidden", "."])
         .status()
         .context("start the pinned ast-grep")?;
     ensure!(

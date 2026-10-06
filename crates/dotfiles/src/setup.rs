@@ -166,9 +166,9 @@ pub fn scripted_steps(scripts: &str) -> Vec<Step> {
         .lines()
         .map(|line| line.split_whitespace().collect::<Vec<_>>())
     {
-        for pair in words.windows(2) {
-            if pair[0] == "setup"
-                && let Ok(step) = Step::from_str(pair[1], false)
+        for (word, next) in words.iter().zip(words.iter().skip(1)) {
+            if *word == "setup"
+                && let Ok(step) = Step::from_str(next, false)
                 && !steps.contains(&step)
             {
                 steps.push(step);
@@ -292,6 +292,11 @@ pub const GUARD_CRATE: &str = "crates/dotguard";
 pub const RUNTIME_CRATE: &str = "crates/dotfiles";
 /// The workspace profile that builds the guard small, with link-time optimization, which Cargo offers only for a whole profile.
 pub const GUARD_PROFILE: &str = "release-guard";
+
+const CLAUDE_INSTALLER: &str = "https://claude.ai/install.sh";
+const ONEPASSWORD_APP: &str = "/Applications/1Password.app";
+/// The owner's public repositories clone over HTTPS.
+const OWNER_HTTPS: &str = "https://github.com/P4suta";
 
 /// `cargo install` overwrites each binary in place, which Windows refuses while that binary runs, so each one moves aside first.
 fn install_crate(
@@ -423,7 +428,7 @@ pub(crate) fn execute(context: &ContextData, runner: &mut impl Runner, step: Ste
         Step::ForgeKeys => forge_keys(runner)?,
         Step::Claude => {
             if !runner.available(Tool::Claude) {
-                vendor_installer(runner, "https://claude.ai/install.sh", &[])?;
+                vendor_installer(runner, CLAUDE_INSTALLER, &[])?;
             }
         }
         Step::Fcitx5 => fcitx(context, runner)?,
@@ -531,7 +536,7 @@ fn integrations(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()));
     let gui = !remote
         && match context.profile {
-            Profile::Mac => Path::new("/Applications/1Password.app").is_dir(),
+            Profile::Mac => Path::new(ONEPASSWORD_APP).is_dir(),
             Profile::Linux => runner.available(Tool::OnePassword),
             _ => false,
         };
@@ -600,6 +605,7 @@ fn tools(context: &ContextData, runner: &mut impl Runner, upgrade: bool) -> Resu
 
 /// Launchd stops a running job before it removes it, and `bootout` returns before the job exits, so a bootstrap that follows at once fails with EINPROGRESS.
 const AGENT_REMOVAL: std::time::Duration = std::time::Duration::from_secs(30);
+const AGENT_REMOVAL_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
 fn agent_loaded(runner: &mut impl Runner, target: &str) -> Result<bool> {
     Ok(runner
@@ -621,7 +627,7 @@ pub(crate) fn unload_agent(runner: &mut impl Runner, domain: &str, label: &str) 
             "{label} was still loaded {} seconds after its bootout",
             AGENT_REMOVAL.as_secs()
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(AGENT_REMOVAL_POLL);
     }
     Ok(())
 }
@@ -865,7 +871,7 @@ impl OwnerSource {
 
     fn clone_url(self) -> String {
         if self.public() {
-            format!("https://github.com/P4suta/{}.git", self.repository())
+            format!("{OWNER_HTTPS}/{}.git", self.repository())
         } else {
             format!("git@github.com:P4suta/{}", self.repository())
         }
@@ -916,6 +922,10 @@ fn source_tool(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
 
 /// GitHub's current web-flow signing key, which signs commits merged through the web interface.
 const FORGE_CURRENT: &str = "968479A1AFF927E37D1A566BB5690EEEBB952194";
+/// The key GitHub signs web commits with.
+const GITHUB_WEB_FLOW_KEY: &str = "https://github.com/web-flow.gpg";
+/// In `gpg --with-colons` output, the fingerprint fills the tenth field, eight after the record type that names it.
+const FINGERPRINT_AFTER_TYPE: usize = 8;
 /// The web-flow key GitHub retired in January 2024, which older signatures still need.
 const FORGE_RETIRED: &str = "5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23";
 
@@ -929,7 +939,7 @@ fn primary_fingerprints(records: &str) -> Vec<&str> {
             Some("pub") => primary = true,
             Some("sub") => primary = false,
             Some("fpr") if primary => {
-                fingerprints.push(fields.nth(8).unwrap_or_default());
+                fingerprints.push(fields.nth(FINGERPRINT_AFTER_TYPE).unwrap_or_default());
                 primary = false;
             }
             _ => {}
@@ -984,7 +994,7 @@ fn forge_keys(runner: &mut impl Runner) -> Result<()> {
             "30".into(),
             "--output".into(),
             key.clone().into(),
-            "https://github.com/web-flow.gpg".into(),
+            GITHUB_WEB_FLOW_KEY.into(),
         ],
     )?;
     let records = checked(

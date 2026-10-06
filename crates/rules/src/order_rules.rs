@@ -1,16 +1,19 @@
 //! The run order of the setup steps: every step after each step it relies on, with ties in declaration order.
 //! Each step goes by its index in the declaration, and `after[step]` holds one bit for each step that `step` relies on.
 
+/// The most steps a declaration holds, one bit each in a `u32` set.
+const MAX_STEPS: usize = 32;
+
 /// Writes the run order of the steps `0..after.len()` into `order` and returns `true`.
 /// Among the steps whose dependencies already ran, the one declared first runs next.
 /// Returns `false` when the dependencies form a cycle, name a step outside the list, or the list holds more than 32 steps.
 #[must_use]
 pub fn order(after: &[u32], order: &mut [usize]) -> bool {
     let count = after.len();
-    if count > 32 || order.len() != count {
+    if count > MAX_STEPS || order.len() != count {
         return false;
     }
-    let all = if count == 32 {
+    let all = if count == MAX_STEPS {
         u32::MAX
     } else {
         (1u32 << count) - 1
@@ -41,7 +44,7 @@ pub fn order(after: &[u32], order: &mut [usize]) -> bool {
 /// Whether `sequence` runs each of the steps `0..after.len()` exactly once and every step after each step it relies on.
 #[must_use]
 pub fn respects(after: &[u32], sequence: &[usize]) -> bool {
-    if sequence.len() != after.len() || after.len() > 32 {
+    if sequence.len() != after.len() || after.len() > MAX_STEPS {
         return false;
     }
     let mut ran: u32 = 0;

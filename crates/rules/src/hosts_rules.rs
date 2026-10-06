@@ -1,9 +1,11 @@
 /// An operating-system family a CI matrix can require and a managed host can provide.
+/// Each variant's value gives the family's position in a per-family array.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(usize)]
 pub enum Family {
-    Linux,
-    Mac,
-    Windows,
+    Linux = 0,
+    Mac = 1,
+    Windows = 2,
 }
 
 impl Family {
@@ -11,11 +13,7 @@ impl Family {
 
     #[must_use]
     pub const fn index(self) -> usize {
-        match self {
-            Self::Linux => 0,
-            Self::Mac => 1,
-            Self::Windows => 2,
-        }
+        self as usize
     }
 
     #[must_use]
@@ -66,15 +64,17 @@ const fn verdict(family: Family, required: bool, evidence: Evidence) -> Verdict 
 /// Otherwise name the first one to check.
 #[must_use]
 pub const fn admit(required: [bool; 3], evidence: [Evidence; 3]) -> Verdict {
-    let linux = verdict(Family::Linux, required[0], evidence[0]);
+    let [linux_required, mac_required, windows_required] = required;
+    let [linux_evidence, mac_evidence, windows_evidence] = evidence;
+    let linux = verdict(Family::Linux, linux_required, linux_evidence);
     if !matches!(linux, Verdict::Admit) {
         return linux;
     }
-    let mac = verdict(Family::Mac, required[1], evidence[1]);
+    let mac = verdict(Family::Mac, mac_required, mac_evidence);
     if !matches!(mac, Verdict::Admit) {
         return mac;
     }
-    verdict(Family::Windows, required[2], evidence[2])
+    verdict(Family::Windows, windows_required, windows_evidence)
 }
 
 /// The gate covers only a branch update on GitHub.
@@ -111,13 +111,15 @@ pub enum Start {
 /// Gates run only for a clean tree, and the first required host that lacks readiness stops the check.
 #[must_use]
 pub const fn start(clean: bool, required: [bool; 3], ready: [bool; 3]) -> Start {
+    let [linux_required, mac_required, windows_required] = required;
+    let [linux_ready, mac_ready, windows_ready] = ready;
     if !clean {
         Start::Dirty
-    } else if required[0] && !ready[0] {
+    } else if linux_required && !linux_ready {
         Start::Unready(Family::Linux)
-    } else if required[1] && !ready[1] {
+    } else if mac_required && !mac_ready {
         Start::Unready(Family::Mac)
-    } else if required[2] && !ready[2] {
+    } else if windows_required && !windows_ready {
         Start::Unready(Family::Windows)
     } else {
         Start::Run

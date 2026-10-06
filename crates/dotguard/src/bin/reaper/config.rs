@@ -31,6 +31,17 @@ pub fn get(file: &HashMap<String, String>, key: &str, default: &str) -> String {
     expand(&raw)
 }
 
+/// Looks a number up as `get` does, and takes `default` when the value doesn't parse.
+pub fn number<T: std::str::FromStr + ToString>(
+    file: &HashMap<String, String>,
+    key: &str,
+    default: T,
+) -> T {
+    get(file, key, &default.to_string())
+        .parse()
+        .unwrap_or(default)
+}
+
 /// Expand `$NAME` and `${NAME}` from the environment, the way a sourced shell file would.
 /// Existing values such as `SESSION_REAPER_USER_PATH_REGEX="^(${HOME}|…)"` depend on this expansion.
 fn expand(value: &str) -> String {
@@ -51,12 +62,14 @@ where
             continue;
         }
         let (name, next) = if chars.get(i + 1) == Some(&'{') {
-            let end = chars[i + 2..]
+            // The name starts after the `${` that opens a braced expansion.
+            let start = i + "${".len();
+            let end = chars[start..]
                 .iter()
                 .position(|c| *c == '}')
-                .map(|p| i + 2 + p);
+                .map(|p| start + p);
             match end {
-                Some(e) => (chars[i + 2..e].iter().collect::<String>(), e + 1),
+                Some(e) => (chars[start..e].iter().collect::<String>(), e + 1),
                 None => (String::new(), i + 1),
             }
         } else {

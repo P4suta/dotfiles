@@ -11,6 +11,7 @@
 
 pub mod attribution;
 pub mod bypass;
+pub mod clock;
 pub mod gitargv;
 pub mod lang;
 pub mod locate;

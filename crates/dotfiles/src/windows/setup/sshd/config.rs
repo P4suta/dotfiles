@@ -7,6 +7,8 @@
 
 /// Marks directives that this tool appended.
 const MARKER: &str = "# --- managed by dotfiles-win ---";
+/// The `sshd_config` keyword that starts a conditional block.
+const MATCH: &str = "match";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Kind {
@@ -56,10 +58,10 @@ pub fn apply(original: &str, directives: &[(&str, String)]) -> String {
         .position(|line| {
             let trimmed = line.trim_start();
             trimmed
-                .get(..5)
-                .is_some_and(|keyword| keyword.eq_ignore_ascii_case("match"))
+                .get(..MATCH.len())
+                .is_some_and(|keyword| keyword.eq_ignore_ascii_case(MATCH))
                 && trimmed
-                    .get(5..)
+                    .get(MATCH.len()..)
                     .is_some_and(|rest| rest.starts_with(char::is_whitespace))
         })
         .unwrap_or(lines.len());
