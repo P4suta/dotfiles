@@ -337,7 +337,7 @@ fn claude_and_codex_hooks_request_one_rewrite_of_a_failing_reply() -> Result<()>
         response["reason"]
             .as_str()
             .unwrap_or_default()
-            .contains("mise run install:prose")
+            .contains("just install-prose")
     );
     Ok(())
 }
@@ -455,7 +455,7 @@ fn the_opencode_plugin_requests_one_rewrite_through_the_native_checker() -> Resu
     let (prompts, toasts) = run_with(&missing, ATTRIBUTED)?;
     assert!(prompts.is_empty(), "{prompts:?}");
     assert_eq!(toasts.len(), 1, "{toasts:?}");
-    assert!(toasts[0].contains("mise run install:prose"));
+    assert!(toasts[0].contains("just install-prose"));
     Ok(())
 }
 
@@ -538,13 +538,13 @@ fn a_changed_style_package_or_a_missing_configuration_is_refused() -> Result<()>
     fs::write(config.join("styles/Google/We.yml"), "extends: existence\n")?;
     let error = format!("{:#}", copied.verify().expect_err("tampered style"));
     assert!(
-        error.contains("Google") && error.contains("install:prose"),
+        error.contains("Google") && error.contains("install-prose"),
         "{error}"
     );
     fs::remove_file(config.join("packages.toml"))?;
     let error = format!("{:#}", copied.verify().expect_err("missing lock"));
     assert!(
-        error.contains("missing") && error.contains("install:prose"),
+        error.contains("missing") && error.contains("install-prose"),
         "{error}"
     );
     Ok(())
@@ -682,7 +682,8 @@ fn repository(files: &[(&str, &str)]) -> Result<tempfile::TempDir> {
     Ok(directory)
 }
 
-/// The prose arguments of a command in the repository's `lefthook.yml`.
+/// The prose arguments that a command in the repository's `lefthook.yml` runs through its just recipe.
+/// A recipe parameter becomes the argument lefthook passes in its place, such as `{1}`.
 fn hook_arguments(hook: &str, command: &str) -> Result<Vec<String>> {
     let documents =
         yaml_rust2::YamlLoader::load_from_str(&fs::read_to_string(root().join("lefthook.yml"))?)?;
@@ -690,11 +691,44 @@ fn hook_arguments(hook: &str, command: &str) -> Result<Vec<String>> {
         .as_str()
         .expect("the hook command")
         .to_owned();
-    let (_, arguments) = run
+    let mut words = run
+        .strip_prefix("mise x -- just ")
+        .expect("the hook runs a just recipe")
+        .split_whitespace();
+    let recipe = words.next().expect("the recipe name");
+    let passed: Vec<&str> = words.collect();
+    let justfile = fs::read_to_string(root().join("justfile"))?;
+    let mut lines = justfile.lines();
+    let header = lines
+        .by_ref()
+        .find(|line| {
+            line.ends_with(':')
+                && line.trim_end_matches(':').split_whitespace().next() == Some(recipe)
+        })
+        .expect("the recipe the hook names");
+    let parameters: Vec<&str> = header
+        .trim_end_matches(':')
+        .split_whitespace()
+        .skip(1)
+        .collect();
+    let body = lines
+        .take_while(|line| line.starts_with("    "))
+        .find(|line| line.contains(" --bin prose -- "))
+        .expect("the recipe runs the prose binary")
+        .trim();
+    assert!(body.starts_with("mise x -- cargo run --locked --manifest-path xtask/Cargo.toml"));
+    let (_, arguments) = body
         .split_once(" --bin prose -- ")
-        .expect("the hook runs the prose binary");
-    assert!(run.starts_with("mise x -- cargo run --locked --manifest-path xtask/Cargo.toml"));
-    Ok(arguments.split_whitespace().map(str::to_owned).collect())
+        .expect("prose arguments");
+    Ok(arguments
+        .split_whitespace()
+        .map(|argument| {
+            parameters
+                .iter()
+                .position(|parameter| argument == format!("{{{{quote({parameter})}}}}"))
+                .map_or_else(|| argument.to_owned(), |index| passed[index].to_owned())
+        })
+        .collect())
 }
 
 /// The directory holding a stand-in `ocomment`, compiled once, because CI hosts don't install the owner's tool.
@@ -762,7 +796,7 @@ fn the_document_gate_refuses_new_prose_in_a_repository() -> Result<()> {
 
 #[test]
 fn the_pre_commit_comment_gate_reads_source_comments_through_ocomment() -> Result<()> {
-    let arguments = hook_arguments("pre-commit", "comments")?;
+    let arguments = hook_arguments("pre-commit", "staged")?;
     assert_eq!(
         arguments,
         ["--source", ".", "repository", "--scope", "comments"]

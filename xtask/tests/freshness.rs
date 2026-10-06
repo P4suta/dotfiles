@@ -115,7 +115,7 @@ fn a_fixture_installation_older_than_its_sources_is_refused_with_the_install_act
         assert_eq!(refusal.rule, "tool.stale");
         assert_eq!(
             refusal.next.as_deref(),
-            Some(format!("mise run {}", built.install_task()).as_str())
+            Some(format!("just {}", built.install_task()).as_str())
         );
         assert!(refusal.is_complete());
     }
@@ -292,7 +292,7 @@ fn the_installed_binary_refuses_stale_sources_and_runs_current_ones() -> Result<
     assert!(!stale.status.success());
     let stderr = String::from_utf8_lossy(&stale.stderr);
     assert!(stderr.contains("tool.stale"), "{stderr}");
-    assert!(stderr.contains("mise run install:pr-workflow"), "{stderr}");
+    assert!(stderr.contains("just install-pr-workflow"), "{stderr}");
     assert_eq!(embedded().hash.len(), 64, "the build embeds a sha-256 hash");
     Ok(())
 }

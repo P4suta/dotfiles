@@ -1,6 +1,6 @@
 # Commands and evidence
 
-The dotfiles `install:skill-ops` task installs `skill-ops`, a native Rust executable.
+The dotfiles `install-skill-ops` recipe installs `skill-ops`, a native Rust executable.
 It reads the managed catalog under `~/.agents/skills` and policy under `~/.config/skill-ops`.
 The reviewed installation manifest declares the managed files, and unrelated legacy helpers and caches stay local.
 Installation applies policy, checks and installs the native runtime, and only then activates the OpenCode adapter.
@@ -18,10 +18,10 @@ skill-ops note --kind mechanize --skill example --summary "The demonstrated inva
 skill-ops triage --decisions /tmp/skill-decisions.json --evidence-root /path/to/project
 skill-ops check
 just decide skill-operations
-mise run check:skills
-mise run check:rust
-mise run check:adapters
-mise run check:proofs
+just skills
+just check
+just adapters
+just proofs
 ```
 
 Use a fresh report path, and native Windows paths where they apply.
@@ -50,7 +50,7 @@ Write the reason for the new revision, and change the other fields when the judg
 Installation records the reviewed revisions in the manifest it writes with the engine.
 While the installed skill still matches them, the local gate adopts their catalog findings and their size findings, except a deferred size disposition.
 The gate never adopts a deferred decision.
-The engine refuses a manifest without reviewed revisions, and `mise run install:skill-ops` rewrites it.
+The engine refuses a manifest without reviewed revisions, and `just install-skill-ops` rewrites it.
 The runtime maintenance gate turns pending when content changes, a new demonstrated improvement note arrives, or new observations reach the configured count.
 A pending gate analyzes the current evidence and completes when the gate adopts every finding, without `analyze` or a disposition file.
 Codex and Claude Stop adapters request maintenance before completion and bound automatic continuation.

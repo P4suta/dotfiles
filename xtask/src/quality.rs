@@ -471,8 +471,63 @@ pub fn chezmoi_version(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The value `key` takes in the `[*]` section of an `.editorconfig`.
+pub fn editorconfig_default<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    let mut every_file = false;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            every_file = line == "[*]";
+        } else if every_file
+            && let Some((name, value)) = line.split_once('=')
+            && name.trim() == key
+        {
+            return Some(value.trim());
+        }
+    }
+    None
+}
+
+/// The line ending the `* text=auto` rule of a `.gitattributes` declares.
+pub fn gitattributes_default_eol(text: &str) -> Option<&str> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| line.split_whitespace().next() == Some("*"))
+        .flat_map(str::split_whitespace)
+        .find_map(|attribute| attribute.strip_prefix("eol="))
+}
+
+/// Refuses an `.editorconfig` whose default line ending, charset, or final newline disagrees with `.gitattributes` and the LF and UTF-8 policy.
+pub fn editorconfig(root: &Path) -> Result<()> {
+    let editor = fs::read_to_string(root.join(".editorconfig"))
+        .context("the repository needs an .editorconfig")?;
+    let attributes = fs::read_to_string(root.join(".gitattributes"))?;
+    let eol = gitattributes_default_eol(&attributes)
+        .context(".gitattributes declares no default eol for `*`")?;
+    ensure!(
+        editorconfig_default(&editor, "end_of_line") == Some(eol)
+            && editorconfig_default(&editor, "charset") == Some("utf-8")
+            && editorconfig_default(&editor, "insert_final_newline") == Some("true"),
+        ".editorconfig must set end_of_line = {eol}, charset = utf-8, and insert_final_newline = true for [*], as .gitattributes and the line ending gate require"
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn editorconfig_and_gitattributes_name_the_same_line_ending() {
+        let editor = "root = true\n\n[*.md]\nend_of_line = crlf\n\n[*]\nend_of_line = lf\n";
+        assert_eq!(
+            super::editorconfig_default(editor, "end_of_line"),
+            Some("lf")
+        );
+        assert_eq!(
+            super::gitattributes_default_eol("# note\n* text=auto eol=lf\n*.bat eol=crlf\n"),
+            Some("lf")
+        );
+        assert_eq!(super::gitattributes_default_eol("*.sh eol=lf\n"), None);
+    }
+
     use super::*;
 
     #[test]

@@ -56,16 +56,16 @@ jobs:
       - name: Check the selected gates
         if: needs.classify.outputs.gates != ''
         shell: bash
-        run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check --gates "$GATES"
+        run: mise x -- just check --gates "$GATES"
       - name: Set up the pinned native verifier
         if: runner.os == 'macOS' && contains(needs.classify.outputs.gates, 'rust')
         run: mise x -- kani setup
       - name: Prove production maintenance contracts and reject the counterexample
         if: runner.os == 'macOS' && contains(needs.classify.outputs.gates, 'rust')
-        run: mise run check:proofs
+        run: mise x -- just proofs
       - name: Check Linux system provisioning syntax
         if: runner.os == 'Linux' && contains(needs.classify.outputs.gates, 'profiles')
-        run: mise run check:ops
+        run: mise x -- just ops-check
 
   minimum-git:
     # Git 2.43 comes from Ubuntu 24.04 and ranks as the oldest Git on a managed host.

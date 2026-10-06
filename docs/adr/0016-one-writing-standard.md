@@ -20,7 +20,7 @@ Japanese replies run through textlint with `preset-ja-technical-writing` and thr
 The repository vendors the four style packages under `home/dot_config/prose/styles`.
 `packages.toml` records each upstream archive, its digest, and a digest of the vendored tree, and `mise.toml` pins Vale.
 The textlint packages carry their own `bun.lock`.
-The checker refuses a missing configuration, a changed style tree, or another Vale version, and names `mise run install:prose` as the remedy.
+The checker refuses a missing configuration, a changed style tree, or another Vale version, and names `just install-prose` as the remedy.
 
 The enforcement points cover these channels:
 
@@ -61,7 +61,7 @@ Downloading the packages with `vale sync` on each run depends on the network at 
 
 Every sentence in the repository meets the full standard.
 A reply that fails the checker gets one rewrite request, and the hook then ends the turn with the findings.
-OpenCode shows those findings in a notification, and it reports a missing checker with the `mise run install:prose` remedy.
-The commit-msg hook refuses a commit to a personal repository until `mise run install:prose` installs the checker.
+OpenCode shows those findings in a notification, and it reports a missing checker with the `just install-prose` remedy.
+The commit-msg hook refuses a commit to a personal repository until `just install-prose` installs the checker.
 OComment reads no PowerShell script, systemd unit, or property list, so comments in those files stay outside the comment gate.
 Updating a style package means vendoring the new release and recording its digests in `packages.toml`.

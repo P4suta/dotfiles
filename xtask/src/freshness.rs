@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 /// Runs outside any checkout and fixtures use it.
 pub const SOURCE_VARIABLE: &str = "DOTFILES_SOURCE";
 
-/// An executable that an `install:*` task builds and copies into the user's home.
+/// An executable that an `install-*` recipe builds and copies into the user's home.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Built {
     Coderabbit,
@@ -34,12 +34,12 @@ impl Built {
         }
     }
 
-    /// The mise task that rebuilds and installs it from the checkout it runs in.
+    /// The just recipe that rebuilds and installs it from the checkout it runs in.
     pub const fn install_task(self) -> &'static str {
         match self {
-            Self::Coderabbit => "install:review-guard",
-            Self::PrWorkflow => "install:pr-workflow",
-            Self::SkillOps => "install:skill-ops",
+            Self::Coderabbit => "install-review-guard",
+            Self::PrWorkflow => "install-pr-workflow",
+            Self::SkillOps => "install-skill-ops",
         }
     }
 }
@@ -112,7 +112,7 @@ fn stale(built: Built, build: &Embedded, origin: Origin, root: &Path) -> Refusal
             built.binary(),
             describe(origin)
         ),
-        format!("mise run {}", built.install_task()),
+        format!("just {}", built.install_task()),
     )
     .evidence(format!(
         "built from revision {} with content hash {}",
@@ -192,15 +192,15 @@ pub fn reinstall_lagging(home: &Path, root: &Path) -> Result<()> {
             "Reinstalling {}: its sources changed since it was installed",
             built.binary()
         );
-        let status = Tool::Mise
+        let status = Tool::Just
             .command()
             .current_dir(root)
-            .args(["run", built.install_task()])
+            .arg(built.install_task())
             .status()
-            .context("start mise")?;
+            .context("start just")?;
         ensure!(
             status.success(),
-            "mise run {} failed with {status}",
+            "just {} failed with {status}",
             built.install_task()
         );
     }

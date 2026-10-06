@@ -377,7 +377,7 @@ fn main() {
         cli.command = Action::Check;
         let checked = match dotfiles_xtask::freshness::require_current(Built::SkillOps) {
             Err(error) => Err(error.context(
-                "run `mise run install:skill-ops` in the dotfiles checkout to rebuild the stale hook",
+                "run `just install-skill-ops` in the dotfiles checkout to rebuild the stale hook",
             )),
             Ok(()) => input.and_then(|_| execute(cli)),
         };

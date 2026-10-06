@@ -686,11 +686,11 @@ pub struct Approved {
     pub reviewed: BTreeMap<String, Reviewed>,
 }
 
-/// Reads the installation manifest, which `install:skill-ops` writes together with the engine that reads it.
+/// Reads the installation manifest, which `just install-skill-ops` writes together with the engine that reads it.
 pub fn read_approved(path: &Path) -> Result<Approved> {
     read_json(path).with_context(|| {
         format!(
-            "the skill-ops installation manifest {} is missing or was written by another engine; run `mise run install:skill-ops` in the dotfiles checkout",
+            "the skill-ops installation manifest {} is missing or was written by another engine; run `just install-skill-ops` in the dotfiles checkout",
             path.display()
         )
     })

@@ -1,7 +1,7 @@
 {
-  "revision": "d6769d5ac1d1a2540132018a6037234b5ed2e0a63779be43daaf328ddcb3a571",
+  "revision": "32e5bf0704c4baa4bcfd7446241589c47e3a0763a4d617751c1234f807719f47",
   "outcome": "implemented",
-  "reason": "The skill points at the checked commands of pr-workflow: documents meet the writing standard, dependent work opens as a stack, independent PRs merge without manual updates, and create refuses a PR beyond the author's work-in-progress limit from the workflow policy.",
+  "reason": "The workflow reference installs pr-workflow and the prose checker through the just recipes that replaced the mise tasks; the checked commands and their rules stay the same.",
   "evidence": [
     "home/dot_agents/skills/pull-request/SKILL.md",
     "docs/adr/0004-checked-pull-request-authoring.md",

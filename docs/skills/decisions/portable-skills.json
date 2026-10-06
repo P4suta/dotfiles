@@ -1,7 +1,7 @@
 {
-  "revision": "06a54d320dcc4bccaad35ba4243ffbd6b556519cc041b4b012349e63decdfb7d",
+  "revision": "9c59d6d0a1efa993a3e0b9a825fe09314f38d7c4284c702a70a500196ecb6d52",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "The skill names `just check`, now the only command surface of the dotfiles repository, for the gate that checks and generates the shared discovery entries; its instructions stay the same.",
   "evidence": [
     "home/dot_agents/skills/portable-skills/SKILL.md",
     "docs/adr/0003-local-skill-operations.md",

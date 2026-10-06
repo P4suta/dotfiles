@@ -244,6 +244,7 @@ fn check_package(root: &Path, manifest: &Path) -> Result<()> {
 fn check(root: &Path, gates: Gates) -> Result<()> {
     if gates.contains(Gate::Prose) {
         dotfiles_xtask::adr::generate(root, true)?;
+        dotfiles_xtask::quality::editorconfig(root)?;
         dotfiles_xtask::quality::comment_scopes(root)?;
         dotfiles_xtask::instruction_audit::check(root)?;
         dotfiles_xtask::line_endings::check(root)?;

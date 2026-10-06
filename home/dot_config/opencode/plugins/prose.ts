@@ -46,7 +46,7 @@ export const ProseReply: Plugin = async (
     if (!existsSync(executable)) {
       if (!warned.has(sessionID)) {
         warned.add(sessionID);
-        await show(`The prose checker is not installed at ${executable}; run \`mise run install:prose\` in the dotfiles source.`);
+        await show(`The prose checker is not installed at ${executable}; run \`just install-prose\` in the dotfiles source.`);
       }
       return;
     }

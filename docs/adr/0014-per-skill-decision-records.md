@@ -24,7 +24,7 @@ The required check reads the current policy, so lowering the limit refuses every
 
 The tracked state carries no engine or policy identity, because the commit identifies the engine that checked it.
 Installation records the reviewed revisions in the local manifest, leaves out deferred decisions, and marks the revisions with a settled, undeferred size disposition.
-The engine and its manifest install together, and the engine refuses a manifest without reviewed revisions and names `mise run install:skill-ops`.
+The engine and its manifest install together, and the engine refuses a manifest without reviewed revisions and names `just install-skill-ops`.
 The local gate adopts a catalog finding whose skill revision matches a reviewed revision, and a size finding only when it has also adopted that revision's size disposition.
 When the gate turns pending, it analyzes the current evidence and completes if it adopts every finding, so a reviewed host needs neither `analyze` nor a disposition file.
 

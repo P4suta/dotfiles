@@ -1,7 +1,7 @@
 {
-  "revision": "b5e0c24b7a7837ff687cb0da7fef9843abb1b7f2677d3f73b788536624050ce3",
+  "revision": "eeabda9e07c6d8d170635b7543c48f2b69d149f92fbfd7f7a71a41790a512d33",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "The operations reference names the just recipes that replaced the mise tasks for installation and checks; the engine, gate, and decision rules stay the same.",
   "evidence": [
     "home/dot_agents/skills/skill-operations/SKILL.md",
     "home/dot_agents/skills/skill-operations/references/operations.md",

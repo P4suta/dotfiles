@@ -51,7 +51,7 @@ Both live in `~/.agents/skills` with relative Claude aliases, and the shared `do
 The dotfiles mise template pins the CodeRabbit CLI with per-platform checksums from the official release manifest.
 Mise renames the upstream executable to `coderabbit-vendor`, and the Rust guard owns `~/.local/bin/coderabbit` and `cr`.
 The chezmoi setup script builds and installs the guard through the repository's xtask.
-For a scoped installation from this checkout, run `mise run install:review-guard`, then run `coderabbit auth login` on each machine.
+For a scoped installation from this checkout, run `just install-review-guard`, then run `coderabbit auth login` on each machine.
 Never synchronize `.coderabbit` authentication, history, or incremental checkpoints.
 Change the version through dotfiles, never through the CLI's self-updater.
 
@@ -123,6 +123,6 @@ Posting a command or choosing direct commit delivery needs the current user auth
 
 ### Verification
 
-Run `mise run check:rust` for the shared skill tree, aliases, and guard contracts.
+Run `just check` for the shared skill tree, aliases, and guard contracts.
 Run `coderabbit --version`, `coderabbit auth status`, and `coderabbit doctor` to check the runtime and connection without starting a paid review or cloud task.
 Run `coderabbit --guard-status` and `mise x -- coderabbit --guard-status`, and confirm that `coderabbit review --use-credits` exits with code 75 and leaves the ledger unchanged.

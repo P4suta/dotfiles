@@ -12,8 +12,8 @@ Set `paths.projects` to the native checkout directory and select `mac`, `linux`,
 Supply a public SSH signing key from 1Password, which keeps the private keys.
 
 ```text
-mise run check:rust
-mise run check:proofs
+just check
+just proofs
 just diff CONFIG_ABSOLUTE_PATH NATIVE_HOME_ABSOLUTE_PATH PRIVATE_STATE_DIRECTORY
 just apply CONFIG_ABSOLUTE_PATH NATIVE_HOME_ABSOLUTE_PATH PRIVATE_STATE_DIRECTORY FRESH_BACKUP_DIRECTORY
 just refresh CONFIG_ABSOLUTE_PATH

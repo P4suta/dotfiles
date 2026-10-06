@@ -31,7 +31,7 @@ Apply only the intended skill paths on a host.
 A skill installation grants no authority to apply another machine's whole dotfiles profile.
 Use `dotfiles` to apply matching setup through each affected host's own profile and verify its native discovery entries.
 
-The dotfiles `mise run check:rust` gate checks and generates the shared discovery entries.
+The dotfiles `just check` gate checks and generates the shared discovery entries.
 Run `mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- install` from the dotfiles source to apply only validated skill files and client entries through chezmoi.
 A project-owned manual may load the same canonical file through a small checked-in discovery page on a platform without native links.
 Try the instructions on a realistic task without client-exclusive tools.

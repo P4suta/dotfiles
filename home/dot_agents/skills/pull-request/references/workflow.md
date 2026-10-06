@@ -1,8 +1,8 @@
 # Commands and generation
 
 The dotfiles Rust xtask provides the installed `pr-workflow` executable.
-Install it with `mise run install:pr-workflow`.
-`check`, `create`, `edit`, and `issue` also need `mise run install:prose` for a personal destination.
+Install it with `just install-pr-workflow`.
+`check`, `create`, `edit`, and `issue` also need `just install-prose` for a personal destination.
 The command always takes an exact `OWNER/REPO` and uses `github.com` even under an inherited `GH_HOST`.
 
 ## Issue-first preparation

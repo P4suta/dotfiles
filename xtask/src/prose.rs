@@ -17,7 +17,7 @@ use std::process::{Command, Stdio};
 
 pub const POLICY: &str = "policy/prose.toml";
 pub const SOURCE_CONFIG: &str = "home/dot_config/prose";
-const INSTALL: &str = "mise run install:prose";
+const INSTALL: &str = "just install-prose";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum Channel {
@@ -149,7 +149,7 @@ impl Bundle {
         })
     }
 
-    /// The configuration and linters that `mise run install:prose` placed in the user directory.
+    /// The configuration and linters that `just install-prose` placed in the user directory.
     pub fn installed() -> Result<Self> {
         let config = match std::env::var_os("PROSE_CONFIG") {
             Some(directory) => PathBuf::from(directory),

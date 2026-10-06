@@ -17,7 +17,7 @@ Both the build script and the library compile `xtask/src/build_inputs.rs`, so th
 
 `pr-workflow`, `coderabbit`, and `skill-ops`, including its stop hook, hash the same files in the checkout they can find before doing anything else.
 They look at `DOTFILES_SOURCE`, then the dotfiles checkout containing the working directory, then the checkout that built the tool.
-A difference refuses with `tool.stale` and the next action `mise run install:<tool>`.
+A difference refuses with `tool.stale` and the next action `just install-<tool>`.
 No checkout means the tool refuses nothing.
 
 Each install task records the hash it installed from under `~/.local/state/dotfiles/installed`.
