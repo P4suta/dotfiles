@@ -61,19 +61,15 @@ fn toml_string(value: &str) -> String {
 /// Returns an error for the Linux profile when the data has no Nix package table.
 pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<String> {
     let data = crate::profiles::source_data(root)?;
-    let projects = home.join("projects");
-    let mut identity = String::new();
-    if profile == Profile::Windows {
-        identity.push_str(
-            "[interpreters.ps1]\ncommand = \"pwsh\"\nargs = [\"-NoLogo\", \"-NoProfile\"]\n\n",
-        );
-    }
-    let _ = write!(
-        identity,
-        "[data]\nprofile = {}\nrole = \"personal\"\n\n[data.git]\nname = \"Rehearsal\"\nemail = \"rehearsal@example.invalid\"\n\n[data.signing]\nenabled = false\npublic_key = \"\"\npubkey = \"\"\nkey_comment = \"\"\n\n[data.herdr_agent]\npublic_keys = []\n\n[data.doppler]\nproject = \"\"\nconfig = \"\"\n\n[data.doppler.secrets]\ncodex = []\nclaude = []\nopencode = []\n\n[data.paths]\nprojects = {}\n\n",
-        toml_string(profile.name()),
-        toml_string(&projects.to_string_lossy()),
+    let mut answers = crate::profiles::Answers::fixture(
+        profile,
+        home.join("projects").to_string_lossy().into_owned(),
     );
+    answers.name = "Rehearsal";
+    answers.email = "rehearsal@example.invalid";
+    answers.doppler = "";
+    let mut identity = crate::profiles::configuration(root, &answers)?;
+    identity.push_str("\n\n");
     for skip in omitted(profile) {
         let _ = write!(
             identity,

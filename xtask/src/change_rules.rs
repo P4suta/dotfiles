@@ -123,7 +123,7 @@ enum Match {
 }
 
 /// The first matching rule decides, so a narrower rule precedes the broader one it overrides.
-const RULES: [(Match, &[u8], Class); 33] = [
+const RULES: [(Match, &[u8], Class); 32] = [
     (Match::Prefix, b".github/", Class::Everything),
     (Match::Prefix, b"xtask/proofs/", Class::Everything),
     (Match::Prefix, b"xtask/src/change", Class::Everything),
@@ -158,7 +158,6 @@ const RULES: [(Match, &[u8], Class); 33] = [
     (Match::Prefix, b"home/", Class::Profiles),
     (Match::Prefix, b"ops/", Class::Profiles),
     (Match::Prefix, b"policy/", Class::Profiles),
-    (Match::Prefix, b"examples/", Class::Profiles),
     (Match::Prefix, b"docs/", Class::Prose),
     (Match::Suffix, b".md", Class::Prose),
 ];

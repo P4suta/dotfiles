@@ -73,21 +73,17 @@ impl Combination {
         )
     }
 
-    fn data(self) -> Value {
-        let mut data = crate::profiles::fixture(self.profile, Path::new(SOURCE), Path::new(HOME));
-        data["role"] = json!(self.role.name());
-        data["paths"]["projects"] = json!(format!("{HOME}/projects"));
-        data["chezmoi"]["homeDir"] = json!(HOME);
-        data["chezmoi"]["sourceDir"] = json!(SOURCE);
+    /// The combination's data as the configuration template writes it, with the fixed virtual host.
+    fn data(self, source: &Path) -> Result<Value> {
+        let mut answers =
+            crate::profiles::Answers::fixture(self.profile, format!("{HOME}/projects"));
+        answers.role = self.role.name();
         if self.signing {
-            data["signing"] = json!({
-                "enabled": true,
-                "public_key": PUBLIC_KEY,
-                "pubkey": PUBLIC_KEY,
-                "key_comment": "fixture",
-            });
+            PUBLIC_KEY.clone_into(&mut answers.public_key);
         }
-        data
+        let mut data = crate::profiles::configuration_data(source, &answers)?;
+        data["chezmoi"] = crate::profiles::fixture_host(self.profile, SOURCE, HOME);
+        Ok(data)
     }
 }
 
@@ -130,7 +126,9 @@ fn virtual_host(real: &Value, combination: Combination, args: Option<&Value>) ->
             "pathListSeparator" => json!(":"),
             "pathSeparator" => json!("/"),
             "sourceDir" | "workingTree" => json!(SOURCE),
-            "kernel" => combination.data()["chezmoi"]["kernel"].clone(),
+            "kernel" => {
+                crate::profiles::fixture_host(combination.profile, SOURCE, HOME)["kernel"].clone()
+            }
             _ => Value::Null,
         }
     };
@@ -163,7 +161,7 @@ struct Scope {
 }
 
 impl Scope {
-    fn new(combination: Combination) -> Result<Self> {
+    fn new(data: &Value) -> Result<Self> {
         let directory = tempfile::tempdir()?;
         let root = directory.path().to_path_buf();
         // Templates read `.chezmoi.targetFile`, which joins the destination, so the destination stays fixed and unwritten.
@@ -171,7 +169,7 @@ impl Scope {
         let config = root.join("chezmoi.json");
         fs::write(
             &config,
-            serde_json::to_vec(&json!({"umask": 0o022, "data": combination.data()}))?,
+            serde_json::to_vec(&json!({"umask": 0o022, "data": data}))?,
         )?;
         Ok(Self {
             _directory: directory,
@@ -204,7 +202,7 @@ fn overrides(
     combination: Combination,
     args: Option<&Value>,
 ) -> Result<Value> {
-    let mut data = combination.data();
+    let mut data = combination.data(source)?;
     let real: Value =
         serde_json::from_slice(&scope.run(source, &data, &["data", "--format", "json"])?)?;
     data["chezmoi"] = virtual_host(&real["chezmoi"], combination, args);
@@ -219,7 +217,7 @@ fn mode(entry: &Value) -> Value {
 
 /// The manifest of one combination: every target with its type, mode, and content digest, and every script with its phase, position, and body digest.
 pub(crate) fn manifest(source: &Path, combination: Combination) -> Result<Value> {
-    let scope = Scope::new(combination)?;
+    let scope = Scope::new(&combination.data(source)?)?;
     let overrides = overrides(source, &scope, combination, None)?;
     let dump: BTreeMap<String, Value> = serde_json::from_slice(&scope.run(
         source,
@@ -421,7 +419,7 @@ pub(crate) fn command_line_dependent(root: &Path) -> Result<Vec<String>> {
         };
         let mut bodies = Vec::new();
         for args in [json!(["apply"]), json!(["apply", "--verbose"])] {
-            let scope = Scope::new(combination)?;
+            let scope = Scope::new(&combination.data(root)?)?;
             let overrides = overrides(root, &scope, combination, Some(&args))?;
             let dump: BTreeMap<String, Value> = serde_json::from_slice(&scope.run(
                 root,

@@ -45,7 +45,8 @@ pub const PR_HARNESSES: [&str; 16] = [
     "rejected_documents_never_produce_a_pr_mutation",
 ];
 
-pub const PROFILE_HARNESSES: [&str; 8] = [
+pub const PROFILE_HARNESSES: [&str; 9] = [
+    "wsl_is_detected_only_on_a_microsoft_linux_kernel",
     "application_requires_owned_destination_or_native_authorization",
     "concurrent_source_and_local_edits_are_never_overwritten",
     "secrets_require_present_nonempty_resolved_values",
@@ -660,11 +661,16 @@ fn reject_an_unset_memory_switch() {
 fn reject_overwriting_a_merge_that_drops_a_host_key() {
     assert!(!production::host_edit_refused(true, true, false));
 }
+#[kani::proof]
+fn reject_detecting_wsl_on_a_plain_linux_kernel() {
+    assert!(production::detected(production::System::Linux, false) == production::Profile::Wsl);
+}
 ",
         rejected: &[
             "reject_unapproved_application",
             "reject_an_unset_memory_switch",
             "reject_overwriting_a_merge_that_drops_a_host_key",
+            "reject_detecting_wsl_on_a_plain_linux_kernel",
         ],
     },
     Rules {

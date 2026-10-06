@@ -7,8 +7,8 @@ Shell and PowerShell launchers only forward arguments.
 Claude Code, Codex, and OpenCode share the skills in `~/.agents/skills`.
 
 Install mise, Git, and chezmoi, then run `mise install` here.
-Keep the native profile and Git identity in a private configuration outside this checkout, as in [the example](examples/chezmoi.toml).
-Set `paths.projects` to the native checkout directory and select `mac`, `linux`, `windows`, or `wsl`.
+Keep the native profile and Git identity in a private configuration outside this checkout, which `chezmoi init` writes from [the template](home/.chezmoi.toml.tmpl).
+It detects `mac`, `linux`, `windows`, or `wsl` from this host and asks for the role, the Git identity, and `paths.projects`, the native checkout directory.
 Supply a public SSH signing key from 1Password, which keeps the private keys.
 
 ```text

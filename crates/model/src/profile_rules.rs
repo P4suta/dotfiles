@@ -29,6 +29,32 @@ impl Profile {
     }
 }
 
+/// The operating system a host reports.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum System {
+    Mac,
+    Linux,
+    Windows,
+}
+
+/// The profile a host's operating system and kernel imply.
+/// WSL runs Linux on a Microsoft kernel, the rule that chezmoi's Windows guide and the configuration template both apply.
+#[must_use]
+pub const fn detected(system: System, microsoft_kernel: bool) -> Profile {
+    match system {
+        System::Mac => Profile::Mac,
+        System::Windows => Profile::Windows,
+        System::Linux if microsoft_kernel => Profile::Wsl,
+        System::Linux => Profile::Linux,
+    }
+}
+
+/// Whether a Linux kernel release names Microsoft, which marks WSL.
+#[must_use]
+pub fn microsoft_kernel(osrelease: &str) -> bool {
+    osrelease.to_ascii_lowercase().contains("microsoft")
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
     Preview,
@@ -126,6 +152,28 @@ pub fn memory_off(switches: &[Memory]) -> bool {
 #[must_use]
 pub fn host_edit_refused(changed: bool, merged: bool, keeps_host_keys: bool) -> bool {
     changed && !(merged && keeps_host_keys)
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn wsl_is_detected_only_on_a_microsoft_linux_kernel() {
+    let system = match kani::any::<u8>() % 3 {
+        0 => System::Mac,
+        1 => System::Linux,
+        _ => System::Windows,
+    };
+    let microsoft: bool = kani::any();
+    let profile = detected(system, microsoft);
+    assert_eq!(
+        profile == Profile::Wsl,
+        system == System::Linux && microsoft
+    );
+    assert_eq!(
+        matches!(profile, Profile::Linux | Profile::Wsl),
+        system == System::Linux
+    );
+    kani::cover!(profile == Profile::Wsl);
+    kani::cover!(profile == Profile::Linux);
 }
 
 #[cfg(kani)]

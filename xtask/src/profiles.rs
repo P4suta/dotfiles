@@ -146,19 +146,129 @@ pub fn chezmoi_path(path: &Path) -> String {
     }
 }
 
+/// The machine-local configuration template, relative to the source state.
+pub const CONFIG_TEMPLATE: &str = ".chezmoi.toml.tmpl";
+
+/// Answers to the prompts of the configuration template.
+#[derive(Clone, Debug)]
+pub struct Answers {
+    pub profile: Profile,
+    pub role: &'static str,
+    pub name: &'static str,
+    pub email: &'static str,
+    pub public_key: String,
+    pub doppler: &'static str,
+    pub projects: String,
+}
+
+impl Answers {
+    /// The anonymous answers of a gate fixture: the personal role, no signing key, and a fixture Doppler project.
+    #[must_use]
+    pub fn fixture(profile: Profile, projects: String) -> Self {
+        Self {
+            profile,
+            role: "personal",
+            name: "Example User",
+            email: "user@example.invalid",
+            public_key: String::new(),
+            doppler: "fixture",
+            projects,
+        }
+    }
+}
+
+/// The configuration that `chezmoi init` writes from the template for these answers.
+///
+/// # Errors
+///
+/// Returns an error when reading the template fails or chezmoi can't render it.
+pub fn configuration(root: &Path, answers: &Answers) -> Result<String> {
+    let template = fs::read_to_string(crate::source_state(root).join(CONFIG_TEMPLATE))?;
+    let scope = tempfile::tempdir()?;
+    let config = scope.path().join("chezmoi.toml");
+    fs::write(&config, "")?;
+    let mut command = Tool::chezmoi_in(root);
+    command
+        .arg("--config")
+        .arg(&config)
+        .arg("--cache")
+        .arg(scope.path().join("cache"))
+        .arg("--persistent-state")
+        .arg(scope.path().join("state.boltdb"))
+        .args(["execute-template", "--init", "--no-tty"])
+        .arg("--promptChoice")
+        .arg(format!("Dotfiles profile={}", answers.profile.name()))
+        .arg("--promptChoice")
+        .arg(format!("Machine role={}", answers.role))
+        .arg("--promptString")
+        .arg(format!("Git author name={}", answers.name))
+        .arg("--promptString")
+        .arg(format!("Git author email={}", answers.email))
+        .arg("--promptString")
+        .arg(format!(
+            "SSH signing public key (empty disables signing)={}",
+            answers.public_key
+        ))
+        .arg("--promptString")
+        .arg(format!("Doppler project (optional)={}", answers.doppler))
+        .arg("--promptString")
+        .arg(format!("Doppler config (optional)={}", answers.doppler))
+        .arg("--promptString")
+        .arg(format!("Project checkout directory={}", answers.projects))
+        .arg(template)
+        .stdin(std::process::Stdio::null());
+    let result = output(&mut command, "render the configuration template")?;
+    Ok(String::from_utf8(result.stdout)?)
+}
+
+/// The `data` table of the configuration for these answers, rendered once per distinct answer set.
+///
+/// # Errors
+///
+/// Returns an error when rendering fails or the configuration holds no `data` table.
+pub fn configuration_data(root: &Path, answers: &Answers) -> Result<Value> {
+    static RENDERED: std::sync::Mutex<std::collections::BTreeMap<String, Value>> =
+        std::sync::Mutex::new(std::collections::BTreeMap::new());
+    let key = format!("{}\n{answers:?}", root.display());
+    if let Some(data) = RENDERED
+        .lock()
+        .map_err(|_| anyhow::anyhow!("configuration cache poisoned"))?
+        .get(&key)
+    {
+        return Ok(data.clone());
+    }
+    let table: toml::Table = toml::from_str(&configuration(root, answers)?)?;
+    let data = serde_json::to_value(table.get("data").context("configuration without data")?)?;
+    RENDERED
+        .lock()
+        .map_err(|_| anyhow::anyhow!("configuration cache poisoned"))?
+        .insert(key, data.clone());
+    Ok(data)
+}
+
+/// The host facts a fixture shows to templates under `.chezmoi`.
 #[must_use]
-pub fn fixture(profile: Profile, root: &Path, destination: &Path) -> Value {
-    json!({
-        "profile": profile.name(), "role": "personal",
-        "git": {"name": "Example User", "email": "user@example.invalid"},
-        "signing": {"enabled": false, "public_key": "", "pubkey": "", "key_comment": ""},
-        "herdr_agent": {"public_keys": []},
-        "doppler": {"project": "fixture", "config": "fixture"},
-        "paths": {"projects": destination.join("projects")},
-        "chezmoi": {"os": profile.os(), "homeDir": chezmoi_path(destination), "sourceDir": chezmoi_path(root),
-            "workingTree": chezmoi_path(root), "username": "fixture", "hostname": "fixture.invalid",
-            "kernel": {"osrelease": if profile == Profile::Wsl {"fixture-microsoft"} else {"fixture"}}}
-    })
+pub fn fixture_host(profile: Profile, source: &str, home: &str) -> Value {
+    json!({"os": profile.os(), "homeDir": home, "sourceDir": source,
+        "workingTree": source, "username": "fixture", "hostname": "fixture.invalid",
+        "kernel": {"osrelease": if profile == Profile::Wsl {"fixture-microsoft"} else {"fixture"}}})
+}
+
+/// The data of a gate fixture: the configuration template's answer for an anonymous host, with fixed host facts.
+///
+/// # Errors
+///
+/// Returns an error when rendering the configuration template fails.
+pub fn fixture(profile: Profile, root: &Path, destination: &Path) -> Result<Value> {
+    let mut data = configuration_data(
+        root,
+        &Answers::fixture(
+            profile,
+            destination.join("projects").to_string_lossy().into_owned(),
+        ),
+    )?;
+    data["chezmoi"] = fixture_host(profile, &chezmoi_path(root), &chezmoi_path(destination));
+    Ok(data)
 }
 
 fn output(command: &mut Command, phase: &str) -> Result<Output> {
@@ -732,9 +842,9 @@ impl<'a> Fixture<'a> {
         let destination = scope.join("home with ' quote");
         fs::create_dir_all(&destination)?;
         let config = scope.join("config.json");
-        let data = fixture(profile, root, &destination);
+        let data = fixture(profile, root, &destination)?;
         fs::write(&config, serde_json::to_vec(&json!({"data": data}))?)?;
-        let overrides = serde_json::to_string(&fixture(profile, root, &destination))?;
+        let overrides = serde_json::to_string(&data)?;
         Ok(Self {
             root,
             profile,
@@ -1007,20 +1117,17 @@ impl<'a> Fixture<'a> {
 }
 
 pub(crate) fn native_profile() -> Result<Profile> {
-    match std::env::consts::OS {
-        "macos" => Ok(Profile::Mac),
-        "windows" => Ok(Profile::Windows),
-        "linux" => Ok(
-            if fs::read_to_string("/proc/sys/kernel/osrelease")
-                .is_ok_and(|release| release.to_ascii_lowercase().contains("microsoft"))
-            {
-                Profile::Wsl
-            } else {
-                Profile::Linux
-            },
-        ),
+    use crate::profile_rules::{System, detected, microsoft_kernel};
+    let system = match std::env::consts::OS {
+        "macos" => System::Mac,
+        "windows" => System::Windows,
+        "linux" => System::Linux,
         _ => anyhow::bail!("unsupported native operating system"),
-    }
+    };
+    let microsoft = system == System::Linux
+        && fs::read_to_string("/proc/sys/kernel/osrelease")
+            .is_ok_and(|release| microsoft_kernel(&release));
+    Ok(detected(system, microsoft))
 }
 
 /// A setup script a machine-local configuration leaves out, with the reason that makes the omission reviewable.
@@ -1112,6 +1219,15 @@ pub fn operate(
     .stdout;
     let data: Value = serde_json::from_slice(&bytes)?;
     let profile = configured_profile(&data)?;
+    if matches!(action, NativeAction::Doctor) {
+        let native = native_profile()?;
+        ensure!(
+            profile == native,
+            "the configuration names the {} profile, but this host is {}; run `chezmoi init` to write the detected profile",
+            profile.name(),
+            native.name()
+        );
+    }
     for skip in declared_skips(&data)? {
         println!("Skipping setup script {}: {}", skip.script, skip.reason);
     }

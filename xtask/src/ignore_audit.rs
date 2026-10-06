@@ -93,7 +93,7 @@ fn configure(
     let config = scope.join(profile.name()).join("config.json");
     fs::write(
         &config,
-        serde_json::to_vec(&json!({"data": fixture(profile, root, &destination)}))?,
+        serde_json::to_vec(&json!({"data": fixture(profile, root, &destination)?}))?,
     )?;
     Ok((config, destination))
 }

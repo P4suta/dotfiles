@@ -9,6 +9,8 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 
 1. `.chezmoiroot` names `home/`, so chezmoi reads the source state there while every command passes the checkout root as `--source`.
 2. A machine-local configuration outside the checkout selects the profile and holds the Git identity, the signing key, and the project root.
+   `home/.chezmoi.toml.tmpl` defines it once: `chezmoi init` writes it with the profile detected from the host, and the profile gates render their fixtures from it.
+   `dotfiles-xtask profile doctor` refuses a configured profile that differs from the detected one.
 3. The TOML files in `home/.chezmoidata/` hold the data, split by concern: shared values at the top level and per-profile values under `platforms.<profile>`.
    Templates read each value at its explicit path, and `crates/model` refuses an unknown key with its file.
 4. Every target renders from one template at its own path.

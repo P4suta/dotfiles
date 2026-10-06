@@ -35,6 +35,81 @@ fn templates_read_data_at_explicit_paths_instead_of_a_merged_platform_context() 
 }
 
 #[test]
+fn wsl_is_linux_on_a_microsoft_kernel() {
+    use dotfiles_xtask::profile_rules::{System, detected, microsoft_kernel};
+    assert!(microsoft_kernel("5.15.167.4-microsoft-standard-WSL2"));
+    assert!(microsoft_kernel("4.4.0-19041-Microsoft"));
+    assert!(!microsoft_kernel("6.8.0-45-generic"));
+    assert_eq!(detected(System::Linux, true), Profile::Wsl);
+    assert_eq!(detected(System::Linux, false), Profile::Linux);
+    assert_eq!(detected(System::Mac, true), Profile::Mac);
+    assert_eq!(detected(System::Windows, true), Profile::Windows);
+}
+
+#[test]
+fn the_configuration_template_writes_exactly_the_keys_its_consumers_read() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    for combination in dotfiles_xtask::profile_snapshot::Combination::all() {
+        let mut answers =
+            profiles::Answers::fixture(combination.profile, "/fixture/projects".into());
+        answers.role = combination.role.name();
+        if combination.signing {
+            answers.public_key = "ssh-ed25519 AAAA fixture".into();
+        }
+        let text = profiles::configuration(&root, &answers).unwrap();
+        let config: toml::Table = toml::from_str(&text).unwrap();
+        let data = serde_json::to_value(&config["data"]).unwrap();
+        assert_eq!(data["profile"], combination.profile.name());
+        assert_eq!(data["role"], combination.role.name());
+        assert_eq!(data["signing"]["enabled"], combination.signing);
+        assert_eq!(data["paths"]["projects"], "/fixture/projects");
+        let mut keys = Vec::new();
+        let mut stack = vec![(String::new(), &data)];
+        while let Some((prefix, value)) = stack.pop() {
+            for (key, inner) in value.as_object().into_iter().flatten() {
+                let path = format!("{prefix}{key}");
+                if inner.is_object() {
+                    stack.push((format!("{path}."), inner));
+                } else {
+                    keys.push(path);
+                }
+            }
+        }
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "doppler.config",
+                "doppler.project",
+                "doppler.secrets.claude",
+                "doppler.secrets.codex",
+                "doppler.secrets.opencode",
+                "git.email",
+                "git.name",
+                "herdr_agent.public_keys",
+                "paths.projects",
+                "profile",
+                "role",
+                "signing.enabled",
+                "signing.public_key",
+            ],
+            "{}",
+            combination.name()
+        );
+        assert_eq!(
+            config
+                .get("interpreters")
+                .and_then(|interpreters| interpreters.get("ps1"))
+                .and_then(|ps1| ps1.get("command"))
+                .and_then(toml::Value::as_str),
+            (combination.profile == Profile::Windows).then_some("pwsh"),
+            "{}",
+            combination.name()
+        );
+    }
+}
+
+#[test]
 fn the_target_manifest_refuses_unknown_profiles_and_sets() {
     let data = serde_json::json!({
         "profiles": {"mac": ["mac"], "all": ["mac", "linux", "windows", "wsl"], "typo": ["macos"]},
