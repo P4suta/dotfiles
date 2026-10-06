@@ -12,11 +12,9 @@ const PSGALLERY_HELPER: &str = include_str!("../../assets/psgallery.ps1");
 pub fn run(scoop_apps: &[String]) -> Result<i32> {
     let token = github_token();
 
+    // Installing converges to the reviewed pins, and version changes arrive only as pull requests.
     println!(">>> mise install");
     proc::run(mise(&token).args(["install", "-y"]))?;
-
-    println!(">>> mise upgrade --bump");
-    proc::run(mise(&token).args(["upgrade", "--bump", "-y"]))?;
 
     let absent = scoop::absent(scoop_apps);
     if absent.is_empty() {

@@ -4,3 +4,4 @@ node_modules/
 .migration-imported
 .doppler/
 *.local.toml
+.mise/

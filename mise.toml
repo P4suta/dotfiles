@@ -16,6 +16,10 @@ powershell = "7.6.6"
 "github:github/gh-stack" = { version = "0.2.0", bin = "gh-stack" }
 vale = "3.24.0"
 
+[settings]
+# mise.lock records each tool's version, download URL, and checksum for every host platform.
+lockfile = true
+
 [tasks."check:skills"]
 run = "cargo run --locked --manifest-path xtask/Cargo.toml -- skills"
 

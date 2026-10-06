@@ -404,7 +404,7 @@
     {"mode":"0644","path":".config/starship.toml","sha256":"b209492a779d0894c7dae63df8d4833083b4d3bcc341caabe2526f5dbac7f1db","type":"file"},
     {"mode":"0755","path":".config/systemd","sha256":null,"type":"dir"},
     {"mode":"0755","path":".config/systemd/user","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".config/systemd/user/mise-upgrade.service","sha256":"e5cf7be9a3be4dbdd4c124507e5681c8bb9905f3945dfc686f6b88334f35cb45","type":"file"},
+    {"mode":"0644","path":".config/systemd/user/mise-upgrade.service","sha256":"24fba72b8d615fb5fc817ad70f5c2806bc7ee7f1021ecf0c1ed6f9bd14b4ef34","type":"file"},
     {"mode":"0644","path":".config/systemd/user/mise-upgrade.timer","sha256":"da48438bf695a6d0c98abce33ffe9121cc0f65e5fe67f25cdf8f08482492a9f6","type":"file"},
     {"mode":"0755","path":".local","sha256":null,"type":"dir"},
     {"mode":"0755","path":".local/bin","sha256":null,"type":"dir"},

@@ -620,43 +620,12 @@ fn tools(context: &ContextData, runner: &mut impl Runner, upgrade: bool) -> Resu
         checked(runner, Tool::Dotctl, &arguments)?;
         return Ok(());
     }
-    if upgrade {
-        if context.profile == Profile::Mac {
-            optional(runner, Tool::Brew, &["update", "--quiet"]);
-            optional(runner, Tool::Brew, &["upgrade", "--quiet"]);
-        } else {
-            optional(
-                runner,
-                Tool::Nix,
-                &[
-                    "flake",
-                    "update",
-                    "--flake",
-                    context
-                        .home
-                        .join(".config/dotfiles-nix")
-                        .to_str()
-                        .context("invalid flake path")?,
-                ],
-            );
-            optional(runner, Tool::Nix, &["profile", "upgrade", "--all"]);
-        }
-        optional(runner, Tool::Mise, &["self-update", "-y", "--no-plugins"]);
-    } else {
-        checked(runner, Tool::Mise, &args(&["install", "-y"]))?;
+    // Both the apply and the timer converge to the reviewed pins, so no unattended run rewrites a managed file or a lock.
+    // Version changes arrive only as pull requests.
+    if upgrade && context.profile != Profile::Mac && runner.available(Tool::Nix) {
+        optional(runner, Tool::Nix, &["profile", "upgrade", "--all"]);
     }
-    let mut arguments = args(&["upgrade", "--bump", "-y"]);
-    if context.profile == Profile::Mac {
-        arguments.extend(args(&[
-            "--exclude",
-            "ghc",
-            "--exclude",
-            "cabal",
-            "--exclude",
-            "github:haskell/haskell-language-server",
-        ]));
-    }
-    checked(runner, Tool::Mise, &arguments)?;
+    checked(runner, Tool::Mise, &args(&["install", "-y"]))?;
     if !context.home.join(".local/share/atuin/history.db").exists() {
         optional(runner, Tool::Atuin, &["import", "auto"]);
     }
@@ -1137,6 +1106,59 @@ mod tests {
         }
         fn run_installed(&mut self, _: &Path, _: &[OsString]) -> Result<crate::runtime::Reply> {
             unreachable!()
+        }
+    }
+
+    /// Records every command, offers only mise and Nix, and reports no loaded launchd job.
+    struct Recording(Vec<String>);
+    impl crate::runtime::Runner for Recording {
+        fn available(&self, tool: Tool) -> bool {
+            matches!(tool, Tool::Mise | Tool::Nix)
+        }
+        fn run(&mut self, tool: Tool, arguments: &[OsString]) -> Result<crate::runtime::Reply> {
+            let words: Vec<_> = arguments.iter().map(|a| a.to_string_lossy()).collect();
+            self.0
+                .push(format!("{} {}", tool.program(), words.join(" ")));
+            Ok(crate::runtime::Reply {
+                success: tool != Tool::Launchctl,
+                bytes: Vec::new(),
+            })
+        }
+        fn run_installed(&mut self, _: &Path, _: &[OsString]) -> Result<crate::runtime::Reply> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn neither_the_apply_nor_the_timer_moves_a_pin() {
+        for profile in [Profile::Mac, Profile::Linux, Profile::Wsl] {
+            for upgrade in [false, true] {
+                let scope = tempfile::tempdir().unwrap();
+                let context = ContextData {
+                    source: scope.path().into(),
+                    home: scope.path().into(),
+                    profile,
+                    data: serde_json::json!({}),
+                };
+                let mut runner = Recording(Vec::new());
+                tools(&context, &mut runner, upgrade).unwrap();
+                assert!(
+                    runner
+                        .0
+                        .iter()
+                        .any(|command| command.ends_with("install -y")),
+                    "{profile:?} never converges: {:?}",
+                    runner.0
+                );
+                for command in &runner.0 {
+                    for rewrite in ["--bump", "self-update", "flake update", "brew upgrade"] {
+                        assert!(
+                            !command.contains(rewrite),
+                            "{profile:?} runs {command} unattended"
+                        );
+                    }
+                }
+            }
         }
     }
 
