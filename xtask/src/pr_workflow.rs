@@ -379,7 +379,7 @@ struct Destination {
 
 fn workflow_policy() -> Result<WorkflowPolicy> {
     let policy: WorkflowPolicy = serde_json::from_str(include_str!(
-        "../../dot_agents/skills/pull-request/assets/workflow-policy.json"
+        "../../home/dot_agents/skills/pull-request/assets/workflow-policy.json"
     ))?;
     require(
         policy.schema == 1
@@ -395,7 +395,7 @@ fn workflow_policy() -> Result<WorkflowPolicy> {
             Refusal::new(
                 "pr.policy",
                 "the installed workflow policy needs schema 1, a nonzero quota reserve, at least one personal owner, and nonzero work-in-progress limits whose overrides each state a reason",
-                "git ls-files dot_agents/skills/pull-request/assets/workflow-policy.json",
+                "git ls-files home/dot_agents/skills/pull-request/assets/workflow-policy.json",
             )
             .evidence(format!(
                 "schema {}, reserve {}, {} personal owner(s), work-in-progress default {}",
@@ -2422,7 +2422,7 @@ pub fn deploy(
         ops::hash(&policy)? == approved.policy_hash,
         "installed policy differs from its managed identity"
     );
-    let expected = ops::catalog(&source.join("dot_agents/skills"))?;
+    let expected = ops::catalog(&source.join("home/dot_agents/skills"))?;
     approved.catalog.skills.insert(
         "pull-request".into(),
         expected
@@ -2441,8 +2441,8 @@ pub fn deploy(
             .insert("pull-request".into(), skill.clone()),
         None => approved.reviewed.remove("pull-request"),
     };
-    let tree = source.join("dot_agents/skills/pull-request");
-    let alias = source.join("dot_claude/skills/symlink_pull-request");
+    let tree = source.join("home/dot_agents/skills/pull-request");
+    let alias = source.join("home/dot_claude/skills/symlink_pull-request");
     let paths: Vec<_> = crate::skill_source_paths(source)?
         .into_iter()
         .filter(|path| path.starts_with(&tree) || *path == alias)

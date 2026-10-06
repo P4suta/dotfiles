@@ -16,7 +16,7 @@ A repository style named `Dotfiles` adds rules that refuse requester attribution
 The checker itself adds the sentence-per-line rule and a language gate that refuses non-Latin letters in persisted text.
 Japanese replies run through textlint with `preset-ja-technical-writing` and through the Japanese attribution and hedging rules in `japanese.toml`.
 
-The repository vendors the four style packages under `dot_config/prose/styles`.
+The repository vendors the four style packages under `home/dot_config/prose/styles`.
 `packages.toml` records each upstream archive, its digest, and a digest of the vendored tree, and `mise.toml` pins Vale.
 The textlint packages carry their own `bun.lock`.
 The checker refuses a missing configuration, a changed style tree, or another Vale version, and names `mise run install:prose` as the remedy.

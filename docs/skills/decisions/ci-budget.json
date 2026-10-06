@@ -3,7 +3,7 @@
   "outcome": "implemented",
   "reason": "Point cross-platform verification at `dotfiles-xtask hosts check`, which the push gates enforce, in the minimal prose of the writing standard; keep CI-job mapping, hosted-only prerequisites, and push-hold judgment.",
   "evidence": [
-    "dot_agents/skills/ci-budget/SKILL.md",
+    "home/dot_agents/skills/ci-budget/SKILL.md",
     "xtask/src/hosts.rs",
     "docs/adr/0020-os-family-push-evidence.md"
   ],

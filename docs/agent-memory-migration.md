@@ -10,9 +10,9 @@ Each client's profile disables its own memory, and `just profiles` fails when a 
 
 | Client | Profile source | Switches |
 | --- | --- | --- |
-| Claude Code | `dot_claude/modify_settings.json` | `autoMemoryEnabled = false` |
-| Codex | `dot_codex/modify_config.toml` | `[features]` `memories`, `external_agent_memory_import`, `chronicle` and `[memories]` `generate_memories`, `use_memories`, all `false` |
-| OpenCode | `dot_config/opencode/opencode.json.tmpl` | `permission.read` and `permission.edit` deny `.github/instructions/memory.instruction.md` at a project root and below any directory, and `permission.bash` denies every command naming `memory.instruction.md` |
+| Claude Code | `home/dot_claude/modify_settings.json` | `autoMemoryEnabled = false` |
+| Codex | `home/dot_codex/modify_config.toml` | `[features]` `memories`, `external_agent_memory_import`, `chronicle` and `[memories]` `generate_memories`, `use_memories`, all `false` |
+| OpenCode | `home/dot_config/opencode/opencode.json.tmpl` | `permission.read` and `permission.edit` deny `.github/instructions/memory.instruction.md` at a project root and below any directory, and `permission.bash` denies every command naming `memory.instruction.md` |
 
 The Claude Code and Codex clients rewrite their files at run time, so their `modify_` templates set these keys over the existing file and keep every other key.
 The Windows Subsystem for Linux profile sets its whole Claude Code settings template the same way, and that template carries the same key.
@@ -27,8 +27,8 @@ The Windows Subsystem for Linux profile sets its whole Claude Code settings temp
 | `feedback_no_heavy_apply_loop.md` | Command and gate | `just diff` and `just verify` preview a profile without changing the host. `just apply` refuses without `--live`, the host's own profile, and a fresh backup directory, and the transaction in `xtask/src/transaction.rs` restores every target when the apply or verification fails, per [ADR 0010](adr/0010-rehearse-native-application.md). |
 | `user_security_policy_1password.md` | Gate | `check_public` in `xtask/src/profiles.rs` refuses private key material, credential paths, and secret retrieval in managed templates, and `quality::secrets` runs Gitleaks over the source, per [ADR 0009](adr/0009-public-native-profiles.md). |
 | `feedback_bash_tool_mise_shims.md` | Default and document | Hook gates start their tools with the mise shims on `PATH` through `xtask/src/runtime.rs`, and `lefthook.yml` runs `mise x --`. [Agent clients](agent-clients.md#tool-search-path-for-agent-shells-on-windows) covers the remaining agent shell behavior. |
-| `project_herdr_preview_mouse_fix.md` | Default and code | `tools/dotctl/src/setup/herdr.rs` selects the herdr channel's manifest, and the test `the_preview_channel_reads_the_preview_manifest` covers it. `.chezmoidata.json` selects the preview channel that carries the [upstream fix](https://github.com/herdrdev/herdr/pull/4319). Every tool process that xtask starts drops the hook's repository variables, set in `GIT_LOCAL_ENVIRONMENT` in `xtask/src/tool.rs`, so a test run from a hook never writes to the repository that ran it. |
-| `user_terminal_setup.md` | Default and document | The WezTerm profile in `.chezmoitemplates/profiles/windows/dot_config/wezterm/wezterm.lua.tmpl` starts `pwsh -NoLogo` in the local domain. Its font, opacity, and tab bar come from `platforms.windows.terminal` and its colors from `platforms.windows.palette` in `.chezmoidata.json`. Those values define the appearance now, so the entry's Ayu Dark colors, 0.75 opacity, and always shown tab bar no longer apply. [Agent clients](agent-clients.md#claude-code-host-terminal-on-windows) covers the Claude Code host terminal. |
+| `project_herdr_preview_mouse_fix.md` | Default and code | `tools/dotctl/src/setup/herdr.rs` selects the herdr channel's manifest, and the test `the_preview_channel_reads_the_preview_manifest` covers it. `home/.chezmoidata.json` selects the preview channel that carries the [upstream fix](https://github.com/herdrdev/herdr/pull/4319). Every tool process that xtask starts drops the hook's repository variables, set in `GIT_LOCAL_ENVIRONMENT` in `xtask/src/tool.rs`, so a test run from a hook never writes to the repository that ran it. |
+| `user_terminal_setup.md` | Default and document | The WezTerm profile in `home/.chezmoitemplates/profiles/windows/dot_config/wezterm/wezterm.lua.tmpl` starts `pwsh -NoLogo` in the local domain. Its font, opacity, and tab bar come from `platforms.windows.terminal` and its colors from `platforms.windows.palette` in `home/.chezmoidata.json`. Those values define the appearance now, so the entry's Ayu Dark colors, 0.75 opacity, and always shown tab bar no longer apply. [Agent clients](agent-clients.md#claude-code-host-terminal-on-windows) covers the Claude Code host terminal. |
 | `project_claude_auto_mode_classifier.md` | Document | [Agent clients](agent-clients.md#claude-code-permission-evaluation-in-auto-mode). |
 | `feedback_bash_tool_posix.md` | Document | [Agent clients](agent-clients.md#the-bash-tool-on-windows). |
 | `project_windows_defender_hang_devdrive.md` | Document | [Windows host operations](windows-host.md#defender-and-the-dev-drive). |
@@ -36,7 +36,7 @@ The Windows Subsystem for Linux profile sets its whole Claude Code settings temp
 | `feedback_official_first.md` | Judgment | See the table below. |
 | `feedback_simplicity.md` | Judgment | See the table below. |
 | `feedback_docs_no_cross_platform.md` | Judgment | See the table below. |
-| `user_theme_preference.md` | Default and judgment | `platforms.mac.palette` and `platforms.windows.palette` in `.chezmoidata.json` define the colors that those profiles' terminal and tool configurations render, so switching the scheme takes one edit of each value. The table below holds the preference for Ayu. |
+| `user_theme_preference.md` | Default and judgment | `platforms.mac.palette` and `platforms.windows.palette` in `home/.chezmoidata.json` define the colors that those profiles' terminal and tool configurations render, so switching the scheme takes one edit of each value. The table below holds the preference for Ayu. |
 
 ## Judgment preferences
 

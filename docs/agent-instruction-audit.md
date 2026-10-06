@@ -1,7 +1,7 @@
 # Agent instruction audit
 
-Every managed global `CLAUDE.md` and `AGENTS.md` renders the partials `.chezmoitemplates/agent_policy`, `.chezmoitemplates/prose_policy`, and `.chezmoitemplates/remote_machines`, and nothing else.
-The OpenCode prompts under `dot_config/opencode/agents/` and `dot_config/opencode/commands/` add instructions when they run.
+Every managed global `CLAUDE.md` and `AGENTS.md` renders the partials `home/.chezmoitemplates/agent_policy`, `home/.chezmoitemplates/prose_policy`, and `home/.chezmoitemplates/remote_machines`, and nothing else.
+The OpenCode prompts under `home/dot_config/opencode/agents/` and `home/dot_config/opencode/commands/` add instructions when they run.
 This document classifies every line of those partials and prompts.
 A retained text line holds judgment no mechanism can enforce, or it stays until the named follow-up mechanizes it.
 Headings, template actions that render nothing, and front matter lines take the classes `Heading:`, `Directive:`, and `Setting:`.
@@ -98,7 +98,7 @@ Whether a diff fits an issue's scope stays judgment.
 
 > - For every implementation change, run `skill-ops load formal-assurance verification-tools` and meet the obligations of the skills it loads before declaring the change complete.
 
-Follow-up F5: `dot_config/skill-ops/policy.json` makes `verification-tools` load `type-contracts` and `executable-policy`.
+Follow-up F5: `home/dot_config/skill-ops/policy.json` makes `verification-tools` load `type-contracts` and `executable-policy`.
 The observer hook records skill loads, but completion doesn't require them yet.
 
 > - Before declaring work complete, run `skill-ops check` and resolve what it reports.
@@ -168,7 +168,7 @@ The notes file stays machine-local, and the agent reads it when needed instead o
 Judgment: what counts as private depends on the destination.
 This repository's secret scan covers only its own publication snapshot.
 
-### `dot_config/opencode/agents/reviewer.md`
+### `home/dot_config/opencode/agents/reviewer.md`
 
 > ---
 
@@ -286,7 +286,7 @@ Judgment: whether a finding holds requires reading the change.
 
 Judgment: whether the change holds up requires reading it.
 
-### `dot_config/opencode/commands/commit.md`
+### `home/dot_config/opencode/commands/commit.md`
 
 > ---
 
@@ -344,7 +344,7 @@ Judgment: the heredoc keeps a multi-line message intact through the shell, and n
 
 Judgment: whether the commit holds the intended changes requires reading its contents.
 
-### `dot_config/opencode/commands/pr.md`
+### `home/dot_config/opencode/commands/pr.md`
 
 > ---
 
@@ -378,7 +378,7 @@ Follow-up F4: nothing stops a direct `gh pr create` yet.
 
 Judgment: which result the reader needs depends on the task.
 
-### `dot_config/opencode/commands/review.md`
+### `home/dot_config/opencode/commands/review.md`
 
 > ---
 
@@ -437,7 +437,7 @@ No gate refuses work done without loading a skill, and F5 adds a completion gate
 | Personal non-fork repositories require an existing issue. | Gate and skill | `pr-workflow start`, `create`, and `edit` refuse a personal non-fork without an open, finished issue in `xtask/src/pr_workflow.rs`, and `pull-request` states the rule for external projects and forks. |
 | Confirm that the diff stays within the issue's scope. | Merged | Reworded as `for PR creation, document edits, and ready transitions`. |
 | Load `formal-assurance` for every implementation change. | Skill | The retained `skill-ops load formal-assurance` line loads `formal-assurance`, which states the obligations. |
-| Load `verification-tools` and `type-contracts` for implementation work. | Skill | The retained `skill-ops load formal-assurance` line loads `verification-tools`, and `dot_config/skill-ops/policy.json` adds `type-contracts` and `executable-policy`. |
+| Load `verification-tools` and `type-contracts` for implementation work. | Skill | The retained `skill-ops load formal-assurance` line loads `verification-tools`, and `home/dot_config/skill-ops/policy.json` adds `type-contracts` and `executable-policy`. |
 | Load `ci-budget` before an authorized push or PR update. | Gate and skill | The pre-push dispatcher refuses while `~/.config/git/push-paused` exists in `xtask/src/hooks.rs`, and `ci-budget` states the local checks. |
 | Load `coderabbit-review` for an initial substantive PR. | Gate and skill | The CodeRabbit guard admits a CLI review only within verified allowance in `xtask/src/review_guard.rs`, and `coderabbit-review` states the trigger. |
 | Use `floor(capacity * 0.9 * 0.8)` budgets and hold publication on unverified capacity. | Gate | The CodeRabbit guard floors the budget once and refuses unverifiable CLI capacity in `xtask/src/review_rules.rs`. |
@@ -455,7 +455,7 @@ No gate refuses work done without loading a skill, and F5 adds a completion gate
 | A passing CodeRabbit check alone doesn't establish a completed review. | Skill | `coderabbit-review` states it once. |
 | Use the existing PR review before requesting a CLI review of the same diff. | Gate and skill | `coderabbit-review` states the order, and the guard enforces the CLI budget in `xtask/src/review_guard.rs`. |
 | Commit, push, PR replies, thread resolution, manual review triggers, and merge still require authorization. | Merged | Merged into `only when the owner asks`. |
-| The former nine-sentence prose rules and their rationale. | Gate | The global pre-commit hook runs `ocomment fix --tidy --staged`, which reflows a touched paragraph in `dot_config/lefthook/global.yml`. |
+| The former nine-sentence prose rules and their rationale. | Gate | The global pre-commit hook runs `ocomment fix --tidy --staged`, which reflows a touched paragraph in `home/dot_config/lefthook/global.yml`. |
 | Use the `multi-machine` skill for remote execution. | Skill | `multi-machine` and `domyjob` state the trigger in their descriptions. |
 | The template actions that rendered the machine-local notes file into every instruction file. | Merged | The retained line names the file to read instead: `when it exists, before operating another host`. |
 | In `commit.md`, wrap an optional body at 100 characters. | Contradicted | It contradicted `Never wrap prose to a fixed column`, and the command keeps the reason line. |
@@ -502,7 +502,7 @@ It names `skill-ops load formal-assurance verification-tools`.
 
 ### F6:
 
-The OpenCode `skill-ops` plugin in `dot_config/opencode/plugins/skill-ops.ts` runs `skill-ops check` when a session goes idle and reports its refusal to the agent.
+The OpenCode `skill-ops` plugin in `home/dot_config/opencode/plugins/skill-ops.ts` runs `skill-ops check` when a session goes idle and reports its refusal to the agent.
 
 ### F7:
 

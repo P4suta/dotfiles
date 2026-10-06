@@ -3,7 +3,7 @@
   "outcome": "keep",
   "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
-    "dot_agents/skills/rust-invariants/SKILL.md"
+    "home/dot_agents/skills/rust-invariants/SKILL.md"
   ],
   "revisit": null
 }

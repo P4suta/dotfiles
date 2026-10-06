@@ -8,7 +8,7 @@ description = "Local policy gate: refuses destructive git operations, foreign-sc
 license = "MIT"
 publish = false
 
-# The prose gate runs the ocomment binary, configured in `dot_config/ocomment/config.toml`.
+# The prose gate runs the ocomment binary, configured in `home/dot_config/ocomment/config.toml`.
 [dependencies]
 
 [profile.release]

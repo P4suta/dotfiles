@@ -25,7 +25,7 @@ fn source() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("repository root")
-        .to_path_buf()
+        .join("home")
 }
 
 /// A Git environment that reads only the given global configuration.

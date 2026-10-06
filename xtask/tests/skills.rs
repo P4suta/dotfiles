@@ -79,14 +79,14 @@ fn broken_or_escaping_local_resources_are_rejected() -> Result<()> {
 
 fn tree() -> Result<tempfile::TempDir> {
     let root = tempfile::tempdir()?;
-    fs::create_dir_all(root.path().join("dot_agents/skills/example"))?;
-    fs::create_dir_all(root.path().join("dot_claude/skills"))?;
+    fs::create_dir_all(root.path().join("home/dot_agents/skills/example"))?;
+    fs::create_dir_all(root.path().join("home/dot_claude/skills"))?;
     fs::write(
-        root.path().join("dot_agents/skills/example/SKILL.md"),
+        root.path().join("home/dot_agents/skills/example/SKILL.md"),
         "---\nname: example\ndescription: Task\n---\n# Body\n",
     )?;
     fs::write(
-        root.path().join("dot_claude/skills/symlink_example"),
+        root.path().join("home/dot_claude/skills/symlink_example"),
         "../../.agents/skills/example\n",
     )?;
     Ok(root)
@@ -96,13 +96,13 @@ fn tree() -> Result<tempfile::TempDir> {
 fn discovery_aliases_are_complete_and_cannot_drift() -> Result<()> {
     let root = tree()?;
     assert_eq!(validate_tree(root.path())?, 1);
-    let alias = root.path().join("dot_claude/skills/symlink_example");
+    let alias = root.path().join("home/dot_claude/skills/symlink_example");
     fs::write(&alias, "/tmp/unrelated-source\n")?;
     assert!(validate_tree(root.path()).is_err());
     fs::remove_file(&alias)?;
     assert!(validate_tree(root.path()).is_err());
     fs::write(&alias, "../../.agents/skills/example\n")?;
-    fs::create_dir(root.path().join("dot_claude/skills/independent-copy"))?;
+    fs::create_dir(root.path().join("home/dot_claude/skills/independent-copy"))?;
     assert!(validate_tree(root.path()).is_err());
     Ok(())
 }
@@ -126,12 +126,13 @@ fn check_snapshots_preserve_sources_and_exclude_builds_and_unrelated_state() -> 
         "private build bytes",
     )?;
     for relative in [
-        ".chezmoiignore",
+        ".chezmoiroot",
+        "home/.chezmoiignore",
         "lefthook.yml",
         ".github/workflows/required.yml",
-        "dot_config/skill-ops/policy.json",
-        "dot_config/opencode/plugins/skill-ops.ts",
-        "dot_config/opencode/plugins/line-endings.ts",
+        "home/dot_config/skill-ops/policy.json",
+        "home/dot_config/opencode/plugins/skill-ops.ts",
+        "home/dot_config/opencode/plugins/line-endings.ts",
         "docs/skills/decisions/alpha.json",
         "package.json",
         "bun.lock",

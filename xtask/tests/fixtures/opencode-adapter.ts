@@ -1,4 +1,4 @@
-import { SkillOperations } from "../../../dot_config/opencode/plugins/skill-ops";
+import { SkillOperations } from "../../../home/dot_config/opencode/plugins/skill-ops";
 import { createOpencodeClient } from "@opencode-ai/sdk";
 import type { WorkspaceAdapter } from "@opencode-ai/plugin";
 

@@ -3,7 +3,7 @@
   "outcome": "implemented",
   "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
-    "dot_agents/skills/oss-readme/SKILL.md",
+    "home/dot_agents/skills/oss-readme/SKILL.md",
     "docs/adr/0016-one-writing-standard.md",
     "xtask/tests/prose.rs"
   ],

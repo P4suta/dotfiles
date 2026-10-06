@@ -35,9 +35,10 @@ pub fn findings(name: &str, text: &str) -> Vec<String> {
 
 fn scripts(root: &Path) -> Result<Vec<(String, String)>> {
     let mut found = Vec::new();
+    let source = crate::source_state(root);
     let mut stack = vec![
-        root.join(".chezmoiscripts"),
-        root.join(".chezmoitemplates/profiles"),
+        source.join(".chezmoiscripts"),
+        source.join(".chezmoitemplates/profiles"),
     ];
     while let Some(directory) = stack.pop() {
         for entry in fs::read_dir(&directory)? {

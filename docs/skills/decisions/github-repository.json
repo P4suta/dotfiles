@@ -3,9 +3,9 @@
   "outcome": "keep",
   "reason": "The baseline now requires secret scanning, push protection, SHA pinning, and selected actions, and a security scope plans and verifies the first three while it reports a repository that runs any action.",
   "evidence": [
-    "dot_agents/skills/github-repository/SKILL.md",
-    "dot_agents/skills/github-repository/assets/baseline.json",
-    "dot_agents/skills/github-repository/scripts/repo-settings/tests/governance.rs"
+    "home/dot_agents/skills/github-repository/SKILL.md",
+    "home/dot_agents/skills/github-repository/assets/baseline.json",
+    "home/dot_agents/skills/github-repository/scripts/repo-settings/tests/governance.rs"
   ],
   "revisit": null
 }

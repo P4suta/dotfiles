@@ -3,8 +3,8 @@
   "outcome": "implemented",
   "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
-    "dot_agents/skills/skill-operations/SKILL.md",
-    "dot_agents/skills/skill-operations/references/operations.md",
+    "home/dot_agents/skills/skill-operations/SKILL.md",
+    "home/dot_agents/skills/skill-operations/references/operations.md",
     "docs/adr/0003-local-skill-operations.md",
     "docs/adr/0014-per-skill-decision-records.md",
     "xtask/tests/skill_ops.rs",

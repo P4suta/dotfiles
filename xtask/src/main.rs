@@ -264,7 +264,7 @@ fn check(root: &Path, gates: Gates) -> Result<()> {
         check_package(root, Path::new("xtask/Cargo.toml"))?;
         check_package(
             root,
-            Path::new("dot_agents/skills/github-repository/scripts/repo-settings/Cargo.toml"),
+            Path::new("home/dot_agents/skills/github-repository/scripts/repo-settings/Cargo.toml"),
         )?;
         check_package(root, Path::new("guard/Cargo.toml"))?;
         if cfg!(windows) {
@@ -272,6 +272,7 @@ fn check(root: &Path, gates: Gates) -> Result<()> {
         }
     }
     if gates.contains(Gate::Profiles) {
+        dotfiles_xtask::quality::chezmoi_version(root)?;
         let unreferenced = dotfiles_xtask::quality::unreferenced_leaves(root)?;
         anyhow::ensure!(
             unreferenced.is_empty(),
@@ -378,6 +379,7 @@ fn run() -> Result<()> {
             dotfiles_xtask::secrets::exit(dotfiles_xtask::secrets::consume(&names, &command)?)
         }
         Action::Profiles { output } => {
+            dotfiles_xtask::quality::chezmoi_version(&cli.root)?;
             dotfiles_xtask::profiles::check_profiles(&cli.root, output.as_deref())?;
             dotfiles_xtask::profile_snapshot::check(&cli.root)?;
             dotfiles_xtask::ignore_audit::check(&cli.root)?;
@@ -522,7 +524,7 @@ fn run() -> Result<()> {
         }
         Action::Aliases => {
             let entries = skills(&cli.root)?;
-            let directory = cli.root.join("dot_claude/skills");
+            let directory = cli.root.join("home/dot_claude/skills");
             fs::create_dir_all(&directory)?;
             for (_, skill) in entries {
                 let path = directory.join(format!("symlink_{}", skill.name));

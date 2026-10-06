@@ -3,8 +3,8 @@
   "outcome": "implemented",
   "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
-    "dot_agents/skills/nas/SKILL.md",
-    "dot_agents/skills/nas/references/synology-drive.md",
+    "home/dot_agents/skills/nas/SKILL.md",
+    "home/dot_agents/skills/nas/references/synology-drive.md",
     "docs/skills/nas-evaluation.md"
   ],
   "revisit": null

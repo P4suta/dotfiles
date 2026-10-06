@@ -3,13 +3,13 @@
   "outcome": "implemented",
   "reason": "The skill points at the checked commands of pr-workflow: documents meet the writing standard, dependent work opens as a stack, independent PRs merge without manual updates, and create refuses a PR beyond the author's work-in-progress limit from the workflow policy.",
   "evidence": [
-    "dot_agents/skills/pull-request/SKILL.md",
+    "home/dot_agents/skills/pull-request/SKILL.md",
     "docs/adr/0004-checked-pull-request-authoring.md",
     "docs/adr/0006-global-personal-issue-prerequisite.md",
     "xtask/tests/pr_workflow.rs",
     "xtask/src/pr_rules.rs",
     "xtask/src/review_rules.rs",
-    "dot_agents/skills/pull-request/references/workflow.md",
+    "home/dot_agents/skills/pull-request/references/workflow.md",
     "docs/adr/0008-layered-review-capacity.md",
     "docs/adr/0013-ready-only-after-passing-checks.md",
     "docs/adr/0015-scoped-coderabbit-pause.md",
@@ -18,7 +18,7 @@
     "xtask/src/prose_rules.rs",
     "guard/src/stack.rs",
     "xtask/src/wip_rules.rs",
-    "dot_agents/skills/pull-request/assets/workflow-policy.json"
+    "home/dot_agents/skills/pull-request/assets/workflow-policy.json"
   ],
   "revisit": null
 }

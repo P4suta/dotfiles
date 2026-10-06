@@ -20,7 +20,7 @@ fn every_ignore_and_remove_pattern_is_distinct_and_justified() {
 #[test]
 fn an_ignore_pattern_that_matches_nothing_is_refused() {
     let snapshot = source_snapshot();
-    let ignore = snapshot.path().join(".chezmoiignore");
+    let ignore = snapshot.path().join("home/.chezmoiignore");
     let mut text = fs::read_to_string(&ignore).unwrap();
     text.push_str("\n.config/never-declared\n.config/never-declared\n");
     fs::write(&ignore, text).unwrap();
@@ -45,7 +45,7 @@ fn an_ignore_pattern_that_matches_nothing_is_refused() {
 #[test]
 fn a_rendering_that_differs_from_its_manifest_is_refused() {
     let snapshot = source_snapshot();
-    let attributes = snapshot.path().join("dot_config/git/attributes");
+    let attributes = snapshot.path().join("home/dot_config/git/attributes");
     let mut text = fs::read_to_string(&attributes).unwrap();
     text.push_str("*.fixture binary\n");
     fs::write(&attributes, text).unwrap();
@@ -457,12 +457,12 @@ fn launchers_exec_their_installed_path_rather_than_the_runtime_home() {
 #[test]
 fn profile_leaves_must_be_included_by_a_template() {
     let scope = tempfile::tempdir().unwrap();
-    let leaves = scope.path().join(".chezmoitemplates/profiles/mac");
+    let leaves = scope.path().join("home/.chezmoitemplates/profiles/mac");
     fs::create_dir_all(&leaves).unwrap();
     fs::write(leaves.join("used"), "a\n").unwrap();
     fs::write(leaves.join("stale"), "b\n").unwrap();
     fs::write(
-        scope.path().join("dot_used.tmpl"),
+        scope.path().join("home/dot_used.tmpl"),
         "{{ includeTemplate \"profiles/mac/used\" . }}\n",
     )
     .unwrap();

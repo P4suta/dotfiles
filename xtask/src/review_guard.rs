@@ -15,7 +15,7 @@ use crate::review_rules::{
 };
 
 /// The guard policy that `mise run install:review-guard` applies from the invoking checkout on every profile.
-pub const SOURCE_POLICY: &str = "dot_config/coderabbit-guard/policy.json.tmpl";
+pub const SOURCE_POLICY: &str = "home/dot_config/coderabbit-guard/policy.json.tmpl";
 
 #[derive(Debug)]
 pub struct LedgerLock(File);

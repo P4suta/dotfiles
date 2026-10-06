@@ -270,24 +270,3 @@ Documents/PowerShell/Microsoft.PowerShell_profile.ps1
 .local/bin/dotfiles-wsl-ssh-keygen
 {{ end }}
 {{ includeTemplate "host-state-ignore" . }}
-.github
-ops
-docs
-xtask
-guard
-tools
-examples
-policy
-README.md
-justfile
-mise.toml
-mise.lock
-package.json
-bun.lock
-tsconfig.json
-lefthook.yml
-.yamllint
-.typos.toml
-.ocomment.toml
-.gitignore
-.gitattributes

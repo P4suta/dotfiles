@@ -78,6 +78,9 @@ pub struct Reviewed {
 
 pub const DECISIONS: &str = "docs/skills/decisions";
 
+/// Where the canonical skills live now, then where commits before the source state moved under `home/` hold them.
+const SKILL_TREES: [&str; 2] = ["home/dot_agents/skills", "dot_agents/skills"];
+
 pub fn dependency_plan(
     available: &BTreeSet<String>,
     requested: &[String],
@@ -372,7 +375,7 @@ pub fn draft_decision(
             revision: revision.into(),
             outcome: Outcome::Keep,
             reason: String::new(),
-            evidence: vec![format!("dot_agents/skills/{skill}/SKILL.md")],
+            evidence: vec![format!("{}/{skill}/SKILL.md", SKILL_TREES[0])],
             revisit: None,
             size: over_limit.then(|| size_draft(None)),
         },
@@ -402,11 +405,27 @@ fn git_output(root: &Path, arguments: &[&str]) -> Result<String> {
 
 /// Hashes a skill tree at a commit as the catalog hashes it, or returns None when that tree lies outside what the catalog can hold.
 fn revision_at(root: &Path, commit: &str, skill: &str) -> Result<Option<String>> {
-    let tree = format!("dot_agents/skills/{skill}");
-    let listing = String::from_utf8(git_bytes(
-        root,
-        &["ls-tree", "-r", "-z", commit, "--", &tree],
-    )?)?;
+    let mut found = None;
+    for skills in SKILL_TREES {
+        let listing = String::from_utf8(git_bytes(
+            root,
+            &[
+                "ls-tree",
+                "-r",
+                "-z",
+                commit,
+                "--",
+                &format!("{skills}/{skill}"),
+            ],
+        )?)?;
+        if !listing.is_empty() {
+            found = Some((skills, listing));
+            break;
+        }
+    }
+    let Some((skills, listing)) = found else {
+        return Ok(None);
+    };
     let mut files = Vec::new();
     for entry in listing.split('\0').filter(|entry| !entry.is_empty()) {
         let (header, path) = entry
@@ -417,7 +436,8 @@ fn revision_at(root: &Path, commit: &str, skill: &str) -> Result<Option<String>>
             anyhow::bail!("malformed git ls-tree entry");
         };
         let relative = path
-            .strip_prefix("dot_agents/skills/")
+            .strip_prefix(skills)
+            .and_then(|rest| rest.strip_prefix('/'))
             .context("git ls-tree listed a path outside the skill")?;
         if relative.split('/').any(|part| part == "target") {
             continue;
@@ -449,7 +469,8 @@ fn assessed_commit(root: &Path, skill: &str, revision: &str) -> Result<Option<St
             "log",
             "--format=%H",
             "--",
-            &format!("dot_agents/skills/{skill}"),
+            &format!("{}/{skill}", SKILL_TREES[0]),
+            &format!("{}/{skill}", SKILL_TREES[1]),
         ],
     )?;
     for commit in history.lines() {
@@ -462,9 +483,12 @@ fn assessed_commit(root: &Path, skill: &str, revision: &str) -> Result<Option<St
 
 /// Writes the draft decision for one skill and returns the context its writer needs.
 pub fn decide(root: &Path, skill: &str) -> Result<String> {
-    let catalog = catalog(&root.join("dot_agents/skills"))?;
+    let catalog = catalog(&root.join(SKILL_TREES[0]))?;
     let current = catalog.skills.get(skill).with_context(|| {
-        format!("{skill} is not a skill; pass a directory name under dot_agents/skills")
+        format!(
+            "{skill} is not a skill; pass a directory name under {}",
+            SKILL_TREES[0]
+        )
     })?;
     let relative = format!("{DECISIONS}/{skill}.json");
     let path = root.join(&relative);
@@ -473,7 +497,7 @@ pub fn decide(root: &Path, skill: &str) -> Result<String> {
     } else {
         None
     };
-    let policy: Policy = read_json(&root.join("dot_config/skill-ops/policy.json"))?;
+    let policy: Policy = read_json(&root.join("home/dot_config/skill-ops/policy.json"))?;
     let draft = draft_decision(
         previous.as_ref(),
         &current.revision,
@@ -486,7 +510,7 @@ pub fn decide(root: &Path, skill: &str) -> Result<String> {
         .filter(|finding| finding.skills == [skill])
         .map(|finding| format!("Finding {}: {}", finding.kind, finding.detail))
         .collect();
-    let tree = format!("dot_agents/skills/{skill}");
+    let tree = format!("{}/{skill}", SKILL_TREES[0]);
     if let Some(previous) = &previous {
         context.push(format!(
             "Previous decision ({}): {}",
@@ -630,7 +654,7 @@ pub fn engine_hash() -> Result<String> {
         include_str!("skill_proofs.rs"),
         include_str!("../proofs/Dockerfile"),
         include_str!("bin/skill-ops.rs"),
-        include_str!("../../dot_config/opencode/plugins/skill-ops.ts"),
+        include_str!("../../home/dot_config/opencode/plugins/skill-ops.ts"),
         include_str!("lib.rs"),
         include_str!("main.rs"),
         include_str!("../Cargo.toml"),
@@ -640,7 +664,7 @@ pub fn engine_hash() -> Result<String> {
         include_str!("../../tsconfig.json"),
         (
             include_str!("../../mise.toml"),
-            include_str!("../../.chezmoiignore"),
+            include_str!("../../home/.chezmoiignore"),
             include_str!("../../lefthook.yml"),
             include_str!("../../.github/workflows/required.yml"),
             include_str!("pr_rules.rs"),
@@ -1217,8 +1241,8 @@ pub fn analyze(
 
 pub fn check_catalog(root: &Path) -> Result<()> {
     crate::validate_tree(root)?;
-    let catalog = catalog(&root.join("dot_agents/skills"))?;
-    let policy: Policy = read_json(&root.join("dot_config/skill-ops/policy.json"))?;
+    let catalog = catalog(&root.join(SKILL_TREES[0]))?;
+    let policy: Policy = read_json(&root.join("home/dot_config/skill-ops/policy.json"))?;
     validate_policy(&policy, &catalog)?;
     check_decisions(
         &catalog,

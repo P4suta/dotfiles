@@ -70,7 +70,7 @@ const ATTRIBUTES: [&str; 17] = [
 /// Extensions of files that can hold a gate.
 const GATE_SOURCES: [&str; 7] = [".rs", ".ts", ".js", ".json", ".toml", ".yml", ".yaml"];
 
-const PROFILES: &str = ".chezmoitemplates/profiles";
+const PROFILES: &str = "home/.chezmoitemplates/profiles";
 const RETAINED: &str = "## Retained lines";
 const REMOVED: &str = "## Removed lines";
 const FOLLOW_UPS: &str = "## Follow-ups";
@@ -615,7 +615,7 @@ fn profile_file(path: &str) -> bool {
 }
 
 fn shared_skills(root: &Path) -> Result<Vec<String>> {
-    let names: BTreeSet<String> = listing(root, &root.join("dot_agents/skills"))?
+    let names: BTreeSet<String> = listing(root, &root.join("home/dot_agents/skills"))?
         .into_iter()
         .filter(|path| path.is_dir())
         .filter_map(|path| path.file_name()?.to_str().map(str::to_owned))
@@ -631,7 +631,7 @@ pub fn check(root: &Path) -> Result<()> {
         .map(|name| {
             Ok((
                 (*name).to_owned(),
-                read(root, &format!(".chezmoitemplates/{name}"))?,
+                read(root, &format!("home/.chezmoitemplates/{name}"))?,
             ))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -653,8 +653,11 @@ pub fn check(root: &Path) -> Result<()> {
         if *kind == Loaded::Prompt {
             continue;
         }
-        if PROFILE_FILES.contains(&path.as_str()) {
-            result.extend(dispatcher_findings(path, &read(root, path)?));
+        if let Some(file) = path
+            .strip_prefix("home/")
+            .filter(|file| PROFILE_FILES.contains(file))
+        {
+            result.extend(dispatcher_findings(file, &read(root, path)?));
         } else if profile_file(path) {
             profiles += 1;
             result.extend(profile_findings(path, &read(root, path)?, &PARTIALS));
@@ -685,11 +688,11 @@ mod tests {
         let root = tempfile::tempdir().expect("temporary repository");
         let message = format!(
             "{:#}",
-            listing(root.path(), &root.path().join("dot_agents/skills"))
+            listing(root.path(), &root.path().join("home/dot_agents/skills"))
                 .expect_err("a missing directory cannot be listed")
         );
         assert!(
-            message.starts_with("dot_agents/skills: cannot be listed"),
+            message.starts_with("home/dot_agents/skills: cannot be listed"),
             "{message}"
         );
         assert!(message.contains("just check"), "{message}");

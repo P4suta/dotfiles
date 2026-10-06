@@ -54,8 +54,9 @@ fn toml_string(value: &str) -> String {
 
 /// The machine-local configuration for the rehearsal: an anonymous identity, no secrets, and one representative entry in each provisioning list.
 pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<String> {
-    let data: serde_json::Value =
-        serde_json::from_slice(&fs::read(root.join(".chezmoidata.json"))?)?;
+    let data: serde_json::Value = serde_json::from_slice(&fs::read(
+        crate::source_state(root).join(".chezmoidata.json"),
+    )?)?;
     let projects = home.join("projects");
     let mut identity = String::new();
     if profile == Profile::Windows {

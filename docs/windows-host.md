@@ -16,4 +16,4 @@ After a forced power-off, `Mount-DiskImage` and `Get-DiskImage` failed with acce
 
 While the Dev Drive stays detached, `TEMP` has no directory and every tool that creates temporary files fails, including the agent clients with `EPERM` from `mkdir`.
 Attaching it again from an elevated shell with the same `diskpart` script recovers immediately.
-The storage watcher follows the temporary directory the host configures in `.chezmoitemplates/profiles/windows/dot_config/storage-scout/auto.toml.tmpl`.
+The storage watcher follows the temporary directory the host configures in `home/.chezmoitemplates/profiles/windows/dot_config/storage-scout/auto.toml.tmpl`.

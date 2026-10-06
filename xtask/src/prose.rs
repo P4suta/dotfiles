@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 pub const POLICY: &str = "policy/prose.toml";
-pub const SOURCE_CONFIG: &str = "dot_config/prose";
+pub const SOURCE_CONFIG: &str = "home/dot_config/prose";
 const INSTALL: &str = "mise run install:prose";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -1480,7 +1480,7 @@ fn ssh_host_name(host: &str) -> Option<String> {
 /// The personal owner logins of the global workflow policy.
 pub fn personal_owners() -> Result<Vec<String>> {
     let policy: Value = serde_json::from_str(include_str!(
-        "../../dot_agents/skills/pull-request/assets/workflow-policy.json"
+        "../../home/dot_agents/skills/pull-request/assets/workflow-policy.json"
     ))?;
     let owners: Vec<String> = policy["personal_owners"]
         .as_array()

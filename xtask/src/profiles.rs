@@ -81,7 +81,7 @@ pub fn check_public(root: &Path) -> Result<()> {
                     ))),
                 "private key material in public source: {relative}"
             );
-            if relative.ends_with(".tmpl") || relative.starts_with(".chezmoitemplates/") {
+            if relative.ends_with(".tmpl") || relative.starts_with("home/.chezmoitemplates/") {
                 ensure!(
                     !text.contains("{{ onepasswordRead")
                         && !text.contains("{{- onepasswordRead")
@@ -481,7 +481,9 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
     }
     let scratch = tempfile::tempdir()?;
     let mut git_policies = Vec::new();
-    let source_data: Value = serde_json::from_slice(&fs::read(root.join(".chezmoidata.json"))?)?;
+    let source_data: Value = serde_json::from_slice(&fs::read(
+        crate::source_state(root).join(".chezmoidata.json"),
+    )?)?;
     for profile in Profile::ALL {
         let scope = scratch.path().join(profile.name());
         let destination = scope.join("home with ' quote");

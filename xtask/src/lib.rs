@@ -149,6 +149,13 @@ pub fn split_frontmatter(text: &str) -> Result<(&str, &str)> {
     Ok((header, body))
 }
 
+/// The chezmoi source state of a checkout, which `.chezmoiroot` names.
+pub const SOURCE_STATE: &str = "home";
+
+pub fn source_state(root: &Path) -> PathBuf {
+    root.join(SOURCE_STATE)
+}
+
 /// Windows `canonicalize` returns verbatim drive paths that cargo rejects.
 pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
     match path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
@@ -196,7 +203,7 @@ pub fn validate_links(text: &str, file: &Path, root: &Path) -> Result<()> {
 }
 
 pub fn skills(root: &Path) -> Result<Vec<(std::path::PathBuf, Metadata)>> {
-    let tree = root.join("dot_agents/skills");
+    let tree = root.join("home/dot_agents/skills");
     let mut result = Vec::new();
     for entry in fs::read_dir(&tree)? {
         let entry = entry?;
@@ -223,7 +230,7 @@ pub fn validate_tree(root: &Path) -> Result<usize> {
     let entries = skills(root)?;
     for (_, skill) in &entries {
         let alias = root
-            .join("dot_claude/skills")
+            .join("home/dot_claude/skills")
             .join(format!("symlink_{}", skill.name));
         let target = fs::read_to_string(&alias)
             .with_context(|| format!("missing alias {}", alias.display()))?;
@@ -233,7 +240,7 @@ pub fn validate_tree(root: &Path) -> Result<usize> {
             alias.display()
         );
     }
-    for entry in fs::read_dir(root.join("dot_claude/skills"))? {
+    for entry in fs::read_dir(root.join("home/dot_claude/skills"))? {
         let entry = entry?;
         let name = entry
             .file_name()
@@ -254,17 +261,18 @@ pub fn export_checks(root: &Path, output: &Path) -> Result<()> {
     validate_tree(root)?;
     let mut files = Vec::new();
     for relative in [
-        "dot_agents/skills",
-        "dot_claude/skills",
+        "home/dot_agents/skills",
+        "home/dot_claude/skills",
         "xtask",
         "guard",
         "mise.toml",
-        ".chezmoiignore",
+        ".chezmoiroot",
+        "home/.chezmoiignore",
         "lefthook.yml",
         ".github/workflows/required.yml",
-        "dot_config/skill-ops/policy.json",
-        "dot_config/opencode/plugins/skill-ops.ts",
-        "dot_config/opencode/plugins/line-endings.ts",
+        "home/dot_config/skill-ops/policy.json",
+        "home/dot_config/opencode/plugins/skill-ops.ts",
+        "home/dot_config/opencode/plugins/line-endings.ts",
         "docs/skills/decisions",
         "package.json",
         "bun.lock",
@@ -290,7 +298,7 @@ pub fn export_checks(root: &Path, output: &Path) -> Result<()> {
 pub fn skill_source_paths(root: &Path) -> Result<Vec<PathBuf>> {
     validate_tree(root)?;
     let mut files = Vec::new();
-    for relative in ["dot_agents/skills", "dot_claude/skills"] {
+    for relative in ["home/dot_agents/skills", "home/dot_claude/skills"] {
         collect(root, Path::new(relative), &mut files)?;
     }
     Ok(files.into_iter().map(|(path, _)| root.join(path)).collect())

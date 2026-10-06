@@ -3,7 +3,7 @@
   "outcome": "implemented",
   "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
-    "dot_agents/skills/coderabbit-review/SKILL.md",
+    "home/dot_agents/skills/coderabbit-review/SKILL.md",
     "xtask/tests/review_guard.rs",
     "xtask/src/review_rules.rs",
     "docs/adr/0008-layered-review-capacity.md",

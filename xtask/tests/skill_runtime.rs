@@ -90,30 +90,34 @@ fn success(output: Output) -> Result<Output> {
 #[test]
 fn build_and_dependency_outputs_are_outside_chezmoi_source_state() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let source = directory.path().join("source");
+    let checkout = directory.path().join("checkout");
+    let source = checkout.join("home");
     let destination = directory.path().join("native-home");
     fs::create_dir_all(&source)?;
     fs::create_dir_all(&destination)?;
+    fs::write(checkout.join(".chezmoiroot"), "home\n")?;
     fs::copy(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../.chezmoiignore"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../home/.chezmoiignore"),
         source.join(".chezmoiignore"),
     )?;
     fs::create_dir_all(source.join(".chezmoitemplates/profiles/linux"))?;
     for template in ["profiles/linux/ignore", "host-state-ignore"] {
         fs::copy(
             Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../.chezmoitemplates")
+                .join("../home/.chezmoitemplates")
                 .join(template),
             source.join(".chezmoitemplates").join(template),
         )?;
     }
     fs::write(source.join("dot_owned"), "managed configuration")?;
     for relative in [
+        "home/target/checks/debug/generated",
+        "home/node_modules/dependency/generated",
         "target/checks/debug/generated",
         "node_modules/dependency/generated",
         "xtask/target/debug/generated",
     ] {
-        let path = source.join(relative);
+        let path = checkout.join(relative);
         fs::create_dir_all(path.parent().expect("generated output parent"))?;
         fs::write(path, "changing build output")?;
     }
@@ -127,7 +131,7 @@ fn build_and_dependency_outputs_are_outside_chezmoi_source_state() -> Result<()>
             .arg("--config")
             .arg(config)
             .arg("--source")
-            .arg(source)
+            .arg(checkout)
             .arg("--destination")
             .arg(destination)
             .arg("--persistent-state")
@@ -482,7 +486,7 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
     let user = fixture.path().join("native-user");
     for name in ["alpha", "beta"] {
         for tree in [
-            source.join("dot_agents/skills"),
+            source.join("home/dot_agents/skills"),
             user.join(".agents/skills"),
         ] {
             fs::create_dir_all(tree.join(name))?;
@@ -491,22 +495,22 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
                 tree.join(name).join("SKILL.md"),
             )?;
         }
-        fs::create_dir_all(source.join("dot_claude/skills"))?;
+        fs::create_dir_all(source.join("home/dot_claude/skills"))?;
         fs::write(
             source
-                .join("dot_claude/skills")
+                .join("home/dot_claude/skills")
                 .join(format!("symlink_{name}")),
             format!("../../.agents/skills/{name}\n"),
         )?;
     }
     let policy: Policy = ops::read_json(&fixture.path().join("policy.json"))?;
     ops::write_json(
-        &source.join("dot_config/skill-ops/policy.json"),
+        &source.join("home/dot_config/skill-ops/policy.json"),
         &policy,
         false,
     )?;
     ops::write_json(&user.join(".config/skill-ops/policy.json"), &policy, false)?;
-    let source_catalog = ops::catalog(&source.join("dot_agents/skills"))?;
+    let source_catalog = ops::catalog(&source.join("home/dot_agents/skills"))?;
     for (name, skill) in &source_catalog.skills {
         ops::write_json(
             &source.join(ops::DECISIONS).join(format!("{name}.json")),
@@ -518,7 +522,7 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
                     Outcome::Keep
                 },
                 reason: "The fixture preserves its separately named native contracts.".into(),
-                evidence: vec!["dot_agents/skills/alpha/SKILL.md".into()],
+                evidence: vec!["home/dot_agents/skills/alpha/SKILL.md".into()],
                 revisit: (name == "beta").then(|| "Reassess once beta is observed.".into()),
                 size: None,
             },
@@ -542,8 +546,8 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
         .join(".local/bin")
         .join(format!("skill-ops{}", std::env::consts::EXE_SUFFIX));
     let adapter = user.join(".config/opencode/plugins/skill-ops.ts");
-    let policy_path = source.join("dot_config/skill-ops/policy.json");
-    let adapter_path = source.join("dot_config/opencode/plugins/skill-ops.ts");
+    let policy_path = source.join("home/dot_config/skill-ops/policy.json");
+    let adapter_path = source.join("home/dot_config/opencode/plugins/skill-ops.ts");
     fs::create_dir_all(adapter_path.parent().expect("adapter directory"))?;
     fs::write(&adapter_path, "native fixture adapter")?;
     let mut applied = Vec::new();

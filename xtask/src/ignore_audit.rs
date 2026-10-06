@@ -55,9 +55,10 @@ pub fn source_targets(root: &Path, scope: &Path) -> Result<BTreeSet<String>> {
     let (config, destination) = configure(root, scope, Profile::Mac)?;
     let prefix = format!("{}/", chezmoi_path(&destination));
     let mut targets = BTreeSet::new();
-    for batch in source_paths(root)?.chunks(200) {
+    let source = crate::source_state(root);
+    for batch in source_paths(&source)?.chunks(200) {
         let output = chezmoi(root, scope, &config, &destination)
-            .current_dir(root)
+            .current_dir(&source)
             .args(["target-path", "--source-path"])
             .args(batch)
             .output()?;
@@ -152,7 +153,11 @@ pub fn check(root: &Path) -> Result<()> {
     for profile in Profile::ALL {
         let (config, destination) = configure(root, scope.path(), profile)?;
         let command = || chezmoi(root, scope.path(), &config, &destination);
-        let ignore = patterns(&render(command(), &fs::read(root.join(".chezmoiignore"))?)?);
+        let source = crate::source_state(root);
+        let ignore = patterns(&render(
+            command(),
+            &fs::read(source.join(".chezmoiignore"))?,
+        )?);
         let host_state = patterns(&render(command(), HOST_STATE.as_bytes())?);
         for (pattern, result) in audit(&ignore, |pattern| {
             let negated = pattern.strip_prefix('!').unwrap_or(pattern);
@@ -175,7 +180,10 @@ pub fn check(root: &Path) -> Result<()> {
             String::from_utf8_lossy(&listed.stderr)
         );
         let managed = managed_paths(&listed.stdout)?;
-        let remove = patterns(&render(command(), &fs::read(root.join(".chezmoiremove"))?)?);
+        let remove = patterns(&render(
+            command(),
+            &fs::read(source.join(".chezmoiremove"))?,
+        )?);
         for (pattern, result) in audit(&remove, |pattern| {
             !managed
                 .iter()

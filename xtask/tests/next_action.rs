@@ -443,7 +443,7 @@ fn an_unmounted_volume_is_reported_before_a_missing_directory() {
 #[test]
 fn skills_without_a_current_or_complete_decision_are_listed() -> Result<()> {
     let root = tempfile::tempdir()?;
-    let tree = root.path().join("dot_agents/skills");
+    let tree = root.path().join("home/dot_agents/skills");
     for name in ["alpha", "beta", "gamma"] {
         fs::create_dir_all(tree.join(name))?;
         fs::write(
@@ -461,7 +461,7 @@ fn skills_without_a_current_or_complete_decision_are_listed() -> Result<()> {
                 "revision": revisions.skills[name].revision,
                 "outcome": "keep",
                 "reason": reason,
-                "evidence": [format!("dot_agents/skills/{name}/SKILL.md")],
+                "evidence": [format!("home/dot_agents/skills/{name}/SKILL.md")],
                 "revisit": null,
             }))?,
         )?;
@@ -1009,13 +1009,13 @@ fn the_coderabbit_pause_file_holds_a_push_whose_pr_is_unknown() -> Result<()> {
 fn executing_draft_decisions_writes_the_draft_and_leaves_its_reason_to_complete() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.git(&fixture.clone, &["switch", "--quiet", "-c", "feat/topic"])?;
-    let skill = fixture.clone.join("dot_agents/skills/alpha");
+    let skill = fixture.clone.join("home/dot_agents/skills/alpha");
     fs::create_dir_all(&skill)?;
     fs::write(
         skill.join("SKILL.md"),
         "---\nname: alpha\ndescription: Check alpha.\n---\n# Contract\nCheck it.\n",
     )?;
-    let policy = fixture.clone.join("dot_config/skill-ops/policy.json");
+    let policy = fixture.clone.join("home/dot_config/skill-ops/policy.json");
     fs::create_dir_all(policy.parent().context("policy directory")?)?;
     fs::write(
         &policy,

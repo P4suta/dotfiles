@@ -104,8 +104,9 @@ fn a_rename_classifies_both_the_old_and_the_new_path() -> Result<()> {
 fn staged_paths_are_classified_and_unstaged_ones_are_not() -> Result<()> {
     let repository = repository()?;
     let root = repository.path();
-    fs::write(root.join("dot_zshrc.tmpl"), "x\n")?;
-    git(root, &["add", "dot_zshrc.tmpl"])?;
+    fs::create_dir_all(root.join("home"))?;
+    fs::write(root.join("home/dot_zshrc.tmpl"), "x\n")?;
+    git(root, &["add", "home/dot_zshrc.tmpl"])?;
     fs::write(root.join("xtask.rs"), "x\n")?;
     assert_eq!(gates(root, &Source::Staged)?.names(), "prose,profiles");
     Ok(())

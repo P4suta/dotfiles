@@ -64,7 +64,7 @@ Keep usage-based reviews, CodeRabbit Security Scan, CodeRabbit Agent, and automa
 For large work, refine a CodeRabbit Plan, select a phase, and copy Agent Handoff into the implementation workflow.
 Finish the local change and its project checks before preparing a PR.
 Run one budget-qualified CLI review after local checks for an initial substantive PR, and read the existing PR review first when updating one.
-The [PR workflow](../../dot_agents/skills/pull-request/references/workflow.md) requires numeric capacity for operations that start a PR review, and holds publication when that capacity stays unverified.
+The [PR workflow](../../home/dot_agents/skills/pull-request/references/workflow.md) requires numeric capacity for operations that start a PR review, and holds publication when that capacity stays unverified.
 The same formula applies to verified PR hourly allowance and adaptive activity thresholds.
 Verify the applicable window and counts first.
 A confirmed seven-day highest-band threshold of 49 then gives 35 review events per rolling 168 hours.

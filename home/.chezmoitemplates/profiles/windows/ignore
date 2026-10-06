@@ -1,9 +1,6 @@
 # Target paths chezmoi never applies to the home directory.
 # The shared host state patterns live in host-state-ignore.
 
-# Repo dev tooling: git-tracked only, not applied to the home directory
-tools/**
-
 # Directories that only hold another profile's targets in the unified source; ignoring them keeps this home from gaining empty trees or changed permissions.
 .claude/shims
 .config/atuin

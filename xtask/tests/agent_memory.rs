@@ -146,9 +146,11 @@ fn unparsable_rendered_settings_are_refused() {
 
 /// Renders a repository `modify_` template for one profile over a host file, as an apply would.
 fn render_merged(profile: &str, template: &str, target: &str, host: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap();
+    let root = dotfiles_xtask::source_state(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap(),
+    );
     let scope = tempfile::tempdir().unwrap();
     let source = scope.path().join("source");
     let destination = scope.path().join("home");

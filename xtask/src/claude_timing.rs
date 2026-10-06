@@ -486,7 +486,7 @@ mod tests {
     #[test]
     fn the_managed_defaults_parse_and_cover_the_long_project_commands() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../dot_config/dotfiles/command-timeouts.json");
+            .join("../home/dot_config/dotfiles/command-timeouts.json");
         let defaults: Defaults = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
         assert!(defaults.default_ms <= CLIENT_LIMIT_MS);
         for signature in [

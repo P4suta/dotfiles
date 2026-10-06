@@ -403,7 +403,8 @@ pub fn unknown_recipes(root: &Path) -> Result<Vec<String>> {
 
 /// Profile leaves that no template includes.
 pub fn unreferenced_leaves(root: &Path) -> Result<Vec<String>> {
-    let leaves_root = root.join(".chezmoitemplates/profiles");
+    let templates = crate::source_state(root).join(".chezmoitemplates");
+    let leaves_root = templates.join("profiles");
     let mut leaves = Vec::new();
     let mut stack = vec![leaves_root.clone()];
     while let Some(directory) = stack.pop() {
@@ -412,7 +413,7 @@ pub fn unreferenced_leaves(root: &Path) -> Result<Vec<String>> {
             if path.is_dir() {
                 stack.push(path);
             } else {
-                let relative = path.strip_prefix(root.join(".chezmoitemplates"))?;
+                let relative = path.strip_prefix(&templates)?;
                 leaves.push(relative.to_string_lossy().replace('\\', "/"));
             }
         }
@@ -442,4 +443,48 @@ pub fn unreferenced_leaves(root: &Path) -> Result<Vec<String>> {
     leaves.retain(|leaf| !referenced.contains(leaf));
     leaves.sort();
     Ok(leaves)
+}
+
+/// The chezmoi version that `mise.toml` pins, or why it names none.
+pub fn mise_chezmoi_pin(mise: &str) -> Result<String> {
+    let table: toml::Table = toml::from_str(mise)?;
+    let pin = &table
+        .get("tools")
+        .and_then(|tools| tools.get("chezmoi"))
+        .context("mise.toml pins no chezmoi version")?;
+    pin.as_str()
+        .or_else(|| pin.get("version").and_then(toml::Value::as_str))
+        .map(str::to_owned)
+        .context("mise.toml names chezmoi without a version string")
+}
+
+/// Refuses when the source state's `.chezmoiversion` and the `mise.toml` chezmoi pin name different versions.
+pub fn chezmoi_version(root: &Path) -> Result<()> {
+    let pin = mise_chezmoi_pin(&fs::read_to_string(root.join("mise.toml"))?)?;
+    let required = fs::read_to_string(crate::source_state(root).join(".chezmoiversion"))
+        .context("the source state needs .chezmoiversion")?;
+    ensure!(
+        required.trim() == pin,
+        "home/.chezmoiversion requires chezmoi {} but mise.toml pins {pin}; set both to the same version",
+        required.trim()
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_chezmoi_pin_reads_a_plain_or_a_table_version() {
+        assert_eq!(
+            mise_chezmoi_pin("[tools]\nchezmoi = \"2.73.0\"\n").unwrap(),
+            "2.73.0"
+        );
+        assert_eq!(
+            mise_chezmoi_pin("[tools]\nchezmoi = { version = \"2.74.1\" }\n").unwrap(),
+            "2.74.1"
+        );
+        assert!(mise_chezmoi_pin("[tools]\njust = \"1\"\n").is_err());
+    }
 }

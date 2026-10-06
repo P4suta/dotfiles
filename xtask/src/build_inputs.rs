@@ -12,13 +12,14 @@ use std::io;
 use std::path::Path;
 
 /// Files outside `xtask/src` that the compiler includes or that decide how the tools build.
-const SHARED: [&str; 14] = [
-    ".chezmoiignore",
+const SHARED: [&str; 15] = [
+    ".chezmoiroot",
     ".github/workflows/required.yml",
     "bun.lock",
-    "dot_agents/skills/pull-request/assets/workflow-policy.json",
-    "dot_config/opencode/plugins/skill-ops.ts",
     "guard/src/refusal.rs",
+    "home/.chezmoiignore",
+    "home/dot_agents/skills/pull-request/assets/workflow-policy.json",
+    "home/dot_config/opencode/plugins/skill-ops.ts",
     "lefthook.yml",
     "mise.toml",
     "package.json",

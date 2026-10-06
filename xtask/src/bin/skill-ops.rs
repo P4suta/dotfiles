@@ -355,7 +355,7 @@ fn execute(cli: Cli) -> Result<()> {
             }
             ensure!(
                 fs::read_to_string(user_directory.join(".config/opencode/plugins/skill-ops.ts"))?
-                    == include_str!("../../../dot_config/opencode/plugins/skill-ops.ts"),
+                    == include_str!("../../../home/dot_config/opencode/plugins/skill-ops.ts"),
                 "OpenCode observer definition has drifted"
             );
             println!(

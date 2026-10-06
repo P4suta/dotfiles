@@ -3,8 +3,8 @@
   "outcome": "implemented",
   "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
-    "dot_agents/skills/reliability/SKILL.md",
-    "dot_agents/skills/reliability/references/time-and-randomness.md"
+    "home/dot_agents/skills/reliability/SKILL.md",
+    "home/dot_agents/skills/reliability/references/time-and-randomness.md"
   ],
   "revisit": null
 }

@@ -42,7 +42,7 @@ fn attribution_reported(findings: &[Finding], sentence: &str) -> bool {
 fn binary(arguments: &[&str], input: &str, runtime: &Path) -> Result<(i32, String, String)> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_prose"))
         .args(arguments)
-        .env("PROSE_CONFIG", root().join("dot_config/prose"))
+        .env("PROSE_CONFIG", root().join("home/dot_config/prose"))
         .env("PROSE_RUNTIME", runtime)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -421,7 +421,7 @@ fn the_opencode_plugin_requests_one_rewrite_through_the_native_checker() -> Resu
             .arg(&fixture)
             .arg(executable)
             .arg(reply)
-            .env("PROSE_CONFIG", root().join("dot_config/prose"))
+            .env("PROSE_CONFIG", root().join("home/dot_config/prose"))
             .env("PROSE_RUNTIME", empty.path())
             .output()?;
         assert!(
@@ -531,8 +531,8 @@ fn a_changed_style_package_or_a_missing_configuration_is_refused() -> Result<()>
     let bundle = source()?;
     bundle.verify()?;
     let copy = tempfile::tempdir()?;
-    let config = copy.path().join("dot_config/prose");
-    copy_tree(&root().join("dot_config/prose"), &config)?;
+    let config = copy.path().join("home/dot_config/prose");
+    copy_tree(&root().join("home/dot_config/prose"), &config)?;
     let copied = Bundle::source(copy.path())?;
     copied.verify()?;
     fs::write(config.join("styles/Google/We.yml"), "extends: existence\n")?;
@@ -553,12 +553,12 @@ fn a_changed_style_package_or_a_missing_configuration_is_refused() -> Result<()>
 #[test]
 fn every_profile_applies_the_style_packages_with_their_pinned_digests() -> Result<()> {
     let lock: toml::Value = toml::from_str(&fs::read_to_string(
-        root().join("dot_config/prose/packages.toml"),
+        root().join("home/dot_config/prose/packages.toml"),
     )?)?;
     let packages = lock["package"].as_array().expect("pinned packages");
     for package in packages {
         let name = package["name"].as_str().expect("package name");
-        let directory = root().join("dot_config/prose/styles").join(name);
+        let directory = root().join("home/dot_config/prose/styles").join(name);
         assert_eq!(
             prose::tree_digest(&directory)?,
             package["tree_sha256"].as_str().expect("tree digest"),
@@ -606,7 +606,7 @@ fn every_profile_applies_the_style_packages_with_their_pinned_digests() -> Resul
 fn the_pinned_vale_matches_the_mise_pin() -> Result<()> {
     let mise: toml::Value = toml::from_str(&fs::read_to_string(root().join("mise.toml"))?)?;
     let lock: toml::Value = toml::from_str(&fs::read_to_string(
-        root().join("dot_config/prose/packages.toml"),
+        root().join("home/dot_config/prose/packages.toml"),
     )?)?;
     assert_eq!(mise["tools"]["vale"].as_str(), lock["vale"].as_str());
     Ok(())
@@ -664,13 +664,13 @@ fn git(directory: &Path, arguments: &[&str]) -> Result<()> {
 fn repository(files: &[(&str, &str)]) -> Result<tempfile::TempDir> {
     let directory = tempfile::tempdir()?;
     copy_tree(
-        &root().join("dot_config/prose"),
-        &directory.path().join("dot_config/prose"),
+        &root().join("home/dot_config/prose"),
+        &directory.path().join("home/dot_config/prose"),
     )?;
     fs::create_dir_all(directory.path().join("policy"))?;
     fs::write(
         directory.path().join("policy/prose.toml"),
-        "[[exempt]]\nscope = \"documents\"\npaths = [\"dot_config/prose/styles/\"]\nreason = \"Vendored Vale packages keep their upstream text.\"\n\n[[exempt]]\nscope = \"comments\"\npaths = [\"dot_config/prose/\"]\nreason = \"The pinned configuration is data.\"\n",
+        "[[exempt]]\nscope = \"documents\"\npaths = [\"home/dot_config/prose/styles/\"]\nreason = \"Vendored Vale packages keep their upstream text.\"\n\n[[exempt]]\nscope = \"comments\"\npaths = [\"home/dot_config/prose/\"]\nreason = \"The pinned configuration is data.\"\n",
     )?;
     for (path, text) in files {
         let path = directory.path().join(path);
@@ -1027,7 +1027,7 @@ fn the_global_commit_msg_hook_checks_personal_repositories() -> Result<()> {
                     if cfg!(windows) { "USERPROFILE" } else { "HOME" },
                     home.path(),
                 )
-                .env("PROSE_CONFIG", root().join("dot_config/prose"))
+                .env("PROSE_CONFIG", root().join("home/dot_config/prose"))
                 .env("PROSE_RUNTIME", home.path().join("runtime"))
                 .stdin(Stdio::null())
                 .output()?;

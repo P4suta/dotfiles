@@ -218,7 +218,7 @@ pub fn github_repository(url: &str) -> Option<String> {
 
 /// Skills whose tracked decision has no entry or binds another revision, and those whose current decision lacks its reason or evidence.
 pub fn decision_backlog(root: &Path) -> Result<(Vec<String>, Vec<String>)> {
-    let tree = root.join("dot_agents/skills");
+    let tree = root.join("home/dot_agents/skills");
     if !tree.is_dir() {
         return Ok(Default::default());
     }

@@ -115,11 +115,15 @@ enum Match {
 }
 
 /// The first matching rule decides, so a narrower rule precedes the broader one it overrides.
-const RULES: [(Match, &[u8], Class); 36] = [
+const RULES: [(Match, &[u8], Class); 32] = [
     (Match::Prefix, b".github/", Class::Everything),
     (Match::Prefix, b"xtask/proofs/", Class::Everything),
     (Match::Prefix, b"xtask/src/change", Class::Everything),
-    (Match::Prefix, b"dot_config/lefthook/", Class::Everything),
+    (
+        Match::Prefix,
+        b"home/dot_config/lefthook/",
+        Class::Everything,
+    ),
     (Match::Exact, b"mise.toml", Class::Everything),
     (Match::Exact, b"justfile", Class::Everything),
     (Match::Exact, b"lefthook.yml", Class::Everything),
@@ -130,23 +134,19 @@ const RULES: [(Match, &[u8], Class); 36] = [
     (Match::Exact, b".typos.toml", Class::Everything),
     (Match::Exact, b".yamllint", Class::Everything),
     (Match::Exact, b".ocomment.toml", Class::Everything),
-    (Match::Exact, b".chezmoiignore", Class::Everything),
+    (Match::Exact, b".chezmoiroot", Class::Everything),
+    (Match::Exact, b"home/.chezmoiignore", Class::Everything),
     (Match::Suffix, b".lock", Class::Everything),
     (Match::Suffix, b"Cargo.toml", Class::Everything),
     (Match::Suffix, b".rs", Class::Rust),
     (Match::Prefix, b"xtask/", Class::Rust),
     (Match::Prefix, b"guard/", Class::Rust),
     (Match::Prefix, b"tools/", Class::Rust),
-    (Match::Prefix, b"dot_agents/skills/", Class::Skills),
-    (Match::Prefix, b"dot_claude/skills/", Class::Skills),
+    (Match::Prefix, b"home/dot_agents/skills/", Class::Skills),
+    (Match::Prefix, b"home/dot_claude/skills/", Class::Skills),
     (Match::Prefix, b"docs/skills/", Class::Skills),
-    (Match::Prefix, b"dot_config/skill-ops/", Class::Skills),
-    (Match::Prefix, b"dot_", Class::Profiles),
-    (Match::Prefix, b"run_", Class::Profiles),
-    (Match::Prefix, b"private_", Class::Profiles),
-    (Match::Prefix, b"AppData/", Class::Profiles),
-    (Match::Prefix, b"Library/", Class::Profiles),
-    (Match::Prefix, b".chezmoi", Class::Profiles),
+    (Match::Prefix, b"home/dot_config/skill-ops/", Class::Skills),
+    (Match::Prefix, b"home/", Class::Profiles),
     (Match::Prefix, b"ops/", Class::Profiles),
     (Match::Prefix, b"policy/", Class::Profiles),
     (Match::Prefix, b"examples/", Class::Profiles),
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn a_skill_change_selects_the_skills_and_profile_gates_without_rust() {
         assert_eq!(
-            selected(&["dot_agents/skills/just/SKILL.md"]),
+            selected(&["home/dot_agents/skills/just/SKILL.md"]),
             "prose,skills,profiles"
         );
         assert_eq!(
@@ -305,9 +305,15 @@ mod tests {
 
     #[test]
     fn a_profile_change_selects_the_profile_gate_without_rust() {
-        assert_eq!(selected(&["dot_zshrc.tmpl"]), "prose,profiles");
-        assert_eq!(selected(&["dot_claude/CLAUDE.md.tmpl"]), "prose,profiles");
-        assert_eq!(selected(&[".chezmoitemplates/x/y.tmpl"]), "prose,profiles");
+        assert_eq!(selected(&["home/dot_zshrc.tmpl"]), "prose,profiles");
+        assert_eq!(
+            selected(&["home/dot_claude/CLAUDE.md.tmpl"]),
+            "prose,profiles"
+        );
+        assert_eq!(
+            selected(&["home/.chezmoitemplates/x/y.tmpl"]),
+            "prose,profiles"
+        );
     }
 
     #[test]
@@ -323,6 +329,8 @@ mod tests {
             "xtask/src/change.rs",
             "xtask/src/change_rules.rs",
             "xtask/proofs/Dockerfile",
+            ".chezmoiroot",
+            "home/.chezmoiignore",
         ] {
             assert_eq!(select([path]), Gates::ALL, "{path}");
         }
@@ -340,8 +348,8 @@ mod tests {
         assert_eq!(
             selected(&[
                 "README.md",
-                "dot_zshrc.tmpl",
-                "dot_agents/skills/just/SKILL.md"
+                "home/dot_zshrc.tmpl",
+                "home/dot_agents/skills/just/SKILL.md"
             ]),
             "prose,skills,profiles"
         );
@@ -351,7 +359,10 @@ mod tests {
     #[test]
     fn narrow_rules_override_broader_ones() {
         assert_eq!(classify(b"docs/skills/x.md"), Class::Skills);
-        assert_eq!(classify(b"dot_agents/skills/a/scripts/x.rs"), Class::Rust);
+        assert_eq!(
+            classify(b"home/dot_agents/skills/a/scripts/x.rs"),
+            Class::Rust
+        );
         assert_eq!(classify(b"ops/README.md"), Class::Profiles);
     }
 

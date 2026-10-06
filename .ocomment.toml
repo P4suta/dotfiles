@@ -1,4 +1,4 @@
-# Repeats `dot_config/ocomment/config.toml`, which a CI runner lacks.
+# Repeats `home/dot_config/ocomment/config.toml`, which a CI runner lacks.
 version = 1
 
 # Remove nothing.
@@ -11,7 +11,7 @@ wrap = "sentence"
 
 # Vendored Vale packages keep their upstream text.
 [files]
-exclude = ["dot_config/prose/styles/**"]
+exclude = ["home/dot_config/prose/styles/**"]
 
 # Source names hide the format behind `dot_` and `.tmpl`, so these overrides name it.
 # Only the prose partials hold Markdown.
@@ -19,15 +19,15 @@ exclude = ["dot_config/prose/styles/**"]
 [[overrides]]
 paths = [
   "**/*.md.tmpl",
-  ".chezmoitemplates/agent_policy",
-  ".chezmoitemplates/prose_policy",
-  ".chezmoitemplates/remote_machines",
-  ".chezmoitemplates/signing_pubkey",
+  "home/.chezmoitemplates/agent_policy",
+  "home/.chezmoitemplates/prose_policy",
+  "home/.chezmoitemplates/remote_machines",
+  "home/.chezmoitemplates/signing_pubkey",
 ]
 language = "markdown"
 
 [[overrides]]
-paths = ["**/*.toml.tmpl", "dot_config/git/config.tmpl"]
+paths = ["**/*.toml.tmpl", "home/dot_config/git/config.tmpl"]
 language = "toml"
 
 [[overrides]]
@@ -44,26 +44,26 @@ language = "lua"
 
 [[overrides]]
 paths = [
-  "dot_config/dev-reaper/config.tmpl",
-  "dot_config/session-reaper/config.tmpl",
-  ".chezmoitemplates/profiles/mac/dot_config/dev-reaper/config",
-  ".chezmoitemplates/profiles/mac/dot_config/session-reaper/config",
-  ".chezmoitemplates/profiles/linux/dot_config/dev-reaper/config",
-  ".chezmoitemplates/profiles/linux/dot_config/session-reaper/config",
+  "home/dot_config/dev-reaper/config.tmpl",
+  "home/dot_config/session-reaper/config.tmpl",
+  "home/.chezmoitemplates/profiles/mac/dot_config/dev-reaper/config",
+  "home/.chezmoitemplates/profiles/mac/dot_config/session-reaper/config",
+  "home/.chezmoitemplates/profiles/linux/dot_config/dev-reaper/config",
+  "home/.chezmoitemplates/profiles/linux/dot_config/session-reaper/config",
 ]
 language = "toml"
 
 # These files share only shell comment and string syntax.
 [[overrides]]
 paths = [
-  "dot_bashrc.tmpl",
-  "dot_profile.tmpl",
-  ".chezmoitemplates/profiles/linux/dot_bashrc.tmpl",
-  ".chezmoitemplates/profiles/linux/dot_profile.tmpl",
-  ".chezmoitemplates/profiles/mac/dot_bashrc",
-  ".chezmoitemplates/profiles/mac/dot_zprofile.tmpl",
-  ".chezmoitemplates/profiles/mac/dot_zshrc.tmpl",
-  ".chezmoitemplates/profiles/wsl/dot_bashrc.tmpl",
+  "home/dot_bashrc.tmpl",
+  "home/dot_profile.tmpl",
+  "home/.chezmoitemplates/profiles/linux/dot_bashrc.tmpl",
+  "home/.chezmoitemplates/profiles/linux/dot_profile.tmpl",
+  "home/.chezmoitemplates/profiles/mac/dot_bashrc",
+  "home/.chezmoitemplates/profiles/mac/dot_zprofile.tmpl",
+  "home/.chezmoitemplates/profiles/mac/dot_zshrc.tmpl",
+  "home/.chezmoitemplates/profiles/wsl/dot_bashrc.tmpl",
   "**/*.sh.tmpl",
   "**/*.nu",
   "**/*.nu.tmpl",

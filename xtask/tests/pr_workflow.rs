@@ -99,7 +99,7 @@ impl Fixture {
             .env("PATH", std::env::join_paths(paths)?)
             .env(
                 "PROSE_CONFIG",
-                concat!(env!("CARGO_MANIFEST_DIR"), "/../dot_config/prose"),
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../home/dot_config/prose"),
             )
             .env("PROSE_RUNTIME", self.directory.path().join("prose"))
             .env("HOME", self.directory.path())
@@ -1594,13 +1594,16 @@ fn scoped_install_preserves_other_managed_skills_policy_and_history() -> Result<
     let home = tempfile::tempdir()?;
     let skills = home.path().join(".agents/skills");
     fs::create_dir_all(&skills)?;
-    let mut catalog = ops::catalog(&source.join("dot_agents/skills"))?;
+    let mut catalog = ops::catalog(&source.join("home/dot_agents/skills"))?;
     catalog.skills.remove("pull-request");
     for skill in catalog.skills.values() {
         for relative in &skill.files {
             let destination = skills.join(relative);
             fs::create_dir_all(destination.parent().unwrap())?;
-            fs::copy(source.join("dot_agents/skills").join(relative), destination)?;
+            fs::copy(
+                source.join("home/dot_agents/skills").join(relative),
+                destination,
+            )?;
         }
     }
     fs::create_dir(skills.join("other-owned"))?;
@@ -1609,7 +1612,8 @@ fn scoped_install_preserves_other_managed_skills_policy_and_history() -> Result<
         "---\nname: other-owned\ndescription: Inspect an independent existing skill.\n---\n# Independent\nPreserve this skill.\n",
     )?;
     catalog = ops::catalog(&skills)?;
-    let policy: ops::Policy = ops::read_json(&source.join("dot_config/skill-ops/policy.json"))?;
+    let policy: ops::Policy =
+        ops::read_json(&source.join("home/dot_config/skill-ops/policy.json"))?;
     ops::write_json(
         &home.path().join(".config/skill-ops/policy.json"),
         &policy,
@@ -1633,12 +1637,17 @@ fn scoped_install_preserves_other_managed_skills_policy_and_history() -> Result<
     fs::write(&binary, "native executable fixture")?;
     dotfiles_xtask::pr_workflow::deploy(source, &binary, home.path(), |paths| {
         for path in paths {
-            if let Ok(relative) = path.strip_prefix(source.join("dot_agents/skills/pull-request")) {
+            if let Ok(relative) =
+                path.strip_prefix(source.join("home/dot_agents/skills/pull-request"))
+            {
                 let destination = skills.join("pull-request").join(relative);
                 fs::create_dir_all(destination.parent().unwrap())?;
                 fs::copy(path, destination)?;
             } else {
-                assert_eq!(*path, source.join("dot_claude/skills/symlink_pull-request"));
+                assert_eq!(
+                    *path,
+                    source.join("home/dot_claude/skills/symlink_pull-request")
+                );
             }
         }
         Ok(())

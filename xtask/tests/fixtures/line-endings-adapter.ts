@@ -1,4 +1,4 @@
-import { LineEndings } from "../../../dot_config/opencode/plugins/line-endings";
+import { LineEndings } from "../../../home/dot_config/opencode/plugins/line-endings";
 import { createOpencodeClient } from "@opencode-ai/sdk";
 import type { WorkspaceAdapter } from "@opencode-ai/plugin";
 

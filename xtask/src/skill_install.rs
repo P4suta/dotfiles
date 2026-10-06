@@ -56,13 +56,14 @@ pub fn merge_hooks(mut value: Value, client: &str) -> Result<Value> {
 pub fn install(source: &Path, binary: &Path, user_directory: &Path) -> Result<()> {
     use crate::skill_ops as ops;
     ops::check_catalog(source)?;
-    let expected = ops::catalog(&source.join("dot_agents/skills"))?;
+    let expected = ops::catalog(&source.join("home/dot_agents/skills"))?;
     let installed = ops::catalog_owned(&user_directory.join(".agents/skills"), &expected)?;
     ensure!(
         expected == installed,
         "installed skill catalog differs; review and apply only the intended native paths"
     );
-    let policy: ops::Policy = ops::read_json(&source.join("dot_config/skill-ops/policy.json"))?;
+    let policy: ops::Policy =
+        ops::read_json(&source.join("home/dot_config/skill-ops/policy.json"))?;
     let native_policy: ops::Policy =
         ops::read_json(&user_directory.join(".config/skill-ops/policy.json"))?;
     ensure!(
@@ -131,7 +132,7 @@ pub fn deploy(
     loop {
         match installation_stage(policy_applied, runtime_installed) {
             InstallationStage::Policy => {
-                apply(&source.join("dot_config/skill-ops/policy.json"))?;
+                apply(&source.join("home/dot_config/skill-ops/policy.json"))?;
                 policy_applied = true;
             }
             InstallationStage::Runtime => {
@@ -139,7 +140,7 @@ pub fn deploy(
                 runtime_installed = true;
             }
             InstallationStage::Adapter => {
-                return apply(&source.join("dot_config/opencode/plugins/skill-ops.ts"));
+                return apply(&source.join("home/dot_config/opencode/plugins/skill-ops.ts"));
             }
         }
     }

@@ -3,7 +3,7 @@
   "outcome": "keep",
   "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
-    "dot_agents/skills/mutation-testing/SKILL.md"
+    "home/dot_agents/skills/mutation-testing/SKILL.md"
   ],
   "revisit": null
 }

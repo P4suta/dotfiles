@@ -781,20 +781,21 @@ mod run_tests {
 mod credential_boundary {
     use std::path::PathBuf;
 
-    fn repo() -> PathBuf {
+    /// The chezmoi source state, which `.chezmoiroot` places under `home/`.
+    fn source() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
-            .to_path_buf()
+            .join("home")
     }
 
     fn read(rel: &str) -> String {
-        std::fs::read_to_string(repo().join(rel)).unwrap_or_default()
+        std::fs::read_to_string(source().join(rel)).unwrap_or_default()
     }
 
     #[test]
     fn no_general_shell_exports_the_gh_token() {
-        assert!(!repo().join("dot_config/shell/github-token.sh").exists());
+        assert!(!source().join("dot_config/shell/github-token.sh").exists());
         let remove = read(".chezmoiremove");
         assert!(
             remove

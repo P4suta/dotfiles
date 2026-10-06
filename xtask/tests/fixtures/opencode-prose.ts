@@ -1,4 +1,4 @@
-import { ProseReply } from "../../../dot_config/opencode/plugins/prose";
+import { ProseReply } from "../../../home/dot_config/opencode/plugins/prose";
 import type { PluginInput, WorkspaceAdapter } from "@opencode-ai/plugin";
 
 const executable = Bun.argv[2];

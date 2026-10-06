@@ -13,6 +13,11 @@ fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
 }
 
+/// The chezmoi source state of the checkout.
+fn source() -> PathBuf {
+    dotfiles_xtask::source_state(root())
+}
+
 fn successful(command: &mut Command) -> Result<Output> {
     let output = command.output().context("start native verification tool")?;
     ensure!(
@@ -37,12 +42,12 @@ fn pinned_tool(name: &str) -> Result<PathBuf> {
 #[test]
 fn opencode_context7_requires_a_local_linux_desktop() -> Result<()> {
     let chezmoi = pinned_tool("chezmoi")?;
-    let template = fs::read_to_string(root().join("dot_config/opencode/opencode.json.tmpl"))?;
+    let template = fs::read_to_string(source().join("dot_config/opencode/opencode.json.tmpl"))?;
     let temporary = tempfile::tempdir()?;
     let config = temporary.path().join("chezmoi.toml");
     fs::write(&config, "")?;
     fs::copy(
-        root().join(".chezmoidata.json"),
+        source().join(".chezmoidata.json"),
         temporary.path().join(".chezmoidata.json"),
     )?;
     for (profile, file) in [
@@ -58,7 +63,7 @@ fn opencode_context7_requires_a_local_linux_desktop() -> Result<()> {
                 .parent()
                 .context("fixture parent is missing")?,
         )?;
-        fs::copy(root().join(&path), temporary.path().join(&path))?;
+        fs::copy(source().join(&path), temporary.path().join(&path))?;
     }
     let bin = temporary.path().join("bin");
     fs::create_dir(&bin)?;

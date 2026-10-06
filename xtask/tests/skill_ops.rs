@@ -565,7 +565,10 @@ fn drafts_keep_the_previous_judgment_and_require_a_new_reason() -> Result<()> {
 
     let fresh = draft_decision(None, current, false, "alpha")?;
     assert_eq!(fresh.outcome, Outcome::Keep);
-    assert_eq!(fresh.evidence, names(&["dot_agents/skills/alpha/SKILL.md"]));
+    assert_eq!(
+        fresh.evidence,
+        names(&["home/dot_agents/skills/alpha/SKILL.md"])
+    );
     assert!(fresh.reason.is_empty() && fresh.revisit.is_none());
     Ok(())
 }
@@ -767,29 +770,29 @@ fn repository() -> Result<tempfile::TempDir> {
     let (skills, _, policy) = fixture()?;
     let root = tempfile::tempdir()?;
     for name in ["alpha", "beta"] {
-        let tree = root.path().join("dot_agents/skills").join(name);
+        let tree = root.path().join("home/dot_agents/skills").join(name);
         fs::create_dir_all(&tree)?;
         fs::copy(
             skills.path().join(name).join("SKILL.md"),
             tree.join("SKILL.md"),
         )?;
-        fs::create_dir_all(root.path().join("dot_claude/skills"))?;
+        fs::create_dir_all(root.path().join("home/dot_claude/skills"))?;
         fs::write(
             root.path()
-                .join("dot_claude/skills")
+                .join("home/dot_claude/skills")
                 .join(format!("symlink_{name}")),
             format!("../../.agents/skills/{name}\n"),
         )?;
     }
     write_json(
-        &root.path().join("dot_config/skill-ops/policy.json"),
+        &root.path().join("home/dot_config/skill-ops/policy.json"),
         &policy,
         false,
     )?;
-    let catalog = catalog(&root.path().join("dot_agents/skills"))?;
+    let catalog = catalog(&root.path().join("home/dot_agents/skills"))?;
     for (name, skill) in &catalog.skills {
         let mut decision = settled(&skill.revision);
-        decision.evidence = vec![format!("dot_agents/skills/{name}/SKILL.md")];
+        decision.evidence = vec![format!("home/dot_agents/skills/{name}/SKILL.md")];
         write_json(
             &root
                 .path()
@@ -822,7 +825,7 @@ fn the_required_check_depends_only_on_skills_policy_and_decisions() -> Result<()
         decisions
     );
     fs::write(
-        root.path().join("dot_agents/skills/beta/SKILL.md"),
+        root.path().join("home/dot_agents/skills/beta/SKILL.md"),
         "---\nname: beta\ndescription: Inspect the beta contract.\n---\n# Contract\nChanged.\n",
     )?;
     let message = refusal(check_catalog(root.path()));
@@ -873,7 +876,7 @@ fn decide_writes_the_draft_and_shows_the_content_diff_since_the_recorded_decisio
     git(root.path(), &["add", "--all"])?;
     git(root.path(), &["commit", "--quiet", "--message", "record"])?;
     let recorded = git(root.path(), &["rev-parse", "HEAD"])?;
-    let skill = root.path().join("dot_agents/skills/beta/SKILL.md");
+    let skill = root.path().join("home/dot_agents/skills/beta/SKILL.md");
     fs::write(&skill, skill_text("beta", "Committed change."))?;
     let context = decide(root.path(), "beta")?;
     assert!(context.contains(recorded.trim()), "{context}");
@@ -881,7 +884,7 @@ fn decide_writes_the_draft_and_shows_the_content_diff_since_the_recorded_decisio
     assert!(context.contains(&previous.reason), "{context}");
 
     let draft: SkillDecision = dotfiles_xtask::skill_ops::read_json(&path)?;
-    let revision = catalog(&root.path().join("dot_agents/skills"))?.skills["beta"]
+    let revision = catalog(&root.path().join("home/dot_agents/skills"))?.skills["beta"]
         .revision
         .clone();
     assert_eq!(draft.revision, revision);
@@ -906,10 +909,10 @@ fn skill_text(name: &str, body: &str) -> String {
 fn decide_diffs_from_the_commit_holding_the_assessed_content() -> Result<()> {
     let root = repository()?;
     git(root.path(), &["init", "--quiet"])?;
-    git(root.path(), &["add", "dot_agents"])?;
+    git(root.path(), &["add", "home/dot_agents"])?;
     git(root.path(), &["commit", "--quiet", "--message", "assessed"])?;
     let assessed = git(root.path(), &["rev-parse", "HEAD"])?;
-    let skill = root.path().join("dot_agents/skills/beta/SKILL.md");
+    let skill = root.path().join("home/dot_agents/skills/beta/SKILL.md");
     fs::write(&skill, skill_text("beta", "Intermediate change."))?;
     // The first commit of the decision holds content newer than the content it assessed.
     git(root.path(), &["add", "--all"])?;
@@ -930,7 +933,7 @@ fn decide_diffs_from_the_commit_holding_the_assessed_content() -> Result<()> {
 #[test]
 fn decide_says_when_no_commit_holds_the_assessed_content() -> Result<()> {
     let root = repository()?;
-    let skill = root.path().join("dot_agents/skills/beta/SKILL.md");
+    let skill = root.path().join("home/dot_agents/skills/beta/SKILL.md");
     fs::write(&skill, skill_text("beta", "Unassessed change."))?;
     git(root.path(), &["init", "--quiet"])?;
     git(root.path(), &["add", "--all"])?;
@@ -952,7 +955,9 @@ fn decide_says_when_no_commit_holds_the_assessed_content() -> Result<()> {
 fn decide_on_branch(root: &std::path::Path, branch: &str, skill: &str) -> Result<()> {
     git(root, &["switch", "--quiet", "--create", branch, "main"])?;
     fs::write(
-        root.join("dot_agents/skills").join(skill).join("SKILL.md"),
+        root.join("home/dot_agents/skills")
+            .join(skill)
+            .join("SKILL.md"),
         skill_text(skill, &format!("Changed on {branch}.")),
     )?;
     decide(root, skill)?;
@@ -1005,14 +1010,14 @@ fn decisions_for_different_skills_merge_in_either_order_without_conflict() -> Re
 #[test]
 fn the_assessed_commit_hashes_nested_resources_in_catalog_order() -> Result<()> {
     let root = repository()?;
-    let tree = root.path().join("dot_agents/skills/beta");
+    let tree = root.path().join("home/dot_agents/skills/beta");
     fs::create_dir_all(tree.join("guide/target"))?;
     fs::write(tree.join("guide.md"), "# Guide\n")?;
     fs::write(tree.join("guide/steps.md"), "# Steps\n")?;
     fs::write(tree.join("guide/target/ignored.md"), "# Ignored\n")?;
     let path = root.path().join("docs/skills/decisions/beta.json");
     let mut decision: SkillDecision = dotfiles_xtask::skill_ops::read_json(&path)?;
-    decision.revision = catalog(&root.path().join("dot_agents/skills"))?.skills["beta"]
+    decision.revision = catalog(&root.path().join("home/dot_agents/skills"))?.skills["beta"]
         .revision
         .clone();
     write_json(&path, &decision, true)?;
