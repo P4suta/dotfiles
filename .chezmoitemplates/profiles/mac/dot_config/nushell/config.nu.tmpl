@@ -140,7 +140,7 @@ alias lg = lazygit
 alias top = btm
 
 def --wrapped opencode [...args] {
-  ^dotfiles-xtask --root {{ .chezmoi.sourceDir | toJson }} agent opencode --config {{ .chezmoi.configFile | toJson }} -- ...$args
+  ^dotfiles-xtask --root {{ .chezmoi.workingTree | toJson }} agent opencode --config {{ .chezmoi.configFile | toJson }} -- ...$args
 }
 
 def --env y [...args] {

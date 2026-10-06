@@ -432,20 +432,6 @@ pub fn command_line_dependent(root: &Path) -> Result<Vec<String>> {
     Ok(dependent)
 }
 
-/// Lists the scripts that depend on the command line, without refusing.
-pub fn report_command_line(root: &Path) -> Result<()> {
-    let dependent = command_line_dependent(root)?;
-    if dependent.is_empty() {
-        println!("Every profile renders the same scripts under two command lines");
-    } else {
-        println!(
-            "Scripts whose body depends on the chezmoi command line:\n{}",
-            dependent.join("\n")
-        );
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

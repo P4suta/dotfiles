@@ -1,14 +1,14 @@
 {{- if not (has .profile (list "mac" "linux" "windows" "wsl")) -}}{{ fail "Unknown dotfiles profile" }}{{- end }}
 {{- range (dig "setup" "skip" (list) .) }}
-{{ .script }}
+.chezmoiscripts/*/{{ .script }}
 {{- end }}
 {{ if ne .profile "linux" }}
 .config/dotfiles-nix
 {{ end }}
 {{ if eq .profile "windows" }}
-99-adapters.sh
+.chezmoiscripts/unix/**
 {{ else }}
-99-adapters.ps1
+.chezmoiscripts/windows/**
 {{ end }}
 {{ if eq .profile "mac" }}
 {{ includeTemplate "profiles/mac/ignore" (merge (dict) . (index .platforms .profile)) }}
@@ -48,24 +48,10 @@ AppData/Roaming/herdr/config.toml
 .local/share/applications/kitty-nu.desktop
 .profile
 Documents/PowerShell/Microsoft.PowerShell_profile.ps1
-23-setup-winget.ps1
-25-install-wezterm.ps1
-27-cache-shell-init.ps1
-22-setup-scoop.ps1
-25-setup-tools.ps1
-30-disable-python-store-stub.ps1
-40-install-herdr.ps1
-41-refresh-integrations.ps1
-45-install-ocomment.ps1
-50-enable-sshd.ps1
-55-setup-keyboard.ps1
-60-watch-storage-scout.ps1
-configure-fcitx5.sh
-install-ocomment.sh
-retire-tmux.sh
-install-gh.ps1
-install-mise.ps1
-install-nix-profile.sh
+.chezmoiscripts/unix/configure-fcitx5.sh
+.chezmoiscripts/unix/install-ocomment.sh
+.chezmoiscripts/unix/retire-tmux.sh
+.chezmoiscripts/unix/install-nix-profile.sh
 {{ end }}
 {{ if eq .profile "linux" }}
 {{ includeTemplate "profiles/linux/ignore" (merge (dict) . (index .platforms .profile)) }}
@@ -106,29 +92,15 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .zprofile
 .zshrc
 Documents/PowerShell/Microsoft.PowerShell_profile.ps1
-23-setup-winget.ps1
-25-install-wezterm.ps1
-27-cache-shell-init.ps1
-22-setup-scoop.ps1
-25-setup-tools.ps1
-30-disable-python-store-stub.ps1
-40-install-herdr.ps1
-41-refresh-integrations.ps1
-45-install-ocomment.ps1
-50-enable-sshd.ps1
-55-setup-keyboard.ps1
-60-watch-storage-scout.ps1
-05-brew-bundle.sh
-import-forge-signing-keys.sh
-install-claude-code.sh
-install-domyjob.sh
-install-fleet.sh
-macos-defaults.sh
-setup-guard.sh
-setup-haskell.sh
-setup-racket.sh
-install-gh.ps1
-install-mise.ps1
+.chezmoiscripts/unix/05-brew-bundle.sh
+.chezmoiscripts/unix/import-forge-signing-keys.sh
+.chezmoiscripts/unix/install-claude-code.sh
+.chezmoiscripts/unix/install-domyjob.sh
+.chezmoiscripts/unix/install-fleet.sh
+.chezmoiscripts/unix/macos-defaults.sh
+.chezmoiscripts/unix/setup-guard.sh
+.chezmoiscripts/unix/setup-haskell.sh
+.chezmoiscripts/unix/setup-racket.sh
 {{ end }}
 {{ if eq .profile "windows" }}
 {{ includeTemplate "profiles/windows/ignore" (merge (dict) . (index .platforms .profile)) }}
@@ -207,23 +179,6 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .profile
 .zprofile
 .zshrc
-05-brew-bundle.sh
-configure-fcitx5.sh
-install-domyjob.sh
-install-fleet.sh
-install-ocomment.sh
-10-install-tools.sh
-macos-defaults.sh
-refresh-desktop.sh
-refresh-integrations.sh
-retire-tmux.sh
-setup-guard.sh
-setup-haskell.sh
-setup-ocaml.sh
-setup-racket.sh
-install-gh.sh
-install-mise.sh
-install-nix-profile.sh
 {{ end }}
 {{ if eq .profile "wsl" }}
 {{ includeTemplate "profiles/wsl/ignore" (merge (dict) . (index .platforms .profile)) }}
@@ -305,36 +260,22 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .zprofile
 .zshrc
 Documents/PowerShell/Microsoft.PowerShell_profile.ps1
-23-setup-winget.ps1
-25-install-wezterm.ps1
-27-cache-shell-init.ps1
-22-setup-scoop.ps1
-25-setup-tools.ps1
-30-disable-python-store-stub.ps1
-40-install-herdr.ps1
-41-refresh-integrations.ps1
-45-install-ocomment.ps1
-50-enable-sshd.ps1
-55-setup-keyboard.ps1
-60-watch-storage-scout.ps1
-05-brew-bundle.sh
-configure-fcitx5.sh
-import-forge-signing-keys.sh
-install-claude-code.sh
-install-domyjob.sh
-install-fleet.sh
-install-ocomment.sh
-macos-defaults.sh
-refresh-desktop.sh
-refresh-integrations.sh
-retire-tmux.sh
-setup-guard.sh
-setup-haskell.sh
-setup-ocaml.sh
-setup-racket.sh
-install-gh.ps1
-install-mise.ps1
-install-nix-profile.sh
+.chezmoiscripts/unix/05-brew-bundle.sh
+.chezmoiscripts/unix/configure-fcitx5.sh
+.chezmoiscripts/unix/import-forge-signing-keys.sh
+.chezmoiscripts/unix/install-claude-code.sh
+.chezmoiscripts/unix/install-domyjob.sh
+.chezmoiscripts/unix/install-fleet.sh
+.chezmoiscripts/unix/install-ocomment.sh
+.chezmoiscripts/unix/macos-defaults.sh
+.chezmoiscripts/unix/refresh-desktop.sh
+.chezmoiscripts/unix/refresh-integrations.sh
+.chezmoiscripts/unix/retire-tmux.sh
+.chezmoiscripts/unix/setup-guard.sh
+.chezmoiscripts/unix/setup-haskell.sh
+.chezmoiscripts/unix/setup-ocaml.sh
+.chezmoiscripts/unix/setup-racket.sh
+.chezmoiscripts/unix/install-nix-profile.sh
 {{ end }}
 {{ if ne .profile "wsl" }}
 .local/bin/dotfiles-wsl-ssh-keygen
@@ -360,11 +301,3 @@ lefthook.yml
 .ocomment.toml
 .gitignore
 .gitattributes
-
-{{ if eq .profile "windows" }}
-00-runtime.sh
-import-forge-signing-keys.sh
-install-claude-code.sh
-{{ else }}
-00-runtime.ps1
-{{ end }}

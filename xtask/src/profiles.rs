@@ -119,7 +119,7 @@ pub fn audit_private(root: &Path, denylist: &Path) -> Result<()> {
     Ok(())
 }
 
-/// chezmoi reports `.chezmoi.homeDir` and `.chezmoi.sourceDir` with forward slashes on every host, including Windows.
+/// chezmoi reports `.chezmoi.homeDir`, `.chezmoi.sourceDir`, and `.chezmoi.workingTree` with forward slashes on every host, including Windows.
 pub fn chezmoi_path(path: &Path) -> String {
     let text = path.to_string_lossy();
     if cfg!(windows) {
@@ -138,7 +138,7 @@ pub fn fixture(profile: Profile, root: &Path, destination: &Path) -> Value {
         "doppler": {"project": "fixture", "config": "fixture"},
         "paths": {"projects": destination.join("projects")},
         "chezmoi": {"os": profile.os(), "homeDir": chezmoi_path(destination), "sourceDir": chezmoi_path(root),
-            "username": "fixture", "hostname": "fixture.invalid",
+            "workingTree": chezmoi_path(root), "username": "fixture", "hostname": "fixture.invalid",
             "kernel": {"osrelease": if profile == Profile::Wsl {"fixture-microsoft"} else {"fixture"}}}
     })
 }

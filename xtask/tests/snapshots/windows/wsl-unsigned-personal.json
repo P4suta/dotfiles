@@ -406,10 +406,10 @@
     {"mode":"0755","path":".local/bin/git","sha256":"7053afbde0b294f6917b44c99d67daaa5aeeb649e78688c0c1598c4df45a48a7","type":"file"}
   ],
   "scripts": [
-    {"condition":"always","phase":"before","position":0,"sha256":"0e89bcd1f2dcdedb3578ce52b4921ed253dd84a73e2b592027466c0aac562b8e","target":"00-runtime.sh"},
-    {"condition":"onchange","phase":"before","position":1,"sha256":"5507f3dc4fe308571a7bc9242acbf6f0b706be279e95e1df1711dac465a79816","target":"install-gh.sh"},
-    {"condition":"onchange","phase":"before","position":2,"sha256":"a322cb27486f87c01dc5278af1128682daed2bd35d378fb8cbd430ac3857a468","target":"install-mise.sh"},
-    {"condition":"onchange","phase":"after","position":3,"sha256":"d23a4307252bda3a76ccdda7370791f0b632e882e4dfa65ba2b13ec608bb6f39","target":"10-install-tools.sh"},
-    {"condition":"always","phase":"after","position":4,"sha256":"d11b33191842f27cccd571940300314702838e42c318ad959e4398b61b9fac7a","target":"99-adapters.sh"}
+    {"condition":"always","phase":"before","position":0,"sha256":"0e89bcd1f2dcdedb3578ce52b4921ed253dd84a73e2b592027466c0aac562b8e","target":".chezmoiscripts/unix/00-runtime.sh"},
+    {"condition":"onchange","phase":"before","position":1,"sha256":"7a758dd9e850802dd7268700d2a2ce9c147937cd48eccf3760c6e8db27436d65","target":".chezmoiscripts/unix/install-gh.sh"},
+    {"condition":"onchange","phase":"before","position":2,"sha256":"4f87e01316ebbc50ae14e27961843a166c152e99612fe675f5e51ba1fedfe55d","target":".chezmoiscripts/unix/install-mise.sh"},
+    {"condition":"onchange","phase":"after","position":3,"sha256":"faa119d0bd4faa514428f5c2ff871b6dfd04a99c1a2fa2219df66037b1e2a826","target":".chezmoiscripts/unix/10-install-tools.sh"},
+    {"condition":"always","phase":"after","position":4,"sha256":"d11b33191842f27cccd571940300314702838e42c318ad959e4398b61b9fac7a","target":".chezmoiscripts/unix/99-adapters.sh"}
   ]
 }

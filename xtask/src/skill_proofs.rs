@@ -179,6 +179,16 @@ pub const IGNORE_HARNESSES: [&str; 2] = [
     "a_star_stays_inside_one_segment_and_a_globstar_crosses_them",
 ];
 
+pub const INPUT_HARNESSES: [&str; 2] = [
+    "a_term_that_reads_the_host_always_refuses_the_hash",
+    "the_whole_context_is_hashed_only_through_a_rendered_partial",
+];
+
+pub const OCOMMENT_HARNESSES: [&str; 2] = [
+    "a_build_is_skipped_only_for_the_installed_recorded_revision",
+    "a_missing_checkout_is_always_cloned",
+];
+
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
     let summary = &value["verification_results"]["summary"];
     ensure!(
@@ -762,7 +772,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 13] = [
+pub const RULES: [Rules; 15] = [
     Rules {
         source: "xtask/src/target_rules.rs",
         harnesses: &TARGET_HARNESSES,
@@ -1035,6 +1045,42 @@ fn reject_keeping_a_repeated_pattern() {
         rejected: &[
             "reject_a_star_that_crosses_a_segment",
             "reject_keeping_a_repeated_pattern",
+        ],
+    },
+    Rules {
+        source: "xtask/src/input_rules.rs",
+        harnesses: &INPUT_HARNESSES,
+        counterexamples: "use production::{Term, Verdict, verdict};
+#[kani::proof]
+fn reject_hashing_a_chezmoi_variable() {
+    assert!(verdict(&[Term::Data, Term::Chezmoi]) == Verdict::Admit);
+}
+#[kani::proof]
+fn reject_hashing_the_whole_context() {
+    assert!(verdict(&[Term::Data, Term::Context]) == Verdict::Admit);
+}
+",
+        rejected: &[
+            "reject_hashing_a_chezmoi_variable",
+            "reject_hashing_the_whole_context",
+        ],
+    },
+    Rules {
+        source: "tools/dotctl/src/setup/ocomment_rules.rs",
+        harnesses: &OCOMMENT_HARNESSES,
+        counterexamples: "use production::{Action, action};
+#[kani::proof]
+fn reject_skipping_a_moved_checkout() {
+    assert!(action(Some(&b\"b\"[..]), true, Some(&b\"a\"[..])) == Action::Current);
+}
+#[kani::proof]
+fn reject_skipping_a_missing_binary() {
+    assert!(action(Some(&b\"a\"[..]), false, Some(&b\"a\"[..])) == Action::Current);
+}
+",
+        rejected: &[
+            "reject_skipping_a_moved_checkout",
+            "reject_skipping_a_missing_binary",
         ],
     },
 ];

@@ -459,17 +459,17 @@
     {"mode":"0644","path":".profile","sha256":"4166710f0f3ba794751ee1f8dd330167999fe85374c12bf23991eca2fd253e07","type":"file"}
   ],
   "scripts": [
-    {"condition":"always","phase":"before","position":0,"sha256":"0e89bcd1f2dcdedb3578ce52b4921ed253dd84a73e2b592027466c0aac562b8e","target":"00-runtime.sh"},
-    {"condition":"onchange","phase":"before","position":1,"sha256":"c2688a9e76573bb812072f3538c881f4396438ad3a7d228656e2f505bbdc18f6","target":"install-gh.sh"},
-    {"condition":"onchange","phase":"before","position":2,"sha256":"8d5537a09543950972da80655f55bf6a5ee42036e22b83abb158576e7e0fcc32","target":"install-mise.sh"},
-    {"condition":"onchange","phase":"after","position":3,"sha256":"d237d216db4733f4a4409f2004301ce276fbf343238800491ed34d45181d1f2f","target":"10-install-tools.sh"},
-    {"condition":"always","phase":"after","position":4,"sha256":"12cf3b7f877f32bad49bf27136f581e5cf83093bb0e4df10900a7ee627b71026","target":"99-adapters.sh"},
-    {"condition":"onchange","phase":"after","position":5,"sha256":"75a75f2446fc4e5a53f8cde00ec26bdeec37c01283c57bd4980f80e4849c2421","target":"configure-fcitx5.sh"},
-    {"condition":"onchange","phase":"after","position":6,"sha256":"c7cb0e7207cb3d228ece56a324d2e344c4c1cbdc3432390f552e4d2a64da6ad7","target":"install-nix-profile.sh"},
-    {"condition":"onchange","phase":"after","position":7,"sha256":"7e5853e2971d8291b48206f8df8424addbfa8f2e1a3e5e81335c46688a027ccc","target":"install-ocomment.sh"},
-    {"condition":"onchange","phase":"after","position":8,"sha256":"ada7d8180d213d208fbc5489d73235fd9e00851cca1cb4d9dc94caa59cd5fddf","target":"refresh-desktop.sh"},
-    {"condition":"onchange","phase":"after","position":9,"sha256":"0ba0be16cb3f6a7b083f570ab20e979cfb766f913ddf5413fa57ceee30bc1419","target":"refresh-integrations.sh"},
-    {"condition":"onchange","phase":"after","position":10,"sha256":"f1b2e195c7ca49cbf17de2930344a1a0f8a2521dcfb40b2f39926ba2bba0a44a","target":"retire-tmux.sh"},
-    {"condition":"onchange","phase":"after","position":11,"sha256":"7f1aa3d42eac4a0380b544de0bf675b6accdc8fa9da9426c28391e93ea7811db","target":"setup-ocaml.sh"}
+    {"condition":"always","phase":"before","position":0,"sha256":"0e89bcd1f2dcdedb3578ce52b4921ed253dd84a73e2b592027466c0aac562b8e","target":".chezmoiscripts/unix/00-runtime.sh"},
+    {"condition":"onchange","phase":"before","position":1,"sha256":"2f52133cad5a5ced81264817d2f46fcd212f0bf0f7e0525009c28b972b75a6e1","target":".chezmoiscripts/unix/install-gh.sh"},
+    {"condition":"onchange","phase":"before","position":2,"sha256":"aaca7ce3c0514a6348a1ee1ce42ba4a6476c31a8b267bc87bbbd297d94a921ed","target":".chezmoiscripts/unix/install-mise.sh"},
+    {"condition":"onchange","phase":"after","position":3,"sha256":"24f4eadc5723be4984cdb906b70ffed1f78e69f1ea453cc196da11e42f15272f","target":".chezmoiscripts/unix/10-install-tools.sh"},
+    {"condition":"always","phase":"after","position":4,"sha256":"12cf3b7f877f32bad49bf27136f581e5cf83093bb0e4df10900a7ee627b71026","target":".chezmoiscripts/unix/99-adapters.sh"},
+    {"condition":"onchange","phase":"after","position":5,"sha256":"03581d81af3c1e6d7c82eba247be6db30d82b822ebf7af2d6783708b807501c0","target":".chezmoiscripts/unix/configure-fcitx5.sh"},
+    {"condition":"onchange","phase":"after","position":6,"sha256":"fafbf9cc1801d7a6e8b139ca6c80a0bc0397a0316553db3fae20f3efcadcb9c3","target":".chezmoiscripts/unix/install-nix-profile.sh"},
+    {"condition":"onchange","phase":"after","position":7,"sha256":"76457c6ad009f28b4d6fbb31e564a21c1d629fcb6776821f28473d85d6aee863","target":".chezmoiscripts/unix/install-ocomment.sh"},
+    {"condition":"onchange","phase":"after","position":8,"sha256":"02e50c3b834e132857c06734e686c6236dc910b906bae9bb4bc64019fd0aa623","target":".chezmoiscripts/unix/refresh-desktop.sh"},
+    {"condition":"onchange","phase":"after","position":9,"sha256":"653661da32dd05a3b8cc716d582c602991e997f132b9709af8829e93aba0fb2e","target":".chezmoiscripts/unix/refresh-integrations.sh"},
+    {"condition":"onchange","phase":"after","position":10,"sha256":"71472f86dfbb0b33bd1644914c16a9c9dacbe3615da5f7d9a84a422b7f099b12","target":".chezmoiscripts/unix/retire-tmux.sh"},
+    {"condition":"onchange","phase":"after","position":11,"sha256":"481459b81734309114462e98d31cfb946f1242b522492360cb0c4be884683a34","target":".chezmoiscripts/unix/setup-ocaml.sh"}
   ]
 }

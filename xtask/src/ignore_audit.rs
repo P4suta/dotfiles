@@ -32,7 +32,9 @@ fn source_paths(root: &Path) -> Result<Vec<String>> {
                 .replace('\\', "/");
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if relative.starts_with(".chezmoi") || name == ".git" {
+            if (relative.starts_with(".chezmoi") && !relative.starts_with(".chezmoiscripts"))
+                || name == ".git"
+            {
                 continue;
             }
             if BUILD_OUTPUTS.contains(&name.as_ref()) {

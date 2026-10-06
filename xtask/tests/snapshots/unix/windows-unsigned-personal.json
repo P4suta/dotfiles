@@ -408,21 +408,21 @@
     {"mode":"0644","path":"Documents/PowerShell/Microsoft.PowerShell_profile.ps1","sha256":"42433254ef84ab2a92894d9967f81b03d0ef739e2f552c95597a341ff270c38a","type":"file"}
   ],
   "scripts": [
-    {"condition":"always","phase":"before","position":0,"sha256":"9b54eb323179d06e95f53a56ba9bc7152e4ca5fc4a1b64b8d13ab178ce7b4dbd","target":"00-runtime.ps1"},
-    {"condition":"onchange","phase":"before","position":1,"sha256":"df96f41f287a2959be78907de25399386d9b1d6a667296feee53fb2a404e5864","target":"install-gh.ps1"},
-    {"condition":"onchange","phase":"before","position":2,"sha256":"aa03dc0ff96b1636b875b00c1fe2e16c8b533b708918d7c8aa75765df959b513","target":"install-mise.ps1"},
-    {"condition":"onchange","phase":"after","position":3,"sha256":"70e6bb5259fc63f17532e1c4250cae372f9cbd90d2d1ab9f968478a0d07c6d2d","target":"22-setup-scoop.ps1"},
-    {"condition":"always","phase":"after","position":4,"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","target":"23-setup-winget.ps1"},
-    {"condition":"always","phase":"after","position":5,"sha256":"000a1bd19b7ea6ba2814b851614b9eeb65afa6a71f9b0eca22df3ced5d1df4a1","target":"25-install-wezterm.ps1"},
-    {"condition":"onchange","phase":"after","position":6,"sha256":"1e2b76826a31ffb0ba98f4242c5e3ef7c8eaad9a2277008447d47ad7bf314174","target":"25-setup-tools.ps1"},
-    {"condition":"always","phase":"after","position":7,"sha256":"393f82d8e77bc59a97c88ccff615a2a7f8de21c6ce796c4b4e10a382d1a32a93","target":"27-cache-shell-init.ps1"},
-    {"condition":"onchange","phase":"after","position":8,"sha256":"8a082782ab91b22d51ba188612dd1a8001b56d8d2b343d0397fa577f80d12e67","target":"30-disable-python-store-stub.ps1"},
-    {"condition":"onchange","phase":"after","position":9,"sha256":"f17635958615b0ca7fd8e02dfe26bf026a1ff2b776270200583c41280bcbe6ae","target":"40-install-herdr.ps1"},
-    {"condition":"onchange","phase":"after","position":10,"sha256":"2b993a3f5b7f7df79bbc4fdd7fe583a5d410457101017762f4b142240cabfa6f","target":"41-refresh-integrations.ps1"},
-    {"condition":"onchange","phase":"after","position":11,"sha256":"ca40b2cd9e629fab63aa63ef5350cd7350f5bb715f0ca1b2f3b7f2f1bb1156a1","target":"45-install-ocomment.ps1"},
-    {"condition":"onchange","phase":"after","position":12,"sha256":"d88b56ddde3749db36828bf48434b60c7ac98864b5232429f9b2ac885b5be80f","target":"50-enable-sshd.ps1"},
-    {"condition":"onchange","phase":"after","position":13,"sha256":"626ae2e17fef984619c6b9888d9bc99dc39051f4ed90ed446aa10dd98a3e69f2","target":"55-setup-keyboard.ps1"},
-    {"condition":"onchange","phase":"after","position":14,"sha256":"01e359ead0033dffd019df26bca46f830ad3ad5b247847a1fccf7c31c955da79","target":"60-watch-storage-scout.ps1"},
-    {"condition":"always","phase":"after","position":15,"sha256":"76a7db0053ba20254b2d806e0721a8fbe5a826a3e605bbf2a3cb33845f519987","target":"99-adapters.ps1"}
+    {"condition":"always","phase":"before","position":0,"sha256":"9b54eb323179d06e95f53a56ba9bc7152e4ca5fc4a1b64b8d13ab178ce7b4dbd","target":".chezmoiscripts/windows/00-runtime.ps1"},
+    {"condition":"onchange","phase":"before","position":1,"sha256":"df96f41f287a2959be78907de25399386d9b1d6a667296feee53fb2a404e5864","target":".chezmoiscripts/windows/install-gh.ps1"},
+    {"condition":"onchange","phase":"before","position":2,"sha256":"aa03dc0ff96b1636b875b00c1fe2e16c8b533b708918d7c8aa75765df959b513","target":".chezmoiscripts/windows/install-mise.ps1"},
+    {"condition":"onchange","phase":"after","position":3,"sha256":"70e6bb5259fc63f17532e1c4250cae372f9cbd90d2d1ab9f968478a0d07c6d2d","target":".chezmoiscripts/windows/22-setup-scoop.ps1"},
+    {"condition":"always","phase":"after","position":4,"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","target":".chezmoiscripts/windows/23-setup-winget.ps1"},
+    {"condition":"always","phase":"after","position":5,"sha256":"000a1bd19b7ea6ba2814b851614b9eeb65afa6a71f9b0eca22df3ced5d1df4a1","target":".chezmoiscripts/windows/25-install-wezterm.ps1"},
+    {"condition":"onchange","phase":"after","position":6,"sha256":"8b2a2bd3c391c658c5e99cca424a548d3a9fa7cb5d5daab298859e6c766b22ec","target":".chezmoiscripts/windows/25-setup-tools.ps1"},
+    {"condition":"always","phase":"after","position":7,"sha256":"393f82d8e77bc59a97c88ccff615a2a7f8de21c6ce796c4b4e10a382d1a32a93","target":".chezmoiscripts/windows/27-cache-shell-init.ps1"},
+    {"condition":"onchange","phase":"after","position":8,"sha256":"8a082782ab91b22d51ba188612dd1a8001b56d8d2b343d0397fa577f80d12e67","target":".chezmoiscripts/windows/30-disable-python-store-stub.ps1"},
+    {"condition":"onchange","phase":"after","position":9,"sha256":"f17635958615b0ca7fd8e02dfe26bf026a1ff2b776270200583c41280bcbe6ae","target":".chezmoiscripts/windows/40-install-herdr.ps1"},
+    {"condition":"onchange","phase":"after","position":10,"sha256":"f117615d64773c7ac2840014e43a075cf20c9b013469f47acc5ac967226200da","target":".chezmoiscripts/windows/41-refresh-integrations.ps1"},
+    {"condition":"always","phase":"after","position":11,"sha256":"bfcae7a68e0a93132d2d441143d6a4a4870e29156cbad575b907b5849325425c","target":".chezmoiscripts/windows/45-install-ocomment.ps1"},
+    {"condition":"onchange","phase":"after","position":12,"sha256":"d88b56ddde3749db36828bf48434b60c7ac98864b5232429f9b2ac885b5be80f","target":".chezmoiscripts/windows/50-enable-sshd.ps1"},
+    {"condition":"onchange","phase":"after","position":13,"sha256":"626ae2e17fef984619c6b9888d9bc99dc39051f4ed90ed446aa10dd98a3e69f2","target":".chezmoiscripts/windows/55-setup-keyboard.ps1"},
+    {"condition":"onchange","phase":"after","position":14,"sha256":"33949ee018623d9f82c25d9b799f5c37d6da5ddf4bfbd34fecf341192e2a0488","target":".chezmoiscripts/windows/60-watch-storage-scout.ps1"},
+    {"condition":"always","phase":"after","position":15,"sha256":"76a7db0053ba20254b2d806e0721a8fbe5a826a3e605bbf2a3cb33845f519987","target":".chezmoiscripts/windows/99-adapters.ps1"}
   ]
 }

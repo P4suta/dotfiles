@@ -2,6 +2,7 @@ mod download;
 pub mod herdr;
 pub mod keyboard;
 pub mod ocomment;
+mod ocomment_rules;
 pub mod python_stub;
 pub mod scoop;
 pub mod shell;

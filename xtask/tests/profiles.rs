@@ -537,6 +537,95 @@ fn forgetting_script_runs_reruns_every_onchange_script() {
     assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 2);
 }
 
+/// chezmoi keys `run_onchange_` state by target name and contents, so moving a script into `.chezmoiscripts/` reruns it once.
+#[test]
+fn moving_an_onchange_script_into_chezmoiscripts_reruns_it_once() {
+    let scope = tempfile::tempdir().unwrap();
+    let source = scope.path().join("source");
+    let destination = scope.path().join("home");
+    let state = scope.path().join("state");
+    let log = scope.path().join("runs");
+    let family = source.join(".chezmoiscripts/family");
+    fs::create_dir_all(&family).unwrap();
+    fs::create_dir_all(&destination).unwrap();
+    let (script, contents) = if cfg!(windows) {
+        (
+            "run_onchange_after_10-record.ps1",
+            format!("Add-Content -LiteralPath '{}' -Value ran\n", log.display()),
+        )
+    } else {
+        (
+            "run_onchange_after_10-record.sh",
+            format!("#!/bin/sh\necho ran >> '{}'\n", log.display()),
+        )
+    };
+    fs::write(source.join(script), contents).unwrap();
+    let config = scope.path().join("chezmoi.toml");
+    fs::write(&config, "").unwrap();
+    let apply = || {
+        let status = dotfiles_xtask::profiles::chezmoi(&source, &state, &config, &destination)
+            .arg("apply")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        fs::read_to_string(&log).unwrap().lines().count()
+    };
+    assert_eq!(apply(), 1);
+    assert_eq!(apply(), 1);
+    fs::rename(source.join(script), family.join(script)).unwrap();
+    assert_eq!(apply(), 2);
+    assert_eq!(apply(), 2);
+}
+
+/// Launchers pass the checkout root, which `.chezmoi.workingTree` names even when `.chezmoiroot` moves the source state below it.
+#[test]
+fn the_working_tree_is_the_checkout_root_under_a_chezmoiroot() {
+    let scope = tempfile::tempdir().unwrap();
+    let checkout = scope.path().join("checkout");
+    let home = checkout.join("home");
+    fs::create_dir_all(&home).unwrap();
+    assert!(
+        fixture_git::command("git", &scope.path().join("gitconfig"))
+            .arg("-C")
+            .arg(&checkout)
+            .args(["init", "--quiet"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    fs::write(checkout.join(".chezmoiroot"), "home\n").unwrap();
+    fs::write(
+        home.join("probe.tmpl"),
+        "{{ .chezmoi.workingTree }}|{{ .chezmoi.sourceDir }}",
+    )
+    .unwrap();
+    let destination = scope.path().join("target");
+    fs::create_dir_all(&destination).unwrap();
+    let config = scope.path().join("chezmoi.toml");
+    fs::write(&config, "").unwrap();
+    let output = dotfiles_xtask::profiles::chezmoi(&checkout, scope.path(), &config, &destination)
+        .args(["cat"])
+        .arg(destination.join("probe"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rendered = String::from_utf8(output.stdout).unwrap();
+    let canonical = |path: &Path| {
+        dotfiles_xtask::profiles::chezmoi_path(&dotfiles_xtask::canonical(path).unwrap())
+    };
+    let (working_tree, source) = rendered.split_once('|').unwrap();
+    assert_eq!(
+        canonical(Path::new(working_tree)),
+        canonical(&checkout),
+        "{rendered}"
+    );
+    assert_eq!(canonical(Path::new(source)), canonical(&home), "{rendered}");
+}
+
 #[test]
 fn recipe_references_are_commands_rather_than_prose() {
     let found = |text: &str, markdown: bool| -> Vec<String> {

@@ -21,6 +21,7 @@ windows-sys = { version = "0.61.2", features = ["Win32_UI_Accessibility", "Win32
 unsafe_code = "deny"
 missing_debug_implementations = "warn"
 unfulfilled_lint_expectations = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }
