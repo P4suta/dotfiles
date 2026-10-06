@@ -1,58 +1,26 @@
 //! Locates tools and builds the environment for child processes.
 //!
-//! Hook processes start from a non-interactive `sh` that may never have run `mise activate`, so this module restores the mise shims, `~/.local/bin`, and Homebrew to `PATH`.
+//! Hook processes start from a non-interactive `sh` that may never have run `mise activate`, so this module restores the managed tool directories to `PATH`.
 //!
 //! `MISE_AUTO_INSTALL=false` stops each shim run from downloading missing tools.
 
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Reads `HOME`, or `USERPROFILE` on Windows, where native processes often lack `HOME`.
+/// The user's home, or an empty path when the environment names none.
 pub fn home() -> PathBuf {
-    std::env::var_os("HOME")
-        .or_else(|| {
-            if cfg!(windows) {
-                std::env::var_os("USERPROFILE")
-            } else {
-                None
-            }
-        })
-        .map(PathBuf::from)
-        .unwrap_or_default()
+    platform::home::home().unwrap_or_default()
 }
 
 /// The PATH children of this gate should see.
 pub fn hook_path() -> String {
-    let home = home();
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    let shims = home.join(if cfg!(windows) {
-        "AppData/Local/mise/shims"
-    } else {
-        ".local/share/mise/shims"
-    });
-    if shims.is_dir() {
-        dirs.push(shims);
-    }
-    dirs.push(home.join(".local/bin"));
-    if let Ok(p) = std::env::var("PATH") {
-        dirs.extend(std::env::split_paths(&p));
-    }
-    for extra in ["/opt/homebrew/bin", "/opt/homebrew/sbin"] {
-        let pb = PathBuf::from(extra);
-        if pb.is_dir() && !dirs.contains(&pb) {
-            dirs.push(pb);
-        }
-    }
-    std::env::join_paths(dirs).map_or_else(|_| String::new(), |s| s.to_string_lossy().into_owned())
+    platform::home::managed_path(&home())
+        .map_or_else(|_| String::new(), |s| s.to_string_lossy().into_owned())
 }
 
 /// A `Command` with the hook `PATH` and `MISE_AUTO_INSTALL=false`.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the crate's one constructor for a child process"
-)]
 pub fn child(program: &str) -> Command {
-    let mut c = Command::new(program);
+    let mut c = platform::process::command(program);
     c.env("PATH", hook_path()).env("MISE_AUTO_INSTALL", "false");
     c
 }

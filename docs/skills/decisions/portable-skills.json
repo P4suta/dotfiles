@@ -5,8 +5,8 @@
   "evidence": [
     "home/dot_agents/skills/portable-skills/SKILL.md",
     "docs/adr/0003-local-skill-operations.md",
-    "xtask/tests/skill_ops.rs",
-    "xtask/tests/skill_runtime.rs"
+    "crates/skill-ops/tests/skill_ops.rs",
+    "crates/skill-ops/tests/skill_runtime.rs"
   ],
   "revisit": null
 }

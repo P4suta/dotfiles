@@ -4,10 +4,10 @@
   "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "home/dot_agents/skills/coderabbit/SKILL.md",
-    "xtask/src/review_guard.rs",
+    "crates/coderabbit-guard/src/lib.rs",
     "docs/adr/0008-layered-review-capacity.md",
     "docs/adr/0015-scoped-coderabbit-pause.md",
-    "xtask/src/review_rules.rs"
+    "crates/coderabbit-guard/src/review_rules.rs"
   ],
   "revisit": null
 }

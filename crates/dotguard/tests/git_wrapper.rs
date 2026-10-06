@@ -7,10 +7,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 use std::sync::OnceLock;
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the shared constructor for fixture Git processes"
-)]
 #[path = "support/fixture_git.rs"]
 mod fixture_git;
 #[path = "support/wrapper.rs"]

@@ -3,11 +3,6 @@
 //! The same file installs as `~/.local/bin/dev-reaper` and `~/.local/bin/session-reaper`, and dispatches on the name that launchd invokes.
 //! Invoked as `reaper`, it takes the agent name first: `reaper dev|session [args…]`.
 
-#![expect(
-    clippy::disallowed_methods,
-    reason = "launchd starts the reaper without the hook PATH, so it runs fixed system programs by absolute path"
-)]
-
 use devreaper::DevReaper;
 use sessionreaper::SessionReaper;
 

@@ -10,9 +10,12 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | `home/` | The chezmoi source state that `.chezmoiroot` names. |
 | `home/.chezmoiscripts/` | The setup launchers, one directory per OS family. |
 | `home/.chezmoitemplates/` | Shared partials under `partials/` and per-profile bodies under `native/`. |
-| `xtask/` | The task runner and the installed runtime behind every hook and launcher. |
+| `xtask/` | The development tasks behind `cargo xtask` and the just recipes, which no hook or launcher runs. |
+| `crates/platform/` | The home, the managed `PATH`, the one process constructor, the tool registry, the setup steps, and the build stamp. |
+| `crates/dotfiles/` | The installed runtime `dotfiles-xtask` behind every hook and launcher, and the Windows setup behind `dotctl`. |
+| `crates/skill-ops/`, `crates/pr-workflow/`, `crates/prose/`, `crates/coderabbit-guard/` | Each installed tool with its rules. |
 | `crates/dotguard/` | `dotguard`, the Git wrapper, and the reaper and herdr-agent binaries. |
-| `crates/dotctl/` | Windows machine setup. |
+| `crates/model/` | The typed chezmoi data and the profile rules. |
 | `Cargo.toml` | The workspace of `xtask/` and `crates/`, with its one lint policy, lockfile, and `clippy.toml`. |
 | `policy/` | Data the gates read. |
 | `docs/` | Architecture, [decision records](docs/adr/README.md), and skill decisions. |
@@ -35,10 +38,10 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | A file that differs per profile | an inline condition at its path, or `home/.chezmoitemplates/native/<topic>/<profile>` selected from there |
 | Which profiles receive a target | one line in `home/.chezmoidata/targets.toml`, naming a set of `profiles.toml`, then `just gen` |
 | A target to retire from hosts | one line in `home/.chezmoidata/retired.toml`, then `just gen` |
-| A setup step | `home/.chezmoiscripts/` and `xtask/src/setup.rs` |
+| A setup step | `home/.chezmoiscripts/`, `crates/platform/src/step.rs`, and `crates/dotfiles/src/setup.rs` |
 | Shared data and tool versions | `home/.chezmoidata/`, typed in `crates/model/src/data.rs`, `mise.toml`, and `mise.lock` |
-| A gate | `xtask/src/` with its tests in `xtask/tests/` |
-| A rule a gate decides | `xtask/src/*_rules.rs` and its entry in `xtask/src/skill_proofs.rs` |
+| A gate | `xtask/src/` with its tests in `xtask/tests/`, or the crate of the tool that runs it |
+| A rule a gate decides | a `*_rules.rs` module beside its caller and its entry in `xtask/src/skill_proofs.rs` |
 | A shared skill | `home/dot_agents/skills/<skill>/` and `docs/skills/decisions/<skill>.json` |
 | A durable design decision | a new record in `docs/adr/`, then `just gen` |
 

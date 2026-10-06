@@ -21,7 +21,7 @@ pub fn inheriting(
     global: &Path,
     environment: impl IntoIterator<Item = (OsString, OsString)>,
 ) -> Command {
-    let mut command = Command::new(program);
+    let mut command = platform::process::command(program);
     command.env_clear().envs(
         environment
             .into_iter()

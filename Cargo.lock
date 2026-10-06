@@ -132,6 +132,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
+name = "coderabbit-guard"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "platform",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -204,39 +214,34 @@ dependencies = [
 ]
 
 [[package]]
-name = "dotctl"
+name = "dotfiles"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "coderabbit-guard",
+ "dotguard",
  "jiff",
  "junction",
- "serde_json",
- "sha2",
- "tempfile",
- "windows-sys",
-]
-
-[[package]]
-name = "dotfiles-xtask"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "dotguard",
  "model",
- "pulldown-cmark",
+ "platform",
+ "prose",
  "serde",
  "serde_json",
  "sha2",
+ "skill-ops",
  "tempfile",
  "toml",
+ "windows-sys",
  "yaml-rust2",
 ]
 
 [[package]]
 name = "dotguard"
 version = "0.1.0"
+dependencies = [
+ "platform",
+]
 
 [[package]]
 name = "dyn-clone"
@@ -468,6 +473,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "platform"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "model",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -483,12 +501,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "pr-workflow"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "coderabbit-guard",
+ "dotfiles",
+ "dotguard",
+ "platform",
+ "prose",
+ "pulldown-cmark",
+ "serde",
+ "serde_json",
+ "sha2",
+ "skill-ops",
+ "tempfile",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "prose"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dotguard",
+ "platform",
+ "pulldown-cmark",
+ "serde",
+ "serde_json",
+ "sha2",
+ "skill-ops",
+ "tempfile",
+ "toml",
+ "yaml-rust2",
 ]
 
 [[package]]
@@ -664,6 +719,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "skill-ops"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "platform",
+ "pulldown-cmark",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "yaml-rust2",
+]
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -813,6 +883,29 @@ name = "winnow"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
+
+[[package]]
+name = "xtask"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "coderabbit-guard",
+ "dotfiles",
+ "dotguard",
+ "model",
+ "platform",
+ "pr-workflow",
+ "prose",
+ "pulldown-cmark",
+ "serde",
+ "serde_json",
+ "sha2",
+ "skill-ops",
+ "tempfile",
+ "toml",
+ "yaml-rust2",
+]
 
 [[package]]
 name = "yaml-rust2"

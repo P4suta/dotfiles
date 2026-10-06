@@ -1,9 +1,9 @@
-use dotfiles_xtask::instruction_audit::{check, dispatcher_findings, findings, profile_findings};
-use dotfiles_xtask::instruction_rules::{
-    Class, Definition, Holder, Line, admitted, follow_up, removed_row_held,
-};
 use std::fs;
 use std::path::Path;
+use xtask::instruction_audit::{check, dispatcher_findings, findings, profile_findings};
+use xtask::instruction_rules::{
+    Class, Definition, Holder, Line, admitted, follow_up, removed_row_held,
+};
 
 const PARTIAL: &str = "# Rules\n\n## Language\n\n- Reply in Japanese.\n- Write commits in English.\n{{- if stat $notes }}\n";
 

@@ -1,5 +1,5 @@
-use dotfiles_xtask::agent_memory::violations;
 use serde_json::{Value, json};
+use xtask::agent_memory::violations;
 
 const CLAUDE_OFF: &str = r#"{"model":"opus","autoMemoryEnabled":false}"#;
 const CODEX_OFF: &str = "model = \"o3\"\n[features]\nmemories = false\nexternal_agent_memory_import = false\nchronicle = false\n\n[memories]\ngenerate_memories = false\nuse_memories = false\n";
@@ -145,7 +145,7 @@ fn unparsable_rendered_settings_are_refused() {
 
 /// Renders a repository `modify_` template for one profile over a host file, as an apply would.
 fn render_merged(profile: &str, template: &str, target: &str, host: &str) -> String {
-    let root = dotfiles_xtask::source_state(
+    let root = xtask::source_state(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap(),
@@ -171,7 +171,7 @@ fn render_merged(profile: &str, template: &str, target: &str, host: &str) -> Str
         format!("[data]\nprofile = {profile:?}\n[data.platforms.{profile}]\n"),
     )
     .unwrap();
-    let rendered = dotfiles_xtask::profiles::chezmoi(&source, scope.path(), &config, &destination)
+    let rendered = xtask::profiles::chezmoi(&source, scope.path(), &config, &destination)
         .arg("cat")
         .arg(&path)
         .output()
@@ -313,9 +313,8 @@ fn a_profile_array_replaces_the_host_array_whether_or_not_it_is_empty() {
 
 #[test]
 fn a_host_file_with_memory_turned_back_on_enables_every_switch() {
-    let claude =
-        dotfiles_xtask::agent_memory::reenabled(".claude/settings.json", CLAUDE_OFF).unwrap();
-    let codex = dotfiles_xtask::agent_memory::reenabled(".codex/config.toml", CODEX_OFF).unwrap();
+    let claude = xtask::agent_memory::reenabled(".claude/settings.json", CLAUDE_OFF).unwrap();
+    let codex = xtask::agent_memory::reenabled(".codex/config.toml", CODEX_OFF).unwrap();
     let found = violations(&dump(Some(&claude), Some(&codex), Some(&off()))).unwrap();
     assert_eq!(found.len(), 6, "{found:?}");
     assert!(
@@ -325,14 +324,14 @@ fn a_host_file_with_memory_turned_back_on_enables_every_switch() {
     assert!(claude.contains("\"model\":\"opus\""), "{claude}");
     assert!(codex.contains("model = \"o3\""), "{codex}");
     assert_eq!(
-        dotfiles_xtask::agent_memory::reenabled(".other.json", "{\"a\":1}").unwrap(),
+        xtask::agent_memory::reenabled(".other.json", "{\"a\":1}").unwrap(),
         "{\"a\":1}"
     );
 }
 
 #[test]
 fn the_memory_refusal_names_the_cause_and_a_runnable_next_action() {
-    let message = dotfiles_xtask::agent_memory::refusal(
+    let message = xtask::agent_memory::refusal(
         "linux",
         &[".claude/settings.json: autoMemoryEnabled is Unset".into()],
     );

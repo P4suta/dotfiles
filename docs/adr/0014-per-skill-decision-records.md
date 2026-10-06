@@ -28,7 +28,7 @@ The engine and its manifest install together, and the engine refuses a manifest 
 The local gate adopts a catalog finding whose skill revision matches a reviewed revision, and a size finding only when it has also adopted that revision's size disposition.
 When the gate turns pending, it analyzes the current evidence and completes if it adopts every finding, so a reviewed host needs neither `analyze` nor a disposition file.
 
-The pure rules for a tracked decision's state, its size disposition, adoption, triage completion, and gate completion live in `xtask/src/skill_rules.rs` beside their Kani harnesses and refusing counterexamples.
+The pure rules for a tracked decision's state, its size disposition, adoption, triage completion, and gate completion live in `crates/skill-ops/src/skill_rules.rs` beside their Kani harnesses and refusing counterexamples.
 
 ## Alternatives
 

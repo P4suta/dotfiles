@@ -7,9 +7,10 @@
 
 use super::config;
 use super::util::{self, Lock};
+use platform::process::command;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 pub struct DevReaper;
 
@@ -220,7 +221,7 @@ fn resolve_docker() -> Option<PathBuf> {
 }
 
 fn docker_info(docker: &Path) -> bool {
-    Command::new(docker)
+    command(docker)
         .arg("info")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -229,7 +230,7 @@ fn docker_info(docker: &Path) -> bool {
 }
 
 fn docker_capture(docker: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new(docker).args(args).output().ok()?;
+    let out = command(docker).args(args).output().ok()?;
     out.status
         .success()
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned())
@@ -486,7 +487,7 @@ fn reap_one(cfg: &DevConfig, docker: &Path, activity: &HashMap<String, i64>, fid
             if cfg.mode == "log" {
                 println!("would stop {} (idle {idle}s, mode=log)", st.name);
             } else {
-                let stopped = Command::new(docker)
+                let stopped = command(docker)
                     .args(["stop", "--timeout", &cfg.stop_timeout, fid])
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
@@ -559,7 +560,7 @@ fn cleanup_one(cfg: &DevConfig, docker: &Path, fid: &str, now: i64) {
     }
 
     if cfg.mode == "full" {
-        let removed = Command::new(docker)
+        let removed = command(docker)
             .args(["rm", fid])
             .stdout(Stdio::null())
             .stderr(Stdio::null())

@@ -5,7 +5,7 @@
   "evidence": [
     "home/dot_agents/skills/verification-tools/SKILL.md",
     "docs/adr/0003-local-skill-operations.md",
-    "xtask/src/skill_rules.rs",
+    "crates/skill-ops/src/skill_rules.rs",
     "xtask/src/skill_proofs.rs"
   ],
   "revisit": null

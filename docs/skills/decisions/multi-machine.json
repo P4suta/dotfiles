@@ -4,9 +4,9 @@
   "reason": "Point host inventory, readiness, and pre-push cross-platform verification at `dotfiles-xtask hosts` sync, doctor, and check, whose notes pre-push and pr-workflow ready require, in the minimal prose of the writing standard; keep the native-path, job-identity, 1Password, hub, and agent-dispatch judgment.",
   "evidence": [
     "home/dot_agents/skills/multi-machine/SKILL.md",
-    "xtask/src/hosts.rs",
-    "xtask/src/hosts_rules.rs",
-    "xtask/tests/hosts.rs",
+    "crates/dotfiles/src/hosts.rs",
+    "crates/dotfiles/src/hosts_rules.rs",
+    "crates/dotfiles/tests/hosts.rs",
     "docs/adr/0020-os-family-push-evidence.md"
   ],
   "revisit": null

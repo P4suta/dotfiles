@@ -1,6 +1,7 @@
 [package]
-name = "dotfiles-xtask"
-default-run = "dotfiles-xtask"
+name = "xtask"
+description = "The repository's development tasks, which `cargo xtask` and the just recipes run"
+default-run = "xtask"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,18 +11,21 @@ license.workspace = true
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.6", features = ["derive", "env"] }
+coderabbit-guard = { path = "../crates/coderabbit-guard" }
+dotfiles = { path = "../crates/dotfiles" }
 dotguard = { path = "../crates/dotguard" }
 model = { path = "../crates/model" }
+platform = { path = "../crates/platform" }
+pr-workflow = { path = "../crates/pr-workflow" }
+prose = { path = "../crates/prose" }
 pulldown-cmark = "0.13"
-yaml-rust2 = "0.13"
-serde_json = "1.0"
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0"
 sha2 = "0.11.0"
+skill-ops = { path = "../crates/skill-ops" }
 tempfile = "3.27"
 toml = "1.0"
-
-[build-dependencies]
-sha2 = "0.11.0"
+yaml-rust2 = "0.13"
 
 [lints]
 workspace = true

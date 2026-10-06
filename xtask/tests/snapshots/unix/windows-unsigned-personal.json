@@ -409,7 +409,7 @@
     {"mode":"0644","path":"Documents/PowerShell/Microsoft.PowerShell_profile.ps1","sha256":"42433254ef84ab2a92894d9967f81b03d0ef739e2f552c95597a341ff270c38a","type":"file"}
   ],
   "scripts": [
-    {"condition":"always","phase":"before","position":0,"sha256":"9b54eb323179d06e95f53a56ba9bc7152e4ca5fc4a1b64b8d13ab178ce7b4dbd","target":".chezmoiscripts/windows/00-runtime.ps1"},
+    {"condition":"always","phase":"before","position":0,"sha256":"532b1c1e4ff4896dd2c962c737631996d62a6cb0e1cac683077450b792ab27dd","target":".chezmoiscripts/windows/00-runtime.ps1"},
     {"condition":"onchange","phase":"before","position":1,"sha256":"df96f41f287a2959be78907de25399386d9b1d6a667296feee53fb2a404e5864","target":".chezmoiscripts/windows/install-gh.ps1"},
     {"condition":"onchange","phase":"before","position":2,"sha256":"aa03dc0ff96b1636b875b00c1fe2e16c8b533b708918d7c8aa75765df959b513","target":".chezmoiscripts/windows/install-mise.ps1"},
     {"condition":"onchange","phase":"after","position":3,"sha256":"70e6bb5259fc63f17532e1c4250cae372f9cbd90d2d1ab9f968478a0d07c6d2d","target":".chezmoiscripts/windows/22-setup-scoop.ps1"},

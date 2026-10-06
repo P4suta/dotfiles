@@ -164,8 +164,8 @@ fn required_packages(
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let mut required = crate::setup::scripted_requirements(profile, &contents(true));
-    required.extend(crate::setup::entry_requirements(&contents(false)));
+    let mut required = dotfiles::setup::scripted_requirements(profile, &contents(true));
+    required.extend(dotfiles::setup::entry_requirements(&contents(false)));
     required.sort();
     required.dedup();
     Ok(required

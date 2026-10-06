@@ -4,11 +4,11 @@
 # Its crate repeats the workspace lints with unsafe code denied instead of forbidden, and xtask/tests/lint_policy.rs keeps this list, the sources, and the manifests in agreement.
 
 [[site]]
-path = "crates/dotctl/src/setup/keyboard.rs"
+path = "crates/dotfiles/src/windows/setup/keyboard.rs"
 function = "set_value"
 
 [[site]]
-path = "crates/dotctl/src/setup/keyboard.rs"
+path = "crates/dotfiles/src/windows/setup/keyboard.rs"
 function = "filter_keys"
 
 [[site]]

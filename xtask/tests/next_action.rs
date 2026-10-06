@@ -1,27 +1,16 @@
-#![expect(
-    clippy::disallowed_methods,
-    reason = "integration tests spawn the binaries and real tools they verify"
-)]
-
 use anyhow::{Context, Result, ensure};
-use dotfiles_xtask::next_action::{
-    Environment, HostStatus, Observed, PullRequest, Recommendation, classify_checks,
-    decision_backlog, github_repository, host_status, inspect, perform, recommend,
-};
-use dotfiles_xtask::next_action_rules::{
-    Checks, Head, Host, Pr, State, Step, Upstream, decide, executable,
-};
-use dotfiles_xtask::skill_ops::catalog;
 use serde_json::{Value, json};
+use skill_ops::catalog;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
+use xtask::next_action::{
+    Environment, HostStatus, Observed, PullRequest, Recommendation, classify_checks,
+    decision_backlog, github_repository, host_status, inspect, perform, recommend,
+};
+use xtask::next_action_rules::{Checks, Head, Host, Pr, State, Step, Upstream, decide, executable};
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the shared constructor for fixture Git processes"
-)]
 #[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
@@ -788,7 +777,7 @@ impl Fixture {
         paths.extend(std::env::split_paths(
             &std::env::var_os("PATH").context("PATH")?,
         ));
-        let mut command = Command::new(env!("CARGO_BIN_EXE_dotfiles-xtask"));
+        let mut command = platform::process::command(env!("CARGO_BIN_EXE_xtask"));
         command
             .current_dir(&self.clone)
             .env("PATH", std::env::join_paths(paths)?)
@@ -810,8 +799,11 @@ fn gh_directory() -> &'static tempfile::TempDir {
     static DIRECTORY: OnceLock<tempfile::TempDir> = OnceLock::new();
     DIRECTORY.get_or_init(|| {
         let directory = tempfile::tempdir().unwrap();
-        let result = Command::new("rustc")
-            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/gh.rs"))
+        let result = platform::process::command("rustc")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../crates/pr-workflow/tests/fixtures/gh.rs"
+            ))
             .arg("-o")
             .arg(
                 directory

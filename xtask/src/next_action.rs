@@ -1,12 +1,12 @@
 //! Inspects the repository, GitHub, and host state and recommends the single next step of the workflow.
 
 use crate::next_action_rules::{Checks, Head, Host, Pr, State, Step, Upstream, decide, executable};
-use crate::skill_ops::{DECISIONS, catalog, complete, tracked_decisions};
-use crate::skill_rules::{Tracked, tracked_decision};
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
 use serde_json::Value;
+use skill_ops::skill_rules::{Tracked, tracked_decision};
+use skill_ops::{DECISIONS, catalog, complete, tracked_decisions};
 use std::fmt::Write as _;
 use std::fs;
 use std::io::Write;
@@ -755,9 +755,7 @@ pub fn perform(root: &Path, recommendation: &Recommendation) -> Result<Option<St
             "inspect `git status` and rerun `just next`",
         )
         .map(|_| None),
-        (Step::DraftDecisions, _) => {
-            crate::skill_ops::decide(root, &state.undecided_skills[0]).map(Some)
-        }
+        (Step::DraftDecisions, _) => skill_ops::decide(root, &state.undecided_skills[0]).map(Some),
         (action, _) => bail!(
             "`{}` is not a local, reversible step, so --execute does not run it; next action: {}{}",
             serde_json::to_value(action)?.as_str().unwrap_or_default(),

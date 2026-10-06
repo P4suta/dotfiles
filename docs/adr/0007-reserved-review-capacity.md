@@ -34,7 +34,7 @@ One hour sets the shortest wait before reconsideration, and grants neither autho
 
 ## Assurance and limits
 
-Exhaustive source-bound Kani checks cover overflow, rollback, and the reserve arithmetic and cooldown of the production functions in `xtask/src/review_rules.rs`.
+Exhaustive source-bound Kani checks cover overflow, rollback, and the reserve arithmetic and cooldown of the production functions in `crates/coderabbit-guard/src/review_rules.rs`.
 The proof runner checks exact harness inventories, reachable acceptance and refusal, and false reserve and early review controls.
 An exhaustive proof shows that the production PR marker predicate never lets review exclusion permit unfinished generation.
 Native tests cover directive decoding, locked files, durable preflight reservations, failed probes, rolling-day limits, supported usage spellings, and installation history.

@@ -16,7 +16,7 @@ Chezmoi's Go templates and Ansible's Jinja expressions and command module interp
 Executable lookup, downloads, filesystem state, and GPG lie outside Kani's Rust semantics.
 Native interpreter checks of the production files replace a proof here, and the production Rust decision proofs stay required through `just proofs`.
 
-`xtask/tests/desktop_integrations.rs` runs every combination of the three SSH variables, desktop availability, and supported OS values, including explicit empty variables, through the pinned chezmoi executable.
+`crates/dotfiles/tests/desktop_integrations.rs` runs every combination of the three SSH variables, desktop availability, and supported OS values, including explicit empty variables, through the pinned chezmoi executable.
 On Linux, it parses the production download and conversion tasks and runs them with pinned Ansible and real GPG.
 Only fixture URLs, input and output paths, privilege and ownership settings, and an observation register differ from production.
 The tests cover creation, unchanged reruns, source updates with existing output, missing output, and converter failure.

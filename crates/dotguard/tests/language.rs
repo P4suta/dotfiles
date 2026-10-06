@@ -5,10 +5,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the shared constructor for fixture Git processes"
-)]
 #[path = "support/fixture_git.rs"]
 mod fixture_git;
 #[path = "support/wrapper.rs"]
@@ -52,13 +48,9 @@ fn fixtures() -> &'static Fixtures {
 }
 
 /// A command for dotguard itself, which starts only after the fixtures stand in place.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the test starts the dotguard binary under test, which no host provision declares"
-)]
 fn dotguard() -> Command {
     fixtures();
-    Command::new(env!("CARGO_BIN_EXE_dotguard"))
+    platform::process::command(env!("CARGO_BIN_EXE_dotguard"))
 }
 
 #[test]

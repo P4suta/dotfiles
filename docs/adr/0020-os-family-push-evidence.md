@@ -29,7 +29,7 @@ The multi-machine and ci-budget skills asked for local runs, but nothing enforce
 The commit lacks a passing record for its tree on some required family.
   The gate skips deletions, tags, and pushes to the owner's hubs.
 
-`xtask/src/hosts_rules.rs` holds the decisions, and Kani proves them with rejecting counterexamples.
+`crates/dotfiles/src/hosts_rules.rs` holds the decisions, and Kani proves them with rejecting counterexamples.
 
 ## Alternatives
 

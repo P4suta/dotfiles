@@ -153,8 +153,8 @@ fn every_crate_checks_the_workspace_lints_and_only_foreign_interface_crates_deny
 #[test]
 fn the_git_guard_installs_from_its_link_time_optimized_profile() {
     let workspace = manifest(&root().join("Cargo.toml"));
-    let profile = &workspace["profile"][dotfiles_xtask::setup::GUARD_PROFILE];
+    let profile = &workspace["profile"][dotfiles::setup::GUARD_PROFILE];
     assert_eq!(profile["inherits"].as_str(), Some("release"));
     assert_eq!(profile["lto"].as_bool(), Some(true));
-    assert_eq!(dotfiles_xtask::setup::GUARD_CRATE, "crates/dotguard");
+    assert_eq!(dotfiles::setup::GUARD_CRATE, "crates/dotguard");
 }

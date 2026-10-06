@@ -1,6 +1,6 @@
-use dotfiles_xtask::quality::workflow_findings;
 use std::fs;
 use std::path::Path;
+use xtask::quality::workflow_findings;
 
 fn repository(path: &str) -> String {
     fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(path)).unwrap()

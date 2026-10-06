@@ -460,7 +460,7 @@
     {"mode":"0644","path":".profile","sha256":"4166710f0f3ba794751ee1f8dd330167999fe85374c12bf23991eca2fd253e07","type":"file"}
   ],
   "scripts": [
-    {"condition":"always","phase":"before","position":0,"sha256":"0e89bcd1f2dcdedb3578ce52b4921ed253dd84a73e2b592027466c0aac562b8e","target":".chezmoiscripts/unix/00-runtime.sh"},
+    {"condition":"always","phase":"before","position":0,"sha256":"3f94dfc2680d11ef0d7a669bd2c1f58767feb851ebab94370837e7518b3b6013","target":".chezmoiscripts/unix/00-runtime.sh"},
     {"condition":"onchange","phase":"before","position":1,"sha256":"2f52133cad5a5ced81264817d2f46fcd212f0bf0f7e0525009c28b972b75a6e1","target":".chezmoiscripts/unix/install-gh.sh"},
     {"condition":"onchange","phase":"before","position":2,"sha256":"aaca7ce3c0514a6348a1ee1ce42ba4a6476c31a8b267bc87bbbd297d94a921ed","target":".chezmoiscripts/unix/install-mise.sh"},
     {"condition":"onchange","phase":"after","position":3,"sha256":"731e0a373200954dee7ebeed61daf4c402ee8e179ba34918ed0d7e274552bad3","target":".chezmoiscripts/unix/10-install-tools.sh"},

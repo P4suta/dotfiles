@@ -9,77 +9,77 @@ trust:
     mise trust --quiet {{quote(justfile_directory() / "mise.toml")}}
 
 check *args: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check {{args}}
+    mise x -- cargo xtask check {{args}}
 
 check-staged: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check --staged
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml --bin prose -- --source . repository --scope comments
+    mise x -- cargo xtask check --staged
+    mise x -- cargo run --locked --package prose --bin prose -- --source . repository --scope comments
 
 commit-message file: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml --bin prose -- --source . check --channel commit {{quote(file)}}
+    mise x -- cargo run --locked --package prose --bin prose -- --source . check --channel commit {{quote(file)}}
 
 profiles: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- profiles
+    mise x -- cargo xtask profiles
 
 proofs *args: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- proofs {{args}}
+    mise x -- cargo xtask proofs {{args}}
 
 classify *args: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- classify {{args}}
+    mise x -- cargo xtask classify {{args}}
 
 rehearse *args: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- rehearse {{args}}
+    mise x -- cargo xtask rehearse {{args}}
 
 skills: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- skills
+    mise x -- cargo xtask skills
 
 adapters: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check-adapters
+    mise x -- cargo xtask check-adapters
 
 secrets: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check-secrets
+    mise x -- cargo xtask check-secrets
 
 gen: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- gen
+    mise x -- cargo xtask gen
 
 decide skill: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- decide {{quote(skill)}}
+    mise x -- cargo xtask decide {{quote(skill)}}
 
 hosts *args: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- hosts {{args}}
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- hosts {{args}}
 
 next *flags: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- next {{flags}}
+    mise x -- cargo xtask next {{flags}}
 
 diff config destination state: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- profile diff --config {{quote(config)}} --destination {{quote(destination)}} --state {{quote(state)}}
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- profile diff --config {{quote(config)}} --destination {{quote(destination)}} --state {{quote(state)}}
 
 apply config destination state backup: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- profile apply --config {{quote(config)}} --destination {{quote(destination)}} --state {{quote(state)}} --backup {{quote(backup)}} --live
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- profile apply --config {{quote(config)}} --destination {{quote(destination)}} --state {{quote(state)}} --backup {{quote(backup)}} --live
 
 verify config destination state: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- profile verify --config {{quote(config)}} --destination {{quote(destination)}} --state {{quote(state)}}
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- profile verify --config {{quote(config)}} --destination {{quote(destination)}} --state {{quote(state)}}
 
 refresh config: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- refresh --config {{quote(config)}} --live
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- refresh --config {{quote(config)}} --live
 
 doctor: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- doctor --strict
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- doctor --strict
 
 prose: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml --bin prose -- --source . repository --scope documents --scope comments
+    mise x -- cargo run --locked --package prose --bin prose -- --source . repository --scope documents --scope comments
 
 ops-check: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- ops-check
+    mise x -- cargo xtask ops-check
 
 install-review-guard: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- install-review-guard
+    mise x -- cargo xtask install-review-guard
 
 install-skill-ops: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- install-skill-ops
+    mise x -- cargo xtask install-skill-ops
 
 install-prose: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- install-prose
+    mise x -- cargo xtask install-prose
 
 install-pr-workflow: trust
-    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- install-pr-workflow
+    mise x -- cargo xtask install-pr-workflow

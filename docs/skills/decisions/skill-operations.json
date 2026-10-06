@@ -7,8 +7,8 @@
     "home/dot_agents/skills/skill-operations/references/operations.md",
     "docs/adr/0003-local-skill-operations.md",
     "docs/adr/0014-per-skill-decision-records.md",
-    "xtask/tests/skill_ops.rs",
-    "xtask/tests/skill_runtime.rs"
+    "crates/skill-ops/tests/skill_ops.rs",
+    "crates/skill-ops/tests/skill_runtime.rs"
   ],
   "revisit": null
 }

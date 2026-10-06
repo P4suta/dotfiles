@@ -25,7 +25,7 @@ Refuse unknown quota or billing state, a mismatched personal account, paid-credi
 Check the quota in the selected local repository, and keep one included review as headroom.
 Keep paid service add-ons inactive outside the wrapper.
 
-The [guard implementation](../../xtask/src/review_guard.rs) owns these rules, the [contract tests](../../xtask/tests/review_guard.rs) cover them, and the [operation section of ADR 0008](0008-layered-review-capacity.md#operation) covers use.
+The [guard implementation](../../crates/coderabbit-guard/src/lib.rs) owns these rules, the [contract tests](../../crates/coderabbit-guard/tests/review_guard.rs) cover them, and the [operation section of ADR 0008](0008-layered-review-capacity.md#operation) covers use.
 
 ## Consequences
 

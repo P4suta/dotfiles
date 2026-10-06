@@ -46,12 +46,8 @@ pub fn command() -> Option<Command> {
 }
 
 /// A `Command` for the real git at `path`, which the wrapper must reach without its own hook PATH.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the constructor for the real Git"
-)]
 pub fn at(path: &std::path::Path) -> Command {
-    Command::new(path)
+    platform::process::command(path)
 }
 
 /// Run the real git and return its stdout, or `None` if it exited non-zero.

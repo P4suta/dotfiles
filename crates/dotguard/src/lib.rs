@@ -19,7 +19,7 @@ pub mod postcommit;
 pub mod prepush;
 pub mod realgit;
 pub mod reaper_rules;
-pub mod refusal;
+pub use platform::refusal;
 pub mod renovate;
 pub mod stack;
 pub mod staged;

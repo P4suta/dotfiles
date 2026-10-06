@@ -1,7 +1,10 @@
 # Architecture
 
 This repository renders one chezmoi source state for four host profiles: `mac`, `linux`, `windows`, and `wsl`.
-Rust tools in `xtask/`, `crates/dotguard/`, and `crates/dotctl/` apply it, check it, and run every Git hook.
+Rust tools under `crates/` apply it and run every Git hook, and the development tasks in `xtask/` check it.
+The installed runtime `dotfiles-xtask` builds from `crates/dotfiles/`, which also holds the Windows setup behind `dotctl`.
+`skill-ops`, `pr-workflow`, `prose`, and the `coderabbit` guard each build from their own crate, and `dotguard` from `crates/dotguard/`.
+Every crate starts a process through `crates/platform/`, which also holds the home, the managed `PATH`, the tool registry, and the setup steps.
 One Cargo workspace at the root builds them with one lockfile, one toolchain from `mise.toml`, and one lint policy.
 [ADR 0023](adr/0023-repository-layout-and-target-architecture.md) records this layout and the steps that remain.
 
@@ -26,7 +29,7 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 ## Hook chain
 
 `~/.config/git/config` sets `core.hooksPath` to `~/.config/git/hooks` on every host, and each hook there executes `dotfiles-xtask hook <name>`.
-`xtask/src/hooks.rs` then runs, in order:
+`crates/dotfiles/src/hooks.rs` then runs, in order:
 
 1. For `pre-commit`, `commit-msg`, and `pre-push`, the process start health probe.
 2. For `pre-push`, the push pause marker.

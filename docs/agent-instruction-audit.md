@@ -107,7 +107,7 @@ Follow-up F6: the `skill-ops stop` hook already blocks completion in Claude Code
 
 > - Keep the CodeRabbit CLI and PR review pools separate, apply adaptive thresholds where they apply, and hold a push or PR update while review capacity stays unverified.
 
-Follow-up F7: the CodeRabbit guard enforces the floored budget and refuses unverifiable capacity for a CLI review in `xtask/src/review_guard.rs`.
+Follow-up F7: the CodeRabbit guard enforces the floored budget and refuses unverifiable capacity for a CLI review in `crates/coderabbit-guard/src/lib.rs`.
 No gate represents the PR review pool or its thresholds, or holds a push on its capacity.
 
 > - Never declare a PR complete while supported review findings, required checks, or a review of its current head remain outstanding.
@@ -434,18 +434,18 @@ No gate refuses work done without loading a skill, and F5 adds a completion gate
 | Follow Conventional Commits and omit AI attribution footers and session URLs. | Gate | Dotguard `commit-msg` strips agent attribution and session URLs in `crates/dotguard/src/attribution.rs`. |
 | Keep diffs reviewable by editing the smallest relevant region. | Merged | Merged into `Make the smallest change`. |
 | Load `pull-request` before GitHub-bound implementation. | Skill | The `pull-request` skill description states the same trigger. |
-| Personal non-fork repositories require an existing issue. | Gate and skill | `pr-workflow start`, `create`, and `edit` refuse a personal non-fork without an open, finished issue in `xtask/src/pr_workflow.rs`, and `pull-request` states the rule for external projects and forks. |
+| Personal non-fork repositories require an existing issue. | Gate and skill | `pr-workflow start`, `create`, and `edit` refuse a personal non-fork without an open, finished issue in `crates/pr-workflow/src/lib.rs`, and `pull-request` states the rule for external projects and forks. |
 | Confirm that the diff stays within the issue's scope. | Merged | Reworded as `for PR creation, document edits, and ready transitions`. |
 | Load `formal-assurance` for every implementation change. | Skill | The retained `skill-ops load formal-assurance` line loads `formal-assurance`, which states the obligations. |
 | Load `verification-tools` and `type-contracts` for implementation work. | Skill | The retained `skill-ops load formal-assurance` line loads `verification-tools`, and `home/dot_config/skill-ops/policy.json` adds `type-contracts` and `executable-policy`. |
-| Load `ci-budget` before an authorized push or PR update. | Gate and skill | The pre-push dispatcher refuses while `~/.config/git/push-paused` exists in `xtask/src/hooks.rs`, and `ci-budget` states the local checks. |
-| Load `coderabbit-review` for an initial substantive PR. | Gate and skill | The CodeRabbit guard admits a CLI review only within verified allowance in `xtask/src/review_guard.rs`, and `coderabbit-review` states the trigger. |
-| Use `floor(capacity * 0.9 * 0.8)` budgets and hold publication on unverified capacity. | Gate | The CodeRabbit guard floors the budget once and refuses unverifiable CLI capacity in `xtask/src/review_rules.rs`. |
+| Load `ci-budget` before an authorized push or PR update. | Gate and skill | The pre-push dispatcher refuses while `~/.config/git/push-paused` exists in `crates/dotfiles/src/hooks.rs`, and `ci-budget` states the local checks. |
+| Load `coderabbit-review` for an initial substantive PR. | Gate and skill | The CodeRabbit guard admits a CLI review only within verified allowance in `crates/coderabbit-guard/src/lib.rs`, and `coderabbit-review` states the trigger. |
+| Use `floor(capacity * 0.9 * 0.8)` budgets and hold publication on unverified capacity. | Gate | The CodeRabbit guard floors the budget once and refuses unverifiable CLI capacity in `crates/coderabbit-guard/src/review_rules.rs`. |
 | Elapsed time alone gives no permission to push. | Merged | Merged into `while review capacity stays unverified`. |
-| Honor an owner-imposed CodeRabbit pause. | Gate | The CodeRabbit guard refuses every service call while paused in `xtask/src/review_rules.rs`, with a Kani proof. |
+| Honor an owner-imposed CodeRabbit pause. | Gate | The CodeRabbit guard refuses every service call while paused in `crates/coderabbit-guard/src/review_rules.rs`, with a Kani proof. |
 | Use `reliability` for intermittent failures. | Skill | `reliability` states the trigger in its description and the rule in its body. |
 | Load `dotfiles` for dotfiles changes. | Skill | `dotfiles` states the trigger and the rule in its description. |
-| Prefer `skill-ops load NAME` for shared skills. | Gate and skill | The `skill-ops stop` hook refuses completion with pending maintenance in `xtask/src/bin/skill-ops.rs` and names `skill-operations`. |
+| Prefer `skill-ops load NAME` for shared skills. | Gate and skill | The `skill-ops stop` hook refuses completion with pending maintenance in `crates/skill-ops/src/main.rs` and names `skill-operations`. |
 | Commit and push only on request. | Merged | Merged into `only when the owner asks`. |
 | CodeRabbit automatically reviews ready PRs. | Skill | `coderabbit-review` states it once. |
 | Load `coderabbit-review` on an existing PR or an authorized PR update. | Skill | `coderabbit-review` states the trigger in its description and the inspection in its body. |
@@ -453,7 +453,7 @@ No gate refuses work done without loading a skill, and F5 adds a completion gate
 | Explain unsupported findings with concrete evidence. | Skill | `coderabbit-review` states it once. |
 | The PR completion line, before the current wording. | Merged | Reworded as `Never declare a PR complete`. |
 | A passing CodeRabbit check alone doesn't establish a completed review. | Skill | `coderabbit-review` states it once. |
-| Use the existing PR review before requesting a CLI review of the same diff. | Gate and skill | `coderabbit-review` states the order, and the guard enforces the CLI budget in `xtask/src/review_guard.rs`. |
+| Use the existing PR review before requesting a CLI review of the same diff. | Gate and skill | `coderabbit-review` states the order, and the guard enforces the CLI budget in `crates/coderabbit-guard/src/lib.rs`. |
 | Commit, push, PR replies, thread resolution, manual review triggers, and merge still require authorization. | Merged | Merged into `only when the owner asks`. |
 | The former nine-sentence prose rules and their rationale. | Gate | The global pre-commit hook runs `ocomment fix --tidy --staged`, which reflows a touched paragraph in `home/dot_config/lefthook/global.yml`. |
 | Use the `multi-machine` skill for remote execution. | Skill | `multi-machine` and `domyjob` state the trigger in their descriptions. |
@@ -462,7 +462,7 @@ No gate refuses work done without loading a skill, and F5 adds a completion gate
 | In `commit.md`, never append attribution footers. | Gate | Dotguard `commit-msg` strips agent attribution in `crates/dotguard/src/attribution.rs`. |
 | In `commit.md`, the Japanese reply line. | Merged | Restated by `Reply in Japanese`. |
 | In `pr.md`, open a pull request using `gh`. | Merged | Superseded by `for PR creation, document edits, and ready transitions`. |
-| In `pr.md`, the English title of at most 72 characters in imperative mood. | Contradicted | `pull-request` requires an English Conventional Commits title unless the destination has its own rules, and `pr-workflow` checks the syntax in `xtask/src/pr_workflow.rs`. |
+| In `pr.md`, the English title of at most 72 characters in imperative mood. | Contradicted | `pull-request` requires an English Conventional Commits title unless the destination has its own rules, and `pr-workflow` checks the syntax in `crates/pr-workflow/src/lib.rs`. |
 | In `pr.md`, a body with `## Summary`, `## Changes`, and `## Notes` sections. | Contradicted | `pull-request` prescribes `Why`, `Changes`, and `Validation` when the destination has no template. |
 | In `pr.md`, run `gh pr create` with the base, title, and body. | Merged | Replaced by `create the PR with`. |
 | In `pr.md`, the Japanese reply line. | Merged | Restated by `Reply in Japanese`. |

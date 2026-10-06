@@ -1,14 +1,10 @@
-use dotfiles_xtask::{
+use std::fs;
+use std::path::Path;
+use xtask::{
     profile_rules::{Mode, Profile, Reconcile, permitted, reconcile},
     profiles, quality,
 };
-use std::fs;
-use std::path::Path;
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the shared constructor for fixture Git processes"
-)]
 #[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
@@ -36,7 +32,7 @@ fn templates_read_data_at_explicit_paths_instead_of_a_merged_platform_context() 
 
 #[test]
 fn wsl_is_linux_on_a_microsoft_kernel() {
-    use dotfiles_xtask::profile_rules::{System, detected, microsoft_kernel};
+    use xtask::profile_rules::{System, detected, microsoft_kernel};
     assert!(microsoft_kernel("5.15.167.4-microsoft-standard-WSL2"));
     assert!(microsoft_kernel("4.4.0-19041-Microsoft"));
     assert!(!microsoft_kernel("6.8.0-45-generic"));
@@ -49,7 +45,7 @@ fn wsl_is_linux_on_a_microsoft_kernel() {
 #[test]
 fn the_configuration_template_writes_exactly_the_keys_its_consumers_read() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    for combination in dotfiles_xtask::profile_snapshot::Combination::all() {
+    for combination in xtask::profile_snapshot::Combination::all() {
         let mut answers =
             profiles::Answers::fixture(combination.profile, "/fixture/projects".into());
         answers.role = combination.role.name();
@@ -169,7 +165,7 @@ fn the_source_data_files_hold_only_known_keys() {
 
 #[test]
 fn every_ignore_and_remove_pattern_is_distinct_and_justified() {
-    dotfiles_xtask::ignore_audit::check(&Path::new(env!("CARGO_MANIFEST_DIR")).join("..")).unwrap();
+    xtask::ignore_audit::check(&Path::new(env!("CARGO_MANIFEST_DIR")).join("..")).unwrap();
 }
 
 #[test]
@@ -181,7 +177,7 @@ fn an_ignore_pattern_that_matches_nothing_is_refused() {
     fs::write(&ignore, text).unwrap();
     let error = format!(
         "{:#}",
-        dotfiles_xtask::ignore_audit::check(snapshot.path()).unwrap_err()
+        xtask::ignore_audit::check(snapshot.path()).unwrap_err()
     );
     for profile in Profile::ALL {
         assert!(
@@ -206,9 +202,9 @@ fn a_rendering_that_differs_from_its_manifest_is_refused() {
     fs::write(&attributes, text).unwrap();
     let error = format!(
         "{:#}",
-        dotfiles_xtask::profile_snapshot::check(snapshot.path()).unwrap_err()
+        xtask::profile_snapshot::check(snapshot.path()).unwrap_err()
     );
-    for combination in dotfiles_xtask::profile_snapshot::Combination::all() {
+    for combination in xtask::profile_snapshot::Combination::all() {
         assert!(
             error.contains(&format!(
                 "{}: targets .config/git/attributes",
@@ -230,14 +226,11 @@ fn every_profile_holds_what_the_installers_apply() {
         let config = scope.path().join("chezmoi.toml");
         fs::write(
             &config,
-            dotfiles_xtask::rehearsal::configuration(&root, profile, &home).unwrap(),
+            xtask::rehearsal::configuration(&root, profile, &home).unwrap(),
         )
         .unwrap();
         for (source, targets) in [
-            (
-                true,
-                vec![root.join(dotfiles_xtask::review_guard::SOURCE_POLICY)],
-            ),
+            (true, vec![root.join(coderabbit_guard::SOURCE_POLICY)]),
             (
                 false,
                 vec![
@@ -407,7 +400,7 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
         let config = scope.path().join("chezmoi.toml");
         fs::write(
             &config,
-            dotfiles_xtask::rehearsal::configuration(root, profile, &home).unwrap(),
+            xtask::rehearsal::configuration(root, profile, &home).unwrap(),
         )
         .unwrap();
         let output = profiles::chezmoi(root, scope.path(), &config, &home)
@@ -428,7 +421,7 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
         assert_eq!(common[0], "jq");
         for kept in &common[1..] {
             assert!(
-                dotfiles_xtask::tool::Tool::ALL
+                xtask::tool::Tool::ALL
                     .iter()
                     .filter_map(|tool| tool.package(profile))
                     .any(|(list, entry)| list == "/tools/common" && kept == entry),
@@ -490,7 +483,7 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
 
 #[test]
 fn public_owner_sources_clone_over_https_despite_a_host_ssh_rewrite() {
-    use dotfiles_xtask::setup::OwnerSource;
+    use dotfiles::setup::OwnerSource;
     let scope = tempfile::tempdir().unwrap();
     let global = scope.path().join("gitconfig");
     fs::write(
@@ -529,7 +522,7 @@ fn public_owner_sources_clone_over_https_despite_a_host_ssh_rewrite() {
 
 #[test]
 fn scripted_steps_are_read_from_rendered_launchers_in_order() {
-    use dotfiles_xtask::setup::{Step, scripted_steps};
+    use dotfiles::setup::{Step, scripted_steps};
     let scripts = "#!/bin/sh\nexec '/h/.local/bin/dotfiles-xtask' --root '/s' setup fleet --config '/c' --live\n#!/bin/sh\nexec cargo run -- --root '/s' setup runtime --config '/c' --live\n& 'dotctl.exe' setup keyboard\n";
     assert_eq!(scripted_steps(scripts), [Step::Fleet, Step::Runtime]);
 }
@@ -555,7 +548,7 @@ fn comment_overrides_cannot_capture_whole_directories() {
 
 #[test]
 fn setup_order_rejects_a_step_that_runs_before_its_prerequisite() {
-    use dotfiles_xtask::setup::{Step, ordering_violations};
+    use dotfiles::setup::{Step, ordering_violations};
     assert_eq!(
         ordering_violations(&[Step::Runtime, Step::Mise, Step::Tools, Step::Domyjob]),
         Vec::<(Step, Step)>::new()
@@ -593,12 +586,12 @@ fn setup_that_needs_a_package_requires_the_profile_to_install_it() {
         profiles::unprovisioned(Profile::Linux, &disabled, "setup ocomment\n", "").len(),
         1
     );
-    let shell = "& 'C:/h/.local/bin/dotctl.exe' setup shell\n";
+    let integrations = "& 'C:/h/.local/bin/dotfiles-xtask.exe' --root 'C:/s' setup integrations --config 'C:/c' --live\n";
     assert_eq!(
         profiles::unprovisioned(
             Profile::Windows,
             &serde_json::json!({"scoop": {"apps": ["starship"]}}),
-            shell,
+            integrations,
             ""
         ),
         ["/scoop/apps/zoxide"]
@@ -747,7 +740,7 @@ fn forgetting_script_runs_reruns_every_onchange_script() {
     let config = scope.path().join("chezmoi.toml");
     fs::write(&config, "").unwrap();
     let apply = || {
-        let status = dotfiles_xtask::profiles::chezmoi(&source, &state, &config, &destination)
+        let status = xtask::profiles::chezmoi(&source, &state, &config, &destination)
             .arg("apply")
             .status()
             .unwrap();
@@ -756,7 +749,7 @@ fn forgetting_script_runs_reruns_every_onchange_script() {
     apply();
     apply();
     assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 1);
-    dotfiles_xtask::profiles::forget_script_runs(&source, &state, &config, &destination).unwrap();
+    xtask::profiles::forget_script_runs(&source, &state, &config, &destination).unwrap();
     apply();
     assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 2);
 }
@@ -796,7 +789,7 @@ fn moving_an_onchange_script_into_chezmoiscripts_reruns_it_once() {
     let config = scope.path().join("chezmoi.toml");
     fs::write(&config, "").unwrap();
     let apply = || {
-        let status = dotfiles_xtask::profiles::chezmoi(&source, &state, &config, &destination)
+        let status = xtask::profiles::chezmoi(&source, &state, &config, &destination)
             .arg("apply")
             .status()
             .unwrap();
@@ -836,7 +829,7 @@ fn the_working_tree_is_the_checkout_root_under_a_chezmoiroot() {
     fs::create_dir_all(&destination).unwrap();
     let config = scope.path().join("chezmoi.toml");
     fs::write(&config, "").unwrap();
-    let output = dotfiles_xtask::profiles::chezmoi(&checkout, scope.path(), &config, &destination)
+    let output = xtask::profiles::chezmoi(&checkout, scope.path(), &config, &destination)
         .args(["cat"])
         .arg(destination.join("probe"))
         .output()
@@ -847,9 +840,7 @@ fn the_working_tree_is_the_checkout_root_under_a_chezmoiroot() {
         String::from_utf8_lossy(&output.stderr)
     );
     let rendered = String::from_utf8(output.stdout).unwrap();
-    let canonical = |path: &Path| {
-        dotfiles_xtask::profiles::chezmoi_path(&dotfiles_xtask::canonical(path).unwrap())
-    };
+    let canonical = |path: &Path| xtask::profiles::chezmoi_path(&xtask::canonical(path).unwrap());
     let (working_tree, source) = rendered.split_once('|').unwrap();
     assert_eq!(
         canonical(Path::new(working_tree)),
@@ -888,8 +879,8 @@ fn recipe_references_are_commands_rather_than_prose() {
 
 #[test]
 fn agent_launchers_require_doppler_wherever_they_render() {
-    use dotfiles_xtask::setup::entry_requirements;
-    use dotfiles_xtask::tool::Tool;
+    use dotfiles::setup::entry_requirements;
+    use xtask::tool::Tool;
     assert_eq!(
         entry_requirements(
             r#"  ^dotfiles-xtask --root "/source" agent opencode --config "/config" -- ...$args"#
@@ -902,7 +893,7 @@ fn agent_launchers_require_doppler_wherever_they_render() {
     );
     assert_eq!(
         entry_requirements("dotfiles-xtask --root /source setup tools --live"),
-        Vec::<dotfiles_xtask::tool::Tool>::new()
+        Vec::<xtask::tool::Tool>::new()
     );
     assert_eq!(
         entry_requirements(
@@ -912,7 +903,7 @@ fn agent_launchers_require_doppler_wherever_they_render() {
     );
     assert_eq!(
         entry_requirements("The agent reads its configuration here."),
-        Vec::<dotfiles_xtask::tool::Tool>::new()
+        Vec::<xtask::tool::Tool>::new()
     );
 }
 

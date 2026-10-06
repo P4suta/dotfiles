@@ -1,5 +1,5 @@
 use anyhow::Result;
-use dotfiles_xtask::{Metadata, export_checks, metadata, validate_links, validate_tree};
+use skill_ops::{Metadata, export_checks, metadata, validate_links, validate_tree};
 use std::fs;
 
 #[test]
@@ -177,15 +177,15 @@ fn child_checks_cannot_overwrite_the_running_task_executable() -> Result<()> {
     let root = tempfile::tempdir()?;
     let cache = tempfile::tempdir()?;
     assert_eq!(
-        dotfiles_xtask::check_build_dir(root.path(), Some(cache.path())),
+        xtask::check_build_dir(root.path(), Some(cache.path())),
         cache.path().join("checks")
     );
     assert_eq!(
-        dotfiles_xtask::check_build_dir(root.path(), Some(std::path::Path::new("relative-target"))),
+        xtask::check_build_dir(root.path(), Some(std::path::Path::new("relative-target"))),
         root.path().join("relative-target/checks")
     );
     assert_eq!(
-        dotfiles_xtask::check_build_dir(root.path(), None),
+        xtask::check_build_dir(root.path(), None),
         root.path().join("target/checks")
     );
     Ok(())

@@ -1,8 +1,9 @@
 //! Helpers shared by both reapers: timestamps, the single-instance lock, desktop notifications, and ERE matching without a regular expression engine.
 
+use platform::process::command;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn now() -> i64 {
@@ -125,21 +126,21 @@ pub fn notify(title: &str, body: &str, enabled: bool) {
         return;
     }
     let ok = if cfg!(target_os = "linux") {
-        Command::new("notify-send")
+        command("notify-send")
             .args(["-a", "dotfiles", title, body])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
             .is_ok_and(|status| status.success())
     } else if let Some(tn) = which("terminal-notifier") {
-        Command::new(tn)
+        command(tn)
             .args(["-title", title, "-message", body, "-group", title])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
             .is_ok_and(|s| s.success())
     } else {
-        Command::new("osascript")
+        command("osascript")
             .args([
                 "-e",
                 &format!("display notification \"{body}\" with title \"{title}\""),
@@ -174,7 +175,7 @@ fn which(program: &str) -> Option<PathBuf> {
 /// `anchor_line` makes the whole line the subject of the match.
 /// `None` means grep failed to answer, from a missing binary, an invalid pattern, or an error, and callers must never treat it as an empty match.
 pub fn grep_matching(pattern: &str, lines: &[String]) -> Option<Vec<usize>> {
-    let mut cmd = Command::new("/usr/bin/grep");
+    let mut cmd = command("/usr/bin/grep");
     cmd.args(["-n", "-E", "-e", pattern])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

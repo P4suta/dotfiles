@@ -13,9 +13,10 @@
 
 use super::config;
 use super::util::{self, Lock};
+use platform::process::command;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 pub struct SessionReaper;
 
@@ -293,7 +294,7 @@ fn mac_processes() -> Vec<Process> {
     if uid.parse::<u32>().is_err() {
         return Vec::new();
     }
-    let out = Command::new("/bin/ps")
+    let out = command("/bin/ps")
         .args([
             "-x",
             &format!("-U{uid}"),
@@ -344,7 +345,7 @@ fn parse_ps_line(line: &str) -> Option<Process> {
 }
 
 fn whoami_uid() -> String {
-    Command::new("/usr/bin/id")
+    command("/usr/bin/id")
         .arg("-u")
         .output()
         .ok()
@@ -369,7 +370,7 @@ fn kill_kill(pid: &str, identity: &str) -> bool {
     if identity.is_empty() || native_identity(pid).as_deref() != Some(identity) {
         return false;
     }
-    Command::new("/bin/kill")
+    command("/bin/kill")
         .args(["-KILL", pid])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -391,7 +392,7 @@ fn native_identity(pid: &str) -> Option<String> {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let output = Command::new("/bin/ps")
+        let output = command("/bin/ps")
             .args(["-p", pid, "-o", "lstart="])
             .output()
             .ok()?;
@@ -406,7 +407,7 @@ fn linux_processes() -> Vec<Process> {
     let Ok(uid) = whoami_uid().parse::<u32>() else {
         return Vec::new();
     };
-    let Ok(clock) = Command::new("getconf").arg("CLK_TCK").output() else {
+    let Ok(clock) = command("getconf").arg("CLK_TCK").output() else {
         return Vec::new();
     };
     let Ok(hz) = String::from_utf8_lossy(&clock.stdout).trim().parse::<u64>() else {

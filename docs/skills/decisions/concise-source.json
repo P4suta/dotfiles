@@ -5,7 +5,7 @@
   "evidence": [
     "home/dot_agents/skills/concise-source/SKILL.md",
     "docs/adr/0016-one-writing-standard.md",
-    "xtask/tests/prose.rs"
+    "crates/prose/tests/prose.rs"
   ],
   "revisit": null
 }

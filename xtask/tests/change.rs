@@ -1,12 +1,8 @@
 use anyhow::{Result, ensure};
-use dotfiles_xtask::change::{Source, gates, paths};
 use std::fs;
 use std::path::Path;
+use xtask::change::{Source, gates, paths};
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the shared constructor for fixture Git processes"
-)]
 #[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 

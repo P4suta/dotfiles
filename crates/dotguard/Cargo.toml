@@ -8,7 +8,9 @@ publish.workspace = true
 license.workspace = true
 
 # The prose gate runs the ocomment binary, configured in `home/dot_config/ocomment/config.toml`.
+# The guard starts on every Git command, so it takes only the platform crate's host facts, process constructor, and refusal format.
 [dependencies]
+platform = { path = "../platform", default-features = false }
 
 # The workspace forbids unsafe code, which no #[expect] can lift.
 # The console control handler makes the one foreign call here, and policy/unsafe-sites.toml lists it, so this table repeats the workspace lints with unsafe code denied.

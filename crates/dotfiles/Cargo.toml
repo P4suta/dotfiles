@@ -1,0 +1,52 @@
+[package]
+name = "dotfiles"
+description = "The installed runtime behind every Git hook, setup launcher, and agent hook, and the Windows machine setup"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+default-run = "dotfiles-xtask"
+
+[[bin]]
+name = "dotfiles-xtask"
+path = "src/main.rs"
+
+[[bin]]
+name = "dotctl"
+path = "src/bin/dotctl.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.6", features = ["derive", "env"] }
+coderabbit-guard = { path = "../coderabbit-guard" }
+dotguard = { path = "../dotguard" }
+model = { path = "../model" }
+platform = { path = "../platform" }
+prose = { path = "../prose" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.11.0"
+skill-ops = { path = "../skill-ops" }
+tempfile = "3.27"
+toml = "1.0"
+yaml-rust2 = "0.13"
+
+[target.'cfg(windows)'.dependencies]
+jiff = "0.2.37"
+junction = "2.0.0"
+windows-sys = { version = "0.61.2", features = ["Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging"] }
+
+# The workspace forbids unsafe code, which no #[expect] can lift.
+# The Windows keyboard settings make the foreign calls here, and policy/unsafe-sites.toml lists them, so this table repeats the workspace lints with unsafe code denied.
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unfulfilled_lint_expectations = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"

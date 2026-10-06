@@ -1,2 +1,2 @@
 #!/bin/sh
-exec cargo run --locked --manifest-path {{ includeTemplate "partials/sh_quote" (printf "%s/xtask/Cargo.toml" .chezmoi.workingTree) }} -- --root {{ includeTemplate "partials/sh_quote" .chezmoi.workingTree }} setup runtime --config {{ includeTemplate "partials/sh_quote" .chezmoi.configFile }} --live
+exec cargo run --locked --manifest-path {{ includeTemplate "partials/sh_quote" (printf "%s/crates/dotfiles/Cargo.toml" .chezmoi.workingTree) }} -- --root {{ includeTemplate "partials/sh_quote" .chezmoi.workingTree }} setup runtime --config {{ includeTemplate "partials/sh_quote" .chezmoi.configFile }} --live

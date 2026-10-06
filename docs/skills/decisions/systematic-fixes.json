@@ -5,7 +5,7 @@
   "evidence": [
     "home/dot_agents/skills/systematic-fixes/SKILL.md",
     "crates/dotguard/tests/empty_commit.rs",
-    "xtask/src/hooks.rs"
+    "crates/dotfiles/src/hooks.rs"
   ],
   "revisit": null
 }
