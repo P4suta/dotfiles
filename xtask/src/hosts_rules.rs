@@ -9,6 +9,7 @@ pub enum Family {
 impl Family {
     pub const ALL: [Self; 3] = [Self::Linux, Self::Mac, Self::Windows];
 
+    #[must_use]
     pub const fn index(self) -> usize {
         match self {
             Self::Linux => 0,
@@ -17,6 +18,7 @@ impl Family {
         }
     }
 
+    #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::Linux => "linux",
@@ -36,6 +38,7 @@ pub enum Evidence {
 
 /// Fold the next record in note order.
 /// The newest record for the own tree of the commit decides, and a record for another tree says nothing.
+#[must_use]
 pub const fn record(previous: Evidence, same_tree: bool, passed: bool) -> Evidence {
     match (same_tree, passed) {
         (false, _) => previous,
@@ -61,6 +64,7 @@ const fn verdict(family: Family, required: bool, evidence: Evidence) -> Verdict 
 
 /// Admit only when every required family passed.
 /// Otherwise name the first one to check.
+#[must_use]
 pub const fn admit(required: [bool; 3], evidence: [Evidence; 3]) -> Verdict {
     let linux = verdict(Family::Linux, required[0], evidence[0]);
     if !matches!(linux, Verdict::Admit) {
@@ -75,6 +79,7 @@ pub const fn admit(required: [bool; 3], evidence: [Evidence; 3]) -> Verdict {
 
 /// The gate covers only a branch update on GitHub.
 /// It skips deletions, tags, and pushes to the hubs of the owner.
+#[must_use]
 pub const fn gated(github: bool, branch: bool, deletion: bool) -> bool {
     github && branch && !deletion
 }
@@ -88,6 +93,7 @@ pub enum Key {
 }
 
 /// A changed key replaces the pinned one only when the owner accepted that host.
+#[must_use]
 pub const fn pin(key: Key, accepted: bool) -> bool {
     match key {
         Key::New | Key::Same => true,
@@ -103,6 +109,7 @@ pub enum Start {
 }
 
 /// Gates run only for a clean tree, and the first required host that lacks readiness stops the check.
+#[must_use]
 pub const fn start(clean: bool, required: [bool; 3], ready: [bool; 3]) -> Start {
     if !clean {
         Start::Dirty

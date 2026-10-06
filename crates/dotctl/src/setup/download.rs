@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::io::Read;
 use std::path::Path;
 
@@ -51,6 +52,8 @@ pub fn sha256_of(path: &Path) -> Result<String> {
     Ok(hasher
         .finalize()
         .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+        .fold(String::with_capacity(64), |mut hex, byte| {
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        }))
 }

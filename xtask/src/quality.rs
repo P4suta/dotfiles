@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-pub fn command(root: &Path, tool: Tool, arguments: &[&str]) -> Result<()> {
+pub(crate) fn command(root: &Path, tool: Tool, arguments: &[&str]) -> Result<()> {
     run(tool.command(), root, tool.program(), arguments)
 }
 
@@ -20,6 +20,7 @@ fn run(mut command: Command, root: &Path, name: &str, arguments: &[&str]) -> Res
 }
 
 /// Whether a rendered command launcher or Git hook execs a program located through `$HOME` at run time.
+#[must_use]
 pub fn launcher_resolves_through_home(name: &str, contents: &str) -> bool {
     (name.starts_with(".local/bin/") || name.contains("/hooks/"))
         && contents.lines().any(|line| {
@@ -29,6 +30,7 @@ pub fn launcher_resolves_through_home(name: &str, contents: &str) -> bool {
 }
 
 /// Git for Windows ships the POSIX shell beside its `mingw64/libexec/git-core` directory.
+#[must_use]
 pub fn git_for_windows_shell(exec_path: &Path) -> Option<PathBuf> {
     Some(exec_path.ancestors().nth(3)?.join("usr/bin/sh.exe"))
 }
@@ -54,7 +56,7 @@ fn posix_shell() -> Result<Command> {
     Ok(crate::tool::external(shell))
 }
 
-pub fn rendered(dump: &Value, directory: &Path) -> Result<()> {
+pub(crate) fn rendered(dump: &Value, directory: &Path) -> Result<()> {
     let targets = dump.as_object().context("profile dump must be a mapping")?;
     fs::create_dir(directory)?;
     for (index, (name, target)) in targets.iter().enumerate() {
@@ -64,29 +66,17 @@ pub fn rendered(dump: &Value, directory: &Path) -> Result<()> {
         let contents = target["contents"]
             .as_str()
             .context("rendered content must be text")?;
-        if name.ends_with(".json") {
+        let script = target["type"] == "script";
+        let file = |extension: &str| directory.join(format!("{index}.{extension}"));
+        if crate::has_extension(name, "json") {
             serde_json::from_str::<Value>(contents)
                 .with_context(|| format!("invalid rendered JSON: {name}"))?;
         }
-        if name.ends_with(".toml") {
-            let file = directory.join(format!("{index}.toml"));
-            fs::write(&file, contents)?;
-            let output = Tool::Taplo
-                .command()
-                .current_dir(directory)
-                .args(["lint", "--no-schema", "--no-auto-config"])
-                .arg(file)
-                .output()?;
-            ensure!(
-                output.status.success(),
-                "invalid rendered TOML {name}: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+        if crate::has_extension(name, "toml") {
+            toml_file(directory, &file("toml"), name, contents)?;
         }
-        if name.ends_with(".nu") {
-            let generated = directory.join("generated");
-            fs::create_dir_all(&generated)?;
-            let mut text = if name.ends_with("/config.nu") {
+        if crate::has_extension(name, "nu") {
+            let text = if name.ends_with("/config.nu") {
                 let env = targets
                     .get(".config/nushell/env.nu")
                     .and_then(|value| value["contents"].as_str())
@@ -95,116 +85,153 @@ pub fn rendered(dump: &Value, directory: &Path) -> Result<()> {
             } else {
                 contents.to_owned()
             };
-            for module in [
-                "mise",
-                "starship",
-                "television",
-                "atuin",
-                "zoxide",
-                "ls-colors",
-            ] {
-                let path = generated.join(format!("{module}.nu"));
-                fs::write(&path, "")?;
-                let source = format!("~/.config/nushell/generated/{module}.nu");
-                text = text.replace(&source, &format!("r#'{}'#", path.display()));
-            }
-            let file = directory.join(format!("{index}.nu"));
-            fs::write(&file, text)?;
-            let output = Tool::Nu
-                .command()
-                .current_dir(directory)
-                .args([
-                    "--no-config-file",
-                    "--commands",
-                    "if not (nu-check --debug $env.DOTFILES_NU_PARSE_FILE) { exit 1 }",
-                ])
-                .env("DOTFILES_NU_PARSE_FILE", &file)
-                .output()?;
-            ensure!(
-                output.status.success(),
-                "invalid rendered Nushell {name}: {}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
+            nushell_file(directory, &file("nu"), name, text)?;
         }
         if contents.starts_with("#!/bin/sh\n") {
-            ensure!(
-                !launcher_resolves_through_home(name, contents),
-                "launcher {name} finds its program through the runtime HOME, which tools that run Git with another HOME replace; render the installed path"
-            );
-            let file = directory.join(format!("{index}.sh"));
-            fs::write(&file, contents)?;
-            run(
-                posix_shell()?,
-                directory,
-                "sh",
-                &["-n", file.to_str().context("invalid fixture path")?],
-            )?;
-            command(
-                directory,
-                Tool::Shellcheck,
-                &[
-                    "--severity=style",
-                    file.to_str().context("invalid fixture path")?,
-                ],
-            )?;
-            if target["type"] == "script" {
-                ensure!(
-                    contents
-                        .lines()
-                        .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
-                        .count()
-                        == 1
-                        && contents.lines().any(|line| line.starts_with("exec ")),
-                    "procedural shell setup must move to Rust: {name}"
-                );
-            }
+            shell_file(directory, &file("sh"), name, contents, script)?;
         }
-        if name.ends_with(".ps1") {
-            if target["type"] == "script" {
-                let mut lines = Vec::new();
-                let mut continued = String::new();
-                for line in contents.lines().map(str::trim) {
-                    if line.is_empty() || line.starts_with('#') {
-                        continue;
-                    }
-                    if let Some(line) = line.strip_suffix('`') {
-                        continued.push_str(line);
-                        continued.push(' ');
-                        continue;
-                    }
-                    continued.push_str(line);
-                    lines.push(std::mem::take(&mut continued));
-                }
-                ensure!(
-                    continued.is_empty(),
-                    "unfinished PowerShell launcher: {name}"
-                );
-                if lines
-                    .first()
-                    .is_some_and(|line| line == "$ErrorActionPreference = 'Stop'")
-                {
-                    lines.remove(0);
-                }
-                ensure!(
-                    lines.is_empty()
-                        || (lines.len() == 2
-                            && lines[0].starts_with("& ")
-                            && lines[1] == "exit $LASTEXITCODE"),
-                    "procedural PowerShell setup must move to Rust: {name}"
-                );
-            }
-            let file = directory.join(format!("{index}.ps1"));
-            fs::write(&file, contents)?;
-            let status = Tool::Pwsh.command().current_dir(directory).args(["-NoProfile", "-NonInteractive", "-Command",
-                "$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile($env:DOTFILES_PARSE_FILE,[ref]$tokens,[ref]$errors) > $null; if($errors.Count){$errors | Out-String | Write-Error; exit 1}"])
-                .env("DOTFILES_PARSE_FILE", &file).stdin(Stdio::null()).status()?;
-            ensure!(status.success(), "invalid rendered PowerShell: {name}");
+        if crate::has_extension(name, "ps1") {
+            powershell_file(directory, &file("ps1"), name, contents, script)?;
         }
     }
     Ok(())
 }
 
+fn toml_file(directory: &Path, file: &Path, name: &str, contents: &str) -> Result<()> {
+    fs::write(file, contents)?;
+    let output = Tool::Taplo
+        .command()
+        .current_dir(directory)
+        .args(["lint", "--no-schema", "--no-auto-config"])
+        .arg(file)
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "invalid rendered TOML {name}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+/// Parses a rendered Nushell file with each generated module it sources stubbed out.
+fn nushell_file(directory: &Path, file: &Path, name: &str, mut text: String) -> Result<()> {
+    let generated = directory.join("generated");
+    fs::create_dir_all(&generated)?;
+    for module in [
+        "mise",
+        "starship",
+        "television",
+        "atuin",
+        "zoxide",
+        "ls-colors",
+    ] {
+        let path = generated.join(format!("{module}.nu"));
+        fs::write(&path, "")?;
+        let source = format!("~/.config/nushell/generated/{module}.nu");
+        text = text.replace(&source, &format!("r#'{}'#", path.display()));
+    }
+    fs::write(file, text)?;
+    let output = Tool::Nu
+        .command()
+        .current_dir(directory)
+        .args([
+            "--no-config-file",
+            "--commands",
+            "if not (nu-check --debug $env.DOTFILES_NU_PARSE_FILE) { exit 1 }",
+        ])
+        .env("DOTFILES_NU_PARSE_FILE", file)
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "invalid rendered Nushell {name}: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+fn shell_file(
+    directory: &Path,
+    file: &Path,
+    name: &str,
+    contents: &str,
+    script: bool,
+) -> Result<()> {
+    ensure!(
+        !launcher_resolves_through_home(name, contents),
+        "launcher {name} finds its program through the runtime HOME, which tools that run Git with another HOME replace; render the installed path"
+    );
+    fs::write(file, contents)?;
+    let path = file.to_str().context("invalid fixture path")?;
+    run(posix_shell()?, directory, "sh", &["-n", path])?;
+    command(directory, Tool::Shellcheck, &["--severity=style", path])?;
+    if script {
+        ensure!(
+            contents
+                .lines()
+                .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+                .count()
+                == 1
+                && contents.lines().any(|line| line.starts_with("exec ")),
+            "procedural shell setup must move to Rust: {name}"
+        );
+    }
+    Ok(())
+}
+
+fn powershell_file(
+    directory: &Path,
+    file: &Path,
+    name: &str,
+    contents: &str,
+    script: bool,
+) -> Result<()> {
+    if script {
+        let mut lines = Vec::new();
+        let mut continued = String::new();
+        for line in contents.lines().map(str::trim) {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some(line) = line.strip_suffix('`') {
+                continued.push_str(line);
+                continued.push(' ');
+                continue;
+            }
+            continued.push_str(line);
+            lines.push(std::mem::take(&mut continued));
+        }
+        ensure!(
+            continued.is_empty(),
+            "unfinished PowerShell launcher: {name}"
+        );
+        if lines
+            .first()
+            .is_some_and(|line| line == "$ErrorActionPreference = 'Stop'")
+        {
+            lines.remove(0);
+        }
+        ensure!(
+            lines.is_empty()
+                || (lines.len() == 2
+                    && lines[0].starts_with("& ")
+                    && lines[1] == "exit $LASTEXITCODE"),
+            "procedural PowerShell setup must move to Rust: {name}"
+        );
+    }
+    fs::write(file, contents)?;
+    let status = Tool::Pwsh.command().current_dir(directory).args(["-NoProfile", "-NonInteractive", "-Command",
+        "$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile($env:DOTFILES_PARSE_FILE,[ref]$tokens,[ref]$errors) > $null; if($errors.Count){$errors | Out-String | Write-Error; exit 1}"])
+        .env("DOTFILES_PARSE_FILE", file).stdin(Stdio::null()).status()?;
+    ensure!(status.success(), "invalid rendered PowerShell: {name}");
+    Ok(())
+}
+
+/// Installs the locked Bun dependencies and runs their `check` script.
+///
+/// # Errors
+///
+/// Returns an error when Bun can't start or either Bun command fails.
 pub fn adapters(root: &Path) -> Result<()> {
     command(
         root,
@@ -214,6 +241,11 @@ pub fn adapters(root: &Path) -> Result<()> {
     command(root, Tool::Bun, &["run", "check"])
 }
 
+/// Installs the pinned Ansible collections into a temporary directory and syntax-checks `ops/site.yml`.
+///
+/// # Errors
+///
+/// Returns an error when creating the temporary directory fails, an Ansible command can't start, the collection installation fails, or the syntax check fails.
 pub fn ops(root: &Path) -> Result<()> {
     let owned = tempfile::tempdir()?;
     let collections = owned.path().join("collections");
@@ -247,6 +279,11 @@ pub fn ops(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Runs the public source check, then scans a snapshot of the source files with Gitleaks.
+///
+/// # Errors
+///
+/// Returns an error when the public source check fails, copying the snapshot fails, Gitleaks can't start, or Gitleaks reports a failure.
 pub fn secrets(root: &Path) -> Result<()> {
     crate::profiles::check_public(root)?;
     let snapshot = tempfile::tempdir()?;
@@ -302,8 +339,12 @@ struct CommentOverride {
     language: String,
 }
 
-/// OComment language overrides decide how a prose rule rewrites each file.
+/// `OComment` language overrides decide how a prose rule rewrites each file.
 /// Patterns must name an existing file or select by extension, as in `**/*.md.tmpl`.
+///
+/// # Errors
+///
+/// Returns an error when reading or parsing `.ocomment.toml` fails, or an override pattern names neither an existing file nor an extension.
 pub fn comment_scopes(root: &Path) -> Result<()> {
     let config: CommentConfig = toml::from_str(&fs::read_to_string(root.join(".ocomment.toml"))?)
         .context("read .ocomment.toml overrides")?;
@@ -331,6 +372,7 @@ pub fn comment_scopes(root: &Path) -> Result<()> {
 }
 
 /// `just` invocations a reader of the repository should run, written as code, quoted, or after `run:` or `see`, or at the start of a Markdown line.
+#[must_use]
 pub fn recipe_references(text: &str, markdown: bool) -> Vec<(usize, String)> {
     let mut found = Vec::new();
     for (number, line) in text.lines().enumerate() {
@@ -358,6 +400,10 @@ pub fn recipe_references(text: &str, markdown: bool) -> Vec<(usize, String)> {
 }
 
 /// Recipe references that name no recipe in the justfile, so a hint or document sends the reader to a missing command.
+///
+/// # Errors
+///
+/// Returns an error when `just --summary` can't start, fails, prints non-UTF-8 output, or lists no recipe, or reading a directory fails.
 pub fn unknown_recipes(root: &Path) -> Result<Vec<String>> {
     let summary = Tool::Just
         .command()
@@ -389,7 +435,8 @@ pub fn unknown_recipes(root: &Path) -> Result<Vec<String>> {
                     stack.push(path);
                 }
             } else if let Ok(text) = fs::read_to_string(&path) {
-                for (line, recipe) in recipe_references(&text, relative.ends_with(".md")) {
+                let markdown = crate::has_extension(&relative, "md");
+                for (line, recipe) in recipe_references(&text, markdown) {
                     if !recipes.contains(&recipe) {
                         unknown.push(format!("{relative}:{line}: just {recipe}"));
                     }
@@ -402,6 +449,10 @@ pub fn unknown_recipes(root: &Path) -> Result<Vec<String>> {
 }
 
 /// Profile leaves that no template includes.
+///
+/// # Errors
+///
+/// Returns an error when reading the profile leaves or a source directory fails.
 pub fn unreferenced_leaves(root: &Path) -> Result<Vec<String>> {
     let templates = crate::source_state(root).join(".chezmoitemplates");
     let leaves_root = templates.join("profiles");
@@ -446,7 +497,7 @@ pub fn unreferenced_leaves(root: &Path) -> Result<Vec<String>> {
 }
 
 /// The chezmoi version that `mise.toml` pins, or why it names none.
-pub fn mise_chezmoi_pin(mise: &str) -> Result<String> {
+pub(crate) fn mise_chezmoi_pin(mise: &str) -> Result<String> {
     let table: toml::Table = toml::from_str(mise)?;
     let pin = &table
         .get("tools")
@@ -459,6 +510,10 @@ pub fn mise_chezmoi_pin(mise: &str) -> Result<String> {
 }
 
 /// Refuses when the source state's `.chezmoiversion` and the `mise.toml` chezmoi pin name different versions.
+///
+/// # Errors
+///
+/// Returns an error when reading `mise.toml` or `.chezmoiversion` fails, `mise.toml` pins no chezmoi version string, or the two versions differ.
 pub fn chezmoi_version(root: &Path) -> Result<()> {
     let pin = mise_chezmoi_pin(&fs::read_to_string(root.join("mise.toml"))?)?;
     let required = fs::read_to_string(crate::source_state(root).join(".chezmoiversion"))
@@ -497,6 +552,10 @@ pub fn gitattributes_default_eol(text: &str) -> Option<&str> {
 }
 
 /// Refuses an `.editorconfig` whose default line ending, charset, or final newline disagrees with `.gitattributes` and the LF and UTF-8 policy.
+///
+/// # Errors
+///
+/// Returns an error when reading `.editorconfig` or `.gitattributes` fails, `.gitattributes` declares no default line ending, or `.editorconfig` disagrees with it.
 pub fn editorconfig(root: &Path) -> Result<()> {
     let editor = fs::read_to_string(root.join(".editorconfig"))
         .context("the repository needs an .editorconfig")?;

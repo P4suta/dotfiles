@@ -256,9 +256,9 @@ fn no_installer_reads_the_default_chezmoi_source() -> Result<()> {
 fn a_recorded_installation_is_rebuilt_only_after_its_sources_change() -> Result<()> {
     let home = tempfile::tempdir()?;
     let checkout = fixture("pub fn rule() {}")?;
-    assert!(lagging(home.path(), checkout.path())?.is_empty());
+    assert_eq!(lagging(home.path(), checkout.path())?, Vec::<Built>::new());
     record_installation(home.path(), checkout.path(), Built::SkillOps)?;
-    assert!(lagging(home.path(), checkout.path())?.is_empty());
+    assert_eq!(lagging(home.path(), checkout.path())?, Vec::<Built>::new());
     fs::write(
         checkout.path().join("xtask/src/lib.rs"),
         "pub fn rule() { 2; }",
@@ -268,7 +268,7 @@ fn a_recorded_installation_is_rebuilt_only_after_its_sources_change() -> Result<
         vec![Built::SkillOps]
     );
     record_installation(home.path(), checkout.path(), Built::SkillOps)?;
-    assert!(lagging(home.path(), checkout.path())?.is_empty());
+    assert_eq!(lagging(home.path(), checkout.path())?, Vec::<Built>::new());
     Ok(())
 }
 

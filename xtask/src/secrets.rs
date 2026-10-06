@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
 
-/// The variable OpenCode's GitHub Model Context Protocol server reads its bearer token from.
+/// The variable `OpenCode`'s GitHub Model Context Protocol server reads its bearer token from.
 const GITHUB_MCP_TOKEN: &str = "GH_MCP_TOKEN";
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -23,6 +23,13 @@ impl Agent {
     }
 }
 
+/// Launches `agent` with the Doppler secrets that the machine-local `config` selects for it.
+///
+/// # Errors
+///
+/// Returns an error when `config` names a relative path or lies inside `root`, or when loading the home or configuration fails.
+/// Returns an error when the secret selection holds something other than a list of names.
+/// Returns an error when the selection includes a secret the launcher supplies from another origin, when the Doppler project or config goes missing, or when the command can't start.
 pub fn agent(
     root: &Path,
     config: &Path,
@@ -87,7 +94,7 @@ pub fn agent(
     )
 }
 
-/// OpenCode's GitHub Model Context Protocol server reuses the login of `gh`, the GitHub command-line tool, so the credential has one origin that `gh` keeps current.
+/// `OpenCode`'s GitHub Model Context Protocol server reuses the login of `gh`, the GitHub command-line tool, so the credential has one origin that `gh` keeps current.
 /// The server's read-only header limits what the assistant can do through it.
 /// The token travels only in the assistant's environment, and without a `gh` login the assistant starts without it.
 fn agent_environment(agent: Agent) -> Vec<(&'static str, OsString)> {
@@ -111,7 +118,7 @@ fn agent_environment(agent: Agent) -> Vec<(&'static str, OsString)> {
     }
 }
 
-/// OpenCode runs Model Context Protocol servers in a shared background service that keeps the environment it started with.
+/// `OpenCode` runs Model Context Protocol servers in a shared background service that keeps the environment it started with.
 /// The interface and `run` thus start their own server, which inherits the credentials this launch supplies.
 /// A subcommand comes first on the command line, so any other first word besides a directory passes through unchanged, as does a launch that already chooses a server.
 fn opencode_arguments(arguments: &[OsString]) -> Vec<OsString> {
@@ -141,7 +148,7 @@ fn conflicting_origin(agent: Agent, selected: &[&str]) -> bool {
     matches!(agent, Agent::Opencode) && selected.contains(&GITHUB_MCP_TOKEN)
 }
 
-pub fn names(input: &str) -> Result<Vec<&str>> {
+pub(crate) fn names(input: &str) -> Result<Vec<&str>> {
     let result: Vec<_> = input.split(',').collect();
     ensure!(!result.is_empty(), "at least one secret name is required");
     for (index, name) in result.iter().enumerate() {
@@ -158,7 +165,7 @@ pub fn names(input: &str) -> Result<Vec<&str>> {
     Ok(result)
 }
 
-pub fn validate(input: &str, environment: impl Fn(&str) -> Option<OsString>) -> Result<()> {
+pub(crate) fn validate(input: &str, environment: impl Fn(&str) -> Option<OsString>) -> Result<()> {
     for name in names(input)? {
         let value = environment(name);
         let text = value.as_ref().and_then(|value| value.to_str());
@@ -174,6 +181,11 @@ pub fn validate(input: &str, environment: impl Fn(&str) -> Option<OsString>) -> 
     Ok(())
 }
 
+/// Runs `command` once the environment sets every secret that `input` names, removing `DOPPLER_TOKEN` unless `input` names it.
+///
+/// # Errors
+///
+/// Returns an error when a name fails validation or repeats, when a named secret stays missing, empty, or unresolved, or when `command` holds nothing or can't start.
 pub fn consume(input: &str, command: &[OsString]) -> Result<ExitStatus> {
     validate(input, |name| std::env::var_os(name))?;
     let executable = command.first().context("consuming command is required")?;
@@ -185,6 +197,11 @@ pub fn consume(input: &str, command: &[OsString]) -> Result<ExitStatus> {
     child.status().context("start secret consumer")
 }
 
+/// Runs `command` under `doppler run` with only the secrets named in `input`, checked again by `require-secrets`.
+///
+/// # Errors
+///
+/// Returns an error when a name fails validation or repeats, when `project`, `config`, or `command` holds nothing, or when Doppler can't start.
 pub fn run(project: &str, config: &str, input: &str, command: &[OsString]) -> Result<ExitStatus> {
     run_with(project, config, input, command, &[])
 }

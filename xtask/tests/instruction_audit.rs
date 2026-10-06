@@ -389,13 +389,13 @@ Judgment: the reader decides.
 #[test]
 fn profile_templates_may_only_include_audited_partials() {
     let partials = ["agent_policy", "prose_policy"];
-    assert!(
+    assert_eq!(
         profile_findings(
             "p/CLAUDE.md.tmpl",
             "{{ includeTemplate \"agent_policy\" . }}\n\n{{ includeTemplate \"prose_policy\" . }}\n",
             &partials,
-        )
-        .is_empty()
+        ),
+        Vec::<String>::new()
     );
     for text in [
         "{{ includeTemplate \"agent_policy\" . }}\nAlways push.\n",

@@ -7,6 +7,7 @@ use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
 use serde_json::Value;
+use std::fmt::Write as _;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -27,7 +28,7 @@ pub struct Environment {
 }
 
 impl Environment {
-    pub fn current(offline: bool) -> Result<Self> {
+    pub(crate) fn current(offline: bool) -> Result<Self> {
         let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
             .context("the home directory is unavailable; set HOME or USERPROFILE")?;
         Ok(Self {
@@ -65,6 +66,10 @@ pub struct PullRequest {
 
 /// The facts behind a recommendation, reported with it so an agent can check the reasoning.
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an independent observed fact that the report shows as it was read"
+)]
 pub struct Observed {
     pub host: HostStatus,
     pub branch: Option<String>,
@@ -92,6 +97,7 @@ pub struct Observed {
 }
 
 impl Observed {
+    #[must_use]
     pub fn state(&self) -> State {
         State {
             host: match self.host {
@@ -150,6 +156,7 @@ pub struct Recommendation {
 
 /// An unset `TEMP` comes first, then a required directory on an unmounted volume such as the Dev Drive, then a missing temporary directory.
 /// The volume names the path's root, so only a Windows drive letter can go missing.
+#[must_use]
 pub fn host_status(temp: Option<&Path>, cargo_target: Option<&Path>) -> HostStatus {
     let Some(temp) = temp else {
         return HostStatus::TempUnset;
@@ -177,6 +184,7 @@ pub fn host_status(temp: Option<&Path>, cargo_target: Option<&Path>) -> HostStat
 }
 
 /// Failing checks outrank pending ones, and an empty rollup means no check has reported yet.
+#[must_use]
 pub fn classify_checks(rollup: &[Value]) -> Checks {
     let mut pending = false;
     for item in rollup {
@@ -206,6 +214,7 @@ pub fn classify_checks(rollup: &[Value]) -> Checks {
 }
 
 /// The `OWNER/REPO` of a GitHub remote URL in HTTPS, SSH, or scp form.
+#[must_use]
 pub fn github_repository(url: &str) -> Option<String> {
     let (_, rest) = url.trim().split_once("github.com")?;
     let path = rest
@@ -218,6 +227,10 @@ pub fn github_repository(url: &str) -> Option<String> {
 }
 
 /// Skills whose tracked decision has no entry or binds another revision, and those whose current decision lacks its reason or evidence.
+///
+/// # Errors
+///
+/// Returns an error when reading the skill catalog or the tracked decisions fails.
 pub fn decision_backlog(root: &Path) -> Result<(Vec<String>, Vec<String>)> {
     let tree = root.join("home/dot_agents/skills");
     if !tree.is_dir() {
@@ -377,7 +390,7 @@ fn held_by_branch(root: &Path, branch: &str, commit: &str) -> Result<bool> {
     )?;
     let mut revisions = format!("{commit}\n");
     for entry in reflog.lines() {
-        revisions.push_str(&format!("^{entry}\n"));
+        let _ = writeln!(revisions, "^{entry}");
     }
     let mut child = Tool::Git
         .command()
@@ -402,8 +415,8 @@ fn held_by_branch(root: &Path, branch: &str, commit: &str) -> Result<bool> {
     Ok(count(&String::from_utf8_lossy(&output.stdout))? == 0)
 }
 
-/// Whether the owner paused CodeRabbit PR reviews: the all-scope `paused` marker or the PR-scope `paused-pr` marker.
-pub fn pr_reviews_paused(home: &Path) -> Result<bool> {
+/// Whether the owner paused `CodeRabbit` PR reviews: the all-scope `paused` marker or the PR-scope `paused-pr` marker.
+pub(crate) fn pr_reviews_paused(home: &Path) -> Result<bool> {
     let state = home.join(".local/state/coderabbit-guard");
     for marker in ["paused", "paused-pr"] {
         if state
@@ -435,6 +448,12 @@ fn workflows(root: &Path) -> Result<bool> {
     Ok(false)
 }
 
+/// Observes the host, the worktree, its branches, the skill decisions, and, unless offline, GitHub.
+///
+/// # Errors
+///
+/// Returns an error when a Git command fails, including the fetch when online, or the PR lookup fails.
+/// Also returns an error when reading the skill decisions, the `CodeRabbit` pause markers, or the workflow directory fails.
 pub fn inspect(root: &Path, environment: &Environment) -> Result<Observed> {
     let host = host_status(
         environment.temp.as_deref(),
@@ -526,6 +545,11 @@ pub fn inspect(root: &Path, environment: &Environment) -> Result<Observed> {
     })
 }
 
+#[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per step, which the exhaustive match keeps complete"
+)]
 pub fn recommend(state: Observed) -> Recommendation {
     let step = decide(state.state());
     let branch = state.branch.as_deref().unwrap_or("HEAD");
@@ -709,6 +733,10 @@ pub fn recommend(state: Observed) -> Recommendation {
 
 /// Runs an executable step and returns what it printed.
 /// Any other step gets a refusal with its summary and command.
+///
+/// # Errors
+///
+/// Returns an error when the step lacks an executable form, or when creating the directory, the Git merge, or drafting the decision fails.
 pub fn perform(root: &Path, recommendation: &Recommendation) -> Result<Option<String>> {
     let state = &recommendation.state;
     match (recommendation.action, &state.host) {
@@ -751,6 +779,10 @@ fn report(recommendation: &Recommendation) -> Result<()> {
 
 /// Prints the recommendation as one JSON line on stdout and a summary on stderr.
 /// `--execute` first runs an executable step and then reports the step after it.
+///
+/// # Errors
+///
+/// Returns an error when the home directory stays unavailable, the inspection fails, or `--execute` can't run or complete the step.
 pub fn run(root: &Path, offline: bool, execute: bool) -> Result<()> {
     let environment = Environment::current(offline)?;
     let recommendation = recommend(inspect(root, &environment)?);

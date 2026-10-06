@@ -54,6 +54,10 @@ pub enum Checks {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an independent fact, and the proofs range over every combination"
+)]
 pub struct State {
     pub host: Host,
     pub head: Head,
@@ -104,6 +108,7 @@ pub enum Step {
 
 /// The single next step for a state.
 /// Earlier prerequisites always win over later publication steps.
+#[must_use]
 pub fn decide(state: State) -> Step {
     match state.host {
         Host::TempUnset => return Step::SetTemp,
@@ -177,6 +182,7 @@ fn settled(review_paused: bool, draft: bool) -> Step {
 }
 
 /// Steps `--execute` may run: each only writes local state that a single command restores, and none publishes, commits, or rewrites history.
+#[must_use]
 pub fn executable(step: Step) -> bool {
     matches!(
         step,

@@ -6,6 +6,7 @@ use anyhow::{Context, Result, ensure};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -27,6 +28,7 @@ pub enum Role {
 impl Role {
     pub const ALL: [Self; 2] = [Self::Personal, Self::Work];
 
+    #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::Personal => "personal",
@@ -44,6 +46,7 @@ pub struct Combination {
 }
 
 impl Combination {
+    #[must_use]
     pub fn all() -> Vec<Self> {
         let mut combinations = Vec::new();
         for profile in Profile::ALL {
@@ -60,6 +63,7 @@ impl Combination {
         combinations
     }
 
+    #[must_use]
     pub fn name(self) -> String {
         format!(
             "{}-{}-{}",
@@ -88,10 +92,7 @@ impl Combination {
 }
 
 fn sha256(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    crate::build_inputs::hex(&Sha256::digest(bytes))
 }
 
 /// A chezmoi run with an empty environment and only chezmoi on its search path, so `env` and `lookPath` answer the same on every host.
@@ -123,9 +124,8 @@ fn virtual_host(real: &Value, combination: Combination, args: Option<&Value>) ->
             "configFile" => json!("/fixture/config/chezmoi.json"),
             "executable" => json!("/fixture/bin/chezmoi"),
             "fqdnHostname" => json!("fixture.invalid"),
-            "hostname" => json!("fixture"),
             "gid" | "uid" => json!("1000"),
-            "group" | "username" => json!("fixture"),
+            "group" | "hostname" | "username" => json!("fixture"),
             "os" => json!(combination.profile.os()),
             "pathListSeparator" => json!(":"),
             "pathSeparator" => json!("/"),
@@ -218,7 +218,7 @@ fn mode(entry: &Value) -> Value {
 }
 
 /// The manifest of one combination: every target with its type, mode, and content digest, and every script with its phase, position, and body digest.
-pub fn manifest(source: &Path, combination: Combination) -> Result<Value> {
+pub(crate) fn manifest(source: &Path, combination: Combination) -> Result<Value> {
     let scope = Scope::new(combination)?;
     let overrides = overrides(source, &scope, combination, None)?;
     let dump: BTreeMap<String, Value> = serde_json::from_slice(&scope.run(
@@ -303,6 +303,7 @@ pub fn manifest(source: &Path, combination: Combination) -> Result<Value> {
 }
 
 /// chezmoi joins paths with the separator of the host it runs on, so Windows and Unix hosts each keep their own manifests.
+#[must_use]
 pub const fn family() -> &'static str {
     if cfg!(windows) { "windows" } else { "unix" }
 }
@@ -326,16 +327,14 @@ fn text(manifest: &Value) -> Result<String> {
             .flatten()
             .map(|entry| Ok(format!("    {}", serde_json::to_string(entry)?)))
             .collect::<Result<Vec<_>>>()?;
-        text.push_str(&format!(
-            ",\n  \"{section}\": [\n{}\n  ]",
-            entries.join(",\n")
-        ));
+        let _ = write!(text, ",\n  \"{section}\": [\n{}\n  ]", entries.join(",\n"));
     }
     text.push_str("\n}\n");
     Ok(text)
 }
 
 /// The paths and script targets whose entries differ between `committed` and `rendered`.
+#[must_use]
 pub fn differences(committed: &Value, rendered: &Value) -> Vec<String> {
     let mut changed = Vec::new();
     for (section, key) in [("targets", "path"), ("scripts", "target")] {
@@ -367,6 +366,10 @@ pub fn differences(committed: &Value, rendered: &Value) -> Vec<String> {
 }
 
 /// Refuses any combination whose rendering differs from its committed manifest.
+///
+/// # Errors
+///
+/// Returns an error when chezmoi fails to render a combination, reading or parsing a committed manifest fails, or any rendering differs from its committed manifest.
 pub fn check(root: &Path) -> Result<()> {
     let mut changed = Vec::new();
     for combination in Combination::all() {
@@ -391,6 +394,10 @@ pub fn check(root: &Path) -> Result<()> {
 }
 
 /// Writes every manifest from the current rendering.
+///
+/// # Errors
+///
+/// Returns an error when chezmoi fails to render a combination or writing the manifest directory or a manifest file fails.
 pub fn write(root: &Path) -> Result<()> {
     let directory = root.join(DIRECTORY).join(family());
     fs::create_dir_all(&directory)?;
@@ -404,7 +411,7 @@ pub fn write(root: &Path) -> Result<()> {
 }
 
 /// Scripts whose body changes when only the chezmoi command line changes, which reruns them on every such change.
-pub fn command_line_dependent(root: &Path) -> Result<Vec<String>> {
+pub(crate) fn command_line_dependent(root: &Path) -> Result<Vec<String>> {
     let mut dependent = Vec::new();
     for profile in Profile::ALL {
         let combination = Combination {
@@ -469,7 +476,7 @@ mod tests {
             differences(&committed, &rendered),
             ["targets a", "targets b", "scripts s"]
         );
-        assert!(differences(&rendered, &rendered).is_empty());
+        assert_eq!(differences(&rendered, &rendered), Vec::<String>::new());
     }
 
     #[test]

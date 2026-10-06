@@ -194,6 +194,7 @@ impl Tool {
     ];
 
     /// The program name, or the absolute path where the provider installs it outside PATH.
+    #[must_use]
     pub fn program(self) -> &'static str {
         match self {
             Self::AnsibleGalaxy => "ansible-galaxy",
@@ -295,6 +296,7 @@ impl Tool {
         }
     }
 
+    #[must_use]
     pub fn provision(self) -> Provision {
         match self {
             Self::AnsibleGalaxy | Self::AnsiblePlaybook => Provision::Pinned("pypi:ansible-core"),
@@ -309,78 +311,81 @@ impl Tool {
             Self::Shellcheck => Provision::Pinned("shellcheck"),
             Self::Taplo => Provision::Pinned("taplo"),
             Self::Vale => Provision::Pinned("vale"),
-            Self::Curl
+            Self::Bash
+            | Self::Curl
+            | Self::CurlExe
             | Self::Defaults
+            | Self::Env
             | Self::Git
             | Self::Id
+            | Self::Launchctl
+            | Self::Nohup
             | Self::Sh
             | Self::Ssh
             | Self::SshKeygen
             | Self::Sudo
             | Self::Systemctl
-            | Self::Wslpath => Provision::Host,
-            Self::CurlExe => Provision::Host,
-            Self::Env => Provision::Host,
-            Self::GnomeTerminal => Provision::Owner,
-            Self::HerdrAgent => Provision::Setup(Step::Runtime),
-            Self::Kitty => Provision::Owner,
-            Self::Launchctl => Provision::Host,
-            Self::Lefthook => Provision::Setup(Step::Tools),
-            Self::TarExe => Provision::Host,
-            Self::Unzip => Provision::Host,
-            Self::UpdateDesktopDatabase => Provision::Owner,
-            Self::Winget => Provision::Host,
-            Self::Bash => Provision::Host,
-            Self::Carapace => Provision::Setup(Step::Tools),
-            Self::Code => Provision::Owner,
-            Self::Docker => Provision::Owner,
-            Self::Domyjob => Provision::Setup(Step::Domyjob),
-            Self::Fleet => Provision::Setup(Step::Fleet),
-            Self::Nohup => Provision::Host,
-            Self::Ocomment => Provision::Setup(Step::Ocomment),
-            Self::Op => Provision::Owner,
-            Self::Opencode => Provision::Setup(Step::Tools),
-            Self::Starship => Provision::Setup(Step::Tools),
-            Self::Tailscale => Provision::Owner,
-            Self::Television => Provision::Setup(Step::Tools),
-            Self::Vivid => Provision::Setup(Step::Tools),
-            Self::Zoxide => Provision::Setup(Step::Tools),
-            Self::Zsh => Provision::Host,
-            Self::Erl => Provision::Setup(Step::Tools),
-            Self::Gleam => Provision::Setup(Step::Tools),
-            Self::Go => Provision::Setup(Step::Tools),
-            Self::Java => Provision::Setup(Step::Tools),
-            Self::Just => Provision::Setup(Step::Tools),
-            Self::Ocaml => Provision::Setup(Step::Ocaml),
-            Self::Rustc => Provision::Setup(Step::Tools),
-            Self::Mise => Provision::Setup(Step::Mise),
-            Self::Gh => Provision::Setup(Step::Github),
+            | Self::TarExe
+            | Self::Unzip
+            | Self::Winget
+            | Self::Wslpath
+            | Self::Zsh => Provision::Host,
+            Self::Atuin
+            | Self::Cabal
+            | Self::Carapace
+            | Self::Doppler
+            | Self::Erl
+            | Self::Gleam
+            | Self::Go
+            | Self::Hlint
+            | Self::Java
+            | Self::Just
+            | Self::Lefthook
+            | Self::Opam
+            | Self::Opencode
+            | Self::Rustc
+            | Self::Starship
+            | Self::Television
+            | Self::Tldr
+            | Self::Vivid
+            | Self::Zoxide => Provision::Setup(Step::Tools),
+            Self::Dotctl | Self::HerdrAgent => Provision::Setup(Step::Runtime),
             Self::Claude => Provision::Setup(Step::Claude),
-            Self::Dotctl => Provision::Setup(Step::Runtime),
+            Self::Domyjob => Provision::Setup(Step::Domyjob),
             Self::Dotguard => Provision::Setup(Step::Guard),
-            Self::Atuin | Self::Cabal | Self::Doppler | Self::Hlint | Self::Opam | Self::Tldr => {
-                Provision::Setup(Step::Tools)
-            }
+            Self::Fleet => Provision::Setup(Step::Fleet),
+            Self::Gh => Provision::Setup(Step::Github),
+            Self::Mise => Provision::Setup(Step::Mise),
+            Self::Ocaml => Provision::Setup(Step::Ocaml),
+            Self::Ocomment => Provision::Setup(Step::Ocomment),
             Self::Brew
+            | Self::Code
             | Self::Codex
             | Self::DesktopFileValidate
+            | Self::Docker
             | Self::FcCache
             | Self::Fcitx5
             | Self::Fcitx5Remote
             | Self::Ghostty
+            | Self::GnomeTerminal
             | Self::Gpg
             | Self::Gsettings
             | Self::Herdr
             | Self::ImConfig
+            | Self::Kitty
             | Self::Nix
             | Self::OnePassword
+            | Self::Op
             | Self::Raco
+            | Self::Tailscale
             | Self::Tmux
+            | Self::UpdateDesktopDatabase
             | Self::XdgMime => Provision::Owner,
         }
     }
 
     /// The package list entry that installs this tool.
+    #[must_use]
     pub fn package(self, profile: Profile) -> Option<(&'static str, &'static str)> {
         let pointer = match profile {
             Profile::Mac => "/brew/formulae",
@@ -402,6 +407,7 @@ impl Tool {
     }
 
     /// A Git hook exports its repository through these variables, and a check's fixture repositories would otherwise write to the hook's real index.
+    #[must_use]
     pub fn command(self) -> Command {
         let mut command = self.hook_command();
         for name in GIT_LOCAL_ENVIRONMENT {
@@ -412,6 +418,7 @@ impl Tool {
 
     /// A chezmoi run that reads the invoking checkout.
     /// The default source names a bare repository whose head lags, so no installer may fall back to it.
+    #[must_use]
     pub fn chezmoi_in(root: &std::path::Path) -> Command {
         let mut command = Self::Chezmoi.command();
         command.arg("--source").arg(root);
@@ -423,6 +430,7 @@ impl Tool {
         clippy::disallowed_methods,
         reason = "the registry's own constructor for a hook gate process"
     )]
+    #[must_use]
     pub fn hook_command(self) -> Command {
         Command::new(self.program())
     }

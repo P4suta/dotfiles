@@ -12,6 +12,7 @@ pub enum Verdict {
     Unmeasured,
 }
 
+#[must_use]
 pub const fn verdict(duration_millis: Option<u64>) -> Verdict {
     match duration_millis {
         Some(millis) if millis <= BUDGET_MILLIS => Verdict::Within,

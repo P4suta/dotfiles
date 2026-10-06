@@ -116,7 +116,10 @@ fn main() -> ExitCode {
                 "the keyboard settings exist only on Windows"
             )),
             SetupKind::Shell => setup::shell::run(),
-            SetupKind::PythonStub => setup::python_stub::run(),
+            SetupKind::PythonStub => {
+                setup::python_stub::run();
+                Ok(0)
+            }
             SetupKind::StorageScout => setup::storage_scout::run(),
             SetupKind::Sshd {
                 port,
@@ -136,21 +139,27 @@ fn main() -> ExitCode {
             SetupKind::Ocomment {
                 repo_url,
                 destination,
-            } => setup::ocomment::run(&setup::ocomment::Options {
-                repo_url,
-                destination,
-            }),
+            } => {
+                setup::ocomment::run(&setup::ocomment::Options {
+                    repo_url,
+                    destination,
+                });
+                Ok(0)
+            }
             SetupKind::Herdr {
                 manifest_url,
                 channel,
                 expected_build_id,
                 retain,
-            } => setup::herdr::run(&setup::herdr::Options {
-                manifest_url,
-                channel,
-                expected_build_id,
-                retain,
-            }),
+            } => {
+                setup::herdr::run(&setup::herdr::Options {
+                    manifest_url,
+                    channel,
+                    expected_build_id,
+                    retain,
+                });
+                Ok(0)
+            }
         },
     };
 

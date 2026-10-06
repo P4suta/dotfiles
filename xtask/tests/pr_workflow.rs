@@ -124,7 +124,7 @@ impl Fixture {
         let mut command = self.command_for_repo(operation, "P4suta/project")?;
         command
             .env("GH_FIXTURE_REPOSITORY", serde_json::json!({
-                "full_name":"P4suta/project","owner":{"login":"P4suta","id":42543015},"fork":false
+                "full_name":"P4suta/project","owner":{"login":"P4suta","id":42_543_015},"fork":false
             }).to_string())
             .env("GH_FIXTURE_ISSUE", serde_json::json!({
                 "number":23,"title":"Preserve edits","body":"The original input must survive edits.",
@@ -204,11 +204,13 @@ fn refusal(output: &Output) -> serde_json::Value {
 
 #[test]
 fn every_refusal_ends_with_one_complete_record_naming_its_rule() -> Result<()> {
-    let rule = |output: Output| refusal(&output)["rule"].as_str().unwrap().to_owned();
     let closed = format!("{BODY}\nCloses #23.\n");
 
     let fixture = Fixture::new(BODY)?;
-    assert_eq!(rule(fixture.document("check", "Repair edits")?), "pr.title");
+    assert_eq!(
+        rule(&fixture.document("check", "Repair edits")?),
+        "pr.title"
+    );
     let fixture = Fixture::new(" \n")?;
     let output = fixture.document("check", "fix: preserve edits")?;
     let record = refusal(&output);
@@ -223,7 +225,7 @@ fn every_refusal_ends_with_one_complete_record_naming_its_rule() -> Result<()> {
 
     let fixture = Fixture::new(&closed)?;
     assert_eq!(
-        rule(fixture.personal_command("start")?.output()?),
+        rule(&fixture.personal_command("start")?.output()?),
         "pr.issue"
     );
     let fixture = Fixture::new(BODY)?;
@@ -239,7 +241,7 @@ fn every_refusal_ends_with_one_complete_record_naming_its_rule() -> Result<()> {
         .arg(&fixture.body)
         .args(["--head", "feature"])
         .output()?;
-    assert_eq!(rule(output), "pr.body");
+    assert_eq!(rule(&output), "pr.body");
 
     let fixture = Fixture::new(&closed)?;
     let output = fixture
@@ -250,14 +252,22 @@ fn every_refusal_ends_with_one_complete_record_naming_its_rule() -> Result<()> {
             "HTTP/2.0 200 OK\nX-Ratelimit-Remaining: 9\nX-Ratelimit-Reset: 1800000000\nX-Ratelimit-Resource: core",
         )
         .output()?;
-    assert_eq!(rule(output), "pr.quota");
+    assert_eq!(rule(&output), "pr.quota");
     let output = fixture
         .personal_command("start")?
         .args(["--issue", "23"])
         .env("GH_FIXTURE_FAILURE", "user")
         .output()?;
-    assert_eq!(rule(output), "pr.auth");
+    assert_eq!(rule(&output), "pr.auth");
+    Ok(())
+}
 
+fn rule(output: &Output) -> String {
+    refusal(output)["rule"].as_str().unwrap().to_owned()
+}
+
+#[test]
+fn readying_refuses_a_closed_published_or_failing_pr() -> Result<()> {
     for (state, draft) in [("CLOSED", true), ("OPEN", false)] {
         let fixture = Fixture::new(BODY)?;
         let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":state,"isDraft":draft});
@@ -266,7 +276,7 @@ fn every_refusal_ends_with_one_complete_record_naming_its_rule() -> Result<()> {
             .args(["--pr", "17"])
             .env("GH_FIXTURE_VIEW", view.to_string())
             .output()?;
-        assert_eq!(rule(output), "pr.state");
+        assert_eq!(rule(&output), "pr.state");
     }
     let fixture = Fixture::new(BODY)?;
     let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true,
@@ -279,19 +289,24 @@ fn every_refusal_ends_with_one_complete_record_naming_its_rule() -> Result<()> {
     let record = refusal(&output);
     assert_eq!(record["rule"], "pr.checks");
     assert_eq!(record["next"], "gh pr checks 17 --repo owner/project");
+    Ok(())
+}
 
+#[test]
+fn an_unusable_repository_policy_or_identity_is_refused_by_its_rule() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
     let output = fixture.command_for_repo("start", "owner")?.output()?;
-    assert_eq!(rule(output), "pr.repository");
+    assert_eq!(rule(&output), "pr.repository");
     let output = fixture
         .command("start")?
         .args(["--title-policy", "missing.json"])
         .output()?;
-    assert_eq!(rule(output), "pr.title-policy");
+    assert_eq!(rule(&output), "pr.title-policy");
     let output = fixture
         .command("start")?
         .env("GH_FIXTURE_USER", r#"{"login":"P4suta","id":0}"#)
         .output()?;
-    assert_eq!(rule(output), "pr.auth");
+    assert_eq!(rule(&output), "pr.auth");
     let output = fixture
         .personal_command("start")?
         .env(
@@ -302,8 +317,12 @@ fn every_refusal_ends_with_one_complete_record_naming_its_rule() -> Result<()> {
             .to_string(),
         )
         .output()?;
-    assert_eq!(rule(output), "pr.policy");
+    assert_eq!(rule(&output), "pr.policy");
+    Ok(())
+}
 
+#[test]
+fn creation_refuses_an_invalid_branch_and_reports_a_failed_request() -> Result<()> {
     let fixture = Fixture::new(BODY)?;
     let output = fixture
         .command("create")?
@@ -311,7 +330,7 @@ fn every_refusal_ends_with_one_complete_record_naming_its_rule() -> Result<()> {
         .arg(&fixture.body)
         .args(["--head", "a b"])
         .output()?;
-    assert_eq!(rule(output), "pr.branch");
+    assert_eq!(rule(&output), "pr.branch");
     let output = fixture
         .command("create")?
         .args(["--title", "fix: preserve edits", "--body-file"])
@@ -329,113 +348,105 @@ const PAUSE_MARKER: &str = "<!-- coderabbit-pause -->";
 
 const BODY: &str = "## Why\nAvoid losing edits.\n\n## Changes\nPreserve the original input.\n\n## Validation\nThe targeted regression test passed.\n";
 
+/// Whether the command names `--issue 23`, the issue GitHub returns, what follows [`BODY`] in the document, and whether publication proceeds.
+type Publication = (bool, Option<&'static str>, &'static str, bool);
+
+const PUBLICATIONS: &[Publication] = &[
+    (false, None, "\nCloses #23.\n", false),
+    (true, None, "", false),
+    (true, None, "\n<!-- Closes #23. -->\n", false),
+    (true, None, "\n`Closes #23.`\n", false),
+    (true, None, "\n```text\nCloses #23.\n```\n", false),
+    (true, None, "\nCloses #230.\n", false),
+    (
+        true,
+        None,
+        "\n- Not run: the stopped engine.\n\nCloses #23.\n",
+        true,
+    ),
+    (
+        true,
+        None,
+        "\n| Check | Result |\n| --- | --- |\n| proofs | passed |\n\nCloses #23.\n",
+        true,
+    ),
+    (
+        true,
+        None,
+        "\nCloses https://github.com/other/project/issues/23.\n",
+        false,
+    ),
+    (
+        true,
+        Some(
+            r#"{"number":23,"title":"Preserve edits","body":"Input must survive.","state":"closed","html_url":"https://github.com/P4suta/project/issues/23"}"#,
+        ),
+        "\nCloses #23.\n",
+        false,
+    ),
+    (
+        true,
+        Some(
+            r#"{"number":24,"title":"Preserve edits","body":"Input must survive.","state":"open","html_url":"https://github.com/P4suta/project/issues/24"}"#,
+        ),
+        "\nCloses #23.\n",
+        false,
+    ),
+    (
+        true,
+        Some(
+            r#"{"number":23,"title":"Preserve edits","body":null,"state":"open","html_url":"https://github.com/P4suta/project/issues/23"}"#,
+        ),
+        "\nCloses #23.\n",
+        false,
+    ),
+    (
+        true,
+        Some(
+            r#"{"number":23,"title":"Preserve edits","body":"<!-- instructions -->","state":"open","html_url":"https://github.com/P4suta/project/issues/23"}"#,
+        ),
+        "\nCloses #23.\n",
+        false,
+    ),
+    (
+        true,
+        Some(
+            r#"{"number":23,"title":"Preserve edits","body":"TODO: describe intent","state":"open","html_url":"https://github.com/P4suta/project/issues/23"}"#,
+        ),
+        "\nCloses #23.\n",
+        false,
+    ),
+    (
+        true,
+        Some(
+            r#"{"number":23,"title":"Preserve edits","body":"Input must survive.","state":"open","html_url":"https://github.com/other/project/issues/23"}"#,
+        ),
+        "\nCloses #23.\n",
+        false,
+    ),
+    (
+        true,
+        Some(
+            r#"{"number":23,"title":"Preserve edits","body":"Input must survive.","state":"open","html_url":"https://github.com/P4suta/project/issues/23","pull_request":{}}"#,
+        ),
+        "\nCloses #23.\n",
+        false,
+    ),
+    (true, Some("{truncated"), "\nCloses #23.\n", false),
+    (true, None, "\nCloses #23.\n", true),
+    (
+        true,
+        None,
+        "\nFixes [the issue](https://github.com/P4suta/project/issues/23).\n",
+        true,
+    ),
+];
+
 #[test]
 fn personal_publication_requires_a_real_open_issue_and_visible_reference() -> Result<()> {
     for operation in ["create", "edit", "ready"] {
-        for (issue_argument, issue, body, accepted) in [
-            (false, None, format!("{BODY}\nCloses #23.\n"), false),
-            (true, None, BODY.to_owned(), false),
-            (true, None, format!("{BODY}\n<!-- Closes #23. -->\n"), false),
-            (true, None, format!("{BODY}\n`Closes #23.`\n"), false),
-            (
-                true,
-                None,
-                format!("{BODY}\n```text\nCloses #23.\n```\n"),
-                false,
-            ),
-            (true, None, format!("{BODY}\nCloses #230.\n"), false),
-            (
-                true,
-                None,
-                format!("{BODY}\n- Not run: the stopped engine.\n\nCloses #23.\n"),
-                true,
-            ),
-            (
-                true,
-                None,
-                format!(
-                    "{BODY}\n| Check | Result |\n| --- | --- |\n| proofs | passed |\n\nCloses #23.\n"
-                ),
-                true,
-            ),
-            (
-                true,
-                None,
-                format!("{BODY}\nCloses https://github.com/other/project/issues/23.\n"),
-                false,
-            ),
-            (
-                true,
-                Some(
-                    r#"{"number":23,"title":"Preserve edits","body":"Input must survive.","state":"closed","html_url":"https://github.com/P4suta/project/issues/23"}"#,
-                ),
-                format!("{BODY}\nCloses #23.\n"),
-                false,
-            ),
-            (
-                true,
-                Some(
-                    r#"{"number":24,"title":"Preserve edits","body":"Input must survive.","state":"open","html_url":"https://github.com/P4suta/project/issues/24"}"#,
-                ),
-                format!("{BODY}\nCloses #23.\n"),
-                false,
-            ),
-            (
-                true,
-                Some(
-                    r#"{"number":23,"title":"Preserve edits","body":null,"state":"open","html_url":"https://github.com/P4suta/project/issues/23"}"#,
-                ),
-                format!("{BODY}\nCloses #23.\n"),
-                false,
-            ),
-            (
-                true,
-                Some(
-                    r#"{"number":23,"title":"Preserve edits","body":"<!-- instructions -->","state":"open","html_url":"https://github.com/P4suta/project/issues/23"}"#,
-                ),
-                format!("{BODY}\nCloses #23.\n"),
-                false,
-            ),
-            (
-                true,
-                Some(
-                    r#"{"number":23,"title":"Preserve edits","body":"TODO: describe intent","state":"open","html_url":"https://github.com/P4suta/project/issues/23"}"#,
-                ),
-                format!("{BODY}\nCloses #23.\n"),
-                false,
-            ),
-            (
-                true,
-                Some(
-                    r#"{"number":23,"title":"Preserve edits","body":"Input must survive.","state":"open","html_url":"https://github.com/other/project/issues/23"}"#,
-                ),
-                format!("{BODY}\nCloses #23.\n"),
-                false,
-            ),
-            (
-                true,
-                Some(
-                    r#"{"number":23,"title":"Preserve edits","body":"Input must survive.","state":"open","html_url":"https://github.com/P4suta/project/issues/23","pull_request":{}}"#,
-                ),
-                format!("{BODY}\nCloses #23.\n"),
-                false,
-            ),
-            (
-                true,
-                Some("{truncated"),
-                format!("{BODY}\nCloses #23.\n"),
-                false,
-            ),
-            (true, None, format!("{BODY}\nCloses #23.\n"), true),
-            (
-                true,
-                None,
-                format!(
-                    "{BODY}\nFixes [the issue](https://github.com/P4suta/project/issues/23).\n"
-                ),
-                true,
-            ),
-        ] {
+        for &(issue_argument, issue, suffix, accepted) in PUBLICATIONS {
+            let body = format!("{BODY}{suffix}");
             let fixture = Fixture::new(&body)?;
             let mut command = fixture.personal_command(operation)?;
             if operation == "ready" {
@@ -486,11 +497,11 @@ fn personal_publication_requires_a_real_open_issue_and_visible_reference() -> Re
 #[test]
 fn global_owner_identity_and_forks_preserve_upstream_rules() -> Result<()> {
     for (repository, accepted) in [
-        (serde_json::json!({"full_name":"P4suta/project","owner":{"login":"P4suta","id":42543015},"fork":true}).to_string(), true),
+        (serde_json::json!({"full_name":"P4suta/project","owner":{"login":"P4suta","id":42_543_015},"fork":true}).to_string(), true),
         (serde_json::json!({"full_name":"P4suta/project","owner":{"login":"P4suta","id":1},"fork":false}).to_string(), false),
         (serde_json::json!({"full_name":"other/project","owner":{"login":"other","id":1},"fork":false}).to_string(), false),
-        (serde_json::json!({"full_name":"P4suta/project","owner":{"login":"other","id":42543015},"fork":false}).to_string(), false),
-        (serde_json::json!({"full_name":"P4suta/project","owner":{"login":"P4suta","id":42543015},"fork":null}).to_string(), false),
+        (serde_json::json!({"full_name":"P4suta/project","owner":{"login":"other","id":42_543_015},"fork":false}).to_string(), false),
+        (serde_json::json!({"full_name":"P4suta/project","owner":{"login":"P4suta","id":42_543_015},"fork":null}).to_string(), false),
         ("{truncated".into(), false),
     ] {
         let fixture = Fixture::new(BODY)?;
@@ -780,7 +791,7 @@ fn external_destinations_and_forks_keep_their_own_writing_rules() -> Result<()> 
         );
     }
     let fork = serde_json::json!({
-        "full_name":"P4suta/project","owner":{"login":"P4suta","id":42543015},"fork":true
+        "full_name":"P4suta/project","owner":{"login":"P4suta","id":42_543_015},"fork":true
     });
     let output = fixture
         .personal_command("create")?
@@ -945,16 +956,25 @@ fn review_exclusion_is_published_without_allowing_unfinished_generation() -> Res
     Ok(())
 }
 
+/// Each pause marker the owner can set, and whether it pauses PR reviews.
+const PAUSES: [(Option<&str>, bool); 4] = [
+    (None, false),
+    (Some("paused"), true),
+    (Some("paused-pr"), true),
+    (Some("paused-cli"), false),
+];
+
+fn excluded() -> String {
+    format!("{BODY}\n@coderabbitai ignore\n")
+}
+
+fn pause_excluded() -> String {
+    format!("{}{PAUSE_MARKER}\n", excluded())
+}
+
 #[test]
-fn paused_pr_reviews_are_neither_requested_nor_awaited() -> Result<()> {
-    let excluded = format!("{BODY}\n@coderabbitai ignore\n");
-    let pause_excluded = format!("{excluded}{PAUSE_MARKER}\n");
-    for (marker, paused) in [
-        (None, false),
-        (Some("paused"), true),
-        (Some("paused-pr"), true),
-        (Some("paused-cli"), false),
-    ] {
+fn paused_pr_reviews_are_not_requested_by_generation() -> Result<()> {
+    for (marker, paused) in PAUSES {
         let fixture =
             Fixture::new("@coderabbitai summary\n\n## Validation\nThe regression passed.\n")?;
         if let Some(marker) = marker {
@@ -982,10 +1002,17 @@ fn paused_pr_reviews_are_neither_requested_nor_awaited() -> Result<()> {
                 assert!(!fixture.log.try_exists()?);
             }
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn a_draft_readied_during_the_pause_carries_the_pause_lines() -> Result<()> {
+    for (marker, paused) in PAUSES {
         for (body, generation, accepted) in [
             (BODY.to_owned(), "local", !paused),
-            (excluded.clone(), "local", !paused),
-            (pause_excluded.clone(), "local", true),
+            (excluded(), "local", !paused),
+            (pause_excluded(), "local", true),
             ("@coderabbitai summary\n".to_owned(), "coderabbit", !paused),
         ] {
             let fixture = Fixture::new(BODY)?;
@@ -1018,6 +1045,13 @@ fn paused_pr_reviews_are_neither_requested_nor_awaited() -> Result<()> {
                 }
             }
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn paused_pr_reviews_are_not_awaited() -> Result<()> {
+    for (marker, paused) in PAUSES {
         for (body, expected) in [
             (
                 BODY.to_owned(),
@@ -1028,7 +1062,7 @@ fn paused_pr_reviews_are_neither_requested_nor_awaited() -> Result<()> {
                 },
             ),
             (
-                excluded.clone(),
+                excluded(),
                 if paused {
                     "not required while the owner pauses PR reviews"
                 } else {
@@ -1036,7 +1070,7 @@ fn paused_pr_reviews_are_neither_requested_nor_awaited() -> Result<()> {
                 },
             ),
             (
-                pause_excluded.clone(),
+                pause_excluded(),
                 if paused {
                     "not required while the owner pauses PR reviews"
                 } else {
@@ -1065,6 +1099,11 @@ fn paused_pr_reviews_are_neither_requested_nor_awaited() -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+
+#[test]
+fn readying_without_the_pause_lines_waits_until_reviews_resume() -> Result<()> {
     let fixture = Fixture::new(BODY)?;
     fixture.pause("paused-pr")?;
     let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true});
@@ -1585,15 +1624,13 @@ fn invalid_repository_missing_files_and_invalid_cli_never_start_gh() -> Result<(
     Ok(())
 }
 
-#[test]
-fn scoped_install_preserves_other_managed_skills_policy_and_history() -> Result<()> {
+/// Installs every shared skill except pull-request, and one skill another owner manages, into `skills`.
+fn install_other_skills(
+    source: &std::path::Path,
+    skills: &std::path::Path,
+) -> Result<dotfiles_xtask::skill_ops::Catalog> {
     use dotfiles_xtask::skill_ops as ops;
-    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap();
-    let home = tempfile::tempdir()?;
-    let skills = home.path().join(".agents/skills");
-    fs::create_dir_all(&skills)?;
+    fs::create_dir_all(skills)?;
     let mut catalog = ops::catalog(&source.join("home/dot_agents/skills"))?;
     catalog.skills.remove("pull-request");
     for skill in catalog.skills.values() {
@@ -1611,7 +1648,18 @@ fn scoped_install_preserves_other_managed_skills_policy_and_history() -> Result<
         skills.join("other-owned/SKILL.md"),
         "---\nname: other-owned\ndescription: Inspect an independent existing skill.\n---\n# Independent\nPreserve this skill.\n",
     )?;
-    catalog = ops::catalog(&skills)?;
+    ops::catalog(skills)
+}
+
+#[test]
+fn scoped_install_preserves_other_managed_skills_policy_and_history() -> Result<()> {
+    use dotfiles_xtask::skill_ops as ops;
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let home = tempfile::tempdir()?;
+    let skills = home.path().join(".agents/skills");
+    let catalog = install_other_skills(source, &skills)?;
     let policy: ops::Policy =
         ops::read_json(&source.join("home/dot_config/skill-ops/policy.json"))?;
     ops::write_json(
@@ -1627,7 +1675,7 @@ fn scoped_install_preserves_other_managed_skills_policy_and_history() -> Result<
             catalog,
             policy_hash: ops::hash(&policy)?,
             engine_hash: "existing-native-engine".into(),
-            reviewed: Default::default(),
+            reviewed: std::collections::BTreeMap::default(),
         },
         false,
     )?;
@@ -2184,7 +2232,7 @@ fn stack_sync_and_rebase_run_gh_stack_under_the_lease_and_release_it() -> Result
             .output()?,
     );
     assert_eq!(record["rule"], "pr.stack");
-    assert!(other.stack_log().is_empty());
+    assert_eq!(other.stack_log(), "");
     Ok(())
 }
 
@@ -2224,7 +2272,7 @@ fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<(
          gh-stack sync repo=P4suta/project leased=true notifier=1\n\
          gh-stack merge 17 --yes --squash repo=P4suta/project leased=false notifier=1\n"
     );
-    assert!(mutations(&fixture.log()?).is_empty());
+    assert_eq!(mutations(&fixture.log()?), Vec::<String>::new());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("#5 merged at parent-head") && stdout.contains("#17 merged at top-head"),

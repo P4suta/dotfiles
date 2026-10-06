@@ -55,7 +55,7 @@ fn merge(target: &mut Value, values: &Value) {
     }
 }
 
-pub fn load(source: &Path, config: &Path, home: &Path) -> Result<ContextData> {
+pub(crate) fn load(source: &Path, config: &Path, home: &Path) -> Result<ContextData> {
     let scope = tempfile::tempdir()?;
     let output = crate::profiles::chezmoi(source, scope.path(), config, home)
         .args(["data", "--format", "json"])
@@ -76,6 +76,13 @@ pub fn load(source: &Path, config: &Path, home: &Path) -> Result<ContextData> {
     })
 }
 
+/// Runs one setup `step` on this host with the machine-local `config`.
+///
+/// # Errors
+///
+/// Returns an error when `config` names a relative path or lies inside `source`, or when loading the home or configuration fails.
+/// Returns an error when the caller leaves `live` unset or the configured profile belongs to another host.
+/// Returns an error when the step fails.
 pub fn run(source: &Path, config: &Path, step: Step, live: bool) -> Result<()> {
     ensure!(
         config.is_absolute() && !crate::canonical(config)?.starts_with(source),
@@ -105,7 +112,8 @@ pub fn run(source: &Path, config: &Path, step: Step, live: bool) -> Result<()> {
     {
         let prefix = String::from_utf8(prefix)?;
         if Path::new(prefix.trim()).is_dir() {
-            kerl.push_str(&format!(" --with-ssl={}", prefix.trim()));
+            kerl.push_str(" --with-ssl=");
+            kerl.push_str(prefix.trim());
         }
     }
     native
@@ -121,10 +129,15 @@ pub fn run(source: &Path, config: &Path, step: Step, live: bool) -> Result<()> {
 
 impl Step {
     /// Steps whose effects this step relies on, which must run first when both run in one apply.
+    #[must_use]
     pub fn after(self) -> &'static [Step] {
         match self {
-            Self::Ocomment | Self::Domyjob | Self::Fleet => &[Self::Tools],
-            Self::Ocaml | Self::Haskell | Self::Integrations => &[Self::Tools],
+            Self::Ocomment
+            | Self::Domyjob
+            | Self::Fleet
+            | Self::Ocaml
+            | Self::Haskell
+            | Self::Integrations => &[Self::Tools],
             Self::Racket => &[Self::Desktop],
             Self::Adapters | Self::Guard => &[Self::Runtime],
             Self::Tools | Self::Upgrade => &[Self::Mise],
@@ -146,6 +159,7 @@ impl Step {
 impl Step {
     /// Packaged tools this step invokes beyond those the host or this repository pins.
     /// Cloning owner sources fires the global Git hooks, which run Lefthook for repositories that configure it.
+    #[must_use]
     pub fn requires(self, _profile: Profile) -> &'static [Tool] {
         match self {
             Self::Ocomment | Self::Domyjob | Self::Fleet => &[Tool::Lefthook],
@@ -181,6 +195,7 @@ fn dotctl_requires(command: &str) -> &'static [Tool] {
 }
 
 /// Packaged tools the rendered scripts require, through xtask steps and `dotctl` commands.
+#[must_use]
 pub fn scripted_requirements(profile: Profile, scripts: &str) -> Vec<Tool> {
     let mut tools: Vec<Tool> = scripted_steps(scripts)
         .into_iter()
@@ -204,6 +219,7 @@ pub fn scripted_requirements(profile: Profile, scripts: &str) -> Vec<Tool> {
 /// Packaged tools that installed entry points run, read from rendered files.
 /// An agent launcher reads the secrets the machine-local configuration selects through Doppler, so it needs Doppler wherever it renders.
 /// A global Git hook runs the Lefthook configuration of the repository it fires in, so it needs Lefthook wherever it renders.
+#[must_use]
 pub fn entry_requirements(rendered: &str) -> Vec<Tool> {
     let mut tools = Vec::new();
     for words in rendered
@@ -229,6 +245,7 @@ pub fn entry_requirements(rendered: &str) -> Vec<Tool> {
 }
 
 /// Dependency pairs `(step, prerequisite)` that a run order breaks: the prerequisite runs later, or only later.
+#[must_use]
 pub fn ordering_violations(sequence: &[Step]) -> Vec<(Step, Step)> {
     let mut violations = Vec::new();
     for (index, step) in sequence.iter().enumerate() {
@@ -245,6 +262,7 @@ pub fn ordering_violations(sequence: &[Step]) -> Vec<(Step, Step)> {
 }
 
 /// Setup steps a rendered script runs, in script order, from `dotfiles-xtask ... setup STEP` invocations.
+#[must_use]
 pub fn scripted_steps(scripts: &str) -> Vec<Step> {
     use clap::ValueEnum;
     let mut steps = Vec::new();
@@ -265,7 +283,11 @@ pub fn scripted_steps(scripts: &str) -> Vec<Step> {
 }
 
 /// Requirements checked for every scripted step before apply changes anything.
-pub fn preflight(context: &ContextData, runner: &mut impl Runner, steps: &[Step]) -> Result<()> {
+pub(crate) fn preflight(
+    context: &ContextData,
+    runner: &mut impl Runner,
+    steps: &[Step],
+) -> Result<()> {
     let mut unmet = Vec::new();
     for &step in steps {
         if let Some(source) = owner_source(step)
@@ -354,7 +376,7 @@ pub(crate) fn cargo_install_arguments(
 }
 
 /// Windows has no `exec` for a launcher script, so a copy of dotguard named `git.exe` serves as the Git wrapper, and the PowerShell profile places it ahead of Git for Windows.
-pub fn git_wrapper(bin: &Path) -> Result<()> {
+pub(crate) fn git_wrapper(bin: &Path) -> Result<()> {
     let wrapper = bin.join("git.exe");
     let wanted = fs::read(bin.join("dotguard.exe")).context("dotguard.exe is not installed")?;
     if fs::read(&wrapper).is_ok_and(|current| current == wanted) {
@@ -367,6 +389,11 @@ pub fn git_wrapper(bin: &Path) -> Result<()> {
     }
     Ok(())
 }
+
+/// The Git guard, which every Git command starts.
+pub const GUARD_CRATE: &str = "crates/dotguard";
+/// The workspace profile that builds the guard small, with link-time optimization, which Cargo offers only for a whole profile.
+pub const GUARD_PROFILE: &str = "release-guard";
 
 /// `cargo install` overwrites each binary in place, which Windows refuses while that binary runs, so each one moves aside first.
 fn install_crate(
@@ -384,7 +411,10 @@ fn install_crate(
         let aside = crate::aside::move_aside(&target)?;
         moved.push((target, aside));
     }
-    let arguments = cargo_install_arguments(&context.source.join(relative), &root, binaries);
+    let mut arguments = cargo_install_arguments(&context.source.join(relative), &root, binaries);
+    if relative == GUARD_CRATE {
+        arguments.extend(args(&["--profile", GUARD_PROFILE]));
+    }
     let result = checked(runner, Tool::Cargo, &arguments);
     if result.is_err() {
         for (target, aside) in moved {
@@ -423,35 +453,9 @@ pub(crate) fn vendor_installer(
     Ok(())
 }
 
-pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> Result<()> {
+pub(crate) fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> Result<()> {
     match step {
-        Step::Runtime => {
-            install_crate(
-                context,
-                runner,
-                "xtask",
-                &["dotfiles-xtask", "skill-ops", "pr-workflow"],
-            )?;
-            if context.profile == Profile::Windows {
-                install_crate(context, runner, "crates/dotctl", &["dotctl"])?;
-                install_crate(context, runner, "crates/dotguard", &["dotguard"])?;
-                git_wrapper(&context.home.join(".local/bin"))?;
-            } else {
-                install_crate(
-                    context,
-                    runner,
-                    "crates/dotguard",
-                    &["dotguard", "reaper", "herdr-agent"],
-                )?;
-            }
-            if context.profile == Profile::Mac {
-                install_crate(context, runner, "xtask", &["coderabbit"])?;
-                crate::review_guard::install(
-                    &context.home.join(".local/bin/coderabbit"),
-                    &context.home,
-                )?;
-            }
-        }
+        Step::Runtime => runtime(context, runner)?,
         Step::Adapters => {
             crate::line_endings::install(&context.home)?;
             let binary = context.home.join(format!(
@@ -460,77 +464,11 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
             ));
             crate::skill_install::install(&context.source, &binary, &context.home)?;
         }
-        Step::Mise => {
-            if !runner.available(Tool::Mise) {
-                if context.profile == Profile::Windows {
-                    checked(
-                        runner,
-                        Tool::Winget,
-                        &args(&[
-                            "install",
-                            "--id",
-                            "jdx.mise",
-                            "--exact",
-                            "--silent",
-                            "--accept-source-agreements",
-                            "--accept-package-agreements",
-                        ]),
-                    )?;
-                } else {
-                    vendor_installer(runner, "https://mise.run", &[])?;
-                }
-            }
-        }
-        Step::Github => {
-            if !runner.available(Tool::Gh) {
-                checked(runner, Tool::Mise, &args(&["install", "gh@latest", "-y"]))?;
-                checked(runner, Tool::Mise, &args(&["reshim"]))?;
-            }
-            let reply = runner.run(Tool::Gh, &args(&["auth", "status"]))?;
-            if reply.success {
-                checked(
-                    runner,
-                    Tool::Gh,
-                    &args(&["config", "set", "-h", "github.com", "git_protocol", "ssh"]),
-                )?;
-            } else {
-                eprintln!(
-                    "Warning: GitHub authentication is required; run gh auth login before installing tools."
-                );
-            }
-        }
-        Step::Nix => {
-            let nix = Tool::Nix;
-            if runner.available(nix) {
-                let flake = context.home.join(".config/dotfiles-nix");
-                let listed = checked(runner, nix, &args(&["profile", "list"]))?;
-                if String::from_utf8(listed)?
-                    .contains(flake.to_str().context("Nix profile path is not UTF-8")?)
-                {
-                    checked(runner, nix, &args(&["profile", "upgrade", "--all"]))?;
-                } else {
-                    checked(runner, nix, &["profile".into(), "add".into(), flake.into()])?;
-                }
-            }
-        }
+        Step::Mise => mise(context, runner)?,
+        Step::Github => github(runner)?,
+        Step::Nix => nix(context, runner)?,
         Step::Tools | Step::Upgrade => tools(context, runner, matches!(step, Step::Upgrade))?,
-        Step::Integrations => {
-            if context.profile == Profile::Windows {
-                checked(runner, Tool::Dotctl, &args(&["setup", "shell"]))?;
-                crate::runtime::agent_integrations(runner, true)?;
-            } else {
-                let remote = ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"]
-                    .iter()
-                    .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()));
-                let gui = !remote
-                    && match context.profile {
-                        Profile::Mac => Path::new("/Applications/1Password.app").is_dir(),
-                        Profile::Linux => runner.available(Tool::OnePassword),
-                        _ => false,
-                    };
-                crate::runtime::integrations(&context.home, runner, gui)?;
-            }
-        }
+        Step::Integrations => integrations(context, runner)?,
         Step::Desktop => crate::desktop::refresh(context, runner)?,
         Step::Ocaml => ocaml(context, runner)?,
         Step::Racket => {
@@ -554,7 +492,7 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
             install_crate(
                 context,
                 runner,
-                "crates/dotguard",
+                GUARD_CRATE,
                 &["dotguard", "reaper", "herdr-agent"],
             )?;
             let reaper = context.home.join(".local/bin/reaper");
@@ -567,36 +505,7 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
             }
         }
         Step::Ocomment | Step::Domyjob | Step::Fleet => source_tool(context, runner, step)?,
-        Step::MacosDefaults => {
-            ensure!(
-                context.profile == Profile::Mac,
-                "macOS defaults require the Mac profile"
-            );
-            for (key, pointer, kind) in [
-                ("KeyRepeat", "/macos/keyboard/key_repeat", "-int"),
-                (
-                    "InitialKeyRepeat",
-                    "/macos/keyboard/initial_key_repeat",
-                    "-int",
-                ),
-                (
-                    "ApplePressAndHoldEnabled",
-                    "/macos/keyboard/press_and_hold",
-                    "-bool",
-                ),
-            ] {
-                let value = context
-                    .data
-                    .pointer(pointer)
-                    .context("keyboard setting is missing")?
-                    .to_string();
-                checked(
-                    runner,
-                    Tool::Defaults,
-                    &args(&["write", "-g", key, kind, &value]),
-                )?;
-            }
-        }
+        Step::MacosDefaults => macos_defaults(context, runner)?,
         Step::ForgeKeys => forge_keys(runner)?,
         Step::Claude => {
             if !runner.available(Tool::Claude) {
@@ -606,6 +515,143 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
         Step::Fcitx5 => fcitx(context, runner)?,
         Step::RetireTmux => retire_tmux(context, runner)?,
         Step::Wezterm => crate::windows_setup::wezterm(&context.home, runner)?,
+    }
+    Ok(())
+}
+
+/// The installed runtime, the Git guard, and on the Mac the `CodeRabbit` guard, all built from this checkout.
+fn runtime(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+    install_crate(
+        context,
+        runner,
+        "xtask",
+        &["dotfiles-xtask", "skill-ops", "pr-workflow"],
+    )?;
+    if context.profile == Profile::Windows {
+        install_crate(context, runner, "crates/dotctl", &["dotctl"])?;
+        install_crate(context, runner, GUARD_CRATE, &["dotguard"])?;
+        git_wrapper(&context.home.join(".local/bin"))?;
+    } else {
+        install_crate(
+            context,
+            runner,
+            GUARD_CRATE,
+            &["dotguard", "reaper", "herdr-agent"],
+        )?;
+    }
+    if context.profile == Profile::Mac {
+        install_crate(context, runner, "xtask", &["coderabbit"])?;
+        crate::review_guard::install(&context.home.join(".local/bin/coderabbit"), &context.home)?;
+    }
+    Ok(())
+}
+
+fn mise(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+    if runner.available(Tool::Mise) {
+        return Ok(());
+    }
+    if context.profile == Profile::Windows {
+        checked(
+            runner,
+            Tool::Winget,
+            &args(&[
+                "install",
+                "--id",
+                "jdx.mise",
+                "--exact",
+                "--silent",
+                "--accept-source-agreements",
+                "--accept-package-agreements",
+            ]),
+        )?;
+        Ok(())
+    } else {
+        vendor_installer(runner, "https://mise.run", &[])
+    }
+}
+
+fn github(runner: &mut impl Runner) -> Result<()> {
+    if !runner.available(Tool::Gh) {
+        checked(runner, Tool::Mise, &args(&["install", "gh@latest", "-y"]))?;
+        checked(runner, Tool::Mise, &args(&["reshim"]))?;
+    }
+    let reply = runner.run(Tool::Gh, &args(&["auth", "status"]))?;
+    if reply.success {
+        checked(
+            runner,
+            Tool::Gh,
+            &args(&["config", "set", "-h", "github.com", "git_protocol", "ssh"]),
+        )?;
+    } else {
+        eprintln!(
+            "Warning: GitHub authentication is required; run gh auth login before installing tools."
+        );
+    }
+    Ok(())
+}
+
+fn nix(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+    let nix = Tool::Nix;
+    if !runner.available(nix) {
+        return Ok(());
+    }
+    let flake = context.home.join(".config/dotfiles-nix");
+    let listed = checked(runner, nix, &args(&["profile", "list"]))?;
+    if String::from_utf8(listed)?.contains(flake.to_str().context("Nix profile path is not UTF-8")?)
+    {
+        checked(runner, nix, &args(&["profile", "upgrade", "--all"]))?;
+    } else {
+        checked(runner, nix, &["profile".into(), "add".into(), flake.into()])?;
+    }
+    Ok(())
+}
+
+fn integrations(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+    if context.profile == Profile::Windows {
+        checked(runner, Tool::Dotctl, &args(&["setup", "shell"]))?;
+        crate::runtime::agent_integrations(runner, true);
+        return Ok(());
+    }
+    let remote = ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"]
+        .iter()
+        .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()));
+    let gui = !remote
+        && match context.profile {
+            Profile::Mac => Path::new("/Applications/1Password.app").is_dir(),
+            Profile::Linux => runner.available(Tool::OnePassword),
+            _ => false,
+        };
+    crate::runtime::integrations(&context.home, runner, gui)
+}
+
+fn macos_defaults(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+    ensure!(
+        context.profile == Profile::Mac,
+        "macOS defaults require the Mac profile"
+    );
+    for (key, pointer, kind) in [
+        ("KeyRepeat", "/macos/keyboard/key_repeat", "-int"),
+        (
+            "InitialKeyRepeat",
+            "/macos/keyboard/initial_key_repeat",
+            "-int",
+        ),
+        (
+            "ApplePressAndHoldEnabled",
+            "/macos/keyboard/press_and_hold",
+            "-bool",
+        ),
+    ] {
+        let value = context
+            .data
+            .pointer(pointer)
+            .context("keyboard setting is missing")?
+            .to_string();
+        checked(
+            runner,
+            Tool::Defaults,
+            &args(&["write", "-g", key, kind, &value]),
+        )?;
     }
     Ok(())
 }
@@ -647,8 +693,8 @@ fn agent_loaded(runner: &mut impl Runner, target: &str) -> Result<bool> {
         .success)
 }
 
-/// Boots a LaunchAgent out and returns once launchd no longer knows it.
-pub fn unload_agent(runner: &mut impl Runner, domain: &str, label: &str) -> Result<()> {
+/// Boots a `LaunchAgent` out and returns once launchd no longer knows it.
+pub(crate) fn unload_agent(runner: &mut impl Runner, domain: &str, label: &str) -> Result<()> {
     let target = format!("{domain}/{label}");
     if !agent_loaded(runner, &target)? {
         return Ok(());
@@ -666,7 +712,11 @@ pub fn unload_agent(runner: &mut impl Runner, domain: &str, label: &str) -> Resu
     Ok(())
 }
 
-/// Replaces a LaunchAgent's loaded definition with the one in `plist`, loading it when absent.
+/// Replaces a `LaunchAgent`'s loaded definition with the one in `plist`, loading it when absent.
+///
+/// # Errors
+///
+/// Returns an error when `launchctl` can't start, when the old job stays loaded 30 seconds after its bootout, or when `launchctl bootstrap` fails.
 pub fn reload_agent(
     runner: &mut impl Runner,
     domain: &str,
@@ -798,13 +848,12 @@ fn ocaml(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
 fn haskell(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     checked(runner, Tool::Cabal, &args(&["update"]))?;
     let config = std::env::var_os("CABAL_CONFIG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| context.home.join(".config/cabal/config"));
-    let content = fs::read_to_string(&config)?;
+        .map_or_else(|| context.home.join(".config/cabal/config"), PathBuf::from);
+    let current = fs::read_to_string(&config)?;
     let setting = format!("installdir: {}", context.home.join(".local/bin").display());
     let mut found = false;
     let mut lines = Vec::new();
-    for line in content.lines() {
+    for line in current.lines() {
         if line.starts_with("installdir:") {
             lines.push(setting.clone());
             found = true;
@@ -907,6 +956,7 @@ impl OwnerSource {
 
     /// `git` arguments that clone this source into `checkout`.
     /// Mapping a public URL onto itself beats a host-wide HTTPS-to-SSH rewrite, because git applies the longest matching `insteadOf`.
+    #[must_use]
     pub fn clone_arguments(self, checkout: &Path) -> Vec<OsString> {
         let mut arguments = Vec::new();
         let url = self.clone_url();
@@ -971,6 +1021,7 @@ fn primary_fingerprints(records: &str) -> Vec<&str> {
     fingerprints
 }
 
+#[must_use]
 pub fn verified_forge_key(records: &str) -> bool {
     let primary_count = records
         .lines()
@@ -1045,8 +1096,8 @@ fn fcitx(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         return Ok(());
     }
     let source = context.home.join(".xinputrc");
-    let content = fs::read_to_string(&source).unwrap_or_default();
-    if !content
+    let current = fs::read_to_string(&source).unwrap_or_default();
+    if !current
         .lines()
         .any(|line| line.split_whitespace().collect::<Vec<_>>() == ["run_im", "fcitx5"])
     {
@@ -1054,7 +1105,7 @@ fn fcitx(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
             .home
             .join(".local/state/dotfiles/backups/xinputrc.pre-fcitx5");
         if source.is_file() && !backup.exists() {
-            replace(&backup, content.as_bytes(), false)?;
+            replace(&backup, current.as_bytes(), false)?;
         }
         checked(runner, Tool::ImConfig, &args(&["-n", "fcitx5"]))?;
     }
@@ -1220,7 +1271,7 @@ mod tests {
     }
     use super::*;
 
-    /// The shape GitHub serves at https://github.com/web-flow.gpg since its 2024 key rotation.
+    /// The shape GitHub serves at <https://github.com/web-flow.gpg> since its 2024 key rotation.
     const PUBLISHED: &str = "pub:e:2048:1:4AEE18F83AFDEB23:1502898241:1705435200::-:::sc::::::23::0:\nfpr:::::::::5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23:\npub:-:4096:1:B5690EEEBB952194:1705428342:::-:::scSC::::::23::0:\nfpr:::::::::968479A1AFF927E37D1A566BB5690EEEBB952194:\n";
 
     #[test]

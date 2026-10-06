@@ -183,187 +183,236 @@ fn execute(cli: Cli) -> Result<()> {
     };
     let policy: Policy = ops::read_json(&policy_path)?;
     ops::validate_policy(&policy, &catalog)?;
+    let session = Session {
+        user_directory,
+        tree,
+        state,
+        approved,
+        catalog,
+        policy,
+    };
     match cli.command {
-        Action::Load { mut names, bundle } => {
-            if let Some(bundle) = bundle {
-                names.extend(
-                    policy
-                        .bundles
-                        .get(&bundle)
-                        .context("unknown skill bundle")?
-                        .iter()
-                        .cloned(),
-                );
-            }
-            ensure!(!names.is_empty(), "select a skill or bundle");
-            let available: BTreeSet<_> = catalog.skills.keys().cloned().collect();
-            let plan = ops::dependency_plan(&available, &names, &policy.requirements)?;
-            println!("SKILL_OPS_LOAD {}", serde_json::to_string(&plan)?);
-            for name in plan {
-                println!(
-                    "\n{}",
-                    fs::read_to_string(tree.join(name).join("SKILL.md"))?
-                );
-            }
-        }
+        Action::Load { names, bundle } => session.load(names, bundle)?,
         Action::Observe { client } => {
-            for observation in ops::observations(&client, &stdin_json()?, &catalog, &tree)? {
-                ops::record(&state, &observation)?;
+            for observation in
+                ops::observations(&client, &stdin_json()?, &session.catalog, &session.tree)?
+            {
+                ops::record(&session.state, &observation)?;
             }
         }
-        Action::Analyze { out } => {
-            let events = ops::recorded(&state)?;
-            let notes = ops::notes(&state)?;
-            let report = ops::analyze(&catalog, &policy, &events, &notes)?;
-            let adopted = ops::adopted_findings(&report, &reviewed(&approved)?);
-            ops::write_json(&out, &report, false)?;
-            ops::preserve_json(
-                &state
-                    .join("reports")
-                    .join(format!("{}.json", ops::hash(&report)?)),
-                &report,
-            )?;
-            if out != state.join("report.json") {
-                ops::write_json(&state.join("report.json"), &report, true)?;
-            }
-            println!(
-                "Analyzed {} skills, {} observations, {} sessions, and {} improvement notes; report {}",
-                catalog.skills.len(),
-                events.len(),
-                report.sessions,
-                notes.len(),
-                ops::hash(&report)?
-            );
-            let open: Vec<_> = report
-                .findings
-                .iter()
-                .filter(|finding| !adopted.contains(&finding.id))
-                .collect();
-            println!(
-                "Adopted {} findings from the reviewed skill revisions",
-                adopted.len()
-            );
-            if open.is_empty() {
-                println!("No finding needs triage");
-            } else {
-                for finding in &open {
-                    println!("Needs triage: {} ({})", finding.id, finding.kind);
-                }
-                println!(
-                    "Record these dispositions in a Review JSON with report_hash and decisions, then run skill-ops triage --decisions FILE."
-                );
-            }
-        }
+        Action::Analyze { out } => session.analyze(&out)?,
         Action::Triage {
             decisions,
             evidence_root,
-        } => {
-            let review: Review = ops::read_json(&decisions)?;
-            let report = archived_report(&state, &review.report_hash)?;
-            let current = ops::analyze(
-                &catalog,
-                &policy,
-                &ops::recorded(&state)?,
-                &ops::notes(&state)?,
-            )?;
-            ensure!(
-                report == current,
-                "analysis changed before triage; analyze the current evidence"
-            );
-            let evidence_root = dotfiles_xtask::canonical(&evidence_root.unwrap_or(tree))?;
-            ops::check_review(
-                &ops::hash(&report)?,
-                &report.findings,
-                &ops::adopted_findings(&report, &reviewed(&approved)?),
-                &review,
-                &evidence_root,
-            )?;
-            let reviewed = RuntimeReview {
-                evidence_hashes: ops::evidence_hashes(&review, &evidence_root)?,
-                evidence_root,
-                review,
-            };
-            ops::preserve_json(
-                &state
-                    .join("reviews")
-                    .join(format!("{}.json", ops::hash(&reviewed)?)),
-                &reviewed,
-            )?;
-            ops::write_json(&state.join("review.json"), &reviewed, true)?;
-            println!("Verified every disposition against the current analysis and local evidence");
-        }
+        } => session.triage(&decisions, evidence_root)?,
         Action::Note {
             kind,
             summary,
             skill,
             evidence,
-        } => {
-            let note = Note {
-                kind,
-                skills: skill,
-                summary,
-                evidence,
-            };
-            ops::analyze(&catalog, &policy, &[], std::slice::from_ref(&note))?;
-            let destination = state
-                .join("notes")
-                .join(format!("{}.json", ops::hash(&note)?));
-            if destination.try_exists()? {
-                ensure!(
-                    ops::read_json::<Note>(&destination)? == note,
-                    "conflicting improvement observation"
-                );
-            } else {
-                ops::write_json(&destination, &note, false)?;
-            }
-            println!(
-                "Recorded a local improvement observation; analysis and disposition are now required"
-            );
-        }
+        } => session.note(&Note {
+            kind,
+            skills: skill,
+            summary,
+            evidence,
+        })?,
         Action::Check => ensure!(
-            !pending(&catalog, &policy, &state, &approved, &tree)?,
+            !session.pending()?,
             "skill maintenance is pending; run skill-ops analyze --out FILE and triage the findings it lists with skill-ops triage --decisions FILE"
         ),
         Action::Stop => unreachable!("Stop is translated into a checked completion request"),
-        Action::Doctor => {
-            let events = ops::recorded(&state)?;
-            println!(
-                "Shared catalog: {} validated skills; {} local observations",
-                catalog.skills.len(),
-                events.len()
-            );
-            println!(
-                "Required maintenance: {}",
-                if pending(&catalog, &policy, &state, &approved, &tree)? {
-                    "pending"
-                } else {
-                    "current"
-                }
-            );
-            for (client, path) in [
-                ("codex", user_directory.join(".codex/hooks.json")),
-                ("claude", user_directory.join(".claude/settings.json")),
-            ] {
-                let data: serde_json::Value = ops::read_json(&path)?;
-                ensure!(
-                    dotfiles_xtask::skill_install::merge_hooks(data.clone(), client)? == data,
-                    "{client} observer or completion hook registration has drifted"
-                );
-                println!(
-                    "{client}: observer and completion definitions registered; runtime trust and activation require native client verification"
-                );
-            }
-            ensure!(
-                fs::read_to_string(user_directory.join(".config/opencode/plugins/skill-ops.ts"))?
-                    == include_str!("../../../home/dot_config/opencode/plugins/skill-ops.ts"),
-                "OpenCode observer definition has drifted"
-            );
-            println!(
-                "OpenCode: typed observer definition registered; runtime activation requires native client verification"
-            );
-        }
+        Action::Doctor => session.doctor()?,
     }
     Ok(())
+}
+
+/// The catalog, policy, and local state one skill-ops command works on.
+struct Session {
+    user_directory: PathBuf,
+    tree: PathBuf,
+    state: PathBuf,
+    approved: PathBuf,
+    catalog: ops::Catalog,
+    policy: Policy,
+}
+
+impl Session {
+    fn pending(&self) -> Result<bool> {
+        pending(
+            &self.catalog,
+            &self.policy,
+            &self.state,
+            &self.approved,
+            &self.tree,
+        )
+    }
+
+    /// Prints the dependency plan of the selected skills and each skill's instructions in that order.
+    fn load(&self, mut names: Vec<String>, bundle: Option<String>) -> Result<()> {
+        if let Some(bundle) = bundle {
+            names.extend(
+                self.policy
+                    .bundles
+                    .get(&bundle)
+                    .context("unknown skill bundle")?
+                    .iter()
+                    .cloned(),
+            );
+        }
+        ensure!(!names.is_empty(), "select a skill or bundle");
+        let available: BTreeSet<_> = self.catalog.skills.keys().cloned().collect();
+        let plan = ops::dependency_plan(&available, &names, &self.policy.requirements)?;
+        println!("SKILL_OPS_LOAD {}", serde_json::to_string(&plan)?);
+        for name in plan {
+            println!(
+                "\n{}",
+                fs::read_to_string(self.tree.join(name).join("SKILL.md"))?
+            );
+        }
+        Ok(())
+    }
+
+    fn analyze(&self, out: &Path) -> Result<()> {
+        let (catalog, policy, state, approved) =
+            (&self.catalog, &self.policy, &self.state, &self.approved);
+        let events = ops::recorded(state)?;
+        let notes = ops::notes(state)?;
+        let report = ops::analyze(catalog, policy, &events, &notes)?;
+        let adopted = ops::adopted_findings(&report, &reviewed(approved)?);
+        ops::write_json(out, &report, false)?;
+        ops::preserve_json(
+            &state
+                .join("reports")
+                .join(format!("{}.json", ops::hash(&report)?)),
+            &report,
+        )?;
+        if out != state.join("report.json") {
+            ops::write_json(&state.join("report.json"), &report, true)?;
+        }
+        println!(
+            "Analyzed {} skills, {} observations, {} sessions, and {} improvement notes; report {}",
+            catalog.skills.len(),
+            events.len(),
+            report.sessions,
+            notes.len(),
+            ops::hash(&report)?
+        );
+        let open: Vec<_> = report
+            .findings
+            .iter()
+            .filter(|finding| !adopted.contains(&finding.id))
+            .collect();
+        println!(
+            "Adopted {} findings from the reviewed skill revisions",
+            adopted.len()
+        );
+        if open.is_empty() {
+            println!("No finding needs triage");
+        } else {
+            for finding in &open {
+                println!("Needs triage: {} ({})", finding.id, finding.kind);
+            }
+            println!(
+                "Record these dispositions in a Review JSON with report_hash and decisions, then run skill-ops triage --decisions FILE."
+            );
+        }
+        Ok(())
+    }
+
+    fn triage(&self, decisions: &Path, evidence_root: Option<PathBuf>) -> Result<()> {
+        let (catalog, policy, state, approved) =
+            (&self.catalog, &self.policy, &self.state, &self.approved);
+        let review: Review = ops::read_json(decisions)?;
+        let report = archived_report(state, &review.report_hash)?;
+        let current = ops::analyze(catalog, policy, &ops::recorded(state)?, &ops::notes(state)?)?;
+        ensure!(
+            report == current,
+            "analysis changed before triage; analyze the current evidence"
+        );
+        let evidence_root =
+            dotfiles_xtask::canonical(&evidence_root.unwrap_or_else(|| self.tree.clone()))?;
+        ops::check_review(
+            &ops::hash(&report)?,
+            &report.findings,
+            &ops::adopted_findings(&report, &reviewed(approved)?),
+            &review,
+            &evidence_root,
+        )?;
+        let reviewed = RuntimeReview {
+            evidence_hashes: ops::evidence_hashes(&review, &evidence_root)?,
+            evidence_root,
+            review,
+        };
+        ops::preserve_json(
+            &state
+                .join("reviews")
+                .join(format!("{}.json", ops::hash(&reviewed)?)),
+            &reviewed,
+        )?;
+        ops::write_json(&state.join("review.json"), &reviewed, true)?;
+        println!("Verified every disposition against the current analysis and local evidence");
+        Ok(())
+    }
+
+    fn note(&self, note: &Note) -> Result<()> {
+        ops::analyze(&self.catalog, &self.policy, &[], std::slice::from_ref(note))?;
+        let destination = self
+            .state
+            .join("notes")
+            .join(format!("{}.json", ops::hash(note)?));
+        if destination.try_exists()? {
+            ensure!(
+                ops::read_json::<Note>(&destination)? == *note,
+                "conflicting improvement observation"
+            );
+        } else {
+            ops::write_json(&destination, note, false)?;
+        }
+        println!(
+            "Recorded a local improvement observation; analysis and disposition are now required"
+        );
+        Ok(())
+    }
+
+    fn doctor(&self) -> Result<()> {
+        let user_directory = &self.user_directory;
+        let events = ops::recorded(&self.state)?;
+        println!(
+            "Shared catalog: {} validated skills; {} local observations",
+            self.catalog.skills.len(),
+            events.len()
+        );
+        println!(
+            "Required maintenance: {}",
+            if self.pending()? {
+                "pending"
+            } else {
+                "current"
+            }
+        );
+        for (client, path) in [
+            ("codex", user_directory.join(".codex/hooks.json")),
+            ("claude", user_directory.join(".claude/settings.json")),
+        ] {
+            let data: serde_json::Value = ops::read_json(&path)?;
+            ensure!(
+                dotfiles_xtask::skill_install::merge_hooks(data.clone(), client)? == data,
+                "{client} observer or completion hook registration has drifted"
+            );
+            println!(
+                "{client}: observer and completion definitions registered; runtime trust and activation require native client verification"
+            );
+        }
+        ensure!(
+            fs::read_to_string(user_directory.join(".config/opencode/plugins/skill-ops.ts"))?
+                == include_str!("../../../home/dot_config/opencode/plugins/skill-ops.ts"),
+            "OpenCode observer definition has drifted"
+        );
+        println!(
+            "OpenCode: typed observer definition registered; runtime activation requires native client verification"
+        );
+        Ok(())
+    }
 }
 
 fn main() {

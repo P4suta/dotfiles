@@ -8,6 +8,7 @@ pub enum Outcome {
     Deferred,
 }
 
+#[must_use]
 pub fn decision_complete(outcome: Outcome, reason: bool, evidence: bool, revisit: bool) -> bool {
     reason && evidence && (outcome != Outcome::Deferred || revisit)
 }
@@ -20,6 +21,7 @@ pub enum Tracked {
     Incomplete,
 }
 
+#[must_use]
 pub fn tracked_decision(present: bool, bound: bool, complete: bool) -> Tracked {
     if !present {
         Tracked::Missing
@@ -32,15 +34,18 @@ pub fn tracked_decision(present: bool, bound: bool, complete: bool) -> Tracked {
     }
 }
 
+#[must_use]
 pub fn adopted(bound: bool, outcome: Outcome) -> bool {
     bound && outcome != Outcome::Deferred
 }
 
+#[must_use]
 pub fn triage_complete(unadopted: usize, review_verified: bool) -> bool {
     unadopted == 0 || review_verified
 }
 
 /// Settles maintenance by the recorded analysis or by a current analysis with nothing to triage.
+#[must_use]
 pub fn gate_complete(recorded_current: bool, open_findings: usize) -> bool {
     recorded_current || open_findings == 0
 }
@@ -54,6 +59,7 @@ pub enum Sizing {
     Unexpected,
 }
 
+#[must_use]
 pub fn size_disposition(over_limit: bool, recorded: bool, complete: bool) -> Sizing {
     match (over_limit, recorded, complete) {
         (false, false, _) => Sizing::Within,
@@ -72,6 +78,7 @@ pub enum DiffBase {
 }
 
 /// Shows a diff only from a commit that holds the content the previous decision assessed.
+#[must_use]
 pub fn diff_base(previous: bool, assessed_commit: bool) -> DiffBase {
     match (previous, assessed_commit) {
         (false, _) => DiffBase::Whole,
@@ -80,6 +87,7 @@ pub fn diff_base(previous: bool, assessed_commit: bool) -> DiffBase {
     }
 }
 
+#[must_use]
 pub fn immutable_identity_valid(length: usize, hexadecimal: bool) -> bool {
     length == 64 && hexadecimal
 }
@@ -91,6 +99,7 @@ pub enum InstallationStage {
     Adapter,
 }
 
+#[must_use]
 pub fn installation_stage(policy_applied: bool, runtime_installed: bool) -> InstallationStage {
     if !policy_applied {
         InstallationStage::Policy
@@ -101,6 +110,7 @@ pub fn installation_stage(policy_applied: bool, runtime_installed: bool) -> Inst
     }
 }
 
+#[must_use]
 pub fn composition_candidate(
     shared: usize,
     first: usize,
@@ -117,6 +127,10 @@ pub fn composition_candidate(
 }
 
 #[derive(Clone, Copy, Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an independent fact, and the proofs range over every combination"
+)]
 pub struct Maintenance {
     pub catalog_current: bool,
     pub policy_current: bool,
@@ -127,6 +141,7 @@ pub struct Maintenance {
     pub threshold: usize,
 }
 
+#[must_use]
 pub fn maintenance_current(value: Maintenance) -> bool {
     value.catalog_current
         && value.policy_current
@@ -144,6 +159,7 @@ pub enum Completion {
     EndIncomplete,
 }
 
+#[must_use]
 pub fn completion(current: bool, already_continued: bool) -> Completion {
     if current {
         Completion::Allow

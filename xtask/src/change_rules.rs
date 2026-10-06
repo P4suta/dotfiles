@@ -23,6 +23,7 @@ pub enum Gate {
 pub const GATES: [Gate; 4] = [Gate::Prose, Gate::Skills, Gate::Rust, Gate::Profiles];
 
 impl Gate {
+    #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::Prose => "prose",
@@ -45,26 +46,32 @@ impl Gates {
     pub const NONE: Self = Self(0);
     pub const ALL: Self = Self(0b1111);
 
+    #[must_use]
     pub const fn of(gate: Gate) -> Self {
         Self(gate.bit())
     }
 
+    #[must_use]
     pub const fn with(self, gate: Gate) -> Self {
         Self(self.0 | gate.bit())
     }
 
+    #[must_use]
     pub const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
 
+    #[must_use]
     pub const fn contains(self, gate: Gate) -> bool {
         self.0 & gate.bit() != 0
     }
 
+    #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
 
+    #[must_use]
     pub const fn covers(self, other: Self) -> bool {
         self.0 & other.0 == other.0
     }
@@ -80,7 +87,7 @@ impl Gates {
             .join(",")
     }
 
-    pub fn parse(text: &str) -> Result<Self, String> {
+    pub(crate) fn parse(text: &str) -> Result<Self, String> {
         text.split(',')
             .filter(|name| !name.is_empty())
             .try_fold(Self::NONE, |gates, name| {
@@ -97,6 +104,7 @@ impl Gates {
 /// The gates a class selects: prose checks run for every change, and wider classes add the checks their content can break.
 /// Skills deploy through the native profile, so they also select its rehearsal.
 /// The xtask crates validate and apply everything, so Rust selects every gate.
+#[must_use]
 pub const fn gates(class: Class) -> Gates {
     let prose = Gates::of(Gate::Prose);
     match class {
@@ -185,6 +193,7 @@ fn has_suffix(path: &[u8], suffix: &[u8]) -> bool {
 }
 
 /// The class a rule assigns to the path, or `None` when no rule names it.
+#[must_use]
 pub fn matched(path: &[u8]) -> Option<Class> {
     let mut index = 0;
     while index < RULES.len() {
@@ -203,6 +212,7 @@ pub fn matched(path: &[u8]) -> Option<Class> {
 }
 
 /// A path no rule names could hold anything, so it selects every gate.
+#[must_use]
 pub const fn resolve(found: Option<Class>) -> Class {
     match found {
         Some(class) => class,
@@ -210,6 +220,7 @@ pub const fn resolve(found: Option<Class>) -> Class {
     }
 }
 
+#[must_use]
 pub fn classify(path: &[u8]) -> Class {
     resolve(matched(path))
 }

@@ -8,6 +8,7 @@ pub enum Freshness {
 }
 
 /// A build lags only when the search found a checkout and the files that build the tool differ from the hash the tool embeds.
+#[must_use]
 pub const fn freshness(checkout_found: bool, hashes_match: bool) -> Freshness {
     match (checkout_found, hashes_match) {
         (false, _) => Freshness::Unverified,
@@ -18,6 +19,7 @@ pub const fn freshness(checkout_found: bool, hashes_match: bool) -> Freshness {
 
 /// A stale tool refuses to run.
 /// Every other state runs.
+#[must_use]
 pub const fn runs(freshness: Freshness) -> bool {
     !matches!(freshness, Freshness::Stale)
 }
@@ -34,6 +36,7 @@ pub enum Origin {
 }
 
 /// The default chezmoi source forms a bare repository whose head lags, so no origin ever names it.
+#[must_use]
 pub const fn origin(explicit: bool, working_copy: bool, build_checkout: bool) -> Option<Origin> {
     if explicit {
         Some(Origin::Explicit)
@@ -48,6 +51,7 @@ pub const fn origin(explicit: bool, working_copy: bool, build_checkout: bool) ->
 
 /// The rebuild touches a recorded installation only when it exists and no longer matches the sources.
 /// A tool that the owner never installed stays absent.
+#[must_use]
 pub const fn reinstalls(recorded: bool, recorded_matches: bool) -> bool {
     recorded && !recorded_matches
 }

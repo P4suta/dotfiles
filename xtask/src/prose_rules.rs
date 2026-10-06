@@ -1,10 +1,12 @@
 /// An exemption needs a stated reason, and an exemption that matches nothing fails as stale.
+#[must_use]
 pub fn exemption_valid(reason_present: bool, used: bool) -> bool {
     reason_present && used
 }
 
 /// The personal writing standard governs a destination that a personal owner holds, unless that destination forks another repository.
 /// Other destinations follow their own rules.
+#[must_use]
 pub fn standard_applies(personal_owner: bool, fork: bool) -> bool {
     personal_owner && !fork
 }
@@ -28,6 +30,7 @@ pub enum Standard {
 /// Whether a repository's commits take the personal standard.
 /// The repository's `prose.standard` setting decides when present.
 /// Otherwise another remote with a foreign owner marks a fork, `origin` names the destination, and a personal GitHub remote stands in for a missing `origin` or one that names no GitHub owner.
+#[must_use]
 pub fn repository_standard(
     declared: Option<bool>,
     origin: Option<Owner>,
@@ -35,11 +38,9 @@ pub fn repository_standard(
     other_foreign: bool,
 ) -> Standard {
     match (declared, origin) {
-        (Some(true), _) => Standard::Applies,
-        (Some(false), _) => Standard::Skips,
         (None, _) if other_foreign => Standard::Skips,
-        (None, Some(Owner::Personal)) => Standard::Applies,
-        (None, Some(Owner::Foreign)) => Standard::Skips,
+        (Some(true), _) | (None, Some(Owner::Personal)) => Standard::Applies,
+        (Some(false), _) | (None, Some(Owner::Foreign)) => Standard::Skips,
         (None, Some(Owner::Unresolved) | None) if other_personal => Standard::Applies,
         (None, Some(Owner::Unresolved) | None) => Standard::Undetermined,
     }
@@ -55,11 +56,13 @@ pub enum Reply {
 /// A continued turn counts as this hook's rewrite only when this hook marked the session.
 /// Another hook's continuation still earns one rewrite request.
 /// Without a session to mark, the client's continuation flag decides, which keeps the loop bounded.
+#[must_use]
 pub fn rewritten_by_this_hook(stop_hook_active: bool, marked: Option<bool>) -> bool {
     stop_hook_active && marked.unwrap_or(true)
 }
 
 /// A failing reply gets one rewrite request, and a second failure ends the turn with the findings instead of looping.
+#[must_use]
 pub fn reply(passed: bool, already_continued: bool) -> Reply {
     if passed {
         Reply::Allow

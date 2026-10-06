@@ -45,16 +45,15 @@ fn dump(claude: Option<&str>, codex: Option<&str>, opencode: Option<&str>) -> Va
 #[test]
 fn a_profile_that_disables_every_switch_passes() {
     let off = off();
-    assert!(
-        violations(&dump(Some(CLAUDE_OFF), Some(CODEX_OFF), Some(&off)))
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        violations(&dump(Some(CLAUDE_OFF), Some(CODEX_OFF), Some(&off))).unwrap(),
+        Vec::<String>::new()
     );
 }
 
 #[test]
 fn an_unmanaged_client_needs_no_settings() {
-    assert!(violations(&json!({})).unwrap().is_empty());
+    assert_eq!(violations(&json!({})).unwrap(), Vec::<String>::new());
 }
 
 #[test]

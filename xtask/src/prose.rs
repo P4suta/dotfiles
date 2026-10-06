@@ -1,3 +1,4 @@
+use crate::build_inputs::hex;
 use crate::prose_rules::{
     Owner, Reply, Standard, exemption_valid, reply, repository_standard, rewritten_by_this_hook,
 };
@@ -126,7 +127,7 @@ fn home() -> Result<PathBuf> {
         .context("the user directory is unavailable")
 }
 
-pub fn runtime_directory() -> Result<PathBuf> {
+pub(crate) fn runtime_directory() -> Result<PathBuf> {
     match std::env::var_os("PROSE_RUNTIME") {
         Some(directory) => Ok(PathBuf::from(directory)),
         None => Ok(home()?.join(".local/share/prose")),
@@ -135,6 +136,10 @@ pub fn runtime_directory() -> Result<PathBuf> {
 
 impl Bundle {
     /// The configuration in a dotfiles checkout, with the linters its `mise.toml` pins.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when reading the pinned textlint lockfile fails.
     pub fn source(root: &Path) -> Result<Self> {
         let config = root.join(SOURCE_CONFIG);
         let lock = fs::read(config.join("textlint/bun.lock"))
@@ -151,6 +156,10 @@ impl Bundle {
     }
 
     /// The configuration and linters that `just install-prose` placed in the user directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the system reports no user directory, or reading or parsing the installed `tools.toml` fails.
     pub fn installed() -> Result<Self> {
         let config = match std::env::var_os("PROSE_CONFIG") {
             Some(directory) => PathBuf::from(directory),
@@ -184,6 +193,12 @@ impl Bundle {
     }
 
     /// Refuses a missing configuration, a changed style package, or another Vale version.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when reading or parsing `packages.toml` fails, a required configuration file doesn't exist, or a package pin lacks a required field.
+    /// It also fails when a style package doesn't exist or differs from its pinned digest.
+    /// Returns an error when Vale can't start or reports a version other than the pinned one.
     pub fn verify(&self) -> Result<()> {
         let text = fs::read_to_string(self.config.join("packages.toml")).with_context(|| {
             format!(
@@ -199,8 +214,7 @@ impl Bundle {
         ] {
             ensure!(
                 self.config.join(name).is_file(),
-                "{} is missing from the prose configuration; run `{INSTALL}` in the dotfiles source",
-                name
+                "{name} is missing from the prose configuration; run `{INSTALL}` in the dotfiles source"
             );
         }
         for package in &lock.package {
@@ -242,10 +256,6 @@ impl Bundle {
     }
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 /// The installed name of one entry, so a checkout and an installation of the same tree share one digest.
 fn target_component(entry: Entry, component: &str) -> Result<String> {
     Ok(
@@ -261,6 +271,10 @@ fn target_component(entry: Entry, component: &str) -> Result<String> {
 }
 
 /// A digest over every file below `directory`, keyed by the relative path it has once installed.
+///
+/// # Errors
+///
+/// Returns an error when reading a directory or file fails, or an entry name holds invalid UTF-8.
 pub fn tree_digest(directory: &Path) -> Result<String> {
     let mut files = Vec::new();
     let mut stack = vec![(directory.to_path_buf(), String::new())];
@@ -295,6 +309,7 @@ pub fn tree_digest(directory: &Path) -> Result<String> {
 }
 
 /// Blanks code, markup, and metadata with spaces and keeps every line break, so line numbers stay valid.
+#[must_use]
 pub fn masked(text: &str) -> String {
     let mut bytes = text.as_bytes().to_vec();
     let mut blank = |range: std::ops::Range<usize>| {
@@ -427,6 +442,7 @@ pub struct Input {
 }
 
 impl Input {
+    #[must_use]
     pub fn new(path: &str, text: &str, markdown_document: bool) -> Self {
         Self {
             path: path.to_owned(),
@@ -586,7 +602,7 @@ fn token_rules(bundle: &Bundle, input: &Input) -> Result<Vec<Finding>> {
 }
 
 /// Installs the pinned textlint packages into `target` unless the same lockfile already produced it.
-pub fn install_textlint(package: &Path, target: &Path, bun: Command) -> Result<()> {
+pub(crate) fn install_textlint(package: &Path, target: &Path, bun: Command) -> Result<()> {
     let lock = fs::read(package.join("bun.lock"))?;
     if fs::read(target.join("bun.lock")).is_ok_and(|current| current == lock)
         && target
@@ -712,6 +728,7 @@ fn textlint(bundle: &Bundle, input: &Input) -> Result<Vec<Finding>> {
 }
 
 /// Removes a Conventional Commits prefix such as `feat(scope)!: `, which carries structure rather than prose.
+#[must_use]
 pub fn without_type(subject: &str) -> &str {
     let Some((prefix, rest)) = subject.split_once(": ") else {
         return subject;
@@ -805,6 +822,7 @@ fn generated_lines(lines: &mut Vec<&str>) {
 
 /// The message without Git commentary, the verbose diff, trailers, Git-generated subjects and sentences, or the type prefix.
 /// An `amend!` commit carries the replacement message in its body, and the checker reads that body as a message of its own.
+#[must_use]
 pub fn commit_message(raw: &str) -> String {
     let mut lines: Vec<&str> = raw
         .lines()
@@ -865,7 +883,8 @@ pub fn commit_message(raw: &str) -> String {
     text
 }
 
-/// A pull request or issue as one text: the title, then the body without CodeRabbit requests.
+/// A pull request or issue as one text: the title, then the body without `CodeRabbit` requests.
+#[must_use]
 pub fn publication(title: Option<&str>, body: &str) -> String {
     let mut text = String::new();
     if let Some(title) = title.filter(|title| !title.trim().starts_with("@coderabbitai")) {
@@ -881,11 +900,16 @@ pub fn publication(title: Option<&str>, body: &str) -> String {
     text
 }
 
+#[must_use]
 pub fn japanese(text: &str) -> bool {
     text.chars().any(|c| matches!(c as u32, 0x3040..=0x30FF))
 }
 
 /// Checks one text for one channel and returns every finding.
+///
+/// # Errors
+///
+/// Returns an error when the bundle fails verification, the channel names `Comment`, or a linter fails to run or report.
 pub fn check(bundle: &Bundle, channel: Channel, path: &str, text: &str) -> Result<Vec<Finding>> {
     bundle.verify()?;
     let mut findings = Vec::new();
@@ -927,7 +951,7 @@ pub enum Publication {
 }
 
 /// Checks a pull request or issue title and body as `pr-workflow` publishes them.
-pub fn check_publication(
+pub(crate) fn check_publication(
     bundle: &Bundle,
     kind: Publication,
     title: &str,
@@ -971,6 +995,7 @@ struct ScannedComment {
 }
 
 /// The prose of one comment line without its delimiters.
+#[must_use]
 pub fn comment_prose(line: &str) -> String {
     let mut text = line.trim();
     for suffix in ["*/", "-->"] {
@@ -988,8 +1013,8 @@ pub fn comment_prose(line: &str) -> String {
     text.strip_prefix(' ').unwrap_or(text).trim_end().to_owned()
 }
 
-/// Reads the comments of `paths` through OComment.
-pub fn comment_inputs(root: &Path, paths: &[String]) -> Result<Vec<Input>> {
+/// Reads the comments of `paths` through `OComment`.
+pub(crate) fn comment_inputs(root: &Path, paths: &[String]) -> Result<Vec<Input>> {
     if paths.is_empty() {
         return Ok(Vec::new());
     }
@@ -1013,7 +1038,11 @@ pub fn comment_inputs(root: &Path, paths: &[String]) -> Result<Vec<Input>> {
     scanned_comments(&String::from_utf8(output.stdout)?)
 }
 
-/// Joins adjacent comment lines of an OComment JSON Lines scan into paragraphs, one input per file.
+/// Joins adjacent comment lines of an `OComment` JSON Lines scan into paragraphs, one input per file.
+///
+/// # Errors
+///
+/// Returns an error when a line of the scan fails to parse as a valid `OComment` record.
 pub fn scanned_comments(jsonl: &str) -> Result<Vec<Input>> {
     let mut inputs = Vec::new();
     for line in jsonl.lines().filter(|line| !line.trim().is_empty()) {
@@ -1055,6 +1084,10 @@ pub fn scanned_comments(jsonl: &str) -> Result<Vec<Input>> {
 }
 
 /// Checks comments for language, line layout, and style.
+///
+/// # Errors
+///
+/// Returns an error when Vale fails to run or report.
 pub fn check_inputs(bundle: &Bundle, inputs: &[Input]) -> Result<Vec<Finding>> {
     let mut findings: Vec<Finding> = inputs
         .iter()
@@ -1069,6 +1102,10 @@ pub fn check_inputs(bundle: &Bundle, inputs: &[Input]) -> Result<Vec<Finding>> {
 }
 
 /// Checks the comments of source files for language and style.
+///
+/// # Errors
+///
+/// Returns an error when the bundle fails verification, `OComment` can't start or scan the files, or Vale fails to run or report.
 pub fn check_comments(bundle: &Bundle, root: &Path, paths: &[String]) -> Result<Vec<Finding>> {
     bundle.verify()?;
     check_inputs(bundle, &comment_inputs(root, paths)?)
@@ -1099,6 +1136,11 @@ fn matches_path(pattern: &str, path: &str) -> bool {
         })
 }
 
+/// The prose exemption policy of the checkout at `root`.
+///
+/// # Errors
+///
+/// Returns an error when reading the policy file fails or its contents don't form a valid policy.
 pub fn read_policy(root: &Path) -> Result<Policy> {
     toml::from_str(
         &fs::read_to_string(root.join(POLICY)).with_context(|| format!("read {POLICY}"))?,
@@ -1149,7 +1191,9 @@ fn documents(root: &Path, files: &[String]) -> Result<BTreeSet<String>> {
     Ok(files
         .iter()
         .filter(|path| {
-            path.ends_with(".md") || path.ends_with(".md.tmpl") || declared.contains(*path)
+            crate::has_extension(path, "md")
+                || path.ends_with(".md.tmpl")
+                || declared.contains(*path)
         })
         .cloned()
         .collect())
@@ -1240,6 +1284,7 @@ fn unexempted(
 }
 
 /// Judges findings with the exemptions and lists every refusal with its next action.
+#[must_use]
 pub fn judge(
     scope: Scope,
     findings: Vec<Finding>,
@@ -1268,6 +1313,11 @@ Rewrite these sentences and rerun `just prose`.",
 }
 
 /// Checks the repository for one scope with `policy/prose.toml`.
+///
+/// # Errors
+///
+/// Returns an error when reading the policy fails, the bundle fails verification, listing or reading the tracked files fails, or a linter fails.
+/// Returns an error when any finding remains unexempted or an exemption lacks a reason or matches no finding.
 pub fn repository(root: &Path, scope: Scope, bundle: &Bundle) -> Result<()> {
     let policy = read_policy(root)?;
     let mut used = vec![false; policy.exempt.len()];
@@ -1283,6 +1333,10 @@ pub fn repository(root: &Path, scope: Scope, bundle: &Bundle) -> Result<()> {
 }
 
 /// Lists the findings of one scope that no exemption covers.
+///
+/// # Errors
+///
+/// Returns an error when reading the policy fails, the bundle fails verification, listing or reading the tracked files fails, or a linter fails.
 pub fn findings(root: &Path, scope: Scope, bundle: &Bundle) -> Result<Vec<Finding>> {
     let policy = read_policy(root)?;
     let mut used = vec![false; policy.exempt.len()];
@@ -1291,6 +1345,10 @@ pub fn findings(root: &Path, scope: Scope, bundle: &Bundle) -> Result<Vec<Findin
 }
 
 /// The final reply text from a Stop hook input, falling back to the transcript.
+///
+/// # Errors
+///
+/// Returns an error when the input names an unreadable transcript.
 pub fn reply_text(input: &Value) -> Result<String> {
     if let Some(text) = input["last_assistant_message"].as_str() {
         return Ok(text.to_owned());
@@ -1343,6 +1401,7 @@ fn rewrite_marker(input: &Value) -> Option<PathBuf> {
 }
 
 /// The hook response for a finished turn, which passes it, requests one rewrite, or ends with the findings.
+#[must_use]
 pub fn stop(input: &Value, bundle: Result<Bundle>) -> Value {
     let marker = rewrite_marker(input);
     let continued = rewritten_by_this_hook(
@@ -1480,7 +1539,7 @@ fn ssh_host_name(host: &str) -> Option<String> {
 }
 
 /// The personal owner logins of the global workflow policy.
-pub fn personal_owners() -> Result<Vec<String>> {
+pub(crate) fn personal_owners() -> Result<Vec<String>> {
     let policy: Value = serde_json::from_str(include_str!(
         "../../home/dot_agents/skills/pull-request/assets/workflow-policy.json"
     ))?;
@@ -1498,7 +1557,7 @@ pub fn personal_owners() -> Result<Vec<String>> {
 }
 
 /// The commit-msg gate every repository on a host runs: it checks the message when the repository takes the personal standard.
-pub fn commit_gate(
+pub(crate) fn commit_gate(
     repository: &Path,
     message: &Path,
     bundle: impl FnOnce() -> Result<Bundle>,
@@ -1570,6 +1629,11 @@ pub fn commit_gate(
 const HOOK_PREFIX: &str = "prose reply --client ";
 
 /// Registers the reply check as the client's Stop hook and drops earlier registrations of it.
+///
+/// # Errors
+///
+/// Returns an error for `OpenCode`, which reads the reply check from its plugin.
+/// Returns an error when the settings hold no top-level JSON object, `hooks` holds a non-object value, `Stop` holds a non-array value, or a Stop group has no handler array.
 pub fn merge_hooks(mut value: Value, client: Client) -> Result<Value> {
     let name = match client {
         Client::Claude => "claude",
@@ -1626,6 +1690,11 @@ fn pinned_path(source: &Path, tool: &str) -> Result<PathBuf> {
 }
 
 /// Installs the reply checker, its linters, and the Claude Code and Codex Stop hooks.
+///
+/// # Errors
+///
+/// Returns an error when the built executable doesn't exist, copying or writing a file fails, mise can't locate the pinned Vale or Bun, or the textlint installation fails.
+/// Returns an error when the installed bundle fails verification or reading, merging, or writing a client's hook settings fails.
 pub fn install(source: &Path, binary: &Path, user_directory: &Path) -> Result<()> {
     ensure!(binary.is_file(), "the built prose executable is missing");
     let directory = user_directory.join(".local/bin");

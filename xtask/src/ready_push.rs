@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 /// The `owner/name` of a GitHub remote URL, or `None` for any other remote.
+#[must_use]
 pub fn repository(url: &str) -> Option<String> {
     let path = url
         .strip_prefix("git@github.com:")
@@ -30,6 +31,7 @@ struct Listed {
 
 /// The open PR with `branch` as head in `repository`, as `gh` reports it.
 /// A failed query yields `Unknown`.
+#[must_use]
 pub fn lookup(repository: &str, branch: &str) -> (Pr, Option<u64>) {
     let output = Tool::Gh
         .command()
@@ -62,6 +64,11 @@ pub fn lookup(repository: &str, branch: &str) -> (Pr, Option<u64>) {
 }
 
 /// Judges pre-push input, `<local ref> <local sha> <remote ref> <remote sha>` per line, with `lookup` answering for each pushed branch.
+///
+/// # Errors
+///
+/// Returns an error when the input fails UTF-8 decoding or a line lacks four fields.
+/// Returns a `push.ready` refusal when a pushed branch has a ready PR or `lookup` can't tell its PR state.
 pub fn gate_with(
     url: &str,
     input: &[u8],
@@ -116,7 +123,7 @@ pub fn gate_with(
 }
 
 /// The gate as the global pre-push hook runs it, asking GitHub for each pushed branch.
-pub fn gate(url: &str, input: &[u8]) -> Result<()> {
+pub(crate) fn gate(url: &str, input: &[u8]) -> Result<()> {
     gate_with(url, input, lookup)
 }
 

@@ -30,6 +30,10 @@ pub struct Scope {
 
 impl Scope {
     /// The gates to run: every gate unless the scope names a change set or gates.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when git can't list the scope's change set.
     pub fn resolve(&self, root: &Path) -> Result<Gates> {
         if let Some(gates) = self.gates {
             return Ok(gates);
@@ -45,6 +49,10 @@ impl Scope {
 
 /// Paths changed in the source.
 /// A renamed path lists both names, so each gets a class.
+///
+/// # Errors
+///
+/// Returns an error when git can't start or can't list the change set.
 pub fn paths(root: &Path, source: &Source) -> Result<Vec<String>> {
     let mut command = Tool::Git.command();
     command
@@ -72,11 +80,20 @@ pub fn paths(root: &Path, source: &Source) -> Result<Vec<String>> {
         .collect())
 }
 
+/// The gates the paths changed in the source select.
+///
+/// # Errors
+///
+/// Returns an error when git can't start or can't list the change set.
 pub fn gates(root: &Path, source: &Source) -> Result<Gates> {
     Ok(select(paths(root, source)?.iter().map(String::as_str)))
 }
 
 /// Prints `gates=<names>`, the form a CI step appends to its output file.
+///
+/// # Errors
+///
+/// Returns an error when git can't list the scope's change set.
 pub fn run(root: &Path, scope: &Scope) -> Result<()> {
     println!("gates={}", scope.resolve(root)?.names());
     Ok(())

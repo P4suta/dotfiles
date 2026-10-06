@@ -1,11 +1,12 @@
 // `dotguard:allow-foreign` covers the Chinese reply that the language gate test refuses.
-#![allow(
+#![expect(
     clippy::disallowed_methods,
     reason = "integration tests spawn the binaries and real tools they verify"
 )]
 
 use anyhow::Result;
 use dotfiles_xtask::prose::{self, Bundle, Channel, Client, Exempt, Finding, Policy, Scope};
+use dotfiles_xtask::prose_rules::Standard;
 use serde_json::{Value, json};
 use std::fs;
 use std::io::Write;
@@ -97,11 +98,11 @@ fn repository_rules_cover_hedging_comparison_lines_and_language() -> Result<()> 
         )?)
         .contains(&"Dotfiles.SentencePerLine")
     );
-    assert!(
+    assert_eq!(
         rules(&document(
             "The cache holds the index.\nThe parser reads it.\n"
-        )?)
-        .is_empty()
+        )?),
+        Vec::<&str>::new()
     );
     assert!(rules(&document("キャッシュを読む。\n")?).contains(&"Dotfiles.English"));
     let commit = prose::check(
@@ -119,15 +120,18 @@ fn sentence_boundaries_ignore_abbreviations_numbers_and_code() {
     assert_eq!(prose::sentence_starts("One sentence. Two sentences."), [15]);
     assert_eq!(
         prose::sentence_starts("Use e.g. Vale or i.e. the gate."),
-        [] as [usize; 0]
+        Vec::<usize>::new()
     );
     assert_eq!(
         prose::sentence_starts("Version 1.2. Then"),
-        [] as [usize; 0]
+        Vec::<usize>::new()
     );
     assert_eq!(prose::sentence_starts("Read it (twice). Then stop."), [18]);
     assert_eq!(prose::sentence_starts("読む。書く。"), [4]);
-    assert_eq!(prose::sentence_starts("1. Install it."), [] as [usize; 0]);
+    assert_eq!(
+        prose::sentence_starts("1. Install it."),
+        Vec::<usize>::new()
+    );
     let masked = prose::masked("Run `a. B` now.\n\n```\nOne. Two.\n```\n");
     assert!(
         masked
@@ -343,7 +347,7 @@ fn claude_and_codex_hooks_request_one_rewrite_of_a_failing_reply() -> Result<()>
 }
 
 #[test]
-fn japanese_replies_pass_through_textlint_and_the_japanese_rules() -> Result<()> {
+fn japanese_replies_pass_through_textlint_and_the_japanese_rules() {
     let bundle = || source();
     let refused = prose::stop(
         &json!({"last_assistant_message": "ご依頼どおりパーサーを修正しました。"}),
@@ -377,7 +381,6 @@ fn japanese_replies_pass_through_textlint_and_the_japanese_rules() -> Result<()>
         bundle(),
     );
     assert_eq!(chinese["decision"], "block");
-    Ok(())
 }
 
 #[test]
@@ -481,19 +484,19 @@ fn every_unexempted_finding_is_refused() {
     let refused = judge(vec![finding("a.md", "Google.Passive", old)], vec![]);
     assert_eq!(refused.len(), 1, "{refused:?}");
     assert!(refused[0].contains(old) && refused[0].contains("just prose"));
-    assert!(judge(vec![], vec![]).is_empty());
+    assert_eq!(judge(vec![], vec![]), Vec::<String>::new());
     let exempt = |reason: &str| Exempt {
         scope: Scope::Documents,
         paths: vec!["vendor/".into()],
         rules: vec!["Google.Passive".into()],
         reason: reason.into(),
     };
-    assert!(
+    assert_eq!(
         judge(
             vec![finding("vendor/a.md", "Google.Passive", old)],
             vec![exempt("Upstream text.")]
-        )
-        .is_empty()
+        ),
+        Vec::<String>::new()
     );
     assert_eq!(judge(vec![], vec![exempt("Upstream text.")]).len(), 1);
     assert_eq!(
@@ -874,248 +877,290 @@ fn the_commit_msg_hook_runs_the_tested_check() -> Result<()> {
     Ok(())
 }
 
+/// The declared `prose.standard`, the remotes, and the standard they decide.
+type Destination = (
+    Option<bool>,
+    &'static [(&'static str, &'static str)],
+    Standard,
+);
+
+const DESTINATIONS: &[Destination] = &[
+    (
+        None,
+        &[("origin", "git@github.com:P4suta/dotfiles.git")],
+        Standard::Applies,
+    ),
+    (
+        None,
+        &[("origin", "https://github.com/p4suta/dotfiles")],
+        Standard::Applies,
+    ),
+    (
+        None,
+        &[("origin", "ssh://git@github.com/P4suta/dotfiles.git")],
+        Standard::Applies,
+    ),
+    (
+        None,
+        &[("origin", "ssh://git@github.com:22/P4suta/dotfiles.git")],
+        Standard::Applies,
+    ),
+    (
+        None,
+        &[("origin", "gh-personal:P4suta/dotfiles.git")],
+        Standard::Applies,
+    ),
+    (
+        None,
+        &[("origin", "ssh://gh-personal/P4suta/dotfiles.git")],
+        Standard::Applies,
+    ),
+    (
+        None,
+        &[("origin", "https://github.com/other/project.git")],
+        Standard::Skips,
+    ),
+    (
+        None,
+        &[("origin", "gh-personal:other/project.git")],
+        Standard::Skips,
+    ),
+    (
+        None,
+        &[
+            ("origin", "git@github.com:P4suta/project.git"),
+            ("upstream", "https://github.com/other/project.git"),
+        ],
+        Standard::Skips,
+    ),
+    (
+        None,
+        &[
+            ("origin", "git@github.com:P4suta/project.git"),
+            ("backup", "git@github.com:P4suta/project-backup.git"),
+        ],
+        Standard::Applies,
+    ),
+    (
+        None,
+        &[("upstream", "git@github.com:P4suta/project.git")],
+        Standard::Applies,
+    ),
+    (
+        None,
+        &[("github", "git@github.com:P4suta/project.git")],
+        Standard::Applies,
+    ),
+    (
+        None,
+        &[
+            ("github", "git@github.com:P4suta/project.git"),
+            ("upstream", "https://github.com/other/project.git"),
+        ],
+        Standard::Skips,
+    ),
+    (
+        None,
+        &[("upstream", "https://github.com/other/project.git")],
+        Standard::Skips,
+    ),
+    (
+        None,
+        &[("backup", "hub:repositories/project.git")],
+        Standard::Undetermined,
+    ),
+    (None, &[], Standard::Undetermined),
+    (Some(false), &[], Standard::Skips),
+    (
+        None,
+        &[("origin", "hub:repositories/dotfiles.git")],
+        Standard::Undetermined,
+    ),
+    (
+        None,
+        &[("origin", "/srv/hub/dotfiles.git")],
+        Standard::Undetermined,
+    ),
+    (
+        None,
+        &[("origin", "git@gitlab.com:P4suta/x.git")],
+        Standard::Undetermined,
+    ),
+    (
+        None,
+        &[
+            ("origin", "hub:repositories/dotfiles.git"),
+            ("github", "git@github.com:P4suta/dotfiles.git"),
+        ],
+        Standard::Applies,
+    ),
+    (
+        None,
+        &[
+            ("origin", "hub:repositories/project.git"),
+            ("upstream", "https://github.com/other/project.git"),
+        ],
+        Standard::Skips,
+    ),
+    (
+        Some(true),
+        &[("origin", "hub:repositories/dotfiles.git")],
+        Standard::Applies,
+    ),
+    (
+        Some(false),
+        &[("origin", "hub:repositories/dotfiles.git")],
+        Standard::Skips,
+    ),
+    (
+        Some(false),
+        &[("origin", "git@github.com:P4suta/dotfiles.git")],
+        Standard::Skips,
+    ),
+    (Some(true), &[], Standard::Applies),
+];
+
 #[test]
 fn the_destination_decides_which_repositories_take_the_standard() {
-    use dotfiles_xtask::prose_rules::Standard::{Applies, Skips, Undetermined};
     let personal = ["P4suta".to_owned()];
-    let remotes = |list: &[(&str, &str)]| -> Vec<(String, String)> {
-        list.iter()
-            .map(|(name, url)| ((*name).to_owned(), (*url).to_owned()))
-            .collect()
-    };
     // OpenSSH resolves the `gh-personal` host entry to github.com.
     let resolve = |host: &str| (host == "gh-personal").then(|| "github.com".to_owned());
-    for (declared, list, standard) in [
-        (
-            None,
-            vec![("origin", "git@github.com:P4suta/dotfiles.git")],
-            Applies,
-        ),
-        (
-            None,
-            vec![("origin", "https://github.com/p4suta/dotfiles")],
-            Applies,
-        ),
-        (
-            None,
-            vec![("origin", "ssh://git@github.com/P4suta/dotfiles.git")],
-            Applies,
-        ),
-        (
-            None,
-            vec![("origin", "ssh://git@github.com:22/P4suta/dotfiles.git")],
-            Applies,
-        ),
-        (
-            None,
-            vec![("origin", "gh-personal:P4suta/dotfiles.git")],
-            Applies,
-        ),
-        (
-            None,
-            vec![("origin", "ssh://gh-personal/P4suta/dotfiles.git")],
-            Applies,
-        ),
-        (
-            None,
-            vec![("origin", "https://github.com/other/project.git")],
-            Skips,
-        ),
-        (
-            None,
-            vec![("origin", "gh-personal:other/project.git")],
-            Skips,
-        ),
-        (
-            None,
-            vec![
-                ("origin", "git@github.com:P4suta/project.git"),
-                ("upstream", "https://github.com/other/project.git"),
-            ],
-            Skips,
-        ),
-        (
-            None,
-            vec![
-                ("origin", "git@github.com:P4suta/project.git"),
-                ("backup", "git@github.com:P4suta/project-backup.git"),
-            ],
-            Applies,
-        ),
-        (
-            None,
-            vec![("upstream", "git@github.com:P4suta/project.git")],
-            Applies,
-        ),
-        (
-            None,
-            vec![("github", "git@github.com:P4suta/project.git")],
-            Applies,
-        ),
-        (
-            None,
-            vec![
-                ("github", "git@github.com:P4suta/project.git"),
-                ("upstream", "https://github.com/other/project.git"),
-            ],
-            Skips,
-        ),
-        (
-            None,
-            vec![("upstream", "https://github.com/other/project.git")],
-            Skips,
-        ),
-        (
-            None,
-            vec![("backup", "hub:repositories/project.git")],
-            Undetermined,
-        ),
-        (None, vec![], Undetermined),
-        (Some(false), vec![], Skips),
-        (
-            None,
-            vec![("origin", "hub:repositories/dotfiles.git")],
-            Undetermined,
-        ),
-        (
-            None,
-            vec![("origin", "/srv/hub/dotfiles.git")],
-            Undetermined,
-        ),
-        (
-            None,
-            vec![("origin", "git@gitlab.com:P4suta/x.git")],
-            Undetermined,
-        ),
-        (
-            None,
-            vec![
-                ("origin", "hub:repositories/dotfiles.git"),
-                ("github", "git@github.com:P4suta/dotfiles.git"),
-            ],
-            Applies,
-        ),
-        (
-            None,
-            vec![
-                ("origin", "hub:repositories/project.git"),
-                ("upstream", "https://github.com/other/project.git"),
-            ],
-            Skips,
-        ),
-        (
-            Some(true),
-            vec![("origin", "hub:repositories/dotfiles.git")],
-            Applies,
-        ),
-        (
-            Some(false),
-            vec![("origin", "hub:repositories/dotfiles.git")],
-            Skips,
-        ),
-        (
-            Some(false),
-            vec![("origin", "git@github.com:P4suta/dotfiles.git")],
-            Skips,
-        ),
-        (Some(true), vec![], Applies),
-    ] {
+    for &(declared, list, standard) in DESTINATIONS {
+        let remotes: Vec<(String, String)> = list
+            .iter()
+            .map(|(name, url)| ((*name).to_owned(), (*url).to_owned()))
+            .collect();
         assert_eq!(
-            prose::remotes_standard(declared, &remotes(&list), &personal, resolve),
+            prose::remotes_standard(declared, &remotes, &personal, resolve),
             standard,
             "{declared:?} {list:?}"
         );
     }
 }
 
+/// A home whose `dotguard` succeeds, in which each commit runs the global commit-msg hook in a fresh repository.
+struct CommitMsgHook {
+    home: tempfile::TempDir,
+}
+
+impl CommitMsgHook {
+    fn new() -> Result<Self> {
+        let tools = tempfile::tempdir()?;
+        let succeed = tools.path().join("succeed.rs");
+        fs::write(&succeed, "fn main() {}\n")?;
+        let home = tempfile::tempdir()?;
+        let bin = home.path().join(".local/bin");
+        fs::create_dir_all(&bin)?;
+        let status = Command::new("rustc")
+            .arg(&succeed)
+            .arg("-o")
+            .arg(bin.join(format!("dotguard{}", std::env::consts::EXE_SUFFIX)))
+            .status()?;
+        assert!(status.success());
+        Ok(Self { home })
+    }
+
+    /// Whether the hook accepts `text` in a repository with these remotes and `prose.standard`, and what it printed.
+    fn commit(
+        &self,
+        remotes: &[(&str, &str)],
+        declared: Option<&str>,
+        text: &str,
+    ) -> Result<(bool, String)> {
+        let directory = repository(&[])?;
+        for (name, url) in remotes {
+            git(directory.path(), &["remote", "add", name, url])?;
+        }
+        if let Some(declared) = declared {
+            git(directory.path(), &["config", "prose.standard", declared])?;
+        }
+        let message = directory.path().join(".git/COMMIT_EDITMSG");
+        fs::write(&message, text)?;
+        let output = Command::new(env!("CARGO_BIN_EXE_dotfiles-xtask"))
+            .current_dir(directory.path())
+            .args(["hook", "commit-msg", "--"])
+            .arg(&message)
+            .env(
+                if cfg!(windows) { "USERPROFILE" } else { "HOME" },
+                self.home.path(),
+            )
+            .env("PROSE_CONFIG", root().join("home/dot_config/prose"))
+            .env("PROSE_RUNTIME", self.home.path().join("runtime"))
+            .stdin(Stdio::null())
+            .output()?;
+        Ok((
+            output.status.success(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ))
+    }
+
+    fn origin(&self, origin: &str, upstream: Option<&str>, text: &str) -> Result<(bool, String)> {
+        let mut remotes = vec![("origin", origin)];
+        remotes.extend(upstream.map(|upstream| ("upstream", upstream)));
+        self.commit(&remotes, None, text)
+    }
+}
+
+const HUB: &str = "hub:repositories/project.git";
+
+fn attributed() -> String {
+    format!("fix(parser): keep edits\n\n{ATTRIBUTED}\n")
+}
+
 #[test]
-fn the_global_commit_msg_hook_checks_personal_repositories() -> Result<()> {
-    let tools = tempfile::tempdir()?;
-    let succeed = tools.path().join("succeed.rs");
-    fs::write(&succeed, "fn main() {}\n")?;
-    let home = tempfile::tempdir()?;
-    let bin = home.path().join(".local/bin");
-    fs::create_dir_all(&bin)?;
-    let status = Command::new("rustc")
-        .arg(&succeed)
-        .arg("-o")
-        .arg(bin.join(format!("dotguard{}", std::env::consts::EXE_SUFFIX)))
-        .status()?;
-    assert!(status.success());
-    let remotes_commit =
-        |remotes: &[(&str, &str)], declared: Option<&str>, text: &str| -> Result<(bool, String)> {
-            let directory = repository(&[])?;
-            for (name, url) in remotes {
-                git(directory.path(), &["remote", "add", name, url])?;
-            }
-            if let Some(declared) = declared {
-                git(directory.path(), &["config", "prose.standard", declared])?;
-            }
-            let message = directory.path().join(".git/COMMIT_EDITMSG");
-            fs::write(&message, text)?;
-            let output = Command::new(env!("CARGO_BIN_EXE_dotfiles-xtask"))
-                .current_dir(directory.path())
-                .args(["hook", "commit-msg", "--"])
-                .arg(&message)
-                .env(
-                    if cfg!(windows) { "USERPROFILE" } else { "HOME" },
-                    home.path(),
-                )
-                .env("PROSE_CONFIG", root().join("home/dot_config/prose"))
-                .env("PROSE_RUNTIME", home.path().join("runtime"))
-                .stdin(Stdio::null())
-                .output()?;
-            Ok((
-                output.status.success(),
-                String::from_utf8_lossy(&output.stderr).into_owned(),
-            ))
-        };
-    let declared_commit =
-        |origin: &str, upstream: Option<&str>, declared: Option<&str>, text: &str| {
-            let mut remotes = vec![("origin", origin)];
-            remotes.extend(upstream.map(|upstream| ("upstream", upstream)));
-            remotes_commit(&remotes, declared, text)
-        };
-    let commit = |origin: &str, upstream: Option<&str>, text: &str| {
-        declared_commit(origin, upstream, None, text)
-    };
-    let attributed = format!("fix(parser): keep edits\n\n{ATTRIBUTED}\n");
-    let hub = "hub:repositories/project.git";
-    let (accepted, stderr) = commit(hub, None, &attributed)?;
+fn an_unresolved_destination_passes_and_names_the_setting_that_decides_it() -> Result<()> {
+    let hook = CommitMsgHook::new()?;
+    let (accepted, stderr) = hook.origin(HUB, None, &attributed())?;
     assert!(accepted, "{stderr}");
     assert!(
-        stderr.contains(hub) && stderr.contains("git config prose.standard true"),
+        stderr.contains(HUB) && stderr.contains("git config prose.standard true"),
         "an unresolved destination is reported with the setting that decides it: {stderr}"
     );
     let personal_remote = ("github", "git@github.com:P4suta/project.git");
-    let (accepted, stderr) = remotes_commit(&[personal_remote], None, &attributed)?;
+    let (accepted, stderr) = hook.commit(&[personal_remote], None, &attributed())?;
     assert!(
         !accepted && stderr.contains("Dotfiles.Attribution"),
         "a personal GitHub remote names the destination of a repository without origin: {stderr}"
     );
-    let (accepted, stderr) = remotes_commit(&[], None, &attributed)?;
+    let (accepted, stderr) = hook.commit(&[], None, &attributed())?;
     assert!(accepted, "{stderr}");
     assert!(
         stderr.contains("no origin remote") && stderr.contains("git config prose.standard true"),
         "a repository without remotes reports the setting that decides it: {stderr}"
     );
-    let (accepted, stderr) = remotes_commit(&[], Some("true"), &attributed)?;
+    Ok(())
+}
+
+#[test]
+fn the_declared_setting_decides_whether_the_standard_applies() -> Result<()> {
+    let hook = CommitMsgHook::new()?;
+    let (accepted, stderr) = hook.commit(&[], Some("true"), &attributed())?;
     assert!(
         !accepted && stderr.contains("Dotfiles.Attribution"),
         "{stderr}"
     );
-    let (accepted, stderr) = declared_commit(hub, None, Some("true"), &attributed)?;
+    let origin = [("origin", HUB)];
+    let (accepted, stderr) = hook.commit(&origin, Some("true"), &attributed())?;
     assert!(
         !accepted && stderr.contains("Dotfiles.Attribution"),
         "{stderr}"
     );
-    let (accepted, stderr) = declared_commit(hub, None, Some("false"), &attributed)?;
+    let (accepted, stderr) = hook.commit(&origin, Some("false"), &attributed())?;
     assert!(accepted && stderr.is_empty(), "{stderr}");
-    let (accepted, stderr) = declared_commit(hub, None, Some("maybe"), &attributed)?;
+    let (accepted, stderr) = hook.commit(&origin, Some("maybe"), &attributed())?;
     assert!(
         !accepted && stderr.contains("prose.standard"),
         "an invalid setting is refused: {stderr}"
     );
+    Ok(())
+}
+
+#[test]
+fn the_global_commit_msg_hook_checks_personal_repositories() -> Result<()> {
+    let hook = CommitMsgHook::new()?;
+    let commit =
+        |origin: &str, upstream: Option<&str>, text: &str| hook.origin(origin, upstream, text);
+    let attributed = attributed();
     let (accepted, stderr) = commit("git@github.com:P4suta/project.git", None, &attributed)?;
     assert!(!accepted);
     assert!(

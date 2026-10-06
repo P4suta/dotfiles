@@ -28,7 +28,7 @@ fn git(directory: &Path) -> Command {
 }
 
 /// The top of the work tree containing `directory`, or `None` outside every repository.
-pub fn work_tree(directory: &Path) -> Result<Option<PathBuf>> {
+pub(crate) fn work_tree(directory: &Path) -> Result<Option<PathBuf>> {
     let output = git(directory)
         .args(["rev-parse", "--show-toplevel"])
         .output()
@@ -50,6 +50,13 @@ pub fn work_tree(directory: &Path) -> Result<Option<PathBuf>> {
 
 /// A path from Git's `-z` output.
 /// Windows decodes it as text, and other hosts keep the raw bytes.
+#[cfg_attr(
+    unix,
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "the Windows form refuses a path that is not UTF-8"
+    )
+)]
 fn path_from_bytes(bytes: &[u8]) -> Result<PathBuf> {
     #[cfg(unix)]
     {
@@ -63,6 +70,13 @@ fn path_from_bytes(bytes: &[u8]) -> Result<PathBuf> {
     }
 }
 
+#[cfg_attr(
+    unix,
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "the Windows form refuses a path that is not UTF-8"
+    )
+)]
 fn path_bytes(path: &Path) -> Result<&[u8]> {
     #[cfg(unix)]
     {
@@ -148,7 +162,7 @@ fn eol(value: &str) -> Eol {
 }
 
 /// Resolves `text`, `eol`, and `binary` for paths relative to `directory`.
-pub fn attributes(directory: &Path, paths: &[PathBuf]) -> Result<Vec<Attributes>> {
+pub(crate) fn attributes(directory: &Path, paths: &[PathBuf]) -> Result<Vec<Attributes>> {
     if paths.is_empty() {
         return Ok(Vec::new());
     }
@@ -215,6 +229,10 @@ fn regular(path: &Path) -> bool {
 }
 
 /// Replaces `path` and keeps its permissions, but only while `path` stays writable and still holds `expected`.
+///
+/// # Errors
+///
+/// Returns an error when `path` has no parent, reading or replacing it fails, or writing the temporary file fails.
 pub fn replace(path: &Path, expected: &[u8], next: &[u8]) -> Result<bool> {
     let parent = path.parent().context("file has no parent directory")?;
     let permissions = fs::metadata(path)?.permissions();
@@ -280,11 +298,19 @@ fn rewrite(directory: &Path, staging: Staging, paths: &[(PathBuf, Index)]) -> Re
 }
 
 /// Converts CRLF to LF in `paths`, relative to `directory`, unless their attributes exempt them, as `git add --renormalize` stages them.
+///
+/// # Errors
+///
+/// Returns an error when Git can't resolve the paths' attributes, or reading or replacing a file fails.
 pub fn normalize(directory: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     rewrite(directory, Staging::Renormalize, &renormalized(paths))
 }
 
 /// Tracked files whose working-tree bytes contain CRLF their attributes don't declare, including CRLF the index already holds.
+///
+/// # Errors
+///
+/// Returns an error when Git can't list the tracked files or resolve their attributes, or reading a file fails.
 pub fn offending(root: &Path) -> Result<Vec<PathBuf>> {
     let tracked = renormalized(&listed(root)?);
     Ok(pending(root, Staging::Renormalize, &tracked)?
@@ -293,6 +319,11 @@ pub fn offending(root: &Path) -> Result<Vec<PathBuf>> {
         .collect())
 }
 
+/// Refuses tracked text files that contain CRLF their attributes don't declare.
+///
+/// # Errors
+///
+/// Returns an error when such a file exists, or when listing or reading the tracked files fails.
 pub fn check(root: &Path) -> Result<()> {
     let found = offending(root)?;
     ensure!(
@@ -329,7 +360,7 @@ fn named_file(path: &Path) -> Result<Vec<PathBuf>> {
 
 /// Normalizes the changed files of the work tree at the hook's directory and the file the tool names.
 /// A directory Git can't inspect goes to standard error and gets skipped, so one failure doesn't fail every tool call.
-pub fn hook(input: &Value) -> Result<Vec<PathBuf>> {
+pub(crate) fn hook(input: &Value) -> Result<Vec<PathBuf>> {
     let directory = match input["cwd"].as_str() {
         Some(directory) => PathBuf::from(directory),
         None => std::env::current_dir()?,
@@ -360,6 +391,11 @@ pub fn hook(input: &Value) -> Result<Vec<PathBuf>> {
     Ok(changed)
 }
 
+/// Normalizes the files a request names and reports each converted file.
+///
+/// # Errors
+///
+/// Returns an error when reading standard input fails or it holds no JSON, the current directory stays unavailable, or normalizing the named files fails.
 pub fn run(request: Request) -> Result<()> {
     let changed = match request {
         Request::Hook => {
@@ -379,6 +415,10 @@ pub fn run(request: Request) -> Result<()> {
 }
 
 /// Adds the post-tool hook to a Claude Code or Codex settings document without reordering existing groups.
+///
+/// # Errors
+///
+/// Returns an error when the settings or `hooks` hold something other than an object, `PostToolUse` holds something other than an array, or a group lacks a handler array.
 pub fn merge_hooks(mut value: Value) -> Result<Value> {
     let expected = json!({"hooks":[{"type":"command","command":HOOK_COMMAND,"timeout":30}]});
     let entries = value
@@ -412,7 +452,7 @@ pub fn merge_hooks(mut value: Value) -> Result<Value> {
 }
 
 /// Registers the hook in the machine-local Claude Code and Codex settings under `home`.
-pub fn install(home: &Path) -> Result<()> {
+pub(crate) fn install(home: &Path) -> Result<()> {
     for path in [
         home.join(".codex/hooks.json"),
         home.join(".claude/settings.json"),

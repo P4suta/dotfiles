@@ -24,11 +24,12 @@ pub enum Class {
 
 /// A text line needs judgment or a defined follow-up, and every other shape needs its own class, so none can carry an unaudited instruction.
 /// No class admits a line that renders template output.
+#[must_use]
 pub fn admitted(line: Line, class: Class, follow_up_defined: bool) -> bool {
     match (line, class) {
-        (Line::Text, Class::Judgment) => true,
         (Line::Text, Class::FollowUp) => follow_up_defined,
-        (Line::Heading, Class::Heading)
+        (Line::Text, Class::Judgment)
+        | (Line::Heading, Class::Heading)
         | (Line::Directive, Class::Directive)
         | (Line::Setting, Class::Setting) => true,
         _ => false,
@@ -44,6 +45,7 @@ pub enum Definition {
 }
 
 /// A follow-up stays current when one definition exists and a retained line refers to it.
+#[must_use]
 pub fn follow_up(definitions: usize, references: usize) -> Definition {
     match (definitions, references) {
         (0, _) => Definition::Undefined,
@@ -67,6 +69,7 @@ pub enum Holder {
 /// A removed-line row holds when its holder exists.
 /// A gate row names the gate's source file, a skill row names an existing skill, and a merge row names exactly one retained line.
 /// A contradicted line names the retained line or the skill it contradicted.
+#[must_use]
 pub fn removed_row_held(
     holder: Option<Holder>,
     names_source: bool,

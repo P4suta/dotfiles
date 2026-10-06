@@ -1,6 +1,6 @@
 //! Claude Code shell timeouts set from measured durations.
-//! PreToolUse records when a Bash or PowerShell call starts and sets its timeout from the signature's history.
-//! PostToolUse and PostToolUseFailure record how long it took.
+//! `PreToolUse` records when a Bash or PowerShell call starts and sets its timeout from the signature's history.
+//! `PostToolUse` and `PostToolUseFailure` record how long it took.
 
 use crate::shell_write_rules::{program, segments};
 use crate::timeout_rules::{CLIENT_LIMIT_MS, Timeout, WINDOW, overran, percentile, timeout};
@@ -105,6 +105,7 @@ fn simple(words: &[String]) -> Option<String> {
 }
 
 /// The normalized signature of a shell command: the signatures of its first three simple commands that do more than prepare the shell.
+#[must_use]
 pub fn signature(command: &str) -> String {
     let parts: Vec<String> = segments(command)
         .iter()
@@ -241,13 +242,13 @@ fn compact(directory: &Path, path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn context(event: &str, text: String) -> Value {
+fn context(event: &str, text: &str) -> Value {
     json!({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}})
 }
 
 /// The hook output for one event at `now`, given in milliseconds since the epoch.
 /// Returns `None` when the call needs nothing.
-pub fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Value>> {
+pub(crate) fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Value>> {
     if !matches!(event["tool_name"].as_str(), Some("Bash" | "PowerShell")) {
         return Ok(None);
     }
@@ -294,7 +295,7 @@ pub fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Value>> {
                     " It can outlast the client limit; run it with run_in_background instead.",
                 );
             }
-            let mut output = context(name, text);
+            let mut output = context(name, &text);
             if let Timeout::Set(millis) = decided
                 && requested != Some(millis)
             {
@@ -327,7 +328,7 @@ pub fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Value>> {
             Ok(overran(observed, millis).then(|| {
                 context(
                     name,
-                    format!(
+                    &format!(
                         "`{signature}` took {}, beyond its expected {}; run it with run_in_background next time.",
                         seconds(millis),
                         seconds(observed.unwrap_or_default())
@@ -340,6 +341,11 @@ pub fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Value>> {
 }
 
 /// Reads one hook event from standard input and writes the hook output, if any, to standard output.
+///
+/// # Errors
+///
+/// Returns an error when it can't read standard input or parse it as JSON, the native home stays unset, or a shell event has no command.
+/// It also fails when it can't write the start marker or the run record.
 pub fn run() -> Result<()> {
     let mut text = String::new();
     std::io::stdin().read_to_string(&mut text)?;

@@ -66,6 +66,7 @@ impl Refusal {
 
     /// Whether every field an agent needs has a value: a dotted rule, a cause, and evidence.
     /// Any next command and waiver must fit on one line.
+    #[must_use]
     pub fn is_complete(&self) -> bool {
         let one_line = |text: &str| !text.trim().is_empty() && !text.contains(['\n', '\r']);
         !self.rule.is_empty()
@@ -83,6 +84,7 @@ impl Refusal {
     }
 
     /// The machine-readable line, without a trailing newline.
+    #[must_use]
     pub fn line(&self) -> String {
         let mut out = String::from(PREFIX);
         out.push_str("{\"rule\":");
@@ -111,6 +113,7 @@ impl Refusal {
     }
 
     /// The readable text, ending with a newline.
+    #[must_use]
     pub fn text(&self) -> String {
         let mut out = format!(
             "::error:: {} refused: {}\n",
@@ -141,6 +144,7 @@ impl Refusal {
     }
 
     /// The readable text followed by the machine-readable line.
+    #[must_use]
     pub fn render(&self) -> String {
         format!("{}\n{}\n", self.text(), self.line())
     }
@@ -151,6 +155,7 @@ impl Refusal {
     }
 
     /// Reads a machine-readable line back, or `None` when the line doesn't match this format exactly.
+    #[must_use]
     pub fn parse(line: &str) -> Option<Self> {
         let mut reader = Reader {
             rest: line.strip_prefix(PREFIX)?,
@@ -207,6 +212,7 @@ impl fmt::Display for Refusal {
 impl std::error::Error for Refusal {}
 
 /// Quotes one argument for a POSIX shell, leaving plain words and `<name>` placeholders unquoted.
+#[must_use]
 pub fn quote(argument: &str) -> String {
     let placeholder = argument
         .strip_prefix('<')
@@ -239,6 +245,7 @@ pub fn command<S: AsRef<str>>(arguments: &[S]) -> String {
 }
 
 /// Splits a line that `command` wrote back into its arguments, or `None` when `command` would not write that line.
+#[must_use]
 pub fn words(line: &str) -> Option<Vec<String>> {
     let mut words = Vec::new();
     let mut word = String::new();

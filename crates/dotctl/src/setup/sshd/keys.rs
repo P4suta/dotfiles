@@ -1,7 +1,7 @@
 //! Writes `administrators_authorized_keys` and locks it down.
 //!
 //! Windows' stock `sshd_config` ends with `Match Group administrators`, which makes sshd read this file instead of `~/.ssh/authorized_keys` for every administrator account.
-//! StrictModes refuses the file unless only SYSTEM and the Administrators group hold permissions on it.
+//! `StrictModes` refuses the file unless only SYSTEM and the Administrators group hold permissions on it.
 
 use std::path::Path;
 
@@ -60,7 +60,7 @@ fn merge(existing: &str, key: &str) -> String {
     format!("{}\r\n", lines.join("\r\n"))
 }
 
-/// The `<type> <base64>` half of an authorized_keys line, without the trailing comment.
+/// The `<type> <base64>` half of an `authorized_keys` line, without the trailing comment.
 fn material(line: &str) -> String {
     line.split_whitespace()
         .take(2)

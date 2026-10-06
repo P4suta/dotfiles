@@ -26,7 +26,7 @@ pub fn sweep(target: &Path) {
 }
 
 /// Sweeps old aside copies, then renames `target` aside when it exists and returns where it went.
-pub fn move_aside(target: &Path) -> Result<Option<PathBuf>> {
+pub(crate) fn move_aside(target: &Path) -> Result<Option<PathBuf>> {
     sweep(target);
     if fs::symlink_metadata(target).is_err() {
         return Ok(None);
@@ -50,6 +50,10 @@ pub fn restore(target: &Path, aside: Option<PathBuf>) {
 }
 
 /// Moves `staged` to `target`, first moving a running `target` aside.
+///
+/// # Errors
+///
+/// Returns an error when `target` has no UTF-8 filename, or when it can't move `target` aside or rename `staged` to `target`.
 pub fn replace(staged: &Path, target: &Path) -> Result<()> {
     let aside = move_aside(target)?;
     if let Err(error) = fs::rename(staged, target) {

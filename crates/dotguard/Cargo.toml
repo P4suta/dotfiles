@@ -10,5 +10,16 @@ license.workspace = true
 # The prose gate runs the ocomment binary, configured in `home/dot_config/ocomment/config.toml`.
 [dependencies]
 
-[lints]
-workspace = true
+# The workspace forbids unsafe code, which no #[expect] can lift.
+# The console control handler makes the one foreign call here, and policy/unsafe-sites.toml lists it, so this table repeats the workspace lints with unsafe code denied.
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unfulfilled_lint_expectations = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"

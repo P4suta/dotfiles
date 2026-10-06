@@ -41,10 +41,9 @@ impl Isolated {
         let mut text = String::from("[init]\n\tdefaultBranch = main\n");
         if attributes {
             let file = source().join("dot_config/git/attributes");
-            text.push_str(&format!(
-                "[core]\n\tattributesFile = {}\n",
-                file.to_str().expect("UTF-8 source path").replace('\\', "/")
-            ));
+            text.push_str("[core]\n\tattributesFile = ");
+            text.push_str(&file.to_str().expect("UTF-8 source path").replace('\\', "/"));
+            text.push('\n');
         }
         fs::write(&global, text)?;
         Ok(Self {
@@ -211,7 +210,10 @@ fn repository_check_refuses_only_undeclared_tracked_crlf() -> Result<()> {
         &[PathBuf::from("clean.txt"), PathBuf::from("legacy.txt")],
     )?;
     assert_eq!(fs::read(root.join("legacy.txt"))?, LF);
-    assert!(line_endings::offending(root)?.is_empty());
+    assert_eq!(
+        line_endings::offending(root)?,
+        Vec::<std::path::PathBuf>::new()
+    );
     line_endings::check(root)?;
     assert_eq!(fs::read(root.join("keep.bat"))?, CRLF);
     Ok(())

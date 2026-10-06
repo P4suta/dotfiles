@@ -27,303 +27,302 @@ mod fixture_git;
 
 /// A clean, pushed draft PR with passing checks.
 /// Each case changes the fields that define its state.
-fn published() -> State {
-    State {
-        host: Host::Ready,
-        head: Head::Feature,
-        dirty: false,
-        undecided: false,
-        incomplete: false,
-        behind_base: false,
-        ahead_base: true,
-        upstream: Upstream::Current,
-        push_paused: false,
-        pr: Pr::Draft,
-        checks: Checks::Passing,
-        workflows: true,
-        review_paused: false,
-    }
-}
+const PUBLISHED: State = State {
+    host: Host::Ready,
+    head: Head::Feature,
+    dirty: false,
+    undecided: false,
+    incomplete: false,
+    behind_base: false,
+    ahead_base: true,
+    upstream: Upstream::Current,
+    push_paused: false,
+    pr: Pr::Draft,
+    checks: Checks::Passing,
+    workflows: true,
+    review_paused: false,
+};
 
 #[test]
 fn every_state_maps_to_its_single_next_step() {
-    let base = published();
-    let cases = [
-        (
-            State {
-                host: Host::TempUnset,
-                head: Head::Detached,
-                ..base
-            },
-            Step::SetTemp,
-        ),
-        (
-            State {
-                host: Host::VolumeMissing,
-                dirty: true,
-                ..base
-            },
-            Step::MountVolume,
-        ),
-        (
-            State {
-                host: Host::TempMissing,
-                head: Head::Detached,
-                ..base
-            },
-            Step::CreateTemp,
-        ),
-        (
-            State {
-                head: Head::Detached,
-                ..base
-            },
-            Step::AttachBranch,
-        ),
-        (
-            State {
-                head: Head::Default,
-                dirty: true,
-                ..base
-            },
-            Step::BranchFromDefault,
-        ),
-        (
-            State {
-                head: Head::Default,
-                behind_base: true,
-                ..base
-            },
-            Step::BranchFromDefault,
-        ),
-        (
-            State {
-                head: Head::Default,
-                ahead_base: false,
-                behind_base: true,
-                ..base
-            },
-            Step::FastForward,
-        ),
-        (
-            State {
-                head: Head::Default,
-                ahead_base: false,
-                ..base
-            },
-            Step::StartBranch,
-        ),
-        (
-            State {
-                undecided: true,
-                incomplete: true,
-                dirty: true,
-                ..base
-            },
-            Step::DraftDecisions,
-        ),
-        (
-            State {
-                incomplete: true,
-                dirty: true,
-                ..base
-            },
-            Step::CompleteDecisions,
-        ),
-        (
-            State {
-                dirty: true,
-                pr: Pr::Merged,
-                ..base
-            },
-            Step::Commit,
-        ),
-        (
-            State {
-                pr: Pr::Merged,
-                behind_base: true,
-                ..base
-            },
-            Step::Finished,
-        ),
-        (
-            State {
-                pr: Pr::Closed,
-                ..base
-            },
-            Step::Reopen,
-        ),
-        (
-            State {
-                upstream: Upstream::Behind,
-                behind_base: true,
-                ..base
-            },
-            Step::SyncUpstream,
-        ),
-        (
-            State {
-                behind_base: true,
-                upstream: Upstream::Rewritten,
-                ..base
-            },
-            Step::Rebase,
-        ),
-        (
-            State {
-                ahead_base: false,
-                pr: Pr::None,
-                ..base
-            },
-            Step::StartWork,
-        ),
-        (
-            State {
-                upstream: Upstream::Rewritten,
-                push_paused: true,
-                review_paused: true,
-                ..base
-            },
-            Step::AwaitPushResume,
-        ),
-        (
-            State {
-                upstream: Upstream::Ahead,
-                ..base
-            },
-            Step::Push,
-        ),
-        (
-            State {
-                upstream: Upstream::Absent,
-                pr: Pr::Unknown,
-                ..base
-            },
-            Step::Push,
-        ),
-        (
-            State {
-                upstream: Upstream::Ahead,
-                review_paused: true,
-                ..base
-            },
-            Step::Push,
-        ),
-        (
-            State {
-                upstream: Upstream::Ahead,
-                review_paused: true,
-                pr: Pr::Ready,
-                ..base
-            },
-            Step::AwaitReviewResume,
-        ),
-        (
-            State {
-                upstream: Upstream::Rewritten,
-                review_paused: true,
-                pr: Pr::Unknown,
-                ..base
-            },
-            Step::InspectGithub,
-        ),
-        (
-            State {
-                upstream: Upstream::Rewritten,
-                ..base
-            },
-            Step::ForcePush,
-        ),
-        (
-            State {
-                upstream: Upstream::Diverged,
-                ..base
-            },
-            Step::IntegrateUpstream,
-        ),
-        (
-            State {
-                upstream: Upstream::Diverged,
-                behind_base: true,
-                push_paused: true,
-                review_paused: true,
-                pr: Pr::Ready,
-                ..base
-            },
-            Step::IntegrateUpstream,
-        ),
-        (
-            State {
-                pr: Pr::Unknown,
-                ..base
-            },
-            Step::InspectGithub,
-        ),
-        (
-            State {
-                pr: Pr::None,
-                ..base
-            },
-            Step::CreatePr,
-        ),
-        (
-            State {
-                checks: Checks::Failing,
-                review_paused: true,
-                ..base
-            },
-            Step::FixChecks,
-        ),
-        (
-            State {
-                checks: Checks::Pending,
-                ..base
-            },
-            Step::AwaitChecks,
-        ),
-        (
-            State {
-                checks: Checks::None,
-                ..base
-            },
-            Step::AwaitChecks,
-        ),
-        (
-            State {
-                checks: Checks::None,
-                workflows: false,
-                ..base
-            },
-            Step::MarkReady,
-        ),
-        (
-            State {
-                checks: Checks::Pending,
-                workflows: false,
-                ..base
-            },
-            Step::AwaitChecks,
-        ),
-        (
-            State {
-                review_paused: true,
-                ..base
-            },
-            Step::AwaitReviewResume,
-        ),
-        (base, Step::MarkReady),
-        (
-            State {
-                pr: Pr::Ready,
-                ..base
-            },
-            Step::AwaitReview,
-        ),
-    ];
-    for (state, expected) in cases {
+    for &(state, expected) in CASES {
         assert_eq!(decide(state), expected, "{state:?}");
     }
 }
+
+/// Each state and the one step it maps to.
+const CASES: &[(State, Step)] = &[
+    (
+        State {
+            host: Host::TempUnset,
+            head: Head::Detached,
+            ..PUBLISHED
+        },
+        Step::SetTemp,
+    ),
+    (
+        State {
+            host: Host::VolumeMissing,
+            dirty: true,
+            ..PUBLISHED
+        },
+        Step::MountVolume,
+    ),
+    (
+        State {
+            host: Host::TempMissing,
+            head: Head::Detached,
+            ..PUBLISHED
+        },
+        Step::CreateTemp,
+    ),
+    (
+        State {
+            head: Head::Detached,
+            ..PUBLISHED
+        },
+        Step::AttachBranch,
+    ),
+    (
+        State {
+            head: Head::Default,
+            dirty: true,
+            ..PUBLISHED
+        },
+        Step::BranchFromDefault,
+    ),
+    (
+        State {
+            head: Head::Default,
+            behind_base: true,
+            ..PUBLISHED
+        },
+        Step::BranchFromDefault,
+    ),
+    (
+        State {
+            head: Head::Default,
+            ahead_base: false,
+            behind_base: true,
+            ..PUBLISHED
+        },
+        Step::FastForward,
+    ),
+    (
+        State {
+            head: Head::Default,
+            ahead_base: false,
+            ..PUBLISHED
+        },
+        Step::StartBranch,
+    ),
+    (
+        State {
+            undecided: true,
+            incomplete: true,
+            dirty: true,
+            ..PUBLISHED
+        },
+        Step::DraftDecisions,
+    ),
+    (
+        State {
+            incomplete: true,
+            dirty: true,
+            ..PUBLISHED
+        },
+        Step::CompleteDecisions,
+    ),
+    (
+        State {
+            dirty: true,
+            pr: Pr::Merged,
+            ..PUBLISHED
+        },
+        Step::Commit,
+    ),
+    (
+        State {
+            pr: Pr::Merged,
+            behind_base: true,
+            ..PUBLISHED
+        },
+        Step::Finished,
+    ),
+    (
+        State {
+            pr: Pr::Closed,
+            ..PUBLISHED
+        },
+        Step::Reopen,
+    ),
+    (
+        State {
+            upstream: Upstream::Behind,
+            behind_base: true,
+            ..PUBLISHED
+        },
+        Step::SyncUpstream,
+    ),
+    (
+        State {
+            behind_base: true,
+            upstream: Upstream::Rewritten,
+            ..PUBLISHED
+        },
+        Step::Rebase,
+    ),
+    (
+        State {
+            ahead_base: false,
+            pr: Pr::None,
+            ..PUBLISHED
+        },
+        Step::StartWork,
+    ),
+    (
+        State {
+            upstream: Upstream::Rewritten,
+            push_paused: true,
+            review_paused: true,
+            ..PUBLISHED
+        },
+        Step::AwaitPushResume,
+    ),
+    (
+        State {
+            upstream: Upstream::Ahead,
+            ..PUBLISHED
+        },
+        Step::Push,
+    ),
+    (
+        State {
+            upstream: Upstream::Absent,
+            pr: Pr::Unknown,
+            ..PUBLISHED
+        },
+        Step::Push,
+    ),
+    (
+        State {
+            upstream: Upstream::Ahead,
+            review_paused: true,
+            ..PUBLISHED
+        },
+        Step::Push,
+    ),
+    (
+        State {
+            upstream: Upstream::Ahead,
+            review_paused: true,
+            pr: Pr::Ready,
+            ..PUBLISHED
+        },
+        Step::AwaitReviewResume,
+    ),
+    (
+        State {
+            upstream: Upstream::Rewritten,
+            review_paused: true,
+            pr: Pr::Unknown,
+            ..PUBLISHED
+        },
+        Step::InspectGithub,
+    ),
+    (
+        State {
+            upstream: Upstream::Rewritten,
+            ..PUBLISHED
+        },
+        Step::ForcePush,
+    ),
+    (
+        State {
+            upstream: Upstream::Diverged,
+            ..PUBLISHED
+        },
+        Step::IntegrateUpstream,
+    ),
+    (
+        State {
+            upstream: Upstream::Diverged,
+            behind_base: true,
+            push_paused: true,
+            review_paused: true,
+            pr: Pr::Ready,
+            ..PUBLISHED
+        },
+        Step::IntegrateUpstream,
+    ),
+    (
+        State {
+            pr: Pr::Unknown,
+            ..PUBLISHED
+        },
+        Step::InspectGithub,
+    ),
+    (
+        State {
+            pr: Pr::None,
+            ..PUBLISHED
+        },
+        Step::CreatePr,
+    ),
+    (
+        State {
+            checks: Checks::Failing,
+            review_paused: true,
+            ..PUBLISHED
+        },
+        Step::FixChecks,
+    ),
+    (
+        State {
+            checks: Checks::Pending,
+            ..PUBLISHED
+        },
+        Step::AwaitChecks,
+    ),
+    (
+        State {
+            checks: Checks::None,
+            ..PUBLISHED
+        },
+        Step::AwaitChecks,
+    ),
+    (
+        State {
+            checks: Checks::None,
+            workflows: false,
+            ..PUBLISHED
+        },
+        Step::MarkReady,
+    ),
+    (
+        State {
+            checks: Checks::Pending,
+            workflows: false,
+            ..PUBLISHED
+        },
+        Step::AwaitChecks,
+    ),
+    (
+        State {
+            review_paused: true,
+            ..PUBLISHED
+        },
+        Step::AwaitReviewResume,
+    ),
+    (PUBLISHED, Step::MarkReady),
+    (
+        State {
+            pr: Pr::Ready,
+            ..PUBLISHED
+        },
+        Step::AwaitReview,
+    ),
+];
 
 #[test]
 fn only_local_reversible_steps_are_executable() {
@@ -1116,7 +1115,7 @@ fn execute_runs_the_step_and_then_reports_the_one_after_it() -> Result<()> {
     let output = fixture.cli(&["--offline", "--execute"])?.output()?;
     let stderr = String::from_utf8(output.stderr.clone())?;
     assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, b"");
     assert!(
         stderr.contains("`push` is not a local, reversible step")
             && stderr.contains("(`git push -u origin feat/topic`)"),

@@ -121,7 +121,7 @@ fn lefthook_missing(configuration: &str, hook: Hook) -> Refusal {
     .evidence(format!("{configuration} configures {}", hook.name()))
 }
 
-pub fn configured_hooks(bytes: &[u8]) -> Result<Vec<String>> {
+pub(crate) fn configured_hooks(bytes: &[u8]) -> Result<Vec<String>> {
     let text = std::str::from_utf8(bytes)?;
     let documents = yaml_rust2::YamlLoader::load_from_str(text)?;
     ensure!(
@@ -217,6 +217,11 @@ fn delegate(
     )
 }
 
+/// Runs one global Git hook: the health gate, the push pause, and the repository's own hooks.
+///
+/// # Errors
+///
+/// Returns an error when it can't find the home directory, the host fails its health gate, a push hold pauses pushing, or a gate the hook runs refuses.
 pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .context("native home is unavailable")?;
@@ -319,6 +324,7 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
 }
 
 /// The machine-local push hold, which only an explicit owner instruction lifts, so the refusal names no waiver.
+#[must_use]
 pub fn push_paused(marker: &Path) -> Refusal {
     Refusal::new(
         "push.paused",
@@ -329,7 +335,7 @@ pub fn push_paused(marker: &Path) -> Refusal {
 }
 
 /// Git commits the index that the pre-commit hook leaves, so a gate that changed the staged tree refuses the commit.
-pub fn preserve_staged_tree(before: Option<&str>, after: Option<&str>) -> Result<()> {
+pub(crate) fn preserve_staged_tree(before: Option<&str>, after: Option<&str>) -> Result<()> {
     if before == after {
         return Ok(());
     }
@@ -357,6 +363,11 @@ fn staged_tree(native: &Native) -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+/// Runs Git through the dotguard wrapper and returns its exit status.
+///
+/// # Errors
+///
+/// Returns an error when the wrapper can't start.
 pub fn git(arguments: &[OsString]) -> Result<std::process::ExitStatus> {
     Tool::Dotguard
         .hook_command()
@@ -366,6 +377,11 @@ pub fn git(arguments: &[OsString]) -> Result<std::process::ExitStatus> {
         .context("start the dotguard Git wrapper")
 }
 
+/// Prints the signing and hook state of every repository under `root`, and with `fix` removes stale local hooks that match a known generated copy.
+///
+/// # Errors
+///
+/// Returns an error when it can't read a directory, Git can't report a repository's configuration, or it can't remove a stale hook.
 pub fn audit(root: &Path, fix: bool) -> Result<()> {
     fn walk(path: &Path, repos: &mut Vec<std::path::PathBuf>) -> Result<()> {
         for entry in fs::read_dir(path)? {
@@ -425,10 +441,7 @@ pub fn audit(root: &Path, fix: bool) -> Result<()> {
                 stale += 1;
                 if fix {
                     use sha2::{Digest, Sha256};
-                    let digest: String = Sha256::digest(fs::read(&path)?)
-                        .iter()
-                        .map(|byte| format!("{byte:02x}"))
-                        .collect();
+                    let digest = crate::build_inputs::hex(&Sha256::digest(fs::read(&path)?));
                     if digest == expected {
                         fs::remove_file(path)?;
                     }

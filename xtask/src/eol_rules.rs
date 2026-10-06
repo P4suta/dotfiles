@@ -54,26 +54,31 @@ pub enum Action {
 }
 
 /// A path whose attributes ask for CRLF, no conversion, or binary handling keeps its bytes.
+#[must_use]
 pub fn declared_exempt(attributes: Attributes) -> bool {
     attributes.eol == Eol::Crlf || attributes.text == Text::Unset || attributes.binary
 }
 
 /// Explicit `text`, or `eol=lf` without a `text` value, makes Git convert without content detection.
+#[must_use]
 pub fn forces_text(attributes: Attributes) -> bool {
     attributes.text == Text::Set
         || (attributes.text == Text::Unspecified && attributes.eol == Eol::Lf)
 }
 
 /// Git's `convert_is_binary`: a lone CR, a NUL, or more than one nonprintable byte per 128 printable ones.
+#[must_use]
 pub fn auto_binary(content: Content) -> bool {
     content.lone_cr || content.nul || (content.printable >> 7) < content.nonprintable
 }
 
 /// Git's `has_crlf_in_index` rule: content detection keeps a path whose index entry already holds CRLF text.
+#[must_use]
 pub fn index_keeps(staging: Staging, index: Index) -> bool {
     staging == Staging::Add && index == Index::CrlfText
 }
 
+#[must_use]
 pub fn action(attributes: Attributes, staging: Staging, index: Index, content: Content) -> Action {
     if declared_exempt(attributes) || !content.crlf {
         Action::Keep
@@ -88,6 +93,7 @@ pub fn action(attributes: Attributes, staging: Staging, index: Index, content: C
 
 /// Classifies bytes as Git's `gather_stats` does.
 /// LF and both bytes of a CRLF pair count as neither printable nor nonprintable.
+#[must_use]
 pub fn content(bytes: &[u8]) -> Content {
     let mut found = Content {
         crlf: false,
@@ -122,6 +128,7 @@ pub fn content(bytes: &[u8]) -> Content {
 }
 
 /// Whether conversion keeps the byte at `index`: every byte except a carriage return that precedes a line feed.
+#[must_use]
 pub fn kept(bytes: &[u8], index: usize) -> bool {
     !(bytes.len() > 1
         && index < bytes.len() - 1
@@ -130,6 +137,7 @@ pub fn kept(bytes: &[u8], index: usize) -> bool {
 }
 
 /// Removes each carriage return that precedes a line feed, as Git does when it normalizes text.
+#[must_use]
 pub fn to_lf(bytes: &[u8]) -> Vec<u8> {
     (0..bytes.len())
         .filter(|&index| kept(bytes, index))

@@ -133,9 +133,9 @@ fn disk_scan_refusal(command: &str) -> Option<String> {
     })
 }
 
-/// The refusal for one PreToolUse event, or `None` when the hook admits the tool call.
+/// The refusal for one `PreToolUse` event, or `None` when the hook admits the tool call.
 /// The hook checks PowerShell commands only for disk scans, because the file-write rules read POSIX shell syntax.
-pub fn refusal(event: &str) -> Result<Option<String>> {
+pub(crate) fn refusal(event: &str) -> Result<Option<String>> {
     let event: Value = serde_json::from_str(event).context("PreToolUse event is not JSON")?;
     let tool = event["tool_name"].as_str().unwrap_or_default();
     if !matches!(tool, "Bash" | "PowerShell") {
@@ -163,6 +163,10 @@ pub fn refusal(event: &str) -> Result<Option<String>> {
 }
 
 /// Reads one event from standard input and exits 2, the blocking status, with the refusal on standard error.
+///
+/// # Errors
+///
+/// Returns an error when it can't read standard input, the event doesn't parse as JSON, or a shell event has no command.
 pub fn run() -> Result<()> {
     let mut event = String::new();
     std::io::stdin().read_to_string(&mut event)?;

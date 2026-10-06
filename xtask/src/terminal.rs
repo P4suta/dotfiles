@@ -29,6 +29,67 @@ fn execute(mut command: Command) -> Result<ExitStatus> {
     }
 }
 
+/// Builds the session a terminal window runs, choosing Herdr with its server started, else Nushell, else a login shell.
+fn child_command(native: &mut Native, session: Session, arguments: &[OsString]) -> Result<Command> {
+    if matches!(session, Session::Herdr) && native.available(Tool::Herdr) {
+        if cfg!(target_os = "macos") {
+            start_herdr_server(native)?;
+        }
+        let mut command = native.command(Tool::Herdr);
+        command.args(arguments);
+        return Ok(command);
+    }
+    if native.available(Tool::Nu) {
+        let mut command = native.command(Tool::Nu);
+        command.args(arguments);
+        return Ok(command);
+    }
+    let mut command = native.command(if cfg!(target_os = "macos") {
+        Tool::Zsh
+    } else {
+        Tool::Bash
+    });
+    command
+        .arg("-l")
+        .env("DOTFILES_NO_NU", "1")
+        .env("DOTFILES_BASH_ONLY", "1");
+    Ok(command)
+}
+
+/// Starts the Herdr server with its SSH agent unless it already runs, waiting up to five seconds for it.
+fn start_herdr_server(native: &mut Native) -> Result<()> {
+    if native.available(Tool::HerdrAgent) {
+        let _ = native.run(Tool::HerdrAgent, &args(&["ensure"]));
+    }
+    let running = |native: &mut Native| -> Result<bool> {
+        let server = native.run(Tool::Herdr, &args(&["status", "server"]))?;
+        Ok(server.success && String::from_utf8_lossy(&server.bytes).contains("status: running"))
+    };
+    if running(native)? {
+        return Ok(());
+    }
+    native
+        .command(Tool::Nohup)
+        .args(["herdr", "server"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    for _ in 0..50 {
+        if running(native)? {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Ok(())
+}
+
+/// Opens a terminal window that runs the session, or runs the session itself when invoked as the window's child.
+///
+/// # Errors
+///
+/// Returns an error when the native home can't resolve, the bridge path holds non-UTF-8 text, or the command can't start.
+/// It also returns an error when a Kitty window needs Kitty or `gnome-terminal` and the host has neither.
 pub fn run(
     emulator: Emulator,
     session: Session,
@@ -51,52 +112,7 @@ pub fn run(
         .context("native home is unavailable")?;
     let mut native = Native::new(Path::new(&home))?;
     if child {
-        if matches!(session, Session::Herdr) && native.available(Tool::Herdr) {
-            if cfg!(target_os = "macos") {
-                if native.available(Tool::HerdrAgent) {
-                    let _ = native.run(Tool::HerdrAgent, &args(&["ensure"]));
-                }
-                let server = native.run(Tool::Herdr, &args(&["status", "server"]))?;
-                if !server.success
-                    || !String::from_utf8_lossy(&server.bytes).contains("status: running")
-                {
-                    native
-                        .command(Tool::Nohup)
-                        .args(["herdr", "server"])
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn()?;
-                    for _ in 0..50 {
-                        let server = native.run(Tool::Herdr, &args(&["status", "server"]))?;
-                        if server.success
-                            && String::from_utf8_lossy(&server.bytes).contains("status: running")
-                        {
-                            break;
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                    }
-                }
-            }
-            let mut command = native.command(Tool::Herdr);
-            command.args(arguments);
-            return execute(command);
-        }
-        if native.available(Tool::Nu) {
-            let mut command = native.command(Tool::Nu);
-            command.args(arguments);
-            return execute(command);
-        }
-        let mut command = native.command(if cfg!(target_os = "macos") {
-            Tool::Zsh
-        } else {
-            Tool::Bash
-        });
-        command
-            .arg("-l")
-            .env("DOTFILES_NO_NU", "1")
-            .env("DOTFILES_BASH_ONLY", "1");
-        return execute(command);
+        return execute(child_command(&mut native, session, arguments)?);
     }
     let title = if matches!(session, Session::Herdr) {
         "Herdr"
@@ -164,6 +180,11 @@ pub fn run(
     execute(command)
 }
 
+/// Prints whether each required and optional terminal component works.
+///
+/// # Errors
+///
+/// Returns an error when the native home can't resolve, a Windows check can't run, or `strict` holds true and the host lacks a required component.
 pub fn doctor(strict: bool) -> Result<()> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .context("native home is unavailable")?;
@@ -208,48 +229,7 @@ pub fn doctor(strict: bool) -> Result<()> {
         }
     }
     if cfg!(windows) {
-        if native.available(Tool::Herdr) {
-            let status = String::from_utf8(checked(
-                &mut native,
-                Tool::Herdr,
-                &args(&["integration", "status"]),
-            )?)?;
-            for name in ["claude", "codex", "opencode"] {
-                if !status
-                    .lines()
-                    .any(|line| line.starts_with(&format!("{name}: current ")))
-                {
-                    println!("herdr:{name}: missing integration");
-                    missing += 1;
-                }
-            }
-        }
-        if !native.home.join(".local/bin/git.exe").is_file() {
-            println!("git: dotguard wrapper missing");
-            missing += 1;
-        }
-        for key in [
-            "commit.gpgsign",
-            "tag.gpgsign",
-            "gpg.format",
-            "user.signingkey",
-            "core.hooksPath",
-        ] {
-            let reply = native.run(Tool::Git, &args(&["config", "--get", key]))?;
-            if !reply.success || reply.bytes.is_empty() {
-                println!("git:{key}: missing");
-                missing += 1;
-            }
-        }
-        let settings = native.home.join(".claude/settings.json");
-        if settings.is_file() {
-            let value: serde_json::Value = serde_json::from_slice(&std::fs::read(settings)?)?;
-            let hooks = format!("{} {}", value["hooks"], value["statusLine"]);
-            if hooks.contains(".orca/") || hooks.contains(".orca\\\\") {
-                println!("Claude integration: stale Orca hooks");
-                missing += 1;
-            }
-        }
+        missing += windows_missing(&mut native)?;
     }
     for tool in [
         Tool::Codex,
@@ -276,6 +256,61 @@ pub fn doctor(strict: bool) -> Result<()> {
     Ok(())
 }
 
+/// Prints and counts what Windows lacks among Herdr's agent integrations, the Git wrapper, the signing settings, and current Claude hooks.
+fn windows_missing(native: &mut Native) -> Result<usize> {
+    let mut missing = 0;
+    if native.available(Tool::Herdr) {
+        let status = String::from_utf8(checked(
+            native,
+            Tool::Herdr,
+            &args(&["integration", "status"]),
+        )?)?;
+        for name in ["claude", "codex", "opencode"] {
+            if !status
+                .lines()
+                .any(|line| line.starts_with(&format!("{name}: current ")))
+            {
+                println!("herdr:{name}: missing integration");
+                missing += 1;
+            }
+        }
+    }
+    if !native.home.join(".local/bin/git.exe").is_file() {
+        println!("git: dotguard wrapper missing");
+        missing += 1;
+    }
+    for key in [
+        "commit.gpgsign",
+        "tag.gpgsign",
+        "gpg.format",
+        "user.signingkey",
+        "core.hooksPath",
+    ] {
+        let reply = native.run(Tool::Git, &args(&["config", "--get", key]))?;
+        if !reply.success || reply.bytes.is_empty() {
+            println!("git:{key}: missing");
+            missing += 1;
+        }
+    }
+    let settings = native.home.join(".claude/settings.json");
+    if settings.is_file() {
+        let value: serde_json::Value = serde_json::from_slice(&std::fs::read(settings)?)?;
+        let hooks = format!("{} {}", value["hooks"], value["statusLine"]);
+        if hooks.contains(".orca/") || hooks.contains(".orca\\\\") {
+            println!("Claude integration: stale Orca hooks");
+            missing += 1;
+        }
+    }
+    Ok(missing)
+}
+
+/// Enables fingerprint authentication for `sudo` by creating `/etc/pam.d/sudo_local`, rerunning itself under `sudo` unless the caller passes `elevated`.
+///
+/// # Errors
+///
+/// Returns an error when the host runs something other than macOS, `live` stays false, or stdin lacks a terminal.
+/// It also returns an error when an existing `sudo_local` lacks a `pam_tid.so` entry or the host lacks `/usr/lib/pam/pam_tid.so.2`.
+/// It also returns an error when writing the file or the elevated rerun fails.
 pub fn touchid(live: bool, elevated: bool) -> Result<()> {
     ensure!(
         cfg!(target_os = "macos") && live,

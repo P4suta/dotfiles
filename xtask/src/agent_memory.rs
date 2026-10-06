@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::Value;
 
-/// Inputs that reach the file OpenCode's prompt names for memories.
+/// Inputs that reach the file `OpenCode`'s prompt names for memories.
 /// One probe per tool that can read or write it.
 const OPENCODE_PROBES: [(&str, &str); 6] = [
     ("read", ".github/instructions/memory.instruction.md"),
@@ -33,7 +33,7 @@ const _: () = assert!(
         && OPENCODE_PROBES.len() <= MEMORY_SWITCHES_PROVED
 );
 
-/// One OpenCode permission entry: an action for every input, or patterns in the order the file lists them.
+/// One `OpenCode` permission entry: an action for every input, or patterns in the order the file lists them.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Rule {
@@ -42,7 +42,7 @@ enum Rule {
     Other(serde::de::IgnoredAny),
 }
 
-/// A JSON object in file order, because OpenCode applies the last rule that matches.
+/// A JSON object in file order, because `OpenCode` applies the last rule that matches.
 struct Ordered(Vec<(String, Rule)>);
 
 impl<'de> Deserialize<'de> for Ordered {
@@ -74,7 +74,7 @@ struct OpenCodeConfig {
     permission: Option<Ordered>,
 }
 
-/// OpenCode's wildcard: `*` matches any run of characters, `/` included, and `?` matches one.
+/// `OpenCode`'s wildcard: `*` matches any run of characters, `/` included, and `?` matches one.
 fn wildcard(pattern: &str, input: &str) -> bool {
     let (pattern, input): (Vec<char>, Vec<char>) =
         (pattern.chars().collect(), input.chars().collect());
@@ -98,7 +98,7 @@ fn wildcard(pattern: &str, input: &str) -> bool {
     pattern[p..].iter().all(|&c| c == '*')
 }
 
-/// The action of the last configured rule that matches the tool and its input, as OpenCode evaluates them.
+/// The action of the last configured rule that matches the tool and its input, as `OpenCode` evaluates them.
 fn opencode_action<'a>(permission: &'a Ordered, tool: &str, input: &str) -> Option<&'a str> {
     let mut action = None;
     for (name, rule) in &permission.0 {
@@ -202,6 +202,10 @@ fn flag(value: Option<&Value>) -> Memory {
 }
 
 /// The memory switches a rendered profile leaves on or unset, from a `chezmoi dump` of its files.
+///
+/// # Errors
+///
+/// Returns an error when it can't parse a rendered client settings file.
 pub fn violations(dump: &Value) -> Result<Vec<String>> {
     let mut found = Vec::new();
     for client in Client::ALL {
@@ -236,6 +240,11 @@ pub fn violations(dump: &Value) -> Result<Vec<String>> {
 
 /// A host settings file in which the client turned every memory switch back on, for checking that a `modify_` rendering turns it off again.
 /// Any other target comes back unchanged.
+///
+/// # Errors
+///
+/// Returns an error when the Claude settings hold something other than a JSON object.
+/// It also fails when the Codex settings don't parse as TOML or hold a switch section other than a table.
 pub fn reenabled(target: &str, contents: &str) -> Result<String> {
     if target == Client::Claude.settings() {
         let mut value: Value = serde_json::from_str(contents)?;
@@ -262,6 +271,7 @@ pub fn reenabled(target: &str, contents: &str) -> Result<String> {
 }
 
 /// The refusal for a profile whose rendering leaves the listed memory switches on or unset.
+#[must_use]
 pub fn refusal(profile: &str, found: &[String]) -> String {
     format!(
         "{profile} profile lets an agent client keep persistent memory: {found:?}\nDisable each listed switch in that client's profile template, set over the host file in a modify_ template, as docs/agent-memory-migration.md describes, then run `just profiles`"

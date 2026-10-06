@@ -287,12 +287,6 @@ pub fn findings(
         .iter()
         .map(|(path, text)| (*path, instruction_lines(text)))
         .collect();
-    let mut references: BTreeMap<&str, usize> = BTreeMap::new();
-    for entry in &parsed.entries {
-        if let Some(id) = entry.class.and_then(follow_up_id) {
-            *references.entry(id).or_default() += 1;
-        }
-    }
     let mut quoted: BTreeMap<(&str, &str), usize> = BTreeMap::new();
     let mut result = Vec::new();
     for entry in &parsed.entries {
@@ -349,62 +343,10 @@ pub fn findings(
             entry.line, entry.quote
         ));
     }
-    for (id, lines) in &parsed.definitions {
-        let referenced = references.get(id).copied().unwrap_or_default();
-        match follow_up(lines.len(), referenced) {
-            Definition::Duplicate => result.push(format!(
-                "{AUDIT}:{}: `### F{id}:` is defined more than once; keep one definition, then run `just check`.",
-                lines[1]
-            )),
-            Definition::Unreferenced => result.push(format!(
-                "{AUDIT}:{}: `### F{id}:` is referenced by no retained line; remove it or classify the line it mechanizes as `Follow-up F{id}:`, then run `just check`.",
-                lines[0]
-            )),
-            Definition::Current | Definition::Undefined => {}
-        }
-    }
+    result.extend(definition_findings(&parsed));
     for row in &parsed.rows {
-        let [_, held_by, mechanism] = row.cells[..] else {
-            result.push(format!(
-                "{AUDIT}:{}: a removed-line row needs three cells (former line, held by, mechanism); fix the row, then run `just check`.",
-                row.line
-            ));
-            continue;
-        };
-        let names_source = code_spans(mechanism).any(|span| gate_source(span, exists));
-        let names_skill = code_spans(mechanism).any(|span| skills.contains(&span));
-        let names_retained = code_spans(mechanism).any(|span| {
-            span.contains(' ')
-                && lines
-                    .iter()
-                    .flat_map(|(_, lines)| lines.iter())
-                    .filter(|(_, line, shape)| *shape == Line::Text && line.contains(span))
-                    .count()
-                    == 1
-        });
-        if !removed_row_held(holder(held_by), names_source, names_skill, names_retained) {
-            let need = match holder(held_by) {
-                None => {
-                    "a Held by cell of `Gate`, `Skill`, `Gate and skill`, `Merged`, or `Contradicted`"
-                }
-                Some(Holder::Gate) => {
-                    "a mechanism cell naming the gate's source file (`.rs`, `.ts`, `.js`, `.json`, `.toml`, `.yml`, or `.yaml`)"
-                }
-                Some(Holder::Skill) => "a mechanism cell naming an existing skill",
-                Some(Holder::GateAndSkill) => {
-                    "a mechanism cell naming the gate's source file and an existing skill"
-                }
-                Some(Holder::Merged) => {
-                    "a mechanism cell quoting, in a code span with a space, a fragment of exactly one retained line"
-                }
-                Some(Holder::Contradicted) => {
-                    "a mechanism cell naming what it contradicted: an existing skill, or, in a code span with a space, a fragment of exactly one retained line"
-                }
-            };
-            result.push(format!(
-                "{AUDIT}:{}: the removed line `{}` needs {need}; correct the row, then run `just check`.",
-                row.line, row.cells[0]
-            ));
+        if let Some(finding) = row_finding(row, &lines, exists, skills) {
+            result.push(finding);
         }
     }
     // A quote reproduces a source line, so its code spans make no claim about this repository.
@@ -432,7 +374,82 @@ pub fn findings(
     result
 }
 
+/// Refusals for a follow-up defined more than once or referenced by no retained line.
+fn definition_findings(parsed: &Audit<'_>) -> Vec<String> {
+    let mut uses: BTreeMap<&str, usize> = BTreeMap::new();
+    for entry in &parsed.entries {
+        if let Some(id) = entry.class.and_then(follow_up_id) {
+            *uses.entry(id).or_default() += 1;
+        }
+    }
+    let mut result = Vec::new();
+    for (id, defined_at) in &parsed.definitions {
+        match follow_up(defined_at.len(), uses.get(id).copied().unwrap_or_default()) {
+            Definition::Duplicate => result.push(format!(
+                "{AUDIT}:{}: `### F{id}:` is defined more than once; keep one definition, then run `just check`.",
+                defined_at[1]
+            )),
+            Definition::Unreferenced => result.push(format!(
+                "{AUDIT}:{}: `### F{id}:` is referenced by no retained line; remove it or classify the line it mechanizes as `Follow-up F{id}:`, then run `just check`.",
+                defined_at[0]
+            )),
+            Definition::Current | Definition::Undefined => {}
+        }
+    }
+    result
+}
+
+/// The refusal for a removed-line row whose mechanism cell doesn't name what its Held by cell claims.
+fn row_finding(
+    row: &Row<'_>,
+    lines: &[(&str, Vec<Numbered<'_>>)],
+    exists: &dyn Fn(&str) -> bool,
+    skills: &[&str],
+) -> Option<String> {
+    let [_, held_by, mechanism] = row.cells[..] else {
+        return Some(format!(
+            "{AUDIT}:{}: a removed-line row needs three cells (former line, held by, mechanism); fix the row, then run `just check`.",
+            row.line
+        ));
+    };
+    let names_source = code_spans(mechanism).any(|span| gate_source(span, exists));
+    let names_skill = code_spans(mechanism).any(|span| skills.contains(&span));
+    let names_retained = code_spans(mechanism).any(|span| {
+        span.contains(' ')
+            && lines
+                .iter()
+                .flat_map(|(_, lines)| lines.iter())
+                .filter(|(_, line, shape)| *shape == Line::Text && line.contains(span))
+                .count()
+                == 1
+    });
+    if removed_row_held(holder(held_by), names_source, names_skill, names_retained) {
+        return None;
+    }
+    let need = match holder(held_by) {
+        None => "a Held by cell of `Gate`, `Skill`, `Gate and skill`, `Merged`, or `Contradicted`",
+        Some(Holder::Gate) => {
+            "a mechanism cell naming the gate's source file (`.rs`, `.ts`, `.js`, `.json`, `.toml`, `.yml`, or `.yaml`)"
+        }
+        Some(Holder::Skill) => "a mechanism cell naming an existing skill",
+        Some(Holder::GateAndSkill) => {
+            "a mechanism cell naming the gate's source file and an existing skill"
+        }
+        Some(Holder::Merged) => {
+            "a mechanism cell quoting, in a code span with a space, a fragment of exactly one retained line"
+        }
+        Some(Holder::Contradicted) => {
+            "a mechanism cell naming what it contradicted: an existing skill, or, in a code span with a space, a fragment of exactly one retained line"
+        }
+    };
+    Some(format!(
+        "{AUDIT}:{}: the removed line `{}` needs {need}; correct the row, then run `just check`.",
+        row.line, row.cells[0]
+    ))
+}
+
 /// Refusals for a profile instruction template that renders anything besides the audited partials.
+#[must_use]
 pub fn profile_findings(path: &str, text: &str, partials: &[&str]) -> Vec<String> {
     text.lines()
         .enumerate()
@@ -480,6 +497,7 @@ fn dispatcher_action(action: &str, file: &str) -> bool {
 }
 
 /// Refusals for a root dispatcher that renders text or includes anything besides its own file in a native profile.
+#[must_use]
 pub fn dispatcher_findings(path: &str, text: &str) -> Vec<String> {
     let mut result = Vec::new();
     'lines: for (index, line) in text.lines().enumerate() {
@@ -572,7 +590,7 @@ fn loaded(path: &str) -> Option<Loaded> {
     if INSTRUCTION_NAMES.contains(&name.as_str()) {
         return Some(Loaded::Instructions);
     }
-    let prompt = name.ends_with(".md")
+    let prompt = crate::has_extension(name, "md")
         && segments.windows(3).any(|window| {
             PROMPT_DIRECTORIES
                 .iter()
@@ -625,6 +643,11 @@ fn shared_skills(root: &Path) -> Result<Vec<String>> {
 }
 
 /// Refuses unless the audit classifies every managed instruction and prompt line.
+///
+/// # Errors
+///
+/// Returns an error when the audit has any finding, including an instruction file outside the audit or no profile template.
+/// Also returns an error when reading a source, the audit file, or the skills directory fails.
 pub fn check(root: &Path) -> Result<()> {
     let files = loaded_files(root)?;
     let mut sources = PARTIALS

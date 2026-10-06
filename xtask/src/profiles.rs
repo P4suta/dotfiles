@@ -46,6 +46,12 @@ pub(crate) fn source_files(directory: &Path, output: &mut Vec<PathBuf>) -> Resul
     Ok(())
 }
 
+/// Refuses runtime credentials, private key material, and secret retrieval in managed templates anywhere in the public source.
+///
+/// # Errors
+///
+/// Returns an error when the source has no files or it can't read a file.
+/// Returns an error when a file has a credential path or private key material, or a managed template retrieves a secret.
 pub fn check_public(root: &Path) -> Result<()> {
     let mut files = Vec::new();
     source_files(root, &mut files)?;
@@ -81,7 +87,9 @@ pub fn check_public(root: &Path) -> Result<()> {
                     ))),
                 "private key material in public source: {relative}"
             );
-            if relative.ends_with(".tmpl") || relative.starts_with("home/.chezmoitemplates/") {
+            if crate::has_extension(&relative, "tmpl")
+                || relative.starts_with("home/.chezmoitemplates/")
+            {
                 ensure!(
                     !text.contains("{{ onepasswordRead")
                         && !text.contains("{{- onepasswordRead")
@@ -95,6 +103,13 @@ pub fn check_public(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Refuses any source file that contains a value from the JSON denylist.
+///
+/// # Errors
+///
+/// Returns an error when it can't read the denylist, the denylist holds something other than a JSON list of strings, or the list has no entries.
+/// It also fails when the denylist holds an empty value.
+/// Returns an error when the source has no files, it can't read a file, or a file contains a denylisted value.
 pub fn audit_private(root: &Path, denylist: &Path) -> Result<()> {
     let values: Vec<String> = serde_json::from_slice(&fs::read(denylist)?)?;
     ensure!(
@@ -120,6 +135,7 @@ pub fn audit_private(root: &Path, denylist: &Path) -> Result<()> {
 }
 
 /// chezmoi reports `.chezmoi.homeDir`, `.chezmoi.sourceDir`, and `.chezmoi.workingTree` with forward slashes on every host, including Windows.
+#[must_use]
 pub fn chezmoi_path(path: &Path) -> String {
     let text = path.to_string_lossy();
     if cfg!(windows) {
@@ -129,6 +145,7 @@ pub fn chezmoi_path(path: &Path) -> String {
     }
 }
 
+#[must_use]
 pub fn fixture(profile: Profile, root: &Path, destination: &Path) -> Value {
     json!({
         "profile": profile.name(), "role": "personal",
@@ -153,6 +170,7 @@ fn output(command: &mut Command, phase: &str) -> Result<Output> {
     Ok(result)
 }
 
+#[must_use]
 pub fn chezmoi(root: &Path, scope: &Path, config: &Path, destination: &Path) -> Command {
     let mut command = Tool::chezmoi_in(root);
     command
@@ -169,6 +187,7 @@ pub fn chezmoi(root: &Path, scope: &Path, config: &Path, destination: &Path) -> 
 }
 
 /// Targets that `chezmoi status` reports as changed since chezmoi last wrote them, from its first column.
+#[must_use]
 pub fn externally_changed(status: &str) -> Vec<String> {
     status
         .lines()
@@ -179,18 +198,19 @@ pub fn externally_changed(status: &str) -> Vec<String> {
 
 /// Targets with a `modify_` template source, from `chezmoi managed --path-style all --format json`.
 /// Such a template may merge its keys into whatever the client last wrote, so expect changes made outside chezmoi there.
+///
+/// # Errors
+///
+/// Returns an error when the listing holds something other than a JSON object or an entry has no `sourceRelative`.
 pub fn merged_targets(listing: &[u8]) -> Result<Vec<String>> {
     let entries: serde_json::Map<String, Value> = serde_json::from_slice(listing)?;
     entries
         .into_iter()
         .filter_map(|(target, entry)| {
-            let source = match entry["sourceRelative"].as_str() {
-                Some(source) => source,
-                None => {
-                    return Some(Err(anyhow::anyhow!(
-                        "managed entry without a source: {target}"
-                    )));
-                }
+            let Some(source) = entry["sourceRelative"].as_str() else {
+                return Some(Err(anyhow::anyhow!(
+                    "managed entry without a source: {target}"
+                )));
             };
             let name = source.rsplit('/').next().unwrap_or_default();
             name.starts_with("modify_").then_some(Ok(target))
@@ -199,7 +219,24 @@ pub fn merged_targets(listing: &[u8]) -> Result<Vec<String>> {
 }
 
 /// Whether a rendering keeps every key path of the host file, so a merge overwrites only the keys its template sets.
+///
+/// # Errors
+///
+/// Returns an error when the target names neither a JSON nor a TOML file, or when it can't parse the host file or the rendering.
 pub fn keeps_host_keys(target: &str, current: &str, rendered: &str) -> Result<bool> {
+    fn kept(current: &Value, rendered: &Value) -> bool {
+        match (current, rendered) {
+            (Value::Object(current), Value::Object(rendered)) => {
+                current.iter().all(|(key, value)| {
+                    rendered
+                        .get(key)
+                        .is_some_and(|rendered| kept(value, rendered))
+                })
+            }
+            (Value::Object(current), _) => current.is_empty(),
+            _ => true,
+        }
+    }
     let toml = match Path::new(target).extension().and_then(|e| e.to_str()) {
         Some("json") => false,
         Some("toml") => true,
@@ -216,19 +253,6 @@ pub fn keeps_host_keys(target: &str, current: &str, rendered: &str) -> Result<bo
             serde_json::from_str(contents)?
         })
     };
-    fn kept(current: &Value, rendered: &Value) -> bool {
-        match (current, rendered) {
-            (Value::Object(current), Value::Object(rendered)) => {
-                current.iter().all(|(key, value)| {
-                    rendered
-                        .get(key)
-                        .is_some_and(|rendered| kept(value, rendered))
-                })
-            }
-            (Value::Object(current), _) => current.is_empty(),
-            _ => true,
-        }
-    }
     let current = parse(current).with_context(|| format!("parse host {target}"))?;
     let rendered = parse(rendered).with_context(|| format!("parse rendered {target}"))?;
     Ok(kept(&current, &rendered))
@@ -255,6 +279,11 @@ fn with_host_key(target: &str, contents: &str) -> Result<String> {
 
 /// Targets changed outside chezmoi since the last apply that the next apply would overwrite.
 /// A `modify_` target passes only when its rendering keeps every key the host file has.
+///
+/// # Errors
+///
+/// Returns an error when a chezmoi command fails, it can't parse the command's listing, or it can't read a changed host file.
+/// Returns an error when it can't compare a changed `modify_` target with its rendering.
 pub fn uncommitted_host_edits(
     root: &Path,
     state: &Path,
@@ -310,6 +339,7 @@ pub fn uncommitted_host_edits(
 }
 
 /// The refusal for a `modify_` template whose rendering drops a key the host file has.
+#[must_use]
 pub fn dropped_host_key_refusal(profile: &str, target: &str) -> String {
     format!(
         "{profile} profile renders {target} from a modify_ template that drops a key the client wrote, so application would refuse every runtime change there\nSet the template's keys over .chezmoi.stdin with mergeOverwrite, as dot_claude/modify_settings.json does, then run `just profiles`"
@@ -317,6 +347,7 @@ pub fn dropped_host_key_refusal(profile: &str, target: &str) -> String {
 }
 
 /// The refusal for targets changed outside chezmoi that the next apply would overwrite.
+#[must_use]
 pub fn host_edit_refusal(
     changed: &[String],
     config: &Path,
@@ -336,6 +367,10 @@ pub fn host_edit_refusal(
 }
 
 /// Forgets which `run_onchange_` and `run_once_` scripts already ran, so the next apply reruns them.
+///
+/// # Errors
+///
+/// Returns an error when chezmoi fails to dump or delete its state, or the dump doesn't parse as JSON.
 pub fn forget_script_runs(
     root: &Path,
     scope: &Path,
@@ -362,6 +397,7 @@ pub fn forget_script_runs(
     Ok(())
 }
 
+#[must_use]
 pub fn native_action_arguments(name: &str) -> Vec<&str> {
     if name == "verify" {
         vec![name, "--exclude", "scripts"]
@@ -371,6 +407,7 @@ pub fn native_action_arguments(name: &str) -> Vec<&str> {
 }
 
 /// Packaged tools the rendered scripts and installed entry points require that the profile's platform data omits.
+#[must_use]
 pub fn unprovisioned(
     profile: Profile,
     platform: &Value,
@@ -398,6 +435,10 @@ pub fn unprovisioned(
 }
 
 /// Script targets in the order chezmoi runs them: every `run_before_` script, then every `run_after_` script, each group by target name.
+///
+/// # Errors
+///
+/// Returns an error when the listing holds something other than a JSON object or an entry has no `sourceRelative`.
 pub fn script_order(listing: &[u8]) -> Result<Vec<String>> {
     let entries: std::collections::BTreeMap<String, Value> = serde_json::from_slice(listing)?;
     let mut before = Vec::new();
@@ -420,6 +461,10 @@ pub fn script_order(listing: &[u8]) -> Result<Vec<String>> {
 
 /// `chezmoi managed --nul-path-separator` output.
 /// Its `--format` flag ignores relative paths and always prints them as text.
+///
+/// # Errors
+///
+/// Returns an error when a path contains bytes outside UTF-8.
 pub fn managed_paths(stdout: &[u8]) -> Result<Vec<String>> {
     stdout
         .split(|byte| *byte == 0)
@@ -429,6 +474,7 @@ pub fn managed_paths(stdout: &[u8]) -> Result<Vec<String>> {
 }
 
 /// Managed directories with no managed file or symlink beneath them.
+#[must_use]
 pub fn empty_directories(directories: &[String], leaves: &[String]) -> Vec<String> {
     directories
         .iter()
@@ -474,6 +520,12 @@ pub fn policy(listed: &str) -> Vec<String> {
         .collect()
 }
 
+/// Renders, applies, and verifies every profile in an owned fixture after the public source check.
+///
+/// # Errors
+///
+/// Returns an error when the public source check fails, the report directory already exists, or a profile fails to render, apply, or verify.
+/// Returns an error when the Git configuration of a profile differs from the others beyond the declared per-host settings.
 pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
     check_public(root)?;
     if let Some(report) = report {
@@ -485,23 +537,98 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
         crate::source_state(root).join(".chezmoidata.json"),
     )?)?;
     for profile in Profile::ALL {
-        let scope = scratch.path().join(profile.name());
+        let fixture = Fixture::new(root, &scratch.path().join(profile.name()), profile)?;
+        let dump = fixture.render(report)?;
+        fixture.check_setup(&dump, &source_data["platforms"][profile.name()])?;
+        fixture.apply_files()?;
+        fixture.check_merged_targets(&dump)?;
+        git_policies.push((profile, fixture.git_policy()?));
+        println!(
+            "Rendered, applied twice, and verified {} in an owned fixture",
+            profile.name()
+        );
+    }
+    let differing: Vec<_> = git_policies
+        .iter()
+        .filter(|(_, policy)| *policy != git_policies[0].1)
+        .map(|(profile, _)| profile.name())
+        .collect();
+    ensure!(
+        differing.is_empty(),
+        "the Git configuration of {differing:?} differs from {} beyond the declared per-host settings {DECLARED_GIT_SETTINGS:?}",
+        git_policies[0].0.name()
+    );
+    Ok(())
+}
+
+/// One profile rendered into an owned destination with fixture data.
+struct Fixture<'a> {
+    root: &'a Path,
+    profile: Profile,
+    scope: PathBuf,
+    config: PathBuf,
+    destination: PathBuf,
+    overrides: String,
+}
+
+impl<'a> Fixture<'a> {
+    fn new(root: &'a Path, scope: &Path, profile: Profile) -> Result<Self> {
         let destination = scope.join("home with ' quote");
         fs::create_dir_all(&destination)?;
         let config = scope.join("config.json");
         let data = fixture(profile, root, &destination);
         fs::write(&config, serde_json::to_vec(&json!({"data": data}))?)?;
         let overrides = serde_json::to_string(&fixture(profile, root, &destination))?;
-        let mut command = chezmoi(root, &scope, &config, &destination);
+        Ok(Self {
+            root,
+            profile,
+            scope: scope.to_path_buf(),
+            config,
+            destination,
+            overrides,
+        })
+    }
+
+    /// chezmoi on this fixture, with the fixture data overriding what the host provides.
+    fn chezmoi(&self) -> Command {
+        let mut command = chezmoi(self.root, &self.scope, &self.config, &self.destination);
+        command.arg("--override-data").arg(&self.overrides);
         command
-            .arg("--override-data")
-            .arg(&overrides)
+    }
+
+    fn run(&self, arguments: &[&str], phase: &str) -> Result<Output> {
+        output(
+            self.chezmoi().args(arguments),
+            &format!("{} {phase}", self.profile.name()),
+        )
+    }
+
+    fn managed(&self, include: &str) -> Result<Vec<String>> {
+        let listed = self.run(
+            &[
+                "managed",
+                "--include",
+                include,
+                "--exclude",
+                "externals",
+                "--nul-path-separator",
+            ],
+            &format!("managed {include}"),
+        )?;
+        managed_paths(&listed.stdout)
+    }
+
+    /// The rendered targets, after the availability contracts, the syntax of every rendered file, and the agent memory switches pass.
+    fn render(&self, report: Option<&Path>) -> Result<Value> {
+        let profile = self.profile;
+        let mut command = self.chezmoi();
+        command
             .env_remove("SSH_AUTH_SOCK")
             .env_remove("DOTFILES_SSH_AUTH_SOCK")
             .env_remove("SSH_CONNECTION")
             .env_remove("SSH_CLIENT")
             .env_remove("SSH_TTY")
-            .env("DOTFILES_ONEPASSWORD_APP", scope.join("absent-app"))
+            .env("DOTFILES_ONEPASSWORD_APP", self.scope.join("absent-app"))
             .args([
                 "dump",
                 "--include",
@@ -521,7 +648,7 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
             "empty profile rendering"
         );
         let contracts: std::collections::BTreeMap<String, u8> =
-            serde_json::from_slice(&fs::read(root.join("policy/profile-contracts.json"))?)?;
+            serde_json::from_slice(&fs::read(self.root.join("policy/profile-contracts.json"))?)?;
         for (target, availability) in contracts {
             ensure!(
                 dump.get(&target).is_some()
@@ -530,36 +657,30 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
                 profile.name()
             );
         }
-        crate::quality::rendered(&dump, &scope.join("syntax"))?;
+        crate::quality::rendered(&dump, &self.scope.join("syntax"))?;
         let memory = crate::agent_memory::violations(&dump)?;
         ensure!(
             memory.is_empty(),
             "{}",
             crate::agent_memory::refusal(profile.name(), &memory)
         );
-        let managed = |include: &str| -> Result<Vec<String>> {
-            let listed = output(
-                chezmoi(root, &scope, &config, &destination)
-                    .arg("--override-data")
-                    .arg(&overrides)
-                    .args([
-                        "managed",
-                        "--include",
-                        include,
-                        "--exclude",
-                        "externals",
-                        "--nul-path-separator",
-                    ]),
-                &format!("{} managed {include}", profile.name()),
+        fs::write(self.scope.join("render.json"), &result.stdout)?;
+        if let Some(report) = report {
+            fs::write(
+                report.join(format!("{}.json", profile.name())),
+                &result.stdout,
             )?;
-            managed_paths(&listed.stdout)
-        };
+        }
+        Ok(dump)
+    }
+
+    /// The setup scripts run in dependency order, every entry point has its packages, and no managed directory stays empty.
+    fn check_setup(&self, dump: &Value, platform: &Value) -> Result<()> {
+        let profile = self.profile;
         let order = script_order(
-            &output(
-                chezmoi(root, &scope, &config, &destination)
-                    .arg("--override-data")
-                    .arg(&overrides)
-                    .args([
+            &self
+                .run(
+                    &[
                         "managed",
                         "--include",
                         "scripts",
@@ -567,10 +688,10 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
                         "all",
                         "--format",
                         "json",
-                    ]),
-                &format!("{} script order", profile.name()),
-            )?
-            .stdout,
+                    ],
+                    "script order",
+                )?
+                .stdout,
         )?;
         let sequence: Vec<_> = order
             .iter()
@@ -591,7 +712,6 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
             .filter_map(|(_, entry)| entry["contents"].as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        let platform = &source_data["platforms"][profile.name()];
         let unprovisioned = unprovisioned(profile, platform, &scripts, &files);
         ensure!(
             unprovisioned.is_empty(),
@@ -604,49 +724,48 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
             "{} profile runs a setup step before a step it relies on: {violations:?} in {order:?}",
             profile.name()
         );
-        let empty = empty_directories(&managed("dirs")?, &managed("files,symlinks")?);
+        let empty = empty_directories(&self.managed("dirs")?, &self.managed("files,symlinks")?);
         ensure!(
             empty.is_empty(),
             "{} profile would create or change directories it manages nothing in: {}",
             profile.name(),
             empty.join(", ")
         );
-        fs::write(scope.join("render.json"), &result.stdout)?;
-        if let Some(report) = report {
-            fs::write(
-                report.join(format!("{}.json", profile.name())),
-                &result.stdout,
-            )?;
-        }
-        let retired = destination.join(".config/shell/github-token.sh");
+        Ok(())
+    }
+
+    /// Applies and verifies the files twice, and checks that a retired target leaves the host.
+    fn apply_files(&self) -> Result<()> {
+        let retired = self.destination.join(".config/shell/github-token.sh");
         fs::create_dir_all(retired.parent().context("fixture parent is missing")?)?;
         fs::write(&retired, "obsolete credential exporter fixture")?;
         for action in ["apply", "verify", "apply", "verify"] {
-            output(
-                chezmoi(root, &scope, &config, &destination)
-                    .arg("--override-data")
-                    .arg(&overrides)
-                    .arg("--force")
-                    .args([
-                        action,
-                        "--include",
-                        "dirs,files,symlinks,remove",
-                        "--exclude",
-                        "externals",
-                    ]),
-                &format!("{} isolated files-only {action}", profile.name()),
+            self.run(
+                &[
+                    "--force",
+                    action,
+                    "--include",
+                    "dirs,files,symlinks,remove",
+                    "--exclude",
+                    "externals",
+                ],
+                &format!("isolated files-only {action}"),
             )?;
         }
         ensure!(
-            profile == Profile::Windows || !retired.exists(),
+            self.profile == Profile::Windows || !retired.exists(),
             "obsolete credential exporter was preserved"
         );
+        Ok(())
+    }
+
+    /// Every `modify_` target keeps the host's own keys and keeps agent memory off after the host turned it back on.
+    fn check_merged_targets(&self, dump: &Value) -> Result<()> {
+        let profile = self.profile;
         let merged = merged_targets(
-            &output(
-                chezmoi(root, &scope, &config, &destination)
-                    .arg("--override-data")
-                    .arg(&overrides)
-                    .args([
+            &self
+                .run(
+                    &[
                         "managed",
                         "--include",
                         "files",
@@ -654,24 +773,20 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
                         "all",
                         "--format",
                         "json",
-                    ]),
-                &format!("{} merged targets", profile.name()),
-            )?
-            .stdout,
+                    ],
+                    "merged targets",
+                )?
+                .stdout,
         )?;
         for target in merged {
-            let path = destination.join(&target);
+            let path = self.destination.join(&target);
             let host = with_host_key(
                 &target,
                 &crate::agent_memory::reenabled(&target, &fs::read_to_string(&path)?)?,
             )?;
             fs::write(&path, &host)?;
             let rendered = output(
-                chezmoi(root, &scope, &config, &destination)
-                    .arg("--override-data")
-                    .arg(&overrides)
-                    .arg("cat")
-                    .arg(&path),
+                self.chezmoi().arg("cat").arg(&path),
                 &format!("{} render {target}", profile.name()),
             )?;
             let rendered = String::from_utf8_lossy(&rendered.stdout).into_owned();
@@ -692,6 +807,13 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
                 crate::agent_memory::refusal(profile.name(), &memory)
             );
         }
+        Ok(())
+    }
+
+    /// The rendered Git configuration, after it installs the LF attributes and every hook.
+    fn git_policy(&self) -> Result<Vec<String>> {
+        let profile = self.profile;
+        let destination = &self.destination;
         let git_config = destination.join(".config/git/config");
         let listed = output(
             Tool::Git
@@ -728,26 +850,11 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
             "{} does not run every Git hook: core.hooksPath must name ~/.config/git/hooks and these hooks must render: {missing:?}",
             profile.name()
         );
-        git_policies.push((profile, policy(&listed)));
-        println!(
-            "Rendered, applied twice, and verified {} in an owned fixture",
-            profile.name()
-        );
+        Ok(policy(&listed))
     }
-    let differing: Vec<_> = git_policies
-        .iter()
-        .filter(|(_, policy)| *policy != git_policies[0].1)
-        .map(|(profile, _)| profile.name())
-        .collect();
-    ensure!(
-        differing.is_empty(),
-        "the Git configuration of {differing:?} differs from {} beyond the declared per-host settings {DECLARED_GIT_SETTINGS:?}",
-        git_policies[0].0.name()
-    );
-    Ok(())
 }
 
-pub fn native_profile() -> Result<Profile> {
+pub(crate) fn native_profile() -> Result<Profile> {
     match std::env::consts::OS {
         "macos" => Ok(Profile::Mac),
         "windows" => Ok(Profile::Windows),
@@ -773,6 +880,11 @@ pub struct SkippedScript {
 }
 
 /// `setup.skip` entries, which `.chezmoiignore` keeps chezmoi from applying.
+///
+/// # Errors
+///
+/// Returns an error when `setup.skip` holds something other than a list of script and reason entries.
+/// Returns an error when an entry names something other than a `.sh` or `.ps1` script target or has a blank reason.
 pub fn declared_skips(data: &Value) -> Result<Vec<SkippedScript>> {
     let Some(entries) = data.pointer("/setup/skip") else {
         return Ok(Vec::new());
@@ -786,7 +898,8 @@ pub fn declared_skips(data: &Value) -> Result<Vec<SkippedScript>> {
                     .script
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-                && (skip.script.ends_with(".sh") || skip.script.ends_with(".ps1")),
+                && (crate::has_extension(&skip.script, "sh")
+                    || crate::has_extension(&skip.script, "ps1")),
             "setup.skip names a script target such as 10-install-tools.sh: {}",
             skip.script
         );
@@ -799,6 +912,11 @@ pub fn declared_skips(data: &Value) -> Result<Vec<SkippedScript>> {
     Ok(skips)
 }
 
+/// The profile that machine-local configuration data names.
+///
+/// # Errors
+///
+/// Returns an error when the data names no profile or an unknown one.
 pub fn configured_profile(data: &Value) -> Result<Profile> {
     match data["profile"].as_str() {
         Some("mac") => Ok(Profile::Mac),
@@ -809,6 +927,13 @@ pub fn configured_profile(data: &Value) -> Result<Profile> {
     }
 }
 
+/// Runs a native chezmoi action on this host with a machine-local configuration.
+///
+/// # Errors
+///
+/// Returns an error when the configuration doesn't exist or lives inside the public source, or when it receives a relative path.
+/// It also fails when the configuration names an unknown profile or invalid skips.
+/// Returns an error when a live apply lacks `--live`, this host's native profile, its native home, or a backup directory, or when chezmoi fails.
 pub fn operate(
     root: &Path,
     action: NativeAction,
@@ -862,122 +987,147 @@ pub fn operate(
     } else {
         None
     };
-    let execute = |name: &str| -> Result<()> {
-        let status = chezmoi(root, state, config, destination)
-            .args(native_action_arguments(name))
-            .status()?;
-        ensure!(status.success(), "chezmoi {name} failed with {status}");
-        Ok(())
-    };
     if matches!(action, NativeAction::Apply) {
         let backup = backup.context("application requires an explicit fresh --backup directory")?;
-        outside_public(root, backup)?;
-        let scripts = output(
-            chezmoi(root, scope.path(), config, destination).args([
-                "dump",
-                "--include",
-                "scripts",
-                "--format",
-                "json",
-            ]),
-            "render setup scripts",
-        )?;
-        let rendered: Value = serde_json::from_slice(&scripts.stdout)?;
-        let contents: String = rendered
-            .as_object()
-            .context("script dump must be a mapping")?
-            .values()
-            .filter_map(|script| script["contents"].as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        let context = crate::setup::load(root, config, destination)?;
-        crate::setup::preflight(
-            &context,
-            &mut crate::runtime::Native::new(destination)?,
-            &crate::setup::scripted_steps(&contents),
-        )?;
-        let changed = uncommitted_host_edits(root, state, config, destination)?;
-        ensure!(
-            changed.is_empty(),
-            "{}",
-            host_edit_refusal(&changed, config, destination, state)
-        );
-        let state_file = state.join("state.boltdb");
-        let previous_state = match fs::read(&state_file) {
-            Ok(bytes) => Some(bytes),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error.into()),
-        };
-        let listed = output(
-            chezmoi(root, scope.path(), config, destination).args([
-                "managed",
-                "--include",
-                "files,symlinks,remove",
-                "--exclude",
-                "externals",
-                "--nul-path-separator",
-            ]),
-            "list backup targets",
-        )?;
-        let targets: Vec<PathBuf> = managed_paths(&listed.stdout)?
-            .into_iter()
-            .map(PathBuf::from)
-            .collect();
-        let result = crate::transaction::apply(
-            destination,
-            backup,
-            &targets,
-            || {
-                if let Some(bytes) = &previous_state {
-                    fs::write(backup.join("previous-state.boltdb"), bytes)?;
-                }
-                execute("apply")?;
-                // Scripts can install programs that templates probe for, so render the files again on the resulting machine before verification.
-                let status = chezmoi(root, state, config, destination)
-                    .args(["apply", "--exclude", "scripts"])
-                    .status()?;
-                ensure!(
-                    status.success(),
-                    "chezmoi convergence apply failed with {status}"
-                );
-                Ok(())
-            },
-            || {
-                execute("verify").map_err(|error| {
-                    let report = |arguments: &[&str]| {
-                        chezmoi(root, state, config, destination)
-                            .args(arguments)
-                            .output()
-                            .map(|output| {
-                                let text = String::from_utf8_lossy(&output.stdout);
-                                text.lines().take(200).collect::<Vec<_>>().join("\n")
-                            })
-                            .unwrap_or_default()
-                    };
-                    let pending = report(&["status", "--exclude", "scripts,externals"]);
-                    let difference = report(&["diff", "--exclude", "scripts,externals"]);
-                    error.context(format!(
-                        "targets still differing after apply:\n{pending}\n{difference}"
-                    ))
-                })
-            },
-        );
-        if let Err(error) = result {
-            if let Some(bytes) = previous_state {
-                crate::runtime::replace(&state_file, &bytes, false)?;
-            } else if state_file.exists() {
-                fs::remove_file(&state_file)?;
-            }
-            return Err(error);
-        }
-        println!(
-            "Application verified; managed-file backup retained at {}",
-            backup.display()
-        );
-        crate::freshness::reinstall_lagging(destination, root)?;
+        apply_live(root, scope.path(), config, destination, state, backup)
     } else {
-        execute(action.name())?;
+        run_native(root, state, config, destination, action.name())
     }
+}
+
+fn run_native(
+    root: &Path,
+    state: &Path,
+    config: &Path,
+    destination: &Path,
+    name: &str,
+) -> Result<()> {
+    let status = chezmoi(root, state, config, destination)
+        .args(native_action_arguments(name))
+        .status()?;
+    ensure!(status.success(), "chezmoi {name} failed with {status}");
+    Ok(())
+}
+
+/// Refuses before anything changes when a setup step the rendered scripts run lacks what it needs on this host.
+fn preflight(root: &Path, scope: &Path, config: &Path, destination: &Path) -> Result<()> {
+    let scripts = output(
+        chezmoi(root, scope, config, destination).args([
+            "dump",
+            "--include",
+            "scripts",
+            "--format",
+            "json",
+        ]),
+        "render setup scripts",
+    )?;
+    let rendered: Value = serde_json::from_slice(&scripts.stdout)?;
+    let contents: String = rendered
+        .as_object()
+        .context("script dump must be a mapping")?
+        .values()
+        .filter_map(|script| script["contents"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let context = crate::setup::load(root, config, destination)?;
+    crate::setup::preflight(
+        &context,
+        &mut crate::runtime::Native::new(destination)?,
+        &crate::setup::scripted_steps(&contents),
+    )
+}
+
+/// Applies this host's profile inside a transaction that restores the managed files and the state database when verification fails.
+fn apply_live(
+    root: &Path,
+    scope: &Path,
+    config: &Path,
+    destination: &Path,
+    state: &Path,
+    backup: &Path,
+) -> Result<()> {
+    let execute = |name: &str| run_native(root, state, config, destination, name);
+    outside_public(root, backup)?;
+    preflight(root, scope, config, destination)?;
+    let changed = uncommitted_host_edits(root, state, config, destination)?;
+    ensure!(
+        changed.is_empty(),
+        "{}",
+        host_edit_refusal(&changed, config, destination, state)
+    );
+    let state_file = state.join("state.boltdb");
+    let previous_state = match fs::read(&state_file) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    let listed = output(
+        chezmoi(root, scope, config, destination).args([
+            "managed",
+            "--include",
+            "files,symlinks,remove",
+            "--exclude",
+            "externals",
+            "--nul-path-separator",
+        ]),
+        "list backup targets",
+    )?;
+    let targets: Vec<PathBuf> = managed_paths(&listed.stdout)?
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+    let result = crate::transaction::apply(
+        destination,
+        backup,
+        &targets,
+        || {
+            if let Some(bytes) = &previous_state {
+                fs::write(backup.join("previous-state.boltdb"), bytes)?;
+            }
+            execute("apply")?;
+            // Scripts can install programs that templates probe for, so render the files again on the resulting machine before verification.
+            let status = chezmoi(root, state, config, destination)
+                .args(["apply", "--exclude", "scripts"])
+                .status()?;
+            ensure!(
+                status.success(),
+                "chezmoi convergence apply failed with {status}"
+            );
+            Ok(())
+        },
+        || {
+            execute("verify").map_err(|error| {
+                let report = |arguments: &[&str]| {
+                    chezmoi(root, state, config, destination)
+                        .args(arguments)
+                        .output()
+                        .map(|output| {
+                            let text = String::from_utf8_lossy(&output.stdout);
+                            text.lines().take(200).collect::<Vec<_>>().join("\n")
+                        })
+                        .unwrap_or_default()
+                };
+                let pending = report(&["status", "--exclude", "scripts,externals"]);
+                let difference = report(&["diff", "--exclude", "scripts,externals"]);
+                error.context(format!(
+                    "targets still differing after apply:\n{pending}\n{difference}"
+                ))
+            })
+        },
+    );
+    if let Err(error) = result {
+        if let Some(bytes) = previous_state {
+            crate::runtime::replace(&state_file, &bytes, false)?;
+        } else if state_file.exists() {
+            fs::remove_file(&state_file)?;
+        }
+        return Err(error);
+    }
+    println!(
+        "Application verified; managed-file backup retained at {}",
+        backup.display()
+    );
+    crate::freshness::reinstall_lagging(destination, root)?;
     Ok(())
 }
 

@@ -33,6 +33,7 @@ fn segment_matches(
 
 /// Whether a `.chezmoiignore` or `.chezmoiremove` pattern matches a target path.
 /// A `**` segment matches any number of whole segments, `*` and `?` stay inside one segment, and every other byte matches itself.
+#[must_use]
 pub fn matches(pattern: &[u8], path: &[u8]) -> bool {
     // Each cursor holds the offset where a segment starts, and one past the length marks a fully read text.
     let (pattern_done, path_done) = (pattern.len() + 1, path.len() + 1);
@@ -96,6 +97,7 @@ pub enum Verdict {
     Repeated,
 }
 
+#[must_use]
 pub const fn verdict(matched: bool, earlier_occurrences: usize) -> Verdict {
     if earlier_occurrences > 0 {
         Verdict::Repeated

@@ -42,7 +42,7 @@ fn fixture() -> Result<(tempfile::TempDir, Catalog, Policy)> {
             skill: "alpha".into(),
             also: names(&["beta"]),
         }],
-        bundles: Default::default(),
+        bundles: BTreeMap::default(),
     };
     Ok((root, catalog, policy))
 }
@@ -84,7 +84,10 @@ fn native_observation_signals_are_distinct_and_private_payloads_are_not_retained
         assert!(!serialized.contains(private));
     }
     input["tool_response"]["is_error"] = json!(true);
-    assert!(observations("claude", &input, &catalog, root.path())?.is_empty());
+    assert_eq!(
+        observations("claude", &input, &catalog, root.path())?,
+        Vec::<Observation>::new()
+    );
     input["tool_response"] = json!({"output":"SKILL_OPS_LOAD [\"beta\",\"alpha\"]\nInstructions"});
     input["tool_name"] = json!("Bash");
     input["tool_input"] = json!({"command":"skill-ops load alpha"});
@@ -888,7 +891,7 @@ fn decide_writes_the_draft_and_shows_the_content_diff_since_the_recorded_decisio
         .revision
         .clone();
     assert_eq!(draft.revision, revision);
-    assert!(draft.reason.is_empty());
+    assert_eq!(draft.reason, "");
     assert_eq!(draft.outcome, previous.outcome);
     assert_eq!(draft.evidence, previous.evidence);
     let message = refusal(check_catalog(root.path()));

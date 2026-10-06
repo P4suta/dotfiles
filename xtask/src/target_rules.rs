@@ -10,6 +10,7 @@ pub enum Target {
 }
 
 /// A relative `CARGO_TARGET_DIR` resolves relative to the worktree, so the rule honors only an absolute one.
+#[must_use]
 pub fn target(configured_absolute: bool, temp_volume: bool) -> Target {
     if configured_absolute {
         Target::Configured

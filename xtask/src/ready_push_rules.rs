@@ -19,6 +19,7 @@ pub enum Verdict {
 
 /// The gate admits a push to a GitHub branch only when that branch has no ready PR.
 /// It doesn't judge pushes elsewhere.
+#[must_use]
 pub const fn push(gated: bool, pr: Pr) -> Verdict {
     if !gated {
         return Verdict::Admit;

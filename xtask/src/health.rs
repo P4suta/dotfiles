@@ -19,6 +19,7 @@ pub const PROBE_VARIABLE: &str = "DOTFILES_START_PROBE";
 const LIMIT: Duration = Duration::from_millis(STALL_MILLIS);
 
 /// The probe this host runs: the configured fixture, a trivial Windows process, or none elsewhere.
+#[must_use]
 pub fn configured_probe() -> Option<Command> {
     if let Some(line) = std::env::var_os(PROBE_VARIABLE) {
         let line = line.to_string_lossy().into_owned();
@@ -43,7 +44,7 @@ fn millis(elapsed: Duration) -> u64 {
 /// Starts `command` on another thread and waits at most `limit` for it to exit.
 /// Process creation itself stalls, so the caller never blocks on the start.
 /// The probe kills a process still running at the limit.
-pub fn timed(mut command: Command, limit: Duration) -> Result<(Start, Vec<u8>)> {
+pub(crate) fn timed(mut command: Command, limit: Duration) -> Result<(Start, Vec<u8>)> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -81,6 +82,7 @@ pub fn timed(mut command: Command, limit: Duration) -> Result<(Start, Vec<u8>)> 
 }
 
 /// Counts the stall events in `wevtutil` XML output and lists each as evidence.
+#[must_use]
 pub fn parse_events(xml: &str) -> (Events, Vec<String>) {
     let mut events = Events::NONE;
     let mut evidence = Vec::new();
@@ -153,6 +155,7 @@ fn recent_events() -> Result<(Option<Events>, Vec<String>)> {
 }
 
 /// The append-only incident log, which lets the owner compare stalls across incidents.
+#[must_use]
 pub fn incidents(home: &Path) -> PathBuf {
     home.join(".local/state/start-health/incidents.jsonl")
 }
@@ -183,6 +186,11 @@ fn record(home: &Path, context: &str, start: Start, evidence: &[String]) -> Resu
 }
 
 /// Refuses work on a host whose process creation stalls, after recording the occurrence.
+///
+/// # Errors
+///
+/// Returns a `host.start-stalled` refusal when the probe shows a stall.
+/// Returns an error when the probe or an event query can't start, or when it can't record the incident.
 pub fn gate_with(home: &Path, probe: Option<Command>, context: &str) -> Result<()> {
     let Some(probe) = probe else {
         return Ok(());
@@ -215,6 +223,11 @@ pub fn gate_with(home: &Path, probe: Option<Command>, context: &str) -> Result<(
 }
 
 /// The gate with this host's configured probe.
+///
+/// # Errors
+///
+/// Returns a `host.start-stalled` refusal when the probe shows a stall.
+/// Returns an error when the probe or an event query can't start, or when it can't record the incident.
 pub fn gate(home: &Path, context: &str) -> Result<()> {
     gate_with(home, configured_probe(), context)
 }

@@ -2,6 +2,7 @@
 //! An installer renames the current binary to an aside name, moves the new one in, and deletes aside copies on its next run.
 
 /// The aside name of `name` for the installing process `pid`: `<name>.<pid>.old`.
+#[must_use]
 pub fn aside_name(name: &str, pid: u32) -> String {
     format!("{name}.{pid}.old")
 }
@@ -9,6 +10,7 @@ pub fn aside_name(name: &str, pid: u32) -> String {
 const SUFFIX: &[u8] = b".old";
 
 /// Whether `entry` names an aside copy of `name`: `name`, a dot, one or more decimal digits, and `.old`.
+#[must_use]
 pub fn is_aside(name: &[u8], entry: &[u8]) -> bool {
     let fixed = name.len() + 1 + SUFFIX.len();
     if entry.len() <= fixed {

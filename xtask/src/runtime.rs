@@ -17,8 +17,17 @@ pub struct Reply {
 
 pub trait Runner {
     fn available(&self, tool: Tool) -> bool;
+    /// Run a registered tool with `arguments` and capture its standard output.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the tool can't start.
     fn run(&mut self, tool: Tool, arguments: &[OsString]) -> Result<Reply>;
     /// Run a binary this repository installed at a known path, such as a bundle executable it just verified.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the binary can't start.
     fn run_installed(&mut self, program: &Path, arguments: &[OsString]) -> Result<Reply>;
 }
 
@@ -31,6 +40,11 @@ pub struct Native {
 }
 
 impl Native {
+    /// A runner for `home` whose `PATH` puts the managed tool directories before the inherited `PATH`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when joining a directory into a `PATH` value fails.
     pub fn new(home: &Path) -> Result<Self> {
         let mut paths = vec![
             home.join(".local/bin"),
@@ -63,6 +77,7 @@ impl Native {
         })
     }
 
+    #[must_use]
     pub fn command(&self, tool: Tool) -> Command {
         self.prepare(tool.command(), tool == Tool::Codex)
     }
@@ -84,6 +99,7 @@ impl Native {
     }
 
     /// A binary this repository installed at a known path, run with the same environment as registered tools.
+    #[must_use]
     pub fn command_installed(&self, program: &Path) -> Command {
         self.prepare(crate::tool::external(program), false)
     }
@@ -149,6 +165,7 @@ impl Runner for Native {
 }
 
 /// The Cargo target directory every hook gate shares, so a linked worktree never keeps its own build.
+#[must_use]
 pub fn hook_target(configured: Option<&Path>, temp: Option<&Path>, home: &Path) -> PathBuf {
     let volume = temp.and_then(|temp| {
         let mut parts = temp.components();
@@ -193,7 +210,11 @@ fn executable(path: &Path) -> bool {
     }
 }
 
-pub fn checked(runner: &mut impl Runner, tool: Tool, arguments: &[OsString]) -> Result<Vec<u8>> {
+pub(crate) fn checked(
+    runner: &mut impl Runner,
+    tool: Tool,
+    arguments: &[OsString],
+) -> Result<Vec<u8>> {
     let reply = runner.run(tool, arguments)?;
     ensure!(reply.success, "{} failed", tool.program());
     Ok(reply.bytes)
@@ -207,7 +228,7 @@ pub fn optional(runner: &mut impl Runner, tool: Tool, arguments: &[&str]) {
     }
 }
 
-pub fn replace(path: &Path, bytes: &[u8], executable: bool) -> Result<()> {
+pub(crate) fn replace(path: &Path, bytes: &[u8], executable: bool) -> Result<()> {
     if fs::read(path).is_ok_and(|current| current == bytes) {
         return Ok(());
     }
@@ -251,7 +272,7 @@ struct Marketplace {
     name: String,
 }
 
-pub fn context7(runner: &mut impl Runner, local_gui: bool) -> Result<()> {
+pub(crate) fn context7(runner: &mut impl Runner, local_gui: bool) -> Result<()> {
     if !crate::profile_rules::context7_needed(local_gui, runner.available(Tool::Codex), false) {
         return Ok(());
     }
@@ -291,7 +312,7 @@ pub fn context7(runner: &mut impl Runner, local_gui: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn integrations(home: &Path, runner: &mut impl Runner, local_gui: bool) -> Result<()> {
+pub(crate) fn integrations(home: &Path, runner: &mut impl Runner, local_gui: bool) -> Result<()> {
     let generated = home.join(".config/nushell/generated");
     for (name, tool, arguments) in [
         ("mise", Tool::Mise, args(&["activate", "nu"])),
@@ -325,10 +346,12 @@ pub fn integrations(home: &Path, runner: &mut impl Runner, local_gui: bool) -> R
             replace(&target, b"", false)?;
         }
     }
-    agent_integrations(runner, local_gui)
+    agent_integrations(runner, local_gui);
+    Ok(())
 }
 
-pub fn agent_integrations(runner: &mut impl Runner, local_gui: bool) -> Result<()> {
+/// Installs the herdr integration of each available agent and sets up Context7 for Codex, printing each failure as a warning.
+pub(crate) fn agent_integrations(runner: &mut impl Runner, local_gui: bool) {
     if runner.available(Tool::Herdr) {
         for agent in [Tool::Claude, Tool::Codex, Tool::Opencode] {
             if runner.available(agent) {
@@ -343,7 +366,6 @@ pub fn agent_integrations(runner: &mut impl Runner, local_gui: bool) -> Result<(
     if let Err(error) = context7(runner, local_gui) {
         eprintln!("Warning: Context7 setup failed: {error:#}");
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -374,7 +396,7 @@ mod tests {
 
     #[test]
     fn context7_is_local_idempotent_and_stops_on_invalid_or_failed_inventory() {
-        for bytes in [br#"{}"#.as_slice(), br#"{"installed":{}}"#, b"not JSON"] {
+        for bytes in [br"{}".as_slice(), br#"{"installed":{}}"#, b"not JSON"] {
             let mut fake = Fake {
                 replies: VecDeque::from([Reply {
                     success: true,
@@ -383,7 +405,7 @@ mod tests {
                 calls: Vec::new(),
             };
             context7(&mut fake, false).unwrap();
-            assert!(fake.calls.is_empty());
+            assert_eq!(fake.calls, Vec::<Vec<std::ffi::OsString>>::new());
             assert!(context7(&mut fake, true).is_err());
             assert_eq!(fake.calls.len(), 1);
         }

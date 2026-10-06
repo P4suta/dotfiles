@@ -9,6 +9,7 @@ pub enum Profile {
 impl Profile {
     pub const ALL: [Self; 4] = [Self::Mac, Self::Linux, Self::Windows, Self::Wsl];
 
+    #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::Mac => "mac",
@@ -18,6 +19,7 @@ impl Profile {
         }
     }
 
+    #[must_use]
     pub const fn bit(self) -> u8 {
         match self {
             Self::Mac => 1,
@@ -27,6 +29,7 @@ impl Profile {
         }
     }
 
+    #[must_use]
     pub const fn os(self) -> &'static str {
         match self {
             Self::Mac => "darwin",
@@ -36,6 +39,7 @@ impl Profile {
     }
 }
 
+#[must_use]
 pub fn selected(profile: Profile, available: u8) -> bool {
     available & profile.bit() != 0
 }
@@ -47,6 +51,7 @@ pub enum Mode {
     Full,
 }
 
+#[must_use]
 pub fn permitted(
     mode: Mode,
     native_matches: bool,
@@ -67,6 +72,7 @@ pub enum Reconcile {
     Conflict,
 }
 
+#[must_use]
 pub fn reconcile(
     base_is_local: bool,
     base_is_upstream: bool,
@@ -81,19 +87,23 @@ pub fn reconcile(
     }
 }
 
+#[must_use]
 pub fn secret_ready(present: bool, nonempty: bool, unresolved_reference: bool) -> bool {
     present && nonempty && !unresolved_reference
 }
 
+#[must_use]
 pub fn translate_file(file_argument: bool, inline_public_key: bool) -> bool {
     file_argument && !inline_public_key
 }
 
+#[must_use]
 pub fn context7_needed(local_gui: bool, tool_exists: bool, installed: bool) -> bool {
     local_gui && tool_exists && !installed
 }
 
 /// GitHub publishes its web-flow signing keys as one bundle.
+#[must_use]
 pub fn forge_bundle_accepted(
     primary_count: usize,
     unpinned: usize,
@@ -115,6 +125,7 @@ pub enum Memory {
 pub const MEMORY_SWITCHES_PROVED: usize = 6;
 
 /// Every managed client enables persistent memory by default, so only an explicit `Disabled` on every switch turns it off.
+#[must_use]
 pub fn memory_off(switches: &[Memory]) -> bool {
     fn all_disabled(switches: &[Memory]) -> bool {
         match switches {
@@ -127,6 +138,7 @@ pub fn memory_off(switches: &[Memory]) -> bool {
 }
 
 /// A target changed outside chezmoi refuses the apply unless its `modify_` template merges and its rendering keeps every key the host file has.
+#[must_use]
 pub fn host_edit_refused(changed: bool, merged: bool, keeps_host_keys: bool) -> bool {
     changed && !(merged && keeps_host_keys)
 }

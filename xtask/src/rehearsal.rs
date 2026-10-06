@@ -7,6 +7,7 @@ use crate::profile_rules::Profile;
 use crate::profiles::{NativeAction, forget_script_runs, native_profile, operate};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -53,6 +54,11 @@ fn toml_string(value: &str) -> String {
 }
 
 /// The machine-local configuration for the rehearsal: an anonymous identity, no secrets, and one representative entry in each provisioning list.
+///
+/// # Errors
+///
+/// Returns an error when reading or parsing `.chezmoidata.json` fails, or when rendering the profile to find its required packages fails.
+/// Returns an error for the Linux profile when the data has no Nix package table.
 pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<String> {
     let data: serde_json::Value = serde_json::from_slice(&fs::read(
         crate::source_state(root).join(".chezmoidata.json"),
@@ -64,17 +70,19 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
             "[interpreters.ps1]\ncommand = \"pwsh\"\nargs = [\"-NoLogo\", \"-NoProfile\"]\n\n",
         );
     }
-    identity.push_str(&format!(
+    let _ = write!(
+        identity,
         "[data]\nprofile = {}\nrole = \"personal\"\n\n[data.git]\nname = \"Rehearsal\"\nemail = \"rehearsal@example.invalid\"\n\n[data.signing]\nenabled = false\npublic_key = \"\"\npubkey = \"\"\nkey_comment = \"\"\n\n[data.herdr_agent]\npublic_keys = []\n\n[data.doppler]\nproject = \"\"\nconfig = \"\"\n\n[data.doppler.secrets]\ncodex = []\nclaude = []\nopencode = []\n\n[data.paths]\nprojects = {}\n\n",
         toml_string(profile.name()),
         toml_string(&projects.to_string_lossy()),
-    ));
+    );
     for skip in omitted(profile) {
-        identity.push_str(&format!(
+        let _ = write!(
+            identity,
             "[[data.setup.skip]]\nscript = {}\nreason = {}\n\n",
             toml_string(skip.script),
             toml_string(skip.reason)
-        ));
+        );
     }
     let kept = required_packages(root, profile, home, &identity)?;
     let keep = |pointer: &str| -> Vec<String> {
@@ -91,15 +99,19 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
     };
     let mut text = identity;
     let name = profile.name();
-    text.push_str(&format!(
+    let _ = write!(
+        text,
         "[data.platforms.{name}.tools]\ncommon = [{}]\npersonal = []\nwork = []\n\n",
         list("/tools/common")
-    ));
+    );
     match profile {
-        Profile::Mac => text.push_str(&format!(
-            "[data.platforms.mac.brew]\nformulae = [{}]\ncasks = []\n\n[data.platforms.mac.racket]\ncollections = []\n\n[data.platforms.mac.ocaml]\nplatform_tools = []\n\n",
-            list("/brew/formulae")
-        )),
+        Profile::Mac => {
+            let _ = write!(
+                text,
+                "[data.platforms.mac.brew]\nformulae = [{}]\ncasks = []\n\n[data.platforms.mac.racket]\ncollections = []\n\n[data.platforms.mac.ocaml]\nplatform_tools = []\n\n",
+                list("/brew/formulae")
+            );
+        }
         Profile::Linux => {
             text.push_str("[data.platforms.linux.ocaml]\nplatform_tools = []\n\n");
             text.push_str("[data.platforms.linux.nix.packages]\n");
@@ -114,14 +126,17 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
                 } else {
                     ""
                 };
-                text.push_str(&format!("{} = {}\n", toml_string(package), toml_string(spec)));
+                let _ = writeln!(text, "{} = {}", toml_string(package), toml_string(spec));
             }
             text.push('\n');
         }
-        Profile::Windows => text.push_str(&format!(
-            "[data.platforms.windows.scoop]\napps = [{}]\nwinget_duplicates = []\n\n[data.platforms.windows.winget]\napps = []\n\n",
-            list("/scoop/apps")
-        )),
+        Profile::Windows => {
+            let _ = write!(
+                text,
+                "[data.platforms.windows.scoop]\napps = [{}]\nwinget_duplicates = []\n\n[data.platforms.windows.winget]\napps = []\n\n",
+                list("/scoop/apps")
+            );
+        }
         Profile::Wsl => {}
     }
     Ok(text)
@@ -221,6 +236,12 @@ fn seed_history(home: &Path) -> Result<Vec<(PathBuf, Vec<u8>)>> {
     Ok(preserved)
 }
 
+/// Applies and verifies this host's profile three times with the rehearsal configuration, rerunning every script in the middle round.
+///
+/// # Errors
+///
+/// Returns an error unless the caller sets `disposable_host` and `CI` holds `true`.
+/// Returns an error when an apply or verification round fails, or when installation changed the seeded machine-local history.
 pub fn run(root: &Path, disposable_host: bool) -> Result<()> {
     ensure!(
         disposable_host && std::env::var("CI").as_deref() == Ok("true"),

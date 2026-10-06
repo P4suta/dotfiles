@@ -81,6 +81,11 @@ pub const DECISIONS: &str = "docs/skills/decisions";
 /// Where the canonical skills live now, then where commits before the source state moved under `home/` hold them.
 const SKILL_TREES: [&str; 2] = ["home/dot_agents/skills", "dot_agents/skills"];
 
+/// Orders the requested skills after every skill they depend on.
+///
+/// # Errors
+///
+/// Returns an error when a requested or required skill names no catalog skill, a skill declares or lists a dependency twice, or the dependencies form a cycle.
 pub fn dependency_plan(
     available: &BTreeSet<String>,
     requested: &[String],
@@ -107,32 +112,6 @@ pub fn dependency_plan(
             );
         }
     }
-    fn visit(
-        name: &str,
-        available: &BTreeSet<String>,
-        graph: &BTreeMap<&String, &Vec<String>>,
-        visiting: &mut BTreeSet<String>,
-        done: &mut BTreeSet<String>,
-        plan: &mut Vec<String>,
-    ) -> Result<()> {
-        ensure!(available.contains(name), "unknown skill: {name}");
-        if done.contains(name) {
-            return Ok(());
-        }
-        ensure!(
-            visiting.insert(name.into()),
-            "cyclic skill dependency at {name}"
-        );
-        if let Some(dependencies) = graph.get(&name.to_string()) {
-            for dependency in *dependencies {
-                visit(dependency, available, graph, visiting, done, plan)?;
-            }
-        }
-        visiting.remove(name);
-        done.insert(name.into());
-        plan.push(name.into());
-        Ok(())
-    }
     let mut plan = Vec::new();
     let mut visiting = BTreeSet::new();
     let mut done = BTreeSet::new();
@@ -140,6 +119,34 @@ pub fn dependency_plan(
         visit(name, available, &graph, &mut visiting, &mut done, &mut plan)?;
     }
     Ok(plan)
+}
+
+/// Appends `name` to `plan` after every skill it depends on, refusing a cycle.
+fn visit(
+    name: &str,
+    available: &BTreeSet<String>,
+    graph: &BTreeMap<&String, &Vec<String>>,
+    visiting: &mut BTreeSet<String>,
+    done: &mut BTreeSet<String>,
+    plan: &mut Vec<String>,
+) -> Result<()> {
+    ensure!(available.contains(name), "unknown skill: {name}");
+    if done.contains(name) {
+        return Ok(());
+    }
+    ensure!(
+        visiting.insert(name.into()),
+        "cyclic skill dependency at {name}"
+    );
+    if let Some(dependencies) = graph.get(&name.to_string()) {
+        for dependency in *dependencies {
+            visit(dependency, available, graph, visiting, done, plan)?;
+        }
+    }
+    visiting.remove(name);
+    done.insert(name.into());
+    plan.push(name.into());
+    Ok(())
 }
 
 pub(crate) fn complete(
@@ -177,6 +184,11 @@ fn check_evidence(evidence: &[String], root: &Path) -> Result<()> {
 }
 
 /// Verifies a runtime disposition.
+///
+/// # Errors
+///
+/// Returns an error when the review covers another report, a finding or decision lacks a match or repeats, or a decision lacks a field or cites invalid evidence.
+/// It also returns an error when a finding has neither a decision nor an adoption.
 pub fn check_review(
     report_hash: &str,
     findings: &[Finding],
@@ -220,6 +232,10 @@ pub fn check_review(
 }
 
 /// Reads the tracked decisions, one `<skill>.json` file per skill.
+///
+/// # Errors
+///
+/// Returns an error when reading the directory fails, an entry doesn't match `<skill>.json`, or a decision fails validation.
 pub fn tracked_decisions(directory: &Path) -> Result<BTreeMap<String, SkillDecision>> {
     let mut result = BTreeMap::new();
     if !directory.try_exists()? {
@@ -245,6 +261,12 @@ pub fn tracked_decisions(directory: &Path) -> Result<BTreeMap<String, SkillDecis
 }
 
 /// Requires every catalog skill to have a complete decision bound to its current revision, with a size disposition exactly while its entrypoint exceeds the word limit.
+///
+/// # Errors
+///
+/// Returns an error when resolving `evidence_root` fails.
+/// It also lists every refusal when a skill lacks a decision or a decision names no skill.
+/// The list also covers a decision that has a stale revision, lacks a field, cites invalid evidence, or has a wrong size disposition.
 pub fn check_decisions(
     catalog: &Catalog,
     policy: &Policy,
@@ -343,6 +365,10 @@ fn size_draft(previous: Option<&SizeDecision>) -> SizeDecision {
 }
 
 /// Drafts the decision for a changed or new skill, or the size disposition that its bound decision lacks or no longer needs.
+///
+/// # Errors
+///
+/// Returns an error when the previous decision already binds `revision` and its size disposition needs no change.
 pub fn draft_decision(
     previous: Option<&SkillDecision>,
     revision: &str,
@@ -482,6 +508,12 @@ fn assessed_commit(root: &Path, skill: &str, revision: &str) -> Result<Option<St
 }
 
 /// Writes the draft decision for one skill and returns the context its writer needs.
+///
+/// # Errors
+///
+/// Returns an error when capturing the catalog fails, the catalog lacks `skill`, or reading the previous decision or policy fails.
+/// It also returns an error when the decision already binds the current revision.
+/// It also returns an error when analysis, `git`, or writing the draft fails.
 pub fn decide(root: &Path, skill: &str) -> Result<String> {
     let catalog = catalog(&root.join(SKILL_TREES[0]))?;
     let current = catalog.skills.get(skill).with_context(|| {
@@ -547,6 +579,7 @@ pub fn decide(root: &Path, skill: &str) -> Result<String> {
 }
 
 /// Selects the skill revisions whose tracked decisions a host adopts without local triage.
+#[must_use]
 pub fn adoptable_revisions(
     catalog: &Catalog,
     decisions: &BTreeMap<String, SkillDecision>,
@@ -573,6 +606,7 @@ pub fn adoptable_revisions(
 }
 
 /// Identifies the revision-bound findings that a reviewed revision already settles.
+#[must_use]
 pub fn adopted_findings(
     report: &Report,
     reviewed: &BTreeMap<String, Reviewed>,
@@ -598,10 +632,20 @@ pub fn adopted_findings(
         .collect()
 }
 
+/// Hashes the compact JSON serialization of `value` with SHA-256, as lowercase hex.
+///
+/// # Errors
+///
+/// Returns an error when serializing `value` to JSON fails.
 pub fn hash(value: &impl Serialize) -> Result<String> {
     Ok(digest(&serde_json::to_vec(value)?))
 }
 
+/// Hashes the content of every evidence file that the review's decisions cite.
+///
+/// # Errors
+///
+/// Returns an error when resolving or reading `root` or an evidence file fails, or an evidence path stays empty, lacks a relative form, escapes `root`, or names something other than a file.
 pub fn evidence_hashes(review: &Review, root: &Path) -> Result<BTreeMap<String, String>> {
     let root = crate::canonical(root)?;
     let mut result = BTreeMap::new();
@@ -628,6 +672,11 @@ pub fn evidence_hashes(review: &Review, root: &Path) -> Result<BTreeMap<String, 
     Ok(result)
 }
 
+/// Writes an immutable JSON record, accepting an existing file only when it holds the same value.
+///
+/// # Errors
+///
+/// Returns an error when writing the file fails, or the file already exists and either can't open for reading or holds a different value.
 pub fn preserve_json(path: &Path, value: &impl Serialize) -> Result<()> {
     match write_json(path, value, false) {
         Ok(()) => Ok(()),
@@ -646,6 +695,11 @@ pub fn preserve_json(path: &Path, value: &impl Serialize) -> Result<()> {
     }
 }
 
+/// Hashes the sources compiled into this engine, so a report or manifest from another engine reads as stale.
+///
+/// # Errors
+///
+/// Returns an error when serializing the sources fails.
 pub fn engine_hash() -> Result<String> {
     hash(&(
         include_str!("skill_ops.rs"),
@@ -688,6 +742,10 @@ pub struct Approved {
 }
 
 /// Reads the installation manifest, which `just install-skill-ops` writes together with the engine that reads it.
+///
+/// # Errors
+///
+/// Returns an error when the manifest doesn't exist, reading it fails, or it doesn't match this engine's format.
 pub fn read_approved(path: &Path) -> Result<Approved> {
     read_json(path).with_context(|| {
         format!(
@@ -698,10 +756,7 @@ pub fn read_approved(path: &Path) -> Result<Approved> {
 }
 
 fn digest(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    crate::build_inputs::hex(&Sha256::digest(bytes))
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -732,10 +787,21 @@ pub struct Catalog {
     pub skills: BTreeMap<String, Skill>,
 }
 
+/// Captures every skill directory in `tree` with its revision, description, entrypoint size, files, and references.
+///
+/// # Errors
+///
+/// Returns an error when a skill name holds non-UTF-8 text or names something other than a directory, or reading or validating an entrypoint or resource fails.
+/// It also returns an error when a skill changes during capture or the catalog holds no skill.
 pub fn catalog(tree: &Path) -> Result<Catalog> {
     capture_catalog(tree, None)
 }
 
+/// Captures only the skills and files that `scope` names in `tree`.
+///
+/// # Errors
+///
+/// Returns an error when a managed skill or resource doesn't exist, fails reading or validation, or escapes its skill, or a skill changes during capture.
 pub fn catalog_owned(tree: &Path, scope: &Catalog) -> Result<Catalog> {
     capture_catalog(tree, Some(scope))
 }
@@ -829,6 +895,12 @@ fn capture_catalog(tree: &Path, scope: Option<&Catalog>) -> Result<Catalog> {
     Ok(Catalog { skills })
 }
 
+/// Validates the policy's bounds, dependency declarations, and bundles with the catalog.
+///
+/// # Errors
+///
+/// Returns an error when the schema or a numeric bound fails validation, or a dependency names no catalog skill, repeats, or forms a cycle.
+/// It also returns an error when a bundle holds no skill, repeats a skill, or names an unknown skill.
 pub fn validate_policy(policy: &Policy, catalog: &Catalog) -> Result<()> {
     ensure!(
         policy.schema == 1
@@ -883,6 +955,12 @@ fn response_text(value: &serde_json::Value) -> Option<&str> {
         .or_else(|| value["output"].as_str())
 }
 
+/// Extracts the skill uses that one successful `PostToolUse` hook event shows: a loader call, an entrypoint read, or a shell reference.
+///
+/// # Errors
+///
+/// Returns an error when the client names no known client, resolving the owned tree fails, or the loader output fails validation or names an unknown skill.
+/// It also returns an error when an observed event lacks a session or call identity.
 pub fn observations(
     client: &str,
     input: &serde_json::Value,
@@ -982,6 +1060,13 @@ pub fn observations(
         .collect()
 }
 
+#[cfg_attr(
+    not(unix),
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "the Unix form reports a directory that fails to sync"
+    )
+)]
 fn sync_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]
     fs::File::open(path)?
@@ -992,6 +1077,12 @@ fn sync_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Writes pretty JSON durably through a synced temporary file, replacing an existing file only when `replace` holds true.
+///
+/// # Errors
+///
+/// Returns an error when the path has no parent, or creating, writing, or syncing a directory or the file fails.
+/// It also returns an error when the file exists and `replace` holds false.
 pub fn write_json(path: &Path, value: &impl Serialize, replace: bool) -> Result<()> {
     let absolute = std::path::absolute(path)?;
     let path = absolute.as_path();
@@ -1026,6 +1117,11 @@ pub fn write_json(path: &Path, value: &impl Serialize, replace: bool) -> Result<
     Ok(())
 }
 
+/// Stores an observation once under `events/`, returning whether the store lacked it before.
+///
+/// # Errors
+///
+/// Returns an error when the observation has an invalid schema or identity, a stored observation with the same identity differs, or writing the file fails.
 pub fn record(state: &Path, observation: &Observation) -> Result<bool> {
     ensure!(
         observation.schema == 1
@@ -1064,6 +1160,11 @@ pub fn record(state: &Path, observation: &Observation) -> Result<bool> {
     }
 }
 
+/// Reads and deserializes a JSON file of at most 16 MiB.
+///
+/// # Errors
+///
+/// Returns an error when reading the file fails, the file exceeds 16 MiB, or it doesn't deserialize into `T`.
 pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     ensure!(
         fs::metadata(path)?.len() <= 16_777_216,
@@ -1073,6 +1174,11 @@ pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
         .with_context(|| format!("invalid skill operations data: {}", path.display()))
 }
 
+/// Reads the recorded observations under `events/`, sorted by identity.
+///
+/// # Errors
+///
+/// Returns an error when reading the directory fails, a `.json` entry names something other than a regular file or fails validation, or a filename differs from its observation's identity.
 pub fn recorded(state: &Path) -> Result<Vec<Observation>> {
     let directory = state.join("events");
     if !directory.try_exists()? {
@@ -1135,6 +1241,11 @@ pub struct Report {
     pub findings: Vec<Finding>,
 }
 
+/// Builds the maintenance report: per-skill usage and the review, size, discovery, composition, dependency, and observation findings.
+///
+/// # Errors
+///
+/// Returns an error when the policy fails validation, an observation repeats or has an unknown schema, or a note fails validation, repeats, or names an unknown skill.
 pub fn analyze(
     catalog: &Catalog,
     policy: &Policy,
@@ -1240,6 +1351,11 @@ pub fn analyze(
     Ok(report)
 }
 
+/// Validates the checkout's skill tree, catalog, policy, and tracked decisions.
+///
+/// # Errors
+///
+/// Returns an error when the tree or catalog fails validation, reading or validating the policy fails, or a skill lacks a current and complete tracked decision.
 pub fn check_catalog(root: &Path) -> Result<()> {
     crate::validate_tree(root)?;
     let catalog = catalog(&root.join(SKILL_TREES[0]))?;
@@ -1265,6 +1381,11 @@ pub struct Runtime<'a> {
     pub evidence_root: &'a Path,
 }
 
+/// Whether the runtime maintenance gate has open work: a stale analysis, unprocessed findings, or enough new observations for a review.
+///
+/// # Errors
+///
+/// Returns an error when the policy fails validation, events or notes that an earlier report counted disappeared, the recorded review doesn't verify, or a fresh analysis fails.
 pub fn runtime_pending(runtime: Runtime<'_>) -> Result<bool> {
     let Runtime {
         catalog,
@@ -1325,6 +1446,11 @@ pub fn runtime_pending(runtime: Runtime<'_>) -> Result<bool> {
     Ok(!gate_complete(recorded_current, open))
 }
 
+/// Reads the recorded improvement observations under `notes/`, sorted by kind, summary, skills, and evidence.
+///
+/// # Errors
+///
+/// Returns an error when reading the directory fails, a `.json` entry names something other than a regular file or fails validation, or a filename differs from the hash of its note.
 pub fn notes(state: &Path) -> Result<Vec<Note>> {
     let directory = state.join("notes");
     if !directory.try_exists()? {

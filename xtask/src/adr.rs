@@ -3,6 +3,7 @@
 
 use crate::adr_rules::{Status, Verdict, verdict};
 use anyhow::{Context, Result, bail, ensure};
+use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
@@ -19,7 +20,7 @@ pub struct Record {
 }
 
 /// Reads the front matter and title of one record.
-pub fn parse(file: &str, text: &str) -> Result<Record> {
+pub(crate) fn parse(file: &str, text: &str) -> Result<Record> {
     let (header, body) = crate::split_frontmatter(text)
         .with_context(|| format!("{file}: start with front matter that names its status"))?;
     let mut status = None;
@@ -71,12 +72,12 @@ pub fn parse(file: &str, text: &str) -> Result<Record> {
     })
 }
 
-pub fn records(root: &Path) -> Result<Vec<Record>> {
+pub(crate) fn records(root: &Path) -> Result<Vec<Record>> {
     let mut found = Vec::new();
     for entry in fs::read_dir(root.join(DIRECTORY))? {
         let entry = entry?;
         let file = entry.file_name().to_string_lossy().into_owned();
-        if file.ends_with(".md") && file != "README.md" {
+        if crate::has_extension(&file, "md") && file != "README.md" {
             found.push(parse(&file, &fs::read_to_string(entry.path())?)?);
         }
     }
@@ -85,6 +86,7 @@ pub fn records(root: &Path) -> Result<Vec<Record>> {
 }
 
 /// Every link names an existing record, and each status agrees with its links.
+#[must_use]
 pub fn findings(records: &[Record]) -> Vec<String> {
     let mut found = Vec::new();
     for record in records {
@@ -118,6 +120,7 @@ fn number(file: &str) -> &str {
 }
 
 /// The index the records produce.
+#[must_use]
 pub fn index(records: &[Record]) -> String {
     let mut text = String::from(
         "# Architecture decisions\n\n`just gen` writes this index from the front matter of each record.\n\n| Record | Status | Changed by |\n| --- | --- | --- |\n",
@@ -128,19 +131,25 @@ pub fn index(records: &[Record]) -> String {
             .iter()
             .map(|file| format!("[{}]({file})", number(file)))
             .collect();
-        text.push_str(&format!(
-            "| [{} {}]({}) | {} | {} |\n",
+        let _ = writeln!(
+            text,
+            "| [{} {}]({}) | {} | {} |",
             number(&record.file),
             record.title,
             record.file,
             record.status.name(),
             changed.join(", ")
-        ));
+        );
     }
     text
 }
 
 /// Writes the index, or with `check` refuses a stale one, after refusing records whose status disagrees with their links.
+///
+/// # Errors
+///
+/// Returns an error when it can't read or parse a record, a status disagrees with its links, or it can't write the index.
+/// With `check`, it also fails when the index has gone stale.
 pub fn generate(root: &Path, check: bool) -> Result<()> {
     let records = records(root)?;
     let found = findings(&records);
@@ -195,7 +204,7 @@ mod tests {
             parse("0001-a.md", AMENDED).unwrap(),
             parse("0002-b.md", "---\nstatus: accepted\n---\n# Second\n").unwrap(),
         ];
-        assert!(findings(&records).is_empty());
+        assert_eq!(findings(&records), Vec::<String>::new());
         let text = index(&records);
         assert!(text.contains("| [0001 First record](0001-a.md) | amended | [0002](0002-b.md) |"));
         assert!(text.contains("| [0002 Second](0002-b.md) | accepted |  |"));

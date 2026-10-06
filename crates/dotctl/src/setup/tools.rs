@@ -11,16 +11,17 @@ const PSGALLERY_HELPER: &str = include_str!("../../assets/psgallery.ps1");
 
 pub fn run(scoop_apps: &[String]) -> Result<i32> {
     let token = github_token();
+    let token = token.as_deref();
 
     // Installing converges to the reviewed pins, and version changes arrive only as pull requests.
     println!(">>> mise install");
-    proc::run(mise(&token).args(["install", "-y"]))?;
+    proc::run(mise(token).args(["install", "-y"]))?;
 
     let absent = scoop::absent(scoop_apps);
     if absent.is_empty() {
         println!(">>> mise prune");
-        proc::run(mise(&token).args(["prune", "-y"]))?;
-        proc::run(mise(&token).arg("reshim"))?;
+        proc::run(mise(token).args(["prune", "-y"]))?;
+        proc::run(mise(token).arg("reshim"))?;
     } else {
         eprintln!(
             "mise prune waits for scoop to install {}",
@@ -44,7 +45,7 @@ fn github_token() -> Option<String> {
     (out.ok() && !token.is_empty()).then_some(token)
 }
 
-fn mise(token: &Option<String>) -> std::process::Command {
+fn mise(token: Option<&str>) -> std::process::Command {
     let mut cmd = env::command("mise");
     if let Some(token) = token {
         cmd.env("GITHUB_TOKEN", token);
@@ -201,7 +202,7 @@ mod tests {
 
     #[test]
     fn a_healthy_config_reports_nothing() {
-        assert!(signing_problems(&healthy()).is_empty());
+        assert_eq!(signing_problems(&healthy()), Vec::<String>::new());
     }
 
     #[test]

@@ -3,6 +3,11 @@ use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
 
+/// Registers the skill-ops observe and stop hooks in a Codex or Claude settings value, replacing earlier skill-ops handlers.
+///
+/// # Errors
+///
+/// Returns an error when `client` names neither `codex` nor `claude`, or when the settings, `hooks`, a hook event, or a hook group lack the expected JSON shape.
 pub fn merge_hooks(mut value: Value, client: &str) -> Result<Value> {
     ensure!(matches!(client, "codex" | "claude"), "unknown hook client");
     let object = value
@@ -53,6 +58,12 @@ pub fn merge_hooks(mut value: Value, client: &str) -> Result<Value> {
     Ok(value)
 }
 
+/// Installs `binary` as skill-ops, records the approved catalog and policy, and registers the client hooks.
+///
+/// # Errors
+///
+/// Returns an error when the source catalog fails its check, when the installed catalog or policy differs from the source, or when `binary` doesn't name a file.
+/// Returns an error when copying the binary, writing the approval, or reading or writing a client settings file fails.
 pub fn install(source: &Path, binary: &Path, user_directory: &Path) -> Result<()> {
     use crate::skill_ops as ops;
     ops::check_catalog(source)?;
@@ -120,6 +131,11 @@ pub fn install(source: &Path, binary: &Path, user_directory: &Path) -> Result<()
     Ok(())
 }
 
+/// Applies the skill-ops policy with `apply`, installs the runtime, and then applies the `OpenCode` adapter.
+///
+/// # Errors
+///
+/// Returns the error of `apply` or [`install`] at the stage that fails.
 pub fn deploy(
     source: &Path,
     binary: &Path,

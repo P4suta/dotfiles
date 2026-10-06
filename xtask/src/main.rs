@@ -46,9 +46,9 @@ enum Action {
         #[arg(last = true)]
         arguments: Vec<OsString>,
     },
-    /// Claude Code PreToolUse hook for Bash and PowerShell: refuses recursive disk scans and file writes through inline interpreters, heredocs, and redirects.
+    /// Claude Code `PreToolUse` hook for Bash and PowerShell: refuses recursive disk scans and file writes through inline interpreters, heredocs, and redirects.
     ClaudeBash,
-    /// Claude Code PreToolUse and PostToolUse hook for Bash and PowerShell: sets each command's timeout from its measured durations.
+    /// Claude Code `PreToolUse` and `PostToolUse` hook for Bash and PowerShell: sets each command's timeout from its measured durations.
     ClaudeTiming,
     /// Refuses work on a host whose process creation stalls, as it does when the Defender scan engine stops responding.
     Health {
@@ -317,6 +317,10 @@ fn check(root: &Path, gates: Gates) -> Result<()> {
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per subcommand, which the exhaustive match keeps complete"
+)]
 fn run() -> Result<()> {
     let mut cli = Cli::parse();
     cli.root = dotfiles_xtask::canonical(&cli.root)?;
@@ -340,25 +344,7 @@ fn run() -> Result<()> {
         )?),
         Action::ClaudeBash => dotfiles_xtask::claude_hook::run()?,
         Action::ClaudeTiming => dotfiles_xtask::claude_timing::run()?,
-        Action::Health { session } => {
-            let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-                .context("user directory is unavailable")?;
-            let result = dotfiles_xtask::health::gate(
-                Path::new(&home),
-                if session { "session-start" } else { "health" },
-            );
-            match result {
-                Err(error) if session => {
-                    print!(
-                        "{}",
-                        error
-                            .downcast::<dotfiles_xtask::refusal::Refusal>()?
-                            .render()
-                    );
-                }
-                other => other?,
-            }
-        }
+        Action::Health { session } => health(session)?,
         Action::Hook { hook, arguments } => dotfiles_xtask::hooks::run(hook, &arguments)?,
         Action::LineEndings { request } => dotfiles_xtask::line_endings::run(request)?,
         Action::Git { arguments } => {
@@ -369,7 +355,7 @@ fn run() -> Result<()> {
             fix_stale_hooks,
         } => dotfiles_xtask::hooks::audit(&directory, fix_stale_hooks)?,
         Action::Setup { step, config, live } => {
-            dotfiles_xtask::setup::run(&cli.root, &config, step, live)?
+            dotfiles_xtask::setup::run(&cli.root, &config, step, live)?;
         }
         Action::Refresh { config, live } => {
             dotfiles_xtask::setup::run(
@@ -424,7 +410,7 @@ fn run() -> Result<()> {
             dotfiles_xtask::input_audit::check(&cli.root)?;
         }
         Action::PublicAudit { denylist } => {
-            dotfiles_xtask::profiles::audit_private(&cli.root, &denylist)?
+            dotfiles_xtask::profiles::audit_private(&cli.root, &denylist)?;
         }
         Action::Profile {
             action,
@@ -452,82 +438,8 @@ fn run() -> Result<()> {
             dotfiles_xtask::pr_workflow::execute(command, &arguments)?;
         }
         Action::Hosts { action } => dotfiles_xtask::hosts::run(action)?,
-        Action::InstallPrWorkflow => {
-            cargo(
-                &cli.root,
-                Path::new("xtask/Cargo.toml"),
-                &["build", "--locked", "--release", "--bin", "pr-workflow"],
-            )?;
-            let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
-            let binary = check_build_dir(&cli.root, configured.as_deref())
-                .join("release")
-                .join(format!("pr-workflow{}", std::env::consts::EXE_SUFFIX));
-            let user_directory =
-                std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-                    .context("user directory is unavailable")?;
-            dotfiles_xtask::pr_workflow::deploy(
-                &cli.root,
-                &binary,
-                Path::new(&user_directory),
-                |paths| {
-                    let status = Tool::chezmoi_in(&cli.root)
-                        .args([
-                            "--force",
-                            "apply",
-                            "--include",
-                            "dirs,files,symlinks",
-                            "--source-path",
-                            "--parent-dirs",
-                        ])
-                        .args(paths)
-                        .status()?;
-                    ensure!(
-                        status.success(),
-                        "scoped PR skill installation failed with {status}"
-                    );
-                    Ok(())
-                },
-            )?;
-            dotfiles_xtask::freshness::record_installation(
-                Path::new(&user_directory),
-                &cli.root,
-                Built::PrWorkflow,
-            )?;
-        }
-        Action::InstallProse => {
-            cargo(
-                &cli.root,
-                Path::new("xtask/Cargo.toml"),
-                &["build", "--locked", "--release", "--bin", "prose"],
-            )?;
-            let user_directory = PathBuf::from(
-                std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-                    .context("user directory is unavailable")?,
-            );
-            // chezmoi skips the contents of a directory given by its source path, so the installer gives the target tree.
-            let status = Tool::chezmoi_in(&cli.root)
-                .arg("--destination")
-                .arg(&user_directory)
-                .args([
-                    "--force",
-                    "apply",
-                    "--include",
-                    "dirs,files",
-                    "--parent-dirs",
-                ])
-                .arg(user_directory.join(".config/prose"))
-                .arg(user_directory.join(".config/opencode/plugins/prose.ts"))
-                .status()?;
-            ensure!(
-                status.success(),
-                "the prose configuration installation failed with {status}"
-            );
-            let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
-            let binary = check_build_dir(&cli.root, configured.as_deref())
-                .join("release")
-                .join(format!("prose{}", std::env::consts::EXE_SUFFIX));
-            dotfiles_xtask::prose::install(&cli.root, &binary, &user_directory)?;
-        }
+        Action::InstallPrWorkflow => install_pr_workflow(&cli.root)?,
+        Action::InstallProse => install_prose(&cli.root)?,
         Action::Proofs { scope } => {
             if scope.resolve(&cli.root)?.contains(Gate::Rust) {
                 dotfiles_xtask::skill_proofs::verify(&cli.root)?;
@@ -544,62 +456,17 @@ fn run() -> Result<()> {
             );
         }
         Action::Rehearse { disposable_host } => {
-            dotfiles_xtask::rehearsal::run(&cli.root, disposable_host)?
+            dotfiles_xtask::rehearsal::run(&cli.root, disposable_host)?;
         }
         Action::Check { scope } => check(&cli.root, scope.resolve(&cli.root)?)?,
         Action::Decide { skill } => {
             println!("{}", dotfiles_xtask::skill_ops::decide(&cli.root, &skill)?);
         }
         Action::Next { offline, execute } => {
-            dotfiles_xtask::next_action::run(&cli.root, offline, execute)?
+            dotfiles_xtask::next_action::run(&cli.root, offline, execute)?;
         }
-        Action::Aliases => {
-            let entries = skills(&cli.root)?;
-            let directory = cli.root.join("home/dot_claude/skills");
-            fs::create_dir_all(&directory)?;
-            for (_, skill) in entries {
-                let path = directory.join(format!("symlink_{}", skill.name));
-                let expected = format!("../../.agents/skills/{}\n", skill.name);
-                match fs::read_to_string(&path) {
-                    Ok(current) => ensure!(
-                        current == expected,
-                        "refusing to overwrite {}",
-                        path.display()
-                    ),
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                        let mut file = fs::OpenOptions::new()
-                            .write(true)
-                            .create_new(true)
-                            .open(&path)?;
-                        file.write_all(expected.as_bytes())?;
-                    }
-                    Err(error) => return Err(error.into()),
-                }
-            }
-            println!(
-                "Validated {} shared skills and aliases",
-                validate_tree(&cli.root)?
-            );
-        }
-        Action::FormatMetadata => {
-            for (path, skill) in skills(&cli.root)? {
-                let text = fs::read_to_string(&path)?;
-                let (header, body) = split_frontmatter(&text)?;
-                let documents = yaml_rust2::YamlLoader::load_from_str(header)?;
-                ensure!(
-                    documents[0].as_hash().context("mapping required")?.len() == 2,
-                    "formatting must preserve optional metadata; format this skill manually"
-                );
-                let description = skill.description.replace(". ", ".\n  ");
-                fs::write(
-                    path,
-                    format!(
-                        "---\nname: {}\ndescription: >-\n  {description}\n---\n{body}",
-                        skill.name
-                    ),
-                )?;
-            }
-        }
+        Action::Aliases => aliases(&cli.root)?,
+        Action::FormatMetadata => format_metadata(&cli.root)?,
         Action::Snapshot { output } => export_checks(&cli.root, &output)?,
         Action::SkillPaths => {
             let mut output = std::io::stdout().lock();
@@ -611,99 +478,183 @@ fn run() -> Result<()> {
         Action::Install => {
             let paths = skill_source_paths(&cli.root)?;
             ensure!(!paths.is_empty(), "no skill files to install");
-            let status = Tool::chezmoi_in(&cli.root)
-                .args([
-                    "--force",
-                    "apply",
-                    "--include",
-                    "dirs,files,symlinks",
-                    "--source-path",
-                    "--parent-dirs",
-                ])
-                .args(paths)
-                .status()?;
-            ensure!(
-                status.success(),
-                "scoped skill installation failed with {status}"
+            apply_sources(&cli.root, "dirs,files,symlinks", paths)
+                .context("scoped skill installation failed")?;
+        }
+        Action::InstallReviewGuard => install_review_guard(&cli.root)?,
+        Action::InstallSkillOps => install_skill_ops(&cli.root)?,
+    }
+    Ok(())
+}
+
+/// The health gate, which at session start prints its refusal instead of failing.
+fn health(session: bool) -> Result<()> {
+    let result = dotfiles_xtask::health::gate(
+        &user_directory()?,
+        if session { "session-start" } else { "health" },
+    );
+    match result {
+        Err(error) if session => {
+            print!(
+                "{}",
+                error
+                    .downcast::<dotfiles_xtask::refusal::Refusal>()?
+                    .render()
             );
+            Ok(())
         }
-        Action::InstallReviewGuard => {
-            cargo(
-                &cli.root,
-                Path::new("xtask/Cargo.toml"),
-                &["build", "--locked", "--release", "--bin", "coderabbit"],
-            )?;
-            let status = Tool::chezmoi_in(&cli.root)
-                .args([
-                    "--force",
-                    "apply",
-                    "--include",
-                    "dirs,files",
-                    "--source-path",
-                    "--parent-dirs",
-                ])
-                .arg(cli.root.join(dotfiles_xtask::review_guard::SOURCE_POLICY))
-                .status()?;
-            ensure!(status.success(), "review guard policy installation failed");
-            let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
-            let binary = check_build_dir(&cli.root, configured.as_deref())
-                .join("release")
-                .join(format!("coderabbit{}", std::env::consts::EXE_SUFFIX));
-            let user_directory =
-                std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-                    .context("user directory is unavailable")?;
-            dotfiles_xtask::review_guard::install(&binary, Path::new(&user_directory))?;
-            dotfiles_xtask::freshness::record_installation(
-                Path::new(&user_directory),
-                &cli.root,
-                Built::Coderabbit,
-            )?;
-            println!("Installed CodeRabbit guard and cr alias with persistent local limits");
+        other => other,
+    }
+}
+
+fn user_directory() -> Result<PathBuf> {
+    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .map(PathBuf::from)
+        .context("user directory is unavailable")
+}
+
+/// Builds one binary of this package in release mode and returns where it landed.
+fn release_binary(root: &Path, name: &str) -> Result<PathBuf> {
+    cargo(
+        root,
+        Path::new("xtask/Cargo.toml"),
+        &["build", "--locked", "--release", "--bin", name],
+    )?;
+    let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
+    Ok(check_build_dir(root, configured.as_deref())
+        .join("release")
+        .join(format!("{name}{}", std::env::consts::EXE_SUFFIX)))
+}
+
+/// Applies the targets of the given source paths and their parent directories.
+fn apply_sources<I, S>(root: &Path, include: &str, sources: I) -> Result<()>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let status = Tool::chezmoi_in(root)
+        .args([
+            "--force",
+            "apply",
+            "--include",
+            include,
+            "--source-path",
+            "--parent-dirs",
+        ])
+        .args(sources)
+        .status()?;
+    ensure!(status.success(), "chezmoi apply failed with {status}");
+    Ok(())
+}
+
+fn install_pr_workflow(root: &Path) -> Result<()> {
+    let binary = release_binary(root, "pr-workflow")?;
+    let user_directory = user_directory()?;
+    dotfiles_xtask::pr_workflow::deploy(root, &binary, &user_directory, |paths| {
+        apply_sources(root, "dirs,files,symlinks", paths)
+            .context("scoped PR skill installation failed")
+    })?;
+    dotfiles_xtask::freshness::record_installation(&user_directory, root, Built::PrWorkflow)
+}
+
+fn install_prose(root: &Path) -> Result<()> {
+    let binary = release_binary(root, "prose")?;
+    let user_directory = user_directory()?;
+    // chezmoi skips the contents of a directory given by its source path, so the installer gives the target tree.
+    let status = Tool::chezmoi_in(root)
+        .arg("--destination")
+        .arg(&user_directory)
+        .args([
+            "--force",
+            "apply",
+            "--include",
+            "dirs,files",
+            "--parent-dirs",
+        ])
+        .arg(user_directory.join(".config/prose"))
+        .arg(user_directory.join(".config/opencode/plugins/prose.ts"))
+        .status()?;
+    ensure!(
+        status.success(),
+        "the prose configuration installation failed with {status}"
+    );
+    dotfiles_xtask::prose::install(root, &binary, &user_directory)
+}
+
+fn install_review_guard(root: &Path) -> Result<()> {
+    let binary = release_binary(root, "coderabbit")?;
+    apply_sources(
+        root,
+        "dirs,files",
+        [root.join(dotfiles_xtask::review_guard::SOURCE_POLICY)],
+    )
+    .context("review guard policy installation failed")?;
+    let user_directory = user_directory()?;
+    dotfiles_xtask::review_guard::install(&binary, &user_directory)?;
+    dotfiles_xtask::freshness::record_installation(&user_directory, root, Built::Coderabbit)?;
+    println!("Installed CodeRabbit guard and cr alias with persistent local limits");
+    Ok(())
+}
+
+fn install_skill_ops(root: &Path) -> Result<()> {
+    dotfiles_xtask::skill_ops::check_catalog(root)?;
+    let binary = release_binary(root, "skill-ops")?;
+    let user_directory = user_directory()?;
+    dotfiles_xtask::skill_install::deploy(root, &binary, &user_directory, |path| {
+        apply_sources(root, "dirs,files", [path])
+            .with_context(|| format!("installation failed for {}", path.display()))
+    })?;
+    dotfiles_xtask::freshness::record_installation(&user_directory, root, Built::SkillOps)
+}
+
+/// Writes the Claude Code symlink of every shared skill, refusing to overwrite a different file.
+fn aliases(root: &Path) -> Result<()> {
+    let entries = skills(root)?;
+    let directory = root.join("home/dot_claude/skills");
+    fs::create_dir_all(&directory)?;
+    for (_, skill) in entries {
+        let path = directory.join(format!("symlink_{}", skill.name));
+        let expected = format!("../../.agents/skills/{}\n", skill.name);
+        match fs::read_to_string(&path) {
+            Ok(current) => ensure!(
+                current == expected,
+                "refusing to overwrite {}",
+                path.display()
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let mut file = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)?;
+                file.write_all(expected.as_bytes())?;
+            }
+            Err(error) => return Err(error.into()),
         }
-        Action::InstallSkillOps => {
-            dotfiles_xtask::skill_ops::check_catalog(&cli.root)?;
-            cargo(
-                &cli.root,
-                Path::new("xtask/Cargo.toml"),
-                &["build", "--locked", "--release", "--bin", "skill-ops"],
-            )?;
-            let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
-            let binary = check_build_dir(&cli.root, configured.as_deref())
-                .join("release")
-                .join(format!("skill-ops{}", std::env::consts::EXE_SUFFIX));
-            let user_directory =
-                std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-                    .context("user directory is unavailable")?;
-            dotfiles_xtask::skill_install::deploy(
-                &cli.root,
-                &binary,
-                Path::new(&user_directory),
-                |path| {
-                    let status = Tool::chezmoi_in(&cli.root)
-                        .args([
-                            "--force",
-                            "apply",
-                            "--include",
-                            "dirs,files",
-                            "--source-path",
-                            "--parent-dirs",
-                        ])
-                        .arg(path)
-                        .status()?;
-                    ensure!(
-                        status.success(),
-                        "installation failed for {}",
-                        path.display()
-                    );
-                    Ok(())
-                },
-            )?;
-            dotfiles_xtask::freshness::record_installation(
-                Path::new(&user_directory),
-                &cli.root,
-                Built::SkillOps,
-            )?;
-        }
+    }
+    println!(
+        "Validated {} shared skills and aliases",
+        validate_tree(root)?
+    );
+    Ok(())
+}
+
+fn format_metadata(root: &Path) -> Result<()> {
+    for (path, skill) in skills(root)? {
+        let text = fs::read_to_string(&path)?;
+        let (header, body) = split_frontmatter(&text)?;
+        let documents = yaml_rust2::YamlLoader::load_from_str(header)?;
+        ensure!(
+            documents[0].as_hash().context("mapping required")?.len() == 2,
+            "formatting must preserve optional metadata; format this skill manually"
+        );
+        let description = skill.description.replace(". ", ".\n  ");
+        fs::write(
+            path,
+            format!(
+                "---\nname: {}\ndescription: >-\n  {description}\n---\n{body}",
+                skill.name
+            ),
+        )?;
     }
     Ok(())
 }

@@ -23,6 +23,7 @@ impl Events {
         service_timeout: 0,
     };
 
+    #[must_use]
     pub const fn any(self) -> bool {
         self.engine_terminated > 0 || self.protection_failed > 0 || self.service_timeout > 0
     }
@@ -40,6 +41,7 @@ pub const SLOW_MILLIS: u64 = 1_500;
 pub const STALL_MILLIS: u64 = 5_000;
 
 /// Whether the event query earns its own process start.
+#[must_use]
 pub const fn needs_events(start: Start) -> bool {
     match start {
         Start::Completed { millis } => millis >= SLOW_MILLIS,
@@ -49,6 +51,7 @@ pub const fn needs_events(start: Start) -> bool {
 
 /// A start that never finished or took the full bound counts as a stall on its own.
 /// A slow start counts as a stall when the engine reported a failure, or when the event query, `None`, also failed to finish.
+#[must_use]
 pub const fn verdict(start: Start, events: Option<Events>) -> Verdict {
     match start {
         Start::TimedOut => Verdict::Stalled,

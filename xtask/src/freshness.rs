@@ -26,6 +26,7 @@ pub enum Built {
 impl Built {
     pub const ALL: [Self; 3] = [Self::Coderabbit, Self::PrWorkflow, Self::SkillOps];
 
+    #[must_use]
     pub const fn binary(self) -> &'static str {
         match self {
             Self::Coderabbit => "coderabbit",
@@ -35,6 +36,7 @@ impl Built {
     }
 
     /// The just recipe that rebuilds and installs it from the checkout it runs in.
+    #[must_use]
     pub const fn install_task(self) -> &'static str {
         match self {
             Self::Coderabbit => "install-review-guard",
@@ -53,6 +55,7 @@ pub struct Embedded {
 }
 
 /// The build facts compiled into this executable.
+#[must_use]
 pub fn embedded() -> Embedded {
     Embedded {
         revision: env!("DOTFILES_BUILD_REVISION").into(),
@@ -62,6 +65,7 @@ pub fn embedded() -> Embedded {
 }
 
 /// Whether `path` holds the xtask package that builds the tools, which makes it a dotfiles checkout.
+#[must_use]
 pub fn is_checkout(path: &Path) -> bool {
     fs::read_to_string(path.join("xtask/Cargo.toml"))
         .is_ok_and(|manifest| manifest.contains("name = \"dotfiles-xtask\""))
@@ -103,7 +107,7 @@ fn short(hash: &str) -> String {
     hash.chars().take(12).collect()
 }
 
-fn stale(built: Built, build: &Embedded, origin: Origin, root: &Path) -> Refusal {
+fn stale(built: Built, stamp: &Embedded, origin: Origin, root: &Path) -> Refusal {
     let current = content_hash(root).map_or_else(|_| "unreadable".into(), |hash| short(&hash));
     Refusal::new(
         "tool.stale",
@@ -116,8 +120,8 @@ fn stale(built: Built, build: &Embedded, origin: Origin, root: &Path) -> Refusal
     )
     .evidence(format!(
         "built from revision {} with content hash {}",
-        build.revision,
-        short(&build.hash)
+        stamp.revision,
+        short(&stamp.hash)
     ))
     .evidence(format!(
         "checkout {} has content hash {current}",
@@ -129,27 +133,35 @@ fn stale(built: Built, build: &Embedded, origin: Origin, root: &Path) -> Refusal
     ))
 }
 
-/// Refuses when `build` lags the checkout.
+/// Refuses when `stamp` lags the checkout.
 /// The search tries the explicit path, the working directory, and the original build location.
+///
+/// # Errors
+///
+/// Returns a `tool.stale` refusal when the located checkout's content hash differs from `stamp`, or an error when it can't hash that checkout.
 pub fn verify(
     built: Built,
-    build: &Embedded,
+    stamp: &Embedded,
     explicit: Option<&Path>,
     start: Option<&Path>,
 ) -> Result<()> {
-    let located = locate(explicit, start, &build.root);
+    let located = locate(explicit, start, &stamp.root);
     let matching = match &located {
-        Some((_, root)) => content_hash(root)? == build.hash,
+        Some((_, root)) => content_hash(root)? == stamp.hash,
         None => false,
     };
     if runs(freshness(located.is_some(), matching)) {
         return Ok(());
     }
     let (origin, root) = located.context("a stale build always has a checkout")?;
-    Err(stale(built, build, origin, &root).into())
+    Err(stale(built, stamp, origin, &root).into())
 }
 
 /// The check every installed tool makes before it does anything else.
+///
+/// # Errors
+///
+/// Returns a `tool.stale` refusal when the tool's build lags the located checkout, or an error when it can't hash that checkout.
 pub fn require_current(built: Built) -> Result<()> {
     let explicit = std::env::var_os(SOURCE_VARIABLE).map(PathBuf::from);
     let start = std::env::current_dir().ok();
@@ -163,6 +175,10 @@ fn record_path(home: &Path, built: Built) -> PathBuf {
 
 /// Records the content hash of the sources that produced the installed `built`.
 /// A later apply or merge compares that hash with the checkout.
+///
+/// # Errors
+///
+/// Returns an error when it can't hash the checkout or write the record.
 pub fn record_installation(home: &Path, root: &Path, built: Built) -> Result<()> {
     let path = record_path(home, built);
     fs::create_dir_all(path.parent().context("record directory")?)?;
@@ -171,6 +187,10 @@ pub fn record_installation(home: &Path, root: &Path, built: Built) -> Result<()>
 }
 
 /// The recorded installations whose sources in `root` have changed since.
+///
+/// # Errors
+///
+/// Returns an error when it can't hash the checkout in `root`.
 pub fn lagging(home: &Path, root: &Path) -> Result<Vec<Built>> {
     let current = content_hash(root)?;
     Ok(Built::ALL
@@ -186,7 +206,7 @@ pub fn lagging(home: &Path, root: &Path) -> Result<Vec<Built>> {
 }
 
 /// Rebuilds each recorded installation whose sources in `root` changed, as the install task does by hand.
-pub fn reinstall_lagging(home: &Path, root: &Path) -> Result<()> {
+pub(crate) fn reinstall_lagging(home: &Path, root: &Path) -> Result<()> {
     for built in lagging(home, root)? {
         println!(
             "Reinstalling {}: its sources changed since it was installed",

@@ -4,8 +4,6 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
-
 /// `FILE_ATTRIBUTE_REPARSE_POINT`.
 const REPARSE_POINT: u32 = 0x400;
 
@@ -16,10 +14,10 @@ fn looks_like_stub(len: u64, attributes: u32) -> bool {
     len == 0 && attributes & REPARSE_POINT != 0
 }
 
-pub fn run() -> Result<i32> {
+pub fn run() {
     let Some(dir) = windows_apps_dir() else {
         println!(">>> no %LOCALAPPDATA%, nothing to do");
-        return Ok(0);
+        return;
     };
 
     for name in STUBS {
@@ -41,7 +39,6 @@ pub fn run() -> Result<i32> {
             );
         }
     }
-    Ok(0)
 }
 
 #[cfg(windows)]

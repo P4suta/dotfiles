@@ -220,7 +220,7 @@ mod debsig {
                 match argument.as_str().context("string argv")? {
                     "/etc/apt/keyrings/1password.asc" => *argument = json!(source),
                     "/usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg" => {
-                        *argument = json!(keyring)
+                        *argument = json!(keyring);
                     }
                     _ => {}
                 }

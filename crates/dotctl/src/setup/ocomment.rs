@@ -1,6 +1,6 @@
 //! Installs ocomment, the prose gate's binary.
 //!
-//! OComment has no crates.io release, so this clones its repository and builds the release binary.
+//! `OComment` has no crates.io release, so this clones its repository and builds the release binary.
 //! The prose gate's config names this checkout.
 //! Every apply runs this step, and it rebuilds only when the checkout's revision differs from the recorded revision of the installed binary.
 
@@ -19,12 +19,11 @@ pub struct Options {
 }
 
 /// Reports a failure as a warning, so a stale gate never rolls back the rest of the apply.
-pub fn run(options: &Options) -> Result<i32> {
+pub fn run(options: &Options) {
     println!(">>> ocomment install");
     if let Err(err) = build(options) {
         eprintln!("ocomment install failed: {err:#}");
     }
-    Ok(0)
 }
 
 fn head(checkout: &Path) -> Result<Option<String>> {
@@ -110,12 +109,12 @@ fn build(options: &Options) -> Result<()> {
         .arg(&manifest);
     proc::run(&mut build).context("building ocomment")?;
 
-    let built = checkout
+    let binary = checkout
         .join("rust")
         .join("target")
         .join("release")
         .join("ocomment.exe");
-    install(&built, &dest)?;
+    install(&binary, &dest)?;
 
     let mut version = env::command(&dest.display().to_string());
     version.arg("--version");

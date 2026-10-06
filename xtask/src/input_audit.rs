@@ -9,6 +9,7 @@ use std::path::Path;
 const CALL: &str = "includeTemplate \"inputs\"";
 
 /// The findings in one script template: a hash outside the `inputs` partial, and each `inputs` argument that reads the host or the whole context.
+#[must_use]
 pub fn findings(name: &str, text: &str) -> Vec<String> {
     let mut found = Vec::new();
     if text.contains("sha256sum") {
@@ -62,6 +63,11 @@ fn scripts(root: &Path) -> Result<Vec<(String, String)>> {
 }
 
 /// Refuses a script that hashes the host, the command line, or the whole context, and a profile whose scripts change with the command line.
+///
+/// # Errors
+///
+/// Returns an error when any such script or profile exists.
+/// Also returns an error when reading the setup scripts or rendering the profiles fails.
 pub fn check(root: &Path) -> Result<()> {
     let mut found = Vec::new();
     for (name, text) in scripts(root)? {
@@ -88,7 +94,7 @@ mod tests {
     #[test]
     fn own_data_and_rendered_partials_pass() {
         let text = "#!/bin/sh\n{{ includeTemplate \"inputs\" (list (includeTemplate \"profiles/mac/dot_config/mise/config.toml.tmpl\" .) .tools) }}\nexec x\n";
-        assert!(findings("run_x.sh.tmpl", text).is_empty());
+        assert_eq!(findings("run_x.sh.tmpl", text), Vec::<String>::new());
     }
 
     #[test]

@@ -108,7 +108,8 @@ fn bypasses(source: &str, tool_allowed: bool) -> Vec<String> {
             rest = &rest[start + construction.len()..];
             let program = rest.split(')').next().unwrap_or_default().trim();
             let program = program.trim_start_matches('&');
-            bypassed |= program == "\"git\"" || program == "git" || program.ends_with(".git");
+            let field = program.rsplit_once('.').map(|(_, field)| field);
+            bypassed |= program == "\"git\"" || program == "git" || field == Some("git");
         }
         if bypassed {
             found.push(line.trim().to_owned());
@@ -127,7 +128,10 @@ fn the_bypass_check_finds_every_way_to_start_git() {
     ] {
         assert_eq!(bypasses(line, false), [line], "{line}");
     }
-    assert!(bypasses(concat!("Tool::", "Git.command()"), true).is_empty());
+    assert_eq!(
+        bypasses(concat!("Tool::", "Git.command()"), true),
+        Vec::<String>::new()
+    );
     for line in [
         concat!("Command::", "new(\"rustc\")"),
         concat!("Command::", "new(program)"),

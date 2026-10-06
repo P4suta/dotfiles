@@ -9,7 +9,7 @@ struct Entry {
     existed: bool,
 }
 
-pub fn relative(path: &Path) -> Result<()> {
+pub(crate) fn relative(path: &Path) -> Result<()> {
     ensure!(
         !path.as_os_str().is_empty()
             && path
@@ -114,7 +114,7 @@ fn copy(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn capture(destination: &Path, backup: &Path, targets: &[PathBuf]) -> Result<()> {
+pub(crate) fn capture(destination: &Path, backup: &Path, targets: &[PathBuf]) -> Result<()> {
     ensure!(!backup.exists(), "backup must use a fresh directory");
     ensure!(!targets.is_empty(), "backup requires managed targets");
     let destination = crate::canonical(destination)?;
@@ -180,7 +180,7 @@ pub fn capture(destination: &Path, backup: &Path, targets: &[PathBuf]) -> Result
     Ok(())
 }
 
-pub fn restore(destination: &Path, backup: &Path) -> Result<()> {
+pub(crate) fn restore(destination: &Path, backup: &Path) -> Result<()> {
     let destination = crate::canonical(destination)?;
     ensure!(
         fs::read(backup.join("destination.txt"))? == destination.as_os_str().as_encoded_bytes(),
@@ -215,7 +215,7 @@ pub fn restore(destination: &Path, backup: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn apply(
+pub(crate) fn apply(
     destination: &Path,
     backup: &Path,
     targets: &[PathBuf],

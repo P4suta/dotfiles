@@ -7,6 +7,7 @@
 //! The hash a tool embeds at build time and the hash of a checkout at run time agree on which files count.
 
 use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -47,6 +48,10 @@ fn collect(root: &Path, relative: &str, found: &mut Vec<String>) -> io::Result<(
 }
 
 /// The checkout-relative paths that build the tools, sorted and slash-separated on every host.
+///
+/// # Errors
+///
+/// Returns an error when it can't read a directory under `xtask/src` or one of its entries.
 pub fn inputs(root: &Path) -> io::Result<Vec<String>> {
     let mut found: Vec<String> = SHARED.map(String::from).into();
     collect(root, "xtask/src", &mut found)?;
@@ -56,6 +61,10 @@ pub fn inputs(root: &Path) -> io::Result<Vec<String>> {
 
 /// A hash over every input's path and content with line endings normalized, so a checkout converted between LF and CRLF hashes the same.
 /// A missing input hashes as absent, which differs from every present file.
+///
+/// # Errors
+///
+/// Returns an error when it can't list the inputs or can't read an input that exists.
 pub fn content_hash(root: &Path) -> io::Result<String> {
     let mut hasher = Sha256::new();
     for path in inputs(root)? {
@@ -79,9 +88,16 @@ pub fn content_hash(root: &Path) -> io::Result<String> {
         }
         hasher.update(b"\0");
     }
-    Ok(hasher
-        .finalize()
+    Ok(hex(&hasher.finalize()))
+}
+
+/// Lowercase hexadecimal, two digits per byte.
+#[must_use]
+pub fn hex(bytes: &[u8]) -> String {
+    bytes
         .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+        .fold(String::with_capacity(bytes.len() * 2), |mut text, byte| {
+            let _ = write!(text, "{byte:02x}");
+            text
+        })
 }

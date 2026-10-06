@@ -299,7 +299,7 @@ fn report_done(applied: &Value) {
     }
 }
 
-/// sshd_config appears only after the service first starts.
+/// `sshd_config` appears only after the service first starts.
 fn wait_for_config(ssh_dir: &Path) -> Result<PathBuf> {
     let path = ssh_dir.join("sshd_config");
     for _ in 0..40 {
@@ -356,11 +356,11 @@ fn reg_set(key: &str, value: &str, data: &str) -> Result<()> {
     Ok(())
 }
 
-/// The DefaultShell target, or None when no usable shell exists.
+/// The `DefaultShell` target, or None when no usable shell exists.
 ///
 /// Skips the first pwsh.exe on PATH, because that resolves to a mise shim here, and a shim login shell runs mise resolution before every inbound session.
 ///
-/// Skips the Store build, because sshd fails to exec an MSIX binary through its App Execution Alias or the versioned path under WindowsApps.
+/// Skips the Store build, because sshd fails to exec an MSIX binary through its App Execution Alias or the versioned path under `WindowsApps`.
 /// The client gets only `exec request failed on channel 0`.
 fn which_pwsh() -> Option<PathBuf> {
     if let Some(msi) = std::env::var_os("ProgramFiles")
@@ -451,9 +451,7 @@ fn config_predates_service(config_path: &Path, state: &Value) -> bool {
 }
 
 fn program_data() -> PathBuf {
-    std::env::var_os("ProgramData")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
+    std::env::var_os("ProgramData").map_or_else(|| PathBuf::from(r"C:\ProgramData"), PathBuf::from)
 }
 
 #[cfg(test)]

@@ -95,6 +95,12 @@ pub struct Metadata {
     pub description: String,
 }
 
+/// The portable name and description of a skill file in `directory`.
+///
+/// # Errors
+///
+/// Returns an error when the frontmatter lacks one YAML mapping, or it has a non-portable field.
+/// Also returns an error when the name fails validation or differs from `directory`, the description has no text or exceeds 1024 characters, or the body has no text.
 pub fn metadata(text: &str, directory: &str) -> Result<Metadata> {
     let (header, body) = split_frontmatter(text)?;
     let documents = YamlLoader::load_from_str(header)?;
@@ -141,6 +147,11 @@ pub fn metadata(text: &str, directory: &str) -> Result<Metadata> {
     })
 }
 
+/// The YAML frontmatter and the body of a Markdown document.
+///
+/// # Errors
+///
+/// Returns an error when `text` doesn't start with a `---` line or the frontmatter has no closing `---` line.
 pub fn split_frontmatter(text: &str) -> Result<(&str, &str)> {
     let content = text
         .strip_prefix("---\n")
@@ -154,8 +165,17 @@ pub fn split_frontmatter(text: &str) -> Result<(&str, &str)> {
 /// The chezmoi source state of a checkout, which `.chezmoiroot` names.
 pub const SOURCE_STATE: &str = "home";
 
+#[must_use]
 pub fn source_state(root: &Path) -> PathBuf {
     root.join(SOURCE_STATE)
+}
+
+/// Whether `path` ends in `.<extension>`, compared exactly, because chezmoi and the gates treat names case-sensitively on every host.
+#[must_use]
+pub fn has_extension(path: &str, extension: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .is_some_and(|found| found == extension)
 }
 
 /// Windows `canonicalize` returns verbatim drive paths that cargo rejects.
@@ -172,6 +192,10 @@ pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
 }
 
 /// `canonicalize` without the Windows verbatim drive prefix.
+///
+/// # Errors
+///
+/// Returns an error when `path` doesn't exist or resolving it fails.
 #[expect(
     clippy::disallowed_methods,
     reason = "the one place that canonicalizes a path, so every caller gets the spelling without the verbatim prefix"
@@ -180,6 +204,11 @@ pub fn canonical(path: &Path) -> Result<PathBuf> {
     Ok(without_verbatim_prefix(&path.canonicalize()?))
 }
 
+/// Refuses a relative link or image in `file` that points nowhere or resolves outside `root`.
+///
+/// # Errors
+///
+/// Returns an error when resolving `root` fails, a relative link target doesn't exist, or it resolves outside `root`.
 pub fn validate_links(text: &str, file: &Path, root: &Path) -> Result<()> {
     let root = canonical(root)?;
     for event in Parser::new(text) {
@@ -204,6 +233,12 @@ pub fn validate_links(text: &str, file: &Path, root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Each shared skill's `SKILL.md` path and metadata, sorted by name.
+///
+/// # Errors
+///
+/// Returns an error when reading the skill tree fails, or it holds no skill or an entry other than a directory with a UTF-8 name.
+/// It also returns an error when a skill has invalid metadata or links.
 pub fn skills(root: &Path) -> Result<Vec<(std::path::PathBuf, Metadata)>> {
     let tree = root.join("home/dot_agents/skills");
     let mut result = Vec::new();
@@ -228,6 +263,11 @@ pub fn skills(root: &Path) -> Result<Vec<(std::path::PathBuf, Metadata)>> {
     Ok(result)
 }
 
+/// Checks the shared skills and their Claude aliases, and returns the number of skills.
+///
+/// # Errors
+///
+/// Returns an error when a skill fails validation, a skill's symlink goes missing or points elsewhere, or a symlink names no shared skill.
 pub fn validate_tree(root: &Path) -> Result<usize> {
     let entries = skills(root)?;
     for (_, skill) in &entries {
@@ -259,6 +299,12 @@ pub fn validate_tree(root: &Path) -> Result<usize> {
     Ok(entries.len())
 }
 
+/// Copies the files the skill checks read into the new directory `output` and validates the copy.
+///
+/// # Errors
+///
+/// Returns an error when either skill tree fails validation, an input names a symlink or anything other than a regular file, or `output` already exists or creating it fails.
+/// Also returns an error when reading or writing a file fails, or a source file changes during the copy.
 pub fn export_checks(root: &Path, output: &Path) -> Result<()> {
     validate_tree(root)?;
     let mut files = Vec::new();
@@ -300,6 +346,11 @@ pub fn export_checks(root: &Path, output: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Every file of the shared skill tree and its Claude aliases.
+///
+/// # Errors
+///
+/// Returns an error when the skill tree fails validation, holds a symlink or an irregular file, or reading it fails.
 pub fn skill_source_paths(root: &Path) -> Result<Vec<PathBuf>> {
     validate_tree(root)?;
     let mut files = Vec::new();
@@ -332,6 +383,7 @@ fn collect(root: &Path, relative: &Path, files: &mut Vec<(PathBuf, Vec<u8>)>) ->
     Ok(())
 }
 
+#[must_use]
 pub fn check_build_dir(root: &Path, configured: Option<&Path>) -> PathBuf {
     let target = match configured {
         Some(target) => root.join(target),

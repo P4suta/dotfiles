@@ -8,7 +8,7 @@ use dotfiles_xtask::skill_ops::{self as ops, Decision, Outcome, Policy, Review};
 use serde_json::{Value, json};
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 fn fixture() -> Result<tempfile::TempDir> {
@@ -33,7 +33,7 @@ fn fixture() -> Result<tempfile::TempDir> {
             skill: "alpha".into(),
             also: vec!["beta".into()],
         }],
-        bundles: Default::default(),
+        bundles: std::collections::BTreeMap::default(),
     };
     ops::write_json(&directory.path().join("policy.json"), &policy, false)?;
     ops::write_json(
@@ -43,7 +43,7 @@ fn fixture() -> Result<tempfile::TempDir> {
             catalog_hash: ops::hash(&ops::catalog(&tree)?)?,
             policy_hash: ops::hash(&policy)?,
             engine_hash: ops::engine_hash()?,
-            reviewed: Default::default(),
+            reviewed: std::collections::BTreeMap::default(),
         },
         false,
     )?;
@@ -479,11 +479,10 @@ fn opencode_adapter_records_a_native_sdk_read_without_retaining_private_payloads
     Ok(())
 }
 
-#[test]
-fn native_installation_preserves_settings_and_history_across_reinstall() -> Result<()> {
-    let fixture = fixture()?;
-    let source = fixture.path().join("source");
-    let user = fixture.path().join("native-user");
+/// A source checkout and a native user tree that both hold the fixture skills, with the policy and a decision record for each skill.
+fn native_source(fixture: &Path) -> Result<(PathBuf, PathBuf, ops::Catalog)> {
+    let source = fixture.join("source");
+    let user = fixture.join("native-user");
     for name in ["alpha", "beta"] {
         for tree in [
             source.join("home/dot_agents/skills"),
@@ -491,7 +490,7 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
         ] {
             fs::create_dir_all(tree.join(name))?;
             fs::copy(
-                fixture.path().join("tree").join(name).join("SKILL.md"),
+                fixture.join("tree").join(name).join("SKILL.md"),
                 tree.join(name).join("SKILL.md"),
             )?;
         }
@@ -503,7 +502,7 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
             format!("../../.agents/skills/{name}\n"),
         )?;
     }
-    let policy: Policy = ops::read_json(&fixture.path().join("policy.json"))?;
+    let policy: Policy = ops::read_json(&fixture.join("policy.json"))?;
     ops::write_json(
         &source.join("home/dot_config/skill-ops/policy.json"),
         &policy,
@@ -529,6 +528,39 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
             false,
         )?;
     }
+    Ok((source, user, source_catalog))
+}
+
+/// Runs the built skill-ops for the native user with `input` on its standard input.
+fn native(
+    fixture: &Path,
+    user: &Path,
+    arguments: &[&str],
+    input: Option<&Value>,
+) -> Result<Output> {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_skill-ops"))
+        .current_dir(fixture)
+        .env("HOME", user)
+        .env("USERPROFILE", user)
+        .arg("--state")
+        .arg(fixture.join("native-state"))
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let mut stdin = child.stdin.take().expect("piped input");
+    if let Some(input) = input {
+        stdin.write_all(&serde_json::to_vec(input)?)?;
+    }
+    drop(stdin);
+    Ok(child.wait_with_output()?)
+}
+
+#[test]
+fn native_installation_preserves_settings_and_history_across_reinstall() -> Result<()> {
+    let fixture = fixture()?;
+    let (source, user, source_catalog) = native_source(fixture.path())?;
     let existing = json!({"model":"owner-choice","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"existing-helper session"}]}]}});
     ops::write_json(&user.join(".codex/hooks.json"), &existing, false)?;
     ops::write_json(&user.join(".claude/settings.json"), &existing, false)?;
@@ -583,25 +615,8 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
             }
         )])
     );
-    let native = |arguments: &[&str], input: Option<&Value>| -> Result<Output> {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_skill-ops"))
-            .current_dir(fixture.path())
-            .env("HOME", &user)
-            .env("USERPROFILE", &user)
-            .arg("--state")
-            .arg(fixture.path().join("native-state"))
-            .args(arguments)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-        let mut stdin = child.stdin.take().expect("piped input");
-        if let Some(input) = input {
-            stdin.write_all(&serde_json::to_vec(input)?)?;
-        }
-        drop(stdin);
-        Ok(child.wait_with_output()?)
-    };
+    let native =
+        |arguments: &[&str], input: Option<&Value>| native(fixture.path(), &user, arguments, input);
     for call in ["first", "second", "third"] {
         success(native(
             &["observe", "--client", "claude"],

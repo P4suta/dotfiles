@@ -12,6 +12,7 @@ pub enum Verdict {
 }
 
 /// The checker never sends a PR, issue, or comment body that carries an attribution line.
+#[must_use]
 pub fn verdict(attributed: bool) -> Verdict {
     if attributed {
         Verdict::Refuse(Reason::Attribution)
@@ -20,6 +21,7 @@ pub fn verdict(attributed: bool) -> Verdict {
     }
 }
 
+#[must_use]
 pub const fn next_action(reason: Reason) -> &'static str {
     match reason {
         Reason::Attribution => {

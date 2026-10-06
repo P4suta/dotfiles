@@ -32,25 +32,12 @@ fn archive_paths(text: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn wezterm(home: &Path, runner: &mut impl Runner) -> Result<()> {
-    ensure!(
-        cfg!(windows),
-        "WezTerm installation requires native Windows"
-    );
-    let local = PathBuf::from(std::env::var_os("LOCALAPPDATA").context("LOCALAPPDATA is missing")?);
-    let roaming = PathBuf::from(std::env::var_os("APPDATA").context("APPDATA is missing")?);
-    let install = local.join("Programs/WezTerm-nightly");
-    let shim = home.join(".local/bin/wezterm.cmd");
-    let shortcut = roaming.join("Microsoft/Windows/Start Menu/Programs/WezTerm Nightly.lnk");
-    if install.join("wezterm.exe").is_file() && shim.is_file() && shortcut.is_file() {
-        return Ok(());
-    }
-    let scope = tempfile::tempdir()?;
-    let zip = scope.path().join(ARCHIVE);
-    let hashes = scope.path().join("checksum");
+/// Downloads the nightly archive to `zip` and returns its published SHA-256 after the archive matches it.
+fn download(runner: &mut impl Runner, scope: &Path, zip: &Path) -> Result<String> {
+    let hashes = scope.join("checksum");
     for (name, path) in [
-        (format!("{ARCHIVE}.sha256"), &hashes),
-        (ARCHIVE.to_owned(), &zip),
+        (format!("{ARCHIVE}.sha256"), hashes.as_path()),
+        (ARCHIVE.to_owned(), zip),
     ] {
         checked(
             runner,
@@ -70,11 +57,27 @@ pub fn wezterm(home: &Path, runner: &mut impl Runner) -> Result<()> {
         )?;
     }
     let expected = checksum(&fs::read_to_string(hashes)?)?;
-    let actual: String = Sha256::digest(fs::read(&zip)?)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let actual = crate::build_inputs::hex(&Sha256::digest(fs::read(zip)?));
     ensure!(actual == expected, "WezTerm SHA-256 verification failed");
+    Ok(expected)
+}
+
+pub(crate) fn wezterm(home: &Path, runner: &mut impl Runner) -> Result<()> {
+    ensure!(
+        cfg!(windows),
+        "WezTerm installation requires native Windows"
+    );
+    let local = PathBuf::from(std::env::var_os("LOCALAPPDATA").context("LOCALAPPDATA is missing")?);
+    let roaming = PathBuf::from(std::env::var_os("APPDATA").context("APPDATA is missing")?);
+    let install = local.join("Programs/WezTerm-nightly");
+    let shim = home.join(".local/bin/wezterm.cmd");
+    let shortcut = roaming.join("Microsoft/Windows/Start Menu/Programs/WezTerm Nightly.lnk");
+    if install.join("wezterm.exe").is_file() && shim.is_file() && shortcut.is_file() {
+        return Ok(());
+    }
+    let scope = tempfile::tempdir()?;
+    let zip = scope.path().join(ARCHIVE);
+    let expected = download(runner, scope.path(), &zip)?;
     archive_paths(&String::from_utf8(checked(
         runner,
         Tool::TarExe,

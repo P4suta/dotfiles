@@ -57,6 +57,7 @@ const fn ends_with(text: &[u8], suffix: &[u8]) -> bool {
 
 /// The target name chezmoi gives a source entry that it copies byte for byte.
 /// A template, script, symlink, modification, encrypted, or literal name has no byte-identical target, so it has no answer here.
+#[must_use]
 pub fn target(entry: Entry, source: &[u8]) -> Option<Target<'_>> {
     let mut index = 0;
     while index < UNCOPIED_PREFIXES.len() {

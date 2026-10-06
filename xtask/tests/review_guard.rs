@@ -37,7 +37,7 @@ fn admission_matches_the_final_decimal_budget_at_capacity_boundaries() {
         }
     }
     let limit = u64::MAX;
-    let budget = (u128::from(limit) * 72 / 100) as u64;
+    let budget = u64::try_from(u128::from(limit) * 72 / 100).unwrap();
     assert!(included_allowance(limit, limit - budget + 1));
     assert!(!included_allowance(limit, limit - budget));
 }

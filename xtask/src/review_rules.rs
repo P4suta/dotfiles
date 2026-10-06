@@ -1,19 +1,30 @@
 pub const HOUR_MS: u64 = 3_600_000;
 pub const DAY_MS: u64 = 86_400_000;
 pub const PROBE_GAP_MS: u64 = 60_000;
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the budget of ten reviews is seven, which every pointer width holds"
+)]
 pub const HOURLY_LIMIT: usize = capacity_budget(10) as usize;
 pub const DAILY_LIMIT: usize = HOURLY_LIMIT * 24;
 pub const PROBE_DAILY_LIMIT: usize = DAILY_LIMIT;
 
+/// 72 percent of `capacity`, rounded down.
+#[must_use]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "72 percent of a u64 is at most the u64 itself, so the narrowing keeps every value"
+)]
 pub const fn capacity_budget(capacity: u64) -> u64 {
     (capacity as u128 * 18 / 25) as u64
 }
 
+#[must_use]
 pub fn rolling_allowance(hourly: usize, daily: usize) -> bool {
     hourly < HOURLY_LIMIT && daily < DAILY_LIMIT
 }
 
-/// The CodeRabbit review pools an owner pause stops.
+/// The `CodeRabbit` review pools an owner pause stops.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PauseScope {
     None,
@@ -23,6 +34,7 @@ pub enum PauseScope {
 }
 
 impl PauseScope {
+    #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::None => "none",
@@ -34,6 +46,7 @@ impl PauseScope {
 }
 
 /// Combine the all, PR, and CLI pause markers into one scope.
+#[must_use]
 pub const fn pause_scope(all: bool, pr: bool, cli: bool) -> PauseScope {
     match (all || pr, all || cli) {
         (false, false) => PauseScope::None,
@@ -43,24 +56,29 @@ pub const fn pause_scope(all: bool, pr: bool, cli: bool) -> PauseScope {
     }
 }
 
+#[must_use]
 pub const fn pr_reviews_paused(scope: PauseScope) -> bool {
     matches!(scope, PauseScope::Pr | PauseScope::All)
 }
 
+#[must_use]
 pub const fn cli_reviews_paused(scope: PauseScope) -> bool {
     matches!(scope, PauseScope::Cli | PauseScope::All)
 }
 
 /// Admit a vendor call unless the owner paused CLI use.
 /// The local status stays readable.
+#[must_use]
 pub fn service_access(scope: PauseScope, local_status: bool) -> bool {
     !cli_reviews_paused(scope) || local_status
 }
 
+#[must_use]
 pub fn cooldown_complete(previous: u64, now: u64, gap: u64) -> bool {
     gap > 0 && now >= previous && now - previous >= gap
 }
 
+#[must_use]
 pub fn included_allowance(limit: u64, remaining: u64) -> bool {
     remaining <= limit && (u128::from(limit - remaining) + 1) * 25 <= u128::from(limit) * 18
 }

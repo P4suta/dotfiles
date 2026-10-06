@@ -14,7 +14,7 @@ fn text(data: &serde_json::Value, pointer: &str) -> Result<String> {
         .to_owned())
 }
 
-pub fn refresh(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+pub(crate) fn refresh(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     match context.profile {
         Profile::Mac => mac(context, runner),
         Profile::Linux => linux(context, runner),
@@ -27,6 +27,7 @@ pub fn refresh(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
 }
 
 /// Launchers the earlier Linux and Mac repositories wrote for the same bundle, which this one takes over byte for byte.
+#[must_use]
 pub fn earlier_bundle_launchers(binary: &Path) -> [Vec<u8>; 2] {
     [
         format!("#!/bin/sh\nexec {} \"$@\"\n", binary.display()).into_bytes(),
@@ -38,6 +39,11 @@ pub fn earlier_bundle_launchers(binary: &Path) -> [Vec<u8>; 2] {
     ]
 }
 
+/// Writes a launcher at `target` that runs `binary` and takes over any launcher this or an earlier repository wrote.
+///
+/// # Errors
+///
+/// Returns an error when `target` names a directory or a launcher another tool owns, when the `binary` path lacks a UTF-8 form, or when it can't write the launcher.
 pub fn bundle_shim(target: &Path, binary: &Path) -> Result<()> {
     ensure!(
         !fs::symlink_metadata(target).is_ok_and(|metadata| metadata.is_dir()),
@@ -153,6 +159,34 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
                 .all(|byte| byte.is_ascii_digit() || byte == b'.'),
         "invalid Nerd Font version"
     );
+    kitty(context, runner, &kitty_channel)?;
+    zed(context, runner, &zed_channel, suffix, app_id)?;
+    nerd_font(context, runner, &font_version)?;
+    if runner.available(Tool::Gsettings) {
+        gnome(context, runner)?;
+    }
+    optional(
+        runner,
+        Tool::UpdateDesktopDatabase,
+        &[context
+            .home
+            .join(".local/share/applications")
+            .to_str()
+            .context("invalid applications path")?],
+    );
+    if runner.available(Tool::XdgMime) {
+        for mime in ["text/plain", "text/markdown"] {
+            checked(
+                runner,
+                Tool::XdgMime,
+                &args(&["default", &format!("{app_id}.desktop"), mime]),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn kitty(context: &ContextData, runner: &mut impl Runner, kitty_channel: &str) -> Result<()> {
     let destination = format!("dest={}", context.home.join(".local").display());
     let channel = format!("installer={kitty_channel}");
     let mut arguments = vec!["launch=n", destination.as_str()];
@@ -170,6 +204,16 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
             &context.home.join(".local/bin").join(name),
         )?;
     }
+    Ok(())
+}
+
+fn zed(
+    context: &ContextData,
+    runner: &mut impl Runner,
+    zed_channel: &str,
+    suffix: &str,
+    app_id: &str,
+) -> Result<()> {
     let bundle = context.home.join(format!(".local/zed{suffix}.app"));
     let binary = bundle.join("bin/zed");
     if !binary.is_file()
@@ -215,7 +259,7 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     if !desktop_source.is_file() {
         desktop_source = bundle.join(format!("share/applications/zed{suffix}.desktop"));
     }
-    let content = fs::read_to_string(desktop_source)?;
+    let entry = fs::read_to_string(desktop_source)?;
     let quoted_binary = format!(
         "\"{}\"",
         binary
@@ -224,7 +268,7 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
             .replace('\\', "\\\\")
             .replace('"', "\\\"")
     );
-    let desktop = content
+    let desktop = entry
         .replace(
             "Icon=zed",
             &format!(
@@ -247,6 +291,10 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
             &[desktop_target.clone().into()],
         )?;
     }
+    Ok(())
+}
+
+fn nerd_font(context: &ContextData, runner: &mut impl Runner, font_version: &str) -> Result<()> {
     let fonts = context
         .home
         .join(".local/share/fonts/JetBrainsMonoNerdFont");
@@ -272,86 +320,71 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
             checked(runner, Tool::FcCache, &["-f".into(), fonts.into()])?;
         }
     }
-    if runner.available(Tool::Gsettings) {
-        let profile = runner.run(
-            Tool::Gsettings,
-            &args(&["get", "org.gnome.Terminal.ProfilesList", "default"]),
-        )?;
-        if profile.success {
-            let id = String::from_utf8(profile.bytes)?
-                .trim()
-                .trim_matches('\'')
-                .to_owned();
-            ensure!(
-                !id.is_empty()
-                    && id
-                        .bytes()
-                        .all(|byte| byte.is_ascii_hexdigit() || byte == b'-'),
-                "invalid terminal profile identifier"
-            );
-            let schema = format!(
-                "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:{id}/"
-            );
-            for (key, value) in [
-                ("use-theme-colors", "false"),
-                ("foreground-color", "rgb(192,202,245)"),
-                ("background-color", "rgb(26,27,38)"),
-                ("use-transparent-background", "true"),
-                ("background-transparency-percent", "15"),
-                ("use-system-font", "false"),
-                ("font", "JetBrainsMono Nerd Font Mono 11"),
-            ] {
-                gsetting(runner, &schema, key, value)?;
-            }
-            gsetting(
-                runner,
-                &schema,
-                "palette",
-                "['rgb(21,22,30)', 'rgb(247,118,142)', 'rgb(158,206,106)', 'rgb(224,175,104)', 'rgb(122,162,247)', 'rgb(187,154,247)', 'rgb(125,207,255)', 'rgb(169,177,214)', 'rgb(65,72,104)', 'rgb(247,118,142)', 'rgb(158,206,106)', 'rgb(224,175,104)', 'rgb(122,162,247)', 'rgb(187,154,247)', 'rgb(125,207,255)', 'rgb(192,202,245)']",
-            )?;
-        }
-        for schema in [
-            "org.cinnamon.desktop.peripherals.keyboard",
-            "org.gnome.desktop.peripherals.keyboard",
+    Ok(())
+}
+
+/// The `gnome-terminal` profile colors and font, the keyboard repeat timing, and the Cinnamon terminal.
+fn gnome(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+    let profile = runner.run(
+        Tool::Gsettings,
+        &args(&["get", "org.gnome.Terminal.ProfilesList", "default"]),
+    )?;
+    if profile.success {
+        let id = String::from_utf8(profile.bytes)?
+            .trim()
+            .trim_matches('\'')
+            .to_owned();
+        ensure!(
+            !id.is_empty()
+                && id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() || byte == b'-'),
+            "invalid terminal profile identifier"
+        );
+        let schema = format!(
+            "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:{id}/"
+        );
+        for (key, value) in [
+            ("use-theme-colors", "false"),
+            ("foreground-color", "rgb(192,202,245)"),
+            ("background-color", "rgb(26,27,38)"),
+            ("use-transparent-background", "true"),
+            ("background-transparency-percent", "15"),
+            ("use-system-font", "false"),
+            ("font", "JetBrainsMono Nerd Font Mono 11"),
         ] {
-            gsetting(runner, schema, "repeat", "true")?;
-            for (key, pointer) in [
-                ("delay", "/desktop/keyboard/delay"),
-                ("repeat-interval", "/desktop/keyboard/repeat_interval"),
-            ] {
-                let value = context
-                    .data
-                    .pointer(pointer)
-                    .and_then(serde_json::Value::as_u64)
-                    .context("invalid keyboard timing")?;
-                gsetting(runner, schema, key, &format!("uint32 {value}"))?;
-            }
+            gsetting(runner, &schema, key, value)?;
         }
         gsetting(
             runner,
-            "org.cinnamon.desktop.default-applications.terminal",
-            "exec",
-            "kitty-herdr",
+            &schema,
+            "palette",
+            "['rgb(21,22,30)', 'rgb(247,118,142)', 'rgb(158,206,106)', 'rgb(224,175,104)', 'rgb(122,162,247)', 'rgb(187,154,247)', 'rgb(125,207,255)', 'rgb(169,177,214)', 'rgb(65,72,104)', 'rgb(247,118,142)', 'rgb(158,206,106)', 'rgb(224,175,104)', 'rgb(122,162,247)', 'rgb(187,154,247)', 'rgb(125,207,255)', 'rgb(192,202,245)']",
         )?;
     }
-    optional(
-        runner,
-        Tool::UpdateDesktopDatabase,
-        &[context
-            .home
-            .join(".local/share/applications")
-            .to_str()
-            .context("invalid applications path")?],
-    );
-    if runner.available(Tool::XdgMime) {
-        for mime in ["text/plain", "text/markdown"] {
-            checked(
-                runner,
-                Tool::XdgMime,
-                &args(&["default", &format!("{app_id}.desktop"), mime]),
-            )?;
+    for schema in [
+        "org.cinnamon.desktop.peripherals.keyboard",
+        "org.gnome.desktop.peripherals.keyboard",
+    ] {
+        gsetting(runner, schema, "repeat", "true")?;
+        for (key, pointer) in [
+            ("delay", "/desktop/keyboard/delay"),
+            ("repeat-interval", "/desktop/keyboard/repeat_interval"),
+        ] {
+            let value = context
+                .data
+                .pointer(pointer)
+                .and_then(serde_json::Value::as_u64)
+                .context("invalid keyboard timing")?;
+            gsetting(runner, schema, key, &format!("uint32 {value}"))?;
         }
     }
+    gsetting(
+        runner,
+        "org.cinnamon.desktop.default-applications.terminal",
+        "exec",
+        "kitty-herdr",
+    )?;
     Ok(())
 }
 

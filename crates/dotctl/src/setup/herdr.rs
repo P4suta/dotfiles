@@ -22,7 +22,7 @@ struct Manifest {
     sha256: String,
 }
 
-pub fn run(options: &Options) -> Result<i32> {
+pub fn run(options: &Options) {
     println!(">>> herdr install ({} channel)", options.channel);
     if let Err(err) = install(options) {
         eprintln!("herdr install failed: {err:#}");
@@ -31,7 +31,6 @@ pub fn run(options: &Options) -> Result<i32> {
             "  powershell -ExecutionPolicy Bypass -c \"irm https://herdr.dev/install.ps1 | iex\""
         );
     }
-    Ok(0)
 }
 
 #[cfg(windows)]
@@ -535,7 +534,10 @@ mod tests {
     #[test]
     fn retention_below_the_limit_removes_nothing() {
         let names = timed(&[("0.9.1-x86_64-pc-windows-msvc", 1)]);
-        assert!(stale_releases(&names, 3, "0.9.1-x86_64-pc-windows-msvc").is_empty());
+        assert_eq!(
+            stale_releases(&names, 3, "0.9.1-x86_64-pc-windows-msvc"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -557,7 +559,10 @@ mod tests {
             (".backup.0.9.1-x86_64-pc-windows-msvc.1234", 2),
             ("0.9.1-x86_64-pc-windows-msvc", 1),
         ]);
-        assert!(stale_releases(&names, 3, "0.9.1-x86_64-pc-windows-msvc").is_empty());
+        assert_eq!(
+            stale_releases(&names, 3, "0.9.1-x86_64-pc-windows-msvc"),
+            Vec::<String>::new()
+        );
         assert_eq!(
             stale_releases(&names, 0, "0.9.1-x86_64-pc-windows-msvc").len(),
             0

@@ -13,6 +13,7 @@ pub enum Verdict {
     Refuse(Reason),
 }
 
+#[must_use]
 pub fn verdict(inline_interpreter: bool, file_write: bool) -> Verdict {
     if inline_interpreter {
         Verdict::Refuse(Reason::InlineInterpreter)
@@ -23,6 +24,7 @@ pub fn verdict(inline_interpreter: bool, file_write: bool) -> Verdict {
     }
 }
 
+#[must_use]
 pub const fn next_action(reason: Reason) -> &'static str {
     match reason {
         Reason::InlineInterpreter => {
@@ -89,6 +91,27 @@ fn skip_heredoc_body(
     index
 }
 
+/// The unquoted delimiter of a here-document whose `<<` ends just before `index`, and the index after it.
+fn heredoc_delimiter(chars: &[char], mut index: usize) -> (String, usize) {
+    if chars.get(index) == Some(&'-') {
+        index += 1;
+    }
+    while matches!(chars.get(index), Some(' ' | '\t')) {
+        index += 1;
+    }
+    let mut delimiter = String::new();
+    while let Some(d) = chars.get(index) {
+        if d.is_whitespace() || matches!(d, ';' | '|' | '&' | '(' | ')' | '<' | '>') {
+            break;
+        }
+        if !matches!(d, '\'' | '"' | '\\') {
+            delimiter.push(*d);
+        }
+        index += 1;
+    }
+    (delimiter, index)
+}
+
 fn scan(command: &str) -> Scan {
     let chars: Vec<char> = command.chars().collect();
     let mut scan = Scan::default();
@@ -135,10 +158,6 @@ fn scan(command: &str) -> Scan {
                 scan.tokens.push(Token::Separator);
                 index = skip_heredoc_body(&chars, index, &mut delimiters, &mut scan.heredocs);
             }
-            ';' | '|' | '(' | ')' | '{' | '}' => {
-                flush(&mut word, &mut plain, &mut started, &mut scan.tokens);
-                scan.tokens.push(Token::Separator);
-            }
             '&' if chars.get(index) == Some(&'>') => {
                 flush(&mut word, &mut plain, &mut started, &mut scan.tokens);
                 index += 1;
@@ -147,7 +166,7 @@ fn scan(command: &str) -> Scan {
                 }
                 scan.tokens.push(Token::Redirect);
             }
-            '&' => {
+            ';' | '|' | '(' | ')' | '{' | '}' | '&' => {
                 flush(&mut word, &mut plain, &mut started, &mut scan.tokens);
                 scan.tokens.push(Token::Separator);
             }
@@ -169,23 +188,8 @@ fn scan(command: &str) -> Scan {
             }
             '<' if chars.get(index) == Some(&'<') && chars.get(index + 1) != Some(&'<') => {
                 flush(&mut word, &mut plain, &mut started, &mut scan.tokens);
-                index += 1;
-                if chars.get(index) == Some(&'-') {
-                    index += 1;
-                }
-                while matches!(chars.get(index), Some(' ' | '\t')) {
-                    index += 1;
-                }
-                let mut delimiter = String::new();
-                while let Some(d) = chars.get(index) {
-                    if d.is_whitespace() || matches!(d, ';' | '|' | '&' | '(' | ')' | '<' | '>') {
-                        break;
-                    }
-                    if !matches!(d, '\'' | '"' | '\\') {
-                        delimiter.push(*d);
-                    }
-                    index += 1;
-                }
+                let (delimiter, next) = heredoc_delimiter(&chars, index + 1);
+                index = next;
                 scan.heredoc = true;
                 delimiters.push(delimiter);
             }
@@ -200,6 +204,7 @@ fn scan(command: &str) -> Scan {
 }
 
 /// The words of each simple command in `command`, in order, each up to its first redirect.
+#[must_use]
 pub fn segments(command: &str) -> Vec<Vec<String>> {
     scan(command)
         .tokens
@@ -216,6 +221,7 @@ pub fn segments(command: &str) -> Vec<Vec<String>> {
 
 /// The program a command word names.
 /// It takes the filename, folded to small letters, without `.exe` or a version suffix.
+#[must_use]
 pub fn program(text: &str) -> String {
     let name = text.rsplit(['/', '\\']).next().unwrap_or(text);
     let lower = name.to_ascii_lowercase();
@@ -428,6 +434,7 @@ pub fn body_sources(command: &str) -> Vec<Source> {
 
 /// The two detections behind the verdict.
 /// They cover an inline interpreter and a file write.
+#[must_use]
 pub fn inspect(command: &str) -> Verdict {
     let scan = scan(command);
     let mut interpreter = false;

@@ -51,7 +51,7 @@ fn source_paths(root: &Path) -> Result<Vec<String>> {
 }
 
 /// Every target name the source declares for any profile, with each of its parent directories.
-pub fn source_targets(root: &Path, scope: &Path) -> Result<BTreeSet<String>> {
+pub(crate) fn source_targets(root: &Path, scope: &Path) -> Result<BTreeSet<String>> {
     let (config, destination) = configure(root, scope, Profile::Mac)?;
     let prefix = format!("{}/", chezmoi_path(&destination));
     let mut targets = BTreeSet::new();
@@ -146,6 +146,11 @@ pub fn audit(listing: &[String], keep: impl Fn(&str) -> bool) -> Vec<(String, Ve
 }
 
 /// Refuses an ignore pattern that matches no source target, a remove pattern that matches a managed target, and any repeated pattern.
+///
+/// # Errors
+///
+/// Returns an error when such a pattern exists for any profile.
+/// Also returns an error when reading or writing a scratch directory or source listing fails, or a chezmoi command fails.
 pub fn check(root: &Path) -> Result<()> {
     let scope = tempfile::tempdir()?;
     let targets = source_targets(root, scope.path())?;

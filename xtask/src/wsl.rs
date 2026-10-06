@@ -3,7 +3,7 @@ use anyhow::{Context, Result, ensure};
 use std::ffi::{OsStr, OsString};
 use std::process::ExitStatus;
 
-pub fn translate(
+pub(crate) fn translate(
     arguments: &[OsString],
     mut convert: impl FnMut(&OsStr) -> Result<OsString>,
 ) -> Result<Vec<OsString>> {
@@ -60,6 +60,11 @@ pub fn translate(
     Ok(result)
 }
 
+/// Runs Windows OpenSSH `ssh-keygen` for a Git signing or verification request, with file paths converted to Windows paths.
+///
+/// # Errors
+///
+/// Returns an error when the host doesn't run a native WSL profile, the arguments form no supported `ssh-keygen -Y` request, `wslpath` fails or returns an empty path, or `ssh-keygen` can't start.
 pub fn run(arguments: &[OsString]) -> Result<ExitStatus> {
     ensure!(
         crate::profiles::native_profile()? == crate::profile_rules::Profile::Wsl,

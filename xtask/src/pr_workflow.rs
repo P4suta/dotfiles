@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 const TITLE_REQUEST: &str = "@coderabbitai";
 const SUMMARY_REQUEST: &str = "@coderabbitai summary";
 const REVIEW_EXCLUSION: &str = "@coderabbitai ignore";
-/// Marks an exclusion that lasts only while the owner pauses CodeRabbit PR reviews.
+/// Marks an exclusion that lasts only while the owner pauses `CodeRabbit` PR reviews.
 const PAUSE_EXCLUSION: &str = "<!-- coderabbit-pause -->";
 
 #[derive(Debug, Parser)]
@@ -64,11 +64,11 @@ pub enum Action {
         /// Check the current GitHub document instead of local files.
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
         pr: Option<u64>,
-        /// Reject generation placeholders even in CodeRabbit mode.
+        /// Reject generation placeholders even in `CodeRabbit` mode.
         #[arg(long)]
         r#final: bool,
     },
-    /// Create a draft for local generation or request CodeRabbit generation.
+    /// Create a draft for local generation or request `CodeRabbit` generation.
     Create {
         #[command(flatten)]
         document: DocumentArgs,
@@ -219,7 +219,7 @@ pub struct Target {
     /// The exact GitHub repository rather than a URL or an inferred one.
     #[arg(long)]
     pub repo: String,
-    /// CodeRabbit mode permits its standard generation placeholders.
+    /// `CodeRabbit` mode permits its standard generation placeholders.
     #[arg(long, value_enum, default_value = "local")]
     pub generation: Generation,
     /// Repository-scoped JSON exception with repository, source URL, and reason.
@@ -703,6 +703,10 @@ fn recheck(target: &Target, title: Option<&str>) -> String {
 
 /// Runs `action` and reports every failure as one refusal.
 /// `arguments` holds the words after `pr-workflow`, whichever entry point received them.
+///
+/// # Errors
+///
+/// Returns a refusal when `action` fails, either its own or one that names the failure and the command to rerun.
 pub fn execute(action: Action, arguments: &[String]) -> Result<()> {
     let name = action.name();
     let rerun = command(
@@ -726,7 +730,7 @@ fn failure(error: &anyhow::Error, name: &str, rerun: &str) -> Refusal {
     .evidence(format!("command: {rerun}"))
 }
 
-pub fn validate(
+pub(crate) fn validate(
     target: &Target,
     title: String,
     body: String,
@@ -1297,7 +1301,7 @@ fn planned(
     .into())
 }
 
-/// Read the owner's CodeRabbit PR review pause from the guard's state.
+/// Read the owner's `CodeRabbit` PR review pause from the guard's state.
 fn pr_reviews_paused() -> Result<bool> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).context(
         "the user directory is unavailable; set HOME or USERPROFILE to read the CodeRabbit pause",
@@ -1320,7 +1324,7 @@ fn review_exclusion(body: &str) -> Exclusion {
     )
 }
 
-/// Refuse an operation that would request a CodeRabbit PR review while the owner pauses them.
+/// Refuse an operation that would request a `CodeRabbit` PR review while the owner pauses them.
 /// Also refuse one that would leave the review unowed after the owner resumes them.
 /// `live` yields the PR's current draft state and exclusion, and runs only during a pause.
 fn admit_review_request(
@@ -1463,23 +1467,7 @@ fn run(action: Action, rerun: &str) -> Result<()> {
             r#final,
         } => {
             if let Some(pr) = pr {
-                target.conventional_required()?;
-                let github = Github::connect()?;
-                let live = live_document(&github, &target, pr)?;
-                let document = validate(&target, live.title, live.body, r#final)?;
-                let destination = destination(&github, &target.repo)?;
-                written_to_standard(destination, PULL_REQUEST, &document)?;
-                require_issue(
-                    inspect_issue(
-                        &github,
-                        &target,
-                        destination,
-                        Some((&document.body, BodySource::Pr(pr))),
-                        rerun,
-                    )?,
-                    &target,
-                )?;
-                report_review_requirement(&document.body)?;
+                check_live(&target, pr, r#final, rerun)?;
             } else {
                 let destination = offline_destination(&target.repo)?;
                 let (_, document) = read_document(
@@ -1502,95 +1490,8 @@ fn run(action: Action, rerun: &str) -> Result<()> {
             base,
             draft,
             independent,
-        } => {
-            let body_file = document.body_file.clone();
-            let title = document.title.clone();
-            let (target, document) = read_document(document, false)?;
-            branch(&head)?;
-            if let Some(base) = &base {
-                branch(base)?;
-            }
-            admit_review_request(Operation::Create, target.generation, &document.body, || {
-                Ok((true, Exclusion::None))
-            })?;
-            let github = Github::connect()?;
-            let destination = destination(&github, &target.repo)?;
-            written_to_standard(destination, PULL_REQUEST, &document)?;
-            let issue = inspect_issue(
-                &github,
-                &target,
-                destination,
-                Some((&document.body, BodySource::File(&body_file))),
-                rerun,
-            )?;
-            let effect = planned(
-                Operation::Create,
-                &target,
-                None,
-                draft,
-                issue,
-                Checks::Incomplete,
-            )?;
-            github.admit_work_in_progress(&target, &head)?;
-            refuse_dependent(
-                &github,
-                &target,
-                &head,
-                base.as_deref(),
-                independent,
-                &title,
-                &body_file,
-            )?;
-            let mut args = arguments("create", &target.repo);
-            args.extend([OsString::from("--head"), head.into()]);
-            if let Some(base) = base {
-                args.extend([OsString::from("--base"), base.into()]);
-            }
-            if effect == Effect::CreateDraft {
-                args.push("--draft".into());
-            }
-            let _body = write_document(&mut args, &document)?;
-            print!("{}", gh(&args)?);
-        }
-        Action::Edit { document, pr } => {
-            let body_file = document.body_file.clone();
-            let (target, document) = read_document(document, false)?;
-            let mut connected = None;
-            admit_review_request(Operation::Edit, target.generation, &document.body, || {
-                let live = live_document(connected.insert(Github::connect()?), &target, pr)?;
-                Ok((live.is_draft, review_exclusion(&live.body)))
-            })?;
-            let github = match connected {
-                Some(github) => github,
-                None => Github::connect()?,
-            };
-            let destination = destination(&github, &target.repo)?;
-            written_to_standard(destination, PULL_REQUEST, &document)?;
-            let issue = inspect_issue(
-                &github,
-                &target,
-                destination,
-                Some((&document.body, BodySource::File(&body_file))),
-                rerun,
-            )?;
-            planned(
-                Operation::Edit,
-                &target,
-                Some(pr),
-                false,
-                issue,
-                Checks::Incomplete,
-            )?;
-            let mut args = vec![
-                OsString::from("pr"),
-                "edit".into(),
-                pr.to_string().into(),
-                "--repo".into(),
-                target.repo.into(),
-            ];
-            let _body = write_document(&mut args, &document)?;
-            print!("{}", gh(&args)?);
-        }
+        } => create(document, head, base, draft, independent, rerun)?,
+        Action::Edit { document, pr } => edit(document, pr, rerun)?,
         Action::Ready { target, pr } => {
             target.conventional_required()?;
             let github = Github::connect()?;
@@ -1640,6 +1541,127 @@ fn run(action: Action, rerun: &str) -> Result<()> {
         Action::Stack { action } => stack(action, rerun)?,
         Action::Issue { action } => issue(action)?,
     }
+    Ok(())
+}
+
+/// Checks the current GitHub document of `pr` and the issue it links.
+fn check_live(target: &Target, pr: u64, r#final: bool, rerun: &str) -> Result<()> {
+    target.conventional_required()?;
+    let github = Github::connect()?;
+    let live = live_document(&github, target, pr)?;
+    let document = validate(target, live.title, live.body, r#final)?;
+    let destination = destination(&github, &target.repo)?;
+    written_to_standard(destination, PULL_REQUEST, &document)?;
+    require_issue(
+        inspect_issue(
+            &github,
+            target,
+            destination,
+            Some((&document.body, BodySource::Pr(pr))),
+            rerun,
+        )?,
+        target,
+    )?;
+    report_review_requirement(&document.body)
+}
+
+fn create(
+    document: DocumentArgs,
+    head: String,
+    base: Option<String>,
+    draft: bool,
+    independent: bool,
+    rerun: &str,
+) -> Result<()> {
+    let body_file = document.body_file.clone();
+    let title = document.title.clone();
+    let (target, document) = read_document(document, false)?;
+    branch(&head)?;
+    if let Some(base) = &base {
+        branch(base)?;
+    }
+    admit_review_request(Operation::Create, target.generation, &document.body, || {
+        Ok((true, Exclusion::None))
+    })?;
+    let github = Github::connect()?;
+    let destination = destination(&github, &target.repo)?;
+    written_to_standard(destination, PULL_REQUEST, &document)?;
+    let issue = inspect_issue(
+        &github,
+        &target,
+        destination,
+        Some((&document.body, BodySource::File(&body_file))),
+        rerun,
+    )?;
+    let effect = planned(
+        Operation::Create,
+        &target,
+        None,
+        draft,
+        issue,
+        Checks::Incomplete,
+    )?;
+    github.admit_work_in_progress(&target, &head)?;
+    refuse_dependent(
+        &github,
+        &target,
+        &head,
+        base.as_deref(),
+        independent,
+        &title,
+        &body_file,
+    )?;
+    let mut args = arguments("create", &target.repo);
+    args.extend([OsString::from("--head"), head.into()]);
+    if let Some(base) = base {
+        args.extend([OsString::from("--base"), base.into()]);
+    }
+    if effect == Effect::CreateDraft {
+        args.push("--draft".into());
+    }
+    let _body = write_document(&mut args, &document)?;
+    print!("{}", gh(&args)?);
+    Ok(())
+}
+
+fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
+    let body_file = document.body_file.clone();
+    let (target, document) = read_document(document, false)?;
+    let mut connected = None;
+    admit_review_request(Operation::Edit, target.generation, &document.body, || {
+        let live = live_document(connected.insert(Github::connect()?), &target, pr)?;
+        Ok((live.is_draft, review_exclusion(&live.body)))
+    })?;
+    let github = match connected {
+        Some(github) => github,
+        None => Github::connect()?,
+    };
+    let destination = destination(&github, &target.repo)?;
+    written_to_standard(destination, PULL_REQUEST, &document)?;
+    let issue = inspect_issue(
+        &github,
+        &target,
+        destination,
+        Some((&document.body, BodySource::File(&body_file))),
+        rerun,
+    )?;
+    planned(
+        Operation::Edit,
+        &target,
+        Some(pr),
+        false,
+        issue,
+        Checks::Incomplete,
+    )?;
+    let mut args = vec![
+        OsString::from("pr"),
+        "edit".into(),
+        pr.to_string().into(),
+        "--repo".into(),
+        target.repo.into(),
+    ];
+    let _body = write_document(&mut args, &document)?;
+    print!("{}", gh(&args)?);
     Ok(())
 }
 
@@ -1819,7 +1841,7 @@ fn wait(target: &Target, pr: u64, polling: Polling, started: Instant) -> Result<
     Ok(())
 }
 
-/// Adds the CodeRabbit pause lines, so the draft becomes ready during the pause of the owner.
+/// Adds the `CodeRabbit` pause lines, so the draft becomes ready during the pause of the owner.
 /// After resumption, the PR needs the review again.
 fn add_pause_lines(target: &Target, pr: u64, view: &MergeView) -> Result<()> {
     let mut body = view.body.trim_end().to_owned();
@@ -1933,11 +1955,7 @@ impl Lease {
         seed.update(std::process::id().to_le_bytes());
         seed.update(format!("{:?}", std::time::SystemTime::now()));
         seed.update(probe.path().as_os_str().as_encoded_bytes());
-        let token: String = seed
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
+        let token = crate::build_inputs::hex(&seed.finalize());
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -2172,14 +2190,13 @@ fn refuse_dependent(
     if others.is_empty() {
         return Ok(());
     }
-    let trunk = match base {
-        Some(base) => base.to_owned(),
-        None => {
-            let repository: Repository = github.read(&format!("repos/{}", target.repo))?;
-            repository
-                .default_branch
-                .context("GitHub reported no default branch")?
-        }
+    let trunk = if let Some(base) = base {
+        base.to_owned()
+    } else {
+        let repository: Repository = github.read(&format!("repos/{}", target.repo))?;
+        repository
+            .default_branch
+            .context("GitHub reported no default branch")?
     };
     git_output(&["fetch", "--quiet", "origin"])?;
     let trunk = format!("refs/remotes/origin/{trunk}");
@@ -2253,72 +2270,75 @@ fn created_number(output: &str) -> Result<u64> {
         .context("gh pr create printed no PR URL")
 }
 
+/// Opens a draft PR on top of the open PR whose head names `base`, and links the stack.
+fn create_stacked(document: DocumentArgs, head: &str, base: &str, rerun: &str) -> Result<()> {
+    let body_file = document.body_file.clone();
+    let (target, document) = read_document(document, false)?;
+    branch(head)?;
+    branch(base)?;
+    admit_review_request(Operation::Create, target.generation, &document.body, || {
+        Ok((true, Exclusion::None))
+    })?;
+    let github = Github::connect()?;
+    let destination = destination(&github, &target.repo)?;
+    written_to_standard(destination, PULL_REQUEST, &document)?;
+    let issue = inspect_issue(
+        &github,
+        &target,
+        destination,
+        Some((&document.body, BodySource::File(&body_file))),
+        rerun,
+    )?;
+    planned(
+        Operation::Create,
+        &target,
+        None,
+        true,
+        issue,
+        Checks::Incomplete,
+    )?;
+    let (below, trunk) = chain(&open_prs(&target)?, base);
+    require(!below.is_empty(), || {
+        Refusal::new(
+            "pr.stack",
+            format!("{base} has no open PR to stack on; open the parent PR first"),
+            command(&[
+                "pr-workflow",
+                "create",
+                "--repo",
+                &target.repo,
+                "--head",
+                base,
+                "--title",
+                "<title>",
+                "--body-file",
+                "<body-file>",
+            ]),
+        )
+        .evidence(format!("no open PR has the head {base}"))
+    })?;
+    let mut args = arguments("create", &target.repo);
+    args.extend(["--head", head, "--base", base, "--draft"].map(OsString::from));
+    let _body = write_document(&mut args, &document)?;
+    let created = gh(&args)?;
+    print!("{created}");
+    let mut link = vec!["link".to_owned(), "--base".to_owned(), trunk];
+    link.extend(below.iter().map(u64::to_string));
+    link.push(created_number(&created)?.to_string());
+    gh_stack(
+        &target,
+        None,
+        &link.iter().map(String::as_str).collect::<Vec<_>>(),
+    )
+}
+
 fn stack(action: StackAction, rerun: &str) -> Result<()> {
     match action {
         StackAction::Create {
             document,
             head,
             base,
-        } => {
-            let body_file = document.body_file.clone();
-            let (target, document) = read_document(document, false)?;
-            branch(&head)?;
-            branch(&base)?;
-            admit_review_request(Operation::Create, target.generation, &document.body, || {
-                Ok((true, Exclusion::None))
-            })?;
-            let github = Github::connect()?;
-            let destination = destination(&github, &target.repo)?;
-            written_to_standard(destination, PULL_REQUEST, &document)?;
-            let issue = inspect_issue(
-                &github,
-                &target,
-                destination,
-                Some((&document.body, BodySource::File(&body_file))),
-                rerun,
-            )?;
-            planned(
-                Operation::Create,
-                &target,
-                None,
-                true,
-                issue,
-                Checks::Incomplete,
-            )?;
-            let (below, trunk) = chain(&open_prs(&target)?, &base);
-            require(!below.is_empty(), || {
-                Refusal::new(
-                    "pr.stack",
-                    format!("{base} has no open PR to stack on; open the parent PR first"),
-                    command(&[
-                        "pr-workflow",
-                        "create",
-                        "--repo",
-                        &target.repo,
-                        "--head",
-                        &base,
-                        "--title",
-                        "<title>",
-                        "--body-file",
-                        "<body-file>",
-                    ]),
-                )
-                .evidence(format!("no open PR has the head {base}"))
-            })?;
-            let mut args = arguments("create", &target.repo);
-            args.extend(["--head", &head, "--base", &base, "--draft"].map(OsString::from));
-            let _body = write_document(&mut args, &document)?;
-            let created = gh(&args)?;
-            print!("{created}");
-            let mut link = vec!["link".to_owned(), "--base".to_owned(), trunk];
-            link.extend(below.iter().map(u64::to_string));
-            link.push(created_number(&created)?.to_string());
-            gh_stack(
-                &target,
-                None,
-                &link.iter().map(String::as_str).collect::<Vec<_>>(),
-            )?;
-        }
+        } => create_stacked(document, &head, &base, rerun)?,
         StackAction::Sync { target } => {
             target.conventional_required()?;
             sync_stack(&target)?;
@@ -2382,7 +2402,7 @@ fn issue(action: IssueAction) -> Result<()> {
     Ok(())
 }
 
-pub fn install(binary: &std::path::Path, user_directory: &std::path::Path) -> Result<()> {
+pub(crate) fn install(binary: &std::path::Path, user_directory: &std::path::Path) -> Result<()> {
     let directory = user_directory.join(".local/bin");
     fs::create_dir_all(&directory)?;
     let file = tempfile::NamedTempFile::new_in(&directory)?;
@@ -2397,6 +2417,12 @@ pub fn install(binary: &std::path::Path, user_directory: &std::path::Path) -> Re
     Ok(())
 }
 
+/// Installs the reviewed PR skill through `apply` and the `pr-workflow` binary under `user_directory`, then records the new catalog.
+///
+/// # Errors
+///
+/// Returns an error when the source catalog fails its check, the installed catalog or policy differs from its approved identity, or another installed managed skill has changed.
+/// Also returns an error when `apply` fails, the installed PR skill differs from the source, or reading, copying, or writing a file fails.
 pub fn deploy(
     source: &std::path::Path,
     binary: &std::path::Path,

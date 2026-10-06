@@ -78,6 +78,7 @@ fn first_command(args: &[String]) -> Option<&str> {
     None
 }
 
+#[must_use]
 pub fn classify(args: &[String]) -> Invocation {
     if args.iter().any(|arg| {
         arg == "--use-credits"
@@ -107,6 +108,11 @@ pub fn classify(args: &[String]) -> Invocation {
     }
 }
 
+/// Checks that one more review fits the rolling hourly and daily limits of the ledger `records`.
+///
+/// # Errors
+///
+/// Returns an error when a record lies after `now`, or when the rolling hour or day has no allowance left.
 pub fn check_budget(records: &[u64], now: u64) -> Result<()> {
     ensure!(
         records.iter().all(|at| *at <= now),
@@ -121,6 +127,12 @@ pub fn check_budget(records: &[u64], now: u64) -> Result<()> {
     Ok(())
 }
 
+/// Checks a `CodeRabbit` usage response for included allowance on the guarded organization with paid usage inactive.
+///
+/// # Errors
+///
+/// Returns an error when a line holds something other than JSON, when the response lacks exactly one completed usage event, or when that event names another organization.
+/// Returns an error when the included allowance runs out or falls short, or when paid review usage stays active.
 pub fn check_usage(text: &str, organization: &str) -> Result<()> {
     let events: Vec<serde_json::Value> = text
         .lines()
@@ -165,6 +177,11 @@ pub fn check_usage(text: &str, organization: &str) -> Result<()> {
     Ok(())
 }
 
+/// Reads the review directory from a `--dir` or `--dir=` argument.
+///
+/// # Errors
+///
+/// Returns an error when `--dir` has no value, or when the arguments name the directory twice or name an empty one or one that starts with `-`.
 pub fn review_directory(args: &[String]) -> Result<Option<std::path::PathBuf>> {
     let mut directory = None;
     for (index, arg) in args.iter().enumerate() {
@@ -188,14 +205,14 @@ pub fn review_directory(args: &[String]) -> Result<Option<std::path::PathBuf>> {
     Ok(directory)
 }
 
-pub fn records(text: &str) -> Result<Vec<u64>> {
+pub(crate) fn records(text: &str) -> Result<Vec<u64>> {
     ensure!(
         text.is_empty() || text.ends_with('\n'),
         "truncated review ledger; refusing to reset allowance"
     );
     let records: Vec<u64> = text
         .lines()
-        .map(|line| line.parse())
+        .map(str::parse)
         .collect::<std::result::Result<_, _>>()
         .context("corrupt review ledger; refusing to reset allowance")?;
     ensure!(
@@ -205,7 +222,7 @@ pub fn records(text: &str) -> Result<Vec<u64>> {
     Ok(records)
 }
 
-pub fn lock_ledger(path: &Path) -> Result<(LedgerLock, Vec<u64>)> {
+pub(crate) fn lock_ledger(path: &Path) -> Result<(LedgerLock, Vec<u64>)> {
     let metadata = std::fs::symlink_metadata(path).context(
         "review ledger is missing; inspect the guard installation without resetting history",
     )?;
@@ -229,12 +246,17 @@ pub fn lock_ledger(path: &Path) -> Result<(LedgerLock, Vec<u64>)> {
     Ok((file, records(&text)?))
 }
 
-pub fn record(file: &mut File, now: u64) -> Result<()> {
+pub(crate) fn record(file: &mut File, now: u64) -> Result<()> {
     writeln!(file, "{now}")?;
     file.sync_all()
         .context("persist CodeRabbit review reservation before launch")
 }
 
+/// Locks the review ledger at `path` and records a review at `now` when the budget has room for one.
+///
+/// # Errors
+///
+/// Returns an error when locking or reading the ledger fails, when the budget check fails, or when persisting the record fails.
 pub fn reserve(path: &Path, now: u64) -> Result<LedgerLock> {
     let (mut file, records) = lock_ledger(path)?;
     check_budget(&records, now)?;
@@ -242,6 +264,12 @@ pub fn reserve(path: &Path, now: u64) -> Result<LedgerLock> {
     Ok(file)
 }
 
+/// Records a usage query in the probe `ledger` and runs `probe` when the cooldown and probe budget permit it.
+///
+/// # Errors
+///
+/// Returns an error when locking, reading, or writing the ledger fails, when a record lies after `now`, or when the cooldown or budget refuses the query.
+/// Returns the error of `probe`.
 pub fn execute_probe<T>(ledger: &Path, now: u64, probe: impl FnOnce() -> Result<T>) -> Result<T> {
     let (mut file, history) = lock_ledger(ledger)?;
     ensure!(
@@ -265,6 +293,7 @@ pub fn execute_probe<T>(ledger: &Path, now: u64, probe: impl FnOnce() -> Result<
     probe()
 }
 
+#[must_use]
 pub fn usage_query(args: &[String]) -> bool {
     first_command(args) == Some("usage")
         || (matches!(first_command(args), None | Some("review"))
@@ -272,6 +301,10 @@ pub fn usage_query(args: &[String]) -> bool {
 }
 
 /// Run a guarded review only while the owner leaves CLI use unpaused CLI use.
+///
+/// # Errors
+///
+/// Returns an error when `scope` pauses CLI use, or any error of [`execute_reserved`].
 pub fn execute_admitted(
     scope: PauseScope,
     ledger: &Path,
@@ -294,6 +327,12 @@ fn admit(scope: PauseScope, local_status: bool) -> Result<()> {
     Ok(())
 }
 
+/// Reserves a review in `ledger`, verifies the included allowance through a usage probe, and then runs `review`.
+///
+/// # Errors
+///
+/// Returns an error when the reservation, the usage probe, or the usage check fails.
+/// Returns the error of `review`.
 pub fn execute_reserved(
     ledger: &Path,
     probes: &Path,
@@ -352,6 +391,11 @@ fn initialize_ledger(user_directory: &Path, marker: &str, name: &str) -> Result<
     Ok(locked)
 }
 
+/// Initializes the review and usage ledgers under `user_directory` and installs `binary` as the `coderabbit` and `cr` wrappers.
+///
+/// # Errors
+///
+/// Returns an error when `binary` names something other than a file, when initializing or locking a ledger fails, or when copying or replacing a wrapper fails.
 pub fn install(binary: &Path, user_directory: &Path) -> Result<()> {
     use std::fs;
     ensure!(binary.is_file(), "built review guard is missing");
@@ -386,6 +430,12 @@ pub fn install(binary: &Path, user_directory: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Parses the review guard policy and returns its organization and vendor version.
+///
+/// # Errors
+///
+/// Returns an error when the policy lacks the shape of a JSON object with exactly three fields, when `review_os` differs from `macos`, or when the organization stays empty.
+/// Returns an error when the policy lacks a vendor version or the version lacks exactly three numeric parts.
 pub fn validate_policy(text: &str) -> Result<(String, String)> {
     let value: serde_json::Value = serde_json::from_str(text)?;
     let object = value
@@ -414,6 +464,10 @@ pub fn validate_policy(text: &str) -> Result<(String, String)> {
 }
 
 /// Read the owner's persistent pause markers, where `paused` marks every scope.
+///
+/// # Errors
+///
+/// Returns an error when checking whether a pause marker exists fails.
 pub fn pause(user_directory: &Path) -> Result<PauseScope> {
     let state = user_directory.join(".local/state/coderabbit-guard");
     let marker = |name: &str| {
@@ -433,68 +487,50 @@ fn review_state(paused: bool) -> &'static str {
     if paused { "paused" } else { "allowed" }
 }
 
-pub fn now_ms() -> Result<u64> {
+pub(crate) fn now_ms() -> Result<u64> {
     Ok(std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_millis()
         .try_into()?)
 }
 
-pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
-    let (organization, version) = validate_policy(&std::fs::read_to_string(
-        user_directory.join(".config/coderabbit-guard/policy.json"),
-    )?)?;
-    let ledger = user_directory.join(".local/state/coderabbit-guard/reviews.log");
-    let scope = pause(user_directory)?;
-    let json = args.len() == 2
-        && args.iter().any(|arg| arg == "--guard-status")
-        && args.iter().any(|arg| arg == "--json");
-    let status = json || args == ["--guard-status"];
-    admit(scope, status)?;
-    if status {
-        let (_file, history) = lock_ledger(&ledger)?;
-        let now = now_ms()?;
-        ensure!(
-            history.last().is_none_or(|at| *at <= now),
-            "clock moved backwards"
+/// Prints the reviews of the rolling hour and day next to their limits.
+/// Also prints the pause and the organization.
+fn report_status(ledger: &Path, organization: &str, scope: PauseScope, json: bool) -> Result<()> {
+    let (_file, history) = lock_ledger(ledger)?;
+    let now = now_ms()?;
+    ensure!(
+        history.last().is_none_or(|at| *at <= now),
+        "clock moved backwards"
+    );
+    let hourly = history.iter().filter(|at| now - **at < HOUR_MS).count();
+    let daily = history.iter().filter(|at| now - **at < DAY_MS).count();
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "schema": 1,
+                "organization": organization,
+                "pause": scope.name(),
+                "reviews": {
+                    "pr": review_state(pr_reviews_paused(scope)),
+                    "cli": review_state(cli_reviews_paused(scope)),
+                },
+                "rolling_hour": {"used": hourly, "limit": HOURLY_LIMIT},
+                "rolling_day": {"used": daily, "limit": DAILY_LIMIT},
+            })
         );
-        let hourly = history.iter().filter(|at| now - **at < HOUR_MS).count();
-        let daily = history.iter().filter(|at| now - **at < DAY_MS).count();
-        if json {
-            println!(
-                "{}",
-                serde_json::json!({
-                    "schema": 1,
-                    "organization": organization,
-                    "pause": scope.name(),
-                    "reviews": {
-                        "pr": review_state(pr_reviews_paused(scope)),
-                        "cli": review_state(cli_reviews_paused(scope)),
-                    },
-                    "rolling_hour": {"used": hourly, "limit": HOURLY_LIMIT},
-                    "rolling_day": {"used": daily, "limit": DAILY_LIMIT},
-                })
-            );
-        } else {
-            println!(
-                "CodeRabbit guard: {hourly}/{HOURLY_LIMIT} in rolling hour; {daily}/{DAILY_LIMIT} in rolling day; organization {organization}; pause {}",
-                scope.name()
-            );
-        }
-        return Ok(0);
-    }
-    let kind = classify(&args);
-    if kind == Invocation::Forbidden {
-        bail!(
-            "paid reviews, inline API keys, remote scopes, cloud coding, and self-update are disabled by the CodeRabbit guard"
+    } else {
+        println!(
+            "CodeRabbit guard: {hourly}/{HOURLY_LIMIT} in rolling hour; {daily}/{DAILY_LIMIT} in rolling day; organization {organization}; pause {}",
+            scope.name()
         );
     }
-    if kind == Invocation::Review || usage_query(&args) {
-        ensure!(
-            std::env::consts::OS == "macos",
-            "managed service reviews and usage queries run only on the Mac; other hosts perform native local checks"
-        );
-    }
+    Ok(())
+}
+
+/// The pinned `CodeRabbit` runtime that mise installed and renamed.
+fn vendor(version: &str) -> Result<std::path::PathBuf> {
     let location = Tool::Mise
         .command()
         .args(["where", &format!("http:coderabbit@{version}")])
@@ -518,6 +554,43 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
         vendor.is_file(),
         "CodeRabbit vendor runtime must be renamed by mise before using the guard"
     );
+    Ok(vendor)
+}
+
+/// Runs a `CodeRabbit` invocation through the guard and returns its exit code.
+///
+/// # Errors
+///
+/// Returns an error when reading the policy or pause markers fails, when a pause covers CLI use, or when the guard forbids the invocation.
+/// Returns an error when a review or usage query runs off macOS, when the vendor runtime goes missing or drifts, or when the budget or allowance refuses the review.
+pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
+    let (organization, version) = validate_policy(&std::fs::read_to_string(
+        user_directory.join(".config/coderabbit-guard/policy.json"),
+    )?)?;
+    let ledger = user_directory.join(".local/state/coderabbit-guard/reviews.log");
+    let scope = pause(user_directory)?;
+    let json = args.len() == 2
+        && args.iter().any(|arg| arg == "--guard-status")
+        && args.iter().any(|arg| arg == "--json");
+    let status = json || args == ["--guard-status"];
+    admit(scope, status)?;
+    if status {
+        report_status(&ledger, &organization, scope, json)?;
+        return Ok(0);
+    }
+    let kind = classify(&args);
+    if kind == Invocation::Forbidden {
+        bail!(
+            "paid reviews, inline API keys, remote scopes, cloud coding, and self-update are disabled by the CodeRabbit guard"
+        );
+    }
+    if kind == Invocation::Review || usage_query(&args) {
+        ensure!(
+            std::env::consts::OS == "macos",
+            "managed service reviews and usage queries run only on the Mac; other hosts perform native local checks"
+        );
+    }
+    let vendor = vendor(&version)?;
     if kind == Invocation::ReadOnly {
         if usage_query(&args) {
             return execute_probe(

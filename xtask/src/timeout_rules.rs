@@ -6,6 +6,7 @@ pub const WINDOW: usize = 20;
 
 /// The nearest-rank ninety-fifth percentile of `sorted`, ascending.
 /// With fewer than 20 runs it equals the slowest one.
+#[must_use]
 pub const fn percentile(sorted: &[u64]) -> Option<u64> {
     if sorted.is_empty() {
         return None;
@@ -15,6 +16,7 @@ pub const fn percentile(sorted: &[u64]) -> Option<u64> {
 }
 
 /// The time a run gets beyond its expectation: half again, plus ten seconds for start-up noise.
+#[must_use]
 pub const fn with_margin(expected: u64) -> u64 {
     expected.saturating_add(expected / 2).saturating_add(10_000)
 }
@@ -28,6 +30,7 @@ pub enum Timeout {
 }
 
 impl Timeout {
+    #[must_use]
     pub const fn millis(self) -> u64 {
         match self {
             Self::Keep(millis) | Self::Set(millis) => millis,
@@ -37,6 +40,7 @@ impl Timeout {
 
 /// The timeout for one call: the observed high percentile with its margin, or the profile default without history, never over the client limit.
 /// A requested timeout stays when it covers that floor within the limit, and one beyond the limit becomes the limit.
+#[must_use]
 pub const fn timeout(
     observed: Option<u64>,
     default: u64,
@@ -56,6 +60,7 @@ pub const fn timeout(
 }
 
 /// The hook reports a run that took longer than its expectation, so the next one can run in the background.
+#[must_use]
 pub const fn overran(expected: Option<u64>, took: u64) -> bool {
     match expected {
         Some(expected) => took > expected,

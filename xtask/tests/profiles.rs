@@ -187,7 +187,7 @@ fn managed_listings_are_nul_separated_text() {
         profiles::managed_paths(b".config/git/config\0path with ' quote\0").unwrap(),
         [".config/git/config", "path with ' quote"]
     );
-    assert!(profiles::managed_paths(b"").unwrap().is_empty());
+    assert_eq!(profiles::managed_paths(b"").unwrap(), Vec::<String>::new());
     assert!(profiles::managed_paths(b"\xff\0").is_err());
 }
 
@@ -213,11 +213,36 @@ fn skipped_setup_scripts_need_a_target_name_and_a_reason() {
     ] {
         assert!(profiles::declared_skips(&rejected).is_err(), "{rejected}");
     }
-    assert!(
-        profiles::declared_skips(&serde_json::json!({}))
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        profiles::declared_skips(&serde_json::json!({})).unwrap(),
+        Vec::<profiles::SkippedScript>::new()
     );
+}
+
+/// How many `jq` entries the mise configuration renders when the personal list repeats the common one.
+fn rendered_tool_entries(
+    mut chezmoi: std::process::Command,
+    profile: Profile,
+    home: &Path,
+) -> usize {
+    let mise = chezmoi
+        .arg("--override-data")
+        .arg(format!(
+            r#"{{"platforms":{{"{0}":{{"tools":{{"personal":["jq"]}}}}}}}}"#,
+            profile.name()
+        ))
+        .args(["cat"])
+        .arg(home.join(".config/mise/config.toml"))
+        .output()
+        .unwrap();
+    assert!(
+        mise.status.success(),
+        "{}",
+        String::from_utf8_lossy(&mise.stderr)
+    );
+    String::from_utf8_lossy(&mise.stdout)
+        .matches("\n\"jq\" =")
+        .count()
 }
 
 #[test]
@@ -259,25 +284,12 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
                 "the rehearsal keeps only declared requirements: {kept}"
             );
         }
-        let mise = profiles::chezmoi(root, scope.path(), &config, &home)
-            .arg("--override-data")
-            .arg(format!(
-                r#"{{"platforms":{{"{0}":{{"tools":{{"personal":["jq"]}}}}}}}}"#,
-                profile.name()
-            ))
-            .args(["cat"])
-            .arg(home.join(".config/mise/config.toml"))
-            .output()
-            .unwrap();
-        assert!(
-            mise.status.success(),
-            "{}",
-            String::from_utf8_lossy(&mise.stderr)
-        );
         assert_eq!(
-            String::from_utf8_lossy(&mise.stdout)
-                .matches("\n\"jq\" =")
-                .count(),
+            rendered_tool_entries(
+                profiles::chezmoi(root, scope.path(), &config, &home),
+                profile,
+                &home
+            ),
             1,
             "a tool listed twice must render once"
         );
@@ -314,7 +326,7 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
             String::from_utf8_lossy(&listed.stderr)
         );
         let scripts = profiles::managed_paths(&listed.stdout).unwrap();
-        assert!(!scripts.is_empty());
+        assert_ne!(scripts, Vec::<String>::new());
         for skip in skips {
             assert!(
                 !scripts.contains(&skip.script),
@@ -393,14 +405,18 @@ fn comment_overrides_cannot_capture_whole_directories() {
 #[test]
 fn setup_order_rejects_a_step_that_runs_before_its_prerequisite() {
     use dotfiles_xtask::setup::{Step, ordering_violations};
-    assert!(
-        ordering_violations(&[Step::Runtime, Step::Mise, Step::Tools, Step::Domyjob]).is_empty()
+    assert_eq!(
+        ordering_violations(&[Step::Runtime, Step::Mise, Step::Tools, Step::Domyjob]),
+        Vec::<(Step, Step)>::new()
     );
     assert_eq!(
         ordering_violations(&[Step::Mise, Step::Domyjob, Step::Tools]),
         [(Step::Domyjob, Step::Tools)]
     );
-    assert!(ordering_violations(&[Step::Domyjob]).is_empty());
+    assert_eq!(
+        ordering_violations(&[Step::Domyjob]),
+        Vec::<(Step, Step)>::new()
+    );
     let listing = br#"{"10-b.sh":{"sourceRelative":"run_onchange_after_10-b.sh.tmpl"},"a.sh":{"sourceRelative":"run_after_a.sh.tmpl"},"z.sh":{"sourceRelative":"run_onchange_before_z.sh.tmpl"}}"#;
     assert_eq!(
         profiles::script_order(listing).unwrap(),
@@ -412,7 +428,10 @@ fn setup_order_rejects_a_step_that_runs_before_its_prerequisite() {
 fn setup_that_needs_a_package_requires_the_profile_to_install_it() {
     let scripts = "exec dotfiles-xtask --root /s setup domyjob --config /c --live\n";
     let provided = serde_json::json!({"brew": {"formulae": ["jq", "lefthook"]}});
-    assert!(profiles::unprovisioned(Profile::Mac, &provided, scripts, "").is_empty());
+    assert_eq!(
+        profiles::unprovisioned(Profile::Mac, &provided, scripts, ""),
+        Vec::<String>::new()
+    );
     let missing = serde_json::json!({"brew": {"formulae": ["jq"]}});
     assert_eq!(
         profiles::unprovisioned(Profile::Mac, &missing, scripts, ""),
@@ -651,9 +670,15 @@ fn recipe_references_are_commands_rather_than_prose() {
     assert_eq!(found("see just apply", false), ["apply"]);
     assert_eq!(found("just refresh CONFIG", true), ["refresh"]);
     assert_eq!(found("$ just verify", true), ["verify"]);
-    assert!(found("This runs just before the hook.", false).is_empty());
-    assert!(found("just refresh CONFIG", false).is_empty());
-    assert!(found("`just --list` prints recipes", true).is_empty());
+    assert_eq!(
+        found("This runs just before the hook.", false),
+        Vec::<String>::new()
+    );
+    assert_eq!(found("just refresh CONFIG", false), Vec::<String>::new());
+    assert_eq!(
+        found("`just --list` prints recipes", true),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
@@ -670,14 +695,20 @@ fn agent_launchers_require_doppler_wherever_they_render() {
         entry_requirements("& 'C:/tools/dotfiles-xtask.exe' agent codex"),
         [Tool::Doppler]
     );
-    assert!(entry_requirements("dotfiles-xtask --root /source setup tools --live").is_empty());
+    assert_eq!(
+        entry_requirements("dotfiles-xtask --root /source setup tools --live"),
+        Vec::<dotfiles_xtask::tool::Tool>::new()
+    );
     assert_eq!(
         entry_requirements(
             r#"exec 'C:/Users/owner/.local/bin/dotfiles-xtask.exe' hook pre-commit -- "$@""#
         ),
         [Tool::Lefthook]
     );
-    assert!(entry_requirements("The agent reads its configuration here.").is_empty());
+    assert_eq!(
+        entry_requirements("The agent reads its configuration here."),
+        Vec::<dotfiles_xtask::tool::Tool>::new()
+    );
 }
 
 #[test]
@@ -689,8 +720,14 @@ fn a_profile_without_the_package_an_entry_point_needs_is_unprovisioned() {
         ["/tools/common/doppler"]
     );
     let with = serde_json::json!({"tools": {"common": ["jq", "doppler"]}});
-    assert!(profiles::unprovisioned(Profile::Mac, &with, "", launcher).is_empty());
-    assert!(profiles::unprovisioned(Profile::Mac, &without, "", "").is_empty());
+    assert_eq!(
+        profiles::unprovisioned(Profile::Mac, &with, "", launcher),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        profiles::unprovisioned(Profile::Mac, &without, "", ""),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
@@ -831,10 +868,9 @@ fn a_modify_template_that_drops_a_host_key_still_refuses_application() {
             .unwrap()
             .success()
     );
-    assert!(
-        profiles::uncommitted_host_edits(&source, &state, &config, &destination)
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        profiles::uncommitted_host_edits(&source, &state, &config, &destination).unwrap(),
+        Vec::<String>::new()
     );
     fs::write(
         destination.join(".client/settings.json"),
@@ -859,7 +895,7 @@ fn a_merge_keeps_host_keys_only_when_every_key_path_survives() {
         .unwrap()
     );
     assert!(!keeps("a.json", r#"{"a":{"b":1},"c":2}"#, r#"{"a":{"d":4},"c":2}"#).unwrap());
-    assert!(!keeps("a.json", r#"{"a":1}"#, r#"{}"#).unwrap());
+    assert!(!keeps("a.json", r#"{"a":1}"#, r"{}").unwrap());
     assert!(keeps("a.json", "", r#"{"memory":false}"#).unwrap());
     assert!(
         keeps(

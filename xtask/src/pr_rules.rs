@@ -28,6 +28,7 @@ pub enum IssueGate {
 }
 
 /// Apply personal issue rules only to owned non-fork repositories.
+#[must_use]
 pub fn issue_gate(personal_owner: bool, fork: bool, checked_issue: bool) -> IssueGate {
     if !personal_owner || fork {
         IssueGate::NotRequired
@@ -38,10 +39,12 @@ pub fn issue_gate(personal_owner: bool, fork: bool, checked_issue: bool) -> Issu
     }
 }
 
+#[must_use]
 pub fn api_quota_available(remaining: u64, reserve: u64) -> bool {
     reserve > 0 && remaining >= reserve
 }
 
+#[must_use]
 pub fn coderabbit_body_marker_allowed(request: bool, summary: bool, ignore: bool) -> bool {
     ignore || request && summary
 }
@@ -53,6 +56,7 @@ pub enum Checks {
     Incomplete,
 }
 
+#[must_use]
 pub fn checks_state(total: usize, unfinished: usize, failed: usize) -> Checks {
     if total > 0 && unfinished == 0 && failed == 0 {
         Checks::Passing
@@ -70,7 +74,7 @@ pub enum Blocker {
     UnfinishedChecks,
 }
 
-/// Why a PR body excludes CodeRabbit's automatic review.
+/// Why a PR body excludes `CodeRabbit`'s automatic review.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Exclusion {
     None,
@@ -80,6 +84,7 @@ pub enum Exclusion {
     Pause,
 }
 
+#[must_use]
 pub fn exclusion(ignore: bool, pause_marker: bool) -> Exclusion {
     match (ignore, pause_marker) {
         (false, _) => Exclusion::None,
@@ -88,8 +93,9 @@ pub fn exclusion(ignore: bool, pause_marker: bool) -> Exclusion {
     }
 }
 
-/// Whether an operation asks CodeRabbit for a PR review or generation.
+/// Whether an operation asks `CodeRabbit` for a PR review or generation.
 /// An edit requests a review when it removes the exclusion of a ready PR.
+#[must_use]
 pub fn requests_review(
     operation: Operation,
     generation: Generation,
@@ -107,6 +113,7 @@ pub fn requests_review(
 
 /// Whether an operation during a PR pause keeps the review owed after resumption.
 /// A PR becomes ready, or stays ready, only with the exclusion made for the pause.
+#[must_use]
 pub fn keeps_pause_exclusion(
     operation: Operation,
     draft: bool,
@@ -120,12 +127,13 @@ pub fn keeps_pause_exclusion(
     }
 }
 
-/// Refuse every review request while the owner pauses CodeRabbit PR reviews.
+/// Refuse every review request while the owner pauses `CodeRabbit` PR reviews.
+#[must_use]
 pub fn review_request_allowed(paused: bool, request: bool) -> bool {
     !paused || !request
 }
 
-/// The CodeRabbit PR review a published PR still owes.
+/// The `CodeRabbit` PR review a published PR still owes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ReviewRequirement {
     Required,
@@ -135,6 +143,7 @@ pub enum ReviewRequirement {
     Paused,
 }
 
+#[must_use]
 pub fn review_requirement(paused: bool, exclusion: Exclusion) -> ReviewRequirement {
     match (paused, exclusion) {
         (true, _) => ReviewRequirement::Paused,
@@ -153,6 +162,7 @@ pub enum HeadChecks {
     Failed,
 }
 
+#[must_use]
 pub fn head_checks(total: usize, unfinished: usize, failed: usize) -> HeadChecks {
     if failed > 0 {
         HeadChecks::Failed
@@ -190,7 +200,7 @@ pub enum Stop {
     Closed,
     Conflict,
     FailedChecks,
-    /// The head still needs a CodeRabbit review.
+    /// The head still needs a `CodeRabbit` review.
     /// Only coderabbit-review can establish that the review's findings have a resolution.
     Review,
 }
@@ -205,7 +215,7 @@ pub enum Step {
     /// A stack needs a linear history.
     Restack,
     Wait,
-    /// Add the CodeRabbit pause lines before a draft becomes ready during the owner's pause.
+    /// Add the `CodeRabbit` pause lines before a draft becomes ready during the owner's pause.
     Exclude,
     Ready,
     /// Merge the head whose checks the tool read.
@@ -213,6 +223,7 @@ pub enum Step {
     Stop(Stop),
 }
 
+#[must_use]
 pub fn merge_step(state: MergeState, stacked: bool, paused: bool) -> Step {
     match state.lifecycle {
         Lifecycle::Merged => return Step::Done,
@@ -253,6 +264,7 @@ pub enum Dependency {
 
 /// A branch that shares commits with another open PR opens only stacked on that PR.
 /// A branch that shares touched paths with another open PR also opens stacked on it, unless the branch carries a declaration of independence.
+#[must_use]
 pub fn dependency(
     shared_commits: bool,
     shared_paths: bool,
@@ -267,7 +279,7 @@ pub fn dependency(
     }
 }
 
-pub fn plan(
+pub(crate) fn plan(
     operation: Operation,
     generation: Generation,
     validated: bool,

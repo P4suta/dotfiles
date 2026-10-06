@@ -21,6 +21,7 @@ impl Status {
         Self::Deprecated,
     ];
 
+    #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::Proposed => "proposed",
@@ -42,14 +43,15 @@ pub enum Verdict {
 }
 
 /// An amended or superseded record names the records that changed it, and no other status names any.
+#[must_use]
 pub const fn verdict(status: Status, successors: usize) -> Verdict {
-    match status {
-        Status::Amended | Status::Superseded if successors == 0 => Verdict::MissingSuccessor,
-        Status::Amended | Status::Superseded => Verdict::Consistent,
-        Status::Proposed | Status::Accepted | Status::Deprecated if successors > 0 => {
+    match (status, successors > 0) {
+        (Status::Amended | Status::Superseded, false) => Verdict::MissingSuccessor,
+        (Status::Proposed | Status::Accepted | Status::Deprecated, true) => {
             Verdict::HiddenSuccessor
         }
-        Status::Proposed | Status::Accepted | Status::Deprecated => Verdict::Consistent,
+        (Status::Amended | Status::Superseded, true)
+        | (Status::Proposed | Status::Accepted | Status::Deprecated, false) => Verdict::Consistent,
     }
 }
 

@@ -24,6 +24,7 @@ pub enum Verdict {
 
 /// A host-reading term refuses the expression outright.
 /// The whole context passes only as the context argument of a rendered partial, as in `includeTemplate "name" .`.
+#[must_use]
 pub fn verdict(terms: &[Term]) -> Verdict {
     let mut whole = false;
     let mut index = 0;
@@ -59,6 +60,7 @@ const HOST_READS: [&str; 11] = [
     "outputList",
 ];
 
+#[must_use]
 pub fn term(token: &str) -> Term {
     match token {
         "." | "$" => Term::Context,
@@ -70,6 +72,7 @@ pub fn term(token: &str) -> Term {
 }
 
 /// The terms of a template expression, split at whitespace and parentheses, with each quoted string as one term.
+#[must_use]
 pub fn terms(expression: &str) -> Vec<Term> {
     let mut found = Vec::new();
     let mut current = String::new();

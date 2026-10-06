@@ -22,5 +22,16 @@ windows-sys = { version = "0.61.2", features = ["Win32_UI_Accessibility", "Win32
 [dev-dependencies]
 tempfile = "3"
 
-[lints]
-workspace = true
+# The workspace forbids unsafe code, which no #[expect] can lift.
+# The keyboard settings make the foreign calls here, and policy/unsafe-sites.toml lists them, so this table repeats the workspace lints with unsafe code denied.
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unfulfilled_lint_expectations = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
