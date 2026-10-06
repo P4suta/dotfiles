@@ -1,7 +1,8 @@
 # Architecture
 
 This repository renders one chezmoi source state for four host profiles: `mac`, `linux`, `windows`, and `wsl`.
-Rust tools in `xtask/`, `guard/`, and `tools/dotctl/` apply it, check it, and run every Git hook.
+Rust tools in `xtask/`, `crates/dotguard/`, and `crates/dotctl/` apply it, check it, and run every Git hook.
+One Cargo workspace at the root builds them with one lockfile, one toolchain from `mise.toml`, and one lint policy.
 [ADR 0023](adr/0023-repository-layout-and-target-architecture.md) records this layout and the steps that remain.
 
 ## Render flow

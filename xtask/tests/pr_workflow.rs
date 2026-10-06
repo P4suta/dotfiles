@@ -13,7 +13,7 @@ use std::sync::OnceLock;
     clippy::disallowed_methods,
     reason = "the shared constructor for fixture Git processes"
 )]
-#[path = "../../guard/tests/support/fixture_git.rs"]
+#[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
 fn gh_directory() -> &'static tempfile::TempDir {
@@ -2237,7 +2237,7 @@ fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<(
 #[test]
 fn the_stack_lease_names_match_dotguard() -> Result<()> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    let guard = fs::read_to_string(root.join("guard/src/stack.rs"))?;
+    let guard = fs::read_to_string(root.join("crates/dotguard/src/stack.rs"))?;
     let workflow = fs::read_to_string(root.join("xtask/src/pr_workflow.rs"))?;
     for (guard_line, workflow_line) in [
         (

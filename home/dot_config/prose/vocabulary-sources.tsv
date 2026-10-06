@@ -105,7 +105,7 @@ YAML	https://yaml.org/spec/1.2.2/
 [Ll]efthook	https://lefthook.dev/
 chezmoi	https://www.chezmoi.io/
 domyjob	dot_agents/skills/domyjob/SKILL.md
-dotguard	guard/Cargo.toml
+dotguard	crates/dotguard/Cargo.toml
 gcloud	https://cloud.google.com/sdk/gcloud
 herdr	https://github.com/ogulcancelik/herdr
 macOS	https://developer.apple.com/macos/

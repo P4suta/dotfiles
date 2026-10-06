@@ -1,16 +1,16 @@
 [package]
 name = "dotfiles-xtask"
 default-run = "dotfiles-xtask"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.90"
-publish = false
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
 
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.6", features = ["derive", "env"] }
-dotguard = { path = "../guard" }
+dotguard = { path = "../crates/dotguard" }
 pulldown-cmark = "0.13"
 yaml-rust2 = "0.13"
 serde_json = "1.0"
@@ -22,14 +22,5 @@ toml = "1.0"
 [build-dependencies]
 sha2 = "0.11.0"
 
-[lints.rust]
-unsafe_code = "forbid"
-unfulfilled_lint_expectations = "deny"
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
-
-[lints.clippy]
-all = { level = "warn", priority = -1 }
-allow_attributes = "deny"
-allow_attributes_without_reason = "deny"
-
-[workspace]
+[lints]
+workspace = true

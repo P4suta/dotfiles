@@ -11,8 +11,9 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | `home/.chezmoiscripts/` | The setup launchers, one directory per OS family. |
 | `home/.chezmoitemplates/` | Shared partials and the per-profile leaves under `profiles/`. |
 | `xtask/` | The task runner and the installed runtime behind every hook and launcher. |
-| `guard/` | `dotguard`, the Git wrapper, and the reaper and herdr-agent binaries. |
-| `tools/dotctl/` | Windows machine setup. |
+| `crates/dotguard/` | `dotguard`, the Git wrapper, and the reaper and herdr-agent binaries. |
+| `crates/dotctl/` | Windows machine setup. |
+| `Cargo.toml` | The workspace of `xtask/` and `crates/`, with its one lint policy, lockfile, and `clippy.toml`. |
 | `policy/` | Data the gates read. |
 | `docs/` | Architecture, [decision records](docs/adr/README.md), and skill decisions. |
 | `ops/` | Ansible inventory and runbooks. |

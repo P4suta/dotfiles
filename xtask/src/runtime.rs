@@ -9,6 +9,7 @@ use std::process::{Command, Stdio};
 use crate::target_rules::{Target, target};
 use crate::tool::Tool;
 
+#[derive(Debug)]
 pub struct Reply {
     pub success: bool,
     pub bytes: Vec<u8>,
@@ -21,6 +22,7 @@ pub trait Runner {
     fn run_installed(&mut self, program: &Path, arguments: &[OsString]) -> Result<Reply>;
 }
 
+#[derive(Debug)]
 pub struct Native {
     pub home: PathBuf,
     pub path: OsString,

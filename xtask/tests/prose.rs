@@ -12,7 +12,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-#[path = "../../guard/tests/support/fixture_git.rs"]
+#[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
 const ATTRIBUTED: &str = "As requested, the parser keeps every edit.";

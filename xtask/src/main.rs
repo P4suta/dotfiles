@@ -212,13 +212,39 @@ fn cargo(root: &Path, manifest: &Path, args: &[&str]) -> Result<()> {
             "CARGO_TARGET_DIR",
             check_build_dir(root, configured.as_deref()),
         )
-        .args(args)
+        .args(&args[..1])
         .arg("--manifest-path")
         .arg(manifest)
+        .args(&args[1..])
         .status()
         .context("start cargo")?;
     ensure!(status.success(), "cargo {args:?} failed with {status}");
     Ok(())
+}
+
+/// Formats, lints, and tests every crate of the root workspace under its one lint policy.
+fn check_workspace(root: &Path) -> Result<()> {
+    let manifest = Path::new("Cargo.toml");
+    cargo(root, manifest, &["fmt", "--all", "--check"])?;
+    cargo(
+        root,
+        manifest,
+        &[
+            "clippy",
+            "--locked",
+            "--workspace",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+        ],
+    )
+    .context("clippy failed")?;
+    cargo(
+        root,
+        manifest,
+        &["test", "--locked", "--workspace", "--all-targets"],
+    )
 }
 
 fn check_package(root: &Path, manifest: &Path) -> Result<()> {
@@ -269,15 +295,11 @@ fn check(root: &Path, gates: Gates) -> Result<()> {
         dotfiles_xtask::quality::adapters(root)?;
     }
     if gates.contains(Gate::Rust) {
-        check_package(root, Path::new("xtask/Cargo.toml"))?;
+        check_workspace(root)?;
         check_package(
             root,
             Path::new("home/dot_agents/skills/github-repository/scripts/repo-settings/Cargo.toml"),
         )?;
-        check_package(root, Path::new("guard/Cargo.toml"))?;
-        if cfg!(windows) {
-            check_package(root, Path::new("tools/dotctl/Cargo.toml"))?;
-        }
     }
     if gates.contains(Gate::Profiles) {
         dotfiles_xtask::quality::chezmoi_version(root)?;

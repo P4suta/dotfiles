@@ -572,7 +572,7 @@ fn verify_native(root: &Path) -> Result<()> {
         fs::read(source)? == original,
         "production profile proof source changed during verification"
     );
-    let source = crate::canonical(&root.join("guard/src/reaper_rules.rs"))?;
+    let source = crate::canonical(&root.join("crates/dotguard/src/reaper_rules.rs"))?;
     let original = fs::read(&source)?;
     let directory = tempfile::tempdir()?;
     verify_inventory(&source, directory.path(), &REAPER_HARNESSES)?;
@@ -581,7 +581,7 @@ fn verify_native(root: &Path) -> Result<()> {
         fs::read(source)? == original,
         "production reaper proof source changed during verification"
     );
-    let source = crate::canonical(&root.join("guard/src/gate_rules.rs"))?;
+    let source = crate::canonical(&root.join("crates/dotguard/src/gate_rules.rs"))?;
     let original = fs::read(&source)?;
     let directory = tempfile::tempdir()?;
     verify_inventory(&source, directory.path(), &GATE_HARNESSES)?;
@@ -804,6 +804,7 @@ fn reject_a_contradiction_without_what_it_contradicted() {{
 /// One pure rule module.
 /// Its harnesses must all pass.
 /// Each counterexample, a harness asserting a rejected rule, must fail when it runs on that module.
+#[derive(Debug)]
 pub struct Rules {
     pub source: &'static str,
     pub harnesses: &'static [&'static str],
@@ -1125,7 +1126,7 @@ fn reject_hashing_the_whole_context() {
         ],
     },
     Rules {
-        source: "tools/dotctl/src/setup/ocomment_rules.rs",
+        source: "crates/dotctl/src/setup/ocomment_rules.rs",
         harnesses: &OCOMMENT_HARNESSES,
         counterexamples: "use production::{Action, action};
 #[kani::proof]

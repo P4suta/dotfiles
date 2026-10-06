@@ -16,7 +16,7 @@ use std::process::{Command, Output};
     clippy::disallowed_methods,
     reason = "the shared constructor for fixture Git processes"
 )]
-#[path = "../../guard/tests/support/fixture_git.rs"]
+#[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
 /// An isolated home with stand-ins for dotguard and lefthook, and a repository holding one staged file.

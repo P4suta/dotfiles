@@ -33,6 +33,7 @@ pub enum Step {
     Wezterm,
 }
 
+#[derive(Debug)]
 pub struct ContextData {
     pub source: PathBuf,
     pub home: PathBuf,
@@ -432,14 +433,14 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
                 &["dotfiles-xtask", "skill-ops", "pr-workflow"],
             )?;
             if context.profile == Profile::Windows {
-                install_crate(context, runner, "tools/dotctl", &["dotctl"])?;
-                install_crate(context, runner, "guard", &["dotguard"])?;
+                install_crate(context, runner, "crates/dotctl", &["dotctl"])?;
+                install_crate(context, runner, "crates/dotguard", &["dotguard"])?;
                 git_wrapper(&context.home.join(".local/bin"))?;
             } else {
                 install_crate(
                     context,
                     runner,
-                    "guard",
+                    "crates/dotguard",
                     &["dotguard", "reaper", "herdr-agent"],
                 )?;
             }
@@ -553,7 +554,7 @@ pub fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> R
             install_crate(
                 context,
                 runner,
-                "guard",
+                "crates/dotguard",
                 &["dotguard", "reaper", "herdr-agent"],
             )?;
             let reaper = context.home.join(".local/bin/reaper");

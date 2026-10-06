@@ -17,6 +17,7 @@ pub const BASE: &str = "origin/main";
 pub const DEFAULT_BRANCH: &str = "main";
 
 /// Where this host keeps the state that the inspection reads.
+#[derive(Debug)]
 pub struct Environment {
     pub home: PathBuf,
     /// `TEMP` on Windows, `None` when unset, and the system temporary directory on other hosts.

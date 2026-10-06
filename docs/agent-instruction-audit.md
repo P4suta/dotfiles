@@ -431,7 +431,7 @@ No gate refuses work done without loading a skill, and F5 adds a completion gate
 | Former line | Held by | Mechanism |
 | --- | --- | --- |
 | The Japanese reply line. | Merged | Reworded as `Reply in Japanese`. |
-| Follow Conventional Commits and omit AI attribution footers and session URLs. | Gate | Dotguard `commit-msg` strips agent attribution and session URLs in `guard/src/attribution.rs`. |
+| Follow Conventional Commits and omit AI attribution footers and session URLs. | Gate | Dotguard `commit-msg` strips agent attribution and session URLs in `crates/dotguard/src/attribution.rs`. |
 | Keep diffs reviewable by editing the smallest relevant region. | Merged | Merged into `Make the smallest change`. |
 | Load `pull-request` before GitHub-bound implementation. | Skill | The `pull-request` skill description states the same trigger. |
 | Personal non-fork repositories require an existing issue. | Gate and skill | `pr-workflow start`, `create`, and `edit` refuse a personal non-fork without an open, finished issue in `xtask/src/pr_workflow.rs`, and `pull-request` states the rule for external projects and forks. |
@@ -459,7 +459,7 @@ No gate refuses work done without loading a skill, and F5 adds a completion gate
 | Use the `multi-machine` skill for remote execution. | Skill | `multi-machine` and `domyjob` state the trigger in their descriptions. |
 | The template actions that rendered the machine-local notes file into every instruction file. | Merged | The retained line names the file to read instead: `when it exists, before operating another host`. |
 | In `commit.md`, wrap an optional body at 100 characters. | Contradicted | It contradicted `Never wrap prose to a fixed column`, and the command keeps the reason line. |
-| In `commit.md`, never append attribution footers. | Gate | Dotguard `commit-msg` strips agent attribution in `guard/src/attribution.rs`. |
+| In `commit.md`, never append attribution footers. | Gate | Dotguard `commit-msg` strips agent attribution in `crates/dotguard/src/attribution.rs`. |
 | In `commit.md`, the Japanese reply line. | Merged | Restated by `Reply in Japanese`. |
 | In `pr.md`, open a pull request using `gh`. | Merged | Superseded by `for PR creation, document edits, and ready transitions`. |
 | In `pr.md`, the English title of at most 72 characters in imperative mood. | Contradicted | `pull-request` requires an English Conventional Commits title unless the destination has its own rules, and `pr-workflow` checks the syntax in `xtask/src/pr_workflow.rs`. |

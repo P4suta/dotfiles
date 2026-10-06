@@ -15,7 +15,7 @@ pub const NOTES: &str = "refs/notes/hosts";
 const STATE: &str = ".local/state/hosts";
 const DEFAULT_GATE: &str = "just check";
 
-#[derive(clap::Subcommand)]
+#[derive(Debug, clap::Subcommand)]
 pub enum Action {
     /// Check tailnet presence, SSH through the agent, domyjob, and the gate's toolchain on every managed host.
     Doctor {

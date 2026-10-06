@@ -42,7 +42,7 @@ dotfiles-refusal/1 {"rule":"...","cause":"...","evidence":["..."],"next":"...","
 
 The line holds the versioned prefix and a compact JSON object with the five keys in this order, so an agent reads the last line that starts with the prefix.
 `next` and `waiver` hold strings or null.
-The format lives once in `guard/src/refusal.rs`, which uses only the standard library, so `dotguard` and the xtask binaries compile the same source.
+The format lives once in `crates/dotguard/src/refusal.rs`, which uses only the standard library, so `dotguard` and the xtask binaries compile the same source.
 
 These gates emit the record:
 

@@ -8,7 +8,7 @@ use std::path::Path;
     clippy::disallowed_methods,
     reason = "the shared constructor for fixture Git processes"
 )]
-#[path = "../../guard/tests/support/fixture_git.rs"]
+#[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
 #[test]
@@ -138,12 +138,12 @@ fn the_bypass_check_finds_every_way_to_start_git() {
     }
 }
 
-/// Every test process that runs Git on a fixture starts from `guard/tests/support/fixture_git.rs`.
+/// Every test process that runs Git on a fixture starts from `crates/dotguard/tests/support/fixture_git.rs`.
 #[test]
 fn fixture_git_processes_start_from_the_shared_helper() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let mut found = Vec::new();
-    for suite in ["xtask/tests", "guard/tests"] {
+    for suite in ["xtask/tests", "crates/dotguard/tests"] {
         for entry in fs::read_dir(root.join(suite)).unwrap() {
             let path = entry.unwrap().path();
             if path.extension().is_none_or(|extension| extension != "rs") {

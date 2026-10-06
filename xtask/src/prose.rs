@@ -111,6 +111,7 @@ struct TokenRule {
 }
 
 /// The configuration, the pinned linters, and the textlint installation one check runs with.
+#[derive(Debug)]
 pub struct Bundle {
     pub config: PathBuf,
     pub textlint: PathBuf,
@@ -417,6 +418,7 @@ fn sentence_at(line: &str, column: usize) -> String {
 }
 
 /// One text a check reads, with the source line each of its lines came from.
+#[derive(Debug)]
 pub struct Input {
     pub path: String,
     pub text: String,
@@ -1072,14 +1074,14 @@ pub fn check_comments(bundle: &Bundle, root: &Path, paths: &[String]) -> Result<
     check_inputs(bundle, &comment_inputs(root, paths)?)
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
     #[serde(default)]
     pub exempt: Vec<Exempt>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Exempt {
     pub scope: Scope,

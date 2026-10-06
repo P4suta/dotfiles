@@ -116,7 +116,7 @@ pub fn composition_candidate(
         && (shared as u128) * 100 >= (first.min(second) as u128) * (percent as u128)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Maintenance {
     pub catalog_current: bool,
     pub policy_current: bool,

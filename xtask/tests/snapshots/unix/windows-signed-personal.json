@@ -388,7 +388,7 @@
     {"mode":"0644","path":".config/prose/textlint/package.json","sha256":"c52af08097f5cfe9fae7c9c891f31ab5d9dddbfcba736235a1dfeeb741f722d0","type":"file"},
     {"mode":"0644","path":".config/prose/textlint/textlintrc.json","sha256":"2013fee3a85d0f89679e3f0402c985e8bb3da55ce51ea8c25542879768b1f4b2","type":"file"},
     {"mode":"0644","path":".config/prose/vale.ini","sha256":"f7146c2a9217d871b5a8c4f57f108e617479a05c8c2e50d95dc2d7d9bc99ac80","type":"file"},
-    {"mode":"0644","path":".config/prose/vocabulary-sources.tsv","sha256":"f65337fb5861961641c1195cc7a7380ef61d3cf0cfd6fe96e8016a3ec515010b","type":"file"},
+    {"mode":"0644","path":".config/prose/vocabulary-sources.tsv","sha256":"8f260f2ed08584299758a1115e18c39edcbc1a850737ecf4860051e4364026f3","type":"file"},
     {"mode":"0755","path":".config/skill-ops","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/skill-ops/policy.json","sha256":"8c49b6785e738bedaa49318401f50455f2f780bcff06b8bc4115de3936c3f9f5","type":"file"},
     {"mode":"0644","path":".config/starship.toml","sha256":"291be391057ebe2f3287027a1235b4dda2c1364cd21e2e9e656f94fdc19a46d5","type":"file"},

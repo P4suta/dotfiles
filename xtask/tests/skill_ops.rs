@@ -17,7 +17,7 @@ use std::fs;
     clippy::disallowed_methods,
     reason = "the shared constructor for fixture Git processes"
 )]
-#[path = "../../guard/tests/support/fixture_git.rs"]
+#[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
 fn fixture() -> Result<(tempfile::TempDir, Catalog, Policy)> {
@@ -813,7 +813,7 @@ fn the_required_check_depends_only_on_skills_policy_and_decisions() -> Result<()
     for (engine, content) in [
         ("xtask/src/skill_ops.rs", "changed engine"),
         ("xtask/src/skill_rules.rs", "changed rules"),
-        ("xtask/Cargo.lock", "changed lock"),
+        ("Cargo.lock", "changed lock"),
     ] {
         let path = root.path().join(engine);
         fs::create_dir_all(path.parent().expect("engine directory"))?;

@@ -115,7 +115,7 @@ enum Match {
 }
 
 /// The first matching rule decides, so a narrower rule precedes the broader one it overrides.
-const RULES: [(Match, &[u8], Class); 32] = [
+const RULES: [(Match, &[u8], Class); 33] = [
     (Match::Prefix, b".github/", Class::Everything),
     (Match::Prefix, b"xtask/proofs/", Class::Everything),
     (Match::Prefix, b"xtask/src/change", Class::Everything),
@@ -140,8 +140,9 @@ const RULES: [(Match, &[u8], Class); 32] = [
     (Match::Suffix, b"Cargo.toml", Class::Everything),
     (Match::Suffix, b".rs", Class::Rust),
     (Match::Prefix, b"xtask/", Class::Rust),
-    (Match::Prefix, b"guard/", Class::Rust),
-    (Match::Prefix, b"tools/", Class::Rust),
+    (Match::Prefix, b"crates/", Class::Rust),
+    (Match::Prefix, b".cargo/", Class::Everything),
+    (Match::Exact, b"clippy.toml", Class::Everything),
     (Match::Prefix, b"home/dot_agents/skills/", Class::Skills),
     (Match::Prefix, b"home/dot_claude/skills/", Class::Skills),
     (Match::Prefix, b"docs/skills/", Class::Skills),
@@ -286,7 +287,7 @@ mod tests {
             "prose,skills,rust,profiles"
         );
         assert_eq!(
-            selected(&["guard/src/refusal.rs"]),
+            selected(&["crates/dotguard/src/refusal.rs"]),
             "prose,skills,rust,profiles"
         );
     }
@@ -324,7 +325,10 @@ mod tests {
             "lefthook.yml",
             "justfile",
             "bun.lock",
-            "xtask/Cargo.lock",
+            "Cargo.lock",
+            "Cargo.toml",
+            "clippy.toml",
+            ".cargo/config.toml",
             "xtask/Cargo.toml",
             "xtask/src/change.rs",
             "xtask/src/change_rules.rs",

@@ -43,7 +43,7 @@ pub mod prose_rules;
 pub mod quality;
 pub mod ready_push;
 pub mod ready_push_rules;
-#[path = "../../guard/src/refusal.rs"]
+#[path = "../../crates/dotguard/src/refusal.rs"]
 pub mod refusal;
 pub mod rehearsal;
 pub mod review_guard;
@@ -266,7 +266,10 @@ pub fn export_checks(root: &Path, output: &Path) -> Result<()> {
         "home/dot_agents/skills",
         "home/dot_claude/skills",
         "xtask",
-        "guard",
+        "crates/dotguard",
+        "Cargo.toml",
+        "Cargo.lock",
+        "clippy.toml",
         "mise.toml",
         ".chezmoiroot",
         "home/.chezmoiignore",

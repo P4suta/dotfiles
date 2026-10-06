@@ -29,14 +29,14 @@ const REVIEW_EXCLUSION: &str = "@coderabbitai ignore";
 /// Marks an exclusion that lasts only while the owner pauses CodeRabbit PR reviews.
 const PAUSE_EXCLUSION: &str = "<!-- coderabbit-pause -->";
 
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 #[command(about = "Validate PR documents before invoking gh; local creation always uses draft")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Action,
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 pub enum Action {
     /// Inspect repository scope and the issue before starting GitHub-bound work.
     Start {
@@ -120,7 +120,7 @@ pub enum Action {
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 pub enum StackAction {
     /// Create a draft PR for the head on top of the open PR of the base branch, and link the chain as one stack.
     Create {
@@ -157,7 +157,7 @@ pub enum StackAction {
     },
 }
 
-#[derive(Args, Clone, Copy)]
+#[derive(Args, Clone, Copy, Debug)]
 pub struct Polling {
     /// Seconds between reads while checks run.
     #[arg(long, default_value_t = 30)]
@@ -167,7 +167,7 @@ pub struct Polling {
     timeout: u64,
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 pub enum IssueAction {
     /// Check a local issue title and body without mutation.
     Check {
@@ -188,7 +188,7 @@ pub enum IssueAction {
     },
 }
 
-#[derive(Args)]
+#[derive(Args, Debug)]
 pub struct IssueDocument {
     /// The repository in exact owner/name form.
     #[arg(long)]
@@ -214,7 +214,7 @@ impl Action {
     }
 }
 
-#[derive(Args, Clone)]
+#[derive(Args, Clone, Debug)]
 pub struct Target {
     /// The exact GitHub repository rather than a URL or an inferred one.
     #[arg(long)]
@@ -230,7 +230,7 @@ pub struct Target {
     pub issue: Option<u64>,
 }
 
-#[derive(Args)]
+#[derive(Args, Debug)]
 pub struct DocumentArgs {
     #[command(flatten)]
     target: Target,
@@ -467,6 +467,7 @@ struct LiveIssue {
     pull_request: Option<serde_json::Value>,
 }
 
+#[derive(Debug)]
 pub struct ValidatedDocument {
     title: String,
     body: String,

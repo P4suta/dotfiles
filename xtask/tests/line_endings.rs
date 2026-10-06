@@ -15,7 +15,7 @@ use std::process::{Command, Output, Stdio};
     clippy::disallowed_methods,
     reason = "the shared constructor for fixture Git processes"
 )]
-#[path = "../../guard/tests/support/fixture_git.rs"]
+#[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
 const CRLF: &[u8] = b"first\r\nsecond\r\n";

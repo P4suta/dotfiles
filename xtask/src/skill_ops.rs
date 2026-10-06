@@ -658,7 +658,8 @@ pub fn engine_hash() -> Result<String> {
         include_str!("lib.rs"),
         include_str!("main.rs"),
         include_str!("../Cargo.toml"),
-        include_str!("../Cargo.lock"),
+        include_str!("../../Cargo.toml"),
+        include_str!("../../Cargo.lock"),
         include_str!("../../package.json"),
         include_str!("../../bun.lock"),
         include_str!("../../tsconfig.json"),
@@ -676,7 +677,7 @@ pub fn engine_hash() -> Result<String> {
     ))
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Approved {
     pub catalog: Catalog,
@@ -1252,7 +1253,7 @@ pub fn check_catalog(root: &Path) -> Result<()> {
     )
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Runtime<'a> {
     pub catalog: &'a Catalog,
     pub policy: &'a Policy,

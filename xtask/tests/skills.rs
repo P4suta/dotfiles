@@ -118,14 +118,20 @@ fn check_snapshots_preserve_sources_and_exclude_builds_and_unrelated_state() -> 
     )?;
     fs::write(root.path().join("xtask/target/build"), "build bytes")?;
     fs::write(root.path().join("mise.toml"), "[tools]\n")?;
-    fs::create_dir_all(root.path().join("guard/src"))?;
-    fs::create_dir_all(root.path().join("guard/target"))?;
-    fs::write(root.path().join("guard/src/lib.rs"), "pub fn guard() {}\n")?;
+    fs::create_dir_all(root.path().join("crates/dotguard/src"))?;
+    fs::create_dir_all(root.path().join("crates/dotguard/target"))?;
     fs::write(
-        root.path().join("guard/target/build"),
+        root.path().join("crates/dotguard/src/lib.rs"),
+        "pub fn guard() {}\n",
+    )?;
+    fs::write(
+        root.path().join("crates/dotguard/target/build"),
         "private build bytes",
     )?;
     for relative in [
+        "Cargo.toml",
+        "Cargo.lock",
+        "clippy.toml",
         ".chezmoiroot",
         "home/.chezmoiignore",
         "lefthook.yml",
@@ -151,9 +157,9 @@ fn check_snapshots_preserve_sources_and_exclude_builds_and_unrelated_state() -> 
         fs::read(root.path().join("xtask/src/lib.rs"))?
     );
     assert!(!output.join("xtask/target").try_exists()?);
-    assert!(!output.join("guard/target").try_exists()?);
+    assert!(!output.join("crates/dotguard/target").try_exists()?);
     assert_eq!(
-        fs::read(output.join("guard/src/lib.rs"))?,
+        fs::read(output.join("crates/dotguard/src/lib.rs"))?,
         b"pub fn guard() {}\n"
     );
     assert!(!output.join("unrelated-state").try_exists()?);

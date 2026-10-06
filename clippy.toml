@@ -1,0 +1,5 @@
+disallowed-methods = [
+  { path = "std::process::Command::new", reason = "start a process through the crate's one constructor, crate::tool in xtask, locate::child or realgit::at in dotguard, and env::command in dotctl, so each host provision is declared" },
+  { path = "std::path::Path::canonicalize", reason = "canonical Windows paths carry a verbatim prefix that tools reject; use xtask's canonical, or compare paths without following links" },
+  { path = "std::fs::canonicalize", reason = "canonical Windows paths carry a verbatim prefix that tools reject; use xtask's canonical, or compare paths without following links" },
+]

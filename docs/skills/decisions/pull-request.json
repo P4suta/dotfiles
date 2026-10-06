@@ -16,7 +16,7 @@
     "docs/adr/0016-one-writing-standard.md",
     "xtask/src/pr_workflow.rs",
     "xtask/src/prose_rules.rs",
-    "guard/src/stack.rs",
+    "crates/dotguard/src/stack.rs",
     "xtask/src/wip_rules.rs",
     "home/dot_agents/skills/pull-request/assets/workflow-policy.json"
   ],

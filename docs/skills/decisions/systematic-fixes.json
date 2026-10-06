@@ -4,7 +4,7 @@
   "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
     "home/dot_agents/skills/systematic-fixes/SKILL.md",
-    "guard/tests/empty_commit.rs",
+    "crates/dotguard/tests/empty_commit.rs",
     "xtask/src/hooks.rs"
   ],
   "revisit": null
