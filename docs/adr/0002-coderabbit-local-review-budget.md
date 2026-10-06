@@ -1,6 +1,10 @@
+---
+status: amended
+changed_by: [0007-reserved-review-capacity.md]
+---
 # Enforce a local CodeRabbit review budget
 
-Status: superseded for attempt limits, service reserve, and executor scope by [reserved review capacity](0007-reserved-review-capacity.md).
+[Reserved review capacity](0007-reserved-review-capacity.md) replaced its attempt limits, service reserve, and executor scope.
 
 ## Context
 
@@ -21,7 +25,7 @@ Refuse unknown quota or billing state, a mismatched personal account, paid-credi
 Check the quota in the selected local repository, and keep one included review as headroom.
 Keep paid service add-ons inactive outside the wrapper.
 
-The [guard implementation](../../xtask/src/review_guard.rs) owns these rules, the [contract tests](../../xtask/tests/review_guard.rs) cover them, and the [runbook](../coderabbit/setup.md) covers use.
+The [guard implementation](../../xtask/src/review_guard.rs) owns these rules, the [contract tests](../../xtask/tests/review_guard.rs) cover them, and the [operation section of ADR 0008](0008-layered-review-capacity.md#operation) covers use.
 
 ## Consequences
 

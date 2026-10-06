@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Reuse the `gh` login for the remote GitHub tool server
-
-Status: accepted.
 
 ## Context
 

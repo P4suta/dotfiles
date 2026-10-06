@@ -1,6 +1,10 @@
+---
+status: amended
+changed_by: [0008-layered-review-capacity.md]
+---
 # Preserve included review capacity
 
-Status: superseded for capacity arithmetic and local cadence by [ADR 0008](0008-layered-review-capacity.md).
+[ADR 0008](0008-layered-review-capacity.md) replaced its capacity arithmetic and local cadence.
 
 ## Context
 

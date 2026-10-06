@@ -115,6 +115,12 @@ enum Action {
         #[arg(long)]
         output: Option<PathBuf>,
     },
+    /// Writes the generated files: the architecture decision index.
+    Gen {
+        /// Refuses a stale generated file instead of writing it.
+        #[arg(long)]
+        check: bool,
+    },
     /// Compares every profile, signing, and role rendering with its committed manifest and lists the scripts that depend on the command line.
     ProfileSnapshots {
         /// Rewrites this host family's manifests from the current rendering instead.
@@ -237,6 +243,7 @@ fn check_package(root: &Path, manifest: &Path) -> Result<()> {
 /// A change that selects fewer gates skips only the checks it can't affect.
 fn check(root: &Path, gates: Gates) -> Result<()> {
     if gates.contains(Gate::Prose) {
+        dotfiles_xtask::adr::generate(root, true)?;
         dotfiles_xtask::quality::comment_scopes(root)?;
         dotfiles_xtask::instruction_audit::check(root)?;
         dotfiles_xtask::line_endings::check(root)?;
@@ -385,6 +392,7 @@ fn run() -> Result<()> {
             dotfiles_xtask::ignore_audit::check(&cli.root)?;
             dotfiles_xtask::input_audit::check(&cli.root)?;
         }
+        Action::Gen { check } => dotfiles_xtask::adr::generate(&cli.root, check)?,
         Action::ProfileSnapshots { write } => {
             if write {
                 dotfiles_xtask::profile_snapshot::write(&cli.root)?;

@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Enforce one writing standard on persisted prose and replies
-
-Status: accepted.
 
 ## Context
 

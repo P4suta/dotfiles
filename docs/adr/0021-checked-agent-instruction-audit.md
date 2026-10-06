@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Check that every agent instruction line has a class
-
-Status: accepted.
 
 ## Context
 

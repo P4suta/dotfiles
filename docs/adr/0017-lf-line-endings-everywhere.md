@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Normalize line endings to LF on every host and agent write
-
-Status: accepted.
 
 ## Context
 

@@ -12,6 +12,9 @@ profiles:
 proofs:
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- proofs
 
+gen:
+    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- gen
+
 decide skill:
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- decide {{quote(skill)}}
 

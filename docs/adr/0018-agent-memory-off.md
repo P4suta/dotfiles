@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Turn off persistent agent memory in the native client profiles
-
-Status: accepted.
 
 ## Context
 

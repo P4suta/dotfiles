@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Require a passing gate on every operating system family before push
-
-The owner accepted this decision.
 
 ## Context
 

@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Scope the CodeRabbit owner pause
-
-Status: accepted.
 Extends the owner pause of [ADR 0007](0007-reserved-review-capacity.md).
 
 ## Context

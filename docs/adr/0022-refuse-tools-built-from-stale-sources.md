@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Refuse installed tools built from stale sources
-
-The owner accepted this decision.
 
 ## Context
 

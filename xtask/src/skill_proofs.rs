@@ -183,6 +183,11 @@ pub const IGNORE_HARNESSES: [&str; 3] = [
     "a_star_stays_inside_one_segment_and_a_globstar_crosses_them",
 ];
 
+pub const ADR_HARNESSES: [&str; 2] = [
+    "a_changed_record_always_names_what_changed_it",
+    "only_a_changed_record_names_successors",
+];
+
 pub const ASIDE_HARNESSES: [&str; 2] = [
     "an_aside_copy_is_recognised_and_its_binary_is_not",
     "only_entries_named_after_the_binary_are_swept",
@@ -808,7 +813,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 17] = [
+pub const RULES: [Rules; 18] = [
     Rules {
         source: "xtask/src/target_rules.rs",
         harnesses: &TARGET_HARNESSES,
@@ -1153,6 +1158,24 @@ fn reject_sweeping_another_binary() {
         rejected: &[
             "reject_sweeping_the_installed_binary",
             "reject_sweeping_another_binary",
+        ],
+    },
+    Rules {
+        source: "xtask/src/adr_rules.rs",
+        harnesses: &ADR_HARNESSES,
+        counterexamples: "use production::{Status, Verdict, verdict};
+#[kani::proof]
+fn reject_a_superseded_record_without_its_successor() {
+    assert!(verdict(Status::Superseded, 0) == Verdict::Consistent);
+}
+#[kani::proof]
+fn reject_an_accepted_record_that_later_records_changed() {
+    assert!(verdict(Status::Accepted, 1) == Verdict::Consistent);
+}
+",
+        rejected: &[
+            "reject_a_superseded_record_without_its_successor",
+            "reject_an_accepted_record_that_later_records_changed",
         ],
     },
 ];

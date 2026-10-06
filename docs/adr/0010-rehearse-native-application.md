@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Rehearse the native apply and declare every external tool
-
-Status: accepted.
 
 ## Context
 

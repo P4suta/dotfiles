@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Mark a PR ready only after every check passes
-
-Status: accepted.
 
 ## Context
 

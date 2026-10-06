@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Native desktop integration assurance
-
-Status: accepted.
 
 ## Contract
 

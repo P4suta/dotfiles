@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Report every gate refusal as one structured record
-
-Status: accepted.
 
 ## Context
 

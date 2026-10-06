@@ -1,6 +1,9 @@
+---
+status: accepted
+---
 # Public source with native profiles and Rust orchestration
 
-Status: accepted for isolated local preparation.
+It covers isolated local preparation.
 
 ## Decision
 

@@ -581,10 +581,11 @@ fn loaded(path: &str) -> Option<Loaded> {
     prompt.then_some(Loaded::Prompt)
 }
 
-/// Files anywhere in the source tree that agent clients load as instructions or prompts.
+/// Files anywhere in the source state that agent clients load as instructions or prompts once they reach a host.
+/// The repository's own `AGENTS.md` and `CLAUDE.md` guide work on this checkout and never deploy, so they stay outside the audit.
 fn loaded_files(root: &Path) -> Result<Vec<(String, Loaded)>> {
     let mut found = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
+    let mut stack = vec![crate::source_state(root)];
     while let Some(directory) = stack.pop() {
         for path in listing(root, &directory)? {
             let name = path

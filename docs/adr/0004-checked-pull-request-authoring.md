@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Checked pull request authoring
-
-Status: accepted.
 
 ## Context
 

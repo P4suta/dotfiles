@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Bind tracked skill decisions to each skill revision
-
-Status: accepted.
 Supersedes the tracked catalog review of [ADR 0003](0003-local-skill-operations.md).
 
 ## Context

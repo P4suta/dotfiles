@@ -4,6 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use yaml_rust2::YamlLoader;
 
+pub mod adr;
+pub mod adr_rules;
 pub mod agent_memory;
 pub mod aside;
 pub mod aside_rules;
