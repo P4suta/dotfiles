@@ -65,7 +65,7 @@
     {"mode":"0644","path":".agents/skills/github-repository/scripts/repo-settings/Cargo.lock","sha256":"5b0beeb11ccf40f849cbccd4eebd98fe783fcdb6d0e0d410c73ee879e64e0d9f","type":"file"},
     {"mode":"0644","path":".agents/skills/github-repository/scripts/repo-settings/Cargo.toml","sha256":"2a8da0047e31edccfea2b9acd1d0384878056a9fdcf89439859bc23728954713","type":"file"},
     {"mode":"0755","path":".agents/skills/github-repository/scripts/repo-settings/src","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/github-repository/scripts/repo-settings/src/lib.rs","sha256":"705ef96c73daeb267d21921aae48f8e1180c8d3d85b6d9f50edbc408840c6bd7","type":"file"},
+    {"mode":"0644","path":".agents/skills/github-repository/scripts/repo-settings/src/lib.rs","sha256":"e70de8b0facbe0d5058740c2fdf555190d75ea64e8d1af07d3a9b0e63aee9f22","type":"file"},
     {"mode":"0644","path":".agents/skills/github-repository/scripts/repo-settings/src/main.rs","sha256":"ef718e2a22e6a9ac0805953c9d4ee2abe8a342cfb078df8a38dbcfb40884aceb","type":"file"},
     {"mode":"0755","path":".agents/skills/github-repository/scripts/repo-settings/tests","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/github-repository/scripts/repo-settings/tests/governance.rs","sha256":"9639891400a9a9e9e8763b8d4bab9a927b6e8dd3439581e84bfa8aae2ec0c85e","type":"file"},

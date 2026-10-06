@@ -674,6 +674,10 @@ impl Api for Gh {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the tool's one GitHub CLI process, which every API request goes through"
+)]
 fn gh_request(method: &str, endpoint: &str, body: Option<&Value>) -> Result<Value> {
     let mut command = Command::new("gh");
     command.args([

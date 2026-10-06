@@ -1,7 +1,7 @@
 {
-  "revision": "5e6b993b4229205e4a991b750a986f976bfc14a89e8948572db63a68f9eed062",
+  "revision": "2b9a8a21212c9d364f8ab07dfd94d9eb259bfa4aa10b486827a5abf18bbd11a1",
   "outcome": "keep",
-  "reason": "The baseline now requires secret scanning, push protection, SHA pinning, and selected actions, and a security scope plans and verifies the first three while it reports a repository that runs any action.",
+  "reason": "The tool's one GitHub CLI process now states its exception to the workspace's process rule, and its behavior and the baseline stay unchanged.",
   "evidence": [
     "home/dot_agents/skills/github-repository/SKILL.md",
     "home/dot_agents/skills/github-repository/assets/baseline.json",
