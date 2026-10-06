@@ -19,10 +19,10 @@ exclude = ["home/dot_config/prose/styles/**"]
 [[overrides]]
 paths = [
   "**/*.md.tmpl",
-  "home/.chezmoitemplates/agent_policy",
-  "home/.chezmoitemplates/prose_policy",
-  "home/.chezmoitemplates/remote_machines",
-  "home/.chezmoitemplates/signing_pubkey",
+  "home/.chezmoitemplates/partials/agent_policy",
+  "home/.chezmoitemplates/partials/prose_policy",
+  "home/.chezmoitemplates/partials/remote_machines",
+  "home/.chezmoitemplates/partials/signing_pubkey",
 ]
 language = "markdown"
 
@@ -46,10 +46,10 @@ language = "lua"
 paths = [
   "home/dot_config/dev-reaper/config.tmpl",
   "home/dot_config/session-reaper/config.tmpl",
-  "home/.chezmoitemplates/profiles/mac/dot_config/dev-reaper/config",
-  "home/.chezmoitemplates/profiles/mac/dot_config/session-reaper/config",
-  "home/.chezmoitemplates/profiles/linux/dot_config/dev-reaper/config",
-  "home/.chezmoitemplates/profiles/linux/dot_config/session-reaper/config",
+  "home/.chezmoitemplates/native/dev-reaper/mac",
+  "home/.chezmoitemplates/native/dev-reaper/linux",
+  "home/.chezmoitemplates/native/session-reaper/mac",
+  "home/.chezmoitemplates/native/session-reaper/linux",
 ]
 language = "toml"
 
@@ -58,12 +58,11 @@ language = "toml"
 paths = [
   "home/dot_bashrc.tmpl",
   "home/dot_profile.tmpl",
-  "home/.chezmoitemplates/profiles/linux/dot_bashrc.tmpl",
-  "home/.chezmoitemplates/profiles/linux/dot_profile.tmpl",
-  "home/.chezmoitemplates/profiles/mac/dot_bashrc",
-  "home/.chezmoitemplates/profiles/mac/dot_zprofile.tmpl",
-  "home/.chezmoitemplates/profiles/mac/dot_zshrc.tmpl",
-  "home/.chezmoitemplates/profiles/wsl/dot_bashrc.tmpl",
+  "home/dot_zprofile.tmpl",
+  "home/dot_zshrc.tmpl",
+  "home/.chezmoitemplates/native/bashrc/mac",
+  "home/.chezmoitemplates/native/bashrc/linux.tmpl",
+  "home/.chezmoitemplates/native/bashrc/wsl.tmpl",
   "**/*.sh.tmpl",
   "**/*.nu",
   "**/*.nu.tmpl",

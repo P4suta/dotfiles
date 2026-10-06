@@ -1,2 +1,2 @@
 #!/bin/sh
-exec {{ includeTemplate "sh_quote" (printf "%s/.local/bin/dotfiles-xtask" .chezmoi.homeDir) }} --root {{ includeTemplate "sh_quote" .chezmoi.workingTree }} setup retire-tmux --config {{ includeTemplate "sh_quote" .chezmoi.configFile }} --live
+exec {{ includeTemplate "partials/sh_quote" (printf "%s/.local/bin/dotfiles-xtask" .chezmoi.homeDir) }} --root {{ includeTemplate "partials/sh_quote" .chezmoi.workingTree }} setup retire-tmux --config {{ includeTemplate "partials/sh_quote" .chezmoi.configFile }} --live

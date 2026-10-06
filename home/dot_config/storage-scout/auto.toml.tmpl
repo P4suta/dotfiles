@@ -1,7 +1,1 @@
-{{- if eq .profile "mac" -}}
-{{ includeTemplate "profiles/mac/dot_config/storage-scout/auto.toml.tmpl" . }}
-{{- else if eq .profile "linux" -}}
-{{ includeTemplate "profiles/linux/dot_config/storage-scout/auto.toml.tmpl" . }}
-{{- else if eq .profile "windows" -}}
-{{ includeTemplate "profiles/windows/dot_config/storage-scout/auto.toml.tmpl" . }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+{{- includeTemplate (printf "native/storage-scout/%s.toml.tmpl" .profile) . -}}

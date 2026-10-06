@@ -1,7 +1,0 @@
-{{ if .platforms.windows.ocomment.enabled -}}
-$ErrorActionPreference = 'Stop'
-& {{ includeTemplate "ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup ocomment `
-    --repo-url {{ includeTemplate "ps_quote" .platforms.windows.ocomment.repo_url }} `
-    --destination {{ includeTemplate "ps_quote" .platforms.windows.ocomment.destination }}
-exit $LASTEXITCODE
-{{ end -}}

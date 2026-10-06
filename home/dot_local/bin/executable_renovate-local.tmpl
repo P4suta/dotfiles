@@ -1,2 +1,2 @@
 #!/bin/sh
-exec {{ includeTemplate "sh_quote" (printf "%s/.local/bin/dotguard" .chezmoi.homeDir) }} renovate run "$@"
+exec {{ includeTemplate "partials/sh_quote" (printf "%s/.local/bin/dotguard" .chezmoi.homeDir) }} renovate run "$@"

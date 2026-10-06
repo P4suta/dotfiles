@@ -1,9 +1,5 @@
-{{- if eq .profile "mac" -}}
-{{ includeTemplate "profiles/mac/dot_config/starship.toml.tmpl" . }}
-{{- else if eq .profile "linux" -}}
-{{ include ".chezmoitemplates/profiles/linux/dot_config/starship.toml" }}
-{{- else if eq .profile "windows" -}}
-{{ includeTemplate "profiles/windows/dot_config/starship.toml.tmpl" . }}
-{{- else if eq .profile "wsl" -}}
-{{ include ".chezmoitemplates/profiles/wsl/dot_config/starship.toml" }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+{{- if has .profile (list "mac" "windows") -}}
+{{ includeTemplate (printf "native/starship/%s.toml.tmpl" .profile) . }}
+{{- else -}}
+{{ include (printf ".chezmoitemplates/native/starship/%s.toml" .profile) }}
+{{- end -}}

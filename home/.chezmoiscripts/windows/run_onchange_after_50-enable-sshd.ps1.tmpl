@@ -1,3 +1,10 @@
-{{- if eq .profile "windows" -}}
-{{ includeTemplate "profiles/windows/run_onchange_after_50-enable-sshd.ps1.tmpl" . }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+{{ if .platforms.windows.sshd.enabled -}}
+$ErrorActionPreference = 'Stop'
+& {{ includeTemplate "partials/ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup sshd `
+    --port {{ .platforms.windows.sshd.port }} `
+    --default-shell {{ includeTemplate "partials/ps_quote" .platforms.windows.sshd.default_shell }} `
+    --password-auth {{ if .platforms.windows.sshd.password_auth }}true{{ else }}false{{ end }} `
+    --firewall-profile {{ includeTemplate "partials/ps_quote" .platforms.windows.sshd.firewall_profile }} `
+    --authorized-key {{ if and .platforms.windows.sshd.authorize_signing_key .signing.enabled }}{{ includeTemplate "partials/ps_quote" (includeTemplate "partials/signing_pubkey" . | trim) }}{{ else }}''{{ end }}
+exit $LASTEXITCODE
+{{ end -}}

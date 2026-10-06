@@ -1,3 +1,3 @@
-{{- if eq .profile "windows" -}}
-{{ includeTemplate "profiles/windows/run_onchange_before_install-gh.ps1.tmpl" . }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+$ErrorActionPreference = 'Stop'
+& {{ includeTemplate "partials/ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles-xtask.exe") }} --root {{ includeTemplate "partials/ps_quote" .chezmoi.workingTree }} setup github --config {{ includeTemplate "partials/ps_quote" (.chezmoi.configFile) }} --live
+exit $LASTEXITCODE

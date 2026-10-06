@@ -1,3 +1,7 @@
-{{- if eq .profile "windows" -}}
-{{ includeTemplate "profiles/windows/run_after_45-install-ocomment.ps1.tmpl" . }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+{{ if .platforms.windows.ocomment.enabled -}}
+$ErrorActionPreference = 'Stop'
+& {{ includeTemplate "partials/ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup ocomment `
+    --repo-url {{ includeTemplate "partials/ps_quote" .platforms.windows.ocomment.repo_url }} `
+    --destination {{ includeTemplate "partials/ps_quote" .platforms.windows.ocomment.destination }}
+exit $LASTEXITCODE
+{{ end -}}

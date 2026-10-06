@@ -1,3 +1,5 @@
-{{- if eq .profile "windows" -}}
-{{ includeTemplate "profiles/windows/run_onchange_after_55-setup-keyboard.ps1.tmpl" . }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+$ErrorActionPreference = 'Stop'
+& {{ includeTemplate "partials/ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup keyboard `
+    --keyboard-delay {{ .platforms.windows.keyboard.keyboard_delay }} `
+    --keyboard-speed {{ .platforms.windows.keyboard.keyboard_speed }}
+exit $LASTEXITCODE

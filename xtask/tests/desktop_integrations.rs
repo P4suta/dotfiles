@@ -57,12 +57,8 @@ fn opencode_context7_requires_a_local_linux_desktop() -> Result<()> {
                 .join(entry.file_name()),
         )?;
     }
-    for (profile, file) in [
-        ("linux", "opencode.json.tmpl"),
-        ("mac", "opencode.json.tmpl"),
-        ("windows", "opencode.json"),
-    ] {
-        let path = format!(".chezmoitemplates/profiles/{profile}/dot_config/opencode/{file}");
+    for body in ["linux.json.tmpl", "mac.json.tmpl", "windows.json"] {
+        let path = format!(".chezmoitemplates/native/opencode/{body}");
         fs::create_dir_all(
             temporary
                 .path()

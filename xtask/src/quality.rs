@@ -448,52 +448,146 @@ pub fn unknown_recipes(root: &Path) -> Result<Vec<String>> {
     Ok(unknown)
 }
 
-/// Profile leaves that no template includes.
+/// chezmoi source attributes, which name a target and so never belong inside `.chezmoitemplates/`.
+const SOURCE_ATTRIBUTES: [&str; 18] = [
+    "after_",
+    "before_",
+    "create_",
+    "dot_",
+    "empty_",
+    "encrypted_",
+    "exact_",
+    "executable_",
+    "external_",
+    "literal_",
+    "modify_",
+    "once_",
+    "onchange_",
+    "private_",
+    "readonly_",
+    "remove_",
+    "run_",
+    "symlink_",
+];
+
+/// Refusals for one `.chezmoitemplates/` file, named by its path below that directory.
+/// A file belongs under `partials/`, or under `native/<topic>/<profile>` with an optional extension, and carries no source attribute.
+#[must_use]
+pub fn template_path_findings(relative: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let segments: Vec<&str> = relative.split('/').collect();
+    if let Some(segment) = segments.iter().find(|segment| {
+        SOURCE_ATTRIBUTES
+            .iter()
+            .any(|attribute| segment.starts_with(attribute))
+    }) {
+        found.push(format!(
+            ".chezmoitemplates/{relative}: `{segment}` carries a chezmoi source attribute; name the body after its topic"
+        ));
+    }
+    match segments.as_slice() {
+        ["partials", _, ..] => {}
+        ["native", topic, body] if !topic.is_empty() => {
+            let profile = body.split('.').next().unwrap_or_default();
+            if !crate::profile_rules::Profile::ALL
+                .iter()
+                .any(|known| known.name() == profile)
+            {
+                found.push(format!(
+                    ".chezmoitemplates/{relative}: a native body is named after its profile, such as native/{topic}/mac"
+                ));
+            }
+        }
+        _ => found.push(format!(
+            ".chezmoitemplates/{relative}: only partials/ and native/<topic>/<profile> may hold templates"
+        )),
+    }
+    found
+}
+
+/// The `.chezmoitemplates/` paths that a source text names, with a `%s` profile placeholder expanded to every profile.
+fn template_references(text: &str, into: &mut std::collections::BTreeSet<String>) {
+    for prefix in ["partials/", "native/"] {
+        for (index, _) in text.match_indices(prefix) {
+            if text[..index]
+                .chars()
+                .next_back()
+                .is_some_and(|before| before.is_alphanumeric() || before == '_' || before == '-')
+            {
+                continue;
+            }
+            let reference: String = text[index..].chars().take_while(|c| *c != '"').collect();
+            if reference.contains("%s") {
+                for profile in crate::profile_rules::Profile::ALL {
+                    into.insert(reference.replace("%s", profile.name()));
+                }
+            } else {
+                into.insert(reference);
+            }
+        }
+    }
+}
+
+/// Refusals for the shared templates: a misplaced or attribute-named file, a template that no source includes, and native bodies with identical bytes.
+/// Also refuses the retired `fail "Target is unavailable for this profile"` guard, since `.chezmoiignore` already keeps a target from other profiles.
 ///
 /// # Errors
 ///
-/// Returns an error when reading the profile leaves or a source directory fails.
-pub fn unreferenced_leaves(root: &Path) -> Result<Vec<String>> {
-    let templates = crate::source_state(root).join(".chezmoitemplates");
-    let leaves_root = templates.join("profiles");
-    let mut leaves = Vec::new();
-    let mut stack = vec![leaves_root.clone()];
+/// Returns an error when reading the source state fails.
+pub fn template_findings(root: &Path) -> Result<Vec<String>> {
+    let source = crate::source_state(root);
+    let templates = source.join(".chezmoitemplates");
+    let mut bodies = std::collections::BTreeMap::new();
+    let mut referenced = std::collections::BTreeSet::new();
+    let mut found = Vec::new();
+    let mut stack = vec![source.clone()];
     while let Some(directory) = stack.pop() {
         for entry in fs::read_dir(&directory)? {
             let path = entry?.path();
             if path.is_dir() {
                 stack.push(path);
-            } else {
-                let relative = path.strip_prefix(&templates)?;
-                leaves.push(relative.to_string_lossy().replace('\\', "/"));
+                continue;
+            }
+            let bytes = fs::read(&path)?;
+            let text = String::from_utf8_lossy(&bytes);
+            template_references(&text, &mut referenced);
+            if let Ok(relative) = path.strip_prefix(&templates) {
+                let relative = relative.to_string_lossy().replace('\\', "/");
+                found.extend(template_path_findings(&relative));
+                bodies.insert(relative, bytes);
+            } else if text.contains("Target is unavailable for this profile") {
+                found.push(format!(
+                    "{}: a profile guard inside a template; list the target in home/.chezmoidata/targets.toml instead",
+                    path.strip_prefix(root)
+                        .unwrap_or(&path)
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                ));
             }
         }
     }
-    let mut referenced = std::collections::BTreeSet::new();
-    let mut sources = vec![root.to_path_buf()];
-    while let Some(directory) = sources.pop() {
-        for entry in fs::read_dir(&directory)? {
-            let path = entry?.path();
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default();
-            if path.is_dir() {
-                if !matches!(name, ".git" | "target" | "node_modules") {
-                    sources.push(path);
-                }
-            } else if let Ok(text) = fs::read_to_string(&path) {
-                for (index, _) in text.match_indices("profiles/") {
-                    let tail = &text[index..];
-                    let reference: String = tail.chars().take_while(|c| *c != '"').collect();
-                    referenced.insert(reference);
-                }
+    for path in bodies.keys() {
+        if !referenced.contains(path) {
+            found.push(format!(
+                ".chezmoitemplates/{path}: no source template includes it; delete it or include it"
+            ));
+        }
+    }
+    let native: Vec<_> = bodies
+        .iter()
+        .filter(|(path, _)| path.starts_with("native/"))
+        .collect();
+    for (index, (left, bytes)) in native.iter().enumerate() {
+        for (right, other) in &native[index + 1..] {
+            if bytes == other {
+                found.push(format!(
+                    ".chezmoitemplates/{left} and {right} hold the same bytes; select one body for both profiles"
+                ));
             }
         }
     }
-    leaves.retain(|leaf| !referenced.contains(leaf));
-    leaves.sort();
-    Ok(leaves)
+    found.sort();
+    Ok(found)
 }
 
 /// The chezmoi version that `mise.toml` pins, or why it names none.

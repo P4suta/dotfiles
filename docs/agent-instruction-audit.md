@@ -1,6 +1,6 @@
 # Agent instruction audit
 
-Every managed global `CLAUDE.md` and `AGENTS.md` renders the partials `home/.chezmoitemplates/agent_policy`, `home/.chezmoitemplates/prose_policy`, and `home/.chezmoitemplates/remote_machines`, and nothing else.
+Every managed global `CLAUDE.md` and `AGENTS.md` renders the partials `home/.chezmoitemplates/partials/agent_policy`, `home/.chezmoitemplates/partials/prose_policy`, and `home/.chezmoitemplates/partials/remote_machines`, and nothing else.
 The OpenCode prompts under `home/dot_config/opencode/agents/` and `home/dot_config/opencode/commands/` add instructions when they run.
 This document classifies every line of those partials and prompts.
 A retained text line holds judgment no mechanism can enforce, or it stays until the named follow-up mechanizes it.

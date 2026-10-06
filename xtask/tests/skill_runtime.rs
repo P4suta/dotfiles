@@ -100,10 +100,11 @@ fn build_and_dependency_outputs_are_outside_chezmoi_source_state() -> Result<()>
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../home/.chezmoiignore"),
         source.join(".chezmoiignore"),
     )?;
-    fs::create_dir_all(source.join(".chezmoitemplates"))?;
+    fs::create_dir_all(source.join(".chezmoitemplates/partials"))?;
     fs::copy(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../home/.chezmoitemplates/host-state-ignore"),
-        source.join(".chezmoitemplates/host-state-ignore"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../home/.chezmoitemplates/partials/host-state-ignore"),
+        source.join(".chezmoitemplates/partials/host-state-ignore"),
     )?;
     fs::create_dir_all(source.join(".chezmoidata"))?;
     for data in ["profiles.toml", "targets.toml"] {

@@ -7,4 +7,4 @@
 {{ $target }}
 {{- end }}
 {{- end }}
-{{ includeTemplate "host-state-ignore" . }}
+{{ includeTemplate "partials/host-state-ignore" . }}

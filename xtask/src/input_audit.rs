@@ -6,7 +6,7 @@ use anyhow::{Result, ensure};
 use std::fs;
 use std::path::Path;
 
-const CALL: &str = "includeTemplate \"inputs\"";
+const CALL: &str = "includeTemplate \"partials/inputs\"";
 
 /// The findings in one script template: a hash outside the `inputs` partial, and each `inputs` argument that reads the host or the whole context.
 #[must_use]
@@ -37,10 +37,8 @@ pub fn findings(name: &str, text: &str) -> Vec<String> {
 fn scripts(root: &Path) -> Result<Vec<(String, String)>> {
     let mut found = Vec::new();
     let source = crate::source_state(root);
-    let mut stack = vec![
-        source.join(".chezmoiscripts"),
-        source.join(".chezmoitemplates/profiles"),
-    ];
+    let native = source.join(".chezmoitemplates/native");
+    let mut stack = vec![source.join(".chezmoiscripts"), native.clone()];
     while let Some(directory) = stack.pop() {
         for entry in fs::read_dir(&directory)? {
             let path = entry?.path();
@@ -49,12 +47,19 @@ fn scripts(root: &Path) -> Result<Vec<(String, String)>> {
                 continue;
             }
             let name = path.file_name().unwrap_or_default().to_string_lossy();
-            if name.starts_with("run_") {
+            let text = fs::read_to_string(&path)?;
+            // A native script body carries no run_ prefix, so its call of the inputs partial marks it.
+            let script = if path.starts_with(&native) {
+                text.contains("includeTemplate \"partials/inputs\"")
+            } else {
+                name.starts_with("run_")
+            };
+            if script {
                 let relative = path
                     .strip_prefix(root)?
                     .to_string_lossy()
                     .replace('\\', "/");
-                found.push((relative, fs::read_to_string(&path)?));
+                found.push((relative, text));
             }
         }
     }
@@ -93,13 +98,13 @@ mod tests {
 
     #[test]
     fn own_data_and_rendered_partials_pass() {
-        let text = "#!/bin/sh\n{{ includeTemplate \"inputs\" (list (includeTemplate \"profiles/mac/dot_config/mise/config.toml.tmpl\" .) .tools) }}\nexec x\n";
+        let text = "#!/bin/sh\n{{ includeTemplate \"partials/inputs\" (list (includeTemplate \"native/mise/mac.toml.tmpl\" .) .tools) }}\nexec x\n";
         assert_eq!(findings("run_x.sh.tmpl", text), Vec::<String>::new());
     }
 
     #[test]
     fn a_whole_context_hash_and_a_host_read_are_named() {
-        let text = "# configuration: {{ . | toJson | sha256sum }}\n{{ includeTemplate \"inputs\" (list .chezmoi.args) -}}\n{{ includeTemplate \"inputs\" (list . .ocaml) }}\n";
+        let text = "# configuration: {{ . | toJson | sha256sum }}\n{{ includeTemplate \"partials/inputs\" (list .chezmoi.args) -}}\n{{ includeTemplate \"partials/inputs\" (list . .ocaml) }}\n";
         let found = findings("run_x.sh.tmpl", text);
         assert_eq!(found.len(), 3, "{found:?}");
         assert!(found[0].contains("hashes outside the inputs partial"));

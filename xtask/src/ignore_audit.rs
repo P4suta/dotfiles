@@ -16,7 +16,7 @@ use std::process::{Command, Stdio};
 const BUILD_OUTPUTS: [&str; 2] = ["node_modules", "target"];
 
 /// The shared listing of paths that applications write into a home directory, which no source entry declares.
-const HOST_STATE: &str = "{{ includeTemplate \"host-state-ignore\" . }}";
+const HOST_STATE: &str = "{{ includeTemplate \"partials/host-state-ignore\" . }}";
 
 fn source_paths(root: &Path) -> Result<Vec<String>> {
     let mut paths = Vec::new();

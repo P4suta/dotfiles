@@ -1,9 +1,4 @@
-{{- if eq .profile "mac" -}}
-{{ includeTemplate "profiles/mac/dot_config/git/private_allowed_signers.tmpl" . }}
-{{- else if eq .profile "linux" -}}
-{{ includeTemplate "profiles/linux/dot_config/git/private_allowed_signers.tmpl" . }}
-{{- else if eq .profile "windows" -}}
-{{ includeTemplate "profiles/windows/dot_config/git/private_allowed_signers.tmpl" . }}
-{{- else if eq .profile "wsl" -}}
-{{ includeTemplate "profiles/wsl/dot_config/git/private_allowed_signers.tmpl" . }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+{{- $signingKey := includeTemplate "partials/signing_pubkey" . | trim -}}
+{{- if or (ne .profile "mac") (ne $signingKey "") -}}
+{{ .git.email }} namespaces="git" {{ $signingKey }}
+{{ end -}}

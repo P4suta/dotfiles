@@ -17,7 +17,7 @@ pub const PARTIALS: [&str; 3] = ["agent_policy", "prose_policy", "remote_machine
 /// The tracked audit that classifies every partial line.
 pub const AUDIT: &str = "docs/agent-instruction-audit.md";
 
-/// The managed instruction files, each a root dispatcher over the same path inside every native profile.
+/// The managed instruction files, each a root dispatcher over the native instruction bodies.
 pub const PROFILE_FILES: [&str; 3] = [
     "dot_claude/CLAUDE.md.tmpl",
     "dot_codex/AGENTS.md.tmpl",
@@ -70,7 +70,9 @@ const ATTRIBUTES: [&str; 17] = [
 /// Extensions of files that can hold a gate.
 const GATE_SOURCES: [&str; 7] = [".rs", ".ts", ".js", ".json", ".toml", ".yml", ".yaml"];
 
-const PROFILES: &str = "home/.chezmoitemplates/profiles";
+/// The native instruction bodies that the dispatchers in `PROFILE_FILES` select, relative to `.chezmoitemplates/`.
+const NATIVE: &str = "native/agent-instructions";
+const PROFILES: &str = "home/.chezmoitemplates/native/agent-instructions";
 const RETAINED: &str = "## Retained lines";
 const REMOVED: &str = "## Removed lines";
 const FOLLOW_UPS: &str = "## Follow-ups";
@@ -457,7 +459,7 @@ pub fn profile_findings(path: &str, text: &str, partials: &[&str]) -> Vec<String
         .filter(|(_, line)| {
             !line
                 .trim()
-                .strip_prefix("{{ includeTemplate \"")
+                .strip_prefix("{{ includeTemplate \"partials/")
                 .and_then(|rest| rest.strip_suffix("\" . }}"))
                 .is_some_and(|name| partials.contains(&name))
         })
@@ -472,20 +474,21 @@ pub fn profile_findings(path: &str, text: &str, partials: &[&str]) -> Vec<String
         .collect()
 }
 
-/// A dispatcher action that renders nothing itself or renders exactly its own file in one profile.
-fn dispatcher_action(action: &str, file: &str) -> bool {
+/// A dispatcher action that renders nothing itself or renders one native instruction body.
+fn dispatcher_action(action: &str) -> bool {
     let action = action.trim_matches('-').trim();
     let selects_profile = action
-        .strip_prefix("includeTemplate \"profiles/")
+        .strip_prefix("includeTemplate \"")
+        .and_then(|rest| rest.strip_prefix(NATIVE))
+        .and_then(|rest| rest.strip_prefix('/'))
         .and_then(|rest| rest.split_once('"'))
-        .and_then(|(target, argument)| Some((target.split_once('/')?, argument.trim())))
-        .is_some_and(|((profile, target), argument)| {
+        .is_some_and(|(body, argument)| {
+            let argument = argument.trim();
             let variable = argument
                 .strip_prefix('$')
                 .is_some_and(|name| !name.is_empty() && name.chars().all(char::is_alphanumeric));
-            !profile.is_empty()
-                && !profile.contains('/')
-                && target == file
+            body.strip_suffix(".md.tmpl")
+                .is_some_and(|profile| !profile.is_empty() && !profile.contains('/'))
                 && (argument == "." || variable)
         });
     selects_profile
@@ -496,14 +499,14 @@ fn dispatcher_action(action: &str, file: &str) -> bool {
             .is_some_and(|message| !message.contains('"'))
 }
 
-/// Refusals for a root dispatcher that renders text or includes anything besides its own file in a native profile.
+/// Refusals for a root dispatcher that renders text or includes anything besides a native instruction body.
 #[must_use]
 pub fn dispatcher_findings(path: &str, text: &str) -> Vec<String> {
     let mut result = Vec::new();
     'lines: for (index, line) in text.lines().enumerate() {
         let mut refuse = |what: &str| {
             result.push(format!(
-                "{path}:{}: {what}; a dispatcher only selects `profiles/<profile>/{path}`, so move the text into an audited partial, then run `just check`.",
+                "{path}:{}: {what}; a dispatcher only selects `{NATIVE}/<profile>.md.tmpl`, so move the text into an audited partial, then run `just check`.",
                 index + 1
             ));
         };
@@ -518,7 +521,7 @@ pub fn dispatcher_findings(path: &str, text: &str) -> Vec<String> {
                 refuse("an action is not closed");
                 continue 'lines;
             };
-            if !dispatcher_action(&after[..end], path) {
+            if !dispatcher_action(&after[..end]) {
                 refuse(&format!(
                     "`{}` is not a profile selection",
                     after[..end].trim()
@@ -626,13 +629,6 @@ fn loaded_files(root: &Path) -> Result<Vec<(String, Loaded)>> {
     Ok(found)
 }
 
-fn profile_file(path: &str) -> bool {
-    path.strip_prefix(PROFILES)
-        .and_then(|rest| rest.strip_prefix('/'))
-        .and_then(|rest| rest.split_once('/'))
-        .is_some_and(|(profile, file)| !profile.is_empty() && PROFILE_FILES.contains(&file))
-}
-
 fn shared_skills(root: &Path) -> Result<Vec<String>> {
     let names: BTreeSet<String> = listing(root, &root.join("home/dot_agents/skills"))?
         .into_iter()
@@ -655,7 +651,7 @@ pub fn check(root: &Path) -> Result<()> {
         .map(|name| {
             Ok((
                 (*name).to_owned(),
-                read(root, &format!("home/.chezmoitemplates/{name}"))?,
+                read(root, &format!("home/.chezmoitemplates/partials/{name}"))?,
             ))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -682,13 +678,18 @@ pub fn check(root: &Path) -> Result<()> {
             .filter(|file| PROFILE_FILES.contains(file))
         {
             result.extend(dispatcher_findings(file, &read(root, path)?));
-        } else if profile_file(path) {
-            profiles += 1;
-            result.extend(profile_findings(path, &read(root, path)?, &PARTIALS));
         } else {
             result.push(format!(
-                "{path}: an agent instruction file outside the audit; render it through a dispatcher from `{PROFILES}/<profile>/` and add it to PROFILE_FILES in xtask/src/instruction_audit.rs, or remove it, then run `just check`."
+                "{path}: an agent instruction file outside the audit; render it through a dispatcher of a body in `{PROFILES}/` and add it to PROFILE_FILES in xtask/src/instruction_audit.rs, or remove it, then run `just check`."
             ));
+        }
+    }
+    let bodies = root.join(PROFILES);
+    if bodies.is_dir() {
+        for body in listing(root, &bodies)? {
+            let path = relative(root, &body);
+            profiles += 1;
+            result.extend(profile_findings(&path, &read(root, &path)?, &PARTIALS));
         }
     }
     if profiles == 0 {

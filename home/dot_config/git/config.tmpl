@@ -95,5 +95,5 @@
 [tag]
 	gpgsign = true
 [user]
-	signingkey = {{ printf "key::%s" (includeTemplate "signing_pubkey" . | trim) | quote }}
+	signingkey = {{ printf "key::%s" (includeTemplate "partials/signing_pubkey" . | trim) | quote }}
 {{- end }}

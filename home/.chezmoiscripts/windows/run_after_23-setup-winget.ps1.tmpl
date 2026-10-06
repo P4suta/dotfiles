@@ -1,3 +1,5 @@
-{{- if eq .profile "windows" -}}
-{{ includeTemplate "profiles/windows/run_after_23-setup-winget.ps1.tmpl" . }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+{{ if .platforms.windows.winget.apps -}}
+$ErrorActionPreference = 'Stop'
+& {{ includeTemplate "partials/ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup winget --apps {{ includeTemplate "partials/ps_quote" (join "," .platforms.windows.winget.apps) }}
+exit $LASTEXITCODE
+{{ end -}}

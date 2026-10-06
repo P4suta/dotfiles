@@ -1,3 +1,3 @@
 $ErrorActionPreference = 'Stop'
-& cargo run --locked --manifest-path {{ includeTemplate "ps_quote" (printf "%s/xtask/Cargo.toml" .chezmoi.workingTree) }} -- --root {{ includeTemplate "ps_quote" .chezmoi.workingTree }} setup runtime --config {{ includeTemplate "ps_quote" (.chezmoi.configFile) }} --live
+& cargo run --locked --manifest-path {{ includeTemplate "partials/ps_quote" (printf "%s/xtask/Cargo.toml" .chezmoi.workingTree) }} -- --root {{ includeTemplate "partials/ps_quote" .chezmoi.workingTree }} setup runtime --config {{ includeTemplate "partials/ps_quote" (.chezmoi.configFile) }} --live
 exit $LASTEXITCODE

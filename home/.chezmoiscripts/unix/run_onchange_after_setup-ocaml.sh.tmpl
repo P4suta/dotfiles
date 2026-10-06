@@ -1,5 +1,3 @@
-{{- if eq .profile "mac" -}}
-{{ includeTemplate "profiles/mac/run_onchange_after_setup-ocaml.sh.tmpl" . }}
-{{- else if eq .profile "linux" -}}
-{{ includeTemplate "profiles/linux/run_onchange_after_setup-ocaml.sh.tmpl" . }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+#!/bin/sh
+{{ includeTemplate "partials/inputs" (list .ocaml) }}
+exec {{ includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles-xtask") }} --root {{ includeTemplate "partials/sh_quote" .chezmoi.workingTree }} setup ocaml --config {{ includeTemplate "partials/sh_quote" .chezmoi.configFile }} --live

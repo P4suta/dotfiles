@@ -1,7 +1,1 @@
-{{- if eq .profile "mac" -}}
-{{ includeTemplate "profiles/mac/run_onchange_after_install-tools.sh.tmpl" . }}
-{{- else if eq .profile "linux" -}}
-{{ includeTemplate "profiles/linux/run_onchange_after_install-tools.sh.tmpl" . }}
-{{- else if eq .profile "wsl" -}}
-{{ includeTemplate "profiles/wsl/run_onchange_after_install-tools.sh.tmpl" . }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+{{- includeTemplate (printf "native/install-tools/%s.sh.tmpl" .profile) . -}}

@@ -155,8 +155,8 @@ fn render_merged(profile: &str, template: &str, target: &str, host: &str) -> Str
     let destination = scope.path().join("home");
     for file in [
         template,
-        ".chezmoitemplates/sh_quote",
-        ".chezmoitemplates/profiles/wsl/dot_claude/settings.json.tmpl",
+        ".chezmoitemplates/partials/sh_quote",
+        ".chezmoitemplates/native/claude-settings/wsl.json.tmpl",
     ] {
         let copy = source.join(file);
         std::fs::create_dir_all(copy.parent().unwrap()).unwrap();

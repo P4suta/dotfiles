@@ -306,11 +306,8 @@ fn check(root: &Path, gates: Gates) -> Result<()> {
         dotfiles_xtask::profiles::source_data(root)?;
         dotfiles_xtask::profiles::targets_page(root, true)?;
         dotfiles_xtask::quality::chezmoi_version(root)?;
-        let unreferenced = dotfiles_xtask::quality::unreferenced_leaves(root)?;
-        anyhow::ensure!(
-            unreferenced.is_empty(),
-            "profile leaves that no template includes: {unreferenced:?}"
-        );
+        let templates = dotfiles_xtask::quality::template_findings(root)?;
+        anyhow::ensure!(templates.is_empty(), "{}", templates.join("\n"));
         dotfiles_xtask::profiles::check_profiles(root, None)?;
         dotfiles_xtask::profile_snapshot::check(root)?;
         dotfiles_xtask::ignore_audit::check(root)?;

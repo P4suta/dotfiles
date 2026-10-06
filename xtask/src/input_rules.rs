@@ -182,7 +182,7 @@ mod tests {
             "(list)",
             "(list .ocaml)",
             "(list (index .tool_versions \"haskell-language-server\"))",
-            "(list (includeTemplate \"profiles/mac/dot_config/mise/config.toml.tmpl\" .) .tools)",
+            "(list (includeTemplate \"native/mise/mac.toml.tmpl\" .) .tools)",
             "(list (include \"dot_config/dotfiles-nix/flake.nix.tmpl\") .nix)",
         ] {
             assert_eq!(verdict(&terms(expression)), Verdict::Admit, "{expression}");

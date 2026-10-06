@@ -9,7 +9,7 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | --- | --- |
 | `home/` | The chezmoi source state that `.chezmoiroot` names. |
 | `home/.chezmoiscripts/` | The setup launchers, one directory per OS family. |
-| `home/.chezmoitemplates/` | Shared partials and the per-profile leaves under `profiles/`. |
+| `home/.chezmoitemplates/` | Shared partials under `partials/` and per-profile bodies under `native/`. |
 | `xtask/` | The task runner and the installed runtime behind every hook and launcher. |
 | `crates/dotguard/` | `dotguard`, the Git wrapper, and the reaper and herdr-agent binaries. |
 | `crates/dotctl/` | Windows machine setup. |
@@ -32,7 +32,7 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | Intent | File |
 | --- | --- |
 | A file every host receives | `home/<source path>` |
-| A file that differs per profile | `home/.chezmoitemplates/profiles/<profile>/` and its dispatcher |
+| A file that differs per profile | an inline condition at its path, or `home/.chezmoitemplates/native/<topic>/<profile>` selected from there |
 | Which profiles receive a target | one line in `home/.chezmoidata/targets.toml`, naming a set of `profiles.toml`, then `just gen` |
 | A target to retire from hosts | one line in `home/.chezmoidata/retired.toml`, then `just gen` |
 | A setup step | `home/.chezmoiscripts/` and `xtask/src/setup.rs` |

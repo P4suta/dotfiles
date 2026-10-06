@@ -1,7 +1,15 @@
-{{- if eq .profile "mac" -}}
-{{ include ".chezmoitemplates/profiles/mac/dot_config/atuin/config.toml" }}
-{{- else if eq .profile "linux" -}}
-{{ include ".chezmoitemplates/profiles/linux/dot_config/atuin/config.toml" }}
-{{- else if eq .profile "wsl" -}}
-{{ include ".chezmoitemplates/profiles/wsl/dot_config/atuin/config.toml" }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+{{ if eq .profile "wsl" -}}
+# Local history only.
+# Sync stays off because no server account exists.
+{{ else -}}
+# Local-only: no server registration, so sync stays off.
+{{ end -}}
+auto_sync = false
+update_check = false
+
+# UI
+style = "compact"
+inline_height = 20
+show_preview = true
+search_mode = "fuzzy"
+filter_mode = "global"

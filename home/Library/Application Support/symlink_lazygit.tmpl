@@ -1,3 +1,1 @@
-{{- if eq .profile "mac" -}}
-{{ includeTemplate "profiles/mac/Library/Application Support/symlink_lazygit.tmpl" . }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+{{ .chezmoi.homeDir }}/.config/lazygit

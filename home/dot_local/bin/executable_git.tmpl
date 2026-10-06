@@ -1,7 +1,2 @@
-{{- if eq .profile "mac" -}}
-{{ includeTemplate "profiles/mac/dot_local/bin/executable_git.tmpl" . }}
-{{- else if eq .profile "linux" -}}
-{{ includeTemplate "profiles/linux/dot_local/bin/executable_git.tmpl" . }}
-{{- else if eq .profile "wsl" -}}
-{{ includeTemplate "profiles/wsl/dot_local/bin/executable_git.tmpl" . }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+#!/bin/sh
+exec {{ includeTemplate "partials/sh_quote" (printf "%s/.local/bin/dotguard" .chezmoi.homeDir) }} git "$@"

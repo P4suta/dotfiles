@@ -1,7 +1,5 @@
 {{- if eq .profile "mac" -}}
-{{ include ".chezmoitemplates/profiles/mac/dot_bashrc" }}
-{{- else if eq .profile "linux" -}}
-{{ includeTemplate "profiles/linux/dot_bashrc.tmpl" . }}
-{{- else if eq .profile "wsl" -}}
-{{ includeTemplate "profiles/wsl/dot_bashrc.tmpl" . }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+{{ include ".chezmoitemplates/native/bashrc/mac" }}
+{{- else -}}
+{{ includeTemplate (printf "native/bashrc/%s.tmpl" .profile) . }}
+{{- end -}}

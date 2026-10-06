@@ -392,14 +392,15 @@ fn profile_templates_may_only_include_audited_partials() {
     assert_eq!(
         profile_findings(
             "p/CLAUDE.md.tmpl",
-            "{{ includeTemplate \"agent_policy\" . }}\n\n{{ includeTemplate \"prose_policy\" . }}\n",
+            "{{ includeTemplate \"partials/agent_policy\" . }}\n\n{{ includeTemplate \"partials/prose_policy\" . }}\n",
             &partials,
         ),
         Vec::<String>::new()
     );
     for text in [
-        "{{ includeTemplate \"agent_policy\" . }}\nAlways push.\n",
-        "{{ includeTemplate \"secret_policy\" . }}\n",
+        "{{ includeTemplate \"partials/agent_policy\" . }}\nAlways push.\n",
+        "{{ includeTemplate \"partials/secret_policy\" . }}\n",
+        "{{ includeTemplate \"agent_policy\" . }}\n",
     ] {
         let reported = profile_findings("p/CLAUDE.md.tmpl", text, &partials);
         assert_eq!(reported.len(), 1, "{text}\n{reported:?}");
@@ -408,14 +409,14 @@ fn profile_templates_may_only_include_audited_partials() {
 }
 
 const DISPATCHER: &str = "{{- if eq .profile \"mac\" -}}
-{{ includeTemplate \"profiles/mac/dot_claude/CLAUDE.md.tmpl\" . }}
-{{- else if has .profile (list \"linux\" \"wsl\") -}}
-{{ includeTemplate \"profiles/linux/dot_claude/CLAUDE.md.tmpl\" . }}
-{{- else -}}{{ fail \"Target is unavailable for this profile\" }}{{- end -}}
+{{ includeTemplate \"native/agent-instructions/mac.md.tmpl\" . }}
+{{- else -}}
+{{ includeTemplate \"native/agent-instructions/linux.md.tmpl\" . }}
+{{- end -}}
 ";
 
 #[test]
-fn a_dispatcher_only_selects_its_own_profile_file() {
+fn a_dispatcher_only_selects_a_native_instruction_body() {
     assert_eq!(
         dispatcher_findings("dot_claude/CLAUDE.md.tmpl", DISPATCHER),
         Vec::<String>::new()
@@ -423,14 +424,17 @@ fn a_dispatcher_only_selects_its_own_profile_file() {
     for (from, to) in [
         ("{{- else -}}", "Always push.\n{{- else -}}"),
         (
-            "profiles/linux/dot_claude/CLAUDE.md.tmpl",
-            "profiles/linux/dot_codex/AGENTS.md.tmpl",
+            "native/agent-instructions/linux.md.tmpl",
+            "native/bashrc/linux.tmpl",
         ),
-        ("profiles/linux/dot_claude/CLAUDE.md.tmpl", "agent_policy"),
-        ("{{ fail ", "{{ \"Always push.\" }}{{ fail "),
         (
-            "CLAUDE.md.tmpl\" . }}",
-            "CLAUDE.md.tmpl\" . | printf \"%s Always push.\" }}",
+            "native/agent-instructions/linux.md.tmpl",
+            "partials/agent_policy",
+        ),
+        ("{{- end -}}", "{{ \"Always push.\" }}{{- end -}}"),
+        (
+            "linux.md.tmpl\" . }}",
+            "linux.md.tmpl\" . | printf \"%s Always push.\" }}",
         ),
         ("{{- end -}}", "{{- end -}}{{"),
     ] {
@@ -502,7 +506,7 @@ fn write(root: &Path, relative: &str, text: &str) {
     fs::write(path, text).expect("write fixture");
 }
 
-const PROFILE: &str = "{{ includeTemplate \"agent_policy\" . }}\n\n{{ includeTemplate \"prose_policy\" . }}\n\n{{ includeTemplate \"remote_machines\" . }}\n";
+const PROFILE: &str = "{{ includeTemplate \"partials/agent_policy\" . }}\n\n{{ includeTemplate \"partials/prose_policy\" . }}\n\n{{ includeTemplate \"partials/remote_machines\" . }}\n";
 
 /// A minimal repository whose instruction files the audit fully classifies.
 fn repository() -> tempfile::TempDir {
@@ -510,17 +514,17 @@ fn repository() -> tempfile::TempDir {
     let path = root.path();
     write(
         path,
-        "home/.chezmoitemplates/agent_policy",
+        "home/.chezmoitemplates/partials/agent_policy",
         "- Reply in Japanese.\n",
     );
     write(
         path,
-        "home/.chezmoitemplates/prose_policy",
+        "home/.chezmoitemplates/partials/prose_policy",
         "- Write one sentence per line.\n",
     );
     write(
         path,
-        "home/.chezmoitemplates/remote_machines",
+        "home/.chezmoitemplates/partials/remote_machines",
         "- Read the SSH aliases.\n",
     );
     write(
@@ -531,13 +535,13 @@ fn repository() -> tempfile::TempDir {
     write(path, "home/dot_agents/skills/demo/SKILL.md", "demo\n");
     write(
         path,
-        "home/.chezmoitemplates/profiles/mac/dot_claude/CLAUDE.md.tmpl",
+        "home/.chezmoitemplates/native/agent-instructions/mac.md.tmpl",
         PROFILE,
     );
     write(
         path,
         "home/dot_claude/CLAUDE.md.tmpl",
-        "{{- if eq .profile \"mac\" -}}\n{{ includeTemplate \"profiles/mac/dot_claude/CLAUDE.md.tmpl\" . }}\n{{- else -}}{{ fail \"Target is unavailable for this profile\" }}{{- end -}}\n",
+        "{{- includeTemplate \"native/agent-instructions/mac.md.tmpl\" . -}}\n",
     );
     root
 }
@@ -556,17 +560,17 @@ fn the_check_walks_every_profile_and_dispatcher() {
     let root = repository();
     write(
         root.path(),
-        "home/.chezmoitemplates/profiles/mac/dot_claude/CLAUDE.md.tmpl",
+        "home/.chezmoitemplates/native/agent-instructions/mac.md.tmpl",
         &format!("{PROFILE}Always push.\n"),
     );
     write(
         root.path(),
         "home/dot_claude/CLAUDE.md.tmpl",
-        "Always push.\n{{ includeTemplate \"profiles/mac/dot_claude/CLAUDE.md.tmpl\" . }}\n",
+        "Always push.\n{{ includeTemplate \"native/agent-instructions/mac.md.tmpl\" . }}\n",
     );
     let message = refusal(root.path());
     assert!(
-        message.contains("home/.chezmoitemplates/profiles/mac/dot_claude/CLAUDE.md.tmpl:6"),
+        message.contains("home/.chezmoitemplates/native/agent-instructions/mac.md.tmpl:6"),
         "{message}"
     );
     assert!(message.contains("dot_claude/CLAUDE.md.tmpl:1"), "{message}");
@@ -659,12 +663,12 @@ fn a_missing_skill_tree_names_the_directory_and_the_next_action() {
 #[test]
 fn a_repository_without_profile_templates_is_refused_with_its_location() {
     let root = repository();
-    fs::remove_dir_all(root.path().join("home/.chezmoitemplates/profiles"))
-        .expect("remove profiles");
+    fs::remove_dir_all(root.path().join("home/.chezmoitemplates/native"))
+        .expect("remove native bodies");
     fs::remove_file(root.path().join("home/dot_claude/CLAUDE.md.tmpl")).expect("remove dispatcher");
     let message = refusal(root.path());
     assert!(
-        message.contains("home/.chezmoitemplates/profiles"),
+        message.contains("home/.chezmoitemplates/native/agent-instructions"),
         "{message}"
     );
     assert!(message.contains("just check"), "{message}");
@@ -673,11 +677,14 @@ fn a_repository_without_profile_templates_is_refused_with_its_location() {
 #[test]
 fn an_unreadable_partial_names_the_file_and_the_next_action() {
     let root = repository();
-    fs::remove_file(root.path().join("home/.chezmoitemplates/prose_policy"))
-        .expect("remove partial");
+    fs::remove_file(
+        root.path()
+            .join("home/.chezmoitemplates/partials/prose_policy"),
+    )
+    .expect("remove partial");
     let message = refusal(root.path());
     assert!(
-        message.contains("home/.chezmoitemplates/prose_policy"),
+        message.contains("home/.chezmoitemplates/partials/prose_policy"),
         "{message}"
     );
     assert!(message.contains("just check"), "{message}");

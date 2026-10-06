@@ -550,20 +550,74 @@ fn launchers_exec_their_installed_path_rather_than_the_runtime_home() {
 }
 
 #[test]
-fn profile_leaves_must_be_included_by_a_template() {
+fn shared_templates_must_be_placed_included_and_distinct() {
     let scope = tempfile::tempdir().unwrap();
-    let leaves = scope.path().join("home/.chezmoitemplates/profiles/mac");
-    fs::create_dir_all(&leaves).unwrap();
-    fs::write(leaves.join("used"), "a\n").unwrap();
-    fs::write(leaves.join("stale"), "b\n").unwrap();
+    let templates = scope.path().join("home/.chezmoitemplates");
+    for directory in ["partials", "native/topic", "native/twin", "profiles/mac"] {
+        fs::create_dir_all(templates.join(directory)).unwrap();
+    }
+    fs::write(templates.join("partials/used"), "a\n").unwrap();
+    fs::write(templates.join("partials/stale"), "b\n").unwrap();
+    fs::write(templates.join("native/topic/mac.toml"), "c\n").unwrap();
+    fs::write(templates.join("native/topic/linux.toml"), "d\n").unwrap();
+    fs::write(templates.join("native/twin/mac"), "e\n").unwrap();
+    fs::write(templates.join("native/twin/wsl"), "e\n").unwrap();
+    fs::write(templates.join("profiles/mac/dot_x"), "f\n").unwrap();
     fs::write(
         scope.path().join("home/dot_used.tmpl"),
-        "{{ includeTemplate \"profiles/mac/used\" . }}\n",
+        concat!(
+            "{{ includeTemplate \"partials/used\" . }}\n",
+            "{{ include (printf \".chezmoitemplates/native/topic/%s.toml\" .profile) }}\n",
+            "{{ include \".chezmoitemplates/native/twin/mac\" }}{{ include \".chezmoitemplates/native/twin/wsl\" }}\n",
+            "{{ includeTemplate \"profiles/mac/dot_x\" . }}\n",
+        ),
     )
     .unwrap();
+    fs::write(
+        scope.path().join("home/dot_guarded.tmpl"),
+        "{{ fail \"Target is unavailable for this profile\" }}\n",
+    )
+    .unwrap();
+    let found = quality::template_findings(scope.path()).unwrap();
+    assert_eq!(found.len(), 6, "{found:#?}");
+    for expected in [
+        ".chezmoitemplates/native/twin/mac and native/twin/wsl hold the same bytes",
+        ".chezmoitemplates/partials/stale: no source template includes it",
+        ".chezmoitemplates/profiles/mac/dot_x: no source template includes it",
+        ".chezmoitemplates/profiles/mac/dot_x: `dot_x` carries a chezmoi source attribute",
+        ".chezmoitemplates/profiles/mac/dot_x: only partials/ and native/<topic>/<profile> may hold templates",
+        "home/dot_guarded.tmpl: a profile guard inside a template",
+    ] {
+        assert!(
+            found.iter().any(|line| line.starts_with(expected)),
+            "{expected} missing from {found:#?}"
+        );
+    }
+}
+
+#[test]
+fn a_native_body_is_named_after_a_profile() {
     assert_eq!(
-        quality::unreferenced_leaves(scope.path()).unwrap(),
-        ["profiles/mac/stale"]
+        quality::template_path_findings("native/mise/windows.toml.tmpl"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        quality::template_path_findings("partials/sh_quote"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        quality::template_path_findings("native/mise/darwin.toml").len(),
+        1
+    );
+    assert_eq!(quality::template_path_findings("native/mise.toml").len(), 1);
+    assert_eq!(quality::template_path_findings("inputs").len(), 1);
+}
+
+#[test]
+fn the_source_templates_hold_no_finding() {
+    assert_eq!(
+        quality::template_findings(&Path::new(env!("CARGO_MANIFEST_DIR")).join("..")).unwrap(),
+        Vec::<String>::new()
     );
 }
 

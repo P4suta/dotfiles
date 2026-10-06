@@ -1,3 +1,10 @@
-{{- if eq .profile "linux" -}}
-{{ includeTemplate "profiles/linux/dot_profile.tmpl" . }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+# shellcheck source=dot_config/shell/ssh-agent.sh
+if [ -r "${HOME}/.config/shell/ssh-agent.sh" ]; then
+  . "${HOME}/.config/shell/ssh-agent.sh"
+fi
+
+export PATH="${HOME}/.local/bin:${HOME}/.nix-profile/bin:${HOME}/.local/share/mise/shims:${HOME}/.opam/{{ .ocaml.switch }}/bin:${PATH}"
+
+if [ -n "${BASH_VERSION:-}" ] && [ -f "${HOME}/.bashrc" ]; then
+  . "${HOME}/.bashrc"
+fi

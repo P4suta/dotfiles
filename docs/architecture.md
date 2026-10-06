@@ -11,8 +11,10 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 2. A machine-local configuration outside the checkout selects the profile and holds the Git identity, the signing key, and the project root.
 3. The TOML files in `home/.chezmoidata/` hold the data, split by concern: shared values at the top level and per-profile values under `platforms.<profile>`.
    Templates read each value at its explicit path, and `crates/model` refuses an unknown key with its file.
-4. A target that differs per profile has a dispatcher at its target path that selects `home/.chezmoitemplates/profiles/<profile>/<target>`.
-   A target every profile shares renders from its own path.
+4. Every target renders from one template at its own path.
+   A target that a single profile receives holds its body there, and a small difference between profiles stays an inline condition.
+   A target whose bodies differ more selects `home/.chezmoitemplates/native/<topic>/<profile>`, which can serve further profiles with the same body.
+   `home/.chezmoitemplates/partials/` holds the shared partials, and the profile gate refuses any other file there, a duplicate native body, and an unused template.
 5. `targets.toml` and `retired.toml` in `home/.chezmoidata/` name, through the sets of `profiles.toml`, the profiles that receive each restricted target and that remove each retired one.
    `home/.chezmoiignore` and `home/.chezmoiremove` render from them, and `just gen` writes [the target reference](reference/targets.md).
 6. `home/.chezmoiscripts/unix/` and `home/.chezmoiscripts/windows/` hold the setup scripts.

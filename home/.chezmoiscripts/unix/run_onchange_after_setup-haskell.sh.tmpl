@@ -1,3 +1,3 @@
-{{- if eq .profile "mac" -}}
-{{ includeTemplate "profiles/mac/run_onchange_after_setup-haskell.sh.tmpl" . }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+#!/bin/sh
+{{ includeTemplate "partials/inputs" (list (index .platforms.mac.tool_versions "haskell-language-server")) }}
+exec {{ includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles-xtask") }} --root {{ includeTemplate "partials/sh_quote" .chezmoi.workingTree }} setup haskell --config {{ includeTemplate "partials/sh_quote" .chezmoi.configFile }} --live

@@ -14,12 +14,12 @@ It runs the same xtask binary the git hooks use.
 */ -}}
 {{- $tool := ".local/bin/dotfiles-xtask" -}}
 {{- if eq .profile "windows" }}{{ $tool = ".local/bin/dotfiles-xtask.exe" }}{{ end -}}
-{{- $hook := dict "type" "command" "command" (printf "%s claude-bash" (includeTemplate "sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
+{{- $hook := dict "type" "command" "command" (printf "%s claude-bash" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
 {{- /*
 The timing hook sets each shell command timeout from its measured durations.
 The post-tool events keep every group another installer added and replace only the timing one.
 */ -}}
-{{- $timing := dict "type" "command" "command" (printf "%s claude-timing" (includeTemplate "sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
+{{- $timing := dict "type" "command" "command" (printf "%s claude-timing" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
 {{- $hooks := dict "PreToolUse" (list (dict "matcher" "Bash|PowerShell" "hooks" (list $hook $timing))) -}}
 {{- range $event := list "PostToolUse" "PostToolUseFailure" -}}
 {{-   $groups := list -}}
@@ -32,7 +32,7 @@ The post-tool events keep every group another installer added and replace only t
 On Windows a session starts with the process-start probe, which hands the agent a refusal while a hung Defender engine stalls every process start.
 */ -}}
 {{- if eq .profile "windows" -}}
-{{-   $health := dict "type" "command" "command" (printf "%s health --session" (includeTemplate "sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
+{{-   $health := dict "type" "command" "command" (printf "%s health --session" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
 {{-   $groups := list -}}
 {{-   range (dig "hooks" "SessionStart" (list) $current) -}}
 {{-     if not (contains " health --session" (toJson .)) -}}{{- $groups = append $groups . -}}{{- end -}}
@@ -41,7 +41,7 @@ On Windows a session starts with the process-start probe, which hands the agent 
 {{- end -}}
 {{- $managed := dict "autoMemoryEnabled" false "hooks" $hooks -}}
 {{- if eq .profile "wsl" -}}
-{{- $managed = mergeOverwrite $managed (includeTemplate "profiles/wsl/dot_claude/settings.json.tmpl" . | fromJson) -}}
+{{- $managed = mergeOverwrite $managed (includeTemplate "native/claude-settings/wsl.json.tmpl" . | fromJson) -}}
 {{- end -}}
 {{ mergeOverwrite $current $managed | toPrettyJson "  " | trim }}
 

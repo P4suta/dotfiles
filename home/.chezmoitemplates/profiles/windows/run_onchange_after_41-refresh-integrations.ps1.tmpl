@@ -1,5 +1,0 @@
-{{ includeTemplate "inputs" (list (includeTemplate "profiles/windows/dot_config/mise/config.toml.tmpl" .) .platforms.windows.herdr.revision .platforms.windows.tools .platforms.windows.scoop.apps) }}
-$ErrorActionPreference = 'Stop'
-
-& {{ includeTemplate "ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles-xtask.exe") }} --root {{ includeTemplate "ps_quote" .chezmoi.workingTree }} setup integrations --config {{ includeTemplate "ps_quote" .chezmoi.configFile }} --live
-exit $LASTEXITCODE
