@@ -1631,7 +1631,11 @@ pub fn install(source: &Path, binary: &Path, user_directory: &Path) -> Result<()
     let temporary = tempfile::NamedTempFile::new_in(&directory)?;
     fs::copy(binary, temporary.path())?;
     temporary.as_file().sync_all()?;
-    temporary.persist(directory.join(format!("prose{}", std::env::consts::EXE_SUFFIX)))?;
+    let (_, staged) = temporary.keep()?;
+    crate::aside::replace(
+        &staged,
+        &directory.join(format!("prose{}", std::env::consts::EXE_SUFFIX)),
+    )?;
     let runtime = runtime_directory()?;
     fs::create_dir_all(&runtime)?;
     let tools = Tools {

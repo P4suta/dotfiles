@@ -75,7 +75,11 @@ pub fn install(source: &Path, binary: &Path, user_directory: &Path) -> Result<()
     let temporary = tempfile::NamedTempFile::new_in(&directory)?;
     fs::copy(binary, temporary.path())?;
     temporary.as_file().sync_all()?;
-    temporary.persist(directory.join(format!("skill-ops{}", std::env::consts::EXE_SUFFIX)))?;
+    let (_, staged) = temporary.keep()?;
+    crate::aside::replace(
+        &staged,
+        &directory.join(format!("skill-ops{}", std::env::consts::EXE_SUFFIX)),
+    )?;
     #[cfg(unix)]
     fs::File::open(&directory)?.sync_all()?;
     ops::write_json(

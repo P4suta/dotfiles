@@ -359,35 +359,38 @@ pub fn git_wrapper(bin: &Path) -> Result<()> {
     if fs::read(&wrapper).is_ok_and(|current| current == wanted) {
         return Ok(());
     }
-    if wrapper.exists() {
-        let aside = bin.join(format!("git.exe.{}.old", std::process::id()));
-        fs::rename(&wrapper, &aside)
-            .with_context(|| format!("move {} aside", wrapper.display()))?;
-    }
-    replace(&wrapper, &wanted, true)?;
-    for entry in fs::read_dir(bin)?.flatten() {
-        let name = entry.file_name();
-        if name.to_string_lossy().starts_with("git.exe.")
-            && name.to_string_lossy().ends_with(".old")
-        {
-            let _ = fs::remove_file(entry.path());
-        }
+    let aside = crate::aside::move_aside(&wrapper)?;
+    if let Err(error) = replace(&wrapper, &wanted, true) {
+        crate::aside::restore(&wrapper, aside);
+        return Err(error);
     }
     Ok(())
 }
 
+/// `cargo install` overwrites each binary in place, which Windows refuses while that binary runs, so each one moves aside first.
 fn install_crate(
     context: &ContextData,
     runner: &mut impl Runner,
     relative: &str,
     binaries: &[&str],
 ) -> Result<()> {
-    let arguments = cargo_install_arguments(
-        &context.source.join(relative),
-        &context.home.join(".local"),
-        binaries,
-    );
-    checked(runner, Tool::Cargo, &arguments)?;
+    let root = context.home.join(".local");
+    let mut moved = Vec::new();
+    for binary in binaries {
+        let target = root
+            .join("bin")
+            .join(format!("{binary}{}", std::env::consts::EXE_SUFFIX));
+        let aside = crate::aside::move_aside(&target)?;
+        moved.push((target, aside));
+    }
+    let arguments = cargo_install_arguments(&context.source.join(relative), &root, binaries);
+    let result = checked(runner, Tool::Cargo, &arguments);
+    if result.is_err() {
+        for (target, aside) in moved {
+            crate::aside::restore(&target, aside);
+        }
+    }
+    result?;
     Ok(())
 }
 

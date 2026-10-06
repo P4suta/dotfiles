@@ -369,7 +369,7 @@ pub fn install(binary: &Path, user_directory: &Path) -> Result<()> {
         let result = (|| -> Result<()> {
             fs::copy(binary, &temporary)?;
             File::options().write(true).open(&temporary)?.sync_all()?;
-            fs::rename(&temporary, directory.join(name))?;
+            crate::aside::replace(&temporary, &directory.join(name))?;
             Ok(())
         })();
         if result.is_err() {

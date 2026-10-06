@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use super::aside_rules::{aside_name, is_aside};
 use super::ocomment_rules::{Action, action};
 use crate::{env, proc};
 
@@ -20,7 +21,7 @@ pub struct Options {
 /// Reports a failure as a warning, so a stale gate never rolls back the rest of the apply.
 pub fn run(options: &Options) -> Result<i32> {
     println!(">>> ocomment install");
-    if let Err(err) = install(options) {
+    if let Err(err) = build(options) {
         eprintln!("ocomment install failed: {err:#}");
     }
     Ok(0)
@@ -40,7 +41,38 @@ fn head(checkout: &Path) -> Result<Option<String>> {
     ))
 }
 
-fn install(options: &Options) -> Result<()> {
+/// Windows refuses to overwrite a running `ocomment.exe` but lets a process rename it, so the current binary moves aside and a later installation deletes it.
+fn install(built: &Path, dest: &Path) -> Result<()> {
+    let bin = dest.parent().context("no .local/bin parent")?;
+    std::fs::create_dir_all(bin)?;
+    let name = dest
+        .file_name()
+        .context("no binary name")?
+        .to_string_lossy()
+        .into_owned();
+    for entry in std::fs::read_dir(bin)?.flatten() {
+        if is_aside(name.as_bytes(), entry.file_name().as_encoded_bytes()) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    let staged = tempfile::NamedTempFile::new_in(bin)?;
+    std::fs::copy(built, staged.path()).context("staging ocomment.exe")?;
+    let (_, staged) = staged.keep()?;
+    let aside = bin.join(aside_name(&name, std::process::id()));
+    let moved = dest.exists();
+    if moved {
+        std::fs::rename(dest, &aside).context("moving the installed ocomment.exe aside")?;
+    }
+    if let Err(error) = std::fs::rename(&staged, dest) {
+        if moved {
+            let _ = std::fs::rename(&aside, dest);
+        }
+        return Err(error).context("installing ocomment.exe");
+    }
+    Ok(())
+}
+
+fn build(options: &Options) -> Result<()> {
     let home = std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
         .map(PathBuf::from)
@@ -83,8 +115,7 @@ fn install(options: &Options) -> Result<()> {
         .join("target")
         .join("release")
         .join("ocomment.exe");
-    std::fs::create_dir_all(dest.parent().context("no .local/bin parent")?)?;
-    std::fs::copy(&built, &dest).context("installing ocomment.exe")?;
+    install(&built, &dest)?;
 
     let mut version = env::command(&dest.display().to_string());
     version.arg("--version");

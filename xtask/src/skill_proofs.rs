@@ -183,6 +183,11 @@ pub const IGNORE_HARNESSES: [&str; 3] = [
     "a_star_stays_inside_one_segment_and_a_globstar_crosses_them",
 ];
 
+pub const ASIDE_HARNESSES: [&str; 2] = [
+    "an_aside_copy_is_recognised_and_its_binary_is_not",
+    "only_entries_named_after_the_binary_are_swept",
+];
+
 pub const INPUT_HARNESSES: [&str; 2] = [
     "a_term_that_reads_the_host_always_refuses_the_hash",
     "the_whole_context_is_hashed_only_through_a_rendered_partial",
@@ -803,7 +808,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 16] = [
+pub const RULES: [Rules; 17] = [
     Rules {
         source: "xtask/src/target_rules.rs",
         harnesses: &TARGET_HARNESSES,
@@ -1130,6 +1135,24 @@ fn reject_skipping_a_missing_binary() {
         rejected: &[
             "reject_skipping_a_moved_checkout",
             "reject_skipping_a_missing_binary",
+        ],
+    },
+    Rules {
+        source: "xtask/src/aside_rules.rs",
+        harnesses: &ASIDE_HARNESSES,
+        counterexamples: "use production::is_aside;
+#[kani::proof]
+fn reject_sweeping_the_installed_binary() {
+    assert!(is_aside(b\"a\", b\"a\"));
+}
+#[kani::proof]
+fn reject_sweeping_another_binary() {
+    assert!(is_aside(b\"a\", b\"b.1.old\"));
+}
+",
+        rejected: &[
+            "reject_sweeping_the_installed_binary",
+            "reject_sweeping_another_binary",
         ],
     },
 ];

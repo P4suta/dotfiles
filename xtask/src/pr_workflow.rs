@@ -2387,7 +2387,11 @@ pub fn install(binary: &std::path::Path, user_directory: &std::path::Path) -> Re
     let file = tempfile::NamedTempFile::new_in(&directory)?;
     fs::copy(binary, file.path())?;
     file.as_file().sync_all()?;
-    file.persist(directory.join(format!("pr-workflow{}", std::env::consts::EXE_SUFFIX)))?;
+    let (_, staged) = file.keep()?;
+    crate::aside::replace(
+        &staged,
+        &directory.join(format!("pr-workflow{}", std::env::consts::EXE_SUFFIX)),
+    )?;
     println!("Installed pr-workflow in {}", directory.display());
     Ok(())
 }
