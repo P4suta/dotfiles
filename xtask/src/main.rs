@@ -51,6 +51,7 @@ enum Action {
         disposable_host: bool,
     },
     /// Run the gates a change selects, or every gate without a scope.
+    /// With `--staged`, run the lint stages and the prose checks over the staged files instead.
     Check {
         #[command(flatten)]
         scope: xtask::change::Scope,
@@ -86,8 +87,15 @@ enum Action {
     InstallPrWorkflow,
     /// Install the prose checker, its pinned linters, and the reply hook of each client.
     InstallProse,
+    /// Refuse a lint baseline that admits more than it did at `--base`, or rewrite every baseline from the tracked files with `--write`.
+    Baselines {
+        #[arg(long, conflicts_with = "write")]
+        base: Option<String>,
+        #[arg(long)]
+        write: bool,
+    },
     /// Prove the production contracts.
-    /// A scope without the Rust gate skips them.
+    /// A scope that selects no proofs gate skips them.
     Proofs {
         #[command(flatten)]
         scope: xtask::change::Scope,
@@ -156,10 +164,19 @@ fn check_package(root: &Path, manifest: &Path) -> Result<()> {
     cargo(root, manifest, &["test", "--locked", "--all-targets"])
 }
 
+/// The pre-commit check: the lint stages over the staged files, then the prose of the documents.
+/// The `check-staged` recipe then reads the comments through `OComment`, and the pre-push check runs the gates the whole change selects.
+fn check_staged(root: &Path) -> Result<()> {
+    let staged = xtask::change::paths(root, &xtask::change::Source::Staged)?;
+    xtask::lint::check(root, &staged, false, "HEAD")?;
+    prose::repository(root, prose::Scope::Documents, &prose::Bundle::source(root)?)
+}
+
 /// Runs the checks of each selected gate.
 /// A change that selects fewer gates skips only the checks it can't affect.
-fn check(root: &Path, gates: Gates) -> Result<()> {
+fn check(root: &Path, gates: Gates, reference: &str) -> Result<()> {
     if gates.contains(Gate::Prose) {
+        xtask::lint::check(root, &xtask::lint::tracked(root)?, true, reference)?;
         xtask::adr::generate(root, true)?;
         xtask::quality::editorconfig(root)?;
         xtask::quality::comment_scopes(root)?;
@@ -246,10 +263,12 @@ fn run() -> Result<()> {
         Action::InstallPrWorkflow => install_pr_workflow(&cli.root)?,
         Action::InstallProse => install_prose(&cli.root)?,
         Action::Proofs { scope } => {
-            if scope.resolve(&cli.root)?.contains(Gate::Rust) {
+            if scope.resolve(&cli.root)?.contains(Gate::Proofs) {
                 xtask::skill_proofs::verify(&cli.root)?;
             } else {
-                println!("Skipped the proofs: the change selects no Rust gate");
+                println!(
+                    "Skipped the proofs: the change touches no rule module, proof inventory, or tooling"
+                );
             }
         }
         Action::Classify { scope } => xtask::change::run(&cli.root, &scope)?,
@@ -263,7 +282,18 @@ fn run() -> Result<()> {
         Action::Rehearse { disposable_host } => {
             xtask::rehearsal::run(&cli.root, disposable_host)?;
         }
-        Action::Check { scope } => check(&cli.root, scope.resolve(&cli.root)?)?,
+        Action::Check { scope } if scope.staged() => check_staged(&cli.root)?,
+        Action::Check { scope } => check(&cli.root, scope.resolve(&cli.root)?, scope.reference())?,
+        Action::Baselines { base, write } => {
+            if write {
+                xtask::lint::write_baselines(&cli.root)?;
+            } else {
+                let refusals =
+                    xtask::lint::baseline_growth(&cli.root, base.as_deref().unwrap_or("HEAD"))?;
+                ensure!(refusals.is_empty(), "{}", refusals.join("\n"));
+                println!("Every lint baseline only shrank");
+            }
+        }
         Action::Decide { skill } => {
             println!("{}", skill_ops::decide(&cli.root, &skill)?);
         }

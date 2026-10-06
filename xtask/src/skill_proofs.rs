@@ -327,7 +327,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 30] = [
+pub const RULES: [Rules; 31] = [
     Rules {
         source: "crates/skill-ops/src/skill_rules.rs",
         counterexamples: "#[kani::proof]
@@ -935,7 +935,14 @@ fn reject_checking_a_dirty_tree() {
     },
     Rules {
         source: "xtask/src/change_rules.rs",
-        counterexamples: "use production::{Class, Gates, classify, gates, matched};
+        counterexamples: "use production::{Class, Gate, Gates, classify, gates, matched};
+#[kani::proof]
+#[kani::unwind(40)]
+fn reject_a_rule_change_skipping_the_proofs() {
+    let mut bytes: [u8; 24] = kani::any();
+    bytes[15..].copy_from_slice(b\"_rules.rs\");
+    assert!(!gates(classify(&bytes)).contains(Gate::Proofs));
+}
 #[kani::proof]
 #[kani::unwind(40)]
 fn reject_an_unknown_path_selecting_less_than_everything() {
@@ -953,6 +960,7 @@ fn reject_a_lock_file_selecting_a_single_class() {
 }
 ",
         rejected: &[
+            "reject_a_rule_change_skipping_the_proofs",
             "reject_an_unknown_path_selecting_less_than_everything",
             "reject_a_lock_file_selecting_a_single_class",
         ],
@@ -1094,6 +1102,28 @@ fn reject_ordering_a_cycle() {
         rejected: &[
             "reject_running_a_step_before_what_it_relies_on",
             "reject_ordering_a_cycle",
+        ],
+    },
+    Rules {
+        source: "xtask/src/lint_rules.rs",
+        counterexamples: "use production::{Fault, fault, shrinks};
+#[kani::proof]
+fn reject_a_file_without_its_final_newline() {
+    assert!(fault(b\"text\").is_none());
+}
+#[kani::proof]
+fn reject_a_baseline_that_admits_a_new_finding() {
+    assert!(shrinks(0, 1));
+}
+#[kani::proof]
+fn reject_a_byte_order_mark() {
+    assert!(fault(b\"\\xEF\\xBB\\xBFtext\\n\") != Some(Fault::ByteOrderMark));
+}
+",
+        rejected: &[
+            "reject_a_file_without_its_final_newline",
+            "reject_a_baseline_that_admits_a_new_finding",
+            "reject_a_byte_order_mark",
         ],
     },
     Rules {

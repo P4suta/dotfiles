@@ -23,7 +23,7 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 
 ## Commands
 
-- `just check` runs the gates a change selects.
+- `just check` runs the gates a change selects, and `just check-staged` runs the lint stages over the staged files before each commit.
 - `just proofs` runs the Kani proofs, in a Linux container on Windows.
 - `just profiles` renders every profile and compares it with the committed manifests.
 - `just diff`, `just apply`, and `just verify` preview, apply, and verify this host's profile.
@@ -50,3 +50,4 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 - Every rule module has unit tests, Kani harnesses, and a rejecting counterexample in the proof inventory.
 - A change that alters what a host receives updates both manifest sets in `xtask/tests/snapshots/` and explains the difference.
 - Lint exceptions use `#[expect]` with a reason.
+- The baselines in `policy/lint-baselines/` only shrink: fix a new finding instead of admitting it.

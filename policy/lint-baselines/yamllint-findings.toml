@@ -1,0 +1,29 @@
+# The count of yamllint findings per path and rule that existed when the stage started.
+# The gate refuses a finding beyond these counts and an entry that admits more than its path holds, so this file only shrinks.
+
+[findings."home/dot_config/prose/styles/Google/EmDash.yml"]
+empty-lines = 1
+
+[findings."home/dot_config/prose/styles/Microsoft/SentenceLength.yml"]
+empty-lines = 1
+
+[findings."home/dot_config/prose/styles/proselint/AnimalLabels.yml"]
+colons = 39
+
+[findings."home/dot_config/prose/styles/proselint/DenizenLabels.yml"]
+colons = 44
+
+[findings."home/dot_config/prose/styles/proselint/GenderBias.yml"]
+colons = 37
+
+[findings."home/dot_config/prose/styles/proselint/GroupTerms.yml"]
+colons = 31
+
+[findings."home/dot_config/prose/styles/proselint/LGBTTerms.yml"]
+colons = 8
+
+[findings."home/dot_config/prose/styles/proselint/RASSyndrome.yml"]
+indentation = 1
+
+[findings."home/dot_config/prose/styles/proselint/Uncomparables.yml"]
+indentation = 1

@@ -36,6 +36,11 @@ jobs:
         env:
           BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
         run: mise x -- just classify --base "$BASE" >> "$GITHUB_OUTPUT"
+      # The check jobs hold every finding to its baseline, and only this job fetches the base the baselines may not grow from.
+      - name: Refuse a lint baseline that grew since the base
+        env:
+          BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
+        run: mise x -- just baselines --base "$BASE"
 
   # The ruleset still requires these matrix contexts.
   # Until it requires only the required job, this job keeps their names and always reports, with each step gated instead.
@@ -84,7 +89,7 @@ jobs:
   proofs:
     name: proofs
     needs: classify
-    if: contains(needs.classify.outputs.gates, 'rust')
+    if: contains(needs.classify.outputs.gates, 'proofs')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:

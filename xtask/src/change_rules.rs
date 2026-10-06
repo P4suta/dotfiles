@@ -5,6 +5,8 @@ pub enum Class {
     Prose,
     Skills,
     Rust,
+    /// A rule module or the proof inventory, which the Kani harnesses verify.
+    Rules,
     Profiles,
     /// CI, tooling, lock files, the classifier itself, and every path no rule names.
     Everything,
@@ -18,9 +20,17 @@ pub enum Gate {
     Skills,
     Rust,
     Profiles,
+    /// The Kani proofs, which only a rule module, the proof inventory, or the tooling can change.
+    Proofs,
 }
 
-pub const GATES: [Gate; 4] = [Gate::Prose, Gate::Skills, Gate::Rust, Gate::Profiles];
+pub const GATES: [Gate; 5] = [
+    Gate::Prose,
+    Gate::Skills,
+    Gate::Rust,
+    Gate::Profiles,
+    Gate::Proofs,
+];
 
 impl Gate {
     #[must_use]
@@ -30,6 +40,7 @@ impl Gate {
             Self::Skills => "skills",
             Self::Rust => "rust",
             Self::Profiles => "profiles",
+            Self::Proofs => "proofs",
         }
     }
 
@@ -44,7 +55,7 @@ pub struct Gates(u8);
 
 impl Gates {
     pub const NONE: Self = Self(0);
-    pub const ALL: Self = Self(0b1111);
+    pub const ALL: Self = Self(0b1_1111);
 
     #[must_use]
     pub const fn of(gate: Gate) -> Self {
@@ -54,6 +65,11 @@ impl Gates {
     #[must_use]
     pub const fn with(self, gate: Gate) -> Self {
         Self(self.0 | gate.bit())
+    }
+
+    #[must_use]
+    pub const fn without(self, gate: Gate) -> Self {
+        Self(self.0 & !gate.bit())
     }
 
     #[must_use]
@@ -103,7 +119,8 @@ impl Gates {
 
 /// The gates a class selects: prose checks run for every change, and wider classes add the checks their content can break.
 /// Skills deploy through the native profile, so they also select its rehearsal.
-/// The xtask crates validate and apply everything, so Rust selects every gate.
+/// The xtask crates validate and apply everything, so Rust selects every gate but the proofs.
+/// Each proof harness compiles one rule module alone, so only a rule module, the proof inventory, or the tooling selects the proofs.
 #[must_use]
 pub const fn gates(class: Class) -> Gates {
     let prose = Gates::of(Gate::Prose);
@@ -111,7 +128,8 @@ pub const fn gates(class: Class) -> Gates {
         Class::Prose => prose,
         Class::Skills => prose.with(Gate::Skills).with(Gate::Profiles),
         Class::Profiles => prose.with(Gate::Profiles),
-        Class::Rust | Class::Everything => Gates::ALL,
+        Class::Rust => Gates::ALL.without(Gate::Proofs),
+        Class::Rules | Class::Everything => Gates::ALL,
     }
 }
 
@@ -123,7 +141,7 @@ enum Match {
 }
 
 /// The first matching rule decides, so a narrower rule precedes the broader one it overrides.
-const RULES: [(Match, &[u8], Class); 33] = [
+const RULES: [(Match, &[u8], Class); 35] = [
     (Match::Prefix, b".github/", Class::Everything),
     (Match::Prefix, b"xtask/proofs/", Class::Everything),
     (Match::Prefix, b"xtask/src/change", Class::Everything),
@@ -146,6 +164,8 @@ const RULES: [(Match, &[u8], Class); 33] = [
     (Match::Exact, b"home/.chezmoiignore", Class::Everything),
     (Match::Suffix, b".lock", Class::Everything),
     (Match::Suffix, b"Cargo.toml", Class::Everything),
+    (Match::Exact, b"xtask/src/skill_proofs.rs", Class::Rules),
+    (Match::Suffix, b"_rules.rs", Class::Rules),
     (Match::Suffix, b".rs", Class::Rust),
     (Match::Prefix, b"xtask/", Class::Rust),
     (Match::Prefix, b"crates/", Class::Rust),
@@ -278,6 +298,24 @@ fn ci_tooling_lock_files_and_the_classifier_select_everything() {
     kani::cover!(!infrastructure && selected != Gates::ALL);
 }
 
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(40)]
+fn only_a_rule_module_the_inventory_or_the_tooling_selects_the_proofs() {
+    let bytes: [u8; 24] = kani::any();
+    let length: usize = kani::any();
+    kani::assume(length <= 24);
+    let path = &bytes[..length];
+    let class = classify(path);
+    let proves = gates(class).contains(Gate::Proofs);
+    assert!(proves == matches!(class, Class::Rules | Class::Everything));
+    if has_suffix(path, b"_rules.rs") {
+        assert!(proves);
+    }
+    kani::cover!(proves && class == Class::Rules);
+    kani::cover!(!proves && class == Class::Rust);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,7 +330,8 @@ mod tests {
     }
 
     #[test]
-    fn a_rust_change_selects_every_gate_because_xtask_validates_and_applies_everything() {
+    fn a_rust_change_selects_every_gate_but_the_proofs_because_xtask_validates_and_applies_everything()
+     {
         assert_eq!(
             selected(&["xtask/src/hooks.rs"]),
             "prose,skills,rust,profiles"
@@ -301,6 +340,23 @@ mod tests {
             selected(&["crates/dotguard/src/refusal.rs"]),
             "prose,skills,rust,profiles"
         );
+    }
+
+    #[test]
+    fn a_rule_module_or_the_proof_inventory_also_selects_the_proofs() {
+        for path in [
+            "crates/platform/src/order_rules.rs",
+            "xtask/src/lint_rules.rs",
+            "xtask/src/skill_proofs.rs",
+            "home/dot_agents/skills/a/scripts/x_rules.rs",
+        ] {
+            assert_eq!(
+                selected(&[path]),
+                "prose,skills,rust,profiles,proofs",
+                "{path}"
+            );
+        }
+        assert!(!select(["README.md", "xtask/src/lint.rs"]).contains(Gate::Proofs));
     }
 
     #[test]
@@ -384,7 +440,7 @@ mod tests {
     #[test]
     fn gate_names_round_trip() {
         let all = Gates::ALL.names();
-        assert_eq!(all, "prose,skills,rust,profiles");
+        assert_eq!(all, "prose,skills,rust,profiles,proofs");
         assert_eq!(Gates::parse(&all), Ok(Gates::ALL));
         assert_eq!(Gates::parse(""), Ok(Gates::NONE));
         assert!(Gates::parse("prose,heavy").is_err());

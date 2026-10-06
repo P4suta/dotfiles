@@ -29,6 +29,18 @@ pub struct Scope {
 }
 
 impl Scope {
+    /// Whether the scope names the staged paths.
+    #[must_use]
+    pub const fn staged(&self) -> bool {
+        self.staged
+    }
+
+    /// The reference whose committed state a shrink-only baseline compares with: the base, or `HEAD` without one.
+    #[must_use]
+    pub fn reference(&self) -> &str {
+        self.base.as_deref().unwrap_or("HEAD")
+    }
+
     /// The gates to run: every gate unless the scope names a change set or gates.
     ///
     /// # Errors

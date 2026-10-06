@@ -51,6 +51,25 @@ fn commit(root: &Path, files: &[(&str, &str)]) -> Result<()> {
 }
 
 #[test]
+fn a_committed_lint_baseline_may_shrink_but_never_grow() -> Result<()> {
+    let repository = repository()?;
+    let root = repository.path();
+    let baseline = xtask::lint::Stage::Yamllint.baseline();
+    commit(root, &[(&baseline, "[findings.\"a.yml\"]\ncolons = 2\n")])?;
+    fs::write(root.join(&baseline), "[findings.\"a.yml\"]\ncolons = 1\n")?;
+    assert_eq!(
+        xtask::lint::baseline_growth(root, "HEAD")?,
+        Vec::<String>::new()
+    );
+    fs::write(
+        root.join(&baseline),
+        "[findings.\"a.yml\"]\ncolons = 3\n\n[findings.\"b.yml\"]\nindentation = 1\n",
+    )?;
+    assert_eq!(xtask::lint::baseline_growth(root, "HEAD")?.len(), 2);
+    Ok(())
+}
+
+#[test]
 fn a_markdown_only_branch_selects_the_prose_gate_alone() -> Result<()> {
     let repository = repository()?;
     commit(repository.path(), &[("docs/guide.md", "words\n")])?;
@@ -77,7 +96,7 @@ fn an_unknown_path_selects_every_gate() -> Result<()> {
         &[("docs/guide.md", "words\n"), ("unlisted/file", "x\n")],
     )?;
     let selected = gates(repository.path(), &Source::Base("main".into()))?;
-    assert_eq!(selected.names(), "prose,skills,rust,profiles");
+    assert_eq!(selected.names(), "prose,skills,rust,profiles,proofs");
     Ok(())
 }
 

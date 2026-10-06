@@ -179,6 +179,9 @@ pub(crate) fn rendered(dump: &Value, directory: &Path) -> Result<()> {
             .as_str()
             .context("rendered content must be text")?;
         let script = target["type"] == "script";
+        if let Some(fault) = crate::lint_rules::fault(contents.as_bytes()) {
+            anyhow::bail!("rendered {name} breaks the encoding: {}", fault.key());
+        }
         let file = |extension: &str| directory.join(format!("{index}.{extension}"));
         if crate::has_extension(name, "json") {
             serde_json::from_str::<Value>(contents)

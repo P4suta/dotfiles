@@ -50,9 +50,17 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 
 | Command | Runs |
 | --- | --- |
-| `just check` | The gates a change selects: prose, links, and generated files, the shared skills, the Rust packages, and the profiles. |
+| `just check` | The gates a change selects: the lint stages, prose, links, and generated files, the shared skills, the Rust packages, and the profiles. |
+| `just check-staged` | The pre-commit check: the lint stages over the staged files, then the prose of documents and of the comments `OComment` reads. |
+| `just baselines` | The refusal of a lint baseline under `policy/lint-baselines/` that grew since a base, which CI runs from the merge base. |
 | `just profiles` | Every profile's rendering, an isolated apply and verification, the committed manifests, the ignore and remove audit, and the script input audit. |
 | `just proofs` | The Kani harnesses and rejecting counterexamples of every rule module, each within its time budget. |
 | `just prose` | The writing standard over documents and comments. |
 
 `xtask/src/change_rules.rs` maps each changed path to the gates it selects, and a path no rule names selects every gate.
+Only a rule module, the proof inventory, or the tooling selects the proofs, because each harness compiles one rule module alone.
+
+The lint stages run each pinned linter: rustfmt, typos, taplo, yamllint, shellcheck, and `PSScriptAnalyzer`.
+An encoding stage refuses a byte order mark, malformed UTF-8, and a missing final newline, which the profile gate also refuses in every rendered file.
+Each stage holds its findings to a baseline in `policy/lint-baselines/`, which counts them per path and rule.
+The gate refuses a finding beyond the baseline and an entry that admits more than its path holds, so a fixed finding leaves the baseline for good.

@@ -1,0 +1,46 @@
+# The count of typos findings per path and rule that existed when the stage started.
+# The gate refuses a finding beyond these counts and an entry that admits more than its path holds, so this file only shrinks.
+
+[findings."crates/dotfiles/src/setup.rs"]
+fpr = 1
+
+[findings."crates/dotfiles/tests/fixtures/debsig-original.asc"]
+Fo = 1
+
+[findings."crates/dotfiles/tests/fixtures/debsig-updated.asc"]
+Fo = 2
+Hava = 1
+
+[findings."crates/dotguard/src/bin/herdr-agent/main.rs"]
+Aother = 2
+Asign = 2
+
+[findings."crates/dotguard/src/gitargv.rs"]
+nd = 3
+
+[findings."crates/model/src/data.rs"]
+palete = 2
+
+[findings."home/dot_config/prose/styles/Google/Ordinal.yml"]
+nd = 1
+
+[findings."home/dot_config/prose/styles/Microsoft/Avoid.yml"]
+lication = 2
+
+[findings."home/dot_config/prose/styles/proselint/Archaisms.yml"]
+inforce = 1
+
+[findings."home/dot_config/prose/styles/proselint/Cliches.yml"]
+compleat = 1
+
+[findings."home/dot_config/prose/styles/proselint/Needless.yml"]
+compensative = 1
+conversible = 1
+inconsistence = 1
+interpretate = 1
+perjorative = 1
+subtile = 1
+
+[findings."home/dot_config/prose/styles/proselint/Nonwords.yml"]
+inexpense = 1
+seldomly = 1

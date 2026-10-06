@@ -15,6 +15,9 @@ check-staged: trust
     mise x -- cargo xtask check --staged
     mise x -- cargo run --locked --package prose --bin prose -- --source . repository --scope comments
 
+baselines *args: trust
+    mise x -- cargo xtask baselines {{args}}
+
 commit-message file: trust
     mise x -- cargo run --locked --package prose --bin prose -- --source . check --channel commit {{quote(file)}}
 
