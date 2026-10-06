@@ -12,7 +12,7 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | `home/.chezmoitemplates/` | Shared partials under `partials/` and per-profile bodies under `native/`. |
 | `xtask/` | The development tasks behind `cargo xtask` and the just recipes, which no hook or launcher runs. |
 | `crates/platform/` | The home, the managed `PATH`, the one process constructor, the tool registry, the setup steps, and the build stamp. |
-| `crates/dotfiles/` | The installed runtime `dotfiles-xtask` behind every hook and launcher, and the Windows setup behind `dotctl`. |
+| `crates/dotfiles/` | The installed runtime `dotfiles` behind every hook and launcher, with the Windows setup behind `dotfiles windows`. |
 | `crates/skill-ops/`, `crates/pr-workflow/`, `crates/prose/`, `crates/coderabbit-guard/` | Each installed tool with its rules. |
 | `crates/dotguard/` | `dotguard`, the Git wrapper, and the reaper and herdr-agent binaries. |
 | `crates/model/` | The typed chezmoi data and the profile rules. |

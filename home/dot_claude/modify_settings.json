@@ -10,10 +10,10 @@
 {{- /*
 The shell hook refuses recursive disk-usage scans in Bash and PowerShell.
 It also refuses file writes through inline interpreters, heredocs, and redirects in Bash.
-It runs the same xtask binary the git hooks use.
+It runs the same runtime binary the git hooks use.
 */ -}}
-{{- $tool := ".local/bin/dotfiles-xtask" -}}
-{{- if eq .profile "windows" }}{{ $tool = ".local/bin/dotfiles-xtask.exe" }}{{ end -}}
+{{- $tool := ".local/bin/dotfiles" -}}
+{{- if eq .profile "windows" }}{{ $tool = ".local/bin/dotfiles.exe" }}{{ end -}}
 {{- $hook := dict "type" "command" "command" (printf "%s claude-bash" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
 {{- /*
 The timing hook sets each shell command timeout from its measured durations.

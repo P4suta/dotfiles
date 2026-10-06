@@ -46,25 +46,25 @@ decide skill: trust
     mise x -- cargo xtask decide {{quote(skill)}}
 
 hosts *args: trust
-    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- hosts {{args}}
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles -- hosts {{args}}
 
 next *flags: trust
     mise x -- cargo xtask next {{flags}}
 
 diff config destination: trust
-    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- profile diff --config {{quote(config)}} --destination {{quote(destination)}}
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles -- profile diff --config {{quote(config)}} --destination {{quote(destination)}}
 
 apply config destination backup: trust
-    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- profile apply --config {{quote(config)}} --destination {{quote(destination)}} --backup {{quote(backup)}} --live
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles -- profile apply --config {{quote(config)}} --destination {{quote(destination)}} --backup {{quote(backup)}} --live
 
 verify config destination: trust
-    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- profile verify --config {{quote(config)}} --destination {{quote(destination)}}
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles -- profile verify --config {{quote(config)}} --destination {{quote(destination)}}
 
 refresh config: trust
-    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- refresh --config {{quote(config)}} --live
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles -- refresh --config {{quote(config)}} --live
 
 doctor: trust
-    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- doctor --strict
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles -- doctor --strict
 
 prose: trust
     mise x -- cargo run --locked --package prose --bin prose -- --source . repository --scope documents --scope comments

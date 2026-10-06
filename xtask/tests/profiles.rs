@@ -389,6 +389,21 @@ fn rendered_tool_entries(
         .count()
 }
 
+/// Refuses a rendered target that still names a runtime binary the profiles retired.
+fn assert_no_retired_runtime(profile: Profile, rendered: &serde_json::Value) {
+    for retired in ["dotfiles-xtask", "dotctl"] {
+        for (target, entry) in rendered.as_object().unwrap() {
+            assert!(
+                !entry["contents"]
+                    .as_str()
+                    .is_some_and(|text| text.contains(retired)),
+                "{} {target} still runs the retired {retired}",
+                profile.name()
+            );
+        }
+    }
+}
+
 #[test]
 fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
     let snapshot = source_snapshot();
@@ -458,6 +473,7 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
                 .is_empty(),
             "the rehearsal data must still install what its scripts and entry points require"
         );
+        assert_no_retired_runtime(profile, &rendered);
         let skips = profiles::declared_skips(&data).unwrap();
         // OCaml installs only on desktop profiles, so the wsl rehearsal has nothing to omit.
         assert_eq!(
@@ -528,7 +544,7 @@ fn public_owner_sources_clone_over_https_despite_a_host_ssh_rewrite() {
 #[test]
 fn scripted_steps_are_read_from_rendered_launchers_in_order() {
     use dotfiles::setup::{Step, scripted_steps};
-    let scripts = "#!/bin/sh\nexec '/h/.local/bin/dotfiles-xtask' --root '/s' setup fleet --config '/c' --live\n#!/bin/sh\nexec cargo run -- --root '/s' setup runtime --config '/c' --live\n& (Join-Path $env:USERPROFILE '.local\\bin\\dotfiles-xtask.exe') --root $env:CHEZMOI_WORKING_TREE setup keyboard --config $env:CHEZMOI_CONFIG_FILE --live\nexec cargo run -- setup fleet\n";
+    let scripts = "#!/bin/sh\nexec '/h/.local/bin/dotfiles' --root '/s' setup fleet --config '/c' --live\n#!/bin/sh\nexec cargo run -- --root '/s' setup runtime --config '/c' --live\n& (Join-Path $env:USERPROFILE '.local\\bin\\dotfiles.exe') --root $env:CHEZMOI_WORKING_TREE setup keyboard --config $env:CHEZMOI_CONFIG_FILE --live\nexec cargo run -- setup fleet\n";
     assert_eq!(
         scripted_steps(scripts),
         [Step::Fleet, Step::Runtime, Step::Keyboard]
@@ -578,7 +594,7 @@ fn setup_order_rejects_a_step_that_runs_before_its_prerequisite() {
 
 #[test]
 fn setup_that_needs_a_package_requires_the_profile_to_install_it() {
-    let scripts = "exec dotfiles-xtask --root /s setup domyjob --config /c --live\n";
+    let scripts = "exec dotfiles --root /s setup domyjob --config /c --live\n";
     let provided = serde_json::json!({"brew": {"formulae": ["jq", "lefthook"]}});
     assert_eq!(
         profiles::unprovisioned(Profile::Mac, &provided, scripts, ""),
@@ -594,7 +610,7 @@ fn setup_that_needs_a_package_requires_the_profile_to_install_it() {
         profiles::unprovisioned(Profile::Linux, &disabled, "setup ocomment\n", "").len(),
         1
     );
-    let integrations = "& 'C:/h/.local/bin/dotfiles-xtask.exe' --root 'C:/s' setup integrations --config 'C:/c' --live\n";
+    let integrations = "& 'C:/h/.local/bin/dotfiles.exe' --root 'C:/s' setup integrations --config 'C:/c' --live\n";
     assert_eq!(
         profiles::unprovisioned(
             Profile::Windows,
@@ -897,21 +913,21 @@ fn agent_launchers_require_doppler_wherever_they_render() {
     use xtask::tool::Tool;
     assert_eq!(
         entry_requirements(
-            r#"  ^dotfiles-xtask --root "/source" agent opencode --config "/config" -- ...$args"#
+            r#"  ^dotfiles --root "/source" agent opencode --config "/config" -- ...$args"#
         ),
         [Tool::Doppler]
     );
     assert_eq!(
-        entry_requirements("& 'C:/tools/dotfiles-xtask.exe' agent codex"),
+        entry_requirements("& 'C:/tools/dotfiles.exe' agent codex"),
         [Tool::Doppler]
     );
     assert_eq!(
-        entry_requirements("dotfiles-xtask --root /source setup tools --live"),
+        entry_requirements("dotfiles --root /source setup tools --live"),
         Vec::<xtask::tool::Tool>::new()
     );
     assert_eq!(
         entry_requirements(
-            r#"exec 'C:/Users/owner/.local/bin/dotfiles-xtask.exe' hook pre-commit -- "$@""#
+            r#"exec 'C:/Users/owner/.local/bin/dotfiles.exe' hook pre-commit -- "$@""#
         ),
         [Tool::Lefthook]
     );
@@ -919,11 +935,16 @@ fn agent_launchers_require_doppler_wherever_they_render() {
         entry_requirements("The agent reads its configuration here."),
         Vec::<xtask::tool::Tool>::new()
     );
+    assert_eq!(
+        entry_requirements("exec '/h/.local/bin/dotfiles-sync' agent codex"),
+        Vec::<xtask::tool::Tool>::new(),
+        "only the runtime itself launches an agent"
+    );
 }
 
 #[test]
 fn a_profile_without_the_package_an_entry_point_needs_is_unprovisioned() {
-    let launcher = "^dotfiles-xtask agent opencode";
+    let launcher = "^dotfiles agent opencode";
     let without = serde_json::json!({"tools": {"common": ["jq"]}});
     assert_eq!(
         profiles::unprovisioned(Profile::Mac, &without, "", launcher),

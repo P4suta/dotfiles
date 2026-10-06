@@ -201,8 +201,9 @@ fn application_turns_off_memory_a_client_turned_back_on() {
         assert!(
             hook["hooks"][0]["command"]
                 .as_str()
-                .is_some_and(|command| command.ends_with(" claude-bash")
-                    && command.contains("dotfiles-xtask")),
+                .is_some_and(
+                    |command| command.ends_with(" claude-bash") && runs_the_runtime(command)
+                ),
             "{profile}: {hook}"
         );
         assert_eq!(rendered["model"], json!("opus"), "{profile}");
@@ -237,13 +238,18 @@ fn application_turns_off_memory_a_client_turned_back_on() {
     }
 }
 
+/// Whether a rendered hook command starts the installed runtime, whose path the host spells with either separator.
+fn runs_the_runtime(command: &str) -> bool {
+    command.contains("dotfiles' ") || command.contains("dotfiles.exe' ")
+}
+
 /// The timing hook runs before and after every shell call.
 /// An installer keeps the post-tool groups that other installers added while it replaces its own.
 #[test]
 fn the_timing_hook_joins_the_shell_events_and_keeps_other_post_tool_groups() {
     let host = json!({"hooks": {
         "PostToolUse": [
-            {"matcher": "Write", "hooks": [{"type": "command", "command": "dotfiles-xtask line-endings hook"}]},
+            {"matcher": "Write", "hooks": [{"type": "command", "command": "dotfiles line-endings hook"}]},
             {"matcher": "Bash|PowerShell", "hooks": [{"type": "command", "command": "/old/dotfiles-xtask claude-timing"}]}
         ]
     }})
@@ -261,8 +267,7 @@ fn the_timing_hook_joins_the_shell_events_and_keeps_other_post_tool_groups() {
                 && group["hooks"].as_array().is_some_and(|hooks| {
                     hooks.iter().any(|hook| {
                         hook["command"].as_str().is_some_and(|command| {
-                            command.ends_with(" claude-timing")
-                                && command.contains("dotfiles-xtask")
+                            command.ends_with(" claude-timing") && runs_the_runtime(command)
                         })
                     })
                 })
@@ -285,7 +290,7 @@ fn the_timing_hook_joins_the_shell_events_and_keeps_other_post_tool_groups() {
         }
         assert_eq!(
             rendered["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
-            json!("dotfiles-xtask line-endings hook"),
+            json!("dotfiles line-endings hook"),
             "{profile}"
         );
     }

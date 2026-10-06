@@ -1,4 +1,4 @@
-# Services that only Windows sets up through dotctl.
+# Services that only Windows sets up through the runtime's Windows steps.
 
 [platforms.windows.herdr]
 channel = "preview"

@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 {{ includeTemplate "partials/inputs" (list (index .platforms.mac.tool_versions "haskell-language-server")) }}
-exec "$HOME/.local/bin/dotfiles-xtask" --root "$CHEZMOI_WORKING_TREE" setup haskell --config "$CHEZMOI_CONFIG_FILE" --live
+exec "$HOME/.local/bin/dotfiles" --root "$CHEZMOI_WORKING_TREE" setup haskell --config "$CHEZMOI_CONFIG_FILE" --live

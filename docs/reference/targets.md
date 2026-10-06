@@ -85,7 +85,6 @@ A target missing from the first table reaches every profile.
 | `.config/wezterm/wezterm.lua` | windows | windows |
 | `.config/xdg-terminals.list` | linux | linux |
 | `.local/bin/dev-reaper` | linux | linux |
-| `.local/bin/dotfiles` | mac | mac |
 | `.local/bin/dotfiles-doctor` | linux | linux |
 | `.local/bin/dotfiles-doctor.ps1` | windows | windows |
 | `.local/bin/dotfiles-refresh-desktop` | desktop | mac, linux |
@@ -168,8 +167,11 @@ Each profile in the set removes the target when it applies.
 | `.config/systemd/user/mise-upgrade.service` | linux | linux |
 | `.config/systemd/user/mise-upgrade.timer` | linux | linux |
 | `.gitconfig` | unix | mac, linux, wsl |
+| `.local/bin/dotctl.exe` | windows | windows |
 | `.local/bin/dotfiles-doctor` | mac | mac |
 | `.local/bin/dotfiles-wm-defaults` | mac | mac |
+| `.local/bin/dotfiles-xtask` | unix | mac, linux, wsl |
+| `.local/bin/dotfiles-xtask.exe` | windows | windows |
 | `.local/bin/renovate-local` | mac | mac |
 | `AppData/Roaming/alacritty/alacritty.toml` | windows | windows |
 | `Documents/PowerShell/modules/00-readline.ps1` | windows | windows |

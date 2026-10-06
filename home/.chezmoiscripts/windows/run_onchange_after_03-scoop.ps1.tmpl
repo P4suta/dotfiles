@@ -1,4 +1,4 @@
 $ErrorActionPreference = 'Stop'
 {{ includeTemplate "partials/inputs" (list .platforms.windows.scoop) }}
-& (Join-Path $env:USERPROFILE '.local\bin\dotfiles-xtask.exe') --root $env:CHEZMOI_WORKING_TREE setup scoop --config $env:CHEZMOI_CONFIG_FILE --live
+& (Join-Path $env:USERPROFILE '.local\bin\dotfiles.exe') --root $env:CHEZMOI_WORKING_TREE setup scoop --config $env:CHEZMOI_CONFIG_FILE --live
 exit $LASTEXITCODE

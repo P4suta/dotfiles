@@ -1,4 +1,4 @@
-//! Windows machine setup, which the `dotctl` binary and the Windows setup steps run.
+//! Windows machine setup, which `dotfiles windows` and the Windows setup steps run.
 
 pub mod cli;
 pub(crate) mod env;

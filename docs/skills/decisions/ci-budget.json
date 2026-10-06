@@ -1,7 +1,7 @@
 {
-  "revision": "fae5963ca938364b020650461b6e9e90f986cd28fab950b355b56b0738e671e1",
+  "revision": "39daa4d7a01bbb38bd7781cbc48239c61bdd75225b6d42c001fb177a627df775",
   "outcome": "implemented",
-  "reason": "Point cross-platform verification at `dotfiles-xtask hosts check`, which the push gates enforce, in the minimal prose of the writing standard; keep CI-job mapping, hosted-only prerequisites, and push-hold judgment.",
+  "reason": "Point cross-platform verification at `dotfiles hosts check`, the installed runtime's new name, which the push gates enforce, in the minimal prose of the writing standard; keep CI-job mapping, hosted-only prerequisites, and push-hold judgment.",
   "evidence": [
     "home/dot_agents/skills/ci-budget/SKILL.md",
     "crates/dotfiles/src/hosts.rs",

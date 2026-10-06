@@ -1,2 +1,2 @@
 #!/bin/sh
-exec dotfiles-xtask wsl-sign -- "$@"
+exec dotfiles wsl-sign -- "$@"

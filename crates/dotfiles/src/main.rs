@@ -1,4 +1,4 @@
-//! `dotfiles-xtask`, the installed runtime that every Git hook, setup launcher, and agent hook runs.
+//! `dotfiles`, the installed runtime that every Git hook, setup launcher, and agent hook runs.
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -208,7 +208,7 @@ fn run() -> Result<()> {
 #[cfg(windows)]
 fn windows(arguments: Vec<OsString>) -> Result<()> {
     std::process::exit(dotfiles::windows::cli::execute(
-        std::iter::once(OsString::from("dotfiles-xtask windows")).chain(arguments),
+        std::iter::once(OsString::from("dotfiles windows")).chain(arguments),
     ))
 }
 

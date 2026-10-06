@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 {{ includeTemplate "partials/inputs" (list .paths.projects) }}
-exec "$HOME/.local/bin/dotfiles-xtask" --root "$CHEZMOI_WORKING_TREE" setup fleet --config "$CHEZMOI_CONFIG_FILE" --live
+exec "$HOME/.local/bin/dotfiles" --root "$CHEZMOI_WORKING_TREE" setup fleet --config "$CHEZMOI_CONFIG_FILE" --live

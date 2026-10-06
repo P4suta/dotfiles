@@ -1,4 +1,4 @@
-# requires -Version 7 Runs one command elevated, embedded in dotctl and written to a temp file when a setup step needs an admin token.
+# requires -Version 7 Runs one command elevated, embedded in the runtime and written to a temp file when a setup step needs an admin token.
 #
 # Why PowerShell rather than a ShellExecute call from Rust: `Start-Process -Verb RunAs -Wait -PassThru` is the mechanism already proven on this machine, and a UAC prompt cannot be answered from a test.
 #

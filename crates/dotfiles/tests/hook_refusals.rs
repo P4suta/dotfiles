@@ -75,7 +75,7 @@ impl Host {
 
     fn hook(&self, arguments: &[&str]) -> Result<Output> {
         Ok(self
-            .command(env!("CARGO_BIN_EXE_dotfiles-xtask"))
+            .command(env!("CARGO_BIN_EXE_dotfiles"))
             .arg("hook")
             .args(arguments)
             .output()?)
@@ -154,7 +154,7 @@ fn a_repository_with_its_own_lefthook_configuration_has_its_mise_configuration_t
     let configuration = host.repository().join("mise.toml");
     fs::write(&configuration, "[tools]\n")?;
     let hook = || {
-        host.command(env!("CARGO_BIN_EXE_dotfiles-xtask"))
+        host.command(env!("CARGO_BIN_EXE_dotfiles"))
             .env("MISE_FIXTURE_LOG", &log)
             .args(["hook", "pre-commit"])
             .output()

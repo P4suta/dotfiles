@@ -1,4 +1,4 @@
-# The Windows-side effectors for `dotctl setup sshd`, embedded in dotctl and written to a temp file when it runs.
+# The Windows-side effectors for `dotfiles windows setup sshd`, embedded in the runtime and written to a temp file when it runs.
 #
 # Runs under Windows PowerShell 5.1, not pwsh 7, and that is not a style choice: DISM ships as a 5.1 module, and from an elevated pwsh 7 Get-WindowsCapability fails with "Class not registered" (0x80040154) rather than doing anything.
 # Unelevated it gets as far as the privilege check, so the failure only appears once the UAC prompt has been answered.

@@ -97,7 +97,7 @@ fn unix(step: Step) -> String {
         Launch::InstalledRuntime => {
             let _ = writeln!(
                 text,
-                "exec \"$HOME/.local/bin/dotfiles-xtask\" --root \"$CHEZMOI_WORKING_TREE\" setup {} --config \"$CHEZMOI_CONFIG_FILE\" --live",
+                "exec \"$HOME/.local/bin/dotfiles\" --root \"$CHEZMOI_WORKING_TREE\" setup {} --config \"$CHEZMOI_CONFIG_FILE\" --live",
                 step.name()
             );
         }
@@ -124,7 +124,7 @@ fn windows(step: Step) -> String {
         Launch::InstalledRuntime => {
             let _ = writeln!(
                 text,
-                "& (Join-Path $env:USERPROFILE '.local\\bin\\dotfiles-xtask.exe') --root $env:CHEZMOI_WORKING_TREE setup {} --config $env:CHEZMOI_CONFIG_FILE --live",
+                "& (Join-Path $env:USERPROFILE '.local\\bin\\dotfiles.exe') --root $env:CHEZMOI_WORKING_TREE setup {} --config $env:CHEZMOI_CONFIG_FILE --live",
                 step.name()
             );
             text.push_str("exit $LASTEXITCODE\n");

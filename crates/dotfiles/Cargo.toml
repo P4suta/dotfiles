@@ -6,15 +6,11 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
-default-run = "dotfiles-xtask"
+default-run = "dotfiles"
 
 [[bin]]
-name = "dotfiles-xtask"
+name = "dotfiles"
 path = "src/main.rs"
-
-[[bin]]
-name = "dotctl"
-path = "src/bin/dotctl.rs"
 
 [dependencies]
 anyhow = "1.0"

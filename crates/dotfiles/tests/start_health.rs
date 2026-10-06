@@ -30,7 +30,7 @@ fn bound() -> Duration {
 fn a_hook_refuses_a_stalled_start_within_the_bound_and_names_the_restart() -> Result<()> {
     let home = tempfile::tempdir()?;
     let started = Instant::now();
-    let output = external(env!("CARGO_BIN_EXE_dotfiles-xtask"))
+    let output = external(env!("CARGO_BIN_EXE_dotfiles"))
         .args(["hook", "pre-commit"])
         .env(PROBE_VARIABLE, STALLED)
         .env("HOME", home.path())
@@ -54,7 +54,7 @@ fn a_hook_refuses_a_stalled_start_within_the_bound_and_names_the_restart() -> Re
 #[test]
 fn a_session_start_hands_the_agent_the_refusal() -> Result<()> {
     let home = tempfile::tempdir()?;
-    let output = external(env!("CARGO_BIN_EXE_dotfiles-xtask"))
+    let output = external(env!("CARGO_BIN_EXE_dotfiles"))
         .args(["health", "--session"])
         .env(PROBE_VARIABLE, STALLED)
         .env("HOME", home.path())

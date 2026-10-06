@@ -123,7 +123,8 @@ pub fn entry_requirements(rendered: &str) -> Vec<Tool> {
     {
         let launcher = words.iter().position(|word| {
             let program = word.trim_matches(['\'', '"', '^']);
-            program.ends_with("dotfiles-xtask") || program.ends_with("dotfiles-xtask.exe")
+            let name = program.rsplit(['/', '\\']).next().unwrap_or(program);
+            name == "dotfiles" || name == "dotfiles.exe"
         });
         if let Some(start) = launcher {
             if words[start..].contains(&"agent") {
@@ -156,7 +157,7 @@ pub fn ordering_violations(sequence: &[Step]) -> Vec<(Step, Step)> {
     violations
 }
 
-/// Setup steps a rendered script runs, in script order, from `dotfiles-xtask ... setup STEP` invocations.
+/// Setup steps a rendered script runs, in script order, from `dotfiles ... setup STEP` invocations.
 #[must_use]
 pub fn scripted_steps(scripts: &str) -> Vec<Step> {
     use clap::ValueEnum;
@@ -452,16 +453,7 @@ pub(crate) fn execute(context: &ContextData, runner: &mut impl Runner, step: Ste
 
 /// The installed runtime, the Git guard, and on the Mac the `CodeRabbit` guard, all built from this checkout.
 fn runtime(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
-    install_crate(
-        context,
-        runner,
-        RUNTIME_CRATE,
-        if context.profile == Profile::Windows {
-            &["dotfiles-xtask", "dotctl"]
-        } else {
-            &["dotfiles-xtask"]
-        },
-    )?;
+    install_crate(context, runner, RUNTIME_CRATE, &["dotfiles"])?;
     install_crate(context, runner, "crates/skill-ops", &["skill-ops"])?;
     install_crate(context, runner, "crates/pr-workflow", &["pr-workflow"])?;
     if context.profile == Profile::Windows {

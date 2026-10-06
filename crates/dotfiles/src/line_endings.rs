@@ -11,7 +11,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// The command agent clients run after every tool call.
-pub const HOOK_COMMAND: &str = "dotfiles-xtask line-endings hook";
+pub const HOOK_COMMAND: &str = "dotfiles line-endings hook";
+
+/// Earlier spellings of [`HOOK_COMMAND`], which the merge removes so each client runs the hook once.
+pub const RETIRED_HOOK_COMMANDS: &[&str] = &["dotfiles-xtask line-endings hook"];
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Request {
@@ -238,7 +241,7 @@ pub fn replace(path: &Path, expected: &[u8], next: &[u8]) -> Result<bool> {
     let permissions = fs::metadata(path)?.permissions();
     if permissions.readonly() {
         eprintln!(
-            "Kept CRLF in the read-only file {}; make it writable and run `dotfiles-xtask line-endings normalize {}`",
+            "Kept CRLF in the read-only file {}; make it writable and run `dotfiles line-endings normalize {}`",
             path.display(),
             path.display()
         );
@@ -441,7 +444,12 @@ pub fn merge_hooks(mut value: Value) -> Result<Value> {
             .as_array_mut()
             .context("native hook group must contain handlers")?;
         let before = handlers.len();
-        handlers.retain(|handler| handler["command"] != HOOK_COMMAND);
+        handlers.retain(|handler| {
+            handler["command"] != HOOK_COMMAND
+                && !RETIRED_HOOK_COMMANDS
+                    .iter()
+                    .any(|retired| handler["command"] == *retired)
+        });
         if !handlers.is_empty() || handlers.len() == before {
             retained.push(entry);
         }

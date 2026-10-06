@@ -21,7 +21,7 @@ const USAGE: &str = "usage: herdr-agent ensure|ready|status|lock\n\n  \
     lock    remove every key from the agent";
 
 fn main() -> ExitCode {
-    // This binary serves a Unix socket, and Windows provisions the Herdr ssh-agent through dotctl.
+    // This binary serves a Unix socket, and Windows provisions the Herdr ssh-agent through the runtime's Windows setup.
     if cfg!(not(unix)) {
         eprintln!("herdr-agent manages a Unix-socket SSH agent and does not run on Windows");
         return ExitCode::from(2);

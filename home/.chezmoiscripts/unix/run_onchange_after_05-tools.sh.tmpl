@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 {{ if eq .profile "mac" }}{{ includeTemplate "partials/inputs" (list (includeTemplate "native/mise/mac.toml.tmpl" .) .platforms.mac.tools .platforms.mac.mise .platforms.mac.tool_versions) }}{{ else if eq .profile "linux" }}{{ includeTemplate "partials/inputs" (list (includeTemplate "native/mise/linux.toml.tmpl" .) .platforms.linux.tools .platforms.linux.mise .platforms.linux.tool_versions) }}{{ else if eq .profile "wsl" }}{{ includeTemplate "partials/inputs" (list (includeTemplate "native/mise/wsl.toml.tmpl" .) .platforms.wsl.tools) }}{{ end }}
-exec "$HOME/.local/bin/dotfiles-xtask" --root "$CHEZMOI_WORKING_TREE" setup tools --config "$CHEZMOI_CONFIG_FILE" --live
+exec "$HOME/.local/bin/dotfiles" --root "$CHEZMOI_WORKING_TREE" setup tools --config "$CHEZMOI_CONFIG_FILE" --live

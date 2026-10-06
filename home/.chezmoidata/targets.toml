@@ -84,7 +84,6 @@
 ".config/wezterm/wezterm.lua" = "windows"
 ".config/xdg-terminals.list" = "linux"
 ".local/bin/dev-reaper" = "linux"
-".local/bin/dotfiles" = "mac"
 ".local/bin/dotfiles-doctor" = "linux"
 ".local/bin/dotfiles-doctor.ps1" = "windows"
 ".local/bin/dotfiles-refresh-desktop" = "desktop"

@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 {{ includeTemplate "partials/inputs" (list (include "dot_config/dotfiles-nix/flake.nix.tmpl") .platforms.linux.nix) }}
-exec "$HOME/.local/bin/dotfiles-xtask" --root "$CHEZMOI_WORKING_TREE" setup nix --config "$CHEZMOI_CONFIG_FILE" --live
+exec "$HOME/.local/bin/dotfiles" --root "$CHEZMOI_WORKING_TREE" setup nix --config "$CHEZMOI_CONFIG_FILE" --live

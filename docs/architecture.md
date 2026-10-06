@@ -2,7 +2,7 @@
 
 This repository renders one chezmoi source state for four host profiles: `mac`, `linux`, `windows`, and `wsl`.
 Rust tools under `crates/` apply it and run every Git hook, and the development tasks in `xtask/` check it.
-The installed runtime `dotfiles-xtask` builds from `crates/dotfiles/`, which also holds the Windows setup behind `dotctl`.
+The installed runtime `dotfiles` builds from `crates/dotfiles/`, which also holds the Windows setup behind `dotfiles windows`.
 `skill-ops`, `pr-workflow`, `prose`, and the `coderabbit` guard each build from their own crate, and `dotguard` from `crates/dotguard/`.
 Every crate starts a process through `crates/platform/`, which also holds the home, the managed `PATH`, the tool registry, and the setup steps.
 One Cargo workspace at the root builds them with one lockfile, one toolchain from `mise.toml`, and one lint policy.
@@ -13,7 +13,7 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 1. `.chezmoiroot` names `home/`, so chezmoi reads the source state there while every command passes the checkout root as `--source`.
 2. A machine-local configuration outside the checkout selects the profile and holds the Git identity, the signing key, and the project root.
    `home/.chezmoi.toml.tmpl` defines it once: `chezmoi init` writes it with the profile detected from the host, and the profile gates render their fixtures from it.
-   `dotfiles-xtask profile doctor` refuses a configured profile that differs from the detected one.
+   `dotfiles profile doctor` refuses a configured profile that differs from the detected one.
 3. The TOML files in `home/.chezmoidata/` hold the data, split by concern: shared values at the top level and per-profile values under `platforms.<profile>`.
    Templates read each value at its explicit path, and `crates/model` refuses an unknown key with its file.
 4. Every target renders from one template at its own path.
@@ -25,13 +25,13 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 6. `home/.chezmoiscripts/unix/` and `home/.chezmoiscripts/windows/` hold the setup launchers, which `just gen` writes from the steps in `crates/platform/src/step.rs`.
    Each step declares its profiles, the steps it relies on, when it reruns, and its inputs, and each launcher's name carries its position in the run order.
    The first launcher installs the pinned mise after it checks the release's SHA-256, and the second builds the runtime from the checkout with the toolchain mise pins.
-   Every other launcher passes `CHEZMOI_WORKING_TREE` and `CHEZMOI_CONFIG_FILE` to `dotfiles-xtask setup STEP`, and each `run_onchange_` launcher hashes only its own inputs through the `inputs` partial.
+   Every other launcher passes `CHEZMOI_WORKING_TREE` and `CHEZMOI_CONFIG_FILE` to `dotfiles setup STEP`, and each `run_onchange_` launcher hashes only its own inputs through the `inputs` partial.
    `home/.chezmoidata/scripts.toml` restricts each launcher to its profiles.
 7. `just apply` runs as a transaction that restores every target when the apply or its verification fails.
 
 ## Hook chain
 
-`~/.config/git/config` sets `core.hooksPath` to `~/.config/git/hooks` on every host, and each hook there executes `dotfiles-xtask hook <name>`.
+`~/.config/git/config` sets `core.hooksPath` to `~/.config/git/hooks` on every host, and each hook there executes `dotfiles hook <name>`.
 `crates/dotfiles/src/hooks.rs` then runs, in order:
 
 1. For `pre-commit`, `commit-msg`, and `pre-push`, the process start health probe.

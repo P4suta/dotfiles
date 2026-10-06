@@ -1,12 +1,15 @@
-//! The `dotctl` command line.
+//! The command line of `dotfiles windows`.
 
 use super::setup;
-use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
-#[command(name = "dotctl", version, about = "Command layer for these dotfiles")]
+#[command(
+    name = "dotfiles windows",
+    version,
+    about = "The Windows machine setup of these dotfiles"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -81,22 +84,6 @@ enum SetupKind {
         #[arg(long, default_value_t = 3)]
         retain: usize,
     },
-}
-
-/// Parses the command line, runs the setup it names, and returns the exit code.
-#[must_use]
-pub fn run() -> ExitCode {
-    run_from(std::env::args_os())
-}
-
-/// Parses `arguments`, whose first word names the program, runs the setup they name, and returns the exit code.
-#[must_use]
-pub fn run_from<I, T>(arguments: I) -> ExitCode
-where
-    I: IntoIterator<Item = T>,
-    T: Into<std::ffi::OsString> + Clone,
-{
-    ExitCode::from(u8::try_from(execute(arguments)).unwrap_or(1))
 }
 
 /// Parses `arguments`, whose first word names the program, runs the setup they name, and returns the process exit status.
@@ -182,7 +169,7 @@ where
     match result {
         Ok(code) => code,
         Err(err) => {
-            eprintln!("dotctl: {err:#}");
+            eprintln!("dotfiles windows: {err:#}");
             1
         }
     }

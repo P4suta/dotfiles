@@ -84,7 +84,7 @@ impl Isolated {
 
     fn hook(&self, input: &serde_json::Value) -> Result<Output> {
         let mut child = self
-            .command(env!("CARGO_BIN_EXE_dotfiles-xtask"))
+            .command(env!("CARGO_BIN_EXE_dotfiles"))
             .args(["line-endings", "hook"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -239,6 +239,16 @@ fn hook_registration_is_stable_beside_the_skill_observer() -> Result<()> {
         Some(1)
     );
     assert!(stale["hooks"]["PostToolUse"][0].get("matcher").is_none());
+    for retired in line_endings::RETIRED_HOOK_COMMANDS {
+        let renamed = line_endings::merge_hooks(
+            json!({"hooks":{"PostToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":retired}]}]}}),
+        )?;
+        assert_eq!(
+            renamed["hooks"]["PostToolUse"],
+            json!([{"hooks":[{"type":"command","command":line_endings::HOOK_COMMAND,"timeout":30}]}]),
+            "{retired} still runs beside its successor"
+        );
+    }
     assert!(line_endings::merge_hooks(json!({"hooks":false})).is_err());
     Ok(())
 }
@@ -258,7 +268,7 @@ fn opencode_adapter_normalizes_a_written_file() -> Result<()> {
         .command(runtime.trim())
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/line-endings-adapter.ts"))
         .arg(root)
-        .arg(env!("CARGO_BIN_EXE_dotfiles-xtask"))
+        .arg(env!("CARGO_BIN_EXE_dotfiles"))
         .output()?;
     ensure!(
         output.status.success(),

@@ -1,2 +1,2 @@
 #!/bin/sh
-exec {{ includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir (printf ".local/bin/dotfiles-xtask%s" (ternary ".exe" "" (eq .chezmoi.os "windows")))) }} hook commit-msg -- "$@"
+exec {{ includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir (printf ".local/bin/dotfiles%s" (ternary ".exe" "" (eq .chezmoi.os "windows")))) }} hook commit-msg -- "$@"

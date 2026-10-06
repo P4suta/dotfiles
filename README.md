@@ -24,7 +24,7 @@ just refresh CONFIG_ABSOLUTE_PATH
 Doppler holds API secrets.
 Authenticate the Doppler CLI locally, and set its project, config, and per-agent secret names in the private configuration.
 OpenCode's GitHub MCP server reuses the read-only `gh auth login` instead.
-Run `dotfiles-xtask --root SOURCE agent opencode --config CONFIG --` for the configured OpenCode secrets, or `run-secrets --project PROJECT --config CONFIG --names API_KEY -- COMMAND` for an explicit consumer.
+Run `dotfiles --root SOURCE agent opencode --config CONFIG --` for the configured OpenCode secrets, or `run-secrets --project PROJECT --config CONFIG --names API_KEY -- COMMAND` for an explicit consumer.
 The secret runner requires resolved, nonempty values, and disables Doppler fallback files.
 Each tool's login state stays machine-local.
 See [the architecture and verification boundaries](docs/adr/0009-public-native-profiles.md).

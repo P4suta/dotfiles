@@ -12,10 +12,10 @@ export const LineEndings: Plugin = async (
     homedir(),
     ".local",
     "bin",
-    `dotfiles-xtask${process.platform === "win32" ? ".exe" : ""}`,
+    `dotfiles${process.platform === "win32" ? ".exe" : ""}`,
   );
   if (typeof executable !== "string" || !isAbsolute(executable)) {
-    throw new Error("The dotfiles-xtask executable must be an absolute path");
+    throw new Error("The dotfiles executable must be an absolute path");
   }
   return {
     "tool.execute.after": async (

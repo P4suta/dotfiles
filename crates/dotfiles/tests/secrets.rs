@@ -25,7 +25,7 @@ fn scoped_doppler_execution_refuses_invalid_values_and_preserves_consumer_exit_s
     {
         let consumed = scope.path().join(format!("consumer-{index}"));
         let doppler = scope.path().join(format!("doppler-{index}"));
-        let output = platform::process::command(env!("CARGO_BIN_EXE_dotfiles-xtask"))
+        let output = platform::process::command(env!("CARGO_BIN_EXE_dotfiles"))
             .current_dir(scope.path())
             .args([
                 "run-secrets",

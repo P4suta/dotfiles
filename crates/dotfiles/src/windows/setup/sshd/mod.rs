@@ -4,7 +4,7 @@
 //!
 //! # Privilege model
 //! Every step needs an administrator token, and only this command elevates.
-//! `dotctl setup sshd` reruns itself elevated through `assets/elevate.ps1` and prints the elevated run's log.
+//! `dotfiles windows setup sshd` reruns itself elevated through `assets/elevate.ps1` and prints the elevated run's log.
 //! Declining the prompt produces a warning, not a failed apply.
 
 mod config;
@@ -46,14 +46,9 @@ pub fn run(options: &Options) -> Result<i32> {
 /// No administrator-token detection: `Start-Process -Verb RunAs` from an elevated process raises no prompt.
 fn elevate(options: &Options) -> Result<i32> {
     let exe = std::env::current_exe().context("locating the running executable")?;
-    // The runtime reaches the dotctl command line through its `windows` subcommand.
-    let prefix: &[&str] = if exe.file_stem().is_some_and(|stem| stem == "dotctl") {
-        &[]
-    } else {
-        &["windows"]
-    };
-    let log = std::env::temp_dir().join("dotctl-sshd.log");
-    let mut child_arguments: Vec<String> = prefix.iter().map(|word| (*word).to_owned()).collect();
+    let log = std::env::temp_dir().join("dotfiles-sshd.log");
+    // The runtime reaches the Windows setup command line through its `windows` subcommand.
+    let mut child_arguments = vec!["windows".to_owned()];
     child_arguments.extend(arguments(options));
     let manifest = proc::write_temp(
         &json!({

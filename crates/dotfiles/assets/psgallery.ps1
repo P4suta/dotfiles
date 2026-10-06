@@ -1,4 +1,4 @@
-# requires -Version 7 PSGallery installer, embedded in dotctl and written to a temp file by `dotctl setup tools`.
+# requires -Version 7 PSGallery installer, embedded in the runtime and written to a temp file by its Windows tools step.
 # PowerShellGet is the only interface these modules have, and one process covers the whole list because the module probe is what costs the time.
 #
 # A module that fails to install is a warning, not a failure: the tool set still works without PSFzf, and an unreachable gallery must not fail an otherwise good apply.

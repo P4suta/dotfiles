@@ -98,7 +98,7 @@ impl CommitMsgHook {
         }
         let message = directory.path().join(".git/COMMIT_EDITMSG");
         fs::write(&message, text)?;
-        let output = platform::process::command(env!("CARGO_BIN_EXE_dotfiles-xtask"))
+        let output = platform::process::command(env!("CARGO_BIN_EXE_dotfiles"))
             .current_dir(directory.path())
             .args(["hook", "commit-msg", "--"])
             .arg(&message)

@@ -100,7 +100,7 @@ fn describe(cmd: &Command) -> String {
 /// Dropping the returned value deletes the file.
 pub fn write_temp(content: &str, suffix: &str) -> Result<tempfile::TempPath> {
     let mut file = tempfile::Builder::new()
-        .prefix("dotctl-")
+        .prefix("dotfiles-")
         .suffix(suffix)
         .tempfile()
         .context("creating a temp file for the rendered content")?;

@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 {{ if eq .profile "mac" }}{{ includeTemplate "partials/inputs" (list (includeTemplate "dot_config/homebrew/Brewfile.tmpl" .) .platforms.mac.brew .platforms.mac.desktop) }}{{ else if eq .profile "linux" }}{{ includeTemplate "partials/inputs" (list .platforms.linux.desktop) }}{{ end }}
-exec "$HOME/.local/bin/dotfiles-xtask" --root "$CHEZMOI_WORKING_TREE" setup desktop --config "$CHEZMOI_CONFIG_FILE" --live
+exec "$HOME/.local/bin/dotfiles" --root "$CHEZMOI_WORKING_TREE" setup desktop --config "$CHEZMOI_CONFIG_FILE" --live
