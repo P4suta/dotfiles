@@ -537,6 +537,15 @@ fn forgetting_script_runs_reruns_every_onchange_script() {
     assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 2);
 }
 
+#[test]
+fn hosts_may_differ_only_in_declared_git_settings() {
+    let mac = "core.pager=delta\ncore.fsmonitor=true\ncore.hookspath=~/.config/git/hooks\n";
+    let wsl = "core.pager=delta\ncore.sshcommand=ssh.exe\ncore.hookspath=~/.config/git/hooks\n";
+    assert_eq!(profiles::policy(mac), profiles::policy(wsl));
+    let drifted = "core.pager=less\ncore.hookspath=~/.config/git/hooks\n";
+    assert_ne!(profiles::policy(mac), profiles::policy(drifted));
+}
+
 /// chezmoi keys `run_onchange_` state by target name and contents, so moving a script into `.chezmoiscripts/` reruns it once.
 #[test]
 fn moving_an_onchange_script_into_chezmoiscripts_reruns_it_once() {

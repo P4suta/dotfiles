@@ -442,12 +442,45 @@ pub fn empty_directories(directories: &[String], leaves: &[String]) -> Vec<Strin
         .collect()
 }
 
+/// The hooks every host runs from `core.hooksPath`.
+pub const GIT_HOOKS: [&str; 7] = [
+    "commit-msg",
+    "post-checkout",
+    "post-commit",
+    "post-merge",
+    "pre-commit",
+    "pre-push",
+    "reference-transaction",
+];
+
+/// Git settings that name a host's own executables or file watcher, the only settings in which hosts may differ.
+pub const DECLARED_GIT_SETTINGS: [&str; 4] = [
+    "core.sshcommand",
+    "core.fsmonitor",
+    "core.untrackedcache",
+    "gpg.ssh.program",
+];
+
+/// The `git config --list` entries of one host without the declared per-host settings.
+pub fn policy(listed: &str) -> Vec<String> {
+    listed
+        .lines()
+        .filter(|line| {
+            !DECLARED_GIT_SETTINGS
+                .iter()
+                .any(|key| line.split_once('=').is_some_and(|(name, _)| name == *key))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
 pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
     check_public(root)?;
     if let Some(report) = report {
         fs::create_dir(report).context("profile report requires a fresh output directory")?;
     }
     let scratch = tempfile::tempdir()?;
+    let mut git_policies = Vec::new();
     let source_data: Value = serde_json::from_slice(&fs::read(root.join(".chezmoidata.json"))?)?;
     for profile in Profile::ALL {
         let scope = scratch.path().join(profile.name());
@@ -657,43 +690,58 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
                 crate::agent_memory::refusal(profile.name(), &memory)
             );
         }
-        output(
+        let git_config = destination.join(".config/git/config");
+        let listed = output(
             Tool::Git
                 .command()
                 .args(["config", "--file"])
-                .arg(destination.join(if profile == Profile::Windows {
-                    ".config/git/config"
-                } else {
-                    ".gitconfig"
-                }))
+                .arg(&git_config)
                 .args(["--list"]),
             "parse rendered Git configuration",
         )?;
-        let attributes = output(
-            Tool::Git
-                .command()
-                .args(["config", "--file"])
-                .arg(destination.join(if profile == Profile::Windows {
-                    ".config/git/config"
-                } else {
-                    ".gitconfig"
-                }))
-                .args(["--get", "core.attributesFile"]),
-            "read the rendered global attributes setting",
-        )?;
+        let listed = String::from_utf8(listed.stdout)?;
+        let setting = |key: &str| {
+            listed
+                .lines()
+                .filter_map(|line| line.split_once('='))
+                .filter(|(name, _)| *name == key)
+                .map(|(_, value)| value.to_owned())
+                .next_back()
+        };
         ensure!(
-            String::from_utf8(attributes.stdout)?.trim() == "~/.config/git/attributes"
+            setting("core.attributesfile").as_deref() == Some("~/.config/git/attributes")
                 && fs::read_to_string(destination.join(".config/git/attributes"))?
                     .lines()
                     .any(|line| line == "* text=auto eol=lf"),
             "{} does not install the global LF attributes; set core.attributesFile to ~/.config/git/attributes and render dot_config/git/attributes for this profile",
             profile.name()
         );
+        let missing: Vec<_> = GIT_HOOKS
+            .iter()
+            .filter(|hook| !destination.join(".config/git/hooks").join(hook).is_file())
+            .collect();
+        ensure!(
+            setting("core.hookspath").as_deref() == Some("~/.config/git/hooks")
+                && missing.is_empty(),
+            "{} does not run every Git hook: core.hooksPath must name ~/.config/git/hooks and these hooks must render: {missing:?}",
+            profile.name()
+        );
+        git_policies.push((profile, policy(&listed)));
         println!(
             "Rendered, applied twice, and verified {} in an owned fixture",
             profile.name()
         );
     }
+    let differing: Vec<_> = git_policies
+        .iter()
+        .filter(|(_, policy)| *policy != git_policies[0].1)
+        .map(|(profile, _)| profile.name())
+        .collect();
+    ensure!(
+        differing.is_empty(),
+        "the Git configuration of {differing:?} differs from {} beyond the declared per-host settings {DECLARED_GIT_SETTINGS:?}",
+        git_policies[0].0.name()
+    );
     Ok(())
 }
 

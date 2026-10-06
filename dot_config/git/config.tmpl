@@ -1,4 +1,99 @@
-{{- $context := merge (dict) . (index .platforms .profile) -}}
-{{- if eq .profile "windows" -}}
-{{ includeTemplate "profiles/windows/dot_config/git/config.tmpl" $context }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}
+{{- /* One Git policy on every host: profiles differ only in the executables they declare and the macOS file monitor. */ -}}
+{{- $palette := (index .platforms "mac").palette -}}
+[user]
+	name = {{ .git.name | quote }}
+	email = {{ .git.email | quote }}
+
+[core]
+	pager = delta
+{{- if eq .profile "wsl" }}
+	# WSL reaches the 1Password SSH agent through the Windows OpenSSH client.
+	sshCommand = ssh.exe
+{{- end }}
+	# Every repository normalizes text to LF unless its own attributes say otherwise.
+	attributesFile = ~/.config/git/attributes
+	# These cancel autocrlf=true from the Git for Windows system configuration, so Git never converts text to CRLF.
+	autocrlf = false
+	eol = lf
+	# One hook directory runs the same gates in every repository, including clones made before this setting.
+	# The hooks run each repository's own lefthook configuration, so no repository installs lefthook hooks, which would replace these.
+	# The signing hooks turn themselves off while commit.gpgsign stays off.
+	hooksPath = ~/.config/git/hooks
+{{- if eq .profile "mac" }}
+	# The built-in FSEvents watcher turns `git status` in a large worktree from a full scan into a daemon query.
+	fsmonitor = true
+	untrackedCache = true
+{{- end }}
+
+[interactive]
+	diffFilter = delta --color-only
+
+[delta]
+	navigate = true
+	line-numbers = true
+	side-by-side = true
+	# `ansi` takes the terminal's sixteen colours, which every terminal configuration renders from the Tokyo Night palette.
+	syntax-theme = ansi
+	# Each color needs quotes, because `#` opens a comment in Git configuration.
+	minus-style = "normal {{ $palette.diff_del }}"
+	minus-emph-style = "normal {{ $palette.red }}"
+	plus-style = "normal {{ $palette.diff_add }}"
+	plus-emph-style = "normal {{ $palette.green }}"
+	line-numbers-minus-style = "{{ $palette.red }}"
+	line-numbers-plus-style = "{{ $palette.green }}"
+	line-numbers-zero-style = "{{ $palette.comment }}"
+	hunk-header-style = "file line-number syntax"
+	hunk-header-decoration-style = "{{ $palette.surface }} box ul"
+	file-style = "{{ $palette.blue }} bold"
+	file-decoration-style = "{{ $palette.surface }} ul"
+
+[diff]
+	colorMoved = default
+
+[pull]
+	rebase = true
+
+[init]
+	defaultBranch = main
+
+[ghq]
+	# ghq's own layout, <root>/<host>/<owner>/<repo>, keeps forks, other owners, and other hosts apart.
+	root = ~/projects
+
+[alias]
+	dft = -c diff.external=difft diff
+	co-jj = "!f() { jj git init --colocate; }; f"
+
+[credential "https://github.com"]
+	# gh's stored token answers HTTPS GitHub operations.
+	# The empty helper first drops inherited helpers, such as the macOS system osxkeychain helper, which would answer with a stale credential.
+	helper =
+	helper = !gh auth git-credential
+[credential "https://gist.github.com"]
+	helper =
+	helper = !gh auth git-credential
+
+# Git sends every github.com web address over SSH, so Git transport always uses the 1Password SSH agent.
+# Downloads that never read Git configuration, such as release tarballs, keep their HTTPS URLs.
+[url "git@github.com:"]
+	insteadOf = https://github.com/
+{{- if .signing.enabled }}
+
+[gpg]
+	format = ssh
+[gpg "ssh"]
+{{- if eq .profile "windows" }}
+	# The ssh-keygen of Git for Windows can't reach the 1Password agent's named pipe, so signing uses the Windows OpenSSH build.
+	program = C:/Windows/System32/OpenSSH/ssh-keygen.exe
+{{- else if eq .profile "wsl" }}
+	# Signing and verification run the Windows OpenSSH ssh-keygen, which reaches the 1Password agent that WSL shares with Windows.
+	program = {{ joinPath .chezmoi.homeDir ".local/bin/dotfiles-wsl-ssh-keygen" | quote }}
+{{- end }}
+	allowedSignersFile = ~/.config/git/allowed_signers
+[commit]
+	gpgsign = true
+[tag]
+	gpgsign = true
+[user]
+	signingkey = {{ printf "key::%s" (includeTemplate "signing_pubkey" . | trim) | quote }}
+{{- end }}

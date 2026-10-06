@@ -13,7 +13,6 @@
 {{ if eq .profile "mac" }}
 {{ includeTemplate "profiles/mac/ignore" (merge (dict) . (index .platforms .profile)) }}
 AppData/Roaming/herdr/config.toml
-.config/git/config
 .config/kitty/kitty.conf
 .config/kitty/tokyo-night.conf
 .config/fcitx5/config
@@ -67,8 +66,6 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .config/bat/config
 .config/fzf/fzfrc
 .config/ghostty/config
-.config/git/config
-.config/git/ignore
 .config/herdr-agent/keys
 .config/homebrew/Brewfile
 .config/lazygit/config.yml
@@ -121,7 +118,6 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .config/fzf/fzfrc
 .config/gh/config.yml
 .config/ghostty/config
-.config/git/ignore
 .config/herdr-agent/keys
 .config/herdr/config.toml
 .config/homebrew/Brewfile
@@ -195,13 +191,6 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .config/dev-reaper/config
 .config/fzf/fzfrc
 .config/ghostty/config
-.config/git/config
-.config/git/hooks/commit-msg
-.config/git/hooks/post-checkout
-.config/git/hooks/post-merge
-.config/git/hooks/pre-commit
-.config/git/hooks/reference-transaction
-.config/git/ignore
 .config/herdr-agent/keys
 .config/herdr/config.toml
 .config/homebrew/Brewfile

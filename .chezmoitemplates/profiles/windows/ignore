@@ -4,11 +4,6 @@
 # Repo dev tooling: git-tracked only, not applied to the home directory
 tools/**
 
-# ~/.gitconfig is left to the 1Password app's Sign Git commits feature;
-# dot_config/git/config.tmpl carries our own Git settings instead.
-# Patterns here are target paths (relative to ~/), so this is `.gitconfig` rather than the source name `dot_gitconfig.tmpl`.
-.gitconfig
-
 # Directories that only hold another profile's targets in the unified source; ignoring them keeps this home from gaining empty trees or changed permissions.
 .claude/shims
 .config/atuin

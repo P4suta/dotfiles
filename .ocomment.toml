@@ -27,7 +27,7 @@ paths = [
 language = "markdown"
 
 [[overrides]]
-paths = ["**/*.toml.tmpl", "dot_gitconfig.tmpl"]
+paths = ["**/*.toml.tmpl", "dot_config/git/config.tmpl"]
 language = "toml"
 
 [[overrides]]

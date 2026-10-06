@@ -14,4 +14,5 @@
 .config/git/hooks/dotguard-delegate.sh
 .config/git/hooks/storage-scout-delegate.sh
 .config/git/hooks/renovate-freshness.sh
+.gitconfig
 {{ end }}
