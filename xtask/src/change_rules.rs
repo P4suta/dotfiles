@@ -123,7 +123,7 @@ enum Match {
 }
 
 /// The first matching rule decides, so a narrower rule precedes the broader one it overrides.
-const RULES: [(Match, &[u8], Class); 32] = [
+const RULES: [(Match, &[u8], Class); 33] = [
     (Match::Prefix, b".github/", Class::Everything),
     (Match::Prefix, b"xtask/proofs/", Class::Everything),
     (Match::Prefix, b"xtask/src/change", Class::Everything),
@@ -151,6 +151,7 @@ const RULES: [(Match, &[u8], Class); 32] = [
     (Match::Prefix, b"crates/", Class::Rust),
     (Match::Prefix, b".cargo/", Class::Everything),
     (Match::Exact, b"clippy.toml", Class::Everything),
+    (Match::Exact, b"deny.toml", Class::Rust),
     (Match::Prefix, b"home/dot_agents/skills/", Class::Skills),
     (Match::Prefix, b"home/dot_claude/skills/", Class::Skills),
     (Match::Prefix, b"docs/skills/", Class::Skills),
@@ -330,7 +331,7 @@ mod tests {
     #[test]
     fn ci_tooling_lock_files_and_the_classifier_select_everything() {
         for path in [
-            ".github/workflows/required.yml",
+            ".github/workflows/ci.yml",
             "mise.toml",
             "lefthook.yml",
             "justfile",

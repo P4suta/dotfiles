@@ -19,6 +19,118 @@ fn run(mut command: Command, root: &Path, name: &str, arguments: &[&str]) -> Res
     Ok(())
 }
 
+/// Lints the GitHub workflows with actionlint and audits them with zizmor.
+/// zizmor runs offline, so the check never waits on the GitHub API.
+///
+/// # Errors
+///
+/// Returns an error when either checker can't start or reports a finding.
+pub fn workflows(root: &Path) -> Result<()> {
+    let findings = workflow_findings(
+        &fs::read_to_string(root.join(".github/workflows/ci.yml"))?,
+        &fs::read_to_string(root.join("policy/github.toml"))?,
+    )?;
+    ensure!(findings.is_empty(), "{}", findings.join("\n"));
+    run(Tool::Actionlint.command(), root, "actionlint", &[])?;
+    run(
+        Tool::Zizmor.command(),
+        root,
+        "zizmor",
+        &["--offline", ".github/workflows"],
+    )
+}
+
+/// Refusals for a CI workflow that the settings in `policy/github.toml` can't rely on.
+/// The workflow must run for pull requests and the merge queue, and each required status must name a job that needs every other job and always runs.
+/// No step may call `cargo run`, since the justfile owns every command.
+///
+/// # Errors
+///
+/// Returns an error when the workflow fails to parse as YAML or the policy as TOML.
+pub fn workflow_findings(workflow: &str, policy: &str) -> Result<Vec<String>> {
+    use yaml_rust2::{Yaml, YamlLoader};
+    let document = YamlLoader::load_from_str(workflow)?
+        .into_iter()
+        .next()
+        .context("ci.yml holds no document")?;
+    let policy: toml::Table = toml::from_str(policy)?;
+    let mut found = Vec::new();
+    for event in ["pull_request", "merge_group"] {
+        if document["on"][event].is_badvalue() {
+            found.push(format!("ci.yml does not run on {event}"));
+        }
+    }
+    let jobs = document["jobs"].as_hash().context("ci.yml holds no jobs")?;
+    let required: Vec<&str> = policy
+        .get("ruleset")
+        .and_then(|ruleset| ruleset.get("main"))
+        .and_then(|main| main.get("required_status_checks"))
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(toml::Value::as_str)
+        .collect();
+    for status in required {
+        let Some((id, job)) = jobs
+            .iter()
+            .find(|(_, job)| job["name"].as_str() == Some(status))
+        else {
+            found.push(format!(
+                "policy/github.toml requires {status}, which no job of ci.yml reports"
+            ));
+            continue;
+        };
+        let needs: Vec<&str> = match &job["needs"] {
+            Yaml::Array(items) => items.iter().filter_map(Yaml::as_str).collect(),
+            Yaml::String(item) => vec![item.as_str()],
+            _ => Vec::new(),
+        };
+        for (other, _) in jobs {
+            if other != id
+                && let Some(other) = other.as_str()
+                && !needs.contains(&other)
+            {
+                found.push(format!(
+                    "the {status} job does not wait for the {other} job"
+                ));
+            }
+        }
+        if job["if"].as_str() != Some("always()") {
+            found.push(format!(
+                "the {status} job must run with `if: always()` so a skipped job never hides a failure"
+            ));
+        }
+    }
+    for (id, job) in jobs {
+        for step in job["steps"].as_vec().into_iter().flatten() {
+            if step["run"]
+                .as_str()
+                .is_some_and(|run| run.contains("cargo run"))
+            {
+                found.push(format!(
+                    "the {} job calls `cargo run`; call a just recipe instead",
+                    id.as_str().unwrap_or_default()
+                ));
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// Refuses a dependency of the root workspace that `deny.toml` rejects: an advisory, a yanked release, an unlisted license, or an unknown source.
+///
+/// # Errors
+///
+/// Returns an error when cargo-deny can't start or reports a finding.
+pub fn dependencies(root: &Path) -> Result<()> {
+    run(
+        Tool::CargoDeny.command(),
+        root,
+        "cargo-deny",
+        &["--locked", "check"],
+    )
+}
+
 /// Whether a rendered command launcher or Git hook execs a program located through `$HOME` at run time.
 #[must_use]
 pub fn launcher_resolves_through_home(name: &str, contents: &str) -> bool {

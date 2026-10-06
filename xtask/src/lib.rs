@@ -321,7 +321,7 @@ pub fn export_checks(root: &Path, output: &Path) -> Result<()> {
         ".chezmoiroot",
         "home/.chezmoiignore",
         "lefthook.yml",
-        ".github/workflows/required.yml",
+        ".github/workflows/ci.yml",
         "home/dot_config/skill-ops/policy.json",
         "home/dot_config/opencode/plugins/skill-ops.ts",
         "home/dot_config/opencode/plugins/line-endings.ts",

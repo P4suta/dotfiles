@@ -1,11 +1,19 @@
----
-name: required
+name: ci
 
 on:
   pull_request:
+  merge_group:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Kani installs only in the proofs job, which clears this list.
+  MISE_DISABLE_TOOLS: "cargo:kani-verifier"
 
 jobs:
   classify:
@@ -23,12 +31,12 @@ jobs:
       - name: Select the gates this change affects
         id: classify
         env:
-          BASE: origin/${{ github.base_ref }}
-        run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- classify --base "$BASE" >> "$GITHUB_OUTPUT"
+          BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
+        run: mise x -- just classify --base "$BASE" >> "$GITHUB_OUTPUT"
 
-  # The required checks always run and report, so a change that needs fewer gates still satisfies the ruleset.
-  # Each step runs only for the gates the classify job selected, and a skipped step counts as a success.
-  required:
+  # The ruleset still requires these matrix contexts.
+  # Until it requires only the required job, this job keeps their names and always reports, with each step gated instead.
+  check:
     name: required (${{ matrix.os }})
     needs: classify
     if: ${{ !cancelled() }}
@@ -37,7 +45,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       GATES: ${{ needs.classify.outputs.gates }}
     steps:
@@ -48,24 +56,54 @@ jobs:
           echo "the classify job did not succeed, so no gate was selected" >&2
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.classify.outputs.gates != ''
+        if: env.GATES != ''
         with:
           persist-credentials: false
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
-        if: needs.classify.outputs.gates != ''
+        if: env.GATES != ''
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: env.GATES != ''
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          restore-keys: cargo-${{ runner.os }}-
       - name: Check the selected gates
-        if: needs.classify.outputs.gates != ''
+        if: env.GATES != ''
         shell: bash
         run: mise x -- just check --gates "$GATES"
-      - name: Set up the pinned native verifier
-        if: runner.os == 'macOS' && contains(needs.classify.outputs.gates, 'rust')
-        run: mise x -- kani setup
-      - name: Prove production maintenance contracts and reject the counterexample
-        if: runner.os == 'macOS' && contains(needs.classify.outputs.gates, 'rust')
-        run: mise x -- just proofs
       - name: Check Linux system provisioning syntax
         if: runner.os == 'Linux' && contains(needs.classify.outputs.gates, 'profiles')
         run: mise x -- just ops-check
+
+  proofs:
+    name: proofs
+    needs: classify
+    if: contains(needs.classify.outputs.gates, 'rust')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      MISE_DISABLE_TOOLS: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.kani
+            target
+          key: proofs-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          restore-keys: proofs-
+      - name: Set up the pinned verifier
+        run: mise x -- kani setup
+      - name: Prove the production contracts and reject the counterexamples
+        run: mise x -- just proofs
 
   minimum-git:
     # Git 2.43 comes from Ubuntu 24.04 and ranks as the oldest Git on a managed host.
@@ -94,6 +132,7 @@ jobs:
               git --version | grep -Fx "git version 2.43.0"
               while read -r test; do "$test"; done < ../../guard-tests.txt'
 
+  # The ruleset still requires these matrix contexts, so this job keeps their names and always reports, like the check job.
   rehearsal:
     name: rehearsal (${{ matrix.os }})
     needs: classify
@@ -119,4 +158,24 @@ jobs:
         if: contains(needs.classify.outputs.gates, 'profiles')
       - name: Apply, reprovision, and reapply the native profile on this disposable host
         if: contains(needs.classify.outputs.gates, 'profiles')
-        run: mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- rehearse --disposable-host
+        run: mise x -- just rehearse --disposable-host
+
+  # The one status the ruleset requires.
+  # A job that the change skips counts as passed, and a failed or cancelled one fails this job.
+  required:
+    name: required
+    needs: [classify, check, proofs, minimum-git, rehearsal]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refuse a failed or cancelled job
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            case "$result" in
+              success | skipped) ;;
+              *) echo "a required job ended as $result" >&2; exit 1 ;;
+            esac
+          done

@@ -721,7 +721,7 @@ pub fn engine_hash() -> Result<String> {
             include_str!("../../mise.toml"),
             include_str!("../../home/.chezmoiignore"),
             include_str!("../../lefthook.yml"),
-            include_str!("../../.github/workflows/required.yml"),
+            include_str!("../../.github/workflows/ci.yml"),
             include_str!("pr_rules.rs"),
             include_str!("pr_workflow.rs"),
             include_str!("bin/pr-workflow.rs"),

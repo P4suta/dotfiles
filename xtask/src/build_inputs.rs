@@ -16,7 +16,7 @@ use std::path::Path;
 const SHARED: [&str; 19] = [
     ".cargo/config.toml",
     ".chezmoiroot",
-    ".github/workflows/required.yml",
+    ".github/workflows/ci.yml",
     "Cargo.lock",
     "Cargo.toml",
     "bun.lock",

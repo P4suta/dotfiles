@@ -135,7 +135,7 @@ fn check_snapshots_preserve_sources_and_exclude_builds_and_unrelated_state() -> 
         ".chezmoiroot",
         "home/.chezmoiignore",
         "lefthook.yml",
-        ".github/workflows/required.yml",
+        ".github/workflows/ci.yml",
         "home/dot_config/skill-ops/policy.json",
         "home/dot_config/opencode/plugins/skill-ops.ts",
         "home/dot_config/opencode/plugins/line-endings.ts",

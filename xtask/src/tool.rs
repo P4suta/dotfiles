@@ -19,6 +19,7 @@ pub enum Provision {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Tool {
+    Actionlint,
     AnsibleGalaxy,
     AnsiblePlaybook,
     Atuin,
@@ -28,6 +29,7 @@ pub enum Tool {
     Cabal,
     Carapace,
     Cargo,
+    CargoDeny,
     Chezmoi,
     Claude,
     Code,
@@ -101,12 +103,14 @@ pub enum Tool {
     Winget,
     Wslpath,
     XdgMime,
+    Zizmor,
     Zoxide,
     Zsh,
 }
 
 impl Tool {
-    pub const ALL: [Self; 84] = [
+    pub const ALL: [Self; 87] = [
+        Self::Actionlint,
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
         Self::Atuin,
@@ -116,6 +120,7 @@ impl Tool {
         Self::Cabal,
         Self::Carapace,
         Self::Cargo,
+        Self::CargoDeny,
         Self::Chezmoi,
         Self::Claude,
         Self::Code,
@@ -189,6 +194,7 @@ impl Tool {
         Self::Winget,
         Self::Wslpath,
         Self::XdgMime,
+        Self::Zizmor,
         Self::Zoxide,
         Self::Zsh,
     ];
@@ -197,6 +203,9 @@ impl Tool {
     #[must_use]
     pub fn program(self) -> &'static str {
         match self {
+            Self::Actionlint => "actionlint",
+            Self::CargoDeny => "cargo-deny",
+            Self::Zizmor => "zizmor",
             Self::AnsibleGalaxy => "ansible-galaxy",
             Self::AnsiblePlaybook => "ansible-playbook",
             Self::Atuin => "atuin",
@@ -237,20 +246,10 @@ impl Tool {
             Self::Raco => "raco",
             Self::Sh => "sh",
             Self::Shellcheck => "shellcheck",
-            Self::Ssh => {
-                if cfg!(windows) {
-                    "ssh.exe"
-                } else {
-                    "ssh"
-                }
-            }
-            Self::SshKeygen => {
-                if cfg!(windows) {
-                    "ssh-keygen.exe"
-                } else {
-                    "ssh-keygen"
-                }
-            }
+            Self::Ssh if cfg!(windows) => "ssh.exe",
+            Self::Ssh => "ssh",
+            Self::SshKeygen if cfg!(windows) => "ssh-keygen.exe",
+            Self::SshKeygen => "ssh-keygen",
             Self::Sudo => "sudo",
             Self::Systemctl => "systemctl",
             Self::Taplo => "taplo",
@@ -300,6 +299,9 @@ impl Tool {
     pub fn provision(self) -> Provision {
         match self {
             Self::AnsibleGalaxy | Self::AnsiblePlaybook => Provision::Pinned("pypi:ansible-core"),
+            Self::Actionlint => Provision::Pinned("actionlint"),
+            Self::CargoDeny => Provision::Pinned("cargo-deny"),
+            Self::Zizmor => Provision::Pinned("zizmor"),
             Self::Bun => Provision::Pinned("bun"),
             Self::Cargo => Provision::Pinned("rust"),
             Self::Chezmoi => Provision::Pinned("chezmoi"),

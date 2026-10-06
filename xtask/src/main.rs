@@ -296,6 +296,8 @@ fn check(root: &Path, gates: Gates) -> Result<()> {
     }
     if gates.contains(Gate::Rust) {
         dotfiles_xtask::profiles::data_schema(root, true)?;
+        dotfiles_xtask::quality::workflows(root)?;
+        dotfiles_xtask::quality::dependencies(root)?;
         check_workspace(root)?;
         check_package(
             root,

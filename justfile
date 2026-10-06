@@ -19,6 +19,12 @@ profiles:
 proofs *args:
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- proofs {{args}}
 
+classify *args:
+    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- classify {{args}}
+
+rehearse *args:
+    mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- rehearse {{args}}
+
 skills:
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- skills
 
