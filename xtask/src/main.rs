@@ -50,6 +50,12 @@ enum Action {
     ClaudeBash,
     /// Claude Code PreToolUse and PostToolUse hook for Bash and PowerShell: sets each command's timeout from its measured durations.
     ClaudeTiming,
+    /// Refuses work on a host whose process creation stalls, as it does when the Defender scan engine stops responding.
+    Health {
+        /// Prints a refusal to standard output, which a session start hook adds to the agent's context, and exits successfully.
+        #[arg(long)]
+        session: bool,
+    },
     Hook {
         hook: dotfiles_xtask::hooks::Hook,
         #[arg(last = true)]
@@ -294,6 +300,25 @@ fn run() -> Result<()> {
         )?),
         Action::ClaudeBash => dotfiles_xtask::claude_hook::run()?,
         Action::ClaudeTiming => dotfiles_xtask::claude_timing::run()?,
+        Action::Health { session } => {
+            let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+                .context("user directory is unavailable")?;
+            let result = dotfiles_xtask::health::gate(
+                Path::new(&home),
+                if session { "session-start" } else { "health" },
+            );
+            match result {
+                Err(error) if session => {
+                    print!(
+                        "{}",
+                        error
+                            .downcast::<dotfiles_xtask::refusal::Refusal>()?
+                            .render()
+                    );
+                }
+                other => other?,
+            }
+        }
         Action::Hook { hook, arguments } => dotfiles_xtask::hooks::run(hook, &arguments)?,
         Action::LineEndings { request } => dotfiles_xtask::line_endings::run(request)?,
         Action::Git { arguments } => {

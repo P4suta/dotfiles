@@ -220,6 +220,9 @@ fn delegate(
 pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .context("native home is unavailable")?;
+    if matches!(hook, Hook::PreCommit | Hook::CommitMsg | Hook::PrePush) {
+        crate::health::gate(Path::new(&home), hook.name())?;
+    }
     let mut native = Native::new(Path::new(&home))?;
     if matches!(hook, Hook::PrePush) {
         let marker = native.home.join(".config/git/push-paused");

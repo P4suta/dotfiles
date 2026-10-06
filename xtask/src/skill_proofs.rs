@@ -169,6 +169,11 @@ pub const SOURCE_NAME_HARNESSES: [&str; 2] = [
     "templates_and_scripts_are_never_copied_targets",
 ];
 
+pub const START_HEALTH_HARNESSES: [&str; 2] = [
+    "a_fast_start_is_healthy_whatever_the_events",
+    "a_start_that_reaches_the_bound_is_always_a_stall",
+];
+
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
     let summary = &value["verification_results"]["summary"];
     ensure!(
@@ -752,7 +757,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 11] = [
+pub const RULES: [Rules; 12] = [
     Rules {
         source: "xtask/src/target_rules.rs",
         harnesses: &TARGET_HARNESSES,
@@ -987,6 +992,25 @@ fn reject_a_template_as_a_verbatim_copy() {
         rejected: &[
             "reject_keeping_the_empty_attribute_in_a_target_name",
             "reject_a_template_as_a_verbatim_copy",
+        ],
+    },
+    Rules {
+        source: "xtask/src/start_health_rules.rs",
+        harnesses: &START_HEALTH_HARNESSES,
+        counterexamples: "use production::{Events, Start, Verdict, verdict};
+#[kani::proof]
+fn reject_starting_work_on_a_start_that_never_finished() {
+    assert!(verdict(Start::TimedOut, Some(Events::NONE)) == Verdict::Healthy);
+}
+#[kani::proof]
+fn reject_refusing_a_fast_start_for_past_events() {
+    let events = Events { engine_terminated: 1, protection_failed: 0, service_timeout: 0 };
+    assert!(verdict(Start::Completed { millis: 40 }, Some(events)) == Verdict::Stalled);
+}
+",
+        rejected: &[
+            "reject_starting_work_on_a_start_that_never_finished",
+            "reject_refusing_a_fast_start_for_past_events",
         ],
     },
 ];
