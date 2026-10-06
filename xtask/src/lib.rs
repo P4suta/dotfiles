@@ -32,6 +32,7 @@ pub mod instruction_rules;
 pub mod line_endings;
 pub mod next_action;
 pub mod next_action_rules;
+pub mod path_conversion_rules;
 pub mod pr_rules;
 pub mod pr_workflow;
 pub mod profile_rules;

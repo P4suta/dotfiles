@@ -1,5 +1,6 @@
 use crate::body_rules::{self, Verdict as BodyVerdict};
 use crate::disk_scan_rules;
+use crate::path_conversion_rules;
 use crate::shell_write_rules::{
     Source, Verdict, body_sources, inspect, next_action, program, segments,
 };
@@ -133,6 +134,50 @@ fn disk_scan_refusal(command: &str) -> Option<String> {
     })
 }
 
+/// Whether a domyjob command passes the remote host an argument that looks like an absolute POSIX path, and whether the command turns Git Bash's path conversion off.
+fn remote_paths(command: &str) -> (bool, bool) {
+    let mut remote_path = false;
+    let mut conversion_off = false;
+    let off = |word: &str| matches!(word, "MSYS_NO_PATHCONV=1" | "MSYS2_ARG_CONV_EXCL=*");
+    for words in segments(command) {
+        if words.first().is_some_and(|word| word == "export") {
+            conversion_off |= words[1..].iter().any(|word| off(word));
+            continue;
+        }
+        let start = words
+            .iter()
+            .position(|word| !word.contains('=') && program(word) != "env")
+            .unwrap_or(words.len());
+        if words
+            .get(start)
+            .is_none_or(|word| program(word) != "domyjob")
+        {
+            continue;
+        }
+        let assigned = words[..start].iter().any(|word| off(word));
+        let remote = words[start..]
+            .iter()
+            .skip_while(|word| *word != "--")
+            .skip(1)
+            .any(|word| (word.starts_with('/') && !word.starts_with("//")) || word.contains("=/"));
+        remote_path |= remote && !assigned;
+    }
+    (remote_path, conversion_off)
+}
+
+/// Git Bash on Windows rewrites remote POSIX paths before domyjob starts, so the remote host receives a Windows path it lacks.
+fn path_conversion_refusal(command: &str, converting_shell: bool) -> Option<String> {
+    let (remote_path, conversion_off) = remote_paths(command);
+    (path_conversion_rules::verdict(converting_shell, remote_path, conversion_off)
+        == path_conversion_rules::Verdict::Refuse)
+        .then(|| {
+            format!(
+                "Refused: Git Bash would rewrite the absolute paths this domyjob command sends to the remote host into Windows paths.\nNext action: {}",
+                path_conversion_rules::NEXT_ACTION
+            )
+        })
+}
+
 /// The refusal for one `PreToolUse` event, or `None` when the hook admits the tool call.
 /// The hook checks PowerShell commands only for disk scans, because the file-write rules read POSIX shell syntax.
 pub(crate) fn refusal(event: &str) -> Result<Option<String>> {
@@ -149,6 +194,9 @@ pub(crate) fn refusal(event: &str) -> Result<Option<String>> {
     }
     if tool == "PowerShell" {
         return Ok(None);
+    }
+    if let Some(message) = path_conversion_refusal(command, cfg!(windows)) {
+        return Ok(Some(message));
     }
     if let Verdict::Refuse(reason) = inspect(command) {
         return Ok(Some(format!(
@@ -205,6 +253,34 @@ mod tests {
         refusal(&bash(command))
             .unwrap()
             .unwrap_or_else(|| panic!("admitted: {command}"))
+    }
+
+    #[test]
+    fn remote_absolute_paths_that_git_bash_would_rewrite_are_found() {
+        for command in [
+            "domyjob on mac --wait -- /bin/pwd",
+            "cd x && domyjob run mac --wait -- sh -c 'echo' /tmp/a",
+            "domyjob.exe on mac -- tool --config=/etc/tool.toml",
+        ] {
+            assert_eq!(remote_paths(command), (true, false), "{command}");
+            assert!(
+                path_conversion_refusal(command, true).is_some(),
+                "{command}"
+            );
+            assert_eq!(path_conversion_refusal(command, false), None, "{command}");
+        }
+        for command in [
+            "MSYS_NO_PATHCONV=1 domyjob on mac --wait -- /bin/pwd",
+            "domyjob on mac --wait -- just check",
+            "domyjob ls mac",
+            "ls /bin/pwd",
+            "domyjob on mac -- //server/share",
+        ] {
+            assert_eq!(path_conversion_refusal(command, true), None, "{command}");
+        }
+        let exported = "export MSYS_NO_PATHCONV=1; domyjob on mac -- /bin/pwd";
+        assert_eq!(remote_paths(exported), (true, true));
+        assert_eq!(path_conversion_refusal(exported, true), None);
     }
 
     #[test]

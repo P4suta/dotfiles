@@ -152,6 +152,11 @@ pub const DISK_SCAN_HARNESSES: [&str; 2] = [
     "only_a_recursive_size_scan_is_refused",
 ];
 
+pub const PATH_CONVERSION_HARNESSES: [&str; 2] = [
+    "a_shell_that_keeps_arguments_admits_every_remote_path",
+    "only_a_converted_remote_path_is_refused",
+];
+
 pub const BODY_HARNESSES: [&str; 2] = [
     "attributed_bodies_are_never_admitted",
     "every_body_refusal_names_the_deleting_next_action",
@@ -518,7 +523,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 28] = [
+pub const RULES: [Rules; 29] = [
     Rules {
         source: "xtask/src/skill_rules.rs",
         harnesses: &HARNESSES,
@@ -1075,6 +1080,23 @@ fn reject_refusing_a_walk_without_sizes() {
         rejected: &[
             "reject_admitting_a_recursive_size_scan",
             "reject_refusing_a_walk_without_sizes",
+        ],
+    },
+    Rules {
+        source: "xtask/src/path_conversion_rules.rs",
+        harnesses: &PATH_CONVERSION_HARNESSES,
+        counterexamples: "#[kani::proof]
+fn reject_admitting_a_converted_remote_path() {
+    assert!(production::verdict(true, true, false) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_refusing_a_command_with_the_conversion_off() {
+    assert!(production::verdict(true, true, true) == production::Verdict::Refuse);
+}
+",
+        rejected: &[
+            "reject_admitting_a_converted_remote_path",
+            "reject_refusing_a_command_with_the_conversion_off",
         ],
     },
     Rules {
