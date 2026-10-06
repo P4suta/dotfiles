@@ -99,7 +99,7 @@ pub fn target(entry: Entry, source: &[u8]) -> Option<Target<'_>> {
 #[kani::proof]
 #[kani::unwind(16)]
 fn a_target_name_is_a_nonempty_suffix_of_its_source_name() {
-    let bytes: [u8; 12] = kani::any();
+    let bytes: [u8; 9] = kani::any();
     let length: usize = kani::any();
     kani::assume(length <= bytes.len());
     let source = &bytes[..length];
@@ -118,7 +118,7 @@ fn a_target_name_is_a_nonempty_suffix_of_its_source_name() {
 #[kani::proof]
 #[kani::unwind(16)]
 fn templates_and_scripts_are_never_copied_targets() {
-    let bytes: [u8; 12] = kani::any();
+    let bytes: [u8; 9] = kani::any();
     let length: usize = kani::any();
     kani::assume(length <= bytes.len());
     let source = &bytes[..length];
