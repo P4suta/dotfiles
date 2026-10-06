@@ -14,5 +14,11 @@
   "immutable_releases": true,
   "protected_default_branch": true,
   "protected_release_tags": true,
-  "environment_admin_bypass": false
+  "environment_admin_bypass": false,
+  "security": {
+    "secret_scanning": true,
+    "push_protection": true,
+    "sha_pinning_required": true,
+    "selected_actions": true
+  }
 }

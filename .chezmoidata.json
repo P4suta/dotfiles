@@ -549,7 +549,7 @@
         ]
       },
       "sshd": {
-        "authorize_signing_key": true,
+        "authorize_signing_key": false,
         "default_shell": "pwsh",
         "enabled": true,
         "firewall_profile": "Private",

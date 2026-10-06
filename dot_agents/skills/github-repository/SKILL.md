@@ -35,6 +35,7 @@ Pass the same `--scope` to `plan` and `verify`:
 - `merge-settings` reconciles merge defaults alone, and apply recomputes the recorded scope, so the plan never carries release or environment changes.
 - `environment-protections` removes administrator bypass and preserves environment reviewers, deployment policies, repository settings, rulesets, and release immutability.
 - `release-immutability` applies only after confirming that publication completes the draft and never overwrites published assets.
+- `security` turns on secret scanning, push protection, and SHA pinning for actions, and reports a repository that runs any action, because only a reviewer can list the permitted ones.
 
 The apply report records started, verified, and failed operations, so partial completion stays visible.
 After a failure, audit and plan again, and never roll back by weakening a protection.

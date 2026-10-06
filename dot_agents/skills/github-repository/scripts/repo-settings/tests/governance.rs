@@ -33,7 +33,78 @@ fn state() -> State {
         ],
         environments: Vec::new(),
         workflow_permissions: json!({"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}),
+        security: json!({"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}),
+        actions: json!({"enabled":true,"allowed_actions":"selected","sha_pinning_required":true}),
     }
+}
+
+#[test]
+fn missing_secret_scanning_and_pinning_are_planned_and_open_actions_are_a_finding() -> Result<()> {
+    let mut original = state();
+    original.security["secret_scanning_push_protection"]["status"] = json!("disabled");
+    original.actions["sha_pinning_required"] = json!(false);
+    original.actions["allowed_actions"] = json!("all");
+    let planned = repo_settings::plan_scoped(
+        snapshot(original),
+        Profile::baseline()?,
+        repo_settings::Scope::Security,
+    )?;
+    assert_eq!(planned.changes.len(), 2);
+    let Operation::SecretScanning { after, .. } = &planned.changes[0].operation else {
+        panic!("expected secret scanning");
+    };
+    assert_eq!(
+        after["secret_scanning_push_protection"]["status"],
+        "enabled"
+    );
+    let Operation::ActionsPinning { after, .. } = &planned.changes[1].operation else {
+        panic!("expected action pinning");
+    };
+    assert_eq!(after["sha_pinning_required"], true);
+    assert_eq!(after["allowed_actions"], "all");
+    assert!(
+        planned
+            .findings
+            .iter()
+            .any(|finding| finding.message.contains("allow list"))
+    );
+    Ok(())
+}
+
+#[test]
+fn applying_the_security_scope_verifies_each_setting() -> Result<()> {
+    let mut previous = state();
+    previous.security["secret_scanning"]["status"] = json!("disabled");
+    previous.actions["sha_pinning_required"] = json!(false);
+    let planned = repo_settings::plan_scoped(
+        snapshot(previous.clone()),
+        Profile::baseline()?,
+        repo_settings::Scope::Security,
+    )?;
+    let api = MemoryApi {
+        current: RefCell::new(previous.clone()),
+        remove_required_check_on_enable: false,
+    };
+    apply(&api, &planned, |_| Ok(()))?;
+    let after = api.current.borrow();
+    assert_eq!(after.security["secret_scanning"]["status"], "enabled");
+    assert_eq!(after.actions["sha_pinning_required"], true);
+    assert_eq!(
+        after.actions["allowed_actions"],
+        previous.actions["allowed_actions"]
+    );
+    assert_eq!(after.rulesets, previous.rulesets);
+    Ok(())
+}
+
+#[test]
+fn profiles_cannot_turn_off_secret_scanning_or_pinning() {
+    let mut profile = Profile::baseline().unwrap();
+    profile.security.push_protection = false;
+    assert!(profile.validate().is_err());
+    let mut profile = Profile::baseline().unwrap();
+    profile.security.sha_pinning_required = false;
+    assert!(profile.validate().is_err());
 }
 
 fn snapshot(state: State) -> Snapshot {
@@ -188,6 +259,7 @@ impl ReadOnlyApi {
         raw["archived"] = json!(state.repository.archived);
         raw["fork"] = json!(state.repository.fork);
         raw["permissions"] = json!({"admin":state.repository.admin});
+        raw["security_and_analysis"] = state.security.clone();
         let mut responses = BTreeMap::from([
             (root.clone(), raw),
             (
@@ -206,6 +278,7 @@ impl ReadOnlyApi {
                 format!("{root}/actions/permissions/workflow"),
                 state.workflow_permissions.clone(),
             ),
+            (format!("{root}/actions/permissions"), state.actions.clone()),
         ]);
         for rule in &state.rulesets {
             responses.insert(format!("{root}/rulesets/{}", rule["id"]), rule.clone());
@@ -521,6 +594,17 @@ impl Api for MemoryApi {
                 Ok(Value::Null)
             }
             Mutation::CreateRuleset { .. } => bail!("unexpected ruleset creation"),
+            Mutation::SecretScanning { .. } => {
+                state.security["secret_scanning"]["status"] = json!("enabled");
+                state.security["secret_scanning_push_protection"]["status"] = json!("enabled");
+                Ok(json!({}))
+            }
+            Mutation::ActionsPinning { previous, .. } => {
+                let mut next = previous.clone();
+                next["sha_pinning_required"] = json!(true);
+                state.actions = next;
+                Ok(Value::Null)
+            }
         }
     }
 }

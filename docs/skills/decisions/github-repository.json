@@ -1,9 +1,11 @@
 {
-  "revision": "d0da0c8f0be8bbaef319d5f8f13535cef1e83660471bdae9712e4cd430902570",
+  "revision": "5e6b993b4229205e4a991b750a986f976bfc14a89e8948572db63a68f9eed062",
   "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions, and the helper's lint policy denies unreasoned lint allowances as every crate in the repository does.",
+  "reason": "The baseline now requires secret scanning, push protection, SHA pinning, and selected actions, and a security scope plans and verifies the first three while it reports a repository that runs any action.",
   "evidence": [
-    "dot_agents/skills/github-repository/SKILL.md"
+    "dot_agents/skills/github-repository/SKILL.md",
+    "dot_agents/skills/github-repository/assets/baseline.json",
+    "dot_agents/skills/github-repository/scripts/repo-settings/tests/governance.rs"
   ],
   "revisit": null
 }

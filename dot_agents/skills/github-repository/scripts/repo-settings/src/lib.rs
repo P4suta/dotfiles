@@ -27,7 +27,20 @@ pub struct Profile {
     pub protected_default_branch: bool,
     pub protected_release_tags: bool,
     pub environment_admin_bypass: bool,
+    pub security: SecurityProfile,
 }
+
+/// Secret scanning, push protection, and the Actions supply chain settings, none of which a profile may turn off.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SecurityProfile {
+    pub secret_scanning: bool,
+    pub push_protection: bool,
+    pub sha_pinning_required: bool,
+    pub selected_actions: bool,
+}
+
+const ENABLED_SCANNING: &str = r#"{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}"#;
 
 impl Profile {
     pub fn baseline() -> Result<Self> {
@@ -47,6 +60,14 @@ impl Profile {
         ensure!(
             !self.environment_admin_bypass,
             "environment bypass cannot be enabled"
+        );
+        let security = &self.security;
+        ensure!(
+            security.secret_scanning
+                && security.push_protection
+                && security.sha_pinning_required
+                && security.selected_actions,
+            "secret scanning, push protection, SHA pinning, and selected actions cannot be disabled"
         );
         for (key, value) in &self.repository {
             ensure!(
@@ -100,6 +121,12 @@ pub struct State {
     pub rulesets: Vec<Value>,
     pub environments: Vec<Environment>,
     pub workflow_permissions: Value,
+    /// The repository's `security_and_analysis` object, which GitHub reports only to administrators.
+    #[serde(default)]
+    pub security: Value,
+    /// `GET /repos/{repo}/actions/permissions`.
+    #[serde(default)]
+    pub actions: Value,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -129,6 +156,7 @@ pub enum Scope {
     MergeSettings,
     EnvironmentProtections,
     ReleaseImmutability,
+    Security,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -158,6 +186,14 @@ pub enum Operation {
     },
     Environment {
         name: String,
+        before: Value,
+        after: Value,
+    },
+    SecretScanning {
+        before: Value,
+        after: Value,
+    },
+    ActionsPinning {
         before: Value,
         after: Value,
     },
@@ -266,6 +302,7 @@ pub fn plan(snapshot: Snapshot, profile: Profile) -> Result<Plan> {
         if state.workflow_permissions["default_workflow_permissions"] != "read" {
             findings.push(Finding { repository: repo.full_name.clone(), message: "Default workflow token is writable; review job permissions before changing its default.".into() });
         }
+        security_changes(state, &profile.security, &mut changes, &mut findings);
         for env in &state.environments {
             let current = env.definition["can_admins_bypass"]
                 .as_bool()
@@ -309,8 +346,55 @@ pub fn plan_scoped(snapshot: Snapshot, profile: Profile, scope: Scope) -> Result
         Scope::ReleaseImmutability => result
             .changes
             .retain(|change| matches!(change.operation, Operation::EnableImmutableReleases)),
+        Scope::Security => result.changes.retain(|change| {
+            matches!(
+                change.operation,
+                Operation::SecretScanning { .. } | Operation::ActionsPinning { .. }
+            )
+        }),
     }
     Ok(result)
+}
+
+/// Plans secret scanning, push protection, and SHA pinning, and reports a repository that runs any action.
+/// Only a reviewer can confirm the list of actions the workflows use, so the plan never writes one.
+fn security_changes(
+    state: &State,
+    profile: &SecurityProfile,
+    changes: &mut Vec<Change>,
+    findings: &mut Vec<Finding>,
+) {
+    let repository = &state.repository.full_name;
+    let enabled = |key: &str| state.security[key]["status"] == "enabled";
+    if (profile.secret_scanning && !enabled("secret_scanning"))
+        || (profile.push_protection && !enabled("secret_scanning_push_protection"))
+    {
+        if state.security.is_object() {
+            changes.push(Change {
+                repository: repository.clone(),
+                operation: Operation::SecretScanning {
+                    before: state.security.clone(),
+                    after: serde_json::from_str(ENABLED_SCANNING).unwrap_or(Value::Null),
+                },
+            });
+        } else {
+            findings.push(Finding { repository: repository.clone(), message: "GitHub reported no secret scanning status; audit with an administrator token, or enable Advanced Security for a private repository.".into() });
+        }
+    }
+    if profile.sha_pinning_required && state.actions["sha_pinning_required"] != true {
+        let mut after = state.actions.clone();
+        after["sha_pinning_required"] = json!(true);
+        changes.push(Change {
+            repository: repository.clone(),
+            operation: Operation::ActionsPinning {
+                before: state.actions.clone(),
+                after,
+            },
+        });
+    }
+    if profile.selected_actions && state.actions["allowed_actions"] != "selected" {
+        findings.push(Finding { repository: repository.clone(), message: "Actions run without an allow list; select the actions the workflows use and set allowed_actions to selected, since the CLI never invents the list.".into() });
+    }
 }
 
 fn is_release_environment(name: &str) -> bool {
@@ -468,6 +552,13 @@ pub enum Mutation<'a> {
         name: &'a str,
         previous: &'a Value,
     },
+    SecretScanning {
+        repository: &'a str,
+    },
+    ActionsPinning {
+        repository: &'a str,
+        previous: &'a Value,
+    },
 }
 
 enum WriteMethod {
@@ -482,7 +573,9 @@ impl Mutation<'_> {
             Self::RepositorySettings { repository, .. }
             | Self::EnableImmutableReleases { repository }
             | Self::CreateRuleset { repository, .. }
-            | Self::ProtectEnvironment { repository, .. } => *repository,
+            | Self::ProtectEnvironment { repository, .. }
+            | Self::SecretScanning { repository }
+            | Self::ActionsPinning { repository, .. } => *repository,
         };
         validate_repo_name(repository)?;
         let root = format!("repos/{repository}");
@@ -526,6 +619,32 @@ impl Mutation<'_> {
                     WriteMethod::Put,
                     format!("{root}/environments/{}", encode_segment(name)),
                     Some(payload),
+                )
+            }
+            Self::SecretScanning { .. } => (
+                WriteMethod::Patch,
+                root,
+                Some(
+                    json!({"security_and_analysis": serde_json::from_str::<Value>(ENABLED_SCANNING)?}),
+                ),
+            ),
+            Self::ActionsPinning { previous, .. } => {
+                let enabled = previous["enabled"]
+                    .as_bool()
+                    .context("missing Actions enabled status")?;
+                let allowed = previous["allowed_actions"]
+                    .as_str()
+                    .context("missing allowed actions policy")?;
+                ensure!(
+                    matches!(allowed, "all" | "local_only" | "selected"),
+                    "unknown allowed actions policy: {allowed}"
+                );
+                (
+                    WriteMethod::Put,
+                    format!("{root}/actions/permissions"),
+                    Some(
+                        json!({"enabled": enabled, "allowed_actions": allowed, "sha_pinning_required": true}),
+                    ),
                 )
             }
         })
@@ -668,12 +787,15 @@ pub fn audit(api: &impl Api, name: &str) -> Result<State> {
     }
     environments.sort_by(|left, right| left.name.cmp(&right.name));
     let workflow_permissions = api.read(&format!("{root}/actions/permissions/workflow"))?;
+    let actions = api.read(&format!("{root}/actions/permissions"))?;
     Ok(State {
         repository,
         immutable,
         rulesets,
         environments,
         workflow_permissions,
+        security: raw["security_and_analysis"].clone(),
+        actions,
     })
 }
 
@@ -737,7 +859,8 @@ fn managed_state(state: &State) -> Result<Value> {
             "branch_policies":env.branch_policies.iter().map(|policy|
                 json!({"id":policy["id"],"name":policy["name"],"type":policy["type"]})).collect::<Vec<_>>()
         }))).collect::<Result<Vec<_>>>()?,
-        "workflow_permissions":state.workflow_permissions}),
+        "workflow_permissions":state.workflow_permissions,
+        "security":state.security,"actions":state.actions}),
     )
 }
 
@@ -841,6 +964,26 @@ impl CheckedTarget<'_> {
                     .context("environment missing from snapshot")?
                     .definition = current;
             }
+            Operation::SecretScanning { after, .. } => {
+                api.write(Mutation::SecretScanning { repository: name })?;
+                let current = api.read(&root)?["security_and_analysis"].clone();
+                ensure!(
+                    ["secret_scanning", "secret_scanning_push_protection"]
+                        .iter()
+                        .all(|key| current[key]["status"] == after[key]["status"]),
+                    "secret scanning verification failed: {name}"
+                );
+                expected.security = current;
+            }
+            Operation::ActionsPinning { before, after } => {
+                api.write(Mutation::ActionsPinning {
+                    repository: name,
+                    previous: before,
+                })?;
+                let current = api.read(&format!("{root}/actions/permissions"))?;
+                ensure!(current == *after, "SHA pinning verification failed: {name}");
+                expected.actions = current;
+            }
         }
         Ok(())
     }
@@ -927,6 +1070,16 @@ pub fn apply(
                     );
                 }
             }
+            Operation::SecretScanning { before, .. } => ensure!(
+                current_repository["security_and_analysis"] == *before,
+                "secret scanning settings changed before write: {}",
+                change.repository
+            ),
+            Operation::ActionsPinning { before, .. } => ensure!(
+                api.read(&format!("repos/{}/actions/permissions", change.repository))? == *before,
+                "Actions permissions changed before write: {}",
+                change.repository
+            ),
             Operation::EnableImmutableReleases | Operation::CreateRuleset { .. } => {}
         }
         progress(&ApplyEvent::Applying { change })?;

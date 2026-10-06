@@ -1,1 +1,1 @@
-{{ .git.email }} {{ includeTemplate "signing_pubkey" . | trim }}
+{{ .git.email }} namespaces="git" {{ includeTemplate "signing_pubkey" . | trim }}

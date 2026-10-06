@@ -1,9 +1,10 @@
 //! A dedicated `ssh-agent` for Herdr that needs one 1Password approval when Herdr starts and none afterward.
 //!
 //! `op read` hands each private key to this process, which pipes it into `ssh-add -`, so the key never touches disk.
-//! The keys stay loaded until `herdr-agent lock`, logout, or the death of the process.
+//! Each key stays loaded for at most `KEY_LIFETIME`, and `herdr-agent lock`, logout, or the death of the agent removes it sooner.
 //!
 //! It loads the 1Password SSH keys whose public keys appear in `~/.config/herdr-agent/keys`, which chezmoi renders from `.chezmoidata.json`.
+//! That file names the commit signing key only when the machine-local data opts in through `herdr_agent.load_signing_key`.
 
 mod json;
 
@@ -194,9 +195,17 @@ fn op(args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>, String> {
     }
 }
 
+/// How long the agent holds a loaded key, which bounds the exposure of an unattended session to one working day.
+const KEY_LIFETIME: &str = "8h";
+
+/// `ssh-add` arguments that read one key from standard input and hold it for `KEY_LIFETIME`.
+const fn add_arguments() -> [&'static str; 4] {
+    ["-q", "-t", KEY_LIFETIME, "-"]
+}
+
 fn add_key(sock: &Path, key: &[u8]) -> Result<(), String> {
     let mut child = locate::child("ssh-add")
-        .args(["-q", "-"])
+        .args(add_arguments())
         .env("SSH_AUTH_SOCK", sock)
         .stdin(Stdio::piped())
         .spawn()
@@ -255,7 +264,15 @@ fn private_key_refs(items: &[Value], wanted: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{json, private_key_refs, wanted_keys};
+    use super::{KEY_LIFETIME, add_arguments, json, private_key_refs, wanted_keys};
+
+    #[test]
+    fn every_loaded_key_has_a_lifetime() {
+        let arguments = add_arguments();
+        let flag = arguments.iter().position(|argument| *argument == "-t");
+        assert_eq!(flag.map(|index| arguments[index + 1]), Some(KEY_LIFETIME));
+        assert_eq!(arguments.last(), Some(&"-"));
+    }
 
     const ITEMS: &str = r#"
 {
