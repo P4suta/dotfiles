@@ -304,6 +304,7 @@ fn check(root: &Path, gates: Gates) -> Result<()> {
     }
     if gates.contains(Gate::Profiles) {
         dotfiles_xtask::profiles::source_data(root)?;
+        dotfiles_xtask::profiles::targets_page(root, true)?;
         dotfiles_xtask::quality::chezmoi_version(root)?;
         let unreferenced = dotfiles_xtask::quality::unreferenced_leaves(root)?;
         anyhow::ensure!(
@@ -406,6 +407,7 @@ fn run() -> Result<()> {
         Action::Gen { check } => {
             dotfiles_xtask::adr::generate(&cli.root, check)?;
             dotfiles_xtask::profiles::data_schema(&cli.root, check)?;
+            dotfiles_xtask::profiles::targets_page(&cli.root, check)?;
         }
         Action::ProfileSnapshots { write } => {
             if write {

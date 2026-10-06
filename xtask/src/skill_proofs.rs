@@ -45,8 +45,7 @@ pub const PR_HARNESSES: [&str; 16] = [
     "rejected_documents_never_produce_a_pr_mutation",
 ];
 
-pub const PROFILE_HARNESSES: [&str; 9] = [
-    "only_available_profiles_are_selected",
+pub const PROFILE_HARNESSES: [&str; 8] = [
     "application_requires_owned_destination_or_native_authorization",
     "concurrent_source_and_local_edits_are_never_overwritten",
     "secrets_require_present_nonempty_resolved_values",

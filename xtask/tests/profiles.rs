@@ -1,5 +1,5 @@
 use dotfiles_xtask::{
-    profile_rules::{Mode, Profile, Reconcile, permitted, reconcile, selected},
+    profile_rules::{Mode, Profile, Reconcile, permitted, reconcile},
     profiles, quality,
 };
 use std::fs;
@@ -32,6 +32,51 @@ fn templates_read_data_at_explicit_paths_instead_of_a_merged_platform_context() 
         &mut found,
     );
     assert_eq!(found, Vec::<String>::new());
+}
+
+#[test]
+fn the_target_manifest_refuses_unknown_profiles_and_sets() {
+    let data = serde_json::json!({
+        "profiles": {"mac": ["mac"], "all": ["mac", "linux", "windows", "wsl"], "typo": ["macos"]},
+        "targets": {".zshrc": "mac", ".bashrc": "unix"},
+        "retired": {".gitconfig": "mac"},
+    });
+    let found = profiles::manifest_findings(&data);
+    assert_eq!(found.len(), 3, "{found:?}");
+    assert!(
+        found
+            .iter()
+            .any(|line| line.contains("set all holds every profile"))
+    );
+    assert!(
+        found
+            .iter()
+            .any(|line| line.contains("unknown profile macos"))
+    );
+    assert!(
+        found
+            .iter()
+            .any(|line| line.contains(".bashrc names no set"))
+    );
+    let data = profiles::source_data(&Path::new(env!("CARGO_MANIFEST_DIR")).join("..")).unwrap();
+    assert_eq!(profiles::manifest_findings(&data), Vec::<String>::new());
+}
+
+#[test]
+fn a_manifest_target_without_a_source_is_found() {
+    let data = serde_json::json!({
+        "profiles": {"mac": ["mac"]},
+        "targets": {".zshrc": "mac", ".config/ghostty": "mac", ".chezmoiscripts/unix/**": "mac", ".gone": "mac"},
+    });
+    let dump = serde_json::json!({".zshrc": {}, ".config/ghostty/config": {}});
+    assert_eq!(
+        profiles::absent_targets(&data, Profile::Mac, &dump),
+        [".gone"]
+    );
+    assert_eq!(
+        profiles::absent_targets(&data, Profile::Linux, &dump),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
@@ -187,10 +232,6 @@ fn new_upstream_edits_preserve_local_work_or_require_a_conflict() {
     assert_eq!(reconcile(true, false, false), Reconcile::TakeUpstream);
     assert_eq!(reconcile(false, true, false), Reconcile::KeepLocal);
     assert_eq!(reconcile(false, false, true), Reconcile::KeepLocal);
-    for profile in Profile::ALL {
-        assert!(selected(profile, profile.bit()));
-        assert!(!selected(profile, 15 ^ profile.bit()));
-    }
 }
 
 #[test]

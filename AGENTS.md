@@ -33,8 +33,8 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | --- | --- |
 | A file every host receives | `home/<source path>` |
 | A file that differs per profile | `home/.chezmoitemplates/profiles/<profile>/` and its dispatcher |
-| Which profiles receive a target | `home/.chezmoiignore` and `policy/profile-contracts.json` |
-| A target to retire from hosts | `home/.chezmoiremove` |
+| Which profiles receive a target | one line in `home/.chezmoidata/targets.toml`, naming a set of `profiles.toml`, then `just gen` |
+| A target to retire from hosts | one line in `home/.chezmoidata/retired.toml`, then `just gen` |
 | A setup step | `home/.chezmoiscripts/` and `xtask/src/setup.rs` |
 | Shared data and tool versions | `home/.chezmoidata/`, typed in `crates/model/src/data.rs`, `mise.toml`, and `mise.lock` |
 | A gate | `xtask/src/` with its tests in `xtask/tests/` |

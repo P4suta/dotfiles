@@ -2,6 +2,7 @@ use crate::profile_rules::{Mode, Profile, host_edit_refused, permitted};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -530,6 +531,128 @@ pub fn source_data(root: &Path) -> Result<Value> {
         .map_err(|error| anyhow::anyhow!("{error}"))
 }
 
+/// The file targets of targets.toml whose set holds `profile` but that the profile's rendering lacks.
+/// A directory or a pattern renders no entry of its own, so the check skips them.
+#[must_use]
+pub fn absent_targets(data: &Value, profile: Profile, dump: &Value) -> Vec<String> {
+    let receives = |set: &str| {
+        data["profiles"][set]
+            .as_array()
+            .is_some_and(|members| members.iter().any(|member| member == profile.name()))
+    };
+    data["targets"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(target, set)| {
+            !target.contains('*')
+                && set.as_str().is_some_and(receives)
+                && dump.get(target.as_str()).is_none()
+                && !dump.as_object().is_some_and(|rendered| {
+                    rendered
+                        .keys()
+                        .any(|key| key.starts_with(&format!("{target}/")))
+                })
+        })
+        .map(|(target, _)| target.clone())
+        .collect()
+}
+
+/// Refusals for profile sets that name an unknown profile or hold every profile, and for targets and retired entries that name no set.
+#[must_use]
+pub fn manifest_findings(data: &Value) -> Vec<String> {
+    let mut found = Vec::new();
+    let sets = data["profiles"].as_object();
+    for (name, members) in sets.into_iter().flatten() {
+        let members: Vec<&str> = members
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        for member in &members {
+            if !Profile::ALL.iter().any(|profile| profile.name() == *member) {
+                found.push(format!(
+                    "profiles.toml: set {name} names the unknown profile {member}"
+                ));
+            }
+        }
+        if Profile::ALL
+            .iter()
+            .all(|profile| members.contains(&profile.name()))
+        {
+            found.push(format!(
+                "profiles.toml: set {name} holds every profile, so an entry that uses it restricts nothing"
+            ));
+        }
+    }
+    for listing in ["targets", "retired"] {
+        for (target, set) in data[listing].as_object().into_iter().flatten() {
+            if set
+                .as_str()
+                .is_none_or(|set| sets.is_none_or(|sets| !sets.contains_key(set)))
+            {
+                found.push(format!(
+                    "{listing}.toml: {target} names no set of profiles.toml"
+                ));
+            }
+        }
+    }
+    found
+}
+
+/// Where the generated reference of profile-specific targets lives, relative to the checkout.
+pub const TARGETS_REFERENCE: &str = "docs/reference/targets.md";
+
+/// The reference page that lists which profiles receive each restricted target and which retired targets each profile removes.
+#[must_use]
+pub fn targets_reference(data: &Value) -> String {
+    let members = |set: &str| {
+        data["profiles"][set]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut text = String::from(
+        "# Profile targets\n\n`just gen` writes this page from `home/.chezmoidata/`.\nA target missing from the first table reaches every profile.\n\n| Target | Set | Profiles |\n| --- | --- | --- |\n",
+    );
+    let rows = |text: &mut String, listing: &str| {
+        for (target, set) in data[listing].as_object().into_iter().flatten() {
+            let set = set.as_str().unwrap_or_default();
+            let _ = writeln!(text, "| `{target}` | {set} | {} |", members(set));
+        }
+    };
+    rows(&mut text, "targets");
+    text.push_str(
+        "\n## Retired targets\n\nEach profile in the set removes the target when it applies.\n\n| Target | Set | Profiles |\n| --- | --- | --- |\n",
+    );
+    rows(&mut text, "retired");
+    text
+}
+
+/// Writes the reference of profile-specific targets, or with `check` refuses a stale one.
+///
+/// # Errors
+///
+/// Returns an error when loading the source data or writing the page fails, or with `check` when the committed page differs.
+pub fn targets_page(root: &Path, check: bool) -> Result<()> {
+    let path = root.join(TARGETS_REFERENCE);
+    let wanted = targets_reference(&source_data(root)?);
+    if check {
+        ensure!(
+            fs::read_to_string(&path).is_ok_and(|current| current == wanted),
+            "{TARGETS_REFERENCE} differs from home/.chezmoidata; run `just gen` and commit the result"
+        );
+    } else {
+        fs::create_dir_all(path.parent().context("reference directory")?)?;
+        fs::write(&path, wanted)?;
+    }
+    Ok(())
+}
+
 /// Where the JSON schema of the data files lives, relative to the checkout.
 pub const DATA_SCHEMA: &str = "schemas/chezmoidata.schema.json";
 
@@ -567,6 +690,8 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
     let scratch = tempfile::tempdir()?;
     let mut git_policies = Vec::new();
     let source_data = source_data(root)?;
+    let findings = manifest_findings(&source_data);
+    ensure!(findings.is_empty(), "{}", findings.join("\n"));
     for profile in Profile::ALL {
         let fixture = Fixture::new(root, &scratch.path().join(profile.name()), profile)?;
         let dump = fixture.render(report)?;
@@ -678,16 +803,12 @@ impl<'a> Fixture<'a> {
             dump.as_object().is_some_and(|targets| !targets.is_empty()),
             "empty profile rendering"
         );
-        let contracts: std::collections::BTreeMap<String, u8> =
-            serde_json::from_slice(&fs::read(self.root.join("policy/profile-contracts.json"))?)?;
-        for (target, availability) in contracts {
-            ensure!(
-                dump.get(&target).is_some()
-                    == crate::profile_rules::selected(profile, availability),
-                "profile target contract failed: {} / {target}",
-                profile.name()
-            );
-        }
+        let missing = absent_targets(&source_data(self.root)?, profile, &dump);
+        ensure!(
+            missing.is_empty(),
+            "{} profile renders no source for these targets of targets.toml: {missing:?}",
+            profile.name()
+        );
         crate::quality::rendered(&dump, &self.scope.join("syntax"))?;
         let memory = crate::agent_memory::violations(&dump)?;
         ensure!(

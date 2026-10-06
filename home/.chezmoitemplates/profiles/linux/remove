@@ -1,5 +1,0 @@
-.config/systemd/user/mise-upgrade.service
-.config/systemd/user/mise-upgrade.timer
-.config/nushell/mise.nu
-.config/nushell/autoload
-.config/nushell/login.nu

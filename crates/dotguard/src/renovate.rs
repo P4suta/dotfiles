@@ -794,11 +794,11 @@ mod credential_boundary {
     #[test]
     fn no_general_shell_exports_the_gh_token() {
         assert!(!source().join("dot_config/shell/github-token.sh").exists());
-        let remove = read(".chezmoiremove");
+        let retired = read(".chezmoidata/retired.toml");
         assert!(
-            remove
+            retired
                 .lines()
-                .any(|l| l.trim() == ".config/shell/github-token.sh"),
+                .any(|l| l.trim().starts_with("\".config/shell/github-token.sh\" = ")),
             "retired GitHub token exporter is not removed from existing hosts"
         );
         for rel in [

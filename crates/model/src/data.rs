@@ -17,6 +17,12 @@ pub struct Data {
     pub ocaml: Option<Ocaml>,
     pub palette: Option<BTreeMap<String, String>>,
     pub platforms: Option<Platforms>,
+    /// Named sets of profiles.
+    pub profiles: Option<BTreeMap<String, Vec<String>>>,
+    /// Targets that only the profiles of the named set receive.
+    pub targets: Option<BTreeMap<String, String>>,
+    /// Retired targets that the profiles of the named set remove.
+    pub retired: Option<BTreeMap<String, String>>,
 }
 
 /// The pinned `CodeRabbit` command line and its artifact for each host platform.

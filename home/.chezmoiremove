@@ -1,18 +1,5 @@
-{{ if eq .profile "mac" }}
-{{ includeTemplate "profiles/mac/remove" . }}
-{{ end }}
-{{ if eq .profile "linux" }}
-{{ includeTemplate "profiles/linux/remove" . }}
-{{ end }}
-{{ if eq .profile "windows" }}
-{{ includeTemplate "profiles/windows/remove" . }}
-{{ end }}
-
-{{ if ne .profile "windows" }}
-.config/shell/github-token.sh
-.config/git/hooks/lefthook-delegate.sh
-.config/git/hooks/dotguard-delegate.sh
-.config/git/hooks/storage-scout-delegate.sh
-.config/git/hooks/renovate-freshness.sh
-.gitconfig
-{{ end }}
+{{- range $target, $set := .retired }}
+{{- if has $.profile (index $.profiles $set) }}
+{{ $target }}
+{{- end }}
+{{- end }}

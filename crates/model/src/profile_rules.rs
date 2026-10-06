@@ -20,16 +20,6 @@ impl Profile {
     }
 
     #[must_use]
-    pub const fn bit(self) -> u8 {
-        match self {
-            Self::Mac => 1,
-            Self::Linux => 2,
-            Self::Windows => 4,
-            Self::Wsl => 8,
-        }
-    }
-
-    #[must_use]
     pub const fn os(self) -> &'static str {
         match self {
             Self::Mac => "darwin",
@@ -37,11 +27,6 @@ impl Profile {
             Self::Windows => "windows",
         }
     }
-}
-
-#[must_use]
-pub fn selected(profile: Profile, available: u8) -> bool {
-    available & profile.bit() != 0
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -196,16 +181,6 @@ fn secrets_require_present_nonempty_resolved_values() {
 }
 
 #[cfg(kani)]
-fn arbitrary_profile() -> Profile {
-    match kani::any::<u8>() % 4 {
-        0 => Profile::Mac,
-        1 => Profile::Linux,
-        2 => Profile::Windows,
-        _ => Profile::Wsl,
-    }
-}
-
-#[cfg(kani)]
 fn arbitrary_memory() -> Memory {
     match kani::any::<u8>() % 3 {
         0 => Memory::Unset,
@@ -255,17 +230,6 @@ fn host_edits_are_overwritten_only_by_a_merge_that_keeps_every_host_key() {
     kani::cover!(refused);
     kani::cover!(changed && !refused);
     kani::cover!(refused && merged);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn only_available_profiles_are_selected() {
-    let profile = arbitrary_profile();
-    let available: u8 = kani::any();
-    assert_eq!(selected(profile, available), available & profile.bit() != 0);
-    assert!(profile.bit().is_power_of_two());
-    kani::cover!(selected(profile, available));
-    kani::cover!(!selected(profile, available));
 }
 
 #[cfg(kani)]

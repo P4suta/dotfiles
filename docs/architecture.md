@@ -13,7 +13,8 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
    Templates read each value at its explicit path, and `crates/model` refuses an unknown key with its file.
 4. A target that differs per profile has a dispatcher at its target path that selects `home/.chezmoitemplates/profiles/<profile>/<target>`.
    A target every profile shares renders from its own path.
-5. `home/.chezmoiignore` and `home/.chezmoiremove` decide which targets each profile receives and which retired targets it removes.
+5. `targets.toml` and `retired.toml` in `home/.chezmoidata/` name, through the sets of `profiles.toml`, the profiles that receive each restricted target and that remove each retired one.
+   `home/.chezmoiignore` and `home/.chezmoiremove` render from them, and `just gen` writes [the target reference](reference/targets.md).
 6. `home/.chezmoiscripts/unix/` and `home/.chezmoiscripts/windows/` hold the setup scripts.
    Each launcher passes `.chezmoi.workingTree` and the configuration file to `dotfiles-xtask setup STEP`, and each `run_onchange_` script hashes only its own inputs through the `inputs` partial.
 7. `just apply` runs as a transaction that restores every target when the apply or its verification fails.

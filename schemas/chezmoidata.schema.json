@@ -52,6 +52,39 @@
           "type": "null"
         }
       ]
+    },
+    "profiles": {
+      "description": "Named sets of profiles.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "retired": {
+      "description": "Retired targets that the profiles of the named set remove.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "targets": {
+      "description": "Targets that only the profiles of the named set receive.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      }
     }
   },
   "additionalProperties": false,

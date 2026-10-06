@@ -100,13 +100,18 @@ fn build_and_dependency_outputs_are_outside_chezmoi_source_state() -> Result<()>
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../home/.chezmoiignore"),
         source.join(".chezmoiignore"),
     )?;
-    fs::create_dir_all(source.join(".chezmoitemplates/profiles/linux"))?;
-    for template in ["profiles/linux/ignore", "host-state-ignore"] {
+    fs::create_dir_all(source.join(".chezmoitemplates"))?;
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../home/.chezmoitemplates/host-state-ignore"),
+        source.join(".chezmoitemplates/host-state-ignore"),
+    )?;
+    fs::create_dir_all(source.join(".chezmoidata"))?;
+    for data in ["profiles.toml", "targets.toml"] {
         fs::copy(
             Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../home/.chezmoitemplates")
-                .join(template),
-            source.join(".chezmoitemplates").join(template),
+                .join("../home/.chezmoidata")
+                .join(data),
+            source.join(".chezmoidata").join(data),
         )?;
     }
     fs::write(source.join("dot_owned"), "managed configuration")?;
