@@ -45,12 +45,24 @@ pub enum Pr {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(kani), derive(serde::Serialize), serde(rename_all = "kebab-case"))]
 pub enum Checks {
     None,
     Pending,
     Failing,
     Passing,
+}
+
+impl Checks {
+    /// The name a report prints.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Pending => "pending",
+            Self::Failing => "failing",
+            Self::Passing => "passing",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,7 +88,6 @@ pub struct State {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(kani), derive(serde::Serialize), serde(rename_all = "kebab-case"))]
 pub enum Step {
     SetTemp,
     MountVolume,
@@ -104,6 +115,41 @@ pub enum Step {
     AwaitReviewResume,
     MarkReady,
     AwaitReview,
+}
+
+impl Step {
+    /// The name a report prints.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::SetTemp => "set-temp",
+            Self::MountVolume => "mount-volume",
+            Self::CreateTemp => "create-temp",
+            Self::AttachBranch => "attach-branch",
+            Self::BranchFromDefault => "branch-from-default",
+            Self::FastForward => "fast-forward",
+            Self::StartBranch => "start-branch",
+            Self::DraftDecisions => "draft-decisions",
+            Self::CompleteDecisions => "complete-decisions",
+            Self::Commit => "commit",
+            Self::Finished => "finished",
+            Self::Reopen => "reopen",
+            Self::SyncUpstream => "sync-upstream",
+            Self::IntegrateUpstream => "integrate-upstream",
+            Self::Rebase => "rebase",
+            Self::StartWork => "start-work",
+            Self::AwaitPushResume => "await-push-resume",
+            Self::Push => "push",
+            Self::ForcePush => "force-push",
+            Self::InspectGithub => "inspect-github",
+            Self::CreatePr => "create-pr",
+            Self::FixChecks => "fix-checks",
+            Self::AwaitChecks => "await-checks",
+            Self::AwaitReviewResume => "await-review-resume",
+            Self::MarkReady => "mark-ready",
+            Self::AwaitReview => "await-review",
+        }
+    }
 }
 
 /// The single next step for a state.

@@ -92,18 +92,12 @@ impl Gates {
         self.0 & other.0 == other.0
     }
 
-    /// The names in declaration order, comma-separated, as `parse` reads them back.
-    pub fn names(self) -> String {
-        GATES
-            .iter()
-            .copied()
-            .filter(|gate| self.contains(*gate))
-            .map(Gate::name)
-            .collect::<Vec<_>>()
-            .join(",")
-    }
-
-    pub(crate) fn parse(text: &str) -> Result<Self, String> {
+    /// Reads the comma-separated gate names that `Display` writes.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first name that no gate carries.
+    pub fn parse(text: &str) -> Result<Self, UnknownGate<'_>> {
         text.split(',')
             .filter(|name| !name.is_empty())
             .try_fold(Self::NONE, |gates, name| {
@@ -112,8 +106,30 @@ impl Gates {
                     .copied()
                     .find(|gate| gate.name() == name)
                     .map(|gate| gates.with(gate))
-                    .ok_or_else(|| format!("unknown gate: {name}"))
+                    .ok_or(UnknownGate(name))
             })
+    }
+}
+
+/// The names in declaration order, comma-separated, as `parse` reads them back.
+impl core::fmt::Display for Gates {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut separator = "";
+        for gate in GATES.iter().copied().filter(|gate| self.contains(*gate)) {
+            write!(formatter, "{separator}{}", gate.name())?;
+            separator = ",";
+        }
+        Ok(())
+    }
+}
+
+/// A name in a gate list that no gate carries.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UnknownGate<'a>(pub &'a str);
+
+impl core::fmt::Display for UnknownGate<'_> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(formatter, "unknown gate: {}", self.0)
     }
 }
 
@@ -183,31 +199,29 @@ const RULES: [(Match, &[u8], Class); 35] = [
     (Match::Suffix, b".md", Class::Prose),
 ];
 
-fn has_prefix(path: &[u8], prefix: &[u8]) -> bool {
-    if prefix.len() > path.len() {
-        return false;
-    }
-    let mut index = 0;
-    while index < prefix.len() {
-        if path[index] != prefix[index] {
+/// Slice patterns walk both sides without an index, which keeps the proof's formula as small as indexing would.
+fn has_prefix(mut path: &[u8], mut prefix: &[u8]) -> bool {
+    while let [expected, rest @ ..] = prefix {
+        let [actual, tail @ ..] = path else {
+            return false;
+        };
+        if actual != expected {
             return false;
         }
-        index += 1;
+        (path, prefix) = (tail, rest);
     }
     true
 }
 
-fn has_suffix(path: &[u8], suffix: &[u8]) -> bool {
-    if suffix.len() > path.len() {
-        return false;
-    }
-    let start = path.len() - suffix.len();
-    let mut index = 0;
-    while index < suffix.len() {
-        if path[start + index] != suffix[index] {
+fn has_suffix(mut path: &[u8], mut suffix: &[u8]) -> bool {
+    while let [rest @ .., expected] = suffix {
+        let [head @ .., actual] = path else {
+            return false;
+        };
+        if actual != expected {
             return false;
         }
-        index += 1;
+        (path, suffix) = (head, rest);
     }
     true
 }
@@ -216,8 +230,7 @@ fn has_suffix(path: &[u8], suffix: &[u8]) -> bool {
 #[must_use]
 pub fn matched(path: &[u8]) -> Option<Class> {
     let mut index = 0;
-    while index < RULES.len() {
-        let (kind, text, class) = RULES[index];
+    while let Some(&(kind, text, class)) = RULES.get(index) {
         let hit = match kind {
             Match::Exact => path == text,
             Match::Prefix => has_prefix(path, text),
@@ -320,8 +333,10 @@ fn only_a_rule_module_the_inventory_or_the_tooling_selects_the_proofs() {
 mod tests {
     use super::*;
 
+    use alloc::string::{String, ToString};
+
     fn selected(paths: &[&str]) -> String {
-        select(paths.iter().copied()).names()
+        select(paths.iter().copied()).to_string()
     }
 
     #[test]
@@ -345,8 +360,8 @@ mod tests {
     #[test]
     fn a_rule_module_or_the_proof_inventory_also_selects_the_proofs() {
         for path in [
-            "crates/platform/src/order_rules.rs",
-            "xtask/src/lint_rules.rs",
+            "crates/rules/src/order_rules.rs",
+            "crates/rules/src/lint_rules.rs",
             "xtask/src/skill_proofs.rs",
             "home/dot_agents/skills/a/scripts/x_rules.rs",
         ] {
@@ -398,7 +413,7 @@ mod tests {
             ".cargo/config.toml",
             "xtask/Cargo.toml",
             "xtask/src/change.rs",
-            "xtask/src/change_rules.rs",
+            "crates/rules/src/change_rules.rs",
             "xtask/proofs/Dockerfile",
             ".chezmoiroot",
             "home/.chezmoiignore",
@@ -435,14 +450,18 @@ mod tests {
             Class::Rust
         );
         assert_eq!(classify(b"ops/README.md"), Class::Profiles);
+        assert_eq!(
+            classify(b"home/dot_config/assure/rules/core-panic.yml"),
+            Class::Profiles
+        );
     }
 
     #[test]
     fn gate_names_round_trip() {
-        let all = Gates::ALL.names();
+        let all = Gates::ALL.to_string();
         assert_eq!(all, "prose,skills,rust,profiles,proofs");
         assert_eq!(Gates::parse(&all), Ok(Gates::ALL));
         assert_eq!(Gates::parse(""), Ok(Gates::NONE));
-        assert!(Gates::parse("prose,heavy").is_err());
+        assert_eq!(Gates::parse("prose,heavy"), Err(UnknownGate("heavy")));
     }
 }

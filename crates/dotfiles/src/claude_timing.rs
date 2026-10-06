@@ -87,7 +87,7 @@ fn simple(words: &[String]) -> Option<String> {
     if PREPARATION.contains(&name.as_str()) {
         return None;
     }
-    let mut signature = vec![name.clone()];
+    let mut signature = vec![name.as_str().to_owned()];
     let mut index = start + 1;
     while signature.len() < 3 {
         let Some(word) = words.get(index) else { break };

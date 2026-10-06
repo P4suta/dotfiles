@@ -17,12 +17,12 @@ pub fn order(after: &[u32], order: &mut [usize]) -> bool {
     };
     let mut placed: u32 = 0;
     let mut position = 0;
-    while position < count {
+    while let Some(slot) = order.get_mut(position) {
         let mut chosen = count;
         let mut step = 0;
-        while step < count {
+        while let Some(&needs) = after.get(step) {
             let bit = 1u32 << step;
-            if placed & bit == 0 && after[step] & !all == 0 && after[step] & !placed == 0 {
+            if placed & bit == 0 && needs & !all == 0 && needs & !placed == 0 {
                 chosen = step;
                 break;
             }
@@ -31,7 +31,7 @@ pub fn order(after: &[u32], order: &mut [usize]) -> bool {
         if chosen == count {
             return false;
         }
-        order[position] = chosen;
+        *slot = chosen;
         placed |= 1u32 << chosen;
         position += 1;
     }
@@ -46,13 +46,12 @@ pub fn respects(after: &[u32], sequence: &[usize]) -> bool {
     }
     let mut ran: u32 = 0;
     let mut index = 0;
-    while index < sequence.len() {
-        let step = sequence[index];
-        if step >= after.len() {
+    while let Some(&step) = sequence.get(index) {
+        let Some(&needs) = after.get(step) else {
             return false;
-        }
+        };
         let bit = 1u32 << step;
-        if ran & bit != 0 || after[step] & !ran != 0 {
+        if ran & bit != 0 || needs & !ran != 0 {
             return false;
         }
         ran |= bit;

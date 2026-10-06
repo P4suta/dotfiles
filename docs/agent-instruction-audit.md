@@ -440,9 +440,9 @@ No gate refuses work done without loading a skill, and F5 adds a completion gate
 | Load `verification-tools` and `type-contracts` for implementation work. | Skill | The retained `skill-ops load formal-assurance` line loads `verification-tools`, and `home/dot_config/skill-ops/policy.json` adds `type-contracts` and `executable-policy`. |
 | Load `ci-budget` before an authorized push or PR update. | Gate and skill | The pre-push dispatcher refuses while `~/.config/git/push-paused` exists in `crates/dotfiles/src/hooks.rs`, and `ci-budget` states the local checks. |
 | Load `coderabbit-review` for an initial substantive PR. | Gate and skill | The CodeRabbit guard admits a CLI review only within verified allowance in `crates/coderabbit-guard/src/lib.rs`, and `coderabbit-review` states the trigger. |
-| Use `floor(capacity * 0.9 * 0.8)` budgets and hold publication on unverified capacity. | Gate | The CodeRabbit guard floors the budget once and refuses unverifiable CLI capacity in `crates/coderabbit-guard/src/review_rules.rs`. |
+| Use `floor(capacity * 0.9 * 0.8)` budgets and hold publication on unverified capacity. | Gate | The CodeRabbit guard floors the budget once and refuses unverifiable CLI capacity in `crates/rules/src/review_rules.rs`. |
 | Elapsed time alone gives no permission to push. | Merged | Merged into `while review capacity stays unverified`. |
-| Honor an owner-imposed CodeRabbit pause. | Gate | The CodeRabbit guard refuses every service call while paused in `crates/coderabbit-guard/src/review_rules.rs`, with a Kani proof. |
+| Honor an owner-imposed CodeRabbit pause. | Gate | The CodeRabbit guard refuses every service call while paused in `crates/rules/src/review_rules.rs`, with a Kani proof. |
 | Use `reliability` for intermittent failures. | Skill | `reliability` states the trigger in its description and the rule in its body. |
 | Load `dotfiles` for dotfiles changes. | Skill | `dotfiles` states the trigger and the rule in its description. |
 | Prefer `skill-ops load NAME` for shared skills. | Gate and skill | The `skill-ops stop` hook refuses completion with pending maintenance in `crates/skill-ops/src/main.rs` and names `skill-operations`. |

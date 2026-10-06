@@ -5,7 +5,7 @@
   "evidence": [
     "home/dot_agents/skills/multi-machine/SKILL.md",
     "crates/dotfiles/src/hosts.rs",
-    "crates/dotfiles/src/hosts_rules.rs",
+    "crates/rules/src/hosts_rules.rs",
     "crates/dotfiles/tests/hosts.rs",
     "docs/adr/0020-os-family-push-evidence.md"
   ],

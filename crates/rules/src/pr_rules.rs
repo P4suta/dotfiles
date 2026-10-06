@@ -1,8 +1,29 @@
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg_attr(not(kani), derive(clap::ValueEnum))]
 pub enum Generation {
     Local,
     Coderabbit,
+}
+
+impl Generation {
+    pub const ALL: [Self; 2] = [Self::Local, Self::Coderabbit];
+
+    /// The name a command line gives.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Coderabbit => "coderabbit",
+        }
+    }
+
+    /// The generation a command line names, or `None` for a name no generation carries.
+    #[must_use]
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|generation| generation.key() == key)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -279,7 +300,12 @@ pub fn dependency(
     }
 }
 
-pub(crate) fn plan(
+/// The effect a PR operation may take.
+///
+/// # Errors
+///
+/// Returns the blocker that refuses the operation.
+pub fn plan(
     operation: Operation,
     generation: Generation,
     validated: bool,

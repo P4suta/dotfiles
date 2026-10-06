@@ -1,3 +1,8 @@
+extern crate alloc;
+use self::alloc::borrow::ToOwned;
+use self::alloc::string::String;
+use self::alloc::vec::Vec;
+
 /// How a shell command writes a file when it should have used a file tool or a project command.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Reason {
@@ -54,7 +59,7 @@ struct Scan {
 fn flush(word: &mut String, plain: &mut bool, started: &mut bool, tokens: &mut Vec<Token>) {
     if *started {
         tokens.push(Token::Word {
-            text: std::mem::take(word),
+            text: core::mem::take(word),
             plain: *plain,
         });
     }
@@ -71,11 +76,13 @@ fn skip_heredoc_body(
     for delimiter in delimiters.drain(..) {
         let mut body = String::new();
         loop {
-            let end = chars[index..]
+            let end = chars
+                .get(index..)
+                .unwrap_or_default()
                 .iter()
                 .position(|c| *c == '\n')
                 .map_or(chars.len(), |offset| index + offset);
-            let line: String = chars[index..end].iter().collect();
+            let line: String = chars.get(index..end).unwrap_or_default().iter().collect();
             index = (end + 1).min(chars.len());
             if line.trim_start_matches('\t') == delimiter {
                 break;
@@ -120,15 +127,14 @@ fn scan(command: &str) -> Scan {
     let mut started = false;
     let mut delimiters: Vec<String> = Vec::new();
     let mut index = 0;
-    while index < chars.len() {
-        let c = chars[index];
+    while let Some(&c) = chars.get(index) {
         index += 1;
         match c {
             '\'' => {
                 started = true;
                 plain = false;
-                while index < chars.len() && chars[index] != '\'' {
-                    word.push(chars[index]);
+                while let Some(&quoted) = chars.get(index).filter(|&&quoted| quoted != '\'') {
+                    word.push(quoted);
                     index += 1;
                 }
                 index += 1;
@@ -136,19 +142,26 @@ fn scan(command: &str) -> Scan {
             '"' => {
                 started = true;
                 plain = false;
-                while index < chars.len() && chars[index] != '"' {
-                    if chars[index] == '\\' && index + 1 < chars.len() {
+                while let Some(&quoted) = chars.get(index).filter(|&&quoted| quoted != '"') {
+                    let escaped = if quoted == '\\' {
+                        chars.get(index + 1).copied()
+                    } else {
+                        None
+                    };
+                    if let Some(next) = escaped {
                         index += 1;
+                        word.push(next);
+                    } else {
+                        word.push(quoted);
                     }
-                    word.push(chars[index]);
                     index += 1;
                 }
                 index += 1;
             }
             '\\' => {
                 started = true;
-                if index < chars.len() {
-                    word.push(chars[index]);
+                if let Some(&next) = chars.get(index) {
+                    word.push(next);
                     index += 1;
                 }
             }
@@ -219,15 +232,33 @@ pub fn segments(command: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// The program a command word names.
-/// It takes the filename, folded to small letters, without `.exe` or a version suffix.
+/// The program a command word names: its filename, folded to small letters, without `.exe` or a version suffix.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Program(String);
+
+impl Program {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl PartialEq<&str> for Program {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+/// The program that the command word `text` names.
 #[must_use]
-pub fn program(text: &str) -> String {
+pub fn program(text: &str) -> Program {
     let name = text.rsplit(['/', '\\']).next().unwrap_or(text);
     let lower = name.to_ascii_lowercase();
     let stem = lower.strip_suffix(".exe").unwrap_or(&lower);
-    stem.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.')
-        .to_owned()
+    Program(
+        stem.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.')
+            .to_owned(),
+    )
 }
 
 fn is_assignment(text: &str) -> bool {
@@ -312,7 +343,7 @@ const BODY_COMMANDS: [(&str, &str); 7] = [
 ];
 
 fn flag_value<'a>(arguments: &[&'a str], index: usize, names: &[&str]) -> Option<(&'a str, usize)> {
-    let argument = arguments[index];
+    let argument = *arguments.get(index)?;
     for name in names {
         if argument == *name {
             return arguments.get(index + 1).map(|value| (*value, 2));
@@ -404,14 +435,14 @@ pub fn body_sources(command: &str) -> Vec<Source> {
         let Some(gh) = words.iter().position(|word| program(word) == "gh") else {
             continue;
         };
-        let rest = &words[gh + 1..];
+        let rest = words.get(gh + 1..).unwrap_or_default();
         let before = sources.len();
         if let Some(api) = rest.iter().position(|word| *word == "api") {
-            api_sources(&rest[api + 1..], &mut sources);
-        } else if BODY_COMMANDS.iter().any(|(group, verb)| {
-            rest.windows(2)
-                .any(|pair| pair[0] == *group && pair[1] == *verb)
-        }) {
+            api_sources(rest.get(api + 1..).unwrap_or_default(), &mut sources);
+        } else if BODY_COMMANDS
+            .iter()
+            .any(|(group, verb)| rest.windows(2).any(|pair| pair == [*group, *verb]))
+        {
             command_sources(rest, &mut sources);
         }
         let mut stdin = scan.heredocs.join("");
@@ -423,7 +454,7 @@ pub fn body_sources(command: &str) -> Vec<Source> {
                 }
             }
         }
-        for source in &mut sources[before..] {
+        for source in sources.iter_mut().skip(before) {
             if matches!(source, Source::Stdin(_)) {
                 *source = Source::Stdin(stdin.clone());
             }
@@ -447,9 +478,9 @@ pub fn inspect(command: &str) -> Verdict {
     for segment in scan.tokens.split(|token| *token == Token::Separator) {
         let words = segment_words(segment);
         let mut start = 0;
-        while start < words.len() {
-            let name = program(words[start]);
-            if is_assignment(words[start])
+        while let Some(&word) = words.get(start) {
+            let name = program(word);
+            if is_assignment(word)
                 || matches!(
                     name.as_str(),
                     "env" | "command" | "exec" | "time" | "nohup" | "sudo"
@@ -469,8 +500,8 @@ pub fn inspect(command: &str) -> Verdict {
             continue;
         };
         let name = program(first);
-        let rest = &words[start + 1..];
-        if runs_inline(&name, rest, scan.heredoc) {
+        let rest = words.get(start + 1..).unwrap_or_default();
+        if runs_inline(name.as_str(), rest, scan.heredoc) {
             interpreter = true;
         }
         if name == "tee"
@@ -511,6 +542,7 @@ fn every_refusal_names_a_next_action() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     const REFUSED_INTERPRETER: Verdict = Verdict::Refuse(Reason::InlineInterpreter);
     const REFUSED_FILE: Verdict = Verdict::Refuse(Reason::FileRedirect);

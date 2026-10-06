@@ -75,7 +75,7 @@ fn a_markdown_only_branch_selects_the_prose_gate_alone() -> Result<()> {
     commit(repository.path(), &[("docs/guide.md", "words\n")])?;
     let base = Source::Base("main".into());
     assert_eq!(paths(repository.path(), &base)?, ["docs/guide.md"]);
-    assert_eq!(gates(repository.path(), &base)?.names(), "prose");
+    assert_eq!(gates(repository.path(), &base)?.to_string(), "prose");
     Ok(())
 }
 
@@ -84,7 +84,7 @@ fn a_rust_change_selects_the_rust_gate() -> Result<()> {
     let repository = repository()?;
     commit(repository.path(), &[("xtask/src/new.rs", "fn main() {}\n")])?;
     let selected = gates(repository.path(), &Source::Base("main".into()))?;
-    assert_eq!(selected.names(), "prose,skills,rust,profiles");
+    assert_eq!(selected.to_string(), "prose,skills,rust,profiles");
     Ok(())
 }
 
@@ -96,7 +96,7 @@ fn an_unknown_path_selects_every_gate() -> Result<()> {
         &[("docs/guide.md", "words\n"), ("unlisted/file", "x\n")],
     )?;
     let selected = gates(repository.path(), &Source::Base("main".into()))?;
-    assert_eq!(selected.names(), "prose,skills,rust,profiles,proofs");
+    assert_eq!(selected.to_string(), "prose,skills,rust,profiles,proofs");
     Ok(())
 }
 
@@ -111,7 +111,7 @@ fn a_rename_classifies_both_the_old_and_the_new_path() -> Result<()> {
     git(root, &["mv", "xtask/src/old.rs", "docs/old.md"])?;
     git(root, &["commit", "--quiet", "-m", "move"])?;
     let selected = gates(root, &Source::Base("main".into()))?;
-    assert_eq!(selected.names(), "prose,skills,rust,profiles");
+    assert_eq!(selected.to_string(), "prose,skills,rust,profiles");
     Ok(())
 }
 
@@ -123,7 +123,7 @@ fn staged_paths_are_classified_and_unstaged_ones_are_not() -> Result<()> {
     fs::write(root.join("home/dot_zshrc.tmpl"), "x\n")?;
     git(root, &["add", "home/dot_zshrc.tmpl"])?;
     fs::write(root.join("xtask.rs"), "x\n")?;
-    assert_eq!(gates(root, &Source::Staged)?.names(), "prose,profiles");
+    assert_eq!(gates(root, &Source::Staged)?.to_string(), "prose,profiles");
     Ok(())
 }
 

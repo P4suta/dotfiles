@@ -1,0 +1,23 @@
+id: core-bare-text
+language: rust
+severity: error
+message: A public core function returns bare text where a named domain type belongs.
+note: Return a named type whose constructor validates the value, and let the adapters read it through Display or an accessor.
+metadata:
+  basis: Make illegal states unrepresentable (Minsky 2011); CWE-1106
+files:
+  - "**/rules/src/**/*.rs"
+  - "**/core/src/**/*.rs"
+  - "**/*-core/src/**/*.rs"
+  - "**/*_core/src/**/*.rs"
+  - "**/domain/**/*.rs"
+rule:
+  kind: function_item
+  all:
+    - has:
+        kind: visibility_modifier
+    - has:
+        field: return_type
+        regex: ^(String|Option<String>|Vec<String>|Result<String\b.*|Result<.*,\s*String>)$
+  not:
+    matches: verification-only

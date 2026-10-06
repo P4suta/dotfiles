@@ -7,12 +7,11 @@ pub const WINDOW: usize = 20;
 /// The nearest-rank ninety-fifth percentile of `sorted`, ascending.
 /// With fewer than 20 runs it equals the slowest one.
 #[must_use]
-pub const fn percentile(sorted: &[u64]) -> Option<u64> {
-    if sorted.is_empty() {
-        return None;
-    }
+pub fn percentile(sorted: &[u64]) -> Option<u64> {
     let rank = (sorted.len() * 95).div_ceil(100);
-    Some(sorted[rank - 1])
+    rank.checked_sub(1)
+        .and_then(|index| sorted.get(index))
+        .copied()
 }
 
 /// The time a run gets beyond its expectation: half again, plus ten seconds for start-up noise.
@@ -122,6 +121,7 @@ fn the_percentile_of_a_short_history_is_its_slowest_run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec::Vec;
 
     #[test]
     fn a_short_timeout_is_raised_to_the_percentile_with_its_margin() {

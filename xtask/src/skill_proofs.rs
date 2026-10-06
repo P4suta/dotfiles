@@ -327,9 +327,9 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 31] = [
+pub const RULES: [Rules; 32] = [
     Rules {
-        source: "crates/skill-ops/src/skill_rules.rs",
+        source: "crates/rules/src/skill_rules.rs",
         counterexamples: "#[kani::proof]
 fn reject_completion_without_evidence() {
     assert!(production::decision_complete(production::Outcome::Implemented, true, false, false));
@@ -370,7 +370,7 @@ fn reject_a_diff_from_unassessed_content() {
         ],
     },
     Rules {
-        source: "crates/pr-workflow/src/pr_rules.rs",
+        source: "crates/rules/src/pr_rules.rs",
         counterexamples: "#[kani::proof]
 fn reject_ready_local_creation() {
     assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Passing), Ok(production::Effect::CreateReady));
@@ -449,7 +449,7 @@ fn reject_opening_a_dependent_branch_independently() {
         ],
     },
     Rules {
-        source: "crates/model/src/profile_rules.rs",
+        source: "crates/rules/src/profile_rules.rs",
         counterexamples: "#[kani::proof]
 fn reject_unapproved_application() {
     assert!(production::permitted(production::Mode::Full, true, true, false));
@@ -475,12 +475,12 @@ fn reject_detecting_wsl_on_a_plain_linux_kernel() {
         ],
     },
     Rules {
-        source: "crates/dotguard/src/reaper_rules.rs",
+        source: "crates/rules/src/reaper_rules.rs",
         counterexamples: "",
         rejected: &[],
     },
     Rules {
-        source: "crates/dotguard/src/gate_rules.rs",
+        source: "crates/rules/src/gate_rules.rs",
         counterexamples: "#[kani::proof]
 fn reject_rebasing_across_several_refs() {
     assert!(production::signing(2, production::Reference::Branch, false, false) == production::Signing::Rebase);
@@ -566,7 +566,7 @@ fn reject_the_lease_admitting_a_plain_force_push() {
         ],
     },
     Rules {
-        source: "crates/coderabbit-guard/src/review_rules.rs",
+        source: "crates/rules/src/review_rules.rs",
         counterexamples: "#[kani::proof]
 fn reject_eighth_review_of_ten() {
     assert!(production::included_allowance(10, 3));
@@ -597,7 +597,7 @@ fn reject_owner_pause_bypass() {
         ],
     },
     Rules {
-        source: "crates/prose/src/prose_rules.rs",
+        source: "crates/rules/src/prose_rules.rs",
         counterexamples: "#[kani::proof]
 fn reject_allowing_a_failing_reply() {
     assert!(production::reply(false, false) == production::Reply::Allow);
@@ -638,7 +638,7 @@ fn reject_overriding_a_declared_opt_out() {
         ],
     },
     Rules {
-        source: "xtask/src/next_action_rules.rs",
+        source: "crates/rules/src/next_action_rules.rs",
         counterexamples: "use production::*;
 #[kani::proof]
 fn reject_executing_a_push() {
@@ -665,7 +665,7 @@ fn reject_force_pushing_over_commits_the_branch_never_held() {
         ],
     },
     Rules {
-        source: "crates/dotfiles/src/eol_rules.rs",
+        source: "crates/rules/src/eol_rules.rs",
         counterexamples: "use production::{Action, Attributes, Eol, Index, Staging, Text, action, content};
 #[kani::proof]
 #[kani::unwind(5)]
@@ -693,7 +693,7 @@ fn reject_rewriting_crlf_the_index_keeps() {
         ],
     },
     Rules {
-        source: "xtask/src/instruction_rules.rs",
+        source: "crates/rules/src/instruction_rules.rs",
         counterexamples: "#[kani::proof]
 fn reject_a_directive_classified_as_judgment() {
     assert!(production::admitted(production::Line::Directive, production::Class::Judgment, true));
@@ -734,7 +734,7 @@ fn reject_a_contradiction_without_what_it_contradicted() {
         ],
     },
     Rules {
-        source: "crates/platform/src/target_rules.rs",
+        source: "crates/rules/src/target_rules.rs",
         counterexamples: "use production::{Target, target};
 #[kani::proof]
 fn reject_ignoring_an_absolute_target() {
@@ -756,7 +756,7 @@ fn reject_the_home_target_beside_a_development_volume() {
         ],
     },
     Rules {
-        source: "crates/platform/src/stale_rules.rs",
+        source: "crates/rules/src/stale_rules.rs",
         counterexamples: "#[kani::proof]
 fn reject_calling_a_matching_build_stale() {
     assert!(production::freshness(true, true) == production::Freshness::Stale);
@@ -782,7 +782,7 @@ fn reject_installing_an_unrecorded_tool() {
         ],
     },
     Rules {
-        source: "crates/dotfiles/src/shell_write_rules.rs",
+        source: "crates/rules/src/shell_write_rules.rs",
         counterexamples: "#[kani::proof]
 fn reject_admitting_an_inline_interpreter() {
     assert!(production::verdict(true, false) == production::Verdict::Admit);
@@ -798,7 +798,7 @@ fn reject_admitting_a_file_redirect() {
         ],
     },
     Rules {
-        source: "crates/pr-workflow/src/wip_rules.rs",
+        source: "crates/rules/src/wip_rules.rs",
         counterexamples: "use production::{admits, limit};
 #[kani::proof]
 fn reject_admitting_a_pr_at_the_limit() {
@@ -815,7 +815,7 @@ fn reject_ignoring_a_repository_override() {
         ],
     },
     Rules {
-        source: "crates/dotfiles/src/timeout_rules.rs",
+        source: "crates/rules/src/timeout_rules.rs",
         counterexamples: "use production::{Timeout, percentile, timeout};
 #[kani::proof]
 fn reject_keeping_a_timeout_below_the_observed_percentile() {
@@ -837,7 +837,7 @@ fn reject_the_median_as_the_high_percentile() {
         ],
     },
     Rules {
-        source: "crates/dotfiles/src/ready_push_rules.rs",
+        source: "crates/rules/src/ready_push_rules.rs",
         counterexamples: "use production::{Pr, Verdict, push};
 #[kani::proof]
 fn reject_admitting_a_push_to_a_ready_pr() {
@@ -859,7 +859,7 @@ fn reject_refusing_a_push_to_a_draft() {
         ],
     },
     Rules {
-        source: "crates/dotfiles/src/disk_scan_rules.rs",
+        source: "crates/rules/src/disk_scan_rules.rs",
         counterexamples: "#[kani::proof]
 fn reject_admitting_a_recursive_size_scan() {
     assert!(production::verdict(true, true) == production::Verdict::Admit);
@@ -875,7 +875,7 @@ fn reject_refusing_a_walk_without_sizes() {
         ],
     },
     Rules {
-        source: "crates/dotfiles/src/path_conversion_rules.rs",
+        source: "crates/rules/src/path_conversion_rules.rs",
         counterexamples: "#[kani::proof]
 fn reject_admitting_a_converted_remote_path() {
     assert!(production::verdict(true, true, false) == production::Verdict::Admit);
@@ -891,7 +891,7 @@ fn reject_refusing_a_command_with_the_conversion_off() {
         ],
     },
     Rules {
-        source: "crates/dotfiles/src/body_rules.rs",
+        source: "crates/rules/src/body_rules.rs",
         counterexamples: "#[kani::proof]
 fn reject_admitting_an_attributed_body() {
     assert!(production::verdict(true) == production::Verdict::Admit);
@@ -907,7 +907,7 @@ fn reject_an_empty_deleting_next_action() {
         ],
     },
     Rules {
-        source: "crates/dotfiles/src/hosts_rules.rs",
+        source: "crates/rules/src/hosts_rules.rs",
         counterexamples: "use production::*;
 #[kani::proof]
 fn reject_admitting_a_failed_family() {
@@ -934,7 +934,7 @@ fn reject_checking_a_dirty_tree() {
         ],
     },
     Rules {
-        source: "xtask/src/change_rules.rs",
+        source: "crates/rules/src/change_rules.rs",
         counterexamples: "use production::{Class, Gate, Gates, classify, gates, matched};
 #[kani::proof]
 #[kani::unwind(40)]
@@ -966,7 +966,7 @@ fn reject_a_lock_file_selecting_a_single_class() {
         ],
     },
     Rules {
-        source: "crates/prose/src/source_name_rules.rs",
+        source: "crates/rules/src/source_name_rules.rs",
         counterexamples: "use production::{Entry, target};
 #[kani::proof]
 fn reject_keeping_the_empty_attribute_in_a_target_name() {
@@ -983,7 +983,7 @@ fn reject_a_template_as_a_verbatim_copy() {
         ],
     },
     Rules {
-        source: "crates/dotfiles/src/start_health_rules.rs",
+        source: "crates/rules/src/start_health_rules.rs",
         counterexamples: "use production::{Events, Start, Verdict, verdict};
 #[kani::proof]
 fn reject_starting_work_on_a_start_that_never_finished() {
@@ -1001,7 +1001,7 @@ fn reject_refusing_a_fast_start_for_past_events() {
         ],
     },
     Rules {
-        source: "xtask/src/ignore_rules.rs",
+        source: "crates/rules/src/ignore_rules.rs",
         counterexamples: "use production::{Verdict, matches, verdict};
 #[kani::proof]
 #[kani::unwind(8)]
@@ -1019,7 +1019,7 @@ fn reject_keeping_a_repeated_pattern() {
         ],
     },
     Rules {
-        source: "xtask/src/proof_budget_rules.rs",
+        source: "crates/rules/src/proof_budget_rules.rs",
         counterexamples: "use production::{BUDGET_MILLIS, Verdict, verdict};
 #[kani::proof]
 fn reject_admitting_an_overrun() {
@@ -1036,7 +1036,7 @@ fn reject_admitting_an_unmeasured_harness() {
         ],
     },
     Rules {
-        source: "xtask/src/input_rules.rs",
+        source: "crates/rules/src/input_rules.rs",
         counterexamples: "use production::{Term, Verdict, verdict};
 #[kani::proof]
 fn reject_hashing_a_chezmoi_variable() {
@@ -1053,7 +1053,7 @@ fn reject_hashing_the_whole_context() {
         ],
     },
     Rules {
-        source: "crates/dotfiles/src/windows/setup/ocomment_rules.rs",
+        source: "crates/rules/src/ocomment_rules.rs",
         counterexamples: "use production::{Action, action};
 #[kani::proof]
 fn reject_skipping_a_moved_checkout() {
@@ -1070,7 +1070,7 @@ fn reject_skipping_a_missing_binary() {
         ],
     },
     Rules {
-        source: "crates/platform/src/aside_rules.rs",
+        source: "crates/rules/src/aside_rules.rs",
         counterexamples: "use production::is_aside;
 #[kani::proof]
 fn reject_sweeping_the_installed_binary() {
@@ -1087,7 +1087,7 @@ fn reject_sweeping_another_binary() {
         ],
     },
     Rules {
-        source: "crates/platform/src/order_rules.rs",
+        source: "crates/rules/src/order_rules.rs",
         counterexamples: "use production::{order, respects};
 #[kani::proof]
 fn reject_running_a_step_before_what_it_relies_on() {
@@ -1105,7 +1105,7 @@ fn reject_ordering_a_cycle() {
         ],
     },
     Rules {
-        source: "xtask/src/lint_rules.rs",
+        source: "crates/rules/src/lint_rules.rs",
         counterexamples: "use production::{Fault, fault, shrinks};
 #[kani::proof]
 fn reject_a_file_without_its_final_newline() {
@@ -1127,7 +1127,7 @@ fn reject_a_byte_order_mark() {
         ],
     },
     Rules {
-        source: "xtask/src/adr_rules.rs",
+        source: "crates/rules/src/adr_rules.rs",
         counterexamples: "use production::{Status, Verdict, verdict};
 #[kani::proof]
 fn reject_a_superseded_record_without_its_successor() {
@@ -1141,6 +1141,23 @@ fn reject_an_accepted_record_that_later_records_changed() {
         rejected: &[
             "reject_a_superseded_record_without_its_successor",
             "reject_an_accepted_record_that_later_records_changed",
+        ],
+    },
+    Rules {
+        source: "crates/rules/src/boundary_rules.rs",
+        counterexamples: "use production::{Core, breach};
+#[kani::proof]
+fn reject_a_core_with_a_dependency() {
+    assert!(breach(Core { dependencies: 1, no_std: true, denied: 0x3FF, strays: 0 }).is_none());
+}
+#[kani::proof]
+fn reject_a_core_that_may_panic_through_an_undenied_lint() {
+    assert!(breach(Core { dependencies: 0, no_std: true, denied: 0x1FF, strays: 0 }).is_none());
+}
+",
+        rejected: &[
+            "reject_a_core_with_a_dependency",
+            "reject_a_core_that_may_panic_through_an_undenied_lint",
         ],
     },
 ];

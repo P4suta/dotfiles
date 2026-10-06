@@ -29,3 +29,4 @@
 | [0021 Check that every agent instruction line has a class](0021-checked-agent-instruction-audit.md) | accepted |  |
 | [0022 Refuse installed tools built from stale sources](0022-refuse-tools-built-from-stale-sources.md) | accepted |  |
 | [0023 Give the repository a layout that shows what it manages](0023-repository-layout-and-target-architecture.md) | accepted |  |
+| [0024 Keep every decision in one pure core crate behind its adapters](0024-pure-decision-core-behind-adapters.md) | accepted |  |

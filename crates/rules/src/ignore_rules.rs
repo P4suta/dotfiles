@@ -10,10 +10,15 @@ fn segment_matches(
     let mut star: Option<usize> = None;
     let mut mark = t_start;
     while t < t_end {
-        if p < p_end && (pattern[p] == b'?' || pattern[p] == text[t]) {
+        let current = if p < p_end {
+            pattern.get(p).copied()
+        } else {
+            None
+        };
+        if current.is_some() && (current == Some(b'?') || current == text.get(t).copied()) {
             p += 1;
             t += 1;
-        } else if p < p_end && pattern[p] == b'*' {
+        } else if current == Some(b'*') {
             star = Some(p);
             mark = t;
             p += 1;
@@ -25,7 +30,7 @@ fn segment_matches(
             return false;
         }
     }
-    while p < p_end && pattern[p] == b'*' {
+    while p < p_end && pattern.get(p) == Some(&b'*') {
         p += 1;
     }
     p == p_end
@@ -78,14 +83,17 @@ pub fn matches(pattern: &[u8], path: &[u8]) -> bool {
 /// The offset of the `/` that ends the segment starting at `start`, or the length.
 fn segment_end(text: &[u8], start: usize) -> usize {
     let mut index = start;
-    while index < text.len() && text[index] != b'/' {
+    while let Some(&byte) = text.get(index) {
+        if byte == b'/' {
+            break;
+        }
         index += 1;
     }
     index
 }
 
 fn globstar(pattern: &[u8], start: usize, end: usize) -> bool {
-    end == start + 2 && pattern[start] == b'*' && pattern[start + 1] == b'*'
+    end == start + 2 && pattern.get(start) == Some(&b'*') && pattern.get(start + 1) == Some(&b'*')
 }
 
 /// A pattern stays only when its listing's justification holds and no earlier line already lists it.

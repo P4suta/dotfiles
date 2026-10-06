@@ -11,15 +11,14 @@
 
 pub mod attribution;
 pub mod bypass;
-pub mod gate_rules;
 pub mod gitargv;
 pub mod lang;
 pub mod locate;
 pub mod postcommit;
 pub mod prepush;
 pub mod realgit;
-pub mod reaper_rules;
 pub use platform::refusal;
+pub use rules::{gate_rules, reaper_rules};
 pub mod renovate;
 pub mod stack;
 pub mod staged;

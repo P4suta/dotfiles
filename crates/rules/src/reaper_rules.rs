@@ -1,3 +1,4 @@
+#[must_use]
 pub fn age(uptime: u64, start_ticks: u64, ticks_per_second: u64) -> Option<u64> {
     if ticks_per_second == 0 {
         None
@@ -20,6 +21,7 @@ fn arbitrary_elapsed(_ticks: u64, frequency: u64) -> u64 {
     clippy::fn_params_excessive_bools,
     reason = "Independent observed predicates form the source-bound Kani decision table"
 )]
+#[must_use]
 pub fn killable(
     enabled: bool,
     stopped: bool,

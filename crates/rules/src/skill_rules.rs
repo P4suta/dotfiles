@@ -1,11 +1,38 @@
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg_attr(not(kani), derive(serde::Deserialize, serde::Serialize))]
-#[cfg_attr(not(kani), serde(rename_all = "kebab-case"))]
 pub enum Outcome {
     Keep,
     Implemented,
     Rejected,
     Deferred,
+}
+
+impl Outcome {
+    pub const ALL: [Self; 4] = [
+        Self::Keep,
+        Self::Implemented,
+        Self::Rejected,
+        Self::Deferred,
+    ];
+
+    /// The name a decision record stores.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Keep => "keep",
+            Self::Implemented => "implemented",
+            Self::Rejected => "rejected",
+            Self::Deferred => "deferred",
+        }
+    }
+
+    /// The outcome a decision record names, or `None` for a name no outcome carries.
+    #[must_use]
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|outcome| outcome.key() == key)
+    }
 }
 
 #[must_use]

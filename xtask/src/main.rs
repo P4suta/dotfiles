@@ -208,6 +208,10 @@ fn check(root: &Path, gates: Gates, reference: &str) -> Result<()> {
             Path::new("home/dot_agents/skills/github-repository/scripts/repo-settings/Cargo.toml"),
         )?;
     }
+    // The catalog deploys with the profiles, and the core it checks builds with the Rust packages.
+    if gates.contains(Gate::Rust) || gates.contains(Gate::Profiles) {
+        xtask::structure::check(root)?;
+    }
     if gates.contains(Gate::Profiles) {
         xtask::profiles::source_data(root)?;
         xtask::launchers::generate(root, true)?;
@@ -220,7 +224,7 @@ fn check(root: &Path, gates: Gates, reference: &str) -> Result<()> {
         xtask::ignore_audit::check(root)?;
         xtask::input_audit::check(root)?;
     }
-    println!("Checked the gates: {}", gates.names());
+    println!("Checked the gates: {gates}");
     Ok(())
 }
 

@@ -12,18 +12,19 @@ use std::io;
 use std::path::Path;
 
 /// The crates whose sources build the installed tools.
-pub const CRATES: [&str; 7] = [
+pub const CRATES: [&str; 8] = [
     "crates/coderabbit-guard",
     "crates/dotfiles",
     "crates/model",
     "crates/platform",
     "crates/pr-workflow",
     "crates/prose",
+    "crates/rules",
     "crates/skill-ops",
 ];
 
 /// Files outside the crates' `src` directories that the compiler includes or that decide how the tools build.
-const SHARED: [&str; 20] = [
+const SHARED: [&str; 21] = [
     ".cargo/config.toml",
     ".chezmoiroot",
     ".github/workflows/ci.yml",
@@ -35,6 +36,7 @@ const SHARED: [&str; 20] = [
     "crates/dotfiles/assets/psgallery.ps1",
     "crates/dotfiles/assets/sshd-host.ps1",
     "crates/platform/build.rs",
+    "crates/rules/clippy.toml",
     "home/.chezmoiignore",
     "home/dot_agents/skills/pull-request/assets/workflow-policy.json",
     "home/dot_config/opencode/plugins/skill-ops.ts",

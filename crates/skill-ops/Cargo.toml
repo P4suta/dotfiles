@@ -16,6 +16,7 @@ anyhow = "1.0"
 clap = { version = "4.6", features = ["derive", "env"] }
 platform = { path = "../platform" }
 pulldown-cmark = "0.13"
+rules = { path = "../rules" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11.0"

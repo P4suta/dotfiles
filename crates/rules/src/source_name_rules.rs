@@ -26,13 +26,13 @@ const UNCOPIED_PREFIXES: [&[u8]; 8] = [
 ];
 const UNCOPIED_SUFFIXES: [&[u8]; 2] = [b".tmpl", b".literal"];
 
-const fn starts_with(text: &[u8], prefix: &[u8]) -> bool {
+fn starts_with(text: &[u8], prefix: &[u8]) -> bool {
     if prefix.len() > text.len() {
         return false;
     }
     let mut index = 0;
     while index < prefix.len() {
-        if text[index] != prefix[index] {
+        if text.get(index) != prefix.get(index) {
             return false;
         }
         index += 1;
@@ -40,19 +40,28 @@ const fn starts_with(text: &[u8], prefix: &[u8]) -> bool {
     true
 }
 
-const fn ends_with(text: &[u8], suffix: &[u8]) -> bool {
+fn ends_with(text: &[u8], suffix: &[u8]) -> bool {
     if suffix.len() > text.len() {
         return false;
     }
     let offset = text.len() - suffix.len();
     let mut index = 0;
     while index < suffix.len() {
-        if text[offset + index] != suffix[index] {
+        if text.get(offset + index) != suffix.get(index) {
             return false;
         }
         index += 1;
     }
     true
+}
+
+/// The rest of `text` after `prefix`, or `None` when `text` doesn't start with it.
+fn after<'a>(text: &'a [u8], prefix: &[u8]) -> Option<&'a [u8]> {
+    if starts_with(text, prefix) {
+        text.get(prefix.len()..)
+    } else {
+        None
+    }
 }
 
 /// The target name chezmoi gives a source entry that it copies byte for byte.
@@ -60,15 +69,15 @@ const fn ends_with(text: &[u8], suffix: &[u8]) -> bool {
 #[must_use]
 pub fn target(entry: Entry, source: &[u8]) -> Option<Target<'_>> {
     let mut index = 0;
-    while index < UNCOPIED_PREFIXES.len() {
-        if starts_with(source, UNCOPIED_PREFIXES[index]) {
+    while let Some(prefix) = UNCOPIED_PREFIXES.get(index) {
+        if starts_with(source, prefix) {
             return None;
         }
         index += 1;
     }
     index = 0;
-    while index < UNCOPIED_SUFFIXES.len() {
-        if ends_with(source, UNCOPIED_SUFFIXES[index]) {
+    while let Some(suffix) = UNCOPIED_SUFFIXES.get(index) {
+        if ends_with(source, suffix) {
             return None;
         }
         index += 1;
@@ -79,15 +88,16 @@ pub fn target(entry: Entry, source: &[u8]) -> Option<Target<'_>> {
     };
     let mut name = source;
     index = 0;
-    while index < attributes.len() {
-        if starts_with(name, attributes[index]) {
-            name = &name[attributes[index].len()..];
+    while let Some(attribute) = attributes.get(index) {
+        if let Some(rest) = after(name, attribute) {
+            name = rest;
         }
         index += 1;
     }
-    let dot = starts_with(name, b"dot_");
-    if dot {
-        name = &name[4..];
+    let rest = after(name, b"dot_");
+    let dot = rest.is_some();
+    if let Some(rest) = rest {
+        name = rest;
     }
     if name.is_empty() {
         None

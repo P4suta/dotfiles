@@ -811,7 +811,7 @@ fn the_required_check_depends_only_on_skills_policy_and_decisions() -> Result<()
     check_catalog(root.path())?;
     for (engine, content) in [
         ("crates/skill-ops/src/lib.rs", "changed engine"),
-        ("crates/skill-ops/src/skill_rules.rs", "changed rules"),
+        ("crates/rules/src/skill_rules.rs", "changed rules"),
         ("Cargo.lock", "changed lock"),
     ] {
         let path = root.path().join(engine);

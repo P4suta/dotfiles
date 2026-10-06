@@ -2,14 +2,14 @@
 //! With the default tools feature it adds the tool registry, the setup steps, the process runner, and the build stamp of the installed tools.
 
 pub mod home;
-pub mod order_rules;
 pub mod process;
 pub mod refusal;
+pub use rules::order_rules;
 
 #[cfg(feature = "tools")]
 pub mod aside;
 #[cfg(feature = "tools")]
-pub mod aside_rules;
+pub use rules::aside_rules;
 #[cfg(feature = "tools")]
 pub mod build_inputs;
 #[cfg(feature = "tools")]
@@ -19,11 +19,11 @@ pub mod paths;
 #[cfg(feature = "tools")]
 pub mod runtime;
 #[cfg(feature = "tools")]
-pub mod stale_rules;
+pub use rules::stale_rules;
 #[cfg(feature = "tools")]
 pub mod step;
 #[cfg(feature = "tools")]
-pub mod target_rules;
+pub use rules::target_rules;
 #[cfg(feature = "tools")]
 pub mod tool;
 

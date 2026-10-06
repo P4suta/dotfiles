@@ -39,7 +39,7 @@ pub fn move_aside(target: &Path) -> Result<Option<PathBuf>> {
         .file_name()
         .and_then(|name| name.to_str())
         .context("installed binary name is not UTF-8")?;
-    let aside = target.with_file_name(aside_name(name, std::process::id()));
+    let aside = target.with_file_name(aside_name(name, std::process::id()).to_string());
     fs::rename(target, &aside).with_context(|| format!("move {} aside", target.display()))?;
     Ok(Some(aside))
 }

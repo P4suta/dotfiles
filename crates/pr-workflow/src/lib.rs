@@ -1,9 +1,7 @@
 //! The pull request workflow: issue-scoped preparation, creation, document edits, ready transitions, and stacked branches.
 
-pub mod pr_rules;
-pub mod wip_rules;
-
 pub use platform::{aside, build_inputs, freshness, refusal, report, tool};
+pub use rules::{pr_rules, wip_rules};
 
 use crate::pr_rules::{
     Blocker, Checks, Dependency, Effect, Exclusion, Generation, IssueGate, Lifecycle, MergeState,
@@ -35,6 +33,14 @@ const SUMMARY_REQUEST: &str = "@coderabbitai summary";
 const REVIEW_EXCLUSION: &str = "@coderabbitai ignore";
 /// Marks an exclusion that lasts only while the owner pauses `CodeRabbit` PR reviews.
 const PAUSE_EXCLUSION: &str = "<!-- coderabbit-pause -->";
+
+/// Reads `--generation` as one of the names its rule module gives.
+fn generation_parser() -> impl clap::builder::TypedValueParser<Value = Generation> {
+    use clap::builder::TypedValueParser as _;
+    clap::builder::PossibleValuesParser::new(Generation::ALL.map(Generation::key)).try_map(
+        |key: String| Generation::from_key(&key).ok_or(format!("unknown generation `{key}`")),
+    )
+}
 
 #[derive(Debug, Parser)]
 #[command(about = "Validate PR documents before invoking gh; local creation always uses draft")]
@@ -227,7 +233,7 @@ pub struct Target {
     #[arg(long)]
     pub repo: String,
     /// `CodeRabbit` mode permits its standard generation placeholders.
-    #[arg(long, value_enum, default_value = "local")]
+    #[arg(long, value_parser = generation_parser(), default_value = "local")]
     pub generation: Generation,
     /// Repository-scoped JSON exception with repository, source URL, and reason.
     #[arg(long)]

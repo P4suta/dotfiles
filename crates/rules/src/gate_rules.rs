@@ -26,11 +26,13 @@ pub enum Reference {
 
 impl Reference {
     /// An amend moves only the checked-out ref.
+    #[must_use]
     pub fn checked_out(self) -> bool {
         matches!(self, Self::CheckedOutBranch | Self::Head)
     }
 
     /// A rebase needs a branch to rewrite.
+    #[must_use]
     pub fn branch(self) -> bool {
         matches!(self, Self::CheckedOutBranch | Self::Branch)
     }
@@ -38,6 +40,7 @@ impl Reference {
 
 /// `refs` counts the pushed refs that carry unsigned commits.
 /// `reference` names that ref, `merges` says its pushed range contains a merge, and `only_tip` says its only unsigned commit sits at the checked-out commit.
+#[must_use]
 pub fn signing(refs: usize, reference: Reference, merges: bool, only_tip: bool) -> Signing {
     if refs != 1 {
         Signing::Inspect
@@ -61,6 +64,7 @@ pub enum History {
     ForgeDelete,
 }
 
+#[must_use]
 pub fn history(undecidable: bool, rewrite: bool) -> History {
     if undecidable {
         History::Fetch
@@ -119,6 +123,7 @@ fn a_history_refusal_suggests_the_step_for_its_worst_update() {
 /// Whether a rebase may rewrite a commit a remote-tracking ref holds.
 /// `control` marks a `--continue`, `--abort`, or another step of a rebase already started.
 /// `rewrites` holds `None` when the gate couldn't tell.
+#[must_use]
 pub fn rebase_refused(control: bool, rewrites: Option<bool>) -> bool {
     !control && rewrites != Some(false)
 }
@@ -134,6 +139,7 @@ pub enum Admission {
 }
 
 /// `stack_rule` says the refusal concerns a rebase or a leased force push, the only rewrites the stack tooling makes.
+#[must_use]
 pub fn admission(stack_rule: bool, tooling: bool, waived: bool) -> Admission {
     if stack_rule && tooling {
         Admission::Tooling
@@ -145,6 +151,7 @@ pub fn admission(stack_rule: bool, tooling: bool, waived: bool) -> Admission {
 }
 
 /// The stack tooling holds the lease when the token it exported matches the lease file it wrote in the repository.
+#[must_use]
 pub fn stack_tooling(token: Option<&[u8]>, lease: Option<&[u8]>) -> bool {
     matches!((token, lease), (Some(token), Some(lease)) if !token.is_empty() && token == lease)
 }
@@ -215,11 +222,11 @@ pub enum Spelling {
 }
 
 /// Reads `name`, a long option without its `--` and `=value`, as Git does: an exact spelling first, otherwise a unique prefix.
+#[must_use]
 pub fn spelling(name: &[u8], spellings: &[&[u8]]) -> Spelling {
     let mut found = Spelling::Unknown;
     let mut index = 0;
-    while index < spellings.len() {
-        let candidate = spellings[index];
+    while let Some(&candidate) = spellings.get(index) {
         if candidate == name {
             return Spelling::Is(index);
         }
@@ -292,6 +299,7 @@ pub enum Verdict {
     Withhold,
 }
 
+#[must_use]
 pub fn verdict(refused: bool, read: bool) -> Verdict {
     if !refused {
         Verdict::Allow

@@ -1,3 +1,6 @@
+extern crate alloc;
+use self::alloc::vec::Vec;
+
 /// The `text` attribute as `git check-attr` resolves it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Text {
@@ -103,8 +106,8 @@ pub fn content(bytes: &[u8]) -> Content {
         nonprintable: 0,
     };
     let mut index = 0;
-    while index < bytes.len() {
-        match bytes[index] {
+    while let Some(&byte) = bytes.get(index) {
+        match byte {
             b'\r' if !kept(bytes, index) => {
                 found.crlf = true;
                 index += 1;
@@ -130,18 +133,17 @@ pub fn content(bytes: &[u8]) -> Content {
 /// Whether conversion keeps the byte at `index`: every byte except a carriage return that precedes a line feed.
 #[must_use]
 pub fn kept(bytes: &[u8], index: usize) -> bool {
-    !(bytes.len() > 1
-        && index < bytes.len() - 1
-        && bytes[index] == b'\r'
-        && bytes[index + 1] == b'\n')
+    !matches!(bytes.get(index..), Some([b'\r', b'\n', ..]))
 }
 
 /// Removes each carriage return that precedes a line feed, as Git does when it normalizes text.
 #[must_use]
 pub fn to_lf(bytes: &[u8]) -> Vec<u8> {
-    (0..bytes.len())
-        .filter(|&index| kept(bytes, index))
-        .map(|index| bytes[index])
+    bytes
+        .iter()
+        .enumerate()
+        .filter(|&(index, _)| kept(bytes, index))
+        .map(|(_, &byte)| byte)
         .collect()
 }
 

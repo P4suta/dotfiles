@@ -57,7 +57,7 @@ fn install(built: &Path, dest: &Path) -> Result<()> {
     let staged = tempfile::NamedTempFile::new_in(bin)?;
     std::fs::copy(built, staged.path()).context("staging ocomment.exe")?;
     let (_, staged) = staged.keep()?;
-    let aside = bin.join(aside_name(&name, std::process::id()));
+    let aside = bin.join(aside_name(&name, std::process::id()).to_string());
     let moved = dest.exists();
     if moved {
         std::fs::rename(dest, &aside).context("moving the installed ocomment.exe aside")?;

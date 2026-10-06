@@ -137,6 +137,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "platform",
+ "rules",
  "serde_json",
  "tempfile",
 ]
@@ -226,6 +227,7 @@ dependencies = [
  "model",
  "platform",
  "prose",
+ "rules",
  "serde",
  "serde_json",
  "sha2",
@@ -241,6 +243,7 @@ name = "dotguard"
 version = "0.1.0"
 dependencies = [
  "platform",
+ "rules",
 ]
 
 [[package]]
@@ -453,6 +456,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "model"
 version = "0.1.0"
 dependencies = [
+ "rules",
  "schemars",
  "serde",
  "serde_json",
@@ -479,6 +483,7 @@ dependencies = [
  "anyhow",
  "clap",
  "model",
+ "rules",
  "serde",
  "serde_json",
  "sha2",
@@ -512,6 +517,7 @@ dependencies = [
  "platform",
  "prose",
  "pulldown-cmark",
+ "rules",
  "serde",
  "serde_json",
  "sha2",
@@ -537,6 +543,7 @@ dependencies = [
  "dotguard",
  "platform",
  "pulldown-cmark",
+ "rules",
  "serde",
  "serde_json",
  "sha2",
@@ -599,6 +606,10 @@ dependencies = [
  "quote",
  "syn 3.0.6",
 ]
+
+[[package]]
+name = "rules"
+version = "0.1.0"
 
 [[package]]
 name = "rustix"
@@ -726,6 +737,7 @@ dependencies = [
  "clap",
  "platform",
  "pulldown-cmark",
+ "rules",
  "serde",
  "serde_json",
  "sha2",
@@ -898,6 +910,7 @@ dependencies = [
  "pr-workflow",
  "prose",
  "pulldown-cmark",
+ "rules",
  "serde",
  "serde_json",
  "sha2",

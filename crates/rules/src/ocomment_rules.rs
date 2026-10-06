@@ -10,6 +10,7 @@ pub enum Action {
 }
 
 /// `head` names the checkout's revision when one exists, and `recorded` the revision of the last installation's build.
+#[must_use]
 pub fn action(head: Option<&[u8]>, installed: bool, recorded: Option<&[u8]>) -> Action {
     match head {
         None => Action::Clone,
@@ -26,7 +27,7 @@ fn same(left: &[u8], right: &[u8]) -> bool {
     }
     let mut index = 0;
     while index < left.len() {
-        if left[index] != right[index] {
+        if left.get(index) != right.get(index) {
             return false;
         }
         index += 1;

@@ -1,10 +1,23 @@
 //! Windows refuses to replace or delete a running executable but lets a process rename it.
 //! An installer renames the current binary to an aside name, moves the new one in, and deletes aside copies on its next run.
 
-/// The aside name of `name` for the installing process `pid`: `<name>.<pid>.old`.
+/// The aside name of a binary for one installing process, which displays as `<name>.<pid>.old`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AsideName<'a> {
+    name: &'a str,
+    pid: u32,
+}
+
+impl core::fmt::Display for AsideName<'_> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(formatter, "{}.{}.old", self.name, self.pid)
+    }
+}
+
+/// The aside name of `name` for the installing process `pid`.
 #[must_use]
-pub fn aside_name(name: &str, pid: u32) -> String {
-    format!("{name}.{pid}.old")
+pub const fn aside_name(name: &str, pid: u32) -> AsideName<'_> {
+    AsideName { name, pid }
 }
 
 const SUFFIX: &[u8] = b".old";
@@ -18,25 +31,25 @@ pub fn is_aside(name: &[u8], entry: &[u8]) -> bool {
     }
     let mut index = 0;
     while index < name.len() {
-        if entry[index] != name[index] {
+        if entry.get(index) != name.get(index) {
             return false;
         }
         index += 1;
     }
-    if entry[name.len()] != b'.' {
+    if entry.get(name.len()) != Some(&b'.') {
         return false;
     }
     let digits_end = entry.len() - SUFFIX.len();
     index = name.len() + 1;
     while index < digits_end {
-        if !entry[index].is_ascii_digit() {
+        if !entry.get(index).is_some_and(u8::is_ascii_digit) {
             return false;
         }
         index += 1;
     }
     index = 0;
     while index < SUFFIX.len() {
-        if entry[digits_end + index] != SUFFIX[index] {
+        if entry.get(digits_end + index) != SUFFIX.get(index) {
             return false;
         }
         index += 1;
@@ -128,10 +141,11 @@ fn only_entries_named_after_the_binary_are_swept() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::ToString;
 
     #[test]
     fn the_aside_name_is_recognised_and_other_files_are_not() {
-        let name = aside_name("dotfiles-xtask.exe", 4242);
+        let name = aside_name("dotfiles-xtask.exe", 4242).to_string();
         assert_eq!(name, "dotfiles-xtask.exe.4242.old");
         assert!(is_aside(b"dotfiles-xtask.exe", name.as_bytes()));
         assert!(!is_aside(b"dotfiles-xtask.exe", b"dotfiles-xtask.exe"));

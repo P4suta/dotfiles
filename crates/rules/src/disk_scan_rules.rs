@@ -49,6 +49,6 @@ mod tests {
         assert_eq!(verdict(true, false), Verdict::Admit);
         assert_eq!(verdict(false, true), Verdict::Admit);
         assert!(NEXT_ACTION.contains("storage-scout scan"));
-        assert_eq!(&NEXT_ACTION[25..38], "storage-scout");
+        assert_eq!(NEXT_ACTION.get(25..38), Some("storage-scout"));
     }
 }

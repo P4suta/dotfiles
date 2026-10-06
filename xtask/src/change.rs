@@ -24,8 +24,12 @@ pub struct Scope {
     #[arg(long, conflicts_with = "gates")]
     staged: bool,
     /// Run exactly these comma-separated gates, as `classify` printed them.
-    #[arg(long, value_parser = Gates::parse)]
+    #[arg(long, value_parser = parse_gates)]
     gates: Option<Gates>,
+}
+
+fn parse_gates(text: &str) -> Result<Gates, String> {
+    Gates::parse(text).map_err(|unknown| unknown.to_string())
 }
 
 impl Scope {
@@ -107,6 +111,6 @@ pub fn gates(root: &Path, source: &Source) -> Result<Gates> {
 ///
 /// Returns an error when git can't list the scope's change set.
 pub fn run(root: &Path, scope: &Scope) -> Result<()> {
-    println!("gates={}", scope.resolve(root)?.names());
+    println!("gates={}", scope.resolve(root)?);
     Ok(())
 }

@@ -1,0 +1,19 @@
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+disallowed-types = [
+  { path = "core::cell::Cell", reason = "a rule returns its new state as a value instead of mutating shared state" },
+  { path = "core::cell::RefCell", reason = "a rule returns its new state as a value instead of mutating shared state" },
+  { path = "core::cell::OnceCell", reason = "a rule returns its new state as a value instead of mutating shared state" },
+  { path = "core::cell::UnsafeCell", reason = "a rule returns its new state as a value instead of mutating shared state" },
+  { path = "core::sync::atomic::AtomicBool", reason = "a rule returns its new state as a value instead of mutating shared state" },
+  { path = "core::sync::atomic::AtomicUsize", reason = "a rule returns its new state as a value instead of mutating shared state" },
+  { path = "core::sync::atomic::AtomicIsize", reason = "a rule returns its new state as a value instead of mutating shared state" },
+  { path = "core::sync::atomic::AtomicU8", reason = "a rule returns its new state as a value instead of mutating shared state" },
+  { path = "core::sync::atomic::AtomicU16", reason = "a rule returns its new state as a value instead of mutating shared state" },
+  { path = "core::sync::atomic::AtomicU32", reason = "a rule returns its new state as a value instead of mutating shared state" },
+  { path = "core::sync::atomic::AtomicU64", reason = "a rule returns its new state as a value instead of mutating shared state" },
+  { path = "core::sync::atomic::AtomicI32", reason = "a rule returns its new state as a value instead of mutating shared state" },
+  { path = "core::sync::atomic::AtomicI64", reason = "a rule returns its new state as a value instead of mutating shared state" },
+]

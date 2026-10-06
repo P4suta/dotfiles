@@ -7,7 +7,7 @@
     "crates/coderabbit-guard/src/lib.rs",
     "docs/adr/0008-layered-review-capacity.md",
     "docs/adr/0015-scoped-coderabbit-pause.md",
-    "crates/coderabbit-guard/src/review_rules.rs"
+    "crates/rules/src/review_rules.rs"
   ],
   "revisit": null
 }

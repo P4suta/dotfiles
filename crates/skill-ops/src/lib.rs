@@ -1,11 +1,11 @@
 //! The skill operations engine: the catalog, the maintenance reports and decisions, and the installation of the shared skills.
 
 pub mod skill_install;
-pub mod skill_rules;
 mod tree;
 
 pub use platform::paths::canonical;
 pub use platform::{aside, build_inputs, freshness, refusal, report, tool};
+pub use rules::skill_rules;
 pub(crate) use tree::collect;
 pub use tree::{
     Metadata, export_checks, metadata, skill_source_paths, skills, split_frontmatter,
@@ -46,10 +46,35 @@ pub struct Finding {
 #[serde(deny_unknown_fields)]
 pub struct Decision {
     pub id: String,
+    #[serde(with = "outcome_key")]
     pub outcome: Outcome,
     pub reason: String,
     pub evidence: Vec<String>,
     pub revisit: Option<String>,
+}
+
+/// Stores an outcome as the name its rule module gives it.
+mod outcome_key {
+    use super::Outcome;
+    use serde::{Deserialize, Deserializer, Serializer, de::Error as _};
+
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde passes every field to a serializer by reference"
+    )]
+    pub fn serialize<S: Serializer>(outcome: &Outcome, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(outcome.key())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Outcome, D::Error> {
+        let key = String::deserialize(deserializer)?;
+        Outcome::from_key(&key).ok_or_else(|| {
+            D::Error::custom(format!(
+                "unknown outcome `{key}`, expected one of {:?}",
+                Outcome::ALL.map(Outcome::key)
+            ))
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -64,6 +89,7 @@ pub struct Review {
 #[serde(deny_unknown_fields)]
 pub struct SkillDecision {
     pub revision: String,
+    #[serde(with = "outcome_key")]
     pub outcome: Outcome,
     pub reason: String,
     pub evidence: Vec<String>,
@@ -77,6 +103,7 @@ pub struct SkillDecision {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SizeDecision {
+    #[serde(with = "outcome_key")]
     pub outcome: Outcome,
     pub reason: String,
     pub revisit: Option<String>,
@@ -561,7 +588,7 @@ pub fn decide(root: &Path, skill: &str) -> Result<String> {
     if let Some(previous) = &previous {
         context.push(format!(
             "Previous decision ({}): {}",
-            serde_json::to_value(previous.outcome)?,
+            serde_json::Value::from(previous.outcome.key()),
             previous.reason
         ));
     }
@@ -718,7 +745,7 @@ pub fn preserve_json(path: &Path, value: &impl Serialize) -> Result<()> {
 pub fn engine_hash() -> Result<String> {
     hash(&(
         include_str!("lib.rs"),
-        include_str!("skill_rules.rs"),
+        include_str!("../../rules/src/skill_rules.rs"),
         include_str!("skill_install.rs"),
         include_str!("tree.rs"),
         include_str!("main.rs"),
@@ -736,11 +763,11 @@ pub fn engine_hash() -> Result<String> {
             include_str!("../../../home/.chezmoiignore"),
             include_str!("../../../lefthook.yml"),
             include_str!("../../../.github/workflows/ci.yml"),
-            include_str!("../../pr-workflow/src/pr_rules.rs"),
+            include_str!("../../rules/src/pr_rules.rs"),
             include_str!("../../pr-workflow/src/lib.rs"),
             include_str!("../../pr-workflow/src/main.rs"),
             include_str!("../../coderabbit-guard/src/lib.rs"),
-            include_str!("../../coderabbit-guard/src/review_rules.rs"),
+            include_str!("../../rules/src/review_rules.rs"),
         ),
     ))
 }

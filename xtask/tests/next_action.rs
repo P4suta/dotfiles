@@ -718,7 +718,7 @@ fn github_states_name_the_pull_request_and_its_command() -> Result<()> {
         assert_eq!(recommendation.command.as_deref(), command, "{step:?}");
         assert!(!recommendation.executable);
         let line = serde_json::to_value(&recommendation)?;
-        assert_eq!(line["action"], serde_json::to_value(step)?);
+        assert_eq!(line["action"], step.key());
         assert_eq!(line["state"]["host"]["status"], "ready");
     }
     Ok(())

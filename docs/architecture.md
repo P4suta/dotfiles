@@ -5,6 +5,7 @@ Rust tools under `crates/` apply it and run every Git hook, and the development 
 The installed runtime `dotfiles` builds from `crates/dotfiles/`, which also holds the Windows setup behind `dotfiles windows`.
 `skill-ops`, `pr-workflow`, `prose`, and the `coderabbit` guard each build from their own crate, and `dotguard` from `crates/dotguard/`.
 Every crate starts a process through `crates/platform/`, which also holds the home, the managed `PATH`, the tool registry, and the setup steps.
+Every pure decision lives in `crates/rules/`, which has no dependency and no standard library, and each tool re-exports the rule modules it calls, as [ADR 0024](adr/0024-pure-decision-core-behind-adapters.md) records.
 One Cargo workspace at the root builds them with one lockfile, one toolchain from `mise.toml`, and one lint policy.
 [ADR 0023](adr/0023-repository-layout-and-target-architecture.md) records this layout and the steps that remain.
 
@@ -50,14 +51,14 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 
 | Command | Runs |
 | --- | --- |
-| `just check` | The gates a change selects: the lint stages, prose, links, and generated files, the shared skills, the Rust packages, and the profiles. |
+| `just check` | The gates a change selects: the lint stages, prose, links, and generated files, the shared skills, the core boundary and the structural catalog, the Rust packages, and the profiles. |
 | `just check-staged` | The pre-commit check: the lint stages over the staged files, then the prose of documents and of the comments `OComment` reads. |
 | `just baselines` | The refusal of a lint baseline under `policy/lint-baselines/` that grew since a base, which CI runs from the merge base. |
 | `just profiles` | Every profile's rendering, an isolated apply and verification, the committed manifests, the ignore and remove audit, and the script input audit. |
 | `just proofs` | The Kani harnesses and rejecting counterexamples of every rule module, each within its time budget. |
 | `just prose` | The writing standard over documents and comments. |
 
-`xtask/src/change_rules.rs` maps each changed path to the gates it selects, and a path no rule names selects every gate.
+`crates/rules/src/change_rules.rs` maps each changed path to the gates it selects, and a path no rule names selects every gate.
 Only a rule module, the proof inventory, or the tooling selects the proofs, because each harness compiles one rule module alone.
 
 The lint stages run each pinned linter: rustfmt, typos, taplo, yamllint, shellcheck, and `PSScriptAnalyzer`.

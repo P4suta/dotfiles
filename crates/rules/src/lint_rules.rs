@@ -23,8 +23,7 @@ impl Fault {
 #[must_use]
 pub fn is_utf8(bytes: &[u8]) -> bool {
     let mut index = 0;
-    while index < bytes.len() {
-        let lead = bytes[index];
+    while let Some(&lead) = bytes.get(index) {
         let (length, least, mut point) = if lead < 0x80 {
             (1, 0, u32::from(lead))
         } else if lead & 0xE0 == 0xC0 {
@@ -41,7 +40,9 @@ pub fn is_utf8(bytes: &[u8]) -> bool {
         }
         let mut offset = 1;
         while offset < length {
-            let next = bytes[index + offset];
+            let Some(&next) = bytes.get(index + offset) else {
+                return false;
+            };
             if next & 0xC0 != 0x80 {
                 return false;
             }
@@ -59,11 +60,11 @@ pub fn is_utf8(bytes: &[u8]) -> bool {
 /// The first fault of a text file's bytes, or `None` for an empty file or one that keeps the encoding.
 #[must_use]
 pub fn fault(bytes: &[u8]) -> Option<Fault> {
-    if bytes.len() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF {
+    if matches!(bytes, [0xEF, 0xBB, 0xBF, ..]) {
         Some(Fault::ByteOrderMark)
     } else if !is_utf8(bytes) {
         Some(Fault::NotUtf8)
-    } else if !bytes.is_empty() && bytes[bytes.len() - 1] != b'\n' {
+    } else if bytes.last().is_some_and(|&last| last != b'\n') {
         Some(Fault::NoFinalNewline)
     } else {
         None

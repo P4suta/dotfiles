@@ -7,10 +7,11 @@
   "requirements": [
     {"skill": "skill-operations", "also": ["portable-skills"]},
     {"skill": "verification-tools", "also": ["type-contracts", "executable-policy"]},
-    {"skill": "type-contracts", "also": ["executable-policy"]}
+    {"skill": "type-contracts", "also": ["executable-policy"]},
+    {"skill": "formal-assurance", "also": ["functional-architecture"]}
   ],
   "bundles": {
     "skill-maintenance": ["portable-skills", "skill-operations"],
-    "implementation-assurance": ["development-assurance", "formal-assurance", "verification-tools"]
+    "implementation-assurance": ["development-assurance", "formal-assurance", "functional-architecture", "verification-tools"]
   }
 }

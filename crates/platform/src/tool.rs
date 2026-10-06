@@ -22,6 +22,7 @@ pub enum Tool {
     Actionlint,
     AnsibleGalaxy,
     AnsiblePlaybook,
+    AstGrep,
     Atuin,
     Bash,
     Brew,
@@ -111,10 +112,11 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 89] = [
+    pub const ALL: [Self; 90] = [
         Self::Actionlint,
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
+        Self::AstGrep,
         Self::Atuin,
         Self::Bash,
         Self::Brew,
@@ -212,6 +214,7 @@ impl Tool {
             Self::Zizmor => "zizmor",
             Self::AnsibleGalaxy => "ansible-galaxy",
             Self::AnsiblePlaybook => "ansible-playbook",
+            Self::AstGrep => "ast-grep",
             Self::Atuin => "atuin",
             Self::Brew => "brew",
             Self::Bun => "bun",
@@ -306,6 +309,7 @@ impl Tool {
         match self {
             Self::AnsibleGalaxy | Self::AnsiblePlaybook => Provision::Pinned("pypi:ansible-core"),
             Self::Actionlint => Provision::Pinned("actionlint"),
+            Self::AstGrep => Provision::Pinned("ast-grep"),
             Self::CargoDeny => Provision::Pinned("cargo-deny"),
             Self::Zizmor => Provision::Pinned("zizmor"),
             Self::Bun => Provision::Pinned("bun"),

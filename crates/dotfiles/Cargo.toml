@@ -20,7 +20,8 @@ dotguard = { path = "../dotguard" }
 model = { path = "../model" }
 platform = { path = "../platform" }
 prose = { path = "../prose" }
-serde = { version = "1.0.229", features = ["derive"] }
+rules = { path = "../rules" }
+serde ={ version = "1.0.229", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11.0"
 skill-ops = { path = "../skill-ops" }

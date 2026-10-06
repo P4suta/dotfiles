@@ -1,10 +1,8 @@
 //! The writing standard: the prose checker, its pinned linters, and the reply hooks of each client.
 
-pub mod prose_rules;
-pub mod source_name_rules;
-
 pub use platform::paths::{canonical, has_extension};
 pub use platform::{aside, build_inputs, tool};
+pub use rules::{prose_rules, source_name_rules};
 
 use crate::build_inputs::hex;
 use crate::prose_rules::{

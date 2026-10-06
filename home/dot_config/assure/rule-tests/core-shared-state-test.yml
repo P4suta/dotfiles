@@ -1,0 +1,9 @@
+id: core-shared-state
+valid:
+  - "pub fn count(state: Count) -> Count { Count(state.0 + 1) }"
+  - "static LIMIT: u8 = 3;"
+invalid:
+  - "pub struct Counter { hits: Cell<u32> }"
+  - "pub struct Cache { entries: RefCell<Vec<u8>> }"
+  - "static HITS: AtomicUsize = AtomicUsize::new(0);"
+  - "static mut HITS: u32 = 0;"

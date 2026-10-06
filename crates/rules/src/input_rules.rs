@@ -1,5 +1,9 @@
 //! What a script's `# inputs:` hash may read, so the hash changes only when the step's own inputs change.
 
+extern crate alloc;
+use self::alloc::string::String;
+use self::alloc::vec::Vec;
+
 /// One term of the expression a script passes to the `inputs` partial.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Term {
@@ -28,10 +32,15 @@ pub enum Verdict {
 pub fn verdict(terms: &[Term]) -> Verdict {
     let mut whole = false;
     let mut index = 0;
-    while index < terms.len() {
-        match terms[index] {
+    while let Some(&term) = terms.get(index) {
+        match term {
             Term::Chezmoi | Term::HostRead => return Verdict::HostState,
-            Term::Context if !(index >= 2 && matches!(terms[index - 2], Term::Render)) => {
+            Term::Context
+                if !matches!(
+                    index.checked_sub(2).and_then(|render| terms.get(render)),
+                    Some(Term::Render)
+                ) =>
+            {
                 whole = true;
             }
             Term::Context | Term::Data | Term::Render => {}

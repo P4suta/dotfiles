@@ -61,7 +61,24 @@ pub struct PullRequest {
     pub draft: bool,
     /// The branch the PR merges into.
     pub base: String,
+    #[serde(serialize_with = "checks_key")]
     pub checks: Checks,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes every field to a serializer by reference"
+)]
+fn checks_key<S: serde::Serializer>(checks: &Checks, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(checks.key())
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes every field to a serializer by reference"
+)]
+fn step_key<S: serde::Serializer>(step: &Step, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(step.key())
 }
 
 /// The facts behind a recommendation, reported with it so an agent can check the reasoning.
@@ -147,6 +164,7 @@ impl Observed {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Recommendation {
+    #[serde(serialize_with = "step_key")]
     pub action: Step,
     pub executable: bool,
     pub summary: String,
@@ -758,7 +776,7 @@ pub fn perform(root: &Path, recommendation: &Recommendation) -> Result<Option<St
         (Step::DraftDecisions, _) => skill_ops::decide(root, &state.undecided_skills[0]).map(Some),
         (action, _) => bail!(
             "`{}` is not a local, reversible step, so --execute does not run it; next action: {}{}",
-            serde_json::to_value(action)?.as_str().unwrap_or_default(),
+            action.key(),
             recommendation.summary,
             recommendation
                 .command

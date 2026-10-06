@@ -1,0 +1,9 @@
+id: core-bare-text
+valid:
+  - "pub fn program(text: &str) -> Program { Program(text.to_owned()) }"
+  - "fn label(text: &str) -> String { text.to_owned() }"
+  - "#[cfg(test)]\nmod tests { pub fn fixture() -> String { String::new() } }"
+invalid:
+  - "pub fn program(text: &str) -> String { text.to_owned() }"
+  - "impl Gates { pub fn names(self) -> String { String::new() } }"
+  - "pub fn parse(text: &str) -> Result<Gates, String> { Err(text.to_owned()) }"

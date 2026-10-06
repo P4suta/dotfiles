@@ -15,7 +15,8 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | `crates/dotfiles/` | The installed runtime `dotfiles` behind every hook and launcher, with the Windows setup behind `dotfiles windows`. |
 | `crates/skill-ops/`, `crates/pr-workflow/`, `crates/prose/`, `crates/coderabbit-guard/` | Each installed tool with its rules. |
 | `crates/dotguard/` | `dotguard`, the Git wrapper, and the reaper and herdr-agent binaries. |
-| `crates/model/` | The typed chezmoi data and the profile rules. |
+| `crates/model/` | The typed chezmoi data. |
+| `crates/rules/` | The pure decisions of every tool, which reach no dependency and no standard library. |
 | `Cargo.toml` | The workspace of `xtask/` and `crates/`, with its one lint policy, lockfile, and `clippy.toml`. |
 | `policy/` | Data the gates read. |
 | `docs/` | Architecture, [decision records](docs/adr/README.md), and skill decisions. |
@@ -41,13 +42,15 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | A setup step | its declaration in `crates/platform/src/step.rs` and its work in `crates/dotfiles/src/setup.rs`, then `just gen` |
 | Shared data and tool versions | `home/.chezmoidata/`, typed in `crates/model/src/data.rs`, `mise.toml`, and `mise.lock` |
 | A gate | `xtask/src/` with its tests in `xtask/tests/`, or the crate of the tool that runs it |
-| A rule a gate decides | a `*_rules.rs` module beside its caller and its entry in `xtask/src/skill_proofs.rs` |
+| A rule a gate decides | a `*_rules.rs` module in `crates/rules/src/`, re-exported by its caller's crate, and its entry in `xtask/src/skill_proofs.rs` |
+| A structural rule for every repository | `home/dot_config/assure/rules/` with its fixtures in `rule-tests/` |
 | A shared skill | `home/dot_agents/skills/<skill>/` and `docs/skills/decisions/<skill>.json` |
 | A durable design decision | a new record in `docs/adr/`, then `just gen` |
 
 ## Rules
 
 - Every rule module has unit tests, Kani harnesses, and a rejecting counterexample in the proof inventory.
+- A rule module receives every fact as a value and returns its decision as a value, and the compiler and the structural gate refuse anything else.
 - A change that alters what a host receives updates both manifest sets in `xtask/tests/snapshots/` and explains the difference.
 - Lint exceptions use `#[expect]` with a reason.
 - The baselines in `policy/lint-baselines/` only shrink: fix a new finding instead of admitting it.

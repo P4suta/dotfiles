@@ -1,8 +1,7 @@
 //! The `CodeRabbit` guard: the local review budget, the owner's pauses, and the pinned runtime every invocation goes through.
 
-pub mod review_rules;
-
 pub use platform::{aside, freshness, refusal, report, tool};
+pub use rules::review_rules;
 
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
