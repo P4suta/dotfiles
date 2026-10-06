@@ -347,12 +347,12 @@ fn native_verification_ignores_always_run_scripts() {
 
 #[test]
 fn skipped_setup_scripts_need_a_target_name_and_a_reason() {
-    let accepted = serde_json::json!({"setup": {"skip": [{"script": "setup-ocaml.sh", "reason": "compiles a toolchain"}]}});
+    let accepted = serde_json::json!({"setup": {"skip": [{"script": "ocaml.sh", "reason": "compiles a toolchain"}]}});
     assert_eq!(profiles::declared_skips(&accepted).unwrap().len(), 1);
     for rejected in [
-        serde_json::json!({"setup": {"skip": [{"script": "setup-ocaml.sh", "reason": " "}]}}),
+        serde_json::json!({"setup": {"skip": [{"script": "ocaml.sh", "reason": " "}]}}),
         serde_json::json!({"setup": {"skip": [{"script": "../escape.sh", "reason": "x"}]}}),
-        serde_json::json!({"setup": {"skip": [{"script": "setup-ocaml.sh"}]}}),
+        serde_json::json!({"setup": {"skip": [{"script": "ocaml.sh"}]}}),
         serde_json::json!({"setup": {"skip": [{"script": "a.sh", "reason": "x", "extra": 1}]}}),
     ] {
         assert!(profiles::declared_skips(&rejected).is_err(), "{rejected}");
@@ -459,7 +459,12 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
             "the rehearsal data must still install what its scripts and entry points require"
         );
         let skips = profiles::declared_skips(&data).unwrap();
-        assert_eq!(skips.is_empty(), profile == Profile::Windows, "{skips:?}");
+        // OCaml installs only on desktop profiles, so the wsl rehearsal has nothing to omit.
+        assert_eq!(
+            skips.is_empty(),
+            matches!(profile, Profile::Windows | Profile::Wsl),
+            "{skips:?}"
+        );
         let listed = profiles::chezmoi(root, scope.path(), &config, &home)
             .args(["managed", "--include", "scripts", "--nul-path-separator"])
             .output()
@@ -523,8 +528,11 @@ fn public_owner_sources_clone_over_https_despite_a_host_ssh_rewrite() {
 #[test]
 fn scripted_steps_are_read_from_rendered_launchers_in_order() {
     use dotfiles::setup::{Step, scripted_steps};
-    let scripts = "#!/bin/sh\nexec '/h/.local/bin/dotfiles-xtask' --root '/s' setup fleet --config '/c' --live\n#!/bin/sh\nexec cargo run -- --root '/s' setup runtime --config '/c' --live\n& 'dotctl.exe' setup keyboard\n";
-    assert_eq!(scripted_steps(scripts), [Step::Fleet, Step::Runtime]);
+    let scripts = "#!/bin/sh\nexec '/h/.local/bin/dotfiles-xtask' --root '/s' setup fleet --config '/c' --live\n#!/bin/sh\nexec cargo run -- --root '/s' setup runtime --config '/c' --live\n& (Join-Path $env:USERPROFILE '.local\\bin\\dotfiles-xtask.exe') --root $env:CHEZMOI_WORKING_TREE setup keyboard --config $env:CHEZMOI_CONFIG_FILE --live\nexec cargo run -- setup fleet\n";
+    assert_eq!(
+        scripted_steps(scripts),
+        [Step::Fleet, Step::Runtime, Step::Keyboard]
+    );
 }
 
 #[test]
@@ -550,7 +558,7 @@ fn comment_overrides_cannot_capture_whole_directories() {
 fn setup_order_rejects_a_step_that_runs_before_its_prerequisite() {
     use dotfiles::setup::{Step, ordering_violations};
     assert_eq!(
-        ordering_violations(&[Step::Runtime, Step::Mise, Step::Tools, Step::Domyjob]),
+        ordering_violations(&[Step::Mise, Step::Runtime, Step::Tools, Step::Domyjob]),
         Vec::<(Step, Step)>::new()
     );
     assert_eq!(
@@ -749,7 +757,13 @@ fn forgetting_script_runs_reruns_every_onchange_script() {
     apply();
     apply();
     assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 1);
-    xtask::profiles::forget_script_runs(&source, &state, &config, &destination).unwrap();
+    xtask::profiles::forget_script_runs(
+        &source,
+        &xtask::profiles::Store::scoped(&state),
+        &config,
+        &destination,
+    )
+    .unwrap();
     apply();
     assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 2);
 }
@@ -1019,7 +1033,13 @@ fn a_client_rewriting_a_merged_target_is_not_an_uncommitted_host_edit() {
     let merged = profiles::merged_targets(&listing.stdout).unwrap();
     assert_eq!(merged, [".client/settings.json"]);
     assert_eq!(
-        profiles::uncommitted_host_edits(&source, &state, &config, &destination).unwrap(),
+        profiles::uncommitted_host_edits(
+            &source,
+            &profiles::Store::scoped(&state),
+            &config,
+            &destination
+        )
+        .unwrap(),
         [".edited"]
     );
     assert!(
@@ -1065,7 +1085,13 @@ fn a_modify_template_that_drops_a_host_key_still_refuses_application() {
             .success()
     );
     assert_eq!(
-        profiles::uncommitted_host_edits(&source, &state, &config, &destination).unwrap(),
+        profiles::uncommitted_host_edits(
+            &source,
+            &profiles::Store::scoped(&state),
+            &config,
+            &destination
+        )
+        .unwrap(),
         Vec::<String>::new()
     );
     fs::write(
@@ -1074,7 +1100,13 @@ fn a_modify_template_that_drops_a_host_key_still_refuses_application() {
     )
     .unwrap();
     assert_eq!(
-        profiles::uncommitted_host_edits(&source, &state, &config, &destination).unwrap(),
+        profiles::uncommitted_host_edits(
+            &source,
+            &profiles::Store::scoped(&state),
+            &config,
+            &destination
+        )
+        .unwrap(),
         [".client/settings.json"]
     );
 }
@@ -1146,7 +1178,6 @@ fn the_host_edit_refusal_names_each_target_and_runnable_commands() {
         &[".edited".into()],
         Path::new("/c/config.toml"),
         Path::new("/home/user"),
-        Path::new("/s"),
     );
     let (cause, action) = message.split_once('\n').unwrap();
     assert!(
@@ -1154,8 +1185,8 @@ fn the_host_edit_refusal_names_each_target_and_runnable_commands() {
         "{message}"
     );
     assert!(
-        action.contains("`just diff '/c/config.toml' '/home/user' '/s'`")
-            && action.contains("`just apply '/c/config.toml' '/home/user' '/s' "),
+        action.contains("`just diff '/c/config.toml' '/home/user'`")
+            && action.contains("`just apply '/c/config.toml' '/home/user' "),
         "{message}"
     );
 }

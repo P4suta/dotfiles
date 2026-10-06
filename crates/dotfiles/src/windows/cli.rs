@@ -86,7 +86,27 @@ enum SetupKind {
 /// Parses the command line, runs the setup it names, and returns the exit code.
 #[must_use]
 pub fn run() -> ExitCode {
-    let cli = Cli::parse();
+    run_from(std::env::args_os())
+}
+
+/// Parses `arguments`, whose first word names the program, runs the setup they name, and returns the exit code.
+#[must_use]
+pub fn run_from<I, T>(arguments: I) -> ExitCode
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    ExitCode::from(u8::try_from(execute(arguments)).unwrap_or(1))
+}
+
+/// Parses `arguments`, whose first word names the program, runs the setup they name, and returns the process exit status.
+#[must_use]
+pub fn execute<I, T>(arguments: I) -> i32
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    let cli = Cli::parse_from(arguments);
     let result = match cli.command {
         Command::Setup { what } => match what {
             SetupKind::Tools { scoop_apps } => setup::tools::run(&scoop_apps),
@@ -160,10 +180,10 @@ pub fn run() -> ExitCode {
     };
 
     match result {
-        Ok(code) => ExitCode::from(u8::try_from(code).unwrap_or(1)),
+        Ok(code) => code,
         Err(err) => {
             eprintln!("dotctl: {err:#}");
-            ExitCode::FAILURE
+            1
         }
     }
 }

@@ -308,11 +308,23 @@ fn install_crate(
         let aside = crate::aside::move_aside(&target)?;
         moved.push((target, aside));
     }
-    let mut arguments = cargo_install_arguments(&context.source.join(relative), &root, binaries);
+    // mise runs Cargo with the toolchain the checkout pins, so no host Cargo decides the build.
+    let mut arguments = vec![
+        "-C".into(),
+        crate::without_verbatim_prefix(&context.source).into(),
+        "x".into(),
+        "--".into(),
+        "cargo".into(),
+    ];
+    arguments.extend(cargo_install_arguments(
+        &context.source.join(relative),
+        &root,
+        binaries,
+    ));
     if relative == GUARD_CRATE {
         arguments.extend(args(&["--profile", GUARD_PROFILE]));
     }
-    let result = checked(runner, Tool::Cargo, &arguments);
+    let result = checked(runner, Tool::Mise, &arguments);
     if result.is_err() {
         for (target, aside) in moved {
             crate::aside::restore(&target, aside);
@@ -361,7 +373,7 @@ pub(crate) fn execute(context: &ContextData, runner: &mut impl Runner, step: Ste
             ));
             skill_ops::skill_install::install(&context.source, &binary, &context.home)?;
         }
-        Step::Mise => mise(context, runner)?,
+        Step::Mise => mise(runner)?,
         Step::Github => github(runner)?,
         Step::Nix => nix(context, runner)?,
         Step::Tools | Step::Upgrade => tools(context, runner, matches!(step, Step::Upgrade))?,
@@ -401,6 +413,10 @@ pub(crate) fn execute(context: &ContextData, runner: &mut impl Runner, step: Ste
                 )?;
             }
         }
+        #[cfg(windows)]
+        Step::Ocomment if context.profile == Profile::Windows => {
+            crate::windows::steps::run(context, step)?;
+        }
         Step::Ocomment | Step::Domyjob | Step::Fleet => source_tool(context, runner, step)?,
         Step::MacosDefaults => macos_defaults(context, runner)?,
         Step::ForgeKeys => forge_keys(runner)?,
@@ -413,8 +429,23 @@ pub(crate) fn execute(context: &ContextData, runner: &mut impl Runner, step: Ste
         Step::RetireTmux => retire_tmux(context, runner)?,
         #[cfg(windows)]
         Step::Wezterm => crate::windows::wezterm::wezterm(&context.home, runner)?,
+        #[cfg(windows)]
+        Step::Scoop
+        | Step::Winget
+        | Step::PythonStub
+        | Step::Herdr
+        | Step::Sshd
+        | Step::Keyboard
+        | Step::StorageScout => crate::windows::steps::run(context, step)?,
         #[cfg(not(windows))]
-        Step::Wezterm => anyhow::bail!("WezTerm setup runs only on Windows"),
+        Step::Wezterm
+        | Step::Scoop
+        | Step::Winget
+        | Step::PythonStub
+        | Step::Herdr
+        | Step::Sshd
+        | Step::Keyboard
+        | Step::StorageScout => anyhow::bail!("the {} step runs only on Windows", step.name()),
     }
     Ok(())
 }
@@ -451,28 +482,13 @@ fn runtime(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     Ok(())
 }
 
-fn mise(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
-    if runner.available(Tool::Mise) {
-        return Ok(());
-    }
-    if context.profile == Profile::Windows {
-        checked(
-            runner,
-            Tool::Winget,
-            &args(&[
-                "install",
-                "--id",
-                "jdx.mise",
-                "--exact",
-                "--silent",
-                "--accept-source-agreements",
-                "--accept-package-agreements",
-            ]),
-        )?;
-        Ok(())
-    } else {
-        vendor_installer(runner, "https://mise.run", &[])
-    }
+/// The mise launcher installs the pinned release and verifies its checksum before the runtime exists, so the step only confirms it.
+fn mise(runner: &mut impl Runner) -> Result<()> {
+    ensure!(
+        runner.available(Tool::Mise),
+        "mise is missing; the mise launcher installs the pinned release, so apply again"
+    );
+    Ok(())
 }
 
 fn github(runner: &mut impl Runner) -> Result<()> {
@@ -513,7 +529,8 @@ fn nix(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
 
 fn integrations(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     if context.profile == Profile::Windows {
-        checked(runner, Tool::Dotctl, &args(&["setup", "shell"]))?;
+        #[cfg(windows)]
+        crate::windows::steps::run(context, Step::Integrations)?;
         crate::integrations::agent_integrations(runner, true);
         return Ok(());
     }
@@ -563,16 +580,11 @@ fn macos_defaults(context: &ContextData, runner: &mut impl Runner) -> Result<()>
 
 fn tools(context: &ContextData, runner: &mut impl Runner, upgrade: bool) -> Result<()> {
     if context.profile == Profile::Windows {
-        checked(
-            runner,
-            Tool::Dotctl,
-            &args(&[
-                "setup",
-                "tools",
-                "--scoop-apps",
-                &strings(&context.data, &context.platform("/scoop/apps"))?.join(","),
-            ]),
-        )?;
+        #[cfg(windows)]
+        crate::windows::steps::run(context, Step::Tools)?;
+        if upgrade {
+            execute(context, runner, Step::Integrations)?;
+        }
         return Ok(());
     }
     // Both the apply and the timer converge to the reviewed pins, so no unattended run rewrites a managed file or a lock.
@@ -585,8 +597,10 @@ fn tools(context: &ContextData, runner: &mut impl Runner, upgrade: bool) -> Resu
         optional(runner, Tool::Atuin, &["import", "auto"]);
     }
     optional(runner, Tool::Tldr, &["--update"]);
-    execute(context, runner, Step::Integrations)?;
-    if !upgrade {
+    // An apply runs the integrations step on its own, and the timer refreshes them after it upgrades.
+    if upgrade {
+        execute(context, runner, Step::Integrations)?;
+    } else {
         services(context, runner)?;
     }
     Ok(())

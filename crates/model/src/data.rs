@@ -14,6 +14,8 @@ use std::path::Path;
 pub struct Data {
     pub coderabbit: Option<Coderabbit>,
     pub herdr_agent: Option<HerdrAgent>,
+    /// The mise release that every host installs before any other step.
+    pub mise: Option<MiseRelease>,
     pub ocaml: Option<Ocaml>,
     pub palette: Option<BTreeMap<String, String>>,
     pub platforms: Option<Platforms>,
@@ -23,6 +25,16 @@ pub struct Data {
     pub targets: Option<BTreeMap<String, String>>,
     /// Retired targets that the profiles of the named set remove.
     pub retired: Option<BTreeMap<String, String>>,
+    /// Setup launchers that only the profiles of the named set run, which `just gen` writes from the setup steps.
+    pub scripts: Option<BTreeMap<String, String>>,
+}
+
+/// A mise release and the SHA-256 of its asset for each platform, such as `linux-x64` or `windows-x64`.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MiseRelease {
+    pub version: Option<String>,
+    pub sha256: Option<BTreeMap<String, String>>,
 }
 
 /// The pinned `CodeRabbit` command line and its artifact for each host platform.

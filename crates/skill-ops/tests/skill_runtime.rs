@@ -102,7 +102,7 @@ fn build_and_dependency_outputs_are_outside_chezmoi_source_state() -> Result<()>
         source.join(".chezmoitemplates/partials/host-state-ignore"),
     )?;
     fs::create_dir_all(source.join(".chezmoidata"))?;
-    for data in ["profiles.toml", "targets.toml"] {
+    for data in ["profiles.toml", "targets.toml", "scripts.toml"] {
         fs::copy(
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../home/.chezmoidata")

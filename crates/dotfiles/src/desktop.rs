@@ -18,10 +18,10 @@ pub(crate) fn refresh(context: &ContextData, runner: &mut impl Runner) -> Result
     match context.profile {
         Profile::Mac => mac(context, runner),
         Profile::Linux => linux(context, runner),
-        Profile::Windows => {
-            checked(runner, Tool::Dotctl, &args(&["setup", "shell"]))?;
-            Ok(())
-        }
+        #[cfg(windows)]
+        Profile::Windows => crate::windows::steps::run(context, crate::setup::Step::Desktop),
+        #[cfg(not(windows))]
+        Profile::Windows => anyhow::bail!("the Windows desktop refresh runs only on Windows"),
         Profile::Wsl => Ok(()),
     }
 }

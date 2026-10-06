@@ -1,0 +1,4 @@
+$ErrorActionPreference = 'Stop'
+{{ includeTemplate "partials/inputs" (list) }}
+& (Join-Path $env:USERPROFILE '.local\bin\dotfiles-xtask.exe') --root $env:CHEZMOI_WORKING_TREE setup github --config $env:CHEZMOI_CONFIG_FILE --live
+exit $LASTEXITCODE

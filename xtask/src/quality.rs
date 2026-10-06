@@ -277,18 +277,26 @@ fn shell_file(
     let path = file.to_str().context("invalid fixture path")?;
     run(posix_shell()?, directory, "sh", &["-n", path])?;
     command(directory, Tool::Shellcheck, &["--severity=style", path])?;
-    if script {
+    if script && !crate::launchers::bootstraps(name) {
         ensure!(
-            contents
-                .lines()
-                .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
-                .count()
-                == 1
-                && contents.lines().any(|line| line.starts_with("exec ")),
+            single_exec(contents),
             "procedural shell setup must move to Rust: {name}"
         );
     }
     Ok(())
+}
+
+/// Whether a shell launcher holds only one `exec`, after an optional `set -eu`.
+#[must_use]
+pub fn single_exec(contents: &str) -> bool {
+    let mut lines = contents
+        .lines()
+        .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+        .peekable();
+    if lines.peek() == Some(&"set -eu") {
+        lines.next();
+    }
+    lines.next().is_some_and(|line| line.starts_with("exec ")) && lines.next().is_none()
 }
 
 fn powershell_file(
@@ -298,7 +306,7 @@ fn powershell_file(
     contents: &str,
     script: bool,
 ) -> Result<()> {
-    if script {
+    if script && !crate::launchers::bootstraps(name) {
         let mut lines = Vec::new();
         let mut continued = String::new();
         for line in contents.lines().map(str::trim) {

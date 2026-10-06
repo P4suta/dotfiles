@@ -163,11 +163,59 @@ jobs:
         if: contains(needs.classify.outputs.gates, 'profiles')
         run: mise x -- just rehearse --disposable-host
 
+  # The wsl profile rehearses inside a fresh WSL distribution on a disposable Windows host.
+  rehearsal-wsl:
+    name: rehearsal (wsl)
+    needs: classify
+    if: ${{ !cancelled() }}
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      # WSL receives only the variables that WSLENV names.
+      WSLENV: CI:MISE_DISABLE_TOOLS:MISE_PARANOID
+    steps:
+      - name: Refuse to pass without a classification
+        if: needs.classify.result != 'success'
+        shell: bash
+        run: |
+          echo "the classify job did not succeed, so no gate was selected" >&2
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: contains(needs.classify.outputs.gates, 'profiles')
+        with:
+          persist-credentials: false
+      - uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
+        if: contains(needs.classify.outputs.gates, 'profiles')
+        with:
+          distribution: Ubuntu-24.04
+          additional-packages: build-essential ca-certificates curl git
+      - name: Install the pinned mise release in WSL
+        if: contains(needs.classify.outputs.gates, 'profiles')
+        shell: wsl-bash {0}
+        run: |
+          set -eu
+          version=$(sed -n '/^\[mise\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)
+          digest=$(sed -n 's/^linux-x64 = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)
+          mkdir -p "$HOME/.local/bin"
+          curl --fail --location --silent --show-error --output "$HOME/.local/bin/mise" \
+            "https://github.com/jdx/mise/releases/download/v$version/mise-v$version-linux-x64"
+          echo "$digest  $HOME/.local/bin/mise" | sha256sum --check --strict
+          chmod +x "$HOME/.local/bin/mise"
+      - name: Apply, reprovision, and reapply the native profile in this disposable distribution
+        if: contains(needs.classify.outputs.gates, 'profiles')
+        shell: wsl-bash {0}
+        run: |
+          set -eu
+          export PATH="$HOME/.local/bin:$PATH"
+          mise trust "$PWD/mise.toml"
+          mise install
+          mise x -- just rehearse --disposable-host
+
   # The one status the ruleset requires.
   # A job that the change skips counts as passed, and a failed or cancelled one fails this job.
   required:
     name: required
-    needs: [classify, check, proofs, minimum-git, rehearsal]
+    needs: [classify, check, proofs, minimum-git, rehearsal, rehearsal-wsl]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -1,0 +1,4 @@
+$ErrorActionPreference = 'Stop'
+{{ includeTemplate "partials/inputs" (list (includeTemplate "native/mise/windows.toml.tmpl" .) .platforms.windows.tools .platforms.windows.scoop.apps) }}
+& (Join-Path $env:USERPROFILE '.local\bin\dotfiles-xtask.exe') --root $env:CHEZMOI_WORKING_TREE setup tools --config $env:CHEZMOI_CONFIG_FILE --live
+exit $LASTEXITCODE

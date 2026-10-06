@@ -815,7 +815,20 @@ mod credential_boundary {
 
     #[test]
     fn install_tools_reads_the_token_only_as_a_command_prefix() {
-        let text = read(".chezmoiscripts/unix/run_onchange_after_10-install-tools.sh.tmpl");
+        let launchers = std::fs::read_dir(source().join(".chezmoiscripts/unix"))
+            .expect("the unix launchers")
+            .map(|entry| {
+                entry
+                    .expect("a launcher")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            });
+        let tools = launchers
+            .into_iter()
+            .find(|name| name.ends_with("-tools.sh.tmpl"))
+            .expect("the tools launcher");
+        let text = read(&format!(".chezmoiscripts/unix/{tools}"));
         for line in text.lines().filter(|l| l.contains("gh auth token")) {
             let t = line.trim();
             assert!(

@@ -1,7 +1,20 @@
-# The tool versions that mise installs on each profile.
+# The tool versions that mise installs on each profile, and the mise release itself.
 # Renovate proposes each update as a pull request, after the release has aged, and no host rewrites these pins on its own.
 # A `renovate:` comment names where Renovate looks up the next version of the pin below it.
 # A channel such as `stable` or `temurin-25` follows its own releases and carries no comment.
+
+# The mise launcher installs this release before any other step and refuses an asset whose SHA-256 differs.
+# A version update takes every checksum from the release's SHASUMS256.txt.
+[mise]
+# renovate: datasource=github-releases depName=jdx/mise extractVersion=^v(?<version>.+)$
+version = "2026.10.0"
+
+[mise.sha256]
+linux-arm64 = "4b8cacffac83e8493fc5d1eef25f6365edba73ccbed5a1f3987b7cb3f5079656"
+linux-x64 = "57ced973f968b8fbab07aa8e32bd7077d4a357e200a22356d98963c723c6de0a"
+macos-arm64 = "8d2007efdae0c2b64e3955257533e6ec17197bc2fdcbc5dd8f6847f92881deea"
+macos-x64 = "815eb7872e453dcd30ed5e2e478978d2947e34106b6cd4f9cc4d4e51f7761332"
+windows-x64 = "5dce09e85ef62afc35d988e2c2b8aef39b04bdfe8d19d206d05cedb6db5076a0"
 
 [platforms.linux.tool_versions]
 java = "temurin-25"

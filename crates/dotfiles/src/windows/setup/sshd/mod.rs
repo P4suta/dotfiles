@@ -45,13 +45,21 @@ pub fn run(options: &Options) -> Result<i32> {
 ///
 /// No administrator-token detection: `Start-Process -Verb RunAs` from an elevated process raises no prompt.
 fn elevate(options: &Options) -> Result<i32> {
-    let exe = std::env::current_exe().context("locating dotctl")?;
+    let exe = std::env::current_exe().context("locating the running executable")?;
+    // The runtime reaches the dotctl command line through its `windows` subcommand.
+    let prefix: &[&str] = if exe.file_stem().is_some_and(|stem| stem == "dotctl") {
+        &[]
+    } else {
+        &["windows"]
+    };
     let log = std::env::temp_dir().join("dotctl-sshd.log");
+    let mut child_arguments: Vec<String> = prefix.iter().map(|word| (*word).to_owned()).collect();
+    child_arguments.extend(arguments(options));
     let manifest = proc::write_temp(
         &json!({
             "exe": exe.to_string_lossy(),
             "log": log.to_string_lossy(),
-            "arguments": arguments(options),
+            "arguments": child_arguments,
         })
         .to_string(),
         ".json",
@@ -97,7 +105,7 @@ fn elevate(options: &Options) -> Result<i32> {
             }
         }
         eprintln!(
-            "Re-run it with `dotctl setup sshd` once the cause is fixed; log: {}",
+            "Re-run the sshd setup step once the cause is fixed; log: {}",
             log.display()
         );
     }

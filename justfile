@@ -51,14 +51,14 @@ hosts *args: trust
 next *flags: trust
     mise x -- cargo xtask next {{flags}}
 
-diff config destination state: trust
-    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- profile diff --config {{quote(config)}} --destination {{quote(destination)}} --state {{quote(state)}}
+diff config destination: trust
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- profile diff --config {{quote(config)}} --destination {{quote(destination)}}
 
-apply config destination state backup: trust
-    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- profile apply --config {{quote(config)}} --destination {{quote(destination)}} --state {{quote(state)}} --backup {{quote(backup)}} --live
+apply config destination backup: trust
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- profile apply --config {{quote(config)}} --destination {{quote(destination)}} --backup {{quote(backup)}} --live
 
-verify config destination state: trust
-    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- profile verify --config {{quote(config)}} --destination {{quote(destination)}} --state {{quote(state)}}
+verify config destination: trust
+    mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- profile verify --config {{quote(config)}} --destination {{quote(destination)}}
 
 refresh config: trust
     mise x -- cargo run --locked --package dotfiles --bin dotfiles-xtask -- refresh --config {{quote(config)}} --live

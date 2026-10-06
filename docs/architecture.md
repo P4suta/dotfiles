@@ -22,8 +22,11 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
    `home/.chezmoitemplates/partials/` holds the shared partials, and the profile gate refuses any other file there, a duplicate native body, and an unused template.
 5. `targets.toml` and `retired.toml` in `home/.chezmoidata/` name, through the sets of `profiles.toml`, the profiles that receive each restricted target and that remove each retired one.
    `home/.chezmoiignore` and `home/.chezmoiremove` render from them, and `just gen` writes [the target reference](reference/targets.md).
-6. `home/.chezmoiscripts/unix/` and `home/.chezmoiscripts/windows/` hold the setup scripts.
-   Each launcher passes `.chezmoi.workingTree` and the configuration file to `dotfiles-xtask setup STEP`, and each `run_onchange_` script hashes only its own inputs through the `inputs` partial.
+6. `home/.chezmoiscripts/unix/` and `home/.chezmoiscripts/windows/` hold the setup launchers, which `just gen` writes from the steps in `crates/platform/src/step.rs`.
+   Each step declares its profiles, the steps it relies on, when it reruns, and its inputs, and each launcher's name carries its position in the run order.
+   The first launcher installs the pinned mise after it checks the release's SHA-256, and the second builds the runtime from the checkout with the toolchain mise pins.
+   Every other launcher passes `CHEZMOI_WORKING_TREE` and `CHEZMOI_CONFIG_FILE` to `dotfiles-xtask setup STEP`, and each `run_onchange_` launcher hashes only its own inputs through the `inputs` partial.
+   `home/.chezmoidata/scripts.toml` restricts each launcher to its profiles.
 7. `just apply` runs as a transaction that restores every target when the apply or its verification fails.
 
 ## Hook chain

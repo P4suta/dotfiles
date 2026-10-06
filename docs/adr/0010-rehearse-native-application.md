@@ -19,12 +19,12 @@ The defects share five mechanisms:
 
 ## Decision
 
-Required CI rehearses the native apply on disposable Linux, macOS, and Windows hosts.
+Required CI rehearses the native apply on disposable Linux, macOS, and Windows hosts, and in a fresh WSL distribution on a Windows host.
 `xtask rehearse` writes an anonymous machine-local configuration and seeds existing review history and helper binaries from another cargo package.
 It then applies the native profile with its scripts and verifies it, three times.
 Before the second apply, it forgets which scripts ran, so every script runs again on the host it provisioned with services loaded and running.
-The third apply changes nothing.
-It refuses to run unless CI reports a disposable host and the caller passes `--disposable-host`.
+The third apply changes nothing, and the rehearsal refuses it when a launcher whose inputs stayed the same would run again.
+It refuses to run unless the caller passes `--disposable-host` and either CI reports a disposable host or `DOTFILES_DISPOSABLE_HOST=1` marks a local host the owner gave up.
 Provisioning lists keep one representative entry and every entry that a later step invokes.
 The apply omits a script that the host can't run only through a `setup.skip` entry with the script name and a reason, and prints those entries before any change.
 

@@ -110,8 +110,9 @@ enum Action {
         destination: PathBuf,
         #[arg(long)]
         live: bool,
+        /// A state directory apart from chezmoi's default database beside the configuration.
         #[arg(long)]
-        state: PathBuf,
+        state: Option<PathBuf>,
         #[arg(long)]
         backup: Option<PathBuf>,
     },
@@ -119,6 +120,12 @@ enum Action {
     Hosts {
         #[command(subcommand)]
         action: dotfiles::hosts::Action,
+    },
+    /// The Windows setup command line, which the elevated sshd setup reruns.
+    #[command(hide = true)]
+    Windows {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        arguments: Vec<OsString>,
     },
 }
 
@@ -188,12 +195,26 @@ fn run() -> Result<()> {
             &config,
             &destination,
             live,
-            &state,
+            state.as_deref(),
             backup.as_deref(),
         )?,
         Action::Hosts { action } => dotfiles::hosts::run(action)?,
+        Action::Windows { arguments } => windows(arguments)?,
     }
     Ok(())
+}
+
+/// Runs the Windows setup command line and exits with its status.
+#[cfg(windows)]
+fn windows(arguments: Vec<OsString>) -> Result<()> {
+    std::process::exit(dotfiles::windows::cli::execute(
+        std::iter::once(OsString::from("dotfiles-xtask windows")).chain(arguments),
+    ))
+}
+
+#[cfg(not(windows))]
+fn windows(_: Vec<OsString>) -> Result<()> {
+    anyhow::bail!("the Windows setup runs only on Windows")
 }
 
 /// The health gate, which at session start prints its refusal instead of failing.

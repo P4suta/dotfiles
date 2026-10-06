@@ -41,7 +41,6 @@ pub enum Tool {
     Docker,
     Domyjob,
     Doppler,
-    Dotctl,
     Dotguard,
     Env,
     Erl,
@@ -109,7 +108,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 87] = [
+    pub const ALL: [Self; 86] = [
         Self::Actionlint,
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
@@ -132,7 +131,6 @@ impl Tool {
         Self::Docker,
         Self::Domyjob,
         Self::Doppler,
-        Self::Dotctl,
         Self::Dotguard,
         Self::Env,
         Self::Erl,
@@ -220,7 +218,6 @@ impl Tool {
             Self::Defaults => "defaults",
             Self::DesktopFileValidate => "desktop-file-validate",
             Self::Doppler => "doppler",
-            Self::Dotctl => "dotctl",
             Self::Dotguard => "dotguard",
             Self::FcCache => "fc-cache",
             Self::Fcitx5 => "fcitx5",
@@ -351,7 +348,7 @@ impl Tool {
             | Self::Tldr
             | Self::Vivid
             | Self::Zoxide => Provision::Setup(Step::Tools),
-            Self::Dotctl | Self::HerdrAgent => Provision::Setup(Step::Runtime),
+            Self::HerdrAgent => Provision::Setup(Step::Runtime),
             Self::Claude => Provision::Setup(Step::Claude),
             Self::Domyjob => Provision::Setup(Step::Domyjob),
             Self::Dotguard => Provision::Setup(Step::Guard),

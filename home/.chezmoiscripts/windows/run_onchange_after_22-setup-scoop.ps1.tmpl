@@ -1,8 +1,0 @@
-$ErrorActionPreference = 'Stop'
-& {{ includeTemplate "partials/ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup scoop `
-    --installer-commit {{ includeTemplate "partials/ps_quote" .platforms.windows.scoop.installer_commit }} `
-    --installer-sha256 {{ includeTemplate "partials/ps_quote" .platforms.windows.scoop.installer_sha256 }} `
-    --buckets {{ includeTemplate "partials/ps_quote" (join "," .platforms.windows.scoop.buckets) }} `
-    --apps {{ includeTemplate "partials/ps_quote" (join "," .platforms.windows.scoop.apps) }} `
-    --winget-duplicates {{ includeTemplate "partials/ps_quote" (join "," .platforms.windows.scoop.winget_duplicates) }}
-exit $LASTEXITCODE

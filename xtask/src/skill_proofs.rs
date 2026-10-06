@@ -327,7 +327,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 29] = [
+pub const RULES: [Rules; 30] = [
     Rules {
         source: "crates/skill-ops/src/skill_rules.rs",
         counterexamples: "#[kani::proof]
@@ -1076,6 +1076,24 @@ fn reject_sweeping_another_binary() {
         rejected: &[
             "reject_sweeping_the_installed_binary",
             "reject_sweeping_another_binary",
+        ],
+    },
+    Rules {
+        source: "crates/platform/src/order_rules.rs",
+        counterexamples: "use production::{order, respects};
+#[kani::proof]
+fn reject_running_a_step_before_what_it_relies_on() {
+    assert!(respects(&[0b10, 0], &[0, 1]));
+}
+#[kani::proof]
+fn reject_ordering_a_cycle() {
+    let mut sequence = [0usize; 2];
+    assert!(order(&[0b10, 0b01], &mut sequence));
+}
+",
+        rejected: &[
+            "reject_running_a_step_before_what_it_relies_on",
+            "reject_ordering_a_cycle",
         ],
     },
     Rules {

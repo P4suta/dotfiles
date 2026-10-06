@@ -1,0 +1,6 @@
+$ErrorActionPreference = 'Stop'
+$mise = Join-Path $env:USERPROFILE '.local\bin\mise.exe'
+& $mise trust --quiet (Join-Path $env:CHEZMOI_WORKING_TREE 'mise.toml')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $mise -C $env:CHEZMOI_WORKING_TREE x -- cargo run --locked --manifest-path (Join-Path $env:CHEZMOI_WORKING_TREE 'crates\dotfiles\Cargo.toml') -- --root $env:CHEZMOI_WORKING_TREE setup runtime --config $env:CHEZMOI_CONFIG_FILE --live
+exit $LASTEXITCODE

@@ -1,3 +1,0 @@
-#!/bin/sh
-{{ includeTemplate "partials/inputs" (list (index .platforms.mac.tool_versions "haskell-language-server")) }}
-exec {{ includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles-xtask") }} --root {{ includeTemplate "partials/sh_quote" .chezmoi.workingTree }} setup haskell --config {{ includeTemplate "partials/sh_quote" .chezmoi.configFile }} --live

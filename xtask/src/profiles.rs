@@ -4,10 +4,10 @@ use crate::profile_rules::Profile;
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 pub use dotfiles::profiles::{
-    NativeAction, SkippedScript, chezmoi, configured_profile, declared_skips, externally_changed,
-    forget_script_runs, host_edit_refusal, keeps_host_keys, managed_paths, merged_targets,
-    native_action_arguments, native_profile, operate, output, script_order, source_data,
-    uncommitted_host_edits,
+    NativeAction, SkippedScript, Store, chezmoi, chezmoi_with, configured_profile, declared_skips,
+    externally_changed, forget_script_runs, host_edit_refusal, keeps_host_keys, managed_paths,
+    merged_targets, native_action_arguments, native_profile, operate, output,
+    pending_onchange_scripts, script_order, source_data, uncommitted_host_edits,
 };
 use serde_json::{Value, json};
 use std::fmt::Write as _;
@@ -418,7 +418,7 @@ pub fn manifest_findings(data: &Value) -> Vec<String> {
             ));
         }
     }
-    for listing in ["targets", "retired"] {
+    for listing in ["targets", "scripts", "retired"] {
         for (target, set) in data[listing].as_object().into_iter().flatten() {
             if set
                 .as_str()
@@ -458,6 +458,10 @@ pub fn targets_reference(data: &Value) -> String {
         }
     };
     rows(&mut text, "targets");
+    text.push_str(
+        "\n## Setup launchers\n\n`just gen` writes each launcher from its setup step, and only the profiles of its set run it.\n\n| Target | Set | Profiles |\n| --- | --- | --- |\n",
+    );
+    rows(&mut text, "scripts");
     text.push_str(
         "\n## Retired targets\n\nEach profile in the set removes the target when it applies.\n\n| Target | Set | Profiles |\n| --- | --- | --- |\n",
     );

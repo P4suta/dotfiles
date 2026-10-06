@@ -1,26 +1,11 @@
 # Each target here reaches only the profiles of its set in profiles.toml.
 # Every other target reaches every profile.
 # A directory entry keeps other profiles from gaining an empty tree.
+# scripts.toml restricts the setup launchers inside each directory, from the setup steps.
 
 [targets]
 ".bashrc" = "unix"
 ".chezmoiscripts/unix/**" = "unix"
-".chezmoiscripts/unix/05-brew-bundle.sh" = "mac"
-".chezmoiscripts/unix/configure-fcitx5.sh" = "linux"
-".chezmoiscripts/unix/import-forge-signing-keys.sh" = "mac"
-".chezmoiscripts/unix/install-claude-code.sh" = "mac"
-".chezmoiscripts/unix/install-domyjob.sh" = "mac"
-".chezmoiscripts/unix/install-fleet.sh" = "mac"
-".chezmoiscripts/unix/install-nix-profile.sh" = "linux"
-".chezmoiscripts/unix/install-ocomment.sh" = "linux"
-".chezmoiscripts/unix/macos-defaults.sh" = "mac"
-".chezmoiscripts/unix/refresh-desktop.sh" = "desktop"
-".chezmoiscripts/unix/refresh-integrations.sh" = "desktop"
-".chezmoiscripts/unix/retire-tmux.sh" = "linux"
-".chezmoiscripts/unix/setup-guard.sh" = "mac"
-".chezmoiscripts/unix/setup-haskell.sh" = "mac"
-".chezmoiscripts/unix/setup-ocaml.sh" = "desktop"
-".chezmoiscripts/unix/setup-racket.sh" = "mac"
 ".chezmoiscripts/windows/**" = "windows"
 ".claude/bashenv.sh" = "unix"
 ".claude/shims" = "unix"

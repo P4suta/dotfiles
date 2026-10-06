@@ -1,4 +1,0 @@
-{{ includeTemplate "partials/inputs" (list (includeTemplate "native/storage-scout/windows.toml.tmpl" .)) }}
-$ErrorActionPreference = 'Stop'
-& {{ includeTemplate "partials/ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup storage-scout
-exit $LASTEXITCODE

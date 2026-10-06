@@ -2,6 +2,7 @@
 //! With the default tools feature it adds the tool registry, the setup steps, the process runner, and the build stamp of the installed tools.
 
 pub mod home;
+pub mod order_rules;
 pub mod process;
 pub mod refusal;
 

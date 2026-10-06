@@ -1,3 +1,0 @@
-$ErrorActionPreference = 'Stop'
-& {{ includeTemplate "partials/ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles-xtask.exe") }} --root {{ includeTemplate "partials/ps_quote" .chezmoi.workingTree }} setup adapters --config {{ includeTemplate "partials/ps_quote" (.chezmoi.configFile) }} --live
-exit $LASTEXITCODE

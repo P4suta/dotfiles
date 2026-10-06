@@ -14,10 +14,12 @@ Supply a public SSH signing key from 1Password, which keeps the private keys.
 ```text
 just check
 just proofs
-just diff CONFIG_ABSOLUTE_PATH NATIVE_HOME_ABSOLUTE_PATH PRIVATE_STATE_DIRECTORY
-just apply CONFIG_ABSOLUTE_PATH NATIVE_HOME_ABSOLUTE_PATH PRIVATE_STATE_DIRECTORY FRESH_BACKUP_DIRECTORY
+just diff CONFIG_ABSOLUTE_PATH NATIVE_HOME_ABSOLUTE_PATH
+just apply CONFIG_ABSOLUTE_PATH NATIVE_HOME_ABSOLUTE_PATH FRESH_BACKUP_DIRECTORY
 just refresh CONFIG_ABSOLUTE_PATH
 ```
+
+`just apply` keeps chezmoi's state database beside the configuration, so a plain `chezmoi apply` reads the same record of the setup steps that ran.
 
 Doppler holds API secrets.
 Authenticate the Doppler CLI locally, and set its project, config, and per-agent secret names in the private configuration.

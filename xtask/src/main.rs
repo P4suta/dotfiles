@@ -193,6 +193,7 @@ fn check(root: &Path, gates: Gates) -> Result<()> {
     }
     if gates.contains(Gate::Profiles) {
         xtask::profiles::source_data(root)?;
+        xtask::launchers::generate(root, true)?;
         xtask::profiles::targets_page(root, true)?;
         xtask::quality::chezmoi_version(root)?;
         let templates = xtask::quality::template_findings(root)?;
@@ -229,6 +230,7 @@ fn run() -> Result<()> {
         Action::Gen { check } => {
             xtask::adr::generate(&cli.root, check)?;
             xtask::profiles::data_schema(&cli.root, check)?;
+            xtask::launchers::generate(&cli.root, check)?;
             xtask::profiles::targets_page(&cli.root, check)?;
         }
         Action::ProfileSnapshots { write } => {

@@ -1,0 +1,3 @@
+$ErrorActionPreference = 'Stop'
+& (Join-Path $env:USERPROFILE '.local\bin\dotfiles-xtask.exe') --root $env:CHEZMOI_WORKING_TREE setup adapters --config $env:CHEZMOI_CONFIG_FILE --live
+exit $LASTEXITCODE

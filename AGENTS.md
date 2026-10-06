@@ -8,7 +8,7 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | Path | Holds |
 | --- | --- |
 | `home/` | The chezmoi source state that `.chezmoiroot` names. |
-| `home/.chezmoiscripts/` | The setup launchers, one directory per OS family. |
+| `home/.chezmoiscripts/` | The setup launchers that `just gen` writes, one directory per OS family. |
 | `home/.chezmoitemplates/` | Shared partials under `partials/` and per-profile bodies under `native/`. |
 | `xtask/` | The development tasks behind `cargo xtask` and the just recipes, which no hook or launcher runs. |
 | `crates/platform/` | The home, the managed `PATH`, the one process constructor, the tool registry, the setup steps, and the build stamp. |
@@ -38,7 +38,7 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | A file that differs per profile | an inline condition at its path, or `home/.chezmoitemplates/native/<topic>/<profile>` selected from there |
 | Which profiles receive a target | one line in `home/.chezmoidata/targets.toml`, naming a set of `profiles.toml`, then `just gen` |
 | A target to retire from hosts | one line in `home/.chezmoidata/retired.toml`, then `just gen` |
-| A setup step | `home/.chezmoiscripts/`, `crates/platform/src/step.rs`, and `crates/dotfiles/src/setup.rs` |
+| A setup step | its declaration in `crates/platform/src/step.rs` and its work in `crates/dotfiles/src/setup.rs`, then `just gen` |
 | Shared data and tool versions | `home/.chezmoidata/`, typed in `crates/model/src/data.rs`, `mise.toml`, and `mise.lock` |
 | A gate | `xtask/src/` with its tests in `xtask/tests/`, or the crate of the tool that runs it |
 | A rule a gate decides | a `*_rules.rs` module beside its caller and its entry in `xtask/src/skill_proofs.rs` |

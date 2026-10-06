@@ -42,18 +42,65 @@ pub fn output(command: &mut Command, phase: &str) -> Result<Output> {
     Ok(result)
 }
 
+/// Where chezmoi keeps the state database and the cache of one profile.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Store {
+    /// The directory that holds the database and the apply lock.
+    pub directory: PathBuf,
+    pub database: PathBuf,
+    /// The cache, or `None` for chezmoi's default.
+    pub cache: Option<PathBuf>,
+}
+
+impl Store {
+    /// A database and a cache under `directory`, which keep a gate or a rehearsal apart from the host's own record.
+    #[must_use]
+    pub fn scoped(directory: &Path) -> Self {
+        Self {
+            directory: directory.to_path_buf(),
+            database: directory.join("state.boltdb"),
+            cache: Some(directory.join("cache")),
+        }
+    }
+
+    /// chezmoi's default database beside the machine-local configuration.
+    /// `just apply` and a plain `chezmoi apply` then share one record of the scripts that ran.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `config` names no directory.
+    pub fn beside(config: &Path) -> Result<Self> {
+        let directory = config
+            .parent()
+            .context("the machine-local configuration names no directory")?;
+        Ok(Self {
+            directory: directory.to_path_buf(),
+            database: directory.join("chezmoistate.boltdb"),
+            cache: None,
+        })
+    }
+}
+
 #[must_use]
 pub fn chezmoi(root: &Path, scope: &Path, config: &Path, destination: &Path) -> Command {
+    chezmoi_with(root, &Store::scoped(scope), config, destination)
+}
+
+/// chezmoi on `destination` with `config`, reading and writing its state in `store`.
+#[must_use]
+pub fn chezmoi_with(root: &Path, store: &Store, config: &Path, destination: &Path) -> Command {
     let mut command = Tool::chezmoi_in(root);
     command
         .arg("--config")
         .arg(config)
         .arg("--destination")
-        .arg(destination)
-        .arg("--cache")
-        .arg(scope.join("cache"))
+        .arg(destination);
+    if let Some(cache) = &store.cache {
+        command.arg("--cache").arg(cache);
+    }
+    command
         .arg("--persistent-state")
-        .arg(scope.join("state.boltdb"))
+        .arg(&store.database)
         .args(["--refresh-externals=never", "--no-tty"]);
     command
 }
@@ -139,17 +186,17 @@ pub fn keeps_host_keys(target: &str, current: &str, rendered: &str) -> Result<bo
 /// Returns an error when it can't compare a changed `modify_` target with its rendering.
 pub fn uncommitted_host_edits(
     root: &Path,
-    state: &Path,
+    store: &Store,
     config: &Path,
     destination: &Path,
 ) -> Result<Vec<String>> {
     let status = output(
-        chezmoi(root, state, config, destination).args(["status", "--exclude", "scripts"]),
+        chezmoi_with(root, store, config, destination).args(["status", "--exclude", "scripts"]),
         "read target status",
     )?;
     let merged = merged_targets(
         &output(
-            chezmoi(root, state, config, destination).args([
+            chezmoi_with(root, store, config, destination).args([
                 "managed",
                 "--include",
                 "files",
@@ -168,7 +215,7 @@ pub fn uncommitted_host_edits(
         let keeps = is_merged && {
             let path = destination.join(&target);
             let rendered = output(
-                chezmoi(root, state, config, destination)
+                chezmoi_with(root, store, config, destination)
                     .arg("cat")
                     .arg(&path),
                 &format!("render {target}"),
@@ -193,18 +240,8 @@ pub fn uncommitted_host_edits(
 
 /// The refusal for targets changed outside chezmoi that the next apply would overwrite.
 #[must_use]
-pub fn host_edit_refusal(
-    changed: &[String],
-    config: &Path,
-    destination: &Path,
-    state: &Path,
-) -> String {
-    let paths = format!(
-        "'{}' '{}' '{}'",
-        config.display(),
-        destination.display(),
-        state.display()
-    );
+pub fn host_edit_refusal(changed: &[String], config: &Path, destination: &Path) -> String {
+    let paths = format!("'{}' '{}'", config.display(), destination.display());
     format!(
         "{} managed files changed outside chezmoi since the last application, and nothing has been changed: {changed:?}\nRun `just diff {paths}` to see each change, carry it into the source or undo it on the host, then run `just apply {paths} <fresh backup directory>`",
         changed.len()
@@ -218,19 +255,19 @@ pub fn host_edit_refusal(
 /// Returns an error when chezmoi fails to dump or delete its state, or the dump doesn't parse as JSON.
 pub fn forget_script_runs(
     root: &Path,
-    scope: &Path,
+    store: &Store,
     config: &Path,
     destination: &Path,
 ) -> Result<()> {
     let dump = output(
-        chezmoi(root, scope, config, destination).args(["state", "dump", "--format", "json"]),
+        chezmoi_with(root, store, config, destination).args(["state", "dump", "--format", "json"]),
         "read chezmoi state",
     )?;
     let buckets: Value = serde_json::from_slice(&dump.stdout)?;
     for bucket in ["entryState", "scriptState"] {
         if buckets.get(bucket).is_some() {
             output(
-                chezmoi(root, scope, config, destination).args([
+                chezmoi_with(root, store, config, destination).args([
                     "state",
                     "delete-bucket",
                     &format!("--bucket={bucket}"),
@@ -240,6 +277,52 @@ pub fn forget_script_runs(
         }
     }
     Ok(())
+}
+
+/// The script targets the next apply would run that rerun only when their inputs change, which a repeated apply must leave none of.
+///
+/// # Errors
+///
+/// Returns an error when a chezmoi command fails or its listing doesn't parse.
+pub fn pending_onchange_scripts(
+    root: &Path,
+    store: &Store,
+    config: &Path,
+    destination: &Path,
+) -> Result<Vec<String>> {
+    let status = output(
+        chezmoi_with(root, store, config, destination).args(["status", "--include", "scripts"]),
+        "read script status",
+    )?;
+    let listing: serde_json::Map<String, Value> = serde_json::from_slice(
+        &output(
+            chezmoi_with(root, store, config, destination).args([
+                "managed",
+                "--include",
+                "scripts",
+                "--path-style",
+                "all",
+                "--format",
+                "json",
+            ]),
+            "list scripts",
+        )?
+        .stdout,
+    )?;
+    Ok(String::from_utf8_lossy(&status.stdout)
+        .lines()
+        .filter(|line| line.len() > 3)
+        .map(|line| line[3..].to_owned())
+        .filter(|target| {
+            listing
+                .get(target)
+                .and_then(|entry| entry["sourceRelative"].as_str())
+                .and_then(|source| source.rsplit('/').next())
+                .is_some_and(|name| {
+                    name.starts_with("run_onchange_") || name.starts_with("run_once_")
+                })
+        })
+        .collect())
 }
 
 #[must_use]
@@ -348,7 +431,7 @@ pub fn declared_skips(data: &Value) -> Result<Vec<SkippedScript>> {
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
                 && (crate::has_extension(&skip.script, "sh")
                     || crate::has_extension(&skip.script, "ps1")),
-            "setup.skip names a script target such as 10-install-tools.sh: {}",
+            "setup.skip names a setup launcher by its step and extension, such as ocaml.sh: {}",
             skip.script
         );
         ensure!(
@@ -382,20 +465,25 @@ pub fn configured_profile(data: &Value) -> Result<Profile> {
 /// Returns an error when the configuration doesn't exist or lives inside the public source, or when it receives a relative path.
 /// It also fails when the configuration names an unknown profile or invalid skips.
 /// Returns an error when a live apply lacks `--live`, this host's native profile, its native home, or a backup directory, or when chezmoi fails.
+/// Without `state`, chezmoi keeps its default database beside the configuration.
 pub fn operate(
     root: &Path,
     action: NativeAction,
     config: &Path,
     destination: &Path,
     live: bool,
-    state: &Path,
+    state: Option<&Path>,
     backup: Option<&Path>,
 ) -> Result<()> {
     ensure!(config.is_file(), "machine-local config is missing");
     ensure!(
-        config.is_absolute() && destination.is_absolute() && state.is_absolute(),
+        config.is_absolute() && destination.is_absolute() && state.is_none_or(Path::is_absolute),
         "native paths must be explicit absolute paths"
     );
+    let store = match state {
+        Some(state) => Store::scoped(state),
+        None => Store::beside(config)?,
+    };
     ensure!(
         !crate::canonical(config)?.starts_with(root),
         "machine-local config belongs outside the public source"
@@ -436,29 +524,29 @@ pub fn operate(
             "setup scripts require this host's own native home destination"
         );
     }
-    outside_public(root, state)?;
-    fs::create_dir_all(state)?;
+    outside_public(root, &store.directory)?;
+    fs::create_dir_all(&store.directory)?;
     let _lock = if matches!(mode, Mode::Full) {
-        Some(StateLock::acquire(state)?)
+        Some(StateLock::acquire(&store.directory)?)
     } else {
         None
     };
     if matches!(action, NativeAction::Apply) {
         let backup = backup.context("application requires an explicit fresh --backup directory")?;
-        apply_live(root, scope.path(), config, destination, state, backup)
+        apply_live(root, scope.path(), config, destination, &store, backup)
     } else {
-        run_native(root, state, config, destination, action.name())
+        run_native(root, &store, config, destination, action.name())
     }
 }
 
 fn run_native(
     root: &Path,
-    state: &Path,
+    store: &Store,
     config: &Path,
     destination: &Path,
     name: &str,
 ) -> Result<()> {
-    let status = chezmoi(root, state, config, destination)
+    let status = chezmoi_with(root, store, config, destination)
         .args(native_action_arguments(name))
         .status()?;
     ensure!(status.success(), "chezmoi {name} failed with {status}");
@@ -499,20 +587,20 @@ fn apply_live(
     scope: &Path,
     config: &Path,
     destination: &Path,
-    state: &Path,
+    store: &Store,
     backup: &Path,
 ) -> Result<()> {
-    let execute = |name: &str| run_native(root, state, config, destination, name);
+    let execute = |name: &str| run_native(root, store, config, destination, name);
     outside_public(root, backup)?;
     preflight(root, scope, config, destination)?;
-    let changed = uncommitted_host_edits(root, state, config, destination)?;
+    let changed = uncommitted_host_edits(root, store, config, destination)?;
     ensure!(
         changed.is_empty(),
         "{}",
-        host_edit_refusal(&changed, config, destination, state)
+        host_edit_refusal(&changed, config, destination)
     );
-    let state_file = state.join("state.boltdb");
-    let previous_state = match fs::read(&state_file) {
+    let state_file = store.database.as_path();
+    let previous_state = match fs::read(state_file) {
         Ok(bytes) => Some(bytes),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
@@ -542,7 +630,7 @@ fn apply_live(
             }
             execute("apply")?;
             // Scripts can install programs that templates probe for, so render the files again on the resulting machine before verification.
-            let status = chezmoi(root, state, config, destination)
+            let status = chezmoi_with(root, store, config, destination)
                 .args(["apply", "--exclude", "scripts"])
                 .status()?;
             ensure!(
@@ -554,7 +642,7 @@ fn apply_live(
         || {
             execute("verify").map_err(|error| {
                 let report = |arguments: &[&str]| {
-                    chezmoi(root, state, config, destination)
+                    chezmoi_with(root, store, config, destination)
                         .args(arguments)
                         .output()
                         .map(|output| {
@@ -573,9 +661,9 @@ fn apply_live(
     );
     if let Err(error) = result {
         if let Some(bytes) = previous_state {
-            crate::runtime::replace(&state_file, &bytes, false)?;
+            crate::runtime::replace(state_file, &bytes, false)?;
         } else if state_file.exists() {
-            fs::remove_file(&state_file)?;
+            fs::remove_file(state_file)?;
         }
         return Err(error);
     }

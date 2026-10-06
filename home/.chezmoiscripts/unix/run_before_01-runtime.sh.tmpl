@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+mise="$HOME/.local/bin/mise"
+"$mise" trust --quiet "$CHEZMOI_WORKING_TREE/mise.toml"
+exec "$mise" -C "$CHEZMOI_WORKING_TREE" x -- cargo run --locked --manifest-path "$CHEZMOI_WORKING_TREE/crates/dotfiles/Cargo.toml" -- --root "$CHEZMOI_WORKING_TREE" setup runtime --config "$CHEZMOI_CONFIG_FILE" --live

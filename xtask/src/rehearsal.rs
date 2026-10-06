@@ -4,7 +4,9 @@
 //! This module seeds earlier provisioning and runs the real `profile apply` on the host's own home three times, the second rerunning every script.
 
 use crate::profile_rules::Profile;
-use crate::profiles::{NativeAction, forget_script_runs, native_profile, operate};
+use crate::profiles::{
+    NativeAction, Store, forget_script_runs, native_profile, operate, pending_onchange_scripts,
+};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::fmt::Write as _;
@@ -25,27 +27,27 @@ fn omitted(profile: Profile) -> Vec<Omitted> {
     match profile {
         Profile::Mac => vec![
             Omitted {
-                script: "setup-ocaml.sh",
+                script: "ocaml.sh",
                 reason: TOOLCHAIN,
             },
             Omitted {
-                script: "setup-haskell.sh",
+                script: "haskell.sh",
                 reason: TOOLCHAIN,
             },
             Omitted {
-                script: "setup-racket.sh",
+                script: "racket.sh",
                 reason: TOOLCHAIN,
             },
             Omitted {
-                script: "install-fleet.sh",
+                script: "fleet.sh",
                 reason: PRIVATE_SOURCE,
             },
         ],
-        Profile::Linux | Profile::Wsl => vec![Omitted {
-            script: "setup-ocaml.sh",
+        Profile::Linux => vec![Omitted {
+            script: "ocaml.sh",
             reason: TOOLCHAIN,
         }],
-        Profile::Windows => Vec::new(),
+        Profile::Wsl | Profile::Windows => Vec::new(),
     }
 }
 
@@ -234,12 +236,15 @@ fn seed_history(home: &Path) -> Result<Vec<(PathBuf, Vec<u8>)>> {
 ///
 /// # Errors
 ///
-/// Returns an error unless the caller sets `disposable_host` and `CI` holds `true`.
+/// Returns an error unless the caller sets `disposable_host` and either `CI` holds `true` or `DOTFILES_DISPOSABLE_HOST` holds `1` on a local host the owner gave up.
 /// Returns an error when an apply or verification round fails, or when installation changed the seeded machine-local history.
+/// Returns an error when the repeated round would rerun a script whose inputs stayed the same.
 pub fn run(root: &Path, disposable_host: bool) -> Result<()> {
+    let disposable = std::env::var("CI").as_deref() == Ok("true")
+        || std::env::var("DOTFILES_DISPOSABLE_HOST").as_deref() == Ok("1");
     ensure!(
-        disposable_host && std::env::var("CI").as_deref() == Ok("true"),
-        "rehearsal replaces this host's home configuration; run it only on a disposable CI host with --disposable-host"
+        disposable_host && disposable,
+        "rehearsal replaces this host's home configuration; run it only on a disposable host with --disposable-host, where CI is true or DOTFILES_DISPOSABLE_HOST is 1"
     );
     let profile = native_profile()?;
     let home = native_home()?;
@@ -250,15 +255,23 @@ pub fn run(root: &Path, disposable_host: bool) -> Result<()> {
     fs::write(&config, configuration(root, profile, &home)?)?;
     seed_foreign_helpers(&home, scope.path())?;
     let preserved = seed_history(&home)?;
-    let state = scope.path().join("state");
+    // The rehearsal keeps chezmoi's default database beside its configuration, as `just apply` does.
+    let store = Store::beside(&config)?;
     // The middle round reruns every script on the host the first round provisioned, as `profile apply` does when it takes over an earlier repository's machine or a script changes.
+    // The repeated round must find nothing to rerun, because no script's inputs changed.
     for (round, rerun_scripts) in [
         ("first", false),
         ("reprovisioning", true),
         ("repeated", false),
     ] {
         if rerun_scripts {
-            forget_script_runs(root, &state, &config, &home)?;
+            forget_script_runs(root, &store, &config, &home)?;
+        } else if round == "repeated" {
+            let pending = pending_onchange_scripts(root, &store, &config, &home)?;
+            ensure!(
+                pending.is_empty(),
+                "the repeated application would rerun scripts whose inputs stayed the same: {pending:?}"
+            );
         }
         operate(
             root,
@@ -266,7 +279,7 @@ pub fn run(root: &Path, disposable_host: bool) -> Result<()> {
             &config,
             &home,
             true,
-            &state,
+            None,
             Some(&scope.path().join(format!("backup-{round}"))),
         )
         .with_context(|| format!("{round} rehearsal application"))?;
@@ -276,7 +289,7 @@ pub fn run(root: &Path, disposable_host: bool) -> Result<()> {
             &config,
             &home,
             false,
-            &state,
+            None,
             None,
         )
         .with_context(|| format!("{round} rehearsal verification"))?;
@@ -285,6 +298,11 @@ pub fn run(root: &Path, disposable_host: bool) -> Result<()> {
             profile.name()
         );
     }
+    let pending = pending_onchange_scripts(root, &store, &config, &home)?;
+    ensure!(
+        pending.is_empty(),
+        "an application left scripts that would rerun with unchanged inputs: {pending:?}"
+    );
     for (path, contents) in preserved {
         ensure!(
             fs::read(&path)? == contents,

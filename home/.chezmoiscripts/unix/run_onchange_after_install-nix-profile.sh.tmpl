@@ -1,3 +1,0 @@
-#!/bin/sh
-{{ includeTemplate "partials/inputs" (list (include "dot_config/dotfiles-nix/flake.nix.tmpl") .platforms.linux.nix) }}
-exec {{ includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles-xtask") }} --root {{ includeTemplate "partials/sh_quote" .chezmoi.workingTree }} setup nix --config {{ includeTemplate "partials/sh_quote" .chezmoi.configFile }} --live

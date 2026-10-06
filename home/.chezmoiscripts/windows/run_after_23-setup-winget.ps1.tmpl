@@ -1,5 +1,0 @@
-{{ if .platforms.windows.winget.apps -}}
-$ErrorActionPreference = 'Stop'
-& {{ includeTemplate "partials/ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotctl.exe") }} setup winget --apps {{ includeTemplate "partials/ps_quote" (join "," .platforms.windows.winget.apps) }}
-exit $LASTEXITCODE
-{{ end -}}

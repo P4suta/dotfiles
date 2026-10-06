@@ -24,6 +24,17 @@
         }
       ]
     },
+    "mise": {
+      "description": "The mise release that every host installs before any other step.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MiseRelease"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "ocaml": {
       "anyOf": [
         {
@@ -68,6 +79,16 @@
     },
     "retired": {
       "description": "Retired targets that the profiles of the named set remove.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "scripts": {
+      "description": "Setup launchers that only the profiles of the named set run, which `just gen` writes from the setup steps.",
       "type": [
         "object",
         "null"
@@ -494,6 +515,28 @@
           ],
           "format": "uint32",
           "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "MiseRelease": {
+      "description": "A mise release and the SHA-256 of its asset for each platform, such as `linux-x64` or `windows-x64`.",
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false

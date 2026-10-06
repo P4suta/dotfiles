@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+exec "$HOME/.local/bin/dotfiles-xtask" --root "$CHEZMOI_WORKING_TREE" setup adapters --config "$CHEZMOI_CONFIG_FILE" --live

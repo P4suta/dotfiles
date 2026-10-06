@@ -7,22 +7,6 @@ A target missing from the first table reaches every profile.
 | --- | --- | --- |
 | `.bashrc` | unix | mac, linux, wsl |
 | `.chezmoiscripts/unix/**` | unix | mac, linux, wsl |
-| `.chezmoiscripts/unix/05-brew-bundle.sh` | mac | mac |
-| `.chezmoiscripts/unix/configure-fcitx5.sh` | linux | linux |
-| `.chezmoiscripts/unix/import-forge-signing-keys.sh` | mac | mac |
-| `.chezmoiscripts/unix/install-claude-code.sh` | mac | mac |
-| `.chezmoiscripts/unix/install-domyjob.sh` | mac | mac |
-| `.chezmoiscripts/unix/install-fleet.sh` | mac | mac |
-| `.chezmoiscripts/unix/install-nix-profile.sh` | linux | linux |
-| `.chezmoiscripts/unix/install-ocomment.sh` | linux | linux |
-| `.chezmoiscripts/unix/macos-defaults.sh` | mac | mac |
-| `.chezmoiscripts/unix/refresh-desktop.sh` | desktop | mac, linux |
-| `.chezmoiscripts/unix/refresh-integrations.sh` | desktop | mac, linux |
-| `.chezmoiscripts/unix/retire-tmux.sh` | linux | linux |
-| `.chezmoiscripts/unix/setup-guard.sh` | mac | mac |
-| `.chezmoiscripts/unix/setup-haskell.sh` | mac | mac |
-| `.chezmoiscripts/unix/setup-ocaml.sh` | desktop | mac, linux |
-| `.chezmoiscripts/unix/setup-racket.sh` | mac | mac |
 | `.chezmoiscripts/windows/**` | windows | windows |
 | `.claude/bashenv.sh` | unix | mac, linux, wsl |
 | `.claude/shims` | unix | mac, linux, wsl |
@@ -136,6 +120,27 @@ A target missing from the first table reaches every profile.
 | `Library/LaunchAgents/dev.dotfiles.session-reaper.plist` | mac | mac |
 | `Library/LaunchAgents/dev.dotfiles.storage-scout.plist` | mac | mac |
 | `Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist` | mac | mac |
+
+## Setup launchers
+
+`just gen` writes each launcher from its setup step, and only the profiles of its set run it.
+
+| Target | Set | Profiles |
+| --- | --- | --- |
+| `.chezmoiscripts/unix/03-nix.sh` | linux | linux |
+| `.chezmoiscripts/unix/04-desktop.sh` | desktop | mac, linux |
+| `.chezmoiscripts/unix/07-fcitx5.sh` | linux | linux |
+| `.chezmoiscripts/unix/08-macos-defaults.sh` | mac | mac |
+| `.chezmoiscripts/unix/09-forge-keys.sh` | mac | mac |
+| `.chezmoiscripts/unix/10-claude.sh` | mac | mac |
+| `.chezmoiscripts/unix/11-ocaml.sh` | desktop | mac, linux |
+| `.chezmoiscripts/unix/12-haskell.sh` | mac | mac |
+| `.chezmoiscripts/unix/13-racket.sh` | mac | mac |
+| `.chezmoiscripts/unix/14-guard.sh` | mac | mac |
+| `.chezmoiscripts/unix/15-ocomment.sh` | linux | linux |
+| `.chezmoiscripts/unix/16-domyjob.sh` | mac | mac |
+| `.chezmoiscripts/unix/17-fleet.sh` | mac | mac |
+| `.chezmoiscripts/unix/18-retire-tmux.sh` | linux | linux |
 
 ## Retired targets
 

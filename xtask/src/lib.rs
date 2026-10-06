@@ -12,6 +12,7 @@ pub mod input_audit;
 pub mod input_rules;
 pub mod instruction_audit;
 pub mod instruction_rules;
+pub mod launchers;
 pub mod next_action;
 pub mod next_action_rules;
 pub mod profile_snapshot;
