@@ -1,3 +1,4 @@
+use crate::proof_budget_rules;
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
@@ -164,9 +165,11 @@ pub const HOSTS_HARNESSES: [&str; 5] = [
     "the_latest_record_for_the_commit_tree_decides_a_family",
 ];
 
-pub const SOURCE_NAME_HARNESSES: [&str; 2] = [
-    "a_target_name_is_a_nonempty_suffix_of_its_source_name",
-    "templates_and_scripts_are_never_copied_targets",
+pub const SOURCE_NAME_HARNESSES: [&str; 4] = [
+    "a_directory_target_name_is_a_nonempty_suffix_of_its_source_name",
+    "a_file_target_name_is_a_nonempty_suffix_of_its_source_name",
+    "directory_templates_and_scripts_are_never_copied_targets",
+    "file_templates_and_scripts_are_never_copied_targets",
 ];
 
 pub const START_HEALTH_HARNESSES: [&str; 2] = [
@@ -174,8 +177,9 @@ pub const START_HEALTH_HARNESSES: [&str; 2] = [
     "a_start_that_reaches_the_bound_is_always_a_stall",
 ];
 
-pub const IGNORE_HARNESSES: [&str; 2] = [
+pub const IGNORE_HARNESSES: [&str; 3] = [
     "a_literal_pattern_matches_only_itself",
+    "a_pattern_is_kept_only_when_it_matches_and_appears_first",
     "a_star_stays_inside_one_segment_and_a_globstar_crosses_them",
 ];
 
@@ -187,6 +191,11 @@ pub const INPUT_HARNESSES: [&str; 2] = [
 pub const OCOMMENT_HARNESSES: [&str; 2] = [
     "a_build_is_skipped_only_for_the_installed_recorded_revision",
     "a_missing_checkout_is_always_cloned",
+];
+
+pub const PROOF_BUDGET_HARNESSES: [&str; 2] = [
+    "an_overrun_and_a_missing_duration_are_told_apart_below_the_timeout",
+    "only_a_measured_harness_inside_the_budget_passes",
 ];
 
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
@@ -211,6 +220,28 @@ pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) 
     ensure!(
         results.len() == expected.len() && names == expected.iter().copied().collect(),
         "unexpected, missing, or duplicate proof harness"
+    );
+    let slow: Vec<String> = results
+        .iter()
+        .filter_map(|result| {
+            let duration = result["duration_ms"].as_u64();
+            (proof_budget_rules::verdict(duration) != proof_budget_rules::Verdict::Within).then(
+                || {
+                    format!(
+                        "{} took {} ms",
+                        result["harness_id"].as_str().unwrap_or_default(),
+                        duration
+                            .map_or_else(|| "unmeasured".to_owned(), |millis| millis.to_string())
+                    )
+                },
+            )
+        })
+        .collect();
+    ensure!(
+        slow.is_empty(),
+        "each proof harness must finish within {} ms; shrink its bounds or split it without weakening its assertions:\n{}",
+        proof_budget_rules::BUDGET_MILLIS,
+        slow.join("\n")
     );
     if counterexample {
         ensure!(
@@ -282,9 +313,9 @@ fn verify_file(
             "-Z",
             "stubbing",
             "--harness-timeout",
-            "60s",
-            "--export-json",
         ])
+        .arg(format!("{}s", proof_budget_rules::TIMEOUT_SECONDS))
+        .arg("--export-json")
         .arg(&output);
     if counterexample {
         command.args(["--harness", expected[0], "--exact"]);
@@ -772,7 +803,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 15] = [
+pub const RULES: [Rules; 16] = [
     Rules {
         source: "xtask/src/target_rules.rs",
         harnesses: &TARGET_HARNESSES,
@@ -1045,6 +1076,24 @@ fn reject_keeping_a_repeated_pattern() {
         rejected: &[
             "reject_a_star_that_crosses_a_segment",
             "reject_keeping_a_repeated_pattern",
+        ],
+    },
+    Rules {
+        source: "xtask/src/proof_budget_rules.rs",
+        harnesses: &PROOF_BUDGET_HARNESSES,
+        counterexamples: "use production::{BUDGET_MILLIS, Verdict, verdict};
+#[kani::proof]
+fn reject_admitting_an_overrun() {
+    assert!(verdict(Some(BUDGET_MILLIS + 1)) == Verdict::Within);
+}
+#[kani::proof]
+fn reject_admitting_an_unmeasured_harness() {
+    assert!(verdict(None) == Verdict::Within);
+}
+",
+        rejected: &[
+            "reject_admitting_an_overrun",
+            "reject_admitting_an_unmeasured_harness",
         ],
     },
     Rules {

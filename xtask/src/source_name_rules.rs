@@ -95,16 +95,13 @@ pub fn target(entry: Entry, source: &[u8]) -> Option<Target<'_>> {
     }
 }
 
+/// Each entry type gets its own harnesses, so each stays well inside the proof budget.
 #[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(16)]
-fn a_target_name_is_a_nonempty_suffix_of_its_source_name() {
+fn a_target_name_is_a_nonempty_suffix_of_its_source_name(entry: Entry) {
     let bytes: [u8; 9] = kani::any();
     let length: usize = kani::any();
     kani::assume(length <= bytes.len());
     let source = &bytes[..length];
-    let file: bool = kani::any();
-    let entry = if file { Entry::File } else { Entry::Directory };
     let result = target(entry, source);
     if let Some(found) = result {
         assert!(!found.name.is_empty() && ends_with(source, found.name));
@@ -115,21 +112,45 @@ fn a_target_name_is_a_nonempty_suffix_of_its_source_name() {
 }
 
 #[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(16)]
-fn templates_and_scripts_are_never_copied_targets() {
+fn templates_and_scripts_are_never_copied_targets(entry: Entry) {
     let bytes: [u8; 9] = kani::any();
     let length: usize = kani::any();
     kani::assume(length <= bytes.len());
     let source = &bytes[..length];
-    let file: bool = kani::any();
-    let entry = if file { Entry::File } else { Entry::Directory };
     let result = target(entry, source);
     if ends_with(source, b".tmpl") || starts_with(source, b"run_") {
         assert!(result.is_none());
     }
     kani::cover!(result.is_some());
     kani::cover!(result.is_none() && ends_with(source, b".tmpl"));
+}
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(16)]
+fn a_file_target_name_is_a_nonempty_suffix_of_its_source_name() {
+    a_target_name_is_a_nonempty_suffix_of_its_source_name(Entry::File);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(16)]
+fn a_directory_target_name_is_a_nonempty_suffix_of_its_source_name() {
+    a_target_name_is_a_nonempty_suffix_of_its_source_name(Entry::Directory);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(16)]
+fn file_templates_and_scripts_are_never_copied_targets() {
+    templates_and_scripts_are_never_copied_targets(Entry::File);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(16)]
+fn directory_templates_and_scripts_are_never_copied_targets() {
+    templates_and_scripts_are_never_copied_targets(Entry::Directory);
 }
 
 #[cfg(test)]

@@ -33,6 +33,7 @@ pub mod pr_workflow;
 pub mod profile_rules;
 pub mod profile_snapshot;
 pub mod profiles;
+pub mod proof_budget_rules;
 pub mod prose;
 pub mod prose_rules;
 pub mod quality;

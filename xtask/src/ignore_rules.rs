@@ -1,13 +1,19 @@
-/// Whether one pattern segment matches one path segment, where `*` matches any run of bytes and `?` one byte.
-fn segment_matches(pattern: &[u8], text: &[u8]) -> bool {
-    let (mut p, mut t) = (0, 0);
+/// Whether `pattern[p_start..p_end]` matches `text[t_start..t_end]`, where `*` matches any run of bytes and `?` one byte.
+/// Offsets instead of subslices keep the proof's formula small enough for the proof budget.
+fn segment_matches(
+    pattern: &[u8],
+    (p_start, p_end): (usize, usize),
+    text: &[u8],
+    (t_start, t_end): (usize, usize),
+) -> bool {
+    let (mut p, mut t) = (p_start, t_start);
     let mut star: Option<usize> = None;
-    let mut mark = 0;
-    while t < text.len() {
-        if p < pattern.len() && (pattern[p] == b'?' || pattern[p] == text[t]) {
+    let mut mark = t_start;
+    while t < t_end {
+        if p < p_end && (pattern[p] == b'?' || pattern[p] == text[t]) {
             p += 1;
             t += 1;
-        } else if p < pattern.len() && pattern[p] == b'*' {
+        } else if p < p_end && pattern[p] == b'*' {
             star = Some(p);
             mark = t;
             p += 1;
@@ -19,10 +25,10 @@ fn segment_matches(pattern: &[u8], text: &[u8]) -> bool {
             return false;
         }
     }
-    while p < pattern.len() && pattern[p] == b'*' {
+    while p < p_end && pattern[p] == b'*' {
         p += 1;
     }
-    p == pattern.len()
+    p == p_end
 }
 
 /// Whether a `.chezmoiignore` or `.chezmoiremove` pattern matches a target path.
@@ -37,13 +43,13 @@ pub fn matches(pattern: &[u8], path: &[u8]) -> bool {
         let t_end = segment_end(path, t);
         if p < pattern_done {
             let p_end = segment_end(pattern, p);
-            if globstar(&pattern[p..p_end]) {
+            if globstar(pattern, p, p_end) {
                 star = Some(p_end + 1);
                 mark = t;
                 p = p_end + 1;
                 continue;
             }
-            if segment_matches(&pattern[p..p_end], &path[t..t_end]) {
+            if segment_matches(pattern, (p, p_end), path, (t, t_end)) {
                 p = p_end + 1;
                 t = t_end + 1;
                 continue;
@@ -60,7 +66,7 @@ pub fn matches(pattern: &[u8], path: &[u8]) -> bool {
     }
     while p < pattern_done {
         let p_end = segment_end(pattern, p);
-        if !globstar(&pattern[p..p_end]) {
+        if !globstar(pattern, p, p_end) {
             return false;
         }
         p = p_end + 1;
@@ -77,8 +83,8 @@ fn segment_end(text: &[u8], start: usize) -> usize {
     index
 }
 
-fn globstar(segment: &[u8]) -> bool {
-    segment.len() == 2 && segment[0] == b'*' && segment[1] == b'*'
+fn globstar(pattern: &[u8], start: usize, end: usize) -> bool {
+    end == start + 2 && pattern[start] == b'*' && pattern[start + 1] == b'*'
 }
 
 /// A pattern stays only when its listing's justification holds and no earlier line already lists it.
@@ -146,6 +152,7 @@ fn same(left: &[u8], right: &[u8]) -> bool {
     true
 }
 
+/// Every pattern of up to three bytes, wildcards included, matches every path of up to two bytes without fault.
 #[cfg(kani)]
 #[kani::proof]
 #[kani::unwind(7)]
@@ -167,19 +174,28 @@ fn a_literal_pattern_matches_only_itself() {
 #[kani::proof]
 #[kani::unwind(7)]
 fn a_star_stays_inside_one_segment_and_a_globstar_crosses_them() {
-    let (pattern, pattern_length) = any_text::<3>(true);
     let (path, path_length) = any_text::<2>(false);
-    let pattern = &pattern[..pattern_length];
     let path = &path[..path_length];
     let crosses = count(path, b"/") > 0;
     assert!(matches(b"**", path));
-    assert_eq!(matches(b"*", path), !crosses);
+    let star = matches(b"*", path);
+    assert_eq!(star, !crosses);
+    assert_eq!(matches(b"?", path), path_length == 1 && !crosses);
+    assert!(!matches(b"a/**", path) || (path_length > 0 && path[0] == b'a'));
+    kani::cover!(star);
+    kani::cover!(!star);
+}
+
+/// `verdict` reads only whether a pattern matched, so every match result stands for every pattern and path.
+#[cfg(kani)]
+#[kani::proof]
+fn a_pattern_is_kept_only_when_it_matches_and_appears_first() {
+    let found: bool = kani::any();
     let earlier: usize = kani::any();
-    let found = matches(pattern, path);
     let kept = verdict(found, earlier);
     assert_eq!(kept == Verdict::Kept, found && earlier == 0);
-    kani::cover!(kept == Verdict::Kept && crosses);
-    kani::cover!(kept != Verdict::Kept && !crosses);
+    kani::cover!(kept == Verdict::Kept);
+    kani::cover!(kept == Verdict::Repeated && found);
 }
 
 #[cfg(test)]
@@ -205,6 +221,8 @@ mod tests {
             b"Library/LaunchAgents/dev.dotfiles.x.plist"
         ));
         assert!(!matches(b".config/bat", b".config/bat/config"));
+        assert!(matches(b"a*b*c", b"aXbYc"));
+        assert!(!matches(b"a*b", b"ab/b"));
     }
 
     #[test]

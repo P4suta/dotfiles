@@ -407,9 +407,24 @@ fn a_reviewed_installed_catalog_passes_the_gate_without_analysis_or_triage() -> 
 }
 
 #[test]
-fn proof_gate_rejects_empty_missing_vacuous_and_failed_results() -> Result<()> {
+fn proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results() -> Result<()> {
     let expected = ["actual-production-contract"];
-    let valid = json!({"verification_results":{"summary":{"status":"completed","executed":1,"failed":0,"successful":1},"results":[{"harness_id":expected[0],"status":"Success","checks":[{"category":"assertion","status":"Success"},{"category":"cover","status":"Satisfied"},{"category":"cover","status":"Satisfied"}]}]}});
+    let valid = json!({"verification_results":{"summary":{"status":"completed","executed":1,"failed":0,"successful":1},"results":[{"harness_id":expected[0],"status":"Success","duration_ms":1200,"checks":[{"category":"assertion","status":"Success"},{"category":"cover","status":"Satisfied"},{"category":"cover","status":"Satisfied"}]}]}});
+    let mut slow = valid.clone();
+    slow["verification_results"]["results"][0]["duration_ms"] = json!(30_001);
+    let error = dotfiles_xtask::skill_proofs::validate_results(&slow, &expected, false)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("actual-production-contract took 30001 ms"),
+        "{error}"
+    );
+    let mut unmeasured = valid.clone();
+    unmeasured["verification_results"]["results"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("duration_ms");
+    assert!(dotfiles_xtask::skill_proofs::validate_results(&unmeasured, &expected, false).is_err());
     dotfiles_xtask::skill_proofs::validate_results(&valid, &expected, false)?;
     assert!(dotfiles_xtask::skill_proofs::validate_results(&valid, &[], false).is_err());
     let mut missing = valid.clone();
