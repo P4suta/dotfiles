@@ -115,6 +115,12 @@ enum Action {
         #[arg(long)]
         output: Option<PathBuf>,
     },
+    /// Compares every profile, signing, and role rendering with its committed manifest and lists the scripts that depend on the command line.
+    ProfileSnapshots {
+        /// Rewrites this host family's manifests from the current rendering instead.
+        #[arg(long)]
+        write: bool,
+    },
     PublicAudit {
         #[arg(long)]
         denylist: PathBuf,
@@ -272,6 +278,7 @@ fn check(root: &Path, gates: Gates) -> Result<()> {
             "profile leaves that no template includes: {unreferenced:?}"
         );
         dotfiles_xtask::profiles::check_profiles(root, None)?;
+        dotfiles_xtask::profile_snapshot::check(root)?;
     }
     println!("Checked the gates: {}", gates.names());
     Ok(())
@@ -369,7 +376,15 @@ fn run() -> Result<()> {
             dotfiles_xtask::secrets::exit(dotfiles_xtask::secrets::consume(&names, &command)?)
         }
         Action::Profiles { output } => {
-            dotfiles_xtask::profiles::check_profiles(&cli.root, output.as_deref())?
+            dotfiles_xtask::profiles::check_profiles(&cli.root, output.as_deref())?;
+            dotfiles_xtask::profile_snapshot::check(&cli.root)?;
+        }
+        Action::ProfileSnapshots { write } => {
+            if write {
+                dotfiles_xtask::profile_snapshot::write(&cli.root)?;
+            }
+            dotfiles_xtask::profile_snapshot::check(&cli.root)?;
+            dotfiles_xtask::profile_snapshot::report_command_line(&cli.root)?;
         }
         Action::PublicAudit { denylist } => {
             dotfiles_xtask::profiles::audit_private(&cli.root, &denylist)?

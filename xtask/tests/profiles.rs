@@ -13,6 +13,29 @@ use std::path::Path;
 mod fixture_git;
 
 #[test]
+fn a_rendering_that_differs_from_its_manifest_is_refused() {
+    let snapshot = source_snapshot();
+    let attributes = snapshot.path().join("dot_config/git/attributes");
+    let mut text = fs::read_to_string(&attributes).unwrap();
+    text.push_str("*.fixture binary\n");
+    fs::write(&attributes, text).unwrap();
+    let error = format!(
+        "{:#}",
+        dotfiles_xtask::profile_snapshot::check(snapshot.path()).unwrap_err()
+    );
+    for combination in dotfiles_xtask::profile_snapshot::Combination::all() {
+        assert!(
+            error.contains(&format!(
+                "{}: targets .config/git/attributes",
+                combination.name()
+            )),
+            "{error}"
+        );
+    }
+    assert!(error.contains("profile-snapshots --write"), "{error}");
+}
+
+#[test]
 fn every_profile_holds_what_the_installers_apply() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     for profile in Profile::ALL {
