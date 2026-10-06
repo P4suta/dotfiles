@@ -36,7 +36,7 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | Which profiles receive a target | `home/.chezmoiignore` and `policy/profile-contracts.json` |
 | A target to retire from hosts | `home/.chezmoiremove` |
 | A setup step | `home/.chezmoiscripts/` and `xtask/src/setup.rs` |
-| Shared data and tool versions | `home/.chezmoidata.json`, `mise.toml`, and `mise.lock` |
+| Shared data and tool versions | `home/.chezmoidata/`, typed in `crates/model/src/data.rs`, `mise.toml`, and `mise.lock` |
 | A gate | `xtask/src/` with its tests in `xtask/tests/` |
 | A rule a gate decides | `xtask/src/*_rules.rs` and its entry in `xtask/src/skill_proofs.rs` |
 | A shared skill | `home/dot_agents/skills/<skill>/` and `docs/skills/decisions/<skill>.json` |

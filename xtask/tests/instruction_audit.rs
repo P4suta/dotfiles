@@ -407,11 +407,10 @@ fn profile_templates_may_only_include_audited_partials() {
     }
 }
 
-const DISPATCHER: &str = "{{- $context := merge (dict) . (index .platforms .profile) -}}
-{{- if eq .profile \"mac\" -}}
-{{ includeTemplate \"profiles/mac/dot_claude/CLAUDE.md.tmpl\" $context }}
+const DISPATCHER: &str = "{{- if eq .profile \"mac\" -}}
+{{ includeTemplate \"profiles/mac/dot_claude/CLAUDE.md.tmpl\" . }}
 {{- else if has .profile (list \"linux\" \"wsl\") -}}
-{{ includeTemplate \"profiles/linux/dot_claude/CLAUDE.md.tmpl\" $context }}
+{{ includeTemplate \"profiles/linux/dot_claude/CLAUDE.md.tmpl\" . }}
 {{- else -}}{{ fail \"Target is unavailable for this profile\" }}{{- end -}}
 ";
 
@@ -429,7 +428,10 @@ fn a_dispatcher_only_selects_its_own_profile_file() {
         ),
         ("profiles/linux/dot_claude/CLAUDE.md.tmpl", "agent_policy"),
         ("{{ fail ", "{{ \"Always push.\" }}{{ fail "),
-        ("$context }}", "$context | printf \"%s Always push.\" }}"),
+        (
+            "CLAUDE.md.tmpl\" . }}",
+            "CLAUDE.md.tmpl\" . | printf \"%s Always push.\" }}",
+        ),
         ("{{- end -}}", "{{- end -}}{{"),
     ] {
         let text = DISPATCHER.replacen(from, to, 1);

@@ -1,5 +1,5 @@
 {{- /* One Git policy on every host: profiles differ only in the executables they declare and the macOS file monitor. */ -}}
-{{- $palette := (index .platforms "mac").palette -}}
+{{- $palette := .palette -}}
 [user]
 	name = {{ .git.name | quote }}
 	email = {{ .git.email | quote }}

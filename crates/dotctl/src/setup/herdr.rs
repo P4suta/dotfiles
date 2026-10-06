@@ -58,7 +58,7 @@ fn install(options: &Options) -> Result<()> {
             manifest.build_id, options.expected_build_id
         );
         eprintln!(
-            "Clear expected_build_id in .chezmoidata.json to take the manifest's current build."
+            "Clear expected_build_id in home/.chezmoidata/windows.toml to take the manifest's current build."
         );
         return Ok(());
     }

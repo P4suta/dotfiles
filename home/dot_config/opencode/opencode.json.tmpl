@@ -1,8 +1,7 @@
-{{- $context := merge (dict) . (index .platforms .profile) -}}
 {{- if eq .profile "mac" -}}
-{{ includeTemplate "profiles/mac/dot_config/opencode/opencode.json.tmpl" $context }}
+{{ includeTemplate "profiles/mac/dot_config/opencode/opencode.json.tmpl" . }}
 {{- else if eq .profile "linux" -}}
-{{ includeTemplate "profiles/linux/dot_config/opencode/opencode.json.tmpl" $context }}
+{{ includeTemplate "profiles/linux/dot_config/opencode/opencode.json.tmpl" . }}
 {{- else if eq .profile "windows" -}}
 {{ include ".chezmoitemplates/profiles/windows/dot_config/opencode/opencode.json" }}
 {{- else if eq .profile "wsl" -}}

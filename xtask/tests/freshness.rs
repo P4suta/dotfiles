@@ -20,6 +20,8 @@ fn repository() -> PathBuf {
 fn fixture(source: &str) -> Result<tempfile::TempDir> {
     let root = tempfile::tempdir()?;
     fs::create_dir_all(root.path().join("xtask/src/bin"))?;
+    fs::create_dir_all(root.path().join("crates/model/src"))?;
+    fs::write(root.path().join("crates/model/src/lib.rs"), "")?;
     fs::write(
         root.path().join("xtask/Cargo.toml"),
         "[package]\nname = \"dotfiles-xtask\"\n",

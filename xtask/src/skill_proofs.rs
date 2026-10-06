@@ -647,7 +647,7 @@ fn reject_opening_a_dependent_branch_independently() {
         ],
     },
     Rules {
-        source: "xtask/src/profile_rules.rs",
+        source: "crates/model/src/profile_rules.rs",
         harnesses: &PROFILE_HARNESSES,
         counterexamples: "#[kani::proof]
 fn reject_unapproved_application() {

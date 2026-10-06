@@ -12,8 +12,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-/// Files outside `xtask/src` that the compiler includes or that decide how the tools build.
-const SHARED: [&str; 18] = [
+/// Files outside `xtask/src` and `crates/model/src` that the compiler includes or that decide how the tools build.
+const SHARED: [&str; 19] = [
     ".cargo/config.toml",
     ".chezmoiroot",
     ".github/workflows/required.yml",
@@ -22,6 +22,7 @@ const SHARED: [&str; 18] = [
     "bun.lock",
     "clippy.toml",
     "crates/dotguard/src/refusal.rs",
+    "crates/model/Cargo.toml",
     "home/.chezmoiignore",
     "home/dot_agents/skills/pull-request/assets/workflow-policy.json",
     "home/dot_config/opencode/plugins/skill-ops.ts",
@@ -51,10 +52,11 @@ fn collect(root: &Path, relative: &str, found: &mut Vec<String>) -> io::Result<(
 ///
 /// # Errors
 ///
-/// Returns an error when it can't read a directory under `xtask/src` or one of its entries.
+/// Returns an error when it can't read a directory under `xtask/src` or `crates/model/src`, or one of their entries.
 pub fn inputs(root: &Path) -> io::Result<Vec<String>> {
     let mut found: Vec<String> = SHARED.map(String::from).into();
     collect(root, "xtask/src", &mut found)?;
+    collect(root, "crates/model/src", &mut found)?;
     found.sort();
     Ok(found)
 }

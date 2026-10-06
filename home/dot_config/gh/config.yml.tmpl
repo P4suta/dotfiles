@@ -1,8 +1,7 @@
-{{- $context := merge (dict) . (index .platforms .profile) -}}
 {{- if eq .profile "mac" -}}
-{{ includeTemplate "profiles/mac/dot_config/gh/config.yml.tmpl" $context }}
+{{ includeTemplate "profiles/mac/dot_config/gh/config.yml.tmpl" . }}
 {{- else if eq .profile "linux" -}}
-{{ includeTemplate "profiles/linux/dot_config/gh/config.yml.tmpl" $context }}
+{{ includeTemplate "profiles/linux/dot_config/gh/config.yml.tmpl" . }}
 {{- else if eq .profile "wsl" -}}
-{{ includeTemplate "profiles/wsl/dot_config/gh/config.yml.tmpl" $context }}
+{{ includeTemplate "profiles/wsl/dot_config/gh/config.yml.tmpl" . }}
 {{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}

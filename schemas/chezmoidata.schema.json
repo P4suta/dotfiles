@@ -1,0 +1,901 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Data",
+  "description": "Every key a data file may hold.",
+  "type": "object",
+  "properties": {
+    "coderabbit": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Coderabbit"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "herdr_agent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HerdrAgent"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ocaml": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ocaml"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "palette": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "platforms": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Platforms"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Artifact": {
+      "type": "object",
+      "properties": {
+        "artifact": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Brew": {
+      "type": "object",
+      "properties": {
+        "casks": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "formulae": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Coderabbit": {
+      "description": "The pinned `CodeRabbit` command line and its artifact for each host platform.",
+      "type": "object",
+      "properties": {
+        "platforms": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/Artifact"
+          }
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Herdr": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "expected_build_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manifest_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retain": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "HerdrAgent": {
+      "type": "object",
+      "properties": {
+        "public_keys": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Linux": {
+      "type": "object",
+      "properties": {
+        "desktop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LinuxDesktop"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mise": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Mise"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nix": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Nix"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tool_versions": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tools": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tools"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "LinuxDesktop": {
+      "type": "object",
+      "properties": {
+        "keyboard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LinuxKeyboard"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kitty_channel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nerd_fonts_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "opacity": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "zed_channel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "LinuxKeyboard": {
+      "type": "object",
+      "properties": {
+        "delay": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "repeat_interval": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Mac": {
+      "type": "object",
+      "properties": {
+        "brew": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Brew"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "desktop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MacDesktop"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "macos": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Macos"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mise": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Mise"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "racket": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Racket"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tool_versions": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tools": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tools"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "MacDesktop": {
+      "type": "object",
+      "properties": {
+        "blur": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font_family": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font_size": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "opacity": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "zed_channel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "MacKeyboard": {
+      "type": "object",
+      "properties": {
+        "initial_key_repeat": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "key_repeat": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "press_and_hold": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Macos": {
+      "type": "object",
+      "properties": {
+        "keyboard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MacKeyboard"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Mise": {
+      "type": "object",
+      "properties": {
+        "jobs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Nix": {
+      "description": "The packages the Nix profile installs, each with the mise tool that replaces it where Nix stays absent, or an empty string for none.",
+      "type": "object",
+      "properties": {
+        "packages": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Ocaml": {
+      "type": "object",
+      "properties": {
+        "compiler": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform_tools": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "switch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Ocomment": {
+      "type": "object",
+      "properties": {
+        "destination": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "repo_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Platforms": {
+      "type": "object",
+      "properties": {
+        "linux": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Linux"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mac": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Mac"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "windows": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Windows"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wsl": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Wsl"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Racket": {
+      "type": "object",
+      "properties": {
+        "collections": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Scoop": {
+      "type": "object",
+      "properties": {
+        "apps": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "buckets": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "installer_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "installer_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "winget_duplicates": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Sshd": {
+      "type": "object",
+      "properties": {
+        "authorize_signing_key": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "default_shell": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "firewall_profile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password_auth": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Terminal": {
+      "type": "object",
+      "properties": {
+        "font_family": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font_size": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_fps": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "multiplexer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "opacity": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Tools": {
+      "description": "The tools mise installs: `common` on every machine, and `personal` or `work` by the machine's role.",
+      "type": "object",
+      "properties": {
+        "common": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "personal": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "work": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Windows": {
+      "type": "object",
+      "properties": {
+        "herdr": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Herdr"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "keyboard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WindowsKeyboard"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ocomment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ocomment"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scoop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Scoop"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sshd": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sshd"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Terminal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tools": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tools"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "winget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Winget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "WindowsKeyboard": {
+      "type": "object",
+      "properties": {
+        "keyboard_delay": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "keyboard_speed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Winget": {
+      "type": "object",
+      "properties": {
+        "apps": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Wsl": {
+      "type": "object",
+      "properties": {
+        "tools": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tools"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

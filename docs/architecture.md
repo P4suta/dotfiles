@@ -9,7 +9,8 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 
 1. `.chezmoiroot` names `home/`, so chezmoi reads the source state there while every command passes the checkout root as `--source`.
 2. A machine-local configuration outside the checkout selects the profile and holds the Git identity, the signing key, and the project root.
-3. `home/.chezmoidata.json` holds the shared data, keyed by profile under `platforms`.
+3. The TOML files in `home/.chezmoidata/` hold the data, split by concern: shared values at the top level and per-profile values under `platforms.<profile>`.
+   Templates read each value at its explicit path, and `crates/model` refuses an unknown key with its file.
 4. A target that differs per profile has a dispatcher at its target path that selects `home/.chezmoitemplates/profiles/<profile>/<target>`.
    A target every profile shares renders from its own path.
 5. `home/.chezmoiignore` and `home/.chezmoiremove` decide which targets each profile receives and which retired targets it removes.

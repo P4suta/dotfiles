@@ -57,12 +57,10 @@ fn toml_string(value: &str) -> String {
 ///
 /// # Errors
 ///
-/// Returns an error when reading or parsing `.chezmoidata.json` fails, or when rendering the profile to find its required packages fails.
+/// Returns an error when loading the source data fails, or when rendering the profile to find its required packages fails.
 /// Returns an error for the Linux profile when the data has no Nix package table.
 pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<String> {
-    let data: serde_json::Value = serde_json::from_slice(&fs::read(
-        crate::source_state(root).join(".chezmoidata.json"),
-    )?)?;
+    let data = crate::profiles::source_data(root)?;
     let projects = home.join("projects");
     let mut identity = String::new();
     if profile == Profile::Windows {
@@ -108,12 +106,12 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
         Profile::Mac => {
             let _ = write!(
                 text,
-                "[data.platforms.mac.brew]\nformulae = [{}]\ncasks = []\n\n[data.platforms.mac.racket]\ncollections = []\n\n[data.platforms.mac.ocaml]\nplatform_tools = []\n\n",
+                "[data.platforms.mac.brew]\nformulae = [{}]\ncasks = []\n\n[data.platforms.mac.racket]\ncollections = []\n\n[data.ocaml]\nplatform_tools = []\n\n",
                 list("/brew/formulae")
             );
         }
         Profile::Linux => {
-            text.push_str("[data.platforms.linux.ocaml]\nplatform_tools = []\n\n");
+            text.push_str("[data.ocaml]\nplatform_tools = []\n\n");
             text.push_str("[data.platforms.linux.nix.packages]\n");
             let packages = data
                 .pointer("/platforms/linux/nix/packages")

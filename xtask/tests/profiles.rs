@@ -13,6 +13,41 @@ use std::path::Path;
 mod fixture_git;
 
 #[test]
+fn templates_read_data_at_explicit_paths_instead_of_a_merged_platform_context() {
+    fn walk(directory: &Path, found: &mut Vec<String>) {
+        for entry in fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, found);
+            } else if fs::read_to_string(&path)
+                .is_ok_and(|text| text.contains("index .platforms .profile"))
+            {
+                found.push(path.display().to_string());
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../home"),
+        &mut found,
+    );
+    assert_eq!(found, Vec::<String>::new());
+}
+
+#[test]
+fn the_source_data_files_hold_only_known_keys() {
+    let data = profiles::source_data(&Path::new(env!("CARGO_MANIFEST_DIR")).join("..")).unwrap();
+    for profile in Profile::ALL {
+        assert!(
+            data["platforms"][profile.name()]["tools"]["common"].is_array(),
+            "{}",
+            profile.name()
+        );
+    }
+    assert!(data["palette"]["bg"].is_string());
+}
+
+#[test]
 fn every_ignore_and_remove_pattern_is_distinct_and_justified() {
     dotfiles_xtask::ignore_audit::check(&Path::new(env!("CARGO_MANIFEST_DIR")).join("..")).unwrap();
 }

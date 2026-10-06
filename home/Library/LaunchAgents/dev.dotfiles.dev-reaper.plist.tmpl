@@ -1,4 +1,3 @@
-{{- $context := merge (dict) . (index .platforms .profile) -}}
 {{- if eq .profile "mac" -}}
-{{ includeTemplate "profiles/mac/Library/LaunchAgents/dev.dotfiles.dev-reaper.plist.tmpl" $context }}
+{{ includeTemplate "profiles/mac/Library/LaunchAgents/dev.dotfiles.dev-reaper.plist.tmpl" . }}
 {{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}

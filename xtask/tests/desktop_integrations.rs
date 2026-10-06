@@ -46,10 +46,17 @@ fn opencode_context7_requires_a_local_linux_desktop() -> Result<()> {
     let temporary = tempfile::tempdir()?;
     let config = temporary.path().join("chezmoi.toml");
     fs::write(&config, "")?;
-    fs::copy(
-        source().join(".chezmoidata.json"),
-        temporary.path().join(".chezmoidata.json"),
-    )?;
+    fs::create_dir(temporary.path().join(".chezmoidata"))?;
+    for entry in fs::read_dir(source().join(".chezmoidata"))? {
+        let entry = entry?;
+        fs::copy(
+            entry.path(),
+            temporary
+                .path()
+                .join(".chezmoidata")
+                .join(entry.file_name()),
+        )?;
+    }
     for (profile, file) in [
         ("linux", "opencode.json.tmpl"),
         ("mac", "opencode.json.tmpl"),

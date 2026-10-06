@@ -295,6 +295,7 @@ fn check(root: &Path, gates: Gates) -> Result<()> {
         dotfiles_xtask::quality::adapters(root)?;
     }
     if gates.contains(Gate::Rust) {
+        dotfiles_xtask::profiles::data_schema(root, true)?;
         check_workspace(root)?;
         check_package(
             root,
@@ -302,6 +303,7 @@ fn check(root: &Path, gates: Gates) -> Result<()> {
         )?;
     }
     if gates.contains(Gate::Profiles) {
+        dotfiles_xtask::profiles::source_data(root)?;
         dotfiles_xtask::quality::chezmoi_version(root)?;
         let unreferenced = dotfiles_xtask::quality::unreferenced_leaves(root)?;
         anyhow::ensure!(
@@ -401,7 +403,10 @@ fn run() -> Result<()> {
             dotfiles_xtask::ignore_audit::check(&cli.root)?;
             dotfiles_xtask::input_audit::check(&cli.root)?;
         }
-        Action::Gen { check } => dotfiles_xtask::adr::generate(&cli.root, check)?,
+        Action::Gen { check } => {
+            dotfiles_xtask::adr::generate(&cli.root, check)?;
+            dotfiles_xtask::profiles::data_schema(&cli.root, check)?;
+        }
         Action::ProfileSnapshots { write } => {
             if write {
                 dotfiles_xtask::profile_snapshot::write(&cli.root)?;

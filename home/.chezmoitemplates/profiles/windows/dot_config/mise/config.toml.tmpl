@@ -1,5 +1,5 @@
 [tools]
-{{- range (concat .tools.common (index .tools .role) | uniq) }}
+{{- range (concat .platforms.windows.tools.common (index .platforms.windows.tools .role) | uniq) }}
 {{ . | quote }} = {{ if eq . "rust" }}"stable"{{ else }}"latest"{{ end }}
 {{- end }}
 

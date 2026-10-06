@@ -19,13 +19,13 @@ palette = 12={{ .palette.blue }}
 palette = 13={{ .palette.magenta }}
 palette = 14={{ .palette.cyan }}
 palette = 15={{ .palette.fg }}
-font-family = "{{ .desktop.font_family }}"
-font-size = {{ .desktop.font_size }}
+font-family = "{{ .platforms.mac.desktop.font_family }}"
+font-size = {{ .platforms.mac.desktop.font_size }}
 font-thicken = true
 window-colorspace = display-p3
 
-background-opacity = {{ .desktop.opacity }}
-background-blur = {{ .desktop.blur }}
+background-opacity = {{ .platforms.mac.desktop.opacity }}
+background-blur = {{ .platforms.mac.desktop.blur }}
 unfocused-split-opacity = 0.82
 custom-shader = shaders/cursor_warp.glsl
 

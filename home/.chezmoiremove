@@ -1,11 +1,11 @@
 {{ if eq .profile "mac" }}
-{{ includeTemplate "profiles/mac/remove" (merge (dict) . (index .platforms .profile)) }}
+{{ includeTemplate "profiles/mac/remove" . }}
 {{ end }}
 {{ if eq .profile "linux" }}
-{{ includeTemplate "profiles/linux/remove" (merge (dict) . (index .platforms .profile)) }}
+{{ includeTemplate "profiles/linux/remove" . }}
 {{ end }}
 {{ if eq .profile "windows" }}
-{{ includeTemplate "profiles/windows/remove" (merge (dict) . (index .platforms .profile)) }}
+{{ includeTemplate "profiles/windows/remove" . }}
 {{ end }}
 
 {{ if ne .profile "windows" }}

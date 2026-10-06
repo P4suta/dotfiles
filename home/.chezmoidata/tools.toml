@@ -1,0 +1,161 @@
+# Tools mise installs on each profile, their pinned versions, and how many it builds at once.
+# `common` installs on every machine of the profile, and `personal` and `work` follow the machine's role.
+
+[platforms.linux.mise]
+jobs = 2
+
+[platforms.linux.tool_versions]
+java = "temurin-25"
+rust = "stable"
+
+[platforms.linux.tools]
+common = [
+  "bun",
+  "go",
+  "java",
+  "node",
+  "opam",
+  "rust",
+  "uv",
+  "erlang",
+  "gleam",
+  "rebar",
+  "aqua:pnpm/pnpm",
+  "google-java-format",
+  "gradle",
+  "jbang",
+  "maven",
+  "mvnd",
+  "go:github.com/go-delve/delve/cmd/dlv",
+  "go:golang.org/x/tools/gopls",
+  "go:golang.org/x/vuln/cmd/govulncheck",
+  "go:honnef.co/go/tools/cmd/staticcheck",
+  "go:mvdan.cc/gofumpt",
+  "golangci-lint",
+  "cargo:cargo-semver-checks",
+]
+personal = []
+work = []
+
+[platforms.mac.mise]
+jobs = 8
+
+[platforms.mac.tool_versions]
+cabal = "3.16.1.0"
+ghc = "9.14.1"
+haskell-language-server = "2.15.0.0"
+java = "temurin-25"
+racket = "9.3"
+rust = "stable"
+
+[platforms.mac.tools]
+common = [
+  "bun",
+  "ghc",
+  "go",
+  "java",
+  "node",
+  "opam",
+  "racket",
+  "rust",
+  "uv",
+  "erlang",
+  "gleam",
+  "rebar",
+  "cabal",
+  "google-java-format",
+  "gradle",
+  "jbang",
+  "maven",
+  "go:mvdan.cc/gofumpt",
+  "golangci-lint",
+  "go:honnef.co/go/tools/cmd/staticcheck",
+  "npm:repomix",
+  "air",
+  "aqua:dlvhdr/gh-dash",
+  "aqua:wader/fq",
+  "cargo:cargo-machete",
+  "cargo:cargo-semver-checks",
+  "mvnd",
+  "process-compose",
+  "usql",
+  "doppler",
+]
+personal = []
+work = []
+
+[platforms.windows.tools]
+common = [
+  "python",
+  "rust",
+  "cargo:cargo-edit",
+  "gleam",
+  "erlang",
+  "node",
+  "deno",
+  "bun",
+  "yamllint",
+]
+personal = []
+work = []
+
+[platforms.wsl.tools]
+common = [
+  "ast-grep",
+  "bat",
+  "eza",
+  "fd",
+  "fzf",
+  "ripgrep",
+  "sd",
+  "aqua:dduan/tre",
+  "zoxide",
+  "aqua:dalance/procs",
+  "bottom",
+  "duf",
+  "dust",
+  "gping",
+  "hyperfine",
+  "viddy",
+  "gron",
+  "jaq",
+  "jq",
+  "xh",
+  "yq",
+  "doggo",
+  "delta",
+  "difftastic",
+  "gh",
+  "git-cliff",
+  "jj",
+  "lazygit",
+  "ctop",
+  "dive",
+  "lazydocker",
+  "atuin",
+  "direnv",
+  "just",
+  "lefthook",
+  "starship",
+  "vivid",
+  "watchexec",
+  "glow",
+  "grex",
+  "hexyl",
+  "aqua:svenstaro/miniserve",
+  "aqua:o2sh/onefetch",
+  "aqua:ouch-org/ouch",
+  "chezmoi",
+  "shellcheck",
+  "bun",
+  "go",
+  "node",
+  "rust",
+  "uv",
+  "aqua:pnpm/pnpm",
+  "cargo:cargo-llvm-cov",
+  "cargo:tokei",
+  "github:crate-ci/typos",
+]
+personal = []
+work = []

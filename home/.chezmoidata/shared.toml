@@ -1,0 +1,57 @@
+# Values every profile shares.
+
+# The pinned CodeRabbit CLI, which mise installs and the review guard checks, with one artifact per host platform.
+[coderabbit]
+version = "0.8.2"
+
+[coderabbit.platforms.linux-arm64]
+artifact = "coderabbit-linux-arm64.zip"
+sha256 = "3b08717d40d51fd2d884a4ef0d97f3e01726cca7163653b38405313ad398dc8f"
+
+[coderabbit.platforms.linux-x64]
+artifact = "coderabbit-linux-x64.zip"
+sha256 = "a6344485153c5889c91bae71d9172c0d2d7d3924a45661173030e28570bb7bb2"
+
+[coderabbit.platforms.macos-arm64]
+artifact = "coderabbit-darwin-arm64.zip"
+sha256 = "6091d03164b47190b4dbb20de97312f79bde03fc35b4b7c2705f8f4d3ba8067e"
+
+[coderabbit.platforms.macos-x64]
+artifact = "coderabbit-darwin-x64.zip"
+sha256 = "c00982108b0f816df0cb96c427c1b99d59161cd9150c57749dd1f20b418d1d08"
+
+[coderabbit.platforms.windows-x64]
+artifact = "coderabbit-windows-x64.zip"
+sha256 = "d8f613b64fad7ccc33b0a09cc2218ab218071fb3fef25e15bc211789107e72d4"
+
+# The SSH keys herdr-agent serves, which the machine-local configuration replaces.
+[herdr_agent]
+public_keys = []
+
+# The OCaml switch and the tools opam installs into it.
+[ocaml]
+compiler = "5.5.0"
+platform_tools = ["dune", "ocaml-lsp-server", "ocamlformat", "odoc", "utop"]
+switch = "5.5.0"
+
+# The Tokyo Night colors of every themed tool.
+[palette]
+bg = "#1a1b26"
+bg_dim = "#15161e"
+bg_highlight = "#292e42"
+blue = "#7aa2f7"
+bright_black = "#414868"
+comment = "#565f89"
+cyan = "#7dcfff"
+diff_add = "#283b4d"
+diff_del = "#3f2d3d"
+fg = "#c0caf5"
+fg_dim = "#a9b1d6"
+green = "#9ece6a"
+magenta = "#bb9af7"
+orange = "#ff9e64"
+red = "#f7768e"
+selection = "#33467c"
+surface = "#3b4261"
+teal = "#73daca"
+yellow = "#e0af68"

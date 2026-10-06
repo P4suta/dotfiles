@@ -520,6 +520,39 @@ pub fn policy(listed: &str) -> Vec<String> {
         .collect()
 }
 
+/// The data files of the source state, merged the way chezmoi merges them.
+///
+/// # Errors
+///
+/// Returns an error that names the file and the key when a data file holds an unknown or mistyped key, or when reading a file fails.
+pub fn source_data(root: &Path) -> Result<Value> {
+    model::data::load(&crate::source_state(root).join(model::data::DIRECTORY))
+        .map_err(|error| anyhow::anyhow!("{error}"))
+}
+
+/// Where the JSON schema of the data files lives, relative to the checkout.
+pub const DATA_SCHEMA: &str = "schemas/chezmoidata.schema.json";
+
+/// Writes the JSON schema of the data files, or with `check` refuses a stale one.
+///
+/// # Errors
+///
+/// Returns an error when writing the schema fails, or with `check` when the committed schema differs from the model.
+pub fn data_schema(root: &Path, check: bool) -> Result<()> {
+    let path = root.join(DATA_SCHEMA);
+    let wanted = model::data::schema();
+    if check {
+        ensure!(
+            fs::read_to_string(&path).is_ok_and(|current| current == wanted),
+            "{DATA_SCHEMA} differs from the data model; run `just gen` and commit the result"
+        );
+    } else {
+        fs::create_dir_all(path.parent().context("schema directory")?)?;
+        fs::write(&path, wanted)?;
+    }
+    Ok(())
+}
+
 /// Renders, applies, and verifies every profile in an owned fixture after the public source check.
 ///
 /// # Errors
@@ -533,9 +566,7 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
     }
     let scratch = tempfile::tempdir()?;
     let mut git_policies = Vec::new();
-    let source_data: Value = serde_json::from_slice(&fs::read(
-        crate::source_state(root).join(".chezmoidata.json"),
-    )?)?;
+    let source_data = source_data(root)?;
     for profile in Profile::ALL {
         let fixture = Fixture::new(root, &scratch.path().join(profile.name()), profile)?;
         let dump = fixture.render(report)?;

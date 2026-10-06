@@ -138,12 +138,12 @@ fn gsetting(runner: &mut impl Runner, schema: &str, key: &str, value: &str) -> R
 }
 
 fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
-    let kitty_channel = text(&context.data, "/desktop/kitty_channel")?;
+    let kitty_channel = text(&context.data, &context.platform("/desktop/kitty_channel"))?;
     ensure!(
         matches!(kitty_channel.as_str(), "stable" | "nightly"),
         "unknown Kitty channel"
     );
-    let zed_channel = text(&context.data, "/desktop/zed_channel")?;
+    let zed_channel = text(&context.data, &context.platform("/desktop/zed_channel"))?;
     let (suffix, app_id) = match zed_channel.as_str() {
         "stable" => ("", "dev.zed.Zed"),
         "preview" => ("-preview", "dev.zed.Zed-Preview"),
@@ -151,7 +151,10 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         "dev" => ("-dev", "dev.zed.Zed-Dev"),
         _ => anyhow::bail!("unknown Zed channel"),
     };
-    let font_version = text(&context.data, "/desktop/nerd_fonts_version")?;
+    let font_version = text(
+        &context.data,
+        &context.platform("/desktop/nerd_fonts_version"),
+    )?;
     ensure!(
         font_version.starts_with('v')
             && font_version[1..]
@@ -373,7 +376,7 @@ fn gnome(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         ] {
             let value = context
                 .data
-                .pointer(pointer)
+                .pointer(&context.platform(pointer))
                 .and_then(serde_json::Value::as_u64)
                 .context("invalid keyboard timing")?;
             gsetting(runner, schema, key, &format!("uint32 {value}"))?;

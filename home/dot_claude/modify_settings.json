@@ -41,7 +41,7 @@ On Windows a session starts with the process-start probe, which hands the agent 
 {{- end -}}
 {{- $managed := dict "autoMemoryEnabled" false "hooks" $hooks -}}
 {{- if eq .profile "wsl" -}}
-{{- $managed = mergeOverwrite $managed (includeTemplate "profiles/wsl/dot_claude/settings.json.tmpl" (merge (dict) . (index .platforms .profile)) | fromJson) -}}
+{{- $managed = mergeOverwrite $managed (includeTemplate "profiles/wsl/dot_claude/settings.json.tmpl" . | fromJson) -}}
 {{- end -}}
 {{ mergeOverwrite $current $managed | toPrettyJson "  " | trim }}
 

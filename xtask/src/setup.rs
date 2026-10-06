@@ -41,17 +41,11 @@ pub struct ContextData {
     pub data: Value,
 }
 
-fn merge(target: &mut Value, values: &Value) {
-    if let (Some(target), Some(values)) = (target.as_object_mut(), values.as_object()) {
-        for (key, value) in values {
-            if let Some(current) = target.get_mut(key) {
-                merge(current, value);
-            } else {
-                target.insert(key.clone(), value.clone());
-            }
-        }
-    } else {
-        *target = values.clone();
+impl ContextData {
+    /// The JSON pointer to `pointer` under this profile's `platforms` entry.
+    #[must_use]
+    pub fn platform(&self, pointer: &str) -> String {
+        format!("/platforms/{}{pointer}", self.profile.name())
     }
 }
 
@@ -64,10 +58,8 @@ pub(crate) fn load(source: &Path, config: &Path, home: &Path) -> Result<ContextD
         output.status.success(),
         "machine-local profile could not be read"
     );
-    let raw: Value = serde_json::from_slice(&output.stdout)?;
-    let profile = crate::profiles::configured_profile(&raw)?;
-    let mut data = raw["platforms"][profile.name()].clone();
-    merge(&mut data, &raw);
+    let data: Value = serde_json::from_slice(&output.stdout)?;
+    let profile = crate::profiles::configured_profile(&data)?;
     Ok(ContextData {
         source: source.to_path_buf(),
         home: home.to_path_buf(),
@@ -119,7 +111,11 @@ pub fn run(source: &Path, config: &Path, step: Step, live: bool) -> Result<()> {
     native
         .environment
         .push(("KERL_CONFIGURE_OPTIONS".into(), kerl.into()));
-    if let Some(jobs) = context.data.pointer("/mise/jobs").and_then(Value::as_u64) {
+    if let Some(jobs) = context
+        .data
+        .pointer(&context.platform("/mise/jobs"))
+        .and_then(Value::as_u64)
+    {
         native
             .environment
             .push(("MISE_JOBS".into(), jobs.to_string().into()));
@@ -481,7 +477,7 @@ pub(crate) fn execute(context: &ContextData, runner: &mut impl Runner, step: Ste
                 "--no-docs",
             ]);
             arguments.extend(
-                strings(&context.data, "/racket/collections")?
+                strings(&context.data, &context.platform("/racket/collections"))?
                     .into_iter()
                     .map(Into::into),
             );
@@ -644,7 +640,7 @@ fn macos_defaults(context: &ContextData, runner: &mut impl Runner) -> Result<()>
     ] {
         let value = context
             .data
-            .pointer(pointer)
+            .pointer(&context.platform(pointer))
             .context("keyboard setting is missing")?
             .to_string();
         checked(
@@ -662,7 +658,7 @@ fn tools(context: &ContextData, runner: &mut impl Runner, upgrade: bool) -> Resu
         arguments.push(context.source.clone().into());
         arguments.extend(args(&[
             "--scoop-apps",
-            &strings(&context.data, "/scoop/apps")?.join(","),
+            &strings(&context.data, &context.platform("/scoop/apps"))?.join(","),
         ]));
         checked(runner, Tool::Dotctl, &arguments)?;
         return Ok(());
@@ -865,7 +861,10 @@ fn haskell(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         lines.push(setting);
     }
     replace(&config, format!("{}\n", lines.join("\n")).as_bytes(), false)?;
-    let version = string(&context.data, "/tool_versions/haskell-language-server")?;
+    let version = string(
+        &context.data,
+        &context.platform("/tool_versions/haskell-language-server"),
+    )?;
     let installation = context
         .home
         .join(".local/share/mise/installs/github-haskell-haskell-language-server")

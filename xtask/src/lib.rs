@@ -35,7 +35,7 @@ pub mod next_action_rules;
 pub mod path_conversion_rules;
 pub mod pr_rules;
 pub mod pr_workflow;
-pub mod profile_rules;
+pub use model::profile_rules;
 pub mod profile_snapshot;
 pub mod profiles;
 pub mod proof_budget_rules;

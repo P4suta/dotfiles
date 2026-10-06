@@ -1,5 +1,5 @@
 [tools]
-{{- range (concat .tools.common (index .tools .role) | uniq) }}
+{{- range (concat .platforms.wsl.tools.common (index .platforms.wsl.tools .role) | uniq) }}
 {{ . | quote }} = "latest"
 {{- end }}
 

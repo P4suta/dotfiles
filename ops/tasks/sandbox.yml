@@ -1,7 +1,7 @@
 ---
 # Prerequisites for the Claude Code sandbox.
 #
-# ripgrep belongs to mise, through tools.common in .chezmoidata.toml.
+# ripgrep belongs to mise, through tools.common in home/.chezmoidata/tools.toml.
 # The kernel supplies the seccomp filter, so this file asserts it.
 
 - name: Install sandbox prerequisites (bubblewrap + socat)

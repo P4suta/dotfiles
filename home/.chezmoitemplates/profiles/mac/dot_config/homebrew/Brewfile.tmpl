@@ -26,9 +26,9 @@ cask "raycast"
 
 cask "font-udev-gothic-nf"
 
-{{ range .brew.formulae -}}
+{{ range .platforms.mac.brew.formulae -}}
 brew {{ . | quote }}
 {{ end -}}
-{{ range .brew.casks -}}
+{{ range .platforms.mac.brew.casks -}}
 cask {{ . | quote }}
 {{ end -}}

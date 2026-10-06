@@ -11,7 +11,7 @@
 .chezmoiscripts/windows/**
 {{ end }}
 {{ if eq .profile "mac" }}
-{{ includeTemplate "profiles/mac/ignore" (merge (dict) . (index .platforms .profile)) }}
+{{ includeTemplate "profiles/mac/ignore" . }}
 AppData/Roaming/herdr/config.toml
 .config/kitty/kitty.conf
 .config/kitty/tokyo-night.conf
@@ -53,7 +53,7 @@ Documents/PowerShell/Microsoft.PowerShell_profile.ps1
 .chezmoiscripts/unix/install-nix-profile.sh
 {{ end }}
 {{ if eq .profile "linux" }}
-{{ includeTemplate "profiles/linux/ignore" (merge (dict) . (index .platforms .profile)) }}
+{{ includeTemplate "profiles/linux/ignore" . }}
 AppData/Roaming/herdr/config.toml
 Library/Application Support/lazygit
 Library/Application Support/nushell
@@ -100,7 +100,7 @@ Documents/PowerShell/Microsoft.PowerShell_profile.ps1
 .chezmoiscripts/unix/setup-racket.sh
 {{ end }}
 {{ if eq .profile "windows" }}
-{{ includeTemplate "profiles/windows/ignore" (merge (dict) . (index .platforms .profile)) }}
+{{ includeTemplate "profiles/windows/ignore" . }}
 Library/Application Support/lazygit
 Library/Application Support/nushell
 Library/LaunchAgents/dev.dotfiles.desktop-refresh.plist
@@ -177,7 +177,7 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .zshrc
 {{ end }}
 {{ if eq .profile "wsl" }}
-{{ includeTemplate "profiles/wsl/ignore" (merge (dict) . (index .platforms .profile)) }}
+{{ includeTemplate "profiles/wsl/ignore" . }}
 AppData/Roaming/herdr/config.toml
 Library/Application Support/lazygit
 Library/Application Support/nushell

@@ -3,7 +3,7 @@
 //! `op read` hands each private key to this process, which pipes it into `ssh-add -`, so the key never touches disk.
 //! Each key stays loaded for at most `KEY_LIFETIME`, and `herdr-agent lock`, logout, or the death of the agent removes it sooner.
 //!
-//! It loads the 1Password SSH keys whose public keys appear in `~/.config/herdr-agent/keys`, which chezmoi renders from `.chezmoidata.json`.
+//! It loads the 1Password SSH keys whose public keys appear in `~/.config/herdr-agent/keys`, which chezmoi renders from the `herdr_agent` data.
 //! That file names the commit signing key only when the machine-local data opts in through `herdr_agent.load_signing_key`.
 
 mod json;
