@@ -1,6 +1,6 @@
 //! Locates tools and builds the environment for child processes.
 //!
-//! Hook processes start from a non-interactive `sh` that may never have run `mise activate`, so this module restores the mise shims, `~/.local/bin`, and Homebrew to `PATH` the way `scripts/_common.sh` does for the shell gates.
+//! Hook processes start from a non-interactive `sh` that may never have run `mise activate`, so this module restores the mise shims, `~/.local/bin`, and Homebrew to `PATH`.
 //!
 //! `MISE_AUTO_INSTALL=false` stops each shim run from downloading missing tools.
 

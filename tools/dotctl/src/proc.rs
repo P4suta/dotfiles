@@ -60,13 +60,6 @@ impl Captured {
     pub fn stderr_text(&self) -> String {
         String::from_utf8_lossy(&self.stderr).into_owned()
     }
-
-    /// Writes captured stdout and stderr to their own streams, unchanged.
-    pub fn echo(&self) {
-        let _ = std::io::stdout().write_all(&self.stdout);
-        let _ = std::io::stderr().write_all(&self.stderr);
-        let _ = std::io::stdout().flush();
-    }
 }
 
 pub fn capture(cmd: &mut Command) -> Result<Captured> {

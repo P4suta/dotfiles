@@ -1,34 +1,7 @@
 # Target paths chezmoi never applies to the home directory.
-
-# Machine-local login state, contains tokens.
-# This profile manages no GitHub CLI configuration; the unified ignore list also excludes config.yml here.
-.config/gh/hosts.yml
-
-# Runtime state
-AppData/Local/mise/**
-AppData/Roaming/atuin/**
-.cache/**
-
-# Claude Code is machine-local where it rewrites its own state; only skills/ and the merged settings keys are ours to ship.
-.claude/settings.local.json
-.claude/projects/**
-.claude/todos/**
-.claude/statsig/**
-.claude/shell-snapshots/**
-.claude/history.jsonl
-.claude/file-history/**
-.claude/__store.db
-.claude.json
-
-# Repo documentation: git-tracked only, not applied to the home directory
-README.md
+# The shared host state patterns live in host-state-ignore.
 
 # Repo dev tooling: git-tracked only, not applied to the home directory
-lefthook.yml
-.typos.toml
-PSScriptAnalyzerSettings.psd1
-justfile
-.gitignore
 tools/**
 
 # ~/.gitconfig is left to the 1Password app's Sign Git commits feature;

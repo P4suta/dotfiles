@@ -11,11 +11,9 @@
 
 pub mod attribution;
 pub mod bypass;
-pub mod doctor;
 pub mod gate_rules;
 pub mod gitargv;
 pub mod lang;
-pub mod lint;
 pub mod locate;
 pub mod postcommit;
 pub mod prepush;

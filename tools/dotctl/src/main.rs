@@ -1,10 +1,7 @@
 mod env;
-mod lint;
 mod proc;
-mod render;
 mod setup;
 
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
@@ -18,11 +15,6 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Lint {
-        kind: lint::Kind,
-        files: Vec<PathBuf>,
-    },
-    Preflight,
     Setup {
         #[command(subcommand)]
         what: SetupKind,
@@ -95,8 +87,6 @@ enum SetupKind {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Lint { kind, files } => lint::run(kind, &files),
-        Command::Preflight => preflight(),
         Command::Setup { what } => match what {
             SetupKind::Tools { scoop_apps } => setup::tools::run(&scoop_apps),
             SetupKind::Scoop {
@@ -166,10 +156,4 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-
-fn preflight() -> anyhow::Result<i32> {
-    let mut cmd = env::command("lefthook");
-    cmd.args(["run", "preflight", "--all-files"]);
-    Ok(proc::status(&mut cmd)?.code())
 }

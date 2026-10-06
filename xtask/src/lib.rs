@@ -19,6 +19,8 @@ pub mod health;
 pub mod hooks;
 pub mod hosts;
 pub mod hosts_rules;
+pub mod ignore_audit;
+pub mod ignore_rules;
 pub mod instruction_audit;
 pub mod instruction_rules;
 pub mod line_endings;

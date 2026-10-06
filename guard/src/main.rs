@@ -7,11 +7,11 @@
 //! - `~/.config/git/hooks/commit-msg` runs `dotguard commit-msg`, which strips attribution and checks the language.
 //! - `~/.config/git/hooks/pre-commit` runs `dotguard pre-commit`, the language and staged-diff gates.
 //!
-//! `core.hooksPath` in `~/.gitconfig` points every repository at that hooks directory, so no repository needs to opt in.
+//! `core.hooksPath` in the global Git configuration points every repository at that hooks directory, so no repository needs to opt in.
 
 use dotguard::{
-    attribution, bypass, doctor, gate_rules, gitargv, lang, lint, postcommit, prepush, realgit,
-    refusal, renovate, stack, staged,
+    attribution, bypass, gate_rules, gitargv, lang, postcommit, prepush, realgit, refusal,
+    renovate, stack, staged,
 };
 
 use bypass::Category;
@@ -41,8 +41,6 @@ fn main() -> ExitCode {
         "renovate-gate" => code(renovate::run(args.get(1).map_or("origin", String::as_str))),
         "renovate" => code(renovate::dispatch(&args[1..])),
         "scan" => code(scan_paths(&args[1..])),
-        "lint" => code(lint::dispatch(&args[1..])),
-        "doctor" => code(doctor::run(&args[1..])),
         "--version" | "-V" | "version" => {
             println!("dotguard {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS

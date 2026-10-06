@@ -174,6 +174,11 @@ pub const START_HEALTH_HARNESSES: [&str; 2] = [
     "a_start_that_reaches_the_bound_is_always_a_stall",
 ];
 
+pub const IGNORE_HARNESSES: [&str; 2] = [
+    "a_literal_pattern_matches_only_itself",
+    "a_star_stays_inside_one_segment_and_a_globstar_crosses_them",
+];
+
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
     let summary = &value["verification_results"]["summary"];
     ensure!(
@@ -757,7 +762,7 @@ pub struct Rules {
 }
 
 /// Every rule module registered with the shared verification, in source order.
-pub const RULES: [Rules; 12] = [
+pub const RULES: [Rules; 13] = [
     Rules {
         source: "xtask/src/target_rules.rs",
         harnesses: &TARGET_HARNESSES,
@@ -1011,6 +1016,25 @@ fn reject_refusing_a_fast_start_for_past_events() {
         rejected: &[
             "reject_starting_work_on_a_start_that_never_finished",
             "reject_refusing_a_fast_start_for_past_events",
+        ],
+    },
+    Rules {
+        source: "xtask/src/ignore_rules.rs",
+        harnesses: &IGNORE_HARNESSES,
+        counterexamples: "use production::{Verdict, matches, verdict};
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_a_star_that_crosses_a_segment() {
+    assert!(matches(b\"*\", b\"a/b\"));
+}
+#[kani::proof]
+fn reject_keeping_a_repeated_pattern() {
+    assert!(verdict(true, 1) == Verdict::Kept);
+}
+",
+        rejected: &[
+            "reject_a_star_that_crosses_a_segment",
+            "reject_keeping_a_repeated_pattern",
         ],
     },
 ];

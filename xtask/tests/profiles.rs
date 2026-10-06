@@ -13,6 +13,36 @@ use std::path::Path;
 mod fixture_git;
 
 #[test]
+fn every_ignore_and_remove_pattern_is_distinct_and_justified() {
+    dotfiles_xtask::ignore_audit::check(&Path::new(env!("CARGO_MANIFEST_DIR")).join("..")).unwrap();
+}
+
+#[test]
+fn an_ignore_pattern_that_matches_nothing_is_refused() {
+    let snapshot = source_snapshot();
+    let ignore = snapshot.path().join(".chezmoiignore");
+    let mut text = fs::read_to_string(&ignore).unwrap();
+    text.push_str("\n.config/never-declared\n.config/never-declared\n");
+    fs::write(&ignore, text).unwrap();
+    let error = format!(
+        "{:#}",
+        dotfiles_xtask::ignore_audit::check(snapshot.path()).unwrap_err()
+    );
+    for profile in Profile::ALL {
+        assert!(
+            error.contains(&format!(
+                "{} .chezmoiignore .config/never-declared: Unjustified",
+                profile.name()
+            )) && error.contains(&format!(
+                "{} .chezmoiignore .config/never-declared: Repeated",
+                profile.name()
+            )),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn a_rendering_that_differs_from_its_manifest_is_refused() {
     let snapshot = source_snapshot();
     let attributes = snapshot.path().join("dot_config/git/attributes");

@@ -2,7 +2,7 @@ use crate::runtime::{Native, Runner, args, checked};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::ffi::OsString;
-use std::io::{IsTerminal, Write};
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 
@@ -168,19 +168,6 @@ pub fn doctor(strict: bool) -> Result<()> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .context("native home is unavailable")?;
     let mut native = Native::new(Path::new(&home))?;
-    if cfg!(target_os = "macos") {
-        let output = checked(
-            &mut native,
-            Tool::Dotguard,
-            &args(if strict {
-                &["doctor", "--strict"]
-            } else {
-                &["doctor"]
-            }),
-        )?;
-        std::io::stdout().write_all(&output)?;
-        return Ok(());
-    }
     let mut missing = 0;
     let required: &[Tool] = if cfg!(windows) {
         &[

@@ -279,6 +279,7 @@ fn check(root: &Path, gates: Gates) -> Result<()> {
         );
         dotfiles_xtask::profiles::check_profiles(root, None)?;
         dotfiles_xtask::profile_snapshot::check(root)?;
+        dotfiles_xtask::ignore_audit::check(root)?;
     }
     println!("Checked the gates: {}", gates.names());
     Ok(())
@@ -378,6 +379,7 @@ fn run() -> Result<()> {
         Action::Profiles { output } => {
             dotfiles_xtask::profiles::check_profiles(&cli.root, output.as_deref())?;
             dotfiles_xtask::profile_snapshot::check(&cli.root)?;
+            dotfiles_xtask::ignore_audit::check(&cli.root)?;
         }
         Action::ProfileSnapshots { write } => {
             if write {

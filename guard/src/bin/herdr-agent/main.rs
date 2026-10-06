@@ -3,7 +3,7 @@
 //! `op read` hands each private key to this process, which pipes it into `ssh-add -`, so the key never touches disk.
 //! The keys stay loaded until `herdr-agent lock`, logout, or the death of the process.
 //!
-//! It loads the 1Password SSH keys whose public keys appear in `~/.config/herdr-agent/keys`, which chezmoi renders from `.chezmoidata.toml`.
+//! It loads the 1Password SSH keys whose public keys appear in `~/.config/herdr-agent/keys`, which chezmoi renders from `.chezmoidata.json`.
 
 mod json;
 

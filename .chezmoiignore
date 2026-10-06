@@ -14,7 +14,6 @@
 {{ includeTemplate "profiles/mac/ignore" (merge (dict) . (index .platforms .profile)) }}
 AppData/Roaming/herdr/config.toml
 .config/git/config
-.config/git/hooks/renovate-freshness.sh
 .config/kitty/kitty.conf
 .config/kitty/tokyo-night.conf
 .config/fcitx5/config
@@ -47,14 +46,11 @@ AppData/Roaming/herdr/config.toml
 .local/bin/session-reaper
 .local/share/applications/kitty-herdr.desktop
 .local/share/applications/kitty-nu.desktop
-.local/share/dotfiles/bin/remove_claude
 .profile
 Documents/PowerShell/Microsoft.PowerShell_profile.ps1
 23-setup-winget.ps1
 25-install-wezterm.ps1
 27-cache-shell-init.ps1
-10-install-rust.ps1
-20-install-dotctl.ps1
 22-setup-scoop.ps1
 25-setup-tools.ps1
 30-disable-python-store-stub.ps1
@@ -67,7 +63,6 @@ Documents/PowerShell/Microsoft.PowerShell_profile.ps1
 configure-fcitx5.sh
 install-ocomment.sh
 retire-tmux.sh
-setup-coderabbit.sh
 install-gh.ps1
 install-mise.ps1
 install-nix-profile.sh
@@ -87,7 +82,6 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .config/fzf/fzfrc
 .config/ghostty/config
 .config/git/config
-.config/git/hooks/dotguard-delegate.sh
 .config/git/ignore
 .config/herdr-agent/keys
 .config/homebrew/Brewfile
@@ -115,8 +109,6 @@ Documents/PowerShell/Microsoft.PowerShell_profile.ps1
 23-setup-winget.ps1
 25-install-wezterm.ps1
 27-cache-shell-init.ps1
-10-install-rust.ps1
-20-install-dotctl.ps1
 22-setup-scoop.ps1
 25-setup-tools.ps1
 30-disable-python-store-stub.ps1
@@ -157,10 +149,6 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .config/fzf/fzfrc
 .config/gh/config.yml
 .config/ghostty/config
-.config/git/hooks/dotguard-delegate.sh
-.config/git/hooks/lefthook-delegate.sh
-.config/git/hooks/renovate-freshness.sh
-.config/git/hooks/storage-scout-delegate.sh
 .config/git/ignore
 .config/herdr-agent/keys
 .config/herdr/config.toml
@@ -200,7 +188,6 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .config/systemd/user/tools-upgrade.service
 .config/systemd/user/tools-upgrade.timer
 .config/xdg-terminals.list
-.gitconfig
 .local/bin/dev-reaper
 .local/bin/dotfiles
 .local/bin/dotfiles-doctor
@@ -217,14 +204,11 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .local/bin/session-reaper
 .local/share/applications/kitty-herdr.desktop
 .local/share/applications/kitty-nu.desktop
-.local/share/dotfiles/bin/remove_claude
 .profile
 .zprofile
 .zshrc
 05-brew-bundle.sh
 configure-fcitx5.sh
-import-forge-signing-keys.sh
-install-claude-code.sh
 install-domyjob.sh
 install-fleet.sh
 install-ocomment.sh
@@ -233,7 +217,6 @@ macos-defaults.sh
 refresh-desktop.sh
 refresh-integrations.sh
 retire-tmux.sh
-setup-coderabbit.sh
 setup-guard.sh
 setup-haskell.sh
 setup-ocaml.sh
@@ -259,14 +242,10 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .config/ghostty/config
 .config/git/config
 .config/git/hooks/commit-msg
-.config/git/hooks/dotguard-delegate.sh
-.config/git/hooks/lefthook-delegate.sh
 .config/git/hooks/post-checkout
 .config/git/hooks/post-merge
 .config/git/hooks/pre-commit
 .config/git/hooks/reference-transaction
-.config/git/hooks/renovate-freshness.sh
-.config/git/hooks/storage-scout-delegate.sh
 .config/git/ignore
 .config/herdr-agent/keys
 .config/herdr/config.toml
@@ -322,7 +301,6 @@ Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
 .local/bin/session-reaper
 .local/share/applications/kitty-herdr.desktop
 .local/share/applications/kitty-nu.desktop
-.local/share/dotfiles/bin/remove_claude
 .profile
 .zprofile
 .zshrc
@@ -330,8 +308,6 @@ Documents/PowerShell/Microsoft.PowerShell_profile.ps1
 23-setup-winget.ps1
 25-install-wezterm.ps1
 27-cache-shell-init.ps1
-10-install-rust.ps1
-20-install-dotctl.ps1
 22-setup-scoop.ps1
 25-setup-tools.ps1
 30-disable-python-store-stub.ps1
@@ -352,7 +328,6 @@ macos-defaults.sh
 refresh-desktop.sh
 refresh-integrations.sh
 retire-tmux.sh
-setup-coderabbit.sh
 setup-guard.sh
 setup-haskell.sh
 setup-ocaml.sh
@@ -364,22 +339,16 @@ install-nix-profile.sh
 {{ if ne .profile "wsl" }}
 .local/bin/dotfiles-wsl-ssh-keygen
 {{ end }}
+{{ includeTemplate "host-state-ignore" . }}
 .github
 ops
 docs
-scripts
 xtask
 guard
 tools
 examples
-tests
 policy
-node_modules
-.cache
-target
 README.md
-CONTRIBUTING.md
-LICENSE
 justfile
 mise.toml
 package.json
@@ -389,19 +358,8 @@ lefthook.yml
 .yamllint
 .typos.toml
 .ocomment.toml
-PSScriptAnalyzerSettings.psd1
 .gitignore
 .gitattributes
-.migration-imported
-.doppler
-.doppler/**
-.config/chezmoi/**
-.config/dotfiles/private/**
-.config/op/**
-.config/1Password/**
-.local/state/**
-.codex/auth.json
-.codex/sessions/**
 
 {{ if eq .profile "windows" }}
 00-runtime.sh

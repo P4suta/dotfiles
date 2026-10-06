@@ -3,7 +3,7 @@ name = "dotctl"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = "Command layer for these dotfiles: lint, apply, git hooks, machine setup"
+description = "Windows machine setup for these dotfiles"
 license = "MIT"
 publish = false
 
