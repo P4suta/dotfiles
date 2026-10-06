@@ -5,5 +5,15 @@
   // A release waits three days before Renovate proposes it, so a pulled release never reaches a host.
   minimumReleaseAge: '3 days',
   // Version changes arrive only through these managers, as pull requests that pass the required checks.
-  enabledManagers: ['github-actions', 'mise', 'cargo', 'dockerfile'],
+  enabledManagers: ['github-actions', 'mise', 'cargo', 'dockerfile', 'custom.regex'],
+  customManagers: [
+    {
+      // Each pin in versions.toml that a `renovate:` comment precedes, with the lookup that comment names.
+      customType: 'regex',
+      managerFilePatterns: ['/^home/\\.chezmoidata/versions\\.toml$/'],
+      matchStrings: [
+        '# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\n[\\w-]+ = "(?<currentValue>[^"]+)"',
+      ],
+    },
+  ],
 }

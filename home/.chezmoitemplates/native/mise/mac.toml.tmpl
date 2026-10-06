@@ -10,6 +10,8 @@ ghc = "asdf:mise-plugins/mise-ghcup"
 
 [settings]
 experimental = true
+# A project's configuration loads only after `mise trust` records its exact contents.
+paranoid = true
 jobs = {{ .platforms.mac.mise.jobs }}
 # domyjob runs the owner's own projects in this work area, and each new workspace path would otherwise have its mise.toml refused.
 trusted_config_paths = [{{ joinPath .chezmoi.homeDir ".local/state/domyjob/v3/work" | quote }}]

@@ -4,4 +4,6 @@ node_modules/
 .migration-imported
 .doppler/
 *.local.toml
-.mise/
+# mise.lock names the uv lock of each Python tool under .mise/locks/, which a fresh install needs.
+.mise/*
+!.mise/locks/

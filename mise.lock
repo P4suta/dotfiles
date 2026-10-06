@@ -385,7 +385,7 @@ url_api = "https://api.github.com/repos/PowerShell/PowerShell/releases/assets/55
 version = "2.21.4"
 backend = "pypi:ansible-core"
 specifiers = ["2.21.4"]
-uv = { path = ".mise/locks/pypi-ansible-core/2.21.4", digest = "sha256:cb239b34f038c6f98892959d6f7d80dd24176dd19070eb77fdc9234cb9c51300" }
+uv = { path = ".mise/locks/pypi-ansible-core/2.21.4", digest = "sha256:a95abe6c1161fffcbe2fd93d656ca45f38d10611d279e4c62ec4a15ce651c492" }
 
 [[tools.rust]]
 version = "1.99.0"
@@ -461,6 +461,7 @@ url = "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-darwin-aa
 url_api = "https://api.github.com/repos/tamasfe/taplo/releases/assets/257323110"
 
 [tools.taplo."platforms.windows-x64"]
+checksum = "blake3:2e8452e361c735169a8ce92d36b22e451e3504a8d996e7603f9840dddffb93a7"
 url = "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-windows-x86_64.zip"
 url_api = "https://api.github.com/repos/tamasfe/taplo/releases/assets/257323062"
 
@@ -599,7 +600,7 @@ url_api = "https://api.github.com/repos/vale-cli/vale/releases/assets/603879364"
 version = "1.38.0"
 backend = "pypi:yamllint"
 specifiers = ["1.38.0"]
-uv = { path = ".mise/locks/yamllint/1.38.0", digest = "sha256:1fe4154cd2ac78fb3d00a3e1ebdafe1d998ae5d2bbc9199ac3ef286f5f320420" }
+uv = { path = ".mise/locks/yamllint/1.38.0", digest = "sha256:0cbcd3b4b06ec8f5f4783c6d9c718bb105d18fc8eb32977feb1ee0fcb51733aa" }
 
 [[tools.zizmor]]
 version = "1.30.1"

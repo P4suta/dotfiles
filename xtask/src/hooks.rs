@@ -5,7 +5,7 @@ use anyhow::{Context, Result, ensure};
 use std::ffi::OsString;
 use std::fs;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -141,6 +141,74 @@ pub(crate) fn configured_hooks(bytes: &[u8]) -> Result<Vec<String>> {
         .collect()
 }
 
+/// The Lefthook configurations a repository can carry at its root.
+const LEFTHOOK_CONFIGURATIONS: [&str; 8] = [
+    "lefthook.yml",
+    "lefthook.yaml",
+    "lefthook.toml",
+    "lefthook.json",
+    ".lefthook.yml",
+    ".lefthook.yaml",
+    ".lefthook.toml",
+    ".lefthook.json",
+];
+
+/// The project configurations mise loads from a repository root.
+const MISE_CONFIGURATIONS: [&str; 9] = [
+    "mise.toml",
+    "mise.local.toml",
+    ".mise.toml",
+    ".mise.local.toml",
+    "mise/config.toml",
+    ".mise/config.toml",
+    ".config/mise.toml",
+    ".config/mise/config.toml",
+    ".tool-versions",
+];
+
+/// The root of the repository whose own Lefthook configuration the hook runs, with its mise configuration trusted.
+/// `post-commit` and `reference-transaction` run no repository configuration.
+fn lefthook_repository(native: &mut Native, hook: Hook) -> Result<Option<PathBuf>> {
+    if matches!(hook, Hook::PostCommit | Hook::ReferenceTransaction) {
+        return Ok(None);
+    }
+    let reply = native.run(Tool::Git, &args(&["rev-parse", "--show-toplevel"]))?;
+    if !reply.success {
+        return Ok(None);
+    }
+    let root = PathBuf::from(String::from_utf8(reply.bytes)?.trim());
+    if !LEFTHOOK_CONFIGURATIONS
+        .iter()
+        .any(|name| root.join(name).is_file())
+    {
+        return Ok(None);
+    }
+    trust_repository(native, &root)?;
+    Ok(Some(root))
+}
+
+/// mise's paranoid mode loads a repository's configuration only after a trust that records its current contents.
+/// Until then, a mise shim there starts no tool, not even Lefthook.
+/// The hook runs that repository's own Lefthook commands anyway, so trusting the configuration beside them grants them nothing more.
+fn trust_repository(native: &mut Native, root: &Path) -> Result<()> {
+    if !native.available(Tool::Mise) {
+        return Ok(());
+    }
+    for name in MISE_CONFIGURATIONS {
+        let configuration = root.join(name);
+        if configuration.is_file() {
+            let mut arguments = args(&["trust", "--quiet"]);
+            arguments.push(configuration.clone().into());
+            ensure!(
+                native.run(Tool::Mise, &arguments)?.success,
+                "mise could not trust {}",
+                configuration.display()
+            );
+        }
+    }
+    Ok(())
+}
+
 fn delegate(
     native: &mut Native,
     hook: Hook,
@@ -148,28 +216,6 @@ fn delegate(
     input: &[u8],
     global: Option<&Path>,
 ) -> Result<()> {
-    if global.is_none() {
-        let reply = native.run(Tool::Git, &args(&["rev-parse", "--show-toplevel"]))?;
-        if !reply.success {
-            return Ok(());
-        }
-        let root = String::from_utf8(reply.bytes)?.trim().to_owned();
-        let configured = [
-            "lefthook.yml",
-            "lefthook.yaml",
-            "lefthook.toml",
-            "lefthook.json",
-            ".lefthook.yml",
-            ".lefthook.yaml",
-            ".lefthook.toml",
-            ".lefthook.json",
-        ]
-        .iter()
-        .any(|name| Path::new(&root).join(name).is_file());
-        if !configured {
-            return Ok(());
-        }
-    }
     let configuration = global.map_or_else(
         || "the repository's lefthook configuration".to_owned(),
         |config| config.display().to_string(),
@@ -268,13 +314,14 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
             crate::prose::Bundle::installed,
         )?;
     }
+    let repository = lefthook_repository(&mut native, hook)?;
     if matches!(hook, Hook::PreCommit) {
         let global = native.home.join(".config/lefthook/global.yml");
         if global.is_file() {
             delegate(&mut native, hook, arguments, &input, Some(&global))?;
         }
     }
-    if !matches!(hook, Hook::PostCommit | Hook::ReferenceTransaction) {
+    if repository.is_some() {
         delegate(&mut native, hook, arguments, &input, None)?;
     }
     if let Some(before) = staged {

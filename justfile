@@ -3,78 +3,83 @@ set windows-shell := ["pwsh.exe", "-NoLogo", "-NoProfile", "-Command"]
 default:
     @just --list
 
-check *args:
+# mise's paranoid mode loads this checkout's configuration only after a trust that records its current contents.
+[private]
+trust:
+    mise trust --quiet {{quote(justfile_directory() / "mise.toml")}}
+
+check *args: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check {{args}}
 
-check-staged:
+check-staged: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check --staged
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml --bin prose -- --source . repository --scope comments
 
-commit-message file:
+commit-message file: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml --bin prose -- --source . check --channel commit {{quote(file)}}
 
-profiles:
+profiles: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- profiles
 
-proofs *args:
+proofs *args: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- proofs {{args}}
 
-classify *args:
+classify *args: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- classify {{args}}
 
-rehearse *args:
+rehearse *args: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- rehearse {{args}}
 
-skills:
+skills: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- skills
 
-adapters:
+adapters: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check-adapters
 
-secrets:
+secrets: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- check-secrets
 
-gen:
+gen: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- gen
 
-decide skill:
+decide skill: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- decide {{quote(skill)}}
 
-hosts *args:
+hosts *args: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- hosts {{args}}
 
-next *flags:
+next *flags: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- next {{flags}}
 
-diff config destination state:
+diff config destination state: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- profile diff --config {{quote(config)}} --destination {{quote(destination)}} --state {{quote(state)}}
 
-apply config destination state backup:
+apply config destination state backup: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- profile apply --config {{quote(config)}} --destination {{quote(destination)}} --state {{quote(state)}} --backup {{quote(backup)}} --live
 
-verify config destination state:
+verify config destination state: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- profile verify --config {{quote(config)}} --destination {{quote(destination)}} --state {{quote(state)}}
 
-refresh config:
+refresh config: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- refresh --config {{quote(config)}} --live
 
-doctor:
+doctor: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- doctor --strict
 
-prose:
+prose: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml --bin prose -- --source . repository --scope documents --scope comments
 
-ops-check:
+ops-check: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- ops-check
 
-install-review-guard:
+install-review-guard: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- install-review-guard
 
-install-skill-ops:
+install-skill-ops: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- install-skill-ops
 
-install-prose:
+install-prose: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- install-prose
 
-install-pr-workflow:
+install-pr-workflow: trust
     mise x -- cargo run --locked --manifest-path xtask/Cargo.toml -- install-pr-workflow

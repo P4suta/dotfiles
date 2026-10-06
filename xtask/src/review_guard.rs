@@ -530,9 +530,11 @@ fn report_status(ledger: &Path, organization: &str, scope: PauseScope, json: boo
 }
 
 /// The pinned `CodeRabbit` runtime that mise installed and renamed.
-fn vendor(version: &str) -> Result<std::path::PathBuf> {
+/// The global configuration pins it, so mise reads it from the user directory, where no project configuration that paranoid mode refuses can apply.
+fn vendor(version: &str, user_directory: &Path) -> Result<std::path::PathBuf> {
     let location = Tool::Mise
         .command()
+        .current_dir(user_directory)
         .args(["where", &format!("http:coderabbit@{version}")])
         .output()
         .context("locate the dotfiles-managed CodeRabbit runtime")?;
@@ -590,7 +592,7 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
             "managed service reviews and usage queries run only on the Mac; other hosts perform native local checks"
         );
     }
-    let vendor = vendor(&version)?;
+    let vendor = vendor(&version, user_directory)?;
     if kind == Invocation::ReadOnly {
         if usage_query(&args) {
             return execute_probe(

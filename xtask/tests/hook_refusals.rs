@@ -145,6 +145,53 @@ fn a_child_refusal_stays_last_and_a_bare_failure_gets_its_own_record() -> Result
 }
 
 #[test]
+fn a_repository_with_its_own_lefthook_configuration_has_its_mise_configuration_trusted_first()
+-> Result<()> {
+    let host = Host::new()?;
+    let status = Command::new("rustc")
+        .args(["--edition", "2024"])
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mise.rs"))
+        .arg("-o")
+        .arg(
+            host.home()
+                .join(".local/bin")
+                .join(format!("mise{}", std::env::consts::EXE_SUFFIX)),
+        )
+        .status()?;
+    ensure!(status.success(), "fixture mise compilation failed");
+    let log = host.scope.path().join("mise.log");
+    let configuration = host.repository().join("mise.toml");
+    fs::write(&configuration, "[tools]\n")?;
+    let hook = || {
+        host.command(env!("CARGO_BIN_EXE_dotfiles-xtask"))
+            .env("MISE_FIXTURE_LOG", &log)
+            .args(["hook", "pre-commit"])
+            .output()
+    };
+    assert_eq!(refusal(&hook()?).rule, "commit.staged-tree");
+    assert!(
+        !log.exists(),
+        "a repository without its own hooks keeps its trust"
+    );
+    fs::write(host.repository().join("lefthook.yml"), "pre-commit: {}\n")?;
+    assert_eq!(refusal(&hook()?).rule, "hook.lefthook");
+    let recorded = fs::read_to_string(&log)?;
+    let trusted: Vec<_> = recorded
+        .lines()
+        .map(|line| {
+            line.strip_prefix("trust --quiet ")
+                .map(|path| dotfiles_xtask::canonical(Path::new(path)).ok())
+        })
+        .collect();
+    assert_eq!(
+        trusted,
+        [Some(Some(dotfiles_xtask::canonical(&configuration)?))],
+        "{recorded}"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_lefthook_configuration_that_cannot_be_loaded_refuses_the_hook() -> Result<()> {
     let host = Host::new()?;
     fs::write(host.repository().join("lefthook.yml"), "pre-push: {}\n")?;

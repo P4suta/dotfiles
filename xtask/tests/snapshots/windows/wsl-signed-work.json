@@ -235,7 +235,7 @@
     {"mode":"0755","path":".config/jj","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/jj/config.toml","sha256":"8a0bf40fa4671d8413fdfd2919837aade53a83b4beeb20118ab99f85c4b2926e","type":"file"},
     {"mode":"0755","path":".config/mise","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".config/mise/config.toml","sha256":"84779b5a26fa11af9dcc357a2e5a7f473e4f17e3458b52aa614a88f22f2f02cf","type":"file"},
+    {"mode":"0644","path":".config/mise/config.toml","sha256":"c0442bd3b7512b9d0787195733c11dc0e209a3ae0b15a1677afe4be1578fe3c3","type":"file"},
     {"mode":"0755","path":".config/mise/tasks","sha256":null,"type":"dir"},
     {"mode":"0755","path":".config/mise/tasks/git-audit","sha256":"2b46f987a14edb84177ede3a7841f1e377d6d0cbd27840854c97d9ac8eb7adb6","type":"file"},
     {"mode":"0755","path":".config/opencode","sha256":null,"type":"dir"},
@@ -415,7 +415,7 @@
     {"condition":"always","phase":"before","position":0,"sha256":"0e89bcd1f2dcdedb3578ce52b4921ed253dd84a73e2b592027466c0aac562b8e","target":".chezmoiscripts/unix/00-runtime.sh"},
     {"condition":"onchange","phase":"before","position":1,"sha256":"7a758dd9e850802dd7268700d2a2ce9c147937cd48eccf3760c6e8db27436d65","target":".chezmoiscripts/unix/install-gh.sh"},
     {"condition":"onchange","phase":"before","position":2,"sha256":"4f87e01316ebbc50ae14e27961843a166c152e99612fe675f5e51ba1fedfe55d","target":".chezmoiscripts/unix/install-mise.sh"},
-    {"condition":"onchange","phase":"after","position":3,"sha256":"faa119d0bd4faa514428f5c2ff871b6dfd04a99c1a2fa2219df66037b1e2a826","target":".chezmoiscripts/unix/10-install-tools.sh"},
+    {"condition":"onchange","phase":"after","position":3,"sha256":"f95d4b55d7f800df3c3f09e380679a53761f391e4cbf5c080715b045114966cc","target":".chezmoiscripts/unix/10-install-tools.sh"},
     {"condition":"always","phase":"after","position":4,"sha256":"d11b33191842f27cccd571940300314702838e42c318ad959e4398b61b9fac7a","target":".chezmoiscripts/unix/99-adapters.sh"}
   ]
 }

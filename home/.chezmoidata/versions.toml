@@ -1,0 +1,20 @@
+# The tool versions that mise installs on each profile.
+# Renovate proposes each update as a pull request, after the release has aged, and no host rewrites these pins on its own.
+# A `renovate:` comment names where Renovate looks up the next version of the pin below it.
+# A channel such as `stable` or `temurin-25` follows its own releases and carries no comment.
+
+[platforms.linux.tool_versions]
+java = "temurin-25"
+rust = "stable"
+
+[platforms.mac.tool_versions]
+# renovate: datasource=github-tags depName=haskell/cabal extractVersion=^cabal-install-v(?<version>.+)$
+cabal = "3.16.1.0"
+# renovate: datasource=github-tags depName=ghc/ghc extractVersion=^ghc-(?<version>.+)-release$
+ghc = "9.14.1"
+# renovate: datasource=github-releases depName=haskell/haskell-language-server
+haskell-language-server = "2.15.0.0"
+java = "temurin-25"
+# renovate: datasource=github-tags depName=racket/racket extractVersion=^v(?<version>.+)$
+racket = "9.3"
+rust = "stable"

@@ -1,12 +1,9 @@
-# Tools mise installs on each profile, their pinned versions, and how many it builds at once.
+# Tools mise installs on each profile, and how many it builds at once.
 # `common` installs on every machine of the profile, and `personal` and `work` follow the machine's role.
+# versions.toml holds their pinned versions.
 
 [platforms.linux.mise]
 jobs = 2
-
-[platforms.linux.tool_versions]
-java = "temurin-25"
-rust = "stable"
 
 [platforms.linux.tools]
 common = [
@@ -39,14 +36,6 @@ work = []
 
 [platforms.mac.mise]
 jobs = 8
-
-[platforms.mac.tool_versions]
-cabal = "3.16.1.0"
-ghc = "9.14.1"
-haskell-language-server = "2.15.0.0"
-java = "temurin-25"
-racket = "9.3"
-rust = "stable"
 
 [platforms.mac.tools]
 common = [

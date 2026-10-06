@@ -14,6 +14,9 @@ concurrency:
 env:
   # Kani installs only in the proofs job, which clears this list.
   MISE_DISABLE_TOOLS: "cargo:kani-verifier"
+  # Every managed host runs mise in paranoid mode, which loads a project configuration only once it trusts that exact file.
+  MISE_PARANOID: "1"
+  MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}/mise.toml
 
 jobs:
   classify:

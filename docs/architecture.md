@@ -34,6 +34,7 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 4. For `pre-push`, the host family evidence gate, then the ready pull request gate.
 5. For `commit-msg`, the prose checker on the message.
 6. For `pre-commit`, the global Lefthook configuration, then for every hook but `post-commit` and `reference-transaction`, the repository's own Lefthook configuration.
+   A repository with its own Lefthook configuration first has its mise configuration trusted, because mise runs in paranoid mode and the hook runs that repository's commands anyway.
 7. For `pre-commit`, a refusal when a hook changed the staged tree.
 8. For `pre-push`, the Renovate freshness gate.
 9. For `post-merge`, the reinstallation of tools built from changed sources.

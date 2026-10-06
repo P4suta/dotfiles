@@ -704,16 +704,11 @@ fn hook_arguments(hook: &str, command: &str) -> Result<Vec<String>> {
     let mut lines = justfile.lines();
     let header = lines
         .by_ref()
-        .find(|line| {
-            line.ends_with(':')
-                && line.trim_end_matches(':').split_whitespace().next() == Some(recipe)
-        })
+        .filter(|line| !line.starts_with(' '))
+        .filter_map(|line| line.split_once(':').map(|(signature, _)| signature))
+        .find(|signature| signature.split_whitespace().next() == Some(recipe))
         .expect("the recipe the hook names");
-    let parameters: Vec<&str> = header
-        .trim_end_matches(':')
-        .split_whitespace()
-        .skip(1)
-        .collect();
+    let parameters: Vec<&str> = header.split_whitespace().skip(1).collect();
     let body = lines
         .take_while(|line| line.starts_with("    "))
         .find(|line| line.contains(" --bin prose -- "))
