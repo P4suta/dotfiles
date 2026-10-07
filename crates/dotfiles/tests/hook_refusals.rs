@@ -39,6 +39,12 @@ impl Host {
             .arg(bin.join(format!("lefthook{}", std::env::consts::EXE_SUFFIX)))
             .status()?;
         ensure!(status.success(), "fixture lefthook compilation failed");
+        let catalog = scope.path().join("home").join(dotfiles::assure::CATALOG);
+        fs::create_dir_all(catalog.parent().unwrap_or(scope.path()))?;
+        fs::write(
+            catalog,
+            include_str!("../../../home/dot_config/assure/shapes.toml"),
+        )?;
         let host = Self { scope };
         host.run("git", &["init", "-q"])?;
         fs::write(host.repository().join("a.txt"), "a\n")?;
@@ -112,6 +118,25 @@ fn a_gate_that_changes_the_staged_tree_refuses_the_commit() -> Result<()> {
     let refused = refusal(&host.hook(&["pre-commit"])?);
     assert_eq!(refused.rule, "commit.staged-tree");
     assert_eq!(refused.waiver, None);
+    Ok(())
+}
+
+#[test]
+fn a_commit_that_adds_an_unowned_parser_is_refused_with_its_next_action() -> Result<()> {
+    let host = Host::new()?;
+    fs::create_dir_all(host.repository().join("src"))?;
+    fs::write(
+        host.repository().join("src/lib.rs"),
+        "pub fn parse(text: &str) -> bool {\n    text.is_empty()\n}\n",
+    )?;
+    host.run("git", &["add", "src/lib.rs"])?;
+    let refused = refusal(&host.hook(&["pre-commit"])?);
+    assert_eq!(refused.rule, "assure.added");
+    assert!(
+        refused.evidence[0].starts_with("src/lib.rs:1: parser has no owner")
+            && refused.evidence[0].contains("next: add fuzz/fuzz_targets/"),
+        "{refused:?}"
+    );
     Ok(())
 }
 

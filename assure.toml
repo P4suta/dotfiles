@@ -1,0 +1,46 @@
+# What owns each code shape that the shape catalog of `~/.config/assure/shapes.toml` finds in this repository, and the budgets no change may weaken.
+# Each rule module owns its decisions through its own Kani harnesses, so only the other shapes need an entry.
+
+[[owner]]
+shape = "protocol"
+path = "crates/rules/src/pr_ready_rules.rs"
+by = "crates/pr-workflow/tests/pr_ready_replay.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/model/src/data.rs"
+by = "fuzz/fuzz_targets/chezmoi_data.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/rules/src/change_rules.rs"
+by = "fuzz/fuzz_targets/gate_list.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotguard/src/lang.rs"
+by = "fuzz/fuzz_targets/language_mode.rs"
+
+[[owner]]
+shape = "parser"
+path = "xtask/src/agent_memory.rs"
+by = "fuzz/fuzz_targets/opencode_permissions.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/platform/src/refusal.rs"
+by = "fuzz/fuzz_targets/refusal_line.rs"
+
+# The mutation campaign of `just proofs` over the decision core.
+[[budget]]
+name = "mutants-missed"
+ceiling = 0
+
+[[budget]]
+name = "mutants-timed-out"
+ceiling = 0
+
+# The Win32 sites of policy/unsafe-sites.toml and the read past a slice in the Miri fixture.
+[[budget]]
+name = "unsafe-sites"
+ceiling = 5

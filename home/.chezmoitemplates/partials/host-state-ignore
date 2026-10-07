@@ -58,7 +58,6 @@ Library/Application Support/com.mitchellh.ghostty/**
 .claude/history.jsonl
 .claude/settings.local.json
 .claude.json
-.codex/hooks.json
 .codex/sessions/**
 .config/skill-ops/approved.json
 

@@ -1,0 +1,58 @@
+# The cargo-fuzz targets of every parser the shape catalog finds in this repository, which `just proofs` replays over each committed corpus.
+# libFuzzer builds only on a nightly toolchain, so the targets keep their own workspace outside the stable one.
+[package]
+name = "dotfiles-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+dotguard = { path = "../crates/dotguard" }
+libfuzzer-sys = "0.4.13"
+model = { path = "../crates/model" }
+platform = { path = "../crates/platform" }
+rules = { path = "../crates/rules" }
+serde_json = "1.0"
+toml = "1.0"
+xtask = { path = "../xtask" }
+
+[[bin]]
+name = "chezmoi_data"
+path = "fuzz_targets/chezmoi_data.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gate_list"
+path = "fuzz_targets/gate_list.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "language_mode"
+path = "fuzz_targets/language_mode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "opencode_permissions"
+path = "fuzz_targets/opencode_permissions.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "refusal_line"
+path = "fuzz_targets/refusal_line.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

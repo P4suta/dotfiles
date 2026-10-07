@@ -1592,12 +1592,12 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 Refusal::new("pr.state", "only an open PR can become ready", inspect())
                     .evidence(format!("#{pr}: state {}", live.state))
             })?;
-            let required = github.required_checks(
-                &target,
-                live.base_ref_name
-                    .as_deref()
-                    .context("GitHub reported no base branch")?,
-            )?;
+            let (Some(base), Some(head)) =
+                (live.base_ref_name.as_deref(), live.head_ref_oid.as_deref())
+            else {
+                bail!("GitHub reported no base branch or no head commit");
+            };
+            let required = github.required_checks(&target, base)?;
             let body = make_ready(
                 &github,
                 &target,
@@ -1606,9 +1606,7 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 live.body,
                 live.is_draft,
                 checks(&live.status_check_rollup, &required),
-                live.head_ref_oid
-                    .as_deref()
-                    .context("GitHub reported no head commit")?,
+                (base, head),
                 rerun,
             )?;
             report_review_requirement(&body)?;
@@ -1764,7 +1762,7 @@ fn make_ready(
     body: String,
     draft: bool,
     report: Report,
-    head: &str,
+    (base, head): (&str, &str),
     rerun: &str,
 ) -> Result<String> {
     let document = validate(target, title, body, false)?;
@@ -1783,6 +1781,7 @@ fn make_ready(
     };
     planned(Operation::Ready, target, Some(pr), draft, issue, checks)?;
     dotfiles::hosts::require_admission(Path::new("."), head)?;
+    dotfiles::assure::ready(Path::new("."), &dotfiles::assure::installed()?, base, head)?;
     admit_review_request(Operation::Ready, target.generation, &document.body, || {
         Ok((draft, review_exclusion(&document.body)))
     })?;
@@ -2067,7 +2066,7 @@ fn merge_independent(
                     view.body,
                     true,
                     checks(&view.status_check_rollup, &required),
-                    &view.head_ref_oid,
+                    (&view.base_ref_name, &view.head_ref_oid),
                     rerun,
                 )?;
             }
@@ -2289,7 +2288,7 @@ fn merge_stack(
                         view.body,
                         true,
                         checks(&view.status_check_rollup, &required),
-                        &view.head_ref_oid,
+                        (&view.base_ref_name, &view.head_ref_oid),
                         rerun,
                     )?;
                     continue 'restart;

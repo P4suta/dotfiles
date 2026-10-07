@@ -1,0 +1,8 @@
+# Named sets of profiles that targets.toml and retired.toml refer to.
+
+[profiles]
+mac = ["mac"]
+linux = ["linux"]
+windows = ["windows"]
+wsl = ["wsl"]
+unix = ["mac", "linux", "wsl"]

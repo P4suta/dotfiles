@@ -29,15 +29,29 @@ The post-tool events keep every group another installer added and replace only t
 {{-   $_ := set $hooks $event (append $groups (dict "matcher" "Bash|PowerShell" "hooks" (list $timing))) -}}
 {{- end -}}
 {{- /*
-On Windows a session starts with the process-start probe, which hands the agent a refusal while a hung Defender engine stalls every process start.
+A session starts with the verification report, which lists the repository's code shapes that nothing verifies with their next actions.
+On Windows it first runs the process-start probe, which hands the agent a refusal while a hung Defender engine stalls every process start.
+The stop hook refuses to end a turn while a file it changed holds such a shape.
+Both events keep every group another installer added and replace only these.
+skill-ops keeps its own groups last, so these go before them and neither installer reorders the other's.
 */ -}}
+{{- $session := list -}}
 {{- if eq .profile "windows" -}}
-{{-   $health := dict "type" "command" "command" (printf "%s health --session" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
+{{-   $session = append $session (dict "type" "command" "command" (printf "%s health --session" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool)))) -}}
+{{- end -}}
+{{- $session = append $session (dict "type" "command" "command" (printf "%s assure start" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool)))) -}}
+{{- $stop := dict "type" "command" "command" (printf "%s assure stop" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
+{{- range $event := list "SessionStart" "Stop" -}}
 {{-   $groups := list -}}
-{{-   range (dig "hooks" "SessionStart" (list) $current) -}}
-{{-     if not (contains " health --session" (toJson .)) -}}{{- $groups = append $groups . -}}{{- end -}}
+{{-   $last := list -}}
+{{-   range (dig "hooks" $event (list) $current) -}}
+{{-     $text := toJson . -}}
+{{-     if contains "skill-ops " $text -}}{{- $last = append $last . -}}
+{{-     else if not (or (contains " health --session" $text) (contains " assure start" $text) (contains " assure stop" $text)) -}}{{- $groups = append $groups . -}}{{- end -}}
 {{-   end -}}
-{{-   $_ := set $hooks "SessionStart" (append $groups (dict "hooks" (list $health))) -}}
+{{-   $own := dict "hooks" (list $stop) -}}
+{{-   if eq $event "SessionStart" -}}{{- $own = dict "hooks" $session -}}{{- end -}}
+{{-   $_ := set $hooks $event (concat $groups (list $own) $last) -}}
 {{- end -}}
 {{- $managed := dict "autoMemoryEnabled" false "hooks" $hooks -}}
 {{- if eq .profile "wsl" -}}

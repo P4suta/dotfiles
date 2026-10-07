@@ -44,6 +44,8 @@ enum Action {
     ClaudeBash,
     /// Claude Code `PreToolUse` and `PostToolUse` hook for Bash and PowerShell: sets each command's timeout from its measured durations.
     ClaudeTiming,
+    /// The agent hooks of the verification gate: the session start report of a repository's gaps, and the stop decision over the files a turn changed.
+    Assure { point: dotfiles::assure::AgentPoint },
     /// Refuses work on a host whose process creation stalls, as it does when the Defender scan engine stops responding.
     Health {
         /// Prints a refusal to standard output, which a session start hook adds to the agent's context, and exits successfully.
@@ -153,6 +155,7 @@ fn run() -> Result<()> {
         )?),
         Action::ClaudeBash => dotfiles::claude_hook::run()?,
         Action::ClaudeTiming => dotfiles::claude_timing::run()?,
+        Action::Assure { point } => dotfiles::assure::hook(point)?,
         Action::Health { session } => health(session)?,
         Action::Hook { hook, arguments } => dotfiles::hooks::run(hook, &arguments)?,
         Action::LineEndings { request } => dotfiles::line_endings::run(request)?,

@@ -631,6 +631,31 @@ fn reject_owner_pause_bypass() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/shape_rules.rs"
+probes = '''
+use production::{Bound, Change, Exemption, Point, Verdict, exemption, lowered, verdict};
+#[kani::proof]
+fn reject_refusing_a_commit_for_an_old_gap() {
+    let old = Change { before: 1, after: 1, ..Change::default() };
+    assert!(verdict(Point::Commit, old).refuses());
+}
+#[kani::proof]
+fn reject_admitting_a_pr_that_closes_no_gap() {
+    let stalled = Change { before: 1, after: 1, ..Change::default() };
+    assert!(verdict(Point::Ready, stalled) == Verdict::Admit);
+}
+#[kani::proof]
+fn reject_an_exemption_with_an_open_reason() {
+    assert!(matches!(exemption(b"// Exempt as later: someday"), Some(Exemption::Exempt(_))));
+}
+#[kani::proof]
+fn reject_admitting_a_raised_ceiling() {
+    assert!(!lowered(Bound::Ceiling, 0, Some(1)));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/shell_write_rules.rs"
 probes = '''
 #[kani::proof]

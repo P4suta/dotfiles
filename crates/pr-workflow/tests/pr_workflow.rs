@@ -67,6 +67,19 @@ impl Fixture {
         git(directory.path(), &["add", "body.md"])?;
         git(directory.path(), &["commit", "--quiet", "-m", "head"])?;
         let head = git(directory.path(), &["rev-parse", "HEAD"])?;
+        // The verification gate of `ready` compares the head with its base branch and reads the installed shape catalog.
+        for base in ["main", "parent", "bottom"] {
+            git(
+                directory.path(),
+                &["update-ref", &format!("refs/remotes/origin/{base}"), &head],
+            )?;
+        }
+        let catalog = directory.path().join(dotfiles::assure::CATALOG);
+        fs::create_dir_all(catalog.parent().context("catalog directory")?)?;
+        fs::write(
+            catalog,
+            include_str!("../../../home/dot_config/assure/shapes.toml"),
+        )?;
         Ok(Self {
             directory,
             body: file,
@@ -1919,6 +1932,59 @@ fn ready_requires_a_passing_note_for_every_os_family_in_the_ci_matrix() -> Resul
     }
     note("windows", 0)?;
     let output = ready()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(fixture.log()?.contains("\nready\n"));
+    Ok(())
+}
+
+#[test]
+fn ready_refuses_a_pr_that_adds_an_unowned_parser_until_its_fuzz_target_exists() -> Result<()> {
+    let mut fixture = Fixture::new(BODY)?;
+    let root = fixture.directory.path().to_path_buf();
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(
+        root.join("src/lib.rs"),
+        "pub fn parse(text: &str) -> bool {\n    text.is_empty()\n}\n",
+    )?;
+    git(&root, &["add", "src"])?;
+    git(&root, &["commit", "--quiet", "-m", "parser"])?;
+    let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true});
+    let ready = |fixture: &Fixture| -> Result<Output> {
+        Ok(fixture
+            .command("ready")?
+            .args(["--pr", "17"])
+            .env("GH_FIXTURE_HEAD", &fixture.head)
+            .env("GH_FIXTURE_VIEW", view.to_string())
+            .output()?)
+    };
+    fixture.head = git(&root, &["rev-parse", "HEAD"])?;
+    let output = ready(&fixture)?;
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        error.contains("assure.added") && error.contains("src/lib.rs:1: parser has no owner"),
+        "{error}"
+    );
+    assert!(!fixture.log()?.contains("\nready\n"));
+    fs::create_dir_all(root.join("fuzz/fuzz_targets"))?;
+    fs::create_dir_all(root.join("fuzz/corpus/parse"))?;
+    fs::write(
+        root.join("fuzz/fuzz_targets/parse.rs"),
+        "#![no_main]\nlibfuzzer_sys::fuzz_target!(|data: &[u8]| {});\n",
+    )?;
+    fs::write(root.join("fuzz/corpus/parse/seed"), "")?;
+    fs::write(
+        root.join("assure.toml"),
+        "[[owner]]\nshape = \"parser\"\npath = \"src/lib.rs\"\nby = \"fuzz/fuzz_targets/parse.rs\"\n",
+    )?;
+    git(&root, &["add", "fuzz", "assure.toml"])?;
+    git(&root, &["commit", "--quiet", "-m", "own the parser"])?;
+    fixture.head = git(&root, &["rev-parse", "HEAD"])?;
+    let output = ready(&fixture)?;
     assert!(
         output.status.success(),
         "{}",

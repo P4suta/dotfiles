@@ -1,5 +1,6 @@
 //! The installed runtime behind every Git hook, setup launcher, and agent hook, and the Windows machine setup.
 
+pub mod assure;
 pub mod claude_hook;
 pub mod claude_timing;
 pub mod desktop;
@@ -16,7 +17,7 @@ pub mod terminal;
 pub mod transaction;
 pub use rules::{
     body_rules, disk_scan_rules, eol_rules, hosts_rules, path_conversion_rules, ready_push_rules,
-    shell_write_rules, start_health_rules, timeout_rules,
+    shape_rules, shell_write_rules, skill_rules, start_health_rules, timeout_rules,
 };
 #[cfg(windows)]
 pub mod windows;

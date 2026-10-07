@@ -39,13 +39,22 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 2. For `pre-push`, the push pause marker.
 3. For `pre-commit`, `commit-msg`, `pre-push`, and `post-commit`, the matching `dotguard` gate.
 4. For `pre-push`, the host family evidence gate, then the ready pull request gate.
-5. For `commit-msg`, the prose checker on the message.
-6. For `pre-commit`, the global Lefthook configuration, then for every hook but `post-commit` and `reference-transaction`, the repository's own Lefthook configuration.
+5. For `pre-commit` and `pre-push`, the verification gate, which refuses a change that adds code of a shape nothing in the repository verifies.
+6. For `commit-msg`, the prose checker on the message.
+7. For `pre-commit`, the global Lefthook configuration, then for every hook but `post-commit` and `reference-transaction`, the repository's own Lefthook configuration.
    A repository with its own Lefthook configuration first has its mise configuration trusted, because mise runs in paranoid mode and the hook runs that repository's commands anyway.
-7. For `pre-commit`, a refusal when a hook changed the staged tree.
-8. For `pre-push`, the Renovate freshness gate.
-9. For `post-merge`, the reinstallation of tools built from changed sources.
-10. For `post-checkout`, `post-merge`, and a committed `reference-transaction`, the storage maintenance notification.
+8. For `pre-commit`, a refusal when a hook changed the staged tree.
+9. For `pre-push`, the Renovate freshness gate.
+10. For `post-merge`, the reinstallation of tools built from changed sources.
+11. For `post-checkout`, `post-merge`, and a committed `reference-transaction`, the storage maintenance notification.
+
+## Verification on every repository
+
+`home/dot_config/assure/shapes.toml` names the code shapes every repository on these machines must verify: pure decisions, protocols, and parsers, each with the signals that find it and the owner it needs.
+A repository names its owners and budgets in `assure.toml` at its root, and an exemption sits in the comment block that precedes the site it exempts, as [its decision record](adr/verification-proportional-to-code-shape.md) describes.
+`dotfiles assure start` reports the gaps when an agent session starts, and the stop hook refuses to end a turn that leaves a gap in a file it changed.
+The `pre-commit` and `pre-push` hooks refuse a change that adds a gap.
+`pr-workflow ready` also refuses a PR that weakens a budget, and in a repository with gaps one that closes none.
 
 ## Gate map
 
@@ -55,7 +64,7 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 | `just check-staged` | The pre-commit check: the lint stages over the staged files, then the prose of documents and of the comments `OComment` reads. |
 | `just baselines` | The refusal of a lint baseline under `policy/lint-baselines/` that grew since a base, which CI runs from the merge base. |
 | `just profiles` | Every profile's rendering, an isolated apply and verification, the committed manifests, the ignore and remove audit, and the script input audit. |
-| `just proofs` | The Kani obligations of `policy/obligations.toml`, Miri over the pure core's tests for the host and Windows, a mutation campaign over the core, and the Quint models under `specs/`. |
+| `just proofs` | The Kani obligations of `policy/obligations.toml`, Miri over the pure core's tests for the host and Windows, and a mutation campaign over the core. It also replays the corpus of every fuzz target under `fuzz/` and checks the Quint models under `specs/`. |
 | `just prose` | The writing standard over documents and comments. |
 
 The Rust gate of `just check` also runs the obligation closure, which holds `policy/obligations.toml` to the source.

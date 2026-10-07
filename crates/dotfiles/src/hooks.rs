@@ -306,6 +306,7 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
         crate::hosts::push_gate(Path::new("."), &url.to_string_lossy(), &input)?;
         crate::ready_push::gate(&url.to_string_lossy(), &input)?;
     }
+    verification(hook, arguments, &input)?;
     if matches!(hook, Hook::CommitMsg) {
         let message = arguments
             .first()
@@ -370,6 +371,25 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The verification gate of `pre-commit` and `pre-push`, which refuses a change that adds code of a shape nothing verifies.
+fn verification(hook: Hook, arguments: &[OsString], input: &[u8]) -> Result<()> {
+    if !matches!(hook, Hook::PreCommit | Hook::PrePush) {
+        return Ok(());
+    }
+    let Some(root) = crate::assure::repository() else {
+        return Ok(());
+    };
+    let catalog = crate::assure::installed()?;
+    if matches!(hook, Hook::PrePush) {
+        let remote = arguments
+            .first()
+            .context("the pre-push hook needs the remote name")?;
+        crate::assure::push(&root, &catalog, &remote.to_string_lossy(), input)
+    } else {
+        crate::assure::commit(&root, &catalog)
+    }
 }
 
 /// The machine-local push hold, which only an explicit owner instruction lifts, so the refusal names no waiver.

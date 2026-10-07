@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use xtask::skill_proofs::{
-    KANI_VERSION, MUTANTS_VERSION, container_image, container_run_arguments,
+    FUZZ_VERSION, KANI_VERSION, MUTANTS_VERSION, container_image, container_run_arguments,
     container_target_volume, validate_results,
 };
 
@@ -177,6 +177,10 @@ fn the_container_verifier_matches_the_native_pin() {
     assert!(definition.contains(&format!("cargo-mutants --version {MUTANTS_VERSION}")));
     assert!(mise.contains(&format!(
         "\"cargo:cargo-mutants\" = {{ version = \"{MUTANTS_VERSION}\""
+    )));
+    assert!(definition.contains(&format!("cargo-fuzz --version {FUZZ_VERSION}")));
+    assert!(mise.contains(&format!(
+        "\"cargo:cargo-fuzz\" = {{ version = \"{FUZZ_VERSION}\""
     )));
     let rust = mise
         .lines()

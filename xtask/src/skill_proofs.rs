@@ -346,7 +346,85 @@ fn verify_native(root: &Path) -> Result<()> {
         "Verified all {verified} production policy harnesses with their reachable outcomes, and rejected all {rejected} counterexamples"
     );
     verify_miri(root)?;
+    verify_fuzz(root)?;
     verify_mutants(root, &manifest)
+}
+
+/// The cargo-fuzz release that `mise.toml` and the proof image pin.
+pub const FUZZ_VERSION: &str = "0.13.2";
+
+/// The cargo-fuzz directory of this repository's parser targets, which `assure.toml` names as their owners.
+pub const FUZZ_DIRECTORY: &str = "fuzz";
+
+/// A cargo-fuzz directory whose one target panics on its corpus, which the replay must refuse.
+const FUZZ_FIXTURE: &str = "xtask/proofs/fuzz-fixture";
+
+/// The name of every target under `<directory>/fuzz_targets`.
+///
+/// # Errors
+///
+/// Returns an error when reading the directory fails.
+pub fn fuzz_targets(directory: &Path) -> Result<Vec<String>> {
+    let mut targets = Vec::new();
+    for entry in fs::read_dir(directory.join("fuzz_targets"))? {
+        let path = entry?.path();
+        if path.extension().is_some_and(|extension| extension == "rs")
+            && let Some(name) = path.file_stem().and_then(|name| name.to_str())
+        {
+            targets.push(name.to_owned());
+        }
+    }
+    targets.sort();
+    Ok(targets)
+}
+
+/// Replays the committed corpus of `target` once, with no new input, and returns the run's output.
+fn replay(root: &Path, directory: &str, target: &str) -> Result<std::process::Output> {
+    Tool::Cargo
+        .command()
+        .current_dir(root)
+        .arg(format!("+{MIRI_TOOLCHAIN}"))
+        .args(["fuzz", "run", "--fuzz-dir", directory, target])
+        .arg(format!("{directory}/corpus/{target}"))
+        .args(["--", "-runs=0"])
+        .output()
+        .context("start cargo-fuzz")
+}
+
+/// Replays every parser target over its committed corpus and refuses a fixture whose corpus makes its target panic.
+fn verify_fuzz(root: &Path) -> Result<()> {
+    let version = Tool::Cargo.command().args(["fuzz", "--version"]).output()?;
+    ensure!(
+        version.status.success()
+            && String::from_utf8(version.stdout)?.contains(&format!("cargo-fuzz {FUZZ_VERSION}")),
+        "the pinned cargo-fuzz {FUZZ_VERSION} is unavailable"
+    );
+    let targets = fuzz_targets(&root.join(FUZZ_DIRECTORY))?;
+    ensure!(!targets.is_empty(), "{FUZZ_DIRECTORY} holds no fuzz target");
+    for target in &targets {
+        let corpus = root.join(FUZZ_DIRECTORY).join("corpus").join(target);
+        ensure!(
+            fs::read_dir(&corpus).is_ok_and(|mut entries| entries.next().is_some()),
+            "the fuzz target {target} has no corpus under {}",
+            corpus.display()
+        );
+        let output = replay(root, FUZZ_DIRECTORY, target)?;
+        ensure!(
+            output.status.success(),
+            "replaying the corpus of {target} failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let output = replay(root, FUZZ_FIXTURE, "crash")?;
+    ensure!(
+        !output.status.success() && String::from_utf8_lossy(&output.stderr).contains("panicked"),
+        "the corpus replay admitted {FUZZ_FIXTURE}, whose corpus makes its target panic, so the gate proves nothing"
+    );
+    println!(
+        "Replayed the corpus of every fuzz target, {}, and refused its fixture",
+        targets.join(", ")
+    );
+    Ok(())
 }
 
 /// The cargo-mutants release that `mise.toml` and the proof image pin.
