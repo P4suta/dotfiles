@@ -157,6 +157,72 @@
             "tool",
             "settings"
           ]
+        },
+        {
+          "description": "A Quint model, which `just proofs` checks offline in its pinned image.",
+          "type": "object",
+          "properties": {
+            "distinct_states": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "invariant": {
+              "type": "string"
+            },
+            "main": {
+              "type": "string"
+            },
+            "probe": {
+              "type": "string"
+            },
+            "samples": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "seed": {
+              "type": "string"
+            },
+            "spec": {
+              "type": "string"
+            },
+            "steps": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "traces": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "verifier": {
+              "type": "string",
+              "const": "quint"
+            },
+            "witnesses": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "spec",
+            "main",
+            "probe",
+            "invariant",
+            "witnesses",
+            "seed",
+            "samples",
+            "steps",
+            "distinct_states",
+            "traces"
+          ]
         }
       ]
     },

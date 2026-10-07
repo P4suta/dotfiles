@@ -70,20 +70,11 @@ pub fn coderabbit_body_marker_allowed(request: bool, summary: bool, ignore: bool
     ignore || request && summary
 }
 
-/// The head commit's reported checks, where an empty report never passes.
+/// The head commit's reported checks, which `pr_ready_rules::complete` decides from its report.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Checks {
     Passing,
     Incomplete,
-}
-
-#[must_use]
-pub fn checks_state(total: usize, unfinished: usize, failed: usize) -> Checks {
-    if total > 0 && unfinished == 0 && failed == 0 {
-        Checks::Passing
-    } else {
-        Checks::Incomplete
-    }
 }
 
 /// The first unmet condition that refuses an operation.
@@ -384,12 +375,8 @@ mod proofs {
         );
     }
 
-    /// An empty report never passes, any failure fails a merge, and anything unfinished waits.
+    /// Any failure fails a merge, and an empty or unfinished report waits.
     pub fn spec_checks(total: usize, unfinished: usize, failed: usize) {
-        assert_eq!(
-            checks_state(total, unfinished, failed) == Checks::Passing,
-            total != 0 && unfinished == 0 && failed == 0
-        );
         let head = head_checks(total, unfinished, failed);
         assert_eq!(head == HeadChecks::Failed, failed != 0);
         assert_eq!(
@@ -506,7 +493,11 @@ mod proofs {
         let operation = OPERATIONS[usize::from(kani::any::<u8>() % 3)];
         let generation = Generation::ALL[usize::from(kani::any::<u8>() % 2)];
         let issue = ISSUES[usize::from(kani::any::<u8>() % 3)];
-        let checks = checks_state(kani::any(), kani::any(), kani::any());
+        let checks = if kani::any() {
+            Checks::Passing
+        } else {
+            Checks::Incomplete
+        };
         let validated: bool = kani::any();
         let draft: bool = kani::any();
         spec_plan(operation, generation, validated, draft, issue, checks);
@@ -529,7 +520,7 @@ mod proofs {
         let remaining: u64 = kani::any();
         let reserve: u64 = kani::any();
         spec_quota(remaining, reserve);
-        kani::cover!(checks_state(total, unfinished, failed) == Checks::Passing);
+        kani::cover!(head_checks(total, unfinished, failed) == HeadChecks::Passing);
         kani::cover!(head_checks(total, unfinished, failed) == HeadChecks::Pending && failed == 0);
         kani::cover!(!api_quota_available(remaining, reserve) && reserve > 0);
     }

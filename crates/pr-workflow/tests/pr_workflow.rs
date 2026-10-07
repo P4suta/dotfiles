@@ -623,7 +623,8 @@ fn authentication_quota_and_api_failures_stop_without_retry_or_publication() -> 
                 "authentication must not retry: {log}"
             );
             assert!(
-                log.matches("invocation\n").count() <= 4,
+                // The ready operation also reads the required checks of its base.
+                log.matches("invocation\n").count() <= 5,
                 "bounded reads: {log}"
             );
         }
@@ -1480,6 +1481,79 @@ fn ready_checks_live_contents_and_draft_state_before_mutation() -> Result<()> {
 }
 
 #[test]
+fn ready_requires_every_required_check_of_the_base_to_pass() -> Result<()> {
+    let rules = r#"[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"required (ubuntu-latest)"},{"context":"lint"}]}},{"type":"deletion","parameters":null}]"#;
+    for (checks, accepted) in [
+        (
+            r#"[{"name":"required (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS"},{"context":"lint","state":"SUCCESS"}]"#,
+            true,
+        ),
+        (
+            r#"[{"name":"required (ubuntu-latest)","status":"COMPLETED","conclusion":"SUCCESS"}]"#,
+            false,
+        ),
+        (
+            r#"[{"name":"other","status":"COMPLETED","conclusion":"SUCCESS"}]"#,
+            false,
+        ),
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true});
+        let output = fixture
+            .command("ready")?
+            .args(["--pr", "17"])
+            .env("GH_FIXTURE_VIEW", view.to_string())
+            .env("GH_FIXTURE_CHECKS", checks)
+            .env("GH_FIXTURE_RULES", rules)
+            .output()?;
+        assert_eq!(output.status.success(), accepted, "{checks}");
+        assert_eq!(fixture.log()?.contains("\nready\n"), accepted, "{checks}");
+        assert!(
+            fixture
+                .log()?
+                .contains("repos/owner/project/rules/branches/main")
+        );
+        if !accepted {
+            assert_eq!(rule(&output), "pr.checks");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn a_push_between_the_read_and_ready_returns_the_pr_to_draft() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true});
+    let output = fixture
+        .command("ready")?
+        .args(["--pr", "17"])
+        .env("GH_FIXTURE_VIEW", view.to_string())
+        .env(
+            "GH_FIXTURE_PUSHED_HEAD",
+            "0000000000000000000000000000000000000001",
+        )
+        .output()?;
+    assert!(!output.status.success());
+    let record = refusal(&output);
+    assert_eq!(record["rule"], "pr.head");
+    let log = fixture.log()?;
+    let marked = log
+        .find("\nready\n--repo\nowner/project\n17\n")
+        .context("ready")?;
+    let undone = log.find("\n17\n--undo\n").context("undo")?;
+    assert!(marked < undone, "{log}");
+    let fixture = Fixture::new(BODY)?;
+    let output = fixture
+        .command("ready")?
+        .args(["--pr", "17"])
+        .env("GH_FIXTURE_VIEW", view.to_string())
+        .output()?;
+    assert!(output.status.success());
+    assert!(!fixture.log()?.contains("--undo"));
+    Ok(())
+}
+
+#[test]
 fn edit_and_gh_failure_preserve_one_attempt_and_report_the_failure() -> Result<()> {
     for operation in ["create", "edit"] {
         let fixture = Fixture::new(BODY)?;
@@ -1543,7 +1617,7 @@ fn live_final_check_is_read_only_and_rejects_malformed_or_pending_documents() ->
         assert!(String::from_utf8_lossy(&output.stderr).contains("42"));
         assert_eq!(
             fixture.log()?.matches("invocation\n").count(),
-            if failure == "view" { 2 } else { 4 }
+            if failure == "view" { 2 } else { 5 }
         );
     }
     Ok(())

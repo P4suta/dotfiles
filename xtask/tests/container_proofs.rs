@@ -185,3 +185,64 @@ fn the_container_verifier_matches_the_native_pin() {
         .expect("pinned rust");
     assert!(definition.contains(&format!("rust:{rust}-")));
 }
+
+#[test]
+fn the_quint_image_pins_quint_its_apalache_and_every_base_by_digest() {
+    use xtask::quint::{APALACHE_VERSION, QUINT_VERSION};
+    let definition = include_str!("../proofs/quint/Dockerfile");
+    let package = include_str!("../proofs/quint/package.json");
+    let lock: serde_json::Value =
+        serde_json::from_str(include_str!("../proofs/quint/package-lock.json")).unwrap();
+    assert!(package.contains(&format!("\"@informalsystems/quint\": \"{QUINT_VERSION}\"")));
+    assert_eq!(
+        lock["packages"]["node_modules/@informalsystems/quint"]["version"],
+        QUINT_VERSION
+    );
+    assert!(lock["packages"]["node_modules/@informalsystems/quint"]["integrity"].is_string());
+    assert!(definition.contains(&format!("ARG APALACHE_VERSION={APALACHE_VERSION}\n")));
+    assert!(definition.contains("ADD --checksum=sha256:${APALACHE_SHA256}"));
+    assert!(definition.contains("sha256sum.txt"));
+    for line in definition.lines().filter(|line| line.starts_with("FROM ")) {
+        assert!(line.contains("@sha256:"), "{line}");
+    }
+}
+
+#[test]
+fn quint_runs_offline_with_the_checkout_read_only() {
+    let arguments = xtask::quint::run_arguments(
+        Path::new(r"C:\Users\fixture\dotfiles"),
+        Path::new(r"C:\Temp\out"),
+        "dotfiles-quint:fixture",
+        &["typecheck", "/source/specs/pr_ready.qnt"],
+    );
+    let text: Vec<_> = arguments
+        .iter()
+        .map(|value| value.to_string_lossy().into_owned())
+        .collect();
+    let network = text.iter().position(|value| value == "--network").unwrap();
+    assert_eq!(text[network + 1], "none");
+    assert!(text.contains(
+        &r#"type=bind,"source=C:\Users\fixture\dotfiles",target=/source,readonly"#.to_owned()
+    ));
+    assert!(text.contains(&r#"type=bind,"source=C:\Temp\out",target=/out"#.to_owned()));
+    assert_eq!(
+        text[text.len() - 3..],
+        ["quint", "typecheck", "/source/specs/pr_ready.qnt"].map(str::to_owned)
+    );
+}
+
+#[test]
+fn the_quint_reports_yield_the_state_count_and_each_witness() {
+    let tlc = "Model checking completed. No error has been found.\n1928 states generated, 971 distinct states found, 0 states left on queue.\n";
+    assert_eq!(xtask::quint::distinct_states(tlc), Some(971));
+    assert_eq!(
+        xtask::quint::distinct_states(
+            "67 states generated, 61 distinct states found, 43 states left on queue."
+        ),
+        None
+    );
+    let run = "keptReady was witnessed in 70 trace(s) out of 1000 explored (7.00%)\nrefused was witnessed in 0 trace(s) out of 1000 explored (0.00%)\n";
+    assert_eq!(xtask::quint::witnessed(run, "keptReady"), Some(70));
+    assert_eq!(xtask::quint::witnessed(run, "refused"), Some(0));
+    assert_eq!(xtask::quint::witnessed(run, "returnedToDraft"), None);
+}

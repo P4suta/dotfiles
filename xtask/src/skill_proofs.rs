@@ -235,6 +235,8 @@ pub fn container_run_arguments(root: &Path, image: &str, target_volume: &str) ->
             "dotfiles-proofs-registry:/usr/local/cargo/registry",
             "--env",
             "CARGO_TARGET_DIR=/cache/target",
+            "--env",
+            &format!("{INSIDE_CONTAINER}=1"),
             "--workdir",
             "/work",
             image,
@@ -307,11 +309,19 @@ fn verify_in_container(root: &Path) -> Result<()> {
 /// Returns an error when the pinned Kani version or Docker engine can't run, Docker can't build the verification image, or any proof or counterexample check fails.
 pub fn verify(root: &Path) -> Result<()> {
     if cfg!(any(target_os = "macos", target_os = "linux")) {
-        verify_native(root)
+        verify_native(root)?;
     } else {
-        verify_in_container(root)
+        verify_in_container(root)?;
     }
+    // The Quint models run in their own pinned image without a network on every host, so the container gate leaves them out.
+    if std::env::var_os(INSIDE_CONTAINER).is_none() {
+        crate::quint::verify(root, &obligations::manifest(root)?)?;
+    }
+    Ok(())
 }
+
+/// Set inside the Kani container, whose gate leaves the Quint models to the host that started it.
+const INSIDE_CONTAINER: &str = "DOTFILES_PROOFS_CONTAINER";
 
 fn verify_native(root: &Path) -> Result<()> {
     let version = Tool::Kani.command().arg("--version").output()?;

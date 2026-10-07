@@ -406,6 +406,36 @@ fn reject_refusing_a_command_with_the_conversion_off() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/pr_ready_rules.rs"
+probes = '''
+use production::{Action, Report, Settlement, Workflow, complete, initial, report, safe, settle, step};
+#[kani::proof]
+fn reject_marking_a_partial_report_ready() {
+    assert!(complete(Workflow::Fixed, Report::Partial));
+}
+#[kani::proof]
+fn reject_a_report_that_lacks_a_required_check_as_complete() {
+    assert!(report(3, 0, 0, 1) == Report::Complete);
+}
+#[kani::proof]
+fn reject_a_report_with_an_unfinished_check_as_complete() {
+    assert!(report(3, 1, 0, 0) == Report::Complete);
+}
+#[kani::proof]
+fn reject_keeping_a_moved_head_ready() {
+    assert!(settle(&1_u8, &2_u8) == Settlement::Keep);
+}
+#[kani::proof]
+fn reject_the_old_command_that_marks_a_head_pushed_after_its_read() {
+    let old = |state, action| step(Workflow::Old, state, action).unwrap_or(state);
+    let reported = old(initial(), Action::Report(Report::Complete));
+    let marked = old(old(old(reported, Action::View), Action::Push), Action::Mark);
+    assert!(safe(&marked));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/pr_rules.rs"
 probes = '''
 #[kani::proof]
@@ -422,7 +452,7 @@ fn reject_unfinished_summary_as_review_exclusion() {
 }
 #[kani::proof]
 fn reject_ready_with_unfinished_checks() {
-    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, true, production::IssueGate::Linked, production::checks_state(3, 1, 0)), Ok(production::Effect::Ready));
+    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, true, production::IssueGate::Linked, production::Checks::Incomplete), Ok(production::Effect::Ready));
 }
 #[kani::proof]
 fn reject_blaming_checks_for_a_published_pr() {
@@ -753,6 +783,31 @@ fn reject_ignoring_a_repository_override() {
 }
 '''
 
+# `pr-workflow ready` while other hosts push and CI reports, which the model checker visits state by state and the replay test in crates/pr-workflow runs through `pr_ready_rules`.
+# The probe module models the command before the fix, so the model checker must find the push between the read and the mark.
+[[obligation]]
+verifier = "quint"
+spec = "specs/pr_ready.qnt"
+main = "pr_ready"
+probe = "pr_ready_buggy"
+invariant = "safe"
+witnesses = ["keptReady", "returnedToDraft", "refused"]
+seed = "0x2a"
+samples = 1000
+steps = 12
+distinct_states = 971
+traces = [
+  "specs/traces/pr_ready.0.itf.json",
+  "specs/traces/pr_ready.1.itf.json",
+  "specs/traces/pr_ready.2.itf.json",
+  "specs/traces/pr_ready.3.itf.json",
+  "specs/traces/pr_ready.4.itf.json",
+  "specs/traces/pr_ready.5.itf.json",
+  "specs/traces/pr_ready.6.itf.json",
+  "specs/traces/pr_ready.7.itf.json",
+  "specs/traces/pr_ready_buggy.itf.json",
+]
+
 [[pilot]]
 tool = "aeneas"
 subjects = ["skill_ops::dependency_plan", "order_rules::order"]
@@ -781,7 +836,7 @@ issue = 105
 # Each names the cursor of a hand-written scan that the mutant stops or turns back.
 
 [[non-terminating]]
-mutant = "crates/rules/src/change_rules.rs:244:15: replace += with *= in matched"
+mutant = "crates/rules/src/change_rules.rs:245:15: replace += with *= in matched"
 reason = "the rule cursor stays at zero, so the walk over the rules never ends"
 
 [[non-terminating]]

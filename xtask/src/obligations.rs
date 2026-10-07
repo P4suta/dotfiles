@@ -104,6 +104,48 @@ pub enum Obligation {
     JsonSchema { schema: String, sha256: String },
     /// A linter run with its committed settings.
     Lint { tool: LintTool, settings: String },
+    /// A Quint model, which `just proofs` checks offline in its pinned image.
+    Quint(QuintModel),
+}
+
+/// A Quint model whose `main` module holds `invariant` in exactly `distinct_states` reachable states and whose `probe` module breaks it.
+/// A simulation at `seed` must witness every name in `witnesses` and write the committed `traces` again.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QuintModel {
+    pub spec: String,
+    pub main: String,
+    pub probe: String,
+    pub invariant: String,
+    pub witnesses: Vec<String>,
+    pub seed: String,
+    pub samples: u32,
+    pub steps: u32,
+    pub distinct_states: u64,
+    pub traces: Vec<String>,
+}
+
+/// The refusals of a Quint obligation that the source alone decides: its modules, witnesses, and traces.
+fn close_quint(root: &Path, quint: &QuintModel) -> Vec<String> {
+    let mut refusals = Vec::new();
+    let spec = &quint.spec;
+    let text = fs::read_to_string(root.join(spec)).unwrap_or_default();
+    for module in [&quint.main, &quint.probe] {
+        if !text.contains(&format!("module {module} {{")) {
+            refusals.push(format!("{MANIFEST}: {spec} declares no module {module}"));
+        }
+    }
+    if quint.witnesses.is_empty() {
+        refusals.push(format!(
+            "{MANIFEST}: {spec} names no witness, so nothing shows its runs reach an outcome"
+        ));
+    }
+    for trace in &quint.traces {
+        if !root.join(trace).is_file() {
+            refusals.push(format!("{MANIFEST}: the trace {trace} is missing"));
+        }
+    }
+    refusals
 }
 
 /// A tool tried on named subjects for one issue, which discharges no obligation.
@@ -838,6 +880,7 @@ pub fn closure(root: &Path, manifest: &Manifest) -> Result<Closure> {
                     ));
                 }
             }
+            Obligation::Quint(quint) => result.refusals.extend(close_quint(root, quint)),
         }
     }
     for missing in modules.difference(&listed) {

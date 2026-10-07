@@ -136,7 +136,7 @@ impl core::fmt::Display for UnknownGate<'_> {
 /// The gates a class selects: prose checks run for every change, and wider classes add the checks their content can break.
 /// Skills deploy through the native profile, so they also select its rehearsal.
 /// The xtask crates validate and apply everything, so Rust selects every gate but the proofs.
-/// Each proof harness compiles one rule module alone, so only a rule module, the proof inventory, or the tooling selects the proofs.
+/// Each proof harness compiles one rule module alone, so only a rule module, the proof inventory, a model under `specs/`, or the tooling selects the proofs.
 #[must_use]
 pub const fn gates(class: Class) -> Gates {
     let prose = Gates::of(Gate::Prose);
@@ -157,7 +157,7 @@ enum Match {
 }
 
 /// The first matching rule decides, so a narrower rule precedes the broader one it overrides.
-const RULES: [(Match, &[u8], Class); 37] = [
+const RULES: [(Match, &[u8], Class); 38] = [
     (Match::Prefix, b".github/", Class::Everything),
     (Match::Prefix, b"xtask/proofs/", Class::Everything),
     (Match::Prefix, b"xtask/src/change", Class::Everything),
@@ -182,6 +182,7 @@ const RULES: [(Match, &[u8], Class); 37] = [
     (Match::Suffix, b"Cargo.toml", Class::Everything),
     (Match::Exact, b"xtask/src/skill_proofs.rs", Class::Rules),
     (Match::Exact, b"policy/obligations.toml", Class::Rules),
+    (Match::Prefix, b"specs/", Class::Rules),
     (Match::Exact, b"policy/baselines.toml", Class::Rust),
     (Match::Suffix, b"_rules.rs", Class::Rules),
     (Match::Suffix, b".rs", Class::Rust),
@@ -441,6 +442,8 @@ mod tests {
             "crates/rules/src/lint_rules.rs",
             "xtask/src/skill_proofs.rs",
             "policy/obligations.toml",
+            "specs/pr_ready.qnt",
+            "specs/traces/pr_ready.0.itf.json",
             "home/dot_agents/skills/a/scripts/x_rules.rs",
         ] {
             assert_eq!(

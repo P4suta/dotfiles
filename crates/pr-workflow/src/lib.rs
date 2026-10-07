@@ -1,14 +1,14 @@
 //! The pull request workflow: issue-scoped preparation, creation, document edits, ready transitions, and stacked branches.
 
 pub use platform::{aside, build_inputs, freshness, refusal, report, tool};
-pub use rules::{pr_rules, wip_rules};
+pub use rules::{pr_ready_rules, pr_rules, wip_rules};
 
+use crate::pr_ready_rules::{Action as Move, Report, Settlement, State, Workflow};
 use crate::pr_rules::{
     Blocker, Checks, Dependency, Effect, Exclusion, Generation, IssueGate, Lifecycle, MergeState,
-    Operation, ReviewRequirement, Step, Stop, api_quota_available, checks_state,
-    coderabbit_body_marker_allowed, dependency, exclusion, head_checks, issue_gate,
-    keeps_pause_exclusion, merge_step, plan, requests_review, review_request_allowed,
-    review_requirement,
+    Operation, ReviewRequirement, Step, Stop, api_quota_available, coderabbit_body_marker_allowed,
+    dependency, exclusion, head_checks, issue_gate, keeps_pause_exclusion, merge_step, plan,
+    requests_review, review_request_allowed, review_requirement,
 };
 use crate::refusal::{Refusal, command};
 use crate::tool::Tool;
@@ -291,18 +291,44 @@ struct LiveDocument {
     #[serde(default)]
     status_check_rollup: Vec<ReportedCheck>,
     head_ref_oid: Option<String>,
+    base_ref_name: Option<String>,
 }
 
-/// One entry of the head commit's check rollup: a check run or a commit status.
+/// One entry of the head commit's check rollup: a check run, named by `name`, or a commit status, named by `context`.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReportedCheck {
     status: Option<String>,
     conclusion: Option<String>,
     state: Option<String>,
+    name: Option<String>,
+    context: Option<String>,
+}
+
+/// One rule of a branch's rulesets, of which only the required status checks matter here.
+#[derive(Deserialize)]
+struct BranchRule {
+    r#type: String,
+    #[serde(default)]
+    parameters: Option<RuleParameters>,
+}
+
+#[derive(Deserialize)]
+struct RuleParameters {
+    #[serde(default)]
+    required_status_checks: Vec<RequiredCheck>,
+}
+
+#[derive(Deserialize)]
+struct RequiredCheck {
+    context: String,
 }
 
 impl ReportedCheck {
+    fn label(&self) -> Option<&str> {
+        self.name.as_deref().or(self.context.as_deref())
+    }
+
     fn finished(&self) -> bool {
         match (&self.status, &self.state) {
             (Some(status), _) => status == "COMPLETED",
@@ -320,19 +346,28 @@ impl ReportedCheck {
     }
 }
 
-/// The total, unfinished, and failed checks of a rollup.
-fn tally(rollup: &[ReportedCheck]) -> (usize, usize, usize) {
+/// The total, unfinished, and failed checks of a rollup, and how many `required` checks it lacks or hasn't passed.
+fn tally(rollup: &[ReportedCheck], required: &[String]) -> (usize, usize, usize, usize) {
     let unfinished = rollup.iter().filter(|check| !check.finished()).count();
     let failed = rollup
         .iter()
         .filter(|check| check.finished() && !check.passed())
         .count();
-    (rollup.len(), unfinished, failed)
+    let missing = required
+        .iter()
+        .filter(|name| {
+            !rollup.iter().any(|check| {
+                check.label() == Some(name.as_str()) && check.finished() && check.passed()
+            })
+        })
+        .count();
+    (rollup.len(), unfinished, failed, missing)
 }
 
-fn checks(rollup: &[ReportedCheck]) -> Checks {
-    let (total, unfinished, failed) = tally(rollup);
-    checks_state(total, unfinished, failed)
+/// The report of a head's rollup, given the checks its base requires.
+fn checks(rollup: &[ReportedCheck], required: &[String]) -> Report {
+    let (total, unfinished, failed, missing) = tally(rollup, required);
+    pr_ready_rules::report(total, unfinished, failed, missing)
 }
 
 #[derive(Deserialize)]
@@ -953,6 +988,19 @@ impl Github {
         Ok(github)
     }
 
+    /// The status checks that the rulesets of `base` require, by the name each check reports.
+    fn required_checks(&self, target: &Target, base: &str) -> Result<Vec<String>> {
+        let rules: Vec<BranchRule> =
+            self.read(&format!("repos/{}/rules/branches/{base}", target.repo))?;
+        Ok(rules
+            .into_iter()
+            .filter(|rule| rule.r#type == "required_status_checks")
+            .filter_map(|rule| rule.parameters)
+            .flat_map(|parameters| parameters.required_status_checks)
+            .map(|check| check.context)
+            .collect())
+    }
+
     /// Refuses a new PR while the authenticated user already has as many open PRs as the work-in-progress limit of the repository permits.
     fn admit_work_in_progress(&self, target: &Target, head: &str) -> Result<()> {
         let open: Vec<ListedPr> = self.read(&format!(
@@ -1474,7 +1522,7 @@ fn live_document(_github: &Github, target: &Target, pr: u64) -> Result<LiveDocum
     args.extend([
         pr.to_string().into(),
         "--json".into(),
-        "title,body,state,isDraft,statusCheckRollup,headRefOid".into(),
+        "title,body,state,isDraft,statusCheckRollup,headRefOid,baseRefName".into(),
     ]);
     serde_json::from_str(&gh(&args)?).context("invalid gh PR document")
 }
@@ -1544,6 +1592,12 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 Refusal::new("pr.state", "only an open PR can become ready", inspect())
                     .evidence(format!("#{pr}: state {}", live.state))
             })?;
+            let required = github.required_checks(
+                &target,
+                live.base_ref_name
+                    .as_deref()
+                    .context("GitHub reported no base branch")?,
+            )?;
             let body = make_ready(
                 &github,
                 &target,
@@ -1551,7 +1605,7 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 live.title,
                 live.body,
                 live.is_draft,
-                checks(&live.status_check_rollup),
+                checks(&live.status_check_rollup, &required),
                 live.head_ref_oid
                     .as_deref()
                     .context("GitHub reported no head commit")?,
@@ -1709,7 +1763,7 @@ fn make_ready(
     title: String,
     body: String,
     draft: bool,
-    checks: Checks,
+    report: Report,
     head: &str,
     rerun: &str,
 ) -> Result<String> {
@@ -1722,15 +1776,82 @@ fn make_ready(
         Some((&document.body, BodySource::Pr(pr))),
         rerun,
     )?;
+    let checks = if pr_ready_rules::complete(Workflow::Fixed, report) {
+        Checks::Passing
+    } else {
+        Checks::Incomplete
+    };
     planned(Operation::Ready, target, Some(pr), draft, issue, checks)?;
     dotfiles::hosts::require_admission(Path::new("."), head)?;
     admit_review_request(Operation::Ready, target.generation, &document.body, || {
         Ok((draft, review_exclusion(&document.body)))
     })?;
+    // The command walks the model of `specs/pr_ready.qnt`: head 0 carries the report this read returned.
+    let reported = ready_step(pr_ready_rules::initial(), Move::Report(report))
+        .unwrap_or_else(|_| pr_ready_rules::initial());
+    let marked = ready_step(ready_step(reported, Move::View)?, Move::Mark)?;
     let mut args = arguments("ready", &target.repo);
     args.push(pr.to_string().into());
     print!("{}", gh(&args)?);
+    settle_ready(target, pr, head, marked)?;
     Ok(document.body)
+}
+
+/// One step of the fixed command in the model, which the plan has already admitted.
+fn ready_step(state: State, action: Move) -> Result<State> {
+    pr_ready_rules::step(Workflow::Fixed, state, action)
+        .with_context(|| format!("the ready model can't take {action:?} in {state:?}"))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HeadView {
+    head_ref_oid: String,
+}
+
+/// Reads the head again after `gh pr ready` and returns the PR to draft when another push moved it, so no unchecked head stays ready after the command returns.
+/// Exempt as semantic-boundary: GitHub's `markPullRequestReadyForReview` takes no expected head, so a push can still land between the mark and this read.
+/// Evidence: `crates/pr-workflow/tests/pr_ready_replay.rs::every_trace_of_the_fixed_model_replays_state_for_state_and_covers_every_action`.
+/// Reconsider when GitHub accepts an expected head for marking a PR ready.
+fn settle_ready(target: &Target, pr: u64, checked: &str, marked: State) -> Result<()> {
+    let mut args = arguments("view", &target.repo);
+    args.extend([pr.to_string().into(), "--json".into(), "headRefOid".into()]);
+    let reread: HeadView = serde_json::from_str(&gh(&args)?).context("invalid gh PR head")?;
+    let moved =
+        pr_ready_rules::settle(checked, reread.head_ref_oid.as_str()) == Settlement::ReturnToDraft;
+    let observed = if moved {
+        ready_step(marked, Move::Push)?
+    } else {
+        marked
+    };
+    let settled = ready_step(observed, Move::Settle)?;
+    ensure!(
+        pr_ready_rules::safe(&settled),
+        "the ready model left an unchecked head ready: {settled:?}"
+    );
+    if settled.ready {
+        return Ok(());
+    }
+    let mut undo = arguments("ready", &target.repo);
+    undo.extend([pr.to_string().into(), "--undo".into()]);
+    print!("{}", gh(&undo)?);
+    Err(Refusal::new(
+        "pr.head",
+        "another push moved the head after its checks were read, so the PR returned to draft",
+        command(&[
+            "pr-workflow",
+            "ready",
+            "--repo",
+            &target.repo,
+            "--pr",
+            &pr.to_string(),
+        ]),
+    )
+    .evidence(format!(
+        "checked {checked}, head {} after marking ready",
+        reread.head_ref_oid
+    ))
+    .into())
 }
 
 fn open_prs(target: &Target) -> Result<Vec<OpenPr>> {
@@ -1802,7 +1923,8 @@ fn merge_state(
     } else {
         false
     };
-    let (total, unfinished, failed) = tally(&view.status_check_rollup);
+    // GitHub itself holds a merge to the required checks, so the merge state reads the rollup alone.
+    let (total, unfinished, failed, _) = tally(&view.status_check_rollup, &[]);
     Ok(MergeState {
         lifecycle,
         conflict: view.mergeable == "CONFLICTING",
@@ -1936,6 +2058,7 @@ fn merge_independent(
             Step::Wait => wait(target, pr, polling, started)?,
             Step::Exclude => add_pause_lines(target, pr, &view)?,
             Step::Ready => {
+                let required = github.required_checks(target, &view.base_ref_name)?;
                 make_ready(
                     github,
                     &ready_target(target, &view),
@@ -1943,7 +2066,7 @@ fn merge_independent(
                     view.title,
                     view.body,
                     true,
-                    checks(&view.status_check_rollup),
+                    checks(&view.status_check_rollup, &required),
                     &view.head_ref_oid,
                     rerun,
                 )?;
@@ -2157,6 +2280,7 @@ fn merge_stack(
                     continue 'restart;
                 }
                 Step::Ready => {
+                    let required = github.required_checks(target, &view.base_ref_name)?;
                     make_ready(
                         github,
                         &ready_target(target, &view),
@@ -2164,7 +2288,7 @@ fn merge_stack(
                         view.title,
                         view.body,
                         true,
-                        checks(&view.status_check_rollup),
+                        checks(&view.status_check_rollup, &required),
                         &view.head_ref_oid,
                         rerun,
                     )?;

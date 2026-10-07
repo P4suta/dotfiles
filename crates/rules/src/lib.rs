@@ -66,6 +66,7 @@ pub mod obligation_rules;
 pub mod ocomment_rules;
 pub mod order_rules;
 pub mod path_conversion_rules;
+pub mod pr_ready_rules;
 pub mod pr_rules;
 pub mod profile_rules;
 pub mod proof_budget_rules;

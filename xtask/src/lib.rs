@@ -14,6 +14,7 @@ pub mod obligations;
 pub mod profile_snapshot;
 pub mod profiles;
 pub mod quality;
+pub mod quint;
 pub mod rehearsal;
 pub mod skill_proofs;
 pub mod structure;

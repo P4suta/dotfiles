@@ -30,6 +30,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let variable = if endpoint == "user" {
             "GH_FIXTURE_USER"
+        } else if endpoint.contains("/rules/branches/") {
+            "GH_FIXTURE_RULES"
         } else if endpoint.contains("/issues/") {
             "GH_FIXTURE_ISSUE"
         } else if endpoint.contains("/compare/") {
@@ -50,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .split(',')
                 .any(|listed| listed == head);
             println!("{{\"behind_by\":{}}}", u8::from(behind));
-        } else if variable == "GH_FIXTURE_PULLS" {
+        } else if variable == "GH_FIXTURE_PULLS" || variable == "GH_FIXTURE_RULES" {
             println!(
                 "{}",
                 std::env::var(variable).unwrap_or_else(|_| "[]".into())
@@ -83,8 +85,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             view = field(view, "statusCheckRollup", &checks);
         }
         if !view.contains("headRefOid") {
-            let head = std::env::var("GH_FIXTURE_HEAD").unwrap_or_default();
+            // A push that GH_FIXTURE_PUSHED_HEAD names lands right after `gh pr ready`, so a later read returns it.
+            let pushed = std::env::var("GH_FIXTURE_PUSHED_HEAD").ok().filter(|_| {
+                std::fs::read_to_string(&log_path).is_ok_and(|log| log.contains("\nready\n"))
+            });
+            let head = pushed
+                .or_else(|| std::env::var("GH_FIXTURE_HEAD").ok())
+                .unwrap_or_default();
             view = field(view, "headRefOid", &format!("\"{head}\""));
+        }
+        if !view.contains("baseRefName") {
+            view = field(view, "baseRefName", "\"main\"");
         }
         println!("{view}");
     } else {

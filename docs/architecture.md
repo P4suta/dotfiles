@@ -55,7 +55,7 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 | `just check-staged` | The pre-commit check: the lint stages over the staged files, then the prose of documents and of the comments `OComment` reads. |
 | `just baselines` | The refusal of a lint baseline under `policy/lint-baselines/` that grew since a base, which CI runs from the merge base. |
 | `just profiles` | Every profile's rendering, an isolated apply and verification, the committed manifests, the ignore and remove audit, and the script input audit. |
-| `just proofs` | The Kani obligations of `policy/obligations.toml`, Miri over the pure core's tests for the host and Windows, and a mutation campaign over the core. |
+| `just proofs` | The Kani obligations of `policy/obligations.toml`, Miri over the pure core's tests for the host and Windows, a mutation campaign over the core, and the Quint models under `specs/`. |
 | `just prose` | The writing standard over documents and comments. |
 
 The Rust gate of `just check` also runs the obligation closure, which holds `policy/obligations.toml` to the source.
@@ -65,6 +65,13 @@ It also refuses a proved function that no production code calls, a pilot whose i
 Each rule module keeps its properties in `spec_*` functions of its `proofs` module.
 Its Kani harnesses prove them for every input, and its tests run them over every input they can list.
 The mutation campaign of `just proofs` runs those tests, since cargo-mutants can't run Kani, and refuses a surviving mutant or a timeout that `policy/obligations.toml` doesn't name as non-terminating.
+
+A Quint model under `specs/` describes a workflow that races other actors, such as `pr-workflow ready` while other hosts push.
+`just proofs` checks it in a pinned image without a network.
+`quint verify --backend tlc` visits every reachable state with one worker, and the obligation records the exact count of distinct states.
+A probe module models the code before its fix, and the model checker must find its violation.
+The rule module with the same step function replays the committed traces and compares the whole state after every step.
+The gate writes those traces again at the fixed seed to show they still match.
 
 `crates/rules/src/change_rules.rs` maps each changed path to the gates it selects, and a path no rule names selects every gate.
 Only a rule module, the proof inventory, or the tooling selects the proofs, because each harness compiles one rule module alone.
