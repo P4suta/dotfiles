@@ -217,6 +217,10 @@ fn scan(command: &str) -> Scan {
 }
 
 /// The words of each simple command in `command`, in order, each up to its first redirect.
+///
+/// Exempt as disproportionate: a shell parser over unbounded text needs fuzzing, which no verifier here owns yet.
+/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::standard_input_bodies_include_heredocs_and_piped_words`.
+/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
 #[must_use]
 pub fn segments(command: &str) -> Vec<Vec<String>> {
     scan(command)
@@ -250,6 +254,10 @@ impl PartialEq<&str> for Program {
 }
 
 /// The program that the command word `text` names.
+///
+/// Exempt as disproportionate: Kani spends past its budget on the string search of even a three-byte word.
+/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::a_program_name_drops_its_directory_case_and_suffixes`.
+/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
 #[must_use]
 pub fn program(text: &str) -> Program {
     let name = text.rsplit(['/', '\\']).next().unwrap_or(text);
@@ -437,6 +445,10 @@ fn command_sources(arguments: &[&str], sources: &mut Vec<Source>) {
 /// This function resolves standard input because it knows the command text.
 /// Standard input covers the heredoc bodies and the words of every other command in the line.
 /// It also covers `echo "$text" | gh pr comment --body-file -`.
+///
+/// Exempt as disproportionate: a shell parser over unbounded text needs fuzzing, which no verifier here owns yet.
+/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::gh_body_arguments_are_collected_from_every_spelling`.
+/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
 pub fn body_sources(command: &str) -> Vec<Source> {
     let scan = scan(command);
     let segments: Vec<Vec<&str>> = scan
@@ -479,6 +491,10 @@ pub fn body_sources(command: &str) -> Vec<Source> {
 
 /// The two detections behind the verdict.
 /// They cover an inline interpreter and a file write.
+///
+/// Exempt as disproportionate: a shell parser over unbounded text needs fuzzing, which no verifier here owns yet.
+/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::inline_interpreters_are_refused`.
+/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
 #[must_use]
 pub fn inspect(command: &str) -> Verdict {
     let scan = scan(command);
@@ -710,6 +726,15 @@ mod tests {
         ] {
             assert!(body_sources(command).is_empty(), "{command}");
         }
+    }
+
+    #[test]
+    fn a_program_name_drops_its_directory_case_and_suffixes() {
+        assert_eq!(program("/usr/bin/Python3.12"), "python");
+        assert_eq!(program(r"C:\Tools\GIT.EXE"), "git");
+        assert_eq!(program("node"), "node");
+        assert_eq!(program("dir/"), "");
+        assert_eq!(program("2to3"), "2to");
     }
 
     #[test]

@@ -23,7 +23,7 @@ pub const CRATES: [&str; 8] = [
 ];
 
 /// Files outside the crates' `src` directories that the compiler includes or that decide how the tools build.
-const SHARED: [&str; 21] = [
+const SHARED: [&str; 22] = [
     ".cargo/config.toml",
     ".chezmoiroot",
     ".github/workflows/ci.yml",
@@ -42,6 +42,7 @@ const SHARED: [&str; 21] = [
     "lefthook.yml",
     "mise.toml",
     "package.json",
+    "policy/obligations.toml",
     "tsconfig.json",
     "xtask/proofs/Dockerfile",
     "xtask/src/skill_proofs.rs",

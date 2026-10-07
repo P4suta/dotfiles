@@ -750,6 +750,7 @@ pub fn engine_hash() -> Result<String> {
         include_str!("tree.rs"),
         include_str!("main.rs"),
         include_str!("../../../xtask/src/skill_proofs.rs"),
+        include_str!("../../../policy/obligations.toml"),
         include_str!("../../../xtask/proofs/Dockerfile"),
         include_str!("../../../home/dot_config/opencode/plugins/skill-ops.ts"),
         include_str!("../Cargo.toml"),

@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 use xtask::{
-    profile_rules::{Mode, Profile, Reconcile, permitted, reconcile},
+    profile_rules::{Mode, Profile, permitted},
     profiles, quality,
 };
 
@@ -33,9 +33,9 @@ fn templates_read_data_at_explicit_paths_instead_of_a_merged_platform_context() 
 #[test]
 fn wsl_is_linux_on_a_microsoft_kernel() {
     use xtask::profile_rules::{System, detected, microsoft_kernel};
-    assert!(microsoft_kernel("5.15.167.4-microsoft-standard-WSL2"));
-    assert!(microsoft_kernel("4.4.0-19041-Microsoft"));
-    assert!(!microsoft_kernel("6.8.0-45-generic"));
+    assert!(microsoft_kernel(b"5.15.167.4-microsoft-standard-WSL2"));
+    assert!(microsoft_kernel(b"4.4.0-19041-Microsoft"));
+    assert!(!microsoft_kernel(b"6.8.0-45-generic"));
     assert_eq!(detected(System::Linux, true), Profile::Wsl);
     assert_eq!(detected(System::Linux, false), Profile::Linux);
     assert_eq!(detected(System::Mac, true), Profile::Mac);
@@ -292,14 +292,6 @@ fn cross_profile_preview_cannot_turn_into_a_live_apply() {
     assert!(!permitted(Mode::Full, false, true, true));
     assert!(!permitted(Mode::Full, true, true, false));
     assert!(permitted(Mode::Full, true, false, true));
-}
-
-#[test]
-fn new_upstream_edits_preserve_local_work_or_require_a_conflict() {
-    assert_eq!(reconcile(false, false, false), Reconcile::Conflict);
-    assert_eq!(reconcile(true, false, false), Reconcile::TakeUpstream);
-    assert_eq!(reconcile(false, true, false), Reconcile::KeepLocal);
-    assert_eq!(reconcile(false, false, true), Reconcile::KeepLocal);
 }
 
 #[test]

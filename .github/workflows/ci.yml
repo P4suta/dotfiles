@@ -6,6 +6,8 @@ on:
 
 permissions:
   contents: read
+  # The obligation closure reads whether each pilot's issue closed.
+  issues: read
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -81,6 +83,8 @@ jobs:
       - name: Check the selected gates
         if: env.GATES != ''
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: mise x -- just check --gates "$GATES"
       - name: Check Linux system provisioning syntax
         if: runner.os == 'Linux' && contains(needs.classify.outputs.gates, 'profiles')

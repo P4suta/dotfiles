@@ -15,6 +15,10 @@ impl core::fmt::Display for AsideName<'_> {
 }
 
 /// The aside name of `name` for the installing process `pid`.
+///
+/// Exempt as no-decision: it pairs its two arguments without a branch.
+/// Evidence: `crates/rules/src/aside_rules.rs::tests::the_aside_name_is_recognised_and_other_files_are_not`.
+/// Reconsider when it gains a branch.
 #[must_use]
 pub const fn aside_name(name: &str, pid: u32) -> AsideName<'_> {
     AsideName { name, pid }

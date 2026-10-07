@@ -17,13 +17,17 @@ dotguard = { path = "../crates/dotguard" }
 model = { path = "../crates/model" }
 platform = { path = "../crates/platform" }
 pr-workflow = { path = "../crates/pr-workflow" }
+proc-macro2 = "1.0.107"
 prose = { path = "../crates/prose" }
 pulldown-cmark = "0.13"
+quote = "1.0.47"
 rules = { path = "../crates/rules" }
+schemars = "1.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11.0"
 skill-ops = { path = "../crates/skill-ops" }
+syn = { version = "2.0.119", features = ["full", "visit"] }
 tempfile = "3.27"
 toml = "1.0"
 yaml-rust2 = "0.13"

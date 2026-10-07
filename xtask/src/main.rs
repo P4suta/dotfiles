@@ -200,6 +200,7 @@ fn check(root: &Path, gates: Gates, reference: &str) -> Result<()> {
     }
     if gates.contains(Gate::Rust) {
         xtask::profiles::data_schema(root, true)?;
+        xtask::obligations::check(root, &xtask::obligations::github_issue_closed)?;
         xtask::quality::workflows(root)?;
         xtask::quality::dependencies(root)?;
         check_workspace(root)?;
@@ -251,6 +252,7 @@ fn run() -> Result<()> {
         Action::Gen { check } => {
             xtask::adr::generate(&cli.root, check)?;
             xtask::profiles::data_schema(&cli.root, check)?;
+            xtask::obligations::schemas(&cli.root, check)?;
             xtask::launchers::generate(&cli.root, check)?;
             xtask::profiles::targets_page(&cli.root, check)?;
         }

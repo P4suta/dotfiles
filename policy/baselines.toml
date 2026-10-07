@@ -1,0 +1,16 @@
+#:schema ../schemas/baselines.schema.json
+# The deterministic metrics `just check` holds exactly, so a change that moves one records the new value here.
+# Wall time stays advisory, and the schema refuses any threshold on it.
+
+[[metric]]
+metric = "harnesses"
+exact = 131
+
+[[metric]]
+metric = "probes"
+exact = 125
+
+# The three unsafe blocks and the console handler of the Win32 sites in policy/unsafe-sites.toml, and the read past a slice in the Miri fixture.
+[[metric]]
+metric = "unsafe-sites"
+exact = 5

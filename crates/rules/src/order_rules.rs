@@ -42,6 +42,7 @@ pub fn order(after: &[u32], order: &mut [usize]) -> bool {
 }
 
 /// Whether `sequence` runs each of the steps `0..after.len()` exactly once and every step after each step it relies on.
+#[cfg(any(test, kani))]
 #[must_use]
 pub fn respects(after: &[u32], sequence: &[usize]) -> bool {
     if sequence.len() != after.len() || after.len() > MAX_STEPS {

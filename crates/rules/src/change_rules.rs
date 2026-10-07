@@ -157,7 +157,7 @@ enum Match {
 }
 
 /// The first matching rule decides, so a narrower rule precedes the broader one it overrides.
-const RULES: [(Match, &[u8], Class); 35] = [
+const RULES: [(Match, &[u8], Class); 37] = [
     (Match::Prefix, b".github/", Class::Everything),
     (Match::Prefix, b"xtask/proofs/", Class::Everything),
     (Match::Prefix, b"xtask/src/change", Class::Everything),
@@ -181,6 +181,8 @@ const RULES: [(Match, &[u8], Class); 35] = [
     (Match::Suffix, b".lock", Class::Everything),
     (Match::Suffix, b"Cargo.toml", Class::Everything),
     (Match::Exact, b"xtask/src/skill_proofs.rs", Class::Rules),
+    (Match::Exact, b"policy/obligations.toml", Class::Rules),
+    (Match::Exact, b"policy/baselines.toml", Class::Rust),
     (Match::Suffix, b"_rules.rs", Class::Rules),
     (Match::Suffix, b".rs", Class::Rust),
     (Match::Prefix, b"xtask/", Class::Rust),
@@ -259,6 +261,10 @@ pub fn classify(path: &[u8]) -> Class {
 }
 
 /// The gates a change set selects: the union over its paths, and none for an empty change.
+///
+/// Exempt as no-decision: it folds the proved `classify` and `gates` over the paths with a union and decides nothing itself.
+/// Evidence: `crates/rules/src/change_rules.rs::tests::a_change_set_selects_the_union_of_its_paths_and_an_empty_one_selects_nothing`.
+/// Reconsider when it gains a branch.
 pub fn select<'a>(paths: impl IntoIterator<Item = &'a str>) -> Gates {
     paths.into_iter().fold(Gates::NONE, |selected, path| {
         selected.union(gates(classify(path.as_bytes())))
@@ -363,6 +369,7 @@ mod tests {
             "crates/rules/src/order_rules.rs",
             "crates/rules/src/lint_rules.rs",
             "xtask/src/skill_proofs.rs",
+            "policy/obligations.toml",
             "home/dot_agents/skills/a/scripts/x_rules.rs",
         ] {
             assert_eq!(

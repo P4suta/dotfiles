@@ -57,14 +57,12 @@ pub enum Action {
 }
 
 /// A path whose attributes ask for CRLF, no conversion, or binary handling keeps its bytes.
-#[must_use]
-pub fn declared_exempt(attributes: Attributes) -> bool {
+fn declared_exempt(attributes: Attributes) -> bool {
     attributes.eol == Eol::Crlf || attributes.text == Text::Unset || attributes.binary
 }
 
 /// Explicit `text`, or `eol=lf` without a `text` value, makes Git convert without content detection.
-#[must_use]
-pub fn forces_text(attributes: Attributes) -> bool {
+fn forces_text(attributes: Attributes) -> bool {
     attributes.text == Text::Set
         || (attributes.text == Text::Unspecified && attributes.eol == Eol::Lf)
 }
@@ -91,8 +89,7 @@ pub fn auto_binary(content: Content) -> bool {
 }
 
 /// Git's `has_crlf_in_index` rule: content detection keeps a path whose index entry already holds CRLF text.
-#[must_use]
-pub fn index_keeps(staging: Staging, index: Index) -> bool {
+fn index_keeps(staging: Staging, index: Index) -> bool {
     staging == Staging::Add && index == Index::CrlfText
 }
 
@@ -152,6 +149,10 @@ pub fn kept(bytes: &[u8], index: usize) -> bool {
 }
 
 /// Removes each carriage return that precedes a line feed, as Git does when it normalizes text.
+///
+/// Exempt as no-decision: it keeps the bytes the proved `kept` admits, and Kani can't verify the allocation of its result.
+/// Evidence: `crates/rules/src/eol_rules.rs::tests::normalizing_drops_one_carriage_return_per_pair_and_keeps_every_line_feed`.
+/// Reconsider when it gains a branch.
 #[must_use]
 pub fn to_lf(bytes: &[u8]) -> Vec<u8> {
     bytes
@@ -323,4 +324,18 @@ fn auto_detection_follows_git_byte_classes() {
     assert_eq!(auto_binary(found), lone_cr || control);
     kani::cover!(auto_binary(found) && !found.lone_cr && !found.nul);
     kani::cover!(!auto_binary(found) && found.crlf && input[3] == 0x1a);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizing_drops_one_carriage_return_per_pair_and_keeps_every_line_feed() {
+        assert_eq!(to_lf(b"a\r\nb\r\n"), b"a\nb\n");
+        assert_eq!(to_lf(b"\r\r\n"), b"\r\n");
+        assert_eq!(to_lf(b"a\rb\n"), b"a\rb\n");
+        assert_eq!(to_lf(b"\r"), b"\r");
+        assert_eq!(to_lf(b""), b"");
+    }
 }

@@ -51,8 +51,56 @@ pub const fn detected(system: System, microsoft_kernel: bool) -> Profile {
 
 /// Whether a Linux kernel release names Microsoft, which marks WSL.
 #[must_use]
-pub fn microsoft_kernel(osrelease: &str) -> bool {
-    osrelease.to_ascii_lowercase().contains("microsoft")
+pub fn microsoft_kernel(osrelease: &[u8]) -> bool {
+    let mut start: usize = 0;
+    while let Some(rest) = osrelease.get(start..) {
+        if starts_with_microsoft(rest) {
+            return true;
+        }
+        start += 1;
+    }
+    false
+}
+
+/// The vendor name a WSL kernel release carries, in any letter case.
+const MICROSOFT: &[u8] = b"microsoft";
+
+/// Whether `text` starts with the vendor name in any letter case.
+/// Indexing keeps the proof free of the iterator adapters that Kani can't reach.
+fn starts_with_microsoft(text: &[u8]) -> bool {
+    let mut index = 0;
+    while let (Some(byte), Some(letter)) = (text.get(index), MICROSOFT.get(index)) {
+        if byte.to_ascii_lowercase() != *letter {
+            return false;
+        }
+        index += 1;
+    }
+    index == MICROSOFT.len()
+}
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(12)]
+fn only_a_release_that_names_microsoft_marks_wsl() {
+    const PLANTED: &[u8] = b"MicroSoft";
+    let mut bytes: [u8; 10] = kani::any();
+    let planted: bool = kani::any();
+    if planted {
+        let mut index = 0;
+        while index < PLANTED.len() {
+            bytes[index + 1] = PLANTED[index];
+            index += 1;
+        }
+    }
+    let result = microsoft_kernel(&bytes);
+    if planted {
+        assert!(result);
+    }
+    if result {
+        assert!(bytes[0].to_ascii_lowercase() == b'm' || bytes[1].to_ascii_lowercase() == b'm');
+    }
+    kani::cover!(result && !planted);
+    kani::cover!(!result);
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,28 +121,6 @@ pub fn permitted(
         Mode::Preview => true,
         Mode::FilesOnly => owned_target,
         Mode::Full => native_matches && live_authorized,
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Reconcile {
-    KeepLocal,
-    TakeUpstream,
-    Conflict,
-}
-
-#[must_use]
-pub fn reconcile(
-    base_is_local: bool,
-    base_is_upstream: bool,
-    local_is_upstream: bool,
-) -> Reconcile {
-    if base_is_upstream || local_is_upstream {
-        Reconcile::KeepLocal
-    } else if base_is_local {
-        Reconcile::TakeUpstream
-    } else {
-        Reconcile::Conflict
     }
 }
 
@@ -294,20 +320,4 @@ fn application_requires_owned_destination_or_native_authorization() {
     assert!(permitted(Mode::Preview, native, owned, authorized));
     kani::cover!(permitted(Mode::Full, native, owned, authorized));
     kani::cover!(!permitted(Mode::Full, native, owned, authorized));
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn concurrent_source_and_local_edits_are_never_overwritten() {
-    let base_is_local: bool = kani::any();
-    let base_is_upstream: bool = kani::any();
-    let local_is_upstream: bool = kani::any();
-    let decision = reconcile(base_is_local, base_is_upstream, local_is_upstream);
-    assert_eq!(
-        decision == Reconcile::Conflict,
-        !base_is_local && !base_is_upstream && !local_is_upstream
-    );
-    assert!(!matches!(decision, Reconcile::TakeUpstream) || base_is_local);
-    kani::cover!(decision == Reconcile::Conflict);
-    kani::cover!(decision == Reconcile::TakeUpstream);
 }

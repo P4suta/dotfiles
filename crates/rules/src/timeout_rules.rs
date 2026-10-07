@@ -25,8 +25,7 @@ pub fn percentile(sorted: &[u64]) -> Option<u64> {
 }
 
 /// The time a run gets beyond its expectation: half again, plus ten seconds for start-up noise.
-#[must_use]
-pub const fn with_margin(expected: u64) -> u64 {
+const fn with_margin(expected: u64) -> u64 {
     expected
         .saturating_add(expected / MARGIN_DIVISOR)
         .saturating_add(START_UP_MS)
@@ -115,6 +114,25 @@ fn without_history_the_profile_default_decides() {
     }
     kani::cover!(observed.is_none() && default < limit);
     kani::cover!(observed.is_none() && default > limit);
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn a_run_overran_only_past_a_known_expectation_and_stays_overrun_when_slower() {
+    let expected: Option<u64> = kani::any();
+    let took: u64 = kani::any();
+    let result = overran(expected, took);
+    if expected.is_none() {
+        assert!(!result);
+    }
+    if let Some(limit) = expected {
+        assert!(!overran(expected, limit));
+        if result && took < u64::MAX {
+            assert!(overran(expected, took + 1));
+        }
+    }
+    kani::cover!(result);
+    kani::cover!(!result && expected.is_some());
 }
 
 #[cfg(kani)]

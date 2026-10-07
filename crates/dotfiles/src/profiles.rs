@@ -411,7 +411,7 @@ pub fn native_profile() -> Result<Profile> {
         _ => anyhow::bail!("unsupported native operating system"),
     };
     let microsoft = system == System::Linux
-        && fs::read_to_string(OS_RELEASE).is_ok_and(|release| microsoft_kernel(&release));
+        && fs::read(OS_RELEASE).is_ok_and(|release| microsoft_kernel(&release));
     Ok(detected(system, microsoft))
 }
 

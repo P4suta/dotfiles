@@ -33,6 +33,7 @@ pub mod input_rules;
 pub mod instruction_rules;
 pub mod lint_rules;
 pub mod next_action_rules;
+pub mod obligation_rules;
 pub mod ocomment_rules;
 pub mod order_rules;
 pub mod path_conversion_rules;

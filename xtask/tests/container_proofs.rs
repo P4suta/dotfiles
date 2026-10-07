@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use xtask::skill_proofs::{
-    KANI_VERSION, RULES, container_image, container_run_arguments, container_target_volume,
+    KANI_VERSION, container_image, container_run_arguments, container_target_volume,
     validate_results,
 };
 
@@ -39,7 +39,15 @@ fn every_rule_module_and_only_those_are_registered_for_proof() {
             rule_modules(root, &source, &mut found);
         }
     }
-    let registered: BTreeSet<String> = RULES.iter().map(|rules| rules.source.to_owned()).collect();
+    let registered: BTreeSet<String> = xtask::obligations::manifest(root)
+        .unwrap()
+        .obligations
+        .iter()
+        .filter_map(|obligation| match obligation {
+            xtask::obligations::Obligation::Kani { source, .. } => Some(source.clone()),
+            _ => None,
+        })
+        .collect();
     assert_eq!(found, registered);
 }
 

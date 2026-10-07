@@ -10,6 +10,7 @@ pub mod instruction_audit;
 pub mod launchers;
 pub mod lint;
 pub mod next_action;
+pub mod obligations;
 pub mod profile_snapshot;
 pub mod profiles;
 pub mod quality;

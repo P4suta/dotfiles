@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Manifest",
+  "type": "object",
+  "properties": {
+    "obligation": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Obligation"
+      }
+    },
+    "pilot": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PilotEntry"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "KaniFlag": {
+      "description": "The flags a Kani contract run may pass, pinned with the Kani version in `skill_proofs::KANI_VERSION`.",
+      "type": "string",
+      "enum": [
+        "function-contracts",
+        "loop-contracts",
+        "stubbing"
+      ]
+    },
+    "LintTool": {
+      "description": "The linters a `lint` obligation may name.",
+      "type": "string",
+      "enum": [
+        "shellcheck",
+        "psscriptanalyzer"
+      ]
+    },
+    "Obligation": {
+      "description": "One obligation and the verifier that discharges it.",
+      "oneOf": [
+        {
+          "description": "Every harness in `source` must pass, and every harness in `probes` must fail on an assertion.",
+          "type": "object",
+          "properties": {
+            "probes": {
+              "description": "Harness definitions placed after `mod production;`, which names the module under proof.",
+              "type": "string",
+              "default": ""
+            },
+            "source": {
+              "type": "string"
+            },
+            "verifier": {
+              "type": "string",
+              "const": "kani"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "source"
+          ]
+        },
+        {
+          "description": "A function contract in `source`, proved by its `proof_for_contract` harness under `flags`.",
+          "type": "object",
+          "properties": {
+            "flags": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/KaniFlag"
+              }
+            },
+            "function": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "verifier": {
+              "type": "string",
+              "const": "kani-contract"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "source",
+            "function",
+            "flags"
+          ]
+        },
+        {
+          "description": "A vendored JSON Schema, which must keep the recorded digest.",
+          "type": "object",
+          "properties": {
+            "schema": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string"
+            },
+            "verifier": {
+              "type": "string",
+              "const": "json-schema"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "schema",
+            "sha256"
+          ]
+        },
+        {
+          "description": "A linter run with its committed settings.",
+          "type": "object",
+          "properties": {
+            "settings": {
+              "type": "string"
+            },
+            "tool": {
+              "$ref": "#/$defs/LintTool"
+            },
+            "verifier": {
+              "type": "string",
+              "const": "lint"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "tool",
+            "settings"
+          ]
+        }
+      ]
+    },
+    "PilotEntry": {
+      "description": "A tool tried on named subjects for one issue, which discharges no obligation.",
+      "type": "object",
+      "properties": {
+        "decision": {
+          "description": "The decision record that adopts, rejects, or defers the tool.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "exit": {
+          "description": "What result adopts the tool.",
+          "type": "string"
+        },
+        "issue": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "subjects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "subjects",
+        "exit",
+        "issue"
+      ]
+    }
+  }
+}

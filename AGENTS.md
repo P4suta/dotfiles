@@ -42,7 +42,7 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | A setup step | its declaration in `crates/platform/src/step.rs` and its work in `crates/dotfiles/src/setup.rs`, then `just gen` |
 | Shared data and tool versions | `home/.chezmoidata/`, typed in `crates/model/src/data.rs`, `mise.toml`, and `mise.lock` |
 | A gate | `xtask/src/` with its tests in `xtask/tests/`, or the crate of the tool that runs it |
-| A rule a gate decides | a `*_rules.rs` module in `crates/rules/src/`, re-exported by its caller's crate, and its entry in `xtask/src/skill_proofs.rs` |
+| A rule a gate decides | a `*_rules.rs` module in `crates/rules/src/`, re-exported by its caller's crate, and its Kani obligation with its probes in `policy/obligations.toml` |
 | A structural rule for every repository | `home/dot_config/assure/rules/` with its fixtures in `rule-tests/` and its entry in `catalog.toml` |
 | A shared skill | `home/dot_agents/skills/<skill>/` and `docs/skills/decisions/<skill>.json` |
 | A durable design decision | a new record `docs/adr/<decision>.md` with `date:` in its front matter and no number, then `just gen` |

@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Baselines",
+  "type": "object",
+  "properties": {
+    "metric": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Metric"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Metric": {
+      "description": "One deterministic metric and its recorded value.\nWall time appears only as an advisory note, so no entry can gate on it.",
+      "oneOf": [
+        {
+          "description": "The Kani harnesses of the decision core.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "harnesses"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "exact"
+          ]
+        },
+        {
+          "description": "The rejecting probes of the decision core.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "probes"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "exact"
+          ]
+        },
+        {
+          "description": "The unsafe blocks, functions, and implementations of the workspace.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "unsafe-sites"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "exact"
+          ]
+        },
+        {
+          "description": "A wall time measured on one host, which never gates.",
+          "type": "object",
+          "properties": {
+            "advisory": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "wall-millis"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "advisory"
+          ]
+        }
+      ]
+    }
+  }
+}
