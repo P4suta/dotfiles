@@ -700,6 +700,10 @@ fn reject_completing_the_gate_with_open_findings() {
 fn reject_a_diff_from_unassessed_content() {
     assert!(production::diff_base(true, false) == production::DiffBase::Assessed);
 }
+#[kani::proof]
+fn reject_naming_a_pin_inside_a_longer_version() {
+    assert!(production::names(b"10.68.0", b"0.68.0"));
+}
 '''
 
 [[obligation]]

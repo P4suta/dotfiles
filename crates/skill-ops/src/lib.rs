@@ -5,7 +5,7 @@ mod tree;
 
 pub use platform::paths::canonical;
 pub use platform::{aside, build_inputs, freshness, refusal, report, tool};
-pub use rules::skill_rules;
+pub use rules::{proof_budget_rules, skill_rules};
 pub(crate) use tree::collect;
 pub use tree::{
     Metadata, export_checks, metadata, skill_source_paths, skills, split_frontmatter,
@@ -1396,6 +1396,72 @@ pub fn analyze(
     Ok(report)
 }
 
+/// The milliseconds in a second, which turn the proof budget into the words a skill would use.
+const MILLIS_PER_SECOND: u64 = 1000;
+
+/// The texts the checkout's gates pin, which a skill points at instead of repeating: each tool version of `mise.toml`, and the proof budget.
+///
+/// # Errors
+///
+/// Returns an error when `mise.toml` exists but doesn't parse.
+pub fn pinned_terms(root: &Path) -> Result<Vec<String>> {
+    let mut terms = Vec::new();
+    let manifest = root.join("mise.toml");
+    if manifest.is_file() {
+        let value: toml::Table = toml::from_str(&fs::read_to_string(&manifest)?)
+            .with_context(|| manifest.display().to_string())?;
+        for spec in value
+            .get("tools")
+            .and_then(toml::Value::as_table)
+            .into_iter()
+            .flat_map(toml::Table::values)
+        {
+            let version = match spec {
+                toml::Value::String(version) => Some(version.as_str()),
+                toml::Value::Table(table) => table.get("version").and_then(toml::Value::as_str),
+                _ => None,
+            };
+            if let Some(version) = version.filter(|version| version.contains('.')) {
+                terms.push(version.to_owned());
+            }
+        }
+    }
+    let seconds = proof_budget_rules::BUDGET_MILLIS / MILLIS_PER_SECOND;
+    terms.push(format!("{seconds}-second"));
+    terms.push(format!("{seconds} seconds"));
+    terms.sort();
+    terms.dedup();
+    Ok(terms)
+}
+
+/// Refuses a skill document that names a pin of the checkout's gates, since it drifts once the pin moves.
+///
+/// # Errors
+///
+/// Returns an error naming each document and pin, or when reading the skill tree or `mise.toml` fails.
+pub fn check_pins(root: &Path) -> Result<()> {
+    let terms = pinned_terms(root)?;
+    let mut files = Vec::new();
+    collect(root, Path::new(SKILL_TREES[0]), &mut files)?;
+    let mut found = Vec::new();
+    for (path, bytes) in &files {
+        if path.extension().is_none_or(|extension| extension != "md") {
+            continue;
+        }
+        for term in &terms {
+            if skill_rules::names(bytes, term.as_bytes()) {
+                found.push(format!("{}: names `{term}`", path.display()));
+            }
+        }
+    }
+    ensure!(
+        found.is_empty(),
+        "a skill repeats what a gate pins, which drifts once the pin moves; point at the gate or the file that holds the pin instead:\n{}",
+        found.join("\n")
+    );
+    Ok(())
+}
+
 /// Validates the checkout's skill tree, catalog, policy, and tracked decisions.
 ///
 /// # Errors
@@ -1403,6 +1469,7 @@ pub fn analyze(
 /// Returns an error when the tree or catalog fails validation, reading or validating the policy fails, or a skill lacks a current and complete tracked decision.
 pub fn check_catalog(root: &Path) -> Result<()> {
     crate::validate_tree(root)?;
+    check_pins(root)?;
     let catalog = catalog(&root.join(SKILL_TREES[0]))?;
     let policy: Policy = read_json(&root.join("home/dot_config/skill-ops/policy.json"))?;
     validate_policy(&policy, &catalog)?;

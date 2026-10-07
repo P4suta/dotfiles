@@ -41,3 +41,7 @@ Never add tests that only match headings, tool names, generated wording, or impl
 Use `development-assurance`, `formal-assurance`, and `reliability` for the implementation's correctness and external assumptions.
 Run native checks through `multi-machine`, and use `ci-budget` for publication.
 After moving a rule into code, cut its skill down to the remaining judgment, invocation, failure handling, and limits.
+A skill never repeats a version or budget that a gate pins, and the skill check refuses one that does.
+
+These machines report a repository's verification gaps when a session starts, and refuse new ones at commit, push, the end of a turn, and `pr-workflow ready`.
+Each refusal names its next action, and the repository's `assure.toml` names the owner of each shape.
