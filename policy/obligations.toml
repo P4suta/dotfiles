@@ -98,6 +98,20 @@ fn reject_a_lock_file_selecting_a_single_class() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/directive_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_reading_a_namespaced_directive_as_prose() {
+    assert!(!production::is_directive(b"a:b"));
+}
+#[kani::proof]
+fn reject_skipping_a_sentence_as_a_directive() {
+    assert!(production::is_directive(b"A b."));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/disk_scan_rules.rs"
 probes = '''
 #[kani::proof]

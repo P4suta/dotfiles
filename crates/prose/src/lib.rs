@@ -2,7 +2,7 @@
 
 pub use platform::paths::{canonical, has_extension};
 pub use platform::{aside, build_inputs, tool};
-pub use rules::{prose_rules, source_name_rules};
+pub use rules::{directive_rules, prose_rules, source_name_rules};
 
 use crate::build_inputs::hex;
 use crate::prose_rules::{
@@ -1090,7 +1090,8 @@ pub fn scanned_comments(jsonl: &str) -> Result<Vec<Input>> {
             matches!(
                 comment.kind.as_str(),
                 "line" | "block" | "doc-line" | "doc-block"
-            )
+            ) && !(comment.text.lines().count() == 1
+                && directive_rules::is_directive(comment_prose(&comment.text).as_bytes()))
         }) {
             let adjacent = previous_end == Some((comment.line.saturating_sub(1), comment.column));
             if !adjacent && !text.is_empty() {

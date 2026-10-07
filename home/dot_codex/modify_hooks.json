@@ -1,4 +1,4 @@
-{{- $marker := "chezmoi:modify-template" -}}
+{{- /* chezmoi:modify-template */ -}}
 {{- /*
   Codex reads its hooks from this file, which skill-ops also writes, so each profile sets only the verification hooks and keeps every other group.
   A session starts with the verification report, which lists the repository's code shapes that nothing verifies with their next actions.

@@ -244,7 +244,9 @@ fn comments_from_ocomment_map_findings_to_source_lines() -> Result<()> {
         "report": {"comments": [
             {"line": 1, "column": 1, "end_line": 1, "kind": "line", "text": "// Parses the header."},
             {"line": 2, "column": 1, "end_line": 2, "kind": "line", "text": format!("// {ATTRIBUTED}")},
+            {"line": 3, "column": 5, "end_line": 3, "kind": "block", "text": "/* chezmoi:modify-template */"},
             {"line": 4, "column": 1, "end_line": 4, "kind": "directive", "text": "// SAFETY-IGNORED: kept"},
+            {"line": 4, "column": 30, "end_line": 4, "kind": "line", "text": "// shellcheck disable=SC2034"},
             {"line": 5, "column": 1, "end_line": 5, "kind": "doc-line", "text": "/// Returns the count."},
             {"line": 6, "column": 25, "end_line": 6, "kind": "line", "text": "// Holds the count."}
         ]}
