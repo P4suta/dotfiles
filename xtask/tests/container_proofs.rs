@@ -44,6 +44,20 @@ fn every_rule_module_and_only_those_are_registered_for_proof() {
 }
 
 #[test]
+fn miri_reports_each_test_binary_duration_in_milliseconds() {
+    let report = "running 60 tests\ntest result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.74s\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n";
+    assert_eq!(
+        xtask::skill_proofs::test_durations(report),
+        [Some(14_740), Some(0)]
+    );
+    assert_eq!(
+        xtask::skill_proofs::test_durations("test result: ok. finished in soon"),
+        [None]
+    );
+    assert!(xtask::skill_proofs::MIRI_CRATES.contains(&"rules"));
+}
+
+#[test]
 fn proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results() -> anyhow::Result<()> {
     let expected = ["actual-production-contract"];
     let valid = json!({"verification_results":{"summary":{"status":"completed","executed":1,"failed":0,"successful":1},"results":[{"harness_id":expected[0],"status":"Success","duration_ms":1200,"checks":[{"category":"assertion","status":"Success"},{"category":"cover","status":"Satisfied"},{"category":"cover","status":"Satisfied"}]}]}});

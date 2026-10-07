@@ -2,15 +2,19 @@
 # Each function here calls a foreign interface that has no safe binding.
 # It carries an unsafe code expectation with its reason and justifies its unsafe block in a SAFETY comment.
 # Its crate repeats the workspace lints with unsafe code denied instead of forbidden, and xtask/tests/lint_policy.rs keeps this list, the sources, and the manifests in agreement.
+# `outside_miri` says why the Miri gate, which interprets only the pure core, can't reach the site.
 
 [[site]]
 path = "crates/dotfiles/src/windows/setup/keyboard.rs"
 function = "set_value"
+outside_miri = "SystemParametersInfoW is a Win32 call that Miri doesn't model, so its effect on the session's keyboard settings has only a real-host check"
 
 [[site]]
 path = "crates/dotfiles/src/windows/setup/keyboard.rs"
 function = "filter_keys"
+outside_miri = "SystemParametersInfoW is a Win32 call that Miri doesn't model, so its effect on the session's keyboard settings has only a real-host check"
 
 [[site]]
 path = "crates/dotguard/src/main.rs"
 function = "ignore_console_interrupts"
+outside_miri = "SetConsoleCtrlHandler registers a handler with the Windows console, which Miri doesn't model and which needs a live console process"

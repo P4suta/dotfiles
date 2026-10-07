@@ -110,6 +110,8 @@ jobs:
           restore-keys: proofs-
       - name: Set up the pinned verifier
         run: mise x -- kani setup
+      - name: Set up Miri on the nightly the verifier pins
+        run: rustup toolchain install nightly-2026-08-21 --profile minimal --component miri,rust-src
       - name: Prove the production contracts and reject the counterexamples
         run: mise x -- just proofs
 

@@ -318,6 +318,102 @@ fn verify_native(root: &Path) -> Result<()> {
     println!(
         "Verified all {verified} production policy harnesses, reachable outcomes, and the rejecting counterexamples"
     );
+    verify_miri(root)
+}
+
+/// The nightly that Kani pins, which also carries Miri.
+pub const MIRI_TOOLCHAIN: &str = "nightly-2026-08-21";
+
+/// The crates whose tests need no foreign interface, process, or network, so Miri can interpret every one.
+pub const MIRI_CRATES: [&str; 1] = ["rules"];
+
+/// The targets Miri interprets the tests for: the host, and Windows, which the tools also ship to.
+pub const MIRI_TARGETS: [Option<&str>; 2] = [None, Some("x86_64-pc-windows-msvc")];
+
+/// The crate with undefined behavior that Miri must refuse.
+const MIRI_FIXTURE: &str = "xtask/proofs/miri-fixture/Cargo.toml";
+
+/// The wall time of each test binary that `cargo test` reports, in milliseconds.
+#[must_use]
+pub fn test_durations(output: &str) -> Vec<Option<u64>> {
+    output
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("test result: "))
+        .map(|result| {
+            result
+                .rsplit_once("finished in ")
+                .and_then(|(_, time)| time.strip_suffix('s'))
+                .and_then(millis_of)
+        })
+        .collect()
+}
+
+/// Milliseconds of a decimal count of seconds such as `14.74`.
+fn millis_of(seconds: &str) -> Option<u64> {
+    const MILLIS_PER_SECOND: u64 = 1000;
+    const MILLI_DIGITS: usize = 3;
+    let (whole, fraction) = seconds.split_once('.').unwrap_or((seconds, ""));
+    let fraction = format!("{fraction:0<MILLI_DIGITS$}");
+    let millis: u64 = fraction.get(..MILLI_DIGITS)?.parse().ok()?;
+    whole
+        .parse::<u64>()
+        .ok()?
+        .checked_mul(MILLIS_PER_SECOND)?
+        .checked_add(millis)
+}
+
+fn miri(root: &Path) -> std::process::Command {
+    let mut command = Tool::Cargo.command();
+    command
+        .current_dir(root)
+        .arg(format!("+{MIRI_TOOLCHAIN}"))
+        .args(["miri", "test", "--locked"]);
+    command
+}
+
+/// Interprets the pure crates' tests under Miri for every target, each test binary within the proof budget, and refuses a fixture with undefined behavior.
+fn verify_miri(root: &Path) -> Result<()> {
+    for target in MIRI_TARGETS {
+        for krate in MIRI_CRATES {
+            let mut command = miri(root);
+            command.args(["--package", krate]);
+            if let Some(target) = target {
+                command.args(["--target", target]);
+            }
+            let output = command.output().context("start Miri")?;
+            let report = String::from_utf8_lossy(&output.stdout);
+            ensure!(
+                output.status.success(),
+                "Miri refused the tests of {krate} for {}:\n{report}\n{}",
+                target.unwrap_or("the host"),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let durations = test_durations(&report);
+            ensure!(!durations.is_empty(), "Miri ran no test binary of {krate}");
+            ensure!(
+                durations.iter().all(|duration| {
+                    proof_budget_rules::verdict(*duration) == proof_budget_rules::Verdict::Within
+                }),
+                "the Miri tests of {krate} for {} must each finish within {} ms; split a slow test without weakening it:\n{report}",
+                target.unwrap_or("the host"),
+                proof_budget_rules::BUDGET_MILLIS
+            );
+        }
+    }
+    let output = miri(root)
+        .arg("--manifest-path")
+        .arg(root.join(MIRI_FIXTURE))
+        .output()
+        .context("start Miri on its fixture")?;
+    ensure!(
+        !output.status.success()
+            && String::from_utf8_lossy(&output.stderr).contains("Undefined Behavior"),
+        "Miri admitted the out-of-bounds read in {MIRI_FIXTURE}, so the gate proves nothing"
+    );
+    println!(
+        "Miri interpreted the tests of {} for the host and Windows without undefined behavior, and refused its fixture",
+        MIRI_CRATES.join(", ")
+    );
     Ok(())
 }
 

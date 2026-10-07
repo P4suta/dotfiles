@@ -1,0 +1,8 @@
+# A crate with undefined behavior that the Miri gate must refuse, which shows the gate can fail.
+[package]
+name = "miri-fixture"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]

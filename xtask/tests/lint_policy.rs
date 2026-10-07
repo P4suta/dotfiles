@@ -97,6 +97,19 @@ fn source_sites(root: &Path) -> BTreeSet<(String, String)> {
 }
 
 #[test]
+fn every_unsafe_site_says_why_miri_cannot_reach_it() {
+    let policy = manifest(&root().join("policy/unsafe-sites.toml"));
+    for site in policy["site"].as_array().expect("site entries") {
+        assert!(
+            site.get("outside_miri")
+                .and_then(toml::Value::as_str)
+                .is_some_and(|reason| !reason.trim().is_empty()),
+            "{site:?} needs an outside_miri reason"
+        );
+    }
+}
+
+#[test]
 fn unsafe_code_is_expected_only_at_the_listed_foreign_interface_sites() {
     let root = root();
     assert_eq!(source_sites(&root), listed_sites(&root));

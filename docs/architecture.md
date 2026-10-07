@@ -55,7 +55,7 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 | `just check-staged` | The pre-commit check: the lint stages over the staged files, then the prose of documents and of the comments `OComment` reads. |
 | `just baselines` | The refusal of a lint baseline under `policy/lint-baselines/` that grew since a base, which CI runs from the merge base. |
 | `just profiles` | Every profile's rendering, an isolated apply and verification, the committed manifests, the ignore and remove audit, and the script input audit. |
-| `just proofs` | The Kani harnesses and rejecting counterexamples of every rule module, each within its time budget. |
+| `just proofs` | The Kani harnesses and rejecting counterexamples of every rule module, then Miri over the pure core's tests for the host and Windows, each within its time budget. |
 | `just prose` | The writing standard over documents and comments. |
 
 `crates/rules/src/change_rules.rs` maps each changed path to the gates it selects, and a path no rule names selects every gate.
