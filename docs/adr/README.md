@@ -33,4 +33,5 @@
 | [2026-10-07 Name new decision records after their decision and place them by date](dated-decision-record-names.md) | accepted |  |
 | [2026-10-07 Refuse generic anti-patterns through one catalog of checks](generic-anti-pattern-catalog.md) | accepted |  |
 | [2026-10-07 Keep every decision in one pure core crate behind its adapters](pure-decision-core-behind-adapters.md) | accepted |  |
+| [2026-10-07 Replay the whole reachable state graph of each finite Quint model](state-graph-replay-of-finite-quint-models.md) | accepted |  |
 | [2026-10-07 Require verification in proportion to code shape on every repository](verification-proportional-to-code-shape.md) | accepted |  |

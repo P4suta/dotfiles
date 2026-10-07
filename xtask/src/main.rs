@@ -100,6 +100,8 @@ enum Action {
         #[command(flatten)]
         scope: xtask::change::Scope,
     },
+    /// Write the reachable state graph of every Quint model that records one, as `TLC` dumps it in the pinned image.
+    Graphs,
 }
 
 fn cargo(root: &Path, manifest: &Path, args: &[&str]) -> Result<()> {
@@ -277,6 +279,7 @@ fn run() -> Result<()> {
                 );
             }
         }
+        Action::Graphs => xtask::state_graph::write(&cli.root)?,
         Action::Classify { scope } => xtask::change::run(&cli.root, &scope)?,
         Action::Skills => {
             skill_ops::check_catalog(&cli.root)?;

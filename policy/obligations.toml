@@ -832,6 +832,7 @@ traces = [
   "specs/traces/pr_ready.7.itf.json",
   "specs/traces/pr_ready_buggy.itf.json",
 ]
+graph = "specs/graphs/pr_ready.json"
 
 [[pilot]]
 tool = "aeneas"
@@ -850,6 +851,7 @@ tool = "tlc-state-graph-replay"
 subjects = ["reaper_lock", "pr_ready"]
 exit = "Adopt when the replay covers every reachable edge and refuses a step that diverges on an untraced state; drop it otherwise"
 issue = 104
+decision = "docs/adr/state-graph-replay-of-finite-quint-models.md"
 
 [[pilot]]
 tool = "bolero"
