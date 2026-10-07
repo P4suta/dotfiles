@@ -1,11 +1,12 @@
 ---
 status: amended
-changed_by: [0012-windows-proofs-in-a-linux-container.md, 0014-per-skill-decision-records.md]
+changed_by: [0012-windows-proofs-in-a-linux-container.md, 0014-per-skill-decision-records.md, checked-obligation-manifest.md]
 ---
 # Local shared-skill operations
 
 [ADR 0014](0014-per-skill-decision-records.md) replaced its tracked catalog review.
 [ADR 0012](0012-windows-proofs-in-a-linux-container.md) runs its proof gate on Windows in a pinned Linux container.
+[The obligation manifest record](checked-obligation-manifest.md) supersedes its proof-gate paragraph.
 
 ## Context
 

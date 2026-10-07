@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | [0001 Shared skills and typed repository governance](0001-shared-skills-and-governance.md) | accepted |  |
 | [0002 Enforce a local CodeRabbit review budget](0002-coderabbit-local-review-budget.md) | amended | [0007](0007-reserved-review-capacity.md) |
-| [0003 Local shared-skill operations](0003-local-skill-operations.md) | amended | [0012](0012-windows-proofs-in-a-linux-container.md), [0014](0014-per-skill-decision-records.md) |
+| [0003 Local shared-skill operations](0003-local-skill-operations.md) | amended | [0012](0012-windows-proofs-in-a-linux-container.md), [0014](0014-per-skill-decision-records.md), [2026-10-07](checked-obligation-manifest.md) |
 | [0004 Checked pull request authoring](0004-checked-pull-request-authoring.md) | accepted |  |
 | [0005 Native desktop integration assurance](0005-native-desktop-integration-assurance.md) | accepted |  |
 | [0006 Global personal issue prerequisite](0006-global-personal-issue-prerequisite.md) | accepted |  |
@@ -29,6 +29,7 @@
 | [0023 Give the repository a layout that shows what it manages](0023-repository-layout-and-target-architecture.md) | accepted |  |
 | [2026-10-05 Reuse the `gh` login for the remote GitHub tool server](github-mcp-uses-the-github-cli-login.md) | accepted |  |
 | [2026-10-06 Report every gate refusal as one structured record](structured-gate-refusals.md) | accepted |  |
+| [2026-10-07 Enforce formal obligations and deterministic metrics through one repository manifest](checked-obligation-manifest.md) | accepted |  |
 | [2026-10-07 Name new decision records after their decision and place them by date](dated-decision-record-names.md) | accepted |  |
 | [2026-10-07 Refuse generic anti-patterns through one catalog of checks](generic-anti-pattern-catalog.md) | accepted |  |
 | [2026-10-07 Keep every decision in one pure core crate behind its adapters](pure-decision-core-behind-adapters.md) | accepted |  |
