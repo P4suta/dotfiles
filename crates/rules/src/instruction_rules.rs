@@ -86,97 +86,139 @@ pub fn removed_row_held(
     }
 }
 
-#[cfg(kani)]
-fn any_line() -> Line {
-    let choice: u8 = kani::any();
-    kani::assume(choice < 5);
-    match choice {
-        0 => Line::Text,
-        1 => Line::Heading,
-        2 => Line::Directive,
-        3 => Line::Output,
-        _ => Line::Setting,
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
+
+    pub const LINES: [Line; 5] = [
+        Line::Text,
+        Line::Heading,
+        Line::Directive,
+        Line::Output,
+        Line::Setting,
+    ];
+    pub const CLASSES: [Class; 6] = [
+        Class::Missing,
+        Class::Judgment,
+        Class::FollowUp,
+        Class::Heading,
+        Class::Directive,
+        Class::Setting,
+    ];
+    pub const HOLDERS: [Option<Holder>; 6] = [
+        Some(Holder::Gate),
+        Some(Holder::Skill),
+        Some(Holder::GateAndSkill),
+        Some(Holder::Merged),
+        Some(Holder::Contradicted),
+        None,
+    ];
+
+    /// A text line takes judgment or a defined follow-up, every other shape its own class, and output none.
+    pub fn spec_admitted(line: Line, class: Class, defined: bool) {
+        let expected = match line {
+            Line::Text => class == Class::Judgment || (class == Class::FollowUp && defined),
+            Line::Heading => class == Class::Heading,
+            Line::Directive => class == Class::Directive,
+            Line::Setting => class == Class::Setting,
+            Line::Output => false,
+        };
+        assert_eq!(admitted(line, class, defined), expected);
+    }
+
+    /// A follow-up stays current only with one definition and a reference, and each other state names its cause.
+    pub fn spec_follow_up(definitions: usize, references: usize) {
+        let state = follow_up(definitions, references);
+        assert_eq!(
+            state == Definition::Current,
+            definitions == 1 && references > 0
+        );
+        assert_eq!(state == Definition::Duplicate, definitions > 1);
+        assert_eq!(state == Definition::Undefined, definitions == 0);
+        assert_eq!(
+            state == Definition::Unreferenced,
+            definitions == 1 && references == 0
+        );
+    }
+
+    /// A removed line holds exactly when the row names what its holder needs.
+    pub fn spec_removed_row_held(
+        holder: Option<Holder>,
+        source: bool,
+        skill: bool,
+        retained: bool,
+    ) {
+        let expected = match holder {
+            Some(Holder::Gate) => source,
+            Some(Holder::Skill) => skill,
+            Some(Holder::GateAndSkill) => source && skill,
+            Some(Holder::Merged) => retained,
+            Some(Holder::Contradicted) => retained || skill,
+            None => false,
+        };
+        assert_eq!(removed_row_held(holder, source, skill, retained), expected);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn every_line_needs_the_class_of_its_shape() {
+        let line = LINES[usize::from(kani::any::<u8>() % 5)];
+        let class = CLASSES[usize::from(kani::any::<u8>() % 6)];
+        let defined: bool = kani::any();
+        spec_admitted(line, class, defined);
+        kani::cover!(admitted(line, class, defined));
+        kani::cover!(!admitted(line, class, defined) && class == Class::FollowUp);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn follow_ups_are_defined_once_and_referenced() {
+        let definitions: usize = kani::any();
+        let references: usize = kani::any();
+        spec_follow_up(definitions, references);
+        let state = follow_up(definitions, references);
+        kani::cover!(state == Definition::Current);
+        kani::cover!(state == Definition::Duplicate);
+        kani::cover!(state == Definition::Unreferenced);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn removed_lines_name_what_holds_them() {
+        let holder = HOLDERS[usize::from(kani::any::<u8>() % 6)];
+        let source: bool = kani::any();
+        let skill: bool = kani::any();
+        let retained: bool = kani::any();
+        spec_removed_row_held(holder, source, skill, retained);
+        kani::cover!(removed_row_held(holder, source, skill, retained));
+        kani::cover!(!removed_row_held(holder, source, skill, retained) && holder.is_some());
     }
 }
 
-#[cfg(kani)]
-fn any_class() -> Class {
-    let choice: u8 = kani::any();
-    kani::assume(choice < 6);
-    match choice {
-        0 => Class::Missing,
-        1 => Class::Judgment,
-        2 => Class::FollowUp,
-        3 => Class::Heading,
-        4 => Class::Directive,
-        _ => Class::Setting,
+#[cfg(test)]
+mod tests {
+    use super::proofs;
+    use crate::domain::flags;
+
+    #[test]
+    fn every_input_meets_the_specifications() {
+        for line in proofs::LINES {
+            for class in proofs::CLASSES {
+                for defined in [false, true] {
+                    proofs::spec_admitted(line, class, defined);
+                }
+            }
+        }
+        for definitions in [0, 1, 2, usize::MAX] {
+            for references in [0, 1, 2, usize::MAX] {
+                proofs::spec_follow_up(definitions, references);
+            }
+        }
+        for holder in proofs::HOLDERS {
+            for [source, skill, retained] in flags() {
+                proofs::spec_removed_row_held(holder, source, skill, retained);
+            }
+        }
     }
-}
-
-#[cfg(kani)]
-fn any_holder() -> Option<Holder> {
-    let choice: u8 = kani::any();
-    kani::assume(choice < 6);
-    match choice {
-        0 => Some(Holder::Gate),
-        1 => Some(Holder::Skill),
-        2 => Some(Holder::GateAndSkill),
-        3 => Some(Holder::Merged),
-        4 => Some(Holder::Contradicted),
-        _ => None,
-    }
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn every_line_needs_the_class_of_its_shape() {
-    let line = any_line();
-    let class = any_class();
-    let defined: bool = kani::any();
-    let result = admitted(line, class, defined);
-    assert!(!result || class != Class::Missing);
-    assert!(!result || (line == Line::Heading) == (class == Class::Heading));
-    assert!(!result || (line == Line::Directive) == (class == Class::Directive));
-    assert!(!result || (line == Line::Setting) == (class == Class::Setting));
-    assert!(!result || line != Line::Output);
-    assert!(!result || class != Class::FollowUp || defined);
-    assert!(line != Line::Text || class != Class::Judgment || result);
-    kani::cover!(result);
-    kani::cover!(!result);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn follow_ups_are_defined_once_and_referenced() {
-    let definitions: usize = kani::any();
-    let references: usize = kani::any();
-    let state = follow_up(definitions, references);
-    assert_eq!(
-        state == Definition::Current,
-        definitions == 1 && references > 0
-    );
-    assert!(state != Definition::Duplicate || definitions > 1);
-    assert!(state != Definition::Undefined || definitions == 0);
-    assert!(state != Definition::Unreferenced || (definitions == 1 && references == 0));
-    kani::cover!(state == Definition::Current);
-    kani::cover!(state == Definition::Undefined);
-    kani::cover!(state == Definition::Duplicate);
-    kani::cover!(state == Definition::Unreferenced);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn removed_lines_name_what_holds_them() {
-    let holder = any_holder();
-    let source: bool = kani::any();
-    let skill: bool = kani::any();
-    let retained: bool = kani::any();
-    let result = removed_row_held(holder, source, skill, retained);
-    assert!(!result || holder.is_some());
-    assert!(!result || !matches!(holder, Some(Holder::Gate | Holder::GateAndSkill)) || source);
-    assert!(!result || !matches!(holder, Some(Holder::Skill | Holder::GateAndSkill)) || skill);
-    assert!(!result || holder != Some(Holder::Merged) || retained);
-    assert!(!result || holder != Some(Holder::Contradicted) || retained || skill);
-    kani::cover!(result);
-    kani::cover!(!result);
 }

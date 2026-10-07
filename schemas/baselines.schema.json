@@ -16,7 +16,7 @@
       "description": "One deterministic metric and its recorded value.\nWall time appears only as an advisory note, so no entry can gate on it.",
       "oneOf": [
         {
-          "description": "The Kani harnesses of the decision core.",
+          "description": "The public functions of the decision core that a Kani harness proves, which merging two harnesses of one decision leaves unchanged.",
           "type": "object",
           "properties": {
             "exact": {
@@ -26,7 +26,7 @@
             },
             "metric": {
               "type": "string",
-              "const": "harnesses"
+              "const": "proved-subjects"
             }
           },
           "additionalProperties": false,
@@ -67,6 +67,46 @@
             "metric": {
               "type": "string",
               "const": "unsafe-sites"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "exact"
+          ]
+        },
+        {
+          "description": "The mutants of the decision core that its tests let survive, which `just proofs` measures.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "mutants-missed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "exact"
+          ]
+        },
+        {
+          "description": "The mutants of the decision core that timed out without a non-terminating entry, which `just proofs` measures.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "mutants-timed-out"
             }
           },
           "additionalProperties": false,

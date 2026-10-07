@@ -231,3 +231,38 @@ fn a_pilot_whose_issue_closed_without_a_decision_fails() {
     .unwrap();
     assert_eq!(pilots(checkout.path(), &decided, &closed).unwrap(), NONE);
 }
+
+#[test]
+fn a_surviving_mutant_or_an_unnamed_timeout_fails_and_a_named_timeout_passes() {
+    let baselines = parse_baselines(
+        "[[metric]]\nmetric = \"mutants-missed\"\nexact = 0\n\n[[metric]]\nmetric = \"mutants-timed-out\"\nexact = 0\n",
+    )
+    .unwrap();
+    let clean = xtask::obligations::Campaign::default();
+    assert_eq!(
+        xtask::obligations::mutation_metrics(&baselines, clean),
+        NONE
+    );
+    let survivor = xtask::obligations::Campaign {
+        missed: 1,
+        timed_out: 0,
+    };
+    assert!(
+        xtask::obligations::mutation_metrics(&baselines, survivor)[0]
+            .contains("mutants-missed went from 0 to 1")
+    );
+    let manifest = parse_manifest(
+        "[[non-terminating]]\nmutant = \"a.rs:1:1: replace += with *= in walk\"\nreason = \"the cursor stops moving\"\n",
+    )
+    .unwrap();
+    let timeouts = "a.rs:1:1: replace += with *= in walk\nb.rs:2:2: replace + with * in other\n";
+    assert_eq!(
+        xtask::obligations::unexplained_timeouts(&manifest, timeouts),
+        ["b.rs:2:2: replace + with * in other"]
+    );
+    let missing = parse_baselines("").unwrap();
+    assert_eq!(
+        xtask::obligations::mutation_metrics(&missing, clean).len(),
+        2
+    );
+}

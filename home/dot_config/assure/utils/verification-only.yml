@@ -10,4 +10,4 @@ rule:
       - kind: impl_item
     follows:
       kind: attribute_item
-      regex: ^#\[(cfg\((test|kani)\)|test|kani::)
+      regex: ^#\[(cfg\((test|kani|any\(test, kani\))\)|test|kani::)

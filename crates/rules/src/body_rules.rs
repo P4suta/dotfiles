@@ -30,31 +30,39 @@ pub const fn next_action(reason: Reason) -> &'static str {
     }
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn attributed_bodies_are_never_admitted() {
-    let attributed: bool = kani::any();
-    let result = verdict(attributed);
-    assert_eq!(result == Verdict::Admit, !attributed);
-    kani::cover!(result == Verdict::Admit);
-    kani::cover!(result != Verdict::Admit);
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-fn every_body_refusal_names_the_deleting_next_action() {
-    let attributed: bool = kani::any();
-    let result = verdict(attributed);
-    if let Verdict::Refuse(reason) = result {
-        assert!(!next_action(reason).is_empty());
+    pub fn spec_verdict(attributed: bool) {
+        let result = verdict(attributed);
+        assert_eq!(result == Verdict::Admit, !attributed);
+        if let Verdict::Refuse(reason) = result {
+            assert!(next_action(reason).starts_with("Delete that line"));
+        }
     }
-    kani::cover!(result == Verdict::Admit);
-    kani::cover!(result == Verdict::Refuse(Reason::Attribution));
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn attributed_bodies_are_never_admitted_and_each_refusal_names_the_deletion() {
+        let attributed: bool = kani::any();
+        spec_verdict(attributed);
+        kani::cover!(verdict(attributed) == Verdict::Admit);
+        kani::cover!(verdict(attributed) == Verdict::Refuse(Reason::Attribution));
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_input_meets_the_specification() {
+        for attributed in [false, true] {
+            proofs::spec_verdict(attributed);
+        }
+    }
 
     #[test]
     fn an_attributed_body_is_refused_and_a_clean_one_admitted() {

@@ -52,55 +52,35 @@ pub const fn detected(system: System, microsoft_kernel: bool) -> Profile {
 /// Whether a Linux kernel release names Microsoft, which marks WSL.
 #[must_use]
 pub fn microsoft_kernel(osrelease: &[u8]) -> bool {
-    let mut start: usize = 0;
-    while let Some(rest) = osrelease.get(start..) {
+    let mut rest = osrelease;
+    loop {
         if starts_with_microsoft(rest) {
             return true;
         }
-        start += 1;
+        let [_, tail @ ..] = rest else {
+            return false;
+        };
+        rest = tail;
     }
-    false
 }
 
 /// The vendor name a WSL kernel release carries, in any letter case.
 const MICROSOFT: &[u8] = b"microsoft";
 
 /// Whether `text` starts with the vendor name in any letter case.
-/// Indexing keeps the proof free of the iterator adapters that Kani can't reach.
-fn starts_with_microsoft(text: &[u8]) -> bool {
-    let mut index = 0;
-    while let (Some(byte), Some(letter)) = (text.get(index), MICROSOFT.get(index)) {
+/// Walking both slices keeps the proof free of the iterator code that Kani can't reach.
+fn starts_with_microsoft(mut text: &[u8]) -> bool {
+    let mut letters = MICROSOFT;
+    while let [letter, rest @ ..] = letters {
+        let [byte, tail @ ..] = text else {
+            return false;
+        };
         if byte.to_ascii_lowercase() != *letter {
             return false;
         }
-        index += 1;
+        (text, letters) = (tail, rest);
     }
-    index == MICROSOFT.len()
-}
-
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(12)]
-fn only_a_release_that_names_microsoft_marks_wsl() {
-    const PLANTED: &[u8] = b"MicroSoft";
-    let mut bytes: [u8; 10] = kani::any();
-    let planted: bool = kani::any();
-    if planted {
-        let mut index = 0;
-        while index < PLANTED.len() {
-            bytes[index + 1] = PLANTED[index];
-            index += 1;
-        }
-    }
-    let result = microsoft_kernel(&bytes);
-    if planted {
-        assert!(result);
-    }
-    if result {
-        assert!(bytes[0].to_ascii_lowercase() == b'm' || bytes[1].to_ascii_lowercase() == b'm');
-    }
-    kani::cover!(result && !planted);
-    kani::cover!(!result);
+    true
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -180,144 +160,223 @@ pub fn host_edit_refused(changed: bool, merged: bool, keeps_host_keys: bool) -> 
     changed && !(merged && keeps_host_keys)
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn wsl_is_detected_only_on_a_microsoft_linux_kernel() {
-    let system = match kani::any::<u8>() % 3 {
-        0 => System::Mac,
-        1 => System::Linux,
-        _ => System::Windows,
-    };
-    let microsoft: bool = kani::any();
-    let profile = detected(system, microsoft);
-    assert_eq!(
-        profile == Profile::Wsl,
-        system == System::Linux && microsoft
-    );
-    assert_eq!(
-        matches!(profile, Profile::Linux | Profile::Wsl),
-        system == System::Linux
-    );
-    kani::cover!(profile == Profile::Wsl);
-    kani::cover!(profile == Profile::Linux);
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-fn remote_or_installed_context7_never_requires_a_mutation() {
-    let local: bool = kani::any();
-    let tool: bool = kani::any();
-    let installed: bool = kani::any();
-    assert_eq!(
-        context7_needed(local, tool, installed),
-        local && tool && !installed
-    );
-    kani::cover!(context7_needed(local, tool, installed));
-    kani::cover!(!context7_needed(local, tool, installed));
-}
+    pub const SYSTEMS: [System; 3] = [System::Mac, System::Linux, System::Windows];
+    pub const MEMORY: [Memory; 3] = [Memory::Unset, Memory::Enabled, Memory::Disabled];
 
-#[cfg(kani)]
-#[kani::proof]
-fn forge_import_requires_only_pinned_keys_including_the_current_one() {
-    let count: usize = kani::any();
-    let unpinned: usize = kani::any();
-    let current: bool = kani::any();
-    kani::assume(unpinned <= count);
-    let accepted = forge_bundle_accepted(count, unpinned, current);
-    assert_eq!(accepted, count > 0 && unpinned == 0 && current);
-    if unpinned > 0 || !current {
-        assert!(!accepted);
+    /// Only a release that names Microsoft in some letter case marks WSL.
+    pub fn spec_microsoft_kernel(release: &[u8]) {
+        let mut named = false;
+        let mut start = 0;
+        while start + MICROSOFT.len() <= release.len() {
+            let mut matching = true;
+            let mut index = 0;
+            while index < MICROSOFT.len() {
+                matching &= release.get(start + index).map(u8::to_ascii_lowercase)
+                    == MICROSOFT.get(index).copied();
+                index += 1;
+            }
+            named |= matching;
+            start += 1;
+        }
+        assert_eq!(microsoft_kernel(release), named);
     }
-    kani::cover!(accepted);
-    kani::cover!(!accepted && current);
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn windows_path_translation_preserves_inline_public_keys() {
-    let file: bool = kani::any();
-    let inline: bool = kani::any();
-    assert_eq!(translate_file(file, inline), file && !inline);
-    kani::cover!(translate_file(file, inline));
-    kani::cover!(!translate_file(file, inline));
-}
+    pub fn spec_detected(system: System, microsoft: bool) {
+        let profile = detected(system, microsoft);
+        assert_eq!(
+            profile == Profile::Wsl,
+            system == System::Linux && microsoft
+        );
+        assert_eq!(
+            profile == Profile::Linux,
+            system == System::Linux && !microsoft
+        );
+        assert_eq!(profile == Profile::Mac, system == System::Mac);
+        assert_eq!(profile == Profile::Windows, system == System::Windows);
+    }
 
-#[cfg(kani)]
-#[kani::proof]
-fn secrets_require_present_nonempty_resolved_values() {
-    let present: bool = kani::any();
-    let nonempty: bool = kani::any();
-    let unresolved: bool = kani::any();
-    let ready = secret_ready(present, nonempty, unresolved);
-    assert_eq!(ready, present && nonempty && !unresolved);
-    kani::cover!(ready);
-    kani::cover!(!ready);
-}
+    /// Each flag decision admits exactly what its rule names.
+    pub fn spec_flags(first: bool, second: bool, third: bool) {
+        assert_eq!(
+            context7_needed(first, second, third),
+            first && second && !third
+        );
+        assert_eq!(translate_file(first, second), first && !second);
+        assert_eq!(
+            secret_ready(first, second, third),
+            first && second && !third
+        );
+        assert_eq!(
+            host_edit_refused(first, second, third),
+            first && !(second && third)
+        );
+        assert_eq!(permitted(Mode::FilesOnly, first, second, third), second);
+        assert_eq!(permitted(Mode::Full, first, second, third), first && third);
+        assert!(permitted(Mode::Preview, first, second, third));
+    }
 
-#[cfg(kani)]
-fn arbitrary_memory() -> Memory {
-    match kani::any::<u8>() % 3 {
-        0 => Memory::Unset,
-        1 => Memory::Enabled,
-        _ => Memory::Disabled,
+    pub fn spec_forge_bundle(count: usize, unpinned: usize, current: bool) {
+        assert_eq!(
+            forge_bundle_accepted(count, unpinned, current),
+            count > 0 && unpinned == 0 && current
+        );
+    }
+
+    /// Memory stays off only when every listed switch says `Disabled`.
+    pub fn spec_memory_off(listed: &[Memory]) {
+        let mut every_disabled = true;
+        let mut index = 0;
+        while let Some(&switch) = listed.get(index) {
+            every_disabled &= switch == Memory::Disabled;
+            index += 1;
+        }
+        assert_eq!(memory_off(listed), !listed.is_empty() && every_disabled);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn only_a_release_that_names_microsoft_marks_wsl() {
+        const PLANTED: &[u8] = b"MicroSoft";
+        let mut bytes: [u8; 10] = kani::any();
+        let planted: bool = kani::any();
+        if planted {
+            let mut index = 0;
+            while index < PLANTED.len() {
+                bytes[index + 1] = PLANTED[index];
+                index += 1;
+            }
+        }
+        spec_microsoft_kernel(&bytes);
+        let result = microsoft_kernel(&bytes);
+        kani::cover!(result && !planted);
+        kani::cover!(!result);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn wsl_is_detected_only_on_a_microsoft_linux_kernel() {
+        let system = SYSTEMS[usize::from(kani::any::<u8>() % 3)];
+        let microsoft: bool = kani::any();
+        spec_detected(system, microsoft);
+        kani::cover!(detected(system, microsoft) == Profile::Wsl);
+        kani::cover!(detected(system, microsoft) == Profile::Linux);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn each_host_decision_admits_exactly_what_its_rule_names() {
+        let flags: [bool; 3] = [kani::any(), kani::any(), kani::any()];
+        let [first, second, third] = flags;
+        spec_flags(first, second, third);
+        let count: usize = kani::any();
+        let unpinned: usize = kani::any();
+        spec_forge_bundle(count, unpinned, third);
+        kani::cover!(forge_bundle_accepted(count, unpinned, third));
+        kani::cover!(host_edit_refused(first, second, third) && second);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn memory_is_off_only_when_every_switch_is_explicitly_disabled() {
+        let switches: [Memory; MEMORY_SWITCHES_PROVED] = [
+            MEMORY[usize::from(kani::any::<u8>() % 3)],
+            MEMORY[usize::from(kani::any::<u8>() % 3)],
+            MEMORY[usize::from(kani::any::<u8>() % 3)],
+            MEMORY[usize::from(kani::any::<u8>() % 3)],
+            MEMORY[usize::from(kani::any::<u8>() % 3)],
+            MEMORY[usize::from(kani::any::<u8>() % 3)],
+        ];
+        let length: usize = kani::any();
+        kani::assume(length <= MEMORY_SWITCHES_PROVED);
+        let listed = &switches[..length];
+        spec_memory_off(listed);
+        let off = memory_off(listed);
+        kani::cover!(off && length == MEMORY_SWITCHES_PROVED);
+        kani::cover!(!off && length == 0);
+        kani::cover!(
+            !off && length == MEMORY_SWITCHES_PROVED && listed[length - 1] == Memory::Unset
+        );
     }
 }
 
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(8)]
-fn memory_is_off_only_when_every_switch_is_explicitly_disabled() {
-    let switches: [Memory; MEMORY_SWITCHES_PROVED] = [
-        arbitrary_memory(),
-        arbitrary_memory(),
-        arbitrary_memory(),
-        arbitrary_memory(),
-        arbitrary_memory(),
-        arbitrary_memory(),
-    ];
-    let length: usize = kani::any();
-    kani::assume(length <= MEMORY_SWITCHES_PROVED);
-    let listed = &switches[..length];
-    let off = memory_off(listed);
-    let mut every_disabled = true;
-    let mut index = 0;
-    while index < length {
-        every_disabled &= listed[index] == Memory::Disabled;
-        index += 1;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{flags, words};
+    use alloc::vec::Vec;
+
+    #[test]
+    fn every_input_meets_the_profile_specifications() {
+        for system in proofs::SYSTEMS {
+            for microsoft in [false, true] {
+                proofs::spec_detected(system, microsoft);
+            }
+        }
+        for [first, second, third] in flags() {
+            proofs::spec_flags(first, second, third);
+            for count in [0, 1, 2, usize::MAX] {
+                for unpinned in [0, 1, usize::MAX] {
+                    proofs::spec_forge_bundle(count, unpinned, third);
+                }
+            }
+        }
     }
-    assert_eq!(off, length > 0 && every_disabled);
-    kani::cover!(off && length == 1);
-    kani::cover!(off && length == MEMORY_SWITCHES_PROVED);
-    kani::cover!(!off && length == 0);
-    kani::cover!(!off && length == MEMORY_SWITCHES_PROVED && listed[length - 1] == Memory::Unset);
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn host_edits_are_overwritten_only_by_a_merge_that_keeps_every_host_key() {
-    let changed: bool = kani::any();
-    let merged: bool = kani::any();
-    let keeps: bool = kani::any();
-    let refused = host_edit_refused(changed, merged, keeps);
-    assert!(!refused || changed);
-    assert!(refused || !changed || merged && keeps);
-    kani::cover!(refused);
-    kani::cover!(changed && !refused);
-    kani::cover!(refused && merged);
-}
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every switch list")]
+    fn every_switch_list_up_to_the_proved_length_meets_the_memory_specification() {
+        for code in words(&[0, 1, 2], MEMORY_SWITCHES_PROVED) {
+            let listed: Vec<Memory> = code
+                .iter()
+                .map(|&choice| {
+                    proofs::MEMORY
+                        .get(usize::from(choice))
+                        .copied()
+                        .unwrap_or(Memory::Unset)
+                })
+                .collect();
+            proofs::spec_memory_off(&listed);
+        }
+    }
 
-#[cfg(kani)]
-#[kani::proof]
-fn application_requires_owned_destination_or_native_authorization() {
-    let native: bool = kani::any();
-    let owned: bool = kani::any();
-    let authorized: bool = kani::any();
-    assert_eq!(permitted(Mode::FilesOnly, native, owned, authorized), owned);
-    assert_eq!(
-        permitted(Mode::Full, native, owned, authorized),
-        native && authorized
-    );
-    assert!(permitted(Mode::Preview, native, owned, authorized));
-    kani::cover!(permitted(Mode::Full, native, owned, authorized));
-    kani::cover!(!permitted(Mode::Full, native, owned, authorized));
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every release")]
+    fn every_short_release_meets_the_kernel_specification() {
+        let truncated = MICROSOFT.split_last().map_or(&[][..], |(_, rest)| rest);
+        for release in [
+            &b"5.15.167.4-microsoft-standard-WSL2"[..],
+            b"4.4.0-19041-Microsoft",
+            b"MICROSOFT",
+            truncated,
+            b"6.8.0-45-generic",
+            b"",
+        ] {
+            proofs::spec_microsoft_kernel(release);
+        }
+        for tail in words(b"mT", 3) {
+            proofs::spec_microsoft_kernel(&[truncated, &tail].concat());
+            proofs::spec_microsoft_kernel(&[&tail[..], b"MICROSOFT"].concat());
+        }
+        assert!(microsoft_kernel(b"xMicrosoft"));
+        assert!(!microsoft_kernel(&[b"x", truncated].concat()));
+    }
+
+    #[test]
+    fn each_profile_has_its_own_name_and_system() {
+        assert_eq!(
+            Profile::ALL.map(Profile::name),
+            ["mac", "linux", "windows", "wsl"]
+        );
+        assert_eq!(
+            Profile::ALL.map(Profile::os),
+            ["darwin", "linux", "windows", "linux"]
+        );
+    }
 }

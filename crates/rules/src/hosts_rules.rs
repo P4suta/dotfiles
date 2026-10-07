@@ -126,141 +126,176 @@ pub const fn start(clean: bool, required: [bool; 3], ready: [bool; 3]) -> Start 
     }
 }
 
-#[cfg(kani)]
-fn any_evidence() -> Evidence {
-    match kani::any::<u8>() % 3 {
-        0 => Evidence::Missing,
-        1 => Evidence::Failed,
-        _ => Evidence::Passed,
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
+
+    pub const EVIDENCE: [Evidence; 3] = [Evidence::Missing, Evidence::Failed, Evidence::Passed];
+    pub const KEYS: [Key; 3] = [Key::New, Key::Same, Key::Changed];
+
+    /// The families from last to first, so the gap a reverse walk records last matches the one a check names first.
+    const LAST_FIRST: [Family; 3] = [Family::Windows, Family::Mac, Family::Linux];
+
+    /// A push passes only when every required family passed, and otherwise names the first gap with what its notes say.
+    pub fn spec_admit(required: [bool; 3], evidence: [Evidence; 3]) {
+        let result = admit(required, evidence);
+        let mut expected = Verdict::Admit;
+        let mut position = 0;
+        while let Some(&family) = LAST_FIRST.get(position) {
+            let index = family.index();
+            let needed = required.get(index).copied().unwrap_or(false);
+            match evidence.get(index) {
+                Some(Evidence::Missing) if needed => expected = Verdict::Missing(family),
+                Some(Evidence::Failed) if needed => expected = Verdict::Failed(family),
+                _ => {}
+            }
+            position += 1;
+        }
+        assert_eq!(result, expected);
+    }
+
+    /// The newest record for the commit's own tree decides a family.
+    pub fn spec_record([first_tree, first_passed, second_tree, second_passed]: [bool; 4]) {
+        let evidence = record(
+            record(Evidence::Missing, first_tree, first_passed),
+            second_tree,
+            second_passed,
+        );
+        let outcome = |passed| {
+            if passed {
+                Evidence::Passed
+            } else {
+                Evidence::Failed
+            }
+        };
+        let expected = if second_tree {
+            outcome(second_passed)
+        } else if first_tree {
+            outcome(first_passed)
+        } else {
+            Evidence::Missing
+        };
+        assert_eq!(evidence, expected);
+    }
+
+    pub fn spec_gated(github: bool, branch: bool, deletion: bool) {
+        assert_eq!(
+            gated(github, branch, deletion),
+            github && branch && !deletion
+        );
+    }
+
+    pub fn spec_pin(key: Key, accepted: bool) {
+        assert_eq!(pin(key, accepted), key != Key::Changed || accepted);
+    }
+
+    /// Checks start only from a clean tree with every required host ready, and otherwise name the first unready one.
+    pub fn spec_start(clean: bool, required: [bool; 3], ready: [bool; 3]) {
+        let result = start(clean, required, ready);
+        let mut expected = if clean { Start::Run } else { Start::Dirty };
+        let mut position = 0;
+        while let Some(&family) = LAST_FIRST.get(position) {
+            let index = family.index();
+            if clean && required.get(index) == Some(&true) && ready.get(index) == Some(&false) {
+                expected = Start::Unready(family);
+            }
+            position += 1;
+        }
+        assert_eq!(result, expected);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_push_is_admitted_only_when_every_required_family_passed() {
+        let required: [bool; 3] = [kani::any(), kani::any(), kani::any()];
+        let evidence = [
+            EVIDENCE[usize::from(kani::any::<u8>() % 3)],
+            EVIDENCE[usize::from(kani::any::<u8>() % 3)],
+            EVIDENCE[usize::from(kani::any::<u8>() % 3)],
+        ];
+        spec_admit(required, evidence);
+        let result = admit(required, evidence);
+        kani::cover!(result == Verdict::Admit && required[0] && required[1] && required[2]);
+        kani::cover!(result == Verdict::Failed(Family::Mac));
+        kani::cover!(result == Verdict::Missing(Family::Windows));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn the_latest_record_for_the_commit_tree_decides_a_family() {
+        let flags: [bool; 4] = [kani::any(), kani::any(), kani::any(), kani::any()];
+        let [first_tree, first_passed, second_tree, second_passed] = flags;
+        spec_record(flags);
+        let evidence = record(
+            record(Evidence::Missing, first_tree, first_passed),
+            second_tree,
+            second_passed,
+        );
+        kani::cover!(first_tree && first_passed && second_tree && evidence == Evidence::Failed);
+        kani::cover!(!first_tree && first_passed && !second_tree && evidence == Evidence::Missing);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_github_branch_updates_are_gated_and_a_changed_key_needs_acceptance() {
+        let [github, branch, deletion]: [bool; 3] = [kani::any(), kani::any(), kani::any()];
+        let key = KEYS[usize::from(kani::any::<u8>() % 3)];
+        spec_gated(github, branch, deletion);
+        spec_pin(key, deletion);
+        kani::cover!(gated(github, branch, deletion));
+        kani::cover!(key == Key::Changed && !pin(key, deletion));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn checks_start_only_from_a_clean_tree_with_every_required_host_ready() {
+        let clean: bool = kani::any();
+        let required: [bool; 3] = [kani::any(), kani::any(), kani::any()];
+        let ready: [bool; 3] = [kani::any(), kani::any(), kani::any()];
+        spec_start(clean, required, ready);
+        let result = start(clean, required, ready);
+        kani::cover!(result == Start::Run && required[0] && required[1] && required[2]);
+        kani::cover!(result == Start::Unready(Family::Windows));
+        kani::cover!(result == Start::Dirty);
     }
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_push_is_admitted_only_when_every_required_family_passed() {
-    let required: [bool; 3] = [kani::any(), kani::any(), kani::any()];
-    let evidence = [any_evidence(), any_evidence(), any_evidence()];
-    let verdict = admit(required, evidence);
-    let complete = (!required[0] || evidence[0] == Evidence::Passed)
-        && (!required[1] || evidence[1] == Evidence::Passed)
-        && (!required[2] || evidence[2] == Evidence::Passed);
-    assert_eq!(verdict == Verdict::Admit, complete);
-    let gap = [
-        required[0] && evidence[0] != Evidence::Passed,
-        required[1] && evidence[1] != Evidence::Passed,
-        required[2] && evidence[2] != Evidence::Passed,
-    ];
-    assert_eq!(
-        verdict == Verdict::Missing(Family::Linux) || verdict == Verdict::Failed(Family::Linux),
-        gap[0]
-    );
-    assert_eq!(
-        verdict == Verdict::Missing(Family::Mac) || verdict == Verdict::Failed(Family::Mac),
-        !gap[0] && gap[1]
-    );
-    assert_eq!(
-        verdict == Verdict::Missing(Family::Windows) || verdict == Verdict::Failed(Family::Windows),
-        !gap[0] && !gap[1] && gap[2]
-    );
-    assert!(verdict != Verdict::Missing(Family::Linux) || evidence[0] == Evidence::Missing);
-    assert!(verdict != Verdict::Missing(Family::Mac) || evidence[1] == Evidence::Missing);
-    assert!(verdict != Verdict::Missing(Family::Windows) || evidence[2] == Evidence::Missing);
-    kani::cover!(verdict == Verdict::Admit && required[0] && required[1] && required[2]);
-    kani::cover!(verdict == Verdict::Failed(Family::Mac));
-    kani::cover!(verdict == Verdict::Missing(Family::Windows));
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::flags;
 
-#[cfg(kani)]
-#[kani::proof]
-fn the_latest_record_for_the_commit_tree_decides_a_family() {
-    let first_tree: bool = kani::any();
-    let first_passed: bool = kani::any();
-    let second_tree: bool = kani::any();
-    let second_passed: bool = kani::any();
-    let evidence = record(
-        record(Evidence::Missing, first_tree, first_passed),
-        second_tree,
-        second_passed,
-    );
-    let expected = if second_tree {
-        if second_passed {
-            Evidence::Passed
-        } else {
-            Evidence::Failed
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every input")]
+    fn every_input_meets_the_specifications() {
+        for required in flags() {
+            for linux in proofs::EVIDENCE {
+                for mac in proofs::EVIDENCE {
+                    for windows in proofs::EVIDENCE {
+                        proofs::spec_admit(required, [linux, mac, windows]);
+                    }
+                }
+            }
+            for ready in flags() {
+                proofs::spec_start(false, required, ready);
+                proofs::spec_start(true, required, ready);
+            }
         }
-    } else if first_tree {
-        if first_passed {
-            Evidence::Passed
-        } else {
-            Evidence::Failed
+        for records in flags() {
+            proofs::spec_record(records);
         }
-    } else {
-        Evidence::Missing
-    };
-    assert_eq!(evidence, expected);
-    assert!(
-        evidence != Evidence::Passed
-            || (first_tree && first_passed)
-            || (second_tree && second_passed)
-    );
-    kani::cover!(first_tree && first_passed && second_tree && evidence == Evidence::Failed);
-    kani::cover!(!first_tree && first_passed && !second_tree && evidence == Evidence::Missing);
-    kani::cover!(evidence == Evidence::Passed);
-}
+        for [github, branch, deletion] in flags() {
+            proofs::spec_gated(github, branch, deletion);
+            for key in proofs::KEYS {
+                proofs::spec_pin(key, deletion);
+            }
+        }
+    }
 
-#[cfg(kani)]
-#[kani::proof]
-fn only_github_branch_updates_are_gated() {
-    let github: bool = kani::any();
-    let branch: bool = kani::any();
-    let deletion: bool = kani::any();
-    let result = gated(github, branch, deletion);
-    assert_eq!(result, github && branch && !deletion);
-    kani::cover!(result);
-    kani::cover!(!result && github && branch);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn a_changed_host_key_is_pinned_only_with_acceptance() {
-    let key = match kani::any::<u8>() % 3 {
-        0 => Key::New,
-        1 => Key::Same,
-        _ => Key::Changed,
-    };
-    let accepted: bool = kani::any();
-    let result = pin(key, accepted);
-    assert!(key != Key::Changed || result == accepted);
-    assert!(key == Key::Changed || result);
-    kani::cover!(key == Key::Changed && !result);
-    kani::cover!(key == Key::Changed && result);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn checks_start_only_from_a_clean_tree_with_every_required_host_ready() {
-    let clean: bool = kani::any();
-    let required: [bool; 3] = [kani::any(), kani::any(), kani::any()];
-    let ready: [bool; 3] = [kani::any(), kani::any(), kani::any()];
-    let result = start(clean, required, ready);
-    let all_ready =
-        (!required[0] || ready[0]) && (!required[1] || ready[1]) && (!required[2] || ready[2]);
-    assert_eq!(result == Start::Run, clean && all_ready);
-    let gap = [
-        required[0] && !ready[0],
-        required[1] && !ready[1],
-        required[2] && !ready[2],
-    ];
-    assert_eq!(result == Start::Unready(Family::Linux), clean && gap[0]);
-    assert_eq!(
-        result == Start::Unready(Family::Mac),
-        clean && !gap[0] && gap[1]
-    );
-    assert_eq!(
-        result == Start::Unready(Family::Windows),
-        clean && !gap[0] && !gap[1] && gap[2]
-    );
-    kani::cover!(result == Start::Run && required[0] && required[1] && required[2]);
-    kani::cover!(result == Start::Unready(Family::Linux));
-    kani::cover!(result == Start::Dirty);
+    #[test]
+    fn each_family_has_its_own_index_and_name() {
+        assert_eq!(Family::ALL.map(Family::index), [0, 1, 2]);
+        assert_eq!(Family::ALL.map(Family::name), ["linux", "macos", "windows"]);
+    }
 }

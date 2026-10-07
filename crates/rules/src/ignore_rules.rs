@@ -10,10 +10,11 @@ fn segment_matches(
     let mut star: Option<usize> = None;
     let mut mark = t_start;
     while t < t_end {
-        let current = if p < p_end {
-            pattern.get(p).copied()
-        } else {
+        // The cursor never passes the end, since it moves only past a byte it read.
+        let current = if p == p_end {
             None
+        } else {
+            pattern.get(p).copied()
         };
         if current.is_some() && (current == Some(b'?') || current == text.get(t).copied()) {
             p += 1;
@@ -30,7 +31,7 @@ fn segment_matches(
             return false;
         }
     }
-    while p < p_end && pattern.get(p) == Some(&b'*') {
+    while p != p_end && pattern.get(p) == Some(&b'*') {
         p += 1;
     }
     p == p_end
@@ -121,6 +122,116 @@ pub const fn verdict(matched: bool, earlier_occurrences: usize) -> Verdict {
     }
 }
 
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
+
+    /// A pattern without wildcards matches only itself.
+    pub fn spec_literal(pattern: &[u8], path: &[u8]) -> bool {
+        let result = matches(pattern, path);
+        if count(pattern, b"*?") == 0 {
+            assert_eq!(result, same(pattern, path));
+        }
+        result
+    }
+
+    /// How many bytes of `text` appear in `wanted`, counted without iterators so the proof stays small.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "the loop bounds keep every index in range, and indexing keeps the proof inside its budget"
+    )]
+    fn count(text: &[u8], wanted: &[u8]) -> usize {
+        let mut found = 0;
+        let mut index = 0;
+        while index < text.len() {
+            let mut choice = 0;
+            while choice < wanted.len() {
+                if text[index] == wanted[choice] {
+                    found += 1;
+                }
+                choice += 1;
+            }
+            index += 1;
+        }
+        found
+    }
+
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "the length check and the loop bound keep every index in range, and indexing keeps the proof inside its budget"
+    )]
+    fn same(left: &[u8], right: &[u8]) -> bool {
+        if left.len() != right.len() {
+            return false;
+        }
+        let mut index = 0;
+        while index < left.len() {
+            if left[index] != right[index] {
+                return false;
+            }
+            index += 1;
+        }
+        true
+    }
+
+    /// A star stays inside one segment, a mark matches one byte, and a globstar crosses segments.
+    pub fn spec_wildcards(path: &[u8]) -> bool {
+        let crosses = count(path, b"/") > 0;
+        assert!(matches(b"**", path));
+        let star = matches(b"*", path);
+        assert_eq!(star, !crosses);
+        assert_eq!(matches(b"?", path), path.len() == 1 && !crosses);
+        assert!(!matches(b"a/**", path) || path.first() == Some(&b'a'));
+        star
+    }
+
+    pub fn spec_verdict(found: bool, earlier: usize) {
+        let kept = verdict(found, earlier);
+        assert_eq!(kept == Verdict::Kept, found && earlier == 0);
+        assert_eq!(kept == Verdict::Repeated, earlier > 0);
+        assert_eq!(kept == Verdict::Unjustified, !found && earlier == 0);
+    }
+
+    #[cfg(kani)]
+    fn any_text<const N: usize>(wildcards: bool) -> ([u8; N], usize) {
+        let bytes: [u8; N] = kani::any();
+        let mut index = 0;
+        while index < N {
+            let byte = bytes[index];
+            kani::assume(
+                byte == b'a' || byte == b'/' || (wildcards && (byte == b'*' || byte == b'?')),
+            );
+            index += 1;
+        }
+        let length: usize = kani::any();
+        kani::assume(length <= N);
+        (bytes, length)
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn a_star_stays_inside_one_segment_and_a_globstar_crosses_them() {
+        let (path, path_length) = any_text::<2>(false);
+        let path = &path[..path_length];
+        let star = spec_wildcards(path);
+        kani::cover!(star);
+        kani::cover!(!star);
+    }
+
+    /// `verdict` reads only whether a pattern matched, so every match result stands for every pattern and path.
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_pattern_is_kept_only_when_it_matches_and_appears_first() {
+        let found: bool = kani::any();
+        let earlier: usize = kani::any();
+        spec_verdict(found, earlier);
+        kani::cover!(verdict(found, earlier) == Verdict::Kept);
+        kani::cover!(verdict(found, earlier) == Verdict::Repeated && found);
+    }
+}
+
 #[cfg(kani)]
 fn any_text<const N: usize>(wildcards: bool) -> ([u8; N], usize) {
     let bytes: [u8; N] = kani::any();
@@ -168,6 +279,8 @@ fn same(left: &[u8], right: &[u8]) -> bool {
 }
 
 /// Every pattern of up to three bytes, wildcards included, matches every path of up to two bytes without fault.
+/// This harness states `proofs::spec_literal` in its own body at the top of the module.
+/// Through the shared specification, Kani takes a fifth longer and leaves too little of the proof budget.
 #[cfg(kani)]
 #[kani::proof]
 #[kani::unwind(7)]
@@ -185,37 +298,75 @@ fn a_literal_pattern_matches_only_itself() {
     kani::cover!(!result && wild);
 }
 
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(7)]
-fn a_star_stays_inside_one_segment_and_a_globstar_crosses_them() {
-    let (path, path_length) = any_text::<2>(false);
-    let path = &path[..path_length];
-    let crosses = count(path, b"/") > 0;
-    assert!(matches(b"**", path));
-    let star = matches(b"*", path);
-    assert_eq!(star, !crosses);
-    assert_eq!(matches(b"?", path), path_length == 1 && !crosses);
-    assert!(!matches(b"a/**", path) || (path_length > 0 && path[0] == b'a'));
-    kani::cover!(star);
-    kani::cover!(!star);
-}
-
-/// `verdict` reads only whether a pattern matched, so every match result stands for every pattern and path.
-#[cfg(kani)]
-#[kani::proof]
-fn a_pattern_is_kept_only_when_it_matches_and_appears_first() {
-    let found: bool = kani::any();
-    let earlier: usize = kani::any();
-    let kept = verdict(found, earlier);
-    assert_eq!(kept == Verdict::Kept, found && earlier == 0);
-    kani::cover!(kept == Verdict::Kept);
-    kani::cover!(kept == Verdict::Repeated && found);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::words;
+    use alloc::vec::Vec;
+
+    /// A direct recursive reading of the pattern language, which the tests hold the matcher to.
+    fn segment(pattern: &[u8], text: &[u8]) -> bool {
+        match pattern.split_first() {
+            None => text.is_empty(),
+            Some((b'*', rest)) => {
+                segment(rest, text)
+                    || text
+                        .split_first()
+                        .is_some_and(|(_, tail)| segment(pattern, tail))
+            }
+            Some((b'?', rest)) => text
+                .split_first()
+                .is_some_and(|(_, tail)| segment(rest, tail)),
+            Some((byte, rest)) => text
+                .split_first()
+                .is_some_and(|(first, tail)| first == byte && segment(rest, tail)),
+        }
+    }
+
+    fn segments(pattern: &[&[u8]], path: &[&[u8]]) -> bool {
+        match pattern.split_first() {
+            None => path.is_empty(),
+            Some((&b"**", rest)) => {
+                segments(rest, path)
+                    || path
+                        .split_first()
+                        .is_some_and(|(_, tail)| segments(pattern, tail))
+            }
+            Some((first, rest)) => path
+                .split_first()
+                .is_some_and(|(head, tail)| segment(first, head) && segments(rest, tail)),
+        }
+    }
+
+    fn oracle(pattern: &[u8], path: &[u8]) -> bool {
+        let pattern: Vec<&[u8]> = pattern.split(|&byte| byte == b'/').collect();
+        let path: Vec<&[u8]> = path.split(|&byte| byte == b'/').collect();
+        segments(&pattern, &path)
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes minutes over every pattern and path")]
+    fn every_short_pattern_and_path_matches_as_the_pattern_language_reads() {
+        let paths = words(b"ab/", 4);
+        for pattern in words(b"a/*?", 4) {
+            for path in &paths {
+                assert_eq!(
+                    matches(&pattern, path),
+                    oracle(&pattern, path),
+                    "{pattern:?} {path:?}"
+                );
+                proofs::spec_literal(&pattern, path);
+            }
+        }
+        for path in &paths {
+            proofs::spec_wildcards(path);
+        }
+        for found in [false, true] {
+            for earlier in [0, 1, 2, usize::MAX] {
+                proofs::spec_verdict(found, earlier);
+            }
+        }
+    }
 
     #[test]
     fn globstars_cover_zero_or_more_segments() {

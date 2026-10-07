@@ -89,96 +89,184 @@ pub fn included_allowance(limit: u64, remaining: u64) -> bool {
             <= u128::from(limit) * BUDGET_NUMERATOR
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn layered_capacity_is_floored_once_without_overflow() {
-    let capacity: u64 = kani::any();
-    let budget = capacity_budget(capacity);
-    assert_eq!(u128::from(budget), u128::from(capacity) * 18 / 25);
-    assert!(budget <= capacity);
-    kani::cover!(capacity > 0 && budget == 0);
-    kani::cover!(budget > 0);
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-fn review_consumption_respects_the_layered_capacity_budget() {
-    let limit: u64 = kani::any();
-    let remaining: u64 = kani::any();
-    let accepted = included_allowance(limit, remaining);
-    if accepted {
-        assert!(limit > 0 && remaining <= limit && remaining > 0);
-        assert!((u128::from(limit - remaining) + 1) * 100 <= u128::from(limit) * 9 * 8);
+    /// A count fits the budget exactly when 25 times it stays within 18 times the capacity, so the budget floors once.
+    pub fn spec_capacity_budget(capacity: u64, count: u64) -> u64 {
+        let budget = capacity_budget(capacity);
+        assert!(budget <= capacity);
+        assert_eq!(
+            count <= budget,
+            u128::from(count) * BUDGET_DENOMINATOR <= u128::from(capacity) * BUDGET_NUMERATOR
+        );
+        budget
     }
-    assert_eq!(
-        accepted,
-        remaining <= limit
-            && (u128::from(limit - remaining) + 1) * 100 <= u128::from(limit) * 9 * 8
-    );
-    kani::cover!(accepted);
-    kani::cover!(!accepted && limit > 0 && remaining <= limit);
-    kani::cover!(!accepted && remaining > limit);
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn rolling_attempts_cannot_exceed_the_layered_local_budget() {
-    let hourly: usize = kani::any();
-    let daily: usize = kani::any();
-    let accepted = rolling_allowance(hourly, daily);
-    assert_eq!(accepted, hourly < 7 && daily < 168);
-    if accepted {
-        assert!(hourly + 1 <= HOURLY_LIMIT);
-        assert!(daily + 1 <= DAILY_LIMIT);
+    /// A review fits the included allowance when the consumed count after it stays within the layered budget of the limit.
+    pub fn spec_included_allowance(limit: u64, remaining: u64) -> bool {
+        let accepted = included_allowance(limit, remaining);
+        assert_eq!(
+            accepted,
+            remaining <= limit
+                && (u128::from(limit - remaining) + 1) * 100 <= u128::from(limit) * 9 * 8
+        );
+        if accepted {
+            assert!(limit > 0 && remaining > 0);
+        }
+        accepted
     }
-    kani::cover!(accepted);
-    kani::cover!(!accepted && hourly >= HOURLY_LIMIT);
-    kani::cover!(!accepted && daily >= DAILY_LIMIT);
+
+    pub fn spec_rolling_allowance(hourly: usize, daily: usize) {
+        assert_eq!(
+            rolling_allowance(hourly, daily),
+            hourly < HOURLY_LIMIT && daily < DAILY_LIMIT
+        );
+    }
+
+    pub fn spec_cooldown_complete(previous: u64, now: u64, gap: u64) {
+        assert_eq!(
+            cooldown_complete(previous, now, gap),
+            gap != 0 && now >= previous && now - previous >= gap
+        );
+    }
+
+    pub fn spec_pause([all, pr, cli, local_status]: [bool; 4]) {
+        let scope = pause_scope(all, pr, cli);
+        assert_eq!(pr_reviews_paused(scope), all || pr);
+        assert_eq!(cli_reviews_paused(scope), all || cli);
+        assert_eq!(scope == PauseScope::All, all || (pr && cli));
+        assert_eq!(scope == PauseScope::None, !all && !pr && !cli);
+        assert_eq!(
+            service_access(scope, local_status),
+            !(all || cli) || local_status
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_count_fits_the_layered_budget_exactly_when_25_times_it_stays_within_18_times_the_capacity()
+    {
+        let capacity: u64 = kani::any();
+        let count: u64 = kani::any();
+        let budget = spec_capacity_budget(capacity, count);
+        kani::cover!(capacity > 0 && budget == 0);
+        kani::cover!(count == budget && count > 0);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn review_consumption_respects_the_layered_capacity_budget() {
+        let limit: u64 = kani::any();
+        let remaining: u64 = kani::any();
+        let accepted = spec_included_allowance(limit, remaining);
+        kani::cover!(accepted);
+        kani::cover!(!accepted && limit > 0 && remaining <= limit);
+        kani::cover!(!accepted && remaining > limit);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn rolling_attempts_cannot_exceed_the_layered_local_budget() {
+        let hourly: usize = kani::any();
+        let daily: usize = kani::any();
+        spec_rolling_allowance(hourly, daily);
+        let accepted = rolling_allowance(hourly, daily);
+        kani::cover!(accepted);
+        kani::cover!(!accepted && hourly >= HOURLY_LIMIT);
+        kani::cover!(!accepted && daily >= DAILY_LIMIT);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn cooldown_refuses_rollback_and_every_incomplete_interval() {
+        let previous: u64 = kani::any();
+        let now: u64 = kani::any();
+        let gap: u64 = kani::any();
+        spec_cooldown_complete(previous, now, gap);
+        let accepted = cooldown_complete(previous, now, gap);
+        kani::cover!(accepted);
+        kani::cover!(!accepted && now < previous);
+        kani::cover!(!accepted && gap > 0 && now >= previous && now - previous < gap);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn the_pause_scope_is_the_union_of_its_markers_and_leaves_only_local_status() {
+        let all: bool = kani::any();
+        let pr: bool = kani::any();
+        let cli: bool = kani::any();
+        let local_status: bool = kani::any();
+        spec_pause([all, pr, cli, local_status]);
+        let scope = pause_scope(all, pr, cli);
+        kani::cover!(scope == PauseScope::Pr && service_access(scope, false));
+        kani::cover!(!service_access(scope, local_status));
+        kani::cover!(scope == PauseScope::None);
+    }
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn cooldown_refuses_rollback_and_every_incomplete_interval() {
-    let previous: u64 = kani::any();
-    let now: u64 = kani::any();
-    let gap: u64 = kani::any();
-    let accepted = cooldown_complete(previous, now, gap);
-    assert_eq!(
-        accepted,
-        gap != 0 && now >= previous && now - previous >= gap
-    );
-    kani::cover!(accepted);
-    kani::cover!(!accepted && now < previous);
-    kani::cover!(!accepted && gap > 0 && now >= previous && now - previous < gap);
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-fn owner_pause_allows_only_local_guard_status() {
-    let all: bool = kani::any();
-    let pr: bool = kani::any();
-    let cli: bool = kani::any();
-    let local_status: bool = kani::any();
-    let scope = pause_scope(all, pr, cli);
-    let accepted = service_access(scope, local_status);
-    assert_eq!(accepted, !(all || cli) || local_status);
-    assert!(!cli_reviews_paused(scope) || !accepted || local_status);
-    kani::cover!(accepted && cli_reviews_paused(scope) && local_status);
-    kani::cover!(!accepted && cli_reviews_paused(scope) && !local_status);
-}
+    /// Capacities and counts around every rounding step of the budget and both ends of the range.
+    const VALUES: [u64; 12] = [0, 1, 2, 3, 7, 8, 9, 10, 49, 50, u64::MAX - 1, u64::MAX];
 
-#[cfg(kani)]
-#[kani::proof]
-fn pause_scope_is_the_union_of_its_markers() {
-    let all: bool = kani::any();
-    let pr: bool = kani::any();
-    let cli: bool = kani::any();
-    let scope = pause_scope(all, pr, cli);
-    assert_eq!(pr_reviews_paused(scope), all || pr);
-    assert_eq!(cli_reviews_paused(scope), all || cli);
-    assert!(!all || scope == PauseScope::All);
-    assert!(scope != PauseScope::Pr || service_access(scope, false));
-    kani::cover!(scope == PauseScope::Pr && service_access(scope, false));
-    kani::cover!(scope == PauseScope::Cli && !pr_reviews_paused(scope));
-    kani::cover!(scope == PauseScope::None);
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every boundary")]
+    fn every_boundary_meets_the_budget_specifications() {
+        for first in VALUES {
+            for second in VALUES {
+                proofs::spec_capacity_budget(first, second);
+                proofs::spec_included_allowance(first, second);
+                for third in VALUES {
+                    proofs::spec_cooldown_complete(first, second, third);
+                }
+            }
+        }
+        for capacity in 0..=100 {
+            for count in 0..=100 {
+                proofs::spec_capacity_budget(capacity, count);
+                proofs::spec_included_allowance(capacity, count);
+            }
+        }
+    }
+
+    #[test]
+    fn every_window_count_and_pause_meets_its_specification() {
+        for hourly in [0, 1, HOURLY_LIMIT - 1, HOURLY_LIMIT, usize::MAX] {
+            for daily in [0, 1, DAILY_LIMIT - 1, DAILY_LIMIT, usize::MAX] {
+                proofs::spec_rolling_allowance(hourly, daily);
+            }
+        }
+        for markers in crate::domain::flags() {
+            proofs::spec_pause(markers);
+        }
+    }
+
+    #[test]
+    fn ten_reviews_an_hour_leave_seven_and_a_day_of_them_168() {
+        assert_eq!(capacity_budget(10), 7);
+        assert_eq!(HOURLY_LIMIT, 7);
+        assert_eq!(DAILY_LIMIT, 168);
+        assert_eq!(PROBE_DAILY_LIMIT, DAILY_LIMIT);
+        assert_eq!(capacity_budget(49), 35);
+        assert_eq!(capacity_budget(u64::MAX), 13_281_655_733_070_877_162);
+    }
+
+    #[test]
+    fn each_pause_scope_has_its_own_name() {
+        assert_eq!(
+            [
+                PauseScope::None,
+                PauseScope::Pr,
+                PauseScope::Cli,
+                PauseScope::All
+            ]
+            .map(PauseScope::name),
+            ["none", "pr", "cli", "all"]
+        );
+    }
 }

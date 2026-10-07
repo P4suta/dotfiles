@@ -123,105 +123,155 @@ pub enum Better {
 }
 
 #[must_use]
-pub const fn standing(better: Better, baseline: u64, measured: u64) -> Standing {
-    if measured == baseline {
-        Standing::Holds
-    } else if (measured < baseline) == matches!(better, Better::Lower) {
-        Standing::Improved
-    } else {
-        Standing::Regressed
+pub fn standing(better: Better, baseline: u64, measured: u64) -> Standing {
+    match (measured.cmp(&baseline), better) {
+        (core::cmp::Ordering::Equal, _) => Standing::Holds,
+        (core::cmp::Ordering::Less, Better::Lower)
+        | (core::cmp::Ordering::Greater, Better::Higher) => Standing::Improved,
+        (core::cmp::Ordering::Less, Better::Higher)
+        | (core::cmp::Ordering::Greater, Better::Lower) => Standing::Regressed,
     }
 }
 
-#[cfg(kani)]
-fn any_reason() -> Option<Reason> {
-    match kani::any::<u8>() {
-        0 => Some(Reason::SemanticBoundary),
-        1 => Some(Reason::NoDecision),
-        2 => Some(Reason::Disproportionate),
-        _ => None,
-    }
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-fn any_subject() -> Subject {
-    Subject {
-        proved: kani::any(),
-        exemption: any_reason(),
-        decides: kani::any(),
-        pure: kani::any(),
-        evidence: kani::any(),
-        called: kani::any(),
-    }
-}
+    pub const REASONS: [Option<Reason>; 4] = [
+        Some(Reason::SemanticBoundary),
+        Some(Reason::NoDecision),
+        Some(Reason::Disproportionate),
+        None,
+    ];
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_subject_passes_only_with_one_owner_that_still_holds() {
-    let subject = any_subject();
-    let result = verdict(subject);
-    if result.admitted() {
-        assert!(subject.proved != subject.exemption.is_some());
-        assert!(!subject.proved || subject.called);
-        assert!(subject.exemption.is_none() || subject.evidence);
+    /// A subject passes only with exactly one owner that still holds, and each refusal names why.
+    pub fn spec_verdict(subject: Subject) {
+        let result = verdict(subject);
+        let holds = match subject.exemption {
+            Some(Reason::NoDecision) => subject.evidence && !subject.decides,
+            Some(Reason::SemanticBoundary) => subject.evidence && !subject.pure,
+            Some(Reason::Disproportionate) => subject.evidence,
+            None => false,
+        };
+        assert_eq!(
+            result == Verdict::Proved,
+            subject.proved && subject.exemption.is_none() && subject.called
+        );
+        assert_eq!(
+            result == Verdict::Uncalled,
+            subject.proved && subject.exemption.is_none() && !subject.called
+        );
+        assert_eq!(result == Verdict::Exempt, !subject.proved && holds);
+        assert_eq!(
+            result == Verdict::Unowned,
+            !subject.proved && subject.exemption.is_none()
+        );
+        assert_eq!(
+            result.admitted(),
+            matches!(result, Verdict::Proved | Verdict::Exempt)
+        );
     }
-    if !subject.proved && subject.exemption.is_none() {
-        assert!(result == Verdict::Unowned);
-    }
-    kani::cover!(result == Verdict::Proved);
-    kani::cover!(result == Verdict::Exempt);
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_stale_exemption_never_passes() {
-    let subject = any_subject();
-    let result = verdict(subject);
-    let stale_decision = subject.exemption == Some(Reason::NoDecision) && subject.decides;
-    let stale_boundary = subject.exemption == Some(Reason::SemanticBoundary) && subject.pure;
-    let lost_evidence = subject.exemption.is_some() && !subject.evidence;
-    if stale_decision || stale_boundary || lost_evidence {
-        assert!(!result.admitted());
+    pub fn spec_pilot(closed: bool, decided: bool) {
+        let result = pilot(closed, decided);
+        assert_eq!(result == Pilot::Undecided, closed && !decided);
+        assert_eq!(result == Pilot::Decided, decided);
+        assert_eq!(result == Pilot::Running, !closed && !decided);
     }
-    kani::cover!(stale_decision && result == Verdict::StaleExemption);
-    kani::cover!(result == Verdict::Uncalled);
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_closed_pilot_fails_until_a_record_decides_it() {
-    let closed: bool = kani::any();
-    let decided: bool = kani::any();
-    let result = pilot(closed, decided);
-    assert_eq!(result == Pilot::Undecided, closed && !decided);
-    assert_eq!(result == Pilot::Decided, decided);
-    kani::cover!(result == Pilot::Undecided);
-    kani::cover!(result == Pilot::Running);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn a_metric_holds_only_at_its_baseline_and_tells_the_direction() {
-    let lower: bool = kani::any();
-    let better = if lower { Better::Lower } else { Better::Higher };
-    let baseline: u64 = kani::any();
-    let measured: u64 = kani::any();
-    let result = standing(better, baseline, measured);
-    assert_eq!(result == Standing::Holds, baseline == measured);
-    if result == Standing::Regressed {
-        assert!(if lower {
-            measured > baseline
-        } else {
-            measured < baseline
-        });
+    pub fn spec_standing(lower: bool, baseline: u64, measured: u64) {
+        let better = if lower { Better::Lower } else { Better::Higher };
+        let result = standing(better, baseline, measured);
+        assert_eq!(result == Standing::Holds, baseline == measured);
+        assert_eq!(
+            result == Standing::Regressed,
+            if lower {
+                measured > baseline
+            } else {
+                measured < baseline
+            }
+        );
     }
-    kani::cover!(result == Standing::Regressed);
-    kani::cover!(result == Standing::Improved);
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_subject_passes_only_with_one_owner_that_still_holds() {
+        let subject = Subject {
+            proved: kani::any(),
+            exemption: REASONS[usize::from(kani::any::<u8>() % 4)],
+            decides: kani::any(),
+            pure: kani::any(),
+            evidence: kani::any(),
+            called: kani::any(),
+        };
+        spec_verdict(subject);
+        let result = verdict(subject);
+        kani::cover!(result == Verdict::Exempt);
+        kani::cover!(result == Verdict::StaleExemption && !subject.proved);
+        kani::cover!(result == Verdict::Uncalled);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_closed_pilot_fails_until_a_record_decides_it() {
+        let closed: bool = kani::any();
+        let decided: bool = kani::any();
+        spec_pilot(closed, decided);
+        kani::cover!(pilot(closed, decided) == Pilot::Undecided);
+        kani::cover!(pilot(closed, decided) == Pilot::Running);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_metric_holds_only_at_its_baseline_and_tells_the_direction() {
+        let lower: bool = kani::any();
+        let baseline: u64 = kani::any();
+        let measured: u64 = kani::any();
+        spec_standing(lower, baseline, measured);
+        kani::cover!(lower && measured > baseline);
+        kani::cover!(!lower && measured > baseline);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_input_meets_the_specifications() {
+        for exemption in proofs::REASONS {
+            for [proved, decides, pure, evidence, called] in crate::domain::flags() {
+                proofs::spec_verdict(Subject {
+                    proved,
+                    exemption,
+                    decides,
+                    pure,
+                    evidence,
+                    called,
+                });
+            }
+        }
+        for [closed, decided] in crate::domain::flags() {
+            proofs::spec_pilot(closed, decided);
+        }
+        for lower in [false, true] {
+            for baseline in [0, 1, 2, u64::MAX] {
+                for measured in [0, 1, 2, u64::MAX] {
+                    proofs::spec_standing(lower, baseline, measured);
+                }
+            }
+        }
+        for reason in [
+            Reason::SemanticBoundary,
+            Reason::NoDecision,
+            Reason::Disproportionate,
+        ] {
+            assert_ne!(reason.key(), "");
+        }
+        assert_eq!(Reason::SemanticBoundary.key(), "semantic-boundary");
+        assert_eq!(Reason::Disproportionate.key(), "disproportionate");
+    }
 
     const OWNED: Subject = Subject {
         proved: true,

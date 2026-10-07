@@ -51,17 +51,12 @@ impl Timeout {
 /// The timeout for one call: the observed high percentile with its margin, or the profile default without history, never over the client limit.
 /// A requested timeout stays when it covers that floor within the limit, and one beyond the limit becomes the limit.
 #[must_use]
-pub const fn timeout(
-    observed: Option<u64>,
-    default: u64,
-    requested: Option<u64>,
-    limit: u64,
-) -> Timeout {
+pub fn timeout(observed: Option<u64>, default: u64, requested: Option<u64>, limit: u64) -> Timeout {
     let needed = match observed {
         Some(observed) => with_margin(observed),
         None => default,
     };
-    let floor = if needed < limit { needed } else { limit };
+    let floor = needed.min(limit);
     match requested {
         Some(requested) if requested > limit => Timeout::Set(limit),
         Some(requested) if requested >= floor => Timeout::Keep(requested),
@@ -78,80 +73,120 @@ pub const fn overran(expected: Option<u64>, took: u64) -> bool {
     }
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn the_timeout_never_falls_below_the_observed_percentile_nor_exceeds_the_limit() {
-    let observed: Option<u64> = kani::any();
-    let default: u64 = kani::any();
-    let requested: Option<u64> = kani::any();
-    let limit: u64 = kani::any();
-    let decided = timeout(observed, default, requested, limit);
-    assert!(decided.millis() <= limit);
-    if let Some(observed) = observed {
-        assert!(decided.millis() >= if observed < limit { observed } else { limit });
-    }
-    assert_eq!(decided, timeout(observed, default, requested, limit));
-    if let Timeout::Keep(kept) = decided {
-        assert_eq!(requested, Some(kept));
-    }
-    kani::cover!(matches!(decided, Timeout::Keep(_)));
-    kani::cover!(matches!(decided, Timeout::Set(_)) && requested.is_some());
-    kani::cover!(decided.millis() == limit && observed.is_some());
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-fn without_history_the_profile_default_decides() {
-    let observed: Option<u64> = kani::any();
-    let default: u64 = kani::any();
-    let limit: u64 = kani::any();
-    let decided = timeout(observed, default, None, limit);
-    if observed.is_none() {
-        assert_eq!(
-            decided,
-            Timeout::Set(if default < limit { default } else { limit })
-        );
-    }
-    kani::cover!(observed.is_none() && default < limit);
-    kani::cover!(observed.is_none() && default > limit);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn a_run_overran_only_past_a_known_expectation_and_stays_overrun_when_slower() {
-    let expected: Option<u64> = kani::any();
-    let took: u64 = kani::any();
-    let result = overran(expected, took);
-    if expected.is_none() {
-        assert!(!result);
-    }
-    if let Some(limit) = expected {
-        assert!(!overran(expected, limit));
-        if result && took < u64::MAX {
-            assert!(overran(expected, took + 1));
+    /// The timeout never exceeds the limit, never falls below the needed time within it, and keeps only a request that covers that.
+    pub fn spec_timeout(observed: Option<u64>, default: u64, requested: Option<u64>, limit: u64) {
+        let decided = timeout(observed, default, requested, limit);
+        let needed = observed.map_or(u128::from(default), |observed| {
+            u128::from(observed) + u128::from(observed / 2) + u128::from(START_UP_MS)
+        });
+        let floor = needed.min(u128::from(limit));
+        match requested {
+            Some(requested) if requested > limit => assert_eq!(decided, Timeout::Set(limit)),
+            Some(requested) if u128::from(requested) >= floor => {
+                assert_eq!(decided, Timeout::Keep(requested));
+            }
+            _ => assert!(matches!(decided, Timeout::Set(millis) if u128::from(millis) == floor)),
+        }
+        assert!(decided.millis() <= limit);
+        assert!(u128::from(decided.millis()) >= floor);
+        match decided {
+            Timeout::Keep(kept) | Timeout::Set(kept) => assert_eq!(decided.millis(), kept),
         }
     }
-    kani::cover!(result);
-    kani::cover!(!result && expected.is_some());
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn the_percentile_of_a_short_history_is_its_slowest_run() {
-    let mut runs: [u64; 3] = kani::any();
-    kani::assume(runs[0] <= runs[1] && runs[1] <= runs[2]);
-    assert_eq!(percentile(&runs), Some(runs[2]));
-    assert_eq!(percentile(&runs[..0]), None);
-    kani::cover!(runs[1] < runs[2]);
-    kani::cover!(runs[0] == runs[2]);
-    runs[2] = runs[1];
-    assert_eq!(percentile(&runs), Some(runs[1]));
+    pub fn spec_overran(expected: Option<u64>, took: u64) {
+        assert_eq!(
+            overran(expected, took),
+            expected.is_some_and(|limit| took > limit)
+        );
+    }
+
+    /// The nearest-rank percentile of a sorted history picks the run at the rank `(95 * n).div_ceil(100)`.
+    pub fn spec_percentile(sorted: &[u64]) {
+        let rank = (sorted.len() * 95).div_ceil(100);
+        let expected = if rank == 0 {
+            None
+        } else {
+            sorted.get(rank - 1).copied()
+        };
+        assert_eq!(percentile(sorted), expected);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn the_timeout_covers_the_needed_time_within_the_limit_and_keeps_only_a_covering_request() {
+        let observed: Option<u64> = kani::any();
+        let default: u64 = kani::any();
+        let requested: Option<u64> = kani::any();
+        let limit: u64 = kani::any();
+        spec_timeout(observed, default, requested, limit);
+        let decided = timeout(observed, default, requested, limit);
+        kani::cover!(matches!(decided, Timeout::Keep(_)));
+        kani::cover!(matches!(decided, Timeout::Set(_)) && requested.is_some());
+        kani::cover!(decided.millis() == limit && observed.is_some());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_run_overran_only_past_a_known_expectation() {
+        let expected: Option<u64> = kani::any();
+        let took: u64 = kani::any();
+        spec_overran(expected, took);
+        kani::cover!(overran(expected, took));
+        kani::cover!(!overran(expected, took) && expected.is_some());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn the_percentile_of_a_short_history_is_its_slowest_run() {
+        let runs: [u64; 3] = kani::any();
+        kani::assume(runs[0] <= runs[1] && runs[1] <= runs[2]);
+        let length: usize = kani::any();
+        kani::assume(length <= runs.len());
+        spec_percentile(&runs[..length]);
+        kani::cover!(length == 3 && runs[1] < runs[2]);
+        kani::cover!(length == 0);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloc::vec::Vec;
+
+    const VALUES: [u64; 8] = [0, 1, 2, 9_999, 10_000, 600_000, u64::MAX - 1, u64::MAX];
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every boundary")]
+    fn every_boundary_meets_the_timeout_specifications() {
+        let options: Vec<Option<u64>> = core::iter::once(None).chain(VALUES.map(Some)).collect();
+        for &observed in &options {
+            for default in VALUES {
+                for &requested in &options {
+                    for limit in VALUES {
+                        proofs::spec_timeout(observed, default, requested, limit);
+                    }
+                }
+            }
+            for took in VALUES {
+                proofs::spec_overran(observed, took);
+            }
+        }
+    }
+
+    #[test]
+    fn every_history_up_to_two_windows_meets_the_percentile_specification() {
+        let runs: Vec<u64> = (0u64..).take(2 * WINDOW).collect();
+        for length in 0..=runs.len() {
+            proofs::spec_percentile(runs.get(..length).unwrap_or_default());
+        }
+        assert_eq!(percentile(&runs), Some(37));
+    }
 
     #[test]
     fn a_short_timeout_is_raised_to_the_percentile_with_its_margin() {

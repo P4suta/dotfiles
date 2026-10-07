@@ -3,6 +3,13 @@
   "title": "Manifest",
   "type": "object",
   "properties": {
+    "non-terminating": {
+      "description": "The mutants that run forever by construction, as cargo-mutants names them, whose timeouts the gate admits.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/NonTerminating"
+      }
+    },
     "obligation": {
       "type": "array",
       "items": {
@@ -33,6 +40,23 @@
       "enum": [
         "shellcheck",
         "psscriptanalyzer"
+      ]
+    },
+    "NonTerminating": {
+      "description": "A mutant known to run forever, with the reason no test can end it.",
+      "type": "object",
+      "properties": {
+        "mutant": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "mutant",
+        "reason"
       ]
     },
     "Obligation": {

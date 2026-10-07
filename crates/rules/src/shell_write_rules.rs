@@ -316,9 +316,6 @@ const FLAG_WITH_VALUE: usize = 2;
 /// The words of a `gh` subcommand: its group and its verb.
 const SUBCOMMAND_WORDS: usize = 2;
 
-/// The words of `mise x` or `mise exec` before the wrapped command.
-const MISE_EXEC_WORDS: usize = 2;
-
 fn writes_to(target: Option<&Token>) -> bool {
     match target {
         Some(Token::Word { text, .. }) => !matches!(text.as_str(), DISCARD | STDOUT | STDERR),
@@ -397,46 +394,57 @@ fn body_value(field: &str) -> Option<&str> {
         .map(|(_, value)| value)
 }
 
-fn api_sources(arguments: &[&str], sources: &mut Vec<Source>) {
-    let mut index = 0;
-    while index < arguments.len() {
-        if let Some((value, used)) = flag_value(arguments, index, &["-f", "--raw-field"]) {
+/// The words after the one at `index`.
+fn following<'a, 'b>(words: &'b [&'a str], index: usize) -> &'b [&'a str] {
+    words
+        .get(index..)
+        .and_then(<[&str]>::split_first)
+        .map_or(&[], |(_, rest)| rest)
+}
+
+/// The arguments after the `used` words a flag took, always at least the flag itself.
+fn after_flag<'a, 'b>(arguments: &'b [&'a str], used: usize) -> &'b [&'a str] {
+    arguments.get(used.max(1)..).unwrap_or_default()
+}
+
+fn api_sources(mut arguments: &[&str], sources: &mut Vec<Source>) {
+    while !arguments.is_empty() {
+        let mut used = 1;
+        if let Some((value, taken)) = flag_value(arguments, 0, &["-f", "--raw-field"]) {
             if let Some(text) = body_value(value) {
                 sources.push(Source::Inline(text.to_owned()));
             }
-            index += used;
-        } else if let Some((value, used)) = flag_value(arguments, index, &["-F", "--field"]) {
+            used = taken;
+        } else if let Some((value, taken)) = flag_value(arguments, 0, &["-F", "--field"]) {
             if let Some(text) = body_value(value) {
                 sources.push(match text.strip_prefix('@') {
                     Some(path) => file_source(path),
                     None => Source::Inline(text.to_owned()),
                 });
             }
-            index += used;
-        } else if let Some((value, used)) = flag_value(arguments, index, &["--input"]) {
+            used = taken;
+        } else if let Some((value, taken)) = flag_value(arguments, 0, &["--input"]) {
             sources.push(match value {
                 "-" => Source::Stdin(String::new()),
                 path => Source::Json(path.to_owned()),
             });
-            index += used;
-        } else {
-            index += 1;
+            used = taken;
         }
+        arguments = after_flag(arguments, used);
     }
 }
 
-fn command_sources(arguments: &[&str], sources: &mut Vec<Source>) {
-    let mut index = 0;
-    while index < arguments.len() {
-        if let Some((value, used)) = flag_value(arguments, index, &["-b", "--body"]) {
+fn command_sources(mut arguments: &[&str], sources: &mut Vec<Source>) {
+    while !arguments.is_empty() {
+        let mut used = 1;
+        if let Some((value, taken)) = flag_value(arguments, 0, &["-b", "--body"]) {
             sources.push(Source::Inline(value.to_owned()));
-            index += used;
-        } else if let Some((value, used)) = flag_value(arguments, index, &["-F", "--body-file"]) {
+            used = taken;
+        } else if let Some((value, taken)) = flag_value(arguments, 0, &["-F", "--body-file"]) {
             sources.push(file_source(value));
-            index += used;
-        } else {
-            index += 1;
+            used = taken;
         }
+        arguments = after_flag(arguments, used);
     }
 }
 
@@ -461,10 +469,10 @@ pub fn body_sources(command: &str) -> Vec<Source> {
         let Some(gh) = words.iter().position(|word| program(word) == "gh") else {
             continue;
         };
-        let rest = words.get(gh + 1..).unwrap_or_default();
+        let rest = following(words, gh);
         let before = sources.len();
         if let Some(api) = rest.iter().position(|word| *word == "api") {
-            api_sources(rest.get(api + 1..).unwrap_or_default(), &mut sources);
+            api_sources(following(rest, api), &mut sources);
         } else if BODY_COMMANDS.iter().any(|(group, verb)| {
             rest.windows(SUBCOMMAND_WORDS)
                 .any(|pair| pair == [*group, *verb])
@@ -507,30 +515,30 @@ pub fn inspect(command: &str) -> Verdict {
     }
     for segment in scan.tokens.split(|token| *token == Token::Separator) {
         let words = segment_words(segment);
-        let mut start = 0;
-        while let Some(&word) = words.get(start) {
-            let name = program(word);
-            if is_assignment(word)
-                || matches!(
-                    name.as_str(),
-                    "env" | "command" | "exec" | "time" | "nohup" | "sudo"
-                )
-            {
-                start += 1;
-            } else if name == "mise" && matches!(words.get(start + 1), Some(&"x" | &"exec")) {
-                start += MISE_EXEC_WORDS;
-                if words.get(start) == Some(&"--") {
-                    start += 1;
+        let mut command = words.as_slice();
+        loop {
+            command = match command {
+                [word, rest @ ..]
+                    if is_assignment(word)
+                        || matches!(
+                            program(word).as_str(),
+                            "env" | "command" | "exec" | "time" | "nohup" | "sudo"
+                        ) =>
+                {
+                    rest
                 }
-            } else {
-                break;
-            }
+                [word, "x" | "exec", "--", rest @ ..] | [word, "x" | "exec", rest @ ..]
+                    if program(word) == "mise" =>
+                {
+                    rest
+                }
+                _ => break,
+            };
         }
-        let Some(first) = words.get(start) else {
+        let Some((first, rest)) = command.split_first() else {
             continue;
         };
         let name = program(first);
-        let rest = words.get(start + 1..).unwrap_or_default();
         if runs_inline(name.as_str(), rest, scan.heredoc) {
             interpreter = true;
         }
@@ -545,32 +553,51 @@ pub fn inspect(command: &str) -> Verdict {
     verdict(interpreter, file_write)
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn file_writing_commands_are_never_admitted() {
-    let interpreter: bool = kani::any();
-    let file: bool = kani::any();
-    let result = verdict(interpreter, file);
-    assert_eq!(result == Verdict::Admit, !interpreter && !file);
-    kani::cover!(result == Verdict::Admit);
-    kani::cover!(result != Verdict::Admit);
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-fn every_refusal_names_a_next_action() {
-    let interpreter: bool = kani::any();
-    let file: bool = kani::any();
-    let result = verdict(interpreter, file);
-    if let Verdict::Refuse(reason) = result {
-        assert!(!next_action(reason).is_empty());
+    /// The verdict never admits a file-writing command, an inline interpreter names its own refusal first, and each refusal names a file tool.
+    pub fn spec_verdict(interpreter: bool, file: bool) {
+        let result = verdict(interpreter, file);
+        let expected = if interpreter {
+            Verdict::Refuse(Reason::InlineInterpreter)
+        } else if file {
+            Verdict::Refuse(Reason::FileRedirect)
+        } else {
+            Verdict::Admit
+        };
+        assert_eq!(result, expected);
+        if let Verdict::Refuse(reason) = result {
+            assert!(next_action(reason).len() > 1);
+        }
     }
-    kani::cover!(result == Verdict::Refuse(Reason::InlineInterpreter));
-    kani::cover!(result == Verdict::Refuse(Reason::FileRedirect));
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn file_writing_commands_are_never_admitted_and_every_refusal_names_a_next_action() {
+        let interpreter: bool = kani::any();
+        let file: bool = kani::any();
+        spec_verdict(interpreter, file);
+        let result = verdict(interpreter, file);
+        kani::cover!(result == Verdict::Admit);
+        kani::cover!(result == Verdict::Refuse(Reason::InlineInterpreter));
+        kani::cover!(result == Verdict::Refuse(Reason::FileRedirect));
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_input_meets_the_verdict_specification() {
+        for [interpreter, file] in crate::domain::flags() {
+            super::proofs::spec_verdict(interpreter, file);
+        }
+        assert!(super::next_action(super::Reason::InlineInterpreter).starts_with("Use the Edit"));
+        assert!(super::next_action(super::Reason::FileRedirect).starts_with("Use the Write"));
+    }
+
     use super::*;
     use alloc::vec;
 
@@ -578,6 +605,7 @@ mod tests {
     const REFUSED_FILE: Verdict = Verdict::Refuse(Reason::FileRedirect);
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every interpreter")]
     fn inline_interpreters_are_refused() {
         for command in [
             "python -c \"open('a','w').write('x')\"",
@@ -615,6 +643,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every command")]
     fn reading_and_project_commands_are_admitted() {
         for command in [
             "cat README.md",
@@ -652,6 +681,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every spelling")]
     fn gh_body_arguments_are_collected_from_every_spelling() {
         for (command, expected) in [
             ("gh pr create --title t --body 'a\nb'", vec![inline("a\nb")]),
@@ -742,5 +772,255 @@ mod tests {
         for reason in [Reason::InlineInterpreter, Reason::FileRedirect] {
             assert!(next_action(reason).contains("Write"));
         }
+    }
+
+    fn word(text: &str, plain: bool) -> Token {
+        Token::Word {
+            text: text.to_owned(),
+            plain,
+        }
+    }
+
+    fn plain(text: &str) -> Token {
+        word(text, true)
+    }
+
+    #[test]
+    fn the_scanner_reads_quotes_escapes_and_separators_into_tokens() {
+        assert_eq!(scan("'a b'c").tokens, [word("a bc", false)]);
+        assert_eq!(scan("'a' 'b'").tokens, [word("a", false), word("b", false)]);
+        assert_eq!(
+            scan("\"a\\\"b\" c").tokens,
+            [word("a\"b", false), plain("c")]
+        );
+        assert_eq!(scan("\"a\\\\\" b").tokens, [word("a\\", false), plain("b")]);
+        assert_eq!(scan("a\\ b c").tokens, [plain("a b"), plain("c")]);
+        assert_eq!(scan("a\\").tokens, [plain("a")]);
+        assert_eq!(
+            scan("a;b|c(d)e{f}g&h").tokens,
+            [
+                plain("a"),
+                Token::Separator,
+                plain("b"),
+                Token::Separator,
+                plain("c"),
+                Token::Separator,
+                plain("d"),
+                Token::Separator,
+                plain("e"),
+                Token::Separator,
+                plain("f"),
+                Token::Separator,
+                plain("g"),
+                Token::Separator,
+                plain("h")
+            ]
+        );
+        assert_eq!(scan("a\tb\rc").tokens, [plain("a"), plain("b"), plain("c")]);
+    }
+
+    #[test]
+    fn the_scanner_tells_each_redirect_from_a_descriptor_copy() {
+        for command in ["a &> b", "a &>> b", "a > b", "a >> b", "a >| b", "a 2> b"] {
+            assert_eq!(
+                scan(command).tokens,
+                [plain("a"), Token::Redirect, plain("b")],
+                "{command}"
+            );
+        }
+        assert_eq!(
+            scan("ab>f").tokens,
+            [plain("ab"), Token::Redirect, plain("f")]
+        );
+        assert_eq!(
+            scan("a2x>f").tokens,
+            [plain("a2x"), Token::Redirect, plain("f")]
+        );
+        assert_eq!(
+            scan("a 2>&1 b").tokens,
+            [plain("a"), plain("1"), plain("b")]
+        );
+        assert_eq!(
+            scan("a & b").tokens,
+            [plain("a"), Token::Separator, plain("b")]
+        );
+        assert_eq!(scan("cat <x").tokens, [plain("cat"), plain("<x")]);
+        // A here-string feeds standard input as a heredoc does, so its text never counts as an argument.
+        let here_string = scan("cat <<< x");
+        assert_eq!(here_string.tokens, [plain("cat"), plain("<")]);
+        assert!(here_string.heredoc);
+    }
+
+    #[test]
+    fn a_heredoc_body_ends_at_its_delimiter_and_stays_out_of_the_words() {
+        let found = scan("cat <<'EOF' > f\nline one\n\tEOF\nnext");
+        assert!(found.heredoc);
+        assert_eq!(found.heredocs, ["line one\n"]);
+        assert_eq!(
+            found.tokens,
+            [
+                plain("cat"),
+                Token::Redirect,
+                plain("f"),
+                Token::Separator,
+                plain("next")
+            ]
+        );
+        let stripped = scan("cat <<-  \"END\"\nbody\nEND\n");
+        assert_eq!(stripped.heredocs, ["body\n"]);
+        let unterminated = scan("cat <<X\nopen");
+        assert_eq!(unterminated.heredocs, ["open\n"]);
+        let chars: Vec<char> = "-  EOF; rest".chars().collect();
+        assert_eq!(heredoc_delimiter(&chars, 0), ("EOF".to_owned(), 6));
+        let chars: Vec<char> = "x  E\\O\"F\" rest".chars().collect();
+        assert_eq!(heredoc_delimiter(&chars, 1), ("EOF".to_owned(), 9));
+        let chars: Vec<char> = "a\nEND\nb".chars().collect();
+        let mut delimiters = alloc::vec!["END".to_owned()];
+        let mut bodies = Vec::new();
+        assert_eq!(
+            skip_heredoc_body(&chars, 0, &mut delimiters, &mut bodies),
+            6
+        );
+        assert_eq!(bodies, ["a\n"]);
+    }
+
+    #[test]
+    fn segments_drop_empty_commands_and_stop_at_a_redirect() {
+        assert_eq!(segments("a b; ;c > f d"), [vec!["a", "b"], vec!["c"]]);
+        assert_eq!(segments(" ; "), Vec::<Vec<String>>::new());
+    }
+
+    #[test]
+    fn an_assignment_names_a_variable_before_its_equals_sign() {
+        assert!(is_assignment("A_1=x"));
+        assert!(is_assignment("a="));
+        assert!(!is_assignment("=x"));
+        assert!(!is_assignment("a-b=x"));
+        assert!(!is_assignment("plain"));
+    }
+
+    #[test]
+    fn each_interpreter_runs_inline_only_through_its_own_flags() {
+        assert!(runs_inline("node", &["--eval", "x"], false));
+        assert!(runs_inline("node", &["-p", "x"], false));
+        assert!(!runs_inline("node", &["--check", "s.js"], false));
+        assert!(!runs_inline(
+            "python",
+            &["--check-hash-based-pycs", "always", "s.py"],
+            false
+        ));
+        assert!(runs_inline("python", &["-Bc", "x"], false));
+        assert!(runs_inline("ruby", &["-E", "x"], false));
+        assert!(!runs_inline("ruby", &["--encoding", "s.rb"], false));
+        assert!(runs_inline("perl", &["-", "x"], false));
+        assert!(!runs_inline("perl", &["s.pl"], false));
+        assert!(runs_inline("perl", &["s.pl"], true));
+        assert!(!runs_inline("python", &["-V"], false));
+        assert!(runs_inline("python", &[], false));
+        assert!(!runs_inline("bash", &["-c", "x"], false));
+    }
+
+    #[test]
+    fn a_command_prefix_is_skipped_only_for_mise_and_the_wrappers() {
+        assert_eq!(inspect("foo x python -c 1"), Verdict::Admit);
+        assert_eq!(
+            inspect("mise x -- python -c 1"),
+            Verdict::Refuse(Reason::InlineInterpreter)
+        );
+        assert_eq!(
+            inspect("mise exec python -c 1"),
+            Verdict::Refuse(Reason::InlineInterpreter)
+        );
+        assert_eq!(
+            inspect("A=1 env sudo time python -c 1"),
+            Verdict::Refuse(Reason::InlineInterpreter)
+        );
+        assert_eq!(inspect("mise run python"), Verdict::Admit);
+        assert_eq!(inspect("tee -a /dev/null"), Verdict::Admit);
+        assert_eq!(inspect("tee log"), Verdict::Refuse(Reason::FileRedirect));
+    }
+
+    #[test]
+    fn api_and_command_bodies_come_from_every_flag_form() {
+        let mut sources = Vec::new();
+        api_sources(
+            &[
+                "repos/x",
+                "-f",
+                "body=a",
+                "-f",
+                "title=t",
+                "--raw-field=body=b",
+                "-F",
+                "body=@f.md",
+                "-F",
+                "body=c",
+                "--field",
+                "body=@-",
+                "--input",
+                "p.json",
+                "--input=-",
+                "-f",
+            ],
+            &mut sources,
+        );
+        assert_eq!(
+            sources,
+            [
+                Source::Inline("a".to_owned()),
+                Source::Inline("b".to_owned()),
+                Source::File("f.md".to_owned()),
+                Source::Inline("c".to_owned()),
+                Source::Stdin(String::new()),
+                Source::Json("p.json".to_owned()),
+                Source::Stdin(String::new()),
+            ]
+        );
+        let mut sources = Vec::new();
+        command_sources(
+            &[
+                "pr",
+                "create",
+                "-b",
+                "x",
+                "--body=y",
+                "--body-file",
+                "-",
+                "-F",
+                "f.md",
+                "--body",
+            ],
+            &mut sources,
+        );
+        assert_eq!(
+            sources,
+            [
+                Source::Inline("x".to_owned()),
+                Source::Inline("y".to_owned()),
+                Source::Stdin(String::new()),
+                Source::File("f.md".to_owned()),
+            ]
+        );
+        assert_eq!(flag_value(&["-b"], 0, &["-b"]), None);
+        assert_eq!(flag_value(&["-bx"], 0, &["-b"]), None);
+        assert_eq!(flag_value(&["--body=v"], 0, &["--body"]), Some(("v", 1)));
+        assert_eq!(flag_value(&["x", "-b", "v"], 1, &["-b"]), Some(("v", 2)));
+    }
+
+    #[test]
+    fn standard_input_takes_the_words_of_every_other_command() {
+        assert_eq!(
+            body_sources("echo hello | env gh pr comment --body-file -"),
+            [Source::Stdin("echo\nhello\n".to_owned())]
+        );
+        assert_eq!(
+            body_sources("env gh api x -f body=a"),
+            [Source::Inline("a".to_owned())]
+        );
+        assert_eq!(
+            body_sources("gh repo api x -f body=a"),
+            [Source::Inline("a".to_owned())]
+        );
+        assert_eq!(body_sources("gh pr list --body x"), []);
     }
 }

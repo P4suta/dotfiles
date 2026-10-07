@@ -67,66 +67,99 @@ pub const fn verdict(start: Start, events: Option<Events>) -> Verdict {
 /// Defender protection stays as configured, so the refusal offers only a restart of the host.
 pub const NEXT_ACTION: &str = "Restart-Computer";
 
-#[cfg(kani)]
-fn any_start() -> Start {
-    if kani::any() {
-        Start::TimedOut
-    } else {
-        Start::Completed {
-            millis: kani::any(),
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
+
+    /// A start that reaches the bound always stalls, a fast one never does, and a slow one stalls unless the events show a working engine.
+    pub fn spec_verdict(start: Start, events: Option<Events>) {
+        let result = verdict(start, events);
+        let (bounded, slow) = match start {
+            Start::TimedOut => (true, true),
+            Start::Completed { millis } => (millis >= STALL_MILLIS, millis >= SLOW_MILLIS),
+        };
+        let quiet = events.is_some_and(|events| {
+            events.engine_terminated == 0
+                && events.protection_failed == 0
+                && events.service_timeout == 0
+        });
+        assert_eq!(events.is_some_and(Events::any), events.is_some() && !quiet);
+        assert_eq!(needs_events(start), slow);
+        assert_eq!(result == Verdict::Stalled, bounded || (slow && !quiet));
+    }
+
+    #[cfg(kani)]
+    fn any_start() -> Start {
+        if kani::any() {
+            Start::TimedOut
+        } else {
+            Start::Completed {
+                millis: kani::any(),
+            }
         }
     }
-}
 
-#[cfg(kani)]
-fn any_events() -> Option<Events> {
-    if kani::any() {
-        None
-    } else {
-        Some(Events {
-            engine_terminated: kani::any(),
-            protection_failed: kani::any(),
-            service_timeout: kani::any(),
-        })
+    #[cfg(kani)]
+    fn any_events() -> Option<Events> {
+        if kani::any() {
+            None
+        } else {
+            Some(Events {
+                engine_terminated: kani::any(),
+                protection_failed: kani::any(),
+                service_timeout: kani::any(),
+            })
+        }
     }
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_start_that_reaches_the_bound_is_always_a_stall() {
-    let start = any_start();
-    let events = any_events();
-    let result = verdict(start, events);
-    let bounded = match start {
-        Start::TimedOut => true,
-        Start::Completed { millis } => millis >= STALL_MILLIS,
-    };
-    if bounded {
-        assert!(result == Verdict::Stalled);
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_start_stalls_at_the_bound_or_when_slow_without_evidence_of_a_working_engine() {
+        let start = any_start();
+        let events = any_events();
+        spec_verdict(start, events);
+        let result = verdict(start, events);
+        kani::cover!(result == Verdict::Healthy && needs_events(start));
+        kani::cover!(result == Verdict::Stalled && events.is_some());
+        kani::cover!(result == Verdict::Healthy && events.is_some_and(Events::any));
     }
-    assert!(result == Verdict::Healthy || needs_events(start));
-    kani::cover!(result == Verdict::Healthy);
-    kani::cover!(result == Verdict::Stalled && !bounded);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn a_fast_start_is_healthy_whatever_the_events() {
-    let millis: u64 = kani::any();
-    let events = any_events();
-    let start = Start::Completed { millis };
-    let result = verdict(start, events);
-    if millis < SLOW_MILLIS {
-        assert!(result == Verdict::Healthy && !needs_events(start));
-    }
-    kani::cover!(millis < SLOW_MILLIS && events.is_some_and(Events::any));
-    kani::cover!(result == Verdict::Stalled);
-    assert!(!NEXT_ACTION.is_empty());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_boundary_meets_the_specification() {
+        let starts = [
+            0,
+            1,
+            SLOW_MILLIS - 1,
+            SLOW_MILLIS,
+            STALL_MILLIS - 1,
+            STALL_MILLIS,
+            u64::MAX,
+        ]
+        .map(|millis| Start::Completed { millis });
+        let counts = [0, 1, u32::MAX];
+        for start in starts.into_iter().chain([Start::TimedOut]) {
+            proofs::spec_verdict(start, None);
+            for engine_terminated in counts {
+                for protection_failed in counts {
+                    for service_timeout in counts {
+                        let events = Events {
+                            engine_terminated,
+                            protection_failed,
+                            service_timeout,
+                        };
+                        proofs::spec_verdict(start, Some(events));
+                    }
+                }
+            }
+        }
+        assert_eq!(NEXT_ACTION, "Restart-Computer");
+    }
 
     const FAILED_ENGINE: Events = Events {
         engine_terminated: 1,

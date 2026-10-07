@@ -63,19 +63,16 @@ impl Breach {
 
 /// The breach a core shows, or `None` when it keeps its boundary.
 #[must_use]
-pub const fn breach(core: Core) -> Option<Breach> {
+pub fn breach(core: Core) -> Option<Breach> {
     if core.dependencies > 0 {
         return Some(Breach::Dependency);
     }
     if !core.no_std {
         return Some(Breach::Std);
     }
-    let mut index = 0;
-    while index < DENIED.len() {
-        if core.denied & (1 << index) == 0 {
-            return Some(Breach::Undenied(index));
-        }
-        index += 1;
+    let missing = !core.denied & ((1 << DENIED.len()) - 1);
+    if missing != 0 {
+        return Some(Breach::Undenied(missing.trailing_zeros() as usize));
     }
     if core.strays > 0 {
         return Some(Breach::Stray);
@@ -83,48 +80,87 @@ pub const fn breach(core: Core) -> Option<Breach> {
     None
 }
 
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(11)]
-fn a_core_passes_only_with_no_dependency_no_std_every_lint_and_no_stray() {
-    let core = Core {
-        dependencies: kani::any(),
-        no_std: kani::any(),
-        denied: kani::any(),
-        strays: kani::any(),
-    };
-    let every = (1u16 << DENIED.len()) - 1;
-    let result = breach(core);
-    assert_eq!(
-        result.is_none(),
-        core.dependencies == 0 && core.no_std && core.denied & every == every && core.strays == 0
-    );
-    if let Some(Breach::Undenied(index)) = result {
-        assert!(index < DENIED.len() && core.denied & (1 << index) == 0);
-    }
-    kani::cover!(result.is_none());
-    kani::cover!(result == Some(Breach::Stray));
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(11)]
-fn a_dependency_outranks_every_other_breach() {
-    let core = Core {
-        dependencies: kani::any(),
-        no_std: kani::any(),
-        denied: kani::any(),
-        strays: kani::any(),
-    };
-    let result = breach(core);
-    assert_eq!(result == Some(Breach::Dependency), core.dependencies > 0);
-    kani::cover!(core.dependencies > 0 && core.no_std);
-    kani::cover!(core.dependencies > 0 && !core.no_std);
+    /// A core passes only with no dependency, `no_std`, every lint, and no stray, and otherwise names its first breach in that order.
+    pub fn spec_breach(core: Core) {
+        let every = (1u16 << DENIED.len()) - 1;
+        let result = breach(core);
+        assert_eq!(
+            result.is_none(),
+            core.dependencies == 0
+                && core.no_std
+                && core.denied & every == every
+                && core.strays == 0
+        );
+        assert_eq!(result == Some(Breach::Dependency), core.dependencies > 0);
+        assert_eq!(
+            result == Some(Breach::Std),
+            core.dependencies == 0 && !core.no_std
+        );
+        if let Some(Breach::Undenied(index)) = result {
+            assert!(index < DENIED.len());
+            assert_eq!(core.denied & (1 << index), 0);
+            assert_eq!(core.denied & ((1 << index) - 1), (1 << index) - 1);
+        }
+        assert_eq!(
+            result == Some(Breach::Stray),
+            core.dependencies == 0
+                && core.no_std
+                && core.denied & every == every
+                && core.strays > 0
+        );
+    }
+
+    #[cfg(kani)]
+    fn any_core() -> Core {
+        Core {
+            dependencies: kani::any(),
+            no_std: kani::any(),
+            denied: kani::any(),
+            strays: kani::any(),
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(11)]
+    fn a_core_passes_only_with_no_dependency_no_std_every_lint_and_no_stray() {
+        let core = any_core();
+        spec_breach(core);
+        let result = breach(core);
+        kani::cover!(result.is_none());
+        kani::cover!(result == Some(Breach::Stray));
+        kani::cover!(result == Some(Breach::Undenied(DENIED.len() - 1)));
+        kani::cover!(core.dependencies > 0 && !core.no_std);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes minutes over every lint set")]
+    fn every_lint_set_meets_the_boundary_specification() {
+        for dependencies in [0, 1, usize::MAX] {
+            for no_std in [false, true] {
+                for denied in 0..=u16::MAX {
+                    for strays in [0, 1, usize::MAX] {
+                        proofs::spec_breach(Core {
+                            dependencies,
+                            no_std,
+                            denied,
+                            strays,
+                        });
+                    }
+                }
+            }
+        }
+    }
 
     const PURE: Core = Core {
         dependencies: 0,

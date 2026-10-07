@@ -52,8 +52,9 @@ const MARK_THIRD: u8 = 0xBF;
 /// Whether `bytes` hold well-formed UTF-8: shortest forms only, no surrogates, and nothing past U+10FFFF.
 #[must_use]
 pub fn is_utf8(bytes: &[u8]) -> bool {
-    let mut index = 0;
-    while let Some(&lead) = bytes.get(index) {
+    let mut rest = bytes;
+    while let [lead, tail @ ..] = rest {
+        let lead = *lead;
         let (length, least, mut point) = if lead < ASCII_END {
             (1, 0, u32::from(lead))
         } else if lead & TWO_MASK == TWO_MARKER {
@@ -65,19 +66,17 @@ pub fn is_utf8(bytes: &[u8]) -> bool {
         } else {
             return false;
         };
-        if bytes.len() - index < length {
+        let (Some(mut continuation), Some(after)) =
+            (tail.get(..length - 1), tail.get(length - 1..))
+        else {
             return false;
-        }
-        let mut offset = 1;
-        while offset < length {
-            let Some(&next) = bytes.get(index + offset) else {
-                return false;
-            };
+        };
+        while let [next, others @ ..] = continuation {
             if next & CONTINUATION_MASK != CONTINUATION_MARKER {
                 return false;
             }
-            point = (point << CONTINUATION_BITS) | u32::from(next & CONTINUATION_PAYLOAD);
-            offset += 1;
+            point = (point << CONTINUATION_BITS) + u32::from(next & CONTINUATION_PAYLOAD);
+            continuation = others;
         }
         if point < least
             || point > MAX_SCALAR
@@ -85,7 +84,7 @@ pub fn is_utf8(bytes: &[u8]) -> bool {
         {
             return false;
         }
-        index += length;
+        rest = after;
     }
     true
 }
@@ -132,81 +131,154 @@ pub const fn shrinks(before: u32, after: u32) -> bool {
     after <= before
 }
 
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(6)]
-fn the_validator_accepts_every_scalar_value_and_refuses_impossible_leads() {
-    let point: u32 = kani::any();
-    kani::assume(point <= 0x10_FFFF && !(0xD800..=0xDFFF).contains(&point));
-    let mut encoded = [0u8; 4];
-    let length = if point < 0x80 {
-        encoded[0] = point as u8;
-        1
-    } else if point < 0x800 {
-        encoded[0] = 0xC0 | (point >> 6) as u8;
-        encoded[1] = 0x80 | (point & 0x3F) as u8;
-        2
-    } else if point < 0x1_0000 {
-        encoded[0] = 0xE0 | (point >> 12) as u8;
-        encoded[1] = 0x80 | ((point >> 6) & 0x3F) as u8;
-        encoded[2] = 0x80 | (point & 0x3F) as u8;
-        3
-    } else {
-        encoded[0] = 0xF0 | (point >> 18) as u8;
-        encoded[1] = 0x80 | ((point >> 12) & 0x3F) as u8;
-        encoded[2] = 0x80 | ((point >> 6) & 0x3F) as u8;
-        encoded[3] = 0x80 | (point & 0x3F) as u8;
-        4
-    };
-    assert!(is_utf8(&encoded[..length]));
-    let other: [u8; 2] = kani::any();
-    let impossible =
-        other[0] == 0xC0 || other[0] == 0xC1 || other[0] >= 0xF5 || other[0] & 0xC0 == 0x80;
-    if impossible {
-        assert!(!is_utf8(&other));
-    }
-    kani::cover!(length == 4);
-    kani::cover!(impossible && other[0] == 0xC0);
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(6)]
-fn a_file_passes_only_as_utf8_without_a_mark_that_ends_with_a_newline() {
-    let bytes: [u8; 4] = kani::any();
-    let length: usize = kani::any();
-    kani::assume(length <= 4);
-    let text = &bytes[..length];
-    let passes = fault(text).is_none();
-    if passes {
-        assert!(is_utf8(text));
-        assert!(length == 0 || text[length - 1] == b'\n');
-        assert!(!(length >= 3 && text[0] == 0xEF && text[1] == 0xBB && text[2] == 0xBF));
-    } else {
-        assert!(length > 0);
+    /// The validator accepts the encoding of every scalar value, which the caller builds by RFC 3629.
+    pub fn spec_scalar(encoded: &[u8]) {
+        assert!(is_utf8(encoded));
     }
-    kani::cover!(passes && length == 4);
-    kani::cover!(fault(text) == Some(Fault::NoFinalNewline));
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_baseline_admits_no_new_finding_and_keeps_shrinking() {
-    let before: u32 = kani::any();
-    let after: u32 = kani::any();
-    let found: u32 = kani::any();
-    let accepted = shrinks(before, after) && standing(after, found) == Standing::Within;
-    if accepted {
-        assert!(found <= before);
+    /// The validator refuses a text whose first byte can't lead any encoding.
+    pub fn spec_impossible_lead(bytes: &[u8]) {
+        let impossible = bytes.first().is_some_and(|&lead| {
+            lead == 0xC0 || lead == 0xC1 || lead >= 0xF5 || lead & 0xC0 == 0x80
+        });
+        assert!(!impossible || !is_utf8(bytes));
     }
-    assert!((standing(after, found) == Standing::Exceeded) == (found > after));
-    kani::cover!(accepted && found < before);
-    kani::cover!(!accepted && found > before);
+
+    /// A file passes only as UTF-8 without a mark that ends with a newline, and its first fault comes in that order.
+    pub fn spec_fault(text: &[u8]) {
+        let marked = text.get(..3) == Some(&[0xEF, 0xBB, 0xBF][..]);
+        let expected = if marked {
+            Some(Fault::ByteOrderMark)
+        } else if !is_utf8(text) {
+            Some(Fault::NotUtf8)
+        } else if text.last().is_some_and(|&last| last != b'\n') {
+            Some(Fault::NoFinalNewline)
+        } else {
+            None
+        };
+        assert_eq!(fault(text), expected);
+    }
+
+    /// A baseline admits no new finding, notices a vanished one, and only shrinks.
+    pub fn spec_baseline(before: u32, after: u32, found: u32) {
+        assert_eq!(shrinks(before, after), after <= before);
+        let standing = standing(after, found);
+        assert_eq!(standing == Standing::Exceeded, found > after);
+        assert_eq!(standing == Standing::Shrunk, found < after);
+        assert_eq!(standing == Standing::Within, found == after);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn the_validator_accepts_every_scalar_value_and_refuses_impossible_leads() {
+        let point: u32 = kani::any();
+        kani::assume(point <= 0x10_FFFF && !(0xD800..=0xDFFF).contains(&point));
+        let mut encoded = [0u8; 4];
+        let length = if point < 0x80 {
+            encoded[0] = point as u8;
+            1
+        } else if point < 0x800 {
+            encoded[0] = 0xC0 | (point >> 6) as u8;
+            encoded[1] = 0x80 | (point & 0x3F) as u8;
+            2
+        } else if point < 0x1_0000 {
+            encoded[0] = 0xE0 | (point >> 12) as u8;
+            encoded[1] = 0x80 | ((point >> 6) & 0x3F) as u8;
+            encoded[2] = 0x80 | (point & 0x3F) as u8;
+            3
+        } else {
+            encoded[0] = 0xF0 | (point >> 18) as u8;
+            encoded[1] = 0x80 | ((point >> 12) & 0x3F) as u8;
+            encoded[2] = 0x80 | ((point >> 6) & 0x3F) as u8;
+            encoded[3] = 0x80 | (point & 0x3F) as u8;
+            4
+        };
+        spec_scalar(&encoded[..length]);
+        let other: [u8; 2] = kani::any();
+        spec_impossible_lead(&other);
+        kani::cover!(point > 0xFFFF);
+        kani::cover!(other[0] == 0xC0);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn a_file_passes_only_as_utf8_without_a_mark_that_ends_with_a_newline() {
+        let bytes: [u8; 4] = kani::any();
+        let length: usize = kani::any();
+        kani::assume(length <= 4);
+        let text = &bytes[..length];
+        spec_fault(text);
+        kani::cover!(fault(text).is_none() && length == 4);
+        kani::cover!(fault(text) == Some(Fault::NoFinalNewline));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_baseline_admits_no_new_finding_and_keeps_shrinking() {
+        let before: u32 = kani::any();
+        let after: u32 = kani::any();
+        let found: u32 = kani::any();
+        spec_baseline(before, after, found);
+        kani::cover!(shrinks(before, after) && found < before);
+        kani::cover!(standing(after, found) == Standing::Exceeded);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bytes at every boundary of the UTF-8 encoding forms.
+    const BOUNDARIES: &[u8] =
+        b"\x00\x0a\x7f\x80\x8f\x90\x9f\xa0\xbb\xbf\xc0\xc1\xc2\xdf\xe0\xed\xef\xf0\xf4\xf5\xff";
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes minutes over every scalar value")]
+    fn every_scalar_value_and_every_short_text_meets_the_encoding_specifications() {
+        for character in (0..=0x10_FFFF)
+            .step_by(7)
+            .chain(0xD7F0..=0xE010)
+            .filter_map(char::from_u32)
+        {
+            let mut encoded = [0u8; 4];
+            proofs::spec_scalar(character.encode_utf8(&mut encoded).as_bytes());
+        }
+        for text in crate::domain::words(BOUNDARIES, 4) {
+            assert_eq!(
+                is_utf8(&text),
+                core::str::from_utf8(&text).is_ok(),
+                "{text:x?}"
+            );
+            proofs::spec_impossible_lead(&text);
+            proofs::spec_fault(&text);
+        }
+    }
+
+    #[test]
+    fn every_boundary_meets_the_baseline_specification() {
+        for before in [0, 1, 2, u32::MAX] {
+            for after in [0, 1, 2, u32::MAX] {
+                for found in [0, 1, 2, u32::MAX] {
+                    proofs::spec_baseline(before, after, found);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn each_fault_has_its_own_key() {
+        assert_eq!(
+            [Fault::ByteOrderMark, Fault::NotUtf8, Fault::NoFinalNewline].map(Fault::key),
+            ["byte-order-mark", "not-utf-8", "no-final-newline"]
+        );
+    }
 
     #[test]
     fn the_encoding_refuses_a_mark_broken_utf8_and_a_missing_final_newline() {

@@ -332,394 +332,333 @@ pub fn plan(
     }
 }
 
-#[cfg(kani)]
-fn inputs() -> (Operation, Generation, bool, bool, IssueGate, Checks) {
-    let choice: u8 = kani::any();
-    kani::assume(choice < 3);
-    (
-        match choice {
-            0 => Operation::Create,
-            1 => Operation::Edit,
-            _ => Operation::Ready,
-        },
-        if kani::any() {
-            Generation::Local
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
+
+    pub const OPERATIONS: [Operation; 3] = [Operation::Create, Operation::Edit, Operation::Ready];
+    pub const ISSUES: [IssueGate; 3] = [
+        IssueGate::NotRequired,
+        IssueGate::Linked,
+        IssueGate::Missing,
+    ];
+    pub const EXCLUSIONS: [Exclusion; 3] = [Exclusion::None, Exclusion::Owner, Exclusion::Pause];
+    pub const LIFECYCLES: [Lifecycle; 4] = [
+        Lifecycle::Draft,
+        Lifecycle::Ready,
+        Lifecycle::Merged,
+        Lifecycle::Closed,
+    ];
+    pub const HEAD_CHECKS: [HeadChecks; 3] =
+        [HeadChecks::Passing, HeadChecks::Pending, HeadChecks::Failed];
+
+    /// A rejected document never mutates a PR, local creation starts as a draft, ready needs a validated draft with passing checks, and a refusal names the first unmet condition.
+    pub fn spec_plan(
+        operation: Operation,
+        generation: Generation,
+        validated: bool,
+        draft: bool,
+        issue: IssueGate,
+        checks: Checks,
+    ) {
+        let expected = if !validated {
+            Err(Blocker::Unvalidated)
+        } else if issue == IssueGate::Missing {
+            Err(Blocker::MissingIssue)
         } else {
-            Generation::Coderabbit
-        },
-        kani::any(),
-        kani::any(),
-        issue_gate(kani::any(), kani::any(), kani::any()),
-        checks_state(kani::any(), kani::any(), kani::any()),
-    )
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn rejected_documents_never_produce_a_pr_mutation() {
-    let (operation, generation, validated, draft, issue, checks) = inputs();
-    let result = plan(operation, generation, validated, draft, issue, checks);
-    assert!(validated || result.is_err());
-    assert_eq!(
-        result.is_ok(),
-        validated
-            && issue != IssueGate::Missing
-            && (operation != Operation::Ready || draft && checks == Checks::Passing)
-    );
-    kani::cover!(result.is_ok());
-    kani::cover!(result.is_err());
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn local_creation_always_starts_as_draft() {
-    let (operation, generation, validated, draft, issue, checks) = inputs();
-    let result = plan(operation, generation, validated, draft, issue, checks);
-    if operation == Operation::Create && validated && issue != IssueGate::Missing {
+            match operation {
+                Operation::Create if generation == Generation::Local || draft => {
+                    Ok(Effect::CreateDraft)
+                }
+                Operation::Create => Ok(Effect::CreateReady),
+                Operation::Edit => Ok(Effect::Edit),
+                Operation::Ready if !draft => Err(Blocker::NotDraft),
+                Operation::Ready if checks != Checks::Passing => Err(Blocker::UnfinishedChecks),
+                Operation::Ready => Ok(Effect::Ready),
+            }
+        };
         assert_eq!(
-            result == Ok(Effect::CreateDraft),
-            generation == Generation::Local || draft
+            plan(operation, generation, validated, draft, issue, checks),
+            expected
+        );
+    }
+
+    /// An empty report never passes, any failure fails a merge, and anything unfinished waits.
+    pub fn spec_checks(total: usize, unfinished: usize, failed: usize) {
+        assert_eq!(
+            checks_state(total, unfinished, failed) == Checks::Passing,
+            total != 0 && unfinished == 0 && failed == 0
+        );
+        let head = head_checks(total, unfinished, failed);
+        assert_eq!(head == HeadChecks::Failed, failed != 0);
+        assert_eq!(
+            head == HeadChecks::Pending,
+            failed == 0 && (total == 0 || unfinished != 0)
         );
         assert_eq!(
-            result == Ok(Effect::CreateReady),
-            generation == Generation::Coderabbit && !draft
+            head == HeadChecks::Passing,
+            failed == 0 && total != 0 && unfinished == 0
         );
     }
-    kani::cover!(result == Ok(Effect::CreateDraft));
-    kani::cover!(result == Ok(Effect::CreateReady));
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn ready_requires_a_validated_draft_transition() {
-    let (operation, generation, validated, draft, issue, checks) = inputs();
-    let result = plan(operation, generation, validated, draft, issue, checks);
-    assert_eq!(
-        result == Ok(Effect::Ready),
-        operation == Operation::Ready
-            && validated
-            && draft
-            && issue != IssueGate::Missing
-            && checks == Checks::Passing
-    );
-    kani::cover!(result == Ok(Effect::Ready));
-    kani::cover!(result.is_err());
-    kani::cover!(
-        result.is_err()
-            && operation == Operation::Ready
-            && validated
-            && draft
-            && issue != IssueGate::Missing
-    );
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn ready_requires_every_reported_check_to_pass() {
-    let total: usize = kani::any();
-    let unfinished: usize = kani::any();
-    let failed: usize = kani::any();
-    let state = checks_state(total, unfinished, failed);
-    assert_eq!(
-        state == Checks::Passing,
-        total != 0 && unfinished == 0 && failed == 0
-    );
-    kani::cover!(state == Checks::Passing);
-    kani::cover!(state == Checks::Incomplete && total == 0);
-    kani::cover!(state == Checks::Incomplete && unfinished != 0);
-    kani::cover!(state == Checks::Incomplete && failed != 0);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn personal_issue_prerequisites_cannot_be_skipped_by_any_generation_mode() {
-    let personal_owner: bool = kani::any();
-    let fork: bool = kani::any();
-    let checked_issue: bool = kani::any();
-    let gate = issue_gate(personal_owner, fork, checked_issue);
-    assert_eq!(
-        gate == IssueGate::Missing,
-        personal_owner && !fork && !checked_issue
-    );
-    assert_eq!(gate == IssueGate::NotRequired, !personal_owner || fork);
-    let (operation, generation, validated, draft, _, checks) = inputs();
-    let result = plan(operation, generation, validated, draft, gate, checks);
-    assert!(gate != IssueGate::Missing || result.is_err());
-    kani::cover!(result.is_ok() && gate == IssueGate::Linked);
-    kani::cover!(result.is_ok() && gate == IssueGate::NotRequired);
-    kani::cover!(result.is_err() && gate == IssueGate::Missing);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn a_refusal_names_the_first_unmet_condition() {
-    let (operation, generation, validated, draft, issue, checks) = inputs();
-    let result = plan(operation, generation, validated, draft, issue, checks);
-    let expected = if !validated {
-        Some(Blocker::Unvalidated)
-    } else if issue == IssueGate::Missing {
-        Some(Blocker::MissingIssue)
-    } else if operation == Operation::Ready && !draft {
-        Some(Blocker::NotDraft)
-    } else if operation == Operation::Ready && checks != Checks::Passing {
-        Some(Blocker::UnfinishedChecks)
-    } else {
-        None
-    };
-    assert_eq!(result.err(), expected);
-    assert!(
-        operation == Operation::Ready
-            || !matches!(result, Err(Blocker::NotDraft | Blocker::UnfinishedChecks))
-    );
-    kani::cover!(result == Err(Blocker::Unvalidated));
-    kani::cover!(result == Err(Blocker::MissingIssue));
-    kani::cover!(result == Err(Blocker::NotDraft));
-    kani::cover!(result == Err(Blocker::UnfinishedChecks));
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn coderabbit_exclusion_does_not_authorize_unfinished_generation() {
-    let request: bool = kani::any();
-    let summary: bool = kani::any();
-    let ignore: bool = kani::any();
-    let accepted = coderabbit_body_marker_allowed(request, summary, ignore);
-    assert_eq!(accepted, ignore || request && summary);
-    assert!(request || ignore || !accepted);
-    assert!(summary || ignore || !accepted);
-    kani::cover!(accepted && !request && ignore);
-    kani::cover!(!accepted && !request && summary && !ignore);
-    kani::cover!(!accepted && !summary && !ignore);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn api_quota_requires_a_nonzero_reserve_and_sufficient_remaining_requests() {
-    let remaining: u64 = kani::any();
-    let reserve: u64 = kani::any();
-    let accepted = api_quota_available(remaining, reserve);
-    assert!(!accepted || reserve > 0 && remaining >= reserve);
-    assert_eq!(accepted, reserve != 0 && remaining >= reserve);
-    kani::cover!(accepted);
-    kani::cover!(!accepted && remaining < reserve);
-    kani::cover!(!accepted && reserve == 0);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn paused_pr_reviews_are_never_requested() {
-    let (operation, generation, _, draft, _, _) = inputs();
-    let paused: bool = kani::any();
-    let was_excluded: bool = kani::any();
-    let excluded: bool = kani::any();
-    let request = requests_review(operation, generation, draft, was_excluded, excluded);
-    let accepted = review_request_allowed(paused, request);
-    assert_eq!(accepted, !paused || !request);
-    assert!(!paused || generation == Generation::Local || !accepted);
-    assert!(!paused || operation != Operation::Ready || excluded || !accepted);
-    assert!(paused || accepted);
-    kani::cover!(paused && accepted && operation == Operation::Ready);
-    kani::cover!(paused && !accepted && generation == Generation::Coderabbit);
-    kani::cover!(paused && !accepted && generation == Generation::Local);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn a_paused_edit_never_removes_the_exclusion_of_a_ready_pr() {
-    let paused: bool = kani::any();
-    let draft: bool = kani::any();
-    let was_excluded: bool = kani::any();
-    let excluded: bool = kani::any();
-    let accepted = review_request_allowed(
-        paused,
-        requests_review(
-            Operation::Edit,
-            Generation::Local,
-            draft,
-            was_excluded,
-            excluded,
-        ),
-    );
-    assert_eq!(accepted, !paused || draft || !was_excluded || excluded);
-    kani::cover!(paused && !accepted);
-    kani::cover!(paused && accepted && draft && was_excluded && !excluded);
-    kani::cover!(!paused && accepted && !draft && was_excluded && !excluded);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn a_pr_ready_during_the_pause_keeps_its_pause_exclusion() {
-    let (operation, _, _, draft, _, _) = inputs();
-    let was = exclusion(kani::any(), kani::any());
-    let now = exclusion(kani::any(), kani::any());
-    let kept = keeps_pause_exclusion(operation, draft, was, now);
-    assert!(operation != Operation::Ready || kept == (now == Exclusion::Pause));
-    assert!(
-        operation != Operation::Edit
-            || draft
-            || was != Exclusion::Pause
-            || kept == (now == Exclusion::Pause)
-    );
-    assert!(
-        !kept
-            || operation != Operation::Ready
-            || review_requirement(false, now) == ReviewRequirement::Resumed
-    );
-    kani::cover!(!kept && operation == Operation::Ready && now == Exclusion::Owner);
-    kani::cover!(!kept && operation == Operation::Edit && now == Exclusion::Owner);
-    kani::cover!(kept && operation == Operation::Edit && draft && now == Exclusion::None);
-    kani::cover!(kept && operation == Operation::Ready);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn pr_review_requirement_returns_after_resumption() {
-    let paused: bool = kani::any();
-    let ignore: bool = kani::any();
-    let marker: bool = kani::any();
-    let kind = exclusion(ignore, marker);
-    let requirement = review_requirement(paused, kind);
-    assert_eq!(requirement == ReviewRequirement::Paused, paused);
-    assert_eq!(
-        matches!(
-            requirement,
-            ReviewRequirement::Required | ReviewRequirement::Resumed
-        ),
-        !paused && (!ignore || marker)
-    );
-    assert_eq!(
-        requirement == ReviewRequirement::Excluded,
-        !paused && ignore && !marker
-    );
-    assert!(kind != Exclusion::Pause || requirement != ReviewRequirement::Excluded);
-    kani::cover!(requirement == ReviewRequirement::Required);
-    kani::cover!(requirement == ReviewRequirement::Resumed);
-    kani::cover!(requirement == ReviewRequirement::Paused && kind == Exclusion::Pause);
-    kani::cover!(requirement == ReviewRequirement::Excluded);
-}
-
-#[cfg(kani)]
-fn merge_state() -> MergeState {
-    MergeState {
-        lifecycle: match kani::any::<u8>() {
-            0 => Lifecycle::Draft,
-            1 => Lifecycle::Ready,
-            2 => Lifecycle::Merged,
-            _ => Lifecycle::Closed,
-        },
-        conflict: kani::any(),
-        behind: kani::any(),
-        checks: head_checks(kani::any(), kani::any(), kani::any()),
-        clean: kani::any(),
-        exclusion: exclusion(kani::any(), kani::any()),
-    }
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn a_pr_merges_only_ready_current_passing_clean_and_without_an_owed_review() {
-    let state = merge_state();
-    let stacked: bool = kani::any();
-    let paused: bool = kani::any();
-    let step = merge_step(state, stacked, paused);
-    assert_eq!(
-        step == Step::Merge,
-        state.lifecycle == Lifecycle::Ready
-            && !state.conflict
-            && !state.behind
-            && state.checks == HeadChecks::Passing
-            && state.clean
-            && matches!(
-                review_requirement(paused, state.exclusion),
-                ReviewRequirement::Paused | ReviewRequirement::Excluded
-            )
-    );
-    assert!(
-        state.checks != HeadChecks::Failed
-            || state.behind
-            || !matches!(step, Step::Merge | Step::Ready | Step::Wait)
-    );
-    kani::cover!(step == Step::Merge && paused);
-    kani::cover!(step == Step::Merge && !paused);
-    kani::cover!(step == Step::Stop(Stop::Review));
-    kani::cover!(step == Step::Stop(Stop::FailedChecks));
-    kani::cover!(step == Step::Stop(Stop::Conflict));
-    kani::cover!(step == Step::Wait && state.checks == HeadChecks::Passing);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn a_behind_stacked_pr_is_restacked_and_an_independent_one_updated_by_merge() {
-    let state = merge_state();
-    let stacked: bool = kani::any();
-    let step = merge_step(state, stacked, kani::any());
-    let open = matches!(state.lifecycle, Lifecycle::Draft | Lifecycle::Ready);
-    assert_eq!(
-        step == Step::Restack,
-        open && !state.conflict && state.behind && stacked
-    );
-    assert_eq!(
-        step == Step::Update,
-        open && !state.conflict && state.behind && !stacked
-    );
-    assert!(!stacked || step != Step::Update);
-    kani::cover!(step == Step::Restack);
-    kani::cover!(step == Step::Update);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn a_draft_becomes_ready_during_the_pause_only_with_the_pause_lines() {
-    let state = merge_state();
-    let paused: bool = kani::any();
-    let step = merge_step(state, kani::any(), paused);
-    if step == Step::Ready {
-        assert!(state.lifecycle == Lifecycle::Draft && state.checks == HeadChecks::Passing);
-        assert!(!paused || state.exclusion == Exclusion::Pause);
-        assert!(
-            keeps_pause_exclusion(Operation::Ready, true, state.exclusion, state.exclusion)
-                || !paused
+    /// The flag decisions admit exactly what their rules name.
+    pub fn spec_flags(first: bool, second: bool, third: bool) {
+        let gate = issue_gate(first, second, third);
+        assert_eq!(gate == IssueGate::NotRequired, !first || second);
+        assert_eq!(gate == IssueGate::Linked, first && !second && third);
+        assert_eq!(gate == IssueGate::Missing, first && !second && !third);
+        assert_eq!(
+            coderabbit_body_marker_allowed(first, second, third),
+            third || first && second
+        );
+        assert_eq!(review_request_allowed(first, second), !first || !second);
+        let kind = exclusion(first, second);
+        assert_eq!(kind == Exclusion::None, !first);
+        assert_eq!(kind == Exclusion::Owner, first && !second);
+        assert_eq!(kind == Exclusion::Pause, first && second);
+        assert_eq!(
+            dependency(first, second, third),
+            if first {
+                Some(Dependency::Commits)
+            } else if second && !third {
+                Some(Dependency::Paths)
+            } else {
+                None
+            }
         );
     }
-    assert_eq!(
-        step == Step::Exclude,
-        state.lifecycle == Lifecycle::Draft
-            && !state.conflict
-            && !state.behind
-            && state.checks == HeadChecks::Passing
-            && paused
-            && state.exclusion != Exclusion::Pause
-    );
-    kani::cover!(step == Step::Ready && paused);
-    kani::cover!(step == Step::Ready && !paused);
-    kani::cover!(step == Step::Exclude);
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_branch_sharing_work_with_another_open_pr_opens_only_on_top_of_it() {
-    let shared_commits: bool = kani::any();
-    let shared_paths: bool = kani::any();
-    let independent: bool = kani::any();
-    let found = dependency(shared_commits, shared_paths, independent);
-    assert_eq!(
-        found.is_some(),
-        shared_commits || shared_paths && !independent
-    );
-    assert_eq!(found == Some(Dependency::Commits), shared_commits);
-    assert!(!shared_commits || found.is_some());
-    kani::cover!(found == Some(Dependency::Commits) && independent);
-    kani::cover!(found == Some(Dependency::Paths));
-    kani::cover!(found.is_none() && shared_paths);
-    kani::cover!(found.is_none() && !shared_paths);
+    pub fn spec_quota(remaining: u64, reserve: u64) {
+        assert_eq!(
+            api_quota_available(remaining, reserve),
+            reserve != 0 && remaining >= reserve
+        );
+    }
+
+    /// No operation requests a paused PR review, and an edit requests one only by removing the exclusion of a ready PR.
+    pub fn spec_review(operation: Operation, generation: Generation, flags: [bool; 4]) {
+        let [draft, was_excluded, excluded, paused] = flags;
+        let request = requests_review(operation, generation, draft, was_excluded, excluded);
+        let expected = generation == Generation::Coderabbit
+            || (operation == Operation::Edit && !draft && was_excluded && !excluded)
+            || (operation == Operation::Ready && !excluded);
+        assert_eq!(request, expected);
+        let accepted = review_request_allowed(paused, request);
+        assert!(!paused || generation == Generation::Local || !accepted);
+        assert!(paused || accepted);
+    }
+
+    /// A PR ready during the pause keeps its pause exclusion, and a review comes back once the pause ends.
+    pub fn spec_pause(
+        operation: Operation,
+        draft: bool,
+        was: Exclusion,
+        now: Exclusion,
+        paused: bool,
+    ) {
+        let kept = keeps_pause_exclusion(operation, draft, was, now);
+        let expected = match operation {
+            Operation::Create => true,
+            Operation::Edit => draft || was != Exclusion::Pause || now == Exclusion::Pause,
+            Operation::Ready => now == Exclusion::Pause,
+        };
+        assert_eq!(kept, expected);
+        let requirement = review_requirement(paused, now);
+        assert_eq!(requirement == ReviewRequirement::Paused, paused);
+        assert_eq!(
+            requirement == ReviewRequirement::Required,
+            !paused && now == Exclusion::None
+        );
+        assert_eq!(
+            requirement == ReviewRequirement::Resumed,
+            !paused && now == Exclusion::Pause
+        );
+        assert_eq!(
+            requirement == ReviewRequirement::Excluded,
+            !paused && now == Exclusion::Owner
+        );
+    }
+
+    /// A PR merges only ready, current, passing, clean, and without an owed review, and each other state takes its own next step.
+    pub fn spec_merge(state: MergeState, stacked: bool, paused: bool) {
+        let owed = !paused && state.exclusion != Exclusion::Owner;
+        let expected = match state.lifecycle {
+            Lifecycle::Merged => Step::Done,
+            Lifecycle::Closed => Step::Stop(Stop::Closed),
+            _ if state.conflict => Step::Stop(Stop::Conflict),
+            _ if state.behind && stacked => Step::Restack,
+            _ if state.behind => Step::Update,
+            _ if state.checks == HeadChecks::Failed => Step::Stop(Stop::FailedChecks),
+            _ if state.checks == HeadChecks::Pending => Step::Wait,
+            Lifecycle::Draft if paused && state.exclusion != Exclusion::Pause => Step::Exclude,
+            Lifecycle::Draft => Step::Ready,
+            Lifecycle::Ready if owed => Step::Stop(Stop::Review),
+            Lifecycle::Ready if !state.clean => Step::Wait,
+            Lifecycle::Ready => Step::Merge,
+        };
+        assert_eq!(merge_step(state, stacked, paused), expected);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_pr_operation_takes_its_effect_only_after_every_condition_and_names_the_first_unmet_one() {
+        let operation = OPERATIONS[usize::from(kani::any::<u8>() % 3)];
+        let generation = Generation::ALL[usize::from(kani::any::<u8>() % 2)];
+        let issue = ISSUES[usize::from(kani::any::<u8>() % 3)];
+        let checks = checks_state(kani::any(), kani::any(), kani::any());
+        let validated: bool = kani::any();
+        let draft: bool = kani::any();
+        spec_plan(operation, generation, validated, draft, issue, checks);
+        let result = plan(operation, generation, validated, draft, issue, checks);
+        kani::cover!(result == Ok(Effect::CreateReady));
+        kani::cover!(result == Ok(Effect::Ready));
+        kani::cover!(result == Err(Blocker::UnfinishedChecks));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn checks_flags_and_quotas_decide_exactly_what_their_rules_name() {
+        let total: usize = kani::any();
+        let unfinished: usize = kani::any();
+        let failed: usize = kani::any();
+        spec_checks(total, unfinished, failed);
+        let flags: [bool; 3] = [kani::any(), kani::any(), kani::any()];
+        let [first, second, third] = flags;
+        spec_flags(first, second, third);
+        let remaining: u64 = kani::any();
+        let reserve: u64 = kani::any();
+        spec_quota(remaining, reserve);
+        kani::cover!(checks_state(total, unfinished, failed) == Checks::Passing);
+        kani::cover!(head_checks(total, unfinished, failed) == HeadChecks::Pending && failed == 0);
+        kani::cover!(!api_quota_available(remaining, reserve) && reserve > 0);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn paused_reviews_are_never_requested_and_return_after_resumption() {
+        let operation = OPERATIONS[usize::from(kani::any::<u8>() % 3)];
+        let generation = Generation::ALL[usize::from(kani::any::<u8>() % 2)];
+        let flags: [bool; 4] = [kani::any(), kani::any(), kani::any(), kani::any()];
+        spec_review(operation, generation, flags);
+        let was = EXCLUSIONS[usize::from(kani::any::<u8>() % 3)];
+        let now = EXCLUSIONS[usize::from(kani::any::<u8>() % 3)];
+        spec_pause(operation, flags[0], was, now, flags[3]);
+        kani::cover!(
+            !keeps_pause_exclusion(operation, flags[0], was, now) && operation == Operation::Edit
+        );
+        kani::cover!(review_requirement(flags[3], now) == ReviewRequirement::Resumed);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_pr_merges_only_ready_current_passing_clean_and_without_an_owed_review() {
+        let flags: [bool; 5] = [
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+        ];
+        let [conflict, behind, clean, stacked, paused] = flags;
+        let state = MergeState {
+            lifecycle: LIFECYCLES[usize::from(kani::any::<u8>() % 4)],
+            conflict,
+            behind,
+            checks: HEAD_CHECKS[usize::from(kani::any::<u8>() % 3)],
+            clean,
+            exclusion: EXCLUSIONS[usize::from(kani::any::<u8>() % 3)],
+        };
+        spec_merge(state, stacked, paused);
+        let step = merge_step(state, stacked, paused);
+        kani::cover!(step == Step::Merge && paused);
+        kani::cover!(step == Step::Restack);
+        kani::cover!(step == Step::Exclude);
+        kani::cover!(step == Step::Wait && state.checks == HeadChecks::Passing);
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Dependency, Exclusion, HeadChecks, Lifecycle, MergeState, Step, Stop, dependency,
-        head_checks, merge_step,
-    };
+    use super::*;
+    use crate::domain::flags;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every input")]
+    fn every_input_meets_the_pr_specifications() {
+        for operation in proofs::OPERATIONS {
+            for generation in Generation::ALL {
+                for issue in proofs::ISSUES {
+                    for checks in [Checks::Passing, Checks::Incomplete] {
+                        for [validated, draft] in flags() {
+                            proofs::spec_plan(
+                                operation, generation, validated, draft, issue, checks,
+                            );
+                        }
+                    }
+                }
+                for review in flags() {
+                    proofs::spec_review(operation, generation, review);
+                }
+            }
+            for was in proofs::EXCLUSIONS {
+                for now in proofs::EXCLUSIONS {
+                    for [draft, paused] in flags() {
+                        proofs::spec_pause(operation, draft, was, now, paused);
+                    }
+                }
+            }
+        }
+        for [first, second, third] in flags() {
+            proofs::spec_flags(first, second, third);
+        }
+        for total in [0, 1, 2, usize::MAX] {
+            for unfinished in [0, 1, usize::MAX] {
+                for failed in [0, 1, usize::MAX] {
+                    proofs::spec_checks(total, unfinished, failed);
+                }
+            }
+        }
+        for remaining in [0, 1, 2, u64::MAX] {
+            for reserve in [0, 1, 2, u64::MAX] {
+                proofs::spec_quota(remaining, reserve);
+            }
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every merge state")]
+    fn every_merge_state_meets_the_merge_specification() {
+        for lifecycle in proofs::LIFECYCLES {
+            for checks in proofs::HEAD_CHECKS {
+                for exclusion in proofs::EXCLUSIONS {
+                    for [conflict, behind, clean, stacked, paused] in flags() {
+                        let state = MergeState {
+                            lifecycle,
+                            conflict,
+                            behind,
+                            checks,
+                            clean,
+                            exclusion,
+                        };
+                        proofs::spec_merge(state, stacked, paused);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn each_generation_has_its_own_key() {
+        assert_eq!(
+            Generation::ALL.map(Generation::key),
+            ["local", "coderabbit"]
+        );
+        for generation in Generation::ALL {
+            assert_eq!(Generation::from_key(generation.key()), Some(generation));
+        }
+        assert_eq!(Generation::from_key("remote"), None);
+    }
 
     const READY: MergeState = MergeState {
         lifecycle: Lifecycle::Ready,
@@ -784,14 +723,5 @@ mod tests {
         assert_eq!(merge_step(merged, false, true), Step::Done);
         let closed = with(|state| state.lifecycle = Lifecycle::Closed);
         assert_eq!(merge_step(closed, false, true), Step::Stop(Stop::Closed));
-    }
-
-    #[test]
-    fn shared_commits_or_paths_make_a_branch_dependent() {
-        assert_eq!(dependency(true, true, false), Some(Dependency::Commits));
-        assert_eq!(dependency(true, false, true), Some(Dependency::Commits));
-        assert_eq!(dependency(false, true, false), Some(Dependency::Paths));
-        assert_eq!(dependency(false, true, true), None);
-        assert_eq!(dependency(false, false, false), None);
     }
 }

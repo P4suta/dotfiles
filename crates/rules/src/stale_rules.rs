@@ -56,61 +56,83 @@ pub const fn reinstalls(recorded: bool, recorded_matches: bool) -> bool {
     recorded && !recorded_matches
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn only_a_found_differing_build_is_stale() {
-    let found: bool = kani::any();
-    let matching: bool = kani::any();
-    let state = freshness(found, matching);
-    assert_eq!(state == Freshness::Stale, found && !matching);
-    assert_eq!(state == Freshness::Unverified, !found);
-    assert_eq!(state == Freshness::Current, found && matching);
-    kani::cover!(state == Freshness::Stale);
-    kani::cover!(state == Freshness::Current);
-    kani::cover!(state == Freshness::Unverified);
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
+
+    pub fn spec_freshness(found: bool, matching: bool) {
+        let state = freshness(found, matching);
+        assert_eq!(state == Freshness::Stale, found && !matching);
+        assert_eq!(state == Freshness::Unverified, !found);
+        assert_eq!(state == Freshness::Current, found && matching);
+        assert_eq!(runs(state), !found || matching);
+    }
+
+    pub fn spec_origin(explicit: bool, working: bool, built: bool) {
+        let chosen = origin(explicit, working, built);
+        assert_eq!(chosen.is_some(), explicit || working || built);
+        assert_eq!(chosen == Some(Origin::Explicit), explicit);
+        assert_eq!(chosen == Some(Origin::WorkingCopy), !explicit && working);
+        assert_eq!(
+            chosen == Some(Origin::BuildCheckout),
+            !explicit && !working && built
+        );
+    }
+
+    pub fn spec_reinstalls(recorded: bool, matching: bool) {
+        let rebuild = reinstalls(recorded, matching);
+        assert_eq!(rebuild, recorded && !matching);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_a_found_differing_build_is_stale_and_refuses_to_run() {
+        let found: bool = kani::any();
+        let matching: bool = kani::any();
+        spec_freshness(found, matching);
+        let state = freshness(found, matching);
+        kani::cover!(state == Freshness::Stale);
+        kani::cover!(state == Freshness::Current);
+        kani::cover!(state == Freshness::Unverified);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn the_nearest_named_checkout_wins() {
+        let explicit: bool = kani::any();
+        let working: bool = kani::any();
+        let built: bool = kani::any();
+        spec_origin(explicit, working, built);
+        let chosen = origin(explicit, working, built);
+        kani::cover!(chosen == Some(Origin::WorkingCopy));
+        kani::cover!(chosen == Some(Origin::BuildCheckout));
+        kani::cover!(chosen.is_none());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_a_recorded_lagging_installation_is_rebuilt() {
+        let recorded: bool = kani::any();
+        let matching: bool = kani::any();
+        spec_reinstalls(recorded, matching);
+        kani::cover!(reinstalls(recorded, matching));
+        kani::cover!(!reinstalls(recorded, matching) && recorded);
+    }
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_stale_build_never_runs() {
-    let found: bool = kani::any();
-    let matching: bool = kani::any();
-    let accepted = runs(freshness(found, matching));
-    assert_eq!(accepted, !found || matching);
-    assert!(!(found && !matching) || !accepted);
-    kani::cover!(accepted);
-    kani::cover!(!accepted);
-}
+#[cfg(test)]
+mod tests {
+    use crate::domain::flags;
 
-#[cfg(kani)]
-#[kani::proof]
-fn the_nearest_named_checkout_wins() {
-    let explicit: bool = kani::any();
-    let working: bool = kani::any();
-    let built: bool = kani::any();
-    let chosen = origin(explicit, working, built);
-    assert_eq!(chosen.is_some(), explicit || working || built);
-    assert_eq!(chosen == Some(Origin::Explicit), explicit);
-    assert_eq!(chosen == Some(Origin::WorkingCopy), !explicit && working);
-    assert_eq!(
-        chosen == Some(Origin::BuildCheckout),
-        !explicit && !working && built
-    );
-    kani::cover!(chosen == Some(Origin::Explicit));
-    kani::cover!(chosen == Some(Origin::WorkingCopy));
-    kani::cover!(chosen == Some(Origin::BuildCheckout));
-    kani::cover!(chosen.is_none());
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn only_a_recorded_lagging_installation_is_rebuilt() {
-    let recorded: bool = kani::any();
-    let matching: bool = kani::any();
-    let rebuild = reinstalls(recorded, matching);
-    assert_eq!(rebuild, recorded && !matching);
-    assert!(recorded || !rebuild);
-    kani::cover!(rebuild);
-    kani::cover!(!rebuild && recorded);
-    kani::cover!(!rebuild && !recorded);
+    #[test]
+    fn every_input_meets_the_specification() {
+        for [first, second] in flags() {
+            super::proofs::spec_freshness(first, second);
+            super::proofs::spec_reinstalls(first, second);
+        }
+        for [explicit, working, built] in flags() {
+            super::proofs::spec_origin(explicit, working, built);
+        }
+    }
 }

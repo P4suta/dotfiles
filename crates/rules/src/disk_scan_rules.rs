@@ -17,31 +17,42 @@ pub const fn verdict(recursive: bool, sizes: bool) -> Verdict {
 
 pub const NEXT_ACTION: &str = "Measure disk usage with `storage-scout scan <path>` and reclaim space with `storage-scout clean`; they skip what a recursive walk should not touch and report what is safe to remove.";
 
-#[cfg(kani)]
-#[kani::proof]
-fn only_a_recursive_size_scan_is_refused() {
-    let recursive: bool = kani::any();
-    let sizes: bool = kani::any();
-    let result = verdict(recursive, sizes);
-    assert_eq!(result == Verdict::Refuse, recursive && sizes);
-    kani::cover!(result == Verdict::Refuse);
-    kani::cover!(result == Verdict::Admit && recursive);
-    kani::cover!(result == Verdict::Admit && sizes);
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_walk_or_a_size_report_alone_is_admitted() {
-    let recursive: bool = kani::any();
-    let result = verdict(recursive, !recursive);
-    assert_eq!(result, Verdict::Admit);
-    kani::cover!(recursive);
-    kani::cover!(!recursive);
+    pub fn spec_verdict(recursive: bool, sizes: bool) {
+        assert_eq!(
+            verdict(recursive, sizes) == Verdict::Refuse,
+            recursive && sizes
+        );
+        assert_eq!(verdict(recursive, !recursive), Verdict::Admit);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_a_recursive_size_scan_is_refused() {
+        let recursive: bool = kani::any();
+        let sizes: bool = kani::any();
+        spec_verdict(recursive, sizes);
+        let result = verdict(recursive, sizes);
+        kani::cover!(result == Verdict::Refuse);
+        kani::cover!(result == Verdict::Admit && recursive);
+        kani::cover!(result == Verdict::Admit && sizes);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_input_meets_the_specification() {
+        for [recursive, sizes] in crate::domain::flags() {
+            proofs::spec_verdict(recursive, sizes);
+        }
+    }
 
     #[test]
     fn a_tree_walk_that_reports_sizes_is_refused() {

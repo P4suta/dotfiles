@@ -57,7 +57,7 @@ Every `#[mutants::skip]` and every `exclude_re` entry of the mutation configurat
 
 ### Metrics
 
-Every gating metric stays deterministic: harness and probe counts, surviving and timed-out mutants, and unsafe sites as an exact count.
+Every gating metric stays deterministic: proved subjects and probe counts, surviving and timed-out mutants, and unsafe sites as an exact count.
 The same holds for instruction counts, peak heap bytes, binary size, process counts, and distinct model states.
 A metric baseline only moves toward the better value.
 Measured wall time stays advisory, and the manifest types can't express a wall-time threshold.

@@ -34,8 +34,11 @@ const CONTEXT_AFTER_RENDER: usize = 2;
 #[must_use]
 pub fn verdict(terms: &[Term]) -> Verdict {
     let mut whole = false;
-    let mut index = 0;
-    while let Some(&term) = terms.get(index) {
+    let mut rest = terms;
+    let mut index: usize = 0;
+    while let [term, tail @ ..] = rest {
+        let term = *term;
+        rest = tail;
         match term {
             Term::Chezmoi | Term::HostRead => return Verdict::HostState,
             Term::Context
@@ -74,6 +77,11 @@ const HOST_READS: [&str; 11] = [
     "outputList",
 ];
 
+/// The term a token of a template expression stands for.
+///
+/// Exempt as disproportionate: Kani runs past its budget on the string comparisons of even a short token.
+/// Evidence: `crates/rules/src/input_rules.rs::tests::each_token_names_its_term`.
+/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
 #[must_use]
 pub fn term(token: &str) -> Term {
     match token {
@@ -86,6 +94,10 @@ pub fn term(token: &str) -> Term {
 }
 
 /// The terms of a template expression, split at whitespace and parentheses, with each quoted string as one term.
+///
+/// Exempt as disproportionate: a parser over unbounded text needs fuzzing, which no verifier here owns yet.
+/// Evidence: `crates/rules/src/input_rules.rs::tests::terms_split_at_spaces_and_parentheses_and_keep_quotes_whole`.
+/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
 #[must_use]
 pub fn terms(expression: &str) -> Vec<Term> {
     let mut found = Vec::new();
@@ -119,76 +131,109 @@ pub fn terms(expression: &str) -> Vec<Term> {
     found
 }
 
-#[cfg(kani)]
-fn any_term() -> Term {
-    let choice: u8 = kani::any();
-    kani::assume(choice < 5);
-    match choice {
-        0 => Term::Data,
-        1 => Term::Context,
-        2 => Term::Chezmoi,
-        3 => Term::HostRead,
-        _ => Term::Render,
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
+
+    pub const TERMS: [Term; 5] = [
+        Term::Data,
+        Term::Context,
+        Term::Chezmoi,
+        Term::HostRead,
+        Term::Render,
+    ];
+
+    /// A host-reading term refuses the hash, and otherwise only a context outside a rendered partial does.
+    pub fn spec_verdict(terms: &[Term]) {
+        let mut host = false;
+        let mut bare = false;
+        let mut index = 0;
+        while let Some(&term) = terms.get(index) {
+            host |= matches!(term, Term::Chezmoi | Term::HostRead);
+            bare |= term == Term::Context
+                && !(index >= 2 && terms.get(index - 2) == Some(&Term::Render));
+            index += 1;
+        }
+        let result = verdict(terms);
+        assert_eq!(result == Verdict::HostState, host);
+        assert_eq!(result == Verdict::WholeContext, !host && bare);
+        assert_eq!(result == Verdict::Admit, !host && !bare);
     }
-}
 
-#[cfg(kani)]
-fn any_terms() -> [Term; 4] {
-    [any_term(), any_term(), any_term(), any_term()]
-}
-
-#[cfg(kani)]
-const fn reads_host(term: Term) -> bool {
-    matches!(term, Term::Chezmoi | Term::HostRead)
-}
-
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(6)]
-fn a_term_that_reads_the_host_always_refuses_the_hash() {
-    let terms = any_terms();
-    let length: usize = kani::any();
-    kani::assume(length <= terms.len());
-    let terms = &terms[..length];
-    let mut host = false;
-    let mut index = 0;
-    while index < terms.len() {
-        host |= reads_host(terms[index]);
-        index += 1;
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn a_host_read_refuses_the_hash_and_the_whole_context_passes_only_into_a_rendered_partial() {
+        let terms = [
+            TERMS[usize::from(kani::any::<u8>() % 5)],
+            TERMS[usize::from(kani::any::<u8>() % 5)],
+            TERMS[usize::from(kani::any::<u8>() % 5)],
+            TERMS[usize::from(kani::any::<u8>() % 5)],
+        ];
+        let length: usize = kani::any();
+        kani::assume(length <= terms.len());
+        let terms = &terms[..length];
+        spec_verdict(terms);
+        let result = verdict(terms);
+        kani::cover!(result == Verdict::HostState);
+        kani::cover!(result == Verdict::WholeContext);
+        kani::cover!(result == Verdict::Admit && length == 3 && terms[2] == Term::Context);
     }
-    let result = verdict(terms);
-    assert!((result == Verdict::HostState) == host);
-    kani::cover!(result == Verdict::HostState);
-    kani::cover!(result == Verdict::Admit && length > 2);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(6)]
-fn the_whole_context_is_hashed_only_through_a_rendered_partial() {
-    let terms = any_terms();
-    let length: usize = kani::any();
-    kani::assume(length <= terms.len());
-    let terms = &terms[..length];
-    let mut host = false;
-    let mut bare = false;
-    let mut index = 0;
-    while index < terms.len() {
-        host |= reads_host(terms[index]);
-        bare |= terms[index] == Term::Context && !(index >= 2 && terms[index - 2] == Term::Render);
-        index += 1;
-    }
-    kani::assume(!host);
-    let result = verdict(terms);
-    assert!((result == Verdict::WholeContext) == bare);
-    assert!((result == Verdict::Admit) == !bare);
-    kani::cover!(result == Verdict::WholeContext);
-    kani::cover!(result == Verdict::Admit && length == 3 && terms[2] == Term::Context);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec::Vec;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every expression")]
+    fn every_expression_of_up_to_four_terms_meets_the_specification() {
+        let mut expressions: Vec<Vec<Term>> = alloc::vec![Vec::new()];
+        for _ in 0..4 {
+            let longer: Vec<Vec<Term>> = expressions
+                .iter()
+                .filter(|terms| terms.len() == expressions.last().map_or(0, Vec::len))
+                .flat_map(|terms| {
+                    proofs::TERMS.iter().map(move |&term| {
+                        let mut next = terms.clone();
+                        next.push(term);
+                        next
+                    })
+                })
+                .collect();
+            expressions.extend(longer);
+        }
+        for terms in &expressions {
+            proofs::spec_verdict(terms);
+        }
+    }
+
+    #[test]
+    fn each_token_names_its_term() {
+        assert_eq!(term("."), Term::Context);
+        assert_eq!(term("$"), Term::Context);
+        assert_eq!(term("includeTemplate"), Term::Render);
+        for read in HOST_READS {
+            assert_eq!(term(read), Term::HostRead, "{read}");
+        }
+        assert_eq!(term(".chezmoi.os"), Term::Chezmoi);
+        assert_eq!(term("$.chezmoi.os"), Term::Chezmoi);
+        assert_eq!(term(".chezmoidata"), Term::Chezmoi);
+        assert_eq!(term(".ocaml"), Term::Data);
+        assert_eq!(term("list"), Term::Data);
+    }
+
+    #[test]
+    fn terms_split_at_spaces_and_parentheses_and_keep_quotes_whole() {
+        assert_eq!(terms(""), []);
+        assert_eq!(terms("  "), []);
+        assert_eq!(terms("(.a)"), [Term::Data]);
+        assert_eq!(terms(".a\t."), [Term::Data, Term::Context]);
+        assert_eq!(terms("\"x y\" ."), [Term::Data, Term::Context]);
+        assert_eq!(terms("(output)(.)"), [Term::HostRead, Term::Context]);
+    }
 
     #[test]
     fn a_step_hashes_its_own_data_and_rendered_partials() {

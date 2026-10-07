@@ -75,51 +75,6 @@ pub fn history(undecidable: bool, rewrite: bool) -> History {
     }
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_rebase_signs_one_linear_branch_and_an_amend_only_the_checked_out_tip() {
-    let refs: usize = kani::any();
-    let reference = match kani::any::<u8>() {
-        0 => Reference::CheckedOutBranch,
-        1 => Reference::Head,
-        2 => Reference::Branch,
-        _ => Reference::Other,
-    };
-    let checked_out = matches!(reference, Reference::CheckedOutBranch | Reference::Head);
-    let branch = matches!(reference, Reference::CheckedOutBranch | Reference::Branch);
-    let merges: bool = kani::any();
-    let only_tip: bool = kani::any();
-    let plan = signing(refs, reference, merges, only_tip);
-    assert_eq!(plan == Signing::Amend, refs == 1 && checked_out && only_tip);
-    assert_eq!(
-        plan == Signing::Rebase,
-        refs == 1 && !(checked_out && only_tip) && branch && !merges
-    );
-    assert!(refs == 1 || plan == Signing::Inspect);
-    kani::cover!(plan == Signing::Amend);
-    kani::cover!(plan == Signing::Rebase && only_tip && !checked_out);
-    kani::cover!(
-        plan == Signing::Inspect && refs == 1 && only_tip && reference == Reference::Other
-    );
-    kani::cover!(plan == Signing::Rebase);
-    kani::cover!(plan == Signing::Inspect && refs == 1 && merges);
-    kani::cover!(plan == Signing::Inspect && refs > 1);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn a_history_refusal_suggests_the_step_for_its_worst_update() {
-    let undecidable: bool = kani::any();
-    let rewrite: bool = kani::any();
-    let step = history(undecidable, rewrite);
-    assert_eq!(step == History::Fetch, undecidable);
-    assert_eq!(step == History::Integrate, !undecidable && rewrite);
-    assert_eq!(step == History::ForgeDelete, !undecidable && !rewrite);
-    kani::cover!(step == History::Fetch && rewrite);
-    kani::cover!(step == History::Integrate);
-    kani::cover!(step == History::ForgeDelete);
-}
-
 /// Whether a rebase may rewrite a commit a remote-tracking ref holds.
 /// `control` marks a `--continue`, `--abort`, or another step of a rebase already started.
 /// `rewrites` holds `None` when the gate couldn't tell.
@@ -156,60 +111,6 @@ pub fn stack_tooling(token: Option<&[u8]>, lease: Option<&[u8]>) -> bool {
     matches!((token, lease), (Some(token), Some(lease)) if !token.is_empty() && token == lease)
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_rebase_is_refused_whenever_it_may_rewrite_a_published_commit() {
-    let control: bool = kani::any();
-    let rewrites: Option<bool> = kani::any();
-    let refused = rebase_refused(control, rewrites);
-    assert_eq!(refused, !control && rewrites != Some(false));
-    assert!(control || rewrites == Some(false) || refused);
-    kani::cover!(refused && rewrites.is_none());
-    kani::cover!(refused && rewrites == Some(true));
-    kani::cover!(!refused && control && rewrites == Some(true));
-    kani::cover!(!refused && rewrites == Some(false));
-}
-
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(3)]
-fn a_published_rewrite_runs_only_through_the_leased_stack_tooling_or_a_waiver() {
-    let token: [u8; 2] = kani::any();
-    let lease: [u8; 2] = kani::any();
-    let token_length: usize = kani::any();
-    let lease_length: usize = kani::any();
-    kani::assume(token_length <= 2 && lease_length <= 2);
-    let token = if kani::any() {
-        Some(&token[..token_length])
-    } else {
-        None
-    };
-    let lease = if kani::any() {
-        Some(&lease[..lease_length])
-    } else {
-        None
-    };
-    let tooling = stack_tooling(token, lease);
-    assert_eq!(
-        tooling,
-        token.is_some_and(|token| !token.is_empty() && Some(token) == lease)
-    );
-    let stack_rule: bool = kani::any();
-    let waived: bool = kani::any();
-    let admitted = admission(stack_rule, tooling, waived);
-    assert_eq!(admitted == Admission::Tooling, stack_rule && tooling);
-    assert_eq!(
-        admitted == Admission::Refused,
-        !waived && !(stack_rule && tooling)
-    );
-    kani::cover!(admitted == Admission::Tooling);
-    kani::cover!(admitted == Admission::Waived && !stack_rule);
-    kani::cover!(
-        admitted == Admission::Refused && stack_rule && token.is_some() && lease.is_none()
-    );
-    kani::cover!(admitted == Admission::Refused && tooling && !stack_rule);
-}
-
 /// What a long option's name means among the spellings a Git command accepts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Spelling {
@@ -225,9 +126,10 @@ pub enum Spelling {
 #[must_use]
 pub fn spelling(name: &[u8], spellings: &[&[u8]]) -> Spelling {
     let mut found = Spelling::Unknown;
+    let mut rest = spellings;
     let mut index = 0;
-    while let Some(&candidate) = spellings.get(index) {
-        if candidate == name {
+    while let [candidate, tail @ ..] = rest {
+        if *candidate == name {
             return Spelling::Is(index);
         }
         if candidate.starts_with(name) {
@@ -236,57 +138,10 @@ pub fn spelling(name: &[u8], spellings: &[&[u8]]) -> Spelling {
                 _ => Spelling::Ambiguous,
             };
         }
+        rest = tail;
         index += 1;
     }
     found
-}
-
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(4)]
-fn a_long_option_is_its_exact_spelling_or_its_only_completion() {
-    let first = [kani::any(), kani::any()];
-    let second = [kani::any(), kani::any()];
-    let third = [kani::any(), kani::any()];
-    let word: [u8; 2] = [kani::any(), kani::any()];
-    let first_length: usize = kani::any();
-    let second_length: usize = kani::any();
-    let third_length: usize = kani::any();
-    let length: usize = kani::any();
-    kani::assume(length <= 2 && first_length <= 2 && second_length <= 2 && third_length <= 2);
-    let name = &word[..length];
-    let spellings: [&[u8]; 3] = [
-        &first[..first_length],
-        &second[..second_length],
-        &third[..third_length],
-    ];
-    let prefix_0 = spellings[0].starts_with(name);
-    let prefix_1 = spellings[1].starts_with(name);
-    let prefix_2 = spellings[2].starts_with(name);
-    let completions = usize::from(prefix_0) + usize::from(prefix_1) + usize::from(prefix_2);
-    let first_exact = if spellings[0] == name {
-        Some(0)
-    } else if spellings[1] == name {
-        Some(1)
-    } else if spellings[2] == name {
-        Some(2)
-    } else {
-        None
-    };
-    let read = spelling(name, &spellings);
-    match (first_exact, read) {
-        (Some(index), _) => assert_eq!(read, Spelling::Is(index)),
-        (None, Spelling::Is(index)) => assert!(
-            completions == 1
-                && (index == 0 && prefix_0 || index == 1 && prefix_1 || index == 2 && prefix_2)
-        ),
-        (None, Spelling::Ambiguous) => assert!(completions > 1),
-        (None, Spelling::Unknown) => assert_eq!(completions, 0),
-    }
-    kani::cover!(first_exact.is_some() && completions > 1);
-    kani::cover!(first_exact.is_none() && matches!(read, Spelling::Is(_)));
-    kani::cover!(read == Spelling::Ambiguous);
-    kani::cover!(read == Spelling::Unknown);
 }
 
 /// What a gate does with a command line, given whether a rule refuses it and whether the gate read every option as Git reads it.
@@ -308,20 +163,6 @@ pub fn verdict(refused: bool, read: bool) -> Verdict {
     } else {
         Verdict::Withhold
     }
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn a_suggestion_is_rebuilt_only_from_a_line_read_in_full() {
-    let refused: bool = kani::any();
-    let read: bool = kani::any();
-    let verdict = verdict(refused, read);
-    assert_eq!(verdict == Verdict::Allow, !refused);
-    assert_eq!(verdict == Verdict::Suggest, refused && read);
-    assert_eq!(verdict == Verdict::Withhold, refused && !read);
-    kani::cover!(verdict == Verdict::Suggest);
-    kani::cover!(verdict == Verdict::Withhold);
-    kani::cover!(verdict == Verdict::Allow && !read);
 }
 
 /// How the command line gave `git commit --fixup`.
@@ -398,55 +239,311 @@ pub fn commit_retry(source: Source, picking: Option<bool>, known: bool) -> Resul
     })
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_commit_retry_keeps_what_its_message_source_implied() {
-    let fixup = match kani::any::<u8>() {
-        0 => Fixup::Absent,
-        1 => Fixup::Plain,
-        2 => Fixup::Amend,
-        _ => Fixup::Reword,
-    };
-    let source = Source {
-        fixup,
-        reuse: kani::any(),
-        renew: kani::any(),
-        amend: kani::any(),
-    };
-    let picking: Option<bool> = kani::any();
-    let known: bool = kani::any();
-    let retry = commit_retry(source, picking, known);
-    if source.reuse && picking.is_none() {
-        assert_eq!(retry, Err(Withheld::Picking));
-    }
-    let takes = source.reuse && !source.renew && picking == Some(false);
-    assert_eq!(retry == Err(Withheld::Authorship), takes && !known);
-    if let Ok(retry) = retry {
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
+
+    pub const REFERENCES: [Reference; 4] = [
+        Reference::CheckedOutBranch,
+        Reference::Head,
+        Reference::Branch,
+        Reference::Other,
+    ];
+    pub const FIXUPS: [Fixup; 4] = [Fixup::Absent, Fixup::Plain, Fixup::Amend, Fixup::Reword];
+
+    /// A rebase signs one linear branch, an amend only the checked-out tip, and every other push goes to inspection.
+    pub fn spec_signing(refs: usize, reference: Reference, merges: bool, only_tip: bool) {
+        let checked_out = matches!(reference, Reference::CheckedOutBranch | Reference::Head);
+        let branch = matches!(reference, Reference::CheckedOutBranch | Reference::Branch);
+        assert_eq!(reference.checked_out(), checked_out);
+        assert_eq!(reference.branch(), branch);
+        let plan = signing(refs, reference, merges, only_tip);
+        assert_eq!(plan == Signing::Amend, refs == 1 && checked_out && only_tip);
         assert_eq!(
-            retry.allow_empty,
-            fixup == Fixup::Amend || fixup == Fixup::Reword
+            plan == Signing::Rebase,
+            refs == 1 && !(checked_out && only_tip) && branch && !merges
         );
-        assert_eq!(retry.only, fixup == Fixup::Reword);
-        assert_eq!(retry.authorship, takes);
-        // Git accepts a kept reset, and a dropped one leaves the committer's authorship.
-        if retry.reset_author && source.renew {
-            assert!(source.amend || picking == Some(true) || !source.reuse);
+    }
+
+    pub fn spec_history(undecidable: bool, rewrite: bool) {
+        let step = history(undecidable, rewrite);
+        assert_eq!(step == History::Fetch, undecidable);
+        assert_eq!(step == History::Integrate, !undecidable && rewrite);
+        assert_eq!(step == History::ForgeDelete, !undecidable && !rewrite);
+    }
+
+    pub fn spec_rebase_refused(control: bool, rewrites: Option<bool>) {
+        assert_eq!(
+            rebase_refused(control, rewrites),
+            !control && rewrites != Some(false)
+        );
+    }
+
+    pub fn spec_verdict(refused: bool, read: bool) {
+        let result = verdict(refused, read);
+        assert_eq!(result == Verdict::Allow, !refused);
+        assert_eq!(result == Verdict::Suggest, refused && read);
+        assert_eq!(result == Verdict::Withhold, refused && !read);
+    }
+
+    /// A published rewrite runs only through the leased stack tooling or a waiver.
+    pub fn spec_admission(
+        token: Option<&[u8]>,
+        lease: Option<&[u8]>,
+        stack_rule: bool,
+        waived: bool,
+    ) {
+        let tooling = stack_tooling(token, lease);
+        assert_eq!(
+            tooling,
+            token.is_some_and(|token| !token.is_empty() && Some(token) == lease)
+        );
+        let admitted = admission(stack_rule, tooling, waived);
+        assert_eq!(admitted == Admission::Tooling, stack_rule && tooling);
+        assert_eq!(
+            admitted == Admission::Waived,
+            waived && !(stack_rule && tooling)
+        );
+        assert_eq!(
+            admitted == Admission::Refused,
+            !(waived || stack_rule && tooling)
+        );
+    }
+
+    /// A long option reads as its first exact spelling, else its only completion, else as ambiguous or unknown by how many spellings it starts.
+    pub fn spec_spelling(name: &[u8], spellings: &[&[u8]]) {
+        let mut exact = None;
+        let mut completions = 0;
+        let mut only = 0;
+        let mut index = 0;
+        while let Some(&candidate) = spellings.get(index) {
+            if exact.is_none() && candidate == name {
+                exact = Some(index);
+            }
+            if candidate.starts_with(name) {
+                completions += 1;
+                only = index;
+            }
+            index += 1;
         }
-        if !retry.reset_author {
-            assert!(source.renew && !source.amend && !retry.authorship);
+        let expected = match (exact, completions) {
+            (Some(index), _) => Spelling::Is(index),
+            (None, 0) => Spelling::Unknown,
+            (None, 1) => Spelling::Is(only),
+            (None, _) => Spelling::Ambiguous,
+        };
+        assert_eq!(spelling(name, spellings), expected);
+    }
+
+    /// A retry keeps what its message source implied, and refuses when the gate can't tell whose authorship a reuse takes.
+    pub fn spec_commit_retry(source: Source, picking: Option<bool>, known: bool) {
+        let retry = commit_retry(source, picking, known);
+        let takes = source.reuse && !source.renew && picking == Some(false);
+        let expected = if source.reuse && picking.is_none() {
+            Err(Withheld::Picking)
+        } else if takes && !known {
+            Err(Withheld::Authorship)
+        } else {
+            Ok(Retry {
+                allow_empty: matches!(source.fixup, Fixup::Amend | Fixup::Reword),
+                only: source.fixup == Fixup::Reword,
+                authorship: takes,
+                reset_author: !source.reuse
+                    || !source.renew
+                    || source.amend
+                    || picking == Some(true),
+            })
+        };
+        assert_eq!(retry, expected);
+        // Git accepts a kept reset, and a dropped one leaves the committer's authorship.
+        if let Ok(retry) = retry {
+            assert!(retry.reset_author || (source.renew && !source.amend && !retry.authorship));
         }
     }
-    kani::cover!(retry == Err(Withheld::Picking));
-    kani::cover!(retry == Err(Withheld::Authorship));
-    kani::cover!(retry.is_ok_and(|retry| retry.only && retry.allow_empty));
-    kani::cover!(retry.is_ok_and(|retry| retry.authorship));
-    kani::cover!(retry.is_ok_and(|retry| !retry.reset_author));
-    kani::cover!(retry.is_ok_and(|retry| retry.reset_author && source.reuse && source.renew));
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_rebase_signs_one_linear_branch_and_an_amend_only_the_checked_out_tip() {
+        let refs: usize = kani::any();
+        let reference = REFERENCES[usize::from(kani::any::<u8>() % 4)];
+        let merges: bool = kani::any();
+        let only_tip: bool = kani::any();
+        spec_signing(refs, reference, merges, only_tip);
+        let plan = signing(refs, reference, merges, only_tip);
+        kani::cover!(plan == Signing::Amend);
+        kani::cover!(plan == Signing::Rebase && only_tip && !reference.checked_out());
+        kani::cover!(plan == Signing::Inspect && refs == 1 && merges);
+        kani::cover!(plan == Signing::Inspect && refs > 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_refusal_suggests_the_step_for_its_worst_update_and_only_from_a_line_read_in_full() {
+        let first: bool = kani::any();
+        let second: bool = kani::any();
+        let rewrites: Option<bool> = kani::any();
+        spec_history(first, second);
+        spec_verdict(first, second);
+        spec_rebase_refused(first, rewrites);
+        kani::cover!(history(first, second) == History::Integrate);
+        kani::cover!(verdict(first, second) == Verdict::Withhold);
+        kani::cover!(rebase_refused(first, rewrites) && rewrites.is_none());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn a_published_rewrite_runs_only_through_the_leased_stack_tooling_or_a_waiver() {
+        let token: [u8; 2] = kani::any();
+        let lease: [u8; 2] = kani::any();
+        let token_length: usize = kani::any();
+        let lease_length: usize = kani::any();
+        kani::assume(token_length <= 2 && lease_length <= 2);
+        let token = if kani::any() {
+            Some(&token[..token_length])
+        } else {
+            None
+        };
+        let lease = if kani::any() {
+            Some(&lease[..lease_length])
+        } else {
+            None
+        };
+        let stack_rule: bool = kani::any();
+        let waived: bool = kani::any();
+        spec_admission(token, lease, stack_rule, waived);
+        let admitted = admission(stack_rule, stack_tooling(token, lease), waived);
+        kani::cover!(admitted == Admission::Tooling);
+        kani::cover!(admitted == Admission::Waived && !stack_rule);
+        kani::cover!(
+            admitted == Admission::Refused && stack_rule && token.is_some() && lease.is_none()
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn a_long_option_is_its_exact_spelling_or_its_only_completion() {
+        let first: [u8; 2] = kani::any();
+        let second: [u8; 2] = kani::any();
+        let third: [u8; 2] = kani::any();
+        let word: [u8; 2] = kani::any();
+        let lengths: [usize; 4] = [kani::any(), kani::any(), kani::any(), kani::any()];
+        kani::assume(lengths[0] <= 2 && lengths[1] <= 2 && lengths[2] <= 2 && lengths[3] <= 2);
+        let name = &word[..lengths[3]];
+        let spellings: [&[u8]; 3] = [
+            &first[..lengths[0]],
+            &second[..lengths[1]],
+            &third[..lengths[2]],
+        ];
+        spec_spelling(name, &spellings);
+        let read = spelling(name, &spellings);
+        kani::cover!(read == Spelling::Ambiguous);
+        kani::cover!(read == Spelling::Unknown);
+        kani::cover!(
+            matches!(read, Spelling::Is(_))
+                && spellings[0] != name
+                && spellings[1] != name
+                && spellings[2] != name
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_commit_retry_keeps_what_its_message_source_implied() {
+        let source = Source {
+            fixup: FIXUPS[usize::from(kani::any::<u8>() % 4)],
+            reuse: kani::any(),
+            renew: kani::any(),
+            amend: kani::any(),
+        };
+        let picking: Option<bool> = kani::any();
+        let known: bool = kani::any();
+        spec_commit_retry(source, picking, known);
+        let retry = commit_retry(source, picking, known);
+        kani::cover!(retry == Err(Withheld::Picking));
+        kani::cover!(retry == Err(Withheld::Authorship));
+        kani::cover!(retry.is_ok_and(|retry| retry.only && retry.allow_empty));
+        kani::cover!(retry.is_ok_and(|retry| !retry.reset_author));
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Admission, admission, rebase_refused, stack_tooling};
+    use super::*;
+    use crate::domain::{flags, words};
+    use alloc::vec::Vec;
+
+    #[test]
+    fn every_input_meets_the_signing_history_rebase_and_verdict_specifications() {
+        let options = [None, Some(false), Some(true)];
+        for refs in [0, 1, 2, usize::MAX] {
+            for reference in proofs::REFERENCES {
+                for [merges, only_tip] in flags() {
+                    proofs::spec_signing(refs, reference, merges, only_tip);
+                }
+            }
+        }
+        for [first, second] in flags() {
+            proofs::spec_history(first, second);
+            proofs::spec_verdict(first, second);
+        }
+        for control in [false, true] {
+            for rewrites in options {
+                proofs::spec_rebase_refused(control, rewrites);
+            }
+        }
+        for fixup in proofs::FIXUPS {
+            for [reuse, renew, amend, known] in flags() {
+                for picking in options {
+                    proofs::spec_commit_retry(
+                        Source {
+                            fixup,
+                            reuse,
+                            renew,
+                            amend,
+                        },
+                        picking,
+                        known,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_short_token_and_lease_meets_the_admission_specification() {
+        let values = words(b"ab", 2);
+        let options: Vec<Option<&[u8]>> = core::iter::once(None)
+            .chain(values.iter().map(|value| Some(value.as_slice())))
+            .collect();
+        for &token in &options {
+            for &lease in &options {
+                for [stack_rule, waived] in flags() {
+                    proofs::spec_admission(token, lease, stack_rule, waived);
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every short name")]
+    fn every_short_name_against_three_spellings_meets_the_spelling_specification() {
+        let values = words(b"ab", 2);
+        for name in &values {
+            for first in &values {
+                for second in &values {
+                    for third in &values {
+                        proofs::spec_spelling(
+                            name,
+                            &[first.as_slice(), second.as_slice(), third.as_slice()],
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn a_rebase_is_refused_unless_it_continues_or_keeps_published_commits() {

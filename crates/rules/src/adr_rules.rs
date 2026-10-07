@@ -107,73 +107,114 @@ pub const fn identity(number: Option<u16>, dated: bool) -> Identity {
     }
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn only_an_early_number_or_a_date_identifies_a_record() {
-    let number: Option<u16> = kani::any();
-    let dated: bool = kani::any();
-    let result = identity(number, dated);
-    assert_eq!(
-        result == Identity::Numbered,
-        number.is_some_and(|number| number <= LAST_NUMBERED) && !dated
-    );
-    assert_eq!(result == Identity::Dated, number.is_none() && dated);
-    kani::cover!(result == Identity::Numbered);
-    kani::cover!(result == Identity::Refused(Unidentified::LateNumber));
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-fn every_refused_identity_names_its_fix() {
-    let number: Option<u16> = kani::any();
-    let dated: bool = kani::any();
-    if let Identity::Refused(reason) = identity(number, dated) {
-        assert!(!reason.next_action().is_empty());
+    pub fn spec_identity(number: Option<u16>, dated: bool) {
+        let result = identity(number, dated);
+        assert_eq!(
+            result == Identity::Numbered,
+            number.is_some_and(|number| number <= LAST_NUMBERED) && !dated
+        );
+        assert_eq!(result == Identity::Dated, number.is_none() && dated);
+        assert_eq!(
+            result == Identity::Refused(Unidentified::NumberAndDate),
+            number.is_some() && dated
+        );
+        if let Identity::Refused(reason) = result {
+            assert!(reason.next_action().ends_with("then run `just gen`."));
+        }
     }
-    kani::cover!(matches!(identity(number, dated), Identity::Refused(_)));
-    kani::cover!(identity(number, dated) == Identity::Dated);
-}
 
-#[cfg(kani)]
-fn any_status() -> Status {
-    let choice: u8 = kani::any();
-    kani::assume(choice < 5);
-    match choice {
-        0 => Status::Proposed,
-        1 => Status::Accepted,
-        2 => Status::Amended,
-        3 => Status::Superseded,
-        _ => Status::Deprecated,
+    pub fn spec_verdict(status: Status, successors: usize) {
+        let result = verdict(status, successors);
+        let changed = matches!(status, Status::Amended | Status::Superseded);
+        assert_eq!(
+            result == Verdict::MissingSuccessor,
+            changed && successors == 0
+        );
+        assert_eq!(
+            result == Verdict::HiddenSuccessor,
+            !changed && successors > 0
+        );
     }
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_changed_record_always_names_what_changed_it() {
-    let status = any_status();
-    let successors: usize = kani::any();
-    let result = verdict(status, successors);
-    let changed = matches!(status, Status::Amended | Status::Superseded);
-    assert!((result == Verdict::MissingSuccessor) == (changed && successors == 0));
-    kani::cover!(result == Verdict::MissingSuccessor);
-    kani::cover!(result == Verdict::Consistent && changed);
-}
+    #[cfg(kani)]
+    fn any_status() -> Status {
+        let choice: u8 = kani::any();
+        kani::assume(choice < 5);
+        match choice {
+            0 => Status::Proposed,
+            1 => Status::Accepted,
+            2 => Status::Amended,
+            3 => Status::Superseded,
+            _ => Status::Deprecated,
+        }
+    }
 
-#[cfg(kani)]
-#[kani::proof]
-fn only_a_changed_record_names_successors() {
-    let status = any_status();
-    let successors: usize = kani::any();
-    let result = verdict(status, successors);
-    let changed = matches!(status, Status::Amended | Status::Superseded);
-    assert!((result == Verdict::HiddenSuccessor) == (!changed && successors > 0));
-    kani::cover!(result == Verdict::HiddenSuccessor);
-    kani::cover!(result == Verdict::Consistent && !changed);
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_an_early_number_or_a_date_identifies_a_record_and_each_refusal_names_its_fix() {
+        let number: Option<u16> = kani::any();
+        let dated: bool = kani::any();
+        spec_identity(number, dated);
+        let result = identity(number, dated);
+        kani::cover!(result == Identity::Numbered);
+        kani::cover!(result == Identity::Refused(Unidentified::LateNumber));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_a_changed_record_names_what_changed_it() {
+        let status = any_status();
+        let successors: usize = kani::any();
+        spec_verdict(status, successors);
+        let result = verdict(status, successors);
+        kani::cover!(result == Verdict::MissingSuccessor);
+        kani::cover!(result == Verdict::HiddenSuccessor);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes minutes over every number")]
+    fn every_number_and_date_meets_the_identity_specification() {
+        for dated in [false, true] {
+            proofs::spec_identity(None, dated);
+            for number in 0..=u16::MAX {
+                proofs::spec_identity(Some(number), dated);
+            }
+        }
+    }
+
+    #[test]
+    fn every_status_meets_the_link_specification_around_zero_and_the_extreme() {
+        for status in Status::ALL {
+            for successors in [0, 1, 2, usize::MAX] {
+                proofs::spec_verdict(status, successors);
+            }
+        }
+    }
+
+    #[test]
+    fn each_refusal_names_its_own_fix() {
+        assert!(
+            Unidentified::LateNumber
+                .next_action()
+                .starts_with("Drop the number")
+        );
+        assert!(
+            Unidentified::NumberAndDate
+                .next_action()
+                .starts_with("Remove `date`")
+        );
+        assert!(Unidentified::Undated.next_action().starts_with("Add `date"));
+    }
 
     #[test]
     fn a_record_takes_an_early_number_or_a_date_and_never_both() {

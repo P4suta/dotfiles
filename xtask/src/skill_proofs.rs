@@ -335,7 +335,103 @@ fn verify_native(root: &Path) -> Result<()> {
     println!(
         "Verified all {verified} production policy harnesses with their reachable outcomes, and rejected all {rejected} counterexamples"
     );
-    verify_miri(root)
+    verify_miri(root)?;
+    verify_mutants(root, &manifest)
+}
+
+/// The cargo-mutants release that `mise.toml` and the proof image pin.
+pub const MUTANTS_VERSION: &str = "27.1.0";
+
+/// The mutants built and tested at once: one per core the host offers, since each one only builds and tests the small core.
+fn mutant_jobs() -> String {
+    std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .to_string()
+}
+
+/// The crate whose specification lost its assertion, which the mutation gate must refuse.
+const MUTANTS_FIXTURE: &str = "xtask/proofs/mutants-fixture";
+
+/// The package whose tests must catch every mutant of its code.
+const MUTATED_PACKAGE: &str = "rules";
+
+fn mutants(directory: &Path, output: &Path) -> std::process::Command {
+    let mut command = Tool::Cargo.command();
+    // Each mutant builds in its own copy of the tree, which a shared target directory would serialize.
+    command
+        .env_remove("CARGO_TARGET_DIR")
+        .args(["mutants", "--no-shuffle", "--jobs"])
+        .arg(mutant_jobs())
+        .arg("--dir")
+        .arg(directory)
+        .arg("--output")
+        .arg(output);
+    command
+}
+
+/// A campaign's list of mutants with one outcome, empty when the campaign found none.
+fn outcome(output: &Path, list: &str) -> String {
+    fs::read_to_string(output.join("mutants.out").join(list)).unwrap_or_default()
+}
+
+fn lines(text: &str) -> u64 {
+    text.lines().filter(|line| !line.trim().is_empty()).count() as u64
+}
+
+/// Mutates the decision core, holds its survivors and unexplained timeouts to their baselines, and refuses a fixture whose specification lost its assertion.
+/// Test times stay advisory: only the outcome of each mutant counts.
+fn verify_mutants(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
+    let version = Tool::Cargo
+        .command()
+        .args(["mutants", "--version"])
+        .output()?;
+    ensure!(
+        version.status.success()
+            && String::from_utf8(version.stdout)?
+                .contains(&format!("cargo-mutants {MUTANTS_VERSION}")),
+        "the pinned cargo-mutants {MUTANTS_VERSION} is unavailable"
+    );
+    let output = tempfile::tempdir()?;
+    let status = mutants(root, output.path())
+        .args(["--package", MUTATED_PACKAGE])
+        .status()
+        .context("start cargo-mutants")?;
+    ensure!(
+        !outcome(output.path(), "caught.txt").is_empty(),
+        "cargo-mutants caught no mutant of {MUTATED_PACKAGE}, so the campaign didn't run: {status}"
+    );
+    let missed = outcome(output.path(), "missed.txt");
+    let unexplained =
+        obligations::unexplained_timeouts(manifest, &outcome(output.path(), "timeout.txt"));
+    let baselines = obligations::parse_baselines(
+        &fs::read_to_string(root.join(obligations::BASELINES)).context(obligations::BASELINES)?,
+    )?;
+    let refusals = obligations::mutation_metrics(
+        &baselines,
+        obligations::Campaign {
+            missed: lines(&missed),
+            timed_out: unexplained.len() as u64,
+        },
+    );
+    ensure!(
+        refusals.is_empty(),
+        "{}\nKill each surviving mutant with a test or a stronger specification:\n{missed}\nEnd each timed-out mutant or name it as non-terminating in {}:\n{}",
+        refusals.join("\n"),
+        obligations::MANIFEST,
+        unexplained.join("\n")
+    );
+    let fixture = tempfile::tempdir()?;
+    mutants(&root.join(MUTANTS_FIXTURE), fixture.path())
+        .status()
+        .context("start cargo-mutants on its fixture")?;
+    ensure!(
+        lines(&outcome(fixture.path(), "missed.txt")) > 0,
+        "the mutation gate admitted {MUTANTS_FIXTURE}, whose specification asserts nothing, so the gate proves nothing"
+    );
+    println!(
+        "Every mutant of {MUTATED_PACKAGE} died or holds its baseline, and the fixture without an assertion let its mutants survive"
+    );
+    Ok(())
 }
 
 /// The unstable options the obligations of `source` need: stubbing always, and what each contract obligation names.

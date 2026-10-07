@@ -20,34 +20,43 @@ pub const fn verdict(converting_shell: bool, remote_path: bool, conversion_off: 
 
 pub const NEXT_ACTION: &str = "Prefix the command with `MSYS_NO_PATHCONV=1` so Git Bash passes the remote arguments unchanged, or run it from PowerShell.";
 
-#[cfg(kani)]
-#[kani::proof]
-fn only_a_converted_remote_path_is_refused() {
-    let converting_shell: bool = kani::any();
-    let remote_path: bool = kani::any();
-    let conversion_off: bool = kani::any();
-    let result = verdict(converting_shell, remote_path, conversion_off);
-    assert_eq!(
-        result == Verdict::Refuse,
-        converting_shell && remote_path && !conversion_off
-    );
-    kani::cover!(result == Verdict::Refuse);
-    kani::cover!(result == Verdict::Admit && converting_shell && remote_path);
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_shell_that_keeps_arguments_admits_every_remote_path() {
-    let remote_path: bool = kani::any();
-    let conversion_off: bool = kani::any();
-    assert_eq!(verdict(false, remote_path, conversion_off), Verdict::Admit);
-    kani::cover!(remote_path && !conversion_off);
-    kani::cover!(!remote_path);
+    pub fn spec_verdict(converting_shell: bool, remote_path: bool, conversion_off: bool) {
+        let result = verdict(converting_shell, remote_path, conversion_off);
+        assert_eq!(
+            result == Verdict::Refuse,
+            converting_shell && remote_path && !conversion_off
+        );
+        assert_eq!(verdict(false, remote_path, conversion_off), Verdict::Admit);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_a_converted_remote_path_is_refused() {
+        let converting_shell: bool = kani::any();
+        let remote_path: bool = kani::any();
+        let conversion_off: bool = kani::any();
+        spec_verdict(converting_shell, remote_path, conversion_off);
+        let result = verdict(converting_shell, remote_path, conversion_off);
+        kani::cover!(result == Verdict::Refuse);
+        kani::cover!(result == Verdict::Admit && converting_shell && remote_path);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_input_meets_the_specification() {
+        for [converting_shell, remote_path, conversion_off] in crate::domain::flags() {
+            proofs::spec_verdict(converting_shell, remote_path, conversion_off);
+        }
+    }
 
     #[test]
     fn a_converted_remote_path_is_refused_unless_the_conversion_is_off() {

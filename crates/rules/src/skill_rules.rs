@@ -183,7 +183,6 @@ pub fn maintenance_current(value: Maintenance) -> bool {
         && value.observations_preserved
         && value.notes_current
         && value.review_complete
-        && value.threshold > 0
         && value.new_observations < value.threshold
 }
 
@@ -205,208 +204,243 @@ pub fn completion(current: bool, already_continued: bool) -> Completion {
     }
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn adapter_activation_requires_policy_and_installed_runtime() {
-    let policy: bool = kani::any();
-    let runtime: bool = kani::any();
-    let stage = installation_stage(policy, runtime);
-    assert!(stage != InstallationStage::Adapter || (policy && runtime));
-    assert!(stage != InstallationStage::Runtime || (policy && !runtime));
-    assert!(stage != InstallationStage::Policy || !policy);
-    kani::cover!(stage == InstallationStage::Policy);
-    kani::cover!(stage == InstallationStage::Runtime);
-    kani::cover!(stage == InstallationStage::Adapter);
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-fn immutable_report_identity_requires_exact_digest_shape() {
-    let length: usize = kani::any();
-    let hexadecimal: bool = kani::any();
-    let accepted = immutable_identity_valid(length, hexadecimal);
-    assert!(!accepted || (length == 64 && hexadecimal));
-    assert!(length != 64 || !hexadecimal || accepted);
-    kani::cover!(accepted);
-    kani::cover!(!accepted);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn incomplete_completion_is_refused_and_automatic_continuation_is_bounded() {
-    let current: bool = kani::any();
-    let continued: bool = kani::any();
-    let action = completion(current, continued);
-    assert_eq!(action == Completion::Allow, current);
-    assert!(!continued || action != Completion::RequestMaintenance);
-    if action == Completion::RequestMaintenance {
-        assert_eq!(completion(false, true), Completion::EndIncomplete);
+    /// Each two-flag decision takes exactly the state its rule names.
+    pub fn spec_pairs(first: bool, second: bool) {
+        let stage = installation_stage(first, second);
+        assert_eq!(stage == InstallationStage::Policy, !first);
+        assert_eq!(stage == InstallationStage::Runtime, first && !second);
+        assert_eq!(stage == InstallationStage::Adapter, first && second);
+        let action = completion(first, second);
+        assert_eq!(action == Completion::Allow, first);
+        assert_eq!(action == Completion::RequestMaintenance, !first && !second);
+        assert_eq!(action == Completion::EndIncomplete, !first && second);
+        let base = diff_base(first, second);
+        assert_eq!(base == DiffBase::Whole, !first);
+        assert_eq!(base == DiffBase::Assessed, first && second);
+        assert_eq!(base == DiffBase::Unavailable, first && !second);
     }
-    kani::cover!(action == Completion::Allow);
-    kani::cover!(action == Completion::RequestMaintenance);
-    kani::cover!(action == Completion::EndIncomplete);
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn dispositions_require_evidence_and_defined_follow_up() {
-    let outcome = any_outcome();
-    let reason: bool = kani::any();
-    let evidence: bool = kani::any();
-    let revisit: bool = kani::any();
-    let result = decision_complete(outcome, reason, evidence, revisit);
-    assert!(!result || (reason && evidence));
-    assert!(outcome != Outcome::Deferred || !result || revisit);
-    assert!(!(reason && evidence && (outcome != Outcome::Deferred || revisit)) || result);
-    kani::cover!(result);
-    kani::cover!(!result);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn composition_respects_sample_and_ratio_without_overflow() {
-    let shared: usize = kani::any();
-    let first: usize = kani::any();
-    let second: usize = kani::any();
-    let minimum: usize = kani::any();
-    let percent: usize = kani::any();
-    let result = composition_candidate(shared, first, second, minimum, percent);
-    assert!(
-        !result
-            || (shared <= first
-                && shared <= second
-                && shared >= minimum
-                && minimum >= 2
-                && (1..=100).contains(&percent))
-    );
-    if result {
-        assert!((shared as u128) * 100 >= (first.min(second) as u128) * (percent as u128));
+    pub fn spec_triples(present: bool, bound: bool, complete: bool) {
+        let state = tracked_decision(present, bound, complete);
+        assert_eq!(state == Tracked::Current, present && bound && complete);
+        assert_eq!(state == Tracked::Missing, !present);
+        assert_eq!(state == Tracked::Stale, present && !bound);
+        assert_eq!(state == Tracked::Incomplete, present && bound && !complete);
+        let (over_limit, recorded) = (present, bound);
+        let sizing = size_disposition(over_limit, recorded, complete);
+        assert_eq!(sizing == Sizing::Within, !over_limit && !recorded);
+        assert_eq!(sizing == Sizing::Unexpected, !over_limit && recorded);
+        assert_eq!(sizing == Sizing::Missing, over_limit && !recorded);
+        assert_eq!(
+            sizing == Sizing::Incomplete,
+            over_limit && recorded && !complete
+        );
+        assert_eq!(
+            sizing == Sizing::Settled,
+            over_limit && recorded && complete
+        );
     }
-    kani::cover!(result);
-    kani::cover!(!result);
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn stale_or_unprocessed_maintenance_never_completes() {
-    let value = Maintenance {
-        catalog_current: kani::any(),
-        policy_current: kani::any(),
-        observations_preserved: kani::any(),
-        notes_current: kani::any(),
-        review_complete: kani::any(),
-        new_observations: kani::any(),
-        threshold: kani::any(),
-    };
-    let result = maintenance_current(value);
-    assert!(
-        !result
-            || (value.catalog_current
+    pub fn spec_outcome(outcome: Outcome, reason: bool, evidence: bool, revisit: bool) {
+        assert_eq!(
+            decision_complete(outcome, reason, evidence, revisit),
+            reason && evidence && (outcome != Outcome::Deferred || revisit)
+        );
+        assert_eq!(
+            adopted(reason, outcome),
+            reason && outcome != Outcome::Deferred
+        );
+    }
+
+    pub fn spec_counts(count: usize, flag: bool) {
+        assert_eq!(triage_complete(count, flag), count == 0 || flag);
+        assert_eq!(gate_complete(flag, count), flag || count == 0);
+        assert_eq!(
+            immutable_identity_valid(count, flag),
+            count == DIGEST_LENGTH && flag
+        );
+    }
+
+    /// A pair composes only from enough shared sessions whose share meets the ratio, and the arithmetic never overflows.
+    pub fn spec_composition_sound(
+        shared: usize,
+        first: usize,
+        second: usize,
+        minimum: usize,
+        percent: usize,
+    ) -> bool {
+        let composes = composition_candidate(shared, first, second, minimum, percent);
+        if composes {
+            assert!(shared <= first && shared <= second && shared >= minimum && minimum >= 2);
+            assert!((1..=100).contains(&percent));
+            assert!(shared as u128 * 100 >= first.min(second) as u128 * percent as u128);
+        }
+        composes
+    }
+
+    /// Every pair with enough shared sessions and share composes, which the tests check since Kani can't finish this direction within the budget.
+    pub fn spec_composition(
+        shared: usize,
+        first: usize,
+        second: usize,
+        minimum: usize,
+        percent: usize,
+    ) {
+        let composes = spec_composition_sound(shared, first, second, minimum, percent);
+        let smaller = if first < second { first } else { second };
+        let expected = shared <= first
+            && shared <= second
+            && minimum >= 2
+            && (1..=100).contains(&percent)
+            && shared >= minimum
+            && shared as u128 * 100 >= smaller as u128 * percent as u128;
+        assert_eq!(composes, expected);
+    }
+
+    pub fn spec_maintenance(value: Maintenance) {
+        assert_eq!(
+            maintenance_current(value),
+            value.catalog_current
                 && value.policy_current
                 && value.observations_preserved
                 && value.notes_current
-                && value.review_complete)
-    );
-    assert!(!result || (value.threshold > 0 && value.new_observations < value.threshold));
-    kani::cover!(result);
-    kani::cover!(!result);
-}
+                && value.review_complete
+                && value.threshold > 0
+                && value.new_observations < value.threshold
+        );
+    }
 
-#[cfg(kani)]
-fn any_outcome() -> Outcome {
-    let choice: u8 = kani::any();
-    kani::assume(choice < 4);
-    match choice {
-        0 => Outcome::Keep,
-        1 => Outcome::Implemented,
-        2 => Outcome::Rejected,
-        _ => Outcome::Deferred,
+    #[cfg(kani)]
+    #[kani::proof]
+    fn every_flag_decision_takes_the_state_its_rule_names() {
+        let flags: [bool; 3] = [kani::any(), kani::any(), kani::any()];
+        let [first, second, third] = flags;
+        spec_pairs(first, second);
+        spec_triples(first, second, third);
+        let outcome = Outcome::ALL[usize::from(kani::any::<u8>() % 4)];
+        spec_outcome(outcome, first, second, third);
+        let count: usize = kani::any();
+        spec_counts(count, third);
+        kani::cover!(adopted(first, outcome) && decision_complete(outcome, first, second, third));
+        kani::cover!(size_disposition(first, second, third) == Sizing::Unexpected);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn composition_respects_sample_and_ratio_without_overflow() {
+        let shared: usize = kani::any();
+        let first: usize = kani::any();
+        let second: usize = kani::any();
+        let minimum: usize = kani::any();
+        let percent: usize = kani::any();
+        let composes = spec_composition_sound(shared, first, second, minimum, percent);
+        kani::cover!(composes);
+        kani::cover!(!composes);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn stale_or_unprocessed_maintenance_never_completes() {
+        let value = Maintenance {
+            catalog_current: kani::any(),
+            policy_current: kani::any(),
+            observations_preserved: kani::any(),
+            notes_current: kani::any(),
+            review_complete: kani::any(),
+            new_observations: kani::any(),
+            threshold: kani::any(),
+        };
+        spec_maintenance(value);
+        kani::cover!(maintenance_current(value));
+        kani::cover!(!maintenance_current(value) && value.catalog_current);
     }
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn tracked_decisions_pass_only_when_present_bound_and_complete() {
-    let present: bool = kani::any();
-    let bound: bool = kani::any();
-    let complete: bool = kani::any();
-    let state = tracked_decision(present, bound, complete);
-    assert_eq!(state == Tracked::Current, present && bound && complete);
-    assert!(state != Tracked::Missing || !present);
-    assert!(state != Tracked::Stale || (present && !bound));
-    assert!(state != Tracked::Incomplete || (present && bound && !complete));
-    kani::cover!(state == Tracked::Current);
-    kani::cover!(state == Tracked::Missing);
-    kani::cover!(state == Tracked::Stale);
-    kani::cover!(state == Tracked::Incomplete);
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::flags;
 
-#[cfg(kani)]
-#[kani::proof]
-fn only_current_settled_decisions_are_adopted() {
-    let bound: bool = kani::any();
-    let outcome = any_outcome();
-    let result = adopted(bound, outcome);
-    assert!(!result || bound);
-    assert!(!result || outcome != Outcome::Deferred);
-    assert!(!bound || outcome == Outcome::Deferred || result);
-    kani::cover!(result);
-    kani::cover!(!result);
-}
+    const COUNTS: [usize; 7] = [0, 1, 2, 3, DIGEST_LENGTH, 100, usize::MAX];
 
-#[cfg(kani)]
-#[kani::proof]
-fn triage_is_skipped_only_when_every_finding_is_adopted() {
-    let unadopted: usize = kani::any();
-    let verified: bool = kani::any();
-    let result = triage_complete(unadopted, verified);
-    assert!(!result || unadopted == 0 || verified);
-    assert!(unadopted == 0 || verified || !result);
-    kani::cover!(result && !verified);
-    kani::cover!(!result);
-}
+    #[test]
+    fn every_input_meets_the_decision_specifications() {
+        for [first, second, third] in flags() {
+            proofs::spec_pairs(first, second);
+            proofs::spec_triples(first, second, third);
+            for outcome in Outcome::ALL {
+                proofs::spec_outcome(outcome, first, second, third);
+            }
+        }
+        for count in COUNTS
+            .into_iter()
+            .chain([DIGEST_LENGTH - 1, DIGEST_LENGTH + 1])
+        {
+            proofs::spec_counts(count, false);
+            proofs::spec_counts(count, true);
+        }
+        for [
+            catalog_current,
+            policy_current,
+            observations_preserved,
+            notes_current,
+            review_complete,
+        ] in flags()
+        {
+            for new_observations in [0, 1, 2, usize::MAX] {
+                for threshold in [0, 1, 2, usize::MAX] {
+                    proofs::spec_maintenance(Maintenance {
+                        catalog_current,
+                        policy_current,
+                        observations_preserved,
+                        notes_current,
+                        review_complete,
+                        new_observations,
+                        threshold,
+                    });
+                }
+            }
+        }
+    }
 
-#[cfg(kani)]
-#[kani::proof]
-fn oversized_skills_need_a_complete_size_disposition() {
-    let over_limit: bool = kani::any();
-    let recorded: bool = kani::any();
-    let complete: bool = kani::any();
-    let state = size_disposition(over_limit, recorded, complete);
-    let accepted = matches!(state, Sizing::Within | Sizing::Settled);
-    assert_eq!(accepted, recorded == over_limit && (!recorded || complete));
-    assert!(state != Sizing::Missing || (over_limit && !recorded));
-    assert!(state != Sizing::Unexpected || (!over_limit && recorded));
-    assert!(state != Sizing::Incomplete || (over_limit && recorded && !complete));
-    kani::cover!(state == Sizing::Within);
-    kani::cover!(state == Sizing::Settled);
-    kani::cover!(state == Sizing::Missing);
-    kani::cover!(state == Sizing::Incomplete);
-    kani::cover!(state == Sizing::Unexpected);
-}
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every boundary")]
+    fn every_boundary_meets_the_composition_specification() {
+        for shared in COUNTS {
+            for first in COUNTS {
+                for second in COUNTS {
+                    for minimum in [0, 1, 2, 3] {
+                        for percent in [0, 1, 50, 99, 100, 101] {
+                            proofs::spec_composition(shared, first, second, minimum, percent);
+                        }
+                    }
+                }
+            }
+        }
+        for shared in 0..=10 {
+            for first in 0..=10 {
+                for percent in [1, 30, 50, 70, 100] {
+                    proofs::spec_composition(shared, first, first + 1, 2, percent);
+                    proofs::spec_composition(shared, first + 1, first, 2, percent);
+                }
+            }
+        }
+    }
 
-#[cfg(kani)]
-#[kani::proof]
-fn the_gate_completes_only_when_nothing_remains_to_triage() {
-    let recorded: bool = kani::any();
-    let open: usize = kani::any();
-    let result = gate_complete(recorded, open);
-    assert!(!result || recorded || open == 0);
-    assert!(result || (!recorded && open > 0));
-    kani::cover!(result && !recorded);
-    kani::cover!(!result);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn the_decision_diff_starts_only_from_the_assessed_content() {
-    let previous: bool = kani::any();
-    let assessed: bool = kani::any();
-    let base = diff_base(previous, assessed);
-    assert!(base != DiffBase::Assessed || (previous && assessed));
-    assert!(base != DiffBase::Unavailable || (previous && !assessed));
-    assert_eq!(base == DiffBase::Whole, !previous);
-    kani::cover!(base == DiffBase::Whole);
-    kani::cover!(base == DiffBase::Assessed);
-    kani::cover!(base == DiffBase::Unavailable);
+    #[test]
+    fn each_outcome_has_its_own_key() {
+        assert_eq!(
+            Outcome::ALL.map(Outcome::key),
+            ["keep", "implemented", "rejected", "deferred"]
+        );
+        assert_eq!(Outcome::from_key("skip"), None);
+        for outcome in Outcome::ALL {
+            assert_eq!(Outcome::from_key(outcome.key()), Some(outcome));
+        }
+    }
 }

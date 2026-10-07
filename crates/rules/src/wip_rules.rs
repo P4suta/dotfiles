@@ -15,32 +15,58 @@ pub const fn admits(open: u32, limit: u32) -> bool {
     open < limit
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_recorded_repository_limit_replaces_the_default() {
-    let default: u32 = kani::any();
-    let repository: u32 = kani::any();
-    assert_eq!(limit(default, Some(repository)), repository);
-    assert_eq!(limit(default, None), default);
-    kani::cover!(repository < default);
-    kani::cover!(repository > default);
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_pr_is_created_only_below_the_limit() {
-    let open: u32 = kani::any();
-    let limit: u32 = kani::any();
-    let admitted = admits(open, limit);
-    assert_eq!(admitted, open < limit);
-    assert!(!admitted || open.saturating_add(1) <= limit);
-    kani::cover!(admitted);
-    kani::cover!(!admitted && open == limit);
+    pub fn spec_limit(default: u32, repository: u32) {
+        assert_eq!(limit(default, Some(repository)), repository);
+        assert_eq!(limit(default, None), default);
+    }
+
+    pub fn spec_admits(open: u32, limit: u32) {
+        let admitted = admits(open, limit);
+        assert_eq!(admitted, open < limit);
+        assert!(!admitted || open.saturating_add(1) <= limit);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_recorded_repository_limit_replaces_the_default() {
+        let default: u32 = kani::any();
+        let repository: u32 = kani::any();
+        spec_limit(default, repository);
+        kani::cover!(repository < default);
+        kani::cover!(repository > default);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_pr_is_created_only_below_the_limit() {
+        let open: u32 = kani::any();
+        let limit: u32 = kani::any();
+        spec_admits(open, limit);
+        kani::cover!(admits(open, limit));
+        kani::cover!(!admits(open, limit) && open == limit);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const BOUNDARIES: [u32; 5] = [0, 1, 2, u32::MAX - 1, u32::MAX];
+
+    #[test]
+    fn every_boundary_meets_the_specification() {
+        for first in BOUNDARIES {
+            for second in BOUNDARIES {
+                proofs::spec_limit(first, second);
+                proofs::spec_admits(first, second);
+            }
+        }
+    }
 
     #[test]
     fn the_default_limit_of_one_refuses_a_second_open_pr() {

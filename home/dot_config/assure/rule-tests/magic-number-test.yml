@@ -6,6 +6,7 @@ valid:
   - "fn buffer() -> [u8; 16] { [0; 16] }"
   - "#[kani::unwind(10)]\nfn harness() {}"
   - "#[cfg(test)]\nmod tests { #[test] fn three() { assert_eq!(1 + 2, 3); } }"
+  - "#[cfg(any(test, kani))]\nmod proofs { pub fn spec(count: u64) { assert!(count * 25 <= 18); } }"
   - "enum Code { Missing = 2 }"
   - "fn third(tuple: (u8, u8, u8)) -> u8 { tuple.2 }"
 invalid:

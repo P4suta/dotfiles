@@ -29,123 +29,160 @@ const SUFFIX: &[u8] = b".old";
 /// Whether `entry` names an aside copy of `name`: `name`, a dot, one or more decimal digits, and `.old`.
 #[must_use]
 pub fn is_aside(name: &[u8], entry: &[u8]) -> bool {
-    let fixed = name.len() + 1 + SUFFIX.len();
-    if entry.len() <= fixed {
+    let Some([b'.', middle @ ..]) = after_prefix(entry, name) else {
         return false;
-    }
-    let mut index = 0;
-    while index < name.len() {
-        if entry.get(index) != name.get(index) {
-            return false;
-        }
-        index += 1;
-    }
-    if entry.get(name.len()) != Some(&b'.') {
+    };
+    let Some(digits) = before_suffix(middle, SUFFIX) else {
         return false;
+    };
+    !digits.is_empty() && only_digits(digits)
+}
+
+/// The rest of `text` after `prefix`, walked byte by byte so the proof stays free of iterators.
+fn after_prefix<'a>(mut text: &'a [u8], mut prefix: &[u8]) -> Option<&'a [u8]> {
+    while let [expected, rest @ ..] = prefix {
+        let [actual, tail @ ..] = text else {
+            return None;
+        };
+        if actual != expected {
+            return None;
+        }
+        (text, prefix) = (tail, rest);
     }
-    let digits_end = entry.len() - SUFFIX.len();
-    index = name.len() + 1;
-    while index < digits_end {
-        if !entry.get(index).is_some_and(u8::is_ascii_digit) {
+    Some(text)
+}
+
+/// The start of `text` before `suffix`.
+fn before_suffix<'a>(mut text: &'a [u8], mut suffix: &[u8]) -> Option<&'a [u8]> {
+    while let [rest @ .., expected] = suffix {
+        let [head @ .., actual] = text else {
+            return None;
+        };
+        if actual != expected {
+            return None;
+        }
+        (text, suffix) = (head, rest);
+    }
+    Some(text)
+}
+
+fn only_digits(mut text: &[u8]) -> bool {
+    while let [byte, rest @ ..] = text {
+        if !byte.is_ascii_digit() {
             return false;
         }
-        index += 1;
-    }
-    index = 0;
-    while index < SUFFIX.len() {
-        if entry.get(digits_end + index) != SUFFIX.get(index) {
-            return false;
-        }
-        index += 1;
+        text = rest;
     }
     true
 }
 
-#[cfg(kani)]
-fn any_name() -> ([u8; 2], usize) {
-    let bytes: [u8; 2] = kani::any();
-    let mut index = 0;
-    while index < bytes.len() {
-        kani::assume(bytes[index] == b'a' || bytes[index] == b'.' || bytes[index] == b'1');
-        index += 1;
-    }
-    let length: usize = kani::any();
-    kani::assume(length <= bytes.len());
-    (bytes, length)
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(10)]
-fn an_aside_copy_is_recognised_and_its_binary_is_not() {
-    let (name, length) = any_name();
-    let name = &name[..length];
-    let digit: u8 = kani::any();
-    kani::assume(digit.is_ascii_digit());
-    let mut entry = [0u8; 8];
-    let mut index = 0;
-    while index < name.len() {
-        entry[index] = name[index];
-        index += 1;
-    }
-    entry[length] = b'.';
-    entry[length + 1] = digit;
-    index = 0;
-    while index < SUFFIX.len() {
-        entry[length + 2 + index] = SUFFIX[index];
-        index += 1;
-    }
-    let entry = &entry[..length + 6];
-    let aside = is_aside(name, entry);
-    assert!(aside);
-    assert!(!is_aside(name, name));
-    kani::cover!(aside && length == 2);
-    kani::cover!(aside && length == 0);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(10)]
-fn only_entries_named_after_the_binary_are_swept() {
-    let (name, length) = any_name();
-    let name = &name[..length];
-    let bytes: [u8; 7] = kani::any();
-    let mut index = 0;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        kani::assume(matches!(byte, b'a' | b'.' | b'1' | b'o' | b'l' | b'd'));
-        index += 1;
-    }
-    let entry_length: usize = kani::any();
-    kani::assume(entry_length <= bytes.len());
-    let entry = &bytes[..entry_length];
-    let aside = is_aside(name, entry);
-    if aside {
-        assert!(entry_length > length + 5);
+    /// An entry counts as aside exactly when it spells `name`, a dot, at least one digit, and the suffix.
+    pub fn spec_is_aside(name: &[u8], entry: &[u8]) {
+        let mut expected = entry.len() > name.len() + 1 + SUFFIX.len();
         let mut position = 0;
-        while position < entry_length {
-            let byte = entry[position];
-            let expected = if position < length {
-                byte == name[position]
-            } else if position == length {
-                byte == b'.'
-            } else if position + 4 < entry_length {
-                byte.is_ascii_digit()
+        while expected && position < entry.len() {
+            let byte = entry.get(position);
+            expected = if position < name.len() {
+                byte == name.get(position)
+            } else if position == name.len() {
+                byte == Some(&b'.')
+            } else if position + SUFFIX.len() < entry.len() {
+                byte.is_some_and(u8::is_ascii_digit)
             } else {
-                byte == SUFFIX[position + 4 - entry_length]
+                byte == SUFFIX.get(position + SUFFIX.len() - entry.len())
             };
-            assert!(expected);
             position += 1;
         }
+        assert_eq!(is_aside(name, entry), expected);
+        assert!(!is_aside(name, name));
     }
-    kani::cover!(aside);
-    kani::cover!(!aside && entry_length == bytes.len());
+
+    #[cfg(kani)]
+    fn any_name() -> ([u8; 2], usize) {
+        let bytes: [u8; 2] = kani::any();
+        let mut index = 0;
+        while index < bytes.len() {
+            kani::assume(bytes[index] == b'a' || bytes[index] == b'.' || bytes[index] == b'1');
+            index += 1;
+        }
+        let length: usize = kani::any();
+        kani::assume(length <= bytes.len());
+        (bytes, length)
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn an_aside_copy_is_recognised_and_its_binary_is_not() {
+        let (name, length) = any_name();
+        let name = &name[..length];
+        let digit: u8 = kani::any();
+        kani::assume(digit.is_ascii_digit());
+        let mut entry = [0u8; 8];
+        let mut index = 0;
+        while index < name.len() {
+            entry[index] = name[index];
+            index += 1;
+        }
+        entry[length] = b'.';
+        entry[length + 1] = digit;
+        index = 0;
+        while index < SUFFIX.len() {
+            entry[length + 2 + index] = SUFFIX[index];
+            index += 1;
+        }
+        let entry = &entry[..length + 6];
+        spec_is_aside(name, entry);
+        let aside = is_aside(name, entry);
+        assert!(aside);
+        kani::cover!(aside && length == 2);
+        kani::cover!(aside && length == 0);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn only_entries_named_after_the_binary_are_swept() {
+        let (name, length) = any_name();
+        let name = &name[..length];
+        let bytes: [u8; 7] = kani::any();
+        let mut index = 0;
+        while index < bytes.len() {
+            let byte = bytes[index];
+            kani::assume(matches!(byte, b'a' | b'.' | b'1' | b'o' | b'l' | b'd'));
+            index += 1;
+        }
+        let entry_length: usize = kani::any();
+        kani::assume(entry_length <= bytes.len());
+        let entry = &bytes[..entry_length];
+        spec_is_aside(name, entry);
+        let aside = is_aside(name, entry);
+        kani::cover!(aside);
+        kani::cover!(!aside && entry_length == bytes.len());
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::words;
     use alloc::string::ToString;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes minutes over every word")]
+    fn every_short_name_and_entry_meets_the_aside_specification() {
+        let entries = words(b"a.1old", 7);
+        for name in words(b"a.1", 2) {
+            for entry in &entries {
+                proofs::spec_is_aside(&name, entry);
+            }
+        }
+    }
 
     #[test]
     fn the_aside_name_is_recognised_and_other_files_are_not() {

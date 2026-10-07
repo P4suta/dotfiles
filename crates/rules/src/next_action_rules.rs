@@ -236,178 +236,319 @@ pub fn executable(step: Step) -> bool {
     )
 }
 
-#[cfg(kani)]
-fn any_state() -> State {
-    let host: u8 = kani::any();
-    let head: u8 = kani::any();
-    let pr: u8 = kani::any();
-    let checks: u8 = kani::any();
-    let upstream: u8 = kani::any();
-    kani::assume(host < 4 && head < 3 && pr < 6 && checks < 4 && upstream < 6);
-    State {
-        host: match host {
-            0 => Host::Ready,
-            1 => Host::TempUnset,
-            2 => Host::VolumeMissing,
-            _ => Host::TempMissing,
-        },
-        head: match head {
-            0 => Head::Detached,
-            1 => Head::Default,
-            _ => Head::Feature,
-        },
-        dirty: kani::any(),
-        undecided: kani::any(),
-        incomplete: kani::any(),
-        behind_base: kani::any(),
-        ahead_base: kani::any(),
-        upstream: match upstream {
-            0 => Upstream::Absent,
-            1 => Upstream::Current,
-            2 => Upstream::Ahead,
-            3 => Upstream::Behind,
-            4 => Upstream::Rewritten,
-            _ => Upstream::Diverged,
-        },
-        push_paused: kani::any(),
-        pr: match pr {
-            0 => Pr::Unknown,
-            1 => Pr::None,
-            2 => Pr::Draft,
-            3 => Pr::Ready,
-            4 => Pr::Merged,
-            _ => Pr::Closed,
-        },
-        checks: match checks {
-            0 => Checks::None,
-            1 => Checks::Pending,
-            2 => Checks::Failing,
-            _ => Checks::Passing,
-        },
-        workflows: kani::any(),
-        review_paused: kani::any(),
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
+
+    pub const HOSTS: [Host; 4] = [
+        Host::Ready,
+        Host::TempUnset,
+        Host::VolumeMissing,
+        Host::TempMissing,
+    ];
+    pub const HEADS: [Head; 3] = [Head::Detached, Head::Default, Head::Feature];
+    pub const UPSTREAMS: [Upstream; 6] = [
+        Upstream::Absent,
+        Upstream::Current,
+        Upstream::Ahead,
+        Upstream::Behind,
+        Upstream::Rewritten,
+        Upstream::Diverged,
+    ];
+    pub const PRS: [Pr; 6] = [
+        Pr::Unknown,
+        Pr::None,
+        Pr::Draft,
+        Pr::Ready,
+        Pr::Merged,
+        Pr::Closed,
+    ];
+    pub const CHECKS: [Checks; 4] = [
+        Checks::None,
+        Checks::Pending,
+        Checks::Failing,
+        Checks::Passing,
+    ];
+
+    const fn publishes(step: Step) -> bool {
+        matches!(
+            step,
+            Step::Push | Step::ForcePush | Step::CreatePr | Step::MarkReady
+        )
     }
-}
 
-#[cfg(kani)]
-fn publishes(step: Step) -> bool {
-    matches!(
-        step,
-        Step::Push | Step::ForcePush | Step::CreatePr | Step::MarkReady
-    )
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn host_prerequisites_precede_every_repository_step() {
-    let state = any_state();
-    let step = decide(state);
-    assert_eq!(state.host == Host::TempUnset, step == Step::SetTemp);
-    assert_eq!(state.host == Host::VolumeMissing, step == Step::MountVolume);
-    assert_eq!(state.host == Host::TempMissing, step == Step::CreateTemp);
-    kani::cover!(step == Step::SetTemp);
-    kani::cover!(state.host == Host::Ready && step == Step::Push);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn executed_steps_run_only_on_their_own_preconditions() {
-    let state = any_state();
-    let step = decide(state);
-    match step {
-        Step::CreateTemp => assert!(state.host == Host::TempMissing),
-        Step::FastForward => {
-            assert!(state.head == Head::Default && !state.dirty && !state.ahead_base);
-            assert!(state.behind_base);
+    /// Host prerequisites come first, executed steps run only on their own preconditions, owner pauses hold, publication needs committed and decided work, and no step overwrites foreign upstream commits.
+    pub fn spec_decide(state: State) {
+        let step = decide(state);
+        let synced = spec_prerequisites(state, step);
+        spec_publication(state, step, synced);
+        if state.upstream == Upstream::Diverged {
+            assert!(!publishes(step));
         }
-        Step::SyncUpstream => {
-            assert!(state.head == Head::Feature && !state.dirty);
-            assert!(state.upstream == Upstream::Behind);
+        if state.push_paused {
+            assert!(!matches!(step, Step::Push | Step::ForcePush));
         }
-        Step::DraftDecisions => {
-            assert!(state.host == Host::Ready && state.head == Head::Feature);
+        if state.review_paused {
+            assert_ne!(step, Step::MarkReady);
         }
-        _ => assert!(!executable(step)),
-    }
-    kani::cover!(step == Step::FastForward);
-    kani::cover!(step == Step::SyncUpstream);
-    kani::cover!(step == Step::DraftDecisions);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn owner_pauses_are_never_bypassed() {
-    let state = any_state();
-    let step = decide(state);
-    if state.push_paused {
-        assert!(step != Step::Push && step != Step::ForcePush);
-    }
-    if state.review_paused {
-        assert!(step != Step::MarkReady);
-        // A push starts a review unless the PR has a known draft state or no PR exists.
-        if matches!(step, Step::Push | Step::ForcePush) {
-            assert!(matches!(state.pr, Pr::None | Pr::Draft));
-        }
-    }
-    kani::cover!(state.push_paused && step == Step::AwaitPushResume);
-    kani::cover!(state.review_paused && step == Step::AwaitReviewResume);
-    kani::cover!(state.review_paused && state.pr == Pr::Draft && step == Step::Push);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn publication_requires_committed_decided_current_work() {
-    let state = any_state();
-    let step = decide(state);
-    if publishes(step) {
-        assert!(state.host == Host::Ready && state.head == Head::Feature);
-        assert!(!state.dirty && !state.undecided && !state.incomplete);
-        assert!(!state.behind_base && state.ahead_base);
-    }
-    if step == Step::Push {
-        assert!(matches!(state.upstream, Upstream::Absent | Upstream::Ahead));
-    }
-    if step == Step::ForcePush {
-        assert!(state.upstream == Upstream::Rewritten);
-    }
-    if matches!(step, Step::CreatePr | Step::MarkReady | Step::AwaitReview) {
-        assert!(state.upstream == Upstream::Current);
-    }
-    if step == Step::MarkReady {
-        assert!(state.pr == Pr::Draft);
-        assert!(
-            state.checks == Checks::Passing || (state.checks == Checks::None && !state.workflows)
+        assert_eq!(
+            executable(step),
+            matches!(
+                step,
+                Step::CreateTemp | Step::FastForward | Step::SyncUpstream | Step::DraftDecisions
+            )
         );
     }
-    kani::cover!(step == Step::MarkReady);
-    kani::cover!(step == Step::ForcePush);
-    kani::cover!(state.dirty && step == Step::Commit);
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn upstream_commits_the_branch_never_held_are_never_overwritten() {
-    let state = any_state();
-    let step = decide(state);
-    if step == Step::ForcePush {
-        assert!(state.upstream == Upstream::Rewritten);
-    }
-    if state.upstream == Upstream::Diverged {
-        assert!(!publishes(step));
-    }
-    // Once the branch's own work has a commit, integrate foreign upstream commits before anything else.
-    let settled = state.host == Host::Ready
-        && state.head == Head::Feature
-        && !state.dirty
-        && !state.undecided
-        && !state.incomplete
-        && !matches!(state.pr, Pr::Merged | Pr::Closed);
-    if settled {
+    /// The host, the branch, the decisions, the commit, the PR's life, and the upstream come first, in that order, and the result says whether the branch reached publication.
+    fn spec_prerequisites(state: State, step: Step) -> bool {
+        assert_eq!(state.host == Host::TempUnset, step == Step::SetTemp);
+        assert_eq!(state.host == Host::VolumeMissing, step == Step::MountVolume);
+        assert_eq!(state.host == Host::TempMissing, step == Step::CreateTemp);
+        let ready = state.host == Host::Ready;
         assert_eq!(
-            state.upstream == Upstream::Diverged,
+            ready && state.head == Head::Detached,
+            step == Step::AttachBranch
+        );
+        let on_default = ready && state.head == Head::Default;
+        assert_eq!(
+            on_default && (state.dirty || state.ahead_base),
+            step == Step::BranchFromDefault
+        );
+        assert_eq!(
+            on_default && !state.dirty && !state.ahead_base && state.behind_base,
+            step == Step::FastForward
+        );
+        assert_eq!(
+            on_default && !state.dirty && !state.ahead_base && !state.behind_base,
+            step == Step::StartBranch
+        );
+        let feature = ready && state.head == Head::Feature;
+        assert_eq!(feature && state.undecided, step == Step::DraftDecisions);
+        assert_eq!(
+            feature && !state.undecided && state.incomplete,
+            step == Step::CompleteDecisions
+        );
+        let decided = feature && !state.undecided && !state.incomplete;
+        assert_eq!(decided && state.dirty, step == Step::Commit);
+        let committed = decided && !state.dirty;
+        assert_eq!(committed && state.pr == Pr::Merged, step == Step::Finished);
+        assert_eq!(committed && state.pr == Pr::Closed, step == Step::Reopen);
+        let open = committed && !matches!(state.pr, Pr::Merged | Pr::Closed);
+        assert_eq!(
+            open && state.upstream == Upstream::Behind,
+            step == Step::SyncUpstream
+        );
+        assert_eq!(
+            open && state.upstream == Upstream::Diverged,
             step == Step::IntegrateUpstream
         );
+        open && !matches!(state.upstream, Upstream::Behind | Upstream::Diverged)
     }
-    kani::cover!(state.upstream == Upstream::Diverged && step == Step::IntegrateUpstream);
-    kani::cover!(state.upstream == Upstream::Rewritten && step == Step::ForcePush);
+
+    /// Publication rebases, pushes, opens, waits for checks and reviews, and marks ready in that order, and each pause holds its steps.
+    fn spec_publication(state: State, step: Step, synced: bool) {
+        assert_eq!(synced && state.behind_base, step == Step::Rebase);
+        assert_eq!(
+            synced && !state.behind_base && !state.ahead_base,
+            step == Step::StartWork
+        );
+        let pushing =
+            synced && !state.behind_base && state.ahead_base && state.upstream != Upstream::Current;
+        assert_eq!(pushing && state.push_paused, step == Step::AwaitPushResume);
+        let held = pushing && !state.push_paused && state.review_paused;
+        assert_eq!(
+            pushing
+                && !state.push_paused
+                && !(state.review_paused && matches!(state.pr, Pr::Unknown | Pr::Ready)),
+            matches!(step, Step::Push | Step::ForcePush)
+        );
+        if matches!(step, Step::Push | Step::ForcePush) {
+            assert_eq!(
+                step == Step::ForcePush,
+                state.upstream == Upstream::Rewritten
+            );
+        }
+        let published =
+            synced && !state.behind_base && state.ahead_base && state.upstream == Upstream::Current;
+        assert_eq!(
+            state.pr == Pr::Unknown && (held || published),
+            step == Step::InspectGithub
+        );
+        assert_eq!(published && state.pr == Pr::None, step == Step::CreatePr);
+        let reviewed = published && matches!(state.pr, Pr::Draft | Pr::Ready);
+        assert_eq!(
+            reviewed && state.checks == Checks::Failing,
+            step == Step::FixChecks
+        );
+        let reported =
+            state.checks == Checks::Passing || (state.checks == Checks::None && !state.workflows);
+        assert_eq!(
+            reviewed && !reported && state.checks != Checks::Failing,
+            step == Step::AwaitChecks
+        );
+        assert_eq!(
+            (held && state.pr == Pr::Ready) || (reviewed && reported && state.review_paused),
+            step == Step::AwaitReviewResume
+        );
+        assert_eq!(
+            reviewed && reported && !state.review_paused && state.pr == Pr::Draft,
+            step == Step::MarkReady
+        );
+        assert_eq!(
+            reviewed && reported && !state.review_paused && state.pr == Pr::Ready,
+            step == Step::AwaitReview
+        );
+        if publishes(step) {
+            assert!(synced && !state.behind_base && state.ahead_base);
+        }
+    }
+
+    #[cfg(kani)]
+    fn any_state() -> State {
+        State {
+            host: HOSTS[usize::from(kani::any::<u8>() % 4)],
+            head: HEADS[usize::from(kani::any::<u8>() % 3)],
+            dirty: kani::any(),
+            undecided: kani::any(),
+            incomplete: kani::any(),
+            behind_base: kani::any(),
+            ahead_base: kani::any(),
+            upstream: UPSTREAMS[usize::from(kani::any::<u8>() % 6)],
+            push_paused: kani::any(),
+            pr: PRS[usize::from(kani::any::<u8>() % 6)],
+            checks: CHECKS[usize::from(kani::any::<u8>() % 4)],
+            workflows: kani::any(),
+            review_paused: kani::any(),
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn every_state_takes_the_one_step_its_prerequisites_and_pauses_allow() {
+        let state = any_state();
+        spec_decide(state);
+        let step = decide(state);
+        kani::cover!(step == Step::MarkReady);
+        kani::cover!(step == Step::ForcePush);
+        kani::cover!(state.review_paused && state.pr == Pr::Draft && step == Step::Push);
+        kani::cover!(state.push_paused && step == Step::AwaitPushResume);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::flags;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes minutes over every state")]
+    fn every_state_meets_the_decision_specification() {
+        for host in proofs::HOSTS {
+            for head in proofs::HEADS {
+                for upstream in proofs::UPSTREAMS {
+                    for pr in proofs::PRS {
+                        for checks in proofs::CHECKS {
+                            for [
+                                dirty,
+                                undecided,
+                                incomplete,
+                                behind_base,
+                                ahead_base,
+                                push_paused,
+                                workflows,
+                                review_paused,
+                            ] in flags()
+                            {
+                                proofs::spec_decide(State {
+                                    host,
+                                    head,
+                                    dirty,
+                                    undecided,
+                                    incomplete,
+                                    behind_base,
+                                    ahead_base,
+                                    upstream,
+                                    push_paused,
+                                    pr,
+                                    checks,
+                                    workflows,
+                                    review_paused,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn each_check_state_and_step_has_its_own_key() {
+        assert_eq!(
+            proofs::CHECKS.map(Checks::key),
+            ["none", "pending", "failing", "passing"]
+        );
+        let keys = [
+            Step::SetTemp,
+            Step::MountVolume,
+            Step::CreateTemp,
+            Step::AttachBranch,
+            Step::BranchFromDefault,
+            Step::FastForward,
+            Step::StartBranch,
+            Step::DraftDecisions,
+            Step::CompleteDecisions,
+            Step::Commit,
+            Step::Finished,
+            Step::Reopen,
+            Step::SyncUpstream,
+            Step::IntegrateUpstream,
+            Step::Rebase,
+            Step::StartWork,
+            Step::AwaitPushResume,
+            Step::Push,
+            Step::ForcePush,
+            Step::InspectGithub,
+            Step::CreatePr,
+            Step::FixChecks,
+            Step::AwaitChecks,
+            Step::AwaitReviewResume,
+            Step::MarkReady,
+            Step::AwaitReview,
+        ]
+        .map(Step::key);
+        assert_eq!(
+            keys,
+            [
+                "set-temp",
+                "mount-volume",
+                "create-temp",
+                "attach-branch",
+                "branch-from-default",
+                "fast-forward",
+                "start-branch",
+                "draft-decisions",
+                "complete-decisions",
+                "commit",
+                "finished",
+                "reopen",
+                "sync-upstream",
+                "integrate-upstream",
+                "rebase",
+                "start-work",
+                "await-push-resume",
+                "push",
+                "force-push",
+                "inspect-github",
+                "create-pr",
+                "fix-checks",
+                "await-checks",
+                "await-review-resume",
+                "mark-ready",
+                "await-review"
+            ]
+        );
+    }
 }

@@ -1,0 +1,23 @@
+# cargo-mutants reads this file, and `just proofs` runs its campaign over the decision core with `--package rules`.
+# Fixed timeouts keep the outcome independent of how fast a host runs the unmutated tests.
+timeout_multiplier = 3.0
+minimum_test_timeout = 20.0
+# The core's own tests decide every outcome, so a mutant survives whatever another crate happens to exercise.
+test_package = ["rules"]
+exclude_re = [
+  # Exempt as no-decision: each `proofs` module holds only the specifications and harnesses that test the rules.
+  # The probes of the proof gate show they fail when weakened.
+  # Evidence: `xtask/src/skill_proofs.rs::verify_rules`.
+  # Reconsider when a rule module keeps production code in `proofs`.
+  "proofs::",
+  # Exempt as no-decision: the literal harness of `ignore_rules` and its helpers compile only under Kani.
+  # Kani proves the shared check a fifth faster outside `proofs`.
+  # Evidence: `xtask/src/skill_proofs.rs::verify_rules`.
+  # Reconsider when Kani proves that harness inside `proofs` within the budget.
+  "ignore_rules\\.rs:.*(in |replace )(any_text|count|same|a_literal_pattern_matches_only_itself)\\b",
+  # Exempt as disproportionate: resuming at the star instead of after it rereads the star into the same state.
+  # No test can then tell that mutant from the matcher.
+  # Evidence: `crates/rules/src/ignore_rules.rs::tests::every_short_pattern_and_path_matches_as_the_pattern_language_reads`.
+  # Reconsider when the matcher stores the position after the star.
+  "ignore_rules\\.rs:[0-9]+:[0-9]+: replace \\+ with \\* in segment_matches",
+]

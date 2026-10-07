@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use xtask::skill_proofs::{
-    KANI_VERSION, container_image, container_run_arguments, container_target_volume,
-    validate_results,
+    KANI_VERSION, MUTANTS_VERSION, container_image, container_run_arguments,
+    container_target_volume, validate_results,
 };
 
 /// Every `*_rules.rs` file under `directory`, as a checkout-relative path with forward slashes.
@@ -173,6 +173,10 @@ fn the_container_verifier_matches_the_native_pin() {
     assert!(definition.contains(&format!("kani-verifier --version {KANI_VERSION}")));
     assert!(mise.contains(&format!(
         "\"cargo:kani-verifier\" = {{ version = \"{KANI_VERSION}\""
+    )));
+    assert!(definition.contains(&format!("cargo-mutants --version {MUTANTS_VERSION}")));
+    assert!(mise.contains(&format!(
+        "\"cargo:cargo-mutants\" = {{ version = \"{MUTANTS_VERSION}\""
     )));
     let rust = mise
         .lines()

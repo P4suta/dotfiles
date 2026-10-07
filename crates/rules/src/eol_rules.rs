@@ -117,13 +117,13 @@ pub fn content(bytes: &[u8]) -> Content {
         printable: 0,
         nonprintable: 0,
     };
-    let mut index = 0;
-    while let Some(&byte) = bytes.get(index) {
+    // The line feed of a CRLF pair counts as nothing, like every line feed, so the pair needs no skip.
+    let mut rest = bytes;
+    while let [byte, tail @ ..] = rest {
+        let byte = *byte;
+        rest = tail;
         match byte {
-            b'\r' if !kept(bytes, index) => {
-                found.crlf = true;
-                index += 1;
-            }
+            b'\r' if tail.first() == Some(&b'\n') => found.crlf = true,
             b'\r' => found.lone_cr = true,
             b'\n' => {}
             BACKSPACE | b'\t' | FORM_FEED | ESCAPE => found.printable += 1,
@@ -134,7 +134,6 @@ pub fn content(bytes: &[u8]) -> Content {
             DELETE | FIRST_CONTROL..=LAST_CONTROL => found.nonprintable += 1,
             _ => found.printable += 1,
         }
-        index += 1;
     }
     if bytes.last() == Some(&END_OF_FILE) {
         found.nonprintable -= 1;
@@ -163,172 +162,165 @@ pub fn to_lf(bytes: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-#[cfg(kani)]
-impl kani::Arbitrary for Text {
-    fn any() -> Self {
-        match kani::any::<u8>() % 4 {
-            0 => Self::Set,
-            1 => Self::Unset,
-            2 => Self::Auto,
-            _ => Self::Unspecified,
-        }
-    }
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-impl kani::Arbitrary for Eol {
-    fn any() -> Self {
-        match kani::any::<u8>() % 3 {
-            0 => Self::Lf,
-            1 => Self::Crlf,
-            _ => Self::Unspecified,
-        }
-    }
-}
+    pub const TEXTS: [Text; 4] = [Text::Set, Text::Unset, Text::Auto, Text::Unspecified];
+    pub const EOLS: [Eol; 3] = [Eol::Lf, Eol::Crlf, Eol::Unspecified];
 
-#[cfg(kani)]
-impl kani::Arbitrary for Index {
-    fn any() -> Self {
-        if kani::any() {
-            Self::CrlfText
+    /// Git never rewrites declared line endings or content without CRLF, a forced text conversion always normalizes, and content detection keeps binary data and CRLF the index already holds.
+    pub fn spec_action(attributes: Attributes, staging: Staging, index: Index, content: Content) {
+        let decided = action(attributes, staging, index, content);
+        let declared =
+            attributes.eol == Eol::Crlf || attributes.text == Text::Unset || attributes.binary;
+        let forced = attributes.text == Text::Set
+            || (attributes.text == Text::Unspecified && attributes.eol == Eol::Lf);
+        let binary =
+            content.lone_cr || content.nul || content.printable / 128 < content.nonprintable;
+        let indexed = staging == Staging::Add && index == Index::CrlfText;
+        let normalizes = content.crlf && !declared && (forced || (!binary && !indexed));
+        assert_eq!(decided == Action::Normalize, normalizes);
+        assert_eq!(auto_binary(content), binary);
+    }
+
+    /// The statistics count every byte but a line feed and both bytes of a CRLF pair, and drop a final `Ctrl-Z` from the nonprintable ones.
+    pub fn spec_content(bytes: &[u8]) {
+        let mut expected = Content {
+            crlf: false,
+            lone_cr: false,
+            nul: false,
+            printable: 0,
+            nonprintable: 0,
+        };
+        let mut index = 0;
+        while let Some(&byte) = bytes.get(index) {
+            let pair = byte == b'\r' && bytes.get(index + 1) == Some(&b'\n');
+            assert_eq!(kept(bytes, index), !pair);
+            if pair {
+                expected.crlf = true;
+                index += 2;
+                continue;
+            }
+            match byte {
+                b'\r' => expected.lone_cr = true,
+                b'\n' => {}
+                0 => {
+                    expected.nul = true;
+                    expected.nonprintable += 1;
+                }
+                0x08 | b'\t' | 0x0c | 0x1b => expected.printable += 1,
+                _ if byte < 0x20 || byte == 0x7f => expected.nonprintable += 1,
+                _ => expected.printable += 1,
+            }
+            index += 1;
+        }
+        if bytes.last() == Some(&0x1a) {
+            expected.nonprintable -= 1;
+        }
+        assert_eq!(content(bytes), expected);
+        assert!(kept(bytes, bytes.len()));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn declared_line_endings_are_never_rewritten_and_detection_keeps_binary_and_indexed_crlf() {
+        let attributes = Attributes {
+            text: TEXTS[usize::from(kani::any::<u8>() % 4)],
+            eol: EOLS[usize::from(kani::any::<u8>() % 3)],
+            binary: kani::any(),
+        };
+        let content = Content {
+            crlf: kani::any(),
+            lone_cr: kani::any(),
+            nul: kani::any(),
+            printable: kani::any(),
+            nonprintable: kani::any(),
+        };
+        let staging = if kani::any() {
+            Staging::Add
         } else {
-            Self::Other
-        }
-    }
-}
-
-#[cfg(kani)]
-impl kani::Arbitrary for Staging {
-    fn any() -> Self {
-        if kani::any() {
-            Self::Add
+            Staging::Renormalize
+        };
+        let index = if kani::any() {
+            Index::CrlfText
         } else {
-            Self::Renormalize
-        }
-    }
-}
-
-#[cfg(kani)]
-#[kani::proof]
-fn declared_line_endings_are_never_rewritten() {
-    let attributes = Attributes {
-        text: kani::any(),
-        eol: kani::any(),
-        binary: kani::any(),
-    };
-    let content = Content {
-        crlf: kani::any(),
-        lone_cr: kani::any(),
-        nul: kani::any(),
-        printable: kani::any(),
-        nonprintable: kani::any(),
-    };
-    let staging: Staging = kani::any();
-    let index: Index = kani::any();
-    let decided = action(attributes, staging, index, content);
-    if attributes.eol == Eol::Crlf || attributes.text == Text::Unset || attributes.binary {
-        assert_eq!(decided, Action::Keep);
-    }
-    if !content.crlf {
-        assert_eq!(decided, Action::Keep);
-    }
-    let eol_only = attributes.text == Text::Unspecified && attributes.eol == Eol::Lf;
-    if decided == Action::Normalize && attributes.text != Text::Set && !eol_only {
-        assert!(!(content.nul || content.lone_cr));
-        assert!(content.nonprintable == 0 || content.printable >= 128);
-        assert!(staging == Staging::Renormalize || index == Index::Other);
-    }
-    if decided == Action::Keep
-        && content.crlf
-        && !attributes.binary
-        && attributes.eol != Eol::Crlf
-        && matches!(attributes.text, Text::Auto | Text::Unspecified)
-    {
-        assert!(!eol_only);
-        assert!(
-            content.nul
-                || content.lone_cr
-                || content.nonprintable > content.printable / 128
-                || (staging == Staging::Add && index == Index::CrlfText)
+            Index::Other
+        };
+        spec_action(attributes, staging, index, content);
+        let decided = action(attributes, staging, index, content);
+        kani::cover!(decided == Action::Normalize && attributes.text == Text::Auto);
+        kani::cover!(decided == Action::Normalize && content.nul);
+        kani::cover!(decided == Action::Keep && content.crlf && !content.nul && !content.lone_cr);
+        kani::cover!(
+            decided == Action::Normalize
+                && attributes.text == Text::Auto
+                && index == Index::CrlfText
         );
     }
-    if staging == Staging::Renormalize || index == Index::Other {
-        let other = if staging == Staging::Add {
-            Staging::Renormalize
-        } else {
-            Staging::Add
-        };
-        assert_eq!(decided, action(attributes, other, Index::Other, content));
-    }
-    kani::cover!(decided == Action::Normalize && attributes.text == Text::Auto);
-    kani::cover!(decided == Action::Normalize && content.nul);
-    kani::cover!(decided == Action::Keep && content.crlf && attributes.eol == Eol::Crlf);
-    kani::cover!(decided == Action::Keep && content.crlf && !content.nul && !content.lone_cr);
-    kani::cover!(
-        decided == Action::Keep
-            && attributes.text == Text::Auto
-            && content.crlf
-            && content.nonprintable == 0
-            && !content.lone_cr
-            && !content.nul
-    );
-    kani::cover!(
-        decided == Action::Normalize && attributes.text == Text::Auto && index == Index::CrlfText
-    );
-}
 
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(5)]
-fn conversion_removes_only_carriage_returns_before_line_feeds() {
-    let input: [u8; 4] = kani::any();
-    let index: usize = kani::any();
-    let keep = kept(&input, index);
-    let pair = index < 3 && input[index] == b'\r' && input[index + 1] == b'\n';
-    assert_eq!(keep, !pair);
-    let carriage_return = index < 4 && input[index] == b'\r';
-    if carriage_return && !content(&input).lone_cr {
-        assert!(!keep);
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn detection_follows_git_byte_classes_and_conversion_removes_only_carriage_returns_before_line_feeds()
+     {
+        let input: [u8; 4] = kani::any();
+        let length: usize = kani::any();
+        kani::assume(length <= input.len());
+        spec_content(&input[..length]);
+        let found = content(&input[..length]);
+        kani::cover!(auto_binary(found) && !found.lone_cr && !found.nul);
+        kani::cover!(!auto_binary(found) && found.crlf && length == 4 && input[3] == 0x1a);
     }
-    kani::cover!(keep && carriage_return);
-    kani::cover!(!keep);
-    kani::cover!(keep && index >= 4);
-}
-
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(5)]
-fn auto_detection_follows_git_byte_classes() {
-    let input: [u8; 4] = kani::any();
-    let found = content(&input);
-    let mut lone_cr = false;
-    let mut control = false;
-    let mut crlf = false;
-    let mut nul = false;
-    let mut index = 0;
-    while index < 4 {
-        let byte = input[index];
-        let pair = index < 3 && byte == b'\r' && input[index + 1] == b'\n';
-        crlf |= pair;
-        nul |= byte == 0;
-        lone_cr |= byte == b'\r' && !pair;
-        let class = byte == 0x7f
-            || (byte < 0x20 && !matches!(byte, 0x08 | b'\t' | b'\n' | 0x0c | b'\r' | 0x1b));
-        control |= class && !(index == 3 && byte == 0x1a);
-        index += 1;
-    }
-    assert_eq!(found.crlf, crlf);
-    assert_eq!(found.lone_cr, lone_cr);
-    assert_eq!(found.nul, nul);
-    assert!(found.printable + found.nonprintable <= 4);
-    assert_eq!(auto_binary(found), lone_cr || control);
-    kani::cover!(auto_binary(found) && !found.lone_cr && !found.nul);
-    kani::cover!(!auto_binary(found) && found.crlf && input[3] == 0x1a);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every attribute and staging")]
+    fn every_attribute_staging_and_boundary_content_meets_the_action_specification() {
+        for text in proofs::TEXTS {
+            for eol in proofs::EOLS {
+                for [binary, crlf, lone_cr, nul, add, crlf_index] in crate::domain::flags() {
+                    for printable in [0, 127, 128, 255, 256, usize::MAX] {
+                        for nonprintable in [0, 1, 2, usize::MAX] {
+                            proofs::spec_action(
+                                Attributes { text, eol, binary },
+                                if add {
+                                    Staging::Add
+                                } else {
+                                    Staging::Renormalize
+                                },
+                                if crlf_index {
+                                    Index::CrlfText
+                                } else {
+                                    Index::Other
+                                },
+                                Content {
+                                    crlf,
+                                    lone_cr,
+                                    nul,
+                                    printable,
+                                    nonprintable,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes minutes over every text")]
+    fn every_short_text_over_each_byte_class_meets_the_content_specification() {
+        for bytes in crate::domain::words(b"\0\x01\x08\t\n\x0c\r\x1a\x1b\x1f a\x7f\x80", 4) {
+            proofs::spec_content(&bytes);
+        }
+    }
 
     #[test]
     fn normalizing_drops_one_carriage_return_per_pair_and_keeps_every_line_feed() {

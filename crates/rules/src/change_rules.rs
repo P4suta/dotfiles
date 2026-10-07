@@ -271,73 +271,144 @@ pub fn select<'a>(paths: impl IntoIterator<Item = &'a str>) -> Gates {
     })
 }
 
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(40)]
-fn every_path_selects_a_gate_and_unknown_paths_select_all() {
-    let bytes: [u8; 24] = kani::any();
-    let length: usize = kani::any();
-    kani::assume(length <= 24);
-    let path = &bytes[..length];
-    let found = matched(path);
-    let selected = gates(resolve(found));
-    assert!(!selected.is_empty());
-    if found.is_none() {
-        assert_eq!(selected, Gates::ALL);
-    }
-    if found.is_some() {
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
+
+    /// Every path selects the prose gate, and a path no rule names selects every gate.
+    pub fn spec_selects(path: &[u8]) -> Option<Class> {
+        let found = matched(path);
+        let selected = gates(resolve(found));
         assert!(selected.contains(Gate::Prose));
+        if found.is_none() {
+            assert_eq!(selected, Gates::ALL);
+        }
+        found
     }
-    kani::cover!(found.is_none() && selected == Gates::ALL);
-    kani::cover!(found == Some(Class::Prose));
-    kani::cover!(found == Some(Class::Rust));
-    kani::cover!(found.is_some() && selected != Gates::ALL);
-}
 
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(40)]
-fn ci_tooling_lock_files_and_the_classifier_select_everything() {
-    let bytes: [u8; 24] = kani::any();
-    let length: usize = kani::any();
-    kani::assume(length <= 24);
-    let path = &bytes[..length];
-    let infrastructure = has_prefix(path, b".github/")
-        || has_prefix(path, b"xtask/src/change")
-        || has_prefix(path, b"xtask/proofs/")
-        || has_suffix(path, b".lock")
-        || has_suffix(path, b"Cargo.toml")
-        || path == b"mise.toml"
-        || path == b"lefthook.yml";
-    let selected = gates(classify(path));
-    if infrastructure {
-        assert_eq!(selected, Gates::ALL);
+    /// CI, tooling, lock files, and the classifier select every gate.
+    pub fn spec_infrastructure(path: &[u8]) -> Gates {
+        let infrastructure = has_prefix(path, b".github/")
+            || has_prefix(path, b"xtask/src/change")
+            || has_prefix(path, b"xtask/proofs/")
+            || has_suffix(path, b".lock")
+            || has_suffix(path, b"Cargo.toml")
+            || path == b"mise.toml"
+            || path == b"lefthook.yml";
+        let selected = gates(classify(path));
+        if infrastructure {
+            assert_eq!(selected, Gates::ALL);
+        }
+        selected
     }
-    kani::cover!(infrastructure && selected == Gates::ALL);
-    kani::cover!(!infrastructure && selected != Gates::ALL);
-}
 
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(40)]
-fn only_a_rule_module_the_inventory_or_the_tooling_selects_the_proofs() {
-    let bytes: [u8; 24] = kani::any();
-    let length: usize = kani::any();
-    kani::assume(length <= 24);
-    let path = &bytes[..length];
-    let class = classify(path);
-    let proves = gates(class).contains(Gate::Proofs);
-    assert!(proves == matches!(class, Class::Rules | Class::Everything));
-    if has_suffix(path, b"_rules.rs") {
-        assert!(proves);
+    /// Only a rule module, the proof inventory, or the tooling selects the proofs.
+    pub fn spec_proofs(path: &[u8]) -> Class {
+        let class = classify(path);
+        let proves = gates(class).contains(Gate::Proofs);
+        assert_eq!(proves, matches!(class, Class::Rules | Class::Everything));
+        if has_suffix(path, b"_rules.rs") {
+            assert!(proves);
+        }
+        class
     }
-    kani::cover!(proves && class == Class::Rules);
-    kani::cover!(!proves && class == Class::Rust);
+
+    #[cfg(kani)]
+    fn any_path(bytes: &[u8; 24]) -> &[u8] {
+        let length: usize = kani::any();
+        kani::assume(length <= 24);
+        &bytes[..length]
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(40)]
+    fn every_path_selects_a_gate_and_unknown_paths_select_all() {
+        let bytes: [u8; 24] = kani::any();
+        let path = any_path(&bytes);
+        let found = spec_selects(path);
+        kani::cover!(found.is_none());
+        kani::cover!(found == Some(Class::Prose));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(40)]
+    fn ci_tooling_lock_files_and_the_classifier_select_everything() {
+        let bytes: [u8; 24] = kani::any();
+        let path = any_path(&bytes);
+        let selected = spec_infrastructure(path);
+        kani::cover!(selected == Gates::ALL);
+        kani::cover!(selected != Gates::ALL);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(40)]
+    fn only_a_rule_module_the_inventory_or_the_tooling_selects_the_proofs() {
+        let bytes: [u8; 24] = kani::any();
+        let path = any_path(&bytes);
+        let class = spec_proofs(path);
+        kani::cover!(class == Class::Rules);
+        kani::cover!(class == Class::Rust);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec::Vec;
+
+    /// Every rule's own text, and that text with a byte before, after, and missing, so each boundary of each rule meets the specification.
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every rule and neighbour")]
+    fn every_rule_and_its_neighbours_meet_the_classification_specification() {
+        for (_, text, _) in RULES {
+            let mut variants = alloc::vec![text.to_vec()];
+            for extra in [&b"x"[..], b"/", b".rs", b"_rules.rs"] {
+                variants.push([text, extra].concat());
+                variants.push([extra, text].concat());
+            }
+            if let Some((_, shorter)) = text.split_first() {
+                variants.push(shorter.to_vec());
+            }
+            if let Some((_, shorter)) = text.split_last() {
+                variants.push(shorter.to_vec());
+            }
+            variants.push(Vec::new());
+            for path in variants {
+                proofs::spec_selects(&path);
+                proofs::spec_infrastructure(&path);
+                proofs::spec_proofs(&path);
+            }
+        }
+    }
+
+    #[test]
+    fn a_gate_set_adds_removes_and_covers_exactly_its_own_gates() {
+        for gate in GATES {
+            let one = Gates::of(gate);
+            assert!(one.contains(gate) && !one.is_empty());
+            assert_eq!(one.with(gate), one);
+            assert_eq!(Gates::ALL.without(gate).with(gate), Gates::ALL);
+            assert!(!Gates::ALL.without(gate).contains(gate));
+            assert!(Gates::ALL.covers(one) && one.covers(Gates::NONE));
+            assert!(!Gates::NONE.covers(one));
+            assert!(!one.covers(Gates::ALL));
+            for other in GATES {
+                assert_eq!(one.contains(other), gate == other);
+                assert!(one.with(other).contains(other));
+            }
+        }
+        assert!(Gates::NONE.is_empty());
+        assert_eq!(Gates::default(), Gates::NONE);
+    }
+
+    #[test]
+    fn an_unknown_gate_names_itself() {
+        assert_eq!(UnknownGate("heavy").to_string(), "unknown gate: heavy");
+    }
 
     use alloc::string::{String, ToString};
 

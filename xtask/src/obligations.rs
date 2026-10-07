@@ -42,6 +42,17 @@ pub struct Manifest {
     pub obligations: Vec<Obligation>,
     #[serde(default, rename = "pilot")]
     pub pilots: Vec<PilotEntry>,
+    /// The mutants that run forever by construction, as cargo-mutants names them, whose timeouts the gate admits.
+    #[serde(default, rename = "non-terminating")]
+    pub non_terminating: Vec<NonTerminating>,
+}
+
+/// A mutant known to run forever, with the reason no test can end it.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NonTerminating {
+    pub mutant: String,
+    pub reason: String,
 }
 
 /// The flags a Kani contract run may pass, pinned with the Kani version in `skill_proofs::KANI_VERSION`.
@@ -121,12 +132,16 @@ pub struct Baselines {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(tag = "metric", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Metric {
-    /// The Kani harnesses of the decision core.
-    Harnesses { exact: u64 },
+    /// The public functions of the decision core that a Kani harness proves, which merging two harnesses of one decision leaves unchanged.
+    ProvedSubjects { exact: u64 },
     /// The rejecting probes of the decision core.
     Probes { exact: u64 },
     /// The unsafe blocks, functions, and implementations of the workspace.
     UnsafeSites { exact: u64 },
+    /// The mutants of the decision core that its tests let survive, which `just proofs` measures.
+    MutantsMissed { exact: u64 },
+    /// The mutants of the decision core that timed out without a non-terminating entry, which `just proofs` measures.
+    MutantsTimedOut { exact: u64 },
     /// A wall time measured on one host, which never gates.
     WallMillis { advisory: u64 },
 }
@@ -236,6 +251,27 @@ fn identifiers(tokens: TokenStream, found: &mut BTreeSet<String>) {
             }
             TokenTree::Group(group) => identifiers(group.stream(), found),
             TokenTree::Punct(_) | TokenTree::Literal(_) => {}
+        }
+    }
+}
+
+/// The names that `tokens` call, as an identifier right before a parenthesized group, macro arguments included.
+/// A local variable that shares a function's name never counts, because nothing calls it.
+fn calls(tokens: TokenStream, found: &mut BTreeSet<String>) {
+    let mut previous: Option<String> = None;
+    for tree in tokens {
+        match tree {
+            TokenTree::Ident(ident) => previous = Some(ident.to_string()),
+            TokenTree::Group(group) => {
+                if group.delimiter() == proc_macro2::Delimiter::Parenthesis
+                    && let Some(name) = previous.take()
+                {
+                    found.insert(name);
+                }
+                calls(group.stream(), found);
+                previous = None;
+            }
+            TokenTree::Punct(_) | TokenTree::Literal(_) => previous = None,
         }
     }
 }
@@ -396,13 +432,9 @@ pub fn module(source: &str) -> Result<Module> {
     for item in &file.items {
         let attributes = item_attributes(item);
         if verification_only(attributes) {
-            if let syn::Item::Fn(function) = item
-                && is_harness(attributes)
-            {
-                found.harnesses.insert(function.sig.ident.to_string());
-            }
-            if !has_attribute_cfg_test(attributes) {
-                identifiers(item.to_token_stream(), &mut found.verified);
+            harnesses(item, "", &mut found.harnesses);
+            if compiles_for_kani(attributes) {
+                calls(item.to_token_stream(), &mut found.verified);
             }
             continue;
         }
@@ -425,16 +457,36 @@ pub fn module(source: &str) -> Result<Module> {
     Ok(found)
 }
 
-fn has_attribute_cfg_test(attributes: &[syn::Attribute]) -> bool {
-    has_attribute(attributes, &["test"])
-        || attributes.iter().any(|attribute| {
-            attribute.path().is_ident("cfg")
-                && attribute
-                    .meta
-                    .to_token_stream()
-                    .to_string()
-                    .contains("test")
-        })
+/// Whether a verification-only item also compiles under Kani, so what it mentions counts as proved.
+fn compiles_for_kani(attributes: &[syn::Attribute]) -> bool {
+    attributes.iter().any(|attribute| {
+        attribute.path().is_ident("cfg")
+            && attribute
+                .meta
+                .to_token_stream()
+                .to_string()
+                .contains("kani")
+    })
+}
+
+/// The Kani harnesses an item declares, named by their path below the module as `kani list` names them.
+fn harnesses(item: &syn::Item, prefix: &str, found: &mut BTreeSet<String>) {
+    match item {
+        syn::Item::Fn(function) if is_harness(&function.attrs) => {
+            found.insert(format!("{prefix}{}", function.sig.ident));
+        }
+        syn::Item::Mod(syn::ItemMod {
+            ident,
+            content: Some((_, items)),
+            ..
+        }) => {
+            let inner = format!("{prefix}{ident}::");
+            for item in items {
+                harnesses(item, &inner, found);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The Kani harnesses `probes` declares, which must each fail on the module.
@@ -654,13 +706,19 @@ fn unexempted_skips(root: &Path) -> Result<Vec<String>> {
 pub fn unexempted_exclusions(config: &str) -> Result<Vec<String>> {
     let mut found = Vec::new();
     let mut inside = false;
-    let mut previous = "";
+    // The comment lines right before an entry, one sentence per line, read as one exemption.
+    let mut comment = String::new();
     for line in config.lines() {
         let trimmed = line.trim();
+        if let Some(text) = trimmed.strip_prefix('#') {
+            comment.push_str(text);
+            comment.push(' ');
+            continue;
+        }
         if trimmed.starts_with("exclude_re") {
             inside = true;
         } else if inside && trimmed.starts_with('"') {
-            if exemption(previous.trim_start_matches('#'))?.is_none() {
+            if exemption(&comment)?.is_none() {
                 found.push(format!(
                     "{MUTANTS_CONFIG}: {trimmed} excludes mutants without an exemption comment above it"
                 ));
@@ -668,9 +726,7 @@ pub fn unexempted_exclusions(config: &str) -> Result<Vec<String>> {
         } else if trimmed.starts_with(']') {
             inside = false;
         }
-        if !trimmed.is_empty() {
-            previous = trimmed;
-        }
+        comment.clear();
     }
     Ok(found)
 }
@@ -712,6 +768,7 @@ pub struct Closure {
     pub harnesses: u64,
     pub probes: u64,
     pub subjects: u64,
+    pub proved: u64,
     pub exempt: u64,
 }
 
@@ -743,6 +800,11 @@ pub fn closure(root: &Path, manifest: &Manifest) -> Result<Closure> {
                     .with_context(|| source.clone())?;
                 close_module(root, source, &found, &mentions, &mut result);
                 let rejected = probe_harnesses(probes).with_context(|| source.clone())?;
+                if rejected.is_empty() {
+                    result.refusals.push(format!(
+                        "{MANIFEST}: {source} has no rejecting probe, so nothing shows its harnesses can fail; add a probe that asserts a refused decision"
+                    ));
+                }
                 result.probes += u64::try_from(rejected.len())?;
                 for name in rejected.intersection(&found.harnesses) {
                     result.refusals.push(format!(
@@ -827,7 +889,10 @@ fn close_module(
         };
         result.subjects += 1;
         let refusal = match obligation_rules::verdict(facts) {
-            Verdict::Proved => continue,
+            Verdict::Proved => {
+                result.proved += 1;
+                continue;
+            }
             Verdict::Exempt => {
                 result.exempt += 1;
                 continue;
@@ -907,14 +972,86 @@ pub fn pilots(root: &Path, manifest: &Manifest, closed: IssueState<'_>) -> Resul
 /// Refusals for every metric that differs from its baseline.
 #[must_use]
 pub fn metrics(baselines: &Baselines, measured: &Closure, unsafe_sites: u64) -> Vec<String> {
+    compare(baselines, |metric| match *metric {
+        Metric::ProvedSubjects { exact } => {
+            Some(("proved-subjects", Better::Higher, exact, measured.proved))
+        }
+        Metric::Probes { exact } => Some(("probes", Better::Higher, exact, measured.probes)),
+        Metric::UnsafeSites { exact } => Some(("unsafe-sites", Better::Lower, exact, unsafe_sites)),
+        Metric::MutantsMissed { .. }
+        | Metric::MutantsTimedOut { .. }
+        | Metric::WallMillis { .. } => None,
+    })
+}
+
+/// What one mutation campaign over the decision core measured.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Campaign {
+    pub missed: u64,
+    /// The timeouts that no non-terminating entry names.
+    pub timed_out: u64,
+}
+
+/// Refusals for every mutation metric that differs from its baseline, and for a baseline file without both of them.
+#[must_use]
+pub fn mutation_metrics(baselines: &Baselines, measured: Campaign) -> Vec<String> {
+    let mut refusals = compare(baselines, |metric| match *metric {
+        Metric::MutantsMissed { exact } => {
+            Some(("mutants-missed", Better::Lower, exact, measured.missed))
+        }
+        Metric::MutantsTimedOut { exact } => Some((
+            "mutants-timed-out",
+            Better::Lower,
+            exact,
+            measured.timed_out,
+        )),
+        _ => None,
+    });
+    for (name, present) in [
+        (
+            "mutants-missed",
+            baselines
+                .metrics
+                .iter()
+                .any(|metric| matches!(metric, Metric::MutantsMissed { .. })),
+        ),
+        (
+            "mutants-timed-out",
+            baselines
+                .metrics
+                .iter()
+                .any(|metric| matches!(metric, Metric::MutantsTimedOut { .. })),
+        ),
+    ] {
+        if !present {
+            refusals.push(format!("{BASELINES} records no {name} metric"));
+        }
+    }
+    refusals
+}
+
+/// The timeouts of a campaign's `timeout.txt` that no non-terminating entry names.
+#[must_use]
+pub fn unexplained_timeouts(manifest: &Manifest, timeouts: &str) -> Vec<String> {
+    timeouts
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| {
+            !manifest
+                .non_terminating
+                .iter()
+                .any(|entry| entry.mutant == *line)
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+type Measured = (&'static str, Better, u64, u64);
+
+fn compare(baselines: &Baselines, measure: impl Fn(&Metric) -> Option<Measured>) -> Vec<String> {
     let mut refusals = Vec::new();
-    for metric in &baselines.metrics {
-        let (name, better, baseline, value) = match *metric {
-            Metric::Harnesses { exact } => ("harnesses", Better::Higher, exact, measured.harnesses),
-            Metric::Probes { exact } => ("probes", Better::Higher, exact, measured.probes),
-            Metric::UnsafeSites { exact } => ("unsafe-sites", Better::Lower, exact, unsafe_sites),
-            Metric::WallMillis { .. } => continue,
-        };
+    for (name, better, baseline, value) in baselines.metrics.iter().filter_map(measure) {
         match obligation_rules::standing(better, baseline, value) {
             Standing::Holds => {}
             Standing::Regressed => refusals.push(format!(
@@ -948,8 +1085,8 @@ pub fn check(root: &Path, closed: IssueState<'_>) -> Result<()> {
         );
     }
     println!(
-        "Every one of {} subjects has an owner ({} exempt beside the code), {} harnesses and {} probes are listed, and every metric holds its baseline",
-        measured.subjects, measured.exempt, measured.harnesses, measured.probes
+        "Every one of {} subjects has an owner, {} proved and {} exempt beside the code, the modules declare {} harnesses and {} probes, and every metric holds its baseline",
+        measured.subjects, measured.proved, measured.exempt, measured.harnesses, measured.probes
     );
     Ok(())
 }

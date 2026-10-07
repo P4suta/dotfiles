@@ -21,23 +21,50 @@ pub fn target(configured_absolute: bool, temp_volume: bool) -> Target {
     }
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn an_absolute_configured_target_is_always_honored() {
-    let temp_volume: bool = kani::any();
-    assert_eq!(target(true, temp_volume), Target::Configured);
-    kani::cover!(temp_volume);
-    kani::cover!(!temp_volume);
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
+
+    pub fn spec_target(configured_absolute: bool, temp_volume: bool) {
+        let decided = target(configured_absolute, temp_volume);
+        assert_eq!(decided == Target::Configured, configured_absolute);
+        assert_eq!(
+            decided == Target::Development,
+            !configured_absolute && temp_volume
+        );
+        assert_eq!(
+            decided == Target::Home,
+            !configured_absolute && !temp_volume
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn an_absolute_configured_target_is_always_honored() {
+        let temp_volume: bool = kani::any();
+        spec_target(true, temp_volume);
+        kani::cover!(temp_volume);
+        kani::cover!(!temp_volume);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn an_unconfigured_target_is_shared_and_never_inside_the_worktree() {
+        let temp_volume: bool = kani::any();
+        spec_target(false, temp_volume);
+        let decided = target(false, temp_volume);
+        kani::cover!(decided == Target::Development);
+        kani::cover!(decided == Target::Home);
+    }
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn an_unconfigured_target_is_shared_and_never_inside_the_worktree() {
-    let temp_volume: bool = kani::any();
-    let decided = target(false, temp_volume);
-    assert_ne!(decided, Target::Configured);
-    assert_eq!(decided == Target::Development, temp_volume);
-    assert_eq!(decided == Target::Home, !temp_volume);
-    kani::cover!(decided == Target::Development);
-    kani::cover!(decided == Target::Home);
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_input_meets_the_specification() {
+        for [configured_absolute, temp_volume] in crate::domain::flags() {
+            super::proofs::spec_target(configured_absolute, temp_volume);
+        }
+    }
 }

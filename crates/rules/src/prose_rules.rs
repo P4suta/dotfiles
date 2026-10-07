@@ -73,99 +73,124 @@ pub fn reply(passed: bool, already_continued: bool) -> Reply {
     }
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn only_personal_non_fork_destinations_take_the_standard() {
-    let personal: bool = kani::any();
-    let fork: bool = kani::any();
-    let applies = standard_applies(personal, fork);
-    assert!(!applies || personal);
-    assert!(!applies || !fork);
-    assert_eq!(applies, personal && !fork);
-    kani::cover!(applies);
-    kani::cover!(!applies && personal);
-}
+/// The properties Kani proves for every input and the tests check over every input they list.
+#[cfg(any(test, kani))]
+mod proofs {
+    use super::*;
 
-#[cfg(kani)]
-fn any_owner() -> Option<Owner> {
-    let choice: u8 = kani::any();
-    kani::assume(choice < 4);
-    match choice {
-        0 => Some(Owner::Personal),
-        1 => Some(Owner::Foreign),
-        2 => Some(Owner::Unresolved),
-        _ => None,
+    pub const ORIGINS: [Option<Owner>; 4] = [
+        Some(Owner::Personal),
+        Some(Owner::Foreign),
+        Some(Owner::Unresolved),
+        None,
+    ];
+
+    pub fn spec_standard_applies(personal: bool, fork: bool) {
+        assert_eq!(standard_applies(personal, fork), personal && !fork);
     }
-}
 
-#[cfg(kani)]
-#[kani::proof]
-fn a_declared_standard_wins_and_an_unresolved_destination_is_reported() {
-    let declared: Option<bool> = kani::any();
-    let origin = any_owner();
-    let personal: bool = kani::any();
-    let foreign: bool = kani::any();
-    let standard = repository_standard(declared, origin, personal, foreign);
-    if let Some(declared) = declared {
-        assert_eq!(standard == Standard::Applies, declared);
-        assert!(standard != Standard::Undetermined);
-    } else {
-        assert!(standard != Standard::Applies || !foreign);
-        assert!(origin != Some(Owner::Foreign) || standard == Standard::Skips);
-        assert_eq!(
-            standard == Standard::Undetermined,
-            matches!(origin, Some(Owner::Unresolved) | None) && !personal && !foreign
-        );
-        if origin != Some(Owner::Foreign) && personal && !foreign {
-            assert_eq!(standard, Standard::Applies);
-        }
-        if origin == Some(Owner::Personal) {
+    pub fn spec_exemption_valid(reason: bool, used: bool) {
+        assert_eq!(exemption_valid(reason, used), reason && used);
+    }
+
+    /// A declared standard wins, a foreign remote marks a fork, and only remotes that name no destination leave it undetermined.
+    pub fn spec_repository_standard(
+        declared: Option<bool>,
+        origin: Option<Owner>,
+        personal: bool,
+        foreign: bool,
+    ) {
+        let standard = repository_standard(declared, origin, personal, foreign);
+        if let Some(declared) = declared {
+            assert_eq!(
+                standard,
+                if declared {
+                    Standard::Applies
+                } else {
+                    Standard::Skips
+                }
+            );
+        } else {
+            let unresolved = matches!(origin, Some(Owner::Unresolved) | None);
             assert_eq!(
                 standard == Standard::Applies,
-                standard_applies(true, foreign)
+                !foreign && (origin == Some(Owner::Personal) || (unresolved && personal))
             );
+            assert_eq!(
+                standard == Standard::Undetermined,
+                unresolved && !personal && !foreign
+            );
+            assert!(origin != Some(Owner::Foreign) || standard == Standard::Skips);
         }
     }
-    kani::cover!(standard == Standard::Applies && declared.is_none());
-    kani::cover!(standard == Standard::Skips && declared.is_none());
-    kani::cover!(standard == Standard::Undetermined);
-    kani::cover!(standard == Standard::Applies && origin.is_none());
-    kani::cover!(standard == Standard::Undetermined && origin.is_none());
+
+    /// A failing reply gets one rewrite request, and a continuation this hook marked ends the turn instead.
+    pub fn spec_reply(passed: bool, active: bool, marked: Option<bool>) {
+        let continued = rewritten_by_this_hook(active, marked);
+        assert_eq!(continued, active && marked != Some(false));
+        let action = reply(passed, continued);
+        assert_eq!(action == Reply::Allow, passed);
+        assert_eq!(action == Reply::Rewrite, !passed && !continued);
+        assert_eq!(action == Reply::EndUnchecked, !passed && continued);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_personal_non_fork_destinations_take_the_standard_and_exemptions_need_a_reason_and_a_match()
+     {
+        let first: bool = kani::any();
+        let second: bool = kani::any();
+        spec_standard_applies(first, second);
+        spec_exemption_valid(first, second);
+        kani::cover!(standard_applies(first, second));
+        kani::cover!(!exemption_valid(first, second) && first);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_declared_standard_wins_and_an_unresolved_destination_is_reported() {
+        let declared: Option<bool> = kani::any();
+        let origin = ORIGINS[usize::from(kani::any::<u8>() % 4)];
+        let personal: bool = kani::any();
+        let foreign: bool = kani::any();
+        spec_repository_standard(declared, origin, personal, foreign);
+        let standard = repository_standard(declared, origin, personal, foreign);
+        kani::cover!(standard == Standard::Applies && origin.is_none());
+        kani::cover!(standard == Standard::Skips && declared.is_none());
+        kani::cover!(standard == Standard::Undetermined);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn failing_replies_are_rewritten_once_and_never_allowed() {
+        let passed: bool = kani::any();
+        let active: bool = kani::any();
+        let marked: Option<bool> = kani::any();
+        spec_reply(passed, active, marked);
+        let action = reply(passed, rewritten_by_this_hook(active, marked));
+        kani::cover!(action == Reply::Allow);
+        kani::cover!(action == Reply::Rewrite && active);
+        kani::cover!(action == Reply::EndUnchecked);
+    }
 }
 
-#[cfg(kani)]
-#[kani::proof]
-fn exemptions_require_a_reason_and_a_match() {
-    let reason: bool = kani::any();
-    let used: bool = kani::any();
-    let valid = exemption_valid(reason, used);
-    assert_eq!(valid, reason && used);
-    kani::cover!(valid);
-    kani::cover!(!valid);
-}
+#[cfg(test)]
+mod tests {
+    use super::proofs;
+    use crate::domain::flags;
 
-#[cfg(kani)]
-#[kani::proof]
-fn failing_replies_are_rewritten_once_and_never_allowed() {
-    let passed: bool = kani::any();
-    let active: bool = kani::any();
-    let marked: Option<bool> = kani::any();
-    let continued = rewritten_by_this_hook(active, marked);
-    assert!(!continued || active);
-    assert!(continued || !active || marked == Some(false));
-    let action = reply(passed, continued);
-    assert_eq!(action == Reply::Allow, passed);
-    assert!(!continued || action != Reply::Rewrite);
-    if action == Reply::Rewrite {
-        assert_eq!(
-            reply(false, rewritten_by_this_hook(true, Some(true))),
-            Reply::EndUnchecked
-        );
+    #[test]
+    fn every_input_meets_the_specifications() {
+        let declarations = [None, Some(false), Some(true)];
+        for [first, second] in flags() {
+            proofs::spec_standard_applies(first, second);
+            proofs::spec_exemption_valid(first, second);
+            for declared in declarations {
+                for origin in proofs::ORIGINS {
+                    proofs::spec_repository_standard(declared, origin, first, second);
+                }
+                proofs::spec_reply(first, second, declared);
+            }
+        }
     }
-    if !passed && marked == Some(false) {
-        assert_eq!(action, Reply::Rewrite);
-    }
-    kani::cover!(action == Reply::Allow);
-    kani::cover!(action == Reply::Rewrite);
-    kani::cover!(action == Reply::EndUnchecked);
 }

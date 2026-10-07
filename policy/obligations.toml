@@ -377,7 +377,8 @@ fn reject_skipping_a_missing_binary() {
 verifier = "kani"
 source = "crates/rules/src/order_rules.rs"
 probes = '''
-use production::{order, respects};
+use production::order;
+use production::proofs::respects;
 #[kani::proof]
 fn reject_running_a_step_before_what_it_relies_on() {
     assert!(respects(&[0b10, 0], &[0, 1]));
@@ -561,6 +562,16 @@ fn reject_refusing_a_push_to_a_draft() {
 [[obligation]]
 verifier = "kani"
 source = "crates/rules/src/reaper_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_killing_a_process_that_still_runs() {
+    assert!(production::killable(true, false, true, true, true, true));
+}
+#[kani::proof]
+fn reject_an_age_without_a_tick_rate() {
+    assert!(production::age(10, 5, 0).is_some());
+}
+'''
 
 [[obligation]]
 verifier = "kani"
@@ -765,3 +776,122 @@ tool = "bolero"
 subjects = ["windows_setup::archive_paths", "attribution::strip"]
 exit = "Adopt when a campaign finds an input outside the Kani bound or measurably extends coverage; drop it otherwise"
 issue = 105
+
+# The mutants that run forever by construction, whose timeouts the mutation campaign of `just proofs` admits.
+# Each names the cursor of a hand-written scan that the mutant stops or turns back.
+
+[[non-terminating]]
+mutant = "crates/rules/src/change_rules.rs:244:15: replace += with *= in matched"
+reason = "the rule cursor stays at zero, so the walk over the rules never ends"
+
+[[non-terminating]]
+mutant = "crates/rules/src/ignore_rules.rs:22:27: replace == with != in segment_matches"
+reason = "a byte that matches sends the matcher back to the star, which never advances past it"
+
+[[non-terminating]]
+mutant = "crates/rules/src/ignore_rules.rs:25:15: replace += with *= in segment_matches"
+reason = "the pattern cursor stays where it stands, so the segment walk never ends"
+
+[[non-terminating]]
+mutant = "crates/rules/src/ignore_rules.rs:28:18: replace += with *= in segment_matches"
+reason = "the star leaves the pattern cursor in place, so it reads the star forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/ignore_rules.rs:35:11: replace += with *= in segment_matches"
+reason = "the trailing-star cursor stays where it stands, so the loop over trailing stars never ends"
+
+[[non-terminating]]
+mutant = "crates/rules/src/ignore_rules.rs:68:48: replace + with - in matches"
+reason = "backtracking resumes before the segment it left, so a globstar retries one segment forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/ignore_rules.rs:68:48: replace + with * in matches"
+reason = "backtracking resumes at the separator it left, so a globstar retries one segment forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/ignore_rules.rs:91:15: replace += with *= in segment_end"
+reason = "the segment cursor stays where it stands, so the search for the separator never ends"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:76:5: replace skip_heredoc_body -> usize with 0"
+reason = "the scanner restarts at the first character after every heredoc, so it reads the command forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:76:5: replace skip_heredoc_body -> usize with 1"
+reason = "the scanner restarts at the second character after every heredoc, so it reads the command forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:86:26: replace + with - in skip_heredoc_body"
+reason = "the body cursor steps back onto the line it read, so it reads that line forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:86:26: replace + with * in skip_heredoc_body"
+reason = "the body cursor stays at the line feed it read, so it reads that line forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:103:5: replace heredoc_delimiter -> (String, usize) with (String::new(), 0)"
+reason = "the scanner resumes before the heredoc operator, so it reads the operator forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:103:5: replace heredoc_delimiter -> (String, usize) with (String::new(), 1)"
+reason = "the scanner resumes before the heredoc operator, so it reads the operator forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:103:5: replace heredoc_delimiter -> (String, usize) with (\"xyzzy\".into(), 0)"
+reason = "the scanner resumes before the heredoc operator, so it reads the operator forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:103:5: replace heredoc_delimiter -> (String, usize) with (\"xyzzy\".into(), 1)"
+reason = "the scanner resumes before the heredoc operator, so it reads the operator forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:107:15: replace += with *= in heredoc_delimiter"
+reason = "the cursor stays on the blank before the delimiter, so the loop over blanks never ends"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:117:15: replace += with *= in heredoc_delimiter"
+reason = "the cursor stays on the first byte of the delimiter, so the delimiter grows forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:131:15: replace += with *= in scan"
+reason = "the scanner cursor stays on one character, so the scan never ends"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:138:27: replace += with *= in scan"
+reason = "the cursor stays inside a single-quoted word, so the word grows forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:140:23: replace += with -= in scan"
+reason = "the cursor steps back onto the closing quote, so it reopens the same quote forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:152:31: replace += with -= in scan"
+reason = "the cursor steps back over an escape, so it reads the same escape forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:157:27: replace += with *= in scan"
+reason = "the cursor stays inside a double-quoted word, so the word grows forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:159:23: replace += with -= in scan"
+reason = "the cursor steps back onto the closing quote, so it reopens the same quote forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:165:27: replace += with -= in scan"
+reason = "the cursor steps back onto the backslash, so it reads the same escape forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:176:23: replace += with -= in scan"
+reason = "the cursor steps back onto the ampersand, so it reads the same redirect forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:194:27: replace += with -= in scan"
+reason = "the cursor steps back onto the redirect, so it reads the same descriptor copy forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:198:27: replace += with -= in scan"
+reason = "the cursor steps back onto the redirect, so it reads the same append forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_write_rules.rs:204:73: replace + with - in scan"
+reason = "the delimiter scan starts on the first `<` and returns there, so the cursor rereads the same here-document operator forever"

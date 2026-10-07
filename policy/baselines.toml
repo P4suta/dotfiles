@@ -1,16 +1,25 @@
 #:schema ../schemas/baselines.schema.json
-# The deterministic metrics `just check` holds exactly, so a change that moves one records the new value here.
+# The deterministic metrics `just check` and `just proofs` hold exactly, so a change that moves one records the new value here.
 # Wall time stays advisory, and the schema refuses any threshold on it.
 
 [[metric]]
-metric = "harnesses"
-exact = 131
+metric = "proved-subjects"
+exact = 112
 
 [[metric]]
 metric = "probes"
-exact = 125
+exact = 127
 
 # The three unsafe blocks and the console handler of the Win32 sites in policy/unsafe-sites.toml, and the read past a slice in the Miri fixture.
 [[metric]]
 metric = "unsafe-sites"
 exact = 5
+
+# The mutation campaign of `just proofs` over the decision core.
+[[metric]]
+metric = "mutants-missed"
+exact = 0
+
+[[metric]]
+metric = "mutants-timed-out"
+exact = 0
