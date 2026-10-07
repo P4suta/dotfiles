@@ -31,6 +31,18 @@ pub struct Catalog {
     pub exclude: Vec<String>,
     #[serde(rename = "shape")]
     pub shapes: Vec<Shape>,
+    pub anti_patterns: Option<AntiPatterns>,
+    /// The directory that holds the catalog, which relative paths in it start from.
+    #[serde(skip)]
+    pub directory: PathBuf,
+}
+
+/// The structural catalog of generic anti-patterns that ast-grep applies, and the file extensions its rules read.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AntiPatterns {
+    pub config: String,
+    pub extensions: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,7 +119,8 @@ impl BudgetSpec {
 /// Returns an error when reading the file fails, or when it holds an unknown key, a shape without a signal, or two shapes with one id.
 pub fn catalog(path: &Path) -> Result<Catalog> {
     let text = std::fs::read_to_string(path).with_context(|| path.display().to_string())?;
-    let catalog: Catalog = toml::from_str(&text).with_context(|| path.display().to_string())?;
+    let mut catalog: Catalog = toml::from_str(&text).with_context(|| path.display().to_string())?;
+    catalog.directory = path.parent().map(Path::to_path_buf).unwrap_or_default();
     let mut ids = BTreeSet::new();
     for shape in &catalog.shapes {
         ensure!(
@@ -307,14 +320,24 @@ fn contents(root: &Path, tree: &Tree, wanted: &[String]) -> Result<BTreeMap<Stri
     Ok(found)
 }
 
-/// One gap: a site that nothing owns and nothing exempts.
+/// What makes a site a gap.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Kind {
+    /// A shape that nothing owns or exempts.
+    Shape(Cause),
+    /// Code that a rule of the anti-pattern catalog refuses, with the rule's message and corrective note.
+    AntiPattern { message: String, note: String },
+}
+
+/// One gap: a site that nothing owns and nothing exempts, or code the anti-pattern catalog refuses.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Gap {
+    /// The shape, or the anti-pattern rule that refuses the code.
     pub shape: String,
     pub path: String,
     /// The line of the site, counting from one.
     pub line: usize,
-    pub cause: Cause,
+    pub kind: Kind,
     /// What identifies the gap across revisions: the shape, the path, the site's text, and its occurrence in the file.
     key: Vec<u8>,
 }
@@ -401,6 +424,36 @@ fn exemption_at(lines: &[&[u8]], index: usize, whole: bool) -> Option<Exemption>
     found
 }
 
+/// What owns the sites of `shape` in `path`, as the entries of `owners` declare and `holds` judges each owning file.
+fn owner_of(owners: &Owners, shape: &Shape, path: &str, holds: impl Fn(&str) -> bool) -> Owner {
+    owners
+        .owners
+        .iter()
+        .filter(|owner| owner.shape == shape.id && owner.path == path)
+        .fold(Owner::Undeclared, |standing, owner| {
+            match (standing, holds(&owner.by)) {
+                (Owner::Present, _) | (_, true) => Owner::Present,
+                _ => Owner::Broken,
+            }
+        })
+}
+
+/// The paths of `all` in `scope` whose extension the anti-pattern catalog reads.
+fn scanned(catalog: &Catalog, all: &[String], scope: Option<&BTreeSet<String>>) -> Vec<String> {
+    let Some(anti) = &catalog.anti_patterns else {
+        return Vec::new();
+    };
+    all.iter()
+        .filter(|path| scope.is_none_or(|scope| scope.contains(*path)))
+        .filter(|path| {
+            path.rsplit_once('.').is_some_and(|(_, extension)| {
+                anti.extensions.iter().any(|wanted| wanted == extension)
+            })
+        })
+        .cloned()
+        .collect()
+}
+
 /// Surveys `tree`, reading only `scope` when it names paths, and every shipped file otherwise.
 ///
 /// # Errors
@@ -437,7 +490,9 @@ pub fn survey(
         })
         .cloned()
         .collect();
+    let scanned = scanned(catalog, &all, scope);
     let mut wanted = candidates.clone();
+    wanted.extend(scanned.iter().cloned());
     for owner in &owners.owners {
         result.owning.insert(owner.by.clone());
         wanted.push(owner.by.clone());
@@ -460,20 +515,12 @@ pub fn survey(
         let mut seen: BTreeMap<Vec<u8>, usize> = BTreeMap::new();
         for shape in &catalog.shapes {
             let marker = contains(bytes, shape.marker.as_bytes());
-            let owner = owners
-                .owners
-                .iter()
-                .filter(|owner| owner.shape == shape.id && owner.path == *path)
-                .fold(Owner::Undeclared, |standing, owner| {
-                    let holds = files
-                        .get(&owner.by)
-                        .is_some_and(|text| contains(text, shape.marker.as_bytes()))
-                        && (!shape.corpus || corpus_present(&owner.by));
-                    match (standing, holds) {
-                        (Owner::Present, _) | (_, true) => Owner::Present,
-                        _ => Owner::Broken,
-                    }
-                });
+            let owner = owner_of(&owners, shape, path, |by| {
+                files
+                    .get(by)
+                    .is_some_and(|text| contains(text, shape.marker.as_bytes()))
+                    && (!shape.corpus || corpus_present(by))
+            });
             for (index, line) in lines.iter().enumerate() {
                 let Some(signal) = signals(shape)
                     .find(|signal| shape_rules::found(*signal, path.as_bytes(), index == 0, line))
@@ -497,14 +544,127 @@ pub fn survey(
                         shape: shape.id.clone(),
                         path: path.clone(),
                         line: index + 1,
-                        cause,
+                        kind: Kind::Shape(cause),
                         key,
                     });
                 }
             }
         }
     }
+    if let Some(anti) = &catalog.anti_patterns
+        && !scanned.is_empty()
+    {
+        result.gaps.extend(anti_patterns(
+            &catalog.directory.join(&anti.config),
+            &scanned,
+            &files,
+        )?);
+    }
     Ok(result)
+}
+
+/// One finding of `ast-grep scan --json=stream`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Finding {
+    text: String,
+    range: Range,
+    file: String,
+    rule_id: String,
+    message: String,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Range {
+    start: Position,
+}
+
+#[derive(Deserialize)]
+struct Position {
+    line: usize,
+}
+
+/// The code of `scanned` that the anti-pattern catalog at `config` refuses, each finding as a gap.
+/// The files go to a scratch directory under their own paths, so a revision or the index scans the same as the working tree.
+fn anti_patterns(
+    config: &Path,
+    scanned: &[String],
+    files: &BTreeMap<String, Vec<u8>>,
+) -> Result<Vec<Gap>> {
+    if !config.is_file() {
+        return Err(Refusal::new(
+            "assure.catalog",
+            "the anti-pattern catalog these machines apply to every repository is not installed",
+            "chezmoi apply",
+        )
+        .evidence(format!("missing {}", config.display()))
+        .into());
+    }
+    let scratch = tempfile::tempdir()?;
+    for path in scanned {
+        if let Some(bytes) = files.get(path) {
+            let target = scratch.path().join(path);
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(target, bytes)?;
+        }
+    }
+    let output = Tool::AstGrep
+        .command()
+        .current_dir(scratch.path())
+        .arg("scan")
+        .arg("--config")
+        .arg(config)
+        .args(["--json=stream", "--no-ignore", "hidden", "."])
+        .output()
+        .map_err(|error| {
+            anyhow::Error::from(
+                Refusal::new(
+                    "assure.ast-grep",
+                    "ast-grep applies the anti-pattern catalog and could not start",
+                    "chezmoi apply",
+                )
+                .evidence(error.to_string()),
+            )
+        })?;
+    let stdout = String::from_utf8(output.stdout)?;
+    ensure!(
+        output.status.success() || !stdout.trim().is_empty(),
+        "ast-grep could not apply {}: {}",
+        config.display(),
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    let mut seen: BTreeMap<Vec<u8>, usize> = BTreeMap::new();
+    let mut gaps = Vec::new();
+    for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+        let finding: Finding =
+            serde_json::from_str(line).context("ast-grep wrote a finding that doesn't parse")?;
+        let path = finding.file.replace('\\', "/");
+        let path = path.trim_start_matches("./").to_owned();
+        let mut key = [
+            finding.rule_id.as_bytes(),
+            path.as_bytes(),
+            finding.text.trim().as_bytes(),
+        ]
+        .join(&0);
+        let occurrence = seen.entry(key.clone()).or_default();
+        *occurrence += 1;
+        key.extend_from_slice(format!("\0{occurrence}").as_bytes());
+        gaps.push(Gap {
+            shape: finding.rule_id,
+            path,
+            line: finding.range.start.line + 1,
+            kind: Kind::AntiPattern {
+                message: finding.message,
+                note: finding.note.unwrap_or_default(),
+            },
+            key,
+        });
+    }
+    Ok(gaps)
 }
 
 /// The paths that differ between two states of a repository.
@@ -620,13 +780,13 @@ impl Outcome {
             Verdict::Admit | Verdict::Report => return None,
             Verdict::Added => (
                 "assure.added",
-                "the change adds code of a shape that nothing in the repository verifies",
-                "add the owner each gap names, or an `Exempt as <reason>: <why>` comment above it, then retry",
+                "the change adds code of a shape that nothing in the repository verifies, or code the anti-pattern catalog refuses",
+                "apply each gap's next action, then retry",
             ),
             Verdict::Touched => (
                 "assure.touched",
-                "a file this turn changed still holds a shape that nothing verifies",
-                "close each listed gap with its owner or an exemption beside it before finishing",
+                "a file this turn changed still holds a shape that nothing verifies, or code the anti-pattern catalog refuses",
+                "apply each listed gap's next action before finishing",
             ),
             Verdict::Lowered => (
                 "assure.lowered",
@@ -653,8 +813,17 @@ impl Outcome {
 /// One gap with what its shape needs and its next action.
 #[must_use]
 pub fn describe(catalog: &Catalog, gap: &Gap) -> String {
+    let cause = match &gap.kind {
+        Kind::AntiPattern { message, note } => {
+            return format!(
+                "{}:{}: {} {message} next: {note}",
+                gap.path, gap.line, gap.shape
+            );
+        }
+        Kind::Shape(cause) => *cause,
+    };
     let shape = catalog.shapes.iter().find(|shape| shape.id == gap.shape);
-    let cause = match gap.cause {
+    let cause = match cause {
         Cause::Unowned => "has no owner",
         Cause::BrokenOwner => "names an owner in assure.toml that lacks its marker or corpus",
         Cause::MalformedExemption => {

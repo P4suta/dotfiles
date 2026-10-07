@@ -10,6 +10,9 @@ use std::process::{Command, Output};
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
+#[path = "support/catalog.rs"]
+mod catalog;
+
 /// An isolated home with stand-ins for dotguard and lefthook, and a repository holding one staged file.
 struct Host {
     scope: tempfile::TempDir,
@@ -39,12 +42,7 @@ impl Host {
             .arg(bin.join(format!("lefthook{}", std::env::consts::EXE_SUFFIX)))
             .status()?;
         ensure!(status.success(), "fixture lefthook compilation failed");
-        let catalog = scope.path().join("home").join(dotfiles::assure::CATALOG);
-        fs::create_dir_all(catalog.parent().unwrap_or(scope.path()))?;
-        fs::write(
-            catalog,
-            include_str!("../../../home/dot_config/assure/shapes.toml"),
-        )?;
+        catalog::install(&scope.path().join("home"))?;
         let host = Self { scope };
         host.run("git", &["init", "-q"])?;
         fs::write(host.repository().join("a.txt"), "a\n")?;

@@ -34,6 +34,12 @@ rust = "ast-grep:catalog-suppression"
 uncovered = { shell = "ast-grep reads no suppression comment in shell here", typescript = "ast-grep reads no suppression comment in TypeScript here", powershell = "ast-grep has no PowerShell grammar" }
 
 [[pattern]]
+id = "lint-allow"
+weakness = "CWE-1164"
+rust = "ast-grep:lint-allow"
+uncovered = { shell = "ast-grep reads no ShellCheck directive comment in shell here", typescript = "ast-grep reads no lint directive comment in TypeScript here", powershell = "ast-grep has no PowerShell grammar" }
+
+[[pattern]]
 id = "core-effect"
 weakness = "Ports and Adapters"
 rust = "ast-grep:core-effect"

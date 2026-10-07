@@ -41,3 +41,8 @@ signals = [
   { suffix = ".rs", prefix = "impl<'de> Deserialize<'de> for " },
   { suffix = ".rs", prefix = "impl<'de> serde::Deserialize<'de> for " },
 ]
+
+# The same points refuse the code that the generic anti-pattern catalog beside this file refuses, in the files whose extension its rules read.
+[anti_patterns]
+config = "sgconfig.yml"
+extensions = ["rs", "sh", "bash", "ts", "tsx", "mts", "cts"]

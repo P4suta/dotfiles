@@ -7,6 +7,9 @@ use std::sync::OnceLock;
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
+#[path = "../../dotfiles/tests/support/catalog.rs"]
+mod catalog;
+
 fn gh_directory() -> &'static tempfile::TempDir {
     static DIRECTORY: OnceLock<tempfile::TempDir> = OnceLock::new();
     DIRECTORY.get_or_init(|| {
@@ -74,12 +77,7 @@ impl Fixture {
                 &["update-ref", &format!("refs/remotes/origin/{base}"), &head],
             )?;
         }
-        let catalog = directory.path().join(dotfiles::assure::CATALOG);
-        fs::create_dir_all(catalog.parent().context("catalog directory")?)?;
-        fs::write(
-            catalog,
-            include_str!("../../../home/dot_config/assure/shapes.toml"),
-        )?;
+        catalog::install(directory.path())?;
         Ok(Self {
             directory,
             body: file,

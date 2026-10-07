@@ -51,6 +51,7 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 ## Verification on every repository
 
 `home/dot_config/assure/shapes.toml` names the code shapes every repository on these machines must verify: pure decisions, protocols, and parsers, each with the signals that find it and the owner it needs.
+The same gate applies the anti-pattern catalog beside it, and counts each finding as a gap.
 A repository names its owners and budgets in `assure.toml` at its root, and an exemption sits in the comment block that precedes the site it exempts, as [its decision record](adr/verification-proportional-to-code-shape.md) describes.
 `dotfiles assure start` reports the gaps when an agent session starts, and the stop hook refuses to end a turn that leaves a gap in a file it changed.
 The `pre-commit` and `pre-push` hooks refuse a change that adds a gap.

@@ -1,7 +1,7 @@
 //! Each enforcement point refuses a fixture repository with an unowned shape and admits it once its owner exists.
 
 use anyhow::{Result, ensure};
-use dotfiles::assure::{self, Catalog};
+use dotfiles::assure::{self, Catalog, Kind};
 use dotfiles::refusal::Refusal;
 use dotfiles::shape_rules::{Cause, Verdict};
 use std::fs;
@@ -129,8 +129,8 @@ fn an_unowned_parser_is_refused_at_every_point_and_admitted_once_its_fuzz_target
     let broken = assure::stop(root, &catalog)?;
     assert_eq!(broken.verdict, Verdict::Added);
     assert_eq!(
-        broken.gaps.first().map(|gap| gap.cause),
-        Some(Cause::BrokenOwner)
+        broken.gaps.first().map(|gap| gap.kind.clone()),
+        Some(Kind::Shape(Cause::BrokenOwner))
     );
     assert_eq!(
         rule(assure::commit(root, &catalog)).as_deref(),
@@ -224,9 +224,136 @@ fn old_gaps_refuse_no_commit_or_push_but_a_touch_must_close_them_and_a_pr_must_c
     let malformed = assure::stop(root, &catalog)?;
     assert_eq!(malformed.verdict, Verdict::Touched);
     assert_eq!(
-        malformed.gaps.first().map(|gap| gap.cause),
-        Some(Cause::MalformedExemption)
+        malformed.gaps.first().map(|gap| gap.kind.clone()),
+        Some(Kind::Shape(Cause::MalformedExemption))
     );
+    Ok(())
+}
+
+/// One violation of each catalog rule that applies outside a decision core, in each language the catalog checks.
+const ANTI_PATTERNS: [(&str, &str, &str); 7] = [
+    (
+        "src/retries.rs",
+        "pub fn retries() -> u32 {\n    3\n}\n",
+        "magic-number",
+    ),
+    (
+        "src/shell.rs",
+        "pub fn shell() -> &'static str {\n    \"/bin/zsh\"\n}\n",
+        "hard-coded-location",
+    ),
+    (
+        "src/clean.rs",
+        "pub fn clean(path: &std::path::Path) {\n    let _ = std::fs::remove_file(path);\n}\n",
+        "swallowed-error",
+    ),
+    (
+        "src/quiet.rs",
+        "#![allow(dead_code)]\nfn unused() {}\n",
+        "lint-allow",
+    ),
+    (
+        "scripts/clean.sh",
+        "#!/bin/sh\nrm -f stale.lock || :\n",
+        "shell-swallowed-error",
+    ),
+    (
+        "web/wait.ts",
+        "export function wait(): number {\n  return 30000;\n}\n",
+        "typescript-magic-number",
+    ),
+    (
+        "web/run.ts",
+        "export function run(task: () => void): void {\n  try {\n    task();\n  } catch {}\n}\n",
+        "empty-catch",
+    ),
+];
+
+/// Each file of [`ANTI_PATTERNS`] after its fix.
+const FIXED: [(&str, &str); 7] = [
+    (
+        "src/retries.rs",
+        "const RETRIES: u32 = 3;\npub fn retries() -> u32 {\n    RETRIES\n}\n",
+    ),
+    (
+        "src/shell.rs",
+        "const SHELL: &str = \"/bin/zsh\";\npub fn shell() -> &'static str {\n    SHELL\n}\n",
+    ),
+    (
+        "src/clean.rs",
+        "pub fn clean(path: &std::path::Path) -> std::io::Result<()> {\n    std::fs::remove_file(path)\n}\n",
+    ),
+    ("src/quiet.rs", "pub fn used() {}\n"),
+    ("scripts/clean.sh", "#!/bin/sh\nrm -f stale.lock\n"),
+    (
+        "web/wait.ts",
+        "const DELAY_MS = 30000;\nexport function wait(): number {\n  return DELAY_MS;\n}\n",
+    ),
+    (
+        "web/run.ts",
+        "export function run(task: () => void): void {\n  task();\n}\n",
+    ),
+];
+
+#[test]
+fn each_anti_pattern_is_refused_at_every_point_with_its_rule_and_next_action_until_fixed()
+-> Result<()> {
+    let catalog = catalog()?;
+    let fixture = Fixture::new()?;
+    let root = &fixture.root;
+    let base = fixture.git(&["rev-parse", "HEAD"])?;
+    fixture.git(&["update-ref", "refs/remotes/origin/main", &base])?;
+    for (path, text, _) in ANTI_PATTERNS {
+        fixture.write(path, text)?;
+    }
+    let report = assure::start(root, &catalog)?.unwrap_or_default();
+    let stopped = assure::stop(root, &catalog)?;
+    assert_eq!(stopped.verdict, Verdict::Added);
+    fixture.stage()?;
+    let refused = assure::commit(root, &catalog).unwrap_err();
+    let refused = refused.downcast_ref::<Refusal>().expect("a refusal");
+    assert_eq!(refused.rule, "assure.added");
+    for (path, _, rule) in ANTI_PATTERNS {
+        let line = format!("{path}:");
+        assert!(
+            report.contains(&line) && report.contains(rule),
+            "{rule}: {report}"
+        );
+        let evidence = refused
+            .evidence
+            .iter()
+            .find(|evidence| evidence.starts_with(&line))
+            .unwrap_or_else(|| panic!("no evidence for {path}: {refused:?}"));
+        assert!(
+            evidence.contains(rule) && evidence.contains("next: "),
+            "{evidence}"
+        );
+    }
+    let violating = fixture.commit("violations without the machine hooks")?;
+    let push = format!("refs/heads/main {violating} refs/heads/main {base}\n");
+    assert_eq!(
+        rule(assure::push(root, &catalog, "origin", push.as_bytes())).as_deref(),
+        Some("assure.added")
+    );
+    assert_eq!(
+        rule(assure::ready(root, &catalog, "main", &violating)).as_deref(),
+        Some("assure.added")
+    );
+
+    for (path, text) in FIXED {
+        fixture.write(path, text)?;
+    }
+    assert_eq!(assure::stop(root, &catalog)?.verdict, Verdict::Admit);
+    fixture.stage()?;
+    assert_eq!(rule(assure::commit(root, &catalog)), None);
+    assert_eq!(assure::start(root, &catalog)?, None);
+    let fixed = fixture.commit("fix every violation")?;
+    let push = format!("refs/heads/main {fixed} refs/heads/main {violating}\n");
+    assert_eq!(
+        rule(assure::push(root, &catalog, "origin", push.as_bytes())),
+        None
+    );
+    assert_eq!(rule(assure::ready(root, &catalog, "main", &fixed)), None);
     Ok(())
 }
 

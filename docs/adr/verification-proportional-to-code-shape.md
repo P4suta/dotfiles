@@ -40,6 +40,8 @@ No exemption lives outside the repository, and nothing switches the rule off for
 - The agent stop hook refuses to end a turn while a file the turn changed holds a gap, and continues automatically at most once.
 - `pr-workflow ready` refuses a PR that adds a gap or weakens a budget, and in a repository with gaps one that closes none.
 
+The same points apply [the anti-pattern catalog](generic-anti-pattern-catalog.md) to every file whose extension its rules read.
+Each finding counts as a gap, with the rule's identifier and its note as the next action.
 A gap stays the same gap across revisions while its shape, path, site text, and occurrence stay the same.
 Moving code around a gap doesn't make it new.
 A commit or push reads only the changed files, unless the change touches the owners file or an owner, which can change the standing of any site.
