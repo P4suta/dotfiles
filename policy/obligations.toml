@@ -839,6 +839,7 @@ tool = "aeneas"
 subjects = ["skill_ops::dependency_plan", "order_rules::order"]
 exit = "Adopt when Charon and Aeneas extract both cores byte-identically and both theorems close without sorry; drop it with Verus as the next candidate otherwise"
 issue = 102
+decision = "docs/adr/aeneas-extraction-pilot.md"
 
 [[pilot]]
 tool = "kani-loop-contracts"

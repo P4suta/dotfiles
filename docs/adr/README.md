@@ -35,3 +35,4 @@
 | [2026-10-07 Keep every decision in one pure core crate behind its adapters](pure-decision-core-behind-adapters.md) | accepted |  |
 | [2026-10-07 Replay the whole reachable state graph of each finite Quint model](state-graph-replay-of-finite-quint-models.md) | accepted |  |
 | [2026-10-07 Require verification in proportion to code shape on every repository](verification-proportional-to-code-shape.md) | accepted |  |
+| [2026-10-08 Drop Aeneas extraction for the plan and ordering cores and try Verus next](aeneas-extraction-pilot.md) | accepted |  |

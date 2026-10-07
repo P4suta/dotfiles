@@ -168,7 +168,7 @@
               "minimum": 0
             },
             "graph": {
-              "description": "The committed reachable state graph, which TLC must dump again and a test replays edge for edge.",
+              "description": "The committed reachable state graph, which `TLC` must dump again and a test replays edge for edge.",
               "type": [
                 "string",
                 "null"
