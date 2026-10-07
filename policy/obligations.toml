@@ -846,6 +846,7 @@ tool = "kani-loop-contracts"
 subjects = ["gate_rules::spelling"]
 exit = "Adopt when a loop contract proves the global-option loop for argv of any length; keep the bounded harness and a disproportionate exemption otherwise"
 issue = 103
+decision = "docs/adr/bounded-harness-over-kani-loop-contracts.md"
 
 [[pilot]]
 tool = "tlc-state-graph-replay"
@@ -859,6 +860,7 @@ tool = "bolero"
 subjects = ["windows_setup::archive_paths", "attribution::strip"]
 exit = "Adopt when a campaign finds an input outside the Kani bound or measurably extends coverage; drop it otherwise"
 issue = 105
+decision = "docs/adr/no-bolero-beside-kani.md"
 
 # The mutants that run forever by construction, whose timeouts the mutation campaign of `just proofs` admits.
 # Each names the cursor of a hand-written scan that the mutant stops or turns back.
