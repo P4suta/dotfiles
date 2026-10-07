@@ -242,8 +242,11 @@ dependencies = [
 name = "dotguard"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "platform",
  "rules",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

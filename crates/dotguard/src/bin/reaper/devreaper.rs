@@ -66,7 +66,7 @@ impl DevReaper {
             return 0;
         }
         let now = util::now();
-        let Some(_lock) = Lock::take(&cfg.state_dir, "dev-reaper", now, &|m| {
+        let Some(_lock) = Lock::take(&cfg.state_dir, &|m| {
             println!("dev-reaper: {m}");
         }) else {
             return 0;
@@ -91,7 +91,7 @@ impl DevReaper {
             return 0;
         }
         let now = util::now();
-        let Some(_lock) = Lock::take(&cfg.state_dir, "dev-reaper", now, &|m| {
+        let Some(_lock) = Lock::take(&cfg.state_dir, &|m| {
             println!("dev-reaper: {m}");
         }) else {
             return 0;
