@@ -1,5 +1,6 @@
 ---
 status: accepted
+date: 2026-10-05
 ---
 # Reuse the `gh` login for the remote GitHub tool server
 

@@ -1134,7 +1134,7 @@ fn reject_a_byte_order_mark() {
     },
     Rules {
         source: "crates/rules/src/adr_rules.rs",
-        counterexamples: "use production::{Status, Verdict, verdict};
+        counterexamples: "use production::{Identity, Status, Verdict, identity, verdict};
 #[kani::proof]
 fn reject_a_superseded_record_without_its_successor() {
     assert!(verdict(Status::Superseded, 0) == Verdict::Consistent);
@@ -1143,10 +1143,15 @@ fn reject_a_superseded_record_without_its_successor() {
 fn reject_an_accepted_record_that_later_records_changed() {
     assert!(verdict(Status::Accepted, 1) == Verdict::Consistent);
 }
+#[kani::proof]
+fn reject_a_new_record_that_takes_the_next_number() {
+    assert!(identity(Some(production::LAST_NUMBERED + 1), false) == Identity::Numbered);
+}
 ",
         rejected: &[
             "reject_a_superseded_record_without_its_successor",
             "reject_an_accepted_record_that_later_records_changed",
+            "reject_a_new_record_that_takes_the_next_number",
         ],
     },
     Rules {

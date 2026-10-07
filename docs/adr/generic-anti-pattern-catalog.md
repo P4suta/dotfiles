@@ -1,5 +1,6 @@
 ---
 status: accepted
+date: 2026-10-07
 ---
 # Refuse generic anti-patterns through one catalog of checks
 
@@ -7,7 +8,7 @@ status: accepted
 
 Unnamed numbers, inline URLs and system paths, and discarded failures reached merged code because no gate refused them.
 The Common Weakness Enumeration classifies these as `CWE-1106`, `CWE-547`, and `CWE-390`, and the secure coding standards of the Software Engineering Institute forbid them.
-The pure core of [ADR 0024](0024-pure-decision-core-behind-adapters.md) already runs a shared `ast-grep` catalog, which other repositories can run too.
+The pure core of [its own record](pure-decision-core-behind-adapters.md) already runs a shared `ast-grep` catalog, which other repositories can run too.
 
 ## Decision
 

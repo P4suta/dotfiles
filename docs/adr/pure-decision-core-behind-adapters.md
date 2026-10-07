@@ -1,5 +1,6 @@
 ---
 status: accepted
+date: 2026-10-07
 ---
 # Keep every decision in one pure core crate behind its adapters
 

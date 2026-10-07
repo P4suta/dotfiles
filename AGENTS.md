@@ -45,7 +45,7 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | A rule a gate decides | a `*_rules.rs` module in `crates/rules/src/`, re-exported by its caller's crate, and its entry in `xtask/src/skill_proofs.rs` |
 | A structural rule for every repository | `home/dot_config/assure/rules/` with its fixtures in `rule-tests/` and its entry in `catalog.toml` |
 | A shared skill | `home/dot_agents/skills/<skill>/` and `docs/skills/decisions/<skill>.json` |
-| A durable design decision | a new record in `docs/adr/`, then `just gen` |
+| A durable design decision | a new record `docs/adr/<decision>.md` with `date:` in its front matter and no number, then `just gen` |
 
 ## Rules
 

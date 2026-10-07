@@ -17,7 +17,6 @@
 | [0011 Run one Git policy on every host](0011-one-git-policy-on-every-host.md) | accepted |  |
 | [0012 Run the Kani proofs on Windows in a pinned Linux container](0012-windows-proofs-in-a-linux-container.md) | accepted |  |
 | [0013 Mark a PR ready only after every check passes](0013-ready-only-after-passing-checks.md) | accepted |  |
-| [0014 Reuse the `gh` login for the remote GitHub tool server](0014-github-mcp-uses-the-github-cli-login.md) | accepted |  |
 | [0014 Bind tracked skill decisions to each skill revision](0014-per-skill-decision-records.md) | accepted |  |
 | [0015 Scope the CodeRabbit owner pause](0015-scoped-coderabbit-pause.md) | accepted |  |
 | [0016 Enforce one writing standard on persisted prose and replies](0016-one-writing-standard.md) | accepted |  |
@@ -25,9 +24,11 @@
 | [0018 Turn off persistent agent memory in the native client profiles](0018-agent-memory-off.md) | accepted |  |
 | [0019 Recommend the next workflow step from inspected state](0019-state-inspecting-next-action.md) | accepted |  |
 | [0020 Require a passing gate on every operating system family before push](0020-os-family-push-evidence.md) | accepted |  |
-| [0020 Report every gate refusal as one structured record](0020-structured-gate-refusals.md) | accepted |  |
 | [0021 Check that every agent instruction line has a class](0021-checked-agent-instruction-audit.md) | accepted |  |
 | [0022 Refuse installed tools built from stale sources](0022-refuse-tools-built-from-stale-sources.md) | accepted |  |
 | [0023 Give the repository a layout that shows what it manages](0023-repository-layout-and-target-architecture.md) | accepted |  |
-| [0024 Keep every decision in one pure core crate behind its adapters](0024-pure-decision-core-behind-adapters.md) | accepted |  |
-| [0025 Refuse generic anti-patterns through one catalog of checks](0025-generic-anti-pattern-catalog.md) | accepted |  |
+| [2026-10-05 Reuse the `gh` login for the remote GitHub tool server](github-mcp-uses-the-github-cli-login.md) | accepted |  |
+| [2026-10-06 Report every gate refusal as one structured record](structured-gate-refusals.md) | accepted |  |
+| [2026-10-07 Name new decision records after their decision and place them by date](dated-decision-record-names.md) | accepted |  |
+| [2026-10-07 Refuse generic anti-patterns through one catalog of checks](generic-anti-pattern-catalog.md) | accepted |  |
+| [2026-10-07 Keep every decision in one pure core crate behind its adapters](pure-decision-core-behind-adapters.md) | accepted |  |

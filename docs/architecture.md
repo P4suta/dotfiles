@@ -5,7 +5,7 @@ Rust tools under `crates/` apply it and run every Git hook, and the development 
 The installed runtime `dotfiles` builds from `crates/dotfiles/`, which also holds the Windows setup behind `dotfiles windows`.
 `skill-ops`, `pr-workflow`, `prose`, and the `coderabbit` guard each build from their own crate, and `dotguard` from `crates/dotguard/`.
 Every crate starts a process through `crates/platform/`, which also holds the home, the managed `PATH`, the tool registry, and the setup steps.
-Every pure decision lives in `crates/rules/`, which has no dependency and no standard library, and each tool re-exports the rule modules it calls, as [ADR 0024](adr/0024-pure-decision-core-behind-adapters.md) records.
+Every pure decision lives in `crates/rules/`, which has no dependency and no standard library, and each tool re-exports the rule modules it calls, as [its decision record](adr/pure-decision-core-behind-adapters.md) states.
 One Cargo workspace at the root builds them with one lockfile, one toolchain from `mise.toml`, and one lint policy.
 [ADR 0023](adr/0023-repository-layout-and-target-architecture.md) records this layout and the steps that remain.
 

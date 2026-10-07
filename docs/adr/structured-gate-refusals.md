@@ -1,5 +1,6 @@
 ---
 status: accepted
+date: 2026-10-06
 ---
 # Report every gate refusal as one structured record
 
