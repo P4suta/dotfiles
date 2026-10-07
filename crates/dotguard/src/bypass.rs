@@ -19,6 +19,8 @@ pub enum Category {
     Foreign,
     /// A commit whose tree equals its parent's.
     Empty,
+    /// A post-commit run under `GIT_HOOK_FORCE_SIGN_LOCK`, which skips re-signing and the empty-commit refusal.
+    SignLock,
 }
 
 impl Category {
@@ -29,6 +31,7 @@ impl Category {
             Self::NoVerify => None,
             Self::Foreign => Some("ALLOW_FOREIGN"),
             Self::Empty => Some("ALLOW_EMPTY"),
+            Self::SignLock => Some("GIT_HOOK_FORCE_SIGN_LOCK"),
         }
     }
 
@@ -38,6 +41,7 @@ impl Category {
             Self::NoVerify => "no-verify",
             Self::Foreign => "foreign",
             Self::Empty => "empty",
+            Self::SignLock => "sign-lock",
         }
     }
 }

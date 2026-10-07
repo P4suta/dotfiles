@@ -406,6 +406,30 @@ fn reject_refusing_a_command_with_the_conversion_off() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/postcommit_rules.rs"
+probes = '''
+use production::{Decision, Gate, Outcome, Shape, Step, Target, decide, refuses_empty, rollback_target};
+#[kani::proof]
+fn reject_the_old_rollback_that_drops_the_commit_an_amend_replaced() {
+    assert!(rollback_target(Gate::Old, Shape::Amend, Outcome::Failed).target == Target::Original);
+}
+#[kani::proof]
+#[kani::unwind(4)]
+fn reject_the_old_rollback_that_drops_the_second_parent_of_a_merge() {
+    assert!(rollback_target(Gate::Old, Shape::Merge, Outcome::Unverified).steps().contains(&Step::RestoreMergeParent));
+}
+#[kani::proof]
+fn reject_resigning_inside_the_hooks_own_amend() {
+    assert!(decide(true, false, false) == Decision::Resign);
+}
+#[kani::proof]
+fn reject_refusing_a_waived_empty_commit() {
+    assert!(refuses_empty(true, true, true));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/pr_ready_rules.rs"
 probes = '''
 use production::{Action, Report, Settlement, Workflow, complete, initial, report, safe, settle, step};
