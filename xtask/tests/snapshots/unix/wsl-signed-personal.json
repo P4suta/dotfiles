@@ -278,7 +278,7 @@
     {"mode":"0755","path":".config/mise/tasks/git-audit","sha256":"647cab69b80ed1b10bb952c611f244337f35bbf4ec9ab92de311f1612291e8cc","type":"file"},
     {"mode":"0755","path":".config/opencode","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/opencode/AGENTS.md","sha256":"f5b8c6f85bc2aa6c255982c24fe535be323f0ca42939f8ec569f7587da92e04a","type":"file"},
-    {"mode":"0644","path":".config/opencode/opencode.json","sha256":"1487e3dc2b85f983409c6cd9ba59a591fb24d65acd28951171f763e14fb48e5a","type":"file"},
+    {"mode":"0644","path":".config/opencode/opencode.json","sha256":"8820b8dd768c155a50f7dd7efd1358698f15a04aac91e73cb27325e471508665","type":"file"},
     {"mode":"0755","path":".config/opencode/plugins","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/opencode/plugins/line-endings.ts","sha256":"fdb7056ccb3106fe9f65d4a22cb1a95f35ce8c97851cd5b8708673f7ce251471","type":"file"},
     {"mode":"0644","path":".config/opencode/plugins/prose.ts","sha256":"6b0dae5645fca94e59dc97d63cac2a690ca65cb81453c8f28888bba96d101246","type":"file"},

@@ -307,7 +307,7 @@
     {"mode":"0644","path":".config/opencode/commands/commit.md","sha256":"76ed4b970ceea647ba4974df7798e5bd4232976179c6e01083d610f975c873e2","type":"file"},
     {"mode":"0644","path":".config/opencode/commands/pr.md","sha256":"658fee3103133773817bb7cace71c604d1aab44902e6408bc328e7e518e9b361","type":"file"},
     {"mode":"0644","path":".config/opencode/commands/review.md","sha256":"b983e9fef2545ce192f2011725d3de4babae3656ecd87b4de35ce528b993b414","type":"file"},
-    {"mode":"0644","path":".config/opencode/opencode.json","sha256":"c9c40353baa7a6771b40e3753e28b192ec22e17ea731db5a622e77d822fec8ad","type":"file"},
+    {"mode":"0644","path":".config/opencode/opencode.json","sha256":"88f175daf97be804c2afcb352d7a3f3f3a252e6614921a09ee1105d8febc0a0c","type":"file"},
     {"mode":"0755","path":".config/opencode/plugins","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/opencode/plugins/line-endings.ts","sha256":"fdb7056ccb3106fe9f65d4a22cb1a95f35ce8c97851cd5b8708673f7ce251471","type":"file"},
     {"mode":"0644","path":".config/opencode/plugins/prose.ts","sha256":"6b0dae5645fca94e59dc97d63cac2a690ca65cb81453c8f28888bba96d101246","type":"file"},
