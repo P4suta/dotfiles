@@ -2,6 +2,7 @@ use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use skill_ops::freshness::Built;
+use skill_ops::refusal::Refusal;
 use skill_ops::{self as ops, Catalog, Note, Policy, Report, Review, Runtime};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -114,6 +115,71 @@ fn archived_report(state: &Path, identity: &str) -> Result<Report> {
     Ok(report)
 }
 
+/// The store that holds the content of a review's evidence, named by the digest of its evidence hashes, so the review outlives the checkout it cited.
+fn evidence_store(state: &Path, hashes: &BTreeMap<String, String>) -> Result<PathBuf> {
+    Ok(state.join("review-evidence").join(ops::hash(hashes)?))
+}
+
+/// Copies each cited evidence file from `root` into `store`, accepting an existing copy only when it holds the same bytes.
+fn record_evidence(store: &Path, root: &Path, hashes: &BTreeMap<String, String>) -> Result<()> {
+    for name in hashes.keys() {
+        let bytes = fs::read(root.join(name))
+            .with_context(|| format!("read review evidence {name} under {}", root.display()))?;
+        let copy = store.join(name);
+        if copy.try_exists()? {
+            ensure!(
+                fs::read(&copy)? == bytes,
+                "the recorded copy of review evidence {name} differs from the evidence it records"
+            );
+        } else {
+            ops::write_file(&copy, &bytes, false)?;
+        }
+    }
+    Ok(())
+}
+
+/// The command that records a fresh review, which every refusal of recorded evidence names.
+const RETRIAGE: &str = "skill-ops analyze --out <report.json> && skill-ops triage --decisions <decisions.json> --evidence-root <checkout>";
+
+/// The evidence store of a recorded review, once its content matches the review's hashes.
+/// A review recorded before the store existed names only its checkout, so this copies its evidence from that checkout while the checkout still holds it.
+fn recorded_evidence(state: &Path, reviewed: &RuntimeReview) -> Result<PathBuf> {
+    let store = evidence_store(state, &reviewed.evidence_hashes)?;
+    let root = &reviewed.evidence_root;
+    if !store.try_exists()? {
+        let current = root
+            .is_dir()
+            .then(|| ops::evidence_hashes(&reviewed.review, root).ok())
+            .flatten();
+        if current.as_ref() != Some(&reviewed.evidence_hashes) {
+            let cause = if root.is_dir() {
+                "the review recorded its evidence only by path, and that checkout no longer holds the evidence it reviewed"
+            } else {
+                "the review recorded its evidence only by path, and that checkout no longer exists"
+            };
+            return Err(Refusal::new("skill-ops.review-evidence", cause, RETRIAGE)
+                .evidence(format!("evidence checkout: {}", root.display()))
+                .evidence(format!(
+                    "review record: {}",
+                    state.join("review.json").display()
+                ))
+                .into());
+        }
+        record_evidence(&store, root, &reviewed.evidence_hashes)?;
+    }
+    let verified = ops::evidence_hashes(&reviewed.review, &store).ok();
+    if verified.as_ref() != Some(&reviewed.evidence_hashes) {
+        return Err(Refusal::new(
+            "skill-ops.review-evidence",
+            "the recorded copy of the review's evidence no longer matches the hashes the review holds",
+            RETRIAGE,
+        )
+        .evidence(format!("evidence store: {}", store.display()))
+        .into());
+    }
+    Ok(store)
+}
+
 fn pending(
     catalog: &Catalog,
     policy: &Policy,
@@ -129,13 +195,10 @@ fn pending(
         .transpose()?;
     let events = ops::recorded(state)?;
     let notes = ops::notes(state)?;
-    if let Some(reviewed) = &reviewed {
-        ensure!(
-            ops::evidence_hashes(&reviewed.review, &reviewed.evidence_root)?
-                == reviewed.evidence_hashes,
-            "review evidence changed; reassess the current evidence"
-        );
-    }
+    let recorded = reviewed
+        .as_ref()
+        .map(|reviewed| recorded_evidence(state, reviewed))
+        .transpose()?;
     let baseline = ops::read_approved(approved)?;
     let runtime = Runtime {
         catalog,
@@ -145,9 +208,7 @@ fn pending(
         report: report.as_ref().or(draft.as_ref()),
         review: reviewed.as_ref().map(|item| &item.review),
         approved: &baseline,
-        evidence_root: reviewed
-            .as_ref()
-            .map_or(root, |item| item.evidence_root.as_path()),
+        evidence_root: recorded.as_deref().unwrap_or(root),
     };
     if draft.is_some()
         && !ops::runtime_pending(Runtime {
@@ -346,9 +407,15 @@ impl Session {
             &review,
             &evidence_root,
         )?;
+        let evidence_hashes = ops::evidence_hashes(&review, &evidence_root)?;
+        record_evidence(
+            &evidence_store(state, &evidence_hashes)?,
+            &evidence_root,
+            &evidence_hashes,
+        )?;
         let reviewed = RuntimeReview {
-            evidence_hashes: ops::evidence_hashes(&review, &evidence_root)?,
             evidence_root,
+            evidence_hashes,
             review,
         };
         ops::preserve_json(
@@ -438,7 +505,14 @@ fn main() {
             )),
             Ok(()) => input.and_then(|_| execute(cli)),
         };
-        let reason = checked.as_ref().err().map(|error| format!("Skill maintenance remains incomplete: {error:#}. Run skill-ops analyze, assess the findings it lists with skill-operations, implement accepted changes, and run skill-ops triage for them before claiming completion."));
+        let reason = checked.as_ref().err().map(|error| match error.downcast_ref::<Refusal>() {
+            Some(refusal) => format!(
+                "Skill maintenance remains incomplete: {}. Next: {}",
+                refusal.cause,
+                refusal.next.as_deref().unwrap_or("none")
+            ),
+            None => format!("Skill maintenance remains incomplete: {error:#}. Run skill-ops analyze, assess the findings it lists with skill-operations, implement accepted changes, and run skill-ops triage for them before claiming completion."),
+        });
         let response = match completion(checked.is_ok(), continued) {
             Completion::Allow => serde_json::json!({}),
             Completion::RequestMaintenance => {

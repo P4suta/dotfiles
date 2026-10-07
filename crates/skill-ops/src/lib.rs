@@ -1126,6 +1126,17 @@ fn sync_directory(path: &Path) -> Result<()> {
 /// Returns an error when the path has no parent, or creating, writing, or syncing a directory or the file fails.
 /// It also returns an error when the file exists and `replace` holds false.
 pub fn write_json(path: &Path, value: &impl Serialize, replace: bool) -> Result<()> {
+    let mut text = serde_json::to_vec_pretty(value)?;
+    text.push(b'\n');
+    write_file(path, &text, replace)
+}
+
+/// Writes `bytes` durably through a temporary file, creating missing directories and replacing an existing file only when `replace` holds.
+///
+/// # Errors
+///
+/// Returns an error when creating the directories or the file fails, or the file exists and `replace` holds false.
+pub fn write_file(path: &Path, bytes: &[u8], replace: bool) -> Result<()> {
     let absolute = std::path::absolute(path)?;
     let path = absolute.as_path();
     let directory = path.parent().context("missing output directory")?;
@@ -1147,8 +1158,7 @@ pub fn write_json(path: &Path, value: &impl Serialize, replace: bool) -> Result<
         )?;
     }
     let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
-    serde_json::to_writer_pretty(&mut temporary, value)?;
-    writeln!(temporary)?;
+    temporary.write_all(bytes)?;
     temporary.as_file().sync_all()?;
     if replace {
         temporary.persist(path)?;
