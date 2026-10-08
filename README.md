@@ -1,30 +1,25 @@
 # Dotfiles
 
-One chezmoi source for Mac, Linux, Windows, and WSL.
-Provisioning, refresh, hooks, validation, and rollback run through Rust in `xtask/` and the native Rust helpers.
-Shell and PowerShell launchers only forward arguments.
+One chezmoi source for Mac, Linux, Windows, and WSL with Rust-driven setup.
 
-Claude Code, Codex, and OpenCode share the skills in `~/.agents/skills`.
+## Installation
 
-Install mise, Git, and chezmoi, then run `mise install` here.
-Keep the native profile and Git identity in a private configuration outside this checkout, which `chezmoi init` writes from [the template](home/.chezmoi.toml.tmpl).
-It detects `mac`, `linux`, `windows`, or `wsl` from this host and asks for the role, the Git identity, and `paths.projects`, the native checkout directory.
-Supply a public SSH signing key from 1Password, which keeps the private keys.
-
-```text
-just check
-just proofs
-just diff CONFIG_ABSOLUTE_PATH NATIVE_HOME_ABSOLUTE_PATH
-just apply CONFIG_ABSOLUTE_PATH NATIVE_HOME_ABSOLUTE_PATH FRESH_BACKUP_DIRECTORY
-just refresh CONFIG_ABSOLUTE_PATH
+```sh
+git clone https://github.com/P4suta/dotfiles.git
+cd dotfiles
+mise install
+chezmoi init --source .
 ```
 
-`just apply` keeps chezmoi's state database beside the configuration, so a plain `chezmoi apply` reads the same record of the setup steps that ran.
+## Usage
 
-Doppler holds API secrets.
-Authenticate the Doppler CLI locally, and set its project, config, and per-agent secret names in the private configuration.
-OpenCode's GitHub MCP server reuses the read-only `gh auth login` instead.
-Run `dotfiles --root SOURCE agent opencode --config CONFIG --` for the configured OpenCode secrets, or `run-secrets --project PROJECT --config CONFIG --names API_KEY -- COMMAND` for an explicit consumer.
-The secret runner requires resolved, nonempty values, and disables Doppler fallback files.
-Each tool's login state stays machine-local.
-See [the architecture and verification boundaries](docs/adr/0009-public-native-profiles.md).
+```sh
+just diff CONFIG_ABSOLUTE_PATH NATIVE_HOME_ABSOLUTE_PATH
+just apply CONFIG_ABSOLUTE_PATH NATIVE_HOME_ABSOLUTE_PATH FRESH_BACKUP_DIRECTORY
+just check
+```
+
+## License
+
+Licensed under either of the [Apache License, Version 2.0](LICENSE-APACHE) or the [Massachusetts Institute of Technology (MIT) license](LICENSE-MIT), at your option.
+You license each contribution you submit under the same two licenses, without other terms, unless you state otherwise.

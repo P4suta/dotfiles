@@ -32,6 +32,11 @@ path = "crates/platform/src/refusal.rs"
 by = "fuzz/fuzz_targets/refusal_line.rs"
 
 # The mutation campaign of `just proofs` over the decision core.
+[[owner]]
+shape = "parser"
+path = "crates/model/src/repository.rs"
+by = "fuzz/fuzz_targets/repository_metadata.rs"
+
 [[budget]]
 name = "mutants-missed"
 ceiling = 0

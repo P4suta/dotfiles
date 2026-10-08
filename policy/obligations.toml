@@ -21,6 +21,21 @@ fn reject_refusing_a_listed_bootstrap_script() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/repository_rules.rs"
+probes = '''
+use production::{Drift, drift};
+#[kani::proof]
+fn reject_passing_a_repository_with_a_single_license() {
+    assert!(drift(false, true, true, true) == Drift::Current);
+}
+#[kani::proof]
+fn reject_passing_an_edited_readme() {
+    assert!(drift(true, true, false, true) == Drift::Current);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/adr_rules.rs"
 probes = '''
 use production::{Identity, Status, Verdict, identity, verdict};

@@ -192,6 +192,7 @@ fn check(root: &Path, gates: Gates, reference: &str) -> Result<()> {
         );
         xtask::quality::secrets(root)?;
         prose::repository(root, prose::Scope::Documents, &prose::Bundle::source(root)?)?;
+        dotfiles::repository::check(root, None)?;
     }
     if gates.contains(Gate::Skills) {
         skill_ops::check_catalog(root)?;

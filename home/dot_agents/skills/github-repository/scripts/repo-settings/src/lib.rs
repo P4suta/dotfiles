@@ -132,6 +132,9 @@ pub struct State {
     /// `GET /repos/{repo}/actions/permissions`.
     #[serde(default)]
     pub actions: Value,
+    /// The common repository checker result for the remote default branch.
+    #[serde(default)]
+    pub metadata: Value,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -306,6 +309,12 @@ pub fn plan(snapshot: Snapshot, profile: Profile) -> Result<Plan> {
         }
         if state.workflow_permissions["default_workflow_permissions"] != "read" {
             findings.push(Finding { repository: repo.full_name.clone(), message: "Default workflow token is writable; review job permissions before changing its default.".into() });
+        }
+        if state.metadata["current"] != true {
+            findings.push(Finding {
+                repository: repo.full_name.clone(),
+                message: format!("The common repository metadata check failed: {}. Run `dotfiles repository generate --remote {}` and review the generated files.", state.metadata["evidence"].as_str().unwrap_or("metadata evidence is missing"), repo.full_name),
+            });
         }
         security_changes(state, &profile.security, &mut changes, &mut findings);
         for env in &state.environments {
@@ -659,11 +668,35 @@ impl Mutation<'_> {
 pub trait Api {
     fn read(&self, endpoint: &str) -> Result<Value>;
     fn write(&self, mutation: Mutation<'_>) -> Result<Value>;
+    fn metadata(&self, name: &str) -> Result<Value>;
 }
 
 pub struct Gh;
 
 impl Api for Gh {
+    fn metadata(&self, name: &str) -> Result<Value> {
+        validate_repo_name(name)?;
+        let directory = tempfile::tempdir()?;
+        let checkout = directory.path().join("repository");
+        let cloned = process("gh")
+            .args(["repo", "clone", name])
+            .arg(&checkout)
+            .args(["--", "--filter=blob:none"])
+            .output()?;
+        ensure!(
+            cloned.status.success(),
+            "could not inspect {name}: {}",
+            String::from_utf8_lossy(&cloned.stderr)
+        );
+        let checked = process("dotfiles")
+            .arg("--root")
+            .arg(&checkout)
+            .args(["repository", "check", "--remote", name])
+            .output()?;
+        Ok(
+            json!({"current": checked.status.success(), "evidence": String::from_utf8_lossy(&checked.stderr)}),
+        )
+    }
     fn read(&self, endpoint: &str) -> Result<Value> {
         gh_request("GET", endpoint, None)
     }
@@ -679,12 +712,8 @@ impl Api for Gh {
     }
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the tool's one GitHub CLI process, which every API request goes through"
-)]
 fn gh_request(method: &str, endpoint: &str, body: Option<&Value>) -> Result<Value> {
-    let mut command = Command::new("gh");
+    let mut command = process("gh");
     command.args([
         "api",
         "--hostname",
@@ -798,6 +827,7 @@ pub fn audit(api: &impl Api, name: &str) -> Result<State> {
     let workflow_permissions = api.read(&format!("{root}/actions/permissions/workflow"))?;
     let actions = api.read(&format!("{root}/actions/permissions"))?;
     Ok(State {
+        metadata: api.metadata(name)?,
         repository,
         immutable,
         rulesets,
@@ -806,6 +836,16 @@ pub fn audit(api: &impl Api, name: &str) -> Result<State> {
         security: raw["security_and_analysis"].clone(),
         actions,
     })
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the standalone governance tool's one native process constructor"
+)]
+fn process(program: &str) -> Command {
+    let mut command = Command::new(program);
+    command.env_remove("GH_DEBUG");
+    command
 }
 
 pub fn paged_array(api: &impl Api, endpoint: &str, key: Option<&str>) -> Result<Vec<Value>> {

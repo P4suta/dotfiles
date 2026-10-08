@@ -15,6 +15,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    Repository {
+        #[command(subcommand)]
+        request: RepositoryRequest,
+    },
     Agent {
         agent: dotfiles::secrets::Agent,
         #[arg(long, env = "DOTFILES_CONFIG")]
@@ -131,11 +135,34 @@ enum Commands {
     },
 }
 
+#[derive(Subcommand)]
+enum RepositoryRequest {
+    Generate {
+        #[arg(long)]
+        remote: Option<String>,
+    },
+    Check {
+        #[arg(long)]
+        remote: Option<String>,
+    },
+}
+
 fn run() -> Result<()> {
     let mut cli = Cli::parse();
     cli.root = dotfiles::canonical(&cli.root)?;
     let exit = dotfiles::secrets::exit;
     match cli.command {
+        Commands::Repository { request } => match request {
+            RepositoryRequest::Generate { remote } => {
+                dotfiles::repository::write(&cli.root)?;
+                if let Some(remote) = remote {
+                    dotfiles::repository::write_description(&cli.root, &remote)?;
+                }
+            }
+            RepositoryRequest::Check { remote } => {
+                dotfiles::repository::check(&cli.root, remote.as_deref())?;
+            }
+        },
         Commands::Agent {
             agent,
             config,

@@ -23,7 +23,7 @@ pub const CRATES: [&str; 8] = [
 ];
 
 /// Files outside the crates' `src` directories that the compiler includes or that decide how the tools build.
-const SHARED: [&str; 23] = [
+const SHARED: [&str; 26] = [
     ".cargo/config.toml",
     ".chezmoiroot",
     ".github/workflows/ci.yml",
@@ -33,6 +33,9 @@ const SHARED: [&str; 23] = [
     "clippy.toml",
     "crates/dotfiles/assets/elevate.ps1",
     "crates/dotfiles/assets/psgallery.ps1",
+    "crates/dotfiles/assets/repository/LICENSE-APACHE",
+    "crates/dotfiles/assets/repository/LICENSE-MIT",
+    "crates/dotfiles/assets/repository/README.template",
     "crates/dotfiles/assets/sshd-host.ps1",
     "crates/platform/build.rs",
     "crates/rules/clippy.toml",
