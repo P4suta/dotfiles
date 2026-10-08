@@ -230,7 +230,12 @@ fn scan(command: &str) -> Scan {
 /// Reconsider when a cargo-fuzz target owns this function.
 #[must_use]
 pub fn segments(command: &str) -> Vec<Vec<String>> {
-    scan(command)
+    script_segments(command, 0)
+}
+
+fn script_segments(command: &str, depth: usize) -> Vec<Vec<String>> {
+    let scan = scan(command);
+    let mut result: Vec<Vec<String>> = scan
         .tokens
         .split(|token| *token == Token::Separator)
         .map(|segment| {
@@ -240,7 +245,19 @@ pub fn segments(command: &str) -> Vec<Vec<String>> {
                 .collect::<Vec<_>>()
         })
         .filter(|words| !words.is_empty())
-        .collect()
+        .collect();
+    let shell = result.iter().any(|words| {
+        let words: Vec<&str> = words.iter().map(String::as_str).collect();
+        command_words(&words)
+            .first()
+            .is_some_and(|first| SCRIPT_SHELLS.contains(&program(first).as_str()))
+    });
+    if shell && depth < SCRIPT_DEPTH {
+        for body in scan.heredocs {
+            result.extend(script_segments(&body, depth + 1));
+        }
+    }
+    result
 }
 
 /// The program a command word names: its filename, folded to small letters, without `.exe` or a version suffix.
@@ -603,6 +620,36 @@ pub fn body_sources(command: &str) -> Vec<Source> {
 /// Reconsider when a cargo-fuzz target owns this function.
 #[must_use]
 pub fn inspect(command: &str) -> Verdict {
+    inspect_at(command, 0)
+}
+
+/// Inspect recursive shell scripts through this many nested wrappers.
+const SCRIPT_DEPTH: usize = 4;
+const SCRIPT_SHELLS: [&str; 5] = ["sh", "bash", "zsh", "dash", "ksh"];
+
+fn command_words<'a>(mut words: &'a [&'a str]) -> &'a [&'a str] {
+    loop {
+        words = match words {
+            [word, rest @ ..]
+                if is_assignment(word)
+                    || matches!(
+                        program(word).as_str(),
+                        "env" | "command" | "exec" | "time" | "nohup" | "sudo"
+                    ) =>
+            {
+                rest
+            }
+            [word, "x" | "exec", "--", rest @ ..] | [word, "x" | "exec", rest @ ..]
+                if program(word) == "mise" =>
+            {
+                rest
+            }
+            _ => return words,
+        };
+    }
+}
+
+fn inspect_at(command: &str, depth: usize) -> Verdict {
     let scan = scan(command);
     let mut interpreter = false;
     let mut in_place = false;
@@ -614,37 +661,37 @@ pub fn inspect(command: &str) -> Verdict {
     }
     for segment in scan.tokens.split(|token| *token == Token::Separator) {
         let words = segment_words(segment);
-        let mut command = words.as_slice();
-        loop {
-            command = match command {
-                [word, rest @ ..]
-                    if is_assignment(word)
-                        || matches!(
-                            program(word).as_str(),
-                            "env" | "command" | "exec" | "time" | "nohup" | "sudo"
-                        ) =>
-                {
-                    rest
-                }
-                [word, "x" | "exec", "--", rest @ ..] | [word, "x" | "exec", rest @ ..]
-                    if program(word) == "mise" =>
-                {
-                    rest
-                }
-                _ => break,
-            };
-        }
+        let command = command_words(&words);
         let Some((first, rest)) = command.split_first() else {
             continue;
         };
         let name = program(first);
+        if SCRIPT_SHELLS.contains(&name.as_str()) {
+            let flag = rest.iter().position(|word| {
+                word.starts_with('-') && !word.starts_with("--") && word.contains('c')
+            });
+            let scripts: Vec<&str> = match flag {
+                Some(flag) => rest.get(flag + 1).copied().into_iter().collect(),
+                None => scan.heredocs.iter().map(String::as_str).collect(),
+            };
+            if !scripts.is_empty() && depth >= SCRIPT_DEPTH {
+                interpreter = true;
+            } else {
+                for script in scripts {
+                    let found = inspect_at(script, depth + 1);
+                    if matches!(found, Verdict::Refuse(_)) {
+                        return found;
+                    }
+                }
+            }
+        }
         if runs_inline(name.as_str(), rest, scan.heredoc) {
             interpreter = true;
         }
         if in_place_flag(name.as_str(), rest) {
             in_place = true;
         }
-        if matches!(name.as_str(), "awk" | "gawk")
+        if matches!(name.as_str(), "awk" | "gawk" | "mawk" | "nawk")
             && rest.iter().any(|argument| awk_program_writes(argument))
         {
             in_place = true;
@@ -735,6 +782,20 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "nested shell regressions allocate parsed command text")]
+    fn nested_shells_and_heredocs_cannot_hide_file_writes() {
+        for command in [
+            "bash -c \"cat > notes.md <<'EOF'\nbody\nEOF\"",
+            "sh <<'EOF'\nsed -i s/a/b/ f\nEOF",
+            "bash -c 'awk \"{print > f}\" input'",
+            "sh -c 'sh -c \"sed -i s/a/b/ f\"'",
+        ] {
+            assert!(matches!(inspect(command), Verdict::Refuse(_)), "{command}");
+        }
+        assert_eq!(inspect("sh <<'EOF'\nrg x .\nEOF"), Verdict::Admit);
+    }
     use alloc::vec;
 
     const REFUSED_INTERPRETER: Verdict = Verdict::Refuse(Reason::InlineInterpreter);

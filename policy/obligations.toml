@@ -735,6 +735,14 @@ fn reject_admitting_unbalanced_quotes() {
     assert!(production::verdict(true, false, false) == production::Verdict::Admit);
 }
 #[kani::proof]
+fn reject_accepting_a_missing_syntax_validator() {
+    assert!(production::checked(production::Verdict::Admit, false, false) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_accepting_a_shellcheck_error() {
+    assert!(production::checked(production::Verdict::Admit, true, true) == production::Verdict::Admit);
+}
+#[kani::proof]
 fn reject_admitting_a_broken_windows_path() {
     assert!(production::verdict(false, true, false) == production::Verdict::Admit);
 }

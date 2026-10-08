@@ -11,6 +11,10 @@ pub enum Reason {
     BrokenWindowsPath,
     /// A `$` sits where expansion must happen but can't.
     FrozenExpansion,
+    /// `ShellCheck` reported an error in the command.
+    ShellCheck,
+    /// The mandatory syntax validator couldn't inspect the command.
+    ValidatorUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -32,6 +36,17 @@ pub fn verdict(unbalanced: bool, broken_path: bool, frozen: bool) -> Verdict {
     }
 }
 
+/// A command passes only after the repository parser and the mandatory validator both pass.
+#[must_use]
+pub const fn checked(parsed: Verdict, available: bool, errors: bool) -> Verdict {
+    match parsed {
+        Verdict::Refuse(reason) => Verdict::Refuse(reason),
+        Verdict::Admit if !available => Verdict::Refuse(Reason::ValidatorUnavailable),
+        Verdict::Admit if errors => Verdict::Refuse(Reason::ShellCheck),
+        Verdict::Admit => Verdict::Admit,
+    }
+}
+
 #[must_use]
 pub const fn next_action(reason: Reason) -> &'static str {
     match reason {
@@ -44,6 +59,8 @@ pub const fn next_action(reason: Reason) -> &'static str {
         Reason::FrozenExpansion => {
             "Close the `${`, or use double quotes where the variable must expand."
         }
+        Reason::ShellCheck => "Correct the ShellCheck error, then retry the command.",
+        Reason::ValidatorUnavailable => "Run `mise install shellcheck`, then retry the command.",
     }
 }
 
@@ -56,6 +73,8 @@ pub const fn cause(reason: Reason) -> &'static str {
             "a backslash escape eats a Windows path separator or an expansion"
         }
         Reason::FrozenExpansion => "a `$` sits where expansion cannot happen",
+        Reason::ShellCheck => "ShellCheck reported a syntax error",
+        Reason::ValidatorUnavailable => "ShellCheck could not validate the command",
     }
 }
 
@@ -201,6 +220,36 @@ pub fn inspect(command: &str) -> Verdict {
 mod proofs {
     use super::*;
 
+    pub fn spec_checked(refused: bool, available: bool, errors: bool) {
+        let parsed = if refused {
+            Verdict::Refuse(Reason::UnbalancedQuotes)
+        } else {
+            Verdict::Admit
+        };
+        let result = checked(parsed, available, errors);
+        assert_eq!(result == Verdict::Admit, !refused && available && !errors);
+        if refused {
+            assert_eq!(result, parsed);
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn missing_or_failed_validators_never_admit_commands() {
+        let refused: bool = kani::any();
+        let available: bool = kani::any();
+        let errors: bool = kani::any();
+        spec_checked(refused, available, errors);
+        kani::cover!(checked(Verdict::Admit, available, errors) == Verdict::Admit);
+        kani::cover!(
+            checked(Verdict::Admit, available, errors)
+                == Verdict::Refuse(Reason::ValidatorUnavailable)
+        );
+        kani::cover!(
+            checked(Verdict::Admit, available, errors) == Verdict::Refuse(Reason::ShellCheck)
+        );
+    }
+
     /// The verdict names the first malformed form by its precedence and each refusal names a next action.
     pub fn spec_verdict(unbalanced: bool, broken_path: bool, frozen: bool) {
         let result = verdict(unbalanced, broken_path, frozen);
@@ -243,6 +292,13 @@ mod tests {
     const REFUSED_FROZEN: Verdict = Verdict::Refuse(Reason::FrozenExpansion);
 
     #[test]
+    fn both_parsers_must_pass() {
+        for [refused, available, errors] in crate::domain::flags() {
+            super::proofs::spec_checked(refused, available, errors);
+        }
+    }
+
+    #[test]
     fn every_input_meets_the_verdict_specification() {
         for [unbalanced, broken_path, frozen] in crate::domain::flags() {
             super::proofs::spec_verdict(unbalanced, broken_path, frozen);
@@ -264,6 +320,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "shell text regressions allocate parsed command text")]
     fn the_incident_forms_are_refused() {
         for (command, expected) in [
             ("export CARGO_TARGET_DIR=\"D:\\cargo\\$k\"", REFUSED_PATH),
@@ -285,6 +342,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "shell text regressions allocate parsed command text")]
     fn well_formed_commands_are_admitted() {
         for command in [
             "just check",
@@ -307,6 +365,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "drive text regressions allocate character windows")]
     fn drive_paths_are_recognized_in_every_quoting() {
         assert!(windows_path("D:\\cargo"));
         assert!(windows_path("C:/Users"));

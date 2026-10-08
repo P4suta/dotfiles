@@ -18,7 +18,7 @@
 {{-   $text := toJson . -}}
 {{-   if contains " claude-bash" $text -}}{{- else if contains "skill-ops " $text -}}{{- $preLast = append $preLast . -}}{{- else -}}{{- $pre = append $pre . -}}{{- end -}}
 {{- end -}}
-{{- $own_pre := dict "type" "command" "command" (printf "%s claude-bash" $command) -}}
+{{- $own_pre := dict "matcher" "shell|exec_command" "hooks" (list (dict "type" "command" "command" (printf "%s claude-bash" $command))) -}}
 {{- $_ := set $hooks "PreToolUse" (concat $pre (list $own_pre) $preLast) -}}
 {{- range $event, $point := dict "SessionStart" "start" "Stop" "stop" -}}
 {{-   $groups := list -}}

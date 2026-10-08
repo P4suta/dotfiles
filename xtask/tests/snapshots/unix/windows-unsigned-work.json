@@ -210,7 +210,7 @@
     {"mode":"0755","path":".codex","sha256":null,"type":"dir"},
     {"mode":"0644","path":".codex/AGENTS.md","sha256":"f5b8c6f85bc2aa6c255982c24fe535be323f0ca42939f8ec569f7587da92e04a","type":"file"},
     {"mode":"0644","path":".codex/config.toml","sha256":"6417b83fbf9f5aef2f6fabeb36c3db4ab86113f7adae096e6058fe9107bdfe8e","type":"file"},
-    {"mode":"0644","path":".codex/hooks.json","sha256":"fe82bf49836b3b389ec1da6cea16e10ca23abe1ab5ecc6f491b5532b9ce1a340","type":"file"},
+    {"mode":"0644","path":".codex/hooks.json","sha256":"84e765173ebc466d89ccdda80ca5115294fe3655fcd2a381054d30f89accc1e6","type":"file"},
     {"mode":"0755","path":".config","sha256":null,"type":"dir"},
     {"mode":"0755","path":".config/assure","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/assure/catalog.toml","sha256":"f00880443ebf441cc0803ecc40a16d46927d0becd9237dbd25c6a200139a6387","type":"file"},

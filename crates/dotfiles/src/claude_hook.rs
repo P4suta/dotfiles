@@ -8,7 +8,9 @@ use crate::shell_write_rules::{
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::io::Read;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 /// A Git Bash drive path's parts: the empty root, the drive letter, and the rest.
 const DRIVE_PATH_PARTS: usize = 3;
@@ -205,17 +207,71 @@ pub(crate) struct Blocked {
 /// The session identity an event without one records, so the incident still deduplicates.
 const NO_SESSION: &str = "no-session";
 
+fn shell_command(event: &Value) -> Result<String> {
+    let input = &event["tool_input"];
+    let command = input.get("command").or_else(|| input.get("cmd"));
+    match command {
+        Some(Value::String(text)) => Ok(text.clone()),
+        Some(Value::Array(words)) => {
+            let words: Vec<&str> = words
+                .iter()
+                .map(|word| word.as_str().context("shell command word is not a string"))
+                .collect::<Result<_>>()?;
+            if words
+                .first()
+                .is_some_and(|word| matches!(program(word).as_str(), "pwsh" | "powershell"))
+                && let Some(position) = words.iter().position(|word| {
+                    word.eq_ignore_ascii_case("-Command") || word.eq_ignore_ascii_case("-c")
+                })
+                && let Some(script) = words.get(position + 1)
+            {
+                return Ok((*script).to_owned());
+            }
+            match words.as_slice() {
+                [shell, flag, script]
+                    if matches!(program(shell).as_str(), "bash" | "sh" | "zsh" | "dash")
+                        && flag.starts_with('-')
+                        && flag.ends_with('c') =>
+                {
+                    Ok((*script).to_owned())
+                }
+                _ => Ok(words
+                    .iter()
+                    .map(|word| crate::refusal::quote(word))
+                    .collect::<Vec<_>>()
+                    .join(" ")),
+            }
+        }
+        _ => anyhow::bail!("shell event has no command"),
+    }
+}
+
+fn powershell(event: &Value) -> bool {
+    let input = &event["tool_input"];
+    let explicit = input["shell"]
+        .as_str()
+        .or_else(|| input["cmd"].as_array()?.first()?.as_str())
+        .or_else(|| input["command"].as_array()?.first()?.as_str());
+    event["tool_name"] == "PowerShell"
+        || explicit.is_some_and(|shell| matches!(program(shell).as_str(), "pwsh" | "powershell"))
+        || cfg!(windows) && event["tool_name"] == "exec_command" && explicit.is_none()
+}
+
+const POWERSHELL_PARSE: &str = "$tokens = $null; $errors = $null; $ast = [System.Management.Automation.Language.Parser]::ParseInput([Console]::In.ReadToEnd(), [ref]$tokens, [ref]$errors); $writes = @($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FileRedirectionAst] -and -not ($node.Location -is [System.Management.Automation.Language.VariableExpressionAst] -and $node.Location.VariablePath.UserPath -ieq 'null')}, $true)).Count -gt 0; @{errors = @($errors); file_write = $writes} | ConvertTo-Json -Depth 4 -Compress";
+
 /// The refusal for one `PreToolUse` event, or `None` when the hook admits the tool call.
-/// The hook checks PowerShell commands only for disk scans, because the file-write rules read POSIX shell syntax.
+/// Client and subagent events share the same command policy.
 pub(crate) fn refusal(event: &str) -> Result<Option<Blocked>> {
     let event: Value = serde_json::from_str(event).context("PreToolUse event is not JSON")?;
     let tool = event["tool_name"].as_str().unwrap_or_default();
-    if !matches!(tool, "Bash" | "PowerShell") {
+    if !matches!(
+        tool,
+        "Bash" | "PowerShell" | "bash" | "exec_command" | "shell"
+    ) {
         return Ok(None);
     }
-    let command = event["tool_input"]["command"]
-        .as_str()
-        .context("shell event has no command")?;
+    let command = shell_command(&event)?;
+    let command = command.as_str();
     let session = event["session_id"]
         .as_str()
         .filter(|value| !value.is_empty())
@@ -234,9 +290,6 @@ pub(crate) fn refusal(event: &str) -> Result<Option<Blocked>> {
             message,
         )));
     }
-    if tool == "PowerShell" {
-        return Ok(None);
-    }
     if let Some(message) = path_conversion_refusal(command, cfg!(windows)) {
         return Ok(Some(blocked(
             "hook.path-conversion",
@@ -244,7 +297,9 @@ pub(crate) fn refusal(event: &str) -> Result<Option<Blocked>> {
             message,
         )));
     }
-    if let shell_syntax_rules::Verdict::Refuse(reason) = shell_syntax_rules::inspect(command) {
+    if !powershell(&event)
+        && let shell_syntax_rules::Verdict::Refuse(reason) = shell_syntax_rules::inspect(command)
+    {
         return Ok(Some(blocked(
             "hook.shell-syntax",
             skill_ops::incident_rules::Source::MalformedInput,
@@ -255,7 +310,9 @@ pub(crate) fn refusal(event: &str) -> Result<Option<Blocked>> {
             ),
         )));
     }
-    if let Verdict::Refuse(reason) = inspect(command) {
+    if let Verdict::Refuse(reason) = inspect(command)
+        && (!powershell(&event) || reason != crate::shell_write_rules::Reason::FileRedirect)
+    {
         return Ok(Some(blocked(
             "hook.shell-write",
             skill_ops::incident_rules::Source::GateRefusal,
@@ -281,6 +338,119 @@ pub(crate) fn refusal(event: &str) -> Result<Option<Blocked>> {
             )
         }),
     )
+}
+
+fn validate_command(
+    mut validator: std::process::Command,
+    command: &str,
+) -> Result<std::process::Output> {
+    let mut child = validator
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    child
+        .stdin
+        .take()
+        .context("syntax validator has no stdin")?
+        .write_all(command.as_bytes())?;
+    Ok(child.wait_with_output()?)
+}
+
+fn checked_event(event: &str) -> Result<Option<Blocked>> {
+    if let Some(blocked) = refusal(event)? {
+        return Ok(Some(blocked));
+    }
+    let value: Value = serde_json::from_str(event)?;
+    if !matches!(
+        value["tool_name"].as_str(),
+        Some("Bash" | "PowerShell" | "bash" | "shell" | "exec_command")
+    ) {
+        return Ok(None);
+    }
+    let command = shell_command(&value)?;
+    let validation = (|| -> Result<(bool, bool)> {
+        let validator = if powershell(&value) {
+            let mut validator = crate::tool::Tool::Pwsh.command();
+            validator.args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                POWERSHELL_PARSE,
+            ]);
+            validator
+        } else {
+            let mut validator = crate::tool::Tool::Shellcheck.command();
+            validator.args(["--shell=bash", "--severity=error", "--format=json", "-"]);
+            validator
+        };
+        let output = validate_command(validator, &command)?;
+        let result: Value = serde_json::from_slice(&output.stdout)?;
+        let (findings, file_write) = if powershell(&value) {
+            (
+                result["errors"]
+                    .as_array()
+                    .context("PowerShell returned no errors array")?,
+                result["file_write"]
+                    .as_bool()
+                    .context("PowerShell returned no write verdict")?,
+            )
+        } else {
+            (
+                result
+                    .as_array()
+                    .context("ShellCheck returned no findings array")?,
+                false,
+            )
+        };
+        anyhow::ensure!(
+            output.status.success() || !findings.is_empty(),
+            "ShellCheck did not produce a validation result"
+        );
+        Ok((!findings.is_empty(), file_write))
+    })();
+    let available = validation.is_ok();
+    let (errors, file_write) = validation.unwrap_or((false, false));
+    let verdict =
+        shell_syntax_rules::checked(shell_syntax_rules::Verdict::Admit, available, errors);
+    if verdict == shell_syntax_rules::Verdict::Admit
+        && let Verdict::Refuse(reason) = crate::shell_write_rules::verdict(false, false, file_write)
+    {
+        return Ok(Some(Blocked {
+            rule: "hook.shell-write",
+            source: skill_ops::incident_rules::Source::GateRefusal,
+            session: value["session_id"]
+                .as_str()
+                .unwrap_or(NO_SESSION)
+                .to_owned(),
+            message: format!(
+                "Refused: this PowerShell command writes a file.\nNext action: {}",
+                next_action(reason)
+            ),
+        }));
+    }
+    Ok(match verdict {
+        shell_syntax_rules::Verdict::Admit => None,
+        shell_syntax_rules::Verdict::Refuse(reason) => Some(Blocked {
+            rule: "hook.shell-syntax",
+            source: skill_ops::incident_rules::Source::MalformedInput,
+            session: value["session_id"]
+                .as_str()
+                .filter(|value| !value.is_empty())
+                .unwrap_or(NO_SESSION)
+                .to_owned(),
+            message: if powershell(&value) {
+                "Refused: the mandatory PowerShell parser did not validate the command.\nNext action: install the pinned powershell tool and correct its syntax errors.".to_owned()
+            } else {
+                format!(
+                    "Refused: {}.\nNext action: {}",
+                    shell_syntax_rules::cause(reason),
+                    shell_syntax_rules::next_action(reason)
+                )
+            },
+        }),
+    })
 }
 
 /// The skill-ops state directory the incident store lives under, which the test environment can move.
@@ -337,7 +507,7 @@ fn record(blocked: &Blocked) {
 pub fn run() -> Result<()> {
     let mut event = String::new();
     std::io::stdin().read_to_string(&mut event)?;
-    if let Some(blocked) = refusal(&event)? {
+    if let Some(blocked) = checked_event(&event)? {
         record(&blocked);
         eprintln!("{}", blocked.message);
         std::process::exit(BLOCK);
@@ -431,10 +601,8 @@ mod tests {
         }
         for command in ["sed -n 's/a/b/p' file.txt", "awk '{print $1}' data.tsv"] {
             assert_eq!(
-                refusal(&bash(command))
-                    .unwrap()
-                    .map(|blocked| blocked.message),
-                None,
+                refusal(&bash(command)).unwrap().map(|blocked| blocked.rule),
+                Some("hook.legacy"),
                 "{command}"
             );
         }
@@ -539,6 +707,26 @@ mod tests {
     fn a_malformed_event_is_an_error_rather_than_an_admission() {
         assert!(refusal("not json").is_err());
         assert!(refusal(r#"{"tool_name":"Bash","tool_input":{}}"#).is_err());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn powershell_null_sinks_and_file_redirects_use_the_native_ast() {
+        for (command, blocked) in [
+            ("git status 2>$null", false),
+            ("git status 2>&1", false),
+            ("Write-Output hi > result.txt", true),
+            ("Write-Output hi > '$null'", true),
+            ("git status 2>$null; Write-Output hi > result.txt", true),
+        ] {
+            let event =
+                json!({"tool_name": "PowerShell", "tool_input": {"command": command}}).to_string();
+            assert_eq!(
+                checked_event(&event).unwrap().is_some(),
+                blocked,
+                "{command}"
+            );
+        }
     }
 
     #[test]
