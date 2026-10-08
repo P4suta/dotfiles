@@ -313,9 +313,11 @@ pub fn verify(root: &Path) -> Result<()> {
     } else {
         verify_in_container(root)?;
     }
-    // The Quint models run in their own pinned image without a network on every host, so the container gate leaves them out.
+    // The Quint and Alloy models run in their own pinned images without a network on every host, so the container gate leaves them out.
     if std::env::var_os(INSIDE_CONTAINER).is_none() {
-        crate::quint::verify(root, &obligations::manifest(root)?)?;
+        let manifest = obligations::manifest(root)?;
+        crate::quint::verify(root, &manifest)?;
+        crate::alloy::verify(root, &manifest)?;
     }
     Ok(())
 }

@@ -536,6 +536,7 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
     let scratch = tempfile::tempdir()?;
     let mut git_policies = Vec::new();
     let source_data = source_data(root)?;
+    crate::manifest_model::verify(root, &source_data)?;
     let findings = manifest_findings(&source_data);
     ensure!(findings.is_empty(), "{}", findings.join("\n"));
     for profile in Profile::ALL {

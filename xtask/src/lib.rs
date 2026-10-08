@@ -3,6 +3,7 @@
 
 pub mod adr;
 pub mod agent_memory;
+pub mod alloy;
 pub mod change;
 pub mod environment;
 pub mod ignore_audit;
@@ -11,6 +12,7 @@ pub mod instruction_audit;
 pub mod inventory;
 pub mod launchers;
 pub mod lint;
+pub mod manifest_model;
 pub mod modern;
 pub mod next_action;
 pub mod obligations;

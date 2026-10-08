@@ -247,6 +247,15 @@ fn check(root: &Path, gates: Gates, reference: &str) -> Result<()> {
     Ok(())
 }
 
+fn generate(root: &Path, check: bool) -> Result<()> {
+    xtask::adr::generate(root, check)?;
+    xtask::profiles::data_schema(root, check)?;
+    xtask::obligations::schemas(root, check)?;
+    xtask::manifest_model::instance(root, check)?;
+    xtask::launchers::generate(root, check)?;
+    xtask::profiles::targets_page(root, check)
+}
+
 fn run() -> Result<()> {
     let mut cli = Cli::parse();
     cli.root = xtask::canonical(&cli.root)?;
@@ -267,13 +276,7 @@ fn run() -> Result<()> {
             xtask::ignore_audit::check(&cli.root)?;
             xtask::input_audit::check(&cli.root)?;
         }
-        Action::Gen { check } => {
-            xtask::adr::generate(&cli.root, check)?;
-            xtask::profiles::data_schema(&cli.root, check)?;
-            xtask::obligations::schemas(&cli.root, check)?;
-            xtask::launchers::generate(&cli.root, check)?;
-            xtask::profiles::targets_page(&cli.root, check)?;
-        }
+        Action::Gen { check } => generate(&cli.root, check)?,
         Action::ProfileSnapshots { write } => {
             if write {
                 xtask::profile_snapshot::write(&cli.root)?;

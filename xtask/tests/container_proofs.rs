@@ -236,6 +236,69 @@ fn quint_runs_offline_with_the_checkout_read_only() {
 }
 
 #[test]
+fn the_alloy_image_pins_alloy_and_its_base_by_digest() {
+    let definition = include_str!("../proofs/alloy/Dockerfile");
+    assert!(definition.contains(&format!(
+        "ARG ALLOY_VERSION={}\n",
+        xtask::alloy::ALLOY_VERSION
+    )));
+    assert!(definition.contains("ADD --checksum=sha256:${ALLOY_SHA256}"));
+    for line in definition.lines().filter(|line| line.starts_with("FROM ")) {
+        assert!(line.contains("@sha256:"), "{line}");
+    }
+}
+
+#[test]
+fn alloy_runs_one_command_offline_with_the_checkout_read_only() {
+    let arguments = xtask::alloy::run_arguments(
+        Path::new(r"C:\Users\fixture\dotfiles"),
+        Path::new(r"C:\Temp\out"),
+        "dotfiles-alloy:fixture",
+        "specs/transaction.als",
+        "sat4j",
+        "Durable",
+    );
+    let text: Vec<_> = arguments
+        .iter()
+        .map(|value| value.to_string_lossy().into_owned())
+        .collect();
+    let network = text.iter().position(|value| value == "--network").unwrap();
+    assert_eq!(text[network + 1], "none");
+    assert!(text.contains(
+        &r#"type=bind,"source=C:\Users\fixture\dotfiles",target=/source,readonly"#.to_owned()
+    ));
+    let solver = text.iter().position(|value| value == "--solver").unwrap();
+    assert_eq!(text[solver + 1], "sat4j");
+    let command = text.iter().position(|value| value == "--command").unwrap();
+    assert_eq!(text[command + 1], "Durable");
+    assert_eq!(
+        text.last().map(String::as_str),
+        Some("/source/specs/transaction.als")
+    );
+}
+
+#[test]
+fn an_alloy_receipt_with_a_solution_reports_an_instance_or_a_counterexample() {
+    let solved: serde_json::Value = serde_json::from_str(
+        r#"{"commands":{"Bad":{"type":"check","solution":[{"instances":[]}]}}}"#,
+    )
+    .unwrap();
+    let unsolved: serde_json::Value =
+        serde_json::from_str(r#"{"commands":{"Good":{"type":"check"}}}"#).unwrap();
+    assert!(xtask::alloy::solved(&solved, "Bad").unwrap());
+    assert!(!xtask::alloy::solved(&unsolved, "Good").unwrap());
+    assert!(xtask::alloy::solved(&unsolved, "Missing").is_err());
+    for malformed in [
+        json!(null),
+        json!({}),
+        json!({"type":"check", "solution":false}),
+    ] {
+        let receipt = json!({"commands":{"Bad":malformed}});
+        assert!(xtask::alloy::solved(&receipt, "Bad").is_err());
+    }
+}
+
+#[test]
 fn the_quint_reports_yield_the_state_count_and_each_witness() {
     let tlc = "Model checking completed. No error has been found.\n1928 states generated, 971 distinct states found, 0 states left on queue.\n";
     assert_eq!(xtask::quint::distinct_states(tlc), Some(971));

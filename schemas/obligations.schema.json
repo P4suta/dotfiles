@@ -25,6 +25,42 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "AlloyCheck": {
+      "description": "One property of an Alloy model, as three named commands that share one scope.",
+      "type": "object",
+      "properties": {
+        "assertion": {
+          "description": "A `check` command that must find no counterexample.",
+          "type": "string"
+        },
+        "counterexample": {
+          "description": "A `check` command over a mutated fact that must find a counterexample, which shows the assertion can fail.",
+          "type": "string"
+        },
+        "instance": {
+          "description": "A `run` command that must find an instance, ruling out a vacuous assertion.",
+          "type": "string"
+        },
+        "scope": {
+          "description": "The scope each of the three commands states, such as `for 4 but 12 steps`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "assertion",
+        "instance",
+        "counterexample",
+        "scope"
+      ]
+    },
+    "AlloySolver": {
+      "description": "The Boolean satisfiability solvers an Alloy obligation may pin, each running in Java without a native library.",
+      "type": "string",
+      "enum": [
+        "sat4j"
+      ]
+    },
     "KaniFlag": {
       "description": "The flags a Kani contract run may pass, pinned with the Kani version in `skill_proofs::KANI_VERSION`.",
       "type": "string",
@@ -249,6 +285,35 @@
             "steps",
             "distinct_states",
             "traces"
+          ]
+        },
+        {
+          "description": "An Alloy 6 model, which `just proofs` checks offline in its pinned image.",
+          "type": "object",
+          "properties": {
+            "checks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AlloyCheck"
+              }
+            },
+            "solver": {
+              "$ref": "#/$defs/AlloySolver"
+            },
+            "spec": {
+              "type": "string"
+            },
+            "verifier": {
+              "type": "string",
+              "const": "alloy"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "spec",
+            "solver",
+            "checks"
           ]
         }
       ]

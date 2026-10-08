@@ -1506,3 +1506,53 @@ fn reject_missing_a_back_edge() { assert_eq!(production::cycle(&[2, 1]), 0); }
 #[kani::unwind(6)]
 fn reject_a_cycle_in_a_closed_linear_order() { assert_ne!(production::cycle(&[0, 1]), 0); }
 '''
+
+[[obligation]]
+verifier = "alloy"
+spec = "specs/manifest.als"
+solver = "sat4j"
+[[obligation.checks]]
+assertion = "Disjoint"
+instance = "Populated"
+counterexample = "DisjointUnchecked"
+scope = "for 4"
+[[obligation.checks]]
+assertion = "NoEmptyDirectory"
+instance = "Populated"
+counterexample = "NoEmptyDirectoryUnchecked"
+scope = "for 4"
+[[obligation.checks]]
+assertion = "HookBijection"
+instance = "Populated"
+counterexample = "HookBijectionUnchecked"
+scope = "for 4"
+[[obligation.checks]]
+assertion = "UniformHookMask"
+instance = "Populated"
+counterexample = "UniformHookMaskUnchecked"
+scope = "for 4"
+
+[[obligation]]
+verifier = "alloy"
+spec = "specs/manifest_instance.als"
+solver = "sat4j"
+[[obligation.checks]]
+assertion = "Real_disjoint"
+instance = "RealManifest"
+counterexample = "Planted_disjoint"
+scope = "for 4"
+[[obligation.checks]]
+assertion = "Real_hookBijection"
+instance = "RealManifest"
+counterexample = "Planted_hookBijection"
+scope = "for 4"
+[[obligation.checks]]
+assertion = "Real_uniformHookMask"
+instance = "RealManifest"
+counterexample = "Planted_uniformHookMask"
+scope = "for 4"
+[[obligation.checks]]
+assertion = "Real_noEmptyDirectory"
+instance = "RealManifest"
+counterexample = "Planted_noEmptyDirectory"
+scope = "for 4"

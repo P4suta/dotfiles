@@ -105,7 +105,78 @@ pub enum Obligation {
     /// A linter run with its committed settings.
     Lint { tool: LintTool, settings: String },
     /// A Quint model, which `just proofs` checks offline in its pinned image.
-    Quint(QuintModel),
+    Quint(Box<QuintModel>),
+    /// An Alloy 6 model, which `just proofs` checks offline in its pinned image.
+    Alloy(AlloyModel),
+}
+
+/// The Boolean satisfiability solvers an Alloy obligation may pin, each running in Java without a native library.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AlloySolver {
+    Sat4j,
+}
+
+impl AlloySolver {
+    #[must_use]
+    pub const fn argument(self) -> &'static str {
+        match self {
+            Self::Sat4j => "sat4j",
+        }
+    }
+}
+
+/// An Alloy model whose every check pairs an assertion, an instance, and a counterexample over a mutated fact.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AlloyModel {
+    pub spec: String,
+    pub solver: AlloySolver,
+    pub checks: Vec<AlloyCheck>,
+}
+
+/// One property of an Alloy model, as three named commands that share one scope.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AlloyCheck {
+    /// A `check` command that must find no counterexample.
+    pub assertion: String,
+    /// A `run` command that must find an instance, ruling out a vacuous assertion.
+    pub instance: String,
+    /// A `check` command over a mutated fact that must find a counterexample, which shows the assertion can fail.
+    pub counterexample: String,
+    /// The scope each of the three commands states, such as `for 4 but 12 steps`.
+    pub scope: String,
+}
+
+/// The refusals of an Alloy obligation that the source alone decides: each command exists with its kind and the recorded scope.
+#[must_use]
+pub fn close_alloy(root: &Path, alloy: &AlloyModel) -> Vec<String> {
+    let spec = &alloy.spec;
+    let text = fs::read_to_string(root.join(spec)).unwrap_or_default();
+    let mut refusals = Vec::new();
+    if alloy.checks.is_empty() {
+        refusals.push(format!("{MANIFEST}: {spec} names no check"));
+    }
+    for check in &alloy.checks {
+        for (name, kind) in [
+            (&check.assertion, "check"),
+            (&check.instance, "run"),
+            (&check.counterexample, "check"),
+        ] {
+            let declared = text.lines().any(|line| {
+                line.trim_start().starts_with(&format!("{name}: {kind} "))
+                    && line.trim_end().ends_with(&check.scope)
+            });
+            if !declared {
+                refusals.push(format!(
+                    "{MANIFEST}: {spec} declares no `{name}: {kind}` command {}",
+                    check.scope
+                ));
+            }
+        }
+    }
+    refusals
 }
 
 /// A Quint model whose `main` module holds `invariant` in exactly `distinct_states` reachable states and whose `probe` module breaks it.
@@ -912,6 +983,7 @@ pub fn closure(root: &Path, manifest: &Manifest) -> Result<Closure> {
                 }
             }
             Obligation::Quint(quint) => result.refusals.extend(close_quint(root, quint)),
+            Obligation::Alloy(alloy) => result.refusals.extend(close_alloy(root, alloy)),
         }
     }
     for missing in modules.difference(&listed) {
