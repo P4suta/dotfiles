@@ -1478,3 +1478,19 @@ fn reject_removing_a_nonempty_interpreter() { assert!(looks_like_stub(1, product
 #[kani::unwind(12)]
 fn reject_colliding_distinct_powershell_literals() { assert_eq!(powershell_literal("a'").as_str(), powershell_literal("a''").as_str()); }
 '''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/hook_rules.rs"
+probes = '''
+use production::{Configured, Gate, Hook, name, notification, plan, takes_input};
+#[kani::proof]
+#[kani::unwind(10)]
+fn reject_health_before_the_push_hold() { assert_eq!(plan(Hook::PrePush, Configured::default()).gates().first(), Some(&Gate::Health)); }
+#[kani::proof]
+fn reject_a_shared_hook_name() { assert_eq!(name(Hook::PreCommit), name(Hook::PrePush)); }
+#[kani::proof]
+fn reject_a_neutral_security_refusal() { assert!(notification(Gate::Dotguard)); }
+#[kani::proof]
+fn reject_losing_hook_input() { assert!(!takes_input(Gate::RepositoryLefthook)); }
+'''

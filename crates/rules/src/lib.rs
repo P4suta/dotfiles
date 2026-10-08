@@ -59,6 +59,7 @@ pub mod env_expansion_rules;
 pub mod eol_rules;
 pub mod freshness_rules;
 pub mod gate_rules;
+pub mod hook_rules;
 pub mod host_setup_rules;
 pub mod hosts_rules;
 pub mod ignore_rules;

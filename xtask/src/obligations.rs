@@ -215,6 +215,8 @@ pub enum Metric {
     MutantsTimedOut { exact: u64 },
     /// A wall time measured on one host, which never gates.
     WallMillis { advisory: u64 },
+    /// The gate processes one Git hook spawns, which `crates/dotfiles/tests/hook_exec_count.rs` counts through stand-ins.
+    ExecCount { hook: String, exact: u64 },
 }
 
 /// The JSON Schema of the manifest.
@@ -1052,7 +1054,8 @@ pub fn metrics(baselines: &Baselines, measured: &Closure, unsafe_sites: u64) -> 
         Metric::UnsafeSites { exact } => Some(("unsafe-sites", Better::Lower, exact, unsafe_sites)),
         Metric::MutantsMissed { .. }
         | Metric::MutantsTimedOut { .. }
-        | Metric::WallMillis { .. } => None,
+        | Metric::WallMillis { .. }
+        | Metric::ExecCount { .. } => None,
     })
 }
 

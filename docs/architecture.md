@@ -33,10 +33,12 @@ One Cargo workspace at the root builds them with one lockfile, one toolchain fro
 ## Hook chain
 
 `~/.config/git/config` sets `core.hooksPath` to `~/.config/git/hooks` on every host, and each hook there executes `dotfiles hook <name>`.
-`crates/dotfiles/src/hooks.rs` then runs, in order:
+`crates/dotfiles/src/hooks.rs` then runs the gates that `plan` in `crates/rules/src/hook_rules.rs` lists, stops at the first refusal, and only warns when a notification fails.
+`crates/dotfiles/tests/hook_exec_count.rs` counts the processes each hook spawns and compares the count with the `exec-count` metrics of `policy/baselines.toml`.
+The plan runs, in order:
 
-1. For `pre-commit`, `commit-msg`, and `pre-push`, the process start health probe.
-2. For `pre-push`, the push pause marker.
+1. For `pre-push`, the push pause marker.
+2. For `pre-commit`, `commit-msg`, and `pre-push`, the process start health probe.
 3. For `pre-commit`, `commit-msg`, `pre-push`, and `post-commit`, the matching `dotguard` gate.
 4. For `pre-push`, the host family evidence gate, then the ready pull request gate.
 5. For `pre-commit` and `pre-push`, the verification gate, which refuses a change that adds code of a shape nothing in the repository verifies.
