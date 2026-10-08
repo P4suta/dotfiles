@@ -211,7 +211,7 @@ pub(crate) fn refusal(event: &str) -> Result<Option<String>> {
     }
     if let Verdict::Refuse(reason) = inspect(command) {
         return Ok(Some(format!(
-            "Refused: this command writes a file through an inline interpreter, heredoc, or redirect.\nNext action: {}",
+            "Refused: this command writes a file through an inline interpreter, in-place editor, heredoc, or redirect.\nNext action: {}",
             next_action(reason)
         )));
     }
@@ -300,6 +300,26 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(message.contains("Next action") && message.contains("Edit or Write tool"));
+    }
+
+    #[test]
+    fn an_in_place_editor_write_is_refused_with_the_next_action() {
+        for command in [
+            "sed -i 's/a/b/' file.txt",
+            "awk -i inplace '{print $1}' data.tsv",
+            "awk '{print $1 > \"out.txt\"}' data.tsv",
+        ] {
+            let message = refusal(&bash(command))
+                .unwrap()
+                .unwrap_or_else(|| panic!("{command}"));
+            assert!(
+                message.contains("in-place editor") && message.contains("Edit tool"),
+                "{command}: {message}"
+            );
+        }
+        for command in ["sed -n 's/a/b/p' file.txt", "awk '{print $1}' data.tsv"] {
+            assert_eq!(refusal(&bash(command)).unwrap(), None, "{command}");
+        }
     }
 
     #[test]

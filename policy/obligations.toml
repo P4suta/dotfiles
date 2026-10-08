@@ -674,11 +674,15 @@ source = "crates/rules/src/shell_write_rules.rs"
 probes = '''
 #[kani::proof]
 fn reject_admitting_an_inline_interpreter() {
-    assert!(production::verdict(true, false) == production::Verdict::Admit);
+    assert!(production::verdict(true, false, false) == production::Verdict::Admit);
 }
 #[kani::proof]
 fn reject_admitting_a_file_redirect() {
-    assert!(production::verdict(false, true) == production::Verdict::Admit);
+    assert!(production::verdict(false, false, true) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_admitting_an_in_place_edit() {
+    assert!(production::verdict(false, true, false) == production::Verdict::Admit);
 }
 '''
 

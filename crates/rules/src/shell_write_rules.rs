@@ -8,6 +8,8 @@ use self::alloc::vec::Vec;
 pub enum Reason {
     /// An inline interpreter runs code from `-c`, `-e`, or standard input.
     InlineInterpreter,
+    /// An in-place editor flag or an awk program statement writes a named file.
+    InPlaceEdit,
     /// A redirect, `tee`, or heredoc target names a file.
     FileRedirect,
 }
@@ -19,9 +21,11 @@ pub enum Verdict {
 }
 
 #[must_use]
-pub fn verdict(inline_interpreter: bool, file_write: bool) -> Verdict {
+pub fn verdict(inline_interpreter: bool, in_place: bool, file_write: bool) -> Verdict {
     if inline_interpreter {
         Verdict::Refuse(Reason::InlineInterpreter)
+    } else if in_place {
+        Verdict::Refuse(Reason::InPlaceEdit)
     } else if file_write {
         Verdict::Refuse(Reason::FileRedirect)
     } else {
@@ -34,6 +38,9 @@ pub const fn next_action(reason: Reason) -> &'static str {
     match reason {
         Reason::InlineInterpreter => {
             "Use the Edit or Write tool to change files, or add the logic as a project command (`just`, `xtask`, `pr-workflow`) and run that."
+        }
+        Reason::InPlaceEdit => {
+            "Use the Edit tool to change the file, or run a project command (`just`, `xtask`, `pr-workflow`) that applies the change."
         }
         Reason::FileRedirect => {
             "Use the Write tool for new files and the Edit tool for changes, or run a project command (`just`, `xtask`, `pr-workflow`) that produces the file."
@@ -310,6 +317,97 @@ const DISCARD: &str = "/dev/null";
 const STDOUT: &str = "/dev/stdout";
 const STDERR: &str = "/dev/stderr";
 
+/// Whether the flags of `sed` or `perl` request in-place edits, or `awk` loads the `inplace` extension.
+///
+/// Exempt as disproportionate: Kani spends past its budget on the string search of even a three-byte word.
+/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::in_place_editor_flags_are_refused`.
+/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+#[must_use]
+pub fn in_place_flag(name: &str, arguments: &[&str]) -> bool {
+    let editor = matches!(name, "sed" | "perl");
+    let awk = matches!(name, "awk" | "gawk");
+    if !editor && !awk {
+        return false;
+    }
+    for (index, argument) in arguments.iter().enumerate() {
+        if argument == &"--" {
+            return false;
+        }
+        let Some(flags) = argument.strip_prefix('-').filter(|f| !f.is_empty()) else {
+            continue;
+        };
+        let long = flags.starts_with('-');
+        let found = if editor {
+            long && (flags == "-in-place" || flags.starts_with("-in-place="))
+                || !long && flags.contains('i')
+        } else if long {
+            false
+        } else {
+            (flags == "i"
+                && arguments
+                    .get(index + 1)
+                    .is_some_and(|word| *word == "inplace"))
+                || flags == "iinplace"
+        };
+        if found {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether an awk program text redirects a `print` or `printf` statement into a file.
+///
+/// A `>` in a print statement always names a redirect target under the awk grammar, never a comparison, and `>>` only appends.
+///
+/// Exempt as disproportionate: Kani spends past its budget on the string search of even a three-byte word.
+/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::awk_programs_that_write_files_are_refused`.
+/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+#[must_use]
+pub fn awk_program_writes(program: &str) -> bool {
+    program
+        .split([';', '{', '}', '\n'])
+        .filter(|statement| {
+            let body = statement.trim_start();
+            body.starts_with("print ")
+                || body.starts_with("print(")
+                || body == "print"
+                || body.starts_with("printf ")
+                || body.starts_with("printf(")
+        })
+        .any(statement_redirects)
+}
+
+/// Whether a print statement holds a `>` or `>>` outside its string literals.
+fn statement_redirects(statement: &str) -> bool {
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut chars = statement.chars().peekable();
+    while let Some(c) = chars.next() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => quoted = true,
+            '>' => {
+                if chars.peek() != Some(&'=') {
+                    return true;
+                }
+                chars.next();
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 /// The words a flag and its separate value take.
 const FLAG_WITH_VALUE: usize = 2;
 
@@ -507,6 +605,7 @@ pub fn body_sources(command: &str) -> Vec<Source> {
 pub fn inspect(command: &str) -> Verdict {
     let scan = scan(command);
     let mut interpreter = false;
+    let mut in_place = false;
     let mut file_write = false;
     for (index, token) in scan.tokens.iter().enumerate() {
         if *token == Token::Redirect && writes_to(scan.tokens.get(index + 1)) {
@@ -542,6 +641,38 @@ pub fn inspect(command: &str) -> Verdict {
         if runs_inline(name.as_str(), rest, scan.heredoc) {
             interpreter = true;
         }
+        if in_place_flag(name.as_str(), rest) {
+            in_place = true;
+        }
+        if matches!(name.as_str(), "awk" | "gawk")
+            && rest.iter().any(|argument| awk_program_writes(argument))
+        {
+            in_place = true;
+        }
+        if name == "xargs"
+            && let Some(position) = rest.iter().position(|word| !word.starts_with('-'))
+            && rest.get(position).is_some_and(|word| {
+                in_place_flag(
+                    program(word).as_str(),
+                    rest.get(position + 1..).unwrap_or_default(),
+                )
+            })
+        {
+            in_place = true;
+        }
+        if name == "find"
+            && let Some(marker) = rest
+                .iter()
+                .position(|word| matches!(*word, "-exec" | "-execdir" | "-ok" | "-okdir"))
+            && rest.get(marker + 1).copied().is_some_and(|editor| {
+                in_place_flag(
+                    program(editor).as_str(),
+                    rest.get(marker + 2..).unwrap_or_default(),
+                )
+            })
+        {
+            in_place = true;
+        }
         if name == "tee"
             && rest
                 .iter()
@@ -550,7 +681,7 @@ pub fn inspect(command: &str) -> Verdict {
             file_write = true;
         }
     }
-    verdict(interpreter, file_write)
+    verdict(interpreter, in_place, file_write)
 }
 
 /// The properties Kani proves for every input and the tests check over every input they list.
@@ -558,11 +689,13 @@ pub fn inspect(command: &str) -> Verdict {
 mod proofs {
     use super::*;
 
-    /// The verdict never admits a file-writing command, an inline interpreter names its own refusal first, and each refusal names a file tool.
-    pub fn spec_verdict(interpreter: bool, file: bool) {
-        let result = verdict(interpreter, file);
+    /// The verdict never admits a file-writing command, the refusal reasons keep their precedence, and each refusal names a file tool.
+    pub fn spec_verdict(interpreter: bool, in_place: bool, file: bool) {
+        let result = verdict(interpreter, in_place, file);
         let expected = if interpreter {
             Verdict::Refuse(Reason::InlineInterpreter)
+        } else if in_place {
+            Verdict::Refuse(Reason::InPlaceEdit)
         } else if file {
             Verdict::Refuse(Reason::FileRedirect)
         } else {
@@ -578,11 +711,13 @@ mod proofs {
     #[kani::proof]
     fn file_writing_commands_are_never_admitted_and_every_refusal_names_a_next_action() {
         let interpreter: bool = kani::any();
+        let in_place: bool = kani::any();
         let file: bool = kani::any();
-        spec_verdict(interpreter, file);
-        let result = verdict(interpreter, file);
+        spec_verdict(interpreter, in_place, file);
+        let result = verdict(interpreter, in_place, file);
         kani::cover!(result == Verdict::Admit);
         kani::cover!(result == Verdict::Refuse(Reason::InlineInterpreter));
+        kani::cover!(result == Verdict::Refuse(Reason::InPlaceEdit));
         kani::cover!(result == Verdict::Refuse(Reason::FileRedirect));
     }
 }
@@ -591,10 +726,11 @@ mod proofs {
 mod tests {
     #[test]
     fn every_input_meets_the_verdict_specification() {
-        for [interpreter, file] in crate::domain::flags() {
-            super::proofs::spec_verdict(interpreter, file);
+        for [interpreter, in_place, file] in crate::domain::flags() {
+            super::proofs::spec_verdict(interpreter, in_place, file);
         }
         assert!(super::next_action(super::Reason::InlineInterpreter).starts_with("Use the Edit"));
+        assert!(super::next_action(super::Reason::InPlaceEdit).starts_with("Use the Edit"));
         assert!(super::next_action(super::Reason::FileRedirect).starts_with("Use the Write"));
     }
 
@@ -602,6 +738,7 @@ mod tests {
     use alloc::vec;
 
     const REFUSED_INTERPRETER: Verdict = Verdict::Refuse(Reason::InlineInterpreter);
+    const REFUSED_IN_PLACE: Verdict = Verdict::Refuse(Reason::InPlaceEdit);
     const REFUSED_FILE: Verdict = Verdict::Refuse(Reason::FileRedirect);
 
     #[test]
@@ -630,6 +767,8 @@ mod tests {
     fn redirects_into_files_are_refused() {
         for command in [
             "cat > notes.txt <<'EOF'\nbody\nEOF",
+            "cat <<EOF >> notes.txt\nbody\nEOF",
+            "echo hi | tee -a notes.txt <<'EOF'\nbody\nEOF",
             "echo hi > out.txt",
             "echo hi >> out.txt",
             "echo hi 2> err.txt",
@@ -640,6 +779,62 @@ mod tests {
         ] {
             assert_eq!(inspect(command), REFUSED_FILE, "{command}");
         }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every command")]
+    fn in_place_editor_flags_are_refused() {
+        for command in [
+            "sed -i 's/a/b/' file.txt",
+            "sed --in-place 's/a/b/' file.txt",
+            "sed --in-place=.bak 's/a/b/' file.txt",
+            "sed -i.bak 's/a/b/' file.txt",
+            "sed -ni 's/a/b/p' file.txt",
+            "awk -i inplace '{print $1}' data.tsv",
+            "gawk -iinplace '{print}' data.tsv",
+            "sudo sed -i 's/a/b/' /etc/hosts",
+            "env sed -i 's/a/b/' file.txt",
+            "mise x -- sed -i 's/a/b/' file.txt",
+            "find src -name '*.rs' -exec sed -i 's/a/b/' {} +",
+            "git ls-files | xargs sed -i 's/a/b/'",
+            "git ls-files -z | xargs -0 sed -i 's/a/b/'",
+        ] {
+            assert_eq!(inspect(command), REFUSED_IN_PLACE, "{command}");
+        }
+        assert!(in_place_flag("sed", &["-i", "s/a/b/"]));
+        assert!(in_place_flag("sed", &["--in-place"]));
+        assert!(in_place_flag("sed", &["--in-place=.bak"]));
+        assert!(in_place_flag("perl", &["-pi"]));
+        assert!(in_place_flag("awk", &["-i", "inplace"]));
+        assert!(!in_place_flag("sed", &["-n", "s/a/b/p"]));
+        assert!(!in_place_flag("sed", &["--", "-i"]));
+        assert!(!in_place_flag("awk", &["-i"]));
+        assert!(!in_place_flag("awk", &["-v", "i=x"]));
+        assert!(!in_place_flag("grep", &["-i", "pattern"]));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every command")]
+    fn awk_programs_that_write_files_are_refused() {
+        for command in [
+            "awk '{print $1 > \"out.txt\"}' data.tsv",
+            "awk '{printf \"%s\\n\", $0 >> \"log.txt\"}' data",
+            "awk '{ print > \"out\" }' data",
+            "awk 'NR>1 {print; print $2 > \"out.txt\"}' data",
+            "awk -F, '{print $1 > (\"part\" $2)}' data",
+            "gawk '{print $0 > \"out.txt\"}' data",
+        ] {
+            assert_eq!(inspect(command), REFUSED_IN_PLACE, "{command}");
+        }
+        assert!(awk_program_writes("{print > \"out\"}"));
+        assert!(awk_program_writes("printf(\"x\") > \"f\""));
+        assert!(awk_program_writes("print $1 >> f"));
+        assert!(!awk_program_writes("{print $1}"));
+        assert!(!awk_program_writes("{print \"a>b\"}"));
+        assert!(!awk_program_writes("{print $1 >= $2}"));
+        assert!(!awk_program_writes("if (a > \"b\") print a"));
+        assert!(!awk_program_writes("{ x = 1; print x }"));
+        assert!(!awk_program_writes("data.tsv"));
     }
 
     #[test]
@@ -668,6 +863,10 @@ mod tests {
             "node script.js",
             "node --version",
             "ls | grep foo",
+            "sed -n 's/a/b/p' file.txt",
+            "sed 's/a/b/' file.txt",
+            "awk '{print $1}' data.tsv",
+            "awk '$1 > 1 {print}' data.tsv",
             "if [ 1 -lt 2 ]; then echo yes; fi",
             "tee --help",
             "",
@@ -769,8 +968,12 @@ mod tests {
 
     #[test]
     fn refusals_name_a_next_action() {
-        for reason in [Reason::InlineInterpreter, Reason::FileRedirect] {
-            assert!(next_action(reason).contains("Write"));
+        for (reason, start) in [
+            (Reason::InlineInterpreter, "Use the Edit"),
+            (Reason::InPlaceEdit, "Use the Edit"),
+            (Reason::FileRedirect, "Use the Write"),
+        ] {
+            assert!(next_action(reason).starts_with(start), "{reason:?}");
         }
     }
 
