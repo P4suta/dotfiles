@@ -60,6 +60,7 @@ pub mod eol_rules;
 pub mod gate_rules;
 pub mod hosts_rules;
 pub mod ignore_rules;
+pub mod incident_rules;
 pub mod input_rules;
 pub mod instruction_rules;
 pub mod lint_rules;

@@ -5,7 +5,7 @@ mod tree;
 
 pub use platform::paths::canonical;
 pub use platform::{aside, build_inputs, freshness, refusal, report, tool};
-pub use rules::{proof_budget_rules, skill_rules};
+pub use rules::{incident_rules, proof_budget_rules, skill_rules};
 pub(crate) use tree::collect;
 pub use tree::{
     Metadata, export_checks, metadata, skill_source_paths, skills, split_frontmatter,
@@ -1607,4 +1607,291 @@ pub fn notes(state: &Path) -> Result<Vec<Note>> {
         )
     });
     Ok(result)
+}
+
+/// One recorded incident: a failure that needs a prevention decision for its rule.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Incident {
+    pub schema: u32,
+    pub id: String,
+    pub rule: String,
+    pub session: String,
+    #[serde(with = "incident_source_key")]
+    pub source: incident_rules::Source,
+    pub evidence: Vec<String>,
+}
+
+/// Stores an incident source as the name its rule module gives it.
+mod incident_source_key {
+    use super::incident_rules::Source;
+    use serde::{Deserialize, Deserializer, Serializer, de::Error as _};
+
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde passes every field to a serializer by reference"
+    )]
+    pub fn serialize<S: Serializer>(source: &Source, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(source.key())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Source, D::Error> {
+        let key = String::deserialize(deserializer)?;
+        Source::from_key(&key).ok_or_else(|| {
+            D::Error::custom(format!(
+                "unknown incident source `{key}`, expected one of {:?}",
+                Source::ALL.map(Source::key)
+            ))
+        })
+    }
+}
+
+impl Incident {
+    /// A new incident of `rule`, identified by the content that makes a retry of the same failure deduplicate.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the rule or the session holds no name.
+    pub fn new(
+        rule: &str,
+        session: &str,
+        source: incident_rules::Source,
+        evidence: Vec<String>,
+    ) -> Result<Self> {
+        ensure!(!rule.trim().is_empty(), "an incident names its rule");
+        ensure!(!session.trim().is_empty(), "an incident names its session");
+        Ok(Self {
+            schema: 1,
+            id: hash(&(rule, session, source.key(), &evidence))?,
+            rule: rule.into(),
+            session: session.into(),
+            source,
+            evidence,
+        })
+    }
+}
+
+/// Records one incident under `incidents/` unless the recorder marks the failure expected, returning whether the store lacked it before.
+///
+/// # Errors
+///
+/// Returns an error when the incident has an invalid schema or identity, a stored incident with the same identity differs, or writing the file fails.
+pub fn record_incident(
+    state: &Path,
+    incident: &Incident,
+    expected: incident_rules::Expected,
+) -> Result<bool> {
+    if incident_rules::excluded(expected) {
+        return Ok(false);
+    }
+    ensure!(
+        incident.schema == 1
+            && incident.id.len() == skill_rules::DIGEST_LENGTH
+            && incident.id.bytes().all(|byte| byte.is_ascii_hexdigit())
+            && !incident.rule.trim().is_empty(),
+        "invalid incident identity"
+    );
+    let directory = state.join("incidents");
+    let destination = directory.join(format!("{}.json", incident.id));
+    if let Ok(existing) = read_json::<Incident>(&destination) {
+        ensure!(
+            existing == *incident,
+            "conflicting replay of an incident record"
+        );
+        return Ok(false);
+    }
+    match write_json(&destination, incident, false) {
+        Ok(()) => Ok(true),
+        Err(error) => match read_json::<Incident>(&destination) {
+            Ok(existing) if existing == *incident => Ok(false),
+            Ok(_) => Err(anyhow::anyhow!(
+                "conflicting concurrent incident record: {error}"
+            )),
+            Err(_) => Err(error),
+        },
+    }
+}
+
+/// Reads the recorded incidents under `incidents/`, sorted by rule, session, and identity.
+///
+/// # Errors
+///
+/// Returns an error when reading the directory fails, a `.json` entry names something other than a regular file or fails validation, or a filename differs from its incident's identity.
+pub fn incidents(state: &Path) -> Result<Vec<Incident>> {
+    let directory = state.join("incidents");
+    if !directory.try_exists()? {
+        return Ok(Vec::new());
+    }
+    let mut result = Vec::new();
+    for entry in fs::read_dir(&directory)? {
+        let entry = entry?;
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|value| value == "json")
+        {
+            ensure!(
+                entry.file_type()?.is_file(),
+                "incident record must be a regular file"
+            );
+            let incident: Incident = read_json(&entry.path())?;
+            ensure!(
+                entry.file_name().to_str() == Some(&format!("{}.json", incident.id)),
+                "incident identity does not match its file"
+            );
+            result.push(incident);
+        }
+    }
+    result.sort_by_cached_key(|incident| {
+        (
+            incident.rule.clone(),
+            incident.session.clone(),
+            incident.id.clone(),
+        )
+    });
+    Ok(result)
+}
+
+/// The disposition of one rule's incidents: mechanized prevention, or an exemption.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Discharge {
+    pub schema: u32,
+    pub rule: String,
+    /// `mechanized` names gate or test evidence, and `exempt` names a reason with a reconsideration condition.
+    pub outcome: String,
+    pub evidence: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconsideration: Option<String>,
+}
+
+/// Reads the recorded discharges under `discharges/`, sorted by rule.
+///
+/// # Errors
+///
+/// Returns an error when reading the directory fails, a `.json` entry names something other than a regular file or fails validation, or a filename differs from its discharge's rule.
+pub fn discharges(state: &Path) -> Result<Vec<Discharge>> {
+    let directory = state.join("discharges");
+    if !directory.try_exists()? {
+        return Ok(Vec::new());
+    }
+    let mut result = Vec::new();
+    for entry in fs::read_dir(&directory)? {
+        let entry = entry?;
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|value| value == "json")
+        {
+            ensure!(
+                entry.file_type()?.is_file(),
+                "discharge record must be a regular file"
+            );
+            let discharge: Discharge = read_json(&entry.path())?;
+            ensure!(
+                entry.file_name().to_str() == Some(&format!("{}.json", discharge.rule)),
+                "discharge rule does not match its file"
+            );
+            result.push(discharge);
+        }
+    }
+    result.sort_by_cached_key(|discharge| discharge.rule.clone());
+    Ok(result)
+}
+
+/// The gate and test evidence a mechanized discharge names, each as `path::test`.
+const EVIDENCE_SEPARATOR: &str = "::";
+
+/// The path half of one evidence entry, or an empty path when the entry names no test.
+fn evidence_path(evidence: &str) -> &str {
+    evidence
+        .split_once(EVIDENCE_SEPARATOR)
+        .map_or("", |(path, _)| path)
+}
+
+/// Whether one mechanized evidence entry exists under `root` and names a test that reproduces the incident.
+fn evidence_reproduces(root: &Path, evidence: &str) -> bool {
+    match evidence.split_once(EVIDENCE_SEPARATOR) {
+        Some((path, test)) => fs::read_to_string(root.join(path))
+            .is_ok_and(|text| text.contains(&format!("fn {test}("))),
+        None => false,
+    }
+}
+
+/// Records one discharge after its evidence holds, replacing a discharge the rule already carries.
+///
+/// # Errors
+///
+/// Returns an error when the outcome names neither form.
+/// It also returns one when mechanized evidence went missing, names no reproducing test, or the exemption lacks a closed-set reason or a reconsideration condition.
+pub fn record_discharge(state: &Path, root: &Path, discharge: &Discharge) -> Result<()> {
+    ensure!(
+        !discharge.rule.trim().is_empty(),
+        "a discharge names its rule"
+    );
+    let outcome = match discharge.outcome.as_str() {
+        "mechanized" => incident_rules::Outcome::Mechanized {
+            evidence_present: !discharge.evidence.is_empty()
+                && discharge
+                    .evidence
+                    .iter()
+                    .all(|evidence| root.join(evidence_path(evidence)).is_file()),
+            reproduces: !discharge.evidence.is_empty()
+                && discharge
+                    .evidence
+                    .iter()
+                    .all(|evidence| evidence_reproduces(root, evidence)),
+        },
+        "exempt" => incident_rules::Outcome::Exempt {
+            reason: discharge
+                .reason
+                .as_deref()
+                .and_then(incident_rules::Reason::from_key),
+            reconsideration: discharge
+                .reconsideration
+                .as_deref()
+                .is_some_and(|text| !text.trim().is_empty()),
+        },
+        other => anyhow::bail!("unknown discharge outcome `{other}`"),
+    };
+    ensure!(
+        incident_rules::complete(outcome),
+        "the discharge of `{}` holds no complete prevention: mechanized evidence names an existing gate or test that reproduces the incident, and an exemption names a closed-set reason with a reconsideration condition",
+        discharge.rule
+    );
+    write_json(
+        &state
+            .join("discharges")
+            .join(format!("{}.json", discharge.rule)),
+        discharge,
+        true,
+    )
+}
+
+/// The rules whose recorded incidents still lack a complete disposition, ranked by repetition first.
+///
+/// # Errors
+///
+/// Returns an error when reading the incidents or the discharges fails.
+pub fn open_incident_rules(state: &Path) -> Result<Vec<(String, u64, incident_rules::Rank)>> {
+    let discharged: BTreeSet<_> = discharges(state)?
+        .into_iter()
+        .map(|discharge| discharge.rule)
+        .collect();
+    let mut counts: BTreeMap<String, u64> = BTreeMap::new();
+    for incident in incidents(state)? {
+        *counts.entry(incident.rule).or_default() += 1;
+    }
+    let mut open: Vec<_> = counts
+        .into_iter()
+        .filter(|(rule, _)| !discharged.contains(rule))
+        .map(|(rule, repetitions)| {
+            let rank = incident_rules::rank(repetitions);
+            (rule, repetitions, rank)
+        })
+        .collect();
+    open.sort_by(|(_, _, first), (_, _, second)| second.cmp(first));
+    Ok(open)
 }

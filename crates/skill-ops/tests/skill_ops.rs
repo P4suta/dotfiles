@@ -2,8 +2,9 @@ use anyhow::Result;
 use serde_json::json;
 use skill_ops::skill_install::merge_hooks;
 use skill_ops::{
-    Catalog, Note, Observation, Policy, Runtime, Signal, analyze, catalog, hash, observations,
-    record, recorded, runtime_pending,
+    Catalog, Discharge, Incident, Note, Observation, Policy, Runtime, Signal, analyze, catalog,
+    hash, incidents, observations, open_incident_rules, record, record_discharge, record_incident,
+    recorded, runtime_pending,
 };
 use skill_ops::{
     Decision, Finding, Outcome, Requirement, Review, Reviewed, SizeDecision, SkillDecision,
@@ -1064,5 +1065,202 @@ fn the_assessed_commit_hashes_nested_resources_in_catalog_order() -> Result<()> 
     let context = decide(root.path(), "beta")?;
     assert!(context.contains(assessed.trim()), "{context}");
     assert!(context.contains("+Changed."), "{context}");
+    Ok(())
+}
+
+#[test]
+fn incidents_are_recorded_deduplicated_and_ranked_until_discharged() -> Result<()> {
+    let state = tempfile::tempdir()?;
+    let expected = skill_ops::incident_rules::Expected {
+        red_test: false,
+        counterexample: false,
+        dry_run: false,
+    };
+    let first = Incident::new(
+        "hook.shell-write",
+        "session-1",
+        skill_ops::incident_rules::Source::GateRefusal,
+        vec!["Refused: this command writes a file.".into()],
+    )?;
+    assert!(record_incident(state.path(), &first, expected)?);
+    assert!(
+        !record_incident(state.path(), &first, expected)?,
+        "a retry deduplicates"
+    );
+    for session in ["session-2", "session-3"] {
+        let repeated = Incident::new(
+            "hook.shell-write",
+            session,
+            skill_ops::incident_rules::Source::GateRefusal,
+            vec!["Refused: this command writes a file.".into()],
+        )?;
+        assert!(record_incident(state.path(), &repeated, expected)?);
+    }
+    let once = Incident::new(
+        "push.paused",
+        "session-1",
+        skill_ops::incident_rules::Source::FailedDelivery,
+        vec!["the push stayed paused".into()],
+    )?;
+    assert!(record_incident(state.path(), &once, expected)?);
+    assert_eq!(incidents(state.path())?.len(), 4);
+    let open = open_incident_rules(state.path())?;
+    assert_eq!(
+        open,
+        vec![
+            (
+                "hook.shell-write".to_owned(),
+                3,
+                skill_ops::incident_rules::Rank::Repeated
+            ),
+            (
+                "push.paused".to_owned(),
+                1,
+                skill_ops::incident_rules::Rank::Once
+            ),
+        ],
+        "the most repeated rule ranks first"
+    );
+    record_discharge(
+        state.path(),
+        std::path::Path::new("."),
+        &Discharge {
+            schema: 1,
+            rule: "hook.shell-write".into(),
+            outcome: "exempt".into(),
+            evidence: vec![],
+            reason: Some("intended".into()),
+            reconsideration: Some("reconsider when the shell-write rule retires".into()),
+        },
+    )?;
+    assert_eq!(
+        open_incident_rules(state.path())?,
+        vec![(
+            "push.paused".to_owned(),
+            1,
+            skill_ops::incident_rules::Rank::Once
+        )],
+        "a discharge settles every incident of its rule"
+    );
+    Ok(())
+}
+
+#[test]
+fn expected_failures_record_no_incident() -> Result<()> {
+    let state = tempfile::tempdir()?;
+    for expected in [
+        skill_ops::incident_rules::Expected {
+            red_test: true,
+            counterexample: false,
+            dry_run: false,
+        },
+        skill_ops::incident_rules::Expected {
+            red_test: false,
+            counterexample: true,
+            dry_run: false,
+        },
+        skill_ops::incident_rules::Expected {
+            red_test: false,
+            counterexample: false,
+            dry_run: true,
+        },
+    ] {
+        let incident = Incident::new(
+            "checks.required",
+            "session-1",
+            skill_ops::incident_rules::Source::FailedDelivery,
+            vec!["a required check failed".into()],
+        )?;
+        assert!(!record_incident(state.path(), &incident, expected)?);
+    }
+    assert_eq!(incidents(state.path())?, Vec::new());
+    Ok(())
+}
+
+#[test]
+fn a_mechanized_discharge_needs_evidence_that_exists_and_reproduces() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let state = tempfile::tempdir()?;
+    fs::create_dir_all(root.path().join("tests"))?;
+    fs::write(
+        root.path().join("tests/gate.rs"),
+        "#[test]\nfn reproduces_the_incident() {}\n",
+    )?;
+    let discharge = |evidence: Vec<String>| Discharge {
+        schema: 1,
+        rule: "hook.shell-write".into(),
+        outcome: "mechanized".into(),
+        evidence,
+        reason: None,
+        reconsideration: None,
+    };
+    assert!(
+        record_discharge(
+            state.path(),
+            root.path(),
+            &discharge(vec!["tests/gate.rs::reproduces_the_incident".into()])
+        )
+        .is_ok()
+    );
+    assert!(
+        record_discharge(
+            state.path(),
+            root.path(),
+            &discharge(vec!["tests/missing.rs::reproduces_the_incident".into()])
+        )
+        .is_err(),
+        "evidence that does not exist is rejected"
+    );
+    assert!(
+        record_discharge(
+            state.path(),
+            root.path(),
+            &discharge(vec!["tests/gate.rs::a_test_the_file_lacks".into()])
+        )
+        .is_err(),
+        "evidence whose test does not reproduce the incident is rejected"
+    );
+    assert!(record_discharge(state.path(), root.path(), &discharge(vec![])).is_err());
+    Ok(())
+}
+
+#[test]
+fn an_exempt_discharge_needs_a_closed_set_reason_and_a_reconsideration() -> Result<()> {
+    let state = tempfile::tempdir()?;
+    let exempt = |reason: Option<String>, reconsideration: Option<String>| Discharge {
+        schema: 1,
+        rule: "hook.disk-scan".into(),
+        outcome: "exempt".into(),
+        evidence: vec![],
+        reason,
+        reconsideration,
+    };
+    assert!(
+        record_discharge(
+            state.path(),
+            std::path::Path::new("."),
+            &exempt(
+                Some("disproportionate".into()),
+                Some("reconsider when scans grow".into())
+            ),
+        )
+        .is_ok()
+    );
+    assert!(
+        record_discharge(
+            state.path(),
+            std::path::Path::new("."),
+            &exempt(Some("because".into()), Some("reconsider".into()))
+        )
+        .is_err()
+    );
+    assert!(
+        record_discharge(
+            state.path(),
+            std::path::Path::new("."),
+            &exempt(Some("intended".into()), None)
+        )
+        .is_err()
+    );
     Ok(())
 }

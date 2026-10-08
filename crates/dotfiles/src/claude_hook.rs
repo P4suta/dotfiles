@@ -1,6 +1,7 @@
 use crate::body_rules::{self, Verdict as BodyVerdict};
 use crate::disk_scan_rules;
 use crate::path_conversion_rules;
+use crate::shell_syntax_rules;
 use crate::shell_write_rules::{
     Source, Verdict, body_sources, inspect, next_action, program, segments,
 };
@@ -189,9 +190,24 @@ fn path_conversion_refusal(command: &str, converting_shell: bool) -> Option<Stri
         })
 }
 
+/// One refusal the hook blocks a tool call with, and the incident it records.
+pub(crate) struct Blocked {
+    /// The dotted rule that refused, which the incident store keys its discharge by.
+    pub rule: &'static str,
+    /// Where the incident came from.
+    pub source: skill_ops::incident_rules::Source,
+    /// The session the event names, or an anonymous stand-in.
+    pub session: String,
+    /// The refusal text, which names the next action.
+    pub message: String,
+}
+
+/// The session identity an event without one records, so the incident still deduplicates.
+const NO_SESSION: &str = "no-session";
+
 /// The refusal for one `PreToolUse` event, or `None` when the hook admits the tool call.
 /// The hook checks PowerShell commands only for disk scans, because the file-write rules read POSIX shell syntax.
-pub(crate) fn refusal(event: &str) -> Result<Option<String>> {
+pub(crate) fn refusal(event: &str) -> Result<Option<Blocked>> {
     let event: Value = serde_json::from_str(event).context("PreToolUse event is not JSON")?;
     let tool = event["tool_name"].as_str().unwrap_or_default();
     if !matches!(tool, "Bash" | "PowerShell") {
@@ -200,34 +216,110 @@ pub(crate) fn refusal(event: &str) -> Result<Option<String>> {
     let command = event["tool_input"]["command"]
         .as_str()
         .context("shell event has no command")?;
+    let session = event["session_id"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .unwrap_or(NO_SESSION)
+        .to_owned();
+    let blocked = |rule: &'static str, source, message: String| Blocked {
+        rule,
+        source,
+        session,
+        message,
+    };
     if let Some(message) = disk_scan_refusal(command) {
-        return Ok(Some(message));
+        return Ok(Some(blocked(
+            "hook.disk-scan",
+            skill_ops::incident_rules::Source::GateRefusal,
+            message,
+        )));
     }
     if tool == "PowerShell" {
         return Ok(None);
     }
     if let Some(message) = path_conversion_refusal(command, cfg!(windows)) {
-        return Ok(Some(message));
+        return Ok(Some(blocked(
+            "hook.path-conversion",
+            skill_ops::incident_rules::Source::GateRefusal,
+            message,
+        )));
     }
-    if let crate::shell_syntax_rules::Verdict::Refuse(reason) =
-        crate::shell_syntax_rules::inspect(command)
-    {
-        return Ok(Some(format!(
-            "Refused: this shell command is malformed: {}.\nNext action: {}",
-            crate::shell_syntax_rules::cause(reason),
-            crate::shell_syntax_rules::next_action(reason)
+    if let shell_syntax_rules::Verdict::Refuse(reason) = shell_syntax_rules::inspect(command) {
+        return Ok(Some(blocked(
+            "hook.shell-syntax",
+            skill_ops::incident_rules::Source::MalformedInput,
+            format!(
+                "Refused: this shell command is malformed: {}.\nNext action: {}",
+                shell_syntax_rules::cause(reason),
+                shell_syntax_rules::next_action(reason)
+            ),
         )));
     }
     if let Verdict::Refuse(reason) = inspect(command) {
-        return Ok(Some(format!(
-            "Refused: this command writes a file through an inline interpreter, in-place editor, heredoc, or redirect.\nNext action: {}",
-            next_action(reason)
+        return Ok(Some(blocked(
+            "hook.shell-write",
+            skill_ops::incident_rules::Source::GateRefusal,
+            format!(
+                "Refused: this command writes a file through an inline interpreter, in-place editor, heredoc, or redirect.\nNext action: {}",
+                next_action(reason)
+            ),
         )));
     }
-    Ok(attribution_refusal(
-        command,
-        event["cwd"].as_str().map(Path::new),
-    ))
+    Ok(
+        attribution_refusal(command, event["cwd"].as_str().map(Path::new)).map(|message| {
+            blocked(
+                "hook.attribution",
+                skill_ops::incident_rules::Source::GateRefusal,
+                message,
+            )
+        }),
+    )
+}
+
+/// The skill-ops state directory the incident store lives under, which the test environment can move.
+fn incident_state() -> Option<PathBuf> {
+    if let Some(state) = std::env::var_os("SKILL_OPS_STATE") {
+        return Some(PathBuf::from(state));
+    }
+    platform::home::home().map(|home| home.join(".local/state/skill-ops"))
+}
+
+/// Records the refusal as an incident, so no session ends without a prevention decision for its rule.
+/// A recording failure reports itself and never admits the command the hook refused.
+fn record(blocked: &Blocked) {
+    let Some(state) = incident_state() else {
+        return;
+    };
+    let incident = skill_ops::Incident::new(
+        blocked.rule,
+        &blocked.session,
+        blocked.source,
+        vec![
+            blocked
+                .message
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_owned(),
+        ],
+    )
+    .and_then(|incident| {
+        skill_ops::record_incident(
+            &state,
+            &incident,
+            skill_ops::incident_rules::Expected {
+                red_test: false,
+                counterexample: false,
+                dry_run: false,
+            },
+        )
+        .map(|recorded| (incident, recorded))
+    });
+    match incident {
+        Ok((_, recorded)) if recorded => {}
+        Ok(_) => {}
+        Err(error) => eprintln!("warning: could not record the refusal as an incident: {error:#}"),
+    }
 }
 
 /// Reads one event from standard input and exits 2, the blocking status, with the refusal on standard error.
@@ -238,8 +330,9 @@ pub(crate) fn refusal(event: &str) -> Result<Option<String>> {
 pub fn run() -> Result<()> {
     let mut event = String::new();
     std::io::stdin().read_to_string(&mut event)?;
-    if let Some(message) = refusal(&event)? {
-        eprintln!("{message}");
+    if let Some(blocked) = refusal(&event)? {
+        record(&blocked);
+        eprintln!("{}", blocked.message);
         std::process::exit(BLOCK);
     }
     Ok(())
@@ -273,6 +366,7 @@ mod tests {
         refusal(&bash(command))
             .unwrap()
             .unwrap_or_else(|| panic!("admitted: {command}"))
+            .message
     }
 
     #[test]
@@ -307,7 +401,8 @@ mod tests {
     fn an_inline_interpreter_file_write_is_refused_with_the_next_action() {
         let message = refusal(&bash("python -c \"open('a','w').write('x')\""))
             .unwrap()
-            .unwrap();
+            .unwrap()
+            .message;
         assert!(message.contains("Next action") && message.contains("Edit or Write tool"));
     }
 
@@ -320,14 +415,21 @@ mod tests {
         ] {
             let message = refusal(&bash(command))
                 .unwrap()
-                .unwrap_or_else(|| panic!("{command}"));
+                .unwrap_or_else(|| panic!("{command}"))
+                .message;
             assert!(
                 message.contains("in-place editor") && message.contains("Edit tool"),
                 "{command}: {message}"
             );
         }
         for command in ["sed -n 's/a/b/p' file.txt", "awk '{print $1}' data.tsv"] {
-            assert_eq!(refusal(&bash(command)).unwrap(), None, "{command}");
+            assert_eq!(
+                refusal(&bash(command))
+                    .unwrap()
+                    .map(|blocked| blocked.message),
+                None,
+                "{command}"
+            );
         }
     }
 
@@ -335,7 +437,8 @@ mod tests {
     fn the_incident_command_is_refused_with_its_corrected_form() {
         let message = refusal(&bash(r#"export CARGO_TARGET_DIR="D:\cargo\$k""#))
             .unwrap()
-            .unwrap();
+            .unwrap()
+            .message;
         assert!(
             message.contains("malformed") && message.contains("forward slashes"),
             "{message}"
@@ -347,7 +450,8 @@ mod tests {
         ] {
             let message = refusal(&bash(command))
                 .unwrap()
-                .unwrap_or_else(|| panic!("{command}"));
+                .unwrap_or_else(|| panic!("{command}"))
+                .message;
             assert!(message.contains("malformed"), "{command}: {message}");
         }
         for command in [
@@ -355,17 +459,32 @@ mod tests {
             "cargo build 2>&1",
             "echo 'D:\\cargo'",
         ] {
-            assert_eq!(refusal(&bash(command)).unwrap(), None, "{command}");
+            assert_eq!(
+                refusal(&bash(command))
+                    .unwrap()
+                    .map(|blocked| blocked.message),
+                None,
+                "{command}"
+            );
         }
     }
 
     #[test]
     fn project_commands_and_other_tools_are_admitted() {
         for command in ["just check", "pr-workflow start", "git status", "cat a.md"] {
-            assert_eq!(refusal(&bash(command)).unwrap(), None, "{command}");
+            assert_eq!(
+                refusal(&bash(command))
+                    .unwrap()
+                    .map(|blocked| blocked.message),
+                None,
+                "{command}"
+            );
         }
         let write = json!({"tool_name": "Write", "tool_input": {"file_path": "a"}}).to_string();
-        assert_eq!(refusal(&write).unwrap(), None);
+        assert_eq!(
+            refusal(&write).unwrap().map(|blocked| blocked.message),
+            None
+        );
     }
 
     #[test]
@@ -385,7 +504,8 @@ mod tests {
         ] {
             let message = refusal(&event)
                 .unwrap()
-                .unwrap_or_else(|| panic!("{event}"));
+                .unwrap_or_else(|| panic!("{event}"))
+                .message;
             assert!(message.contains("storage-scout scan"), "{message}");
         }
         for event in [
@@ -396,7 +516,11 @@ mod tests {
             powershell("git status 2>$null"),
             powershell("Get-ChildItem -Recurse -Filter *.md"),
         ] {
-            assert_eq!(refusal(&event).unwrap(), None, "{event}");
+            assert_eq!(
+                refusal(&event).unwrap().map(|blocked| blocked.message),
+                None,
+                "{event}"
+            );
         }
     }
 
@@ -445,7 +569,13 @@ mod tests {
                 "cat <<'EOF' | gh issue comment 3 -F -\n{}\nEOF",
             ] {
                 let command = template.replace("{}", text);
-                assert_eq!(refusal(&bash(&command)).unwrap(), None, "{command}");
+                assert_eq!(
+                    refusal(&bash(&command))
+                        .unwrap()
+                        .map(|blocked| blocked.message),
+                    None,
+                    "{command}"
+                );
             }
         }
     }
@@ -478,9 +608,9 @@ mod tests {
                 "gh api repos/a/b/issues/3/comments -F body=@body.md".to_owned(),
                 "gh api repos/a/b/issues/3 -X PATCH --input payload.json".to_owned(),
             ] {
-                let message = refusal(&event(&command)).unwrap();
+                let blocked = refusal(&event(&command)).unwrap();
                 assert!(
-                    message.is_some_and(|m| m.contains("AI attribution")),
+                    blocked.is_some_and(|blocked| blocked.message.contains("AI attribution")),
                     "{command}: {form}"
                 );
             }
@@ -502,7 +632,13 @@ mod tests {
                 "gh api repos/a/b/issues/3 -X PATCH --input payload.json",
                 "gh pr create --body-file missing.md",
             ] {
-                assert_eq!(refusal(&event(command)).unwrap(), None, "{command}: {text}");
+                assert_eq!(
+                    refusal(&event(command))
+                        .unwrap()
+                        .map(|blocked| blocked.message),
+                    None,
+                    "{command}: {text}"
+                );
             }
         }
     }

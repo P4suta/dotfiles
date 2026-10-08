@@ -165,6 +165,20 @@ fn reject_an_empty_next_action() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/incident_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_recording_an_expected_failure() {
+    assert!(!production::excluded(production::Expected { red_test: true, counterexample: false, dry_run: false }));
+}
+#[kani::proof]
+fn reject_a_discharge_without_its_evidence() {
+    assert!(production::complete(production::Outcome::Mechanized { evidence_present: false, reproduces: true }));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/gate_rules.rs"
 probes = '''
 #[kani::proof]

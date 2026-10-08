@@ -58,6 +58,36 @@ enum Action {
         #[arg(long, required = true)]
         evidence: Vec<String>,
     },
+    /// Records one incident of a rule, unless the recorder marks the failure expected.
+    Incident {
+        #[arg(long)]
+        rule: String,
+        #[arg(long)]
+        session: String,
+        #[arg(long, default_value = "gate-refusal")]
+        source: String,
+        #[arg(long)]
+        evidence: Vec<String>,
+        #[arg(long)]
+        red_test: bool,
+        #[arg(long)]
+        counterexample: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Records the prevention decision of one rule's incidents.
+    Discharge {
+        #[arg(long)]
+        rule: String,
+        #[arg(long)]
+        evidence: Vec<String>,
+        #[arg(long)]
+        exempt_reason: Option<String>,
+        #[arg(long)]
+        reconsideration: Option<String>,
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+    },
     Check,
     Stop,
     Doctor,
@@ -285,10 +315,39 @@ fn execute(cli: Cli) -> Result<()> {
             summary,
             evidence,
         })?,
-        Action::Check => ensure!(
-            !session.pending()?,
-            "skill maintenance is pending; run skill-ops analyze --out FILE and triage the findings it lists with skill-ops triage --decisions FILE"
-        ),
+        Action::Incident {
+            rule,
+            session: incident_session,
+            source,
+            evidence,
+            red_test,
+            counterexample,
+            dry_run,
+        } => session.incident(
+            &rule,
+            &incident_session,
+            &source,
+            evidence,
+            red_test,
+            counterexample,
+            dry_run,
+        )?,
+        Action::Discharge {
+            rule,
+            evidence,
+            exempt_reason,
+            reconsideration,
+            root,
+        } => session.discharge(&rule, evidence, exempt_reason, reconsideration, &root)?,
+        Action::Check => {
+            if let Some(open) = session.open_incidents()? {
+                anyhow::bail!("{open}");
+            }
+            ensure!(
+                !session.pending()?,
+                "skill maintenance is pending; run skill-ops analyze --out FILE and triage the findings it lists with skill-ops triage --decisions FILE"
+            );
+        }
         Action::Stop => unreachable!("Stop is translated into a checked completion request"),
         Action::Doctor => session.doctor()?,
     }
@@ -314,6 +373,101 @@ impl Session {
             &self.approved,
             &self.tree,
         )
+    }
+
+    /// Records one incident of a rule, unless the recorder marks the failure expected.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the command line holds one flag per expected-failure fact"
+    )]
+    fn incident(
+        &self,
+        rule: &str,
+        incident_session: &str,
+        source: &str,
+        evidence: Vec<String>,
+        red_test: bool,
+        counterexample: bool,
+        dry_run: bool,
+    ) -> Result<()> {
+        let source = skill_ops::incident_rules::Source::from_key(source)
+            .with_context(|| format!("unknown incident source `{source}`"))?;
+        let incident = ops::Incident::new(rule, incident_session, source, evidence)?;
+        let expected = skill_ops::incident_rules::Expected {
+            red_test,
+            counterexample,
+            dry_run,
+        };
+        if ops::record_incident(&self.state, &incident, expected)? {
+            println!("Recorded an incident of `{rule}`; a discharge is now required");
+        } else {
+            println!("Recorded no new incident");
+        }
+        Ok(())
+    }
+
+    /// Records the prevention decision of one rule's incidents.
+    fn discharge(
+        &self,
+        rule: &str,
+        evidence: Vec<String>,
+        exempt_reason: Option<String>,
+        reconsideration: Option<String>,
+        root: &Path,
+    ) -> Result<()> {
+        let exemption = exempt_reason
+            .as_deref()
+            .and_then(skill_ops::incident_rules::Reason::from_key);
+        let outcome = if evidence.is_empty() {
+            "exempt"
+        } else {
+            "mechanized"
+        }
+        .into();
+        ops::record_discharge(
+            &self.state,
+            root,
+            &ops::Discharge {
+                schema: 1,
+                rule: rule.into(),
+                outcome,
+                evidence,
+                reason: exempt_reason,
+                reconsideration,
+            },
+        )?;
+        match exemption {
+            Some(reason) => println!(
+                "Recorded the discharge of `{rule}`: {}",
+                skill_ops::incident_rules::reason_text(reason)
+            ),
+            None => println!("Recorded the mechanized discharge of `{rule}`"),
+        }
+        Ok(())
+    }
+
+    /// The refusal that names every rule whose incidents lack a prevention decision, ranked by repetition first.
+    fn open_incidents(&self) -> Result<Option<String>> {
+        let open = ops::open_incident_rules(&self.state)?;
+        if open.is_empty() {
+            return Ok(None);
+        }
+        let names: Vec<String> = open
+            .iter()
+            .map(|(rule, repetitions, rank)| {
+                let weight = if *rank == skill_ops::incident_rules::Rank::Repeated {
+                    "repeated "
+                } else {
+                    ""
+                };
+                format!("{rule} ({weight}{repetitions} incidents)")
+            })
+            .collect();
+        Ok(Some(format!(
+            "incidents of {} lack a prevention decision.\nNext action: {}",
+            names.join(", "),
+            skill_ops::incident_rules::next_action()
+        )))
     }
 
     /// Prints the dependency plan of the selected skills and each skill's instructions in that order.
