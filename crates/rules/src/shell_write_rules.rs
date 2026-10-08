@@ -667,7 +667,7 @@ pub fn inspect(command: &str) -> Verdict {
             && rest.get(marker + 1).copied().is_some_and(|editor| {
                 in_place_flag(
                     program(editor).as_str(),
-                    rest.get(marker + 2..).unwrap_or_default(),
+                    rest.get(marker + FLAG_WITH_VALUE..).unwrap_or_default(),
                 )
             })
         {
