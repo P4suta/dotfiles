@@ -651,15 +651,15 @@ source = "crates/rules/src/review_rules.rs"
 probes = '''
 #[kani::proof]
 fn reject_eighth_review_of_ten() {
-    assert!(production::included_allowance(10, 3));
+    assert!(production::within_budget(10, 3));
 }
 #[kani::proof]
 fn reject_rounding_the_layered_budget_up() {
-    assert_eq!(production::capacity_budget(49), 36);
+    assert_eq!(production::budget(49), 36);
 }
 #[kani::proof]
 fn reject_eighth_local_attempt() {
-    assert!(production::rolling_allowance(7, 7));
+    assert!(production::within_limits(7, 7));
 }
 #[kani::proof]
 fn reject_early_review() {

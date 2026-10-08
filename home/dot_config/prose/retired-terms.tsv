@@ -1,0 +1,41 @@
+# The verified glossary: every repository-specific term the established vocabulary retires, the term that replaces it, and the source that establishes the replacement.
+# Decision records and architecture decision records keep the terms of their time, so they serve as the migration notes of this table.
+# The prose reject vocabulary (`styles/config/vocabularies/Dotfiles/reject.txt`) and the identifier check (`assure/rules/retired-term.yml`) enforce the terms a host can check without false positives; generic English words such as `hub` or `capacity` stay enforceable only through review.
+term	replacement	source
+realgit	real_git	https://rust-lang.github.io/api-guidelines/naming_conventions.html
+ContextData	TemplateData	https://www.chezmoi.io/reference/templates/
+OpsCheck	ansible-syntax-check	https://docs.ansible.com/ansible/latest/cli/ansible-playbook.html#ansible-playbook-syntax-check
+forget_script_runs	reset_entry_and_script_state	https://www.chezmoi.io/reference/commands/state.go/#delete-bucket
+EXEMPT_MARKER	SUPPRESSION_MARKER	https://docs.oasis-open.org/sarif/sarif/v2.1.0/csprd01/sarif-v2.1.0-csprd01.html#_Toc10541088
+exempts_itself	suppressed_in_source	https://docs.oasis-open.org/sarif/sarif/v2.1.0/csprd01/sarif-v2.1.0-csprd01.html#_Toc10541088
+is_exempt	is_suppressed	https://docs.oasis-open.org/sarif/sarif/v2.1.0/csprd01/sarif-v2.1.0-csprd01.html#_Toc10541088
+SoftToParent	SoftReset	https://git-scm.com/docs/git-reset#Documentation/git-reset.txt---soft
+DropHead	DeleteRef	https://git-scm.com/docs/git-update-ref#Documentation/git-update-ref.txt--d
+FileHits	FileDiagnostics	https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#diagnostic
+included_allowance	within_budget	https://docs.github.com/en/rest/rate-limit/rate-limit?apiVersion=2022-11-28
+rolling_allowance	within_limits	https://docs.github.com/en/rest/rate-limit/rate-limit?apiVersion=2022-11-28
+capacity_budget	budget	https://docs.github.com/en/rest/rate-limit/rate-limit?apiVersion=2022-11-28
+RENOVATE_LOCAL_GATE_TYPES	RENOVATE_LOCAL_UPDATE_TYPES	https://docs.renovatebot.com/configuration-options/#updatetypes
+waived	bypassed	https://git-scm.com/docs/githooks
+waiver	bypass	https://git-scm.com/docs/githooks
+Category	Rule	https://docs.oasis-open.org/sarif/sarif/v2.1.0/csprd01/sarif-v2.1.0-csprd01.html#_Toc10541088
+Hit	Diagnostic	https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#diagnostic
+Verdict	RefUpdate	https://git-scm.com/docs/git-push#_output
+Native	Real	https://martinfowler.com/articles/mocksArentStubs.html
+Action	Commands	https://docs.rs/clap/latest/clap/_derive/_index.html#subcommands
+Failing	Failure	https://docs.github.com/en/rest/checks/runs
+Passing	Success	https://docs.github.com/en/rest/checks/runs
+setup.skip	setup.ignore	https://www.chezmoi.io/reference/chezmoiignore/
+also	dependencies	https://doc.rust-lang.org/cargo/reference/manifest.html#the-dependencies-section
+aliases	symlinks	https://www.chezmoi.io/reference/source-state-attributes/
+partials	shared templates	https://www.chezmoi.io/user-guide/templating/#template-helpers-for-use-in-templates
+hub	central bare repository	https://git-scm.com/book/en/v2/Git-on-the-Server-Getting-Git-on-a-Server
+candidate	check	https://github.com/anomalyco/opencode/blob/main/docs/modules/usage
+contracts	proofs	https://model-checking.github.io/kani/
+push hold	push pause	https://git-scm.com/docs/git-config#Documentation/git-config.txt-pushnonce
+allowance	limit	https://docs.github.com/en/rest/rate-limit/rate-limit?apiVersion=2022-11-28
+capacity	limit	https://docs.github.com/en/rest/rate-limit/rate-limit?apiVersion=2022-11-28
+cleanup	prune	https://docs.docker.com/reference/cli/docker/container/prune/
+stale	outdated	https://github.com/renovatebot/renovate/blob/main/docs/usage/key-concepts/dependency-pinning.md
+Candidate	Update	https://docs.renovatebot.com/configuration-options/#updatetypes
+pubkey	public key	https://man7.org/linux/man-pages/man1/ssh-keygen.1.html

@@ -34,7 +34,7 @@ fn a_push_to_a_ready_pr_is_refused_until_it_returns_to_draft() {
         record.next.as_deref(),
         Some("gh pr ready 17 --repo P4suta/dotfiles --undo")
     );
-    assert_eq!(record.waiver, None);
+    assert_eq!(record.bypass, None);
     state.set(Pr::Draft);
     gate_with(GITHUB, update("feature").as_bytes(), lookup).unwrap();
     assert_eq!(asked.get(), 2);

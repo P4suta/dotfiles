@@ -228,8 +228,8 @@ mod tests {
     fn grep_matching_reports_indices() {
         use super::grep_matching;
         let lines: Vec<String> = vec!["java".into(), "sleep".into(), "gradlew".into()];
-        let hits = grep_matching("java|gradle|kotlin", &lines);
-        assert_eq!(hits, Some(vec![0, 2]));
+        let diagnostics = grep_matching("java|gradle|kotlin", &lines);
+        assert_eq!(diagnostics, Some(vec![0, 2]));
         assert_eq!(grep_matching("nothing", &lines), Some(Vec::new()));
         let dashed: Vec<String> = vec!["-x".into()];
         assert_eq!(grep_matching("-x", &dashed), Some(vec![0]));

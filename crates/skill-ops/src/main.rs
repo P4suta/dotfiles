@@ -24,11 +24,11 @@ struct Cli {
     #[arg(long, env = "SKILL_OPS_APPROVED")]
     approved: Option<PathBuf>,
     #[command(subcommand)]
-    command: Action,
+    command: Commands,
 }
 
 #[derive(Subcommand)]
-enum Action {
+enum Commands {
     Load {
         names: Vec<String>,
         #[arg(long)]
@@ -291,20 +291,20 @@ fn execute(cli: Cli) -> Result<()> {
         policy,
     };
     match cli.command {
-        Action::Load { names, bundle } => session.load(names, bundle)?,
-        Action::Observe { client } => {
+        Commands::Load { names, bundle } => session.load(names, bundle)?,
+        Commands::Observe { client } => {
             for observation in
                 ops::observations(&client, &stdin_json()?, &session.catalog, &session.tree)?
             {
                 ops::record(&session.state, &observation)?;
             }
         }
-        Action::Analyze { out } => session.analyze(&out)?,
-        Action::Triage {
+        Commands::Analyze { out } => session.analyze(&out)?,
+        Commands::Triage {
             decisions,
             evidence_root,
         } => session.triage(&decisions, evidence_root)?,
-        Action::Note {
+        Commands::Note {
             kind,
             summary,
             skill,
@@ -315,7 +315,7 @@ fn execute(cli: Cli) -> Result<()> {
             summary,
             evidence,
         })?,
-        Action::Incident {
+        Commands::Incident {
             rule,
             session: incident_session,
             source,
@@ -332,14 +332,14 @@ fn execute(cli: Cli) -> Result<()> {
             counterexample,
             dry_run,
         )?,
-        Action::Discharge {
+        Commands::Discharge {
             rule,
             evidence,
             exempt_reason,
             reconsideration,
             root,
         } => session.discharge(&rule, evidence, exempt_reason, reconsideration, &root)?,
-        Action::Check => {
+        Commands::Check => {
             if let Some(open) = session.open_incidents()? {
                 anyhow::bail!("{open}");
             }
@@ -348,8 +348,8 @@ fn execute(cli: Cli) -> Result<()> {
                 "skill maintenance is pending; run skill-ops analyze --out FILE and triage the findings it lists with skill-ops triage --decisions FILE"
             );
         }
-        Action::Stop => unreachable!("Stop is translated into a checked completion request"),
-        Action::Doctor => session.doctor()?,
+        Commands::Stop => unreachable!("Stop is translated into a checked completion request"),
+        Commands::Doctor => session.doctor()?,
     }
     Ok(())
 }
@@ -646,13 +646,13 @@ impl Session {
 
 fn main() {
     let mut cli = Cli::parse();
-    let result = if matches!(cli.command, Action::Stop) {
+    let result = if matches!(cli.command, Commands::Stop) {
         use skill_ops::skill_rules::{Completion, completion};
         let input = stdin_json();
         let continued = input
             .as_ref()
             .is_ok_and(|input| input["stop_hook_active"] == true);
-        cli.command = Action::Check;
+        cli.command = Commands::Check;
         let checked = match skill_ops::freshness::require_current(Built::SkillOps) {
             Err(error) => Err(error.context(
                 "run `just install-skill-ops` in the dotfiles checkout to rebuild the stale hook",

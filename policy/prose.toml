@@ -4,6 +4,11 @@ paths = ["home/dot_config/prose/styles/"]
 reason = "Vendored Vale packages keep their upstream text."
 
 [[exempt]]
+scope = "documents"
+paths = ["docs/adr/"]
+reason = "Decision records keep the terms of their time, which the glossary at home/dot_config/prose/retired-terms.tsv names as its migration notes."
+
+[[exempt]]
 scope = "comments"
 paths = ["home/dot_config/prose/styles/"]
 reason = "Vendored Vale packages keep their upstream text."

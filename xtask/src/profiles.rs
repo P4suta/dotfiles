@@ -5,9 +5,9 @@ use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 pub use dotfiles::profiles::{
     NativeAction, SkippedScript, Store, chezmoi, chezmoi_with, configured_profile, declared_skips,
-    externally_changed, forget_script_runs, host_edit_refusal, keeps_host_keys, managed_paths,
-    merged_targets, native_action_arguments, native_profile, operate, output,
-    pending_onchange_scripts, script_order, source_data, uncommitted_host_edits,
+    externally_changed, host_edit_refusal, keeps_host_keys, managed_paths, merged_targets,
+    native_action_arguments, native_profile, operate, output, pending_onchange_scripts,
+    reset_entry_and_script_state, script_order, source_data, uncommitted_host_edits,
 };
 use serde_json::{Value, json};
 use std::fs;

@@ -75,8 +75,8 @@ doctor: trust
 prose: trust
     mise x -- cargo run --locked --package prose --bin prose -- --source . repository --scope documents --scope comments
 
-ops-check: trust
-    mise x -- cargo xtask ops-check
+ansible-syntax-check: trust
+    mise x -- cargo xtask ansible-syntax-check
 
 install-review-guard: trust
     mise x -- cargo xtask install-review-guard

@@ -1,4 +1,4 @@
-use platform::runtime::{Native, hook_target};
+use platform::runtime::{Real, hook_target};
 use platform::target_rules::{Target, target};
 use platform::tool::Tool;
 use std::ffi::OsStr;
@@ -63,7 +63,7 @@ fn other_hosts_share_one_target_in_the_home_directory() {
 
 #[test]
 fn hook_gates_build_outside_the_worktree() {
-    let native = Native::new(Path::new("home")).expect("native");
+    let native = Real::new(Path::new("home")).expect("native");
     let command = native.hook_command(Tool::Lefthook);
     let value = command
         .get_envs()

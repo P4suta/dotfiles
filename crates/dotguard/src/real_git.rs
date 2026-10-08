@@ -17,13 +17,13 @@ const UNIX_GIT: [&str; 3] = [
 
 /// Candidate locations of the real git, in order of preference.
 #[cfg(unix)]
-pub fn candidates() -> Vec<PathBuf> {
+pub fn updates() -> Vec<PathBuf> {
     UNIX_GIT.iter().map(PathBuf::from).collect()
 }
 
 /// Git for Windows installs under `%ProgramFiles%` for all users or under `%LOCALAPPDATA%` for one user.
 #[cfg(windows)]
-pub fn candidates() -> Vec<PathBuf> {
+pub fn updates() -> Vec<PathBuf> {
     [
         ("ProgramFiles", "Git/cmd/git.exe"),
         ("ProgramW6432", "Git/cmd/git.exe"),
@@ -38,7 +38,7 @@ pub fn candidates() -> Vec<PathBuf> {
 
 /// The first real git on disk, or `None` on a machine with no git at all.
 pub fn find() -> Option<PathBuf> {
-    candidates().into_iter().find(|p| p.is_file())
+    updates().into_iter().find(|p| p.is_file())
 }
 
 /// A `Command` for the real git, for this process's own queries.

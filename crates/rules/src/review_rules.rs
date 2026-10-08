@@ -5,26 +5,26 @@ pub const PROBE_GAP_MS: u64 = 60_000;
     clippy::cast_possible_truncation,
     reason = "the budget of ten reviews is seven, which every pointer width holds"
 )]
-pub const HOURLY_LIMIT: usize = capacity_budget(10) as usize;
+pub const HOURLY_LIMIT: usize = budget(10) as usize;
 pub const DAILY_LIMIT: usize = HOURLY_LIMIT * 24;
 pub const PROBE_DAILY_LIMIT: usize = DAILY_LIMIT;
 
-/// The share of included capacity a budget may use: 72 percent, the 90 percent service margin times the 80 percent reserve.
+/// The share of the limit a budget may use: 72 percent, the 90 percent service margin times the 80 percent reserve.
 pub const BUDGET_NUMERATOR: u128 = 18;
 pub const BUDGET_DENOMINATOR: u128 = 25;
 
-/// 72 percent of `capacity`, rounded down.
+/// 72 percent of the `limit`, rounded down.
 #[must_use]
 #[expect(
     clippy::cast_possible_truncation,
     reason = "72 percent of a u64 is at most the u64 itself, so the narrowing keeps every value"
 )]
-pub const fn capacity_budget(capacity: u64) -> u64 {
-    (capacity as u128 * BUDGET_NUMERATOR / BUDGET_DENOMINATOR) as u64
+pub const fn budget(limit: u64) -> u64 {
+    (limit as u128 * BUDGET_NUMERATOR / BUDGET_DENOMINATOR) as u64
 }
 
 #[must_use]
-pub fn rolling_allowance(hourly: usize, daily: usize) -> bool {
+pub fn within_limits(hourly: usize, daily: usize) -> bool {
     hourly < HOURLY_LIMIT && daily < DAILY_LIMIT
 }
 
@@ -83,7 +83,7 @@ pub fn cooldown_complete(previous: u64, now: u64, gap: u64) -> bool {
 }
 
 #[must_use]
-pub fn included_allowance(limit: u64, remaining: u64) -> bool {
+pub fn within_budget(limit: u64, remaining: u64) -> bool {
     remaining <= limit
         && (u128::from(limit - remaining) + 1) * BUDGET_DENOMINATOR
             <= u128::from(limit) * BUDGET_NUMERATOR
@@ -94,20 +94,20 @@ pub fn included_allowance(limit: u64, remaining: u64) -> bool {
 mod proofs {
     use super::*;
 
-    /// A count fits the budget exactly when 25 times it stays within 18 times the capacity, so the budget floors once.
-    pub fn spec_capacity_budget(capacity: u64, count: u64) -> u64 {
-        let budget = capacity_budget(capacity);
-        assert!(budget <= capacity);
+    /// A count fits the budget exactly when 25 times it stays within 18 times the limit, so the budget floors once.
+    pub fn spec_budget(limit: u64, count: u64) -> u64 {
+        let budget = budget(limit);
+        assert!(budget <= limit);
         assert_eq!(
             count <= budget,
-            u128::from(count) * BUDGET_DENOMINATOR <= u128::from(capacity) * BUDGET_NUMERATOR
+            u128::from(count) * BUDGET_DENOMINATOR <= u128::from(limit) * BUDGET_NUMERATOR
         );
         budget
     }
 
-    /// A review fits the included allowance when the consumed count after it stays within the layered budget of the limit.
-    pub fn spec_included_allowance(limit: u64, remaining: u64) -> bool {
-        let accepted = included_allowance(limit, remaining);
+    /// A review fits the remaining budget when the consumed count after it stays within the layered budget of the limit.
+    pub fn spec_within_budget(limit: u64, remaining: u64) -> bool {
+        let accepted = within_budget(limit, remaining);
         assert_eq!(
             accepted,
             remaining <= limit
@@ -119,9 +119,9 @@ mod proofs {
         accepted
     }
 
-    pub fn spec_rolling_allowance(hourly: usize, daily: usize) {
+    pub fn spec_within_limits(hourly: usize, daily: usize) {
         assert_eq!(
-            rolling_allowance(hourly, daily),
+            within_limits(hourly, daily),
             hourly < HOURLY_LIMIT && daily < DAILY_LIMIT
         );
     }
@@ -147,21 +147,20 @@ mod proofs {
 
     #[cfg(kani)]
     #[kani::proof]
-    fn a_count_fits_the_layered_budget_exactly_when_25_times_it_stays_within_18_times_the_capacity()
-    {
-        let capacity: u64 = kani::any();
+    fn a_count_fits_the_layered_budget_exactly_when_25_times_it_stays_within_18_times_the_limit() {
+        let limit: u64 = kani::any();
         let count: u64 = kani::any();
-        let budget = spec_capacity_budget(capacity, count);
-        kani::cover!(capacity > 0 && budget == 0);
+        let budget = spec_budget(limit, count);
+        kani::cover!(limit > 0 && budget == 0);
         kani::cover!(count == budget && count > 0);
     }
 
     #[cfg(kani)]
     #[kani::proof]
-    fn review_consumption_respects_the_layered_capacity_budget() {
+    fn review_consumption_respects_the_layered_budget() {
         let limit: u64 = kani::any();
         let remaining: u64 = kani::any();
-        let accepted = spec_included_allowance(limit, remaining);
+        let accepted = spec_within_budget(limit, remaining);
         kani::cover!(accepted);
         kani::cover!(!accepted && limit > 0 && remaining <= limit);
         kani::cover!(!accepted && remaining > limit);
@@ -172,8 +171,8 @@ mod proofs {
     fn rolling_attempts_cannot_exceed_the_layered_local_budget() {
         let hourly: usize = kani::any();
         let daily: usize = kani::any();
-        spec_rolling_allowance(hourly, daily);
-        let accepted = rolling_allowance(hourly, daily);
+        spec_within_limits(hourly, daily);
+        let accepted = within_limits(hourly, daily);
         kani::cover!(accepted);
         kani::cover!(!accepted && hourly >= HOURLY_LIMIT);
         kani::cover!(!accepted && daily >= DAILY_LIMIT);
@@ -219,17 +218,17 @@ mod tests {
     fn every_boundary_meets_the_budget_specifications() {
         for first in VALUES {
             for second in VALUES {
-                proofs::spec_capacity_budget(first, second);
-                proofs::spec_included_allowance(first, second);
+                proofs::spec_budget(first, second);
+                proofs::spec_within_budget(first, second);
                 for third in VALUES {
                     proofs::spec_cooldown_complete(first, second, third);
                 }
             }
         }
-        for capacity in 0..=100 {
+        for limit in 0..=100 {
             for count in 0..=100 {
-                proofs::spec_capacity_budget(capacity, count);
-                proofs::spec_included_allowance(capacity, count);
+                proofs::spec_budget(limit, count);
+                proofs::spec_within_budget(limit, count);
             }
         }
     }
@@ -238,7 +237,7 @@ mod tests {
     fn every_window_count_and_pause_meets_its_specification() {
         for hourly in [0, 1, HOURLY_LIMIT - 1, HOURLY_LIMIT, usize::MAX] {
             for daily in [0, 1, DAILY_LIMIT - 1, DAILY_LIMIT, usize::MAX] {
-                proofs::spec_rolling_allowance(hourly, daily);
+                proofs::spec_within_limits(hourly, daily);
             }
         }
         for markers in crate::domain::flags() {
@@ -248,12 +247,12 @@ mod tests {
 
     #[test]
     fn ten_reviews_an_hour_leave_seven_and_a_day_of_them_168() {
-        assert_eq!(capacity_budget(10), 7);
+        assert_eq!(budget(10), 7);
         assert_eq!(HOURLY_LIMIT, 7);
         assert_eq!(DAILY_LIMIT, 168);
         assert_eq!(PROBE_DAILY_LIMIT, DAILY_LIMIT);
-        assert_eq!(capacity_budget(49), 35);
-        assert_eq!(capacity_budget(u64::MAX), 13_281_655_733_070_877_162);
+        assert_eq!(budget(49), 35);
+        assert_eq!(budget(u64::MAX), 13_281_655_733_070_877_162);
     }
 
     #[test]

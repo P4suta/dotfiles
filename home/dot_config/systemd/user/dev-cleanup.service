@@ -5,6 +5,6 @@ Description=Remove long-exited dev containers and run a safe Docker prune
 Type=oneshot
 EnvironmentFile=-%h/.config/dev-reaper/config
 Environment=DEV_REAPER_STATE_DIR=%h/.local/state/dev-reaper
-ExecStart=%h/.local/bin/dev-reaper cleanup
+ExecStart=%h/.local/bin/dev-reaper prune
 SyslogIdentifier=dev-reaper
 Nice=10

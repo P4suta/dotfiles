@@ -24,7 +24,7 @@ struct Cli {
 enum Action {
     CheckSecrets,
     CheckAdapters,
-    OpsCheck,
+    AnsibleSyntaxCheck,
     Profiles {
         #[arg(long)]
         output: Option<PathBuf>,
@@ -238,7 +238,7 @@ fn run() -> Result<()> {
     match cli.command {
         Action::CheckSecrets => xtask::quality::secrets(&cli.root)?,
         Action::CheckAdapters => xtask::quality::adapters(&cli.root)?,
-        Action::OpsCheck => {
+        Action::AnsibleSyntaxCheck => {
             ensure!(
                 cfg!(target_os = "linux"),
                 "Ansible checks require the Linux toolchain"

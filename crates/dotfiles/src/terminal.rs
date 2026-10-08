@@ -1,4 +1,4 @@
-use crate::runtime::{Native, Runner, args, checked};
+use crate::runtime::{Real, Runner, args, checked};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::ffi::OsString;
@@ -42,7 +42,7 @@ fn execute(mut command: Command) -> Result<ExitStatus> {
 }
 
 /// Builds the session a terminal window runs, choosing Herdr with its server started, else Nushell, else a login shell.
-fn child_command(native: &mut Native, session: Session, arguments: &[OsString]) -> Result<Command> {
+fn child_command(native: &mut Real, session: Session, arguments: &[OsString]) -> Result<Command> {
     if matches!(session, Session::Herdr) && native.available(Tool::Herdr) {
         if cfg!(target_os = "macos") {
             start_herdr_server(native)?;
@@ -69,14 +69,14 @@ fn child_command(native: &mut Native, session: Session, arguments: &[OsString]) 
 }
 
 /// Starts the Herdr server with its SSH agent unless it already runs, waiting up to five seconds for it.
-fn start_herdr_server(native: &mut Native) -> Result<()> {
+fn start_herdr_server(native: &mut Real) -> Result<()> {
     if native.available(Tool::HerdrAgent) {
         platform::cleanup::report(
             native.run(Tool::HerdrAgent, &args(&["ensure"])),
             "start the Herdr SSH agent",
         );
     }
-    let running = |native: &mut Native| -> Result<bool> {
+    let running = |native: &mut Real| -> Result<bool> {
         let server = native.run(Tool::Herdr, &args(&["status", "server"]))?;
         Ok(server.success && String::from_utf8_lossy(&server.bytes).contains("status: running"))
     };
@@ -125,7 +125,7 @@ pub fn run(
     };
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .context("native home is unavailable")?;
-    let mut native = Native::new(Path::new(&home))?;
+    let mut native = Real::new(Path::new(&home))?;
     if child {
         return execute(child_command(&mut native, session, arguments)?);
     }
@@ -201,7 +201,7 @@ pub fn run(
 pub fn doctor(strict: bool) -> Result<()> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .context("native home is unavailable")?;
-    let mut native = Native::new(Path::new(&home))?;
+    let mut native = Real::new(Path::new(&home))?;
     let mut missing = 0;
     let required: &[Tool] = if cfg!(windows) {
         &[
@@ -270,7 +270,7 @@ pub fn doctor(strict: bool) -> Result<()> {
 }
 
 /// Prints and counts what Windows lacks among Herdr's agent integrations, the Git wrapper, the signing settings, and current Claude hooks.
-fn windows_missing(native: &mut Native) -> Result<usize> {
+fn windows_missing(native: &mut Real) -> Result<usize> {
     let mut missing = 0;
     if native.available(Tool::Herdr) {
         let status = String::from_utf8(checked(

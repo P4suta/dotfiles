@@ -63,18 +63,18 @@ impl Wrapper {
     }
 
     /// Runs the wrapper with an isolated home and Git configuration, so its audit records stay out of the developer's.
-    /// The wrapper drops waivers from the calling shell, such as the one a force push sets for its hooks, so they never decide a refusal.
+    /// The wrapper drops bypasses from the calling shell, such as the one a force push sets for its hooks, so they never decide a refusal.
     fn run(&self, arguments: &[&str], input: Option<&[u8]>) -> Output {
         self.run_with(arguments, input, &[])
     }
 
-    fn run_with(&self, arguments: &[&str], input: Option<&[u8]>, waivers: &[&str]) -> Output {
-        let set: Vec<(&str, &str)> = waivers.iter().map(|waiver| (*waiver, "1")).collect();
+    fn run_with(&self, arguments: &[&str], input: Option<&[u8]>, bypasses: &[&str]) -> Output {
+        let set: Vec<(&str, &str)> = bypasses.iter().map(|bypass| (*bypass, "1")).collect();
         self.run_env(arguments, input, &set)
     }
 
     /// Runs the wrapper with `variables` set.
-    /// The run drops a stack lease token from the calling shell, as it drops a waiver.
+    /// The run drops a stack lease token from the calling shell, as it drops a bypass.
     fn run_env(
         &self,
         arguments: &[&str],
@@ -138,7 +138,7 @@ fn a_copy_named_git_refuses_skipped_hooks_and_records_the_refusal() {
         let refused = wrapper.run(arguments, None);
         let refusal = last_record(&refused);
         assert_eq!(refusal.rule, "git.no-verify");
-        assert_eq!(refusal.waiver, None);
+        assert_eq!(refusal.bypass, None);
         let next = refusal.next.unwrap_or_default();
         assert!(
             next.starts_with("git ") && !next.contains("--no-verify"),
@@ -163,14 +163,14 @@ fn a_copy_named_git_refuses_destructive_commands_unless_waived() {
     let refusal = last_record(&wrapper.run(&["reset", "--hard"], None));
     assert_eq!(refusal.rule, "git.force");
     assert_eq!(
-        refusal.waiver.as_deref(),
+        refusal.bypass.as_deref(),
         Some("ALLOW_FORCE=1 git reset --hard")
     );
-    let waived = wrapper.run_with(&["reset", "--hard"], None, &["ALLOW_FORCE"]);
+    let bypassed = wrapper.run_with(&["reset", "--hard"], None, &["ALLOW_FORCE"]);
     assert!(
-        text(&waived.stderr).contains("ALLOW_FORCE=1 — allowing"),
+        text(&bypassed.stderr).contains("ALLOW_FORCE=1 — allowing"),
         "{}",
-        text(&waived.stderr)
+        text(&bypassed.stderr)
     );
     let log = std::fs::read_to_string(wrapper.home().join(".local/state/git-bypass.log")).unwrap();
     assert!(log.lines().any(|line| line.contains("BYPASS")), "{log}");
@@ -214,8 +214,8 @@ fn an_abbreviated_option_value_is_not_a_deleted_branch() {
             .unwrap_or_default(),
         "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/a'"
     );
-    let waived = wrapper.run_with(&deletion, None, &["ALLOW_FORCE"]);
-    assert!(waived.status.success(), "{}", text(&waived.stderr));
+    let bypassed = wrapper.run_with(&deletion, None, &["ALLOW_FORCE"]);
+    assert!(bypassed.status.success(), "{}", text(&bypassed.stderr));
     let remote = |branch: &str| {
         wrapper
             .run(
@@ -367,8 +367,8 @@ fn a_refused_push_with_an_option_git_rejects_suggests_nothing() {
             "{}",
             refused.cause
         );
-        let waived = wrapper.run_with(&deletion, None, &["ALLOW_FORCE"]);
-        assert!(!waived.status.success(), "Git ran git {deletion:?}");
+        let bypassed = wrapper.run_with(&deletion, None, &["ALLOW_FORCE"]);
+        assert!(!bypassed.status.success(), "Git ran git {deletion:?}");
     }
     for branch in ["a", "origin", "x"] {
         succeeds(&[
@@ -381,7 +381,7 @@ fn a_refused_push_with_an_option_git_rejects_suggests_nothing() {
     }
 }
 
-/// A rebase of a published commit runs only through the stack tooling's lease or a recorded waiver, and the refusal names the stack command.
+/// A rebase of a published commit runs only through the stack tooling's lease or a recorded bypass, and the refusal names the stack command.
 #[test]
 fn a_rebase_of_a_published_branch_runs_only_through_the_stack_lease() {
     let wrapper = Wrapper::new("published-rebase");
@@ -424,7 +424,7 @@ fn a_rebase_of_a_published_branch_runs_only_through_the_stack_lease() {
         Some("pr-workflow stack sync --repo P4suta/dotfiles")
     );
     assert_eq!(
-        refused.waiver.as_deref(),
+        refused.bypass.as_deref(),
         Some("ALLOW_FORCE=1 git rebase main")
     );
     let unleased = wrapper.run_env(&["rebase", "main"], None, &[("DOTGUARD_STACK", "token")]);

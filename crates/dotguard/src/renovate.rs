@@ -3,7 +3,7 @@
 //! The facts come from a pinned read-only Renovate container, which `dotguard renovate run` also starts by hand.
 //!
 //! The gate refuses a push whose range adds or changes a manifest line for a dependency with a non-major update available.
-//! The default update types cover minor, patch, pin, and `pinDigest`, and `RENOVATE_LOCAL_GATE_TYPES` overrides them.
+//! The default update types cover minor, patch, pin, and `pinDigest`, and `RENOVATE_LOCAL_UPDATE_TYPES` overrides them.
 //! Everything else only informs:
 //!
 //! * Major updates never block, because deferring them stays a valid decision.
@@ -13,17 +13,17 @@
 //! Opt out with `git config renovate.localSkip true`, adding `--global` for the whole machine, or once with `RENOVATE_LOCAL_SKIP=1 git push`.
 
 use crate::locate;
-use crate::realgit;
+use crate::real_git;
 use crate::refusal::Refusal;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-const DEFAULT_GATE_TYPES: &str = "minor patch pin pinDigest";
+const DEFAULT_UPDATE_TYPES: &str = "minor patch pin pinDigest";
 
 /// The exit status of a subcommand the gate doesn't serve.
 const USAGE_ERROR: i32 = 2;
-/// The digest digits a candidate shows when it names no version.
+/// The digest digits an update shows when it names no version.
 const SHORT_DIGEST: usize = 12;
 /// The image's tool directory, which Renovate writes inside its read-only container.
 const CONTAINERBASE: &str = "/tmp/containerbase";
@@ -34,13 +34,13 @@ const DEFAULT_UID: u32 = 501;
 const DEFAULT_GID: u32 = 20;
 
 /// One dependency with a blocking update available, as parsed from the jq report.
-struct Candidate {
+struct Update {
     package_file: String,
     dep_name: String,
     current_value: String,
     current_digest: String,
     replace_string: String,
-    update_type: String,
+    kind: String,
     new_value: String,
     new_digest: String,
 }
@@ -63,11 +63,11 @@ pub fn run(remote: &str) -> i32 {
 }
 
 fn gate(remote: &str, input: &str) -> i32 {
-    if realgit::capture(&["rev-parse", "--show-toplevel"]).is_none() {
+    if real_git::capture(&["rev-parse", "--show-toplevel"]).is_none() {
         return 0;
     }
 
-    if realgit::capture(&["config", "--type=bool", "--get", "renovate.localSkip"])
+    if real_git::capture(&["config", "--type=bool", "--get", "renovate.localSkip"])
         .is_some_and(|v| v.trim() == "true")
     {
         return 0;
@@ -96,26 +96,26 @@ fn gate(remote: &str, input: &str) -> i32 {
         return 0;
     };
 
-    let types = std::env::var("RENOVATE_LOCAL_GATE_TYPES")
-        .unwrap_or_else(|_| DEFAULT_GATE_TYPES.to_owned());
-    let out = jq_candidates(&types, &report);
+    let types = std::env::var("RENOVATE_LOCAL_UPDATE_TYPES")
+        .unwrap_or_else(|_| DEFAULT_UPDATE_TYPES.to_owned());
+    let out = jq_updates(&types, &report);
     if let Some(dir) = report.parent() {
         platform::cleanup::remove_dir_all(dir);
     }
     let Some(out) = out else {
         return 0; // jq failed: fail-open, same contract as a missing report
     };
-    let (blocked, stale) = classify(
-        &parse_candidates(&out),
+    let (blocked, outdated) = classify(
+        &parse_updates(&out),
         &changed_files,
         &added_lines,
         scope_unknown,
     );
 
-    if !stale.is_empty() {
+    if !outdated.is_empty() {
         eprintln!(
-            "::notice:: stale but untouched in this push (left for Renovate):\n{}",
-            stale.join("\n")
+            "::notice:: outdated but untouched in this push (left for Renovate):\n{}",
+            outdated.join("\n")
         );
     }
     if blocked.is_empty() {
@@ -123,18 +123,18 @@ fn gate(remote: &str, input: &str) -> i32 {
         return 0;
     }
 
-    stale_refusal(&blocked).emit();
+    outdated_refusal(&blocked).emit();
     1
 }
 
-/// The refusal records no opt-out, so it names no waiver.
+/// The refusal records no opt-out, so it names no bypass.
 /// The cause lists them for the owner.
-fn stale_refusal(blocked: &[String]) -> Refusal {
+fn outdated_refusal(blocked: &[String]) -> Refusal {
     let mut refusal = Refusal::new(
         "push.dependencies",
         "this push changes dependencies that are not on their latest non-major release.\n\
          Bump them to the listed versions (SHA-pinned actions: update both the hash and the version comment), then push again.\n\
-         Unrecorded opt-outs for the owner: RENOVATE_LOCAL_SKIP=1 for one push, git config renovate.localSkip true for this repository, or RENOVATE_LOCAL_GATE_TYPES to narrow what blocks.",
+         Unrecorded opt-outs for the owner: RENOVATE_LOCAL_SKIP=1 for one push, git config renovate.localSkip true for this repository, or RENOVATE_LOCAL_UPDATE_TYPES to narrow what blocks.",
         "dotguard renovate run",
     );
     for dependency in blocked {
@@ -182,16 +182,16 @@ fn scope(remote: &str, input: &str) -> Option<(Vec<String>, String, bool)> {
     Some((changed_files, added_lines, scope_unknown))
 }
 
-/// Splits the candidates into blocking ones, which this push touched, and stale ones, which stay with Renovate.
+/// Splits the updates into blocking ones, which this push touched, and outdated ones, which stay with Renovate.
 fn classify(
-    candidates: &[Candidate],
+    updates: &[Update],
     changed_files: &[String],
     added_lines: &str,
     scope_unknown: bool,
 ) -> (Vec<String>, Vec<String>) {
     let mut blocked = Vec::new();
-    let mut stale = Vec::new();
-    for c in candidates {
+    let mut outdated = Vec::new();
+    for c in updates {
         if !changed_files.iter().any(|f| f == &c.package_file) {
             continue;
         }
@@ -201,15 +201,15 @@ fn classify(
             c.dep_name,
             display_current(c),
             display_new(c),
-            c.update_type
+            c.kind
         );
         if touched(c, added_lines, scope_unknown) {
             blocked.push(line);
         } else {
-            stale.push(line);
+            outdated.push(line);
         }
     }
-    (blocked, stale)
+    (blocked, outdated)
 }
 
 /// The diff base for one pushed ref: the remote tip it updates, or the fork point from the default remote branch for a new branch.
@@ -222,15 +222,15 @@ fn range_base(remote: &str, local_sha: &str, remote_sha: &str) -> Option<String>
         format!("{remote}/main"),
         format!("{remote}/master"),
     ] {
-        if realgit::succeeds(&["rev-parse", "--verify", "-q", &format!("{r}^{{commit}}")]) {
-            return realgit::capture(&["merge-base", local_sha, &r]).map(|s| s.trim().to_owned());
+        if real_git::succeeds(&["rev-parse", "--verify", "-q", &format!("{r}^{{commit}}")]) {
+            return real_git::capture(&["merge-base", local_sha, &r]).map(|s| s.trim().to_owned());
         }
     }
     None
 }
 
 fn diff_names(base: &str, tip: &str) -> Vec<String> {
-    realgit::capture(&["diff", "--name-only", base, tip])
+    real_git::capture(&["diff", "--name-only", base, tip])
         .map(|s| {
             s.lines()
                 .filter(|l| is_manifest(l))
@@ -241,7 +241,7 @@ fn diff_names(base: &str, tip: &str) -> Vec<String> {
 }
 
 fn ls_tree_manifests(tip: &str) -> Vec<String> {
-    realgit::capture(&["ls-tree", "-r", "--name-only", tip])
+    real_git::capture(&["ls-tree", "-r", "--name-only", tip])
         .map(|s| {
             s.lines()
                 .filter(|l| is_manifest(l))
@@ -262,7 +262,7 @@ fn diff_added_lines(base: &str, tip: &str, files: &[String]) -> String {
     ];
     args.extend(files.iter().cloned());
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    realgit::capture(&refs)
+    real_git::capture(&refs)
         .map(|s| {
             s.lines()
                 .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
@@ -274,7 +274,7 @@ fn diff_added_lines(base: &str, tip: &str, files: &[String]) -> String {
 }
 
 /// An added line touches a dependency when it carries its exact `replaceString`, or names it with its current value or digest.
-fn touched(c: &Candidate, added_lines: &str, scope_unknown: bool) -> bool {
+fn touched(c: &Update, added_lines: &str, scope_unknown: bool) -> bool {
     if scope_unknown {
         return true;
     }
@@ -294,7 +294,7 @@ fn touched(c: &Candidate, added_lines: &str, scope_unknown: bool) -> bool {
         .any(|l| l.contains(&c.dep_name) && l.contains(needle.as_str()))
 }
 
-fn display_current(c: &Candidate) -> String {
+fn display_current(c: &Update) -> String {
     if c.current_value.is_empty() {
         c.current_digest.chars().take(SHORT_DIGEST).collect()
     } else {
@@ -302,7 +302,7 @@ fn display_current(c: &Candidate) -> String {
     }
 }
 
-fn display_new(c: &Candidate) -> String {
+fn display_new(c: &Update) -> String {
     if c.new_value.is_empty() {
         c.new_digest.chars().take(SHORT_DIGEST).collect()
     } else {
@@ -331,7 +331,7 @@ fn renovate_report() -> Option<PathBuf> {
     }
 }
 
-/// The jq program that flattens the report into candidate lines joined by the unit separator `U+001F`, which keeps empty fields intact.
+/// The jq program that flattens the report into update lines joined by the unit separator `U+001F`, which keeps empty fields intact.
 const JQ_CANDIDATES: &str = r#"
     ($types | split(" ") | map(select(length > 0))) as $blocking
     | (.repositories.local.packageFiles // {}) | to_entries[] | .value[]
@@ -346,7 +346,7 @@ const JQ_CANDIDATES: &str = r#"
     | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")
 "#;
 
-fn jq_candidates(types: &str, report: &Path) -> Option<String> {
+fn jq_updates(types: &str, report: &Path) -> Option<String> {
     let out = locate::child("jq")
         .args(["-r", "--arg", "types", types, JQ_CANDIDATES])
         .arg(report)
@@ -359,7 +359,7 @@ fn jq_candidates(types: &str, report: &Path) -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-fn parse_candidates(out: &str) -> Vec<Candidate> {
+fn parse_updates(out: &str) -> Vec<Update> {
     let mut v = Vec::new();
     for line in out.lines() {
         let fields: Vec<&str> = line.split('\u{1f}').collect();
@@ -369,7 +369,7 @@ fn parse_candidates(out: &str) -> Vec<Candidate> {
             current_value,
             current_digest,
             replace_string,
-            update_type,
+            kind,
             new_value,
             new_digest,
         ] = fields[..]
@@ -379,13 +379,13 @@ fn parse_candidates(out: &str) -> Vec<Candidate> {
         if package_file.is_empty() {
             continue;
         }
-        v.push(Candidate {
+        v.push(Update {
             package_file: package_file.to_owned(),
             dep_name: dep_name.to_owned(),
             current_value: current_value.to_owned(),
             current_digest: current_digest.to_owned(),
             replace_string: replace_string.to_owned(),
-            update_type: update_type.to_owned(),
+            kind: kind.to_owned(),
             new_value: new_value.to_owned(),
             new_digest: new_digest.to_owned(),
         });
@@ -595,7 +595,7 @@ fn prepare() -> Option<RunConfig> {
         eprintln!("error: docker is required.");
         return None;
     }
-    let root = realgit::capture(&["rev-parse", "--show-toplevel"])?
+    let root = real_git::capture(&["rev-parse", "--show-toplevel"])?
         .trim()
         .to_owned();
     if root.is_empty() {
@@ -621,21 +621,21 @@ fn prepare() -> Option<RunConfig> {
     ));
     std::fs::create_dir_all(&snapshot).ok()?;
     let prefix = format!("{}/", snapshot.display());
-    let ok = realgit::succeeds(&[
+    let ok = real_git::succeeds(&[
         "-C",
         &root,
         "checkout-index",
         "--all",
         "--force",
         &format!("--prefix={prefix}"),
-    ]) && realgit::succeeds(&[
+    ]) && real_git::succeeds(&[
         "-C",
         &prefix,
         "init",
         "--quiet",
         "--initial-branch=main",
         "--template=",
-    ]) && realgit::succeeds(&["-C", &prefix, "add", "--all"]);
+    ]) && real_git::succeeds(&["-C", &prefix, "add", "--all"]);
     if !ok {
         platform::cleanup::remove_dir_all(&snapshot);
         return None;
@@ -890,7 +890,7 @@ mod credential_boundary {
 
 #[cfg(test)]
 mod tests {
-    use super::{Candidate, is_manifest, parse_candidates, touched};
+    use super::{Update, is_manifest, parse_updates, touched};
 
     #[test]
     fn manifests_are_recognized_component_wise() {
@@ -944,38 +944,38 @@ mod tests {
     }
 
     #[test]
-    fn a_stale_dependency_refusal_lists_each_dependency_and_no_waiver() {
-        let refusal = super::stale_refusal(&[
+    fn an_outdated_dependency_refusal_lists_each_dependency_and_no_bypass() {
+        let refusal = super::outdated_refusal(&[
             "  package.json: lodash 4.17.20 -> 4.17.21 (patch)".to_owned(),
             "  Cargo.toml: serde 1.0.1 -> 1.0.2 (patch)".to_owned(),
         ]);
         assert!(refusal.is_complete(), "{refusal:?}");
         assert_eq!(refusal.rule, "push.dependencies");
         assert_eq!(refusal.evidence.len(), 2);
-        assert_eq!(refusal.waiver, None);
+        assert_eq!(refusal.bypass, None);
     }
 
     #[test]
-    fn candidates_parse_from_unit_separated_lines() {
+    fn updates_parse_from_unit_separated_lines() {
         let out =
             "Cargo.toml\u{1f}serde\u{1f}1.0\u{1f}\u{1f}serde = \"1.0\"\u{1f}minor\u{1f}1.1\u{1f}\n";
-        let c = &parse_candidates(out)[0];
+        let c = &parse_updates(out)[0];
         assert_eq!(c.package_file, "Cargo.toml");
         assert_eq!(c.dep_name, "serde");
-        assert_eq!(c.update_type, "minor");
+        assert_eq!(c.kind, "minor");
         assert_eq!(c.new_value, "1.1");
         assert!(c.replace_string.contains("serde"));
-        assert!(parse_candidates("garbage without separators").is_empty());
+        assert!(parse_updates("garbage without separators").is_empty());
     }
 
-    fn cand(rep: &str, cur: &str, dep: &str) -> Candidate {
-        Candidate {
+    fn cand(rep: &str, cur: &str, dep: &str) -> Update {
+        Update {
             package_file: "Cargo.toml".into(),
             dep_name: dep.into(),
             current_value: cur.into(),
             current_digest: String::new(),
             replace_string: rep.into(),
-            update_type: "minor".into(),
+            kind: "minor".into(),
             new_value: "9.9".into(),
             new_digest: String::new(),
         }

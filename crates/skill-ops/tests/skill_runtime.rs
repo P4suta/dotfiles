@@ -26,7 +26,7 @@ fn fixture() -> Result<tempfile::TempDir> {
         max_entry_words: 100,
         requirements: vec![ops::Requirement {
             skill: "alpha".into(),
-            also: vec!["beta".into()],
+            dependencies: vec!["beta".into()],
         }],
         bundles: std::collections::BTreeMap::default(),
     };

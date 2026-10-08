@@ -14,7 +14,7 @@ use xtask::next_action_rules::{Checks, Head, Host, Pr, State, Step, Upstream, de
 #[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
-/// A clean, pushed draft PR with passing checks.
+/// A clean, pushed draft PR with successful checks.
 /// Each case changes the fields that define its state.
 const PUBLISHED: State = State {
     host: Host::Ready,
@@ -27,7 +27,7 @@ const PUBLISHED: State = State {
     upstream: Upstream::Current,
     push_paused: false,
     pr: Pr::Draft,
-    checks: Checks::Passing,
+    checks: Checks::Success,
     workflows: true,
     review_paused: false,
 };
@@ -260,7 +260,7 @@ const CASES: &[(State, Step)] = &[
     ),
     (
         State {
-            checks: Checks::Failing,
+            checks: Checks::Failure,
             review_paused: true,
             ..PUBLISHED
         },
@@ -351,7 +351,7 @@ fn failing_checks_outrank_pending_and_an_empty_rollup_reports_none() {
     assert_eq!(classify_checks(&[]), Checks::None);
     assert_eq!(
         classify_checks(&[success.clone(), skipped.clone()]),
-        Checks::Passing
+        Checks::Success
     );
     assert_eq!(
         classify_checks(&[success.clone(), running]),
@@ -359,10 +359,10 @@ fn failing_checks_outrank_pending_and_an_empty_rollup_reports_none() {
     );
     assert_eq!(
         classify_checks(&[context_pending.clone(), failed]),
-        Checks::Failing
+        Checks::Failure
     );
     assert_eq!(classify_checks(&[context_pending]), Checks::Pending);
-    assert_eq!(classify_checks(&[success, context_error]), Checks::Failing);
+    assert_eq!(classify_checks(&[success, context_error]), Checks::Failure);
 }
 
 #[test]
@@ -669,7 +669,7 @@ fn github_states_name_the_pull_request_and_its_command() -> Result<()> {
             ),
         ),
         (
-            on_github(Some(("OPEN", true, Checks::Failing)), false),
+            on_github(Some(("OPEN", true, Checks::Failure)), false),
             Step::FixChecks,
             Some("gh pr checks 7 --repo P4suta/dotfiles"),
         ),
@@ -679,35 +679,35 @@ fn github_states_name_the_pull_request_and_its_command() -> Result<()> {
             Some("gh pr checks 7 --repo P4suta/dotfiles --watch"),
         ),
         (
-            on_github(Some(("OPEN", true, Checks::Passing)), false),
+            on_github(Some(("OPEN", true, Checks::Success)), false),
             Step::MarkReady,
             Some("pr-workflow ready --repo P4suta/dotfiles --issue <issue> --pr 7"),
         ),
         (
-            on_github(Some(("OPEN", true, Checks::Passing)), true),
+            on_github(Some(("OPEN", true, Checks::Success)), true),
             Step::AwaitReviewResume,
             None,
         ),
         (
-            on_github(Some(("OPEN", false, Checks::Passing)), false),
+            on_github(Some(("OPEN", false, Checks::Success)), false),
             Step::AwaitReview,
             Some("gh pr view 7 --repo P4suta/dotfiles --comments"),
         ),
         (
-            on_github(Some(("MERGED", false, Checks::Passing)), false),
+            on_github(Some(("MERGED", false, Checks::Success)), false),
             Step::Finished,
             None,
         ),
         (
             Observed {
                 unpushed: 1,
-                ..on_github(Some(("OPEN", false, Checks::Passing)), true)
+                ..on_github(Some(("OPEN", false, Checks::Success)), true)
             },
             Step::AwaitReviewResume,
             None,
         ),
         (
-            on_github(Some(("CLOSED", false, Checks::Failing)), false),
+            on_github(Some(("CLOSED", false, Checks::Failure)), false),
             Step::Reopen,
             Some("gh pr reopen 7 --repo P4suta/dotfiles"),
         ),
@@ -1074,7 +1074,7 @@ fn execute_refuses_host_steps_it_cannot_complete() -> Result<()> {
 
 #[test]
 fn a_merged_pull_request_names_its_branch_for_retirement() {
-    let recommendation = recommend(on_github(Some(("MERGED", false, Checks::Passing)), false));
+    let recommendation = recommend(on_github(Some(("MERGED", false, Checks::Success)), false));
     assert_eq!(
         recommendation.summary,
         "PR #7 is merged; retire feat/topic and its worktree"
@@ -1153,7 +1153,7 @@ fn online_inspection_reads_the_pull_request_and_compares_with_its_base() -> Resu
         line["state"]["pull_request"],
         json!({
             "number": 7, "url": "https://github.com/owner/project/pull/7", "state": "OPEN",
-            "draft": true, "base": "feat/base", "checks": "passing",
+            "draft": true, "base": "feat/base", "checks": "success",
         })
     );
     let log = fs::read_to_string(fixture.scope.path().join("gh.log"))?;

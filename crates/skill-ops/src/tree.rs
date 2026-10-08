@@ -144,7 +144,7 @@ pub fn skills(root: &Path) -> Result<Vec<(std::path::PathBuf, Metadata)>> {
     Ok(result)
 }
 
-/// Checks the shared skills and their Claude aliases, and returns the number of skills.
+/// Checks the shared skills and their Claude symlinks, and returns the number of skills.
 ///
 /// # Errors
 ///
@@ -152,15 +152,15 @@ pub fn skills(root: &Path) -> Result<Vec<(std::path::PathBuf, Metadata)>> {
 pub fn validate_tree(root: &Path) -> Result<usize> {
     let entries = skills(root)?;
     for (_, skill) in &entries {
-        let alias = root
+        let symlink = root
             .join("home/dot_claude/skills")
             .join(format!("symlink_{}", skill.name));
-        let target = fs::read_to_string(&alias)
-            .with_context(|| format!("missing alias {}", alias.display()))?;
+        let target = fs::read_to_string(&symlink)
+            .with_context(|| format!("missing symlink {}", symlink.display()))?;
         ensure!(
             target.trim() == format!("../../.agents/skills/{}", skill.name),
-            "incorrect alias {}",
-            alias.display()
+            "incorrect symlink {}",
+            symlink.display()
         );
     }
     for entry in fs::read_dir(root.join("home/dot_claude/skills"))? {
@@ -168,13 +168,13 @@ pub fn validate_tree(root: &Path) -> Result<usize> {
         let name = entry
             .file_name()
             .into_string()
-            .map_err(|_| anyhow::anyhow!("non-UTF-8 alias"))?;
+            .map_err(|_| anyhow::anyhow!("non-UTF-8 symlink"))?;
         let name = name
             .strip_prefix("symlink_")
             .context("independent Claude skill must move to canonical tree")?;
         ensure!(
             entries.iter().any(|(_, skill)| skill.name == name),
-            "alias has no canonical skill: {name}"
+            "symlink has no canonical skill: {name}"
         );
     }
     Ok(entries.len())
@@ -227,7 +227,7 @@ pub fn export_checks(root: &Path, output: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Every file of the shared skill tree and its Claude aliases.
+/// Every file of the shared skill tree and its Claude symlinks.
 ///
 /// # Errors
 ///

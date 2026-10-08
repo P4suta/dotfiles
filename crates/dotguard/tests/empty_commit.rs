@@ -74,15 +74,15 @@ impl Repository {
         commit
     }
 
-    fn post_commit(&self, waivers: &[&str]) -> bool {
-        self.post_commit_output(waivers).status.success()
+    fn post_commit(&self, bypasses: &[&str]) -> bool {
+        self.post_commit_output(bypasses).status.success()
     }
 
-    fn post_commit_output(&self, waivers: &[&str]) -> std::process::Output {
+    fn post_commit_output(&self, bypasses: &[&str]) -> std::process::Output {
         let mut command = self.command(env!("CARGO_BIN_EXE_dotguard"));
         command.arg("post-commit");
-        for waiver in waivers {
-            command.env(waiver, "1");
+        for bypass in bypasses {
+            command.env(bypass, "1");
         }
         command.output().unwrap()
     }

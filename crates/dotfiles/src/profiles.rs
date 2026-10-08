@@ -268,7 +268,7 @@ pub fn host_edit_refusal(changed: &[String], config: &Path, destination: &Path) 
 /// # Errors
 ///
 /// Returns an error when chezmoi fails to dump or delete its state, or the dump doesn't parse as JSON.
-pub fn forget_script_runs(
+pub fn reset_entry_and_script_state(
     root: &Path,
     store: &Store,
     config: &Path,
@@ -423,18 +423,21 @@ pub struct SkippedScript {
     pub reason: String,
 }
 
-/// `setup.skip` entries, which `.chezmoiignore` keeps chezmoi from applying.
+/// `setup.ignore` entries, which `.chezmoiignore` keeps chezmoi from applying, with `setup.skip` as the spelling before the rename.
 ///
 /// # Errors
 ///
-/// Returns an error when `setup.skip` holds something other than a list of script and reason entries.
+/// Returns an error when `setup.ignore` holds something other than a list of script and reason entries.
 /// Returns an error when an entry names something other than a `.sh` or `.ps1` script target or has a blank reason.
 pub fn declared_skips(data: &Value) -> Result<Vec<SkippedScript>> {
-    let Some(entries) = data.pointer("/setup/skip") else {
+    let entries = data
+        .pointer("/setup/ignore")
+        .or_else(|| data.pointer("/setup/skip"));
+    let Some(entries) = entries else {
         return Ok(Vec::new());
     };
     let skips: Vec<SkippedScript> = serde_json::from_value(entries.clone())
-        .context("setup.skip requires a list of script and reason entries")?;
+        .context("setup.ignore requires a list of script and reason entries")?;
     for skip in &skips {
         ensure!(
             !skip.script.is_empty()
@@ -444,12 +447,12 @@ pub fn declared_skips(data: &Value) -> Result<Vec<SkippedScript>> {
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
                 && (crate::has_extension(&skip.script, "sh")
                     || crate::has_extension(&skip.script, "ps1")),
-            "setup.skip names a setup launcher by its step and extension, such as ocaml.sh: {}",
+            "setup.ignore names a setup launcher by its step and extension, such as ocaml.sh: {}",
             skip.script
         );
         ensure!(
             !skip.reason.trim().is_empty(),
-            "setup.skip requires a reason for {}",
+            "setup.ignore requires a reason for {}",
             skip.script
         );
     }
@@ -589,7 +592,7 @@ fn preflight(root: &Path, scope: &Path, config: &Path, destination: &Path) -> Re
     let context = crate::setup::load(root, config, destination)?;
     crate::setup::preflight(
         &context,
-        &mut crate::runtime::Native::new(destination)?,
+        &mut crate::runtime::Real::new(destination)?,
         &crate::setup::scripted_steps(&contents),
     )
 }

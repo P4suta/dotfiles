@@ -30,7 +30,8 @@ use std::path::{Component, Path};
 #[serde(deny_unknown_fields)]
 pub struct Requirement {
     pub skill: String,
-    pub also: Vec<String>,
+    #[serde(alias = "also")]
+    pub dependencies: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -141,12 +142,12 @@ pub fn dependency_plan(
         );
         ensure!(
             graph
-                .insert(&requirement.skill, &requirement.also)
+                .insert(&requirement.skill, &requirement.dependencies)
                 .is_none(),
             "duplicate dependency declaration"
         );
         let mut unique = BTreeSet::new();
-        for name in &requirement.also {
+        for name in &requirement.dependencies {
             ensure!(
                 available.contains(name) && unique.insert(name),
                 "unknown or duplicate dependency: {name}"
@@ -1368,10 +1369,12 @@ pub fn analyze(
     }
     for requirement in &policy.requirements {
         let primary = &report.usage[&requirement.skill].sessions;
-        for also in &requirement.also {
-            let missing = primary.difference(&report.usage[also].sessions).count();
+        for dependency in &requirement.dependencies {
+            let missing = primary
+                .difference(&report.usage[dependency].sessions)
+                .count();
             if missing > 0 {
-                report.findings.push(Finding { id: format!("dependency:{}:{also}", requirement.skill), kind: "dependency-observation-gap".into(), skills: vec![requirement.skill.clone(), also.clone()], detail: format!("{missing} sessions lack an observed dependency load; inspect collection coverage and use the dependency-aware loader.") });
+                report.findings.push(Finding { id: format!("dependency:{}:{dependency}", requirement.skill), kind: "dependency-observation-gap".into(), skills: vec![requirement.skill.clone(), dependency.clone()], detail: format!("{missing} sessions lack an observed dependency load; inspect collection coverage and use the dependency-aware loader.") });
             }
         }
     }

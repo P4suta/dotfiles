@@ -56,7 +56,7 @@ fn a_running_agent_is_replaced_by_its_new_definition() {
     let scope = tempfile::tempdir().unwrap();
     let plist = scope.path().join(format!("{label}.plist"));
     let home = std::env::var_os("HOME").unwrap();
-    let mut runner = dotfiles::runtime::Native::new(Path::new(&home)).unwrap();
+    let mut runner = dotfiles::runtime::Real::new(Path::new(&home)).unwrap();
 
     write_probe(&plist, &label, "first-generation");
     let _loaded = Loaded(target.clone());

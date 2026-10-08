@@ -38,7 +38,7 @@ fn main() -> std::process::ExitCode {
                 (Some("session"), Some(sub)) => code(SessionReaper::run(sub)),
                 _ => {
                     eprintln!(
-                        "usage: reaper dev|session {{reap|cleanup}}  (or invoke as dev-reaper / session-reaper)"
+                        "usage: reaper dev|session {{reap|prune}}  (or invoke as dev-reaper / session-reaper)"
                     );
                     code(i32::from(USAGE_ERROR))
                 }

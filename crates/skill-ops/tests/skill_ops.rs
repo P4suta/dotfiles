@@ -37,7 +37,7 @@ fn fixture() -> Result<(tempfile::TempDir, Catalog, Policy)> {
         max_entry_words: 100,
         requirements: vec![Requirement {
             skill: "alpha".into(),
-            also: names(&["beta"]),
+            dependencies: names(&["beta"]),
         }],
         bundles: BTreeMap::default(),
     };
@@ -282,11 +282,11 @@ fn dependencies_load_once_before_the_requested_skill_and_cycles_are_rejected() -
     let requirements = vec![
         Requirement {
             skill: "tools".into(),
-            also: names(&["types", "checks"]),
+            dependencies: names(&["types", "checks"]),
         },
         Requirement {
             skill: "types".into(),
-            also: names(&["checks"]),
+            dependencies: names(&["checks"]),
         },
     ];
     assert_eq!(
@@ -297,7 +297,7 @@ fn dependencies_load_once_before_the_requested_skill_and_cycles_are_rejected() -
     let mut cyclic = requirements;
     cyclic.push(Requirement {
         skill: "checks".into(),
-        also: names(&["tools"]),
+        dependencies: names(&["tools"]),
     });
     assert!(dependency_plan(&available, &names(&["tools"]), &cyclic).is_err());
     Ok(())

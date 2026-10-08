@@ -33,14 +33,14 @@ pub trait Runner {
 }
 
 #[derive(Debug)]
-pub struct Native {
+pub struct Real {
     pub home: PathBuf,
     pub path: OsString,
     pub environment: Vec<(OsString, OsString)>,
     pub directory: Option<PathBuf>,
 }
 
-impl Native {
+impl Real {
     /// A runner for `home` whose `PATH` puts the managed tool directories before the inherited `PATH`.
     ///
     /// # Errors
@@ -97,7 +97,7 @@ impl Native {
     }
 }
 
-impl Runner for Native {
+impl Runner for Real {
     fn available(&self, tool: Tool) -> bool {
         let name = tool.program();
         if Path::new(name).is_absolute() {

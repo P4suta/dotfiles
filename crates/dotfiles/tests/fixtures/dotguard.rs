@@ -14,7 +14,7 @@ fn main() {
         // Refuses with its own record, which must stay last.
         "commit-msg" => {
             eprintln!(
-                "dotfiles-refusal/1 {{\"rule\":\"commit.language\",\"cause\":\"fixture\",\"evidence\":[\"fixture\"],\"next\":\"git status\",\"waiver\":null}}"
+                "dotfiles-refusal/2 {{\"rule\":\"commit.language\",\"cause\":\"fixture\",\"evidence\":[\"fixture\"],\"next\":\"git status\",\"bypass\":null}}"
             );
             std::process::exit(1);
         }

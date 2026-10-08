@@ -6,8 +6,8 @@
 //!
 //! The hook disables itself on a machine without signing configured, so a fresh Mac without the 1Password SSH agent keeps its commits.
 
-use crate::bypass::{self, Category};
-use crate::realgit;
+use crate::bypass::{self, Rule};
+use crate::real_git;
 use crate::refusal::Refusal;
 
 /// The lock this hook sets around its own `--amend`, so the amended commit skips the hook.
@@ -32,7 +32,7 @@ pub fn run() -> i32 {
     if refuses_empty(
         !in_hook && !mid_operation,
         head_is_empty(),
-        bypass::waived(Category::Empty),
+        bypass::bypassed(Rule::Empty),
     ) {
         return refuse_empty();
     }
@@ -73,35 +73,35 @@ fn decide(s: &Situation) -> Decision {
     }
 }
 
-/// Refuses an ordinary commit that records no change unless waived, because its changes most likely vanished from the index.
-fn refuses_empty(settled: bool, empty: bool, waived: bool) -> bool {
-    settled && empty && !waived
+/// Refuses an ordinary commit that records no change unless bypassed, because its changes most likely vanished from the index.
+fn refuses_empty(settled: bool, empty: bool, bypassed: bool) -> bool {
+    settled && empty && !bypassed
 }
 
 /// `HEAD` has one parent and the same tree, so merges and the root commit never count as empty.
 fn head_is_empty() -> bool {
-    let Some(parents) = realgit::capture(&["rev-list", "--parents", "-n", "1", "HEAD"]) else {
+    let Some(parents) = real_git::capture(&["rev-list", "--parents", "-n", "1", "HEAD"]) else {
         return false;
     };
     // `rev-list --parents` prints the commit and then its parents, so one parent gives two words.
     let [_, _] = parents.split_whitespace().collect::<Vec<_>>()[..] else {
         return false;
     };
-    let tree = |rev: &str| realgit::capture(&["rev-parse", rev]).map(|t| t.trim().to_owned());
+    let tree = |rev: &str| real_git::capture(&["rev-parse", rev]).map(|t| t.trim().to_owned());
     matches!((tree("HEAD^{tree}"), tree("HEAD^^{tree}")), (Some(a), Some(b)) if a == b)
 }
 
 fn refuse_empty() -> i32 {
-    let short = realgit::capture(&["rev-parse", "--short", "HEAD"])
+    let short = real_git::capture(&["rev-parse", "--short", "HEAD"])
         .map(|s| s.trim().to_owned())
         .unwrap_or_default();
-    let rolled_back = realgit::succeeds(&["reset", "--soft", "HEAD^"]);
+    let rolled_back = real_git::succeeds(&["reset", "--soft", "HEAD^"]);
     empty_refusal(&short, rolled_back).emit();
     1
 }
 
-/// Once rolled back, the waiver records the same empty commit again.
-/// While the commit still sits at the checked-out tip, nothing remains to waive.
+/// Once rolled back, the bypass records the same empty commit again.
+/// While the commit still sits at the checked-out tip, nothing remains to bypass.
 fn empty_refusal(short: &str, rolled_back: bool) -> Refusal {
     if rolled_back {
         Refusal::new(
@@ -115,7 +115,7 @@ fn empty_refusal(short: &str, rolled_back: bool) -> Refusal {
         )
         .evidence(format!("HEAD {short} has the same tree as HEAD^"))
         .evidence("rolled back with git reset --soft HEAD^")
-        .waiver(format!(
+        .bypass(format!(
             "ALLOW_EMPTY=1 git commit --allow-empty --reuse-message={short}"
         ))
     } else {
@@ -130,7 +130,7 @@ fn empty_refusal(short: &str, rolled_back: bool) -> Refusal {
 }
 
 fn signing_configured() -> bool {
-    realgit::capture(&["config", "--get", "commit.gpgsign"]).is_some_and(|v| v.trim() == "true")
+    real_git::capture(&["config", "--get", "commit.gpgsign"]).is_some_and(|v| v.trim() == "true")
 }
 
 fn hook_is_reentrant() -> bool {
@@ -138,7 +138,7 @@ fn hook_is_reentrant() -> bool {
 }
 
 fn mid_operation() -> bool {
-    let Some(git_dir) = realgit::capture(&["rev-parse", "--git-dir"]) else {
+    let Some(git_dir) = real_git::capture(&["rev-parse", "--git-dir"]) else {
         return false; // not a repository: nothing to guard
     };
     let git_dir = git_dir.trim();
@@ -148,18 +148,18 @@ fn mid_operation() -> bool {
 }
 
 fn head_signed() -> bool {
-    realgit::succeeds(&["verify-commit", "HEAD"])
+    real_git::succeeds(&["verify-commit", "HEAD"])
 }
 
 fn resign() -> i32 {
-    let Some(pre_head) = realgit::capture(&["rev-parse", "HEAD"]) else {
+    let Some(pre_head) = real_git::capture(&["rev-parse", "HEAD"]) else {
         return 0; // nothing to amend
     };
     let pre_head = pre_head.trim().to_owned();
 
     // The re-sign itself, under the lock.
     // The command's output goes unread because the refusal below already names the reason the agent can't sign.
-    let Some(mut amend) = realgit::command() else {
+    let Some(mut amend) = real_git::command() else {
         return 0;
     };
     let amended = amend
@@ -180,8 +180,8 @@ fn resign() -> i32 {
         .status()
         .is_ok_and(|s| s.success());
 
-    if amended && realgit::succeeds(&["verify-commit", "HEAD"]) {
-        let short = realgit::capture(&["rev-parse", "--short", "HEAD"]).map_or_else(
+    if amended && real_git::succeeds(&["verify-commit", "HEAD"]) {
+        let short = real_git::capture(&["rev-parse", "--short", "HEAD"]).map_or_else(
             || pre_head.chars().take(SHORT_HASH).collect(),
             |s| s.trim().to_owned(),
         );
@@ -190,7 +190,7 @@ fn resign() -> i32 {
     }
 
     let target = rollback(&pre_head);
-    let head = realgit::capture(&["rev-parse", "--short", "HEAD"]).map(|s| s.trim().to_owned());
+    let head = real_git::capture(&["rev-parse", "--short", "HEAD"]).map(|s| s.trim().to_owned());
     unsigned_refusal(&pre_head, target, head.as_deref()).emit();
     1
 }
@@ -199,13 +199,13 @@ fn resign() -> i32 {
 /// The staged changes and the reflog still hold everything needed to commit again.
 fn unsigned_refusal(pre_head: &str, target: Rollback, head: Option<&str>) -> Refusal {
     let rolled_back = match (target, head) {
-        (Rollback::SoftToParent, Some(head)) => {
+        (Rollback::SoftReset, Some(head)) => {
             format!("rolled back to {head}; the changes remain staged")
         }
-        (Rollback::SoftToParent, None) => {
+        (Rollback::SoftReset, None) => {
             "rolled back to the parent; the changes remain staged".to_owned()
         }
-        (Rollback::DropHead, _) => {
+        (Rollback::DeleteRef, _) => {
             "dropped the root commit; the changes remain staged with no HEAD".to_owned()
         }
     };
@@ -225,22 +225,22 @@ fn unsigned_refusal(pre_head: &str, target: Rollback, head: Option<&str>) -> Ref
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rollback {
     /// `git reset --soft <parent>`, which keeps the changes staged.
-    SoftToParent,
+    SoftReset,
     /// `git update-ref -d HEAD`, which leaves the repository without a `HEAD`.
-    DropHead,
+    DeleteRef,
 }
 
 fn rollback_target(parent_exists: bool) -> Rollback {
     if parent_exists {
-        Rollback::SoftToParent
+        Rollback::SoftReset
     } else {
-        Rollback::DropHead
+        Rollback::DeleteRef
     }
 }
 
 fn rollback(pre_head: &str) -> Rollback {
     // Confirm `HEAD` before stepping further, in case a partial amend moved it.
-    let confirmed = realgit::command()
+    let confirmed = real_git::command()
         .and_then(|mut c| {
             c.args(["reset", "--soft", pre_head])
                 .stdout(std::process::Stdio::null())
@@ -253,11 +253,11 @@ fn rollback(pre_head: &str) -> Rollback {
         eprintln!("warning: could not move HEAD back to {pre_head} before the rollback");
     }
 
-    let parent_exists = realgit::succeeds(&["rev-parse", "--verify", &format!("{pre_head}^")]);
+    let parent_exists = real_git::succeeds(&["rev-parse", "--verify", &format!("{pre_head}^")]);
     let target = rollback_target(parent_exists);
     let rolled_back = match target {
-        Rollback::SoftToParent => realgit::succeeds(&["reset", "--soft", &format!("{pre_head}^")]),
-        Rollback::DropHead => realgit::succeeds(&["update-ref", "-d", "HEAD"]),
+        Rollback::SoftReset => real_git::succeeds(&["reset", "--soft", &format!("{pre_head}^")]),
+        Rollback::DeleteRef => real_git::succeeds(&["update-ref", "-d", "HEAD"]),
     };
     if !rolled_back {
         eprintln!(
@@ -279,26 +279,26 @@ mod tests {
         for refusal in [
             empty_refusal("abc1234", true),
             empty_refusal("abc1234", false),
-            unsigned_refusal("abc1234", Rollback::SoftToParent, Some("def5678")),
-            unsigned_refusal("abc1234", Rollback::SoftToParent, None),
-            unsigned_refusal("abc1234", Rollback::DropHead, None),
+            unsigned_refusal("abc1234", Rollback::SoftReset, Some("def5678")),
+            unsigned_refusal("abc1234", Rollback::SoftReset, None),
+            unsigned_refusal("abc1234", Rollback::DeleteRef, None),
         ] {
             assert!(refusal.is_complete(), "{refusal:?}");
         }
         assert_eq!(empty_refusal("a", true).rule, "commit.empty");
         assert_eq!(
-            empty_refusal("abc1234", true).waiver.as_deref(),
+            empty_refusal("abc1234", true).bypass.as_deref(),
             Some("ALLOW_EMPTY=1 git commit --allow-empty --reuse-message=abc1234")
         );
         let kept = empty_refusal("abc1234", false);
         assert_eq!(kept.next.as_deref(), Some("git reset --soft HEAD^"));
-        assert_eq!(kept.waiver, None, "the empty commit is still on HEAD");
-        let unsigned = unsigned_refusal("abc1234", Rollback::DropHead, None);
+        assert_eq!(kept.bypass, None, "the empty commit is still on HEAD");
+        let unsigned = unsigned_refusal("abc1234", Rollback::DeleteRef, None);
         assert_eq!(
             unsigned.next.as_deref(),
             Some("git commit --reuse-message=abc1234")
         );
-        assert_eq!(unsigned.waiver, None);
+        assert_eq!(unsigned.bypass, None);
     }
 
     #[test]
@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn the_root_commit_drops_the_ref_instead_of_stepping_back() {
-        assert_eq!(rollback_target(true), Rollback::SoftToParent);
-        assert_eq!(rollback_target(false), Rollback::DropHead);
+        assert_eq!(rollback_target(true), Rollback::SoftReset);
+        assert_eq!(rollback_target(false), Rollback::DeleteRef);
     }
 }

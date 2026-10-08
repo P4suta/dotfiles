@@ -105,7 +105,7 @@ fn a_paused_push_is_refused_without_a_waiver() -> Result<()> {
     let refused =
         refusal(&host.hook(&["pre-push", "--", "origin", "https://example.invalid/r"])?);
     assert_eq!(refused.rule, "push.paused");
-    assert_eq!(refused.waiver, None);
+    assert_eq!(refused.bypass, None);
     assert!(refused.evidence[0].contains("push-paused"), "{refused:?}");
     Ok(())
 }
@@ -115,7 +115,7 @@ fn a_gate_that_changes_the_staged_tree_refuses_the_commit() -> Result<()> {
     let host = Host::new()?;
     let refused = refusal(&host.hook(&["pre-commit"])?);
     assert_eq!(refused.rule, "commit.staged-tree");
-    assert_eq!(refused.waiver, None);
+    assert_eq!(refused.bypass, None);
     Ok(())
 }
 
@@ -213,7 +213,7 @@ fn a_lefthook_configuration_that_cannot_be_loaded_refuses_the_hook() -> Result<(
         refusal(&host.hook(&["pre-push", "--", "origin", "https://example.invalid/r"])?);
     assert_eq!(refused.rule, "hook.lefthook");
     assert_eq!(refused.next.as_deref().unwrap_or_default(), "lefthook dump");
-    assert_eq!(refused.waiver, None);
+    assert_eq!(refused.bypass, None);
     assert!(
         refused
             .evidence

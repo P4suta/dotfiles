@@ -5,7 +5,8 @@
 
 use crate::profile_rules::Profile;
 use crate::profiles::{
-    NativeAction, Store, forget_script_runs, native_profile, operate, pending_onchange_scripts,
+    NativeAction, Store, native_profile, operate, pending_onchange_scripts,
+    reset_entry_and_script_state,
 };
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
@@ -75,7 +76,7 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
     for skip in omitted(profile) {
         write!(
             identity,
-            "[[data.setup.skip]]\nscript = {}\nreason = {}\n\n",
+            "[[data.setup.ignore]]\nscript = {}\nreason = {}\n\n",
             toml_string(skip.script),
             toml_string(skip.reason)
         )?;
@@ -265,7 +266,7 @@ pub fn run(root: &Path, disposable_host: bool) -> Result<()> {
         ("repeated", false),
     ] {
         if rerun_scripts {
-            forget_script_runs(root, &store, &config, &home)?;
+            reset_entry_and_script_state(root, &store, &config, &home)?;
         } else if round == "repeated" {
             let pending = pending_onchange_scripts(root, &store, &config, &home)?;
             ensure!(

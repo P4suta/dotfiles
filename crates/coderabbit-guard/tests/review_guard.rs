@@ -1,4 +1,4 @@
-use coderabbit_guard::review_rules::{capacity_budget, included_allowance};
+use coderabbit_guard::review_rules::{budget, within_budget};
 use coderabbit_guard::{
     DAY_MS, HOUR_MS, HOURLY_LIMIT, Invocation, PROBE_GAP_MS, PauseScope, check_budget, check_usage,
     classify, execute_admitted, execute_probe, execute_reserved, install, reserve,
@@ -14,10 +14,10 @@ fn invocation(args: &[&str]) -> Invocation {
 #[test]
 fn layered_capacity_uses_exact_single_rounding_for_small_and_maximum_limits() {
     for (capacity, expected) in [(0, 0), (1, 0), (2, 1), (3, 2), (10, 7), (49, 35), (50, 36)] {
-        assert_eq!(capacity_budget(capacity), expected);
+        assert_eq!(budget(capacity), expected);
     }
     assert_eq!(
-        u128::from(capacity_budget(u64::MAX)),
+        u128::from(budget(u64::MAX)),
         u128::from(u64::MAX) * 72 / 100
     );
 }
@@ -28,13 +28,13 @@ fn admission_matches_the_final_decimal_budget_at_capacity_boundaries() {
         let budget = u128::from(limit) * 72 / 100;
         for remaining in 0..=limit + 1 {
             let expected = remaining <= limit && u128::from(limit - remaining) < budget;
-            assert_eq!(included_allowance(limit, remaining), expected);
+            assert_eq!(within_budget(limit, remaining), expected);
         }
     }
     let limit = u64::MAX;
     let budget = u64::try_from(u128::from(limit) * 72 / 100).unwrap();
-    assert!(included_allowance(limit, limit - budget + 1));
-    assert!(!included_allowance(limit, limit - budget));
+    assert!(within_budget(limit, limit - budget + 1));
+    assert!(!within_budget(limit, limit - budget));
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn rolling_hour_daily_budget_and_clock_rollback_fail_closed() {
 const USAGE: &str = r#"{"type":"status","phase":"usage","status":"complete","organization":"P4suta","includedReviews":{"state":"available","repository":"P4suta/dotfiles","fullCapacityInMs":0,"limit":10,"remaining":10,"rollingWindowMs":3600000},"billingPeriod":{"state":"available","scope":"user","usageBillingStatus":"inactive","user":"P4suta","reviewsCount":0}}"#;
 
 #[test]
-fn only_known_included_allowance_with_inactive_paid_usage_is_accepted() {
+fn only_known_within_budget_with_inactive_paid_usage_is_accepted() {
     assert!(check_usage(USAGE, "P4suta").is_ok());
     assert!(check_usage(USAGE, "other").is_err());
     assert!(

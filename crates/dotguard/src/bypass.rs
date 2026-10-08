@@ -10,7 +10,7 @@ use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Category {
+pub enum Rule {
     /// Operations that destroy history or working-tree state.
     Force,
     /// Operations that would skip signing or hook enforcement.
@@ -21,8 +21,8 @@ pub enum Category {
     Empty,
 }
 
-impl Category {
-    /// The environment variable that waives this category for one invocation, if any.
+impl Rule {
+    /// The environment variable that bypasses this rule for one invocation, if any.
     pub const fn env(self) -> Option<&'static str> {
         match self {
             Self::Force => Some("ALLOW_FORCE"),
@@ -42,24 +42,23 @@ impl Category {
     }
 }
 
-impl fmt::Display for Category {
+impl fmt::Display for Rule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.tag())
     }
 }
 
-/// Reports whether this category has a waiver for the current invocation.
+/// Reports whether the current invocation bypasses this rule.
 ///
 /// Any non-empty value counts.
-pub fn waived(category: Category) -> bool {
-    category
-        .env()
+pub fn bypassed(rule: Rule) -> bool {
+    rule.env()
         .is_some_and(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()))
 }
 
 /// Append one line to the bypass log.
 /// A failure to write the log never stops the git command.
-pub fn record(outcome: &str, category: Category, reason: &str, argv: &[String]) {
+pub fn record(outcome: &str, rule: Rule, reason: &str, argv: &[String]) {
     let mut path = crate::locate::home();
     if path.as_os_str().is_empty() {
         return;
@@ -76,7 +75,7 @@ pub fn record(outcome: &str, category: Category, reason: &str, argv: &[String]) 
         "{}\t{}\t{}\tcwd={}\treason={}\targs={}\n",
         timestamp(),
         outcome,
-        category,
+        rule,
         cwd,
         reason,
         argv.join(" ")
@@ -113,13 +112,13 @@ fn timestamp() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Category, waived};
+    use super::{Rule, bypassed};
     use crate::clock::civil_from_days;
 
     #[test]
-    fn hook_and_signing_checks_have_no_waiver() {
-        assert_eq!(Category::NoVerify.env(), None);
-        assert!(!waived(Category::NoVerify));
+    fn hook_and_signing_checks_have_no_bypass() {
+        assert_eq!(Rule::NoVerify.env(), None);
+        assert!(!bypassed(Rule::NoVerify));
     }
 
     #[test]
