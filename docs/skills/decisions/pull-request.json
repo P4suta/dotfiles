@@ -1,7 +1,7 @@
 {
-  "revision": "32e5bf0704c4baa4bcfd7446241589c47e3a0763a4d617751c1234f807719f47",
+  "revision": "2437c19fed21dc366983d92d1ec6e7acc95d1acaace9238b74989d247258e0ec",
   "outcome": "implemented",
-  "reason": "The workflow reference installs pr-workflow and the prose checker through the just recipes that replaced the mise tasks; the checked commands and their rules stay the same.",
+  "reason": "Keep exact destination prerequisites, issue scope, documents, and ready transitions separate from review services.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
     "home/dot_agents/skills/pull-request/SKILL.md",
     "docs/adr/0004-checked-pull-request-authoring.md",
@@ -18,7 +18,9 @@
     "crates/rules/src/prose_rules.rs",
     "crates/dotguard/src/stack.rs",
     "crates/rules/src/wip_rules.rs",
-    "home/dot_agents/skills/pull-request/assets/workflow-policy.json"
+    "home/dot_agents/skills/pull-request/assets/workflow-policy.json",
+    "home/dot_agents/skills/pull-request/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

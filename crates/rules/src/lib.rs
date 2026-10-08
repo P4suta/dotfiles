@@ -89,4 +89,5 @@ pub mod stale_rules;
 pub mod start_health_rules;
 pub mod target_rules;
 pub mod timeout_rules;
+pub mod tool_rules;
 pub mod wip_rules;

@@ -38,6 +38,9 @@ rehearse *args: trust
 skills: trust
     mise x -- cargo xtask skills
 
+inventory: trust
+    mise x -- cargo xtask inventory
+
 adapters: trust
     mise x -- cargo xtask check-adapters
 

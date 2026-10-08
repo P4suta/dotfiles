@@ -3,6 +3,8 @@ name: skill-operations
 description: >-
   Operate and improve the owner's shared skill system through dependency-aware loading, local observations, analysis, evidence-backed decisions, regression checks, and native rollout.
   Use for skill changes, recurring workflow gaps, maintenance findings, or a pending skill-ops gate.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Shared skill operations

@@ -3,6 +3,8 @@ name: ocomment
 description: >-
   Use the personal OComment tool to check source prose, inspect comment decisions, and apply safe comment edits.
   Use for OComment reports, repository comment gates, staged comment changes, and agent editing hooks.
+metadata:
+  tools: "tools.toml"
 ---
 
 # OComment

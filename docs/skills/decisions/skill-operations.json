@@ -1,14 +1,16 @@
 {
-  "revision": "eeabda9e07c6d8d170635b7543c48f2b69d149f92fbfd7f7a71a41790a512d33",
+  "revision": "a7dbe2988a0e9719aa64f78e096d863c6330c843ea82943bc69d301db3cad190",
   "outcome": "implemented",
-  "reason": "The operations reference names the just recipes that replaced the mise tasks for installation and checks; the engine, gate, and decision rules stay the same.",
+  "reason": "Keep catalog discovery, dependency loading, observations, and evidence-backed maintenance separate from native installation.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
     "home/dot_agents/skills/skill-operations/SKILL.md",
     "home/dot_agents/skills/skill-operations/references/operations.md",
     "docs/adr/0003-local-skill-operations.md",
     "docs/adr/0014-per-skill-decision-records.md",
     "crates/skill-ops/tests/skill_ops.rs",
-    "crates/skill-ops/tests/skill_runtime.rs"
+    "crates/skill-ops/tests/skill_runtime.rs",
+    "home/dot_agents/skills/skill-operations/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

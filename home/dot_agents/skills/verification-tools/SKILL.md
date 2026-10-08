@@ -3,6 +3,8 @@ name: verification-tools
 description: >-
   Install and maintain mandatory verification tools for the actual language, risks, and supported targets of a project.
   Use for implementation, project setup, assurance gaps, or propagating a proven new check across existing projects.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Required verification tools

@@ -36,6 +36,25 @@ fn reject_passing_an_edited_readme() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/tool_rules.rs"
+probes = '''
+use production::{Coverage, Placement, coverage, placement};
+#[kani::proof]
+fn reject_admitting_an_installed_tool_without_a_skill_or_decision() {
+    assert!(coverage(true, 0, true, 0) == Coverage::Covered);
+}
+#[kani::proof]
+fn reject_admitting_a_skill_bound_to_a_superseded_pin() {
+    assert!(coverage(true, 1, false, 0) == Coverage::Covered);
+}
+#[kani::proof]
+fn reject_installing_a_platform_skill_everywhere() {
+    assert!(placement(true, false, false) == Placement::Correct);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/adr_rules.rs"
 probes = '''
 use production::{Identity, Status, Verdict, identity, verdict};

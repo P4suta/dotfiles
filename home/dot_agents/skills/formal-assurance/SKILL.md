@@ -4,6 +4,8 @@ description: >-
   Require proof-first, source-bound assurance for implementation changes in any language.
   Prefer a verifier that checks the actual language implementation, and use Lean 4 for general theorems with an explicit implementation refinement.
   Use for implementation, bug fixes, proof gaps, and verification gates.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Proof-first assurance

@@ -1,0 +1,282 @@
+# Every tool an install source places on a profile needs a skill that declares it, or a decision here that it needs none.
+# `just skills` and the skills gate of `just check` compute the inventory from mise, Homebrew, Nix, Scoop, WinGet, the modern tool table, and the setup steps.
+# A skill declares its tools in its frontmatter as `metadata.tools: "TOOL@VERSION"`, and a change of that pin refuses the skill until its review.
+
+# What each setup step installs beyond the data files, by step name.
+[steps]
+mise = []
+runtime = ["dotfiles", "skill-ops", "pr-workflow", "dotguard", "coderabbit"]
+github = ["gh"]
+scoop = ["scoop"]
+winget = []
+nix = ["nix"]
+desktop = []
+tools = []
+wezterm = ["wezterm"]
+herdr = ["herdr"]
+integrations = []
+python-stub = []
+keyboard = []
+sshd = ["sshd"]
+storage-scout = ["storage-scout"]
+fcitx5 = ["fcitx5"]
+macos-defaults = []
+forge-keys = []
+claude = ["claude"]
+ocaml = ["opam"]
+haskell = ["cabal"]
+racket = ["raco"]
+guard = ["dotguard", "reaper", "herdr-agent", "dev-reaper", "session-reaper"]
+ocomment = ["ocomment"]
+domyjob = ["domyjob"]
+fleet = ["fleet"]
+retire-tmux = []
+upgrade = []
+adapters = []
+
+# Tools that exist on only some platforms, so a skill for one installs only there.
+[platform_specific]
+orbstack = ["mac"]
+
+# Tools that need no skill, grouped by a reason from a closed set: self-describing, toolchain, library, desktop, modern-table, or guarded.
+
+[[none]]
+reason = "modern-table"
+why = "The modern tool table names when each tool replaces a legacy one, when the legacy tool stays correct, and the next action, so the hook carries the judgment."
+tools = [
+  "bat",
+  "bottom",
+  "choose",
+  "delta",
+  "difftastic",
+  "dust",
+  "dysk",
+  "eza",
+  "fd",
+  "hexyl",
+  "hyperfine",
+  "jaq",
+  "ouch",
+  "procs",
+  "qsv",
+  "ripgrep",
+  "sd",
+  "tealdeer",
+  "tokei",
+  "xh",
+  "yq",
+]
+
+[[none]]
+reason = "toolchain"
+why = "Each project's manifest and pins choose these toolchains and package managers, and their own documentation governs them, so the mise skill and the project instructions decide their use."
+tools = [
+  "bun",
+  "cabal",
+  "cargo-binstall",
+  "cargo-edit",
+  "deno",
+  "elan-init",
+  "erlang",
+  "fastlane",
+  "ghc",
+  "git",
+  "gleam",
+  "go",
+  "go-task",
+  "gradle",
+  "haskell-stack",
+  "java",
+  "jbang",
+  "mas",
+  "maven",
+  "mvnd",
+  "nix",
+  "node",
+  "powershell",
+  "opam",
+  "pnpm",
+  "python",
+  "racket",
+  "raco",
+  "rebar",
+  "rust",
+  "sccache",
+  "scoop",
+  "task",
+  "uv",
+  "xcodes",
+]
+
+[[none]]
+reason = "library"
+why = "Builds link or read these packages, and no agent runs them."
+tools = [
+  "autoconf",
+  "automake",
+  "font-udev-gothic-nf",
+  "libmagic",
+  "libtool",
+  "openssl",
+  "pkgconf",
+]
+
+[[none]]
+reason = "desktop"
+why = "These are interactive terminals, editors, shells, prompts, and full-screen viewers for the owner, which an agent neither drives nor needs to explain."
+tools = [
+  "atuin",
+  "broot",
+  "carapace",
+  "claude",
+  "codex",
+  "csvlens",
+  "ctop",
+  "fastfetch",
+  "fcitx5",
+  "fx",
+  "gh-dash",
+  "ghostty",
+  "glow",
+  "gping",
+  "gum",
+  "herdr",
+  "jless",
+  "lazydocker",
+  "lazygit",
+  "lazyjournal",
+  "lnav",
+  "mprocs",
+  "navi",
+  "numbat",
+  "nushell",
+  "onefetch",
+  "opencode",
+  "ov",
+  "pastel",
+  "presenterm",
+  "rainfrog",
+  "raycast",
+  "serie",
+  "starship",
+  "tailspin",
+  "television",
+  "trippy",
+  "viddy",
+  "visual-studio-code",
+  "vivid",
+  "wezterm",
+  "yazi",
+  "zed",
+  "zoxide",
+]
+
+[[none]]
+reason = "guarded"
+why = "The Git guard refuses the history rewrites these tools exist for unless the owner records a bypass."
+tools = ["git-absorb", "git-filter-repo", "git-town"]
+
+[[none]]
+reason = "self-describing"
+why = "Each is a single-purpose command whose `--help` covers every use, and its misuse costs nothing that needs judgment beyond the project's own gates."
+tools = [
+  "actionlint",
+  "air",
+  "asciinema",
+  "ast-grep",
+  "bacon",
+  "cargo-audit",
+  "cargo-deny",
+  "cargo-expand",
+  "cargo-llvm-cov",
+  "cargo-machete",
+  "cargo-nextest",
+  "cargo-semver-checks",
+  "choose-rust",
+  "code2prompt",
+  "cosign",
+  "crane",
+  "dasel",
+  "delve",
+  "dev-reaper",
+  "direnv",
+  "dive",
+  "dlv",
+  "doggo",
+  "dua",
+  "dua-cli",
+  "duckdb",
+  "duf",
+  "fleet",
+  "fourmolu",
+  "fq",
+  "fzf",
+  "ghq",
+  "git-cliff",
+  "git-delta",
+  "git-sizer",
+  "gitleaks",
+  "gnupg",
+  "gofumpt",
+  "golangci-lint",
+  "google-java-format",
+  "gopls",
+  "goreleaser",
+  "gotestsum",
+  "govulncheck",
+  "grex",
+  "gron",
+  "grpcurl",
+  "grype",
+  "hadolint",
+  "herdr-agent",
+  "hurl",
+  "jc",
+  "jj",
+  "jq",
+  "jujutsu",
+  "mdbook",
+  "mergiraf",
+  "miller",
+  "miniserve",
+  "oha",
+  "osv-scanner",
+  "process-compose",
+  "reaper",
+  "regclient",
+  "regctl",
+  "repomix",
+  "reuse",
+  "rumdl",
+  "sad",
+  "semgrep",
+  "session-reaper",
+  "shellcheck",
+  "vale",
+  "shfmt",
+  "sshd",
+  "staticcheck",
+  "swiftlint",
+  "syft",
+  "taplo",
+  "terminal-notifier",
+  "tre",
+  "tre-command",
+  "trivy",
+  "trufflehog",
+  "ttyd",
+  "typos",
+  "typos-cli",
+  "typst",
+  "usql",
+  "vegeta",
+  "vhs",
+  "watchexec",
+  "websocat",
+  "win32yank",
+  "xan",
+  "xcbeautify",
+  "yamllint",
+  "yq-go",
+  "zizmor",
+]

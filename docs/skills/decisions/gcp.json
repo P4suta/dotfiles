@@ -1,10 +1,12 @@
 {
-  "revision": "3c5d4e4f70b34ee75a231b2c96e7cb1d0690c909c94cc930614ec67998d0f658",
+  "revision": "24ae14be71728b3573de7091c46c61d685e3aff7194fd15acfa091f77fd29f94",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Keep explicit project, location, and paid resource decisions separate from generic remote execution.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
     "home/dot_agents/skills/gcp/SKILL.md",
-    "docs/adr/0003-local-skill-operations.md"
+    "docs/adr/0003-local-skill-operations.md",
+    "home/dot_agents/skills/gcp/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

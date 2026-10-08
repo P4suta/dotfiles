@@ -46,6 +46,8 @@ enum Action {
         denylist: PathBuf,
     },
     Skills,
+    /// Lists every computed tool, version selector, and profile, then checks skill coverage.
+    Inventory,
     /// Apply the native profile, rerun every script on the provisioned host, and apply again, on a disposable CI host.
     Rehearse {
         #[arg(long)]
@@ -207,6 +209,7 @@ fn check(root: &Path, gates: Gates, reference: &str) -> Result<()> {
     }
     if gates.contains(Gate::Skills) {
         skill_ops::check_catalog(root)?;
+        xtask::inventory::check(root)?;
         println!(
             "Validated {} shared skills and aliases",
             validate_tree(root)?
@@ -296,11 +299,13 @@ fn run() -> Result<()> {
         Action::Classify { scope } => xtask::change::run(&cli.root, &scope)?,
         Action::Skills => {
             skill_ops::check_catalog(&cli.root)?;
+            xtask::inventory::check(&cli.root)?;
             println!(
                 "Validated {} shared skills, aliases, and current maintenance dispositions",
                 validate_tree(&cli.root)?
             );
         }
+        Action::Inventory => inventory(&cli.root)?,
         Action::Rehearse { disposable_host } => {
             xtask::rehearsal::run(&cli.root, disposable_host)?;
         }
@@ -367,6 +372,19 @@ fn release_binary(root: &Path, package: &str, name: &str) -> Result<PathBuf> {
     Ok(check_build_dir(root, configured.as_deref())
         .join("release")
         .join(format!("{name}{}", std::env::consts::EXE_SUFFIX)))
+}
+
+/// Prints installed tools, their versions, and their profiles, and checks their skill coverage.
+fn inventory(root: &Path) -> Result<()> {
+    for (name, installed) in xtask::inventory::inventory(root, &xtask::inventory::policy(root)?)? {
+        println!(
+            "{name}\t{}\t{}",
+            installed.versions.into_iter().collect::<Vec<_>>().join("|"),
+            installed.profiles.into_iter().collect::<Vec<_>>().join(",")
+        );
+    }
+    xtask::inventory::check(root)?;
+    Ok(())
 }
 
 /// Applies the targets of the given source paths and their parent directories.

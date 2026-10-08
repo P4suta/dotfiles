@@ -1,0 +1,11 @@
+{
+  "revision": "b36e4fd0238cc84cc210534b91b65d25c346888df364500b4a78c3c99dc0d2ca",
+  "outcome": "implemented",
+  "reason": "Cover the Mac's shared Docker engine, memory and disk resources, and machine deletion boundary, with installed help and upstream documentation.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "evidence": [
+    "home/dot_agents/skills/orbstack/SKILL.md",
+    "home/dot_agents/skills/orbstack/tools.toml",
+    "xtask/tests/tool_inventory.rs"
+  ],
+  "revisit": null
+}

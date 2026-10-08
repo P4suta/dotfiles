@@ -8,6 +8,7 @@ pub mod environment;
 pub mod ignore_audit;
 pub mod input_audit;
 pub mod instruction_audit;
+pub mod inventory;
 pub mod launchers;
 pub mod lint;
 pub mod modern;
@@ -28,7 +29,7 @@ pub use platform::paths::{SOURCE_STATE, canonical, has_extension, source_state};
 pub use platform::{build_inputs, refusal, report, tool};
 pub use rules::{
     adr_rules, change_rules, env_expansion_rules, ignore_rules, input_rules, instruction_rules,
-    lint_rules, next_action_rules, proof_budget_rules,
+    lint_rules, next_action_rules, proof_budget_rules, tool_rules,
 };
 pub use skill_ops::split_frontmatter;
 

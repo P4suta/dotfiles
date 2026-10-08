@@ -38,5 +38,6 @@
 | [2026-10-08 Drop Aeneas extraction for the plan and ordering cores and try Verus next](aeneas-extraction-pilot.md) | accepted |  |
 | [2026-10-08 Record rule failures at their execution boundaries](automatic-rule-failure-observations.md) | proposed |  |
 | [2026-10-08 Keep bounded harnesses instead of Kani loop contracts for the Git argument scan](bounded-harness-over-kani-loop-contracts.md) | accepted |  |
+| [2026-10-08 Bind installed tools to reviewed skills](installed-tools-and-reviewed-skills.md) | proposed |  |
 | [2026-10-08 Keep property fuzzing in the fuzz targets instead of bolero](no-bolero-beside-kani.md) | accepted |  |
 | [2026-10-08 Generate repository artifacts from checked metadata](repository-metadata-and-generated-artifacts.md) | proposed |  |
