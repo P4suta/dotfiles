@@ -19,6 +19,7 @@ pub mod quality;
 pub mod quint;
 pub mod rehearsal;
 pub mod skill_proofs;
+pub mod staged_snapshot;
 pub mod state_graph;
 pub mod structure;
 

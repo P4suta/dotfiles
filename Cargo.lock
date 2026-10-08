@@ -245,6 +245,7 @@ dependencies = [
  "platform",
  "rules",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

@@ -15,6 +15,7 @@ rules = { path = "../rules" }
 
 [dev-dependencies]
 serde_json = "1.0"
+tempfile = "3.27"
 
 # The workspace forbids unsafe code, which no #[expect] can lift.
 # The console control handler makes the one foreign call here, and policy/unsafe-sites.toml lists it, so this table repeats the workspace lints with unsafe code denied.

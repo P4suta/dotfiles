@@ -2,19 +2,20 @@
 //!
 //! The facts come from a pinned read-only Renovate container, which `dotguard renovate run` also starts by hand.
 //!
-//! The gate refuses a push whose range adds or changes a manifest line for a dependency with a non-major update available.
-//! The default update types cover minor, patch, pin, and `pinDigest`, and `RENOVATE_LOCAL_UPDATE_TYPES` overrides them.
+//! The gate refuses a push whose range adds or changes a manifest line of a dependency's own manifest with a non-major update available, reading the offered commit.
+//! The default update types cover minor, patch, pin, and `pinDigest`, and `RENOVATE_LOCAL_UPDATE_TYPES` overrides them, with `RENOVATE_LOCAL_GATE_TYPES` read as the name before the rename.
 //! Everything else only informs:
 //!
 //! * Major updates never block, because deferring them stays a valid decision.
 //!
-//! An opt-out returns 0 without output, and a missing `docker` or `jq` returns 0 with a `::warning::`.
+//! Missing tools, malformed reports, and failed lookups refuse the push with a structured next action.
 //!
 //! Opt out with `git config renovate.localSkip true`, adding `--global` for the whole machine, or once with `RENOVATE_LOCAL_SKIP=1 git push`.
 
 use crate::locate;
 use crate::real_git;
 use crate::refusal::Refusal;
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -43,6 +44,7 @@ struct Update {
     kind: String,
     new_value: String,
     new_digest: String,
+    breaking: bool,
 }
 
 pub fn dispatch(args: &[String]) -> i32 {
@@ -57,14 +59,41 @@ pub fn dispatch(args: &[String]) -> i32 {
 pub fn run(remote: &str) -> i32 {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
-        return 0;
+        return unavailable("could not read the offered revisions");
     }
     gate(remote, &input)
 }
 
+fn unavailable(cause: &str) -> i32 {
+    let verdict = rules::freshness_rules::verdict(rules::freshness_rules::Facts {
+        needed: rules::freshness_rules::Need::Required,
+        evidence: false,
+        breaking: false,
+        touched: false,
+    });
+    if verdict == rules::freshness_rules::Verdict::MissingEvidence {
+        Refusal::new("push.evidence", cause, "dotguard renovate run")
+            .evidence(cause)
+            .emit();
+        1
+    } else {
+        0
+    }
+}
+
 fn gate(remote: &str, input: &str) -> i32 {
+    for line in input.lines() {
+        let result = gate_ref(remote, line);
+        if result != 0 {
+            return result;
+        }
+    }
+    0
+}
+
+fn gate_ref(remote: &str, input: &str) -> i32 {
     if real_git::capture(&["rev-parse", "--show-toplevel"]).is_none() {
-        return 0;
+        return unavailable("Git could not read the repository root");
     }
 
     if real_git::capture(&["config", "--type=bool", "--get", "renovate.localSkip"])
@@ -76,41 +105,45 @@ fn gate(remote: &str, input: &str) -> i32 {
         return 0;
     }
 
-    let Some((changed_files, added_lines, scope_unknown)) = scope(remote, input) else {
-        return 0;
+    let found = match scope(remote, input) {
+        Ok(Some(found)) => found,
+        Ok(None) => return 0,
+        Err(cause) => return unavailable(&cause),
     };
 
     for tool in ["docker", "jq"] {
         if locate::which(tool).is_none() {
-            eprintln!("::warning:: renovate gate skipped: {tool} not found");
-            return 0;
+            return unavailable(&format!("required tool {tool} is missing"));
         }
     }
     eprintln!(
         ">>> renovate gate: dependency manifests changed — checking the touched dependencies..."
     );
 
-    let report = renovate_report();
+    let report = renovate_report(found.offered.as_deref());
     let Some(report) = report else {
-        eprintln!("::warning:: renovate gate skipped: renovate-local did not produce a report");
-        return 0;
+        return unavailable("Renovate did not produce verified evidence for the offered commit");
     };
 
     let types = std::env::var("RENOVATE_LOCAL_UPDATE_TYPES")
+        .or_else(|_| std::env::var("RENOVATE_LOCAL_GATE_TYPES"))
         .unwrap_or_else(|_| DEFAULT_UPDATE_TYPES.to_owned());
     let out = jq_updates(&types, &report);
     if let Some(dir) = report.parent() {
         platform::cleanup::remove_dir_all(dir);
     }
     let Some(out) = out else {
-        return 0; // jq failed: fail-open, same contract as a missing report
+        return unavailable("the required report could not be validated");
     };
-    let (blocked, outdated) = classify(
-        &parse_updates(&out),
-        &changed_files,
-        &added_lines,
-        scope_unknown,
-    );
+    if out.lines().any(|line| {
+        let fields: Vec<_> = line.split('\u{1f}').collect();
+        fields.len() != UPDATE_FIELDS
+            || fields.first().is_none_or(|file| file.is_empty())
+            || !matches!(fields.last(), Some(&"true" | &"false"))
+    }) {
+        return unavailable("the dependency report contains malformed compatibility evidence");
+    }
+    let (blocked, outdated) = classify(&parse_updates(&out), &found);
 
     if !outdated.is_empty() {
         eprintln!(
@@ -143,11 +176,19 @@ fn outdated_refusal(blocked: &[String]) -> Refusal {
     refusal
 }
 
-/// The manifest gate: the manifests the pushed range changes, the lines it adds, and whether the scope covers the whole tree.
+struct Found {
+    changed_files: Vec<String>,
+    added_by_file: BTreeMap<String, String>,
+    offered: Option<String>,
+    scope_unknown: bool,
+}
+
+/// The manifest gate over one push.
 /// `None` when the push touches nothing Renovate manages, the common case, which must cost nothing.
-fn scope(remote: &str, input: &str) -> Option<(Vec<String>, String, bool)> {
+fn scope(remote: &str, input: &str) -> Result<Option<Found>, String> {
     let mut changed_files: Vec<String> = Vec::new();
-    let mut added_lines = String::new();
+    let mut added_by_file: BTreeMap<String, String> = BTreeMap::new();
+    let mut offered: Option<String> = None;
     let mut scope_unknown = false;
 
     for line in input.lines() {
@@ -158,41 +199,53 @@ fn scope(remote: &str, input: &str) -> Option<(Vec<String>, String, bool)> {
         if local_sha.is_empty() || local_sha.chars().all(|c| c == '0') {
             continue; // nothing pushed, or a ref deletion
         }
-        let base = range_base(remote, local_sha, remote_sha);
+        offered = offered.or_else(|| Some((*local_sha).to_owned()));
+        if !real_git::succeeds(&["cat-file", "-e", &format!("{local_sha}^{{commit}}")]) {
+            return Err("the offered commit cannot be read".to_owned());
+        }
+        let base = range_base(remote, local_sha, remote_sha)?;
         let files: Vec<String> = if let Some(b) = &base {
-            diff_names(b, local_sha)
+            diff_names(b, local_sha)?
         } else {
             // Without a base commit, every manifest in the tree counts as in scope and every dependency as touched.
             scope_unknown = true;
-            ls_tree_manifests(local_sha)
+            ls_tree_manifests(local_sha)?
         };
         if files.is_empty() {
             continue;
         }
         if let Some(b) = &base {
-            added_lines.push_str(&diff_added_lines(b, local_sha, &files));
+            for (file, added) in diff_added_lines(b, local_sha, &files)? {
+                added_by_file
+                    .entry(file)
+                    .and_modify(|lines| {
+                        lines.push('\n');
+                        lines.push_str(&added);
+                    })
+                    .or_insert(added);
+            }
         }
         changed_files.extend(files);
     }
     if changed_files.is_empty() {
-        return None;
+        return Ok(None);
     }
     changed_files.sort_unstable();
     changed_files.dedup();
-    Some((changed_files, added_lines, scope_unknown))
+    Ok(Some(Found {
+        changed_files,
+        added_by_file,
+        offered,
+        scope_unknown,
+    }))
 }
 
 /// Splits the updates into blocking ones, which this push touched, and outdated ones, which stay with Renovate.
-fn classify(
-    updates: &[Update],
-    changed_files: &[String],
-    added_lines: &str,
-    scope_unknown: bool,
-) -> (Vec<String>, Vec<String>) {
+fn classify(updates: &[Update], found: &Found) -> (Vec<String>, Vec<String>) {
     let mut blocked = Vec::new();
     let mut outdated = Vec::new();
     for c in updates {
-        if !changed_files.iter().any(|f| f == &c.package_file) {
+        if !found.changed_files.iter().any(|f| f == &c.package_file) {
             continue;
         }
         let line = format!(
@@ -203,7 +256,17 @@ fn classify(
             display_new(c),
             c.kind
         );
-        if touched(c, added_lines, scope_unknown) {
+        if rules::freshness_rules::verdict(rules::freshness_rules::Facts {
+            needed: rules::freshness_rules::Need::Required,
+            evidence: true,
+            breaking: c.breaking,
+            touched: touched(
+                c,
+                found.added_by_file.get(&c.package_file).map(String::as_str),
+                found.scope_unknown,
+            ),
+        }) == rules::freshness_rules::Verdict::Outdated
+        {
             blocked.push(line);
         } else {
             outdated.push(line);
@@ -212,24 +275,41 @@ fn classify(
     (blocked, outdated)
 }
 
-/// The diff base for one pushed ref: the remote tip it updates, or the fork point from the default remote branch for a new branch.
-fn range_base(remote: &str, local_sha: &str, remote_sha: &str) -> Option<String> {
+/// The diff base for one pushed ref: the remote tip it updates, or the fork point from the default branch for a new branch.
+/// Ask the remote which branch `HEAD` names for a new branch.
+/// A cached `refs/remotes/<remote>/HEAD` can name a branch the remote no longer uses.
+fn range_base(remote: &str, local_sha: &str, remote_sha: &str) -> Result<Option<String>, String> {
     if !remote_sha.is_empty() && !remote_sha.chars().all(|c| c == '0') {
-        return Some(remote_sha.to_owned());
+        return Ok(Some(remote_sha.to_owned()));
     }
-    for r in [
-        format!("{remote}/HEAD"),
-        format!("{remote}/main"),
-        format!("{remote}/master"),
-    ] {
-        if real_git::succeeds(&["rev-parse", "--verify", "-q", &format!("{r}^{{commit}}")]) {
-            return real_git::capture(&["merge-base", local_sha, &r]).map(|s| s.trim().to_owned());
-        }
+    let Some(tip) = default_branch_tip(remote)? else {
+        return Ok(None);
+    };
+    if !real_git::succeeds(&["cat-file", "-e", &format!("{tip}^{{commit}}")])
+        && !real_git::succeeds(&["fetch", "--no-tags", remote, &tip])
+    {
+        return Err("the remote default branch commit cannot be read".to_owned());
     }
-    None
+    Ok(real_git::capture(&["merge-base", local_sha, &tip]).map(|value| value.trim().to_owned()))
 }
 
-fn diff_names(base: &str, tip: &str) -> Vec<String> {
+fn default_branch_tip(remote: &str) -> Result<Option<String>, String> {
+    let listing = real_git::capture(&["ls-remote", "--symref", remote, "HEAD"])
+        .ok_or_else(|| "the actual remote default branch is unavailable".to_owned())?;
+    if listing.trim().is_empty() {
+        return Ok(None);
+    }
+    for line in listing.lines() {
+        if let Some((sha, "HEAD")) = line.split_once('\t')
+            && sha.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Ok(Some(sha.to_owned()));
+        }
+    }
+    Err("the remote default branch response is malformed".to_owned())
+}
+
+fn diff_names(base: &str, tip: &str) -> Result<Vec<String>, String> {
     real_git::capture(&["diff", "--name-only", base, tip])
         .map(|s| {
             s.lines()
@@ -237,10 +317,10 @@ fn diff_names(base: &str, tip: &str) -> Vec<String> {
                 .map(str::to_owned)
                 .collect()
         })
-        .unwrap_or_default()
+        .ok_or_else(|| "Git could not inspect the offered revision".to_owned())
 }
 
-fn ls_tree_manifests(tip: &str) -> Vec<String> {
+fn ls_tree_manifests(tip: &str) -> Result<Vec<String>, String> {
     real_git::capture(&["ls-tree", "-r", "--name-only", tip])
         .map(|s| {
             s.lines()
@@ -248,11 +328,15 @@ fn ls_tree_manifests(tip: &str) -> Vec<String> {
                 .map(str::to_owned)
                 .collect()
         })
-        .unwrap_or_default()
+        .ok_or_else(|| "Git could not inspect the offered revision".to_owned())
 }
 
-/// The `+` side of a zero-context diff over the given files.
-fn diff_added_lines(base: &str, tip: &str, files: &[String]) -> String {
+/// The `+` side of a zero-context diff, per file it covers.
+fn diff_added_lines(
+    base: &str,
+    tip: &str,
+    files: &[String],
+) -> Result<Vec<(String, String)>, String> {
     let mut args: Vec<String> = vec![
         "diff".into(),
         "-U0".into(),
@@ -262,22 +346,36 @@ fn diff_added_lines(base: &str, tip: &str, files: &[String]) -> String {
     ];
     args.extend(files.iter().cloned());
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    real_git::capture(&refs)
-        .map(|s| {
-            s.lines()
-                .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
-                .map(|l| l.strip_prefix('+').unwrap_or(l))
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .unwrap_or_default()
+    let diff = real_git::capture(&refs)
+        .ok_or_else(|| "Git could not inspect the offered revision".to_owned())?;
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut file = String::new();
+    for line in diff.lines() {
+        if let Some(target) = line.strip_prefix("+++ b/") {
+            target.clone_into(&mut file);
+            continue;
+        }
+        if let Some(added) = line.strip_prefix('+').filter(|_| !line.starts_with("+++")) {
+            if let Some(last) = out.last_mut().filter(|(path, _)| *path == file) {
+                last.1.push('\n');
+                last.1.push_str(added);
+            } else {
+                out.push((file.clone(), added.to_owned()));
+            }
+        }
+    }
+    Ok(out)
 }
 
-/// An added line touches a dependency when it carries its exact `replaceString`, or names it with its current value or digest.
-fn touched(c: &Update, added_lines: &str, scope_unknown: bool) -> bool {
+/// An added line of the dependency's own manifest touches it when it carries its exact `replaceString`, or names it with its current value or digest.
+/// A dependency never borrows change lines from another manifest.
+fn touched(c: &Update, added_lines: Option<&str>, scope_unknown: bool) -> bool {
     if scope_unknown {
         return true;
     }
+    let Some(added_lines) = added_lines else {
+        return false;
+    };
     if !c.replace_string.is_empty() && added_lines.contains(&c.replace_string) {
         return true;
     }
@@ -311,12 +409,14 @@ fn display_new(c: &Update) -> String {
 }
 
 /// Run the container lookup for the gate and return the report it wrote.
-fn renovate_report() -> Option<PathBuf> {
+/// `offered` names the first commit the push offers and binds the report to that content.
+/// `None` reads the index.
+fn renovate_report(offered: Option<&str>) -> Option<PathBuf> {
     let dir = std::env::temp_dir().join(format!("renovate-gate.{}", std::process::id()));
     std::fs::create_dir_all(&dir).ok()?;
     let report = dir.join("report.json");
 
-    let mut cfg = prepare()?;
+    let mut cfg = prepare(offered)?;
     cfg.report_file = Some(report.clone());
     cfg.log_level =
         Some(std::env::var("RENOVATE_LOCAL_LOG_LEVEL").unwrap_or_else(|_| "warn".into()));
@@ -331,10 +431,10 @@ fn renovate_report() -> Option<PathBuf> {
     }
 }
 
-/// The jq program that flattens the report into update lines joined by the unit separator `U+001F`, which keeps empty fields intact.
-const JQ_CANDIDATES: &str = r#"
+/// The jq program that flattens the report into candidate lines joined by the unit separator `U+001F`, which keeps empty fields intact.
+const JQ_UPDATES: &str = r#"
     ($types | split(" ") | map(select(length > 0))) as $blocking
-    | (.repositories.local.packageFiles // {}) | to_entries[] | .value[]
+    | if (.repositories.local.packageFiles | type) != "object" then error("missing packageFiles") else .repositories.local.packageFiles end | to_entries[] | .value[]
     | .packageFile as $file
     | (.deps // [])[]
     | .depName as $dep | (.currentValue // "") as $cur | (.currentDigest // "") as $dig
@@ -342,13 +442,13 @@ const JQ_CANDIDATES: &str = r#"
     | (.updates // [])[]
     | (.updateType // .bucket // "") as $type
     | select(($blocking | index($type)) != null)
-    | [$file, $dep, $cur, $dig, $rep, $type, (.newValue // ""), (.newDigest // "")]
+    | [$file, $dep, $cur, $dig, $rep, $type, (.newValue // ""), (.newDigest // ""), (.isBreaking // false)]
     | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")
 "#;
 
 fn jq_updates(types: &str, report: &Path) -> Option<String> {
     let out = locate::child("jq")
-        .args(["-r", "--arg", "types", types, JQ_CANDIDATES])
+        .args(["-r", "--arg", "types", types, JQ_UPDATES])
         .arg(report)
         .env("PATH", locate::hook_path())
         .output()
@@ -358,6 +458,9 @@ fn jq_updates(types: &str, report: &Path) -> Option<String> {
     }
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
+
+/// The report carries eight dependency fields and its compatibility classification.
+const UPDATE_FIELDS: usize = 9;
 
 fn parse_updates(out: &str) -> Vec<Update> {
     let mut v = Vec::new();
@@ -369,9 +472,10 @@ fn parse_updates(out: &str) -> Vec<Update> {
             current_value,
             current_digest,
             replace_string,
-            kind,
+            update_type,
             new_value,
             new_digest,
+            breaking,
         ] = fields[..]
         else {
             continue;
@@ -385,9 +489,10 @@ fn parse_updates(out: &str) -> Vec<Update> {
             current_value: current_value.to_owned(),
             current_digest: current_digest.to_owned(),
             replace_string: replace_string.to_owned(),
-            kind: kind.to_owned(),
+            kind: update_type.to_owned(),
             new_value: new_value.to_owned(),
             new_digest: new_digest.to_owned(),
+            breaking: breaking == "true",
         });
     }
     v
@@ -396,6 +501,12 @@ fn parse_updates(out: &str) -> Vec<Update> {
 /// Reports whether Renovate manages this path.
 pub fn is_manifest(path: &str) -> bool {
     let lowered = path.to_lowercase();
+    if matches!(
+        lowered.as_str(),
+        "home/.chezmoidata/versions.toml" | "home/.chezmoidata/modern.toml"
+    ) {
+        return true;
+    }
     let comps: Vec<&str> = lowered.split('/').collect();
     let name = comps.last().copied().unwrap_or("");
     let owned_name = name.to_owned();
@@ -589,8 +700,9 @@ fn docker_plan(c: &RunConfig) -> (Vec<String>, Vec<&'static str>) {
     (args, removed)
 }
 
-/// Gather the config from the environment and build the staged snapshot.
-fn prepare() -> Option<RunConfig> {
+/// Gather the config from the environment and build the snapshot.
+/// `offered` names the commit the gate reads instead of the index, so the report describes exactly what the push would publish.
+fn prepare(offered: Option<&str>) -> Option<RunConfig> {
     if locate::which("docker").is_none() {
         eprintln!("error: docker is required.");
         return None;
@@ -611,35 +723,7 @@ fn prepare() -> Option<RunConfig> {
         return None;
     }
 
-    // A staged snapshot of the index keeps the original .git, ignored files, untracked files and the original worktree outside the container boundary.
-    let snapshot = std::env::temp_dir().join(format!(
-        "renovate-local.{}.{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos())
-    ));
-    std::fs::create_dir_all(&snapshot).ok()?;
-    let prefix = format!("{}/", snapshot.display());
-    let ok = real_git::succeeds(&[
-        "-C",
-        &root,
-        "checkout-index",
-        "--all",
-        "--force",
-        &format!("--prefix={prefix}"),
-    ]) && real_git::succeeds(&[
-        "-C",
-        &prefix,
-        "init",
-        "--quiet",
-        "--initial-branch=main",
-        "--template=",
-    ]) && real_git::succeeds(&["-C", &prefix, "add", "--all"]);
-    if !ok {
-        platform::cleanup::remove_dir_all(&snapshot);
-        return None;
-    }
+    let snapshot = checkout_snapshot(&root, offered)?;
 
     let config_present = snapshot.join("renovate.local.json5").is_file();
     let (uid, gid) = uid_gid();
@@ -656,6 +740,65 @@ fn prepare() -> Option<RunConfig> {
             .filter(|s| !s.is_empty()),
         passthrough: std::env::args().skip(PASSTHROUGH_AFTER).collect(),
     })
+}
+
+fn checkout_snapshot(root: &str, offered: Option<&str>) -> Option<PathBuf> {
+    // A snapshot of the offered commit, or of the index for a manual run, keeps the original .git, ignored files, untracked files and the original worktree outside the container boundary.
+    let snapshot = std::env::temp_dir().join(format!(
+        "renovate-local.{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    ));
+    std::fs::create_dir_all(&snapshot).ok()?;
+    let prefix = format!("{}/", snapshot.display());
+    // The offered commit reaches checkout-index through a temporary index, so the repository's own index stays untouched.
+    let offered_index = snapshot.join(".gate-index");
+    let staged = match offered {
+        Some(sha) => {
+            let index = offered_index.to_string_lossy().into_owned();
+            real_git::succeeds_with_env("GIT_INDEX_FILE", &index, &["-C", root, "read-tree", sha])
+                && real_git::succeeds_with_env(
+                    "GIT_INDEX_FILE",
+                    &index,
+                    &[
+                        "-C",
+                        root,
+                        "checkout-index",
+                        "--all",
+                        "--force",
+                        &format!("--prefix={prefix}"),
+                    ],
+                )
+        }
+        None => real_git::succeeds(&[
+            "-C",
+            root,
+            "checkout-index",
+            "--all",
+            "--force",
+            &format!("--prefix={prefix}"),
+        ]),
+    };
+    if offered.is_some() {
+        platform::cleanup::remove_file(&offered_index);
+    }
+    let ok = staged
+        && real_git::succeeds(&[
+            "-C",
+            &prefix,
+            "init",
+            "--quiet",
+            "--initial-branch=main",
+            "--template=",
+        ])
+        && real_git::succeeds(&["-C", &prefix, "add", "--all"]);
+    if !ok {
+        platform::cleanup::remove_dir_all(&snapshot);
+        return None;
+    }
+    Some(snapshot)
 }
 
 fn uid_gid() -> (u32, u32) {
@@ -675,7 +818,7 @@ fn uid_gid() -> (u32, u32) {
 }
 
 pub fn run_local() -> i32 {
-    let Some(cfg) = prepare() else {
+    let Some(cfg) = prepare(None) else {
         return 1;
     };
     let code = run_prepared(&cfg, false).unwrap_or(1);
@@ -891,6 +1034,7 @@ mod credential_boundary {
 #[cfg(test)]
 mod tests {
     use super::{Update, is_manifest, parse_updates, touched};
+    use std::collections::BTreeMap;
 
     #[test]
     fn manifests_are_recognized_component_wise() {
@@ -917,6 +1061,8 @@ mod tests {
             ".github/workflows/ci.yml",
             ".github/workflows/release.yaml",
             "mise.toml",
+            "home/.chezmoidata/versions.toml",
+            "home/.chezmoidata/modern.toml",
             ".mise.toml",
             ".mise.dev.toml",
             ".config/mise/config.toml",
@@ -957,8 +1103,7 @@ mod tests {
 
     #[test]
     fn updates_parse_from_unit_separated_lines() {
-        let out =
-            "Cargo.toml\u{1f}serde\u{1f}1.0\u{1f}\u{1f}serde = \"1.0\"\u{1f}minor\u{1f}1.1\u{1f}\n";
+        let out = "Cargo.toml\u{1f}serde\u{1f}1.0\u{1f}\u{1f}serde = \"1.0\"\u{1f}minor\u{1f}1.1\u{1f}\u{1f}false\n";
         let c = &parse_updates(out)[0];
         assert_eq!(c.package_file, "Cargo.toml");
         assert_eq!(c.dep_name, "serde");
@@ -978,6 +1123,7 @@ mod tests {
             kind: "minor".into(),
             new_value: "9.9".into(),
             new_digest: String::new(),
+            breaking: false,
         }
     }
 
@@ -986,20 +1132,113 @@ mod tests {
         let added = "serde = \"1.0\"\n anyhow = \"1\"\n";
         assert!(touched(
             &cand("serde = \"1.0\"", "1.0", "serde"),
-            added,
+            Some(added),
             false
         ));
         assert!(
-            !touched(&cand("", "2.0", "serde"), added, false),
+            !touched(&cand("", "2.0", "serde"), Some(added), false),
             "dep present but old value"
         );
         assert!(
-            touched(&cand("", "1", "anyhow"), added, false),
+            touched(&cand("", "1", "anyhow"), Some(added), false),
             "name + value on the same line"
         );
         assert!(
-            touched(&cand("", "1.0", "serde"), "", true),
+            touched(&cand("", "1.0", "serde"), None, true),
             "unknown scope counts all as touched"
         );
+        assert!(
+            !touched(&cand("", "1.0", "serde"), None, false),
+            "no added lines of its own manifest leaves the dependency untouched"
+        );
+    }
+
+    #[test]
+    fn a_dependency_never_borrows_change_lines_from_another_manifest() {
+        let mut added_by_file = BTreeMap::new();
+        added_by_file.insert("package.json".to_owned(), "serde = \"1.0\"".to_owned());
+        let mut other = cand("", "1.0", "serde");
+        other.package_file = "Cargo.toml".into();
+        assert!(
+            !touched(
+                &other,
+                added_by_file.get("Cargo.toml").map(String::as_str),
+                false
+            ),
+            "the added line of package.json cannot touch a Cargo.toml dependency"
+        );
+        assert!(
+            touched(
+                &cand("", "1.0", "serde"),
+                added_by_file.get("package.json").map(String::as_str),
+                false
+            ),
+            "the added line of its own manifest touches the dependency"
+        );
+    }
+
+    #[test]
+    fn a_new_branch_asks_the_remote_which_branch_head_names() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().to_str().unwrap();
+        let git = |arguments: &[&str]| {
+            let mut words = vec!["-C", root];
+            words.extend(arguments);
+            crate::real_git::capture(&words).unwrap().trim().to_owned()
+        };
+        git(&["init", "--bare", "--initial-branch=main", "--template="]);
+        git(&["config", "user.name", "Fixture"]);
+        git(&["config", "user.email", "fixture@example.invalid"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        let tree = git(&["mktree"]);
+        let main = git(&["commit-tree", &tree, "-m", "main"]);
+        let trunk = git(&["commit-tree", &tree, "-p", &main, "-m", "trunk"]);
+        git(&["update-ref", "refs/heads/main", &main]);
+        git(&["update-ref", "refs/heads/trunk", &trunk]);
+        assert_eq!(super::default_branch_tip(root).unwrap(), Some(main));
+        git(&["symbolic-ref", "HEAD", "refs/heads/trunk"]);
+        assert_eq!(super::default_branch_tip(root).unwrap(), Some(trunk));
+        assert!(super::default_branch_tip(&format!("{root}/missing")).is_err());
+    }
+
+    #[test]
+    fn freshness_checks_the_offered_tree_and_keeps_the_callers_index() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().to_str().unwrap();
+        let git = |arguments: &[&str]| {
+            let mut words = vec!["-C", root];
+            words.extend(arguments);
+            crate::real_git::capture(&words).unwrap().trim().to_owned()
+        };
+        git(&["init", "--initial-branch=main", "--template="]);
+        git(&["config", "user.name", "Fixture"]);
+        git(&["config", "user.email", "fixture@example.invalid"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        let manifest = directory.path().join("Cargo.toml");
+        std::fs::write(&manifest, "offered").unwrap();
+        git(&["add", "Cargo.toml"]);
+        let tree = git(&["write-tree"]);
+        let offered = git(&["commit-tree", &tree, "-m", "offered"]);
+        std::fs::write(&manifest, "staged").unwrap();
+        git(&["add", "Cargo.toml"]);
+        std::fs::write(&manifest, "working").unwrap();
+        std::fs::write(directory.path().join("untracked-secret"), "private").unwrap();
+        let index_path = directory.path().join(".git/index");
+        let index = std::fs::read(&index_path).unwrap();
+        let snapshot = super::checkout_snapshot(root, Some(&offered)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(snapshot.join("Cargo.toml")).unwrap(),
+            "offered"
+        );
+        assert!(!snapshot.join("untracked-secret").exists());
+        assert_eq!(std::fs::read(&index_path).unwrap(), index);
+        assert_eq!(std::fs::read_to_string(manifest).unwrap(), "working");
+        platform::cleanup::remove_dir_all(&snapshot);
+        let staged = super::checkout_snapshot(root, None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(staged.join("Cargo.toml")).unwrap(),
+            "staged"
+        );
+        platform::cleanup::remove_dir_all(&staged);
     }
 }

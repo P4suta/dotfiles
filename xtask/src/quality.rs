@@ -10,6 +10,13 @@ const GIT_EXEC_PATH_DEPTH: usize = 3;
 
 /// The word that starts a recipe reference.
 const JUST: &str = "just ";
+const DENY_CONFIG: &str = "deny.toml";
+const RUSTSEC_URL: &str = "https://github.com/RustSec/advisory-db";
+/// The directory the pinned cargo-deny derives from its default advisory URL.
+const RUSTSEC_DATABASE: &str = "advisory-db-3157b0e258782691";
+const ADVISORY_ROOT: &str = "advisories";
+const ADVISORY_CLONE_DEPTH: &str = "1";
+const TEMP_ENVIRONMENT: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
 
 pub(crate) fn command(root: &Path, tool: Tool, arguments: &[&str]) -> Result<()> {
     run(tool.command(), root, tool.program(), arguments)
@@ -106,9 +113,38 @@ pub fn workflow_findings(workflow: &str, policy: &str) -> Result<Vec<String>> {
                 "the {status} job must run with `if: always()` so a skipped job never hides a failure"
             ));
         }
+        let guard = job["steps"].as_vec().into_iter().flatten().any(|step| {
+            step["env"]["RESULTS"].as_str() == Some("${{ join(needs.*.result, ' ') }}")
+                && step["run"].as_str().is_some_and(|run| {
+                    run.contains("success) ;;")
+                        && !run.contains("skipped")
+                        && run.contains("exit 1")
+                })
+        });
+        if !guard {
+            found.push(format!(
+                "the {status} job must refuse every result other than success"
+            ));
+        }
     }
     for (id, job) in jobs {
+        if !job["continue-on-error"].is_badvalue()
+            && job["continue-on-error"].as_bool() != Some(false)
+        {
+            found.push(format!(
+                "the {} job suppresses failure with continue-on-error",
+                id.as_str().unwrap_or_default()
+            ));
+        }
         for step in job["steps"].as_vec().into_iter().flatten() {
+            if !step["continue-on-error"].is_badvalue()
+                && step["continue-on-error"].as_bool() != Some(false)
+            {
+                found.push(format!(
+                    "the {} job suppresses a step failure with continue-on-error",
+                    id.as_str().unwrap_or_default()
+                ));
+            }
             if step["run"]
                 .as_str()
                 .is_some_and(|run| run.contains("cargo run"))
@@ -129,11 +165,65 @@ pub fn workflow_findings(workflow: &str, policy: &str) -> Result<Vec<String>> {
 ///
 /// Returns an error when cargo-deny can't start or reports a finding.
 pub fn dependencies(root: &Path) -> Result<()> {
+    let scope = tempfile::tempdir()?;
+    let cache = scope.path().join(ADVISORY_ROOT);
+    let database = cache.join(RUSTSEC_DATABASE);
+    let mut policy: toml::Table = toml::from_str(&fs::read_to_string(root.join(DENY_CONFIG))?)?;
+    let advisories = policy
+        .entry("advisories")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .context("advisories must be a table")?;
+    if let Some(urls) = advisories.get("db-urls") {
+        let urls = urls.as_array().context("advisory URLs must be an array")?;
+        ensure!(
+            urls.is_empty() || urls.len() == 1 && urls[0].as_str() == Some(RUSTSEC_URL),
+            "the isolated advisory checker requires the configured RustSec database"
+        );
+    }
+    advisories.insert(
+        "db-path".into(),
+        toml::Value::String(cache.to_str().context("advisory path is not UTF-8")?.into()),
+    );
+    let config = scope.path().join(DENY_CONFIG);
+    fs::write(&config, toml::to_string(&policy)?)?;
     run(
-        Tool::CargoDeny.command(),
+        Tool::Git.command(),
+        root,
+        "git",
+        &[
+            "clone",
+            "--depth",
+            ADVISORY_CLONE_DEPTH,
+            "--",
+            RUSTSEC_URL,
+            database.to_str().context("advisory path is not UTF-8")?,
+        ],
+    )?;
+    let checker = || {
+        let mut command = Tool::CargoDeny.command();
+        command.envs(TEMP_ENVIRONMENT.map(|key| (key, scope.path())));
+        command
+    };
+    run(
+        checker(),
         root,
         "cargo-deny",
-        &["--locked", "check"],
+        &["--locked", "fetch", "index", "std-replacement"],
+    )?;
+    run(
+        checker(),
+        root,
+        "cargo-deny",
+        &[
+            "--locked",
+            "--offline",
+            "--config",
+            config
+                .to_str()
+                .context("deny configuration path is not UTF-8")?,
+            "check",
+        ],
     )
 }
 

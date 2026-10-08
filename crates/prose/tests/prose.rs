@@ -649,7 +649,7 @@ fn repository(files: &[(&str, &str)]) -> Result<tempfile::TempDir> {
     Ok(directory)
 }
 
-/// The prose arguments that a command in the repository's `lefthook.yml` runs through its just recipe.
+/// The prose arguments of the hook's CLI or library entry point.
 /// A recipe parameter becomes the argument lefthook passes in its place, such as `{1}`.
 fn hook_arguments(hook: &str, command: &str) -> Result<Vec<String>> {
     let documents =
@@ -673,6 +673,23 @@ fn hook_arguments(hook: &str, command: &str) -> Result<Vec<String>> {
         .find(|signature| signature.split_whitespace().next() == Some(recipe))
         .expect("the recipe the hook names");
     let parameters: Vec<&str> = header.split_whitespace().skip(1).collect();
+    if recipe == "check-staged" {
+        assert!(lines.any(|line| line.trim() == "mise x -- cargo xtask check --staged"));
+        let source = fs::read_to_string(root().join("xtask/src/main.rs"))?;
+        let check = source
+            .split("fn check_staged(root: &Path)")
+            .nth(1)
+            .expect("staged checker");
+        let check = check
+            .split("\nfn check(")
+            .next()
+            .expect("staged checker body");
+        assert!(check.contains("xtask::staged_snapshot::export(root)?"));
+        assert!(check.contains("prose::Scope::Comments"));
+        return Ok(["--source", ".", "repository", "--scope", "comments"]
+            .map(str::to_owned)
+            .into());
+    }
     let body = lines
         .take_while(|line| line.starts_with("    "))
         .find(|line| line.contains(" --bin prose -- "))

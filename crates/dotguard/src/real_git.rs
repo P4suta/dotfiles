@@ -73,3 +73,18 @@ pub fn succeeds(args: &[&str]) -> bool {
         })
         .is_some_and(|s| s.success())
 }
+
+/// Run Git with an isolated index when checking an offered revision.
+pub fn succeeds_with_env(variable: &str, value: &str, args: &[&str]) -> bool {
+    command()
+        .and_then(|mut command| {
+            command
+                .env(variable, value)
+                .args(args)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .ok()
+        })
+        .is_some_and(|status| status.success())
+}

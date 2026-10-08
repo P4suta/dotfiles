@@ -167,12 +167,23 @@ fn check_package(root: &Path, manifest: &Path) -> Result<()> {
     cargo(root, manifest, &["test", "--locked", "--all-targets"])
 }
 
-/// The pre-commit check: the lint stages over the staged files, then the prose of the documents.
-/// The `check-staged` recipe then reads the comments through `OComment`, and the pre-push check runs the gates the whole change selects.
+/// The pre-commit check validates lint, document prose, and comments from the index snapshot.
+/// The pre-push check runs the gates the whole change selects.
 fn check_staged(root: &Path) -> Result<()> {
     let staged = xtask::change::paths(root, &xtask::change::Source::Staged)?;
-    xtask::lint::check(root, &staged, false, "HEAD")?;
-    prose::repository(root, prose::Scope::Documents, &prose::Bundle::source(root)?)
+    let growth = xtask::lint::baseline_growth(root, "HEAD")?;
+    let snapshot = xtask::staged_snapshot::export(root)?;
+    xtask::lint::check_content(snapshot.path(), &staged, false, growth)?;
+    prose::repository(
+        snapshot.path(),
+        prose::Scope::Documents,
+        &prose::Bundle::source(snapshot.path())?,
+    )?;
+    prose::repository(
+        snapshot.path(),
+        prose::Scope::Comments,
+        &prose::Bundle::source(snapshot.path())?,
+    )
 }
 
 /// Runs the checks of each selected gate.
@@ -366,7 +377,6 @@ where
 {
     let status = Tool::chezmoi_in(root)
         .args([
-            "--force",
             "apply",
             "--include",
             include,
@@ -396,13 +406,7 @@ fn install_prose(root: &Path) -> Result<()> {
     let status = Tool::chezmoi_in(root)
         .arg("--destination")
         .arg(&user_directory)
-        .args([
-            "--force",
-            "apply",
-            "--include",
-            "dirs,files",
-            "--parent-dirs",
-        ])
+        .args(["apply", "--include", "dirs,files", "--parent-dirs"])
         .arg(user_directory.join(".config/prose"))
         .arg(user_directory.join(".config/opencode/plugins/prose.ts"))
         .status()?;

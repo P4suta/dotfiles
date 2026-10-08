@@ -504,6 +504,10 @@ impl Fixture {
     }
 
     fn git(&self, directory: &Path, arguments: &[&str]) -> Result<()> {
+        self.capture(directory, arguments).map(drop)
+    }
+
+    fn capture(&self, directory: &Path, arguments: &[&str]) -> Result<String> {
         let output = fixture_git::command("git", &self.config)
             .current_dir(directory)
             .args(arguments)
@@ -513,7 +517,26 @@ impl Fixture {
             "git {arguments:?}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        Ok(())
+        Ok(String::from_utf8(output.stdout)?.trim().to_owned())
+    }
+
+    fn rebased_history(&self) -> Result<()> {
+        let tree = self.capture(
+            &self.clone,
+            &["merge-tree", "--write-tree", "origin/main", "HEAD"],
+        )?;
+        let mut parent = self.capture(&self.clone, &["rev-parse", "origin/main"])?;
+        for message in ["rebased change", "rebased upstream"] {
+            parent = self.capture(
+                &self.clone,
+                &["commit-tree", &tree, "-p", &parent, "-m", message],
+            )?;
+        }
+        self.git(&self.clone, &["read-tree", "--reset", "-u", &parent])?;
+        self.git(
+            &self.clone,
+            &["update-ref", "refs/heads/feat/topic", &parent],
+        )
     }
 
     fn commit(&self, name: &str) -> Result<()> {
@@ -858,7 +881,7 @@ fn a_rebased_pushed_branch_is_force_pushed_and_upstream_commits_are_pulled_first
         recommendation.command.as_deref(),
         Some("git rebase origin/main")
     );
-    fixture.git(&fixture.clone, &["rebase", "--quiet", "origin/main"])?;
+    fixture.rebased_history()?;
     let recommendation = recommend(fixture.next()?);
     assert_eq!(recommendation.action, Step::ForcePush);
     assert_eq!(

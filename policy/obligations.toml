@@ -55,6 +55,25 @@ fn reject_a_new_record_that_takes_the_next_number() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/freshness_rules.rs"
+probes = '''
+use production::{Facts, Verdict, verdict};
+#[kani::proof]
+fn reject_accepting_unavailable_required_evidence() {
+    assert!(verdict(Facts { needed: production::Need::Required, evidence: false, breaking: false, touched: false }) == Verdict::Admit);
+}
+#[kani::proof]
+fn reject_blocking_a_breaking_update_as_compatible() {
+    assert!(verdict(Facts { needed: production::Need::Required, evidence: true, breaking: true, touched: true }) == Verdict::Outdated);
+}
+#[kani::proof]
+fn reject_using_another_manifest_as_touched_evidence() {
+    assert!(verdict(Facts { needed: production::Need::Required, evidence: true, breaking: false, touched: false }) == Verdict::Outdated);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/aside_rules.rs"
 probes = '''
 use production::is_aside;
@@ -583,6 +602,10 @@ fn reject_opening_a_dependent_branch_independently() {
 verifier = "kani"
 source = "crates/rules/src/profile_rules.rs"
 probes = '''
+#[kani::proof]
+fn reject_an_unmanaged_effective_hooks_path() {
+    assert!(production::hooks_current(true, false));
+}
 #[kani::proof]
 fn reject_unapproved_application() {
     assert!(production::permitted(production::Mode::Full, true, true, false));
