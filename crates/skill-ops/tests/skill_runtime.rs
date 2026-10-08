@@ -6,8 +6,14 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 
+#[path = "../../platform/tests/support/fixture_process.rs"]
+mod fixture_process;
+
 fn fixture() -> Result<tempfile::TempDir> {
-    let directory = tempfile::tempdir()?;
+    let directory = match std::env::var_os(ops::INCIDENT_EVIDENCE_ROOT) {
+        Some(root) => tempfile::tempdir_in(fixture_process::directory(Path::new(&root)))?,
+        None => tempfile::tempdir()?,
+    };
     let tree = directory.path().join("tree");
     for name in ["alpha", "beta"] {
         fs::create_dir_all(tree.join(name))?;
@@ -46,7 +52,21 @@ fn fixture() -> Result<tempfile::TempDir> {
 }
 
 fn run(root: &Path, arguments: &[&str], input: Option<&Value>) -> Result<Output> {
-    let mut child = platform::process::command(env!("CARGO_BIN_EXE_skill-ops"))
+    run_with_label(root, arguments, input, None)
+}
+
+fn counterexample(root: &Path, arguments: &[&str], input: Option<&Value>) -> Result<Output> {
+    run_with_label(root, arguments, input, Some("counterexample"))
+}
+
+fn run_with_label(
+    root: &Path,
+    arguments: &[&str],
+    input: Option<&Value>,
+    label: Option<&str>,
+) -> Result<Output> {
+    let mut command = fixture_process::command(env!("CARGO_BIN_EXE_skill-ops"), root);
+    command
         .current_dir(root)
         .args(["--tree"])
         .arg(root.join("tree"))
@@ -59,8 +79,13 @@ fn run(root: &Path, arguments: &[&str], input: Option<&Value>) -> Result<Output>
         .args(arguments)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    if let Some(label) = label {
+        command.env("DOTFILES_EXPECTED_FAILURE", label);
+    } else {
+        command.env_remove("DOTFILES_EXPECTED_FAILURE");
+    }
+    let mut child = command.spawn()?;
     if let Some(input) = input {
         child
             .stdin
@@ -163,6 +188,37 @@ fn cli_loads_prerequisites_and_refuses_unknown_names() -> Result<()> {
 }
 
 #[test]
+fn fixture_failures_preserve_the_machine_incident_log() -> Result<()> {
+    fn snapshot(state: &Path) -> Result<std::collections::BTreeMap<PathBuf, Vec<u8>>> {
+        let mut records = std::collections::BTreeMap::new();
+        let directory = state.join("incidents");
+        if directory.try_exists()? {
+            for entry in fs::read_dir(directory)? {
+                let entry = entry?;
+                if entry.file_type()?.is_file() {
+                    records.insert(PathBuf::from(entry.file_name()), fs::read(entry.path())?);
+                }
+            }
+        }
+        Ok(records)
+    }
+    let home = platform::home::home().expect("the machine home");
+    let machine_state = home.join(fixture_process::MACHINE_STATE);
+    let before = snapshot(&machine_state)?;
+    let fixture = fixture()?;
+    let output = run(fixture.path(), &["load", "unknown"], None)?;
+    assert!(!output.status.success());
+    let incidents = ops::incidents(&fixture.path().join("state"))?;
+    assert_eq!(incidents.len(), 1);
+    assert_eq!(incidents[0].rule, "tool.failure");
+    assert_eq!(snapshot(&machine_state)?, before);
+    if std::env::var_os(ops::INCIDENT_EVIDENCE_ROOT).is_some() {
+        let _ = fixture.keep();
+    }
+    Ok(())
+}
+
+#[test]
 fn relative_analysis_paths_create_missing_parents_without_overwriting_reports() -> Result<()> {
     let fixture = fixture()?;
     let root = fixture.path();
@@ -229,7 +285,7 @@ fn triage_retains_history_and_changed_evidence_invalidates_completion() -> Resul
         ],
         None,
     )?)?;
-    assert!(!run(root, &["check"], None)?.status.success());
+    assert!(!counterexample(root, &["check"], None)?.status.success());
     let output = root.join("first.json");
     success(run(
         root,
@@ -237,7 +293,7 @@ fn triage_retains_history_and_changed_evidence_invalidates_completion() -> Resul
         None,
     )?)?;
     assert!(
-        !run(
+        !counterexample(
             root,
             &["analyze", "--out", output.to_str().expect("UTF-8 fixture")],
             None
@@ -280,7 +336,7 @@ fn triage_retains_history_and_changed_evidence_invalidates_completion() -> Resul
     assert_eq!(fs::read_dir(root.join("state/reviews"))?.count(), 1);
     let old_decision = fs::read(root.join("state/review.json"))?;
     fs::write(evidence.join("alpha/SKILL.md"), "changed evidence")?;
-    assert!(!run(root, &["check"], None)?.status.success());
+    assert!(!counterexample(root, &["check"], None)?.status.success());
     assert_eq!(fs::read(root.join("state/review.json"))?, old_decision);
     assert_eq!(fs::read_dir(root.join("state/reviews"))?.count(), 1);
     Ok(())
@@ -424,17 +480,17 @@ fn concurrent_drafts_preserve_accepted_review_but_new_notes_and_lost_events_bloc
         ],
         None,
     )?)?;
-    assert!(!run(root, &["check"], None)?.status.success());
+    assert!(!counterexample(root, &["check"], None)?.status.success());
     let event = ops::recorded(&root.join("state"))?.remove(0);
     fs::remove_file(root.join("state/events").join(format!("{}.json", event.id)))?;
-    let lost = run(root, &["check"], None)?;
+    let lost = counterexample(root, &["check"], None)?;
     assert!(!lost.status.success());
     assert!(String::from_utf8(lost.stderr)?.contains("observed events disappeared"));
     let stored = root.join("state/review.json");
     let mut invalid: Value = ops::read_json(&stored)?;
     invalid["review"]["report_hash"] = json!("../outside");
     ops::write_json(&stored, &invalid, true)?;
-    let escaping = run(root, &["check"], None)?;
+    let escaping = counterexample(root, &["check"], None)?;
     assert!(!escaping.status.success());
     assert!(String::from_utf8(escaping.stderr)?.contains("invalid immutable report identity"));
     Ok(())
@@ -511,7 +567,7 @@ fn opencode_adapter_records_a_native_sdk_read_without_retaining_private_payloads
     let runtime = String::from_utf8(runtime.stdout)?;
     let runtime = Path::new(runtime.trim());
     assert!(runtime.is_absolute() && runtime.is_file());
-    let output = platform::process::command(runtime)
+    let output = fixture_process::command(runtime, root)
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/opencode-adapter.ts"))
         .arg(root)
         .arg(executable)
@@ -592,7 +648,7 @@ fn native(
     arguments: &[&str],
     input: Option<&Value>,
 ) -> Result<Output> {
-    let mut child = platform::process::command(env!("CARGO_BIN_EXE_skill-ops"))
+    let mut child = fixture_process::command(env!("CARGO_BIN_EXE_skill-ops"), fixture)
         .current_dir(fixture)
         .env("HOME", user)
         .env("USERPROFILE", user)
@@ -699,7 +755,7 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
     assert_eq!(fs::read(historical)?, original);
     assert_eq!(fs::read_to_string(legacy)?, "unmanaged native helper");
     success(
-        platform::process::command(installed)
+        fixture_process::command(installed, fixture.path())
             .arg("--help")
             .output()?,
     )?;

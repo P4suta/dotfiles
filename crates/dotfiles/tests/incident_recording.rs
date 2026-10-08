@@ -5,10 +5,13 @@ use serde_json::json;
 use std::fs;
 use std::path::Path;
 
+#[path = "../../platform/tests/support/fixture_process.rs"]
+mod fixture_process;
+
 /// Runs one `PreToolUse` event through the installed hook with an isolated incident store.
 fn hook(state: &Path, event: &serde_json::Value) -> anyhow::Result<std::process::Output> {
     use std::io::Write as _;
-    let mut child = platform::process::command(env!("CARGO_BIN_EXE_dotfiles"))
+    let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), state)
         .env("SKILL_OPS_STATE", state)
         .arg("claude-bash")
         .stdin(std::process::Stdio::piped())

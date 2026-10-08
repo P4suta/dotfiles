@@ -3,8 +3,8 @@ use serde_json::json;
 use skill_ops::skill_install::merge_hooks;
 use skill_ops::{
     Catalog, Discharge, Incident, Note, Observation, Policy, Runtime, Signal, analyze, catalog,
-    hash, incidents, observations, open_incident_rules, record, record_discharge, record_incident,
-    recorded, runtime_pending,
+    hash, incidents, observations, open_incident_rules, record, record_discharge,
+    record_discharges, record_incident, recorded, runtime_pending,
 };
 use skill_ops::{
     Decision, Finding, Outcome, Requirement, Review, Reviewed, SizeDecision, SkillDecision,
@@ -1121,18 +1121,37 @@ fn incidents_are_recorded_deduplicated_and_ranked_until_discharged() -> Result<(
         ],
         "the most repeated rule ranks first"
     );
-    record_discharge(
-        state.path(),
-        std::path::Path::new("."),
-        &Discharge {
+    let dispositions: Vec<_> = incidents(state.path())?
+        .into_iter()
+        .filter(|incident| incident.rule == "hook.shell-write")
+        .map(|incident| Discharge {
             schema: 1,
             rule: "hook.shell-write".into(),
+            incident: Some(incident.id),
+            commit: None,
             outcome: "exempt".into(),
             evidence: vec![],
             reason: Some("intended".into()),
             reconsideration: Some("reconsider when the shell-write rule retires".into()),
-        },
-    )?;
+        })
+        .collect();
+    record_discharges(state.path(), std::path::Path::new("."), &dispositions)?;
+    let disposition_path = state.path().join("discharges").join(format!(
+        "{}.json",
+        dispositions[0].incident.as_deref().unwrap()
+    ));
+    for (field, value) in [
+        ("schema", json!(0)),
+        ("outcome", json!("unchecked")),
+        ("reason", json!("unknown")),
+        ("reconsideration", json!("")),
+    ] {
+        let mut malformed = serde_json::to_value(&dispositions[0])?;
+        malformed[field] = value;
+        skill_ops::write_json(&disposition_path, &malformed, true)?;
+        assert!(open_incident_rules(state.path()).is_err(), "{field}");
+    }
+    skill_ops::write_json(&disposition_path, &dispositions[0], true)?;
     assert_eq!(
         open_incident_rules(state.path())?,
         vec![(
@@ -1140,8 +1159,37 @@ fn incidents_are_recorded_deduplicated_and_ranked_until_discharged() -> Result<(
             1,
             skill_ops::incident_rules::Rank::Once
         )],
-        "a discharge settles every incident of its rule"
+        "each disposition settles only its recorded incident"
     );
+    let later = Incident::new(
+        "hook.shell-write",
+        "later-session",
+        skill_ops::incident_rules::Source::FailedDelivery,
+        vec!["a later refusal".into()],
+    )?;
+    record_incident(state.path(), &later, expected)?;
+    assert!(
+        open_incident_rules(state.path())?
+            .iter()
+            .any(|(rule, count, _)| rule == "hook.shell-write" && *count == 1)
+    );
+    let mut legacy = dispositions[0].clone();
+    legacy.incident = None;
+    skill_ops::write_json(
+        &state.path().join("discharges/hook.shell-write.json"),
+        &legacy,
+        true,
+    )?;
+    assert!(
+        open_incident_rules(state.path())?
+            .iter()
+            .any(|(rule, count, _)| rule == "hook.shell-write" && *count == 1),
+        "a historical rule-only disposition covers no new record"
+    );
+    assert!(record_discharge(state.path(), std::path::Path::new("."), &legacy).is_err());
+    let mut mismatched = dispositions[0].clone();
+    mismatched.rule = "push.paused".into();
+    assert!(record_discharge(state.path(), std::path::Path::new("."), &mismatched).is_err());
     Ok(())
 }
 
@@ -1226,7 +1274,7 @@ fn a_mechanized_discharge_needs_evidence_that_exists_and_reproduces() -> Result<
     fs::write(
         root.path().join("Cargo.toml"),
         format!(
-            "[package]\nname = \"incident-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n[dependencies]\nplatform = {{ path = {:?}, default-features = false }}\nrules = {{ path = {:?} }}\n[workspace]\n",
+            "[package]\nname = \"incident-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n[dependencies]\nplatform = {{ path = {:?}, default-features = false }}\nrules = {{ path = {:?} }}\ntempfile = \"3\"\n[workspace]\n",
             source.to_string_lossy().replace('\\', "/"),
             rules.to_string_lossy().replace('\\', "/")
         ),
@@ -1240,11 +1288,96 @@ fn reproduces_the_incident() {
 }
 #[test]
 fn merely_named_test() {}
+#[path = "support/fixture_process.rs"]
+mod fixture_process;
+#[test]
+fn verifies_an_actual_isolated_incident() {
+    let parent = std::env::var_os("SKILL_OPS_INCIDENT_EVIDENCE_ROOT").unwrap();
+    let fixture = tempfile::tempdir_in(fixture_process::directory(std::path::Path::new(&parent))).unwrap();
+    let output = fixture_process::command(env!("CARGO_BIN_EXE_incident-fixture"), fixture.path())
+        .env_remove("DOTFILES_EXPECTED_FAILURE").current_dir(fixture.path()).output().unwrap();
+    assert!(!output.status.success());
+    assert_eq!(std::fs::read_dir(fixture.path().join("state/incidents")).unwrap().count(), 1);
+    let _ = fixture.keep();
+}
+#[test]
+fn prints_an_incident_without_recording_it() {
+    println!("{{\"schema\":1,\"rule\":\"tool.failure\",\"evidence\":[\"a printed incident\"]}}");
+}
 "#,
+    )?;
+    fs::create_dir_all(root.path().join("tests/support"))?;
+    fs::copy(
+        source.join("tests/support/fixture_process.rs"),
+        root.path().join("tests/support/fixture_process.rs"),
+    )?;
+    fs::create_dir(root.path().join("src"))?;
+    fs::write(
+        root.path().join("src/main.rs"),
+        r#"fn main() {
+    let error = std::fs::read("missing-fixture-input").unwrap_err();
+    let refusal = platform::refusal::Refusal::new("tool.failure", error.to_string(), "create the input").evidence("missing-fixture-input");
+    platform::incidents::record(&refusal, rules::incident_rules::Source::MalformedInput);
+    std::process::exit(1);
+}
+"#,
+    )?;
+    let global = root.path().join("global.gitconfig");
+    fs::write(
+        &global,
+        "[user]\nname = Evidence Fixture\nemail = fixture@example.invalid\n[commit]\ngpgsign = false\n[core]\nautocrlf = false\n",
+    )?;
+    for args in [
+        vec!["init", "--quiet"],
+        vec![
+            "add",
+            "Cargo.toml",
+            "tests/gate.rs",
+            "tests/support/fixture_process.rs",
+            "src/main.rs",
+        ],
+        vec![
+            "commit",
+            "--quiet",
+            "-m",
+            "test: preserve prevention evidence",
+        ],
+    ] {
+        let output = fixture_git::command("git", &global)
+            .current_dir(root.path())
+            .args(args)
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let output = fixture_git::command("git", &global)
+        .current_dir(root.path())
+        .args(["rev-parse", "HEAD"])
+        .output()?;
+    let commit = String::from_utf8(output.stdout)?.trim().to_owned();
+    let incident = Incident::new(
+        "hook.shell-write",
+        "evidence-fixture",
+        skill_ops::incident_rules::Source::GateRefusal,
+        vec!["an in-place write was refused".into()],
+    )?;
+    record_incident(
+        state.path(),
+        &incident,
+        skill_ops::incident_rules::Expected {
+            red_test: false,
+            counterexample: false,
+            dry_run: false,
+        },
     )?;
     let discharge = |evidence: Vec<String>| Discharge {
         schema: 1,
         rule: "hook.shell-write".into(),
+        incident: Some(incident.id.clone()),
+        commit: Some(commit.clone()),
         outcome: "mechanized".into(),
         evidence,
         reason: None,
@@ -1258,6 +1391,11 @@ fn merely_named_test() {}
         )
         .is_ok()
     );
+    let mut unbound = discharge(vec!["tests/gate.rs::reproduces_the_incident".into()]);
+    unbound.commit = None;
+    assert!(record_discharge(state.path(), root.path(), &unbound).is_err());
+    unbound.commit = Some("HEAD".into());
+    assert!(record_discharge(state.path(), root.path(), &unbound).is_err());
     assert!(
         record_discharge(
             state.path(),
@@ -1285,15 +1423,72 @@ fn merely_named_test() {}
         )
         .is_err()
     );
+    let native = Incident::new(
+        "tool.failure",
+        "native-evidence-fixture",
+        skill_ops::incident_rules::Source::MalformedInput,
+        vec!["a missing input".into()],
+    )?;
+    record_incident(
+        state.path(),
+        &native,
+        skill_ops::incident_rules::Expected {
+            red_test: false,
+            counterexample: false,
+            dry_run: false,
+        },
+    )?;
+    let mut native_discharge = discharge(vec![
+        "tests/gate.rs::verifies_an_actual_isolated_incident".into(),
+    ]);
+    native_discharge.incident = Some(native.id);
+    native_discharge.rule = "tool.failure".into();
+    record_discharge(state.path(), root.path(), &native_discharge)?;
+    native_discharge.evidence =
+        vec!["tests/gate.rs::prints_an_incident_without_recording_it".into()];
+    assert!(
+        record_discharge(state.path(), root.path(), &native_discharge).is_err(),
+        "a transcript cannot replace an actual isolated record"
+    );
+    fs::write(
+        root.path().join("tests/gate.rs"),
+        "#[test]\nfn reproduces_the_incident() {}\n",
+    )?;
+    assert!(
+        record_discharge(
+            state.path(),
+            root.path(),
+            &discharge(vec!["tests/gate.rs::reproduces_the_incident".into()])
+        )
+        .is_err(),
+        "uncommitted replacement evidence cannot satisfy a disposition"
+    );
     Ok(())
 }
 
 #[test]
 fn an_exempt_discharge_needs_a_closed_set_reason_and_a_reconsideration() -> Result<()> {
     let state = tempfile::tempdir()?;
+    let incident = Incident::new(
+        "hook.disk-scan",
+        "exemption-fixture",
+        skill_ops::incident_rules::Source::GateRefusal,
+        vec!["a scan was refused".into()],
+    )?;
+    record_incident(
+        state.path(),
+        &incident,
+        skill_ops::incident_rules::Expected {
+            red_test: false,
+            counterexample: false,
+            dry_run: false,
+        },
+    )?;
     let exempt = |reason: Option<String>, reconsideration: Option<String>| Discharge {
         schema: 1,
         rule: "hook.disk-scan".into(),
+        incident: Some(incident.id.clone()),
+        commit: None,
         outcome: "exempt".into(),
         evidence: vec![],
         reason,

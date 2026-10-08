@@ -12,6 +12,9 @@ use std::process::Stdio;
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
+#[path = "../../platform/tests/support/fixture_process.rs"]
+mod fixture_process;
+
 const ATTRIBUTED: &str = "As requested, the parser keeps every edit.";
 const COMPLIANT: &str = "The parser keeps every edit.";
 
@@ -37,7 +40,7 @@ fn attribution_reported(findings: &[Finding], sentence: &str) -> bool {
 }
 
 fn binary(arguments: &[&str], input: &str, runtime: &Path) -> Result<(i32, String, String)> {
-    let mut child = platform::process::command(env!("CARGO_BIN_EXE_prose"))
+    let mut child = fixture_process::command(env!("CARGO_BIN_EXE_prose"), runtime)
         .args(arguments)
         .env("PROSE_CONFIG", root().join("home/dot_config/prose"))
         .env("PROSE_RUNTIME", runtime)
@@ -317,7 +320,7 @@ fn claude_and_codex_hooks_request_one_rewrite_of_a_failing_reply() -> Result<()>
         "ending the turn clears this hook's mark"
     );
     let missing = tempfile::tempdir()?;
-    let mut command = platform::process::command(env!("CARGO_BIN_EXE_prose"));
+    let mut command = fixture_process::command(env!("CARGO_BIN_EXE_prose"), missing.path());
     let output = command
         .args(["reply", "--client", "claude"])
         .env("PROSE_CONFIG", missing.path())
@@ -417,7 +420,7 @@ fn the_opencode_plugin_requests_one_rewrite_through_the_native_checker() -> Resu
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/opencode-prose.ts");
     let empty = tempfile::tempdir()?;
     let run_with = |executable: &Path, reply: &str| -> Result<(Vec<String>, Vec<String>)> {
-        let output = platform::process::command(&bun)
+        let output = fixture_process::command(&bun, empty.path())
             .current_dir(root())
             .arg(&fixture)
             .arg(executable)
@@ -732,7 +735,7 @@ fn run_in(directory: &Path, arguments: &[String]) -> Result<(i32, String)> {
     paths.extend(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     ));
-    let output = platform::process::command(env!("CARGO_BIN_EXE_prose"))
+    let output = fixture_process::command(env!("CARGO_BIN_EXE_prose"), directory)
         .current_dir(directory)
         .env("PATH", std::env::join_paths(paths)?)
         .args(arguments)

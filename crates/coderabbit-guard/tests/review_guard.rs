@@ -5,6 +5,9 @@ use coderabbit_guard::{
     review_directory, usage_query, validate_policy,
 };
 use std::fs;
+
+#[path = "../../platform/tests/support/fixture_process.rs"]
+mod fixture_process;
 use std::io::{Read, Seek};
 
 fn invocation(args: &[&str]) -> Invocation {
@@ -466,7 +469,7 @@ fn owner_pause_blocks_the_real_entry_point_before_vendor_lookup_and_survives_ins
         vec!["pullrequest", "18"],
         vec!["review", "findings"],
     ] {
-        let output = platform::process::command(binary)
+        let output = fixture_process::command(binary, &home)
             .args(args)
             .env("HOME", &home)
             .env("USERPROFILE", &home)
@@ -475,7 +478,7 @@ fn owner_pause_blocks_the_real_entry_point_before_vendor_lookup_and_survives_ins
         assert_eq!(output.status.code(), Some(75));
         assert!(String::from_utf8_lossy(&output.stderr).contains("paused by the owner"));
     }
-    let output = platform::process::command(binary)
+    let output = fixture_process::command(binary, &home)
         .arg("--guard-status")
         .env("HOME", &home)
         .env("USERPROFILE", &home)
@@ -518,7 +521,7 @@ fn each_pause_scope_is_reported_and_only_cli_scopes_block_the_guard() {
         }
         assert_eq!(coderabbit_guard::pause(&home).unwrap().name(), scope);
         let run = |args: &[&str]| {
-            platform::process::command(binary)
+            fixture_process::command(binary, &home)
                 .args(args)
                 .env("HOME", &home)
                 .env("USERPROFILE", &home)

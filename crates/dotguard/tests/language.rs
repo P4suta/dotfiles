@@ -7,6 +7,9 @@ use std::sync::OnceLock;
 
 #[path = "support/fixture_git.rs"]
 mod fixture_git;
+
+#[path = "../../platform/tests/support/fixture_process.rs"]
+mod fixture_process;
 #[path = "support/wrapper.rs"]
 mod wrapper;
 
@@ -50,7 +53,7 @@ fn fixtures() -> &'static Fixtures {
 /// A command for dotguard itself, which starts only after the fixtures stand in place.
 fn dotguard() -> Command {
     fixtures();
-    platform::process::command(env!("CARGO_BIN_EXE_dotguard"))
+    fixture_process::command(env!("CARGO_BIN_EXE_dotguard"), &fixtures().template)
 }
 
 #[test]

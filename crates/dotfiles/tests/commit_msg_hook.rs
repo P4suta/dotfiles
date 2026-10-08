@@ -8,6 +8,9 @@ use std::process::Stdio;
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
+#[path = "../../platform/tests/support/fixture_process.rs"]
+mod fixture_process;
+
 const ATTRIBUTED: &str = "As requested, the parser keeps every edit.";
 const COMPLIANT: &str = "The parser keeps every edit.";
 
@@ -98,7 +101,7 @@ impl CommitMsgHook {
         }
         let message = directory.path().join(".git/COMMIT_EDITMSG");
         fs::write(&message, text)?;
-        let output = platform::process::command(env!("CARGO_BIN_EXE_dotfiles"))
+        let output = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), directory.path())
             .current_dir(directory.path())
             .args(["hook", "commit-msg", "--"])
             .arg(&message)

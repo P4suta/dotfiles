@@ -5,6 +5,9 @@ use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::process::Command;
 
+#[path = "../../../platform/tests/support/fixture_process.rs"]
+mod fixture_process;
+
 /// Starts `program` so every Git it runs reads only the fixture: its repository, `global` as the only configuration, and no user attributes or ignore rules.
 #[must_use]
 pub fn command(program: impl AsRef<OsStr>, global: &Path) -> Command {
@@ -21,13 +24,20 @@ pub fn inheriting(
     global: &Path,
     environment: impl IntoIterator<Item = (OsString, OsString)>,
 ) -> Command {
-    let mut command = platform::process::command(program);
+    let mut command = fixture_process::command(program, global.parent().expect("fixture parent"));
+    let incident_state = command
+        .get_envs()
+        .find_map(|(name, value)| (name == fixture_process::INCIDENT_STATE).then_some(value))
+        .flatten()
+        .expect("the fixture's incident store")
+        .to_owned();
     command.env_clear().envs(
         environment
             .into_iter()
             .filter(|(name, _)| !name.to_string_lossy().starts_with("GIT_")),
     );
     command
+        .env(fixture_process::INCIDENT_STATE, incident_state)
         .env("GIT_CONFIG_GLOBAL", global)
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("XDG_CONFIG_HOME", global.with_extension("config-home"));

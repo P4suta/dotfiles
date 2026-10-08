@@ -10,6 +10,9 @@ use std::path::Path;
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
+#[path = "../../platform/tests/support/fixture_process.rs"]
+mod fixture_process;
+
 fn workflow(text: &str) -> Vec<(String, String)> {
     vec![("ci.yml".to_owned(), text.to_owned())]
 }
@@ -305,21 +308,23 @@ fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
         )
     };
     let check = |online: bool, doctor: &str| -> Result<std::process::Output> {
-        Ok(platform::process::command(env!("CARGO_BIN_EXE_dotfiles"))
-            .args(["hosts", "check"])
-            .current_dir(&root)
-            .env("PATH", std::env::join_paths(&paths)?)
-            .env("HOME", &home)
-            .env("USERPROFILE", &home)
-            .env("GIT_CONFIG_GLOBAL", root.join("gitconfig"))
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_AUTHOR_NAME", "Fixture")
-            .env("GIT_AUTHOR_EMAIL", "fixture@example.com")
-            .env("GIT_COMMITTER_NAME", "Fixture")
-            .env("GIT_COMMITTER_EMAIL", "fixture@example.com")
-            .env("HOSTS_FIXTURE_STATUS", status(online))
-            .env("HOSTS_FIXTURE_DOCTOR", doctor)
-            .output()?)
+        Ok(
+            fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), &root)
+                .args(["hosts", "check"])
+                .current_dir(&root)
+                .env("PATH", std::env::join_paths(&paths)?)
+                .env("HOME", &home)
+                .env("USERPROFILE", &home)
+                .env("GIT_CONFIG_GLOBAL", root.join("gitconfig"))
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_AUTHOR_NAME", "Fixture")
+                .env("GIT_AUTHOR_EMAIL", "fixture@example.com")
+                .env("GIT_COMMITTER_NAME", "Fixture")
+                .env("GIT_COMMITTER_EMAIL", "fixture@example.com")
+                .env("HOSTS_FIXTURE_STATUS", status(online))
+                .env("HOSTS_FIXTURE_DOCTOR", doctor)
+                .output()?,
+        )
     };
     let head = git(&root, &["rev-parse", "HEAD"])?;
     let update = format!(

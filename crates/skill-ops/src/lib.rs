@@ -1836,12 +1836,16 @@ pub fn incidents(state: &Path) -> Result<Vec<Incident>> {
     Ok(result)
 }
 
-/// The disposition of one rule's incidents: mechanized prevention, or an exemption.
+/// The disposition of one recorded incident: mechanized prevention, or an exemption.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Discharge {
     pub schema: u32,
     pub rule: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incident: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
     /// `mechanized` names gate or test evidence, and `exempt` names a reason with a reconsideration condition.
     pub outcome: String,
     pub evidence: Vec<String>,
@@ -1855,7 +1859,7 @@ pub struct Discharge {
 ///
 /// # Errors
 ///
-/// Returns an error when reading the directory fails, a `.json` entry names something other than a regular file or fails validation, or a filename differs from its discharge's rule.
+/// Returns an error when reading the directory fails, a `.json` entry names something other than a regular file or fails validation, or a filename differs from its discharge's identity.
 pub fn discharges(state: &Path) -> Result<Vec<Discharge>> {
     let directory = state.join("discharges");
     if !directory.try_exists()? {
@@ -1874,9 +1878,50 @@ pub fn discharges(state: &Path) -> Result<Vec<Discharge>> {
                 "discharge record must be a regular file"
             );
             let discharge: Discharge = read_json(&entry.path())?;
+            ensure!(discharge.schema == 1, "unknown discharge schema");
+            if let Some(incident) = &discharge.incident {
+                ensure!(
+                    incident.len() == skill_rules::DIGEST_LENGTH
+                        && incident.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                    "invalid discharge incident identity"
+                );
+                let outcome = match discharge.outcome.as_str() {
+                    "mechanized" => incident_rules::Outcome::Mechanized {
+                        evidence_present: !discharge.evidence.is_empty()
+                            && discharge.evidence.iter().all(|evidence| {
+                                evidence.split_once(EVIDENCE_SEPARATOR).is_some_and(
+                                    |(path, test)| !path.is_empty() && !test.is_empty(),
+                                )
+                            }),
+                        reproduces: discharge.commit.as_ref().is_some_and(|commit| {
+                            GIT_COMMIT_HEX_LENGTHS.contains(&commit.len())
+                                && commit.bytes().all(|byte| byte.is_ascii_hexdigit())
+                        }),
+                    },
+                    "exempt" => incident_rules::Outcome::Exempt {
+                        reason: discharge
+                            .reason
+                            .as_deref()
+                            .and_then(incident_rules::Reason::from_key),
+                        reconsideration: discharge
+                            .reconsideration
+                            .as_deref()
+                            .is_some_and(|text| !text.trim().is_empty()),
+                    },
+                    other => anyhow::bail!("unknown discharge outcome `{other}`"),
+                };
+                ensure!(
+                    incident_rules::complete(outcome),
+                    "incomplete discharge record"
+                );
+            }
             ensure!(
-                entry.file_name().to_str() == Some(&format!("{}.json", discharge.rule)),
-                "discharge rule does not match its file"
+                entry.file_name().to_str()
+                    == Some(&format!(
+                        "{}.json",
+                        discharge.incident.as_deref().unwrap_or(&discharge.rule)
+                    )),
+                "discharge identity does not match its file"
             );
             result.push(discharge);
         }
@@ -1887,12 +1932,87 @@ pub fn discharges(state: &Path) -> Result<Vec<Discharge>> {
 
 /// The gate and test evidence a mechanized discharge names, each as `path::test`.
 const EVIDENCE_SEPARATOR: &str = "::";
+const GIT_COMMIT_HEX_LENGTHS: [usize; 2] = [40, 64];
+pub const INCIDENT_EVIDENCE_ROOT: &str = "SKILL_OPS_INCIDENT_EVIDENCE_ROOT";
 
 /// The path half of one evidence entry, or an empty path when the entry names no test.
 fn evidence_path(evidence: &str) -> &str {
     evidence
         .split_once(EVIDENCE_SEPARATOR)
         .map_or("", |(path, _)| path)
+}
+
+fn evidence_at_commit(root: &Path, evidence: &str, commit: &str) -> bool {
+    if !GIT_COMMIT_HEX_LENGTHS.contains(&commit.len())
+        || !commit.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return false;
+    }
+    let Ok(root) = platform::paths::canonical(root) else {
+        return false;
+    };
+    let Ok(path) = platform::paths::canonical(&root.join(evidence_path(evidence))) else {
+        return false;
+    };
+    let Ok(relative) = path.strip_prefix(&root) else {
+        return false;
+    };
+    let relative = relative.to_string_lossy().replace('\\', "/");
+    let Ok(contents) = fs::read(&path) else {
+        return false;
+    };
+    let Ok(kind) = platform::tool::Tool::Git
+        .command()
+        .current_dir(&root)
+        .args(["cat-file", "-t", commit])
+        .output()
+    else {
+        return false;
+    };
+    if !kind.status.success() || kind.stdout != b"commit\n" {
+        return false;
+    }
+    let Ok(source) = platform::tool::Tool::Git
+        .command()
+        .current_dir(&root)
+        .args(["show", &format!("{commit}:{relative}")])
+        .output()
+    else {
+        return false;
+    };
+    source.status.success() && source.stdout == contents
+}
+
+fn evidence_incident(root: &Path, rule: &str) -> bool {
+    let Ok(root) = platform::paths::canonical(root) else {
+        return false;
+    };
+    let Ok(entries) = fs::read_dir(&root) else {
+        return false;
+    };
+    entries.filter_map(std::result::Result::ok).any(|entry| {
+        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            return false;
+        }
+        let Ok(state) = platform::paths::canonical(&entry.path().join("state")) else {
+            return false;
+        };
+        state.starts_with(&root)
+            && incidents(&state).is_ok_and(|incidents| {
+                incidents.into_iter().any(|incident| {
+                    incident.rule == rule
+                        && incident.schema == 1
+                        && !incident.evidence.is_empty()
+                        && Incident::new(
+                            &incident.rule,
+                            &incident.session,
+                            incident.source,
+                            incident.evidence.clone(),
+                        )
+                        .is_ok_and(|recorded| recorded.id == incident.id)
+                })
+            })
+    })
 }
 
 /// Whether one mechanized evidence entry exists under `root` and names a test that reproduces the incident.
@@ -1927,12 +2047,17 @@ fn evidence_reproduces(root: &Path, evidence: &str, rule: &str) -> bool {
     let Ok(target) = tempfile::tempdir() else {
         return false;
     };
+    let Ok(incident_evidence) = tempfile::tempdir() else {
+        return false;
+    };
     let mut command = platform::tool::Tool::Cargo.command();
     command
         .current_dir(package)
         .args(["test", "--offline", "--manifest-path"])
         .arg(package.join("Cargo.toml"))
         .env("CARGO_TARGET_DIR", target.path())
+        .env(INCIDENT_EVIDENCE_ROOT, incident_evidence.path())
+        .env("SKILL_OPS_STATE", incident_evidence.path().join("state"))
         .env("DOTFILES_EXPECTED_FAILURE", "counterexample");
     if path
         .parent()
@@ -1962,67 +2087,98 @@ fn evidence_reproduces(root: &Path, evidence: &str, rule: &str) -> bool {
     }
     output.status.success()
         && transcript.contains("test result: ok. 1 passed; 0 failed;")
-        && platform::refusal::Refusal::find(&transcript).is_some_and(|refusal| refusal.rule == rule)
+        && (platform::refusal::Refusal::find(&transcript)
+            .is_some_and(|refusal| refusal.rule == rule)
+            || evidence_incident(incident_evidence.path(), rule))
 }
 
-/// Records one discharge after its evidence holds, replacing a discharge the rule already carries.
+/// Records one discharge after its evidence holds, replacing that incident's previous disposition.
 ///
 /// # Errors
 ///
-/// Returns an error when the outcome names neither form.
-/// It also returns one when mechanized evidence went missing, names no reproducing test, or the exemption lacks a closed-set reason or a reconsideration condition.
+/// Refuses mismatched identities and rules, unknown outcomes, changed prevention evidence, and tests that fail to reproduce the incident.
+/// An exemption must name its reason and reconsideration condition.
 pub fn record_discharge(state: &Path, root: &Path, discharge: &Discharge) -> Result<()> {
-    ensure!(
-        !discharge.rule.trim().is_empty(),
-        "a discharge names its rule"
-    );
-    ensure!(
-        platform::refusal::Refusal::new(
-            &discharge.rule,
-            "failure observation",
-            "inspect the failure"
-        )
-        .evidence("native event")
-        .is_complete(),
-        "a discharge names a valid dotted rule"
-    );
-    let outcome = match discharge.outcome.as_str() {
-        "mechanized" => incident_rules::Outcome::Mechanized {
-            evidence_present: !discharge.evidence.is_empty()
-                && discharge
-                    .evidence
-                    .iter()
-                    .all(|evidence| root.join(evidence_path(evidence)).is_file()),
-            reproduces: !discharge.evidence.is_empty()
-                && discharge
-                    .evidence
-                    .iter()
-                    .all(|evidence| evidence_reproduces(root, evidence, &discharge.rule)),
-        },
-        "exempt" => incident_rules::Outcome::Exempt {
-            reason: discharge
-                .reason
-                .as_deref()
-                .and_then(incident_rules::Reason::from_key),
-            reconsideration: discharge
-                .reconsideration
-                .as_deref()
-                .is_some_and(|text| !text.trim().is_empty()),
-        },
-        other => anyhow::bail!("unknown discharge outcome `{other}`"),
-    };
-    ensure!(
-        incident_rules::complete(outcome),
-        "the discharge of `{}` holds no complete prevention: mechanized evidence names an existing gate or test that reproduces the incident, and an exemption names a closed-set reason with a reconsideration condition",
-        discharge.rule
-    );
-    write_json(
-        &state
-            .join("discharges")
-            .join(format!("{}.json", discharge.rule)),
-        discharge,
-        true,
-    )
+    record_discharges(state, root, core::slice::from_ref(discharge))
+}
+
+/// Records each incident's disposition and checks shared evidence once per batch.
+///
+/// # Errors
+///
+/// Refuses unknown incident identities, mismatched rules, uncommitted evidence, and incomplete prevention.
+pub fn record_discharges(state: &Path, root: &Path, discharges: &[Discharge]) -> Result<()> {
+    let recorded = incidents(state)?;
+    let mut verified: BTreeMap<(String, String, String), bool> = BTreeMap::new();
+    for discharge in discharges {
+        ensure!(discharge.schema == 1, "unknown discharge schema");
+        let incident = recorded
+            .iter()
+            .find(|incident| Some(&incident.id) == discharge.incident.as_ref())
+            .context("a discharge must name one recorded incident identity")?;
+        ensure!(
+            incident.rule == discharge.rule,
+            "the discharge rule differs from its incident"
+        );
+        ensure!(
+            !discharge.rule.trim().is_empty(),
+            "a discharge names its rule"
+        );
+        ensure!(
+            platform::refusal::Refusal::new(
+                &discharge.rule,
+                "failure observation",
+                "inspect the failure"
+            )
+            .evidence("native event")
+            .is_complete(),
+            "a discharge names a valid dotted rule"
+        );
+        let outcome = match discharge.outcome.as_str() {
+            "mechanized" => incident_rules::Outcome::Mechanized {
+                evidence_present: !discharge.evidence.is_empty()
+                    && discharge
+                        .evidence
+                        .iter()
+                        .all(|evidence| root.join(evidence_path(evidence)).is_file()),
+                reproduces: !discharge.evidence.is_empty()
+                    && discharge.evidence.iter().all(|evidence| {
+                        let Some(commit) = discharge.commit.as_ref() else {
+                            return false;
+                        };
+                        let key = (commit.clone(), evidence.clone(), discharge.rule.clone());
+                        *verified.entry(key).or_insert_with(|| {
+                            evidence_at_commit(root, evidence, commit)
+                                && evidence_reproduces(root, evidence, &discharge.rule)
+                        })
+                    }),
+            },
+            "exempt" => incident_rules::Outcome::Exempt {
+                reason: discharge
+                    .reason
+                    .as_deref()
+                    .and_then(incident_rules::Reason::from_key),
+                reconsideration: discharge
+                    .reconsideration
+                    .as_deref()
+                    .is_some_and(|text| !text.trim().is_empty()),
+            },
+            other => anyhow::bail!("unknown discharge outcome `{other}`"),
+        };
+        ensure!(
+            incident_rules::complete(outcome),
+            "the discharge of `{}` holds no complete prevention: mechanized evidence names an existing gate or test that reproduces the incident, and an exemption names a closed-set reason with a reconsideration condition",
+            discharge.rule
+        );
+        write_json(
+            &state
+                .join("discharges")
+                .join(format!("{}.json", incident.id)),
+            discharge,
+            true,
+        )?;
+    }
+    Ok(())
 }
 
 /// The rules whose recorded incidents still lack a complete disposition, ranked by repetition first.
@@ -2033,15 +2189,20 @@ pub fn record_discharge(state: &Path, root: &Path, discharge: &Discharge) -> Res
 pub fn open_incident_rules(state: &Path) -> Result<Vec<(String, u64, incident_rules::Rank)>> {
     let discharged: BTreeSet<_> = discharges(state)?
         .into_iter()
-        .map(|discharge| discharge.rule)
+        .filter_map(|discharge| {
+            discharge
+                .incident
+                .map(|incident| (discharge.rule, incident))
+        })
         .collect();
     let mut counts: BTreeMap<String, u64> = BTreeMap::new();
     for incident in incidents(state)? {
-        *counts.entry(incident.rule).or_default() += 1;
+        if !discharged.contains(&(incident.rule.clone(), incident.id)) {
+            *counts.entry(incident.rule).or_default() += 1;
+        }
     }
     let mut open: Vec<_> = counts
         .into_iter()
-        .filter(|(rule, _)| !discharged.contains(rule))
         .map(|(rule, repetitions)| {
             let rank = incident_rules::rank(repetitions);
             (rule, repetitions, rank)

@@ -75,10 +75,14 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Records the prevention decision of one rule's incidents.
+    /// Records prevention for the named incident identities.
     Discharge {
         #[arg(long)]
         rule: String,
+        #[arg(long, required = true)]
+        incident: Vec<String>,
+        #[arg(long)]
+        commit: Option<String>,
         #[arg(long)]
         evidence: Vec<String>,
         #[arg(long)]
@@ -335,11 +339,33 @@ fn execute(cli: Cli) -> Result<()> {
         )?,
         Commands::Discharge {
             rule,
+            incident,
+            commit,
             evidence,
             exempt_reason,
             reconsideration,
             root,
-        } => session.discharge(&rule, evidence, exempt_reason, reconsideration, &root)?,
+        } => {
+            let outcome = if evidence.is_empty() {
+                "exempt"
+            } else {
+                "mechanized"
+            };
+            let discharges: Vec<ops::Discharge> = incident
+                .into_iter()
+                .map(|id| ops::Discharge {
+                    schema: 1,
+                    rule: rule.clone(),
+                    incident: Some(id),
+                    commit: commit.clone(),
+                    outcome: outcome.into(),
+                    evidence: evidence.clone(),
+                    reason: exempt_reason.clone(),
+                    reconsideration: reconsideration.clone(),
+                })
+                .collect();
+            session.discharge(&discharges, &root)?;
+        }
         Commands::Check => {
             if let Some(open) = session.open_incidents()? {
                 anyhow::bail!("{open}");
@@ -407,42 +433,16 @@ impl Session {
         Ok(())
     }
 
-    /// Records the prevention decision of one rule's incidents.
-    fn discharge(
-        &self,
-        rule: &str,
-        evidence: Vec<String>,
-        exempt_reason: Option<String>,
-        reconsideration: Option<String>,
-        root: &Path,
-    ) -> Result<()> {
-        let exemption = exempt_reason
-            .as_deref()
-            .and_then(skill_ops::incident_rules::Reason::from_key);
-        let outcome = if evidence.is_empty() {
-            "exempt"
-        } else {
-            "mechanized"
-        }
-        .into();
-        ops::record_discharge(
-            &self.state,
-            root,
-            &ops::Discharge {
-                schema: 1,
-                rule: rule.into(),
-                outcome,
-                evidence,
-                reason: exempt_reason,
-                reconsideration,
-            },
-        )?;
-        match exemption {
-            Some(reason) => println!(
-                "Recorded the discharge of `{rule}`: {}",
-                skill_ops::incident_rules::reason_text(reason)
-            ),
-            None => println!("Recorded the mechanized discharge of `{rule}`"),
+    /// Records prevention for each named incident.
+    fn discharge(&self, discharges: &[ops::Discharge], root: &Path) -> Result<()> {
+        ops::record_discharges(&self.state, root, discharges)?;
+        for discharge in discharges {
+            println!(
+                "Recorded {} prevention for incident {} of `{}`",
+                discharge.outcome,
+                discharge.incident.as_deref().unwrap_or_default(),
+                discharge.rule
+            );
         }
         Ok(())
     }
