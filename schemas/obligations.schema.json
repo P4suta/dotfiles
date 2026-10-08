@@ -167,6 +167,14 @@
               "format": "uint64",
               "minimum": 0
             },
+            "graph": {
+              "description": "The committed reachable state graph, which `TLC` must dump again and a test replays edge for edge.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
             "invariant": {
               "type": "string"
             },

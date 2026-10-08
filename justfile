@@ -27,6 +27,9 @@ profiles: trust
 proofs *args: trust
     mise x -- cargo xtask proofs {{args}}
 
+graphs: trust
+    mise x -- cargo xtask graphs
+
 classify *args: trust
     mise x -- cargo xtask classify {{args}}
 
