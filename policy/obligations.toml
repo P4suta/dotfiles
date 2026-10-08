@@ -1556,3 +1556,13 @@ assertion = "Real_noEmptyDirectory"
 instance = "RealManifest"
 counterexample = "Planted_noEmptyDirectory"
 scope = "for 4"
+
+[[obligation]]
+verifier = "alloy"
+spec = "specs/transaction.als"
+solver = "sat4j"
+[[obligation.checks]]
+assertion = "Durable"
+instance = "Rollback"
+counterexample = "NonDurable"
+scope = "for 4 but 12 steps"
