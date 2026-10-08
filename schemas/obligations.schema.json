@@ -167,6 +167,14 @@
               "format": "uint64",
               "minimum": 0
             },
+            "graph": {
+              "description": "The committed reachable state graph, which `TLC` must dump again and a test replays edge for edge.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
             "inductive": {
               "description": "An inductive invariant that Apalache proves for every limit the model chooses, which a bounded Apalache run of `quint::APALACHE_STEPS` steps backs.",
               "type": [
@@ -200,6 +208,17 @@
               "format": "uint32",
               "minimum": 0
             },
+            "symbolic": {
+              "description": "The module and constant initializer of a symbolic Apalache check.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SymbolicQuint"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "traces": {
               "type": "array",
               "items": {
@@ -215,17 +234,6 @@
               "items": {
                 "type": "string"
               }
-            },
-            "symbolic": {
-              "description": "The module and constant initializer of a symbolic Apalache check.",
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/SymbolicQuint"
-                },
-                {
-                  "type": "null"
-                }
-              ]
             }
           },
           "additionalProperties": false,

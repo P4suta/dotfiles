@@ -3,6 +3,8 @@ name: nas
 description: >-
   Discover existing NAS access and archive, retrieve, or verify large and private project artifacts using an authorized share or sync client.
   Use for NAS transfers, archive manifests, restore checks, and storage handoffs, not general cloud provisioning or NAS administration.
+metadata:
+  tools: "tools.toml"
 ---
 
 # NAS artifacts

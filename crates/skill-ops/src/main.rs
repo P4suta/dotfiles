@@ -2,6 +2,7 @@ use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use skill_ops::freshness::Built;
+use skill_ops::refusal::Refusal;
 use skill_ops::{self as ops, Catalog, Note, Policy, Report, Review, Runtime};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -23,11 +24,11 @@ struct Cli {
     #[arg(long, env = "SKILL_OPS_APPROVED")]
     approved: Option<PathBuf>,
     #[command(subcommand)]
-    command: Action,
+    command: Commands,
 }
 
 #[derive(Subcommand)]
-enum Action {
+enum Commands {
     Load {
         names: Vec<String>,
         #[arg(long)]
@@ -56,6 +57,36 @@ enum Action {
         skill: Vec<String>,
         #[arg(long, required = true)]
         evidence: Vec<String>,
+    },
+    /// Records one incident of a rule, unless the recorder marks the failure expected.
+    Incident {
+        #[arg(long)]
+        rule: String,
+        #[arg(long)]
+        session: String,
+        #[arg(long, default_value = "gate-refusal")]
+        source: String,
+        #[arg(long)]
+        evidence: Vec<String>,
+        #[arg(long)]
+        red_test: bool,
+        #[arg(long)]
+        counterexample: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Records the prevention decision of one rule's incidents.
+    Discharge {
+        #[arg(long)]
+        rule: String,
+        #[arg(long)]
+        evidence: Vec<String>,
+        #[arg(long)]
+        exempt_reason: Option<String>,
+        #[arg(long)]
+        reconsideration: Option<String>,
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
     },
     Check,
     Stop,
@@ -114,6 +145,71 @@ fn archived_report(state: &Path, identity: &str) -> Result<Report> {
     Ok(report)
 }
 
+/// The store that holds the content of a review's evidence, named by the digest of its evidence hashes, so the review outlives the checkout it cited.
+fn evidence_store(state: &Path, hashes: &BTreeMap<String, String>) -> Result<PathBuf> {
+    Ok(state.join("review-evidence").join(ops::hash(hashes)?))
+}
+
+/// Copies each cited evidence file from `root` into `store`, accepting an existing copy only when it holds the same bytes.
+fn record_evidence(store: &Path, root: &Path, hashes: &BTreeMap<String, String>) -> Result<()> {
+    for name in hashes.keys() {
+        let bytes = fs::read(root.join(name))
+            .with_context(|| format!("read review evidence {name} under {}", root.display()))?;
+        let copy = store.join(name);
+        if copy.try_exists()? {
+            ensure!(
+                fs::read(&copy)? == bytes,
+                "the recorded copy of review evidence {name} differs from the evidence it records"
+            );
+        } else {
+            ops::write_file(&copy, &bytes, false)?;
+        }
+    }
+    Ok(())
+}
+
+/// The command that records a fresh review, which every refusal of recorded evidence names.
+const RETRIAGE: &str = "skill-ops analyze --out <report.json> && skill-ops triage --decisions <decisions.json> --evidence-root <checkout>";
+
+/// The evidence store of a recorded review, once its content matches the review's hashes.
+/// A review recorded before the store existed names only its checkout, so this copies its evidence from that checkout while the checkout still holds it.
+fn recorded_evidence(state: &Path, reviewed: &RuntimeReview) -> Result<PathBuf> {
+    let store = evidence_store(state, &reviewed.evidence_hashes)?;
+    let root = &reviewed.evidence_root;
+    if !store.try_exists()? {
+        let current = root
+            .is_dir()
+            .then(|| ops::evidence_hashes(&reviewed.review, root).ok())
+            .flatten();
+        if current.as_ref() != Some(&reviewed.evidence_hashes) {
+            let cause = if root.is_dir() {
+                "the review recorded its evidence only by path, and that checkout no longer holds the evidence it reviewed"
+            } else {
+                "the review recorded its evidence only by path, and that checkout no longer exists"
+            };
+            return Err(Refusal::new("skill-ops.review-evidence", cause, RETRIAGE)
+                .evidence(format!("evidence checkout: {}", root.display()))
+                .evidence(format!(
+                    "review record: {}",
+                    state.join("review.json").display()
+                ))
+                .into());
+        }
+        record_evidence(&store, root, &reviewed.evidence_hashes)?;
+    }
+    let verified = ops::evidence_hashes(&reviewed.review, &store).ok();
+    if verified.as_ref() != Some(&reviewed.evidence_hashes) {
+        return Err(Refusal::new(
+            "skill-ops.review-evidence",
+            "the recorded copy of the review's evidence no longer matches the hashes the review holds",
+            RETRIAGE,
+        )
+        .evidence(format!("evidence store: {}", store.display()))
+        .into());
+    }
+    Ok(store)
+}
+
 fn pending(
     catalog: &Catalog,
     policy: &Policy,
@@ -129,13 +225,10 @@ fn pending(
         .transpose()?;
     let events = ops::recorded(state)?;
     let notes = ops::notes(state)?;
-    if let Some(reviewed) = &reviewed {
-        ensure!(
-            ops::evidence_hashes(&reviewed.review, &reviewed.evidence_root)?
-                == reviewed.evidence_hashes,
-            "review evidence changed; reassess the current evidence"
-        );
-    }
+    let recorded = reviewed
+        .as_ref()
+        .map(|reviewed| recorded_evidence(state, reviewed))
+        .transpose()?;
     let baseline = ops::read_approved(approved)?;
     let runtime = Runtime {
         catalog,
@@ -145,9 +238,7 @@ fn pending(
         report: report.as_ref().or(draft.as_ref()),
         review: reviewed.as_ref().map(|item| &item.review),
         approved: &baseline,
-        evidence_root: reviewed
-            .as_ref()
-            .map_or(root, |item| item.evidence_root.as_path()),
+        evidence_root: recorded.as_deref().unwrap_or(root),
     };
     if draft.is_some()
         && !ops::runtime_pending(Runtime {
@@ -200,20 +291,21 @@ fn execute(cli: Cli) -> Result<()> {
         policy,
     };
     match cli.command {
-        Action::Load { names, bundle } => session.load(names, bundle)?,
-        Action::Observe { client } => {
-            for observation in
-                ops::observations(&client, &stdin_json()?, &session.catalog, &session.tree)?
+        Commands::Load { names, bundle } => session.load(names, bundle)?,
+        Commands::Observe { client } => {
+            let input = stdin_json()?;
+            ops::record_native_failure(&session.state, &client, &input)?;
+            for observation in ops::observations(&client, &input, &session.catalog, &session.tree)?
             {
                 ops::record(&session.state, &observation)?;
             }
         }
-        Action::Analyze { out } => session.analyze(&out)?,
-        Action::Triage {
+        Commands::Analyze { out } => session.analyze(&out)?,
+        Commands::Triage {
             decisions,
             evidence_root,
         } => session.triage(&decisions, evidence_root)?,
-        Action::Note {
+        Commands::Note {
             kind,
             summary,
             skill,
@@ -224,12 +316,41 @@ fn execute(cli: Cli) -> Result<()> {
             summary,
             evidence,
         })?,
-        Action::Check => ensure!(
-            !session.pending()?,
-            "skill maintenance is pending; run skill-ops analyze --out FILE and triage the findings it lists with skill-ops triage --decisions FILE"
-        ),
-        Action::Stop => unreachable!("Stop is translated into a checked completion request"),
-        Action::Doctor => session.doctor()?,
+        Commands::Incident {
+            rule,
+            session: incident_session,
+            source,
+            evidence,
+            red_test,
+            counterexample,
+            dry_run,
+        } => session.incident(
+            &rule,
+            &incident_session,
+            &source,
+            evidence,
+            red_test,
+            counterexample,
+            dry_run,
+        )?,
+        Commands::Discharge {
+            rule,
+            evidence,
+            exempt_reason,
+            reconsideration,
+            root,
+        } => session.discharge(&rule, evidence, exempt_reason, reconsideration, &root)?,
+        Commands::Check => {
+            if let Some(open) = session.open_incidents()? {
+                anyhow::bail!("{open}");
+            }
+            ensure!(
+                !session.pending()?,
+                "skill maintenance is pending; run skill-ops analyze --out FILE and triage the findings it lists with skill-ops triage --decisions FILE"
+            );
+        }
+        Commands::Stop => unreachable!("Stop is translated into a checked completion request"),
+        Commands::Doctor => session.doctor()?,
     }
     Ok(())
 }
@@ -253,6 +374,101 @@ impl Session {
             &self.approved,
             &self.tree,
         )
+    }
+
+    /// Records one incident of a rule, unless the recorder marks the failure expected.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the command line holds one flag per expected-failure fact"
+    )]
+    fn incident(
+        &self,
+        rule: &str,
+        incident_session: &str,
+        source: &str,
+        evidence: Vec<String>,
+        red_test: bool,
+        counterexample: bool,
+        dry_run: bool,
+    ) -> Result<()> {
+        let source = skill_ops::incident_rules::Source::from_key(source)
+            .with_context(|| format!("unknown incident source `{source}`"))?;
+        let incident = ops::Incident::new(rule, incident_session, source, evidence)?;
+        let expected = skill_ops::incident_rules::Expected {
+            red_test,
+            counterexample,
+            dry_run,
+        };
+        if ops::record_incident(&self.state, &incident, expected)? {
+            println!("Recorded an incident of `{rule}`; a discharge is now required");
+        } else {
+            println!("Recorded no new incident");
+        }
+        Ok(())
+    }
+
+    /// Records the prevention decision of one rule's incidents.
+    fn discharge(
+        &self,
+        rule: &str,
+        evidence: Vec<String>,
+        exempt_reason: Option<String>,
+        reconsideration: Option<String>,
+        root: &Path,
+    ) -> Result<()> {
+        let exemption = exempt_reason
+            .as_deref()
+            .and_then(skill_ops::incident_rules::Reason::from_key);
+        let outcome = if evidence.is_empty() {
+            "exempt"
+        } else {
+            "mechanized"
+        }
+        .into();
+        ops::record_discharge(
+            &self.state,
+            root,
+            &ops::Discharge {
+                schema: 1,
+                rule: rule.into(),
+                outcome,
+                evidence,
+                reason: exempt_reason,
+                reconsideration,
+            },
+        )?;
+        match exemption {
+            Some(reason) => println!(
+                "Recorded the discharge of `{rule}`: {}",
+                skill_ops::incident_rules::reason_text(reason)
+            ),
+            None => println!("Recorded the mechanized discharge of `{rule}`"),
+        }
+        Ok(())
+    }
+
+    /// The refusal that names every rule whose incidents lack a prevention decision, ranked by repetition first.
+    fn open_incidents(&self) -> Result<Option<String>> {
+        let open = ops::open_incident_rules(&self.state)?;
+        if open.is_empty() {
+            return Ok(None);
+        }
+        let names: Vec<String> = open
+            .iter()
+            .map(|(rule, repetitions, rank)| {
+                let weight = if *rank == skill_ops::incident_rules::Rank::Repeated {
+                    "repeated "
+                } else {
+                    ""
+                };
+                format!("{rule} ({weight}{repetitions} incidents)")
+            })
+            .collect();
+        Ok(Some(format!(
+            "incidents of {} lack a prevention decision.\nNext action: {}",
+            names.join(", "),
+            skill_ops::incident_rules::next_action()
+        )))
     }
 
     /// Prints the dependency plan of the selected skills and each skill's instructions in that order.
@@ -346,9 +562,15 @@ impl Session {
             &review,
             &evidence_root,
         )?;
+        let evidence_hashes = ops::evidence_hashes(&review, &evidence_root)?;
+        record_evidence(
+            &evidence_store(state, &evidence_hashes)?,
+            &evidence_root,
+            &evidence_hashes,
+        )?;
         let reviewed = RuntimeReview {
-            evidence_hashes: ops::evidence_hashes(&review, &evidence_root)?,
             evidence_root,
+            evidence_hashes,
             review,
         };
         ops::preserve_json(
@@ -425,20 +647,27 @@ impl Session {
 
 fn main() {
     let mut cli = Cli::parse();
-    let result = if matches!(cli.command, Action::Stop) {
+    let result = if matches!(cli.command, Commands::Stop) {
         use skill_ops::skill_rules::{Completion, completion};
         let input = stdin_json();
         let continued = input
             .as_ref()
             .is_ok_and(|input| input["stop_hook_active"] == true);
-        cli.command = Action::Check;
+        cli.command = Commands::Check;
         let checked = match skill_ops::freshness::require_current(Built::SkillOps) {
             Err(error) => Err(error.context(
                 "run `just install-skill-ops` in the dotfiles checkout to rebuild the stale hook",
             )),
             Ok(()) => input.and_then(|_| execute(cli)),
         };
-        let reason = checked.as_ref().err().map(|error| format!("Skill maintenance remains incomplete: {error:#}. Run skill-ops analyze, assess the findings it lists with skill-operations, implement accepted changes, and run skill-ops triage for them before claiming completion."));
+        let reason = checked.as_ref().err().map(|error| match error.downcast_ref::<Refusal>() {
+            Some(refusal) => format!(
+                "Skill maintenance remains incomplete: {}. Next: {}",
+                refusal.cause,
+                refusal.next.as_deref().unwrap_or("none")
+            ),
+            None => format!("Skill maintenance remains incomplete: {error:#}. Run skill-ops analyze, assess the findings it lists with skill-operations, implement accepted changes, and run skill-ops triage for them before claiming completion."),
+        });
         let response = match completion(checked.is_ok(), continued) {
             Completion::Allow => serde_json::json!({}),
             Completion::RequestMaintenance => {

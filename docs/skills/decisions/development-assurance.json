@@ -1,9 +1,10 @@
 {
-  "revision": "06e2f4cb514c394d57a13b9785e1a7f32936a60df8380f9c8fd478ce7bacb8c5",
+  "revision": "f616e860e84beae250b0041e5c05d6415504ef82f68df1b99e3fe3352328dbef",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "End with the same pointer as the other assurance skills to the machine gate that reports and refuses verification gaps, since the gate, not the skill, now enforces the owner of each shape.",
   "evidence": [
     "home/dot_agents/skills/development-assurance/SKILL.md",
+    "docs/adr/verification-proportional-to-code-shape.md",
     "home/dot_agents/skills/formal-assurance/references/scoping.md",
     "docs/skills/assurance-scope-evaluation.md"
   ],

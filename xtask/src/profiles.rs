@@ -5,9 +5,9 @@ use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 pub use dotfiles::profiles::{
     NativeAction, SkippedScript, Store, chezmoi, chezmoi_with, configured_profile, declared_skips,
-    externally_changed, forget_script_runs, host_edit_refusal, keeps_host_keys, managed_paths,
-    merged_targets, native_action_arguments, native_profile, operate, output,
-    pending_onchange_scripts, script_order, source_data, uncommitted_host_edits,
+    externally_changed, host_edit_refusal, keeps_host_keys, managed_paths, merged_targets,
+    native_action_arguments, native_profile, operate, output, pending_onchange_scripts,
+    reset_entry_and_script_state, script_order, source_data, uncommitted_host_edits,
 };
 use serde_json::{Value, json};
 use std::fs;
@@ -497,6 +497,17 @@ pub const DATA_SCHEMA: &str = "schemas/chezmoidata.schema.json";
 ///
 /// Returns an error when writing the schema fails, or with `check` when the committed schema differs from the model.
 pub fn data_schema(root: &Path, check: bool) -> Result<()> {
+    let repository_schema = root.join("schemas/repository.schema.json");
+    let repository_wanted = model::repository::schema();
+    if check {
+        ensure!(
+            fs::read_to_string(&repository_schema)
+                .is_ok_and(|current| current == repository_wanted),
+            "repository schema differs from its model; run `just gen`"
+        );
+    } else {
+        fs::write(repository_schema, repository_wanted)?;
+    }
     let path = root.join(DATA_SCHEMA);
     let wanted = model::data::schema();
     if check {
@@ -725,6 +736,7 @@ impl<'a> Fixture<'a> {
 
     /// Applies and verifies the files twice, and checks that a retired target leaves the host.
     fn apply_files(&self) -> Result<()> {
+        let preserved = crate::rehearsal::seed_history(&self.destination)?;
         let retired = self.destination.join(".config/shell/github-token.sh");
         fs::create_dir_all(retired.parent().context("fixture parent is missing")?)?;
         fs::write(&retired, "obsolete credential exporter fixture")?;
@@ -745,6 +757,13 @@ impl<'a> Fixture<'a> {
             self.profile == Profile::Windows || !retired.exists(),
             "obsolete credential exporter was preserved"
         );
+        for (path, contents) in preserved {
+            ensure!(
+                fs::read(&path)? == contents,
+                "profile application changed machine-local state: {}",
+                path.display()
+            );
+        }
         Ok(())
     }
 

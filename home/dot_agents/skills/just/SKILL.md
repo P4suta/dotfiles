@@ -3,6 +3,8 @@ name: just
 description: >-
   Maintain a small discoverable just command surface over project tools and Rust xtask logic.
   Use for just recipes and developer entrypoints, not to move procedural code into shell recipes.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Command surface with `just`

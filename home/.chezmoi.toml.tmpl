@@ -44,9 +44,9 @@ config = {{ promptStringOnce . "doppler.config" "Doppler config (optional)" "" |
 
 [data.paths]
 projects = {{ promptStringOnce . "paths.projects" "Project checkout directory" (joinPath .chezmoi.homeDir "projects") | quote }}
-{{- range (dig "setup" "skip" (list) .) }}
+{{- range (dig "setup" "ignore" (dig "setup" "skip" (list) .) .) }}
 
-[[data.setup.skip]]
+[[data.setup.ignore]]
 script = {{ .script | quote }}
 reason = {{ .reason | quote }}
 {{- end }}

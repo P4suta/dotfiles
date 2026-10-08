@@ -1,6 +1,8 @@
 ---
 name: gcp
 description: Operate Google Cloud through the official gcloud CLI or Google's published gcloud MCP server, and configure or diagnose these tools in Codex, Claude Code, and OpenCode.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Google Cloud

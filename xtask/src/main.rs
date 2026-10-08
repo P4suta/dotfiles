@@ -9,6 +9,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use xtask::change_rules::{Gate, Gates};
 use xtask::check_build_dir;
+use xtask::environment;
 use xtask::tool::Tool;
 
 #[derive(Parser)]
@@ -23,7 +24,7 @@ struct Cli {
 enum Action {
     CheckSecrets,
     CheckAdapters,
-    OpsCheck,
+    AnsibleSyntaxCheck,
     Profiles {
         #[arg(long)]
         output: Option<PathBuf>,
@@ -45,6 +46,8 @@ enum Action {
         denylist: PathBuf,
     },
     Skills,
+    /// Lists every computed tool, version selector, and profile, then checks skill coverage.
+    Inventory,
     /// Apply the native profile, rerun every script on the provisioned host, and apply again, on a disposable CI host.
     Rehearse {
         #[arg(long)]
@@ -100,6 +103,8 @@ enum Action {
         #[command(flatten)]
         scope: xtask::change::Scope,
     },
+    /// Write the reachable state graph of every Quint model that records one, as `TLC` dumps it in the pinned image.
+    Graphs,
 }
 
 fn cargo(root: &Path, manifest: &Path, args: &[&str]) -> Result<()> {
@@ -164,12 +169,23 @@ fn check_package(root: &Path, manifest: &Path) -> Result<()> {
     cargo(root, manifest, &["test", "--locked", "--all-targets"])
 }
 
-/// The pre-commit check: the lint stages over the staged files, then the prose of the documents.
-/// The `check-staged` recipe then reads the comments through `OComment`, and the pre-push check runs the gates the whole change selects.
+/// The pre-commit check validates lint, document prose, and comments from the index snapshot.
+/// The pre-push check runs the gates the whole change selects.
 fn check_staged(root: &Path) -> Result<()> {
     let staged = xtask::change::paths(root, &xtask::change::Source::Staged)?;
-    xtask::lint::check(root, &staged, false, "HEAD")?;
-    prose::repository(root, prose::Scope::Documents, &prose::Bundle::source(root)?)
+    let growth = xtask::lint::baseline_growth(root, "HEAD")?;
+    let snapshot = xtask::staged_snapshot::export(root)?;
+    xtask::lint::check_content(snapshot.path(), &staged, false, growth)?;
+    prose::repository(
+        snapshot.path(),
+        prose::Scope::Documents,
+        &prose::Bundle::source(snapshot.path())?,
+    )?;
+    prose::repository(
+        snapshot.path(),
+        prose::Scope::Comments,
+        &prose::Bundle::source(snapshot.path())?,
+    )
 }
 
 /// Runs the checks of each selected gate.
@@ -189,9 +205,11 @@ fn check(root: &Path, gates: Gates, reference: &str) -> Result<()> {
         );
         xtask::quality::secrets(root)?;
         prose::repository(root, prose::Scope::Documents, &prose::Bundle::source(root)?)?;
+        dotfiles::repository::check(root, None)?;
     }
     if gates.contains(Gate::Skills) {
         skill_ops::check_catalog(root)?;
+        xtask::inventory::check(root)?;
         println!(
             "Validated {} shared skills and aliases",
             validate_tree(root)?
@@ -235,7 +253,7 @@ fn run() -> Result<()> {
     match cli.command {
         Action::CheckSecrets => xtask::quality::secrets(&cli.root)?,
         Action::CheckAdapters => xtask::quality::adapters(&cli.root)?,
-        Action::OpsCheck => {
+        Action::AnsibleSyntaxCheck => {
             ensure!(
                 cfg!(target_os = "linux"),
                 "Ansible checks require the Linux toolchain"
@@ -277,14 +295,17 @@ fn run() -> Result<()> {
                 );
             }
         }
+        Action::Graphs => xtask::state_graph::write(&cli.root)?,
         Action::Classify { scope } => xtask::change::run(&cli.root, &scope)?,
         Action::Skills => {
             skill_ops::check_catalog(&cli.root)?;
+            xtask::inventory::check(&cli.root)?;
             println!(
                 "Validated {} shared skills, aliases, and current maintenance dispositions",
                 validate_tree(&cli.root)?
             );
         }
+        Action::Inventory => inventory(&cli.root)?,
         Action::Rehearse { disposable_host } => {
             xtask::rehearsal::run(&cli.root, disposable_host)?;
         }
@@ -353,6 +374,19 @@ fn release_binary(root: &Path, package: &str, name: &str) -> Result<PathBuf> {
         .join(format!("{name}{}", std::env::consts::EXE_SUFFIX)))
 }
 
+/// Prints installed tools, their versions, and their profiles, and checks their skill coverage.
+fn inventory(root: &Path) -> Result<()> {
+    for (name, installed) in xtask::inventory::inventory(root, &xtask::inventory::policy(root)?)? {
+        println!(
+            "{name}\t{}\t{}",
+            installed.versions.into_iter().collect::<Vec<_>>().join("|"),
+            installed.profiles.into_iter().collect::<Vec<_>>().join(",")
+        );
+    }
+    xtask::inventory::check(root)?;
+    Ok(())
+}
+
 /// Applies the targets of the given source paths and their parent directories.
 fn apply_sources<I, S>(root: &Path, include: &str, sources: I) -> Result<()>
 where
@@ -361,7 +395,6 @@ where
 {
     let status = Tool::chezmoi_in(root)
         .args([
-            "--force",
             "apply",
             "--include",
             include,
@@ -391,13 +424,7 @@ fn install_prose(root: &Path) -> Result<()> {
     let status = Tool::chezmoi_in(root)
         .arg("--destination")
         .arg(&user_directory)
-        .args([
-            "--force",
-            "apply",
-            "--include",
-            "dirs,files",
-            "--parent-dirs",
-        ])
+        .args(["apply", "--include", "dirs,files", "--parent-dirs"])
         .arg(user_directory.join(".config/prose"))
         .arg(user_directory.join(".config/opencode/plugins/prose.ts"))
         .status()?;
@@ -490,7 +517,7 @@ fn format_metadata(root: &Path) -> Result<()> {
 }
 
 fn main() {
-    if let Err(error) = run() {
+    if let Err(error) = environment::check().and_then(|()| run()) {
         xtask::report(&error);
         std::process::exit(1);
     }

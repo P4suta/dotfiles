@@ -1,9 +1,11 @@
 {
-  "revision": "72e98690c316d2afe7512479838ef6f981f5d4c024e57d80e85334183ca864a7",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "83834802c6952688c715c310a6bcf660b3011704e4ebedd5eee9a10778860a59",
+  "outcome": "implemented",
+  "reason": "Keep native profile application and state preservation separate from remote transport and skill discovery.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
-    "home/dot_agents/skills/dotfiles/SKILL.md"
+    "home/dot_agents/skills/dotfiles/SKILL.md",
+    "home/dot_agents/skills/dotfiles/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

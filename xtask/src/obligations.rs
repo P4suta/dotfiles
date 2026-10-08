@@ -123,6 +123,9 @@ pub struct QuintModel {
     pub steps: u32,
     pub distinct_states: u64,
     pub traces: Vec<String>,
+    /// The committed reachable state graph, which `TLC` must dump again and a test replays edge for edge.
+    #[serde(default)]
+    pub graph: Option<String>,
     /// An inductive invariant that Apalache proves for every limit the model chooses, which a bounded Apalache run of `quint::APALACHE_STEPS` steps backs.
     #[serde(default)]
     pub inductive: Option<String>,
@@ -165,6 +168,11 @@ fn close_quint(root: &Path, quint: &QuintModel) -> Vec<String> {
         if !root.join(trace).is_file() {
             refusals.push(format!("{MANIFEST}: the trace {trace} is missing"));
         }
+    }
+    if let Some(graph) = &quint.graph
+        && !root.join(graph).is_file()
+    {
+        refusals.push(format!("{MANIFEST}: the state graph {graph} is missing"));
     }
     refusals
 }

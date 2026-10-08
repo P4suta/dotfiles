@@ -11,8 +11,8 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 
 use crate::review_rules::{
-    Budget, Event, Guard, Stage, cli_reviews_paused, cooldown_complete, included_allowance,
-    pause_scope, rolling_allowance, service_access,
+    Budget, Event, Guard, Stage, cli_reviews_paused, cooldown_complete, pause_scope,
+    service_access, within_budget, within_limits,
 };
 pub use crate::review_rules::{
     DAILY_LIMIT, DAY_MS, HOUR_MS, HOURLY_LIMIT, PROBE_DAILY_LIMIT, PROBE_GAP_MS, PauseScope,
@@ -73,7 +73,7 @@ pub fn classify(args: &[String]) -> Invocation {
 ///
 /// # Errors
 ///
-/// Returns an error when a record lies after `now`, or when the rolling hour or day has no allowance left.
+/// Returns an error when a record lies after `now`, or when the rolling hour or day holds no budget left.
 pub fn check_budget(records: &[u64], now: u64) -> Result<()> {
     match review_rules::check_budget(records, now) {
         Budget::Admit => Ok(()),
@@ -84,12 +84,12 @@ pub fn check_budget(records: &[u64], now: u64) -> Result<()> {
     }
 }
 
-/// Checks a `CodeRabbit` usage response for included allowance on the guarded organization with paid usage inactive.
+/// Checks a `CodeRabbit` usage response for the remaining budget on the guarded organization with paid usage inactive.
 ///
 /// # Errors
 ///
 /// Returns an error when a line holds something other than JSON, when the response lacks exactly one completed usage event, or when that event names another organization.
-/// Returns an error when the included allowance runs out or falls short, or when paid review usage stays active.
+/// Returns an error when the remaining budget runs out or falls short, or when paid review usage stays active.
 pub fn check_usage(text: &str, organization: &str) -> Result<()> {
     let events: Vec<serde_json::Value> = text
         .lines()
@@ -101,7 +101,7 @@ pub fn check_usage(text: &str, organization: &str) -> Result<()> {
         .filter(|event| event["phase"] == "usage" && event["status"] == "complete");
     let usage = completed
         .next()
-        .context("included CodeRabbit allowance is unavailable; review refused")?;
+        .context("the CodeRabbit limit is unavailable; review refused")?;
     ensure!(
         completed.next().is_none(),
         "ambiguous usage response; review refused"
@@ -116,12 +116,12 @@ pub fn check_usage(text: &str, organization: &str) -> Result<()> {
         .context("missing included review limit")?;
     let remaining = included["remaining"]
         .as_u64()
-        .context("missing included review allowance")?;
+        .context("missing review limit")?;
     ensure!(
         included["state"] == "available"
             && included["rollingWindowMs"] == HOUR_MS
-            && included_allowance(limit, remaining),
-        "insufficient verified included allowance; consumption is limited to floor(capacity * 0.9 * 0.8)"
+            && within_budget(limit, remaining),
+        "insufficient remaining budget; consumption is limited to floor(limit * 0.9 * 0.8)"
     );
     let billing = &usage["billingPeriod"];
     ensure!(
@@ -165,13 +165,13 @@ pub fn review_directory(args: &[String]) -> Result<Option<std::path::PathBuf>> {
 pub(crate) fn records(text: &str) -> Result<Vec<u64>> {
     ensure!(
         text.is_empty() || text.ends_with('\n'),
-        "truncated review ledger; refusing to reset allowance"
+        "truncated review ledger; refusing to reset the budget"
     );
     let records: Vec<u64> = text
         .lines()
         .map(str::parse)
         .collect::<std::result::Result<_, _>>()
-        .context("corrupt review ledger; refusing to reset allowance")?;
+        .context("corrupt review ledger; refusing to reset the budget")?;
     ensure!(
         records.is_sorted(),
         "unsorted review ledger; review refused"
@@ -240,7 +240,7 @@ pub fn execute_probe<T>(ledger: &Path, now: u64, probe: impl FnOnce() -> Result<
         "usage query cooldown has not elapsed; do not poll or retry"
     );
     ensure!(
-        rolling_allowance(
+        within_limits(
             history.iter().filter(|at| now - **at < HOUR_MS).count(),
             history.iter().filter(|at| now - **at < DAY_MS).count(),
         ),
@@ -311,7 +311,7 @@ fn admit(scope: PauseScope, local_status: bool) -> Result<()> {
     Ok(())
 }
 
-/// Reserves a review in `ledger`, verifies the included allowance through a usage probe, and then runs `review`.
+/// Reserves a review in `ledger`, verifies the remaining budget through a usage probe, and then runs `review`.
 ///
 /// # Errors
 ///
@@ -551,7 +551,7 @@ fn vendor(version: &str, user_directory: &Path) -> Result<std::path::PathBuf> {
 /// # Errors
 ///
 /// Returns an error when reading the policy or pause markers fails, when a pause covers CLI use, or when the guard forbids the invocation.
-/// Returns an error when a review or usage query runs off macOS, when the vendor runtime goes missing or drifts, or when the budget or allowance refuses the review.
+/// Returns an error when a review or usage query runs off macOS, when the vendor runtime goes missing or drifts, or when the budget or the limits refuse the review.
 pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
     let (organization, version) = validate_policy(&std::fs::read_to_string(
         user_directory.join(".config/coderabbit-guard/policy.json"),
@@ -626,7 +626,7 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
             let usage = command.output()?;
             ensure!(
                 usage.status.success(),
-                "included review allowance could not be verified; no review started"
+                "the remaining review budget could not be verified; no review started"
             );
             Ok(String::from_utf8(usage.stdout)?)
         },

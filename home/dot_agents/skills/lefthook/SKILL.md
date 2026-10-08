@@ -3,6 +3,8 @@ name: lefthook
 description: >-
   Configure and diagnose local Git hooks with Lefthook while preserving the same authoritative project and CI gates.
   Use for hook setup and failures, not bypassing checks to commit or push.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Lefthook Git gates

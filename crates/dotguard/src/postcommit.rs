@@ -7,11 +7,11 @@
 //!
 //! The hook disables itself on a machine without signing configured, so a fresh Mac without the 1Password SSH agent keeps its commits.
 
-use crate::bypass::{self, Category};
+use crate::bypass::{self, Rule};
 use crate::postcommit_rules::{
     self, Decision, Gate, Outcome, Shape, Step, Target, decide, refuses_empty,
 };
-use crate::realgit;
+use crate::real_git;
 use crate::refusal::Refusal;
 
 /// The lock this hook sets around its own `--amend`, so the amended commit skips the hook.
@@ -46,7 +46,7 @@ pub fn run() -> i32 {
     if refuses_empty(
         !in_hook && !mid_operation,
         head_is_empty(),
-        bypass::waived(Category::Empty),
+        bypass::bypassed(Rule::Empty),
     ) {
         return refuse_empty();
     }
@@ -73,12 +73,12 @@ fn record_sign_lock(value: &str) {
     } else {
         "the caller set GIT_HOOK_FORCE_SIGN_LOCK"
     };
-    let head = realgit::capture(&["rev-parse", "HEAD"])
+    let head = real_git::capture(&["rev-parse", "HEAD"])
         .map(|head| head.trim().to_owned())
         .unwrap_or_default();
     bypass::record(
         "skipped",
-        Category::SignLock,
+        Rule::SignLock,
         reason,
         &[format!("post-commit HEAD={head}")],
     );
@@ -86,28 +86,28 @@ fn record_sign_lock(value: &str) {
 
 /// `HEAD` has one parent and the same tree, so merges and the root commit never count as empty.
 fn head_is_empty() -> bool {
-    let Some(parents) = realgit::capture(&["rev-list", "--parents", "-n", "1", "HEAD"]) else {
+    let Some(parents) = real_git::capture(&["rev-list", "--parents", "-n", "1", "HEAD"]) else {
         return false;
     };
     // `rev-list --parents` prints the commit and then its parents, so one parent gives two words.
     let [_, _] = parents.split_whitespace().collect::<Vec<_>>()[..] else {
         return false;
     };
-    let tree = |rev: &str| realgit::capture(&["rev-parse", rev]).map(|t| t.trim().to_owned());
+    let tree = |rev: &str| real_git::capture(&["rev-parse", rev]).map(|t| t.trim().to_owned());
     matches!((tree("HEAD^{tree}"), tree("HEAD^^{tree}")), (Some(a), Some(b)) if a == b)
 }
 
 fn refuse_empty() -> i32 {
-    let short = realgit::capture(&["rev-parse", "--short", "HEAD"])
+    let short = real_git::capture(&["rev-parse", "--short", "HEAD"])
         .map(|s| s.trim().to_owned())
         .unwrap_or_default();
-    let rolled_back = realgit::succeeds(&["reset", "--soft", "HEAD^"]);
+    let rolled_back = real_git::succeeds(&["reset", "--soft", "HEAD^"]);
     empty_refusal(&short, rolled_back).emit();
     1
 }
 
-/// Once rolled back, the waiver records the same empty commit again.
-/// While the commit still sits at the checked-out tip, nothing remains to waive.
+/// Once rolled back, the bypass records the same empty commit again.
+/// While the commit still sits at the checked-out tip, nothing remains to bypass.
 fn empty_refusal(short: &str, rolled_back: bool) -> Refusal {
     if rolled_back {
         Refusal::new(
@@ -121,7 +121,7 @@ fn empty_refusal(short: &str, rolled_back: bool) -> Refusal {
         )
         .evidence(format!("HEAD {short} has the same tree as HEAD^"))
         .evidence("rolled back with git reset --soft HEAD^")
-        .waiver(format!(
+        .bypass(format!(
             "ALLOW_EMPTY=1 git commit --allow-empty --reuse-message={short}"
         ))
     } else {
@@ -136,11 +136,11 @@ fn empty_refusal(short: &str, rolled_back: bool) -> Refusal {
 }
 
 fn signing_configured() -> bool {
-    realgit::capture(&["config", "--get", "commit.gpgsign"]).is_some_and(|v| v.trim() == "true")
+    real_git::capture(&["config", "--get", "commit.gpgsign"]).is_some_and(|v| v.trim() == "true")
 }
 
 fn mid_operation() -> bool {
-    let Some(git_dir) = realgit::capture(&["rev-parse", "--git-dir"]) else {
+    let Some(git_dir) = real_git::capture(&["rev-parse", "--git-dir"]) else {
         return false; // not a repository: nothing to guard
     };
     let git_dir = git_dir.trim();
@@ -150,7 +150,7 @@ fn mid_operation() -> bool {
 }
 
 fn head_signed() -> bool {
-    realgit::succeeds(&["verify-commit", "HEAD"])
+    real_git::succeeds(&["verify-commit", "HEAD"])
 }
 
 /// The commit Git just recorded and the facts its rollback needs, read before the hook's own amend moves `HEAD`.
@@ -162,13 +162,13 @@ struct Recorded {
 }
 
 fn recorded() -> Option<Recorded> {
-    let head = realgit::capture(&["rev-parse", "HEAD"])?.trim().to_owned();
-    let parents = realgit::capture(&["rev-list", "--parents", "-n", "1", &head])
+    let head = real_git::capture(&["rev-parse", "HEAD"])?.trim().to_owned();
+    let parents = real_git::capture(&["rev-list", "--parents", "-n", "1", &head])
         .map_or(0, |line| line.split_whitespace().count().saturating_sub(1));
-    let amended = realgit::capture(&["log", "-g", "-1", "--format=%gs", "HEAD"])
+    let amended = real_git::capture(&["log", "-g", "-1", "--format=%gs", "HEAD"])
         .is_some_and(|subject| subject.starts_with(AMEND_SUBJECT));
     let original = amended
-        .then(|| realgit::capture(&["rev-parse", "--verify", "HEAD@{1}"]))
+        .then(|| real_git::capture(&["rev-parse", "--verify", "HEAD@{1}"]))
         .flatten()
         .map(|original| original.trim().to_owned());
     Some(Recorded {
@@ -182,10 +182,11 @@ fn resign() -> i32 {
     let Some(recorded) = recorded() else {
         return 0; // nothing to amend
     };
+    let pre_head = recorded.head.as_str();
 
     // The re-sign itself, under the lock.
     // The command's output goes unread because the refusal below already names the reason the agent can't sign.
-    let Some(mut amend) = realgit::command() else {
+    let Some(mut amend) = real_git::command() else {
         return 0;
     };
     let amended = amend
@@ -205,51 +206,54 @@ fn resign() -> i32 {
         .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|s| s.success());
-    let outcome = match (amended, amended && head_signed()) {
+    let outcome = match (
+        amended,
+        amended && real_git::succeeds(&["verify-commit", "HEAD"]),
+    ) {
         (_, true) => Outcome::Signed,
         (true, false) => Outcome::Unverified,
         (false, _) => Outcome::Failed,
     };
     let rollback = postcommit_rules::rollback_target(Gate::Fixed, recorded.shape, outcome);
     if rollback.target == Target::Keep {
-        let short = realgit::capture(&["rev-parse", "--short", "HEAD"]).map_or_else(
-            || recorded.head.chars().take(SHORT_HASH).collect(),
+        let short = real_git::capture(&["rev-parse", "--short", "HEAD"]).map_or_else(
+            || pre_head.chars().take(SHORT_HASH).collect(),
             |s| s.trim().to_owned(),
         );
         eprintln!("::notice:: HEAD was unsigned; re-signed automatically: {short}");
         return 0;
     }
 
-    for step in rollback.steps() {
-        if !roll_back(*step, &recorded) {
+    let target = apply_rollback(&recorded, &rollback);
+    let head = real_git::capture(&["rev-parse", "--short", "HEAD"]).map(|s| s.trim().to_owned());
+    unsigned_refusal(pre_head, target, recorded.shape, head.as_deref()).emit();
+    1
+}
+
+/// Runs the proved rollback plan and reports any Git step that fails.
+fn apply_rollback(recorded: &Recorded, plan: &postcommit_rules::Rollback) -> Target {
+    for step in plan.steps() {
+        if !roll_back(*step, recorded) {
             eprintln!(
                 "warning: the rollback step {step:?} failed for {}; inspect `git log -1` before retrying",
                 recorded.head
             );
         }
     }
-    let head = realgit::capture(&["rev-parse", "--short", "HEAD"]).map(|s| s.trim().to_owned());
-    unsigned_refusal(
-        &recorded.head,
-        rollback.target,
-        recorded.shape,
-        head.as_deref(),
-    )
-    .emit();
-    1
+    plan.target
 }
 
 /// Runs one rollback step, each naming an absolute commit, so a rerun after a crash ends in the same place.
 fn roll_back(step: Step, recorded: &Recorded) -> bool {
     let head = recorded.head.as_str();
     match step {
-        Step::ResetToCommit => realgit::succeeds(&["reset", "--soft", head]),
-        Step::ResetToFirstParent => realgit::succeeds(&["reset", "--soft", &format!("{head}^")]),
+        Step::ResetToCommit => real_git::succeeds(&["reset", "--soft", head]),
+        Step::ResetToFirstParent => real_git::succeeds(&["reset", "--soft", &format!("{head}^")]),
         Step::ResetToOriginal => recorded
             .original
             .as_deref()
-            .is_some_and(|original| realgit::succeeds(&["reset", "--soft", original])),
-        Step::DropHead => realgit::succeeds(&["update-ref", "-d", "HEAD"]),
+            .is_some_and(|original| real_git::succeeds(&["reset", "--soft", original])),
+        Step::DropHead => real_git::succeeds(&["update-ref", "-d", "HEAD"]),
         Step::RestoreMergeParent => restore_merge_parent(head),
     }
 }
@@ -257,8 +261,8 @@ fn roll_back(step: Step, recorded: &Recorded) -> bool {
 /// Git removes `MERGE_HEAD` before the hook runs, so the hook writes the second parent back and the next commit counts as a merge again.
 fn restore_merge_parent(head: &str) -> bool {
     let (Some(second), Some(path)) = (
-        realgit::capture(&["rev-parse", "--verify", &format!("{head}^2")]),
-        realgit::capture(&["rev-parse", "--git-path", "MERGE_HEAD"]),
+        real_git::capture(&["rev-parse", "--verify", &format!("{head}^2")]),
+        real_git::capture(&["rev-parse", "--git-path", "MERGE_HEAD"]),
     ) else {
         return false;
     };
@@ -297,7 +301,10 @@ fn unsigned_refusal(pre_head: &str, target: Target, shape: Shape, head: Option<&
 
 #[cfg(test)]
 mod tests {
-    use super::{Shape, Target, empty_refusal, unsigned_refusal};
+    use super::{
+        Decision, Gate, Outcome, Shape, Target, decide, empty_refusal, postcommit_rules,
+        refuses_empty, unsigned_refusal,
+    };
 
     #[test]
     fn every_refusal_is_a_complete_record() {
@@ -318,17 +325,64 @@ mod tests {
         }
         assert_eq!(empty_refusal("a", true).rule, "commit.empty");
         assert_eq!(
-            empty_refusal("abc1234", true).waiver.as_deref(),
+            empty_refusal("abc1234", true).bypass.as_deref(),
             Some("ALLOW_EMPTY=1 git commit --allow-empty --reuse-message=abc1234")
         );
         let kept = empty_refusal("abc1234", false);
         assert_eq!(kept.next.as_deref(), Some("git reset --soft HEAD^"));
-        assert_eq!(kept.waiver, None, "the empty commit is still on HEAD");
+        assert_eq!(kept.bypass, None, "the empty commit is still on HEAD");
         let unsigned = unsigned_refusal("abc1234", Target::Unborn, Shape::Root, None);
         assert_eq!(
             unsigned.next.as_deref(),
             Some("git commit --reuse-message=abc1234")
         );
-        assert_eq!(unsigned.waiver, None);
+        assert_eq!(unsigned.bypass, None);
+    }
+
+    #[test]
+    fn an_empty_commit_is_refused_unless_bypassed_or_git_is_mid_operation() {
+        assert!(refuses_empty(true, true, false));
+        assert!(!refuses_empty(true, false, false));
+        assert!(!refuses_empty(true, true, true));
+        assert!(
+            !refuses_empty(false, true, false),
+            "re-entrant or mid-operation: Git is not done"
+        );
+    }
+
+    #[test]
+    fn nothing_happens_without_a_reason_to_act() {
+        assert_eq!(
+            decide(true, false, false),
+            Decision::Done,
+            "re-entrant: the amend this hook makes must not re-enter it"
+        );
+        assert_eq!(
+            decide(false, true, false),
+            Decision::Done,
+            "mid-operation: amending would corrupt the in-progress rebase"
+        );
+        assert_eq!(
+            decide(false, false, true),
+            Decision::Done,
+            "already signed: nothing to do"
+        );
+        assert_eq!(
+            decide(false, false, false),
+            Decision::Resign,
+            "otherwise: fix it"
+        );
+    }
+
+    #[test]
+    fn the_root_commit_drops_the_ref_instead_of_stepping_back() {
+        assert_eq!(
+            postcommit_rules::rollback_target(Gate::Fixed, Shape::Single, Outcome::Failed).target,
+            Target::FirstParent,
+        );
+        assert_eq!(
+            postcommit_rules::rollback_target(Gate::Fixed, Shape::Root, Outcome::Failed).target,
+            Target::Unborn,
+        );
     }
 }

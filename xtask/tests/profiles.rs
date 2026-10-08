@@ -765,7 +765,7 @@ fn forgetting_script_runs_reruns_every_onchange_script() {
     apply();
     apply();
     assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 1);
-    xtask::profiles::forget_script_runs(
+    xtask::profiles::reset_entry_and_script_state(
         &source,
         &xtask::profiles::Store::scoped(&state),
         &config,

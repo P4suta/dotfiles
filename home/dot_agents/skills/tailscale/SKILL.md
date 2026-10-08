@@ -3,6 +3,8 @@ name: tailscale
 description: >-
   Configure and diagnose Tailscale connectivity and least-privilege tailnet access for development machines.
   Use for tailnet reachability, MagicDNS, access rules, SSH transport, and machine enrollment.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Tailscale connectivity

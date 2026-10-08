@@ -2,7 +2,7 @@
 
 Every managed global `CLAUDE.md` and `AGENTS.md` renders the partials `home/.chezmoitemplates/partials/agent_policy`, `home/.chezmoitemplates/partials/prose_policy`, and `home/.chezmoitemplates/partials/remote_machines`, and nothing else.
 The OpenCode prompts under `home/dot_config/opencode/agents/` and `home/dot_config/opencode/commands/` add instructions when they run.
-This document classifies every line of those partials and prompts.
+This document classifies every line of those shared templates and prompts.
 A retained text line holds judgment no mechanism can enforce, or it stays until the named follow-up mechanizes it.
 Headings, template actions that render nothing, and front matter lines take the classes `Heading:`, `Directive:`, and `Setting:`.
 No class admits a line whose template action renders output.
@@ -17,7 +17,7 @@ No class admits a line whose template action renders output.
 - a removed line without a valid holder
 - a repository path named outside a quote that doesn't exist
 - a root dispatcher that does more than select the same file in a native profile
-- a profile template that renders more than the partials
+- a profile template that renders more than the shared templates
 - a file a client loads as instructions anywhere else in the source tree, such as `CLAUDE.md` or `AGENTS.md`
 
 A `Gate` row names an existing gate source file, and a `Skill` row names an existing skill.

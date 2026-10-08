@@ -17,7 +17,7 @@ pub mod lang;
 pub mod locate;
 pub mod postcommit;
 pub mod prepush;
-pub mod realgit;
+pub mod real_git;
 pub use platform::refusal;
 pub use rules::{gate_rules, postcommit_rules, reaper_rules};
 pub mod renovate;

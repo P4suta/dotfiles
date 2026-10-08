@@ -233,6 +233,34 @@ fn a_pilot_whose_issue_closed_without_a_decision_fails() {
 }
 
 #[test]
+fn a_quint_model_whose_state_graph_is_missing_fails() {
+    let checkout = fixture(PROVED, CALLER);
+    fs::create_dir_all(checkout.path().join("specs")).unwrap();
+    fs::write(
+        checkout.path().join("specs/m.qnt"),
+        "module m {}\nmodule m_buggy {}\n",
+    )
+    .unwrap();
+    let model = |graph: &str| {
+        parse_manifest(&format!(
+            "[[obligation]]\nverifier = \"quint\"\nspec = \"specs/m.qnt\"\nmain = \"m\"\nprobe = \"m_buggy\"\ninvariant = \"safe\"\nwitnesses = [\"w\"]\nseed = \"0x1\"\nsamples = 1\nsteps = 1\ndistinct_states = 1\ntraces = []\n{graph}"
+        ))
+        .unwrap()
+    };
+    let missing = |manifest| -> bool {
+        closure(checkout.path(), &manifest)
+            .unwrap()
+            .refusals
+            .iter()
+            .any(|refusal| refusal.contains("the state graph specs/m.json is missing"))
+    };
+    assert!(!missing(model("")));
+    assert!(missing(model("graph = \"specs/m.json\"\n")));
+    fs::write(checkout.path().join("specs/m.json"), "{}").unwrap();
+    assert!(!missing(model("graph = \"specs/m.json\"\n")));
+}
+
+#[test]
 fn a_surviving_mutant_or_an_unnamed_timeout_fails_and_a_named_timeout_passes() {
     let baselines = parse_baselines(
         "[[metric]]\nmetric = \"mutants-missed\"\nexact = 0\n\n[[metric]]\nmetric = \"mutants-timed-out\"\nexact = 0\n",

@@ -1,0 +1,9 @@
+{{- /*
+The pin of every preferred tool in .chezmoidata/modern.toml, as a JSON object from mise tool to version.
+Each profile's mise configuration installs these pins and drops the same tool from its own lists, so a hook never suggests a tool the host lacks.
+*/ -}}
+{{- $pins := dict -}}
+{{- range .modern.tools -}}
+{{-   $_ := set $pins .tool .version -}}
+{{- end -}}
+{{- $pins | toJson -}}

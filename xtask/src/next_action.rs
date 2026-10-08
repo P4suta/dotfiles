@@ -200,25 +200,25 @@ pub fn host_status(temp: Option<&Path>, cargo_target: Option<&Path>) -> HostStat
     }
 }
 
-/// Failing checks outrank pending ones, and an empty rollup means no check has reported yet.
+/// Failed checks outrank pending ones, and an empty rollup means no check has reported yet.
 #[must_use]
 pub fn classify_checks(rollup: &[Value]) -> Checks {
     let mut pending = false;
     for item in rollup {
         let outcome = match item["state"].as_str() {
             Some(state) => match state {
-                "SUCCESS" => Checks::Passing,
+                "SUCCESS" => Checks::Success,
                 "PENDING" | "EXPECTED" => Checks::Pending,
-                _ => Checks::Failing,
+                _ => Checks::Failure,
             },
             None if item["status"].as_str() != Some("COMPLETED") => Checks::Pending,
             None => match item["conclusion"].as_str() {
-                Some("SUCCESS" | "NEUTRAL" | "SKIPPED") => Checks::Passing,
-                _ => Checks::Failing,
+                Some("SUCCESS" | "NEUTRAL" | "SKIPPED") => Checks::Success,
+                _ => Checks::Failure,
             },
         };
         match outcome {
-            Checks::Failing => return Checks::Failing,
+            Checks::Failure => return Checks::Failure,
             Checks::Pending => pending = true,
             _ => {}
         }
@@ -226,7 +226,7 @@ pub fn classify_checks(rollup: &[Value]) -> Checks {
     match (rollup.is_empty(), pending) {
         (true, _) => Checks::None,
         (false, true) => Checks::Pending,
-        (false, false) => Checks::Passing,
+        (false, false) => Checks::Success,
     }
 }
 

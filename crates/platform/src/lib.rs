@@ -3,6 +3,7 @@
 
 pub mod cleanup;
 pub mod home;
+pub mod incidents;
 pub mod process;
 pub mod refusal;
 pub use rules::order_rules;
@@ -46,6 +47,13 @@ pub fn report(error: &anyhow::Error) {
     if let Some(refusal) = error.downcast_ref::<refusal::Refusal>() {
         refusal.emit();
     } else if error.downcast_ref::<Relayed>().is_none() {
+        let observation = refusal::Refusal::new(
+            "tool.failure",
+            error.to_string(),
+            "inspect the error and retry the tool",
+        )
+        .evidence(format!("{error:#}"));
+        incidents::record(&observation, rules::incident_rules::Source::MalformedInput);
         eprintln!("Error: {error:#}");
     }
 }

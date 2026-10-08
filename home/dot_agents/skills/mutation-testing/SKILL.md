@@ -3,6 +3,8 @@ name: mutation-testing
 description: >-
   Use mutation testing to verify that tests detect broken behavior and repair uncovered invariants.
   Use for survivor analysis, assurance gaps, and the owner's rust-mutants or njutest workflows.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Mutation testing
@@ -25,3 +27,6 @@ An excluded operator needs a precise contract-based justification through the pr
 Recheck the affected mutation and its family after the fix, then run the relevant project gates.
 Record tool versions, source identity, selected operators, seeds or a deterministic reproducer, host identity, and outcomes.
 Finish the authorized assurance work instead of stopping at a survivor list.
+
+These machines report a repository's verification gaps when a session starts, and refuse new ones at commit, push, the end of a turn, and `pr-workflow ready`.
+Each refusal names its next action, and the repository's `assure.toml` names the owner of each shape and the mutation budget no change may weaken.

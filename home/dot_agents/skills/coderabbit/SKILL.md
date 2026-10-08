@@ -3,6 +3,8 @@ name: coderabbit
 description: >-
   Configure CodeRabbit and use its Plan, Triage, PR security reports, and Finishing Touches within the existing subscription.
   Use for CodeRabbit setup or these service workflows; use coderabbit-review for local reviews and applying PR findings.
+metadata:
+  tools: "tools.toml"
 ---
 
 # CodeRabbit service workflow

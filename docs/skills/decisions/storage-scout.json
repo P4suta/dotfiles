@@ -1,9 +1,11 @@
 {
-  "revision": "5f62dc2e1dd17475279b69a96e1836e3084aa8500ea5f88d83b5b1401358f54a",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "ce8d11c9a358f76dc40f9495f5fe1abbca05b930b2f32261586c29e7161a0ed5",
+  "outcome": "implemented",
+  "reason": "Keep owned artifact selection and tool refusals separate from NAS retention and transfer.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
-    "home/dot_agents/skills/storage-scout/SKILL.md"
+    "home/dot_agents/skills/storage-scout/SKILL.md",
+    "home/dot_agents/skills/storage-scout/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

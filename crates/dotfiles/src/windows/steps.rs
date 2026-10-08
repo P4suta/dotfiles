@@ -1,25 +1,25 @@
 //! The Windows setup steps, which read their options from the machine's chezmoi data.
 
 use super::setup;
-use crate::setup::{ContextData, Step};
+use crate::setup::{Step, TemplateData};
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value;
 
-fn value<'a>(context: &'a ContextData, pointer: &str) -> Result<&'a Value> {
+fn value<'a>(context: &'a TemplateData, pointer: &str) -> Result<&'a Value> {
     context
         .data
         .pointer(&context.platform(pointer))
         .with_context(|| format!("configuration requires {}", context.platform(pointer)))
 }
 
-fn text(context: &ContextData, pointer: &str) -> Result<String> {
+fn text(context: &TemplateData, pointer: &str) -> Result<String> {
     Ok(value(context, pointer)?
         .as_str()
         .with_context(|| format!("{} requires a string", context.platform(pointer)))?
         .to_owned())
 }
 
-fn texts(context: &ContextData, pointer: &str) -> Result<Vec<String>> {
+fn texts(context: &TemplateData, pointer: &str) -> Result<Vec<String>> {
     value(context, pointer)?
         .as_array()
         .with_context(|| format!("{} requires a list", context.platform(pointer)))?
@@ -32,13 +32,13 @@ fn texts(context: &ContextData, pointer: &str) -> Result<Vec<String>> {
         .collect()
 }
 
-fn flag(context: &ContextData, pointer: &str) -> Result<bool> {
+fn flag(context: &TemplateData, pointer: &str) -> Result<bool> {
     value(context, pointer)?
         .as_bool()
         .with_context(|| format!("{} requires a boolean", context.platform(pointer)))
 }
 
-fn number(context: &ContextData, pointer: &str) -> Result<u64> {
+fn number(context: &TemplateData, pointer: &str) -> Result<u64> {
     value(context, pointer)?
         .as_u64()
         .with_context(|| format!("{} requires a number", context.platform(pointer)))
@@ -50,7 +50,7 @@ fn finished(step: Step, code: i32) -> Result<()> {
 }
 
 /// The key that sshd authorizes: the signing key when the data asks for it and the profile signs.
-fn authorized_key(context: &ContextData) -> Result<String> {
+fn authorized_key(context: &TemplateData) -> Result<String> {
     let signing = context.data["signing"]["enabled"].as_bool() == Some(true);
     if !(flag(context, "/sshd/authorize_signing_key")? && signing) {
         return Ok(String::new());
@@ -72,7 +72,7 @@ fn authorized_key(context: &ContextData) -> Result<String> {
 /// # Errors
 ///
 /// Returns an error when the data lacks an option the step reads, or the step fails.
-pub(crate) fn run(context: &ContextData, step: Step) -> Result<()> {
+pub(crate) fn run(context: &TemplateData, step: Step) -> Result<()> {
     match step {
         Step::Scoop => finished(
             step,

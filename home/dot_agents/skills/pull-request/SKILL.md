@@ -3,6 +3,8 @@ name: pull-request
 description: >-
   Prepare issue-scoped GitHub changes, create pull requests, update their documents, and move drafts to review through the checked local PR workflow.
   Use before GitHub-bound implementation and for PR authoring, and use coderabbit-review for review findings.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Pull request authoring

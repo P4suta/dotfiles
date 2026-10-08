@@ -1,4 +1,4 @@
-{{- $marker := "chezmoi:modify-template" -}}
+{{- /* chezmoi:modify-template */ -}}
 {{- /*
   Claude Code rewrites this file at runtime.
   Each profile sets the keys here over the current file, treats an array as one value, and keeps every other key the client wrote.

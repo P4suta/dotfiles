@@ -2,6 +2,8 @@
 name: doppler
 description: >-
   Configure and use Doppler for local commands, shared project secrets, and GitHub Actions with OIDC, scoped service tokens, or native GitHub Secrets sync.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Doppler

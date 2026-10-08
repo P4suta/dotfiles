@@ -2,8 +2,9 @@ use anyhow::Result;
 use serde_json::json;
 use skill_ops::skill_install::merge_hooks;
 use skill_ops::{
-    Catalog, Note, Observation, Policy, Runtime, Signal, analyze, catalog, hash, observations,
-    record, recorded, runtime_pending,
+    Catalog, Discharge, Incident, Note, Observation, Policy, Runtime, Signal, analyze, catalog,
+    hash, incidents, observations, open_incident_rules, record, record_discharge, record_incident,
+    recorded, runtime_pending,
 };
 use skill_ops::{
     Decision, Finding, Outcome, Requirement, Review, Reviewed, SizeDecision, SkillDecision,
@@ -36,7 +37,7 @@ fn fixture() -> Result<(tempfile::TempDir, Catalog, Policy)> {
         max_entry_words: 100,
         requirements: vec![Requirement {
             skill: "alpha".into(),
-            also: names(&["beta"]),
+            dependencies: names(&["beta"]),
         }],
         bundles: BTreeMap::default(),
     };
@@ -281,11 +282,11 @@ fn dependencies_load_once_before_the_requested_skill_and_cycles_are_rejected() -
     let requirements = vec![
         Requirement {
             skill: "tools".into(),
-            also: names(&["types", "checks"]),
+            dependencies: names(&["types", "checks"]),
         },
         Requirement {
             skill: "types".into(),
-            also: names(&["checks"]),
+            dependencies: names(&["checks"]),
         },
     ];
     assert_eq!(
@@ -296,7 +297,7 @@ fn dependencies_load_once_before_the_requested_skill_and_cycles_are_rejected() -
     let mut cyclic = requirements;
     cyclic.push(Requirement {
         skill: "checks".into(),
-        also: names(&["tools"]),
+        dependencies: names(&["tools"]),
     });
     assert!(dependency_plan(&available, &names(&["tools"]), &cyclic).is_err());
     Ok(())
@@ -805,6 +806,41 @@ fn repository() -> Result<tempfile::TempDir> {
 }
 
 #[test]
+fn a_skill_that_repeats_a_pinned_version_or_the_proof_budget_is_refused() -> Result<()> {
+    let root = repository()?;
+    fs::write(
+        root.path().join("mise.toml"),
+        "[tools]\nrust = { version = \"1.99.0\" }\n\"cargo:kani-verifier\" = \"0.68.0\"\nbun = \"latest\"\n",
+    )?;
+    check_catalog(root.path())?;
+    let reference = root
+        .path()
+        .join("home/dot_agents/skills/beta/references/tools.md");
+    fs::create_dir_all(reference.parent().expect("reference directory"))?;
+    for (text, pin) in [
+        ("Run Kani 0.68.0 on every harness.\n", "0.68.0"),
+        (
+            "Each harness must finish within its 30-second budget.\n",
+            "30-second",
+        ),
+        ("Build with Rust 1.99.0.\n", "1.99.0"),
+    ] {
+        fs::write(&reference, text)?;
+        let message = refusal(check_catalog(root.path()));
+        assert!(
+            message.contains("tools.md") && message.contains(&format!("names `{pin}`")),
+            "{message}"
+        );
+    }
+    fs::write(
+        &reference,
+        "Run the pinned Kani from mise.toml on every harness.\n",
+    )?;
+    skill_ops::check_pins(root.path())?;
+    Ok(())
+}
+
+#[test]
 fn the_required_check_depends_only_on_skills_policy_and_decisions() -> Result<()> {
     let root = repository()?;
     let decisions = tracked_decisions(&root.path().join("docs/skills/decisions"))?;
@@ -1029,5 +1065,266 @@ fn the_assessed_commit_hashes_nested_resources_in_catalog_order() -> Result<()> 
     let context = decide(root.path(), "beta")?;
     assert!(context.contains(assessed.trim()), "{context}");
     assert!(context.contains("+Changed."), "{context}");
+    Ok(())
+}
+
+#[test]
+fn incidents_are_recorded_deduplicated_and_ranked_until_discharged() -> Result<()> {
+    let state = tempfile::tempdir()?;
+    let expected = skill_ops::incident_rules::Expected {
+        red_test: false,
+        counterexample: false,
+        dry_run: false,
+    };
+    let first = Incident::new(
+        "hook.shell-write",
+        "session-1",
+        skill_ops::incident_rules::Source::GateRefusal,
+        vec!["Refused: this command writes a file.".into()],
+    )?;
+    assert!(record_incident(state.path(), &first, expected)?);
+    assert!(
+        !record_incident(state.path(), &first, expected)?,
+        "a retry deduplicates"
+    );
+    for session in ["session-2", "session-3"] {
+        let repeated = Incident::new(
+            "hook.shell-write",
+            session,
+            skill_ops::incident_rules::Source::GateRefusal,
+            vec!["Refused: this command writes a file.".into()],
+        )?;
+        assert!(record_incident(state.path(), &repeated, expected)?);
+    }
+    let once = Incident::new(
+        "push.paused",
+        "session-1",
+        skill_ops::incident_rules::Source::FailedDelivery,
+        vec!["the push stayed paused".into()],
+    )?;
+    assert!(record_incident(state.path(), &once, expected)?);
+    assert_eq!(incidents(state.path())?.len(), 4);
+    let open = open_incident_rules(state.path())?;
+    assert_eq!(
+        open,
+        vec![
+            (
+                "hook.shell-write".to_owned(),
+                3,
+                skill_ops::incident_rules::Rank::Repeated
+            ),
+            (
+                "push.paused".to_owned(),
+                1,
+                skill_ops::incident_rules::Rank::Once
+            ),
+        ],
+        "the most repeated rule ranks first"
+    );
+    record_discharge(
+        state.path(),
+        std::path::Path::new("."),
+        &Discharge {
+            schema: 1,
+            rule: "hook.shell-write".into(),
+            outcome: "exempt".into(),
+            evidence: vec![],
+            reason: Some("intended".into()),
+            reconsideration: Some("reconsider when the shell-write rule retires".into()),
+        },
+    )?;
+    assert_eq!(
+        open_incident_rules(state.path())?,
+        vec![(
+            "push.paused".to_owned(),
+            1,
+            skill_ops::incident_rules::Rank::Once
+        )],
+        "a discharge settles every incident of its rule"
+    );
+    Ok(())
+}
+
+#[test]
+fn expected_failures_record_no_incident() -> Result<()> {
+    let state = tempfile::tempdir()?;
+    for expected in [
+        skill_ops::incident_rules::Expected {
+            red_test: true,
+            counterexample: false,
+            dry_run: false,
+        },
+        skill_ops::incident_rules::Expected {
+            red_test: false,
+            counterexample: true,
+            dry_run: false,
+        },
+        skill_ops::incident_rules::Expected {
+            red_test: false,
+            counterexample: false,
+            dry_run: true,
+        },
+    ] {
+        let incident = Incident::new(
+            "checks.required",
+            "session-1",
+            skill_ops::incident_rules::Source::FailedDelivery,
+            vec!["a required check failed".into()],
+        )?;
+        assert!(!record_incident(state.path(), &incident, expected)?);
+    }
+    assert_eq!(incidents(state.path())?, Vec::new());
+    Ok(())
+}
+
+#[test]
+fn native_failures_record_automatically_and_expected_signals_do_not() -> Result<()> {
+    let state = tempfile::tempdir()?;
+    for client in ["claude", "codex", "opencode"] {
+        assert!(skill_ops::record_native_failure(
+            state.path(),
+            client,
+            &serde_json::json!({"hook_event_name":"PostToolUseFailure","session_id":client,"error":"a tool failed"})
+        )?);
+        assert!(!skill_ops::record_native_failure(
+            state.path(),
+            client,
+            &serde_json::json!({"hook_event_name":"PostToolUseFailure","expected_failure":"red-test"})
+        )?);
+    }
+    assert!(skill_ops::record_native_failure(
+        state.path(),
+        "verifier",
+        &serde_json::json!({"failure_source":"verification-defect","session_id":"verification"})
+    )?);
+    let refusal =
+        platform::refusal::Refusal::new("hook.shell-write", "a write was refused", "use Edit")
+            .evidence("fixture");
+    for client in ["claude", "opencode"] {
+        assert!(skill_ops::record_native_failure(
+            state.path(),
+            client,
+            &serde_json::json!({"session_id": client, "tool_response": {"output": refusal.line()}})
+        )?);
+    }
+    assert!(skill_ops::record_native_failure(
+        state.path(),
+        "claude",
+        &serde_json::json!({"session_id": "child-status", "tool_response": {"exit_code": 2, "stderr": "failed child"}})
+    )?);
+    assert_eq!(incidents(state.path())?.len(), 7);
+    Ok(())
+}
+
+#[test]
+fn a_mechanized_discharge_needs_evidence_that_exists_and_reproduces() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let state = tempfile::tempdir()?;
+    fs::create_dir_all(root.path().join("tests"))?;
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../platform");
+    let rules = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rules");
+    fs::write(
+        root.path().join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"incident-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n[dependencies]\nplatform = {{ path = {:?}, default-features = false }}\nrules = {{ path = {:?} }}\n[workspace]\n",
+            source.to_string_lossy().replace('\\', "/"),
+            rules.to_string_lossy().replace('\\', "/")
+        ),
+    )?;
+    fs::write(
+        root.path().join("tests/gate.rs"),
+        r#"#[test]
+fn reproduces_the_incident() {
+    assert!(matches!(rules::shell_write_rules::inspect("sed -i 's/a/b/' file"), rules::shell_write_rules::Verdict::Refuse(_)));
+    platform::refusal::Refusal::new("hook.shell-write", "an in-place write was refused", "use Edit").evidence("sed -i").emit();
+}
+#[test]
+fn merely_named_test() {}
+"#,
+    )?;
+    let discharge = |evidence: Vec<String>| Discharge {
+        schema: 1,
+        rule: "hook.shell-write".into(),
+        outcome: "mechanized".into(),
+        evidence,
+        reason: None,
+        reconsideration: None,
+    };
+    assert!(
+        record_discharge(
+            state.path(),
+            root.path(),
+            &discharge(vec!["tests/gate.rs::reproduces_the_incident".into()])
+        )
+        .is_ok()
+    );
+    assert!(
+        record_discharge(
+            state.path(),
+            root.path(),
+            &discharge(vec!["tests/missing.rs::reproduces_the_incident".into()])
+        )
+        .is_err(),
+        "evidence that does not exist is rejected"
+    );
+    assert!(
+        record_discharge(
+            state.path(),
+            root.path(),
+            &discharge(vec!["tests/gate.rs::a_test_the_file_lacks".into()])
+        )
+        .is_err(),
+        "evidence whose test does not reproduce the incident is rejected"
+    );
+    assert!(record_discharge(state.path(), root.path(), &discharge(vec![])).is_err());
+    assert!(
+        record_discharge(
+            state.path(),
+            root.path(),
+            &discharge(vec!["tests/gate.rs::merely_named_test".into()])
+        )
+        .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn an_exempt_discharge_needs_a_closed_set_reason_and_a_reconsideration() -> Result<()> {
+    let state = tempfile::tempdir()?;
+    let exempt = |reason: Option<String>, reconsideration: Option<String>| Discharge {
+        schema: 1,
+        rule: "hook.disk-scan".into(),
+        outcome: "exempt".into(),
+        evidence: vec![],
+        reason,
+        reconsideration,
+    };
+    assert!(
+        record_discharge(
+            state.path(),
+            std::path::Path::new("."),
+            &exempt(
+                Some("disproportionate".into()),
+                Some("reconsider when scans grow".into())
+            ),
+        )
+        .is_ok()
+    );
+    assert!(
+        record_discharge(
+            state.path(),
+            std::path::Path::new("."),
+            &exempt(Some("because".into()), Some("reconsider".into()))
+        )
+        .is_err()
+    );
+    assert!(
+        record_discharge(
+            state.path(),
+            std::path::Path::new("."),
+            &exempt(Some("intended".into()), None)
+        )
+        .is_err()
+    );
     Ok(())
 }

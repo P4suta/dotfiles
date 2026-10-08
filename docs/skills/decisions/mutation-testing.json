@@ -1,9 +1,12 @@
 {
-  "revision": "e49086a34f9b096809e0a05fbc5a7a0455f074498c4e7e29ecf76aa3bebe8795",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "779746608176f9db1ca10b929445804da6c45fc2df8b44042bd0ad86c8c8ccec",
+  "outcome": "implemented",
+  "reason": "Keep survivor classification and invariant repair separate from proof completion.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
-    "home/dot_agents/skills/mutation-testing/SKILL.md"
+    "home/dot_agents/skills/mutation-testing/SKILL.md",
+    "docs/adr/verification-proportional-to-code-shape.md",
+    "home/dot_agents/skills/mutation-testing/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

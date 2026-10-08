@@ -4,11 +4,11 @@
 
 [[metric]]
 metric = "proved-subjects"
-exact = 140
+exact = 161
 
 [[metric]]
 metric = "probes"
-exact = 144
+exact = 171
 
 # The three unsafe blocks and the console handler of the Win32 sites in policy/unsafe-sites.toml, and the read past a slice in the Miri fixture.
 [[metric]]

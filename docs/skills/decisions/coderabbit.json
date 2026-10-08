@@ -1,13 +1,15 @@
 {
-  "revision": "f963a404b048266d53b602212325e901e2b54a0298a8ae737938f904ad2a68a8",
+  "revision": "cbde97c63821fb5176b2c21c898e4d2b0f396123ed5c36e82dbc8e44bf772c55",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Keep service configuration, billing boundaries, and review capacity decisions separate from applying review findings.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
     "home/dot_agents/skills/coderabbit/SKILL.md",
     "crates/coderabbit-guard/src/lib.rs",
     "docs/adr/0008-layered-review-capacity.md",
     "docs/adr/0015-scoped-coderabbit-pause.md",
-    "crates/rules/src/review_rules.rs"
+    "crates/rules/src/review_rules.rs",
+    "home/dot_agents/skills/coderabbit/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

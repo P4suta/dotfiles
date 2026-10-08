@@ -141,7 +141,7 @@ fn published(name: &str) -> (Repository, String) {
 }
 
 #[test]
-fn a_rewrite_is_refused_with_the_integration_step_and_a_waiver_for_exactly_that_update() {
+fn a_rewrite_is_refused_with_the_integration_step_and_a_bypass_for_exactly_that_update() {
     let (repository, base) = published("rewrite");
     let published = repository.commit("published", &[&base]);
     repository.git(&["update-ref", "refs/remotes/origin/main", &published]);
@@ -157,7 +157,7 @@ fn a_rewrite_is_refused_with_the_integration_step_and_a_waiver_for_exactly_that_
         "git pull --rebase origin main"
     );
     assert_eq!(
-        refused.waiver.as_deref(),
+        refused.bypass.as_deref(),
         Some("ALLOW_FORCE=1 git push --force-with-lease origin refs/heads/main:refs/heads/main")
     );
 }
@@ -199,7 +199,7 @@ fn a_deletion_is_refused_with_the_forge_step_and_a_waiver_that_repeats_it() {
         "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/topic'"
     );
     assert_eq!(
-        refused.waiver.as_deref(),
+        refused.bypass.as_deref(),
         Some("ALLOW_FORCE=1 git push origin :refs/heads/topic")
     );
 }
@@ -299,7 +299,7 @@ impl Repository {
             ],
         ));
         assert_eq!(refused.rule, "commit.signature");
-        assert_eq!(refused.waiver, None);
+        assert_eq!(refused.bypass, None);
         refused
     }
 }
@@ -315,6 +315,7 @@ fn a_failed_signature_rolls_the_commit_back_and_names_the_commit_to_repeat() {
         refused.next.as_deref().unwrap_or_default(),
         format!("git commit --reuse-message={unsigned}")
     );
+    assert_eq!(refused.bypass, None);
     assert_eq!(repository.git(&["rev-parse", "HEAD"]), base);
 }
 

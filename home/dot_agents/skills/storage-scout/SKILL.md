@@ -3,6 +3,8 @@ name: storage-scout
 description: >-
   Use the personal storage-scout tool to inspect disk usage and plan safe build-artifact cleanup, pruning, and deduplication.
   Use for storage-scout, cache size, cleanup eligibility, and duplicate build outputs.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Using storage-scout

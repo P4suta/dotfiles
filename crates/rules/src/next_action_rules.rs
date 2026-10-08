@@ -48,8 +48,8 @@ pub enum Pr {
 pub enum Checks {
     None,
     Pending,
-    Failing,
-    Passing,
+    Failure,
+    Success,
 }
 
 impl Checks {
@@ -59,8 +59,8 @@ impl Checks {
         match self {
             Self::None => "none",
             Self::Pending => "pending",
-            Self::Failing => "failing",
-            Self::Passing => "passing",
+            Self::Failure => "failure",
+            Self::Success => "success",
         }
     }
 }
@@ -211,10 +211,10 @@ pub fn decide(state: State) -> Step {
         _ => false,
     };
     match state.checks {
-        Checks::Failing => Step::FixChecks,
+        Checks::Failure => Step::FixChecks,
         Checks::None if !state.workflows => settled(state.review_paused, draft),
         Checks::None | Checks::Pending => Step::AwaitChecks,
-        Checks::Passing => settled(state.review_paused, draft),
+        Checks::Success => settled(state.review_paused, draft),
     }
 }
 
@@ -267,8 +267,8 @@ mod proofs {
     pub const CHECKS: [Checks; 4] = [
         Checks::None,
         Checks::Pending,
-        Checks::Failing,
-        Checks::Passing,
+        Checks::Failure,
+        Checks::Success,
     ];
 
     const fn publishes(step: Step) -> bool {
@@ -379,13 +379,13 @@ mod proofs {
         assert_eq!(published && state.pr == Pr::None, step == Step::CreatePr);
         let reviewed = published && matches!(state.pr, Pr::Draft | Pr::Ready);
         assert_eq!(
-            reviewed && state.checks == Checks::Failing,
+            reviewed && state.checks == Checks::Failure,
             step == Step::FixChecks
         );
         let reported =
-            state.checks == Checks::Passing || (state.checks == Checks::None && !state.workflows);
+            state.checks == Checks::Success || (state.checks == Checks::None && !state.workflows);
         assert_eq!(
-            reviewed && !reported && state.checks != Checks::Failing,
+            reviewed && !reported && state.checks != Checks::Failure,
             step == Step::AwaitChecks
         );
         assert_eq!(
@@ -488,7 +488,7 @@ mod tests {
     fn each_check_state_and_step_has_its_own_key() {
         assert_eq!(
             proofs::CHECKS.map(Checks::key),
-            ["none", "pending", "failing", "passing"]
+            ["none", "pending", "failure", "success"]
         );
         let keys = [
             Step::SetTemp,

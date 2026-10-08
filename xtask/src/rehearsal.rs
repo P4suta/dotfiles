@@ -5,7 +5,8 @@
 
 use crate::profile_rules::Profile;
 use crate::profiles::{
-    NativeAction, Store, forget_script_runs, native_profile, operate, pending_onchange_scripts,
+    NativeAction, Store, native_profile, operate, pending_onchange_scripts,
+    reset_entry_and_script_state,
 };
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
@@ -75,7 +76,7 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
     for skip in omitted(profile) {
         write!(
             identity,
-            "[[data.setup.skip]]\nscript = {}\nreason = {}\n\n",
+            "[[data.setup.ignore]]\nscript = {}\nreason = {}\n\n",
             toml_string(skip.script),
             toml_string(skip.reason)
         )?;
@@ -215,14 +216,24 @@ fn seed_foreign_helpers(home: &Path, scope: &Path) -> Result<()> {
     )
 }
 
-/// Review and maintenance history that installation must keep byte for byte.
-fn seed_history(home: &Path) -> Result<Vec<(PathBuf, Vec<u8>)>> {
+/// Machine-local history, credentials, approvals, and unrelated settings that installation must keep byte for byte.
+pub(crate) fn seed_history(home: &Path) -> Result<Vec<(PathBuf, Vec<u8>)>> {
     let mut preserved = Vec::new();
     for (relative, contents) in [
         (".local/state/coderabbit-guard/initialized", ""),
         (".local/state/coderabbit-guard/reviews.log", "1000\n"),
         (".local/state/coderabbit-guard/usage-initialized", ""),
         (".local/state/coderabbit-guard/usage.log", "1000\n"),
+        (
+            ".local/state/skill-ops/private-history.txt",
+            "owner history\n",
+        ),
+        (".claude/projects/fixture/session.jsonl", "{}\n"),
+        (".codex/sessions/fixture.jsonl", "{}\n"),
+        (".codex/auth.json", "{}\n"),
+        (".codex/owner-approvals.json", "{\"owner\":true}\n"),
+        (".config/opencode/unrelated.json", "{\"owner\":true}\n"),
+        (".config/unrelated/config.toml", "owner = true\n"),
     ] {
         let path = home.join(relative);
         fs::create_dir_all(path.parent().context("history parent is missing")?)?;
@@ -265,7 +276,7 @@ pub fn run(root: &Path, disposable_host: bool) -> Result<()> {
         ("repeated", false),
     ] {
         if rerun_scripts {
-            forget_script_runs(root, &store, &config, &home)?;
+            reset_entry_and_script_state(root, &store, &config, &home)?;
         } else if round == "repeated" {
             let pending = pending_onchange_scripts(root, &store, &config, &home)?;
             ensure!(
