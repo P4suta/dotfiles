@@ -123,7 +123,33 @@ fn git_wrapper(argv: &[String]) -> ExitCode {
         .collect();
     let mut git = real_git::at(&real);
     git.args(argv).env(INVOKED, refusal::command(&invoked));
-    delegate(&real, git)
+    let globals = gitargv::global_options(argv);
+    let subcommand = argv
+        .get(globals.len())
+        .map(String::as_str)
+        .unwrap_or_default();
+    let push = subcommand == "push";
+    let rewrite = subcommand == "revert"
+        || subcommand == "commit" && argv.iter().any(|arg| arg == "--amend")
+        || push
+            && argv
+                .iter()
+                .any(|arg| arg.starts_with("--force") || arg == "-f");
+    let published = if push {
+        rewrite
+    } else if rewrite {
+        let mut query: Vec<&str> = globals.iter().map(String::as_str).collect();
+        query.extend([
+            "for-each-ref",
+            "--contains=HEAD",
+            "--format=%(refname)",
+            "refs/remotes/",
+        ]);
+        real_git::capture(&query).is_some_and(|refs| !refs.trim().is_empty())
+    } else {
+        false
+    };
+    delegate(&real, git, push, rewrite, published)
 }
 
 /// Carries the command the wrapper ran to the hooks of that command, so a hook's bypass can repeat it.
@@ -142,8 +168,17 @@ fn foreign_waiver() -> Option<String> {
 }
 
 #[cfg(unix)]
-fn delegate(real: &Path, mut git: std::process::Command) -> ExitCode {
+fn delegate(
+    real: &Path,
+    mut git: std::process::Command,
+    push: bool,
+    rewrite: bool,
+    published: bool,
+) -> ExitCode {
     use std::os::unix::process::CommandExt;
+    if push || rewrite && published {
+        return observed_delegate(real, git, push, rewrite, published);
+    }
     // `exec` returns only on failure.
     let err = git.exec();
     eprintln!("::error:: could not exec {}: {err}", real.display());
@@ -151,10 +186,55 @@ fn delegate(real: &Path, mut git: std::process::Command) -> ExitCode {
 }
 
 #[cfg(windows)]
-fn delegate(real: &Path, mut git: std::process::Command) -> ExitCode {
+fn delegate(
+    real: &Path,
+    git: std::process::Command,
+    push: bool,
+    rewrite: bool,
+    published: bool,
+) -> ExitCode {
     ignore_console_interrupts();
+    observed_delegate(real, git, push, rewrite, published)
+}
+
+fn observed_delegate(
+    real: &Path,
+    mut git: std::process::Command,
+    push: bool,
+    rewrite: bool,
+    published: bool,
+) -> ExitCode {
+    let invoked = git
+        .get_envs()
+        .find(|(name, _)| *name == INVOKED)
+        .and_then(|(_, value)| value)
+        .map_or_else(String::new, |value| value.to_string_lossy().into_owned());
     match git.status() {
-        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Ok(status) => {
+            if let Some(source) = rules::incident_rules::signal(
+                rules::incident_rules::Operation {
+                    push,
+                    rewrite,
+                    published,
+                },
+                status.success(),
+            ) {
+                let rule = if source == rules::incident_rules::Source::FailedDelivery {
+                    "push.failed"
+                } else {
+                    "git.published-rewrite"
+                };
+                let observation = refusal::Refusal::new(
+                    rule,
+                    "the Git operation produced a failure observation",
+                    "skill-ops discharge --help",
+                )
+                .evidence(invoked)
+                .evidence(status.to_string());
+                platform::incidents::record(&observation, source);
+            }
+            std::process::exit(status.code().unwrap_or(1))
+        }
         Err(err) => {
             eprintln!("::error:: could not run {}: {err}", real.display());
             ExitCode::from(COMMAND_NOT_EXECUTABLE)

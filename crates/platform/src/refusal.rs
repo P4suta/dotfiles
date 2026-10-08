@@ -157,6 +157,7 @@ impl Refusal {
 
     /// Writes the rendered refusal to standard error.
     pub fn emit(&self) {
+        crate::incidents::record(self, rules::incident_rules::Source::GateRefusal);
         eprint!("{}", self.render());
     }
 
@@ -282,7 +283,7 @@ pub fn words(line: &str) -> Option<Vec<String>> {
     (command(&words) == line).then_some(words)
 }
 
-fn string(out: &mut String, value: &str) {
+pub(crate) fn string(out: &mut String, value: &str) {
     out.push('"');
     for character in value.chars() {
         match character {

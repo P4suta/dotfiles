@@ -1178,13 +1178,69 @@ fn expected_failures_record_no_incident() -> Result<()> {
 }
 
 #[test]
+fn native_failures_record_automatically_and_expected_signals_do_not() -> Result<()> {
+    let state = tempfile::tempdir()?;
+    for client in ["claude", "codex", "opencode"] {
+        assert!(skill_ops::record_native_failure(
+            state.path(),
+            client,
+            &serde_json::json!({"hook_event_name":"PostToolUseFailure","session_id":client,"error":"a tool failed"})
+        )?);
+        assert!(!skill_ops::record_native_failure(
+            state.path(),
+            client,
+            &serde_json::json!({"hook_event_name":"PostToolUseFailure","expected_failure":"red-test"})
+        )?);
+    }
+    assert!(skill_ops::record_native_failure(
+        state.path(),
+        "verifier",
+        &serde_json::json!({"failure_source":"verification-defect","session_id":"verification"})
+    )?);
+    let refusal =
+        platform::refusal::Refusal::new("hook.shell-write", "a write was refused", "use Edit")
+            .evidence("fixture");
+    for client in ["claude", "opencode"] {
+        assert!(skill_ops::record_native_failure(
+            state.path(),
+            client,
+            &serde_json::json!({"session_id": client, "tool_response": {"output": refusal.line()}})
+        )?);
+    }
+    assert!(skill_ops::record_native_failure(
+        state.path(),
+        "claude",
+        &serde_json::json!({"session_id": "child-status", "tool_response": {"exit_code": 2, "stderr": "failed child"}})
+    )?);
+    assert_eq!(incidents(state.path())?.len(), 7);
+    Ok(())
+}
+
+#[test]
 fn a_mechanized_discharge_needs_evidence_that_exists_and_reproduces() -> Result<()> {
     let root = tempfile::tempdir()?;
     let state = tempfile::tempdir()?;
     fs::create_dir_all(root.path().join("tests"))?;
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../platform");
+    let rules = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rules");
+    fs::write(
+        root.path().join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"incident-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n[dependencies]\nplatform = {{ path = {:?}, default-features = false }}\nrules = {{ path = {:?} }}\n[workspace]\n",
+            source.to_string_lossy().replace('\\', "/"),
+            rules.to_string_lossy().replace('\\', "/")
+        ),
+    )?;
     fs::write(
         root.path().join("tests/gate.rs"),
-        "#[test]\nfn reproduces_the_incident() {}\n",
+        r#"#[test]
+fn reproduces_the_incident() {
+    assert!(matches!(rules::shell_write_rules::inspect("sed -i 's/a/b/' file"), rules::shell_write_rules::Verdict::Refuse(_)));
+    platform::refusal::Refusal::new("hook.shell-write", "an in-place write was refused", "use Edit").evidence("sed -i").emit();
+}
+#[test]
+fn merely_named_test() {}
+"#,
     )?;
     let discharge = |evidence: Vec<String>| Discharge {
         schema: 1,
@@ -1221,6 +1277,14 @@ fn a_mechanized_discharge_needs_evidence_that_exists_and_reproduces() -> Result<
         "evidence whose test does not reproduce the incident is rejected"
     );
     assert!(record_discharge(state.path(), root.path(), &discharge(vec![])).is_err());
+    assert!(
+        record_discharge(
+            state.path(),
+            root.path(),
+            &discharge(vec!["tests/gate.rs::merely_named_test".into()])
+        )
+        .is_err()
+    );
     Ok(())
 }
 

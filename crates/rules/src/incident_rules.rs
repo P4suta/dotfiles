@@ -1,5 +1,80 @@
 extern crate alloc;
 
+/// A Git operation that can produce a failure observation.
+#[derive(Clone, Copy, Debug)]
+pub struct Operation {
+    pub push: bool,
+    pub rewrite: bool,
+    pub published: bool,
+}
+
+/// The source observed after the Git operation finishes.
+#[must_use]
+pub const fn signal(operation: Operation, success: bool) -> Option<Source> {
+    if operation.push && !success {
+        Some(Source::FailedDelivery)
+    } else if success && operation.rewrite && operation.published {
+        Some(Source::PublishedRewrite)
+    } else {
+        None
+    }
+}
+
+#[cfg(any(test, kani))]
+mod signal_proofs {
+    use super::*;
+
+    pub fn spec(operation: Operation, success: bool) {
+        let Operation {
+            push,
+            rewrite,
+            published,
+        } = operation;
+        let result = signal(operation, success);
+        assert_eq!(result == Some(Source::FailedDelivery), push && !success);
+        assert_eq!(
+            result == Some(Source::PublishedRewrite),
+            success && rewrite && published
+        );
+        assert_eq!(
+            result.is_none(),
+            (!push || success) && (!success || !rewrite || !published)
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn failed_delivery_and_published_rewrites_record_their_sources() {
+        let push: bool = kani::any();
+        let success: bool = kani::any();
+        let rewrite: bool = kani::any();
+        let published: bool = kani::any();
+        let operation = Operation {
+            push,
+            rewrite,
+            published,
+        };
+        spec(operation, success);
+        kani::cover!(signal(operation, success).is_none());
+        kani::cover!(signal(operation, success) == Some(Source::FailedDelivery));
+        kani::cover!(signal(operation, success) == Some(Source::PublishedRewrite));
+    }
+
+    #[test]
+    fn every_signal_tuple_is_checked() {
+        for [push, success, rewrite, published] in crate::domain::flags() {
+            spec(
+                Operation {
+                    push,
+                    rewrite,
+                    published,
+                },
+                success,
+            );
+        }
+    }
+}
+
 /// Where an incident came from: the signal that means an operation that should have succeeded stopped or produced a wrong result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Source {

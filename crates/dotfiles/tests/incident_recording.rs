@@ -105,3 +105,25 @@ fn an_admitted_command_records_nothing() -> Result<()> {
     assert!(!state.path().join("incidents").exists());
     Ok(())
 }
+
+#[test]
+fn every_client_and_subagent_uses_the_write_and_syntax_guards() -> Result<()> {
+    let state = tempfile::tempdir()?;
+    for event in [
+        json!({"tool_name":"Bash", "agent_id":"worker", "tool_input":{"command":"sed -i 's/a/b/' file"}}),
+        json!({"tool_name":"bash", "tool_input":{"command":"awk '{print > \"out\"}' file"}}),
+        json!({"tool_name":"shell", "tool_input":{"command":["bash", "-lc", "cat > out <<EOF\ntext\nEOF"]}}),
+        json!({"tool_name":"Bash", "tool_input":{"command":"if then"}}),
+        json!({"tool_name":"bash", "tool_input":{"command":"if then"}}),
+        json!({"tool_name":"shell", "tool_input":{"command":["bash", "-lc", "if then"]}}),
+    ] {
+        let output = hook(state.path(), &event)?;
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
+}

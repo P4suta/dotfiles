@@ -86,6 +86,7 @@ impl Wrapper {
             Some(environment) => fixture_git::inheriting(self.git, &global, environment.clone()),
             None => fixture_git::command(self.git, &global),
         };
+        command.env("DOTFILES_EXPECTED_FAILURE", "counterexample");
         for (name, _) in std::env::vars_os() {
             let text = name.to_string_lossy();
             if text.starts_with("ALLOW_") || text.starts_with("DOTGUARD_") {
@@ -116,6 +117,43 @@ impl Wrapper {
 
 fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
+}
+
+#[test]
+fn a_failed_real_push_records_its_rule_status_and_invocation() {
+    let wrapper = Wrapper::new("failed-push-observation");
+    let state = wrapper.scope.join("observations");
+    let output = wrapper.run_env(
+        &["push", "origin", "main"],
+        None,
+        &[
+            ("SKILL_OPS_STATE", state.to_str().unwrap()),
+            ("DOTFILES_EXPECTED_FAILURE", ""),
+        ],
+    );
+    assert!(!output.status.success());
+    let records: Vec<_> = std::fs::read_dir(state.join("incidents"))
+        .unwrap()
+        .map(|entry| {
+            serde_json::from_slice::<serde_json::Value>(
+                &std::fs::read(entry.unwrap().path()).unwrap(),
+            )
+            .unwrap()
+        })
+        .collect();
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0]["rule"], "push.failed");
+    assert_eq!(records[0]["source"], "failed-delivery");
+    assert!(
+        records[0]["evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item
+                .as_str()
+                .is_some_and(|text| text.contains("git push origin main"))),
+        "{records:?}"
+    );
 }
 
 /// The complete record a refused command printed as the last line of its standard error.

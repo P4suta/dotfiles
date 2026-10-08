@@ -481,16 +481,8 @@ fn record(blocked: &Blocked) {
         ],
     )
     .and_then(|incident| {
-        skill_ops::record_incident(
-            &state,
-            &incident,
-            skill_ops::incident_rules::Expected {
-                red_test: false,
-                counterexample: false,
-                dry_run: false,
-            },
-        )
-        .map(|recorded| (incident, recorded))
+        skill_ops::record_incident(&state, &incident, platform::incidents::expected())
+            .map(|recorded| (incident, recorded))
     });
     match incident {
         Ok((_, recorded)) if recorded => {}

@@ -198,6 +198,14 @@ verifier = "kani"
 source = "crates/rules/src/incident_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_ignoring_a_failed_push() {
+    assert!(production::signal(production::Operation { push: true, rewrite: false, published: false }, false).is_none());
+}
+#[kani::proof]
+fn reject_recording_an_unpublished_rewrite() {
+    assert!(production::signal(production::Operation { push: false, rewrite: true, published: false }, true).is_some());
+}
+#[kani::proof]
 fn reject_recording_an_expected_failure() {
     assert!(!production::excluded(production::Expected { red_test: true, counterexample: false, dry_run: false }));
 }

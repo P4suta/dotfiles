@@ -1662,6 +1662,12 @@ impl Incident {
         evidence: Vec<String>,
     ) -> Result<Self> {
         ensure!(!rule.trim().is_empty(), "an incident names its rule");
+        ensure!(
+            platform::refusal::Refusal::new(rule, "failure observation", "inspect the failure")
+                .evidence("native event")
+                .is_complete(),
+            "an incident names a valid dotted rule"
+        );
         ensure!(!session.trim().is_empty(), "an incident names its session");
         Ok(Self {
             schema: 1,
@@ -1672,6 +1678,71 @@ impl Incident {
             evidence,
         })
     }
+}
+
+/// Records failed native tool events and structured verification diagnostics.
+///
+/// # Errors
+///
+/// Returns an error for an unknown source or a recording failure.
+pub fn record_native_failure(
+    state: &Path,
+    client: &str,
+    event: &serde_json::Value,
+) -> Result<bool> {
+    let response = event
+        .get("error")
+        .or_else(|| event.get("tool_response"))
+        .or_else(|| event.get("output"));
+    let output = response
+        .and_then(|response| {
+            response.as_str().or_else(|| {
+                response["output"]
+                    .as_str()
+                    .or_else(|| response["stderr"].as_str())
+            })
+        })
+        .unwrap_or_default();
+    let refusal = platform::refusal::Refusal::find(output);
+    let failed = event["hook_event_name"] == "PostToolUseFailure"
+        || event["status"] == "error"
+        || event["status"] == "failed"
+        || event["is_error"].as_bool().unwrap_or(false)
+        || response.is_some_and(|response| {
+            response["is_error"].as_bool().unwrap_or(false)
+                || response["exit_code"].as_i64().is_some_and(|code| code != 0)
+        });
+    let source = match event["failure_source"].as_str() {
+        Some(source) => {
+            incident_rules::Source::from_key(source).context("unknown native failure source")?
+        }
+        None if refusal.is_some() => incident_rules::Source::GateRefusal,
+        None if failed => incident_rules::Source::FailedDelivery,
+        None => return Ok(false),
+    };
+    let session = event["session_id"]
+        .as_str()
+        .or_else(|| event["thread_id"].as_str())
+        .filter(|session| !session.is_empty())
+        .unwrap_or("no-session");
+    let rule = refusal.as_ref().map_or_else(
+        || "native.tool-failure".to_owned(),
+        |refusal| refusal.rule.clone(),
+    );
+    let evidence = vec![
+        format!("{client} native event {}", hash(event)?),
+        refusal.map_or_else(|| source.key().to_owned(), |refusal| refusal.cause),
+    ];
+    let expected = event["expected_failure"].as_str().unwrap_or_default();
+    record_incident(
+        state,
+        &Incident::new(&rule, session, source, evidence)?,
+        incident_rules::Expected {
+            red_test: expected == "red-test",
+            counterexample: expected == "counterexample",
+            dry_run: expected == "dry-run",
+        },
+    )
 }
 
 /// Records one incident under `incidents/` unless the recorder marks the failure expected, returning whether the store lacked it before.
@@ -1693,6 +1764,16 @@ pub fn record_incident(
             && incident.id.bytes().all(|byte| byte.is_ascii_hexdigit())
             && !incident.rule.trim().is_empty(),
         "invalid incident identity"
+    );
+    ensure!(
+        Incident::new(
+            &incident.rule,
+            &incident.session,
+            incident.source,
+            incident.evidence.clone()
+        )?
+        .id == incident.id,
+        "incident content differs from its identity"
     );
     let directory = state.join("incidents");
     let destination = directory.join(format!("{}.json", incident.id));
@@ -1815,12 +1896,73 @@ fn evidence_path(evidence: &str) -> &str {
 }
 
 /// Whether one mechanized evidence entry exists under `root` and names a test that reproduces the incident.
-fn evidence_reproduces(root: &Path, evidence: &str) -> bool {
-    match evidence.split_once(EVIDENCE_SEPARATOR) {
-        Some((path, test)) => fs::read_to_string(root.join(path))
-            .is_ok_and(|text| text.contains(&format!("fn {test}("))),
-        None => false,
+fn evidence_reproduces(root: &Path, evidence: &str, rule: &str) -> bool {
+    let Some((path, test)) = evidence.split_once(EVIDENCE_SEPARATOR) else {
+        return false;
+    };
+    if test.is_empty()
+        || !test
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_:".contains(&byte))
+    {
+        return false;
     }
+    let Ok(root) = platform::paths::canonical(root) else {
+        return false;
+    };
+    let Ok(path) = platform::paths::canonical(&root.join(path)) else {
+        return false;
+    };
+    if !path.starts_with(&root) {
+        return false;
+    }
+    let Some(package) = path
+        .ancestors()
+        .skip(1)
+        .take_while(|parent| parent.starts_with(&root))
+        .find(|parent| parent.join("Cargo.toml").is_file())
+    else {
+        return false;
+    };
+    let Ok(target) = tempfile::tempdir() else {
+        return false;
+    };
+    let mut command = platform::tool::Tool::Cargo.command();
+    command
+        .current_dir(package)
+        .args(["test", "--offline", "--manifest-path"])
+        .arg(package.join("Cargo.toml"))
+        .env("CARGO_TARGET_DIR", target.path())
+        .env("DOTFILES_EXPECTED_FAILURE", "counterexample");
+    if path
+        .parent()
+        .is_some_and(|parent| parent == package.join("tests"))
+    {
+        let Some(name) = path.file_stem() else {
+            return false;
+        };
+        command.arg("--test").arg(name);
+    } else {
+        command.arg("--lib");
+    }
+    let Ok(output) = command
+        .arg(test)
+        .args(["--", "--nocapture", "--test-threads=1"])
+        .output()
+    else {
+        return false;
+    };
+    let transcript = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    if !output.status.success() {
+        eprintln!("incident evidence validator failed: {transcript}");
+    }
+    output.status.success()
+        && transcript.contains("test result: ok. 1 passed; 0 failed;")
+        && platform::refusal::Refusal::find(&transcript).is_some_and(|refusal| refusal.rule == rule)
 }
 
 /// Records one discharge after its evidence holds, replacing a discharge the rule already carries.
@@ -1834,6 +1976,16 @@ pub fn record_discharge(state: &Path, root: &Path, discharge: &Discharge) -> Res
         !discharge.rule.trim().is_empty(),
         "a discharge names its rule"
     );
+    ensure!(
+        platform::refusal::Refusal::new(
+            &discharge.rule,
+            "failure observation",
+            "inspect the failure"
+        )
+        .evidence("native event")
+        .is_complete(),
+        "a discharge names a valid dotted rule"
+    );
     let outcome = match discharge.outcome.as_str() {
         "mechanized" => incident_rules::Outcome::Mechanized {
             evidence_present: !discharge.evidence.is_empty()
@@ -1845,7 +1997,7 @@ pub fn record_discharge(state: &Path, root: &Path, discharge: &Discharge) -> Res
                 && discharge
                     .evidence
                     .iter()
-                    .all(|evidence| evidence_reproduces(root, evidence)),
+                    .all(|evidence| evidence_reproduces(root, evidence, &discharge.rule)),
         },
         "exempt" => incident_rules::Outcome::Exempt {
             reason: discharge

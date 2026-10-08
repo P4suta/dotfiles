@@ -293,8 +293,9 @@ fn execute(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Load { names, bundle } => session.load(names, bundle)?,
         Commands::Observe { client } => {
-            for observation in
-                ops::observations(&client, &stdin_json()?, &session.catalog, &session.tree)?
+            let input = stdin_json()?;
+            ops::record_native_failure(&session.state, &client, &input)?;
+            for observation in ops::observations(&client, &input, &session.catalog, &session.tree)?
             {
                 ops::record(&session.state, &observation)?;
             }
