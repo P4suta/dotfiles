@@ -53,6 +53,7 @@ pub mod aside_rules;
 pub mod body_rules;
 pub mod boundary_rules;
 pub mod change_rules;
+pub mod cycle_rules;
 pub mod directive_rules;
 pub mod disk_scan_rules;
 pub mod env_expansion_rules;

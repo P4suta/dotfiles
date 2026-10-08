@@ -562,20 +562,96 @@ fn comment_overrides_cannot_capture_whole_directories() {
     }
 }
 
+/// The derived order of every profile keeps every declaration, and every dropped prerequisite or added back edge fails with the steps named.
+#[test]
+fn every_derived_setup_order_holds_and_every_broken_edge_names_its_steps() {
+    use dotfiles::setup::{Step, Violation, ordering_violations};
+    use platform::step::{Disorder, Family, sequence, sequence_with};
+    for family in Family::ALL {
+        let order = sequence(family).unwrap();
+        for profile in family.profiles() {
+            let ran: Vec<Step> = order
+                .iter()
+                .copied()
+                .filter(|step| step.runs_on(*profile))
+                .collect();
+            assert_eq!(
+                ordering_violations(*profile, &ran),
+                Vec::<Violation>::new(),
+                "{profile:?}"
+            );
+            for step in &ran {
+                for prerequisite in step.prerequisites() {
+                    if !ran.contains(&prerequisite) {
+                        continue;
+                    }
+                    let dropped: Vec<Step> = ran
+                        .iter()
+                        .copied()
+                        .filter(|other| *other != prerequisite)
+                        .collect();
+                    assert!(
+                        ordering_violations(*profile, &dropped)
+                            .contains(&Violation::Missing(*step, prerequisite)),
+                        "{profile:?}: dropping {prerequisite:?} before {step:?}"
+                    );
+                    let back = sequence_with(family, |declared| {
+                        let mut needs = declared.prerequisites();
+                        if declared == prerequisite {
+                            needs.push(*step);
+                        }
+                        needs
+                    });
+                    // A before-phase step that gains an after-phase prerequisite breaks the phases before it closes a cycle.
+                    let named = match &back {
+                        Err(Disorder::Cycle(members)) => {
+                            members.contains(step) && members.contains(&prerequisite)
+                        }
+                        Err(Disorder::Phase(before, after)) => {
+                            *before == prerequisite && after == step
+                        }
+                        Ok(_) => false,
+                    };
+                    assert!(
+                        named,
+                        "{family:?}: the back edge {prerequisite:?} -> {step:?} reported {back:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn setup_order_rejects_a_step_that_runs_before_its_prerequisite() {
-    use dotfiles::setup::{Step, ordering_violations};
+    use dotfiles::setup::{Step, Violation, ordering_violations};
+    // WSL runs neither Nix, Desktop, nor Scoop, so the tools need only mise before them.
     assert_eq!(
-        ordering_violations(&[Step::Mise, Step::Runtime, Step::Tools, Step::Domyjob]),
-        Vec::<(Step, Step)>::new()
+        ordering_violations(Profile::Wsl, &[Step::Mise, Step::Runtime, Step::Tools]),
+        Vec::<Violation>::new()
     );
     assert_eq!(
-        ordering_violations(&[Step::Mise, Step::Domyjob, Step::Tools]),
-        [(Step::Domyjob, Step::Tools)]
+        ordering_violations(
+            Profile::Wsl,
+            &[Step::Mise, Step::Runtime, Step::Tools, Step::Tools]
+        ),
+        [Violation::Repeated(Step::Tools)]
     );
     assert_eq!(
-        ordering_violations(&[Step::Domyjob]),
-        Vec::<(Step, Step)>::new()
+        ordering_violations(Profile::Mac, &[Step::Mise, Step::Domyjob, Step::Tools]),
+        [
+            Violation::Early(Step::Domyjob, Step::Tools),
+            Violation::Missing(Step::Domyjob, Step::Runtime),
+            Violation::Missing(Step::Tools, Step::Desktop),
+            Violation::Missing(Step::Tools, Step::Runtime),
+        ]
+    );
+    assert_eq!(
+        ordering_violations(Profile::Wsl, &[Step::Mise, Step::Tools, Step::Runtime]),
+        [
+            Violation::Early(Step::Tools, Step::Runtime),
+            Violation::Phase(Step::Runtime, Step::Tools)
+        ]
     );
     let listing = br#"{"10-b.sh":{"sourceRelative":"run_onchange_after_10-b.sh.tmpl"},"a.sh":{"sourceRelative":"run_after_a.sh.tmpl"},"z.sh":{"sourceRelative":"run_onchange_before_z.sh.tmpl"}}"#;
     assert_eq!(

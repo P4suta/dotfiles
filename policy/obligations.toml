@@ -1494,3 +1494,15 @@ fn reject_a_neutral_security_refusal() { assert!(notification(Gate::Dotguard)); 
 #[kani::proof]
 fn reject_losing_hook_input() { assert!(!takes_input(Gate::RepositoryLefthook)); }
 '''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/cycle_rules.rs"
+probes = '''
+#[kani::proof]
+#[kani::unwind(6)]
+fn reject_missing_a_back_edge() { assert_eq!(production::cycle(&[2, 1]), 0); }
+#[kani::proof]
+#[kani::unwind(6)]
+fn reject_a_cycle_in_a_closed_linear_order() { assert_ne!(production::cycle(&[0, 1]), 0); }
+'''

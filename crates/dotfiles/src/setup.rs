@@ -140,18 +140,49 @@ pub fn entry_requirements(rendered: &str) -> Vec<Tool> {
     tools
 }
 
-/// Dependency pairs `(step, prerequisite)` that a run order breaks: the prerequisite runs later, or only later.
+/// A way a run order of the setup steps breaks their declarations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Violation {
+    /// The step runs before a prerequisite that the profile runs.
+    Early(Step, Step),
+    /// The profile runs the prerequisite of a step, and the order leaves it out.
+    Missing(Step, Step),
+    /// The order runs the step more than once.
+    Repeated(Step),
+    /// A step that runs before the files comes after one that runs after them.
+    Phase(Step, Step),
+}
+
+/// Every way `sequence` breaks the declarations on `profile`, checked at every occurrence of each step.
+/// The order must run each step once, after every prerequisite the profile runs, and every before-phase step before every after-phase step.
 #[must_use]
-pub fn ordering_violations(sequence: &[Step]) -> Vec<(Step, Step)> {
+pub fn ordering_violations(profile: Profile, sequence: &[Step]) -> Vec<Violation> {
     let mut violations = Vec::new();
     for (index, step) in sequence.iter().enumerate() {
-        for prerequisite in step.after() {
-            let first = sequence
+        if sequence.iter().take(index).any(|earlier| earlier == step) {
+            violations.push(Violation::Repeated(*step));
+        }
+        for prerequisite in step.prerequisites() {
+            match sequence
                 .iter()
-                .position(|candidate| candidate == prerequisite);
-            if first.is_some_and(|first| first > index) {
-                violations.push((*step, *prerequisite));
+                .position(|candidate| *candidate == prerequisite)
+            {
+                Some(first) if first > index => {
+                    violations.push(Violation::Early(*step, prerequisite));
+                }
+                None if prerequisite.runs_on(profile) => {
+                    violations.push(Violation::Missing(*step, prerequisite));
+                }
+                _ => {}
             }
+        }
+        if step.phase() == platform::step::Phase::Before
+            && let Some(after) = sequence
+                .iter()
+                .take(index)
+                .find(|earlier| earlier.phase() == platform::step::Phase::After)
+        {
+            violations.push(Violation::Phase(*step, *after));
         }
     }
     violations

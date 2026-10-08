@@ -691,14 +691,18 @@ impl<'a> Fixture<'a> {
                 )?
                 .stdout,
         )?;
-        let sequence: Vec<_> = order
+        // The launchers map each rendered script to the step it runs, which the bootstrap launchers of `mise` and the runtime can't name through `dotfiles setup`.
+        let launchers = crate::launchers::launchers()?;
+        let sequence: Vec<platform::step::Step> = order
             .iter()
-            .flat_map(|target| {
-                dotfiles::setup::scripted_steps(
-                    dump[target]["contents"].as_str().unwrap_or_default(),
-                )
+            .map(|target| {
+                launchers
+                    .iter()
+                    .find(|launcher| launcher.target == *target)
+                    .map(|launcher| launcher.step)
+                    .with_context(|| format!("{target} names no setup launcher"))
             })
-            .collect();
+            .collect::<Result<_>>()?;
         let scripts: String = order
             .iter()
             .filter_map(|target| dump[target]["contents"].as_str())
@@ -718,10 +722,10 @@ impl<'a> Fixture<'a> {
             "{} profile runs setup or installs entry points that need packages its data does not install: {unprovisioned:?}",
             profile.name()
         );
-        let violations = dotfiles::setup::ordering_violations(&sequence);
+        let violations = dotfiles::setup::ordering_violations(profile, &sequence);
         ensure!(
             violations.is_empty(),
-            "{} profile runs a setup step before a step it relies on: {violations:?} in {order:?}",
+            "{} profile runs its setup steps out of their declared order: {violations:?} in {order:?}",
             profile.name()
         );
         let empty = empty_directories(&self.managed("dirs")?, &self.managed("files,symlinks")?);
