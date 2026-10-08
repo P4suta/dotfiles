@@ -42,9 +42,11 @@ pub fn run() -> Result<i32> {
     Ok(0)
 }
 
-/// A PowerShell single-quoted literal: only a single quote needs escaping, by doubling it.
+/// A PowerShell single-quoted literal, as `host_setup_rules::powershell_literal` writes it.
 fn literal(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "''"))
+    crate::host_setup_rules::powershell_literal(text)
+        .as_str()
+        .to_owned()
 }
 
 fn register(exe: &Path, policy: &Path, log: &Path) -> String {

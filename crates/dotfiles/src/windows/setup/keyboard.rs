@@ -1,14 +1,21 @@
 use anyhow::{Context, Result, bail};
 
+use crate::host_setup_rules;
 use crate::windows::{env, proc};
 use windows_sys::Win32::UI::Accessibility::FILTERKEYS;
+#[cfg(test)]
+use windows_sys::Win32::UI::WindowsAndMessaging::{FKF_AVAILABLE, FKF_FILTERKEYSON};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    FKF_AVAILABLE, FKF_FILTERKEYSON, SPI_GETFILTERKEYS, SPI_SETFILTERKEYS, SPI_SETKEYBOARDDELAY,
-    SPI_SETKEYBOARDSPEED, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SystemParametersInfoW,
+    SPI_GETFILTERKEYS, SPI_SETFILTERKEYS, SPI_SETKEYBOARDDELAY, SPI_SETKEYBOARDSPEED,
+    SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SystemParametersInfoW,
 };
 
+/// The filter keys the old setup turned on, which the tests build.
+#[cfg(test)]
 const LEGACY_FILTER_KEYS_FLAGS: u32 = FKF_FILTERKEYSON | FKF_AVAILABLE;
+#[cfg(test)]
 const LEGACY_AUTO_REPEAT_DELAY_MS: u32 = 150;
+#[cfg(test)]
 const LEGACY_AUTO_REPEAT_RATE_MS: u32 = 15;
 const ERROR_REQUIRES_INTERACTIVE_WINDOWSTATION: i32 = 1459;
 /// The ranges `SPI_SETKEYBOARDDELAY` and `SPI_SETKEYBOARDSPEED` accept.
@@ -129,16 +136,19 @@ fn get_filter_keys() -> Result<FILTERKEYS> {
     Ok(keys)
 }
 
+/// Turns off filter keys that hold exactly the settings the old setup made, as `host_setup_rules` decides, and reports whether it did.
 fn disable_managed_filter_keys(keys: &mut FILTERKEYS) -> bool {
-    let is_managed = keys.dwFlags == LEGACY_FILTER_KEYS_FLAGS
-        && keys.iWaitMSec == 0
-        && keys.iDelayMSec == LEGACY_AUTO_REPEAT_DELAY_MS
-        && keys.iRepeatMSec == LEGACY_AUTO_REPEAT_RATE_MS
-        && keys.iBounceMSec == 0;
-    if is_managed {
-        keys.dwFlags &= !FKF_FILTERKEYSON;
+    let reset = host_setup_rules::disable_managed_filter_keys(host_setup_rules::FilterKeys {
+        flags: keys.dwFlags,
+        wait_ms: keys.iWaitMSec,
+        delay_ms: keys.iDelayMSec,
+        repeat_ms: keys.iRepeatMSec,
+        bounce_ms: keys.iBounceMSec,
+    });
+    if let Some(reset) = reset {
+        keys.dwFlags = reset.flags;
     }
-    is_managed
+    reset.is_some()
 }
 
 #[cfg(test)]
@@ -176,6 +186,12 @@ mod tests {
         );
     }
     use windows_sys::Win32::UI::WindowsAndMessaging::FKF_HOTKEYACTIVE;
+
+    #[test]
+    fn the_rule_names_the_win32_filter_keys_flags() {
+        assert_eq!(host_setup_rules::FILTER_KEYS_ON, FKF_FILTERKEYSON);
+        assert_eq!(host_setup_rules::FILTER_KEYS_AVAILABLE, FKF_AVAILABLE);
+    }
 
     fn legacy_filter_keys() -> FILTERKEYS {
         FILTERKEYS {

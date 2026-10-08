@@ -14,8 +14,6 @@ use crate::windows::{env, proc};
 /// SIDs rather than names, which a renamed or localized group would break.
 const SYSTEM_SID: &str = "*S-1-5-18";
 const ADMINISTRATORS_SID: &str = "*S-1-5-32-544";
-/// An `authorized_keys` key's material: its type and its base64 body.
-const KEY_MATERIAL_FIELDS: usize = 2;
 
 pub fn authorize(ssh_dir: &Path, key: &str, sshd_config: &str) -> Result<()> {
     let path = ssh_dir.join("administrators_authorized_keys");
@@ -36,10 +34,10 @@ pub fn authorize(ssh_dir: &Path, key: &str, sshd_config: &str) -> Result<()> {
         }
     };
     let wanted = merge(&existing, key);
-    if wanted == existing {
+    if wanted.as_str() == existing {
         println!("    authorized key already present");
     } else {
-        std::fs::write(&path, wanted.as_bytes())
+        std::fs::write(&path, wanted.as_str().as_bytes())
             .with_context(|| format!("writing {}", path.display()))?;
         println!("    authorized key -> {}", path.display());
     }
@@ -47,27 +45,9 @@ pub fn authorize(ssh_dir: &Path, key: &str, sshd_config: &str) -> Result<()> {
     restrict(&path)
 }
 
-/// Keeps every other key and appends this one.
-///
-/// Compares only type and base64, because the comment changes on each 1Password rename.
-fn merge(existing: &str, key: &str) -> String {
-    let body = material(key);
-    let mut lines: Vec<&str> = existing
-        .lines()
-        .map(str::trim_end)
-        .filter(|line| !line.trim().is_empty())
-        .filter(|line| material(line) != body)
-        .collect();
-    lines.push(key);
-    format!("{}\r\n", lines.join("\r\n"))
-}
-
-/// The `<type> <base64>` half of an `authorized_keys` line, without the trailing comment.
-fn material(line: &str) -> String {
-    line.split_whitespace()
-        .take(KEY_MATERIAL_FIELDS)
-        .collect::<Vec<_>>()
-        .join(" ")
+/// Keeps every other key and appends this one, as `host_setup_rules::authorized_keys` decides.
+fn merge(existing: &str, key: &str) -> crate::host_setup_rules::AuthorizedKeys {
+    crate::host_setup_rules::authorized_keys(existing, key)
 }
 
 /// `/inheritance:r` drops inherited ACEs, and `/grant:r` replaces instead of adding.
@@ -100,13 +80,13 @@ mod tests {
 
     #[test]
     fn an_empty_file_gets_the_key() {
-        assert_eq!(merge("", KEY), format!("{KEY}\r\n"));
+        assert_eq!(merge("", KEY).as_str(), format!("{KEY}\r\n"));
     }
 
     #[test]
     fn a_second_pass_changes_nothing() {
         let once = merge("", KEY);
-        assert_eq!(merge(&once, KEY), once);
+        assert_eq!(merge(once.as_str(), KEY).as_str(), once.as_str());
     }
 
     /// A different comment still names the same key.
@@ -114,7 +94,7 @@ mod tests {
     fn a_renamed_key_does_not_duplicate() {
         let existing = format!("{KEY} old-name\r\n");
         assert_eq!(
-            merge(&existing, &format!("{KEY} new-name")),
+            merge(&existing, &format!("{KEY} new-name")).as_str(),
             format!("{KEY} new-name\r\n")
         );
     }
@@ -123,12 +103,12 @@ mod tests {
     fn other_keys_survive() {
         let other = "ssh-rsa AAAAB3Nz someone-else";
         let merged = merge(&format!("{other}\r\n"), KEY);
-        assert_eq!(merged, format!("{other}\r\n{KEY}\r\n"));
+        assert_eq!(merged.as_str(), format!("{other}\r\n{KEY}\r\n"));
     }
 
     #[test]
     fn blank_lines_are_dropped() {
         let merged = merge("\r\n\r\n", KEY);
-        assert_eq!(merged, format!("{KEY}\r\n"));
+        assert_eq!(merged.as_str(), format!("{KEY}\r\n"));
     }
 }

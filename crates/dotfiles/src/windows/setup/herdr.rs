@@ -351,18 +351,22 @@ fn stale_releases(
     retain: usize,
     current: &str,
 ) -> Vec<String> {
-    let mut sorted: Vec<&(String, std::time::SystemTime)> = releases
+    const NANOS_PER_SECOND: i128 = 1_000_000_000;
+    let nanos = |duration: std::time::Duration| {
+        i128::from(duration.as_secs()) * NANOS_PER_SECOND + i128::from(duration.subsec_nanos())
+    };
+    let timed: Vec<(&str, i128)> = releases
         .iter()
-        .filter(|(name, _)| !name.starts_with(".staging.") && !name.starts_with(".backup."))
+        .map(|(name, modified)| {
+            let time = modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or_else(|before| -nanos(before.duration()), nanos);
+            (name.as_str(), time)
+        })
         .collect();
-    sorted.sort_by(|(a_name, a_time), (b_name, b_time)| {
-        b_time.cmp(a_time).then_with(|| b_name.cmp(a_name))
-    });
-    sorted
+    crate::host_setup_rules::stale_releases(&timed, retain, current)
         .into_iter()
-        .skip(retain)
-        .filter(|(name, _)| name.as_str() != current)
-        .map(|(name, _)| name.clone())
+        .map(str::to_owned)
         .collect()
 }
 
@@ -560,6 +564,27 @@ mod tests {
             stale_releases(&names, 1, "0.10.0-x86_64-pc-windows-msvc"),
             vec!["0.9.9-x86_64-pc-windows-msvc".to_owned()]
         );
+    }
+
+    #[test]
+    fn retention_preserves_file_time_order_before_the_epoch_and_after_u64_nanoseconds() {
+        let epoch = std::time::UNIX_EPOCH;
+        let names = [
+            ("z".to_owned(), epoch - std::time::Duration::from_secs(2)),
+            ("y".to_owned(), epoch - std::time::Duration::from_secs(1)),
+            (
+                "b".to_owned(),
+                epoch + std::time::Duration::from_nanos(u64::MAX),
+            ),
+            (
+                "a".to_owned(),
+                epoch
+                    + std::time::Duration::from_nanos(u64::MAX)
+                    + std::time::Duration::from_secs(1),
+            ),
+        ];
+        assert_eq!(stale_releases(&names, 1, "x"), ["z", "y", "b"]);
+        assert_eq!(stale_releases(&names[..2], 1, "x"), ["z"]);
     }
 
     #[test]
