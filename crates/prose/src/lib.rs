@@ -1047,6 +1047,7 @@ pub fn comment_prose(line: &str) -> String {
 /// Each batch leaves room for the executable and configuration in the Windows command line.
 pub(crate) fn comment_inputs(root: &Path, paths: &[String]) -> Result<Vec<Input>> {
     const COMMENT_ARGUMENT_UNITS: usize = 16_000;
+    const PATH_ARGUMENT_OVERHEAD: usize = 3;
     let mut inputs = Vec::new();
     let mut remaining = paths;
     while !remaining.is_empty() {
@@ -1054,7 +1055,7 @@ pub(crate) fn comment_inputs(root: &Path, paths: &[String]) -> Result<Vec<Input>
         let count = remaining
             .iter()
             .take_while(|path| {
-                units += path.encode_utf16().count() + 3;
+                units += path.encode_utf16().count() + PATH_ARGUMENT_OVERHEAD;
                 units <= COMMENT_ARGUMENT_UNITS
             })
             .count();
@@ -1067,6 +1068,62 @@ pub(crate) fn comment_inputs(root: &Path, paths: &[String]) -> Result<Vec<Input>
         remaining = rest;
     }
     Ok(inputs)
+}
+
+#[cfg(test)]
+mod comment_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn a_scan_longer_than_the_windows_command_line_reports_every_source() -> Result<()> {
+        const SOURCES: usize = 400;
+        const PADDING: usize = 80;
+        const WINDOWS_ARGUMENT_UNITS: usize = 32_767;
+        let directory = tempfile::tempdir()?;
+        let paths: Vec<String> = (0..SOURCES)
+            .map(|number| format!("source_{number:03}_{}.rs", "x".repeat(PADDING)))
+            .collect();
+        ensure!(
+            paths
+                .iter()
+                .map(|path| path.encode_utf16().count())
+                .sum::<usize>()
+                > WINDOWS_ARGUMENT_UNITS,
+            "the regression must exceed a single Windows command line"
+        );
+        let expected: BTreeMap<String, String> = paths
+            .iter()
+            .enumerate()
+            .map(|(number, path)| (path.clone(), format!("Comment {number}.\n")))
+            .collect();
+        for (path, text) in &expected {
+            fs::write(
+                directory.path().join(path),
+                format!("// {text}fn item() {{}}\n"),
+            )?;
+        }
+        let scanned = comment_inputs(directory.path(), &paths)?;
+        ensure!(scanned.len() == SOURCES, "each source must appear once");
+        let actual: BTreeMap<String, String> = scanned
+            .into_iter()
+            .map(|input| {
+                let name = Path::new(&input.path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .context("a scanned source name")?
+                    .to_owned();
+                ensure!(
+                    input.lines == [1],
+                    "the original source location is retained"
+                );
+                ensure!(!input.markdown_document, "a source comment stays a comment");
+                Ok((name, input.text))
+            })
+            .collect::<Result<_>>()?;
+        assert_eq!(actual, expected);
+        Ok(())
+    }
 }
 
 fn comment_batch(root: &Path, paths: &[String]) -> Result<Vec<Input>> {
