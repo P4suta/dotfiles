@@ -4,6 +4,7 @@
 pub mod adr;
 pub mod agent_memory;
 pub mod change;
+pub mod environment;
 pub mod ignore_audit;
 pub mod input_audit;
 pub mod instruction_audit;
@@ -24,8 +25,8 @@ pub use model::profile_rules;
 pub use platform::paths::{SOURCE_STATE, canonical, has_extension, source_state};
 pub use platform::{build_inputs, refusal, report, tool};
 pub use rules::{
-    adr_rules, change_rules, ignore_rules, input_rules, instruction_rules, lint_rules,
-    next_action_rules, proof_budget_rules,
+    adr_rules, change_rules, env_expansion_rules, ignore_rules, input_rules, instruction_rules,
+    lint_rules, next_action_rules, proof_budget_rules,
 };
 pub use skill_ops::split_frontmatter;
 

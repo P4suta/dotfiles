@@ -9,6 +9,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use xtask::change_rules::{Gate, Gates};
 use xtask::check_build_dir;
+use xtask::environment;
 use xtask::tool::Tool;
 
 #[derive(Parser)]
@@ -493,7 +494,7 @@ fn format_metadata(root: &Path) -> Result<()> {
 }
 
 fn main() {
-    if let Err(error) = run() {
+    if let Err(error) = environment::check().and_then(|()| run()) {
         xtask::report(&error);
         std::process::exit(1);
     }

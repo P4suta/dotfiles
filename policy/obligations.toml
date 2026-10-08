@@ -151,6 +151,20 @@ fn reject_rewriting_crlf_the_index_keeps() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/env_expansion_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_admitting_an_unexpanded_value() {
+    assert!(production::verdict(true) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_an_empty_next_action() {
+    assert!(production::NEXT_ACTION.is_empty());
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/gate_rules.rs"
 probes = '''
 #[kani::proof]
@@ -665,6 +679,29 @@ fn reject_an_exemption_with_an_open_reason() {
 #[kani::proof]
 fn reject_admitting_a_raised_ceiling() {
     assert!(!lowered(Bound::Ceiling, 0, Some(1)));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/shell_syntax_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_admitting_unbalanced_quotes() {
+    assert!(production::verdict(true, false, false) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_admitting_a_broken_windows_path() {
+    assert!(production::verdict(false, true, false) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_admitting_a_frozen_expansion() {
+    assert!(production::verdict(false, false, true) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_an_empty_cause_or_next_action() {
+    assert!(production::cause(production::Reason::UnbalancedQuotes).is_empty()
+        || production::next_action(production::Reason::UnbalancedQuotes).is_empty());
 }
 '''
 

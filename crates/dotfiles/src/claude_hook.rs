@@ -209,6 +209,15 @@ pub(crate) fn refusal(event: &str) -> Result<Option<String>> {
     if let Some(message) = path_conversion_refusal(command, cfg!(windows)) {
         return Ok(Some(message));
     }
+    if let crate::shell_syntax_rules::Verdict::Refuse(reason) =
+        crate::shell_syntax_rules::inspect(command)
+    {
+        return Ok(Some(format!(
+            "Refused: this shell command is malformed: {}.\nNext action: {}",
+            crate::shell_syntax_rules::cause(reason),
+            crate::shell_syntax_rules::next_action(reason)
+        )));
+    }
     if let Verdict::Refuse(reason) = inspect(command) {
         return Ok(Some(format!(
             "Refused: this command writes a file through an inline interpreter, in-place editor, heredoc, or redirect.\nNext action: {}",
@@ -318,6 +327,34 @@ mod tests {
             );
         }
         for command in ["sed -n 's/a/b/p' file.txt", "awk '{print $1}' data.tsv"] {
+            assert_eq!(refusal(&bash(command)).unwrap(), None, "{command}");
+        }
+    }
+
+    #[test]
+    fn the_incident_command_is_refused_with_its_corrected_form() {
+        let message = refusal(&bash(r#"export CARGO_TARGET_DIR="D:\cargo\$k""#))
+            .unwrap()
+            .unwrap();
+        assert!(
+            message.contains("malformed") && message.contains("forward slashes"),
+            "{message}"
+        );
+        for command in [
+            "echo \"unterminated",
+            "echo \"${name\"",
+            "export DIR='D:\\cargo$k'",
+        ] {
+            let message = refusal(&bash(command))
+                .unwrap()
+                .unwrap_or_else(|| panic!("{command}"));
+            assert!(message.contains("malformed"), "{command}: {message}");
+        }
+        for command in [
+            "export CARGO_TARGET_DIR=\"D:/cargo/$name\"",
+            "cargo build 2>&1",
+            "echo 'D:\\cargo'",
+        ] {
             assert_eq!(refusal(&bash(command)).unwrap(), None, "{command}");
         }
     }
