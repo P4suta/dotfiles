@@ -227,7 +227,7 @@ fn scan(command: &str) -> Scan {
 ///
 /// Exempt as disproportionate: a shell parser over unbounded text needs fuzzing, which no verifier here owns yet.
 /// Evidence: `crates/rules/src/shell_write_rules.rs::tests::standard_input_bodies_include_heredocs_and_piped_words`.
-/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+/// Reconsider when a cargo-fuzz target owns this function.
 #[must_use]
 pub fn segments(command: &str) -> Vec<Vec<String>> {
     scan(command)
@@ -264,7 +264,7 @@ impl PartialEq<&str> for Program {
 ///
 /// Exempt as disproportionate: Kani spends past its budget on the string search of even a three-byte word.
 /// Evidence: `crates/rules/src/shell_write_rules.rs::tests::a_program_name_drops_its_directory_case_and_suffixes`.
-/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+/// Reconsider when a cargo-fuzz target owns this function.
 #[must_use]
 pub fn program(text: &str) -> Program {
     let name = text.rsplit(['/', '\\']).next().unwrap_or(text);
@@ -554,7 +554,7 @@ fn command_sources(mut arguments: &[&str], sources: &mut Vec<Source>) {
 ///
 /// Exempt as disproportionate: a shell parser over unbounded text needs fuzzing, which no verifier here owns yet.
 /// Evidence: `crates/rules/src/shell_write_rules.rs::tests::gh_body_arguments_are_collected_from_every_spelling`.
-/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+/// Reconsider when a cargo-fuzz target owns this function.
 pub fn body_sources(command: &str) -> Vec<Source> {
     let scan = scan(command);
     let segments: Vec<Vec<&str>> = scan
@@ -600,7 +600,7 @@ pub fn body_sources(command: &str) -> Vec<Source> {
 ///
 /// Exempt as disproportionate: a shell parser over unbounded text needs fuzzing, which no verifier here owns yet.
 /// Evidence: `crates/rules/src/shell_write_rules.rs::tests::inline_interpreters_are_refused`.
-/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+/// Reconsider when a cargo-fuzz target owns this function.
 #[must_use]
 pub fn inspect(command: &str) -> Verdict {
     let scan = scan(command);

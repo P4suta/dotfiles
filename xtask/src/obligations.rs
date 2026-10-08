@@ -123,6 +123,9 @@ pub struct QuintModel {
     pub steps: u32,
     pub distinct_states: u64,
     pub traces: Vec<String>,
+    /// The committed reachable state graph, which `TLC` must dump again and a test replays edge for edge.
+    #[serde(default)]
+    pub graph: Option<String>,
 }
 
 /// The refusals of a Quint obligation that the source alone decides: its modules, witnesses, and traces.
@@ -144,6 +147,11 @@ fn close_quint(root: &Path, quint: &QuintModel) -> Vec<String> {
         if !root.join(trace).is_file() {
             refusals.push(format!("{MANIFEST}: the trace {trace} is missing"));
         }
+    }
+    if let Some(graph) = &quint.graph
+        && !root.join(graph).is_file()
+    {
+        refusals.push(format!("{MANIFEST}: the state graph {graph} is missing"));
     }
     refusals
 }

@@ -81,7 +81,7 @@ const HOST_READS: [&str; 11] = [
 ///
 /// Exempt as disproportionate: Kani runs past its budget on the string comparisons of even a short token.
 /// Evidence: `crates/rules/src/input_rules.rs::tests::each_token_names_its_term`.
-/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+/// Reconsider when a cargo-fuzz target owns this function.
 #[must_use]
 pub fn term(token: &str) -> Term {
     match token {
@@ -97,7 +97,7 @@ pub fn term(token: &str) -> Term {
 ///
 /// Exempt as disproportionate: a parser over unbounded text needs fuzzing, which no verifier here owns yet.
 /// Evidence: `crates/rules/src/input_rules.rs::tests::terms_split_at_spaces_and_parentheses_and_keep_quotes_whole`.
-/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+/// Reconsider when a cargo-fuzz target owns this function.
 #[must_use]
 pub fn terms(expression: &str) -> Vec<Term> {
     let mut found = Vec::new();

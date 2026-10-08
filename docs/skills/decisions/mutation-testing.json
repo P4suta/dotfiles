@@ -1,9 +1,10 @@
 {
-  "revision": "e49086a34f9b096809e0a05fbc5a7a0455f074498c4e7e29ecf76aa3bebe8795",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "1eceb35b6f06e80b3e773f0323daac6a9b5562f024c8070a39ef21ccffd7294b",
+  "outcome": "implemented",
+  "reason": "End with the same pointer as the other assurance skills to the machine gate that reports and refuses verification gaps and weakened mutation budgets, since the gate, not the skill, now enforces them.",
   "evidence": [
-    "home/dot_agents/skills/mutation-testing/SKILL.md"
+    "home/dot_agents/skills/mutation-testing/SKILL.md",
+    "docs/adr/verification-proportional-to-code-shape.md"
   ],
   "revisit": null
 }

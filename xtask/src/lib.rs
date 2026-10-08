@@ -17,6 +17,7 @@ pub mod quality;
 pub mod quint;
 pub mod rehearsal;
 pub mod skill_proofs;
+pub mod state_graph;
 pub mod structure;
 
 pub use model::profile_rules;

@@ -805,6 +805,41 @@ fn repository() -> Result<tempfile::TempDir> {
 }
 
 #[test]
+fn a_skill_that_repeats_a_pinned_version_or_the_proof_budget_is_refused() -> Result<()> {
+    let root = repository()?;
+    fs::write(
+        root.path().join("mise.toml"),
+        "[tools]\nrust = { version = \"1.99.0\" }\n\"cargo:kani-verifier\" = \"0.68.0\"\nbun = \"latest\"\n",
+    )?;
+    check_catalog(root.path())?;
+    let reference = root
+        .path()
+        .join("home/dot_agents/skills/beta/references/tools.md");
+    fs::create_dir_all(reference.parent().expect("reference directory"))?;
+    for (text, pin) in [
+        ("Run Kani 0.68.0 on every harness.\n", "0.68.0"),
+        (
+            "Each harness must finish within its 30-second budget.\n",
+            "30-second",
+        ),
+        ("Build with Rust 1.99.0.\n", "1.99.0"),
+    ] {
+        fs::write(&reference, text)?;
+        let message = refusal(check_catalog(root.path()));
+        assert!(
+            message.contains("tools.md") && message.contains(&format!("names `{pin}`")),
+            "{message}"
+        );
+    }
+    fs::write(
+        &reference,
+        "Run the pinned Kani from mise.toml on every harness.\n",
+    )?;
+    skill_ops::check_pins(root.path())?;
+    Ok(())
+}
+
+#[test]
 fn the_required_check_depends_only_on_skills_policy_and_decisions() -> Result<()> {
     let root = repository()?;
     let decisions = tracked_decisions(&root.path().join("docs/skills/decisions"))?;
