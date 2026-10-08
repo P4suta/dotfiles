@@ -565,8 +565,12 @@ fn a_pr_pause_admits_a_guarded_review_through_reservation_preflight_and_executio
         fs::write(&probes, "").unwrap();
         let preflight = std::cell::Cell::new(false);
         let launched = std::cell::Cell::new(false);
+        // The pause reads under the ledger lock, so a second guard can't take the lock meanwhile.
         let result = execute_admitted(
-            scope,
+            || {
+                assert!(coderabbit_guard::reserve(&ledger, 100).is_err());
+                Ok(scope)
+            },
             &ledger,
             &probes,
             100,

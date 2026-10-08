@@ -40,6 +40,9 @@ const PROBE_SAMPLES: &str = "1000";
 /// One worker keeps the model checker's state count exact and the run repeatable.
 const TLC_CONFIG: &str = r#"{"workers": 1}"#;
 
+/// The steps of the bounded Apalache check that backs an inductive invariant.
+pub const APALACHE_STEPS: &str = "16";
+
 /// The verbosity at which Quint passes on the model checker's own report, which holds the state count.
 const TLC_REPORT: &str = "3";
 
@@ -216,6 +219,51 @@ impl Runner<'_> {
             obligations::MANIFEST,
             quint.distinct_states
         );
+        if let Some(inductive) = &quint.inductive {
+            let main = quint
+                .symbolic
+                .as_ref()
+                .map_or(&quint.main, |symbolic| &symbolic.main);
+            let mut options = Vec::new();
+            if let Some(symbolic) = &quint.symbolic {
+                fs::write(
+                    self.output.join("apalache.json"),
+                    serde_json::to_vec(
+                        &serde_json::json!({"checker": {"cinit": symbolic.constants}}),
+                    )?,
+                )?;
+                options.extend(["--apalache-config", "/out/apalache.json"]);
+            }
+            let mut arguments = vec!["verify", model, "--main", main, "--backend", "apalache"];
+            arguments.extend(options);
+            // Apalache proves the invariant inductive, so it holds after any number of steps, and a bounded run backs it with concrete runs.
+            self.passing(
+                &format!("the inductive check of {inductive} in {}", quint.main),
+                &[
+                    arguments.as_slice(),
+                    &[
+                        "--inductive-invariant",
+                        inductive,
+                        "--invariant",
+                        &quint.invariant,
+                    ],
+                ]
+                .concat(),
+            )?;
+            self.passing(
+                &format!("the bounded Apalache check of {}", quint.main),
+                &[
+                    arguments.as_slice(),
+                    &[
+                        "--max-steps",
+                        APALACHE_STEPS,
+                        "--invariant",
+                        &quint.invariant,
+                    ],
+                ]
+                .concat(),
+            )?;
+        }
         let probed = self.tlc(model, &quint.probe, &quint.invariant)?;
         ensure!(
             !probed.status.success()

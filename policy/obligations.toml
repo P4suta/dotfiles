@@ -672,6 +672,16 @@ fn reject_early_review() {
 fn reject_owner_pause_bypass() {
     assert!(production::service_access(production::pause_scope(false, false, true), false));
 }
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_read_only_paid_usage() {
+    assert!(production::classify(&["usage", "--use-credits"]) == production::Invocation::ReadOnly);
+}
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_a_future_record() {
+    assert!(production::check_budget(&[1], 0) == production::Budget::Admit);
+}
 '''
 
 [[obligation]]
@@ -994,6 +1004,123 @@ traces = [
 ]
 
 [[obligation]]
+verifier = "quint"
+spec = "specs/review_ledger.qnt"
+main = "review_ledger"
+probe = "review_ledger_early"
+invariant = "safe"
+inductive = "inductive"
+symbolic = { main = "review_ledger_symbolic", constants = "review_ledger_symbolic::review_ledger_model::ConstInit" }
+witnesses = ["launched", "full", "stopped"]
+seed = "0x2a"
+samples = 1000
+steps = 12
+distinct_states = 1740
+traces = [
+  "specs/traces/review_ledger.0.itf.json",
+  "specs/traces/review_ledger.1.itf.json",
+  "specs/traces/review_ledger.2.itf.json",
+  "specs/traces/review_ledger.3.itf.json",
+  "specs/traces/review_ledger.4.itf.json",
+  "specs/traces/review_ledger.5.itf.json",
+  "specs/traces/review_ledger.6.itf.json",
+  "specs/traces/review_ledger.7.itf.json",
+  "specs/traces/review_ledger.8.itf.json",
+  "specs/traces/review_ledger.9.itf.json",
+  "specs/traces/review_ledger.10.itf.json",
+  "specs/traces/review_ledger.11.itf.json",
+  "specs/traces/review_ledger.12.itf.json",
+  "specs/traces/review_ledger.13.itf.json",
+  "specs/traces/review_ledger.14.itf.json",
+  "specs/traces/review_ledger.15.itf.json",
+  "specs/traces/review_ledger.16.itf.json",
+  "specs/traces/review_ledger.17.itf.json",
+  "specs/traces/review_ledger.18.itf.json",
+  "specs/traces/review_ledger.19.itf.json",
+  "specs/traces/review_ledger.20.itf.json",
+  "specs/traces/review_ledger.21.itf.json",
+  "specs/traces/review_ledger.22.itf.json",
+  "specs/traces/review_ledger.23.itf.json",
+  "specs/traces/review_ledger.24.itf.json",
+  "specs/traces/review_ledger.25.itf.json",
+  "specs/traces/review_ledger.26.itf.json",
+  "specs/traces/review_ledger.27.itf.json",
+  "specs/traces/review_ledger.28.itf.json",
+  "specs/traces/review_ledger.29.itf.json",
+  "specs/traces/review_ledger.30.itf.json",
+  "specs/traces/review_ledger.31.itf.json",
+  "specs/traces/review_ledger.32.itf.json",
+  "specs/traces/review_ledger.33.itf.json",
+  "specs/traces/review_ledger.34.itf.json",
+  "specs/traces/review_ledger.35.itf.json",
+  "specs/traces/review_ledger.36.itf.json",
+  "specs/traces/review_ledger.37.itf.json",
+  "specs/traces/review_ledger.38.itf.json",
+  "specs/traces/review_ledger.39.itf.json",
+  "specs/traces/review_ledger.40.itf.json",
+  "specs/traces/review_ledger.41.itf.json",
+  "specs/traces/review_ledger.42.itf.json",
+  "specs/traces/review_ledger.43.itf.json",
+  "specs/traces/review_ledger.44.itf.json",
+  "specs/traces/review_ledger.45.itf.json",
+  "specs/traces/review_ledger.46.itf.json",
+  "specs/traces/review_ledger.47.itf.json",
+  "specs/traces/review_ledger.48.itf.json",
+  "specs/traces/review_ledger.49.itf.json",
+  "specs/traces/review_ledger.50.itf.json",
+  "specs/traces/review_ledger.51.itf.json",
+  "specs/traces/review_ledger.52.itf.json",
+  "specs/traces/review_ledger.53.itf.json",
+  "specs/traces/review_ledger.54.itf.json",
+  "specs/traces/review_ledger.55.itf.json",
+  "specs/traces/review_ledger.56.itf.json",
+  "specs/traces/review_ledger.57.itf.json",
+  "specs/traces/review_ledger.58.itf.json",
+  "specs/traces/review_ledger.59.itf.json",
+  "specs/traces/review_ledger.60.itf.json",
+  "specs/traces/review_ledger.61.itf.json",
+  "specs/traces/review_ledger.62.itf.json",
+  "specs/traces/review_ledger.63.itf.json",
+  "specs/traces/review_ledger.64.itf.json",
+  "specs/traces/review_ledger.65.itf.json",
+  "specs/traces/review_ledger.66.itf.json",
+  "specs/traces/review_ledger.67.itf.json",
+  "specs/traces/review_ledger.68.itf.json",
+  "specs/traces/review_ledger.69.itf.json",
+  "specs/traces/review_ledger.70.itf.json",
+  "specs/traces/review_ledger.71.itf.json",
+  "specs/traces/review_ledger.72.itf.json",
+  "specs/traces/review_ledger.73.itf.json",
+  "specs/traces/review_ledger.74.itf.json",
+  "specs/traces/review_ledger.75.itf.json",
+  "specs/traces/review_ledger.76.itf.json",
+  "specs/traces/review_ledger.77.itf.json",
+  "specs/traces/review_ledger.78.itf.json",
+  "specs/traces/review_ledger.79.itf.json",
+  "specs/traces/review_ledger.80.itf.json",
+  "specs/traces/review_ledger.81.itf.json",
+  "specs/traces/review_ledger.82.itf.json",
+  "specs/traces/review_ledger.83.itf.json",
+  "specs/traces/review_ledger.84.itf.json",
+  "specs/traces/review_ledger.85.itf.json",
+  "specs/traces/review_ledger.86.itf.json",
+  "specs/traces/review_ledger.87.itf.json",
+  "specs/traces/review_ledger.88.itf.json",
+  "specs/traces/review_ledger.89.itf.json",
+  "specs/traces/review_ledger.90.itf.json",
+  "specs/traces/review_ledger.91.itf.json",
+  "specs/traces/review_ledger.92.itf.json",
+  "specs/traces/review_ledger.93.itf.json",
+  "specs/traces/review_ledger.94.itf.json",
+  "specs/traces/review_ledger.95.itf.json",
+  "specs/traces/review_ledger.96.itf.json",
+  "specs/traces/review_ledger.97.itf.json",
+  "specs/traces/review_ledger.98.itf.json",
+  "specs/traces/review_ledger.99.itf.json",
+  "specs/traces/review_ledger_early.itf.json",
+]
+
+[[obligation]]
 verifier = "kani-contract"
 source = "crates/rules/src/reaper_rules.rs"
 function = "elapsed_seconds"
@@ -1003,6 +1130,18 @@ flags = ["function-contracts"]
 verifier = "kani-contract"
 source = "crates/rules/src/reaper_rules.rs"
 function = "age"
+flags = ["function-contracts"]
+
+[[obligation]]
+verifier = "kani-contract"
+source = "crates/rules/src/review_rules.rs"
+function = "check_budget"
+flags = ["function-contracts"]
+
+[[obligation]]
+verifier = "kani-contract"
+source = "crates/rules/src/review_rules.rs"
+function = "classify"
 flags = ["function-contracts"]
 
 [[pilot]]

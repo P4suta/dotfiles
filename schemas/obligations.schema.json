@@ -167,6 +167,14 @@
               "format": "uint64",
               "minimum": 0
             },
+            "inductive": {
+              "description": "An inductive invariant that Apalache proves for every limit the model chooses, which a bounded Apalache run of `quint::APALACHE_STEPS` steps backs.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
             "invariant": {
               "type": "string"
             },
@@ -207,6 +215,17 @@
               "items": {
                 "type": "string"
               }
+            },
+            "symbolic": {
+              "description": "The module and constant initializer of a symbolic Apalache check.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SymbolicQuint"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "additionalProperties": false,
@@ -263,6 +282,22 @@
         "subjects",
         "exit",
         "issue"
+      ]
+    },
+    "SymbolicQuint": {
+      "type": "object",
+      "properties": {
+        "constants": {
+          "type": "string"
+        },
+        "main": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "main",
+        "constants"
       ]
     }
   }

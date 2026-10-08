@@ -1044,10 +1044,32 @@ pub fn comment_prose(line: &str) -> String {
 }
 
 /// Reads the comments of `paths` through `OComment`.
+/// Each batch leaves room for the executable and configuration in the Windows command line.
 pub(crate) fn comment_inputs(root: &Path, paths: &[String]) -> Result<Vec<Input>> {
-    if paths.is_empty() {
-        return Ok(Vec::new());
+    const COMMENT_ARGUMENT_UNITS: usize = 16_000;
+    let mut inputs = Vec::new();
+    let mut remaining = paths;
+    while !remaining.is_empty() {
+        let mut units = 0;
+        let count = remaining
+            .iter()
+            .take_while(|path| {
+                units += path.encode_utf16().count() + 3;
+                units <= COMMENT_ARGUMENT_UNITS
+            })
+            .count();
+        ensure!(
+            count > 0,
+            "a comment source path exceeds the command argument budget"
+        );
+        let (batch, rest) = remaining.split_at(count);
+        inputs.extend(comment_batch(root, batch)?);
+        remaining = rest;
     }
+    Ok(inputs)
+}
+
+fn comment_batch(root: &Path, paths: &[String]) -> Result<Vec<Input>> {
     let mut command = Tool::Ocomment.command();
     command
         .current_dir(root)

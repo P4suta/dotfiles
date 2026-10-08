@@ -123,6 +123,19 @@ pub struct QuintModel {
     pub steps: u32,
     pub distinct_states: u64,
     pub traces: Vec<String>,
+    /// An inductive invariant that Apalache proves for every limit the model chooses, which a bounded Apalache run of `quint::APALACHE_STEPS` steps backs.
+    #[serde(default)]
+    pub inductive: Option<String>,
+    /// The module and constant initializer of a symbolic Apalache check.
+    #[serde(default)]
+    pub symbolic: Option<SymbolicQuint>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SymbolicQuint {
+    pub main: String,
+    pub constants: String,
 }
 
 /// The refusals of a Quint obligation that the source alone decides: its modules, witnesses, and traces.
@@ -130,10 +143,18 @@ fn close_quint(root: &Path, quint: &QuintModel) -> Vec<String> {
     let mut refusals = Vec::new();
     let spec = &quint.spec;
     let text = fs::read_to_string(root.join(spec)).unwrap_or_default();
-    for module in [&quint.main, &quint.probe] {
+    for module in [&quint.main, &quint.probe]
+        .into_iter()
+        .chain(quint.symbolic.iter().map(|symbolic| &symbolic.main))
+    {
         if !text.contains(&format!("module {module} {{")) {
             refusals.push(format!("{MANIFEST}: {spec} declares no module {module}"));
         }
+    }
+    if quint.symbolic.is_some() && quint.inductive.is_none() {
+        refusals.push(format!(
+            "{MANIFEST}: {spec} names symbolic constants without an inductive invariant"
+        ));
     }
     if quint.witnesses.is_empty() {
         refusals.push(format!(

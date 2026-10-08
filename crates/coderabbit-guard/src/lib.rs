@@ -10,13 +10,13 @@ use std::io::{Read, Write};
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 
+use crate::review_rules::{
+    Budget, Event, Guard, Stage, cli_reviews_paused, cooldown_complete, included_allowance,
+    pause_scope, rolling_allowance, service_access,
+};
 pub use crate::review_rules::{
     DAILY_LIMIT, DAY_MS, HOUR_MS, HOURLY_LIMIT, PROBE_DAILY_LIMIT, PROBE_GAP_MS, PauseScope,
     pr_reviews_paused,
-};
-use crate::review_rules::{
-    cli_reviews_paused, cooldown_complete, included_allowance, pause_scope, rolling_allowance,
-    service_access,
 };
 
 /// The guard policy that `just install-review-guard` applies from the invoking checkout on every profile.
@@ -57,91 +57,31 @@ impl Drop for LedgerLock {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum Invocation {
-    ReadOnly,
-    Review,
-    Forbidden,
+pub use crate::review_rules::Invocation;
+
+fn words(args: &[String]) -> Vec<&str> {
+    args.iter().map(String::as_str).collect()
 }
 
-fn first_command(args: &[String]) -> Option<&str> {
-    let mut args = args.iter().peekable();
-    while let Some(arg) = args.next() {
-        if !arg.starts_with('-') {
-            return Some(arg);
-        }
-        let (flag, inline_value) = arg
-            .split_once('=')
-            .map_or((arg.as_str(), false), |(flag, _)| (flag, true));
-        match flag {
-            "-c" | "--config" => {
-                while args.peek().is_some_and(|value| !value.starts_with('-')) {
-                    args.next();
-                }
-            }
-            "--deep" if !inline_value => {
-                if args.peek().is_some_and(|value| !value.starts_with('-')) {
-                    args.next();
-                }
-            }
-            "--dir" | "--base" | "--base-commit" | "--source-branch" | "--region"
-                if !inline_value =>
-            {
-                args.next();
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
+/// What an invocation does to the budget, as `review_rules::classify` decides.
 #[must_use]
 pub fn classify(args: &[String]) -> Invocation {
-    if args.iter().any(|arg| {
-        arg == "--use-credits"
-            || arg.starts_with("--use-credits=")
-            || arg == "--api-key"
-            || arg.starts_with("--api-key=")
-            || arg == "--remote"
-            || arg.starts_with("--remote=")
-    }) || matches!(first_command(args), Some("code" | "handoff" | "update"))
-    {
-        return Invocation::Forbidden;
-    }
-    if usage_query(args)
-        || matches!(args, [arg] if matches!(arg.as_str(), "--version" | "-V" | "--help" | "-h"))
-        || args.first().is_some_and(|arg| {
-            matches!(
-                arg.as_str(),
-                "auth" | "doctor" | "stats" | "usage" | "pullrequest" | "skills"
-            )
-        })
-        || matches!(args, [command, subcommand, ..] if command == "review" && subcommand == "findings")
-        || matches!(args, [command, flag] if command == "review" && matches!(flag.as_str(), "--show-prompts" | "--usage" | "--help" | "-h"))
-    {
-        Invocation::ReadOnly
-    } else {
-        Invocation::Review
-    }
+    review_rules::classify(&words(args))
 }
 
-/// Checks that one more review fits the rolling hourly and daily limits of the ledger `records`.
+/// Checks that one more review fits the rolling hourly and daily limits of the ledger `records`, as `review_rules::check_budget` decides.
 ///
 /// # Errors
 ///
 /// Returns an error when a record lies after `now`, or when the rolling hour or day has no allowance left.
 pub fn check_budget(records: &[u64], now: u64) -> Result<()> {
-    ensure!(
-        records.iter().all(|at| *at <= now),
-        "clock moved backwards; review refused"
-    );
-    let hourly = records.iter().filter(|at| now - **at < HOUR_MS).count();
-    let daily = records.iter().filter(|at| now - **at < DAY_MS).count();
-    ensure!(
-        rolling_allowance(hourly, daily),
-        "local CodeRabbit limit reached ({HOURLY_LIMIT}/rolling hour, {DAILY_LIMIT}/rolling day); wait for history to leave the window and recheck usage without bypassing the guard"
-    );
-    Ok(())
+    match review_rules::check_budget(records, now) {
+        Budget::Admit => Ok(()),
+        Budget::Backwards => bail!("clock moved backwards; review refused"),
+        Budget::Exhausted => bail!(
+            "local CodeRabbit limit reached ({HOURLY_LIMIT}/rolling hour, {DAILY_LIMIT}/rolling day); wait for history to leave the window and recheck usage without bypassing the guard"
+        ),
+    }
 }
 
 /// Checks a `CodeRabbit` usage response for included allowance on the guarded organization with paid usage inactive.
@@ -312,18 +252,17 @@ pub fn execute_probe<T>(ledger: &Path, now: u64, probe: impl FnOnce() -> Result<
 
 #[must_use]
 pub fn usage_query(args: &[String]) -> bool {
-    first_command(args) == Some("usage")
-        || (matches!(first_command(args), None | Some("review"))
-            && args.iter().any(|arg| arg == "--usage"))
+    review_rules::usage_query(&words(args))
 }
 
-/// Run a guarded review only while the owner leaves CLI use unpaused CLI use.
+/// Run a guarded review only while the owner leaves CLI use unpaused.
+/// The guard reads the pause through `pause` while it holds the ledger lock, so a pause the owner sets before a reservation always stops that reservation.
 ///
 /// # Errors
 ///
-/// Returns an error when `scope` pauses CLI use, or any error of [`execute_reserved`].
+/// Returns an error when locking or reading the ledger fails, when `pause` fails or pauses CLI use, when the budget refuses the review, or any later error of [`execute_reserved`].
 pub fn execute_admitted(
-    scope: PauseScope,
+    pause: impl FnOnce() -> Result<PauseScope>,
     ledger: &Path,
     probes: &Path,
     now: u64,
@@ -331,8 +270,36 @@ pub fn execute_admitted(
     usage: impl FnOnce() -> Result<String>,
     review: impl FnOnce() -> Result<i32>,
 ) -> Result<i32> {
+    let (mut file, records) = lock_ledger(ledger)?;
+    let scope = pause()?;
     admit(scope, false)?;
-    execute_reserved(ledger, probes, now, organization, usage, review)
+    ensure!(
+        pause_admits(scope),
+        "the review ledger model refuses a reservation under pause scope {}",
+        scope.name()
+    );
+    check_budget(&records, now)?;
+    record(&mut file, now)?;
+    check_usage(&execute_probe(probes, now, usage)?, organization)?;
+    review()
+}
+
+/// Whether `specs/review_ledger.qnt` lets a guard that holds the ledger lock reserve under `scope`.
+/// The step function takes the lock, the owner's pause when the scope covers CLI use, the read under the lock, and the reservation.
+fn pause_admits(scope: PauseScope) -> bool {
+    let mut events = vec![Event::Lock(0)];
+    if cli_reviews_paused(scope) {
+        events.push(Event::Pause);
+    }
+    events.extend([Event::Read(0), Event::Reserve(0, 0)]);
+    events
+        .into_iter()
+        .try_fold(review_rules::ledger(1), |state, event| {
+            review_rules::record(Guard::Fixed, state, event)
+        })
+        .is_some_and(|state| {
+            state.stage.first() == Some(&Stage::Reserved) && review_rules::ledger_safe(&state)
+        })
 }
 
 fn admit(scope: PauseScope, local_status: bool) -> Result<()> {
@@ -645,7 +612,7 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
     );
     let directory = review_directory(&args)?;
     execute_admitted(
-        scope,
+        || pause(user_directory),
         &ledger,
         &user_directory.join(".local/state/coderabbit-guard/usage.log"),
         now_ms()?,
