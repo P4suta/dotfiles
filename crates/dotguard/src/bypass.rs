@@ -19,6 +19,8 @@ pub enum Rule {
     Foreign,
     /// A commit whose tree equals its parent's.
     Empty,
+    /// An agent invocation of a legacy command with its recorded reason.
+    Legacy,
 }
 
 impl Rule {
@@ -29,6 +31,7 @@ impl Rule {
             Self::NoVerify => None,
             Self::Foreign => Some("ALLOW_FOREIGN"),
             Self::Empty => Some("ALLOW_EMPTY"),
+            Self::Legacy => Some("DOTFILES_LEGACY_BYPASS"),
         }
     }
 
@@ -38,6 +41,7 @@ impl Rule {
             Self::NoVerify => "no-verify",
             Self::Foreign => "foreign",
             Self::Empty => "empty",
+            Self::Legacy => "legacy",
         }
     }
 }

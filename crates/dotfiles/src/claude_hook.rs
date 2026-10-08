@@ -265,10 +265,17 @@ pub(crate) fn refusal(event: &str) -> Result<Option<Blocked>> {
             ),
         )));
     }
+    if let Some(message) = attribution_refusal(command, event["cwd"].as_str().map(Path::new)) {
+        return Ok(Some(blocked(
+            "hook.attribution",
+            skill_ops::incident_rules::Source::GateRefusal,
+            message,
+        )));
+    }
     Ok(
-        attribution_refusal(command, event["cwd"].as_str().map(Path::new)).map(|message| {
+        crate::legacy::refusal(command, event["cwd"].as_str().map(Path::new))?.map(|message| {
             blocked(
-                "hook.attribution",
+                "hook.legacy",
                 skill_ops::incident_rules::Source::GateRefusal,
                 message,
             )
@@ -471,7 +478,7 @@ mod tests {
 
     #[test]
     fn project_commands_and_other_tools_are_admitted() {
-        for command in ["just check", "pr-workflow start", "git status", "cat a.md"] {
+        for command in ["just check", "pr-workflow start", "git status", "bat a.md"] {
             assert_eq!(
                 refusal(&bash(command))
                     .unwrap()
@@ -480,6 +487,7 @@ mod tests {
                 "{command}"
             );
         }
+        assert!(refused("cat a.md").contains("legacy command"));
         let write = json!({"tool_name": "Write", "tool_input": {"file_path": "a"}}).to_string();
         assert_eq!(
             refusal(&write).unwrap().map(|blocked| blocked.message),
@@ -508,10 +516,13 @@ mod tests {
                 .message;
             assert!(message.contains("storage-scout scan"), "{message}");
         }
+        for command in ["du --version", "find . -name '*.rs'", "ls -la"] {
+            assert!(refused(command).contains("legacy command"), "{command}");
+        }
         for event in [
-            bash("du --version"),
-            bash("find . -name '*.rs'"),
-            bash("ls -la"),
+            bash("dust --version"),
+            bash("fd -g '*.rs'"),
+            bash("eza -la"),
             powershell("Get-ChildItem C:\\Users"),
             powershell("git status 2>$null"),
             powershell("Get-ChildItem -Recurse -Filter *.md"),
@@ -545,7 +556,7 @@ mod tests {
                 "gh api repos/a/b/issues/3 -X PATCH -F body=\"{}\"",
                 "gh pr create --body \"$(cat <<'EOF'\n{}\nEOF\n)\"",
                 "gh pr create --body-file - <<'EOF'\nBody.\n{}\nEOF",
-                "cat <<'EOF' | gh issue comment 3 -F -\n{}\nEOF",
+                "bat --plain <<'EOF' | gh issue comment 3 -F -\n{}\nEOF",
                 "env -u SSH_AUTH_SOCK gh pr create -R a/b --body \"{}\"",
             ] {
                 let command = template.replace("{}", form);
@@ -566,7 +577,7 @@ mod tests {
                 "gh pr comment 3 --body \"{}\"",
                 "gh api repos/a/b/issues/3/comments -f body=\"{}\"",
                 "gh pr create --body-file - <<'EOF'\n{}\nEOF",
-                "cat <<'EOF' | gh issue comment 3 -F -\n{}\nEOF",
+                "bat --plain <<'EOF' | gh issue comment 3 -F -\n{}\nEOF",
             ] {
                 let command = template.replace("{}", text);
                 assert_eq!(

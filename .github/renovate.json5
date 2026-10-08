@@ -10,10 +10,17 @@
     {
       // Each pin in versions.toml that a `renovate:` comment precedes, with the lookup that comment names.
       customType: 'regex',
-      managerFilePatterns: ['/^home/\\.chezmoidata/versions\\.toml$/'],
+      managerFilePatterns: ['/^home/\\.chezmoidata/(versions|modern)\\.toml$/'],
       matchStrings: [
         '# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\n[\\w-]+ = "(?<currentValue>[^"]+)"',
       ],
+    },
+  ],
+  packageRules: [
+    {
+      matchUpdateTypes: ['major'],
+      automerge: false,
+      labels: ['breaking-change'],
     },
   ],
 }

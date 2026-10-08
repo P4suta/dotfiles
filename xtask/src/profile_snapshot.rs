@@ -249,6 +249,12 @@ pub(crate) fn manifest(source: &Path, combination: Combination) -> Result<Value>
         ],
     )?;
     let sources: BTreeMap<String, Value> = serde_json::from_slice(&listing)?;
+    crate::modern::check(
+        &crate::modern::table(&crate::source_state(source))?,
+        &combination.name(),
+        dump.get(crate::modern::MISE_CONFIG)
+            .and_then(|entry| entry["contents"].as_str()),
+    )?;
     let order = script_order(&listing)?;
     let mut targets = Vec::new();
     for (path, entry) in &dump {

@@ -6,6 +6,21 @@
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/legacy_rules.rs"
+probes = '''
+use production::{Verdict, verdict};
+#[kani::proof]
+fn reject_admitting_a_mapped_legacy_command_without_a_bypass() {
+    assert!(verdict(true, false, false) == Verdict::Admit);
+}
+#[kani::proof]
+fn reject_refusing_a_listed_bootstrap_script() {
+    assert!(verdict(true, true, false) == Verdict::Refuse);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/adr_rules.rs"
 probes = '''
 use production::{Identity, Status, Verdict, identity, verdict};

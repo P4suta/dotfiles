@@ -1,6 +1,12 @@
+{{- $pins := includeTemplate "partials/modern-pins" . | fromJson -}}
 [tools]
 {{- range (concat .platforms.windows.tools.common (index .platforms.windows.tools .role) | uniq) }}
+{{- if not (hasKey $pins .) }}
 {{ . | quote }} = {{ if eq . "rust" }}"stable"{{ else }}"latest"{{ end }}
+{{- end }}
+{{- end }}
+{{- range $tool, $version := $pins }}
+{{ $tool | quote }} = {{ $version | quote }}
 {{- end }}
 
 [settings]

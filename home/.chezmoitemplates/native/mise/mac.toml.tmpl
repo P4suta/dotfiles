@@ -1,6 +1,12 @@
+{{- $pins := includeTemplate "partials/modern-pins" . | fromJson -}}
 [tools]
 {{- range (concat .platforms.mac.tools.common (index .platforms.mac.tools .role) | uniq) }}
+{{- if not (hasKey $pins .) }}
 {{ . | quote }} = {{ if hasKey $.platforms.mac.tool_versions . }}{{ index $.platforms.mac.tool_versions . | quote }}{{ else }}"latest"{{ end }}
+{{- end }}
+{{- end }}
+{{- range $tool, $version := $pins }}
+{{ $tool | quote }} = {{ $version | quote }}
 {{- end }}
 
 "github:haskell/haskell-language-server" = { version = {{ index .platforms.mac.tool_versions "haskell-language-server" | quote }}, bin = ["haskell-language-server-wrapper", {{ printf "haskell-language-server-%s" .platforms.mac.tool_versions.ghc | quote }}] }
