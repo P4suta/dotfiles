@@ -1,14 +1,14 @@
 ---
 name: ci-budget
 description: >-
-  Reduce avoidable GitHub Actions runs by verifying coherent changes locally and managing an explicit push hold.
+  Reduce avoidable GitHub Actions runs by verifying coherent changes locally and managing an explicit push pause.
   Use before authorized pushes or PR updates, when Actions allowance runs low, or when mapping CI checks to the owner's native machines.
 ---
 
 # Local verification before pushing
 
 Required hosted checks and the current-head PR review stay the final gates.
-An active owner-imposed push hold overrides any push authorization until the owner explicitly resumes pushes.
+An active owner-imposed push pause overrides any push authorization until the owner explicitly resumes pushes.
 
 ## Prepare locally
 
@@ -24,13 +24,13 @@ Use `reliability` for intermittent failures instead of pushing until CI passes.
 
 ## Control publication
 
-Before every push, inspect the effective hooks and the machine-local hold in [push control](references/push-control.md).
+Before every push, inspect the effective hooks and the machine-local pause in [push control](references/push-control.md).
 Honor the marker even where a Git client lacks the hook.
-Never remove a hold, bypass hooks, change CI requirements, or add skip directives to make a push succeed.
-Only the owner's explicit instruction resumes a hold.
+Never remove a pause, bypass hooks, change CI requirements, or add skip directives to make a push succeed.
+Only the owner's explicit instruction resumes a pause.
 Before a costly hosted run with uncertain allowance, check the owner's [Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
 
-Continue local work, verification, and authorized commits during a hold.
+Continue local work, verification, and authorized commits during a pause.
 A local commit implies no push.
 Fetch before publishing, then publish one complete reviewable update and follow its run instead of launching duplicates.
 Inspect push, `pull_request`, tag, and merge triggers for the hosted effects of one publication.

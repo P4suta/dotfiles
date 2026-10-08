@@ -3,13 +3,13 @@
 //! A refusal prints readable text followed by exactly one machine-readable line:
 //!
 //! ```text
-//! dotfiles-refusal/1 {"rule":"...","cause":"...","evidence":["..."],"next":"...","waiver":null}
+//! dotfiles-refusal/2 {"rule":"...","cause":"...","evidence":["..."],"next":"...","bypass":null}
 //! ```
 //!
 //! The line holds the prefix and one compact JSON object with these five keys in this order.
 //! `next` holds a command to run, and `<name>` marks a value only the person at the terminal can supply.
 //! `next` holds `null` when no command repeats the refused intent, and the cause then says why.
-//! `waiver` holds the command that overrides the gate once with a recorded override, or `null` when the gate offers no waiver.
+//! `bypass` holds the command that bypasses the gate once with a recorded override, or `null` when the gate offers none.
 //!
 //! This module uses std only, so `dotguard` takes it without the platform crate's tools feature.
 
@@ -23,7 +23,7 @@ const HEX_RADIX: u32 = 16;
 
 /// Starts the machine-readable line.
 /// The version changes only with an incompatible format.
-pub const PREFIX: &str = "dotfiles-refusal/1 ";
+pub const PREFIX: &str = "dotfiles-refusal/2 ";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Refusal {
@@ -35,8 +35,8 @@ pub struct Refusal {
     pub evidence: Vec<String>,
     /// The command to run next, or `None` when no command repeats the refused intent.
     pub next: Option<String>,
-    /// The recorded one-time override, when the rule has one.
-    pub waiver: Option<String>,
+    /// The recorded one-time bypass, when the rule has one.
+    pub bypass: Option<String>,
 }
 
 impl Refusal {
@@ -46,7 +46,7 @@ impl Refusal {
             cause: cause.into(),
             evidence: Vec::new(),
             next: Some(next.into()),
-            waiver: None,
+            bypass: None,
         }
     }
 
@@ -65,13 +65,13 @@ impl Refusal {
     }
 
     #[must_use]
-    pub fn waiver(mut self, command: impl Into<String>) -> Self {
-        self.waiver = Some(command.into());
+    pub fn bypass(mut self, command: impl Into<String>) -> Self {
+        self.bypass = Some(command.into());
         self
     }
 
     /// Whether every field an agent needs has a value: a dotted rule, a cause, and evidence.
-    /// Any next command and waiver must fit on one line.
+    /// Any next command and bypass must fit on one line.
     #[must_use]
     pub fn is_complete(&self) -> bool {
         let one_line = |text: &str| !text.trim().is_empty() && !text.contains(['\n', '\r']);
@@ -86,7 +86,7 @@ impl Refusal {
             && !self.evidence.is_empty()
             && self.evidence.iter().all(|item| !item.trim().is_empty())
             && self.next.as_deref().is_none_or(one_line)
-            && self.waiver.as_deref().is_none_or(one_line)
+            && self.bypass.as_deref().is_none_or(one_line)
     }
 
     /// The machine-readable line, without a trailing newline.
@@ -109,9 +109,9 @@ impl Refusal {
             Some(next) => string(&mut out, next),
             None => out.push_str("null"),
         }
-        out.push_str(",\"waiver\":");
-        match &self.waiver {
-            Some(waiver) => string(&mut out, waiver),
+        out.push_str(",\"bypass\":");
+        match &self.bypass {
+            Some(bypass) => string(&mut out, bypass),
             None => out.push_str("null"),
         }
         out.push('}');
@@ -141,9 +141,9 @@ impl Refusal {
                 .unwrap_or("none; the cause says why no command repeats the refused intent"),
         );
         out.push('\n');
-        if let Some(waiver) = &self.waiver {
+        if let Some(bypass) = &self.bypass {
             out.push_str("\nWaiver:\n  ");
-            out.push_str(waiver);
+            out.push_str(bypass);
             out.push('\n');
         }
         out
@@ -157,6 +157,7 @@ impl Refusal {
 
     /// Writes the rendered refusal to standard error.
     pub fn emit(&self) {
+        crate::incidents::record(self, rules::incident_rules::Source::GateRefusal);
         eprint!("{}", self.render());
     }
 
@@ -187,8 +188,8 @@ impl Refusal {
         } else {
             Some(reader.string()?)
         };
-        reader.literal(",\"waiver\":")?;
-        let waiver = if reader.literal("null").is_some() {
+        reader.literal(",\"bypass\":")?;
+        let bypass = if reader.literal("null").is_some() {
             None
         } else {
             Some(reader.string()?)
@@ -199,7 +200,7 @@ impl Refusal {
             cause,
             evidence,
             next,
-            waiver,
+            bypass,
         })
     }
 
@@ -282,7 +283,7 @@ pub fn words(line: &str) -> Option<Vec<String>> {
     (command(&words) == line).then_some(words)
 }
 
-fn string(out: &mut String, value: &str) {
+pub(crate) fn string(out: &mut String, value: &str) {
     out.push('"');
     for character in value.chars() {
         match character {
@@ -366,7 +367,7 @@ mod tests {
             "git stash push --include-untracked",
         )
         .evidence("argv: git reset --hard")
-        .waiver("ALLOW_FORCE=1 git reset --hard")
+        .bypass("ALLOW_FORCE=1 git reset --hard")
     }
 
     #[test]
@@ -376,7 +377,7 @@ mod tests {
         assert_eq!(
             line,
             format!(
-                "{PREFIX}{{\"rule\":\"git.force\",\"cause\":\"refusing `git reset --hard`.\\nIt discards work.\",\"evidence\":[\"argv: git reset --hard\"],\"next\":\"git stash push --include-untracked\",\"waiver\":\"ALLOW_FORCE=1 git reset --hard\"}}"
+                "{PREFIX}{{\"rule\":\"git.force\",\"cause\":\"refusing `git reset --hard`.\\nIt discards work.\",\"evidence\":[\"argv: git reset --hard\"],\"next\":\"git stash push --include-untracked\",\"bypass\":\"ALLOW_FORCE=1 git reset --hard\"}}"
             )
         );
     }
@@ -404,14 +405,14 @@ mod tests {
     #[test]
     fn a_missing_waiver_is_null_and_parses_back() {
         let refusal = Refusal::new("push.signature", "unsigned", "git log").evidence("abc");
-        assert!(refusal.line().ends_with(",\"waiver\":null}"));
+        assert!(refusal.line().ends_with(",\"bypass\":null}"));
         assert_eq!(Refusal::parse(&refusal.line()), Some(refusal));
     }
 
     #[test]
     fn a_withheld_next_is_null_and_parses_back() {
         let refusal = Refusal::without_next("git.force", "unread option").evidence("abc");
-        assert!(refusal.line().ends_with(",\"next\":null,\"waiver\":null}"));
+        assert!(refusal.line().ends_with(",\"next\":null,\"bypass\":null}"));
         assert!(
             refusal
                 .text()
@@ -479,14 +480,14 @@ mod tests {
         );
         assert!(
             !Refusal {
-                waiver: Some(String::new()),
+                bypass: Some(String::new()),
                 ..sample()
             }
             .is_complete()
         );
         assert!(
             Refusal {
-                waiver: None,
+                bypass: None,
                 ..sample()
             }
             .is_complete()

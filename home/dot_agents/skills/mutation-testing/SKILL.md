@@ -3,6 +3,8 @@ name: mutation-testing
 description: >-
   Use mutation testing to verify that tests detect broken behavior and repair uncovered invariants.
   Use for survivor analysis, assurance gaps, and the owner's rust-mutants or njutest workflows.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Mutation testing

@@ -1,4 +1,4 @@
-use crate::runtime::{Native, Runner, args, checked};
+use crate::runtime::{Real, Runner, args, checked};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::ffi::OsString;
@@ -14,6 +14,7 @@ const SERVER_CHECK_INTERVAL: Duration = Duration::from_millis(100);
 /// The local sudo authentication file macOS reads beside its own, and the fingerprint module it names.
 const SUDO_LOCAL: &str = "/etc/pam.d/sudo_local";
 const TOUCH_ID_MODULE: &str = "/usr/lib/pam/pam_tid.so.2";
+const HOOK_DIRECTORY: &str = ".config/git/hooks";
 /// `r--r--r--`, as macOS ships its authentication files.
 #[cfg(unix)]
 const PAM_FILE_MODE: u32 = 0o444;
@@ -42,7 +43,7 @@ fn execute(mut command: Command) -> Result<ExitStatus> {
 }
 
 /// Builds the session a terminal window runs, choosing Herdr with its server started, else Nushell, else a login shell.
-fn child_command(native: &mut Native, session: Session, arguments: &[OsString]) -> Result<Command> {
+fn child_command(native: &mut Real, session: Session, arguments: &[OsString]) -> Result<Command> {
     if matches!(session, Session::Herdr) && native.available(Tool::Herdr) {
         if cfg!(target_os = "macos") {
             start_herdr_server(native)?;
@@ -69,14 +70,14 @@ fn child_command(native: &mut Native, session: Session, arguments: &[OsString]) 
 }
 
 /// Starts the Herdr server with its SSH agent unless it already runs, waiting up to five seconds for it.
-fn start_herdr_server(native: &mut Native) -> Result<()> {
+fn start_herdr_server(native: &mut Real) -> Result<()> {
     if native.available(Tool::HerdrAgent) {
         platform::cleanup::report(
             native.run(Tool::HerdrAgent, &args(&["ensure"])),
             "start the Herdr SSH agent",
         );
     }
-    let running = |native: &mut Native| -> Result<bool> {
+    let running = |native: &mut Real| -> Result<bool> {
         let server = native.run(Tool::Herdr, &args(&["status", "server"]))?;
         Ok(server.success && String::from_utf8_lossy(&server.bytes).contains("status: running"))
     };
@@ -125,7 +126,7 @@ pub fn run(
     };
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .context("native home is unavailable")?;
-    let mut native = Native::new(Path::new(&home))?;
+    let mut native = Real::new(Path::new(&home))?;
     if child {
         return execute(child_command(&mut native, session, arguments)?);
     }
@@ -201,7 +202,7 @@ pub fn run(
 pub fn doctor(strict: bool) -> Result<()> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .context("native home is unavailable")?;
-    let mut native = Native::new(Path::new(&home))?;
+    let mut native = Real::new(Path::new(&home))?;
     let mut missing = 0;
     let required: &[Tool] = if cfg!(windows) {
         &[
@@ -241,6 +242,10 @@ pub fn doctor(strict: bool) -> Result<()> {
             missing += 1;
         }
     }
+    if !hooks_current(&mut native)? {
+        println!("git:core.hooksPath: missing or changed managed hooks path");
+        missing += 1;
+    }
     if cfg!(windows) {
         missing += windows_missing(&mut native)?;
     }
@@ -270,7 +275,7 @@ pub fn doctor(strict: bool) -> Result<()> {
 }
 
 /// Prints and counts what Windows lacks among Herdr's agent integrations, the Git wrapper, the signing settings, and current Claude hooks.
-fn windows_missing(native: &mut Native) -> Result<usize> {
+fn windows_missing(native: &mut Real) -> Result<usize> {
     let mut missing = 0;
     if native.available(Tool::Herdr) {
         let status = String::from_utf8(checked(
@@ -297,7 +302,6 @@ fn windows_missing(native: &mut Native) -> Result<usize> {
         "tag.gpgsign",
         "gpg.format",
         "user.signingkey",
-        "core.hooksPath",
     ] {
         let reply = native.run(Tool::Git, &args(&["config", "--get", key]))?;
         if !reply.success || reply.bytes.is_empty() {
@@ -315,6 +319,21 @@ fn windows_missing(native: &mut Native) -> Result<usize> {
         }
     }
     Ok(missing)
+}
+
+fn hooks_current(native: &mut Real) -> Result<bool> {
+    let reply = native.run(
+        Tool::Git,
+        &args(&["config", "--path", "--get", "core.hooksPath"]),
+    )?;
+    let configured = String::from_utf8(reply.bytes)?;
+    let actual = crate::canonical(Path::new(configured.trim()));
+    let expected = crate::canonical(&native.home.join(HOOK_DIRECTORY));
+    let managed = actual
+        .ok()
+        .zip(expected.ok())
+        .is_some_and(|(actual, expected)| actual == expected);
+    Ok(crate::profile_rules::hooks_current(reply.success, managed))
 }
 
 /// Enables fingerprint authentication for `sudo` by creating `/etc/pam.d/sudo_local`, rerunning itself under `sudo` unless the caller passes `elevated`.
@@ -369,4 +388,38 @@ pub fn touchid(live: bool, elevated: bool) -> Result<()> {
         ensure!(status.success(), "elevated Touch ID setup failed");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn doctor_reads_the_effective_git_hooks_path() -> Result<()> {
+        let fixture = tempfile::tempdir()?;
+        let home = fixture.path();
+        let managed = home.join(HOOK_DIRECTORY);
+        let other = home.join("other-hooks");
+        std::fs::create_dir_all(&managed)?;
+        std::fs::create_dir_all(&other)?;
+        let config = home.join("gitconfig");
+        let mut native = Real::new(home)?;
+        native.environment.extend([
+            ("GIT_CONFIG_GLOBAL".into(), config.as_os_str().to_owned()),
+            ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
+        ]);
+        for (path, current) in [(&managed, true), (&other, false)] {
+            std::fs::write(
+                &config,
+                format!(
+                    "[core]\n\thooksPath = {}\n",
+                    path.to_string_lossy().replace('\\', "/")
+                ),
+            )?;
+            assert_eq!(hooks_current(&mut native)?, current);
+        }
+        std::fs::write(config, "")?;
+        assert!(!hooks_current(&mut native)?);
+        Ok(())
+    }
 }

@@ -17,11 +17,11 @@ struct Cli {
     #[arg(long, global = true)]
     source: Option<PathBuf>,
     #[command(subcommand)]
-    command: Action,
+    command: Commands,
 }
 
 #[derive(Subcommand)]
-enum Action {
+enum Commands {
     /// Check texts for one channel, reading standard input for `-` or no path.
     Check {
         #[arg(long, value_enum)]
@@ -66,7 +66,7 @@ fn run(cli: Cli) -> Result<i32> {
         None => Bundle::installed(),
     };
     match cli.command {
-        Action::Check {
+        Commands::Check {
             channel,
             title,
             paths,
@@ -104,7 +104,7 @@ fn run(cli: Cli) -> Result<i32> {
             );
             Ok(1)
         }
-        Action::Repository { scope, findings } => {
+        Commands::Repository { scope, findings } => {
             let bundle = Bundle::source(&root)?;
             for scope in scope {
                 if findings {
@@ -126,7 +126,7 @@ fn run(cli: Cli) -> Result<i32> {
             }
             Ok(0)
         }
-        Action::Reply { client: _ } => {
+        Commands::Reply { client: _ } => {
             let mut text = String::new();
             std::io::stdin()
                 .take(HOOK_INPUT_READ)

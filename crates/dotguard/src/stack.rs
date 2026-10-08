@@ -5,7 +5,7 @@
 
 use crate::gate_rules;
 use crate::gitargv::Repository;
-use crate::realgit;
+use crate::real_git;
 use std::path::Path;
 
 /// The variable through which the stack tooling hands its lease token to the Git commands it runs.
@@ -42,7 +42,7 @@ fn git(globals: &[String], arguments: &[&str]) -> Option<String> {
         .map(String::as_str)
         .chain(arguments.iter().copied())
         .collect();
-    realgit::capture(&words).map(|output| output.trim().to_owned())
+    real_git::capture(&words).map(|output| output.trim().to_owned())
 }
 
 /// Whether the stack tooling holds the lease of the repository `globals` select.

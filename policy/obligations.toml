@@ -6,6 +6,55 @@
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/legacy_rules.rs"
+probes = '''
+use production::{Verdict, verdict};
+#[kani::proof]
+fn reject_admitting_a_mapped_legacy_command_without_a_bypass() {
+    assert!(verdict(true, false, false) == Verdict::Admit);
+}
+#[kani::proof]
+fn reject_refusing_a_listed_bootstrap_script() {
+    assert!(verdict(true, true, false) == Verdict::Refuse);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/repository_rules.rs"
+probes = '''
+use production::{Drift, drift};
+#[kani::proof]
+fn reject_passing_a_repository_with_a_single_license() {
+    assert!(drift(false, true, true, true) == Drift::Current);
+}
+#[kani::proof]
+fn reject_passing_an_edited_readme() {
+    assert!(drift(true, true, false, true) == Drift::Current);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/tool_rules.rs"
+probes = '''
+use production::{Coverage, Placement, coverage, placement};
+#[kani::proof]
+fn reject_admitting_an_installed_tool_without_a_skill_or_decision() {
+    assert!(coverage(true, 0, true, 0) == Coverage::Covered);
+}
+#[kani::proof]
+fn reject_admitting_a_skill_bound_to_a_superseded_pin() {
+    assert!(coverage(true, 1, false, 0) == Coverage::Covered);
+}
+#[kani::proof]
+fn reject_installing_a_platform_skill_everywhere() {
+    assert!(placement(true, false, false) == Placement::Correct);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/adr_rules.rs"
 probes = '''
 use production::{Identity, Status, Verdict, identity, verdict};
@@ -20,6 +69,25 @@ fn reject_an_accepted_record_that_later_records_changed() {
 #[kani::proof]
 fn reject_a_new_record_that_takes_the_next_number() {
     assert!(identity(Some(production::LAST_NUMBERED + 1), false) == Identity::Numbered);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/freshness_rules.rs"
+probes = '''
+use production::{Facts, Verdict, verdict};
+#[kani::proof]
+fn reject_accepting_unavailable_required_evidence() {
+    assert!(verdict(Facts { needed: production::Need::Required, evidence: false, breaking: false, touched: false }) == Verdict::Admit);
+}
+#[kani::proof]
+fn reject_blocking_a_breaking_update_as_compatible() {
+    assert!(verdict(Facts { needed: production::Need::Required, evidence: true, breaking: true, touched: true }) == Verdict::Outdated);
+}
+#[kani::proof]
+fn reject_using_another_manifest_as_touched_evidence() {
+    assert!(verdict(Facts { needed: production::Need::Required, evidence: true, breaking: false, touched: false }) == Verdict::Outdated);
 }
 '''
 
@@ -98,6 +166,20 @@ fn reject_a_lock_file_selecting_a_single_class() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/directive_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_reading_a_namespaced_directive_as_prose() {
+    assert!(!production::is_directive(b"a:b"));
+}
+#[kani::proof]
+fn reject_skipping_a_sentence_as_a_directive() {
+    assert!(production::is_directive(b"A b."));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/disk_scan_rules.rs"
 probes = '''
 #[kani::proof]
@@ -132,6 +214,42 @@ fn reject_rewriting_control_heavy_content() {
 fn reject_rewriting_crlf_the_index_keeps() {
     let attributes = Attributes { text: Text::Auto, eol: Eol::Lf, binary: false };
     assert!(action(attributes, Staging::Add, Index::CrlfText, content(b"a\r\n")) == Action::Normalize);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/env_expansion_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_admitting_an_unexpanded_value() {
+    assert!(production::verdict(true) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_an_empty_next_action() {
+    assert!(production::NEXT_ACTION.is_empty());
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/incident_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_ignoring_a_failed_push() {
+    assert!(production::signal(production::Operation { push: true, rewrite: false, published: false }, false).is_none());
+}
+#[kani::proof]
+fn reject_recording_an_unpublished_rewrite() {
+    assert!(production::signal(production::Operation { push: false, rewrite: true, published: false }, true).is_some());
+}
+#[kani::proof]
+fn reject_recording_an_expected_failure() {
+    assert!(!production::excluded(production::Expected { red_test: true, counterexample: false, dry_run: false }));
+}
+#[kani::proof]
+fn reject_a_discharge_without_its_evidence() {
+    assert!(production::complete(production::Outcome::Mechanized { evidence_present: false, reproduces: true }));
 }
 '''
 
@@ -504,6 +622,10 @@ verifier = "kani"
 source = "crates/rules/src/profile_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_an_unmanaged_effective_hooks_path() {
+    assert!(production::hooks_current(true, false));
+}
+#[kani::proof]
 fn reject_unapproved_application() {
     assert!(production::permitted(production::Mode::Full, true, true, false));
 }
@@ -609,15 +731,15 @@ source = "crates/rules/src/review_rules.rs"
 probes = '''
 #[kani::proof]
 fn reject_eighth_review_of_ten() {
-    assert!(production::included_allowance(10, 3));
+    assert!(production::within_budget(10, 3));
 }
 #[kani::proof]
 fn reject_rounding_the_layered_budget_up() {
-    assert_eq!(production::capacity_budget(49), 36);
+    assert_eq!(production::budget(49), 36);
 }
 #[kani::proof]
 fn reject_eighth_local_attempt() {
-    assert!(production::rolling_allowance(7, 7));
+    assert!(production::within_limits(7, 7));
 }
 #[kani::proof]
 fn reject_early_review() {
@@ -656,15 +778,50 @@ fn reject_admitting_a_raised_ceiling() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/shell_syntax_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_admitting_unbalanced_quotes() {
+    assert!(production::verdict(true, false, false) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_accepting_a_missing_syntax_validator() {
+    assert!(production::checked(production::Verdict::Admit, false, false) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_accepting_a_shellcheck_error() {
+    assert!(production::checked(production::Verdict::Admit, true, true) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_admitting_a_broken_windows_path() {
+    assert!(production::verdict(false, true, false) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_admitting_a_frozen_expansion() {
+    assert!(production::verdict(false, false, true) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_an_empty_cause_or_next_action() {
+    assert!(production::cause(production::Reason::UnbalancedQuotes).is_empty()
+        || production::next_action(production::Reason::UnbalancedQuotes).is_empty());
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/shell_write_rules.rs"
 probes = '''
 #[kani::proof]
 fn reject_admitting_an_inline_interpreter() {
-    assert!(production::verdict(true, false) == production::Verdict::Admit);
+    assert!(production::verdict(true, false, false) == production::Verdict::Admit);
 }
 #[kani::proof]
 fn reject_admitting_a_file_redirect() {
-    assert!(production::verdict(false, true) == production::Verdict::Admit);
+    assert!(production::verdict(false, false, true) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_admitting_an_in_place_edit() {
+    assert!(production::verdict(false, true, false) == production::Verdict::Admit);
 }
 '''
 

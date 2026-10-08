@@ -35,6 +35,17 @@
         }
       ]
     },
+    "modern": {
+      "description": "The modern command-line tools that replace legacy ones for agents, pinned on every profile.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Modern"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "ocaml": {
       "anyOf": [
         {
@@ -540,6 +551,132 @@
         }
       },
       "additionalProperties": false
+    },
+    "Modern": {
+      "description": "The modern tool table: each preferred tool, the bootstrap scripts that keep legacy tools, and the candidates it leaves out.",
+      "type": "object",
+      "properties": {
+        "exceptions": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ModernException"
+          }
+        },
+        "rejected": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ModernRejected"
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModernTool"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "tools"
+      ]
+    },
+    "ModernException": {
+      "description": "A script that runs before mise provisions the preferred tools, so it keeps the legacy ones.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "reason"
+      ]
+    },
+    "ModernRejected": {
+      "description": "A candidate the table leaves out, with the condition that would admit it.",
+      "type": "object",
+      "properties": {
+        "legacy": {
+          "type": "string"
+        },
+        "preferred": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "revisit": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "legacy",
+        "preferred",
+        "reason",
+        "revisit"
+      ]
+    },
+    "ModernTool": {
+      "description": "One preferred tool and the legacy commands it replaces.",
+      "type": "object",
+      "properties": {
+        "keep": {
+          "description": "When the legacy tool stays correct.",
+          "type": "string"
+        },
+        "legacy": {
+          "description": "The legacy commands the hooks refuse.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "next": {
+          "description": "The next action, where `{args}` stands for the legacy command's arguments, and `grep` or `find` asks for a flag translation.",
+          "type": "string"
+        },
+        "preferred": {
+          "description": "The command the next action names.",
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "tool": {
+          "description": "The mise tool that installs the preferred command on every profile.",
+          "type": "string"
+        },
+        "version": {
+          "description": "The pinned version.",
+          "type": "string"
+        },
+        "when": {
+          "description": "The flags that mark an invocation as legacy when the tool replaces only some uses, such as `-l` for `wc`.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "legacy",
+        "preferred",
+        "tool",
+        "version",
+        "reason",
+        "keep",
+        "next"
+      ]
     },
     "Nix": {
       "description": "The packages the Nix profile installs, each with the mise tool that replaces it where Nix stays absent, or an empty string for none.",

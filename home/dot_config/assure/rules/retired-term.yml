@@ -1,0 +1,16 @@
+id: retired-term
+language: rust
+severity: error
+message: An identifier names a term the verified glossary retired.
+note: Use the established term the glossary records in `home/dot_config/prose/retired-terms.tsv`, which cites its source.
+metadata:
+  cwe: CWE-1106
+  ruleset: SEI CERT DCL06-C
+ignores:
+  - "**/tests/**"
+  - "**/benches/**"
+rule:
+  any:
+    - kind: identifier
+    - kind: type_identifier
+  regex: '^(realgit|ContextData|OpsCheck|forget_script_runs|EXEMPT_MARKER|exempts_itself|is_exempt|SoftToParent|DropHead|FileHits|included_allowance|rolling_allowance|capacity_budget|RENOVATE_LOCAL_GATE_TYPES)$'

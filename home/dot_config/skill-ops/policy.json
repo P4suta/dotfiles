@@ -5,10 +5,10 @@
   "pair_percent": 80,
   "max_entry_words": 1200,
   "requirements": [
-    {"skill": "skill-operations", "also": ["portable-skills"]},
-    {"skill": "verification-tools", "also": ["type-contracts", "executable-policy"]},
-    {"skill": "type-contracts", "also": ["executable-policy"]},
-    {"skill": "formal-assurance", "also": ["functional-architecture"]}
+    {"skill": "skill-operations", "dependencies": ["portable-skills"]},
+    {"skill": "verification-tools", "dependencies": ["type-contracts", "executable-policy"]},
+    {"skill": "type-contracts", "dependencies": ["executable-policy"]},
+    {"skill": "formal-assurance", "dependencies": ["functional-architecture"]}
   ],
   "bundles": {
     "skill-maintenance": ["portable-skills", "skill-operations"],

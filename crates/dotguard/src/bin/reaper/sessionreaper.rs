@@ -385,7 +385,7 @@ fn whoami_uid() -> String {
 /// A grep error protects the process.
 fn matches_allow(ucomm: &str, allow_regex: &str) -> bool {
     let lines = vec![ucomm.to_owned()];
-    util::grep_matching(allow_regex, &lines).is_none_or(|hits| !hits.is_empty())
+    util::grep_matching(allow_regex, &lines).is_none_or(|diagnostics| !diagnostics.is_empty())
 }
 
 /// Tier B's "orphaned" substitute: the executable lives under one of the user-space prefixes rather than under `/System` or `/usr/lib`.

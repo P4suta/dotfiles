@@ -1,14 +1,16 @@
 {
-  "revision": "3d59f3b0fc773c021d5d7700e87bcd1eb5e08c79ac88cbfe6610ba4d8b8e33a4",
+  "revision": "f15fe33f0c5c8c7e8a6a8425606325be989fbdf0fc7ef0ea0c30029ebe455614",
   "outcome": "implemented",
-  "reason": "End with the same pointer as the other assurance skills to the machine gate that reports and refuses verification gaps, since the gate, not the skill, now enforces the owner of each shape.",
+  "reason": "Keep proof selection and implementation refinement separate from installing verification tools.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
     "home/dot_agents/skills/formal-assurance/SKILL.md",
     "docs/adr/verification-proportional-to-code-shape.md",
     "home/dot_agents/skills/formal-assurance/references/scoping.md",
     "docs/skills/assurance-scope-evaluation.md",
     "docs/adr/0012-windows-proofs-in-a-linux-container.md",
-    "xtask/tests/container_proofs.rs"
+    "xtask/tests/container_proofs.rs",
+    "home/dot_agents/skills/formal-assurance/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

@@ -1,5 +1,5 @@
 use crate::refusal::Refusal;
-use crate::runtime::{Native, Runner, args};
+use crate::runtime::{Real, Runner, args};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::ffi::OsString;
@@ -170,7 +170,7 @@ const MISE_CONFIGURATIONS: [&str; 9] = [
 
 /// The root of the repository whose own Lefthook configuration the hook runs, with its mise configuration trusted.
 /// `post-commit` and `reference-transaction` run no repository configuration.
-fn lefthook_repository(native: &mut Native, hook: Hook) -> Result<Option<PathBuf>> {
+fn lefthook_repository(native: &mut Real, hook: Hook) -> Result<Option<PathBuf>> {
     if matches!(hook, Hook::PostCommit | Hook::ReferenceTransaction) {
         return Ok(None);
     }
@@ -192,7 +192,7 @@ fn lefthook_repository(native: &mut Native, hook: Hook) -> Result<Option<PathBuf
 /// mise's paranoid mode loads a repository's configuration only after a trust that records its current contents.
 /// Until then, a mise shim there starts no tool, not even Lefthook.
 /// The hook runs that repository's own Lefthook commands anyway, so trusting the configuration beside them grants them nothing more.
-fn trust_repository(native: &mut Native, root: &Path) -> Result<()> {
+fn trust_repository(native: &mut Real, root: &Path) -> Result<()> {
     if !native.available(Tool::Mise) {
         return Ok(());
     }
@@ -212,7 +212,7 @@ fn trust_repository(native: &mut Native, root: &Path) -> Result<()> {
 }
 
 fn delegate(
-    native: &mut Native,
+    native: &mut Real,
     hook: Hook,
     arguments: &[OsString],
     input: &[u8],
@@ -269,14 +269,14 @@ fn delegate(
 ///
 /// # Errors
 ///
-/// Returns an error when it can't find the home directory, the host fails its health gate, a push hold pauses pushing, or a gate the hook runs refuses.
+/// Returns an error when it can't find the home directory, the host fails its health gate, a push pause stops pushing, or a gate the hook runs refuses.
 pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .context("native home is unavailable")?;
     if matches!(hook, Hook::PreCommit | Hook::CommitMsg | Hook::PrePush) {
         crate::health::gate(Path::new(&home), hook.name())?;
     }
-    let mut native = Native::new(Path::new(&home))?;
+    let mut native = Real::new(Path::new(&home))?;
     if matches!(hook, Hook::PrePush) {
         let marker = native.home.join(".config/git/push-paused");
         if marker.exists() {
@@ -392,7 +392,7 @@ fn verification(hook: Hook, arguments: &[OsString], input: &[u8]) -> Result<()> 
     }
 }
 
-/// The machine-local push hold, which only an explicit owner instruction lifts, so the refusal names no waiver.
+/// The machine-local push pause, which only an explicit owner instruction lifts, so the refusal names no bypass.
 #[must_use]
 pub fn push_paused(marker: &Path) -> Refusal {
     Refusal::new(
@@ -419,7 +419,7 @@ pub(crate) fn preserve_staged_tree(before: Option<&str>, after: Option<&str>) ->
     .into())
 }
 
-fn staged_tree(native: &Native) -> Option<String> {
+fn staged_tree(native: &Real) -> Option<String> {
     let output = native
         .hook_command(Tool::Git)
         .arg("write-tree")
@@ -540,7 +540,7 @@ mod tests {
                 .expect("a structured refusal");
             assert!(refusal.is_complete(), "{refusal:?}");
             assert_eq!(refusal.rule, "commit.staged-tree");
-            assert_eq!(refusal.waiver, None);
+            assert_eq!(refusal.bypass, None);
         }
     }
 
@@ -555,7 +555,7 @@ mod tests {
             install_lefthook()
         );
         assert_eq!(refusal.evidence, ["lefthook.yml configures pre-push"]);
-        assert_eq!(refusal.waiver, None);
+        assert_eq!(refusal.bypass, None);
     }
 
     #[test]
@@ -563,7 +563,7 @@ mod tests {
         let refusal = push_paused(Path::new("/home/me/.config/git/push-paused"));
         assert!(refusal.is_complete(), "{refusal:?}");
         assert_eq!(refusal.rule, "push.paused");
-        assert_eq!(refusal.waiver, None);
+        assert_eq!(refusal.bypass, None);
     }
 
     #[test]

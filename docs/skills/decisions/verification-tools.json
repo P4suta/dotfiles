@@ -1,13 +1,15 @@
 {
-  "revision": "b6768d7d4cc3f9d5c5b01630c92aa1a2923b1c7610febc4661872ee14227e64a",
+  "revision": "001e230fc0482409c77923ec2a7f890a096174de7be8be046b9fce1102a0a268",
   "outcome": "implemented",
-  "reason": "End with the same pointer as the other assurance skills to the machine gate that reports and refuses verification gaps, since the gate, not the skill, now enforces the owner of each shape.",
+  "reason": "Keep actual language and platform coverage, tool adoption, and fail-closed gates separate from theorem selection.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
     "home/dot_agents/skills/verification-tools/SKILL.md",
     "docs/adr/verification-proportional-to-code-shape.md",
     "docs/adr/0003-local-skill-operations.md",
     "crates/rules/src/skill_rules.rs",
-    "xtask/src/skill_proofs.rs"
+    "xtask/src/skill_proofs.rs",
+    "home/dot_agents/skills/verification-tools/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

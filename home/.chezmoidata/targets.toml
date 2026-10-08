@@ -4,6 +4,8 @@
 # scripts.toml restricts the setup launchers inside each directory, from the setup steps.
 
 [targets]
+".agents/skills/orbstack" = "mac"
+".claude/skills/orbstack" = "mac"
 ".bashrc" = "unix"
 ".chezmoiscripts/unix/**" = "unix"
 ".chezmoiscripts/windows/**" = "windows"

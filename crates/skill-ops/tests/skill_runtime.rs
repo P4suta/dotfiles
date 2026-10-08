@@ -26,7 +26,7 @@ fn fixture() -> Result<tempfile::TempDir> {
         max_entry_words: 100,
         requirements: vec![ops::Requirement {
             skill: "alpha".into(),
-            also: vec!["beta".into()],
+            dependencies: vec!["beta".into()],
         }],
         bundles: std::collections::BTreeMap::default(),
     };
@@ -283,6 +283,93 @@ fn triage_retains_history_and_changed_evidence_invalidates_completion() -> Resul
     assert!(!run(root, &["check"], None)?.status.success());
     assert_eq!(fs::read(root.join("state/review.json"))?, old_decision);
     assert_eq!(fs::read_dir(root.join("state/reviews"))?.count(), 1);
+    Ok(())
+}
+
+/// Triages every finding of a fresh analysis with one evidence file under a disposable checkout.
+fn triage_from_checkout(root: &Path, checkout: &Path) -> Result<()> {
+    fs::create_dir_all(checkout.join("alpha"))?;
+    fs::write(checkout.join("alpha/notes.md"), "reviewed evidence\n")?;
+    success(run(root, &["analyze", "--out", "report.json"], None)?)?;
+    let report: ops::Report = ops::read_json(&root.join("report.json"))?;
+    let review = Review {
+        report_hash: ops::hash(&report)?,
+        decisions: report
+            .findings
+            .iter()
+            .map(|finding| Decision {
+                id: finding.id.clone(),
+                outcome: Outcome::Keep,
+                reason: "The fixture reviews evidence from a checkout that later disappears."
+                    .into(),
+                evidence: vec!["alpha/notes.md".into()],
+                revisit: None,
+            })
+            .collect(),
+    };
+    ops::write_json(&root.join("decisions.json"), &review, false)?;
+    success(run(
+        root,
+        &[
+            "triage",
+            "--decisions",
+            "decisions.json",
+            "--evidence-root",
+            checkout.to_str().expect("UTF-8 fixture"),
+        ],
+        None,
+    )?)?;
+    Ok(())
+}
+
+#[test]
+fn a_review_survives_its_removed_or_rewritten_evidence_checkout() -> Result<()> {
+    let fixture = fixture()?;
+    let root = fixture.path();
+    let checkout = root.join("worktree");
+    triage_from_checkout(root, &checkout)?;
+    success(run(root, &["check"], None)?)?;
+    fs::write(checkout.join("alpha/notes.md"), "a later commit\n")?;
+    success(run(root, &["check"], None)?)?;
+    fs::remove_dir_all(&checkout)?;
+    success(run(root, &["check"], None)?)?;
+    let stop = success(run(root, &["stop"], Some(&json!({})))?)?;
+    assert_eq!(serde_json::from_slice::<Value>(&stop.stdout)?, json!({}));
+    Ok(())
+}
+
+#[test]
+fn a_path_only_review_whose_checkout_is_gone_is_refused_with_the_next_action() -> Result<()> {
+    let fixture = fixture()?;
+    let root = fixture.path();
+    let checkout = root.join("worktree");
+    triage_from_checkout(root, &checkout)?;
+    fs::remove_dir_all(root.join("state/review-evidence"))?;
+    fs::remove_dir_all(&checkout)?;
+    let refused = run(root, &["check"], None)?;
+    assert!(!refused.status.success());
+    let stderr = String::from_utf8(refused.stderr)?;
+    assert!(!stderr.contains("os error"), "{stderr}");
+    let line = stderr
+        .lines()
+        .find_map(platform::refusal::Refusal::parse)
+        .unwrap_or_else(|| panic!("no structured refusal: {stderr}"));
+    assert_eq!(line.rule, "skill-ops.review-evidence");
+    assert!(
+        line.next
+            .as_deref()
+            .is_some_and(|next| next.contains("skill-ops triage")),
+        "{line:?}"
+    );
+    let stop = success(run(root, &["stop"], Some(&json!({})))?)?;
+    let reason = serde_json::from_slice::<Value>(&stop.stdout)?["reason"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        reason.contains("skill-ops triage") && !reason.contains("os error"),
+        "{reason}"
+    );
     Ok(())
 }
 

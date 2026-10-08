@@ -241,7 +241,7 @@ pub fn check(root: &Path) -> Result<()> {
         .arg("scan")
         .arg("--config")
         .arg(catalog.join("sgconfig.yml"))
-        // The source state keeps its shared shell partials under the hidden `.chezmoitemplates`.
+        // The source state keeps its shared shell templates under the hidden `.chezmoitemplates`.
         .args(["--no-ignore", "hidden", "."])
         .status()
         .context("start the pinned ast-grep")?;

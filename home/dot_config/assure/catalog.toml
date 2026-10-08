@@ -40,6 +40,12 @@ rust = "ast-grep:lint-allow"
 uncovered = { shell = "ast-grep reads no ShellCheck directive comment in shell here", typescript = "ast-grep reads no lint directive comment in TypeScript here", powershell = "ast-grep has no PowerShell grammar" }
 
 [[pattern]]
+id = "retired-term"
+weakness = "CWE-1106"
+rust = "ast-grep:retired-term"
+uncovered = { shell = "the shared shell templates name no retired identifier", typescript = "the shared TypeScript adapters name no retired identifier", powershell = "the shared PowerShell scripts name no retired identifier" }
+
+[[pattern]]
 id = "core-effect"
 weakness = "Ports and Adapters"
 rust = "ast-grep:core-effect"

@@ -37,6 +37,12 @@ pub enum System {
     Windows,
 }
 
+/// Whether the effective Git hooks path resolves to the managed directory.
+#[must_use]
+pub const fn hooks_current(configured: bool, managed: bool) -> bool {
+    configured && managed
+}
+
 /// The profile a host's operating system and kernel imply.
 /// WSL runs Linux on a Microsoft kernel, the rule that chezmoi's Windows guide and the configuration template both apply.
 #[must_use]
@@ -164,6 +170,16 @@ pub fn host_edit_refused(changed: bool, merged: bool, keeps_host_keys: bool) -> 
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_hooks_installation_requires_the_effective_managed_path() {
+        let configured: bool = kani::any();
+        let managed: bool = kani::any();
+        assert_eq!(hooks_current(configured, managed), configured && managed);
+        kani::cover!(hooks_current(configured, managed));
+        kani::cover!(!hooks_current(configured, managed));
+    }
 
     pub const SYSTEMS: [System; 3] = [System::Mac, System::Linux, System::Windows];
     pub const MEMORY: [Memory; 3] = [Memory::Unset, Memory::Enabled, Memory::Disabled];
@@ -314,6 +330,9 @@ mod tests {
 
     #[test]
     fn every_input_meets_the_profile_specifications() {
+        for [configured, managed] in flags() {
+            assert_eq!(hooks_current(configured, managed), configured && managed);
+        }
         for system in proofs::SYSTEMS {
             for microsoft in [false, true] {
                 proofs::spec_detected(system, microsoft);

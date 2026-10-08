@@ -1,11 +1,13 @@
 {
-  "revision": "7313729874cdbefc5667209608dcab7ae7339efd5b92d49d46ed354d92913877",
+  "revision": "b358c0e60ed1ab6dfa796e2de909ef07dc6cd2ef500bf28e757e83e9d257cf75",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Route README and licensing work through checked repository metadata and its generator; retain judgment about purpose and working examples.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
     "home/dot_agents/skills/oss-readme/SKILL.md",
     "docs/adr/0016-one-writing-standard.md",
-    "crates/prose/tests/prose.rs"
+    "crates/prose/tests/prose.rs",
+    "home/dot_agents/skills/oss-readme/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

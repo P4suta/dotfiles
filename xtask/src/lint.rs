@@ -624,7 +624,20 @@ pub fn tracked(root: &Path) -> Result<Vec<String>> {
 ///
 /// Returns an error listing every refusal, or when a linter or Git fails.
 pub fn check(root: &Path, scope: &[String], every_file: bool, reference: &str) -> Result<()> {
-    let mut refusals = baseline_growth(root, reference)?;
+    check_content(root, scope, every_file, baseline_growth(root, reference)?)
+}
+
+/// Checks content in an isolated staged snapshot with baseline growth measured in its source checkout.
+///
+/// # Errors
+///
+/// Returns every lint refusal, including baseline growth, and any process or file error.
+pub fn check_content(
+    root: &Path,
+    scope: &[String],
+    every_file: bool,
+    mut refusals: Vec<String>,
+) -> Result<()> {
     for stage in Stage::ALL {
         let admitted = baseline(root, stage)?;
         let found = findings(root, stage, scope)?;

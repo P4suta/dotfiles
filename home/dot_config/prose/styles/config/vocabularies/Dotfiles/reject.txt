@@ -1,0 +1,14 @@
+realgit
+ContextData
+OpsCheck
+ops-check
+forget_script_runs
+EXEMPT_MARKER
+exempts_itself
+SoftToParent
+DropHead
+FileHits
+included_allowance
+rolling_allowance
+capacity_budget
+RENOVATE_LOCAL_GATE_TYPES

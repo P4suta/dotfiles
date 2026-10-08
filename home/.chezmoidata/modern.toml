@@ -1,0 +1,255 @@
+# The modern command-line tools that replace legacy ones for agents, each pinned through mise on every profile.
+# The agent shell hooks refuse a legacy command this table maps and name the preferred command as the next action.
+# A refused command runs once with `DOTFILES_LEGACY_BYPASS='<legacy>: <reason>'` before it, and the hook records that bypass in the Git bypass log.
+# The legacy tools stay installed, because scripts and other programs still call them.
+#
+# Each entry names the legacy commands, the preferred command with its mise tool and pin, and why the preferred tool replaces the legacy one.
+# `when` lists the flags that mark an invocation as legacy, for a tool that replaces only some uses.
+# `keep` names when the legacy tool stays correct, and `next` gives the next action.
+# In `next`, `{args}` stands for the words after the legacy command, and `grep` or `find` asks the hook to translate those flags.
+# A tool enters the table only with an active maintainer, a release for every profile's platform, and a pin here.
+# Review the table when Renovate proposes a new major version of a listed tool.
+
+[[modern.tools]]
+legacy = []
+preferred = "shellcheck"
+tool = "shellcheck"
+# renovate: datasource=github-releases depName=koalaman/shellcheck extractVersion=^v(?<version>.+)$
+version = "0.11.0"
+reason = "Every managed shell hook needs the same error validator before executing a command."
+keep = "None."
+next = "shellcheck --help"
+
+[[modern.tools]]
+legacy = ["grep", "egrep", "fgrep"]
+preferred = "rg"
+tool = "ripgrep"
+# renovate: datasource=github-releases depName=BurntSushi/ripgrep
+version = "15.2.0"
+reason = "It respects ignore files and keeps one regular-expression dialect on every host."
+keep = "A POSIX script that runs before provisioning, or a caller that parses GNU grep's exact output."
+next = "grep"
+
+[[modern.tools]]
+legacy = ["find"]
+preferred = "fd"
+tool = "fd"
+# renovate: datasource=github-releases depName=sharkdp/fd extractVersion=^v(?<version>.+)$
+version = "10.5.0"
+reason = "It respects ignore files and has one predictable syntax on every host."
+keep = "A POSIX script that runs before provisioning, or a `-exec` pipeline whose exact semantics a caller depends on."
+next = "find"
+
+[[modern.tools]]
+legacy = ["sed"]
+preferred = "sd"
+tool = "sd"
+# renovate: datasource=github-releases depName=chmln/sd extractVersion=^v(?<version>.+)$
+version = "1.1.0"
+reason = "Its literal and regular-expression modes need no escaping of delimiters."
+keep = "A POSIX script that runs before provisioning."
+next = "the Edit tool for a file, or `sd 'FROM' 'TO'` for a stream"
+
+[[modern.tools]]
+legacy = ["cut", "awk", "gawk", "mawk", "nawk"]
+preferred = "choose"
+tool = "choose"
+# renovate: datasource=github-releases depName=theryangeary/choose extractVersion=^v(?<version>.+)$
+version = "1.3.7"
+reason = "It selects fields without an awk program or a delimiter dialect."
+keep = "A POSIX script that runs before provisioning, or a real awk program that computes more than fields."
+next = "`choose` with the field numbers, `rg` for matching lines, or `qsv` for CSV"
+
+[[modern.tools]]
+legacy = ["xsv"]
+preferred = "qsv"
+tool = "qsv"
+# renovate: datasource=github-releases depName=dathere/qsv
+version = "24.0.0"
+reason = "It continues xsv, which no one maintains."
+keep = "None."
+next = "qsv {args}"
+
+[[modern.tools]]
+legacy = ["cat"]
+preferred = "bat"
+tool = "bat"
+# renovate: datasource=github-releases depName=sharkdp/bat extractVersion=^v(?<version>.+)$
+version = "0.26.1"
+reason = "It sends the same bytes with paging off, and the client's read tool reads files."
+keep = "A POSIX script that runs before provisioning."
+next = "the Read tool for a file, or `bat --plain {args}` in a pipeline"
+
+[[modern.tools]]
+legacy = ["ls", "tree"]
+preferred = "eza"
+tool = "eza"
+# renovate: datasource=github-releases depName=eza-community/eza extractVersion=^v(?<version>.+)$
+version = "0.23.5"
+reason = "Its output and flags match on every host, and `eza --tree` replaces tree."
+keep = "A POSIX script that runs before provisioning."
+next = "the Glob tool to find files, or `eza {args}` (`eza --tree` for tree)"
+
+[[modern.tools]]
+legacy = ["du"]
+preferred = "dust"
+tool = "dust"
+# renovate: datasource=github-releases depName=bootandy/dust extractVersion=^v(?<version>.+)$
+version = "1.2.6"
+reason = "It bounds its output and walks in parallel, and storage-scout plans scans and cleanup."
+keep = "None."
+next = "`dust {args}` for a quick view, or `storage-scout scan` for scans and cleanup"
+
+[[modern.tools]]
+legacy = ["ps"]
+preferred = "procs"
+tool = "aqua:dalance/procs"
+# renovate: datasource=github-releases depName=dalance/procs extractVersion=^v(?<version>.+)$
+version = "0.14.12"
+reason = "It prints structured process views with the same columns on every host."
+keep = "A POSIX script that runs before provisioning."
+next = "procs {args}"
+
+[[modern.tools]]
+legacy = ["top", "htop"]
+preferred = "btm"
+tool = "bottom"
+# renovate: datasource=github-releases depName=ClementTsang/bottom
+version = "0.14.9"
+reason = "It shows one structured process and resource view on every host."
+keep = "None."
+next = "procs for a snapshot, or btm for a live view"
+
+[[modern.tools]]
+legacy = ["diff"]
+preferred = "difft"
+tool = "difftastic"
+# renovate: datasource=github-releases depName=Wilfred/difftastic
+version = "0.71.0"
+reason = "It compares syntax trees, so a reformatting doesn't hide the change."
+keep = "A caller that applies the output as a patch."
+next = "difft {args}"
+
+[[modern.tools]]
+legacy = ["colordiff"]
+preferred = "delta"
+tool = "delta"
+# renovate: datasource=github-releases depName=dandavison/delta
+version = "0.20.1"
+reason = "It pages Git's diffs with syntax highlighting."
+keep = "None."
+next = "delta {args}"
+
+[[modern.tools]]
+legacy = ["jq"]
+preferred = "jaq"
+tool = "jaq"
+# renovate: datasource=github-releases depName=01mf02/jaq extractVersion=^v(?<version>.+)$
+version = "3.1.1"
+reason = "It runs faster and refuses ambiguous filters that jq accepts."
+keep = "A filter that relies on a jq builtin jaq lacks."
+next = "jaq {args}"
+
+[[modern.tools]]
+legacy = ["xq", "tomlq"]
+preferred = "yq"
+tool = "yq"
+# renovate: datasource=github-releases depName=mikefarah/yq extractVersion=^v(?<version>.+)$
+version = "4.54.1"
+reason = "One tool queries YAML, TOML, and XML."
+keep = "None."
+next = "yq {args}"
+
+[[modern.tools]]
+legacy = ["curl", "wget"]
+preferred = "xh"
+tool = "xh"
+# renovate: datasource=github-releases depName=ducaale/xh extractVersion=^v(?<version>.+)$
+version = "0.26.2"
+reason = "It prints readable requests and responses."
+keep = "A script that depends on curl's exact behavior, such as a download that a checksum verifies."
+next = "xh {args}"
+
+[[modern.tools]]
+legacy = ["xxd", "hexdump", "od"]
+preferred = "hexyl"
+tool = "hexyl"
+# renovate: datasource=github-releases depName=sharkdp/hexyl extractVersion=^v(?<version>.+)$
+version = "0.17.0"
+reason = "It prints a readable view of binary data."
+keep = "A caller that reverses the dump with `xxd -r`."
+next = "hexyl {args}"
+
+[[modern.tools]]
+legacy = ["wc"]
+when = ["-l", "--lines"]
+preferred = "tokei"
+tool = "cargo:tokei"
+# renovate: datasource=github-releases depName=XAMPPRocky/tokei extractVersion=^v(?<version>.+)$
+version = "15.0.0"
+reason = "It counts code, comments, and blanks per language instead of raw lines."
+keep = "Counting the lines of a stream that holds no code."
+next = "tokei for code, or `rg --count-matches ''` for the lines of other files"
+
+[[modern.tools]]
+legacy = ["time"]
+preferred = "hyperfine"
+tool = "hyperfine"
+# renovate: datasource=github-releases depName=sharkdp/hyperfine extractVersion=^v(?<version>.+)$
+version = "1.21.0"
+reason = "It repeats runs and reports statistics, so a comparison survives noise."
+keep = "Timing one run whose output you also need."
+next = "hyperfine '{args}'"
+
+[[modern.tools]]
+legacy = ["man"]
+preferred = "tldr"
+tool = "tealdeer"
+# renovate: datasource=github-releases depName=tealdeer-rs/tealdeer extractVersion=^v(?<version>.+)$
+version = "1.9.0"
+reason = "It shows short examples, and `--help` stays the authority."
+keep = "Reading a full manual section."
+next = "`{args} --help`, or tldr {args}"
+
+[[modern.tools]]
+legacy = ["tar", "unzip", "zip", "gzip", "gunzip"]
+preferred = "ouch"
+tool = "github:ouch-org/ouch"
+# renovate: datasource=github-releases depName=ouch-org/ouch
+version = "0.8.3"
+reason = "One command compresses and extracts every archive format."
+keep = "A POSIX script that runs before provisioning, or `git archive` piped into tar."
+next = "`ouch decompress <archive>` or `ouch compress <files> <archive>`"
+
+# Scripts that run before mise provisions the preferred tools, so they keep the legacy tools.
+[[modern.tools]]
+legacy = []
+preferred = "delta"
+tool = "delta"
+# renovate: datasource=github-releases depName=dandavison/delta
+version = "0.20.1"
+reason = "It renders structural Git diffs as the pager on every host."
+keep = "Git produces its own patch bytes before the pager runs."
+next = "delta {args}"
+
+# The hook reads a script a command runs and refuses its legacy commands unless this list names that script.
+
+[[modern.exceptions]]
+path = "home/.chezmoitemplates/partials/install-mise-sh"
+reason = "It installs mise itself, so no preferred tool exists yet."
+
+[[modern.exceptions]]
+path = "home/.chezmoiscripts/unix/run_before_00-mise.sh.tmpl"
+reason = "It runs the mise installation before any preferred tool exists."
+
+# Candidates the table leaves out, with the condition that would admit them.
+
+[[modern.tools]]
+legacy = ["df"]
+preferred = "dysk"
+tool = "github:Canop/dysk"
+# renovate: datasource=github-releases depName=Canop/dysk extractVersion=^v(?<version>.+)$
+version = "3.7.1"
+reason = "It shows readable mounts and free space on every host."
+keep = "A POSIX script that runs before provisioning, or a caller that parses df's exact output."
+next = "dysk {args}"
