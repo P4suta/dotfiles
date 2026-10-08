@@ -1,6 +1,7 @@
 # The workspace forbids unsafe code.
 # Each function here calls a foreign interface that has no safe binding.
-# It carries an unsafe code expectation with its reason and justifies its unsafe block in a SAFETY comment.
+# It carries an unsafe code expectation with its reason and justifies its unsafe block in a SAFETY comment, which clippy's `undocumented_unsafe_blocks` requires.
+# Its documentation declares the Win32 contract a `semantic-boundary` exemption with its substitute evidence.
 # Its crate repeats the workspace lints with unsafe code denied instead of forbidden, and xtask/tests/lint_policy.rs keeps this list, the sources, and the manifests in agreement.
 # `outside_miri` says why the Miri gate, which interprets only the pure core, can't reach the site.
 

@@ -109,6 +109,98 @@ fn every_unsafe_site_says_why_miri_cannot_reach_it() {
     }
 }
 
+/// The documentation of the function `name` anywhere in `file`.
+fn function_documentation(file: &syn::File, name: &str) -> Option<String> {
+    use syn::visit::Visit;
+    struct Find<'a>(&'a str, Option<String>);
+    impl<'ast> Visit<'ast> for Find<'_> {
+        fn visit_item_fn(&mut self, function: &'ast syn::ItemFn) {
+            if function.sig.ident == self.0 {
+                let lines: Vec<String> = function
+                    .attrs
+                    .iter()
+                    .filter(|attribute| attribute.path().is_ident("doc"))
+                    .filter_map(|attribute| match &attribute.meta {
+                        syn::Meta::NameValue(syn::MetaNameValue {
+                            value:
+                                syn::Expr::Lit(syn::ExprLit {
+                                    lit: syn::Lit::Str(text),
+                                    ..
+                                }),
+                            ..
+                        }) => Some(text.value().trim().to_owned()),
+                        _ => None,
+                    })
+                    .collect();
+                self.1 = Some(lines.join(" "));
+            }
+            syn::visit::visit_item_fn(self, function);
+        }
+    }
+    let mut find = Find(name, None);
+    find.visit_file(file);
+    find.1
+}
+
+#[test]
+fn every_unsafe_site_is_a_semantic_boundary_exemption_with_existing_evidence() {
+    let root = root();
+    for (path, function) in listed_sites(&root) {
+        let file = syn::parse_file(&fs::read_to_string(root.join(&path)).expect("readable site"))
+            .expect("parsable site");
+        let documentation = function_documentation(&file, &function)
+            .unwrap_or_else(|| panic!("{path} defines no function {function}"));
+        let exemption = xtask::obligations::exemption(&documentation)
+            .unwrap_or_else(|error| panic!("{path}::{function}: {error:#}"))
+            .unwrap_or_else(|| panic!("{path}::{function} carries no exemption"));
+        assert_eq!(
+            exemption.reason,
+            rules::obligation_rules::Reason::SemanticBoundary,
+            "{path}::{function}"
+        );
+        let (evidence, test) = &exemption.evidence;
+        assert!(
+            fs::read_to_string(root.join(evidence))
+                .is_ok_and(|text| text.contains(&format!("fn {test}("))),
+            "{path}::{function} names missing evidence {evidence}::{test}"
+        );
+    }
+}
+
+#[test]
+fn an_unsafe_block_without_a_safety_comment_fails_clippy() {
+    let workspace = manifest(&root().join("Cargo.toml"));
+    assert_eq!(
+        workspace["workspace"]["lints"]["clippy"]["undocumented_unsafe_blocks"].as_str(),
+        Some("deny")
+    );
+}
+
+#[test]
+fn no_test_mutates_the_process_environment() {
+    let root = root();
+    let mut sources = Vec::new();
+    for directory in ["xtask", "crates"] {
+        rust_sources(&root.join(directory), &mut sources);
+    }
+    let this = root.join("xtask/tests/lint_policy.rs");
+    let calls: Vec<String> = sources
+        .iter()
+        .filter(|path| **path != this)
+        .filter(|path| {
+            let text = fs::read_to_string(path).expect("readable source");
+            ["set_var(", "remove_var("]
+                .iter()
+                .any(|call| text.contains(call))
+        })
+        .map(|path| path.display().to_string())
+        .collect();
+    assert!(
+        calls.is_empty(),
+        "pass variables through Command::env: {calls:?}"
+    );
+}
+
 #[test]
 fn unsafe_code_is_expected_only_at_the_listed_foreign_interface_sites() {
     let root = root();

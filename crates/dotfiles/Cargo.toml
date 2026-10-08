@@ -47,3 +47,4 @@ all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 allow_attributes = "deny"
 allow_attributes_without_reason = "deny"
+undocumented_unsafe_blocks = "deny"

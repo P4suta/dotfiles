@@ -60,6 +60,9 @@ pub fn run(options: &Options) -> Result<i32> {
 }
 
 /// Sets a system parameter whose whole value travels in `value`.
+/// Exempt as semantic-boundary: the Windows session decides how it applies the parameter.
+/// Evidence: `crates/dotfiles/src/windows/setup/keyboard.rs::managed_filter_keys_are_disabled`.
+/// Reconsider when a dependency offers a safe binding of `SystemParametersInfoW`.
 #[expect(
     unsafe_code,
     reason = "SystemParametersInfoW is the only interface to the keyboard settings"
@@ -74,6 +77,9 @@ fn set_value(action: u32, value: u32, flags: u32) -> std::io::Result<()> {
 }
 
 /// Reads or writes the filter keys settings through `keys`.
+/// Exempt as semantic-boundary: the Windows session decides how it reads and applies the filter keys.
+/// Evidence: `crates/dotfiles/src/windows/setup/keyboard.rs::managed_filter_keys_are_disabled`.
+/// Reconsider when a dependency offers a safe binding of `SystemParametersInfoW`.
 #[expect(
     unsafe_code,
     reason = "SystemParametersInfoW is the only interface to the filter keys settings"

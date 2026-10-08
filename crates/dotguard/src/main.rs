@@ -164,6 +164,9 @@ fn delegate(real: &Path, mut git: std::process::Command) -> ExitCode {
 
 /// The console sends Ctrl+C to every attached process, git handles it, and the wrapper waits so the shell returns only after git exits.
 /// The wrapper registers its own handler, because git inherits the ignore flag that the null handler sets.
+/// Exempt as semantic-boundary: the Windows console decides when the registered handler runs.
+/// Evidence: `crates/dotguard/tests/git_wrapper.rs::a_copy_named_git_passes_arguments_streams_and_status_through`.
+/// Reconsider when the standard library or a dependency offers a safe console control handler.
 #[cfg(windows)]
 #[expect(
     unsafe_code,
