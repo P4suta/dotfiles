@@ -175,9 +175,13 @@ mod proofs {
         let name: [u8; 4] = kani::any();
         spec_select(&name, &line, &directive);
         let result = select(&name, &line, &directive);
-        kani::cover!(result.is_some_and(|selection| selection.evidence == Evidence::Shebang));
-        kani::cover!(result.is_some_and(|selection| selection.evidence == Evidence::Directive));
-        kani::cover!(result.is_some_and(|selection| selection.evidence == Evidence::Extension));
+        if let Some(selection) = result {
+            kani::cover!(selection.evidence == Evidence::Shebang);
+            kani::cover!(selection.evidence == Evidence::Directive);
+            kani::cover!(selection.evidence == Evidence::Extension);
+        } else {
+            kani::cover!(true);
+        }
     }
 
     #[cfg(kani)]
@@ -198,6 +202,9 @@ mod proofs {
             })
         );
         assert!(result.is_some_and(Selection::needs_shell_flag));
+        kani::cover!(*expected == Dialect::Sh);
+        kani::cover!(*expected == Dialect::Bash);
+        kani::cover!(*expected == Dialect::Zsh);
     }
 }
 
