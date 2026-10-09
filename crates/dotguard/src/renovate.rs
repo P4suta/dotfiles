@@ -509,13 +509,6 @@ pub fn is_manifest(path: &str) -> bool {
     }
     let comps: Vec<&str> = lowered.split('/').collect();
     let name = comps.last().copied().unwrap_or("");
-    let file = Path::new(name);
-    let ext = file.extension().unwrap_or_default().to_string_lossy();
-    let stem = file.file_stem().unwrap_or_default().to_string_lossy();
-    let stem_ext = Path::new(stem.as_ref())
-        .extension()
-        .unwrap_or_default()
-        .to_string_lossy();
 
     let exact = [
         "cargo.toml",
@@ -528,13 +521,19 @@ pub fn is_manifest(path: &str) -> bool {
         "pyproject.toml",
         "libs.versions.toml",
         ".tool-versions",
+        "bun.lock",
+        "bun.lockb",
     ];
     if exact.contains(&name) {
         return true;
     }
-    if name == "bun.lock" || name == "bun.lockb" {
-        return true;
-    }
+    let file = Path::new(name);
+    let ext = file.extension().unwrap_or_default().to_string_lossy();
+    let stem = file.file_stem().unwrap_or_default().to_string_lossy();
+    let stem_ext = Path::new(stem.as_ref())
+        .extension()
+        .unwrap_or_default()
+        .to_string_lossy();
     if name.starts_with("requirements") && ext == "txt" {
         return true;
     }
