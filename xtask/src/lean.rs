@@ -158,6 +158,7 @@ fn modules(package: &LeanPackage) -> Vec<String> {
 /// Returns an error when Docker or Lean fails, the build warns, a theorem uses another axiom, or fresh replay fails.
 pub fn verify(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
     let root = crate::canonical(root)?;
+    vectors(&root, true)?;
     let image = image(&root)?;
     build(&root, &image)?;
     let mut proved = 0;
@@ -401,6 +402,12 @@ pub fn vectors(root: &Path, check: bool) -> Result<()> {
     for (path, wanted) in [
         (SKILL_PLAN_VECTORS, skill_plan_vectors(root)?),
         (STEP_ORDER_VECTORS, step_order_vectors()?),
+        (
+            crate::contrast_refinement::GENERATED,
+            crate::contrast_refinement::translate(&fs::read_to_string(
+                root.join(crate::contrast_refinement::SOURCE),
+            )?)?,
+        ),
     ] {
         let file = root.join(path);
         if check {

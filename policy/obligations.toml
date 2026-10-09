@@ -1814,6 +1814,23 @@ name = "Dotfiles.StepOrder.Vectors.windows_transitive"
 module = "Dotfiles.StepOrderVectors"
 bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
 
+[[obligation.theorems]]
+name = "Dotfiles.Contrast.ordered_bounds"
+module = "Dotfiles.Contrast"
+bridge = "xtask/tests/contrast_refinement.rs::the_generated_definition_is_bound_to_the_production_arithmetic"
+[[obligation.theorems]]
+name = "Dotfiles.Contrast.division_bounds"
+module = "Dotfiles.Contrast"
+bridge = "xtask/tests/contrast_refinement.rs::the_generated_definition_is_bound_to_the_production_arithmetic"
+[[obligation.theorems]]
+name = "Dotfiles.Contrast.division_threshold"
+module = "Dotfiles.Contrast"
+bridge = "xtask/tests/contrast_refinement.rs::the_generated_definition_is_bound_to_the_production_arithmetic"
+[[obligation.theorems]]
+name = "Dotfiles.Contrast.reported_ratio"
+module = "Dotfiles.Contrast"
+bridge = "xtask/tests/contrast_refinement.rs::the_generated_definition_is_bound_to_the_production_arithmetic"
+
 [[obligation]]
 verifier = "kani"
 source = "crates/rules/src/guard_rules.rs"
@@ -1847,7 +1864,13 @@ fn reject_losing_the_words_of_a_setting() { let mut scan = global_scan(&["-c", "
 verifier = "kani"
 source = "crates/rules/src/contrast_rules.rs"
 probes = '''
-use production::{Rgb, legible, parse};
+use production::{Rgb, legible, parse, ratio_millis};
+#[kani::proof]
+fn reject_reporting_black_on_white_below_twenty_one_to_one() {
+    let black = Rgb { red: 0, green: 0, blue: 0 };
+    let white = Rgb { red: 255, green: 255, blue: 255 };
+    assert!(ratio_millis(black, white) < 21_000);
+}
 #[kani::proof]
 fn reject_text_legible_on_its_own_color() {
     let color = Rgb { red: kani::any(), green: kani::any(), blue: kani::any() };
@@ -1858,6 +1881,30 @@ fn reject_a_literal_without_its_hash() {
     assert!(parse(b"1a1b26").is_some());
 }
 '''
+
+[[obligation]]
+verifier = "kani-contract"
+source = "crates/rules/src/contrast_rules.rs"
+function = "linear"
+flags = ["function-contracts"]
+
+[[obligation]]
+verifier = "kani-contract"
+source = "crates/rules/src/contrast_rules.rs"
+function = "luminance"
+flags = ["function-contracts"]
+
+[[obligation]]
+verifier = "kani-contract"
+source = "crates/rules/src/contrast_rules.rs"
+function = "ratio_luminances"
+flags = ["function-contracts"]
+
+[[obligation]]
+verifier = "kani-contract"
+source = "crates/rules/src/contrast_rules.rs"
+function = "ratio_ordered"
+flags = ["function-contracts"]
 
 [[obligation]]
 verifier = "kani"

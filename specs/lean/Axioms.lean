@@ -13,3 +13,7 @@ import Dotfiles
 #print axioms Dotfiles.StepOrder.Vectors.unix_transitive
 #print axioms Dotfiles.StepOrder.Vectors.windows_respected
 #print axioms Dotfiles.StepOrder.Vectors.windows_transitive
+#print axioms Dotfiles.Contrast.ordered_bounds
+#print axioms Dotfiles.Contrast.division_bounds
+#print axioms Dotfiles.Contrast.division_threshold
+#print axioms Dotfiles.Contrast.reported_ratio

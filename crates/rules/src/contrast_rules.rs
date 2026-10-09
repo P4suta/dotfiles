@@ -46,6 +46,12 @@ const LEAST_DENOMINATOR: u64 = 2;
 
 /// Contrast ratios in thousandths.
 const MILLIS: u64 = 1000;
+#[cfg(any(test, kani))]
+const MAX_LINEAR: u64 = 10_000_000;
+#[cfg(any(test, kani))]
+const MAX_LUMINANCE: u64 = MAX_LINEAR * 10_000;
+#[cfg(any(test, kani))]
+const MAX_RATIO: u64 = 21 * MILLIS;
 
 /// The hexadecimal digits of one `#rrggbb` literal.
 const HEX_DIGITS: usize = 6;
@@ -62,6 +68,7 @@ pub struct Rgb {
     pub blue: u8,
 }
 
+#[cfg_attr(kani, kani::ensures(|result: &u64| *result <= MAX_LINEAR))]
 fn linear(channel: u8) -> u64 {
     LINEAR
         .get(usize::from(channel))
@@ -70,6 +77,7 @@ fn linear(channel: u8) -> u64 {
 }
 
 /// The relative luminance of a color, scaled by 10^11.
+#[cfg_attr(kani, kani::ensures(|result: &u64| *result <= MAX_LUMINANCE))]
 fn luminance(color: Rgb) -> u64 {
     let [red, green, blue] = WEIGHTS;
     red * linear(color.red) + green * linear(color.green) + blue * linear(color.blue)
@@ -77,17 +85,13 @@ fn luminance(color: Rgb) -> u64 {
 
 /// The lighter and the darker of two luminances, each with the flare added.
 const fn ordered_luminances(first: u64, second: u64) -> (u64, u64) {
-    let (first, second) = (first + FLARE, second + FLARE);
+    let first = FLARE + first;
+    let second = FLARE + second;
     if first >= second {
         (first, second)
     } else {
         (second, first)
     }
-}
-
-/// The lighter and the darker luminance of two colors, each with the flare added.
-fn ordered(first: Rgb, second: Rgb) -> (u64, u64) {
-    ordered_luminances(luminance(first), luminance(second))
 }
 
 /// Whether two luminances keep 4.5:1, compared without a division.
@@ -99,7 +103,17 @@ const fn keeps_least_contrast(first: u64, second: u64) -> bool {
 /// The contrast ratio of two colors in thousandths, rounded down, which the gate reports for the lowest pair.
 #[must_use]
 pub fn ratio_millis(first: Rgb, second: Rgb) -> u64 {
-    let (lighter, darker) = ordered(first, second);
+    ratio_luminances(luminance(first), luminance(second))
+}
+
+#[cfg_attr(kani, kani::requires(first <= MAX_LUMINANCE && second <= MAX_LUMINANCE))]
+fn ratio_luminances(first: u64, second: u64) -> u64 {
+    let (lighter, darker) = ordered_luminances(first, second);
+    ratio_ordered(lighter, darker)
+}
+
+#[cfg_attr(kani, kani::requires(darker >= FLARE && lighter >= darker && lighter <= MAX_LUMINANCE + FLARE))]
+fn ratio_ordered(lighter: u64, darker: u64) -> u64 {
     lighter * MILLIS / darker
 }
 
@@ -148,9 +162,65 @@ mod proofs {
         assert!(!legible(foreground, foreground));
     }
 
-    /// The highest luminance on the 10^11 scale, white's.
     #[cfg(kani)]
-    const MAX_LUMINANCE: u64 = 100_000_000_000;
+    #[kani::proof_for_contract(linear)]
+    fn every_channel_has_bounded_linear_light() {
+        let value = linear(kani::any());
+        kani::cover!(value == 0);
+        kani::cover!(value > 0);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof_for_contract(luminance)]
+    #[kani::stub_verified(linear)]
+    fn every_rgb_color_has_bounded_luminance() {
+        let value = luminance(Rgb {
+            red: kani::any(),
+            green: kani::any(),
+            blue: kani::any(),
+        });
+        kani::cover!(value == 0);
+        kani::cover!(value > 0);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof_for_contract(ratio_luminances)]
+    fn every_luminance_pair_has_safe_ratio_arithmetic() {
+        let first = kani::any();
+        let second = kani::any();
+        let _ratio = ratio_luminances(first, second);
+        kani::cover!(first > second);
+        kani::cover!(first < second);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof_for_contract(ratio_ordered)]
+    fn every_ordered_pair_has_safe_ratio_arithmetic() {
+        let lighter = kani::any();
+        let darker = kani::any();
+        let _ratio = ratio_ordered(lighter, darker);
+        kani::cover!(lighter == darker);
+        kani::cover!(lighter > darker);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::stub_verified(luminance)]
+    fn every_rgb_pair_has_safe_ratio_arithmetic() {
+        let first = Rgb {
+            red: kani::any(),
+            green: kani::any(),
+            blue: kani::any(),
+        };
+        let second = Rgb {
+            red: kani::any(),
+            green: kani::any(),
+            blue: kani::any(),
+        };
+        let _ratio = ratio_millis(first, second);
+        kani::cover!(first.red > second.red);
+        kani::cover!(first.red < second.red);
+    }
 
     /// Symmetry and irreflexivity for every luminance pair.
     #[cfg(kani)]
@@ -211,7 +281,7 @@ mod proofs {
 mod tests {
     use super::*;
 
-    /// The ratio agrees with `legible`, which only the tests check, because Kani can't divide symbolic luminances within budget.
+    /// The reported ratio and the decision agree on the text contrast threshold.
     fn spec_ratio(foreground: Rgb, background: Rgb) {
         assert_eq!(
             legible(foreground, background),
@@ -233,7 +303,8 @@ mod tests {
 
     #[test]
     fn contrast_meets_the_wcag_values_and_the_specification() {
-        assert_eq!(ratio_millis(BLACK, WHITE), 21_000);
+        assert_eq!(ratio_millis(BLACK, WHITE), MAX_RATIO);
+        assert_eq!(luminance(WHITE), MAX_LUMINANCE);
         assert!(legible(BLACK, WHITE));
         let gray = parse(b"#767676").unwrap();
         assert!(legible(gray, WHITE), "#767676 on white is 4.54:1");

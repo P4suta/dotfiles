@@ -6,6 +6,7 @@ pub mod agent_memory;
 pub mod alloy;
 pub mod benchmarks;
 pub mod change;
+pub mod contrast_refinement;
 pub mod environment;
 pub mod ignore_audit;
 pub mod input_audit;
