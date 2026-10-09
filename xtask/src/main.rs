@@ -45,6 +45,13 @@ enum Action {
         #[arg(long)]
         write: bool,
     },
+    /// Counts each shell's startup programs in an owned fixture or an applied home.
+    StartupPrograms {
+        #[arg(long, conflicts_with = "home", required_unless_present = "home")]
+        profile: Option<String>,
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
     PublicAudit {
         #[arg(long)]
         denylist: PathBuf,
@@ -262,6 +269,9 @@ fn run() -> Result<()> {
             xtask::profiles::targets_page(&cli.root, check)?;
         }
         Action::ThemeGrids { write } => xtask::profiles::write_theme_grids(&cli.root, write)?,
+        Action::StartupPrograms { profile, home } => {
+            xtask::profiles::print_startup(&cli.root, profile.as_deref(), home.as_deref())?;
+        }
         Action::ProfileSnapshots { write } => {
             if write {
                 xtask::profile_snapshot::write(&cli.root)?;

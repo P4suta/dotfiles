@@ -310,5 +310,25 @@ pub fn run(root: &Path, disposable_host: bool) -> Result<()> {
             path.display()
         );
     }
+    startup_counts(root, &home)
+}
+
+/// Holds each applied shell's startup to the programs `policy/baselines.toml` admits.
+fn startup_counts(root: &Path, home: &Path) -> Result<()> {
+    let counted = crate::profiles::home_startup_programs(home)?;
+    let mut measured = Vec::new();
+    for (shell, programs) in &counted {
+        println!(
+            "Rehearsal: {shell} started {} programs at startup: {}",
+            programs.len(),
+            programs.join(", ")
+        );
+        measured.push((*shell, u64::try_from(programs.len())?));
+    }
+    let baselines = crate::obligations::parse_baselines(&fs::read_to_string(
+        root.join(crate::obligations::BASELINES),
+    )?)?;
+    let refusals = crate::obligations::exec_counts(&baselines, &measured);
+    ensure!(refusals.is_empty(), "{}", refusals.join("\n"));
     Ok(())
 }

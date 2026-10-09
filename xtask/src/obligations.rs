@@ -230,6 +230,8 @@ pub enum Metric {
     WallMillis { advisory: u64 },
     /// The lowest text contrast in thousandths and the palette pair that reaches it.
     MinimumContrast { exact: u64, pair: String },
+    /// The external programs a shell starts while reading its startup files.
+    ExecCount { shell: String, exact: u64 },
 }
 
 /// The JSON Schema of the manifest.
@@ -1069,8 +1071,40 @@ pub fn metrics(baselines: &Baselines, measured: &Closure, unsafe_sites: u64) -> 
         Metric::MutantsMissed { .. }
         | Metric::MutantsTimedOut { .. }
         | Metric::WallMillis { .. }
-        | Metric::MinimumContrast { .. } => None,
+        | Metric::MinimumContrast { .. }
+        | Metric::ExecCount { .. } => None,
     })
+}
+
+/// Refusals for every measured shell whose startup program count differs from its baseline or has none.
+#[must_use]
+pub fn exec_counts(baselines: &Baselines, measured: &[(&str, u64)]) -> Vec<String> {
+    let mut refusals = Vec::new();
+    for (shell, value) in measured {
+        let recorded = baselines.metrics.iter().find_map(|metric| match metric {
+            Metric::ExecCount {
+                shell: named,
+                exact,
+            } if named == shell => Some(*exact),
+            _ => None,
+        });
+        let Some(baseline) = recorded else {
+            refusals.push(format!(
+                "{BASELINES} records no exec-count metric for {shell}; record {value}"
+            ));
+            continue;
+        };
+        match obligation_rules::standing(Better::Lower, baseline, *value) {
+            Standing::Holds => {}
+            Standing::Regressed => refusals.push(format!(
+                "{BASELINES}: {shell} starts {value} programs at startup instead of {baseline}; cache the initialization that forks instead of moving the baseline"
+            )),
+            Standing::Improved => refusals.push(format!(
+                "{BASELINES}: {shell} now starts {value} programs at startup instead of {baseline}; record {value} so it can't slip back"
+            )),
+        }
+    }
+    refusals
 }
 
 /// Refusals for a lowest contrast pair that differs from the one the baselines record, or a baseline file that records none.

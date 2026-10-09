@@ -17,6 +17,7 @@ pub mod quality;
 pub mod quint;
 pub mod rehearsal;
 pub mod skill_proofs;
+pub mod startup;
 pub mod structure;
 pub mod theme;
 

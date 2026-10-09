@@ -592,6 +592,94 @@ pub fn write_theme_grids(root: &Path, write: bool) -> Result<()> {
     Ok(())
 }
 
+/// The shells whose startup files a rendered profile holds and this host can run.
+#[must_use]
+pub fn startup_shells(dump: &Value) -> Vec<crate::startup::Shell> {
+    use crate::startup::Shell;
+    [
+        (Shell::Zsh, ".zshrc"),
+        (Shell::Nu, ".config/nushell/config.nu"),
+        (
+            Shell::Pwsh,
+            "Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
+        ),
+    ]
+    .into_iter()
+    .filter(|(shell, target)| {
+        dump.get(*target).is_some() && (*shell != Shell::Zsh || !cfg!(windows))
+    })
+    .map(|(shell, _)| shell)
+    .collect()
+}
+
+/// Applies one profile into an owned home, writes its shell caches with this host's tools, and returns the programs each shell starts while it reads its startup files.
+///
+/// # Errors
+///
+/// Returns an error when the profile fails to render or apply, a cache fails to write, or a shell can't start.
+pub fn startup_programs(root: &Path, profile: Profile) -> Result<Vec<(&'static str, Vec<String>)>> {
+    let scratch = tempfile::tempdir()?;
+    // mise writes the home into its Nushell activation unquoted, so this home keeps to plain characters.
+    let fixture = Fixture::at(root, &scratch.path().join(profile.name()), profile, "home")?;
+    let (dump, _) = fixture.render(None)?;
+    fixture.apply_files()?;
+    let home = &fixture.destination;
+    dotfiles::integrations::shell_caches(home, &mut platform::runtime::Native::new(home)?)?;
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    startup_shells(&dump)
+        .into_iter()
+        .map(|shell| Ok((shell.name(), crate::startup::started(shell, home, &path)?)))
+        .collect()
+}
+
+/// The programs each shell starts over the startup files an applied `home` holds.
+///
+/// # Errors
+///
+/// Returns an error when a shell can't start.
+pub fn home_startup_programs(home: &Path) -> Result<Vec<(&'static str, Vec<String>)>> {
+    use crate::startup::Shell;
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    [
+        (Shell::Zsh, ".zshrc"),
+        (Shell::Nu, ".config/nushell/config.nu"),
+        (
+            Shell::Pwsh,
+            "Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
+        ),
+    ]
+    .into_iter()
+    .filter(|(shell, file)| home.join(file).is_file() && (*shell != Shell::Zsh || !cfg!(windows)))
+    .map(|(shell, _)| Ok((shell.name(), crate::startup::started(shell, home, &path)?)))
+    .collect()
+}
+
+/// Prints the programs each shell of the named profile, or of an applied home, starts.
+///
+/// # Errors
+///
+/// Returns an error when the name names no profile or the count fails.
+pub fn print_startup(root: &Path, name: Option<&str>, home: Option<&Path>) -> Result<()> {
+    let counted = if let Some(home) = home {
+        home_startup_programs(home)?
+    } else {
+        let name = name.context("name a profile or a home")?;
+        let profile = Profile::ALL
+            .into_iter()
+            .find(|profile| profile.name() == name)
+            .with_context(|| format!("{name} is no profile"))?;
+        startup_programs(root, profile)?
+    };
+    for (shell, programs) in counted {
+        println!(
+            "{shell} started {}: {}",
+            programs.len(),
+            programs.join(", ")
+        );
+    }
+    Ok(())
+}
+
 /// One profile rendered into an owned destination with fixture data.
 struct Fixture<'a> {
     root: &'a Path,
@@ -604,7 +692,11 @@ struct Fixture<'a> {
 
 impl<'a> Fixture<'a> {
     fn new(root: &'a Path, scope: &Path, profile: Profile) -> Result<Self> {
-        let destination = scope.join("home with ' quote");
+        Self::at(root, scope, profile, "home with ' quote")
+    }
+
+    fn at(root: &'a Path, scope: &Path, profile: Profile, home: &str) -> Result<Self> {
+        let destination = scope.join(home);
         fs::create_dir_all(&destination)?;
         let config = scope.join("config.json");
         let data = fixture(profile, root, &destination)?;

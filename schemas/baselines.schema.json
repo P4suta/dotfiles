@@ -158,6 +158,30 @@
             "exact",
             "pair"
           ]
+        },
+        {
+          "description": "The external programs a shell starts while reading its startup files.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "exec-count"
+            },
+            "shell": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "shell",
+            "exact"
+          ]
         }
       ]
     }

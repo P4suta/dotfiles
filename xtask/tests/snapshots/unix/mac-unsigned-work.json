@@ -487,7 +487,7 @@
     {"mode":"0755","path":".local/bin/ghostty-nu","sha256":"1e9ed08844110cdf645625a448de3dc0bf88f13719f6bfbc11a207f445185f6c","type":"file"},
     {"mode":"0755","path":".local/bin/git","sha256":"7053afbde0b294f6917b44c99d67daaa5aeeb649e78688c0c1598c4df45a48a7","type":"file"},
     {"mode":"0644","path":".zprofile","sha256":"468bbf48e223d7f207af19f50cc5d4ea20a265054dc6ce9405c69854c958e85e","type":"file"},
-    {"mode":"0644","path":".zshrc","sha256":"4d4cc23a7adab2e8bf7e3041f246b10f193182daf11c6f341edf9f9b8ed6ede5","type":"file"},
+    {"mode":"0644","path":".zshrc","sha256":"4f7e3ea6780e9eb41bda8cf2f521ce47f8e7d0a07fbe26841ba64121e84b73dc","type":"file"},
     {"mode":"0755","path":"Library","sha256":null,"type":"dir"},
     {"mode":"0755","path":"Library/Application Support","sha256":null,"type":"dir"},
     {"mode":null,"path":"Library/Application Support/lazygit","sha256":"cd1b3e7685b4403ac2da81e829015e430d6d6d0a8fd0b2ddfe17a2171c3c30ad","type":"symlink"},

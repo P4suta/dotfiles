@@ -29,3 +29,19 @@ exact = 0
 [[metric]]
 metric = "mutants-timed-out"
 exact = 0
+
+# Shell initialization reads generated caches without starting external programs.
+[[metric]]
+metric = 'exec-count'
+shell = 'zsh'
+exact = 0
+
+[[metric]]
+metric = 'exec-count'
+shell = 'nu'
+exact = 0
+
+[[metric]]
+metric = 'exec-count'
+shell = 'pwsh'
+exact = 0

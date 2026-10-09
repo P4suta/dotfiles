@@ -65,6 +65,17 @@ pub(crate) fn context7(runner: &mut impl Runner, local_gui: bool) -> Result<()> 
 }
 
 pub(crate) fn integrations(home: &Path, runner: &mut impl Runner, local_gui: bool) -> Result<()> {
+    shell_caches(home, runner)?;
+    agent_integrations(runner, local_gui);
+    Ok(())
+}
+
+/// Writes the Nushell modules and the zsh caches that each tool generates for its shell initialization under `home`.
+///
+/// # Errors
+///
+/// Returns an error when a generator fails or a cache write fails.
+pub fn shell_caches(home: &Path, runner: &mut impl Runner) -> Result<()> {
     let generated = home.join(".config/nushell/generated");
     for (name, tool, arguments) in [
         ("mise", Tool::Mise, args(&["activate", "nu"])),
@@ -93,13 +104,115 @@ pub(crate) fn integrations(home: &Path, runner: &mut impl Runner, local_gui: boo
                 );
                 bytes = format!("$env.LS_COLORS = r#'{}'#\n", colors.trim_end()).into_bytes();
             }
+            if name == "atuin" {
+                bytes = without_startup_index(&String::from_utf8(bytes)?).into_bytes();
+            }
             replace(&target, &bytes, false)?;
         } else if !target.exists() {
             replace(&target, b"", false)?;
         }
     }
-    agent_integrations(runner, local_gui);
+    zsh_caches(home, runner)
+}
+
+/// The directory of the zsh initialization caches, which `.zshrc` sources so a new shell starts no program.
+pub const ZSH_CACHE: &str = ".cache/zsh";
+
+/// Writes each tool's zsh initialization into [`ZSH_CACHE`], as the Windows setup caches the PowerShell one.
+/// An absent tool keeps its earlier cache, and `.zshrc` skips a cache that doesn't exist.
+fn zsh_caches(home: &Path, runner: &mut impl Runner) -> Result<()> {
+    let cache = home.join(ZSH_CACHE);
+    for (name, tool, arguments) in [
+        ("mise", Tool::Mise, args(&["activate", "zsh"])),
+        (
+            "starship",
+            Tool::Starship,
+            args(&["init", "zsh", "--print-full-init"]),
+        ),
+        ("zoxide", Tool::Zoxide, args(&["init", "zsh"])),
+        (
+            "atuin",
+            Tool::Atuin,
+            args(&["init", "zsh", "--disable-up-arrow"]),
+        ),
+        ("fzf", Tool::Fzf, args(&["--zsh"])),
+        (
+            "ls-colors",
+            Tool::Vivid,
+            args(&["generate", "tokyonight-night"]),
+        ),
+    ] {
+        if !runner.available(tool) {
+            continue;
+        }
+        let text = String::from_utf8(checked(runner, tool, &arguments)?)?;
+        let script = match name {
+            "mise" => deferred_mise(&text),
+            "ls-colors" => {
+                ensure!(
+                    !text.contains('\''),
+                    "a quote in the generated colors would end the zsh string"
+                );
+                format!("export LS_COLORS='{}'\n", text.trim_end())
+            }
+            _ => text,
+        };
+        replace(&cache.join(format!("{name}.zsh")), script.as_bytes(), false)?;
+    }
     Ok(())
+}
+
+/// Atuin's Nushell initialization without the top-level block that starts `atuin __internal prepare-search-index` in a background job as the shell starts.
+/// Atuin builds its search index on the first search instead, and the hooks that run at each prompt stay.
+#[must_use]
+pub fn without_startup_index(initialization: &str) -> String {
+    let mut kept = String::new();
+    let mut block: Vec<&str> = Vec::new();
+    for line in initialization.lines() {
+        if block.is_empty() && !line.starts_with("if ") {
+            kept.push_str(line);
+            kept.push('\n');
+            continue;
+        }
+        block.push(line);
+        if line == "}" {
+            if !block
+                .iter()
+                .any(|line| line.contains("prepare-search-index"))
+            {
+                for line in &block {
+                    kept.push_str(line);
+                    kept.push('\n');
+                }
+            }
+            block.clear();
+        }
+    }
+    for line in block {
+        kept.push_str(line);
+        kept.push('\n');
+    }
+    kept
+}
+
+/// The mise activation without the lines that run `mise hook-env` and pin the generating process's `PATH` as the shell sources it.
+/// The first prompt's hook then computes the environment from the shell's own `PATH`.
+#[must_use]
+pub fn deferred_mise(activation: &str) -> String {
+    activation
+        .lines()
+        .filter(|line| {
+            *line != "_mise_hook --force"
+                && !line.starts_with("export PATH='")
+                && !line.starts_with("export __MISE_ORIG_PATH='")
+                && !line.starts_with("export __MISE_ZSH_ACTIVATE_PATH=")
+                && !line.starts_with("export __MISE_ZSH_ACTIVATE_ENV=")
+        })
+        .fold(String::new(), |mut kept, line| {
+            kept.push_str(line);
+            kept.push('\n');
+            kept
+        })
 }
 
 /// Installs the herdr integration of each available agent and sets up Context7 for Codex, printing each failure as a warning.
@@ -180,6 +293,35 @@ mod tests {
         });
         assert!(context7(&mut fake, true).is_err());
         assert_eq!(fake.calls.len(), 2);
+    }
+
+    #[test]
+    fn the_atuin_module_starts_no_index_job_but_keeps_its_prompt_hooks() {
+        let initialization = "if 'ATUIN_SESSION' not-in $env {\n    $env.ATUIN_SESSION = (random uuid -v 7)\n}\nlet _atuin_pre_prompt = {||\n    job spawn { ^atuin history end } | ignore\n}\nif (version).minor >= 104 {\n    with-env { ATUIN_SHELL: nu } {\n        job spawn {\n            atuin __internal prepare-search-index | complete\n        } | ignore\n    }\n}\n$env.config = ($env.config | default [] keybindings)\n";
+        assert_eq!(
+            without_startup_index(initialization),
+            "if 'ATUIN_SESSION' not-in $env {\n    $env.ATUIN_SESSION = (random uuid -v 7)\n}\nlet _atuin_pre_prompt = {||\n    job spawn { ^atuin history end } | ignore\n}\n$env.config = ($env.config | default [] keybindings)\n"
+        );
+    }
+
+    #[test]
+    fn the_zsh_cache_defers_the_mise_hook_to_the_first_prompt() {
+        let activation = "export __MISE_ORIG_PATH='/baked'\nexport PATH='/baked'\nif [ -z \"${__MISE_ORIG_PATH:-}\" ]; then\n  export __MISE_ORIG_PATH=\"$PATH\"\nfi\nadd-zsh-hook precmd _mise_hook_precmd\n\n_mise_hook --force\nexport __MISE_ZSH_ACTIVATE_PATH=\"$PATH\"\nexport __MISE_ZSH_ACTIVATE_ENV=\"$(_mise_hook_env_state)\"\n";
+        let scope = tempfile::tempdir().unwrap();
+        let mut fake = Fake {
+            replies: VecDeque::from([Reply {
+                success: true,
+                bytes: activation.as_bytes().to_vec(),
+            }]),
+            calls: Vec::new(),
+        };
+        zsh_caches(scope.path(), &mut fake).unwrap();
+        assert_eq!(
+            fs::read_to_string(scope.path().join(ZSH_CACHE).join("mise.zsh")).unwrap(),
+            "if [ -z \"${__MISE_ORIG_PATH:-}\" ]; then\n  export __MISE_ORIG_PATH=\"$PATH\"\nfi\nadd-zsh-hook precmd _mise_hook_precmd\n\n"
+        );
+        assert_eq!(fake.calls, [["mise", "activate", "zsh"]]);
+        assert!(!scope.path().join(ZSH_CACHE).join("starship.zsh").exists());
     }
 
     #[test]
