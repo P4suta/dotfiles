@@ -547,6 +547,7 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
     let unprobed = crate::quality::lint_probes(root, &obligations)?;
     ensure!(unprobed.is_empty(), "{}", unprobed.join("\n"));
     let mut shells = std::collections::BTreeSet::new();
+    let mut contracts = crate::quality::contracts(root, &obligations)?;
     for profile in Profile::ALL {
         let fixture = Fixture::new(root, &scratch.path().join(profile.name()), profile)?;
         let (dump, checked) = fixture.render(report)?;
@@ -555,6 +556,7 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
         ensure!(strays.is_empty(), "{}", strays.join("\n"));
         let grids = crate::theme::check_grids(root, profile.name(), &dump, false)?;
         ensure!(grids.is_empty(), "{}", grids.join("\n"));
+        crate::quality::conform(profile.name(), &dump, &mut contracts)?;
         fixture.check_setup(&dump, &source_data["platforms"][profile.name()])?;
         fixture.apply_files()?;
         fixture.check_merged_targets(&dump)?;
@@ -590,6 +592,18 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
         unchecked.is_empty(),
         "no profile checked these shell targets: {unchecked:?}"
     );
+    let unheld: Vec<String> = contracts
+        .iter()
+        .filter_map(crate::quality::Contract::standing_refusal)
+        .collect();
+    ensure!(unheld.is_empty(), "{}", unheld.join("\n"));
+    for contract in &contracts {
+        println!(
+            "{} governs {}",
+            contract.schema,
+            contract.witnesses.join(", ")
+        );
+    }
     let differing: Vec<_> = git_policies
         .iter()
         .filter(|(_, policy)| *policy != git_policies[0].1)

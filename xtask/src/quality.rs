@@ -303,6 +303,276 @@ pub fn shell_selection(name: &str, contents: &str) -> Option<crate::shell_target
     )
 }
 
+/// The key the gate plants at the top level of a governed target, which no consumer declares.
+pub const PLANTED_KEY: &str = "dotfiles-planted-unknown-key";
+
+/// The schema errors a refusal quotes for one target.
+const QUOTED_ERRORS: usize = 5;
+
+/// A consumer's vendored schema and the rendered targets it governs, with the targets every profile rendered so far.
+pub struct Contract {
+    pub schema: String,
+    pub targets: Vec<String>,
+    digest_matches: bool,
+    validator: jsonschema::Validator,
+    pub witnesses: Vec<String>,
+}
+
+impl std::fmt::Debug for Contract {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Contract")
+            .field("schema", &self.schema)
+            .field("targets", &self.targets)
+            .field("witnesses", &self.witnesses)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Contract {
+    /// Compiles a vendored schema offline, recording whether its bytes keep the manifest's digest.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when reading, parsing, or compiling the schema fails.
+    pub fn load(
+        root: &Path,
+        vendored: &crate::obligations::Vendored,
+        targets: &[String],
+        resources: &[crate::obligations::Vendored],
+        close_root: bool,
+        undeclared: &[String],
+    ) -> Result<Self> {
+        let schema = &vendored.schema;
+        let read = |vendored: &crate::obligations::Vendored| -> Result<(bool, Value)> {
+            let path = &vendored.schema;
+            let (digest_matches, bytes) = crate::obligations::vendored_bytes(root, vendored)
+                .with_context(|| format!("read {path}"))?;
+            let document =
+                serde_json::from_slice(&bytes).with_context(|| format!("parse {path}"))?;
+            Ok((digest_matches, document))
+        };
+        let (mut digest_matches, mut document) = read(vendored)?;
+        if close_root {
+            let root_schema = document
+                .as_object_mut()
+                .with_context(|| format!("{schema} is no schema object"))?;
+            ensure!(
+                root_schema.get("additionalProperties") != Some(&Value::Bool(false)),
+                "{schema} already refuses unknown top-level keys; remove close_root from {}",
+                crate::obligations::MANIFEST
+            );
+            root_schema.insert("additionalProperties".to_owned(), Value::Bool(false));
+            let declared = root_schema
+                .entry("properties")
+                .or_insert_with(|| Value::Object(serde_json::Map::new()))
+                .as_object_mut()
+                .with_context(|| format!("{schema} holds no properties object"))?;
+            for key in undeclared {
+                ensure!(
+                    declared.insert(key.clone(), Value::Bool(true)).is_none(),
+                    "{schema} now declares {key}; remove it from undeclared in {}",
+                    crate::obligations::MANIFEST
+                );
+            }
+        } else {
+            ensure!(
+                undeclared.is_empty(),
+                "{schema} names undeclared keys without close_root in {}",
+                crate::obligations::MANIFEST
+            );
+        }
+        let mut referenced = Vec::new();
+        for resource in resources {
+            let (matches, contents) = read(resource)?;
+            digest_matches &= matches;
+            let id = contents["$id"]
+                .as_str()
+                .with_context(|| format!("{} declares no $id", resource.schema))?
+                .to_owned();
+            referenced.push((id, contents));
+        }
+        let mut options = jsonschema::options();
+        let identifiers: std::collections::BTreeSet<&str> = referenced
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .chain(document["$id"].as_str())
+            .collect();
+        known_references(&document, &identifiers)?;
+        for (_, contents) in &referenced {
+            known_references(contents, &identifiers)?;
+        }
+        for (id, contents) in referenced {
+            options.with_document(id, contents);
+        }
+        let validator = options
+            .build(&document)
+            .map_err(|error| anyhow::anyhow!("compile {schema}: {error}"))?;
+        Ok(Self {
+            schema: schema.to_owned(),
+            targets: targets.to_vec(),
+            digest_matches,
+            validator,
+            witnesses: Vec::new(),
+        })
+    }
+
+    /// The refusal for one rendered target, or `None` when it conforms and the schema refuses a planted key.
+    #[must_use]
+    pub fn refusal(&self, profile: &str, target: &str, instance: &Value) -> Option<String> {
+        let mut planted = instance.clone();
+        if let Some(object) = planted.as_object_mut() {
+            object.insert(PLANTED_KEY.to_owned(), Value::Bool(true));
+        }
+        let facts = crate::schema_rules::Target {
+            conforms: self.validator.is_valid(instance),
+            planted_refused: !self.validator.is_valid(&planted),
+        };
+        let schema = &self.schema;
+        match crate::schema_rules::verdict(facts) {
+            crate::schema_rules::Verdict::Conforms => None,
+            crate::schema_rules::Verdict::Violates => {
+                let errors: Vec<String> = self
+                    .validator
+                    .validate(instance)
+                    .err()
+                    .into_iter()
+                    .flatten()
+                    .take(QUOTED_ERRORS)
+                    .map(|error| format!("{} at `{}`", error, error.instance_path))
+                    .collect();
+                Some(format!(
+                    "the {profile} profile renders {target}, which breaks {schema}: {}",
+                    errors.join("; ")
+                ))
+            }
+            crate::schema_rules::Verdict::Open => Some(format!(
+                "{schema} admits the unknown key {PLANTED_KEY} in {target} of the {profile} profile, so a misspelled key would apply silently"
+            )),
+        }
+    }
+
+    /// The refusal for the schema over every profile, or `None` when its bytes hold and a target saw it.
+    #[must_use]
+    pub fn standing_refusal(&self) -> Option<String> {
+        let schema = &self.schema;
+        let witnesses = u32::try_from(self.witnesses.len()).unwrap_or(u32::MAX);
+        match crate::schema_rules::standing(self.digest_matches, witnesses) {
+            crate::schema_rules::Standing::Holds => None,
+            crate::schema_rules::Standing::Drifted => Some(format!(
+                "{schema} differs from the SHA-256 that {} records; vendor the pinned release again",
+                crate::obligations::MANIFEST
+            )),
+            crate::schema_rules::Standing::Unwitnessed => Some(format!(
+                "no profile renders {}, so {schema} checks nothing",
+                self.targets.join(", ")
+            )),
+        }
+    }
+}
+
+fn known_references(
+    document: &Value,
+    identifiers: &std::collections::BTreeSet<&str>,
+) -> Result<()> {
+    match document {
+        Value::Array(items) => {
+            for item in items {
+                known_references(item, identifiers)?;
+            }
+        }
+        Value::Object(properties) => {
+            for keyword in ["$ref", "$dynamicRef", "$recursiveRef"] {
+                if let Some(reference) = properties.get(keyword).and_then(Value::as_str) {
+                    let external = reference.split('#').next().unwrap_or_default();
+                    ensure!(
+                        external.is_empty() || identifiers.contains(external),
+                        "unvendored schema reference {reference}; network retrieval is disabled"
+                    );
+                }
+            }
+            for (key, value) in properties {
+                if !matches!(key.as_str(), "default" | "examples" | "enum" | "const") {
+                    known_references(value, identifiers)?;
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// The contracts of every `json-schema` obligation in the manifest.
+///
+/// # Errors
+///
+/// Returns an error when a schema fails to load.
+pub fn contracts(root: &Path, manifest: &crate::obligations::Manifest) -> Result<Vec<Contract>> {
+    manifest
+        .obligations
+        .iter()
+        .filter_map(|obligation| match obligation {
+            crate::obligations::Obligation::JsonSchema {
+                schema,
+                sha256,
+                encoded_sha256,
+                targets,
+                resources,
+                close_root,
+                undeclared,
+            } => Some(Contract::load(
+                root,
+                &crate::obligations::Vendored {
+                    schema: schema.clone(),
+                    sha256: sha256.clone(),
+                    encoded_sha256: encoded_sha256.clone(),
+                },
+                targets,
+                resources,
+                *close_root,
+                undeclared,
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The rendered text of a governed target as a JSON value, read as TOML for a `.toml` target.
+fn instance(name: &str, contents: &str) -> Result<Value> {
+    if crate::has_extension(name, "toml") {
+        toml::from_str(contents).with_context(|| format!("invalid rendered TOML: {name}"))
+    } else {
+        serde_json::from_str(contents).with_context(|| format!("invalid rendered JSON: {name}"))
+    }
+}
+
+/// Validates every governed target of one profile's dump under its consumer's schema and records it as a witness.
+/// Exempt as semantic-boundary: a schema checks a permission rule's syntax and a format string's type.
+/// The consumer decides whether the rule takes effect and how the format renders.
+/// Evidence: `xtask/tests/schemas.rs::a_planted_unknown_key_in_a_mapped_target_fails_and_names_the_target_and_profile`.
+/// Reconsider when the cell-grid comparison renders each format string through its consumer.
+///
+/// # Errors
+///
+/// Returns an error naming the target and the profile when a target breaks its schema or the schema admits a planted key.
+pub fn conform(profile: &str, dump: &Value, contracts: &mut [Contract]) -> Result<()> {
+    let mut refusals = Vec::new();
+    for contract in contracts.iter_mut() {
+        for target in contract.targets.clone() {
+            let Some(contents) = dump[&target]["contents"].as_str() else {
+                continue;
+            };
+            if let Some(refusal) = contract.refusal(profile, &target, &instance(&target, contents)?)
+            {
+                refusals.push(refusal);
+            }
+            contract.witnesses.push(format!("{profile}:{target}"));
+        }
+    }
+    ensure!(refusals.is_empty(), "{}", refusals.join("\n"));
+    Ok(())
+}
+
 /// Checks every rendered target of one profile and returns the shell targets it checked.
 pub(crate) fn rendered(root: &Path, dump: &Value, directory: &Path) -> Result<Vec<String>> {
     let targets = dump.as_object().context("profile dump must be a mapping")?;

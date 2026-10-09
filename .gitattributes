@@ -3,3 +3,5 @@
 # A fuzzer reads each corpus entry byte for byte, so no conversion or text check may change it.
 fuzz/corpus/** binary
 xtask/proofs/fuzz-fixture/corpus/** binary
+# Compressed consumer schemas keep their original bytes and both recorded digests.
+schemas/vendor/*.gz binary

@@ -1913,3 +1913,89 @@ fn reject_dropping_an_unrelated_index_block() {
     assert!(startup_index(b"if other {\n    print 'prepare-search-index'\n}\n").is_some());
 }
 '''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/schema_rules.rs"
+probes = '''
+use production::{Standing, Target, Verdict, standing, verdict};
+#[kani::proof]
+fn reject_a_schema_that_admits_a_planted_key() {
+    assert!(verdict(Target { conforms: true, planted_refused: false }) == Verdict::Conforms);
+}
+#[kani::proof]
+fn reject_a_drifted_schema() {
+    assert!(standing(false, 1) == Standing::Holds);
+}
+#[kani::proof]
+fn reject_a_schema_no_profile_witnesses() {
+    assert!(standing(true, 0) == Standing::Holds);
+}
+'''
+
+# The consumers' schemas, each vendored at the release the repository installs, which `just profiles` checks for every governed target of every profile.
+# Each run also plants an unknown key in every governed target, which the schema must refuse.
+# mise pins 2026.10.0 in home/.chezmoidata/versions.toml.
+[[obligation]]
+verifier = "json-schema"
+schema = "schemas/vendor/mise.schema.json.gz"
+encoded_sha256 = "c497d6c91f0608615507b516dce7a0eca8e8bd3cfb01319f475094119ffca34f"
+sha256 = "13c69fc15c8cb38ff1f84d61ce10bfee1491e15f079e6883d8bf7d9b60a0137f"
+targets = [".config/mise/config.toml"]
+
+# Homebrew and Scoop track the starship releases they serve, and this schema matches 1.26.0.
+[[obligation]]
+verifier = "json-schema"
+schema = "schemas/vendor/starship.schema.json.gz"
+encoded_sha256 = "30ca37cdc6da3662bf7ae27d0cf96439ecd0cd37f4a9f28fb01f8d4aa2c57ba9"
+sha256 = "26c0501fa0b516a587c91b6f2314cf4d128923e5dea6487b3d5e82fa8b56b394"
+targets = [".config/starship.toml"]
+
+# Homebrew tracks the Jujutsu releases it serves, and this schema matches 0.45.1.
+[[obligation]]
+verifier = "json-schema"
+schema = "schemas/vendor/jj.schema.json.gz"
+encoded_sha256 = "685c1e122a1e2ea7404687df5d306c1d5d8b49c0b05e74a9b24f2c7656f9245c"
+sha256 = "6e7c1a8d01ad4fa1014861ef3ad3cfde3e7d916651cd4f98abfb70fea7a2aa77"
+targets = [".config/jj/config.toml"]
+# The schema leaves its top level open, so the gate refuses an undeclared top-level key itself.
+close_root = true
+
+# The SchemaStore schema of Claude Code settings, which the settings documentation names.
+[[obligation]]
+verifier = "json-schema"
+schema = "schemas/vendor/claude-code-settings.schema.json.gz"
+encoded_sha256 = "d7f0965d5e4d49e55ad0a719ed626817484ef15c7110e43f1b1eeee6f089296a"
+sha256 = "6d4a6e3c7adedffce8079ccaef0a4bab5f5718b054421b4475c788a0ae4bedfe"
+targets = [".claude/settings.json"]
+# Claude Code ignores an unknown setting, and the schema leaves its top level open, so the gate refuses an undeclared top-level key itself.
+close_root = true
+# Claude Code writes skipAutoPermissionPrompt when the owner accepts the auto mode prompt, and the WSL settings carry it, but SchemaStore doesn't declare it yet.
+undeclared = ["skipAutoPermissionPrompt"]
+
+# opencode.ai serves the configuration and terminal schemas of its current release, and these match 1.18.35.
+[[obligation]]
+verifier = "json-schema"
+schema = "schemas/vendor/opencode-config.schema.json.gz"
+encoded_sha256 = "d17999176a9f7f8c36334459ed63c6b780860308422401d46ff7239108d598a3"
+sha256 = "e8cb6e287a3852ee3403f4803be5ad6b19db94948037eaa9672125c333427922"
+targets = [".config/opencode/opencode.json"]
+# The model enumeration the configuration schema references by its models.dev `$id`.
+resources = [
+  { schema = "schemas/vendor/models-dev-model.schema.json.gz", encoded_sha256 = "dda277854a8ad1c16c435efeb231279f36f71f08f5c7abb69c9f24edfc0bc7d3", sha256 = "d6717e2ac5f30e38ebfcc1cf158f9f5227ef1581accb3d67fb39598a0b995f31" },
+]
+
+[[obligation]]
+verifier = "json-schema"
+schema = "schemas/vendor/opencode-tui.schema.json.gz"
+encoded_sha256 = "faf29d5b1721adaf6a632cd2896ec4396a83f170282ff3f864be3aac42630176"
+sha256 = "eb361e284669bc253982c529b1a67a8d867e5cd96a6eaa696ef162574f85c1df"
+targets = [".config/opencode/tui.json"]
+
+# The theme schema of the opencode 1.18.35 source, since opencode.ai no longer serves the URL themes declare.
+[[obligation]]
+verifier = "json-schema"
+schema = "schemas/vendor/opencode-theme.schema.json.gz"
+encoded_sha256 = "6fd84b36e5d6dab4823122d5803ecd6f30d8ce4382e3064d14f83efab4f1f37d"
+sha256 = "315b18b00549814b545841c32170d9922127faf307d4e66d62299443268ef244"
+targets = [".config/opencode/themes/tokyonight.json"]

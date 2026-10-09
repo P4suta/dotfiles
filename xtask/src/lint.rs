@@ -447,7 +447,14 @@ pub fn findings(root: &Path, stage: Stage, paths: &[String]) -> Result<Counts> {
             root,
             || {
                 let mut command = Tool::Typos.command();
-                command.args(["--format", "brief", "--config", ".typos.toml", "--"]);
+                command.args([
+                    "--force-exclude",
+                    "--format",
+                    "brief",
+                    "--config",
+                    ".typos.toml",
+                    "--",
+                ]);
                 command
             },
             &files,

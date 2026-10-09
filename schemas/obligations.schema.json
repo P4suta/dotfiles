@@ -175,14 +175,44 @@
           ]
         },
         {
-          "description": "A vendored JSON Schema, which must keep the recorded digest.",
+          "description": "A consumer schema and its governed targets.",
           "type": "object",
           "properties": {
+            "close_root": {
+              "type": "boolean",
+              "default": false
+            },
+            "encoded_sha256": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "resources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Vendored"
+              }
+            },
             "schema": {
               "type": "string"
             },
             "sha256": {
               "type": "string"
+            },
+            "targets": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "undeclared": {
+              "type": "array",
+              "default": [],
+              "items": {
+                "type": "string"
+              }
             },
             "verifier": {
               "type": "string",
@@ -193,7 +223,8 @@
           "required": [
             "verifier",
             "schema",
-            "sha256"
+            "sha256",
+            "targets"
           ]
         },
         {
@@ -429,6 +460,30 @@
       "required": [
         "main",
         "constants"
+      ]
+    },
+    "Vendored": {
+      "description": "A vendored schema file and the SHA-256 it must keep.",
+      "type": "object",
+      "properties": {
+        "encoded_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "schema": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "sha256"
       ]
     }
   }

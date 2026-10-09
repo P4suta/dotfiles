@@ -53,7 +53,7 @@ impl Selection {
 pub enum Checker {
     /// `shellcheck` at style severity after the dialect's own parser.
     Shellcheck,
-    /// ShellCheck's SC1071 excludes zsh, so parsing and the startup ceiling stand in.
+    /// `ShellCheck`'s SC1071 excludes zsh, so parsing and the startup ceiling stand in.
     ZshParse,
 }
 

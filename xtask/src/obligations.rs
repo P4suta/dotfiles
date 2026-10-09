@@ -25,6 +25,8 @@ pub const BASELINES: &str = "policy/baselines.toml";
 /// Where `just gen` writes the JSON Schema of the two files.
 pub const MANIFEST_SCHEMA: &str = "schemas/obligations.schema.json";
 pub const BASELINES_SCHEMA: &str = "schemas/baselines.schema.json";
+/// The consumer schema directory.
+pub const VENDORED_SCHEMAS: &str = "schemas/vendor/";
 
 /// The directory of the decision core's rule modules.
 pub const CORE_SOURCES: &str = "crates/rules/src";
@@ -111,8 +113,20 @@ pub enum Obligation {
         function: String,
         flags: Vec<KaniFlag>,
     },
-    /// A vendored JSON Schema, which must keep the recorded digest.
-    JsonSchema { schema: String, sha256: String },
+    /// A consumer schema and its governed targets.
+    JsonSchema {
+        schema: String,
+        sha256: String,
+        targets: Vec<String>,
+        #[serde(default)]
+        encoded_sha256: Option<String>,
+        #[serde(default)]
+        resources: Vec<Vendored>,
+        #[serde(default)]
+        close_root: bool,
+        #[serde(default)]
+        undeclared: Vec<String>,
+    },
     /// A linter run with its committed settings.
     Lint {
         tool: LintTool,
@@ -334,6 +348,64 @@ fn close_lint(
         refusals.push(format!(
             "{MANIFEST}: the {settings} obligation has no probe, so nothing shows the linter can fail"
         ));
+    }
+    refusals
+}
+
+/// A vendored schema file and the SHA-256 it must keep.
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Vendored {
+    pub schema: String,
+    pub sha256: String,
+    #[serde(default)]
+    pub encoded_sha256: Option<String>,
+}
+
+/// Reads the original consumer bytes and checks both digests for a compressed schema.
+///
+/// # Errors
+///
+/// Returns an error for a missing file, an invalid archive, or missing archive metadata.
+pub fn vendored_bytes(root: &Path, vendored: &Vendored) -> Result<(bool, Vec<u8>)> {
+    use std::io::Read as _;
+    let bytes = fs::read(root.join(&vendored.schema))?;
+    let digest = |bytes: &[u8]| crate::build_inputs::hex(&Sha256::digest(bytes));
+    if crate::has_extension(&vendored.schema, "gz") {
+        let encoded = vendored
+            .encoded_sha256
+            .as_ref()
+            .context("a compressed schema needs its archive digest")?;
+        let mut decoded = Vec::new();
+        flate2::read::GzDecoder::new(bytes.as_slice()).read_to_end(&mut decoded)?;
+        Ok((
+            digest(&bytes) == *encoded && digest(&decoded) == vendored.sha256,
+            decoded,
+        ))
+    } else {
+        ensure!(
+            vendored.encoded_sha256.is_none(),
+            "an uncompressed schema names an archive digest"
+        );
+        Ok((digest(&bytes) == vendored.sha256, bytes))
+    }
+}
+
+/// The refusals for a vendored schema: one outside the vendor directory, a missing file, or a digest that moved.
+fn close_vendored(root: &Path, vendored: &Vendored) -> Vec<String> {
+    let schema = &vendored.schema;
+    let mut refusals = Vec::new();
+    if !schema.starts_with(VENDORED_SCHEMAS) {
+        refusals.push(format!(
+            "{MANIFEST}: {schema} lies outside {VENDORED_SCHEMAS}; a serde type owns the data this repository defines, so only a consumer's vendored schema governs a target"
+        ));
+    }
+    match vendored_bytes(root, vendored) {
+        Ok((true, _)) => {}
+        Ok(_) => refusals.push(format!(
+            "{schema} differs from the SHA-256 that {MANIFEST} records; vendor the pinned release again"
+        )),
+        Err(_) => refusals.push(format!("{MANIFEST}: the schema {schema} is missing")),
     }
     refusals
 }
@@ -1129,15 +1201,28 @@ pub fn closure(root: &Path, manifest: &Manifest) -> Result<Closure> {
                     ));
                 }
             }
-            Obligation::JsonSchema { schema, sha256 } => match fs::read(root.join(schema)) {
-                Ok(bytes) if crate::build_inputs::hex(&Sha256::digest(&bytes)) == *sha256 => {}
-                Ok(_) => result.refusals.push(format!(
-                    "{schema} differs from the SHA-256 that {MANIFEST} records; vendor the pinned release again"
-                )),
-                Err(_) => result
-                    .refusals
-                    .push(format!("{MANIFEST}: the schema {schema} is missing")),
-            },
+            Obligation::JsonSchema {
+                schema,
+                sha256,
+                targets,
+                resources,
+                encoded_sha256,
+                ..
+            } => {
+                if targets.is_empty() {
+                    result
+                        .refusals
+                        .push(format!("{MANIFEST}: {schema} governs no rendered target"));
+                }
+                let own = Vendored {
+                    schema: schema.clone(),
+                    sha256: sha256.clone(),
+                    encoded_sha256: encoded_sha256.clone(),
+                };
+                for vendored in std::iter::once(&own).chain(resources) {
+                    result.refusals.extend(close_vendored(root, vendored));
+                }
+            }
             Obligation::Lint {
                 tool,
                 settings,

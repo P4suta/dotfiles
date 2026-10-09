@@ -1,6 +1,8 @@
 
 [files]
-extend-exclude = [".git/"]
+# Vendored upstream schemas keep their upstream text.
+# Their sha256 pins in policy/obligations.toml keep them byte-exact.
+extend-exclude = [".git/", "schemas/vendor/"]
 # Check hidden files.
 ignore-hidden = false
 

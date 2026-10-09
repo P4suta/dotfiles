@@ -7,6 +7,8 @@ use std::path::Path;
 
 const GATE: &str = "set -eo pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -; mise trust --quiet; mise install chezmoi shellcheck nu starship bat atuin television zoxide vivid fzf; mise install --force television atuin; export MISE_AUTO_INSTALL=false; mise x -- cargo test -p xtask --lib startup::tests; exec mise x -- cargo xtask profiles";
 
+const CONTAINER_OPTIONS_START: usize = 2;
+
 /// Runs every rendered profile and its shell checks in an owned Linux container.
 ///
 /// # Errors
@@ -22,7 +24,7 @@ pub fn check(root: &Path) -> Result<()> {
         .last_mut()
         .context("the container command has a gate")? = GATE.into();
     arguments.splice(
-        2..2,
+        CONTAINER_OPTIONS_START..CONTAINER_OPTIONS_START,
         [
             "--volume".into(),
             format!("{volume}-mise:/root/.local/share/mise").into(),
