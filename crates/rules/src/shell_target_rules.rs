@@ -147,6 +147,7 @@ mod proofs {
         if let Some(program) = interpreter(first_line) {
             assert_eq!(result.map(|selection| selection.dialect), dialect(program));
             assert!(result.is_none_or(|selection| selection.evidence == Evidence::Shebang));
+            assert!(result.is_none_or(|selection| !selection.needs_shell_flag()));
         } else if let Some(named) = dialect(directive) {
             assert_eq!(
                 result,
@@ -155,6 +156,7 @@ mod proofs {
                     evidence: Evidence::Directive
                 })
             );
+            assert!(result.is_some_and(|selection| !selection.needs_shell_flag()));
         } else if let Some(selection) = result {
             assert!(selection.needs_shell_flag());
         }
@@ -255,6 +257,25 @@ mod tests {
         assert_eq!(checker(Dialect::Zsh), Checker::ZshParse);
         assert_eq!(checker(Dialect::Sh), Checker::Shellcheck);
         assert_eq!(Dialect::Bash.name(), "bash");
+        for (word, expected) in [
+            (&b"sh"[..], Dialect::Sh),
+            (b"dash", Dialect::Sh),
+            (b"bash", Dialect::Bash),
+            (b"zsh", Dialect::Zsh),
+        ] {
+            let mut line = b"#!/usr/bin/env ".to_vec();
+            line.extend_from_slice(word);
+            assert_eq!(
+                selected(b"tool", &line, b"zsh"),
+                Some((expected, Evidence::Shebang))
+            );
+            assert_eq!(
+                selected(b"tool", b"# managed", word),
+                Some((expected, Evidence::Directive))
+            );
+            proofs::spec_select(b"tool", &line, b"zsh");
+            proofs::spec_select(b"tool", b"# managed", word);
+        }
         for (name, _) in STARTUP {
             for line in [&b""[..], b"#!/bin/zsh", b"#!/bin/sh", b"# x"] {
                 for directive in [&b""[..], b"sh", b"ksh"] {
