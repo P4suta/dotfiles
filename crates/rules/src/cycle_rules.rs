@@ -18,7 +18,7 @@ fn stuck(after: &[u32]) -> u32 {
         let mut freed = 0;
         for (index, needs) in after.iter().take(count).enumerate() {
             let bit = 1u32 << index;
-            if remaining & bit != 0 && needs & remaining & all == 0 {
+            if needs & remaining & all == 0 {
                 freed |= bit;
             }
         }
