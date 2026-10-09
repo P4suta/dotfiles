@@ -2190,9 +2190,18 @@ pub fn record_discharges(state: &Path, root: &Path, discharges: &[Discharge]) ->
             },
             other => anyhow::bail!("unknown discharge outcome `{other}`"),
         };
+        let explanation = match outcome {
+            incident_rules::Outcome::Exempt {
+                reason: Some(reason),
+                ..
+            } => {
+                format!(" Exemption: {}.", incident_rules::reason_text(reason))
+            }
+            _ => String::new(),
+        };
         ensure!(
             incident_rules::complete(outcome),
-            "the discharge of `{}` holds no complete prevention: mechanized evidence names an existing gate or test that reproduces the incident, and an exemption names a closed-set reason with a reconsideration condition",
+            "the discharge of `{}` holds no complete prevention: mechanized evidence names an existing gate or test that reproduces the incident, and an exemption names a closed-set reason with a reconsideration condition{explanation}",
             discharge.rule
         );
         write_json(

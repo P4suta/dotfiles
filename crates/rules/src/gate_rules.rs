@@ -451,6 +451,21 @@ mod proofs {
 
     #[cfg(kani)]
     #[kani::proof]
+    #[kani::unwind(6)]
+    fn a_force_prefix_reaches_the_full_and_ambiguous_spellings() {
+        let bytes: [u8; 5] = kani::any();
+        let length = usize::from(kani::any::<u8>() % 6);
+        let name = &bytes[..length];
+        let spellings: [&[u8]; 3] = [b"force", b"force-with-lease", b"force-if-includes"];
+        spec_spelling(name, &spellings);
+        let read = spelling(name, &spellings);
+        kani::cover!(name == b"force" && read == Spelling::Is(0));
+        kani::cover!(name == b"forc" && read == Spelling::Ambiguous);
+        kani::cover!(read == Spelling::Unknown);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
     fn a_commit_retry_keeps_what_its_message_source_implied() {
         let source = Source {
             fixup: FIXUPS[usize::from(kani::any::<u8>() % 4)],

@@ -85,6 +85,22 @@ fn proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results() -> anyhow:
         .remove("duration_ms");
     assert!(validate_results(&unmeasured, &expected, false).is_err());
     validate_results(&valid, &expected, false)?;
+    let mut impossible = valid.clone();
+    impossible["verification_results"]["results"][0]["checks"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"category":"overflow","status":"Unreachable"}));
+    validate_results(&impossible, &expected, false)?;
+    for status in ["Failure", "Undetermined", "Unknown", "Skipped"] {
+        impossible["verification_results"]["results"][0]["checks"][3]["status"] = json!(status);
+        assert!(validate_results(&impossible, &expected, false).is_err());
+    }
+    let mut unreachable = valid.clone();
+    unreachable["verification_results"]["results"][0]["checks"][0]["status"] = json!("Unreachable");
+    assert!(validate_results(&unreachable, &expected, false).is_err());
+    unreachable = valid.clone();
+    unreachable["verification_results"]["results"][0]["checks"][2]["status"] = json!("Unreachable");
+    assert!(validate_results(&unreachable, &expected, false).is_err());
     assert!(validate_results(&valid, &[], false).is_err());
     let mut missing = valid.clone();
     missing["verification_results"]["results"] = json!([]);
@@ -96,6 +112,17 @@ fn proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results() -> anyhow:
     failed["verification_results"]["results"][0]["status"] = json!("Failure");
     assert!(validate_results(&failed, &expected, false).is_err());
     assert!(validate_results(&valid, &expected, true).is_err());
+    Ok(())
+}
+
+#[test]
+fn the_overflow_fixture_requires_the_actual_checked_add_failure() -> anyhow::Result<()> {
+    let name = "reject_an_overflow_under_checked_mir";
+    let mut receipt = json!({"verification_results":{"summary":{"status":"completed","executed":1,"failed":1,"successful":0},"results":[{"harness_id":name,"status":"Failure","duration_ms":30,"checks":[{"category":"assertion","description":"attempt to add with overflow","status":"Failure"}]}]}});
+    validate_results(&receipt, &[name], true)?;
+    receipt["verification_results"]["results"][0]["checks"][0]["description"] =
+        json!("an unrelated assertion failed");
+    assert!(validate_results(&receipt, &[name], true).is_err());
     Ok(())
 }
 

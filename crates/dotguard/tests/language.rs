@@ -8,8 +8,7 @@ use std::sync::OnceLock;
 #[path = "support/fixture_git.rs"]
 mod fixture_git;
 
-#[path = "../../platform/tests/support/fixture_process.rs"]
-mod fixture_process;
+use fixture_git::fixture_process;
 #[path = "support/wrapper.rs"]
 mod wrapper;
 
@@ -51,9 +50,9 @@ fn fixtures() -> &'static Fixtures {
 }
 
 /// A command for dotguard itself, which starts only after the fixtures stand in place.
-fn dotguard() -> Command {
+fn dotguard(scope: &Path) -> Command {
     fixtures();
-    fixture_process::command(env!("CARGO_BIN_EXE_dotguard"), &fixtures().template)
+    fixture_process::command(env!("CARGO_BIN_EXE_dotguard"), scope)
 }
 
 #[test]
@@ -63,7 +62,7 @@ fn a_contaminated_file_is_refused_with_a_rescan_and_a_recorded_bypass() {
     std::fs::create_dir_all(&scope).unwrap();
     let cyrillic = char::from_u32(0x0441).unwrap();
     std::fs::write(scope.join("a.txt"), format!("plain\nmixed {cyrillic}\n")).unwrap();
-    let output = dotguard()
+    let output = dotguard(&scope)
         .current_dir(&scope)
         .env("HOME", &scope)
         .env("USERPROFILE", &scope)

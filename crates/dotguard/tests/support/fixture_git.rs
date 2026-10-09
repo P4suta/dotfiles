@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 
 #[path = "../../../platform/tests/support/fixture_process.rs"]
-mod fixture_process;
+pub mod fixture_process;
 
 /// Starts `program` so every Git it runs reads only the fixture: its repository, `global` as the only configuration, and no user attributes or ignore rules.
 #[must_use]

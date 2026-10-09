@@ -92,23 +92,36 @@ pub enum Budget {
     Exhausted,
 }
 
-/// The records of `records` less than `window` milliseconds before `now`, all at or before `now`.
-fn within(records: &[u64], now: u64, window: u64) -> usize {
-    records
-        .iter()
-        .filter(|at| now.saturating_sub(**at) < window)
-        .count()
+/// Whether both rolling windows have room for one more review.
+fn room(records: &[u64], now: u64) -> bool {
+    let mut hourly = 0;
+    let mut daily = 0;
+    let hour_start = now.saturating_sub(HOUR_MS);
+    let day_start = now.saturating_sub(DAY_MS);
+    for index in 0..records.len() {
+        let at = records.get(index).copied().unwrap_or_default();
+        hourly += usize::from(now < HOUR_MS || at > hour_start);
+        daily += usize::from(now < DAY_MS || at > day_start);
+    }
+    within_limits(hourly, daily)
+}
+
+fn future(records: &[u64], now: u64) -> bool {
+    for index in 0..records.len() {
+        if records.get(index).is_some_and(|at| *at > now) {
+            return true;
+        }
+    }
+    false
 }
 
 /// The verdict on one more review at `now` over the ledger `records`.
 /// This contract covers one call, and `specs/review_ledger.qnt` owns the rolling property over sequences of calls.
-#[cfg_attr(kani, kani::ensures(|budget: &Budget| (*budget == Budget::Backwards) == records.iter().any(|at| *at > now)))]
-#[cfg_attr(kani, kani::ensures(|budget: &Budget| *budget != Budget::Admit || (within(records, now, HOUR_MS) < HOURLY_LIMIT && within(records, now, DAY_MS) < DAILY_LIMIT)))]
 #[must_use]
 pub fn check_budget(records: &[u64], now: u64) -> Budget {
-    if records.iter().any(|at| *at > now) {
+    if future(records, now) {
         Budget::Backwards
-    } else if within_limits(within(records, now, HOUR_MS), within(records, now, DAY_MS)) {
+    } else if room(records, now) {
         Budget::Admit
     } else {
         Budget::Exhausted
@@ -126,52 +139,102 @@ pub enum Invocation {
 
 /// Whether an argument starts a paid or remote review, or carries an inline API key.
 fn paid_or_remote(argument: &str) -> bool {
-    ["--use-credits", "--api-key", "--remote"]
-        .iter()
-        .any(|flag| {
-            argument == *flag
-                || argument
-                    .strip_prefix(flag)
-                    .is_some_and(|rest| rest.starts_with('='))
-        })
+    let switch = |flag: &str| {
+        let bytes = argument.as_bytes();
+        if bytes.len() < flag.len() {
+            return false;
+        }
+        for index in 0..flag.len() {
+            if bytes.get(index) != flag.as_bytes().get(index) {
+                return false;
+            }
+        }
+        bytes.get(flag.len()).is_none_or(|byte| *byte == b'=')
+    };
+    switch("--use-credits") || switch("--api-key") || switch("--remote")
 }
+
+fn paid(args: &[&str]) -> bool {
+    for index in 0..args.len() {
+        if args
+            .get(index)
+            .is_some_and(|argument| paid_or_remote(argument))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn word_is(argument: &str, word: &str) -> bool {
+    if argument.len() != word.len() {
+        return false;
+    }
+    for index in 0..word.len() {
+        if argument.as_bytes().get(index) != word.as_bytes().get(index) {
+            return false;
+        }
+    }
+    true
+}
+
+fn one_of(argument: &str, words: &[&str]) -> bool {
+    for index in 0..words.len() {
+        if words.get(index).is_some_and(|word| word_is(argument, word)) {
+            return true;
+        }
+    }
+    false
+}
+
+const FORBIDDEN_COMMANDS: [&str; 3] = ["code", "handoff", "update"];
+const COMMAND_AND_OPTION: usize = 2;
 
 /// Skips options with their values to find the first command word of `args`.
 #[must_use]
 pub fn first_command<'a>(args: &[&'a str]) -> Option<&'a str> {
-    let mut rest = args;
-    while let [argument, tail @ ..] = rest {
-        rest = tail;
-        if !argument.starts_with('-') {
+    let mut position = 0;
+    while let Some(argument) = args.get(position) {
+        position += 1;
+        if argument.as_bytes().first() != Some(&b'-') {
             return Some(argument);
         }
-        let (flag, inline_value) = argument
-            .split_once('=')
-            .map_or((*argument, false), |(flag, _)| (flag, true));
-        match flag {
-            "-c" | "--config" => {
-                while let [value, tail @ ..] = rest {
-                    if value.starts_with('-') {
-                        break;
-                    }
-                    rest = tail;
-                }
+        let mut equal = None;
+        for index in 0..argument.len() {
+            if argument.as_bytes().get(index) == Some(&b'=') {
+                equal = Some(index);
+                break;
             }
-            "--deep" if !inline_value => {
-                // Kani parses the whole module as an older edition, which has no let chains.
-                if let Some((_, tail)) = rest
-                    .split_first()
-                    .filter(|(value, _)| !value.starts_with('-'))
-                {
-                    rest = tail;
+        }
+        let (flag, inline_value) = equal
+            .and_then(|index| argument.get(..index))
+            .map_or((*argument, false), |flag| (flag, true));
+        if one_of(flag, &["-c", "--config"]) {
+            while let Some(value) = args.get(position) {
+                if value.as_bytes().first() == Some(&b'-') {
+                    break;
                 }
+                position += 1;
             }
-            "--dir" | "--base" | "--base-commit" | "--source-branch" | "--region"
-                if !inline_value =>
+        } else if word_is(flag, "--deep") && !inline_value {
+            if args
+                .get(position)
+                .is_some_and(|value| value.as_bytes().first() != Some(&b'-'))
             {
-                rest = rest.get(1..).unwrap_or_default();
+                position += 1;
             }
-            _ => {}
+        } else if one_of(
+            flag,
+            &[
+                "--dir",
+                "--base",
+                "--base-commit",
+                "--source-branch",
+                "--region",
+            ],
+        ) && !inline_value
+        {
+            position += 1;
         }
     }
     None
@@ -180,30 +243,48 @@ pub fn first_command<'a>(args: &[&'a str]) -> Option<&'a str> {
 /// Whether the invocation queries the usage the guard probes.
 #[must_use]
 pub fn usage_query(args: &[&str]) -> bool {
-    let command = first_command(args);
-    command == Some("usage")
-        || (matches!(command, None | Some("review")) && args.contains(&"--usage"))
+    usage(args, first_command(args))
+}
+
+fn usage(args: &[&str], command: Option<&str>) -> bool {
+    if command.is_some_and(|command| word_is(command, "usage")) {
+        return true;
+    }
+    if command.is_none_or(|command| word_is(command, "review")) {
+        for index in 0..args.len() {
+            if args
+                .get(index)
+                .is_some_and(|argument| word_is(argument, "--usage"))
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Forbids paid and remote reviews, admits queries without spending the budget, and counts other invocations as reviews.
-#[cfg_attr(kani, kani::ensures(|kind: &Invocation| !args.iter().any(|argument| paid_or_remote(argument)) || *kind == Invocation::Forbidden))]
 #[must_use]
 pub fn classify(args: &[&str]) -> Invocation {
-    if args.iter().any(|argument| paid_or_remote(argument))
-        || matches!(first_command(args), Some("code" | "handoff" | "update"))
-    {
+    if paid(args) {
         return Invocation::Forbidden;
     }
-    let read_only = usage_query(args)
-        || matches!(args, [argument] if matches!(*argument, "--version" | "-V" | "--help" | "-h"))
-        || args.first().is_some_and(|argument| {
-            matches!(
-                *argument,
-                "auth" | "doctor" | "stats" | "usage" | "pullrequest" | "skills"
-            )
-        })
-        || matches!(args, ["review", "findings", ..])
-        || matches!(args, ["review", flag] if matches!(*flag, "--show-prompts" | "--usage" | "--help" | "-h"));
+    let command = first_command(args);
+    if command.is_some_and(|command| one_of(command, &FORBIDDEN_COMMANDS)) {
+        return Invocation::Forbidden;
+    }
+    let first = args.first().copied().unwrap_or_default();
+    let second = args.get(1).copied().unwrap_or_default();
+    let read_only = usage(args, command)
+        || (args.len() == 1 && one_of(first, &["--version", "-V", "--help", "-h"]))
+        || one_of(
+            first,
+            &["auth", "doctor", "stats", "usage", "pullrequest", "skills"],
+        )
+        || (word_is(first, "review") && word_is(second, "findings"))
+        || (args.len() == COMMAND_AND_OPTION
+            && word_is(first, "review")
+            && one_of(second, &["--show-prompts", "--usage", "--help", "-h"]));
     if read_only {
         Invocation::ReadOnly
     } else {
@@ -294,12 +375,13 @@ pub const fn ledger(cap: u8) -> Ledger {
 
 /// The records from tick `start` up to and excluding `end`.
 fn recorded(records: [u8; TICKS], start: i16, end: i16) -> u32 {
-    records
-        .iter()
-        .zip(0i16..)
-        .filter(|(_, tick)| start <= *tick && *tick < end)
-        .map(|(count, _)| u32::from(*count))
-        .sum()
+    let mut count = 0;
+    for tick in 0..=HORIZON {
+        if start <= i16::from(tick) && i16::from(tick) < end {
+            count += u32::from(records.get(usize::from(tick)).copied().unwrap_or_default());
+        }
+    }
+    count
 }
 
 /// Moves guard `guard` from `from` to `to`, or `None` when it stands elsewhere.
@@ -480,28 +562,105 @@ mod proofs {
         "--help",
     ];
 
+    pub fn spec_classify_codes(codes: &[u8]) -> Invocation {
+        assert!(codes.len() <= 3);
+        let args = [
+            WORDS
+                .get(usize::from(codes.first().copied().unwrap_or_default()))
+                .copied()
+                .unwrap_or_default(),
+            WORDS
+                .get(usize::from(codes.get(1).copied().unwrap_or_default()))
+                .copied()
+                .unwrap_or_default(),
+            WORDS
+                .get(usize::from(codes.get(2).copied().unwrap_or_default()))
+                .copied()
+                .unwrap_or_default(),
+        ];
+        let actual = classify(args.get(..codes.len()).unwrap_or_default());
+        assert_classify_result(codes, actual);
+        actual
+    }
+
+    fn assert_classify_result(codes: &[u8], actual: Invocation) {
+        let mut paid = false;
+        let mut usage = false;
+        for index in 0..codes.len() {
+            paid |= codes.get(index).is_some_and(|code| matches!(code, 1..=4));
+            usage |= codes.get(index) == Some(&7);
+        }
+        let mut position = 0;
+        let mut command = None;
+        while let Some(code) = codes.get(position) {
+            position += 1;
+            if matches!(code, 0 | 5 | 6 | 10) {
+                command = Some(*code);
+                break;
+            }
+            if *code == 8 {
+                while codes
+                    .get(position)
+                    .is_some_and(|code| matches!(code, 0 | 5 | 6 | 10))
+                {
+                    position += 1;
+                }
+            } else if *code == 9 {
+                position += 1;
+            }
+        }
+        let expected = if paid || command == Some(5) {
+            Invocation::Forbidden
+        } else if command == Some(6)
+            || (matches!(command, None | Some(0)) && usage)
+            || (codes.len() == 1 && codes.first() == Some(&11))
+            || codes.first() == Some(&6)
+            || (codes.first() == Some(&0) && codes.get(1) == Some(&10))
+            || (codes.len() == 2 && codes.first() == Some(&0) && codes.get(1) == Some(&11))
+        {
+            Invocation::ReadOnly
+        } else {
+            Invocation::Review
+        };
+        assert_eq!(actual, expected);
+        if paid {
+            assert_eq!(actual, Invocation::Forbidden);
+        }
+    }
+
     /// A paid or remote switch anywhere forbids the invocation, so it never reads only, and a forbidden command never reviews.
     pub fn spec_classify(args: &[&str]) -> Invocation {
         let kind = classify(args);
-        let paid = args.iter().any(|argument| {
-            ["--use-credits", "--api-key", "--remote"]
-                .iter()
-                .any(|flag| {
-                    argument == flag
-                        || argument
-                            .strip_prefix(flag)
-                            .is_some_and(|rest| rest.starts_with('='))
-                })
-        });
+        let mut paid = false;
+        for index in 0..args.len() {
+            let argument = args.get(index).copied().unwrap_or_default().as_bytes();
+            let mut end = argument.len();
+            for byte in 0..argument.len() {
+                if argument.get(byte) == Some(&b'=') {
+                    end = byte;
+                    break;
+                }
+            }
+            for flag in [b"--use-credits".as_slice(), b"--api-key", b"--remote"] {
+                if end != flag.len() {
+                    continue;
+                }
+                let mut same = true;
+                for byte in 0..end {
+                    same &= argument.get(byte) == flag.get(byte);
+                }
+                paid |= same;
+            }
+        }
         if paid {
             assert_eq!(kind, Invocation::Forbidden);
         }
         if kind == Invocation::ReadOnly {
             assert!(!paid);
         }
-        if usage_query(args)
-            && !paid
-            && !matches!(first_command(args), Some("code" | "handoff" | "update"))
+        if !paid
+            && usage_query(args)
+            && !first_command(args).is_some_and(|command| one_of(command, &FORBIDDEN_COMMANDS))
         {
             assert_eq!(kind, Invocation::ReadOnly);
         }
@@ -511,23 +670,33 @@ mod proofs {
     /// One call admits a review only when the ledger holds no future record and both windows have room.
     pub fn spec_check_budget(records: &[u64], now: u64) -> Budget {
         let budget = check_budget(records, now);
-        let backwards = records.iter().any(|at| *at > now);
+        assert_budget_result(records, now, budget);
+        budget
+    }
+
+    fn assert_budget_result(records: &[u64], now: u64, budget: Budget) {
+        let mut backwards = false;
+        for index in 0..records.len() {
+            let at = records.get(index).copied().unwrap_or_default();
+            backwards |= at > now;
+        }
         assert_eq!(budget == Budget::Backwards, backwards);
-        let hourly = records
-            .iter()
-            .filter(|at| **at <= now && now - **at < HOUR_MS)
-            .count();
-        let daily = records
-            .iter()
-            .filter(|at| **at <= now && now - **at < DAY_MS)
-            .count();
+        assert!(budget != Budget::Admit || room(records, now));
         if !backwards {
+            let mut hourly = 0;
+            let mut daily = 0;
+            for index in 0..records.len() {
+                let at = records.get(index).copied().unwrap_or_default();
+                if at <= now {
+                    hourly += usize::from(now - at < HOUR_MS);
+                    daily += usize::from(now - at < DAY_MS);
+                }
+            }
             assert_eq!(
                 budget == Budget::Admit,
                 hourly < HOURLY_LIMIT && daily < DAILY_LIMIT
             );
         }
-        budget
     }
 
     #[cfg(kani)]
@@ -549,11 +718,8 @@ mod proofs {
         };
         (1..=2).contains(&state.cap)
             && state.now <= HORIZON
-            && state
-                .records
-                .iter()
-                .zip(0u8..)
-                .all(|(count, tick)| tick <= state.now || *count == 0)
+            && (0..=HORIZON)
+                .all(|tick| tick <= state.now || state.records.get(usize::from(tick)) == Some(&0))
             && (0..GUARDS).all(|guard| (state.holder == Some(guard)) == holds(guard))
             && state.holder.is_none_or(|holder| holder < GUARDS)
             && (0..GUARDS).all(|guard| {
@@ -569,6 +735,10 @@ mod proofs {
     /// The fixed guards keep the invariant through every event, so no sequence of reservations passes a rolling limit or a pause.
     pub fn spec_record(state: Ledger, event: Event) -> Option<Ledger> {
         let next = record(Guard::Fixed, state, event);
+        if let Some(next) = next {
+            assert_eq!(next.cap, state.cap);
+            assert!(next.now >= state.now);
+        }
         if ledger_invariant(&state) {
             assert!(ledger_safe(&state));
             if let Some(next) = next {
@@ -605,9 +775,9 @@ mod proofs {
     }
 
     #[cfg(kani)]
-    fn any_event() -> Event {
+    fn any_event(case: u8) -> Event {
         let who = usize::from(kani::any::<u8>() % 3);
-        match kani::any::<u8>() % 9 {
+        match case {
             0 => Event::Tick,
             1 => Event::Pause,
             2 => Event::Resume,
@@ -624,10 +794,61 @@ mod proofs {
     #[kani::proof]
     #[kani::unwind(6)]
     fn every_event_of_the_fixed_guards_keeps_the_invariant_that_implies_the_rolling_limits() {
-        assert!(ledger_invariant(&ledger(1)) && ledger_invariant(&ledger(2)));
-        let state = any_ledger();
-        let event = any_event();
-        let next = spec_record(state, event);
+        let (state, next) = bounded_event(0);
+        kani::cover!(ledger_invariant(&state) && state.cap == 1 && next.is_some());
+        kani::cover!(ledger_invariant(&state) && state.cap == 2 && next.is_some());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn every_pause_of_the_fixed_guards_keeps_the_rolling_invariant() {
+        let (state, next) = bounded_event(1);
+        kani::cover!(ledger_invariant(&state) && state.cap == 1 && next.is_some());
+        kani::cover!(ledger_invariant(&state) && state.cap == 2 && next.is_some());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn every_resume_of_the_fixed_guards_keeps_the_rolling_invariant() {
+        let (state, next) = bounded_event(2);
+        kani::cover!(ledger_invariant(&state) && state.cap == 1 && next.is_some());
+        kani::cover!(ledger_invariant(&state) && state.cap == 2 && next.is_some());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn every_early_read_of_the_fixed_guards_keeps_the_rolling_invariant() {
+        let (state, next) = bounded_event(3);
+        kani::cover!(ledger_invariant(&state) && state.cap == 1 && next.is_none());
+        kani::cover!(ledger_invariant(&state) && state.cap == 2 && next.is_none());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn every_lock_of_the_fixed_guards_keeps_the_rolling_invariant() {
+        let (state, next) = bounded_event(4);
+        kani::cover!(ledger_invariant(&state) && state.cap == 1 && next.is_some());
+        kani::cover!(ledger_invariant(&state) && state.cap == 2 && next.is_some());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn every_read_of_the_fixed_guards_keeps_the_rolling_invariant() {
+        let (state, next) = bounded_event(5);
+        kani::cover!(ledger_invariant(&state) && state.cap == 1 && next.is_some());
+        kani::cover!(ledger_invariant(&state) && state.cap == 2 && next.is_some());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn every_reserve_of_the_fixed_guards_keeps_the_rolling_invariant() {
+        let (state, next) = bounded_reserve(0);
         kani::cover!(
             ledger_invariant(&state) && next.is_some_and(|next| next.stage[0] == Stage::Reserved)
         );
@@ -638,27 +859,1044 @@ mod proofs {
     }
 
     #[cfg(kani)]
-    #[kani::proof_for_contract(check_budget)]
-    #[kani::unwind(10)]
-    fn one_budget_check_admits_only_a_review_both_windows_hold() {
-        let records: [u64; 8] = kani::any();
-        let length = usize::from(kani::any::<u8>() % 9);
-        let budget = check_budget(&records[..length], kani::any());
-        kani::cover!(budget == Budget::Exhausted);
-        kani::cover!(budget == Budget::Admit);
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn every_reserve_of_the_second_guard_keeps_the_rolling_invariant() {
+        let (state, next) = bounded_reserve(1);
+        kani::cover!(
+            ledger_invariant(&state) && next.is_some_and(|next| next.stage[1] == Stage::Reserved)
+        );
+        kani::cover!(
+            ledger_invariant(&state)
+                && next.is_some_and(|next| next.stage[1] == Stage::Done && next.saw[1])
+        );
     }
 
     #[cfg(kani)]
-    #[kani::proof_for_contract(classify)]
-    #[kani::unwind(10)]
+    fn bounded_reserve(who: usize) -> (Ledger, Option<Ledger>) {
+        assert!(ledger_invariant(&ledger(1)) && ledger_invariant(&ledger(2)));
+        let state = any_ledger();
+        kani::assume(ledger_invariant(&state));
+        let next = spec_record(state, Event::Reserve(who, kani::any::<u8>() % 2));
+        (state, next)
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn every_launch_of_the_fixed_guards_keeps_the_rolling_invariant() {
+        let (state, next) = bounded_event(7);
+        kani::cover!(ledger_invariant(&state) && state.cap == 1 && next.is_some());
+        kani::cover!(ledger_invariant(&state) && state.cap == 2 && next.is_some());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn every_crash_of_the_fixed_guards_keeps_the_rolling_invariant() {
+        let (state, next) = bounded_event(8);
+        kani::cover!(ledger_invariant(&state) && state.cap == 1 && next.is_some());
+        kani::cover!(ledger_invariant(&state) && state.cap == 2 && next.is_some());
+    }
+
+    #[cfg(kani)]
+    fn bounded_event(case: u8) -> (Ledger, Option<Ledger>) {
+        assert!(ledger_invariant(&ledger(1)) && ledger_invariant(&ledger(2)));
+        let state = any_ledger();
+        kani::assume(ledger_invariant(&state));
+        let next = spec_record(state, any_event(case));
+        (state, next)
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn every_event_of_an_invalid_ledger_keeps_the_guarded_specification() {
+        let state = any_ledger();
+        kani::assume(!ledger_invariant(&state));
+        let next = spec_record(state, any_event(kani::any::<u8>() % 9));
+        kani::cover!(next.is_some());
+        kani::cover!(next.is_none());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn one_budget_check_admits_only_a_review_both_windows_hold() {
+        let (budget, _) = bounded_budget::<8>();
+        kani::cover!(budget == Budget::Admit);
+        kani::cover!(budget == Budget::Exhausted);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_budget_check_of_0_records_meets_both_windows() {
+        let (budget, now) = bounded_budget::<0>();
+        kani::cover!(budget == Budget::Admit && now == 0);
+        kani::cover!(budget == Budget::Admit && now == u64::MAX);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_budget_check_of_1_records_meets_both_windows() {
+        let (budget, now) = bounded_budget::<1>();
+        kani::cover!(budget == Budget::Admit && now == 0);
+        kani::cover!(budget == Budget::Admit && now == u64::MAX);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_budget_check_of_2_records_meets_both_windows() {
+        let (budget, now) = bounded_budget::<2>();
+        kani::cover!(budget == Budget::Admit && now == 0);
+        kani::cover!(budget == Budget::Admit && now == u64::MAX);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_budget_check_of_3_records_meets_both_windows() {
+        let (budget, now) = bounded_budget::<3>();
+        kani::cover!(budget == Budget::Admit && now == 0);
+        kani::cover!(budget == Budget::Admit && now == u64::MAX);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_budget_check_of_4_records_meets_both_windows() {
+        let (budget, now) = bounded_budget::<4>();
+        kani::cover!(budget == Budget::Admit && now == 0);
+        kani::cover!(budget == Budget::Admit && now == u64::MAX);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_budget_check_of_5_records_meets_both_windows() {
+        let (budget, now) = bounded_budget::<5>();
+        kani::cover!(budget == Budget::Admit && now == 0);
+        kani::cover!(budget == Budget::Admit && now == u64::MAX);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_budget_check_of_6_records_meets_both_windows() {
+        let (budget, now) = bounded_budget::<6>();
+        kani::cover!(budget == Budget::Admit && now == 0);
+        kani::cover!(budget == Budget::Admit && now == u64::MAX);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_budget_check_of_7_records_meets_both_windows() {
+        let (budget, _) = bounded_budget::<7>();
+        kani::cover!(budget == Budget::Admit);
+        kani::cover!(budget == Budget::Exhausted);
+    }
+
+    #[cfg(kani)]
+    fn bounded_budget<const N: usize>() -> (Budget, u64) {
+        let records: [u64; N] = kani::any();
+        let now: u64 = kani::any();
+        for index in 0..N {
+            kani::assume(records.get(index).is_some_and(|at| *at <= now));
+        }
+        let budget = check_budget(&records, now);
+        assert_budget_result(&records, now, budget);
+        (budget, now)
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_future_record_prevents_every_bounded_budget_check() {
+        let (budget, now) = bounded_future_at::<0>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    fn bounded_future<const N: usize>() -> (Budget, u64) {
+        let records: [u64; N] = kani::any();
+        let now: u64 = kani::any();
+        kani::assume(records.iter().any(|at| *at > now));
+        let budget = check_budget(&records, now);
+        assert_budget_result(&records, now, budget);
+        (budget, now)
+    }
+
+    #[cfg(kani)]
+    fn bounded_future_at<const FIRST: usize>() -> (Budget, u64) {
+        let records: [u64; 8] = kani::any();
+        let now: u64 = kani::any();
+        for index in 0..FIRST {
+            kani::assume(records.get(index).is_some_and(|at| *at <= now));
+        }
+        kani::assume(records.get(FIRST).is_some_and(|at| *at > now));
+        let budget = check_budget(&records, now);
+        assert_budget_result(&records, now, budget);
+        (budget, now)
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_future_record_at_1_prevents_the_eight_record_budget_check() {
+        let (budget, now) = bounded_future_at::<1>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_future_record_at_2_prevents_the_eight_record_budget_check() {
+        let (budget, now) = bounded_future_at::<2>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_future_record_at_3_prevents_the_eight_record_budget_check() {
+        let (budget, now) = bounded_future_at::<3>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_future_record_at_4_prevents_the_eight_record_budget_check() {
+        let (budget, now) = bounded_future_at::<4>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_future_record_at_5_prevents_the_eight_record_budget_check() {
+        let (budget, now) = bounded_future_at::<5>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_future_record_at_6_prevents_the_eight_record_budget_check() {
+        let (budget, now) = bounded_future_at::<6>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn a_future_record_at_7_prevents_the_eight_record_budget_check() {
+        let (budget, now) = bounded_future_at::<7>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn one_future_record_prevents_a_budget_check() {
+        let (budget, now) = bounded_future::<1>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn two_records_with_a_future_record_prevent_a_budget_check() {
+        let (budget, now) = bounded_future::<2>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn three_records_with_a_future_record_prevent_a_budget_check() {
+        let (budget, now) = bounded_future::<3>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn four_records_with_a_future_record_prevent_a_budget_check() {
+        let (budget, now) = bounded_future::<4>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn five_records_with_a_future_record_prevent_a_budget_check() {
+        let (budget, now) = bounded_future::<5>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn six_records_with_a_future_record_prevent_a_budget_check() {
+        let (budget, now) = bounded_future::<6>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn seven_records_with_a_future_record_prevent_a_budget_check() {
+        let (budget, now) = bounded_future::<7>();
+        kani::cover!(budget == Budget::Backwards && now == 0);
+        kani::cover!(budget == Budget::Backwards && now == 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
     fn a_paid_or_remote_switch_never_reads_only() {
-        let args = [
-            WORDS[usize::from(kani::any::<u8>() % 12)],
-            WORDS[usize::from(kani::any::<u8>() % 12)],
-            WORDS[usize::from(kani::any::<u8>() % 12)],
+        let (kind, _) = bounded_classify::<3>(0);
+        kani::cover!(kind == Invocation::ReadOnly);
+        kani::cover!(kind == Invocation::Forbidden);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_paid_switch_is_forbidden() {
+        let (kind, second) = bounded_classify::<3>(1);
+        kani::cover!(kind == Invocation::Forbidden && second == 0);
+        kani::cover!(kind == Invocation::Forbidden && second == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn an_inline_api_key_is_forbidden() {
+        let (kind, second) = bounded_classify::<3>(2);
+        kani::cover!(kind == Invocation::Forbidden && second == 0);
+        kani::cover!(kind == Invocation::Forbidden && second == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_remote_switch_is_forbidden() {
+        let (kind, second) = bounded_classify::<3>(3);
+        kani::cover!(kind == Invocation::Forbidden && second == 0);
+        kani::cover!(kind == Invocation::Forbidden && second == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn an_inline_remote_scope_is_forbidden() {
+        let (kind, second) = bounded_classify::<3>(4);
+        kani::cover!(kind == Invocation::Forbidden && second == 0);
+        kani::cover!(kind == Invocation::Forbidden && second == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_code_command_is_forbidden() {
+        let (kind, second) = bounded_classify::<3>(5);
+        kani::cover!(kind == Invocation::Forbidden && second == 0);
+        kani::cover!(kind == Invocation::Forbidden && second == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_usage_command_never_uses_the_review_pool() {
+        let (kind, _) = bounded_classify::<3>(6);
+        kani::cover!(kind == Invocation::ReadOnly);
+        kani::cover!(kind == Invocation::Forbidden);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_usage_option_never_admits_a_paid_switch() {
+        let (kind, _) = classify_prefix::<7, 0>();
+        kani::cover!(kind == Invocation::ReadOnly);
+        kani::cover!(kind == Invocation::Forbidden);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_config_option_never_admits_a_paid_switch() {
+        let (kind, _) = classify_prefix::<8, 0>();
+        kani::cover!(kind == Invocation::ReadOnly);
+        kani::cover!(kind == Invocation::Forbidden);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_directory_option_never_admits_a_paid_switch() {
+        let (kind, _) = classify_prefix::<9, 0>();
+        kani::cover!(kind == Invocation::ReadOnly);
+        kani::cover!(kind == Invocation::Forbidden);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_findings_word_never_admits_a_paid_switch() {
+        let (kind, _) = bounded_classify::<3>(10);
+        kani::cover!(kind == Invocation::Review);
+        kani::cover!(kind == Invocation::Forbidden);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_help_option_never_admits_a_paid_switch() {
+        let (kind, _) = classify_prefix::<11, 0>();
+        kani::cover!(kind == Invocation::ReadOnly);
+        kani::cover!(kind == Invocation::Forbidden);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_paid_or_remote_switch_never_reads_only_in_a_short_invocation() {
+        let kind = every_first_word();
+        kani::cover!(kind == Invocation::ReadOnly);
+        kani::cover!(kind == Invocation::Forbidden);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_paid_or_remote_switch_never_reads_only_with_two_words() {
+        let (_, second) = bounded_classify::<2>(0);
+        kani::cover!(second == 0);
+        kani::cover!(second == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_paid_switch_is_forbidden_with_two_words() {
+        let (_, second) = bounded_classify::<2>(1);
+        kani::cover!(second == 0);
+        kani::cover!(second == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn an_inline_api_key_is_forbidden_with_two_words() {
+        let (_, second) = bounded_classify::<2>(2);
+        kani::cover!(second == 0);
+        kani::cover!(second == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_remote_switch_is_forbidden_with_two_words() {
+        let (_, second) = bounded_classify::<2>(3);
+        kani::cover!(second == 0);
+        kani::cover!(second == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn an_inline_remote_scope_is_forbidden_with_two_words() {
+        let (_, second) = bounded_classify::<2>(4);
+        kani::cover!(second == 0);
+        kani::cover!(second == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_code_command_is_forbidden_with_two_words() {
+        let (_, second) = bounded_classify::<2>(5);
+        kani::cover!(second == 0);
+        kani::cover!(second == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_usage_command_never_uses_the_review_pool_with_two_words() {
+        let (_, second) = bounded_classify::<2>(6);
+        kani::cover!(second == 0);
+        kani::cover!(second == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_usage_option_never_admits_a_paid_switch_with_two_words() {
+        let kinds = every_second_word::<7>();
+        kani::cover!(kinds.first() == Some(&Invocation::ReadOnly));
+        kani::cover!(kinds.get(1) == Some(&Invocation::Forbidden));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_config_option_never_admits_a_paid_switch_with_two_words() {
+        let kinds = every_second_word::<8>();
+        kani::cover!(kinds.first() == Some(&Invocation::Review));
+        kani::cover!(kinds.get(1) == Some(&Invocation::Forbidden));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_directory_option_never_admits_a_paid_switch_with_two_words() {
+        let (_, second) = bounded_classify::<2>(9);
+        kani::cover!(second == 0);
+        kani::cover!(second == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_findings_word_never_admits_a_paid_switch_with_two_words() {
+        let (_, second) = bounded_classify::<2>(10);
+        kani::cover!(second == 0);
+        kani::cover!(second == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn a_help_option_never_admits_a_paid_switch_with_two_words() {
+        let kinds = every_second_word::<11>();
+        kani::cover!(kinds.first() == Some(&Invocation::Review));
+        kani::cover!(kinds.get(1) == Some(&Invocation::Forbidden));
+    }
+
+    #[cfg(kani)]
+    fn bounded_classify<const N: usize>(first: u8) -> (Invocation, usize) {
+        let second = usize::from(kani::any::<u8>() % 12);
+        let third = kani::any::<u8>() % 12;
+        let codes = [first, u8::try_from(second).unwrap_or_default(), third];
+        let kind = spec_classify_codes(codes.get(..N).unwrap_or_default());
+        (kind, second)
+    }
+
+    #[cfg(kani)]
+    fn every_first_word() -> Invocation {
+        assert_eq!(super::classify(&[]), Invocation::Review);
+        let kinds = [
+            super::classify(&["review"]),
+            super::classify(&["--use-credits"]),
+            super::classify(&["--api-key=k"]),
+            super::classify(&["--remote"]),
+            super::classify(&["--remote=x"]),
+            super::classify(&["code"]),
+            super::classify(&["usage"]),
+            super::classify(&["--usage"]),
+            super::classify(&["-c"]),
+            super::classify(&["--dir"]),
+            super::classify(&["findings"]),
+            super::classify(&["--help"]),
         ];
-        let length = usize::from(kani::any::<u8>() % 4);
-        let kind = spec_classify(&args[..length]);
+        for first in 0..12u8 {
+            let actual = kinds
+                .get(usize::from(first))
+                .copied()
+                .unwrap_or(Invocation::Review);
+            assert_classify_result(&[first], actual);
+        }
+        kinds
+            .get(usize::from(kani::any::<u8>() % 12))
+            .copied()
+            .unwrap_or(Invocation::Review)
+    }
+
+    #[cfg(kani)]
+    fn every_second_word<const FIRST: u8>() -> [Invocation; 12] {
+        let first = WORDS.get(usize::from(FIRST)).copied().unwrap_or_default();
+        let kinds = [
+            super::classify(&[first, "review"]),
+            super::classify(&[first, "--use-credits"]),
+            super::classify(&[first, "--api-key=k"]),
+            super::classify(&[first, "--remote"]),
+            super::classify(&[first, "--remote=x"]),
+            super::classify(&[first, "code"]),
+            super::classify(&[first, "usage"]),
+            super::classify(&[first, "--usage"]),
+            super::classify(&[first, "-c"]),
+            super::classify(&[first, "--dir"]),
+            super::classify(&[first, "findings"]),
+            super::classify(&[first, "--help"]),
+        ];
+        for second in 0..12u8 {
+            let actual = kinds
+                .get(usize::from(second))
+                .copied()
+                .unwrap_or(Invocation::Review);
+            assert_classify_result(&[FIRST, second], actual);
+        }
+        kinds
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_7_1_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<7, 1>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_7_2_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<7, 2>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_7_3_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<7, 3>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_7_4_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<7, 4>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_7_5_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<7, 5>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_7_6_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<7, 6>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_7_7_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<7, 7>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_7_8_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<7, 8>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_7_9_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<7, 9>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_7_10_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<7, 10>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_7_11_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<7, 11>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_8_1_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<8, 1>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_8_2_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<8, 2>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_8_3_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<8, 3>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_8_4_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<8, 4>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_8_5_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<8, 5>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_8_6_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<8, 6>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_8_7_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<8, 7>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_8_8_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<8, 8>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_8_9_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<8, 9>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_8_10_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<8, 10>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_8_11_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<8, 11>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_11_1_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<11, 1>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_11_2_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<11, 2>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_11_3_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<11, 3>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_11_4_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<11, 4>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_11_5_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<11, 5>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_11_6_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<11, 6>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_11_7_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<11, 7>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_11_8_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<11, 8>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_11_9_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<11, 9>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_11_10_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<11, 10>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_11_11_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<11, 11>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_9_1_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<9, 1>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_9_2_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<9, 2>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_9_3_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<9, 3>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_9_4_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<9, 4>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_9_5_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<9, 5>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_9_6_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<9, 6>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_9_7_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<9, 7>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_9_8_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<9, 8>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_9_9_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<9, 9>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_9_10_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<9, 10>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn classifier_prefix_9_11_keeps_every_three_word_case() {
+        let (_, third) = classify_prefix::<9, 11>();
+        kani::cover!(third == 0);
+        kani::cover!(third == 6);
+    }
+
+    #[cfg(kani)]
+    fn classify_prefix<const FIRST: u8, const SECOND: u8>() -> (Invocation, u8) {
+        let first = WORDS.get(usize::from(FIRST)).copied().unwrap_or_default();
+        let second = WORDS.get(usize::from(SECOND)).copied().unwrap_or_default();
+        let kinds = [
+            super::classify(&[first, second, "review"]),
+            super::classify(&[first, second, "--use-credits"]),
+            super::classify(&[first, second, "--api-key=k"]),
+            super::classify(&[first, second, "--remote"]),
+            super::classify(&[first, second, "--remote=x"]),
+            super::classify(&[first, second, "code"]),
+            super::classify(&[first, second, "usage"]),
+            super::classify(&[first, second, "--usage"]),
+            super::classify(&[first, second, "-c"]),
+            super::classify(&[first, second, "--dir"]),
+            super::classify(&[first, second, "findings"]),
+            super::classify(&[first, second, "--help"]),
+        ];
+        for third in 0..12u8 {
+            let actual = kinds
+                .get(usize::from(third))
+                .copied()
+                .unwrap_or(Invocation::Review);
+            assert_classify_result(&[FIRST, SECOND, third], actual);
+        }
+        let selected = kani::any::<u8>() % 12;
+        (
+            kinds
+                .get(usize::from(selected))
+                .copied()
+                .unwrap_or(Invocation::Review),
+            selected,
+        )
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn every_bounded_invocation_matches_the_classifier_specification() {
+        let kind = every_first_word();
         kani::cover!(kind == Invocation::ReadOnly);
         kani::cover!(kind == Invocation::Forbidden);
     }
@@ -680,7 +1918,7 @@ mod proofs {
         let remaining: u64 = kani::any();
         let accepted = spec_within_budget(limit, remaining);
         kani::cover!(accepted);
-        kani::cover!(!accepted && limit > 0 && remaining <= limit);
+        kani::cover!(!accepted & (limit > 0) & (remaining <= limit));
         kani::cover!(!accepted && remaining > limit);
     }
 
@@ -820,16 +2058,28 @@ mod tests {
     )]
     fn every_bounded_argument_list_and_ledger_meets_its_specification() {
         let words = proofs::WORDS;
-        for first in words {
-            proofs::spec_classify(&[first]);
-            for second in words {
-                proofs::spec_classify(&[first, second]);
-                for third in words {
-                    proofs::spec_classify(&[first, second, third]);
+        for (first_code, first) in words.iter().enumerate() {
+            let first_code = u8::try_from(first_code).unwrap();
+            assert_eq!(
+                proofs::spec_classify_codes(&[first_code]),
+                proofs::spec_classify(&[first])
+            );
+            for (second_code, second) in words.iter().enumerate() {
+                let second_code = u8::try_from(second_code).unwrap();
+                assert_eq!(
+                    proofs::spec_classify_codes(&[first_code, second_code]),
+                    proofs::spec_classify(&[first, second])
+                );
+                for (third_code, third) in words.iter().enumerate() {
+                    let third_code = u8::try_from(third_code).unwrap();
+                    assert_eq!(
+                        proofs::spec_classify_codes(&[first_code, second_code, third_code]),
+                        proofs::spec_classify(&[first, second, third])
+                    );
                 }
             }
         }
-        proofs::spec_classify(&[]);
+        assert_eq!(proofs::spec_classify_codes(&[]), proofs::spec_classify(&[]));
         let times = [0, 1, HOUR_MS - 1, HOUR_MS, DAY_MS - 1, DAY_MS, DAY_MS + 1];
         for now in times {
             for count in 0..=8 {

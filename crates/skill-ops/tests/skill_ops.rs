@@ -1068,6 +1068,43 @@ fn the_assessed_commit_hashes_nested_resources_in_catalog_order() -> Result<()> 
     Ok(())
 }
 
+fn shell_write_dispositions(state: &std::path::Path) -> Result<Vec<Discharge>> {
+    let dispositions: Vec<_> = incidents(state)?
+        .into_iter()
+        .filter(|incident| incident.rule == "hook.shell-write")
+        .map(|incident| Discharge {
+            schema: 1,
+            rule: "hook.shell-write".into(),
+            incident: Some(incident.id),
+            commit: None,
+            outcome: "exempt".into(),
+            evidence: vec![],
+            reason: Some("intended".into()),
+            reconsideration: Some("reconsider when the shell-write rule retires".into()),
+        })
+        .collect();
+    Ok(dispositions)
+}
+
+fn assert_disposition_fields(state: &std::path::Path, disposition: &Discharge) -> Result<()> {
+    let disposition_path = state
+        .join("discharges")
+        .join(format!("{}.json", disposition.incident.as_deref().unwrap()));
+    for (field, value) in [
+        ("schema", json!(0)),
+        ("outcome", json!("unchecked")),
+        ("reason", json!("unknown")),
+        ("reconsideration", json!("")),
+    ] {
+        let mut malformed = serde_json::to_value(disposition)?;
+        malformed[field] = value;
+        skill_ops::write_json(&disposition_path, &malformed, true)?;
+        assert!(open_incident_rules(state).is_err(), "{field}");
+    }
+    skill_ops::write_json(&disposition_path, disposition, true)?;
+    Ok(())
+}
+
 #[test]
 fn incidents_are_recorded_deduplicated_and_ranked_until_discharged() -> Result<()> {
     let state = tempfile::tempdir()?;
@@ -1121,37 +1158,9 @@ fn incidents_are_recorded_deduplicated_and_ranked_until_discharged() -> Result<(
         ],
         "the most repeated rule ranks first"
     );
-    let dispositions: Vec<_> = incidents(state.path())?
-        .into_iter()
-        .filter(|incident| incident.rule == "hook.shell-write")
-        .map(|incident| Discharge {
-            schema: 1,
-            rule: "hook.shell-write".into(),
-            incident: Some(incident.id),
-            commit: None,
-            outcome: "exempt".into(),
-            evidence: vec![],
-            reason: Some("intended".into()),
-            reconsideration: Some("reconsider when the shell-write rule retires".into()),
-        })
-        .collect();
+    let dispositions = shell_write_dispositions(state.path())?;
     record_discharges(state.path(), std::path::Path::new("."), &dispositions)?;
-    let disposition_path = state.path().join("discharges").join(format!(
-        "{}.json",
-        dispositions[0].incident.as_deref().unwrap()
-    ));
-    for (field, value) in [
-        ("schema", json!(0)),
-        ("outcome", json!("unchecked")),
-        ("reason", json!("unknown")),
-        ("reconsideration", json!("")),
-    ] {
-        let mut malformed = serde_json::to_value(&dispositions[0])?;
-        malformed[field] = value;
-        skill_ops::write_json(&disposition_path, &malformed, true)?;
-        assert!(open_incident_rules(state.path()).is_err(), "{field}");
-    }
-    skill_ops::write_json(&disposition_path, &dispositions[0], true)?;
+    assert_disposition_fields(state.path(), &dispositions[0])?;
     assert_eq!(
         open_incident_rules(state.path())?,
         vec![(
@@ -1264,23 +1273,20 @@ fn native_failures_record_automatically_and_expected_signals_do_not() -> Result<
     Ok(())
 }
 
-#[test]
-fn a_mechanized_discharge_needs_evidence_that_exists_and_reproduces() -> Result<()> {
-    let root = tempfile::tempdir()?;
-    let state = tempfile::tempdir()?;
-    fs::create_dir_all(root.path().join("tests"))?;
+fn write_evidence_fixture(root: &std::path::Path) -> Result<()> {
+    fs::create_dir_all(root.join("tests"))?;
     let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../platform");
     let rules = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rules");
     fs::write(
-        root.path().join("Cargo.toml"),
+        root.join("Cargo.toml"),
         format!(
-            "[package]\nname = \"incident-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n[dependencies]\nplatform = {{ path = {:?}, default-features = false }}\nrules = {{ path = {:?} }}\ntempfile = \"3\"\n[workspace]\n",
+            "[package]\nname = \"incident-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n[dependencies]\nplatform = {{ path = {:?} }}\nrules = {{ path = {:?} }}\ntempfile = \"3\"\n[workspace]\n",
             source.to_string_lossy().replace('\\', "/"),
             rules.to_string_lossy().replace('\\', "/")
         ),
     )?;
     fs::write(
-        root.path().join("tests/gate.rs"),
+        root.join("tests/gate.rs"),
         r#"#[test]
 fn reproduces_the_incident() {
     assert!(matches!(rules::shell_write_rules::inspect("sed -i 's/a/b/' file"), rules::shell_write_rules::Verdict::Refuse(_)));
@@ -1306,14 +1312,14 @@ fn prints_an_incident_without_recording_it() {
 }
 "#,
     )?;
-    fs::create_dir_all(root.path().join("tests/support"))?;
+    fs::create_dir_all(root.join("tests/support"))?;
     fs::copy(
         source.join("tests/support/fixture_process.rs"),
-        root.path().join("tests/support/fixture_process.rs"),
+        root.join("tests/support/fixture_process.rs"),
     )?;
-    fs::create_dir(root.path().join("src"))?;
+    fs::create_dir(root.join("src"))?;
     fs::write(
-        root.path().join("src/main.rs"),
+        root.join("src/main.rs"),
         r#"fn main() {
     let error = std::fs::read("missing-fixture-input").unwrap_err();
     let refusal = platform::refusal::Refusal::new("tool.failure", error.to_string(), "create the input").evidence("missing-fixture-input");
@@ -1322,11 +1328,17 @@ fn prints_an_incident_without_recording_it() {
 }
 "#,
     )?;
-    let global = root.path().join("global.gitconfig");
+    let global = root.join("global.gitconfig");
     fs::write(
         &global,
         "[user]\nname = Evidence Fixture\nemail = fixture@example.invalid\n[commit]\ngpgsign = false\n[core]\nautocrlf = false\n",
     )?;
+    Ok(())
+}
+
+fn committed_evidence_fixture(root: &std::path::Path) -> Result<String> {
+    write_evidence_fixture(root)?;
+    let global = root.join("global.gitconfig");
     for args in [
         vec!["init", "--quiet"],
         vec![
@@ -1344,7 +1356,7 @@ fn prints_an_incident_without_recording_it() {
         ],
     ] {
         let output = fixture_git::command("git", &global)
-            .current_dir(root.path())
+            .current_dir(root)
             .args(args)
             .output()?;
         anyhow::ensure!(
@@ -1354,10 +1366,56 @@ fn prints_an_incident_without_recording_it() {
         );
     }
     let output = fixture_git::command("git", &global)
-        .current_dir(root.path())
+        .current_dir(root)
         .args(["rev-parse", "HEAD"])
         .output()?;
-    let commit = String::from_utf8(output.stdout)?.trim().to_owned();
+    Ok(String::from_utf8(output.stdout)?.trim().to_owned())
+}
+
+fn assert_invalid_discharge_evidence(
+    state: &std::path::Path,
+    root: &std::path::Path,
+    discharge: &impl Fn(Vec<String>) -> Discharge,
+) {
+    let mut unbound = discharge(vec!["tests/gate.rs::reproduces_the_incident".into()]);
+    unbound.commit = None;
+    assert!(record_discharge(state, root, &unbound).is_err());
+    unbound.commit = Some("HEAD".into());
+    assert!(record_discharge(state, root, &unbound).is_err());
+    assert!(
+        record_discharge(
+            state,
+            root,
+            &discharge(vec!["tests/missing.rs::reproduces_the_incident".into()])
+        )
+        .is_err(),
+        "evidence that does not exist is rejected"
+    );
+    assert!(
+        record_discharge(
+            state,
+            root,
+            &discharge(vec!["tests/gate.rs::a_test_the_file_lacks".into()])
+        )
+        .is_err(),
+        "evidence whose test does not reproduce the incident is rejected"
+    );
+    assert!(record_discharge(state, root, &discharge(vec![])).is_err());
+    assert!(
+        record_discharge(
+            state,
+            root,
+            &discharge(vec!["tests/gate.rs::merely_named_test".into()])
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn a_mechanized_discharge_needs_evidence_that_exists_and_reproduces() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let state = tempfile::tempdir()?;
+    let commit = committed_evidence_fixture(root.path())?;
     let incident = Incident::new(
         "hook.shell-write",
         "evidence-fixture",
@@ -1391,38 +1449,7 @@ fn prints_an_incident_without_recording_it() {
         )
         .is_ok()
     );
-    let mut unbound = discharge(vec!["tests/gate.rs::reproduces_the_incident".into()]);
-    unbound.commit = None;
-    assert!(record_discharge(state.path(), root.path(), &unbound).is_err());
-    unbound.commit = Some("HEAD".into());
-    assert!(record_discharge(state.path(), root.path(), &unbound).is_err());
-    assert!(
-        record_discharge(
-            state.path(),
-            root.path(),
-            &discharge(vec!["tests/missing.rs::reproduces_the_incident".into()])
-        )
-        .is_err(),
-        "evidence that does not exist is rejected"
-    );
-    assert!(
-        record_discharge(
-            state.path(),
-            root.path(),
-            &discharge(vec!["tests/gate.rs::a_test_the_file_lacks".into()])
-        )
-        .is_err(),
-        "evidence whose test does not reproduce the incident is rejected"
-    );
-    assert!(record_discharge(state.path(), root.path(), &discharge(vec![])).is_err());
-    assert!(
-        record_discharge(
-            state.path(),
-            root.path(),
-            &discharge(vec!["tests/gate.rs::merely_named_test".into()])
-        )
-        .is_err()
-    );
+    assert_invalid_discharge_evidence(state.path(), root.path(), &discharge);
     let native = Incident::new(
         "tool.failure",
         "native-evidence-fixture",

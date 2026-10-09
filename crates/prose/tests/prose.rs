@@ -12,8 +12,7 @@ use std::process::Stdio;
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
-#[path = "../../platform/tests/support/fixture_process.rs"]
-mod fixture_process;
+use fixture_git::fixture_process;
 
 const ATTRIBUTED: &str = "As requested, the parser keeps every edit.";
 const COMPLIANT: &str = "The parser keeps every edit.";

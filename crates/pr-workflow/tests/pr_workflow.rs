@@ -7,8 +7,7 @@ use std::sync::OnceLock;
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
-#[path = "../../platform/tests/support/fixture_process.rs"]
-mod fixture_process;
+use fixture_git::fixture_process;
 
 #[path = "../../dotfiles/tests/support/catalog.rs"]
 mod catalog;

@@ -10,8 +10,7 @@ use std::path::Path;
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
-#[path = "../../platform/tests/support/fixture_process.rs"]
-mod fixture_process;
+use fixture_git::fixture_process;
 
 fn workflow(text: &str) -> Vec<(String, String)> {
     vec![("ci.yml".to_owned(), text.to_owned())]
@@ -309,7 +308,7 @@ fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
     };
     let check = |online: bool, doctor: &str| -> Result<std::process::Output> {
         Ok(
-            fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), &root)
+            fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), scope.path())
                 .args(["hosts", "check"])
                 .current_dir(&root)
                 .env("PATH", std::env::join_paths(&paths)?)

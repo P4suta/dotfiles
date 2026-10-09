@@ -1,8 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-#[path = "support/fixture_process.rs"]
-mod fixture_process;
+use fixture_git::fixture_process;
 
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
@@ -37,7 +36,9 @@ fn fixture_git_cannot_inherit_another_incident_store() {
         .expect("fixture incident store");
     assert_eq!(
         Path::new(state),
-        fixture.path().canonicalize().unwrap().join("state")
+        platform::paths::canonical(fixture.path())
+            .unwrap()
+            .join("state")
     );
     assert!(
         ordinary
@@ -86,8 +87,14 @@ fn the_check_refuses_direct_and_aliased_managed_processes() {
         let source = format!("let binary = {binary};\nplatform::process::command({argument})");
         assert_eq!(bypasses(&source).len(), 1);
     }
-    assert!(bypasses(&format!("fixture_process::command({binary}, scope)")).is_empty());
-    assert!(bypasses("platform::process::command(binary)").is_empty());
+    assert_eq!(
+        bypasses(&format!("fixture_process::command({binary}, scope)")),
+        [] as [&str; 0]
+    );
+    assert_eq!(
+        bypasses("platform::process::command(binary)"),
+        [] as [&str; 0]
+    );
 }
 
 #[test]

@@ -14,8 +14,7 @@ use xtask::next_action_rules::{Checks, Head, Host, Pr, State, Step, Upstream, de
 #[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
-#[path = "../../crates/platform/tests/support/fixture_process.rs"]
-mod fixture_process;
+use fixture_git::fixture_process;
 
 /// A clean, pushed draft PR with successful checks.
 /// Each case changes the fields that define its state.

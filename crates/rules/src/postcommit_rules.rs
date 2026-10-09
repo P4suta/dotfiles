@@ -90,7 +90,7 @@ pub enum Step {
     ResetToFirstParent,
     ResetToOriginal,
     /// `git update-ref -d HEAD`.
-    DropHead,
+    DeleteRef,
     /// `git update-ref MERGE_HEAD <second parent>`, so the next commit counts as a merge again.
     RestoreMergeParent,
 }
@@ -130,7 +130,7 @@ pub const fn rollback_target(gate: Gate, shape: Shape, outcome: Outcome) -> Roll
     let filler = Step::ResetToCommit;
     let (steps, len) = match target {
         Target::Keep => ([filler; MOST_STEPS], 0),
-        Target::Unborn => ([Step::ResetToCommit, Step::DropHead, filler], REF_STEPS),
+        Target::Unborn => ([Step::ResetToCommit, Step::DeleteRef, filler], REF_STEPS),
         Target::Original => (
             [Step::ResetToCommit, Step::ResetToOriginal, filler],
             REF_STEPS,
@@ -229,7 +229,7 @@ mod proofs {
                         self.head = Some(Commit::Original);
                     }
                 }
-                Step::DropHead => self.head = None,
+                Step::DeleteRef => self.head = None,
                 Step::RestoreMergeParent => {
                     if second.is_some() {
                         self.merge_head = second;

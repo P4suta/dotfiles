@@ -253,7 +253,7 @@ fn roll_back(step: Step, recorded: &Recorded) -> bool {
             .original
             .as_deref()
             .is_some_and(|original| real_git::succeeds(&["reset", "--soft", original])),
-        Step::DropHead => real_git::succeeds(&["update-ref", "-d", "HEAD"]),
+        Step::DeleteRef => real_git::succeeds(&["update-ref", "-d", "HEAD"]),
         Step::RestoreMergeParent => restore_merge_parent(head),
     }
 }

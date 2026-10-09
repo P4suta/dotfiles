@@ -680,6 +680,21 @@ fn reject_admitting_an_overrun() {
 fn reject_admitting_an_unmeasured_harness() {
     assert!(verdict(None) == Verdict::Within);
 }
+#[kani::proof]
+fn reject_admitting_an_undetermined_property() {
+    assert!(production::verified(false, production::Check::Unverified));
+}
+#[kani::proof]
+fn reject_admitting_an_unreachable_cover() {
+    assert!(production::verified(true, production::Check::Impossible));
+}
+#[kani::proof]
+fn reject_an_overflow_under_checked_mir() {
+    let value: u8 = kani::any();
+    kani::assume(value == u8::MAX);
+    let incremented = value + 1;
+    assert!(verdict(Some(u64::from(incremented))) == Verdict::Over);
+}
 '''
 
 [[obligation]]
@@ -1292,18 +1307,6 @@ flags = ["function-contracts"]
 verifier = "kani-contract"
 source = "crates/rules/src/reaper_rules.rs"
 function = "age"
-flags = ["function-contracts"]
-
-[[obligation]]
-verifier = "kani-contract"
-source = "crates/rules/src/review_rules.rs"
-function = "check_budget"
-flags = ["function-contracts"]
-
-[[obligation]]
-verifier = "kani-contract"
-source = "crates/rules/src/review_rules.rs"
-function = "classify"
 flags = ["function-contracts"]
 
 [[pilot]]

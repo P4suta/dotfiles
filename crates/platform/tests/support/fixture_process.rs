@@ -10,16 +10,15 @@ pub const MACHINE_STATE: &str = ".local/state/skill-ops";
 /// The canonical directory of an owned temporary fixture.
 #[must_use]
 pub fn directory(scope: &Path) -> PathBuf {
-    let scope = scope.canonicalize().expect("an existing fixture directory");
-    let temporary = std::env::temp_dir()
-        .canonicalize()
-        .expect("an existing temporary directory");
+    let scope = platform::paths::canonical(scope).expect("an existing fixture directory");
+    let temporary =
+        platform::paths::canonical(&std::env::temp_dir()).expect("an existing temporary directory");
     assert!(
         scope.starts_with(&temporary) && scope != temporary,
         "the incident store must belong to an owned temporary fixture"
     );
     if let Some(state) = platform::home::home().map(|home| home.join(MACHINE_STATE)) {
-        let state = state.canonicalize().unwrap_or(state);
+        let state = platform::paths::canonical(&state).unwrap_or(state);
         assert!(
             !scope.starts_with(state),
             "a fixture cannot use the machine incident store"

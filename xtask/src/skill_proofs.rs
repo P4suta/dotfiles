@@ -14,6 +14,8 @@ pub const KANI_VERSION: &str = "0.68.0";
 
 /// Every proof covers a reachable acceptance and a reachable refusal.
 const WITNESSES: usize = 2;
+const OVERFLOW_PROBE: &str = "reject_an_overflow_under_checked_mir";
+const CHECKED_ADD_OVERFLOW: &str = "attempt to add with overflow";
 
 /// Compares a Kani results document with the expected harnesses and the proof budget.
 ///
@@ -79,47 +81,91 @@ pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) 
             ),
             "expected assertion counterexample is missing"
         );
+        for result in results.iter().filter(|result| {
+            result["harness_id"]
+                .as_str()
+                .is_some_and(|name| name.rsplit("::").next() == Some(OVERFLOW_PROBE))
+        }) {
+            ensure!(
+                result["checks"]
+                    .as_array()
+                    .is_some_and(|checks| checks.iter().any(|check| {
+                        check["category"] == "assertion"
+                            && check["description"] == CHECKED_ADD_OVERFLOW
+                            && check["status"] == "Failure"
+                    })),
+                "checked MIR did not reject arithmetic overflow"
+            );
+        }
     } else {
         ensure!(
             summary["failed"] == 0 && summary["successful"] == expected.len(),
             "required proof failed"
         );
         for result in results {
-            ensure!(
-                result["status"] == "Success",
-                "proof was unsupported, skipped, or failed"
-            );
-            let checks = result["checks"]
-                .as_array()
-                .context("missing proof properties")?;
-            ensure!(
-                checks.iter().any(|check| check["category"] == "assertion"),
-                "proof has no assertion"
-            );
-            ensure!(
-                checks
-                    .iter()
-                    .filter(|check| check["category"] == "cover" && check["status"] == "Satisfied")
-                    .count()
-                    >= WITNESSES,
-                "proof lacks reachable acceptance and refusal witnesses"
-            );
-            ensure!(
-                checks.iter().all(|check| if check["category"] == "cover" {
-                    check["status"] == "Satisfied"
-                } else {
-                    check["status"] == "Success"
-                }),
-                "proof property is unverified"
-            );
+            validate_proof(result)?;
         }
     }
+    Ok(())
+}
+
+fn validate_proof(result: &Value) -> Result<()> {
+    ensure!(
+        result["status"] == "Success",
+        "proof was unsupported, skipped, or failed"
+    );
+    let checks = result["checks"]
+        .as_array()
+        .context("missing proof properties")?;
+    ensure!(
+        checks
+            .iter()
+            .any(|check| check["category"] == "assertion" && check["status"] == "Success"),
+        "proof has no successful reachable assertion"
+    );
+    ensure!(
+        checks
+            .iter()
+            .filter(|check| check["category"] == "cover" && check["status"] == "Satisfied")
+            .count()
+            >= WITNESSES,
+        "proof lacks reachable acceptance and refusal witnesses"
+    );
+    ensure!(
+        checks.iter().all(|check| {
+            use proof_budget_rules::Check;
+            let status = match check["status"].as_str() {
+                Some("Success") => Check::Proven,
+                Some("Unreachable") => Check::Impossible,
+                Some("Satisfied") => Check::Witness,
+                _ => Check::Unverified,
+            };
+            proof_budget_rules::verified(check["category"] == "cover", status)
+        }),
+        "proof property is unverified"
+    );
     Ok(())
 }
 
 /// The unstable features a Kani run enables: stubbing always, and the ones a contract obligation adds.
 fn features(flags: &BTreeSet<&'static str>) -> Vec<&'static str> {
     flags.iter().flat_map(|flag| ["-Z", flag]).collect()
+}
+
+fn standalone_kani(features: &BTreeSet<&'static str>) -> std::process::Command {
+    const CHECKED_MIR: &str =
+        "--edition=2024 -C overflow-checks=yes -C debug-assertions=yes -Z mir-opt-level=3";
+    let mut flags = std::env::var_os("RUSTFLAGS").unwrap_or_default();
+    if !flags.is_empty() {
+        flags.push(" ");
+    }
+    flags.push(CHECKED_MIR);
+    if features.contains(KaniFlag::FunctionContracts.argument()) {
+        flags.push(" -Z mir-enable-passes=-Inline");
+    }
+    let mut command = Tool::Kani.command();
+    command.env("RUSTFLAGS", flags);
+    command
 }
 
 fn verify_file(
@@ -130,7 +176,7 @@ fn verify_file(
     flags: &BTreeSet<&'static str>,
 ) -> Result<()> {
     let output = directory.join("results.json");
-    let mut command = Tool::Kani.command();
+    let mut command = standalone_kani(flags);
     command
         .current_dir(directory)
         .arg(source)
@@ -161,8 +207,7 @@ fn verify_inventory(
     directory: &Path,
     flags: &BTreeSet<&'static str>,
 ) -> Result<BTreeSet<String>> {
-    let status = Tool::Kani
-        .command()
+    let status = standalone_kani(flags)
         .current_dir(directory)
         .args(["list", "--format", "json"])
         .args(features(flags))
