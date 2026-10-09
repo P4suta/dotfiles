@@ -87,6 +87,8 @@ pub mod review_rules;
 pub mod shape_rules;
 pub mod shell_syntax_rules;
 pub mod shell_write_rules;
+pub mod skill_gate_rules;
+pub mod skill_plan_rules;
 pub mod skill_rules;
 pub mod source_name_rules;
 pub mod stale_rules;

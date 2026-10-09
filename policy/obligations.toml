@@ -1566,3 +1566,189 @@ assertion = "Durable"
 instance = "Rollback"
 counterexample = "NonDurable"
 scope = "for 4 but 12 steps"
+
+[[obligation]]
+verifier = "quint"
+spec = "specs/skill_gate.qnt"
+main = "skill_gate"
+probe = "skill_gate_old"
+invariant = "safe"
+witnesses = ["allowed", "requested", "ended"]
+seed = "0x2a"
+samples = 1000
+steps = 12
+distinct_states = 121
+traces = [
+  "specs/traces/skill_gate.0.itf.json",
+  "specs/traces/skill_gate.1.itf.json",
+  "specs/traces/skill_gate.2.itf.json",
+  "specs/traces/skill_gate.3.itf.json",
+  "specs/traces/skill_gate.4.itf.json",
+  "specs/traces/skill_gate.5.itf.json",
+  "specs/traces/skill_gate.6.itf.json",
+  "specs/traces/skill_gate.7.itf.json",
+  "specs/traces/skill_gate.8.itf.json",
+  "specs/traces/skill_gate.9.itf.json",
+  "specs/traces/skill_gate.10.itf.json",
+  "specs/traces/skill_gate.11.itf.json",
+  "specs/traces/skill_gate.12.itf.json",
+  "specs/traces/skill_gate.13.itf.json",
+  "specs/traces/skill_gate.14.itf.json",
+  "specs/traces/skill_gate.15.itf.json",
+  "specs/traces/skill_gate.16.itf.json",
+  "specs/traces/skill_gate.17.itf.json",
+  "specs/traces/skill_gate.18.itf.json",
+  "specs/traces/skill_gate.19.itf.json",
+  "specs/traces/skill_gate.20.itf.json",
+  "specs/traces/skill_gate.21.itf.json",
+  "specs/traces/skill_gate.22.itf.json",
+  "specs/traces/skill_gate.23.itf.json",
+  "specs/traces/skill_gate.24.itf.json",
+  "specs/traces/skill_gate.25.itf.json",
+  "specs/traces/skill_gate.26.itf.json",
+  "specs/traces/skill_gate.27.itf.json",
+  "specs/traces/skill_gate.28.itf.json",
+  "specs/traces/skill_gate.29.itf.json",
+  "specs/traces/skill_gate.30.itf.json",
+  "specs/traces/skill_gate.31.itf.json",
+  "specs/traces/skill_gate.32.itf.json",
+  "specs/traces/skill_gate.33.itf.json",
+  "specs/traces/skill_gate.34.itf.json",
+  "specs/traces/skill_gate.35.itf.json",
+  "specs/traces/skill_gate.36.itf.json",
+  "specs/traces/skill_gate.37.itf.json",
+  "specs/traces/skill_gate.38.itf.json",
+  "specs/traces/skill_gate.39.itf.json",
+  "specs/traces/skill_gate.40.itf.json",
+  "specs/traces/skill_gate.41.itf.json",
+  "specs/traces/skill_gate.42.itf.json",
+  "specs/traces/skill_gate.43.itf.json",
+  "specs/traces/skill_gate.44.itf.json",
+  "specs/traces/skill_gate.45.itf.json",
+  "specs/traces/skill_gate.46.itf.json",
+  "specs/traces/skill_gate.47.itf.json",
+  "specs/traces/skill_gate.48.itf.json",
+  "specs/traces/skill_gate.49.itf.json",
+  "specs/traces/skill_gate.50.itf.json",
+  "specs/traces/skill_gate.51.itf.json",
+  "specs/traces/skill_gate.52.itf.json",
+  "specs/traces/skill_gate.53.itf.json",
+  "specs/traces/skill_gate.54.itf.json",
+  "specs/traces/skill_gate.55.itf.json",
+  "specs/traces/skill_gate.56.itf.json",
+  "specs/traces/skill_gate.57.itf.json",
+  "specs/traces/skill_gate.58.itf.json",
+  "specs/traces/skill_gate.59.itf.json",
+  "specs/traces/skill_gate.60.itf.json",
+  "specs/traces/skill_gate.61.itf.json",
+  "specs/traces/skill_gate.62.itf.json",
+  "specs/traces/skill_gate.63.itf.json",
+  "specs/traces/skill_gate.64.itf.json",
+  "specs/traces/skill_gate.65.itf.json",
+  "specs/traces/skill_gate.66.itf.json",
+  "specs/traces/skill_gate.67.itf.json",
+  "specs/traces/skill_gate.68.itf.json",
+  "specs/traces/skill_gate.69.itf.json",
+  "specs/traces/skill_gate.70.itf.json",
+  "specs/traces/skill_gate.71.itf.json",
+  "specs/traces/skill_gate.72.itf.json",
+  "specs/traces/skill_gate.73.itf.json",
+  "specs/traces/skill_gate.74.itf.json",
+  "specs/traces/skill_gate.75.itf.json",
+  "specs/traces/skill_gate.76.itf.json",
+  "specs/traces/skill_gate.77.itf.json",
+  "specs/traces/skill_gate.78.itf.json",
+  "specs/traces/skill_gate.79.itf.json",
+  "specs/traces/skill_gate.80.itf.json",
+  "specs/traces/skill_gate.81.itf.json",
+  "specs/traces/skill_gate.82.itf.json",
+  "specs/traces/skill_gate.83.itf.json",
+  "specs/traces/skill_gate.84.itf.json",
+  "specs/traces/skill_gate.85.itf.json",
+  "specs/traces/skill_gate.86.itf.json",
+  "specs/traces/skill_gate.87.itf.json",
+  "specs/traces/skill_gate.88.itf.json",
+  "specs/traces/skill_gate.89.itf.json",
+  "specs/traces/skill_gate.90.itf.json",
+  "specs/traces/skill_gate.91.itf.json",
+  "specs/traces/skill_gate.92.itf.json",
+  "specs/traces/skill_gate.93.itf.json",
+  "specs/traces/skill_gate.94.itf.json",
+  "specs/traces/skill_gate.95.itf.json",
+  "specs/traces/skill_gate.96.itf.json",
+  "specs/traces/skill_gate.97.itf.json",
+  "specs/traces/skill_gate.98.itf.json",
+  "specs/traces/skill_gate.99.itf.json",
+  "specs/traces/skill_gate_old.itf.json",
+]
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/skill_gate_rules.rs"
+probes = '''
+use production::{Answer, Move, Store, gate, review_complete, safe, step};
+#[kani::proof]
+fn reject_a_stop_allowed_with_an_undecided_draft() {
+    let mut state = gate();
+    state.draft = Some(1);
+    state.answer = Answer::Allow;
+    assert!(safe(&state));
+}
+#[kani::proof]
+fn reject_a_second_maintenance_request() {
+    let mut state = gate();
+    state.requests = 2;
+    assert!(safe(&state));
+}
+#[kani::proof]
+#[kani::unwind(9)]
+fn reject_a_triage_between_two_analyses_standing_in_for_the_newer_draft() {
+    let mut state = gate();
+    for action in [Move::Observe, Move::Analyze, Move::Check(0), Move::Observe, Move::Analyze, Move::Record(0), Move::Stop] {
+        state = step(Store::Old, state, action).unwrap_or(state);
+    }
+    assert!(safe(&state));
+}
+#[kani::proof]
+fn reject_the_fixed_triage_of_a_stale_draft() {
+    let mut state = gate();
+    state.events = 1;
+    state.draft = Some(0);
+    assert!(step(Store::Fixed, state, Move::Triage).is_some());
+}
+#[kani::proof]
+fn reject_an_incomplete_decision_completing_the_review() {
+    assert_eq!(review_complete(true, &[(0, false)], &[(0, false)]), Ok(()));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/skill_plan_rules.rs"
+probes = '''
+use production::{Failure, input, plan};
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_a_plan_that_drops_a_dependency() {
+    let deps: [&[usize]; 2] = [&[], &[0]];
+    assert!(input(&deps, &[1]).and_then(plan).is_ok_and(|plan| plan.skills() == [1]));
+}
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_planning_a_cycle() {
+    let deps: [&[usize]; 2] = [&[1], &[0]];
+    assert!(input(&deps, &[0]).and_then(plan).is_ok());
+}
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_planning_a_skill_outside_the_catalog() {
+    let deps: [&[usize]; 1] = [&[2]];
+    assert!(!matches!(input(&deps, &[0]).and_then(plan), Err(Failure::Unknown)));
+}
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_validating_a_dependency_outside_the_catalog() {
+    let deps: [&[usize]; 1] = [&[2]];
+    assert!(input(&deps, &[0]).is_ok());
+}
+'''

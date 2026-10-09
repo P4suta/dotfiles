@@ -5,7 +5,9 @@ mod tree;
 
 pub use platform::paths::canonical;
 pub use platform::{aside, build_inputs, freshness, refusal, report, tool};
-pub use rules::{incident_rules, proof_budget_rules, skill_rules};
+pub use rules::{
+    incident_rules, proof_budget_rules, skill_gate_rules, skill_plan_rules, skill_rules,
+};
 pub(crate) use tree::collect;
 pub use tree::{
     Metadata, export_checks, metadata, skill_source_paths, skills, split_frontmatter,
@@ -17,7 +19,7 @@ use crate::skill_rules::{
     gate_complete, maintenance_current, size_disposition, tracked_decision, triage_complete,
 };
 pub use crate::skill_rules::{Outcome, decision_complete};
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use pulldown_cmark::{Event as MarkdownEvent, Parser};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -154,41 +156,35 @@ pub fn dependency_plan(
             );
         }
     }
-    let mut plan = Vec::new();
-    let mut visiting = BTreeSet::new();
-    let mut done = BTreeSet::new();
+    // `skill_plan_rules` names each skill by its index in the sorted catalog.
+    let names: Vec<&String> = available.iter().collect();
+    let index = |name: &str| names.iter().position(|candidate| *candidate == name);
+    let deps: Vec<Vec<usize>> = names
+        .iter()
+        .map(|name| {
+            graph
+                .get(name)
+                .into_iter()
+                .flat_map(|also| also.iter())
+                .filter_map(|dependency| index(dependency))
+                .collect()
+        })
+        .collect();
+    let deps: Vec<&[usize]> = deps.iter().map(Vec::as_slice).collect();
+    let mut wanted = Vec::new();
     for name in requested {
-        visit(name, available, &graph, &mut visiting, &mut done, &mut plan)?;
+        wanted.push(index(name).with_context(|| format!("unknown skill: {name}"))?);
     }
-    Ok(plan)
-}
-
-/// Appends `name` to `plan` after every skill it depends on, refusing a cycle.
-fn visit(
-    name: &str,
-    available: &BTreeSet<String>,
-    graph: &BTreeMap<&String, &Vec<String>>,
-    visiting: &mut BTreeSet<String>,
-    done: &mut BTreeSet<String>,
-    plan: &mut Vec<String>,
-) -> Result<()> {
-    ensure!(available.contains(name), "unknown skill: {name}");
-    if done.contains(name) {
-        return Ok(());
+    match skill_plan_rules::input(&deps, &wanted).and_then(skill_plan_rules::plan) {
+        Ok(plan) => Ok(plan
+            .skills()
+            .iter()
+            .copied()
+            .filter_map(|skill| names.get(skill).map(|name| (*name).clone()))
+            .collect()),
+        Err(skill_plan_rules::Failure::Cycle) => bail!("cyclic skill dependency"),
+        Err(skill_plan_rules::Failure::Unknown) => bail!("unknown skill dependency"),
     }
-    ensure!(
-        visiting.insert(name.into()),
-        "cyclic skill dependency at {name}"
-    );
-    if let Some(dependencies) = graph.get(&name.to_string()) {
-        for dependency in *dependencies {
-            visit(dependency, available, graph, visiting, done, plan)?;
-        }
-    }
-    visiting.remove(name);
-    done.insert(name.into());
-    plan.push(name.into());
-    Ok(())
 }
 
 #[must_use]
@@ -239,39 +235,68 @@ pub fn check_review(
     review: &Review,
     evidence_root: &Path,
 ) -> Result<()> {
-    ensure!(
-        report_hash == review.report_hash,
-        "stale skill analysis; analyze the current catalog and evidence"
-    );
-    let known: BTreeSet<_> = findings.iter().map(|finding| &finding.id).collect();
-    ensure!(known.len() == findings.len(), "duplicate analysis finding");
-    let mut found = BTreeSet::new();
+    // `skill_gate_rules::review_complete` names each finding by its index and each decision by the index of its finding.
+    let index = |id: &str| {
+        findings
+            .iter()
+            .position(|finding| finding.id == id)
+            .unwrap_or(findings.len())
+    };
+    let facts: Vec<(usize, bool)> = findings
+        .iter()
+        .map(|finding| (index(&finding.id), adopted.contains(&finding.id)))
+        .collect();
+    let decisions: Vec<(usize, bool)> = review
+        .decisions
+        .iter()
+        .map(|decision| {
+            (
+                index(&decision.id),
+                complete(
+                    decision.outcome,
+                    &decision.reason,
+                    &decision.evidence,
+                    decision.revisit.as_ref(),
+                ),
+            )
+        })
+        .collect();
+    match skill_gate_rules::review_complete(report_hash == review.report_hash, &facts, &decisions) {
+        Ok(()) => {}
+        Err(skill_gate_rules::Gap::Stale) => {
+            bail!("stale skill analysis; analyze the current catalog and evidence")
+        }
+        Err(skill_gate_rules::Gap::RepeatedFinding) => bail!("duplicate analysis finding"),
+        Err(skill_gate_rules::Gap::UnknownDecision) => {
+            bail!("unknown or duplicate skill decision")
+        }
+        Err(skill_gate_rules::Gap::IncompleteDecision) => bail!("incomplete decision"),
+        Err(skill_gate_rules::Gap::Undecided) => {
+            bail!("unprocessed skill recommendations; record every disposition with evidence")
+        }
+    }
     let root = crate::canonical(evidence_root)?;
     for decision in &review.decisions {
-        ensure!(
-            known.contains(&decision.id) && found.insert(&decision.id),
-            "unknown or duplicate skill decision: {}",
-            decision.id
-        );
-        ensure!(
-            complete(
-                decision.outcome,
-                &decision.reason,
-                &decision.evidence,
-                decision.revisit.as_ref()
-            ),
-            "incomplete decision: {}",
-            decision.id
-        );
         check_evidence(&decision.evidence, &root)?;
     }
-    ensure!(
-        known
-            .iter()
-            .all(|id| found.contains(id) || adopted.contains(*id)),
-        "unprocessed skill recommendations; record every disposition with evidence"
-    );
     Ok(())
+}
+
+/// Holds the store lock of `state` until the returned file drops, so an analysis and a triage never interleave.
+///
+/// # Errors
+///
+/// Returns an error when opening or locking the lock file fails.
+pub fn lock_store(state: &Path) -> Result<fs::File> {
+    fs::create_dir_all(state)?;
+    let file = fs::File::options()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(state.join("store.lock"))
+        .context("open the skill-ops store lock")?;
+    file.lock().context("lock the skill-ops store")?;
+    Ok(file)
 }
 
 /// Reads the tracked decisions, one `<skill>.json` file per skill.

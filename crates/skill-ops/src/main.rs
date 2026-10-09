@@ -222,7 +222,34 @@ fn pending(
     root: &Path,
 ) -> Result<bool> {
     let draft: Option<Report> = optional(&state.join("report.json"))?;
-    let reviewed: Option<RuntimeReview> = optional(&state.join("review.json"))?;
+    let baseline = ops::read_approved(approved)?;
+    // Each decision binds to its finding, so a review stands in for the draft only when it decides every draft finding that no reviewed revision adopted.
+    let reviewed: Option<RuntimeReview> = optional::<RuntimeReview>(&state.join("review.json"))?
+        .filter(|reviewed| {
+            let findings = draft.as_ref().map(|draft| {
+                let adopted = ops::adopted_findings(draft, &baseline.reviewed);
+                draft
+                    .findings
+                    .iter()
+                    .enumerate()
+                    .map(|(index, finding)| (index, adopted.contains(&finding.id)))
+                    .collect::<Vec<_>>()
+            });
+            let decided: Vec<usize> = draft.as_ref().map_or_else(Vec::new, |draft| {
+                reviewed
+                    .review
+                    .decisions
+                    .iter()
+                    .filter_map(|decision| {
+                        draft
+                            .findings
+                            .iter()
+                            .position(|finding| finding.id == decision.id)
+                    })
+                    .collect()
+            });
+            skill_ops::skill_gate_rules::review_applies(findings.as_deref(), &decided)
+        });
     let report = reviewed
         .as_ref()
         .map(|reviewed| archived_report(state, &reviewed.review.report_hash))
@@ -234,6 +261,17 @@ fn pending(
         .map(|reviewed| recorded_evidence(state, reviewed))
         .transpose()?;
     let baseline = ops::read_approved(approved)?;
+    if let Some(reviewed) = &reviewed {
+        ensure!(
+            ops::evidence_hashes(
+                &reviewed.review,
+                recorded
+                    .as_deref()
+                    .context("a recorded review holds its evidence")?,
+            )? == reviewed.evidence_hashes,
+            "review evidence changed; reassess the current evidence"
+        );
+    }
     let runtime = Runtime {
         catalog,
         policy,
@@ -256,7 +294,32 @@ fn pending(
     ops::runtime_pending(runtime)
 }
 
-fn execute(cli: Cli) -> Result<()> {
+/// Whether `specs/skill_gate.qnt` lets triage record a review of the current analysis and store draft.
+fn triage_admitted(current: bool, drafted: bool) -> bool {
+    use skill_ops::skill_gate_rules::{Gate, Move, Store, gate, step};
+    let state = Gate {
+        events: 1,
+        draft: Some(u8::from(current && drafted)),
+        ..gate()
+    };
+    step(Store::Fixed, state, Move::Triage).is_some()
+}
+
+/// The Stop hook's answer from `specs/skill_gate.qnt`: stop with no pending work, request maintenance once per session, then report an incomplete end.
+fn stop_answer(current: bool, continued: bool) -> skill_ops::skill_gate_rules::Answer {
+    use skill_ops::skill_gate_rules::{Answer, Gate, Move, Store, THRESHOLD, gate, safe, step};
+    let state = Gate {
+        events: if current { 0 } else { THRESHOLD },
+        continued,
+        requests: u8::from(continued),
+        ..gate()
+    };
+    step(Store::Fixed, state, Move::Stop)
+        .filter(safe)
+        .map_or(Answer::End, |next| next.answer)
+}
+
+fn open_session(cli: &Cli) -> Result<Session> {
     let user_directory = PathBuf::from(
         std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
             .context("user directory is unavailable")?,
@@ -267,12 +330,15 @@ fn execute(cli: Cli) -> Result<()> {
         .unwrap_or_else(|| user_directory.join(".agents/skills"));
     let policy_path = cli
         .policy
+        .clone()
         .unwrap_or_else(|| user_directory.join(".config/skill-ops/policy.json"));
     let state = cli
         .state
+        .clone()
         .unwrap_or_else(|| user_directory.join(".local/state/skill-ops"));
     let approved = cli
         .approved
+        .clone()
         .unwrap_or_else(|| user_directory.join(".config/skill-ops/approved.json"));
     let catalog = if cli.tree.is_none() {
         let baseline = ops::read_approved(&approved)?;
@@ -286,14 +352,18 @@ fn execute(cli: Cli) -> Result<()> {
     };
     let policy: Policy = ops::read_json(&policy_path)?;
     ops::validate_policy(&policy, &catalog)?;
-    let session = Session {
+    Ok(Session {
         user_directory,
         tree,
         state,
         approved,
         catalog,
         policy,
-    };
+    })
+}
+
+fn execute(cli: Cli) -> Result<()> {
+    let session = open_session(&cli)?;
     match cli.command {
         Commands::Load { names, bundle } => session.load(names, bundle)?,
         Commands::Observe { client } => {
@@ -499,6 +569,7 @@ impl Session {
     fn analyze(&self, out: &Path) -> Result<()> {
         let (catalog, policy, state, approved) =
             (&self.catalog, &self.policy, &self.state, &self.approved);
+        let _store = ops::lock_store(state)?;
         let events = ops::recorded(state)?;
         let notes = ops::notes(state)?;
         let report = ops::analyze(catalog, policy, &events, &notes)?;
@@ -547,10 +618,13 @@ impl Session {
         let (catalog, policy, state, approved) =
             (&self.catalog, &self.policy, &self.state, &self.approved);
         let review: Review = ops::read_json(decisions)?;
+        // The store lock holds every analysis off until triage records the review, binding it to the draft it checked.
+        let _store = ops::lock_store(state)?;
         let report = archived_report(state, &review.report_hash)?;
         let current = ops::analyze(catalog, policy, &ops::recorded(state)?, &ops::notes(state)?)?;
+        let draft: Option<Report> = optional(&state.join("report.json"))?;
         ensure!(
-            report == current,
+            triage_admitted(report == current, draft.as_ref() == Some(&report)),
             "analysis changed before triage; analyze the current evidence"
         );
         let evidence_root =
@@ -648,7 +722,7 @@ impl Session {
 fn main() {
     let mut cli = Cli::parse();
     let result = if matches!(cli.command, Commands::Stop) {
-        use skill_ops::skill_rules::{Completion, completion};
+        use skill_ops::skill_gate_rules::Answer;
         let input = stdin_json();
         let continued = input
             .as_ref()
@@ -668,12 +742,12 @@ fn main() {
             ),
             None => format!("Skill maintenance remains incomplete: {error:#}. Run skill-ops analyze, assess the findings it lists with skill-operations, implement accepted changes, and run skill-ops triage for them before claiming completion."),
         });
-        let response = match completion(checked.is_ok(), continued) {
-            Completion::Allow => serde_json::json!({}),
-            Completion::RequestMaintenance => {
+        let response = match stop_answer(checked.is_ok(), continued) {
+            Answer::Allow => serde_json::json!({}),
+            Answer::Request => {
                 serde_json::json!({"decision":"block","reason":reason})
             }
-            Completion::EndIncomplete => {
+            Answer::End | Answer::None => {
                 serde_json::json!({"continue":false,"stopReason":reason,"systemMessage":"Skill maintenance remains incomplete; automatic continuation is bounded."})
             }
         };
