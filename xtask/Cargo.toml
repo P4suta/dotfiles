@@ -30,6 +30,7 @@ skill-ops = { path = "../crates/skill-ops" }
 syn = { version = "2.0.119", features = ["full", "visit"] }
 tempfile = "3.27"
 toml = "1.0"
+vt100 = "0.16.2"
 yaml-rust2 = "0.13"
 
 [lints]

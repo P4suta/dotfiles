@@ -40,6 +40,11 @@ enum Action {
         #[arg(long)]
         write: bool,
     },
+    /// Records every profile's terminal cell grids.
+    ThemeGrids {
+        #[arg(long)]
+        write: bool,
+    },
     PublicAudit {
         #[arg(long)]
         denylist: PathBuf,
@@ -256,6 +261,7 @@ fn run() -> Result<()> {
             xtask::launchers::generate(&cli.root, check)?;
             xtask::profiles::targets_page(&cli.root, check)?;
         }
+        Action::ThemeGrids { write } => xtask::profiles::write_theme_grids(&cli.root, write)?,
         Action::ProfileSnapshots { write } => {
             if write {
                 xtask::profile_snapshot::write(&cli.root)?;

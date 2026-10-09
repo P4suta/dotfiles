@@ -186,6 +186,8 @@ pub enum Metric {
     MutantsTimedOut { exact: u64 },
     /// A wall time measured on one host, which never gates.
     WallMillis { advisory: u64 },
+    /// The lowest text contrast in thousandths and the palette pair that reaches it.
+    MinimumContrast { exact: u64, pair: String },
 }
 
 /// The JSON Schema of the manifest.
@@ -1023,8 +1025,45 @@ pub fn metrics(baselines: &Baselines, measured: &Closure, unsafe_sites: u64) -> 
         Metric::UnsafeSites { exact } => Some(("unsafe-sites", Better::Lower, exact, unsafe_sites)),
         Metric::MutantsMissed { .. }
         | Metric::MutantsTimedOut { .. }
-        | Metric::WallMillis { .. } => None,
+        | Metric::WallMillis { .. }
+        | Metric::MinimumContrast { .. } => None,
     })
+}
+
+/// Refusals for a lowest contrast pair that differs from the one the baselines record, or a baseline file that records none.
+/// `lowest` holds the pair's name, such as `comment on bg`, and its contrast in thousandths.
+#[must_use]
+pub fn contrast_metric(baselines: &Baselines, lowest: (&str, u64)) -> Vec<String> {
+    let (name, value) = lowest;
+    let recorded: Vec<(&str, u64)> = baselines
+        .metrics
+        .iter()
+        .filter_map(|metric| match metric {
+            Metric::MinimumContrast { exact, pair } => Some((pair.as_str(), *exact)),
+            _ => None,
+        })
+        .collect();
+    let [(pair, exact)] = recorded.as_slice() else {
+        return vec![format!(
+            "{BASELINES} records no single minimum-contrast metric; record {name} at {value}"
+        )];
+    };
+    let mut refusals = compare(baselines, |metric| match metric {
+        Metric::MinimumContrast { exact, .. } => {
+            Some(("minimum-contrast", Better::Higher, *exact, value))
+        }
+        _ => None,
+    });
+    if *pair != name && *exact == value {
+        refusals.push(format!(
+            "{BASELINES}: the lowest contrast pair is now {name}, not {pair}; record it"
+        ));
+    } else if *pair != name {
+        refusals.push(format!(
+            "{BASELINES}: the lowest contrast pair moved from {pair} to {name}"
+        ));
+    }
+    refusals
 }
 
 /// What one mutation campaign over the decision core measured.
@@ -1121,6 +1160,13 @@ pub fn check(root: &Path, closed: IssueState<'_>) -> Result<()> {
     let mut refusals = measured.refusals.clone();
     refusals.extend(pilots(root, &manifest, closed)?);
     refusals.extend(metrics(&baselines, &measured, unsafe_sites(root)?));
+    let contrasts = crate::theme::contrasts(&crate::profiles::source_data(root)?)?;
+    if let Some((foreground, background, ratio, _)) = contrasts.first() {
+        refusals.extend(contrast_metric(
+            &baselines,
+            (&format!("{foreground} on {background}"), *ratio),
+        ));
+    }
     if !refusals.is_empty() {
         bail!(
             "the obligation manifest doesn't cover the code:\n{}",

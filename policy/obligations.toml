@@ -975,3 +975,19 @@ reason = "the cursor steps back onto the redirect, so it reads the same append f
 [[non-terminating]]
 mutant = "crates/rules/src/shell_write_rules.rs:204:73: replace + with - in scan"
 reason = "the delimiter scan starts on the first `<` and returns there, so the cursor rereads the same here-document operator forever"
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/contrast_rules.rs"
+probes = '''
+use production::{Rgb, legible, parse};
+#[kani::proof]
+fn reject_text_legible_on_its_own_color() {
+    let color = Rgb { red: kani::any(), green: kani::any(), blue: kani::any() };
+    assert!(legible(color, color));
+}
+#[kani::proof]
+fn reject_a_literal_without_its_hash() {
+    assert!(parse(b"1a1b26").is_some());
+}
+'''

@@ -33,45 +33,45 @@ $env.config = {
   }
 
   color_config: {
-    separator: "#565f89"
+    separator: "{{ .palette.comment }}"
     leading_trailing_space_bg: { attr: n }
-    header: { fg: "#9ece6a", attr: b }
-    empty: "#7aa2f7"
-    bool: "#bb9af7"
-    int: "#ff9e64"
-    filesize: "#2ac3de"
-    duration: "#e0af68"
-    date: "#73daca"
-    range: "#7dcfff"
-    float: "#ff9e64"
-    string: "#9ece6a"
-    nothing: "#565f89"
-    binary: "#c0caf5"
-    cell-path: "#7dcfff"
-    row_index: { fg: "#565f89", attr: b }
-    record: "#c0caf5"
-    list: "#c0caf5"
-    block: "#c0caf5"
-    hints: "#565f89"
-    search_result: { fg: "#1a1b26", bg: "#e0af68" }
-    shape_garbage: { fg: "#f7768e", attr: b }
-    shape_bool: "#bb9af7"
-    shape_int: "#ff9e64"
-    shape_float: "#ff9e64"
-    shape_range: "#7dcfff"
-    shape_internalcall: "#7aa2f7"
-    shape_external: "#9ece6a"
-    shape_externalarg: "#73daca"
-    shape_literal: "#2ac3de"
-    shape_operator: "#bb9af7"
-    shape_signature: "#9ece6a"
-    shape_string: "#9ece6a"
-    shape_filepath: "#7dcfff"
-    shape_directory: "#7dcfff"
-    shape_globpattern: "#2ac3de"
-    shape_variable: "#c0caf5"
-    shape_flag: "#e0af68"
-    shape_custom: "#7aa2f7"
+    header: { fg: "{{ .palette.green }}", attr: b }
+    empty: "{{ .palette.blue }}"
+    bool: "{{ .palette.magenta }}"
+    int: "{{ .palette.orange }}"
+    filesize: "{{ .palette.blue1 }}"
+    duration: "{{ .palette.yellow }}"
+    date: "{{ .palette.teal }}"
+    range: "{{ .palette.cyan }}"
+    float: "{{ .palette.orange }}"
+    string: "{{ .palette.green }}"
+    nothing: "{{ .palette.comment }}"
+    binary: "{{ .palette.fg }}"
+    cell-path: "{{ .palette.cyan }}"
+    row_index: { fg: "{{ .palette.comment }}", attr: b }
+    record: "{{ .palette.fg }}"
+    list: "{{ .palette.fg }}"
+    block: "{{ .palette.fg }}"
+    hints: "{{ .palette.comment }}"
+    search_result: { fg: "{{ .palette.bg }}", bg: "{{ .palette.yellow }}" }
+    shape_garbage: { fg: "{{ .palette.red }}", attr: b }
+    shape_bool: "{{ .palette.magenta }}"
+    shape_int: "{{ .palette.orange }}"
+    shape_float: "{{ .palette.orange }}"
+    shape_range: "{{ .palette.cyan }}"
+    shape_internalcall: "{{ .palette.blue }}"
+    shape_external: "{{ .palette.green }}"
+    shape_externalarg: "{{ .palette.teal }}"
+    shape_literal: "{{ .palette.blue1 }}"
+    shape_operator: "{{ .palette.magenta }}"
+    shape_signature: "{{ .palette.green }}"
+    shape_string: "{{ .palette.green }}"
+    shape_filepath: "{{ .palette.cyan }}"
+    shape_directory: "{{ .palette.cyan }}"
+    shape_globpattern: "{{ .palette.blue1 }}"
+    shape_variable: "{{ .palette.fg }}"
+    shape_flag: "{{ .palette.yellow }}"
+    shape_custom: "{{ .palette.blue }}"
   }
 
   shell_integration: {
@@ -120,9 +120,9 @@ $env.config = {
 $env.TRANSIENT_PROMPT_COMMAND = ""
 $env.TRANSIENT_PROMPT_COMMAND_RIGHT = ""
 $env.TRANSIENT_PROMPT_MULTILINE_INDICATOR = ""
-$env.TRANSIENT_PROMPT_INDICATOR = $"(ansi {fg: "#9ece6a" attr: b})❯(ansi reset) "
+$env.TRANSIENT_PROMPT_INDICATOR = $"(ansi {fg: "{{ .palette.green }}" attr: b})❯(ansi reset) "
 $env.TRANSIENT_PROMPT_INDICATOR_VI_INSERT = $env.TRANSIENT_PROMPT_INDICATOR
-$env.TRANSIENT_PROMPT_INDICATOR_VI_NORMAL = $"(ansi {fg: "#bb9af7" attr: b})❮(ansi reset) "
+$env.TRANSIENT_PROMPT_INDICATOR_VI_NORMAL = $"(ansi {fg: "{{ .palette.magenta }}" attr: b})❮(ansi reset) "
 
 use ~/.config/nushell/generated/mise.nu
 

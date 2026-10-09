@@ -15,6 +15,12 @@ exact = 136
 metric = "unsafe-sites"
 exact = 5
 
+# The lowest text contrast, in thousandths, among the palette's text pairs.
+[[metric]]
+metric = "minimum-contrast"
+exact = 4627
+pair = "comment on bg"
+
 # The mutation campaign of `just proofs` over the decision core.
 [[metric]]
 metric = "mutants-missed"

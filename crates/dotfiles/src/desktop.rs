@@ -339,6 +339,36 @@ fn nerd_font(context: &ContextData, runner: &mut impl Runner, font_version: &str
     Ok(())
 }
 
+/// The palette colors of the terminal's sixteen color slots, in slot order, as every terminal theme assigns them.
+const ANSI_SLOTS: [&str; 16] = [
+    "bg_dim",
+    "red",
+    "green",
+    "yellow",
+    "blue",
+    "magenta",
+    "cyan",
+    "fg_dim",
+    "bright_black",
+    "red",
+    "green",
+    "yellow",
+    "blue",
+    "magenta",
+    "cyan",
+    "fg",
+];
+
+/// A palette color of the chezmoi data in the `rgb(r,g,b)` form `gsettings` takes.
+fn palette_rgb(data: &serde_json::Value, name: &str) -> Result<String> {
+    let color = data
+        .pointer(&format!("/palette/{name}"))
+        .and_then(serde_json::Value::as_str)
+        .and_then(|literal| rules::contrast_rules::parse(literal.as_bytes()))
+        .with_context(|| format!("the data holds no palette color {name}"))?;
+    Ok(format!("rgb({},{},{})", color.red, color.green, color.blue))
+}
+
 /// The `gnome-terminal` profile colors and font, the keyboard repeat timing, and the Cinnamon terminal.
 fn gnome(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     let profile = runner.run(
@@ -360,10 +390,14 @@ fn gnome(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         let schema = format!(
             "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:{id}/"
         );
+        let (foreground, background) = (
+            palette_rgb(&context.data, "fg")?,
+            palette_rgb(&context.data, "bg")?,
+        );
         for (key, value) in [
             ("use-theme-colors", "false"),
-            ("foreground-color", "rgb(192,202,245)"),
-            ("background-color", "rgb(26,27,38)"),
+            ("foreground-color", foreground.as_str()),
+            ("background-color", background.as_str()),
             ("use-transparent-background", "true"),
             ("background-transparency-percent", "15"),
             ("use-system-font", "false"),
@@ -371,11 +405,15 @@ fn gnome(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
         ] {
             gsetting(runner, &schema, key, value)?;
         }
+        let slots = ANSI_SLOTS
+            .iter()
+            .map(|name| Ok(format!("'{}'", palette_rgb(&context.data, name)?)))
+            .collect::<Result<Vec<_>>>()?;
         gsetting(
             runner,
             &schema,
             "palette",
-            "['rgb(21,22,30)', 'rgb(247,118,142)', 'rgb(158,206,106)', 'rgb(224,175,104)', 'rgb(122,162,247)', 'rgb(187,154,247)', 'rgb(125,207,255)', 'rgb(169,177,214)', 'rgb(65,72,104)', 'rgb(247,118,142)', 'rgb(158,206,106)', 'rgb(224,175,104)', 'rgb(122,162,247)', 'rgb(187,154,247)', 'rgb(125,207,255)', 'rgb(192,202,245)']",
+            &format!("[{}]", slots.join(", ")),
         )?;
     }
     for schema in [
@@ -419,6 +457,14 @@ fn link(source: &Path, destination: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_terminal_colors_come_from_the_palette() {
+        let data = serde_json::json!({"palette": {"fg": "#c0caf5", "bg": "not a color"}});
+        assert_eq!(palette_rgb(&data, "fg").unwrap(), "rgb(192,202,245)");
+        assert!(palette_rgb(&data, "bg").is_err());
+        assert!(palette_rgb(&data, "red").is_err());
+    }
 
     #[test]
     fn tailscale_launches_inside_its_bundle_and_does_not_overwrite_an_unrelated_binary() {

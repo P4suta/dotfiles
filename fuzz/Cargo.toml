@@ -20,6 +20,13 @@ toml = "1.0"
 xtask = { path = "../xtask" }
 
 [[bin]]
+name = "color_literal"
+path = "fuzz_targets/color_literal.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "chezmoi_data"
 path = "fuzz_targets/chezmoi_data.rs"
 test = false

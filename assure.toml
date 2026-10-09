@@ -13,6 +13,11 @@ by = "fuzz/fuzz_targets/chezmoi_data.rs"
 
 [[owner]]
 shape = "parser"
+path = "crates/rules/src/contrast_rules.rs"
+by = "fuzz/fuzz_targets/color_literal.rs"
+
+[[owner]]
+shape = "parser"
 path = "crates/rules/src/change_rules.rs"
 by = "fuzz/fuzz_targets/gate_list.rs"
 

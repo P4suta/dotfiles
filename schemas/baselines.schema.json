@@ -134,6 +134,30 @@
             "metric",
             "advisory"
           ]
+        },
+        {
+          "description": "The lowest text contrast in thousandths and the palette pair that reaches it.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "minimum-contrast"
+            },
+            "pair": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "exact",
+            "pair"
+          ]
         }
       ]
     }

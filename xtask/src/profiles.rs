@@ -527,9 +527,17 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
     let source_data = source_data(root)?;
     let findings = manifest_findings(&source_data);
     ensure!(findings.is_empty(), "{}", findings.join("\n"));
+    let colors = crate::theme::palette(&source_data)?;
+    let (illegible, minimum) = crate::theme::check_contrast(&source_data)?;
+    ensure!(illegible.is_empty(), "{}", illegible.join("\n"));
+    println!("Every declared text pair keeps 4.5:1, the lowest {minimum}");
     for profile in Profile::ALL {
         let fixture = Fixture::new(root, &scratch.path().join(profile.name()), profile)?;
         let dump = fixture.render(report)?;
+        let strays = crate::theme::strays(profile.name(), &dump, &colors);
+        ensure!(strays.is_empty(), "{}", strays.join("\n"));
+        let grids = crate::theme::check_grids(root, profile.name(), &dump, false)?;
+        ensure!(grids.is_empty(), "{}", grids.join("\n"));
         fixture.check_setup(&dump, &source_data["platforms"][profile.name()])?;
         fixture.apply_files()?;
         fixture.check_merged_targets(&dump)?;
@@ -549,6 +557,25 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
         "the Git configuration of {differing:?} differs from {} beyond the declared per-host settings {DECLARED_GIT_SETTINGS:?}",
         git_policies[0].0.name()
     );
+    Ok(())
+}
+
+/// Records every profile's terminal cell grids.
+///
+/// # Errors
+///
+/// Returns an error without `write` or when a profile or grid fails to render.
+pub fn write_theme_grids(root: &Path, write: bool) -> Result<()> {
+    ensure!(
+        write,
+        "`just profiles` compares the grids; pass --write to record them"
+    );
+    let scratch = tempfile::tempdir()?;
+    for profile in Profile::ALL {
+        let fixture = Fixture::new(root, &scratch.path().join(profile.name()), profile)?;
+        let dump = fixture.render(None)?;
+        crate::theme::check_grids(root, profile.name(), &dump, true)?;
+    }
     Ok(())
 }
 

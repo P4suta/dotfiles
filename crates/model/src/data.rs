@@ -17,7 +17,10 @@ pub struct Data {
     /// The mise release that every host installs before any other step.
     pub mise: Option<MiseRelease>,
     pub ocaml: Option<Ocaml>,
-    pub palette: Option<BTreeMap<String, String>>,
+    /// The one palette every themed target renders its colors from.
+    pub palette: Option<Palette>,
+    /// The foreground and background palette names that some theme draws text with, each of which keeps a text contrast of 4.5:1.
+    pub contrast: Option<Vec<ContrastPair>>,
     pub platforms: Option<Platforms>,
     /// Named sets of profiles.
     pub profiles: Option<BTreeMap<String, Vec<String>>>,
@@ -27,6 +30,91 @@ pub struct Data {
     pub retired: Option<BTreeMap<String, String>>,
     /// Setup launchers that only the profiles of the named set run, which `just gen` writes from the setup steps.
     pub scripts: Option<BTreeMap<String, String>>,
+}
+
+/// The Tokyo Night colors of every themed tool, each a `#rrggbb` literal.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Palette {
+    pub bg: Option<Hex>,
+    pub bg_dim: Option<Hex>,
+    pub bg_highlight: Option<Hex>,
+    pub bg_panel: Option<Hex>,
+    pub blue: Option<Hex>,
+    pub blue1: Option<Hex>,
+    pub bright_black: Option<Hex>,
+    pub comment: Option<Hex>,
+    pub cyan: Option<Hex>,
+    pub diff_add: Option<Hex>,
+    pub diff_add_gutter: Option<Hex>,
+    pub diff_del: Option<Hex>,
+    pub diff_del_gutter: Option<Hex>,
+    pub fg: Option<Hex>,
+    pub fg_dim: Option<Hex>,
+    pub green: Option<Hex>,
+    pub magenta: Option<Hex>,
+    pub orange: Option<Hex>,
+    pub purple: Option<Hex>,
+    pub red: Option<Hex>,
+    pub selection: Option<Hex>,
+    pub surface: Option<Hex>,
+    pub teal: Option<Hex>,
+    pub yellow: Option<Hex>,
+}
+
+/// A `#rrggbb` color literal.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct Hex(String);
+
+impl JsonSchema for Hex {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Hex".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "pattern": "^#[0-9a-f]{6}$"
+        })
+    }
+}
+
+impl TryFrom<String> for Hex {
+    type Error = String;
+
+    fn try_from(text: String) -> Result<Self, Self::Error> {
+        if rules::contrast_rules::parse(text.as_bytes()).is_some()
+            && text == text.to_ascii_lowercase()
+        {
+            Ok(Self(text))
+        } else {
+            Err(format!("{text} is no lowercase #rrggbb color"))
+        }
+    }
+}
+
+impl From<Hex> for String {
+    fn from(hex: Hex) -> Self {
+        hex.0
+    }
+}
+
+impl Hex {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Two palette names that a theme draws text with, the text's color on the background's.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContrastPair {
+    pub foreground: String,
+    pub background: String,
+    /// Where a theme draws this pair.
+    pub used: String,
 }
 
 /// A mise release and the SHA-256 of its asset for each platform, such as `linux-x64` or `windows-x64`.
@@ -339,6 +427,18 @@ mod tests {
     #[test]
     fn a_value_of_the_wrong_type_fails() {
         assert!(parse("tools.toml", "[platforms.mac.mise]\njobs = \"eight\"\n").is_err());
+    }
+
+    #[test]
+    fn the_palette_holds_only_its_named_lowercase_colors() {
+        assert!(parse("shared.toml", "[palette]\nbg = \"#1a1b26\"\n").is_ok());
+        for refused in [
+            "[palette]\nbg = \"#1A1B26\"\n",
+            "[palette]\nbg = \"navy\"\n",
+            "[palette]\nbackground = \"#1a1b26\"\n",
+        ] {
+            assert!(parse("shared.toml", refused).is_err(), "{refused}");
+        }
     }
 
     #[test]

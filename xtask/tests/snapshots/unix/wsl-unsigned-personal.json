@@ -260,7 +260,7 @@
     {"mode":"0755","path":".config/git","sha256":null,"type":"dir"},
     {"mode":"0600","path":".config/git/allowed_signers","sha256":"4935f59f7696ca8ec411ddb7eec8420d95cee203a15c17f424814872288bd9ae","type":"file"},
     {"mode":"0644","path":".config/git/attributes","sha256":"c9066b7104dba3adf0a04fbbf208bc812467fb6a5ba922efb92706b594c0f7e3","type":"file"},
-    {"mode":"0644","path":".config/git/config","sha256":"e2b519e76b72a423c5e5dd65b2f447134c23a97ac6257d7b26a5a34b2d244baa","type":"file"},
+    {"mode":"0644","path":".config/git/config","sha256":"0f6cb957f9f2e600aaf85642f8877bc425b42be0545a95dc8fadc7b41dcd47c0","type":"file"},
     {"mode":"0755","path":".config/git/hooks","sha256":null,"type":"dir"},
     {"mode":"0755","path":".config/git/hooks/commit-msg","sha256":"abde5ea2591c59c3eabd4cb6b94749517f3707d4a30a6d197ae0bed21e857942","type":"file"},
     {"mode":"0755","path":".config/git/hooks/post-checkout","sha256":"f667ae19dc77d21f11727b6385e8cc9803a6845b31b4b19bb084c4e6a6942c40","type":"file"},

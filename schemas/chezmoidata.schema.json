@@ -14,6 +14,16 @@
         }
       ]
     },
+    "contrast": {
+      "description": "The foreground and background palette names that some theme draws text with, each of which keeps a text contrast of 4.5:1.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/ContrastPair"
+      }
+    },
     "herdr_agent": {
       "anyOf": [
         {
@@ -46,13 +56,15 @@
       ]
     },
     "palette": {
-      "type": [
-        "object",
-        "null"
-      ],
-      "additionalProperties": {
-        "type": "string"
-      }
+      "description": "The one palette every themed target renders its colors from.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Palette"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "platforms": {
       "anyOf": [
@@ -174,6 +186,28 @@
       },
       "additionalProperties": false
     },
+    "ContrastPair": {
+      "description": "Two palette names that a theme draws text with, the text's color on the background's.",
+      "type": "object",
+      "properties": {
+        "background": {
+          "type": "string"
+        },
+        "foreground": {
+          "type": "string"
+        },
+        "used": {
+          "description": "Where a theme draws this pair.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "foreground",
+        "background",
+        "used"
+      ]
+    },
     "Herdr": {
       "type": "object",
       "properties": {
@@ -232,6 +266,10 @@
         }
       },
       "additionalProperties": false
+    },
+    "Hex": {
+      "type": "string",
+      "pattern": "^#[0-9a-f]{6}$"
     },
     "Linux": {
       "type": "object",
@@ -603,6 +641,253 @@
           "type": [
             "string",
             "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Palette": {
+      "description": "The Tokyo Night colors of every themed tool, each a `#rrggbb` literal.",
+      "type": "object",
+      "properties": {
+        "bg": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bg_dim": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bg_highlight": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bg_panel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blue": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blue1": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bright_black": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cyan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "diff_add": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "diff_add_gutter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "diff_del": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "diff_del_gutter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fg": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fg_dim": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "green": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "magenta": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "orange": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "purple": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "red": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "surface": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "teal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "yellow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },

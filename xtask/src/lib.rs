@@ -18,6 +18,7 @@ pub mod quint;
 pub mod rehearsal;
 pub mod skill_proofs;
 pub mod structure;
+pub mod theme;
 
 pub use model::profile_rules;
 pub use platform::paths::{SOURCE_STATE, canonical, has_extension, source_state};
