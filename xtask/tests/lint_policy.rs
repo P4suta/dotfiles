@@ -174,6 +174,57 @@ fn an_unsafe_block_without_a_safety_comment_fails_clippy() {
         workspace["workspace"]["lints"]["clippy"]["undocumented_unsafe_blocks"].as_str(),
         Some("deny")
     );
+    let lints = manifest(&root().join("crates/dotfiles/Cargo.toml"))["lints"].clone();
+    let documented = "#[expect(unsafe_code, reason = \"Exercises the foreign-interface lint boundary.\")]\npub fn read(value: &u8) -> u8 {\n    // SAFETY: The borrowed byte remains valid throughout this read.\n    unsafe { core::ptr::from_ref(value).read() }\n}\n";
+    assert!(compile_probe(&lints, documented, "clippy").status.success());
+    let undocumented = documented.replace(
+        "    // SAFETY: The borrowed byte remains valid throughout this read.\n",
+        "",
+    );
+    let rejected = compile_probe(&lints, &undocumented, "clippy");
+    assert!(!rejected.status.success());
+    assert!(
+        has_error(&rejected, "clippy::undocumented_unsafe_blocks"),
+        "{}",
+        String::from_utf8_lossy(&rejected.stdout)
+    );
+}
+
+fn compile_probe(lints: &toml::Value, source: &str, command: &str) -> std::process::Output {
+    let scope = tempfile::tempdir().unwrap();
+    fs::create_dir(scope.path().join("src")).unwrap();
+    let manifest: toml::Table = [("lints".to_owned(), lints.clone())].into_iter().collect();
+    fs::write(scope.path().join("Cargo.toml"), format!("[package]\nname = 'unsafe-lint-probe'\nversion = '0.0.0'\nedition = '2024'\n[workspace]\n{}", toml::to_string(&manifest).unwrap())).unwrap();
+    fs::write(scope.path().join("src/lib.rs"), source).unwrap();
+    xtask::tool::Tool::Cargo
+        .command()
+        .current_dir(scope.path())
+        .env("CARGO_TARGET_DIR", scope.path().join("target"))
+        .args([command, "--quiet", "--message-format=json"])
+        .output()
+        .unwrap()
+}
+
+fn has_error(output: &std::process::Output, lint: &str) -> bool {
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .any(|message| {
+            message["message"]["level"] == "error" && message["message"]["code"]["code"] == lint
+        })
+}
+
+#[test]
+fn an_unlisted_unsafe_block_is_rejected_by_the_compiler() {
+    let source = "pub fn read(value: &u8) -> u8 { unsafe { core::ptr::from_ref(value).read() } }\n";
+    let workspace = manifest(&root().join("Cargo.toml"));
+    let forbidden = compile_probe(&workspace["workspace"]["lints"], source, "check");
+    assert!(!forbidden.status.success());
+    assert!(has_error(&forbidden, "unsafe_code"));
+    let foreign = manifest(&root().join("crates/dotfiles/Cargo.toml"));
+    let denied = compile_probe(&foreign["lints"], source, "check");
+    assert!(!denied.status.success());
+    assert!(has_error(&denied, "unsafe_code"));
 }
 
 #[test]
