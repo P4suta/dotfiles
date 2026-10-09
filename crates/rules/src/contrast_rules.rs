@@ -143,7 +143,7 @@ pub fn parse(text: &[u8]) -> Option<Rgb> {
         let [high, low] = pair else {
             return None;
         };
-        *channel = (digit(*high)? << NIBBLE) | digit(*low)?;
+        *channel = (digit(*high)? << NIBBLE) + digit(*low)?;
     }
     let [red, green, blue] = channels;
     Some(Rgb { red, green, blue })
