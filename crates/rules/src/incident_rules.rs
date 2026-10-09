@@ -55,9 +55,10 @@ mod signal_proofs {
             published,
         };
         spec(operation, success);
-        kani::cover!(signal(operation, success).is_none());
-        kani::cover!(signal(operation, success) == Some(Source::FailedDelivery));
-        kani::cover!(signal(operation, success) == Some(Source::PublishedRewrite));
+        let result = signal(operation, success);
+        kani::cover!(result.is_none());
+        kani::cover!(result == Some(Source::FailedDelivery));
+        kani::cover!(result == Some(Source::PublishedRewrite));
     }
 
     #[test]
@@ -238,7 +239,7 @@ mod proofs {
             excluded(expected),
             expected.red_test || expected.counterexample || expected.dry_run
         );
-        assert!(rank(repetitions) <= rank(repetitions + 1));
+        assert!(rank(repetitions) <= rank(repetitions.saturating_add(1)));
         assert_eq!(
             complete(outcome),
             match outcome {
@@ -278,7 +279,7 @@ mod proofs {
             expected,
             repetitions,
             Outcome::Exempt {
-                reason: kani::any().then_some(Reason::Intended),
+                reason: kani::any::<bool>().then_some(Reason::Intended),
                 reconsideration: kani::any(),
             },
         );
@@ -287,6 +288,8 @@ mod proofs {
         assert!(!next_action().is_empty());
         assert!(!reason_text(Reason::Disproportionate).is_empty());
         assert!(!reason_text(Reason::Intended).is_empty());
+        kani::cover!(excluded(expected));
+        kani::cover!(!excluded(expected));
     }
 }
 
@@ -295,9 +298,13 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "Miri takes seconds over every incident tuple and repetition"
+    )]
     fn every_input_meets_the_incident_specification() {
         for [red_test, counterexample, dry_run, evidence, reproduces] in crate::domain::flags() {
-            for repetitions in [0, 1, 2, 3] {
+            for repetitions in [0, 1, 2, 3, u64::MAX - 1, u64::MAX] {
                 for reason in [None, Some(Reason::Disproportionate), Some(Reason::Intended)] {
                     for reconsideration in [false, true] {
                         let expected = Expected {

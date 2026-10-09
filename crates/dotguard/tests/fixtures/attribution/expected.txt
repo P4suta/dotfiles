@@ -1,0 +1,27 @@
+feat: add the widget
+
+Adds the widget the settings page links to.
+=====
+fix: keep the cache warm
+
+Co-authored-by: Example Person <person@example.com>
+Signed-off-by: Example Person <person@example.com>
+=====
+docs: explain the CLAUDE.md contract
+
+The Claude-Session: prefix is what the hook looks for.
+See https://claude.ai/code/session_01BBBBBBBBBBBBBBBBBBBBBB for the transcript.
+=====
+chore: bump the toolchain
+=====
+refactor: split the parser
+
+Co-authored-by: Another Person <another@example.org>
+=====
+test: cover the empty input
+
+Claude-Session: none
+=====
+feat: nothing to strip
+
+Body only.

@@ -41,3 +41,9 @@
 | [2026-10-08 Bind installed tools to reviewed skills](installed-tools-and-reviewed-skills.md) | proposed |  |
 | [2026-10-08 Keep property fuzzing in the fuzz targets instead of bolero](no-bolero-beside-kani.md) | accepted |  |
 | [2026-10-08 Generate repository artifacts from checked metadata](repository-metadata-and-generated-artifacts.md) | proposed |  |
+| [2026-10-09 Compose the bounded Git argument proofs through a scalar cursor](compose-bounded-git-argument-proofs.md) | accepted |  |
+| [2026-10-09 Check review postconditions directly on bounded production calls](direct-bounded-review-postconditions.md) | accepted |  |
+| [2026-10-09 Bind incident prevention to exact records and committed evidence](incident-dispositions-bind-exact-records.md) | accepted |  |
+| [2026-10-09 Optimize checked MIR for the pinned Kani verifier](optimize-checked-kani-mir.md) | accepted |  |
+| [2026-10-09 Preserve source witnesses under checked Kani MIR](preserve-kani-source-covers.md) | accepted |  |
+| [2026-10-09 Validate skill catalogs before planning](validated-skill-plan-inputs.md) | accepted |  |

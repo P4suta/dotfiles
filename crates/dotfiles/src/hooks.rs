@@ -1,3 +1,4 @@
+use crate::hook_rules::{self, Configured, Gate};
 use crate::refusal::Refusal;
 use crate::runtime::{Real, Runner, args};
 use crate::tool::Tool;
@@ -20,16 +21,22 @@ pub enum Hook {
 }
 
 impl Hook {
-    fn name(self) -> &'static str {
+    /// The hook the plan of `hook_rules` names.
+    #[must_use]
+    pub const fn rule(self) -> hook_rules::Hook {
         match self {
-            Self::PreCommit => "pre-commit",
-            Self::CommitMsg => "commit-msg",
-            Self::PrePush => "pre-push",
-            Self::PostCommit => "post-commit",
-            Self::PostCheckout => "post-checkout",
-            Self::PostMerge => "post-merge",
-            Self::ReferenceTransaction => "reference-transaction",
+            Self::PreCommit => hook_rules::Hook::PreCommit,
+            Self::CommitMsg => hook_rules::Hook::CommitMsg,
+            Self::PrePush => hook_rules::Hook::PrePush,
+            Self::PostCommit => hook_rules::Hook::PostCommit,
+            Self::PostCheckout => hook_rules::Hook::PostCheckout,
+            Self::PostMerge => hook_rules::Hook::PostMerge,
+            Self::ReferenceTransaction => hook_rules::Hook::ReferenceTransaction,
         }
+    }
+
+    fn name(self) -> &'static str {
+        hook_rules::name(self.rule())
     }
 }
 
@@ -179,14 +186,10 @@ fn lefthook_repository(native: &mut Real, hook: Hook) -> Result<Option<PathBuf>>
         return Ok(None);
     }
     let root = PathBuf::from(String::from_utf8(reply.bytes)?.trim());
-    if !LEFTHOOK_CONFIGURATIONS
+    Ok(LEFTHOOK_CONFIGURATIONS
         .iter()
         .any(|name| root.join(name).is_file())
-    {
-        return Ok(None);
-    }
-    trust_repository(native, &root)?;
-    Ok(Some(root))
+        .then_some(root))
 }
 
 /// mise's paranoid mode loads a repository's configuration only after a trust that records its current contents.
@@ -273,104 +276,168 @@ fn delegate(
 pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .context("native home is unavailable")?;
-    if matches!(hook, Hook::PreCommit | Hook::CommitMsg | Hook::PrePush) {
-        crate::health::gate(Path::new(&home), hook.name())?;
-    }
-    let mut native = Real::new(Path::new(&home))?;
-    if matches!(hook, Hook::PrePush) {
-        let marker = native.home.join(".config/git/push-paused");
-        if marker.exists() {
-            return Err(push_paused(&marker).into());
-        }
-    }
-    let mut input = Vec::new();
-    if matches!(hook, Hook::PrePush | Hook::ReferenceTransaction) {
-        std::io::stdin().read_to_end(&mut input)?;
-    }
-    let staged = matches!(hook, Hook::PreCommit).then(|| staged_tree(&native));
-    if matches!(
+    let native = Real::new(Path::new(&home))?;
+    let mut run = Run {
         hook,
-        Hook::PreCommit | Hook::CommitMsg | Hook::PrePush | Hook::PostCommit
-    ) {
-        let mut command = native.hook_command(Tool::Dotguard);
-        command.arg(hook.name()).args(arguments);
-        gate(
-            &mut command,
-            &input,
-            &crate::refusal::command(&["dotguard", hook.name()]),
-        )?;
-    }
-    if matches!(hook, Hook::PrePush)
-        && let Some(url) = arguments.get(1)
-    {
-        crate::hosts::push_gate(Path::new("."), &url.to_string_lossy(), &input)?;
-        crate::ready_push::gate(&url.to_string_lossy(), &input)?;
-    }
-    verification(hook, arguments, &input)?;
-    if matches!(hook, Hook::CommitMsg) {
-        let message = arguments
-            .first()
-            .context("the commit-msg hook needs the message file")?;
-        prose::commit_gate(
-            &std::env::current_dir()?,
-            Path::new(message),
-            prose::Bundle::installed,
-        )?;
-    }
-    let repository = lefthook_repository(&mut native, hook)?;
-    if matches!(hook, Hook::PreCommit) {
-        let global = native.home.join(".config/lefthook/global.yml");
-        if global.is_file() {
-            delegate(&mut native, hook, arguments, &input, Some(&global))?;
-        }
-    }
-    if repository.is_some() {
-        delegate(&mut native, hook, arguments, &input, None)?;
-    }
-    if let Some(before) = staged {
-        preserve_staged_tree(before.as_deref(), staged_tree(&native).as_deref())?;
-    }
-    if matches!(hook, Hook::PrePush) {
-        gate(
-            native
-                .hook_command(Tool::Dotguard)
-                .arg("renovate-gate")
-                .args(arguments),
-            &input,
-            "dotguard renovate run",
-        )?;
-    }
-    if matches!(hook, Hook::PostMerge)
-        && let Some(root) = std::env::current_dir()
-            .ok()
-            .and_then(|directory| crate::freshness::working_copy(&directory))
-        && let Err(error) = crate::freshness::reinstall_lagging(&native.home, &root)
-    {
-        eprintln!("Warning: reinstalling tools built from changed sources failed: {error:#}");
-    }
-    if matches!(hook, Hook::PostCheckout | Hook::PostMerge)
-        || (matches!(hook, Hook::ReferenceTransaction)
-            && arguments
-                .first()
-                .is_some_and(|argument| argument == "committed"))
-    {
-        let executable = native.home.join(".cargo/bin/storage-scout");
-        let policy = native.home.join(".config/storage-scout/auto.toml");
-        if executable.is_file() && policy.is_file() {
-            let mut command = native.command_installed(&executable);
-            command
-                .args(["auto", "--config"])
-                .arg(policy)
-                .args(["--execute", "--detach", "--event", hook.name(), "--"])
-                .args(arguments)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
-            if let Err(error) = piped(&mut command, &input) {
-                eprintln!("Warning: storage maintenance notification failed: {error:#}");
+        arguments,
+        repository: None,
+        working_copy: None,
+        input: Vec::new(),
+        staged: None,
+        native,
+    };
+    let configured = run.configured()?;
+    for gate in hook_rules::plan(hook.rule(), configured).gates() {
+        if let Err(error) = run.gate(*gate) {
+            if !hook_rules::notification(*gate) {
+                return Err(error);
             }
+            eprintln!("Warning: {error:#}");
         }
     }
     Ok(())
+}
+
+/// One run of a hook: what it found before planning, and what its gates read and pass along.
+struct Run<'a> {
+    hook: Hook,
+    arguments: &'a [OsString],
+    /// The repository whose own Lefthook configuration runs.
+    repository: Option<PathBuf>,
+    /// The checkout of this repository a merge ran in.
+    working_copy: Option<PathBuf>,
+    /// The standard input, read once and passed unchanged to every gate that takes it.
+    input: Vec<u8>,
+    /// The staged tree before the first gate that could change it, or `None` without a tree.
+    staged: Option<String>,
+    native: Real,
+}
+
+impl Run<'_> {
+    const GLOBAL_LEFTHOOK: &str = ".config/lefthook/global.yml";
+    const PUSH_PAUSED: &str = ".config/git/push-paused";
+    const STORAGE_SCOUT: &str = ".cargo/bin/storage-scout";
+    const STORAGE_POLICY: &str = ".config/storage-scout/auto.toml";
+
+    /// What the hook finds without running a gate.
+    fn configured(&mut self) -> Result<Configured> {
+        let home = self.native.home.clone();
+        self.repository = lefthook_repository(&mut self.native, self.hook)?;
+        if matches!(self.hook, Hook::PostMerge) {
+            self.working_copy = std::env::current_dir()
+                .ok()
+                .and_then(|directory| crate::freshness::working_copy(&directory));
+        }
+        Ok(Configured {
+            global: home.join(Self::GLOBAL_LEFTHOOK).is_file(),
+            repository: self.repository.is_some(),
+            url: self.arguments.get(1).is_some(),
+            committed: self
+                .arguments
+                .first()
+                .is_some_and(|argument| argument == "committed"),
+            storage: home.join(Self::STORAGE_SCOUT).is_file()
+                && home.join(Self::STORAGE_POLICY).is_file(),
+            working_copy: self.working_copy.is_some(),
+        })
+    }
+
+    /// The input a gate receives: the hook's input when it takes one, and nothing otherwise.
+    fn input(&self, gate: Gate) -> Vec<u8> {
+        if hook_rules::takes_input(gate) {
+            self.input.clone()
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn gate(&mut self, gate: Gate) -> Result<()> {
+        let hook = self.hook;
+        let arguments = self.arguments;
+        let input = self.input(gate);
+        match gate {
+            Gate::PushHold => {
+                let marker = self.native.home.join(Self::PUSH_PAUSED);
+                if marker.exists() {
+                    return Err(push_paused(&marker).into());
+                }
+            }
+            Gate::Health => crate::health::gate(&self.native.home, hook.name())?,
+            Gate::ReadInput => {
+                std::io::stdin().read_to_end(&mut self.input)?;
+            }
+            Gate::StagedTree => self.staged = staged_tree(&self.native),
+            Gate::Dotguard => {
+                let mut command = self.native.hook_command(Tool::Dotguard);
+                command.arg(hook.name()).args(arguments);
+                self::gate(
+                    &mut command,
+                    &input,
+                    &crate::refusal::command(&["dotguard", hook.name()]),
+                )?;
+            }
+            Gate::PushHosts => {
+                let url = arguments
+                    .get(1)
+                    .context("the pre-push hook needs the remote URL")?
+                    .to_string_lossy();
+                crate::hosts::push_gate(Path::new("."), &url, &input)?;
+                crate::ready_push::gate(&url, &input)?;
+            }
+            Gate::Verification => verification(hook, arguments, &input)?,
+            Gate::CommitProse => {
+                let message = arguments
+                    .first()
+                    .context("the commit-msg hook needs the message file")?;
+                prose::commit_gate(
+                    &std::env::current_dir()?,
+                    Path::new(message),
+                    prose::Bundle::installed,
+                )?;
+            }
+            Gate::GlobalLefthook => {
+                let global = self.native.home.join(Self::GLOBAL_LEFTHOOK);
+                delegate(&mut self.native, hook, arguments, &input, Some(&global))?;
+            }
+            Gate::RepositoryLefthook => {
+                if let Some(root) = &self.repository {
+                    trust_repository(&mut self.native, root)?;
+                }
+                delegate(&mut self.native, hook, arguments, &input, None)?;
+            }
+            Gate::StagedTreeCheck => {
+                preserve_staged_tree(self.staged.as_deref(), staged_tree(&self.native).as_deref())?;
+            }
+            Gate::Renovate => self::gate(
+                self.native
+                    .hook_command(Tool::Dotguard)
+                    .arg("renovate-gate")
+                    .args(arguments),
+                &input,
+                "dotguard renovate run",
+            )?,
+            Gate::Reinstall => {
+                if let Some(root) = &self.working_copy {
+                    crate::freshness::reinstall_lagging(&self.native.home, root)
+                        .context("reinstalling tools built from changed sources failed")?;
+                }
+            }
+            Gate::Storage => {
+                let mut command = self
+                    .native
+                    .command_installed(&self.native.home.join(Self::STORAGE_SCOUT));
+                command
+                    .args(["auto", "--config"])
+                    .arg(self.native.home.join(Self::STORAGE_POLICY))
+                    .args(["--execute", "--detach", "--event", hook.name(), "--"])
+                    .args(arguments)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+                piped(&mut command, &input).context("storage maintenance notification failed")?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The verification gate of `pre-commit` and `pre-push`, which refuses a change that adds code of a shape nothing verifies.
@@ -564,6 +631,51 @@ mod tests {
         assert!(refusal.is_complete(), "{refusal:?}");
         assert_eq!(refusal.rule, "push.paused");
         assert_eq!(refusal.bypass, None);
+    }
+
+    /// Each dispatcher hook matches one rule hook and one rendered hook file, and the global configuration names only those.
+    #[test]
+    fn the_hooks_match_the_rendered_hook_files_and_the_global_configuration() {
+        use clap::ValueEnum;
+        use std::collections::BTreeSet;
+        // The top-level keys Lefthook reads as settings rather than as hooks.
+        const SETTINGS: [&str; 6] = ["output", "colors", "min_version", "no_tty", "rc", "remotes"];
+        let accepted: BTreeSet<&str> = Hook::value_variants()
+            .iter()
+            .map(|hook| hook.name())
+            .collect();
+        let ruled: BTreeSet<&str> = hook_rules::HOOKS
+            .iter()
+            .map(|hook| hook_rules::name(*hook))
+            .collect();
+        assert_eq!(accepted, ruled);
+        assert_eq!(accepted.len(), hook_rules::HOOKS.len());
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/dot_config");
+        let rendered: BTreeSet<String> = fs::read_dir(source.join("git/hooks"))
+            .unwrap()
+            .map(|entry| {
+                let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+                name.strip_prefix("executable_")
+                    .and_then(|name| name.strip_suffix(".tmpl"))
+                    .unwrap_or_else(|| panic!("{name} is not a rendered hook"))
+                    .to_owned()
+            })
+            .collect();
+        assert_eq!(
+            rendered,
+            accepted.iter().map(|name| (*name).to_owned()).collect()
+        );
+        let global =
+            configured_hooks(&fs::read(source.join("lefthook/global.yml")).unwrap()).unwrap();
+        let hooks: Vec<&String> = global
+            .iter()
+            .filter(|name| !SETTINGS.contains(&name.as_str()))
+            .collect();
+        assert_ne!(hooks, Vec::<&String>::new());
+        assert!(
+            hooks.iter().all(|name| accepted.contains(name.as_str())),
+            "{global:?}"
+        );
     }
 
     #[test]

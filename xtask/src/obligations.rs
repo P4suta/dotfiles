@@ -105,7 +105,195 @@ pub enum Obligation {
     /// A linter run with its committed settings.
     Lint { tool: LintTool, settings: String },
     /// A Quint model, which `just proofs` checks offline in its pinned image.
-    Quint(QuintModel),
+    Quint(Box<QuintModel>),
+    /// An Alloy 6 model, which `just proofs` checks offline in its pinned image.
+    Alloy(AlloyModel),
+    /// A Lean 4 package, which `just proofs` builds and checks offline in its pinned image.
+    Lean(LeanPackage),
+}
+
+/// A Lean 4 package of theorems that no bounded checker can state, each bound to the Rust code it describes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LeanPackage {
+    /// The package directory, which holds `lean-toolchain`, the lakefile, and `Axioms.lean`.
+    pub package: String,
+    pub theorems: Vec<LeanTheorem>,
+}
+
+/// One theorem and the bridge that binds it to the Rust code.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LeanTheorem {
+    /// The full name, such as `Dotfiles.SkillPlan.plan_correct`.
+    pub name: String,
+    /// The module that states it, such as `Dotfiles.SkillPlan`.
+    pub module: String,
+    /// The Kani harness or Rust test that binds it, as `<path>::<function>`.
+    pub bridge: String,
+}
+
+/// Every public theorem under `directory`, as its module and short name, excluding build outputs under `.lake`.
+fn lean_theorems(package: &Path, directory: &Path) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    let Ok(entries) = fs::read_dir(directory) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if entry.file_name() != ".lake" {
+                found.extend(lean_theorems(package, &path));
+            }
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension == "lean")
+        {
+            let module = path
+                .strip_prefix(package)
+                .unwrap_or(&path)
+                .with_extension("")
+                .to_string_lossy()
+                .replace(['\\', '/'], ".");
+            let text = fs::read_to_string(&path).unwrap_or_default();
+            for line in text.lines() {
+                if let Some(name) = line
+                    .strip_prefix("theorem ")
+                    .and_then(|rest| rest.split_whitespace().next())
+                {
+                    found.push((module.clone(), name.to_owned()));
+                }
+            }
+        }
+    }
+    found
+}
+
+/// The refusals of a Lean obligation that the source alone decides: the package and its pinned toolchain, each theorem in its module and its axiom report, and each bridge.
+#[must_use]
+pub fn close_lean(root: &Path, lean: &LeanPackage) -> Vec<String> {
+    let package = root.join(&lean.package);
+    let mut refusals = Vec::new();
+    let toolchain = fs::read_to_string(package.join("lean-toolchain")).unwrap_or_default();
+    if toolchain.trim() != format!("leanprover/lean4:v{}", crate::lean::LEAN_VERSION) {
+        refusals.push(format!(
+            "{}: lean-toolchain names {}, and the image pins Lean {}",
+            lean.package,
+            toolchain.trim(),
+            crate::lean::LEAN_VERSION
+        ));
+    }
+    for (module, short) in lean_theorems(&package, &package) {
+        if !lean
+            .theorems
+            .iter()
+            .any(|theorem| theorem.module == module && theorem.name.ends_with(&format!(".{short}")))
+        {
+            refusals.push(format!(
+                "{MANIFEST}: the theorem {short} of {module} names no bridge; list it with the test or harness that binds it, or make it private"
+            ));
+        }
+    }
+    let axioms = fs::read_to_string(package.join("Axioms.lean")).unwrap_or_default();
+    for missing in crate::lean::unreported(&axioms, lean) {
+        refusals.push(format!(
+            "{}/Axioms.lean doesn't print the axioms of {missing}",
+            lean.package
+        ));
+    }
+    for theorem in &lean.theorems {
+        let file = package.join(format!("{}.lean", theorem.module.replace('.', "/")));
+        let short = theorem.name.rsplit('.').next().unwrap_or(&theorem.name);
+        if !fs::read_to_string(&file).is_ok_and(|text| text.contains(&format!("theorem {short} ")))
+        {
+            refusals.push(format!(
+                "{MANIFEST}: the module {} states no theorem {short}",
+                theorem.module
+            ));
+        }
+        let bridged = theorem
+            .bridge
+            .rsplit_once("::")
+            .is_some_and(|(path, function)| {
+                evidence_exists(root, &(path.to_owned(), function.to_owned()))
+            });
+        if !bridged {
+            refusals.push(format!(
+                "{MANIFEST}: the bridge {} of {} names no function, so nothing binds the theorem to the Rust code",
+                theorem.bridge, theorem.name
+            ));
+        }
+    }
+    refusals
+}
+
+/// The Boolean satisfiability solvers an Alloy obligation may pin, each running in Java without a native library.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AlloySolver {
+    Sat4j,
+}
+
+impl AlloySolver {
+    #[must_use]
+    pub const fn argument(self) -> &'static str {
+        match self {
+            Self::Sat4j => "sat4j",
+        }
+    }
+}
+
+/// An Alloy model whose every check pairs an assertion, an instance, and a counterexample over a mutated fact.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AlloyModel {
+    pub spec: String,
+    pub solver: AlloySolver,
+    pub checks: Vec<AlloyCheck>,
+}
+
+/// One property of an Alloy model, as three named commands that share one scope.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AlloyCheck {
+    /// A `check` command that must find no counterexample.
+    pub assertion: String,
+    /// A `run` command that must find an instance, ruling out a vacuous assertion.
+    pub instance: String,
+    /// A `check` command over a mutated fact that must find a counterexample, which shows the assertion can fail.
+    pub counterexample: String,
+    /// The scope each of the three commands states, such as `for 4 but 12 steps`.
+    pub scope: String,
+}
+
+/// The refusals of an Alloy obligation that the source alone decides: each command exists with its kind and the recorded scope.
+#[must_use]
+pub fn close_alloy(root: &Path, alloy: &AlloyModel) -> Vec<String> {
+    let spec = &alloy.spec;
+    let text = fs::read_to_string(root.join(spec)).unwrap_or_default();
+    let mut refusals = Vec::new();
+    if alloy.checks.is_empty() {
+        refusals.push(format!("{MANIFEST}: {spec} names no check"));
+    }
+    for check in &alloy.checks {
+        for (name, kind) in [
+            (&check.assertion, "check"),
+            (&check.instance, "run"),
+            (&check.counterexample, "check"),
+        ] {
+            let declared = text.lines().any(|line| {
+                line.trim_start().starts_with(&format!("{name}: {kind} "))
+                    && line.trim_end().ends_with(&check.scope)
+            });
+            if !declared {
+                refusals.push(format!(
+                    "{MANIFEST}: {spec} declares no `{name}: {kind}` command {}",
+                    check.scope
+                ));
+            }
+        }
+    }
+    refusals
 }
 
 /// A Quint model whose `main` module holds `invariant` in exactly `distinct_states` reachable states and whose `probe` module breaks it.
@@ -126,6 +314,19 @@ pub struct QuintModel {
     /// The committed reachable state graph, which `TLC` must dump again and a test replays edge for edge.
     #[serde(default)]
     pub graph: Option<String>,
+    /// An inductive invariant that Apalache proves for every limit the model chooses, which a bounded Apalache run of `quint::APALACHE_STEPS` steps backs.
+    #[serde(default)]
+    pub inductive: Option<String>,
+    /// The module and constant initializer of a symbolic Apalache check.
+    #[serde(default)]
+    pub symbolic: Option<SymbolicQuint>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SymbolicQuint {
+    pub main: String,
+    pub constants: String,
 }
 
 /// The refusals of a Quint obligation that the source alone decides: its modules, witnesses, and traces.
@@ -133,10 +334,18 @@ fn close_quint(root: &Path, quint: &QuintModel) -> Vec<String> {
     let mut refusals = Vec::new();
     let spec = &quint.spec;
     let text = fs::read_to_string(root.join(spec)).unwrap_or_default();
-    for module in [&quint.main, &quint.probe] {
+    for module in [&quint.main, &quint.probe]
+        .into_iter()
+        .chain(quint.symbolic.iter().map(|symbolic| &symbolic.main))
+    {
         if !text.contains(&format!("module {module} {{")) {
             refusals.push(format!("{MANIFEST}: {spec} declares no module {module}"));
         }
+    }
+    if quint.symbolic.is_some() && quint.inductive.is_none() {
+        refusals.push(format!(
+            "{MANIFEST}: {spec} names symbolic constants without an inductive invariant"
+        ));
     }
     if quint.witnesses.is_empty() {
         refusals.push(format!(
@@ -194,6 +403,8 @@ pub enum Metric {
     MutantsTimedOut { exact: u64 },
     /// A wall time measured on one host, which never gates.
     WallMillis { advisory: u64 },
+    /// The gate processes one Git hook spawns, which `crates/dotfiles/tests/hook_exec_count.rs` counts through stand-ins.
+    ExecCount { hook: String, exact: u64 },
 }
 
 /// The JSON Schema of the manifest.
@@ -889,6 +1100,8 @@ pub fn closure(root: &Path, manifest: &Manifest) -> Result<Closure> {
                 }
             }
             Obligation::Quint(quint) => result.refusals.extend(close_quint(root, quint)),
+            Obligation::Alloy(alloy) => result.refusals.extend(close_alloy(root, alloy)),
+            Obligation::Lean(lean) => result.refusals.extend(close_lean(root, lean)),
         }
     }
     for missing in modules.difference(&listed) {
@@ -1031,7 +1244,8 @@ pub fn metrics(baselines: &Baselines, measured: &Closure, unsafe_sites: u64) -> 
         Metric::UnsafeSites { exact } => Some(("unsafe-sites", Better::Lower, exact, unsafe_sites)),
         Metric::MutantsMissed { .. }
         | Metric::MutantsTimedOut { .. }
-        | Metric::WallMillis { .. } => None,
+        | Metric::WallMillis { .. }
+        | Metric::ExecCount { .. } => None,
     })
 }
 

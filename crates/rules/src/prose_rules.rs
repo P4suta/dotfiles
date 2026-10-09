@@ -142,8 +142,10 @@ mod proofs {
         let second: bool = kani::any();
         spec_standard_applies(first, second);
         spec_exemption_valid(first, second);
-        kani::cover!(standard_applies(first, second));
-        kani::cover!(!exemption_valid(first, second) && first);
+        let applies = standard_applies(first, second);
+        let exempt = exemption_valid(first, second);
+        kani::cover!(applies);
+        kani::cover!(!exempt & first);
     }
 
     #[cfg(kani)]
@@ -169,7 +171,7 @@ mod proofs {
         spec_reply(passed, active, marked);
         let action = reply(passed, rewritten_by_this_hook(active, marked));
         kani::cover!(action == Reply::Allow);
-        kani::cover!(action == Reply::Rewrite && active);
+        kani::cover!((action == Reply::Rewrite) & active);
         kani::cover!(action == Reply::EndUnchecked);
     }
 }

@@ -4,6 +4,25 @@ pub const BUDGET_MILLIS: u64 = 30_000;
 /// The `--harness-timeout` after which the verifier abandons a harness.
 pub const TIMEOUT_SECONDS: u64 = 60;
 
+/// A property Kani proves, rules out, reaches, or leaves unverified.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Check {
+    Proven,
+    Impossible,
+    Witness,
+    Unverified,
+}
+
+/// Kani must prove a safety check and reach an execution for a cover.
+#[must_use]
+pub const fn verified(cover: bool, check: Check) -> bool {
+    if cover {
+        matches!(check, Check::Witness)
+    } else {
+        matches!(check, Check::Proven | Check::Impossible)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Verdict {
     Within,
@@ -25,6 +44,29 @@ pub const fn verdict(duration_millis: Option<u64>) -> Verdict {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn an_impossible_check_is_proved_but_an_impossible_witness_is_missing() {
+        let cover: bool = kani::any();
+        let check = match kani::any::<u8>() % 4 {
+            0 => Check::Proven,
+            1 => Check::Impossible,
+            2 => Check::Witness,
+            _ => Check::Unverified,
+        };
+        let accepted = verified(cover, check);
+        assert_eq!(
+            accepted,
+            if cover {
+                check == Check::Witness
+            } else {
+                check == Check::Proven || check == Check::Impossible
+            }
+        );
+        kani::cover!(accepted);
+        kani::cover!(!accepted);
+    }
 
     /// Only a measured harness inside the budget passes, and an overrun and a missing duration stay apart below the timeout.
     pub fn spec_verdict(duration: Option<u64>) {
@@ -55,6 +97,27 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proof_results_keep_impossibility_separate_from_missing_evidence() {
+        for cover in [false, true] {
+            for check in [
+                Check::Proven,
+                Check::Impossible,
+                Check::Witness,
+                Check::Unverified,
+            ] {
+                assert_eq!(
+                    verified(cover, check),
+                    if cover {
+                        check == Check::Witness
+                    } else {
+                        matches!(check, Check::Proven | Check::Impossible)
+                    }
+                );
+            }
+        }
+    }
 
     #[test]
     fn every_boundary_meets_the_specification() {

@@ -16,15 +16,18 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// A setup script the rehearsal host skips, with the reason recorded in the generated configuration.
-struct Omitted {
-    script: &'static str,
-    reason: &'static str,
+#[derive(Debug)]
+pub struct Omitted {
+    pub script: &'static str,
+    pub reason: &'static str,
 }
 
 const TOOLCHAIN: &str = "builds a full language toolchain that the rehearsal host does not need to prove orchestration; native application exercises it";
 const PRIVATE_SOURCE: &str = "clones a private repository with the owner's GitHub credentials, which a disposable host must not hold";
 
-fn omitted(profile: Profile) -> Vec<Omitted> {
+/// The setup scripts the rehearsal host of `profile` skips.
+#[must_use]
+pub fn omitted(profile: Profile) -> Vec<Omitted> {
     match profile {
         Profile::Mac => vec![
             Omitted {

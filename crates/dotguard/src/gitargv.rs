@@ -777,19 +777,6 @@ fn drop_letters(arg: &str, letters: &[char]) -> Option<String> {
     }
 }
 
-/// Global options that consume the following argv element as their value.
-/// The list omits `--exec-path`, because its value stays optional and the bare form prints a path and exits.
-const GLOBAL_TAKES_VALUE: [&str; 8] = [
-    "-c",
-    "-C",
-    "--git-dir",
-    "--work-tree",
-    "--namespace",
-    "--config-env",
-    "--super-prefix",
-    "--attr-source",
-];
-
 /// Known git subcommands.
 const BUILTINS: [&str; 46] = [
     "add",
@@ -872,48 +859,20 @@ pub fn global_options(argv: &[String]) -> &[String] {
 /// The index of the subcommand, and each `-c` or `--config-env` setting before it with the words it spans.
 /// The gate collects settings instead of judging them on sight, because the subcommand decides whether one overrides policy.
 fn globals(argv: &[String]) -> (usize, Vec<(String, std::ops::Range<usize>)>) {
-    let mut i = 0;
-    let mut settings: Vec<(String, std::ops::Range<usize>)> = Vec::new();
-    while i < argv.len() {
-        let arg = argv[i].as_str();
-        if !arg.starts_with('-') {
-            break;
-        }
-        if arg == "--" {
-            i += 1;
-            break;
-        }
-        let start = i;
-        if let Some(rest) = arg.strip_prefix("-c") {
-            // Both `-c key=value` and the attached `-ckey=value` form.
-            if rest.is_empty() {
-                i += 1;
-                if let Some(v) = argv.get(i) {
-                    settings.push((v.clone(), start..i + 1));
-                }
-            } else {
-                settings.push((rest.to_owned(), start..i + 1));
-            }
-        } else if arg.starts_with("--config-env") {
-            // `--config-env=key=ENVVAR` hides the value in the environment, so the key decides alone, recorded as `key=` for an unseen value.
-            let setting = arg.strip_prefix("--config-env=").map_or_else(
-                || {
-                    i += 1;
-                    argv.get(i).map(String::as_str).unwrap_or_default()
-                },
-                |s| s,
-            );
-            if let Some(key) = setting.split('=').next()
-                && is_policy_key(key)
-            {
-                settings.push((format!("{key}="), start..i + 1));
-            }
-        } else if GLOBAL_TAKES_VALUE.contains(&arg) {
-            i += 1;
-        }
-        i += 1;
-    }
-    (i, settings)
+    use crate::guard_rules::Config;
+    let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+    let mut scan = crate::guard_rules::global_scan(&words);
+    let settings = scan
+        .by_ref()
+        .map(|setting| {
+            let text = match setting.config {
+                Config::Inline(value) => value.to_owned(),
+                Config::Environment(key) => format!("{key}="),
+            };
+            (text, setting.span)
+        })
+        .collect();
+    (scan.index(), settings)
 }
 
 fn judge(argv: &[String], repo: &dyn Repository) -> Option<Denial> {
@@ -1485,41 +1444,6 @@ fn no_gpg_sign(call: &Invocation) -> Denial {
     )
 }
 
-/// Subcommands that actually run a hook.
-const RUNS_HOOKS: [&str; 12] = [
-    "commit",
-    "merge",
-    "rebase",
-    "push",
-    "pull",
-    "am",
-    "cherry-pick",
-    "revert",
-    "checkout",
-    "switch",
-    "applypatch",
-    "clone",
-];
-
-/// Subcommands that create a signable object.
-const CREATES_SIGNED_OBJECTS: [&str; 7] = [
-    "commit",
-    "tag",
-    "merge",
-    "rebase",
-    "cherry-pick",
-    "revert",
-    "am",
-];
-
-/// Whether a `-c key=value` sets something the signing policy owns.
-fn is_policy_key(key: &str) -> bool {
-    matches!(
-        key,
-        "commit.gpgsign" | "tag.gpgsign" | "core.hooksPath" | "gpg.format" | "gpg.ssh.program"
-    )
-}
-
 /// `-c key=value` overrides that would change signing or hooks for one command.
 /// The caller fills in the command without the override.
 ///
@@ -1534,27 +1458,18 @@ fn is_policy_key(key: &str) -> bool {
 /// `rev-parse`, `status`, `remote get-url`, and `ls-files` run no hooks, so refusing them breaks the tool for no gain.
 fn config_override(setting: &str, sub: &str) -> Option<Denial> {
     let (key, value) = setting.split_once('=')?;
-    let offends = match key {
-        // `-c commit.gpgsign=false` acts as `--no-gpg-sign`.
-        "commit.gpgsign" | "tag.gpgsign" => {
-            CREATES_SIGNED_OBJECTS.contains(&sub)
-                && matches!(value, "false" | "0" | "no" | "off" | "")
-        }
-        // A per-invocation hooksPath change can replace every gate in ~/.config/git/hooks.
-        "core.hooksPath" => RUNS_HOOKS.contains(&sub),
-        // The SSH agent signs every commit, so any other format names a key this machine lacks.
-        "gpg.format" => CREATES_SIGNED_OBJECTS.contains(&sub) && value != "ssh",
-        "gpg.ssh.program" => CREATES_SIGNED_OBJECTS.contains(&sub) && value.is_empty(),
-        _ => false,
-    };
-    offends.then(|| {
-        Denial::new(
-            Rule::NoVerify,
-            format!("-c {setting}"),
-            format!("`{key}={value}` overrides signing or hook enforcement for this one command."),
-            Next::Git(Vec::new()),
-        )
-    })
+    crate::guard_rules::overrides_policy(key.as_bytes(), value.as_bytes(), sub.as_bytes()).then(
+        || {
+            Denial::new(
+                Rule::NoVerify,
+                format!("-c {setting}"),
+                format!(
+                    "`{key}={value}` overrides signing or hook enforcement for this one command."
+                ),
+                Next::Git(Vec::new()),
+            )
+        },
+    )
 }
 
 /// argv up to `--`, because everything after it forms a pathspec and a file may carry the name `--force`.
@@ -1747,6 +1662,18 @@ mod tests {
             next("-ccommit.gpgsign=false commit -m x"),
             "git commit -m x"
         );
+    }
+
+    /// Git reads the section and the name of a configuration key in any case.
+    #[test]
+    fn a_policy_key_overrides_in_any_case() {
+        for line in [
+            "-c core.hookspath=/dev/null commit -m x",
+            "-c COMMIT.GPGSIGN=false commit -m x",
+            "--config-env=Core.HooksPath=HOOKS push origin main",
+        ] {
+            assert!(inspect(&argv(line)).is_some(), "{line}");
+        }
     }
 
     /// The suggested Git command must itself pass the gate, even when the line combines more than one refused part.

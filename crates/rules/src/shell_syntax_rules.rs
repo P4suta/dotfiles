@@ -345,6 +345,14 @@ mod tests {
     #[cfg_attr(miri, ignore = "shell text regressions allocate parsed command text")]
     fn well_formed_commands_are_admitted() {
         for command in [
+            r"echo $'line\n'",
+            r"echo $'C:/new/path'",
+            r"echo $'it\'s'",
+            r#"echo "a\"b""#,
+            r"echo 'D:\cargo$k'",
+            r"echo a\b",
+            r"echo 1:\x",
+            r"echo ab\c",
             "just check",
             "cargo build 2>&1",
             "echo hi",

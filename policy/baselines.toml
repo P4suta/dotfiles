@@ -4,11 +4,11 @@
 
 [[metric]]
 metric = "proved-subjects"
-exact = 146
+exact = 190
 
 [[metric]]
 metric = "probes"
-exact = 163
+exact = 205
 
 # The three unsafe blocks and the console handler of the Win32 sites in policy/unsafe-sites.toml, and the read past a slice in the Miri fixture.
 [[metric]]
@@ -23,3 +23,38 @@ exact = 0
 [[metric]]
 metric = "mutants-timed-out"
 exact = 0
+
+[[metric]]
+metric = "exec-count"
+hook = "pre-commit"
+exact = 7
+
+[[metric]]
+metric = "exec-count"
+hook = "commit-msg"
+exact = 3
+
+[[metric]]
+metric = "exec-count"
+hook = "pre-push"
+exact = 4
+
+[[metric]]
+metric = "exec-count"
+hook = "post-commit"
+exact = 1
+
+[[metric]]
+metric = "exec-count"
+hook = "post-checkout"
+exact = 3
+
+[[metric]]
+metric = "exec-count"
+hook = "post-merge"
+exact = 3
+
+[[metric]]
+metric = "exec-count"
+hook = "reference-transaction"
+exact = 1

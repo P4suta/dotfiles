@@ -283,29 +283,103 @@ fn several_refs_or_a_merge_are_listed_instead_of_rebased() {
     assert_eq!(refused.evidence.len(), 3);
 }
 
+impl Repository {
+    /// Runs the post-commit gate with signing configured to a program that doesn't exist, so every signature fails.
+    fn failed_signature(&self) -> Refusal {
+        let missing = self.path().join("missing");
+        let missing = missing.to_str().unwrap();
+        let refused = refusal(&self.dotguard(
+            &["post-commit"],
+            "",
+            &[
+                ("commit.gpgsign", "true"),
+                ("gpg.format", "ssh"),
+                ("user.signingkey", missing),
+                ("gpg.ssh.program", missing),
+            ],
+        ));
+        assert_eq!(refused.rule, "commit.signature");
+        assert_eq!(refused.bypass, None);
+        refused
+    }
+}
+
 #[test]
 fn a_failed_signature_rolls_the_commit_back_and_names_the_commit_to_repeat() {
     let repository = Repository::new("signing");
     let base = repository.commit("base", &[]);
     let unsigned = repository.commit("unsigned", &[&base]);
     repository.git(&["update-ref", "HEAD", &unsigned]);
-    let missing = repository.path().join("missing");
-    let missing = missing.to_str().unwrap();
-    let refused = refusal(&repository.dotguard(
-        &["post-commit"],
-        "",
-        &[
-            ("commit.gpgsign", "true"),
-            ("gpg.format", "ssh"),
-            ("user.signingkey", missing),
-            ("gpg.ssh.program", missing),
-        ],
-    ));
-    assert_eq!(refused.rule, "commit.signature");
+    let refused = repository.failed_signature();
     assert_eq!(
         refused.next.as_deref().unwrap_or_default(),
         format!("git commit --reuse-message={unsigned}")
     );
     assert_eq!(refused.bypass, None);
     assert_eq!(repository.git(&["rev-parse", "HEAD"]), base);
+}
+
+/// Git removes `MERGE_HEAD` before the hook runs, so the rollback writes the second parent back.
+#[test]
+fn a_rolled_back_merge_keeps_its_second_parent_for_the_next_commit() {
+    let repository = Repository::new("merge-rollback");
+    let base = repository.commit("base", &[]);
+    let left = repository.commit("left", &[&base]);
+    let right = repository.commit("right", &[&base]);
+    repository.git(&["update-ref", "HEAD", &left]);
+    let merge = repository.commit("merge", &[&left, &right]);
+    repository.git(&["update-ref", "-m", "commit (merge): merge", "HEAD", &merge]);
+    repository.failed_signature();
+    assert_eq!(repository.git(&["rev-parse", "HEAD"]), left);
+    assert_eq!(repository.git(&["rev-parse", "MERGE_HEAD"]), right);
+    assert_eq!(
+        repository.git(&["write-tree"]),
+        repository.git(&["rev-parse", &format!("{merge}^{{tree}}")])
+    );
+}
+
+/// An amend replaced the commit `HEAD` named before, so the rollback restores that commit instead of its parent.
+#[test]
+fn a_rolled_back_amend_restores_the_commit_it_replaced() {
+    let repository = Repository::new("amend-rollback");
+    let base = repository.commit("base", &[]);
+    let original = repository.commit("original", &[&base]);
+    repository.git(&["update-ref", "-m", "commit: original", "HEAD", &original]);
+    let amended = repository.commit("amended", &[&base]);
+    repository.git(&[
+        "update-ref",
+        "-m",
+        "commit (amend): amended",
+        "HEAD",
+        &amended,
+    ]);
+    repository.failed_signature();
+    assert_eq!(repository.git(&["rev-parse", "HEAD"]), original);
+    assert_eq!(
+        repository.git(&["write-tree"]),
+        repository.git(&["rev-parse", &format!("{amended}^{{tree}}")])
+    );
+}
+
+#[test]
+fn every_sign_lock_skip_lands_in_the_bypass_log() {
+    let repository = Repository::new("sign-lock");
+    let base = repository.commit("base", &[]);
+    repository.git(&["update-ref", "HEAD", &base]);
+    let skipped = repository.dotguard_with(
+        &["post-commit"],
+        "",
+        &SIGNED,
+        &[("GIT_HOOK_FORCE_SIGN_LOCK", "1")],
+    );
+    assert!(skipped.status.success());
+    let log =
+        std::fs::read_to_string(repository.path().join(".local/state/git-bypass.log")).unwrap();
+    assert!(
+        log.lines()
+            .any(|line| line.contains("\tskipped\tsign-lock\t")
+                && line.contains("reason=the caller set GIT_HOOK_FORCE_SIGN_LOCK")
+                && line.contains(&base)),
+        "{log}"
+    );
 }

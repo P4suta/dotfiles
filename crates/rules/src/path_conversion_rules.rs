@@ -43,7 +43,7 @@ mod proofs {
         spec_verdict(converting_shell, remote_path, conversion_off);
         let result = verdict(converting_shell, remote_path, conversion_off);
         kani::cover!(result == Verdict::Refuse);
-        kani::cover!(result == Verdict::Admit && converting_shell && remote_path);
+        kani::cover!((result == Verdict::Admit) & converting_shell & remote_path);
     }
 }
 

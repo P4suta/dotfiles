@@ -2,17 +2,12 @@
 //!
 //! For an uninstalled Store Python, `WindowsApps` holds 0-byte reparse point stubs `python.exe` and `python3.exe` that shadow `python` earlier on PATH and fail with exit code 9009.
 
+#[cfg(test)]
+use crate::host_setup_rules::REPARSE_POINT;
+use crate::host_setup_rules::looks_like_stub;
 use std::path::{Path, PathBuf};
 
-/// `FILE_ATTRIBUTE_REPARSE_POINT`.
-const REPARSE_POINT: u32 = 0x400;
-
 const STUBS: &[&str] = &["python.exe", "python3.exe"];
-
-/// Requires both halves of the Store stub signature, so a real interpreter survives.
-fn looks_like_stub(len: u64, attributes: u32) -> bool {
-    len == 0 && attributes & REPARSE_POINT != 0
-}
 
 pub fn run() {
     let Some(dir) = windows_apps_dir() else {

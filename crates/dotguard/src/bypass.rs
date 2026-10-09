@@ -19,6 +19,8 @@ pub enum Rule {
     Foreign,
     /// A commit whose tree equals its parent's.
     Empty,
+    /// A post-commit run under `GIT_HOOK_FORCE_SIGN_LOCK`, which skips re-signing and the empty-commit refusal.
+    SignLock,
     /// An agent invocation of a legacy command with its recorded reason.
     Legacy,
 }
@@ -31,6 +33,7 @@ impl Rule {
             Self::NoVerify => None,
             Self::Foreign => Some("ALLOW_FOREIGN"),
             Self::Empty => Some("ALLOW_EMPTY"),
+            Self::SignLock => Some("GIT_HOOK_FORCE_SIGN_LOCK"),
             Self::Legacy => Some("DOTFILES_LEGACY_BYPASS"),
         }
     }
@@ -41,6 +44,7 @@ impl Rule {
             Self::NoVerify => "no-verify",
             Self::Foreign => "foreign",
             Self::Empty => "empty",
+            Self::SignLock => "sign-lock",
             Self::Legacy => "legacy",
         }
     }

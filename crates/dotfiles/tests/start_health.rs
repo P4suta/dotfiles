@@ -4,6 +4,9 @@ use dotfiles::start_health_rules::STALL_MILLIS;
 use dotfiles::tool::external;
 use std::time::{Duration, Instant};
 
+#[path = "../../platform/tests/support/fixture_process.rs"]
+mod fixture_process;
+
 /// A probe that outlives the bound, as process creation does on a host with a hung Defender engine.
 const STALLED: &str = if cfg!(windows) {
     "ping -n 30 127.0.0.1"
@@ -30,7 +33,7 @@ fn bound() -> Duration {
 fn a_hook_refuses_a_stalled_start_within_the_bound_and_names_the_restart() -> Result<()> {
     let home = tempfile::tempdir()?;
     let started = Instant::now();
-    let output = external(env!("CARGO_BIN_EXE_dotfiles"))
+    let output = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), home.path())
         .args(["hook", "pre-commit"])
         .env(PROBE_VARIABLE, STALLED)
         .env("HOME", home.path())
@@ -54,7 +57,7 @@ fn a_hook_refuses_a_stalled_start_within_the_bound_and_names_the_restart() -> Re
 #[test]
 fn a_session_start_hands_the_agent_the_refusal() -> Result<()> {
     let home = tempfile::tempdir()?;
-    let output = external(env!("CARGO_BIN_EXE_dotfiles"))
+    let output = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), home.path())
         .args(["health", "--session"])
         .env(PROBE_VARIABLE, STALLED)
         .env("HOME", home.path())

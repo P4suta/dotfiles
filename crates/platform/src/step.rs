@@ -1,8 +1,8 @@
 //! The setup steps, and for each one the profiles that run it, what it relies on, when it reruns, and the inputs that rerun it.
 //! `cargo xtask gen` writes one launcher per step and OS family from these declarations, numbered in run order.
 
-use crate::order_rules;
 use crate::tool::Tool;
+use crate::{cycle_rules, order_rules};
 use model::profile_rules::Profile;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, clap::ValueEnum)]
@@ -383,8 +383,8 @@ const ALL_BUT_ADAPTERS: [Step; 28] = {
 /// A dependency that no run order of a family can honor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Disorder {
-    /// The steps' dependencies form a cycle.
-    Cycle,
+    /// The steps' dependencies form a cycle through these steps.
+    Cycle(Vec<Step>),
     /// A step that runs before the files relies on one that runs after them.
     Phase(Step, Step),
 }
@@ -395,6 +395,18 @@ pub enum Disorder {
 ///
 /// Returns the disorder when the dependencies form a cycle or a before-phase step relies on an after-phase one.
 pub fn sequence(family: Family) -> Result<Vec<Step>, Disorder> {
+    sequence_with(family, Step::prerequisites)
+}
+
+/// The run order of `family` when each step relies on what `prerequisites` names, which tests vary to plant a back edge.
+///
+/// # Errors
+///
+/// Returns the disorder when the dependencies form a cycle or a before-phase step relies on an after-phase one.
+pub fn sequence_with(
+    family: Family,
+    prerequisites: impl Fn(Step) -> Vec<Step>,
+) -> Result<Vec<Step>, Disorder> {
     let steps: Vec<Step> = Step::ALL
         .into_iter()
         .filter(|step| {
@@ -407,7 +419,7 @@ pub fn sequence(family: Family) -> Result<Vec<Step>, Disorder> {
     let mut after = Vec::with_capacity(steps.len());
     for step in &steps {
         let mut mask = 0u32;
-        for prerequisite in step.prerequisites() {
+        for prerequisite in prerequisites(*step) {
             if let Some(index) = steps.iter().position(|other| *other == prerequisite) {
                 if step.phase() == Phase::Before && prerequisite.phase() == Phase::After {
                     return Err(Disorder::Phase(*step, prerequisite));
@@ -426,7 +438,15 @@ pub fn sequence(family: Family) -> Result<Vec<Step>, Disorder> {
     }
     let mut order = vec![0usize; steps.len()];
     if !order_rules::order(&after, &mut order) {
-        return Err(Disorder::Cycle);
+        let members = cycle_rules::cycle(&after);
+        return Err(Disorder::Cycle(
+            steps
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| members & (1 << index) != 0)
+                .map(|(_, step)| *step)
+                .collect(),
+        ));
     }
     Ok(order.into_iter().map(|index| steps[index]).collect())
 }

@@ -7,6 +7,8 @@ use std::sync::OnceLock;
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
+use fixture_git::fixture_process;
+
 #[path = "../../dotfiles/tests/support/catalog.rs"]
 mod catalog;
 
@@ -95,7 +97,8 @@ impl Fixture {
         paths.extend(std::env::split_paths(
             &std::env::var_os("PATH").context("PATH")?,
         ));
-        let mut command = platform::process::command(env!("CARGO_BIN_EXE_pr-workflow"));
+        let mut command =
+            fixture_process::command(env!("CARGO_BIN_EXE_pr-workflow"), self.directory.path());
         command
             .current_dir(self.directory.path())
             .env("PATH", std::env::join_paths(paths)?)

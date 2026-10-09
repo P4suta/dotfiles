@@ -7,7 +7,7 @@ use xtask::change::{Source, gates, paths};
 mod fixture_git;
 
 fn git(directory: &Path, arguments: &[&str]) -> Result<()> {
-    let output = fixture_git::command("git", &directory.with_extension("gitconfig"))
+    let output = fixture_git::command("git", &directory.join("global.gitconfig"))
         .arg("-C")
         .arg(directory)
         .args(arguments)

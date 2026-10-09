@@ -25,6 +25,42 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "AlloyCheck": {
+      "description": "One property of an Alloy model, as three named commands that share one scope.",
+      "type": "object",
+      "properties": {
+        "assertion": {
+          "description": "A `check` command that must find no counterexample.",
+          "type": "string"
+        },
+        "counterexample": {
+          "description": "A `check` command over a mutated fact that must find a counterexample, which shows the assertion can fail.",
+          "type": "string"
+        },
+        "instance": {
+          "description": "A `run` command that must find an instance, ruling out a vacuous assertion.",
+          "type": "string"
+        },
+        "scope": {
+          "description": "The scope each of the three commands states, such as `for 4 but 12 steps`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "assertion",
+        "instance",
+        "counterexample",
+        "scope"
+      ]
+    },
+    "AlloySolver": {
+      "description": "The Boolean satisfiability solvers an Alloy obligation may pin, each running in Java without a native library.",
+      "type": "string",
+      "enum": [
+        "sat4j"
+      ]
+    },
     "KaniFlag": {
       "description": "The flags a Kani contract run may pass, pinned with the Kani version in `skill_proofs::KANI_VERSION`.",
       "type": "string",
@@ -32,6 +68,30 @@
         "function-contracts",
         "loop-contracts",
         "stubbing"
+      ]
+    },
+    "LeanTheorem": {
+      "description": "One theorem and the bridge that binds it to the Rust code.",
+      "type": "object",
+      "properties": {
+        "bridge": {
+          "description": "The Kani harness or Rust test that binds it, as `<path>::<function>`.",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module that states it, such as `Dotfiles.SkillPlan`.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The full name, such as `Dotfiles.SkillPlan.plan_correct`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "module",
+        "bridge"
       ]
     },
     "LintTool": {
@@ -175,6 +235,14 @@
               ],
               "default": null
             },
+            "inductive": {
+              "description": "An inductive invariant that Apalache proves for every limit the model chooses, which a bounded Apalache run of `quint::APALACHE_STEPS` steps backs.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
             "invariant": {
               "type": "string"
             },
@@ -199,6 +267,17 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
+            },
+            "symbolic": {
+              "description": "The module and constant initializer of a symbolic Apalache check.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SymbolicQuint"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "traces": {
               "type": "array",
@@ -230,6 +309,61 @@
             "steps",
             "distinct_states",
             "traces"
+          ]
+        },
+        {
+          "description": "An Alloy 6 model, which `just proofs` checks offline in its pinned image.",
+          "type": "object",
+          "properties": {
+            "checks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AlloyCheck"
+              }
+            },
+            "solver": {
+              "$ref": "#/$defs/AlloySolver"
+            },
+            "spec": {
+              "type": "string"
+            },
+            "verifier": {
+              "type": "string",
+              "const": "alloy"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "spec",
+            "solver",
+            "checks"
+          ]
+        },
+        {
+          "description": "A Lean 4 package, which `just proofs` builds and checks offline in its pinned image.",
+          "type": "object",
+          "properties": {
+            "package": {
+              "description": "The package directory, which holds `lean-toolchain`, the lakefile, and `Axioms.lean`.",
+              "type": "string"
+            },
+            "theorems": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/LeanTheorem"
+              }
+            },
+            "verifier": {
+              "type": "string",
+              "const": "lean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "package",
+            "theorems"
           ]
         }
       ]
@@ -271,6 +405,22 @@
         "subjects",
         "exit",
         "issue"
+      ]
+    },
+    "SymbolicQuint": {
+      "type": "object",
+      "properties": {
+        "constants": {
+          "type": "string"
+        },
+        "main": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "main",
+        "constants"
       ]
     }
   }

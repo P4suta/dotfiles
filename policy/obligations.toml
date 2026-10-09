@@ -283,7 +283,7 @@ fn reject_completing_over_an_exact_spelling() {
 }
 #[kani::proof]
 fn reject_ignoring_a_unique_abbreviation() {
-    assert!(production::spelling(b"re", &[&b"repo"[..], &b"force"[..]]) == production::Spelling::Unknown);
+    assert!(matches!(production::spelling(b"re", &[&b"repo"[..], &b"force"[..]]), production::Spelling::Unknown));
 }
 #[kani::proof]
 fn reject_suggesting_from_an_unread_line() {
@@ -441,15 +441,15 @@ fn reject_executing_a_push() {
 }
 #[kani::proof]
 fn reject_pushing_while_paused() {
-    assert!(decide(State { host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Ahead, push_paused: true, pr: Pr::Draft, checks: Checks::Passing, workflows: true, review_paused: false }) == Step::Push);
+    assert!(decide(State { host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Ahead, push_paused: true, pr: Pr::Draft, checks: Checks::Success, workflows: true, review_paused: false }) == Step::Push);
 }
 #[kani::proof]
 fn reject_pushing_to_a_ready_pr_while_review_is_paused() {
-    assert!(decide(State { host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Ahead, push_paused: false, pr: Pr::Ready, checks: Checks::Passing, workflows: true, review_paused: true }) == Step::Push);
+    assert!(decide(State { host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Ahead, push_paused: false, pr: Pr::Ready, checks: Checks::Success, workflows: true, review_paused: true }) == Step::Push);
 }
 #[kani::proof]
 fn reject_force_pushing_over_commits_the_branch_never_held() {
-    assert!(decide(State { host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Diverged, push_paused: false, pr: Pr::Draft, checks: Checks::Passing, workflows: true, review_paused: false }) == Step::ForcePush);
+    assert!(decide(State { host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Diverged, push_paused: false, pr: Pr::Draft, checks: Checks::Success, workflows: true, review_paused: false }) == Step::ForcePush);
 }
 '''
 
@@ -524,6 +524,30 @@ fn reject_refusing_a_command_with_the_conversion_off() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/postcommit_rules.rs"
+probes = '''
+use production::{Decision, Gate, Outcome, Shape, Step, Target, decide, refuses_empty, rollback_target};
+#[kani::proof]
+fn reject_the_old_rollback_that_drops_the_commit_an_amend_replaced() {
+    assert!(rollback_target(Gate::Old, Shape::Amend, Outcome::Failed).target == Target::Original);
+}
+#[kani::proof]
+#[kani::unwind(4)]
+fn reject_the_old_rollback_that_drops_the_second_parent_of_a_merge() {
+    assert!(rollback_target(Gate::Old, Shape::Merge, Outcome::Unverified).steps().contains(&Step::RestoreMergeParent));
+}
+#[kani::proof]
+fn reject_resigning_inside_the_hooks_own_amend() {
+    assert!(decide(true, false, false) == Decision::Resign);
+}
+#[kani::proof]
+fn reject_refusing_a_waived_empty_commit() {
+    assert!(refuses_empty(true, true, true));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/pr_ready_rules.rs"
 probes = '''
 use production::{Action, Report, Settlement, Workflow, complete, initial, report, safe, settle, step};
@@ -558,11 +582,11 @@ source = "crates/rules/src/pr_rules.rs"
 probes = '''
 #[kani::proof]
 fn reject_ready_local_creation() {
-    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Passing), Ok(production::Effect::CreateReady));
+    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Success), Ok(production::Effect::CreateReady));
 }
 #[kani::proof]
 fn reject_creation_without_a_personal_issue() {
-    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false), production::Checks::Passing).is_ok());
+    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false), production::Checks::Success).is_ok());
 }
 #[kani::proof]
 fn reject_unfinished_summary_as_review_exclusion() {
@@ -597,11 +621,11 @@ fn state(lifecycle: production::Lifecycle, behind: bool, checks: production::Hea
 }
 #[kani::proof]
 fn reject_merging_a_behind_pr() {
-    assert!(production::merge_step(state(production::Lifecycle::Ready, true, production::HeadChecks::Passing, production::Exclusion::Pause), false, true) == production::Step::Merge);
+    assert!(production::merge_step(state(production::Lifecycle::Ready, true, production::HeadChecks::Success, production::Exclusion::Pause), false, true) == production::Step::Merge);
 }
 #[kani::proof]
 fn reject_updating_a_stacked_pr_by_merge() {
-    assert!(production::merge_step(state(production::Lifecycle::Ready, true, production::HeadChecks::Passing, production::Exclusion::Pause), true, true) == production::Step::Update);
+    assert!(production::merge_step(state(production::Lifecycle::Ready, true, production::HeadChecks::Success, production::Exclusion::Pause), true, true) == production::Step::Update);
 }
 #[kani::proof]
 fn reject_merging_with_a_failed_check() {
@@ -609,7 +633,7 @@ fn reject_merging_with_a_failed_check() {
 }
 #[kani::proof]
 fn reject_readying_without_the_pause_lines() {
-    assert!(production::merge_step(state(production::Lifecycle::Draft, false, production::HeadChecks::Passing, production::Exclusion::None), false, true) == production::Step::Ready);
+    assert!(production::merge_step(state(production::Lifecycle::Draft, false, production::HeadChecks::Success, production::Exclusion::None), false, true) == production::Step::Ready);
 }
 #[kani::proof]
 fn reject_opening_a_dependent_branch_independently() {
@@ -655,6 +679,21 @@ fn reject_admitting_an_overrun() {
 #[kani::proof]
 fn reject_admitting_an_unmeasured_harness() {
     assert!(verdict(None) == Verdict::Within);
+}
+#[kani::proof]
+fn reject_admitting_an_undetermined_property() {
+    assert!(production::verified(false, production::Check::Unverified));
+}
+#[kani::proof]
+fn reject_admitting_an_unreachable_cover() {
+    assert!(production::verified(true, production::Check::Impossible));
+}
+#[kani::proof]
+fn reject_an_overflow_under_checked_mir() {
+    let value: u8 = kani::any();
+    kani::assume(value == u8::MAX);
+    let incremented = value + 1;
+    assert!(verdict(Some(u64::from(incremented))) == Verdict::Over);
 }
 '''
 
@@ -715,13 +754,34 @@ fn reject_refusing_a_push_to_a_draft() {
 verifier = "kani"
 source = "crates/rules/src/reaper_rules.rs"
 probes = '''
+use production::{Action, Mode, Reaper, Snapshot, Thresholds, Verdict, initial, safe, step, verdict};
 #[kani::proof]
-fn reject_killing_a_process_that_still_runs() {
-    assert!(production::killable(true, false, true, true, true, true));
+fn reject_killing_a_process_that_resumed_since_the_listing() {
+    let snapshot = Snapshot { same_identity: true, stopped: false, orphan: true };
+    assert!(verdict(Mode::Reap, snapshot, 100, 100, Thresholds { min_age: 0, grace: 0 }) == Verdict::Kill);
 }
 #[kani::proof]
 fn reject_an_age_without_a_tick_rate() {
     assert!(production::age(10, 5, 0).is_some());
+}
+fn run(reaper: Reaper, actions: &[Action]) -> production::State {
+    let mut state = initial();
+    for action in actions {
+        state = step(reaper, state, *action).unwrap();
+    }
+    state
+}
+#[kani::proof]
+#[kani::unwind(9)]
+fn reject_two_runs_stealing_the_old_directory_lock() {
+    let state = run(Reaper::Old, &[Action::Take(0), Action::Crash(0), Action::Steal(1), Action::Steal(2), Action::Remove(1), Action::Create(1), Action::Remove(2), Action::Create(2)]);
+    assert!(safe(&state));
+}
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_the_old_kill_that_reads_only_the_identity_again() {
+    let state = run(Reaper::Old, &[Action::Take(0), Action::Observe(0), Action::Resume, Action::Kill(0)]);
+    assert!(safe(&state));
 }
 '''
 
@@ -748,6 +808,23 @@ fn reject_early_review() {
 #[kani::proof]
 fn reject_owner_pause_bypass() {
     assert!(production::service_access(production::pause_scope(false, false, true), false));
+}
+#[kani::proof]
+#[kani::unwind(14)]
+fn reject_read_only_paid_usage() {
+    assert!(production::classify(&["usage", "--use-credits"]) == production::Invocation::ReadOnly);
+}
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_a_future_record() {
+    assert!(production::check_budget(&[1], 0) == production::Budget::Admit);
+}
+#[kani::proof]
+#[kani::unwind(6)]
+fn reject_a_ledger_above_its_hourly_limit() {
+    let mut state = production::ledger(1);
+    state.records[0] = 2;
+    assert!(production::ledger_safe(&state));
 }
 '''
 
@@ -995,6 +1072,250 @@ traces = [
 ]
 graph = "specs/graphs/pr_ready.json"
 
+[[obligation]]
+verifier = "quint"
+spec = "specs/reaper_lock.qnt"
+main = "reaper_lock"
+probe = "reaper_lock_old"
+invariant = "safe"
+witnesses = ["killed", "spared", "skipped"]
+seed = "0x2a"
+samples = 1000
+steps = 12
+distinct_states = 970
+traces = [
+  "specs/traces/reaper_lock.0.itf.json",
+  "specs/traces/reaper_lock.1.itf.json",
+  "specs/traces/reaper_lock.2.itf.json",
+  "specs/traces/reaper_lock.3.itf.json",
+  "specs/traces/reaper_lock.4.itf.json",
+  "specs/traces/reaper_lock.5.itf.json",
+  "specs/traces/reaper_lock.6.itf.json",
+  "specs/traces/reaper_lock.7.itf.json",
+  "specs/traces/reaper_lock.8.itf.json",
+  "specs/traces/reaper_lock.9.itf.json",
+  "specs/traces/reaper_lock.10.itf.json",
+  "specs/traces/reaper_lock.11.itf.json",
+  "specs/traces/reaper_lock.12.itf.json",
+  "specs/traces/reaper_lock.13.itf.json",
+  "specs/traces/reaper_lock.14.itf.json",
+  "specs/traces/reaper_lock.15.itf.json",
+  "specs/traces/reaper_lock.16.itf.json",
+  "specs/traces/reaper_lock.17.itf.json",
+  "specs/traces/reaper_lock.18.itf.json",
+  "specs/traces/reaper_lock.19.itf.json",
+  "specs/traces/reaper_lock.20.itf.json",
+  "specs/traces/reaper_lock.21.itf.json",
+  "specs/traces/reaper_lock.22.itf.json",
+  "specs/traces/reaper_lock.23.itf.json",
+  "specs/traces/reaper_lock.24.itf.json",
+  "specs/traces/reaper_lock.25.itf.json",
+  "specs/traces/reaper_lock.26.itf.json",
+  "specs/traces/reaper_lock.27.itf.json",
+  "specs/traces/reaper_lock.28.itf.json",
+  "specs/traces/reaper_lock.29.itf.json",
+  "specs/traces/reaper_lock.30.itf.json",
+  "specs/traces/reaper_lock.31.itf.json",
+  "specs/traces/reaper_lock.32.itf.json",
+  "specs/traces/reaper_lock.33.itf.json",
+  "specs/traces/reaper_lock.34.itf.json",
+  "specs/traces/reaper_lock.35.itf.json",
+  "specs/traces/reaper_lock.36.itf.json",
+  "specs/traces/reaper_lock.37.itf.json",
+  "specs/traces/reaper_lock.38.itf.json",
+  "specs/traces/reaper_lock.39.itf.json",
+  "specs/traces/reaper_lock.40.itf.json",
+  "specs/traces/reaper_lock.41.itf.json",
+  "specs/traces/reaper_lock.42.itf.json",
+  "specs/traces/reaper_lock.43.itf.json",
+  "specs/traces/reaper_lock.44.itf.json",
+  "specs/traces/reaper_lock.45.itf.json",
+  "specs/traces/reaper_lock.46.itf.json",
+  "specs/traces/reaper_lock.47.itf.json",
+  "specs/traces/reaper_lock.48.itf.json",
+  "specs/traces/reaper_lock.49.itf.json",
+  "specs/traces/reaper_lock.50.itf.json",
+  "specs/traces/reaper_lock.51.itf.json",
+  "specs/traces/reaper_lock.52.itf.json",
+  "specs/traces/reaper_lock.53.itf.json",
+  "specs/traces/reaper_lock.54.itf.json",
+  "specs/traces/reaper_lock.55.itf.json",
+  "specs/traces/reaper_lock.56.itf.json",
+  "specs/traces/reaper_lock.57.itf.json",
+  "specs/traces/reaper_lock.58.itf.json",
+  "specs/traces/reaper_lock.59.itf.json",
+  "specs/traces/reaper_lock.60.itf.json",
+  "specs/traces/reaper_lock.61.itf.json",
+  "specs/traces/reaper_lock.62.itf.json",
+  "specs/traces/reaper_lock.63.itf.json",
+  "specs/traces/reaper_lock.64.itf.json",
+  "specs/traces/reaper_lock.65.itf.json",
+  "specs/traces/reaper_lock.66.itf.json",
+  "specs/traces/reaper_lock.67.itf.json",
+  "specs/traces/reaper_lock.68.itf.json",
+  "specs/traces/reaper_lock.69.itf.json",
+  "specs/traces/reaper_lock.70.itf.json",
+  "specs/traces/reaper_lock.71.itf.json",
+  "specs/traces/reaper_lock.72.itf.json",
+  "specs/traces/reaper_lock.73.itf.json",
+  "specs/traces/reaper_lock.74.itf.json",
+  "specs/traces/reaper_lock.75.itf.json",
+  "specs/traces/reaper_lock.76.itf.json",
+  "specs/traces/reaper_lock.77.itf.json",
+  "specs/traces/reaper_lock.78.itf.json",
+  "specs/traces/reaper_lock.79.itf.json",
+  "specs/traces/reaper_lock.80.itf.json",
+  "specs/traces/reaper_lock.81.itf.json",
+  "specs/traces/reaper_lock.82.itf.json",
+  "specs/traces/reaper_lock.83.itf.json",
+  "specs/traces/reaper_lock.84.itf.json",
+  "specs/traces/reaper_lock.85.itf.json",
+  "specs/traces/reaper_lock.86.itf.json",
+  "specs/traces/reaper_lock.87.itf.json",
+  "specs/traces/reaper_lock.88.itf.json",
+  "specs/traces/reaper_lock.89.itf.json",
+  "specs/traces/reaper_lock.90.itf.json",
+  "specs/traces/reaper_lock.91.itf.json",
+  "specs/traces/reaper_lock.92.itf.json",
+  "specs/traces/reaper_lock.93.itf.json",
+  "specs/traces/reaper_lock.94.itf.json",
+  "specs/traces/reaper_lock.95.itf.json",
+  "specs/traces/reaper_lock.96.itf.json",
+  "specs/traces/reaper_lock.97.itf.json",
+  "specs/traces/reaper_lock.98.itf.json",
+  "specs/traces/reaper_lock.99.itf.json",
+  "specs/traces/reaper_lock_old.itf.json",
+]
+
+[[obligation]]
+verifier = "quint"
+spec = "specs/review_ledger.qnt"
+main = "review_ledger"
+probe = "review_ledger_early"
+invariant = "safe"
+inductive = "inductive"
+symbolic = { main = "review_ledger_symbolic", constants = "review_ledger_symbolic::review_ledger_model::ConstInit" }
+witnesses = ["launched", "full", "stopped"]
+seed = "0x2a"
+samples = 1000
+steps = 12
+distinct_states = 1740
+traces = [
+  "specs/traces/review_ledger.0.itf.json",
+  "specs/traces/review_ledger.1.itf.json",
+  "specs/traces/review_ledger.2.itf.json",
+  "specs/traces/review_ledger.3.itf.json",
+  "specs/traces/review_ledger.4.itf.json",
+  "specs/traces/review_ledger.5.itf.json",
+  "specs/traces/review_ledger.6.itf.json",
+  "specs/traces/review_ledger.7.itf.json",
+  "specs/traces/review_ledger.8.itf.json",
+  "specs/traces/review_ledger.9.itf.json",
+  "specs/traces/review_ledger.10.itf.json",
+  "specs/traces/review_ledger.11.itf.json",
+  "specs/traces/review_ledger.12.itf.json",
+  "specs/traces/review_ledger.13.itf.json",
+  "specs/traces/review_ledger.14.itf.json",
+  "specs/traces/review_ledger.15.itf.json",
+  "specs/traces/review_ledger.16.itf.json",
+  "specs/traces/review_ledger.17.itf.json",
+  "specs/traces/review_ledger.18.itf.json",
+  "specs/traces/review_ledger.19.itf.json",
+  "specs/traces/review_ledger.20.itf.json",
+  "specs/traces/review_ledger.21.itf.json",
+  "specs/traces/review_ledger.22.itf.json",
+  "specs/traces/review_ledger.23.itf.json",
+  "specs/traces/review_ledger.24.itf.json",
+  "specs/traces/review_ledger.25.itf.json",
+  "specs/traces/review_ledger.26.itf.json",
+  "specs/traces/review_ledger.27.itf.json",
+  "specs/traces/review_ledger.28.itf.json",
+  "specs/traces/review_ledger.29.itf.json",
+  "specs/traces/review_ledger.30.itf.json",
+  "specs/traces/review_ledger.31.itf.json",
+  "specs/traces/review_ledger.32.itf.json",
+  "specs/traces/review_ledger.33.itf.json",
+  "specs/traces/review_ledger.34.itf.json",
+  "specs/traces/review_ledger.35.itf.json",
+  "specs/traces/review_ledger.36.itf.json",
+  "specs/traces/review_ledger.37.itf.json",
+  "specs/traces/review_ledger.38.itf.json",
+  "specs/traces/review_ledger.39.itf.json",
+  "specs/traces/review_ledger.40.itf.json",
+  "specs/traces/review_ledger.41.itf.json",
+  "specs/traces/review_ledger.42.itf.json",
+  "specs/traces/review_ledger.43.itf.json",
+  "specs/traces/review_ledger.44.itf.json",
+  "specs/traces/review_ledger.45.itf.json",
+  "specs/traces/review_ledger.46.itf.json",
+  "specs/traces/review_ledger.47.itf.json",
+  "specs/traces/review_ledger.48.itf.json",
+  "specs/traces/review_ledger.49.itf.json",
+  "specs/traces/review_ledger.50.itf.json",
+  "specs/traces/review_ledger.51.itf.json",
+  "specs/traces/review_ledger.52.itf.json",
+  "specs/traces/review_ledger.53.itf.json",
+  "specs/traces/review_ledger.54.itf.json",
+  "specs/traces/review_ledger.55.itf.json",
+  "specs/traces/review_ledger.56.itf.json",
+  "specs/traces/review_ledger.57.itf.json",
+  "specs/traces/review_ledger.58.itf.json",
+  "specs/traces/review_ledger.59.itf.json",
+  "specs/traces/review_ledger.60.itf.json",
+  "specs/traces/review_ledger.61.itf.json",
+  "specs/traces/review_ledger.62.itf.json",
+  "specs/traces/review_ledger.63.itf.json",
+  "specs/traces/review_ledger.64.itf.json",
+  "specs/traces/review_ledger.65.itf.json",
+  "specs/traces/review_ledger.66.itf.json",
+  "specs/traces/review_ledger.67.itf.json",
+  "specs/traces/review_ledger.68.itf.json",
+  "specs/traces/review_ledger.69.itf.json",
+  "specs/traces/review_ledger.70.itf.json",
+  "specs/traces/review_ledger.71.itf.json",
+  "specs/traces/review_ledger.72.itf.json",
+  "specs/traces/review_ledger.73.itf.json",
+  "specs/traces/review_ledger.74.itf.json",
+  "specs/traces/review_ledger.75.itf.json",
+  "specs/traces/review_ledger.76.itf.json",
+  "specs/traces/review_ledger.77.itf.json",
+  "specs/traces/review_ledger.78.itf.json",
+  "specs/traces/review_ledger.79.itf.json",
+  "specs/traces/review_ledger.80.itf.json",
+  "specs/traces/review_ledger.81.itf.json",
+  "specs/traces/review_ledger.82.itf.json",
+  "specs/traces/review_ledger.83.itf.json",
+  "specs/traces/review_ledger.84.itf.json",
+  "specs/traces/review_ledger.85.itf.json",
+  "specs/traces/review_ledger.86.itf.json",
+  "specs/traces/review_ledger.87.itf.json",
+  "specs/traces/review_ledger.88.itf.json",
+  "specs/traces/review_ledger.89.itf.json",
+  "specs/traces/review_ledger.90.itf.json",
+  "specs/traces/review_ledger.91.itf.json",
+  "specs/traces/review_ledger.92.itf.json",
+  "specs/traces/review_ledger.93.itf.json",
+  "specs/traces/review_ledger.94.itf.json",
+  "specs/traces/review_ledger.95.itf.json",
+  "specs/traces/review_ledger.96.itf.json",
+  "specs/traces/review_ledger.97.itf.json",
+  "specs/traces/review_ledger.98.itf.json",
+  "specs/traces/review_ledger.99.itf.json",
+  "specs/traces/review_ledger_early.itf.json",
+]
+
+[[obligation]]
+verifier = "kani-contract"
+source = "crates/rules/src/reaper_rules.rs"
+function = "elapsed_seconds"
+flags = ["function-contracts"]
+
+[[obligation]]
+verifier = "kani-contract"
+source = "crates/rules/src/reaper_rules.rs"
+function = "age"
+flags = ["function-contracts"]
+
 [[pilot]]
 tool = "aeneas"
 subjects = ["skill_ops::dependency_plan", "order_rules::order"]
@@ -1059,85 +1380,465 @@ mutant = "crates/rules/src/ignore_rules.rs:91:15: replace += with *= in segment_
 reason = "the segment cursor stays where it stands, so the search for the separator never ends"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:76:5: replace skip_heredoc_body -> usize with 0"
+mutant = "crates/rules/src/shell_write_rules.rs:83:5: replace skip_heredoc_body -> usize with 0"
 reason = "the scanner restarts at the first character after every heredoc, so it reads the command forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:76:5: replace skip_heredoc_body -> usize with 1"
+mutant = "crates/rules/src/shell_write_rules.rs:83:5: replace skip_heredoc_body -> usize with 1"
 reason = "the scanner restarts at the second character after every heredoc, so it reads the command forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:86:26: replace + with - in skip_heredoc_body"
+mutant = "crates/rules/src/shell_write_rules.rs:93:26: replace + with - in skip_heredoc_body"
 reason = "the body cursor steps back onto the line it read, so it reads that line forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:86:26: replace + with * in skip_heredoc_body"
+mutant = "crates/rules/src/shell_write_rules.rs:93:26: replace + with * in skip_heredoc_body"
 reason = "the body cursor stays at the line feed it read, so it reads that line forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:103:5: replace heredoc_delimiter -> (String, usize) with (String::new(), 0)"
+mutant = "crates/rules/src/shell_write_rules.rs:110:5: replace heredoc_delimiter -> (String, usize) with (String::new(), 0)"
 reason = "the scanner resumes before the heredoc operator, so it reads the operator forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:103:5: replace heredoc_delimiter -> (String, usize) with (String::new(), 1)"
+mutant = "crates/rules/src/shell_write_rules.rs:110:5: replace heredoc_delimiter -> (String, usize) with (String::new(), 1)"
 reason = "the scanner resumes before the heredoc operator, so it reads the operator forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:103:5: replace heredoc_delimiter -> (String, usize) with (\"xyzzy\".into(), 0)"
+mutant = "crates/rules/src/shell_write_rules.rs:110:5: replace heredoc_delimiter -> (String, usize) with (\"xyzzy\".into(), 0)"
 reason = "the scanner resumes before the heredoc operator, so it reads the operator forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:103:5: replace heredoc_delimiter -> (String, usize) with (\"xyzzy\".into(), 1)"
+mutant = "crates/rules/src/shell_write_rules.rs:110:5: replace heredoc_delimiter -> (String, usize) with (\"xyzzy\".into(), 1)"
 reason = "the scanner resumes before the heredoc operator, so it reads the operator forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:107:15: replace += with *= in heredoc_delimiter"
+mutant = "crates/rules/src/shell_write_rules.rs:114:15: replace += with *= in heredoc_delimiter"
 reason = "the cursor stays on the blank before the delimiter, so the loop over blanks never ends"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:117:15: replace += with *= in heredoc_delimiter"
+mutant = "crates/rules/src/shell_write_rules.rs:124:15: replace += with *= in heredoc_delimiter"
 reason = "the cursor stays on the first byte of the delimiter, so the delimiter grows forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:131:15: replace += with *= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:138:15: replace += with *= in scan"
 reason = "the scanner cursor stays on one character, so the scan never ends"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:138:27: replace += with *= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:145:27: replace += with *= in scan"
 reason = "the cursor stays inside a single-quoted word, so the word grows forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:140:23: replace += with -= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:147:23: replace += with -= in scan"
 reason = "the cursor steps back onto the closing quote, so it reopens the same quote forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:152:31: replace += with -= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:159:31: replace += with -= in scan"
 reason = "the cursor steps back over an escape, so it reads the same escape forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:157:27: replace += with *= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:164:27: replace += with *= in scan"
 reason = "the cursor stays inside a double-quoted word, so the word grows forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:159:23: replace += with -= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:166:23: replace += with -= in scan"
 reason = "the cursor steps back onto the closing quote, so it reopens the same quote forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:165:27: replace += with -= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:172:27: replace += with -= in scan"
 reason = "the cursor steps back onto the backslash, so it reads the same escape forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:176:23: replace += with -= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:183:23: replace += with -= in scan"
 reason = "the cursor steps back onto the ampersand, so it reads the same redirect forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:194:27: replace += with -= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:201:27: replace += with -= in scan"
 reason = "the cursor steps back onto the redirect, so it reads the same descriptor copy forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:198:27: replace += with -= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:205:27: replace += with -= in scan"
 reason = "the cursor steps back onto the redirect, so it reads the same append forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:204:73: replace + with - in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:211:73: replace + with - in scan"
 reason = "the delimiter scan starts on the first `<` and returns there, so the cursor rereads the same here-document operator forever"
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/host_setup_rules.rs"
+# The rejecting probes call the byte kernels used by the String transforms.
+# Native tests keep the original full String counterexamples.
+# This avoids standard-library search expansion while keeping the original bounds and proof budget.
+probes = '''
+use production::{FilterKeys, disable_managed_filter_keys, looks_like_stub, powershell_literal, stale_releases};
+#[kani::proof]
+#[kani::unwind(40)]
+fn reject_a_second_sshd_edit_changing_the_result() { let first = production::classify(b"Port 22\n", b"Port"); let second = production::classify(b"Port 23", b"Port"); assert_ne!(first, second); }
+#[kani::proof]
+#[kani::unwind(40)]
+fn reject_overwriting_a_prefixed_keyword() { assert!(production::classify(b"PortExtra 22\n", b"Port") == production::Kind::Active); }
+#[kani::proof]
+#[kani::unwind(40)]
+fn reject_duplicating_a_key_with_a_new_comment() { assert!(!production::same_key(b"t a old\n", b"t a new")); }
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_removing_the_current_release() { assert!(stale_releases(&[("a", 0), ("b", 1)], 1, "a").contains(&"a")); }
+#[kani::proof]
+fn reject_changing_a_persons_keyboard_settings() { let keys = FilterKeys { flags: 3, wait_ms: 10, delay_ms: 150, repeat_ms: 15, bounce_ms: 0 }; assert!(disable_managed_filter_keys(keys).is_some()); }
+#[kani::proof]
+fn reject_removing_a_nonempty_interpreter() { assert!(looks_like_stub(1, production::REPARSE_POINT)); }
+#[kani::proof]
+#[kani::unwind(12)]
+fn reject_colliding_distinct_powershell_literals() { assert_eq!(powershell_literal("a'").as_str(), powershell_literal("a''").as_str()); }
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/hook_rules.rs"
+probes = '''
+use production::{Configured, Gate, Hook, name, notification, plan, takes_input};
+#[kani::proof]
+#[kani::unwind(10)]
+fn reject_health_before_the_push_hold() { assert_eq!(plan(Hook::PrePush, Configured::default()).gates().first(), Some(&Gate::Health)); }
+#[kani::proof]
+fn reject_a_shared_hook_name() { assert_eq!(name(Hook::PreCommit), name(Hook::PrePush)); }
+#[kani::proof]
+fn reject_a_neutral_security_refusal() { assert!(notification(Gate::Dotguard)); }
+#[kani::proof]
+fn reject_losing_hook_input() { assert!(!takes_input(Gate::RepositoryLefthook)); }
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/cycle_rules.rs"
+probes = '''
+#[kani::proof]
+#[kani::unwind(6)]
+fn reject_missing_a_back_edge() { assert_eq!(production::cycle(&[2, 1]), 0); }
+#[kani::proof]
+#[kani::unwind(6)]
+fn reject_a_cycle_in_a_closed_linear_order() { assert_ne!(production::cycle(&[0, 1]), 0); }
+'''
+
+[[obligation]]
+verifier = "alloy"
+spec = "specs/manifest.als"
+solver = "sat4j"
+[[obligation.checks]]
+assertion = "Disjoint"
+instance = "Populated"
+counterexample = "DisjointUnchecked"
+scope = "for 4"
+[[obligation.checks]]
+assertion = "NoEmptyDirectory"
+instance = "Populated"
+counterexample = "NoEmptyDirectoryUnchecked"
+scope = "for 4"
+[[obligation.checks]]
+assertion = "HookBijection"
+instance = "Populated"
+counterexample = "HookBijectionUnchecked"
+scope = "for 4"
+[[obligation.checks]]
+assertion = "UniformHookMask"
+instance = "Populated"
+counterexample = "UniformHookMaskUnchecked"
+scope = "for 4"
+
+[[obligation]]
+verifier = "alloy"
+spec = "specs/manifest_instance.als"
+solver = "sat4j"
+[[obligation.checks]]
+assertion = "Real_disjoint"
+instance = "RealManifest"
+counterexample = "Planted_disjoint"
+scope = "for 4"
+[[obligation.checks]]
+assertion = "Real_hookBijection"
+instance = "RealManifest"
+counterexample = "Planted_hookBijection"
+scope = "for 4"
+[[obligation.checks]]
+assertion = "Real_uniformHookMask"
+instance = "RealManifest"
+counterexample = "Planted_uniformHookMask"
+scope = "for 4"
+[[obligation.checks]]
+assertion = "Real_noEmptyDirectory"
+instance = "RealManifest"
+counterexample = "Planted_noEmptyDirectory"
+scope = "for 4"
+
+[[obligation]]
+verifier = "alloy"
+spec = "specs/transaction.als"
+solver = "sat4j"
+[[obligation.checks]]
+assertion = "Durable"
+instance = "Rollback"
+counterexample = "NonDurable"
+scope = "for 4 but 12 steps"
+
+[[obligation]]
+verifier = "quint"
+spec = "specs/skill_gate.qnt"
+main = "skill_gate"
+probe = "skill_gate_old"
+invariant = "safe"
+witnesses = ["allowed", "requested", "ended"]
+seed = "0x2a"
+samples = 1000
+steps = 12
+distinct_states = 121
+traces = [
+  "specs/traces/skill_gate.0.itf.json",
+  "specs/traces/skill_gate.1.itf.json",
+  "specs/traces/skill_gate.2.itf.json",
+  "specs/traces/skill_gate.3.itf.json",
+  "specs/traces/skill_gate.4.itf.json",
+  "specs/traces/skill_gate.5.itf.json",
+  "specs/traces/skill_gate.6.itf.json",
+  "specs/traces/skill_gate.7.itf.json",
+  "specs/traces/skill_gate.8.itf.json",
+  "specs/traces/skill_gate.9.itf.json",
+  "specs/traces/skill_gate.10.itf.json",
+  "specs/traces/skill_gate.11.itf.json",
+  "specs/traces/skill_gate.12.itf.json",
+  "specs/traces/skill_gate.13.itf.json",
+  "specs/traces/skill_gate.14.itf.json",
+  "specs/traces/skill_gate.15.itf.json",
+  "specs/traces/skill_gate.16.itf.json",
+  "specs/traces/skill_gate.17.itf.json",
+  "specs/traces/skill_gate.18.itf.json",
+  "specs/traces/skill_gate.19.itf.json",
+  "specs/traces/skill_gate.20.itf.json",
+  "specs/traces/skill_gate.21.itf.json",
+  "specs/traces/skill_gate.22.itf.json",
+  "specs/traces/skill_gate.23.itf.json",
+  "specs/traces/skill_gate.24.itf.json",
+  "specs/traces/skill_gate.25.itf.json",
+  "specs/traces/skill_gate.26.itf.json",
+  "specs/traces/skill_gate.27.itf.json",
+  "specs/traces/skill_gate.28.itf.json",
+  "specs/traces/skill_gate.29.itf.json",
+  "specs/traces/skill_gate.30.itf.json",
+  "specs/traces/skill_gate.31.itf.json",
+  "specs/traces/skill_gate.32.itf.json",
+  "specs/traces/skill_gate.33.itf.json",
+  "specs/traces/skill_gate.34.itf.json",
+  "specs/traces/skill_gate.35.itf.json",
+  "specs/traces/skill_gate.36.itf.json",
+  "specs/traces/skill_gate.37.itf.json",
+  "specs/traces/skill_gate.38.itf.json",
+  "specs/traces/skill_gate.39.itf.json",
+  "specs/traces/skill_gate.40.itf.json",
+  "specs/traces/skill_gate.41.itf.json",
+  "specs/traces/skill_gate.42.itf.json",
+  "specs/traces/skill_gate.43.itf.json",
+  "specs/traces/skill_gate.44.itf.json",
+  "specs/traces/skill_gate.45.itf.json",
+  "specs/traces/skill_gate.46.itf.json",
+  "specs/traces/skill_gate.47.itf.json",
+  "specs/traces/skill_gate.48.itf.json",
+  "specs/traces/skill_gate.49.itf.json",
+  "specs/traces/skill_gate.50.itf.json",
+  "specs/traces/skill_gate.51.itf.json",
+  "specs/traces/skill_gate.52.itf.json",
+  "specs/traces/skill_gate.53.itf.json",
+  "specs/traces/skill_gate.54.itf.json",
+  "specs/traces/skill_gate.55.itf.json",
+  "specs/traces/skill_gate.56.itf.json",
+  "specs/traces/skill_gate.57.itf.json",
+  "specs/traces/skill_gate.58.itf.json",
+  "specs/traces/skill_gate.59.itf.json",
+  "specs/traces/skill_gate.60.itf.json",
+  "specs/traces/skill_gate.61.itf.json",
+  "specs/traces/skill_gate.62.itf.json",
+  "specs/traces/skill_gate.63.itf.json",
+  "specs/traces/skill_gate.64.itf.json",
+  "specs/traces/skill_gate.65.itf.json",
+  "specs/traces/skill_gate.66.itf.json",
+  "specs/traces/skill_gate.67.itf.json",
+  "specs/traces/skill_gate.68.itf.json",
+  "specs/traces/skill_gate.69.itf.json",
+  "specs/traces/skill_gate.70.itf.json",
+  "specs/traces/skill_gate.71.itf.json",
+  "specs/traces/skill_gate.72.itf.json",
+  "specs/traces/skill_gate.73.itf.json",
+  "specs/traces/skill_gate.74.itf.json",
+  "specs/traces/skill_gate.75.itf.json",
+  "specs/traces/skill_gate.76.itf.json",
+  "specs/traces/skill_gate.77.itf.json",
+  "specs/traces/skill_gate.78.itf.json",
+  "specs/traces/skill_gate.79.itf.json",
+  "specs/traces/skill_gate.80.itf.json",
+  "specs/traces/skill_gate.81.itf.json",
+  "specs/traces/skill_gate.82.itf.json",
+  "specs/traces/skill_gate.83.itf.json",
+  "specs/traces/skill_gate.84.itf.json",
+  "specs/traces/skill_gate.85.itf.json",
+  "specs/traces/skill_gate.86.itf.json",
+  "specs/traces/skill_gate.87.itf.json",
+  "specs/traces/skill_gate.88.itf.json",
+  "specs/traces/skill_gate.89.itf.json",
+  "specs/traces/skill_gate.90.itf.json",
+  "specs/traces/skill_gate.91.itf.json",
+  "specs/traces/skill_gate.92.itf.json",
+  "specs/traces/skill_gate.93.itf.json",
+  "specs/traces/skill_gate.94.itf.json",
+  "specs/traces/skill_gate.95.itf.json",
+  "specs/traces/skill_gate.96.itf.json",
+  "specs/traces/skill_gate.97.itf.json",
+  "specs/traces/skill_gate.98.itf.json",
+  "specs/traces/skill_gate.99.itf.json",
+  "specs/traces/skill_gate_old.itf.json",
+]
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/skill_gate_rules.rs"
+probes = '''
+use production::{Answer, Move, Store, gate, review_complete, safe, step};
+#[kani::proof]
+fn reject_a_stop_allowed_with_an_undecided_draft() {
+    let mut state = gate();
+    state.draft = Some(1);
+    state.answer = Answer::Allow;
+    assert!(safe(&state));
+}
+#[kani::proof]
+fn reject_a_second_maintenance_request() {
+    let mut state = gate();
+    state.requests = 2;
+    assert!(safe(&state));
+}
+#[kani::proof]
+#[kani::unwind(9)]
+fn reject_a_triage_between_two_analyses_standing_in_for_the_newer_draft() {
+    let mut state = gate();
+    for action in [Move::Observe, Move::Analyze, Move::Check(0), Move::Observe, Move::Analyze, Move::Record(0), Move::Stop] {
+        state = step(Store::Old, state, action).unwrap_or(state);
+    }
+    assert!(safe(&state));
+}
+#[kani::proof]
+fn reject_the_fixed_triage_of_a_stale_draft() {
+    let mut state = gate();
+    state.events = 1;
+    state.draft = Some(0);
+    assert!(step(Store::Fixed, state, Move::Triage).is_some());
+}
+#[kani::proof]
+fn reject_an_incomplete_decision_completing_the_review() {
+    assert_eq!(review_complete(true, &[(0, false)], &[(0, false)]), Ok(()));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/skill_plan_rules.rs"
+probes = '''
+use production::{Failure, input, plan};
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_a_plan_that_drops_a_dependency() {
+    let deps: [&[usize]; 2] = [&[], &[0]];
+    assert!(input(&deps, &[1]).and_then(plan).is_ok_and(|plan| plan.skills() == [1]));
+}
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_planning_a_cycle() {
+    let deps: [&[usize]; 2] = [&[1], &[0]];
+    assert!(input(&deps, &[0]).and_then(plan).is_ok());
+}
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_planning_a_skill_outside_the_catalog() {
+    let deps: [&[usize]; 1] = [&[2]];
+    assert!(!matches!(input(&deps, &[0]).and_then(plan), Err(Failure::Unknown)));
+}
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_validating_a_dependency_outside_the_catalog() {
+    let deps: [&[usize]; 1] = [&[2]];
+    assert!(input(&deps, &[0]).is_ok());
+}
+'''
+
+[[obligation]]
+verifier = "lean"
+package = "specs/lean"
+[[obligation.theorems]]
+name = "Dotfiles.SkillPlan.plan_correct"
+module = "Dotfiles.SkillPlan"
+bridge = "crates/rules/src/skill_plan_rules.rs::every_five_skill_plan_equals_the_lean_algorithm"
+[[obligation.theorems]]
+name = "Dotfiles.SkillPlan.Vectors.plan_implementation_assurance"
+module = "Dotfiles.SkillPlanVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.SkillPlan.Vectors.plan_skill_maintenance"
+module = "Dotfiles.SkillPlanVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.SkillPlan.Vectors.plan_every_skill"
+module = "Dotfiles.SkillPlanVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.SkillPlan.Vectors.plan_cycle"
+module = "Dotfiles.SkillPlanVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.SkillPlan.Vectors.plan_unknown"
+module = "Dotfiles.SkillPlanVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.StepOrder.direct_edges_suffice"
+module = "Dotfiles.StepOrder"
+bridge = "crates/dotfiles/src/setup.rs::ordering_violations"
+[[obligation.theorems]]
+name = "Dotfiles.StepOrder.Vectors.unix_respected"
+module = "Dotfiles.StepOrderVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.StepOrder.Vectors.unix_transitive"
+module = "Dotfiles.StepOrderVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.StepOrder.Vectors.windows_respected"
+module = "Dotfiles.StepOrderVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.StepOrder.Vectors.windows_transitive"
+module = "Dotfiles.StepOrderVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/guard_rules.rs"
+probes = '''
+use production::{Ancestry, Push, civil_from_days, global_scan, image_is_pinned, overrides_policy, push, strip_attribution};
+const MISSING: Ancestry = Ancestry { known: false, descends: true };
+#[kani::proof]
+#[kani::unwind(90)]
+fn reject_removing_a_human_coauthor() { assert_eq!(strip_attribution("Co-authored-by: Human <human@example.invalid>\n").1, 1); }
+#[kani::proof]
+fn reject_admitting_a_deletion() { assert_eq!(push(b"0000", b"abcd", MISSING), Push::Advance); }
+#[kani::proof]
+fn reject_admitting_an_unknown_remote() { assert_eq!(push(b"abcd", b"ef01", MISSING), Push::Advance); }
+#[kani::proof]
+#[kani::unwind(30)]
+fn reject_a_hook_path_override() { assert!(!overrides_policy(b"core.hooksPath", b"", b"commit")); }
+#[kani::proof]
+#[kani::unwind(90)]
+fn reject_a_mutable_image_tag() { assert!(image_is_pinned(b"renovate/renovate:1.2.3")); }
+#[kani::proof]
+fn reject_the_wrong_epoch_date() { assert_ne!(civil_from_days(0), (1970, 1, 1)); }
+#[kani::proof]
+#[kani::unwind(35)]
+fn reject_losing_an_override_before_the_subcommand() { assert!(global_scan(&["-c", "core.hooksPath=x", "commit"]).next().is_none()); }
+#[kani::proof]
+#[kani::unwind(35)]
+fn reject_losing_the_words_of_a_setting() { let mut scan = global_scan(&["-c", "core.hooksPath=x", "commit"]); let _setting = scan.next(); assert_eq!(scan.index(), 0); }
+'''

@@ -14,6 +14,8 @@ use xtask::next_action_rules::{Checks, Head, Host, Pr, State, Step, Upstream, de
 #[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
+use fixture_git::fixture_process;
+
 /// A clean, pushed draft PR with successful checks.
 /// Each case changes the fields that define its state.
 const PUBLISHED: State = State {
@@ -800,7 +802,7 @@ impl Fixture {
         paths.extend(std::env::split_paths(
             &std::env::var_os("PATH").context("PATH")?,
         ));
-        let mut command = platform::process::command(env!("CARGO_BIN_EXE_xtask"));
+        let mut command = fixture_process::command(env!("CARGO_BIN_EXE_xtask"), self.scope.path());
         command
             .current_dir(&self.clone)
             .env("PATH", std::env::join_paths(paths)?)

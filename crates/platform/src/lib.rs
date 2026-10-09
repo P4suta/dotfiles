@@ -6,7 +6,7 @@ pub mod home;
 pub mod incidents;
 pub mod process;
 pub mod refusal;
-pub use rules::order_rules;
+pub use rules::{cycle_rules, order_rules};
 
 #[cfg(feature = "tools")]
 pub mod aside;

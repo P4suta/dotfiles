@@ -130,7 +130,16 @@ mod proofs {
 mod tests {
     use super::*;
 
+    #[cfg(miri)]
     #[test]
+    fn examples_share_one_miri_test() {
+        every_boundary_meets_the_specification();
+        a_start_that_never_finishes_is_a_stall();
+        a_slow_start_is_a_stall_only_with_engine_evidence();
+        a_fast_start_ignores_past_events();
+    }
+
+    #[cfg_attr(not(miri), test)]
     fn every_boundary_meets_the_specification() {
         let starts = [
             0,
@@ -166,7 +175,7 @@ mod tests {
         ..Events::NONE
     };
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_start_that_never_finishes_is_a_stall() {
         assert_eq!(verdict(Start::TimedOut, None), Verdict::Stalled);
         assert_eq!(
@@ -180,7 +189,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_slow_start_is_a_stall_only_with_engine_evidence() {
         let slow = Start::Completed {
             millis: SLOW_MILLIS,
@@ -190,7 +199,7 @@ mod tests {
         assert_eq!(verdict(slow, None), Verdict::Stalled);
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_fast_start_ignores_past_events() {
         let fast = Start::Completed { millis: 40 };
         assert!(!needs_events(fast));

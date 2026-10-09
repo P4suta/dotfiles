@@ -244,7 +244,7 @@ fn graphs(manifest: &Manifest) -> impl Iterator<Item = (&QuintModel, &str)> {
         .obligations
         .iter()
         .filter_map(|obligation| match obligation {
-            Obligation::Quint(model) => model.graph.as_deref().map(|graph| (model, graph)),
+            Obligation::Quint(model) => model.graph.as_deref().map(|graph| (model.as_ref(), graph)),
             _ => None,
         })
 }

@@ -520,9 +520,10 @@ mod proofs {
         let remaining: u64 = kani::any();
         let reserve: u64 = kani::any();
         spec_quota(remaining, reserve);
-        kani::cover!(head_checks(total, unfinished, failed) == HeadChecks::Success);
-        kani::cover!(head_checks(total, unfinished, failed) == HeadChecks::Pending && failed == 0);
-        kani::cover!(!api_quota_available(remaining, reserve) && reserve > 0);
+        let checks = head_checks(total, unfinished, failed);
+        kani::cover!(checks == HeadChecks::Success);
+        kani::cover!((checks == HeadChecks::Pending) & (failed == 0));
+        kani::cover!(!api_quota_available(remaining, reserve) & (reserve > 0));
     }
 
     #[cfg(kani)]
@@ -562,10 +563,14 @@ mod proofs {
         };
         spec_merge(state, stacked, paused);
         let step = merge_step(state, stacked, paused);
-        kani::cover!(step == Step::Merge && paused);
-        kani::cover!(step == Step::Restack);
-        kani::cover!(step == Step::Exclude);
-        kani::cover!(step == Step::Wait && state.checks == HeadChecks::Success);
+        let merge = (step == Step::Merge) & paused;
+        let restack = step == Step::Restack;
+        let exclude = step == Step::Exclude;
+        let wait = (step == Step::Wait) & (state.checks == HeadChecks::Success);
+        kani::cover!(merge);
+        kani::cover!(restack);
+        kani::cover!(exclude);
+        kani::cover!(wait);
     }
 }
 

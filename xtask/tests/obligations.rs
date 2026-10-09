@@ -22,6 +22,41 @@ fn the_repository_manifest_covers_every_subject_and_holds_every_metric() {
 }
 
 #[test]
+fn an_alloy_check_needs_its_three_commands_at_the_recorded_scope() {
+    let parsed = parse_manifest(
+        "[[obligation]]\nverifier = \"alloy\"\nspec = \"specs/m.als\"\nsolver = \"sat4j\"\nchecks = [{ assertion = \"Holds\", instance = \"Exists\", counterexample = \"Breaks\", scope = \"for 3 but 4 steps\" }]\n",
+    )
+    .unwrap();
+    let Obligation::Alloy(model) = &parsed.obligations[0] else {
+        panic!("an Alloy obligation");
+    };
+    let scope = tempfile::tempdir().unwrap();
+    fs::create_dir_all(scope.path().join("specs")).unwrap();
+    let complete = "Holds: check { P } for 3 but 4 steps\nExists: run { Q } for 3 but 4 steps\nBreaks: check { R } for 3 but 4 steps\n";
+    fs::write(scope.path().join("specs/m.als"), complete).unwrap();
+    assert_eq!(xtask::obligations::close_alloy(scope.path(), model), NONE);
+    fs::write(
+        scope.path().join("specs/m.als"),
+        complete.replace(
+            "Exists: run { Q } for 3 but 4 steps",
+            "Exists: run { Q } for 2",
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        xtask::obligations::close_alloy(scope.path(), model).len(),
+        1
+    );
+    assert!(
+        parse_manifest(
+            "[[obligation]]\nverifier = \"alloy\"\nspec = \"specs/m.als\"\nsolver = \"minisat\"\nchecks = []\n"
+        )
+        .is_err(),
+        "a solver with a native library stays outside the image"
+    );
+}
+
+#[test]
 fn a_verifier_outside_the_toolbox_fails_to_parse() {
     let error =
         parse_manifest("[[obligation]]\nverifier = \"z3\"\nsource = \"a.smt2\"\n").unwrap_err();

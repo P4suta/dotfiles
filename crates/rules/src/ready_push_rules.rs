@@ -57,7 +57,7 @@ mod proofs {
         let verdict = push(gated, pr);
         kani::cover!(verdict == Verdict::ReturnToDraft);
         kani::cover!(verdict == Verdict::Inspect);
-        kani::cover!(verdict == Verdict::Admit && gated);
+        kani::cover!((verdict == Verdict::Admit) & gated);
     }
 }
 

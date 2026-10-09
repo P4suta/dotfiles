@@ -105,12 +105,46 @@ fn copy(source: &Path, destination: &Path) -> Result<()> {
             let entry = entry?;
             copy(&entry.path(), &destination.join(entry.file_name()))?;
         }
+        sync_directory(destination)?;
         fs::set_permissions(destination, metadata.permissions())?;
     } else {
         ensure!(metadata.is_file(), "backup refuses special files");
         fs::copy(source, destination)?;
+        // Windows flushes only a handle open for writing, so the copy syncs before it takes a read-only mode.
+        fs::File::options()
+            .write(true)
+            .open(destination)?
+            .sync_all()?;
         fs::set_permissions(destination, metadata.permissions())?;
     }
+    Ok(())
+}
+
+/// Syncs a sibling file and renames it into place.
+/// On Unix, syncs the parent directory.
+fn write_durably(path: &Path, bytes: &[u8]) -> Result<()> {
+    let partial = path.with_extension("partial");
+    let mut file = fs::File::create(&partial)?;
+    std::io::Write::write_all(&mut file, bytes)?;
+    file.sync_all()?;
+    drop(file);
+    fs::rename(&partial, path)?;
+    sync_directory(path.parent().context("a durable file has a parent")?)
+}
+
+/// Syncs the directory on Unix after a rename.
+#[cfg_attr(
+    not(unix),
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "the Unix build syncs the directory, which can fail"
+    )
+)]
+fn sync_directory(directory: &Path) -> Result<()> {
+    #[cfg(unix)]
+    fs::File::open(directory)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = directory;
     Ok(())
 }
 
@@ -164,20 +198,30 @@ pub(crate) fn capture(destination: &Path, backup: &Path, targets: &[PathBuf]) ->
             Err(error) => return Err(error.into()),
         };
         if existed {
-            copy(&source, &backup.join("files").join(path))?;
+            let copied = backup.join("files").join(path);
+            copy(&source, &copied)?;
+            // Each directory down to the copy records its entry.
+            for directory in copied.ancestors().skip(1) {
+                sync_directory(directory)?;
+                if directory == backup {
+                    break;
+                }
+            }
         }
         entries.push(Entry {
             path: path.clone(),
             existed,
         });
     }
-    fs::write(
-        backup.join("manifest.json"),
-        serde_json::to_vec_pretty(&entries)?,
-    )?;
-    fs::write(
-        backup.join("destination.txt"),
+    // Capture syncs the backup before writing the manifest.
+    // Targets change only after capture succeeds.
+    write_durably(
+        &backup.join("destination.txt"),
         destination.as_os_str().as_encoded_bytes(),
+    )?;
+    write_durably(
+        &backup.join("manifest.json"),
+        &serde_json::to_vec_pretty(&entries)?,
     )?;
     Ok(())
 }
@@ -236,6 +280,183 @@ pub(crate) fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+
+    /// What a path holds: a directory, a file's bytes and Unix mode, or a link's target.
+    #[derive(Debug, PartialEq)]
+    enum Node {
+        Directory(Option<u32>),
+        File(Vec<u8>, Option<u32>),
+        Link(PathBuf),
+    }
+
+    fn mode(metadata: &fs::Metadata) -> Option<u32> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            Some(metadata.permissions().mode() & 0o7777)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = metadata;
+            None
+        }
+    }
+
+    /// Every path under `root` with its bytes, mode, or link target.
+    fn tree(root: &Path) -> BTreeMap<PathBuf, Node> {
+        fn walk(root: &Path, directory: &Path, found: &mut BTreeMap<PathBuf, Node>) {
+            for entry in fs::read_dir(directory).unwrap() {
+                let path = entry.unwrap().path();
+                let metadata = fs::symlink_metadata(&path).unwrap();
+                let relative = path.strip_prefix(root).unwrap().to_path_buf();
+                if metadata.is_symlink() {
+                    found.insert(relative, Node::Link(fs::read_link(&path).unwrap()));
+                } else if metadata.is_dir() {
+                    found.insert(relative, Node::Directory(mode(&metadata)));
+                    walk(root, &path, found);
+                } else {
+                    found.insert(
+                        relative,
+                        Node::File(fs::read(&path).unwrap(), mode(&metadata)),
+                    );
+                }
+            }
+        }
+        let mut found = BTreeMap::new();
+        walk(root, root, &mut found);
+        found
+    }
+
+    /// One step of the apply under test, which writes, replaces, removes, links, or changes a mode.
+    type Step = fn(&Path) -> std::io::Result<()>;
+
+    #[cfg(unix)]
+    fn executable(path: &Path) -> std::io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o750))
+    }
+
+    #[cfg(not(unix))]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "each step of the apply returns the result the Unix mode change can fail with"
+    )]
+    fn executable(_path: &Path) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn link(target: &str, path: &Path) -> std::io::Result<()> {
+        #[cfg(unix)]
+        return std::os::unix::fs::symlink(target, path);
+        #[cfg(windows)]
+        return std::os::windows::fs::symlink_file(target, path);
+    }
+
+    /// The steps of an apply, each repeatable, so a second apply finds nothing to change.
+    const STEPS: [Step; 8] = [
+        |home| fs::write(home.join("kept"), "after"),
+        |home| executable(&home.join("kept")),
+        |home| fs::create_dir_all(home.join("tree/nested")),
+        |home| fs::write(home.join("tree/nested/new"), "created"),
+        |home| match fs::remove_file(home.join("tree/old")) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            result => result,
+        },
+        |home| fs::write(home.join("fresh"), "created"),
+        |home| match fs::remove_file(home.join("pointer")) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            result => result,
+        },
+        |home| match link("fresh", &home.join("pointer")) {
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            result => result,
+        },
+    ];
+
+    const TARGETS: [&str; 5] = ["kept", "tree", "tree/nested/new", "fresh", "pointer"];
+
+    /// A home holding a file, a tree with an old file, a link, and an unmanaged file.
+    fn home(scope: &Path) -> PathBuf {
+        let home = scope.join("home");
+        fs::create_dir_all(home.join("tree")).unwrap();
+        fs::write(home.join("kept"), "before").unwrap();
+        fs::write(home.join("tree/old"), "old").unwrap();
+        fs::write(home.join("unmanaged"), "theirs").unwrap();
+        link("kept", &home.join("pointer")).unwrap();
+        home
+    }
+
+    /// The apply fails after each of its steps in turn, and every rollback restores bytes, modes, and links, removes new targets, and changes nothing when it runs again.
+    /// A finished apply changes nothing when it runs a second and a third time.
+    #[test]
+    fn every_crash_point_of_an_apply_rolls_back_to_the_same_tree() {
+        let targets: Vec<PathBuf> = TARGETS.iter().map(PathBuf::from).collect();
+        for crash in 0..=STEPS.len() {
+            let scope = tempfile::tempdir().unwrap();
+            let home = home(scope.path());
+            let before = tree(&home);
+            let backup = scope.path().join("backup");
+            let result = apply(
+                &home,
+                &backup,
+                &targets,
+                || {
+                    for step in STEPS.iter().take(crash) {
+                        step(&home)?;
+                    }
+                    anyhow::bail!("injected crash after step {crash}")
+                },
+                || Ok(()),
+            );
+            assert!(result.unwrap_err().to_string().contains("restored"));
+            assert_eq!(tree(&home), before, "crash after step {crash}");
+            restore(&home, &backup).unwrap();
+            assert_eq!(tree(&home), before, "second restore after step {crash}");
+        }
+        let scope = tempfile::tempdir().unwrap();
+        let home = home(scope.path());
+        let mut applied = None;
+        for run in 0..3 {
+            apply(
+                &home,
+                &scope.path().join(format!("backup-{run}")),
+                &targets,
+                || {
+                    for step in STEPS {
+                        step(&home)?;
+                    }
+                    Ok(())
+                },
+                || Ok(()),
+            )
+            .unwrap();
+            let after = tree(&home);
+            assert!(
+                applied.as_ref().is_none_or(|first| *first == after),
+                "run {run}"
+            );
+            applied = Some(after);
+        }
+    }
+
+    #[test]
+    fn a_capture_leaves_its_manifest_whole_and_no_partial_file() {
+        let scope = tempfile::tempdir().unwrap();
+        let home = home(scope.path());
+        let backup = scope.path().join("backup");
+        capture(&home, &backup, &["kept".into(), "tree".into()]).unwrap();
+        let entries: Vec<Entry> =
+            serde_json::from_slice(&fs::read(backup.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(fs::read_dir(&backup).unwrap().all(|entry| {
+            entry
+                .unwrap()
+                .path()
+                .extension()
+                .is_none_or(|extension| extension != "partial")
+        }));
+    }
 
     #[test]
     fn partial_apply_and_verification_failure_restore_existing_and_remove_new_targets() {
