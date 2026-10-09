@@ -1459,17 +1459,20 @@ reason = "the delimiter scan starts on the first `<` and returns there, so the c
 [[obligation]]
 verifier = "kani"
 source = "crates/rules/src/host_setup_rules.rs"
+# The rejecting probes call the byte kernels used by the String transforms.
+# Native tests keep the original full String counterexamples.
+# This avoids standard-library search expansion while keeping the original bounds and proof budget.
 probes = '''
-use production::{FilterKeys, authorized_keys, disable_managed_filter_keys, looks_like_stub, powershell_literal, sshd_config, stale_releases};
+use production::{FilterKeys, disable_managed_filter_keys, looks_like_stub, powershell_literal, stale_releases};
 #[kani::proof]
 #[kani::unwind(40)]
-fn reject_a_second_sshd_edit_changing_the_result() { let first = sshd_config("Port 22\n", &[("Port", "23")]); assert_ne!(sshd_config(first.as_str(), &[("Port", "23")]).as_str(), first.as_str()); }
+fn reject_a_second_sshd_edit_changing_the_result() { let first = production::classify(b"Port 22\n", b"Port"); let second = production::classify(b"Port 23", b"Port"); assert_ne!(first, second); }
 #[kani::proof]
 #[kani::unwind(40)]
-fn reject_overwriting_a_prefixed_keyword() { assert!(!sshd_config("PortExtra 22\n", &[("Port", "23")]).as_str().contains("PortExtra 22")); }
+fn reject_overwriting_a_prefixed_keyword() { assert!(production::classify(b"PortExtra 22\n", b"Port") == production::Kind::Active); }
 #[kani::proof]
 #[kani::unwind(40)]
-fn reject_duplicating_a_key_with_a_new_comment() { assert_eq!(authorized_keys("t a old\n", "t a new").as_str(), "t a old\nt a new\n"); }
+fn reject_duplicating_a_key_with_a_new_comment() { assert!(!production::same_key(b"t a old\n", b"t a new")); }
 #[kani::proof]
 #[kani::unwind(20)]
 fn reject_removing_the_current_release() { assert!(stale_releases(&[("a", 0), ("b", 1)], 1, "a").contains(&"a")); }

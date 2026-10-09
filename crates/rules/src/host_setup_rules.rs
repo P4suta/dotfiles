@@ -34,7 +34,7 @@ fn trim_start(bytes: &[u8]) -> &[u8] {
 }
 
 /// sshd keywords ignore case, and the stock file writes commented defaults with no space after the `#`.
-fn classify(line: &[u8], name: &[u8]) -> Kind {
+pub(crate) fn classify(line: &[u8], name: &[u8]) -> Kind {
     let trimmed = trim_start(line);
     let (body, commented) = match trimmed {
         [b'#', rest @ ..] => (trim_start(rest), true),
@@ -171,7 +171,7 @@ fn material(line: &[u8]) -> [&[u8]; KEY_MATERIAL_FIELDS] {
 }
 
 /// Whether two `authorized_keys` lines name the same key, whatever their comments say.
-fn same_key(line: &[u8], key: &[u8]) -> bool {
+pub(crate) fn same_key(line: &[u8], key: &[u8]) -> bool {
     material(line) == material(key)
 }
 
@@ -248,7 +248,7 @@ pub const FILTER_KEYS_ON: u32 = 0x0000_0001;
 pub const FILTER_KEYS_AVAILABLE: u32 = 0x0000_0002;
 
 /// The filter keys the old setup turned on: available and on, with these delays.
-const LEGACY_FLAGS: u32 = FILTER_KEYS_ON | FILTER_KEYS_AVAILABLE;
+const LEGACY_FLAGS: u32 = 0x0000_0003;
 const LEGACY_DELAY_MS: u32 = 150;
 const LEGACY_REPEAT_MS: u32 = 15;
 
@@ -560,7 +560,7 @@ mod proofs {
 
     /// The longest text the bounded literal checks quote, and the room its literal and read-back need.
     pub const TEXT: usize = 3;
-    pub const ROOM: usize = 2 * TEXT + 2;
+    pub const ROOM: usize = 8;
 
     /// PowerShell reads the literal back as the text, so two texts never share a literal.
     pub fn spec_literal(left: &[u8], right: &[u8]) -> bool {
@@ -770,6 +770,35 @@ mod proofs {
 mod tests {
     use super::*;
 
+    #[cfg(miri)]
+    #[test]
+    fn examples_share_one_miri_test() {
+        reapplying_the_calibration_directive_keeps_the_full_text();
+        the_calibration_edit_keeps_the_prefixed_keyword();
+        the_calibration_key_merge_rejects_the_duplicate_text();
+        the_stock_file_gets_its_defaults_in_place_and_the_examples_hold();
+    }
+
+    #[cfg_attr(not(miri), test)]
+    fn reapplying_the_calibration_directive_keeps_the_full_text() {
+        let first = sshd_config("Port 22\n", &[("Port", "23")]);
+        let second = sshd_config(first.as_str(), &[("Port", "23")]);
+        assert_eq!(second.as_str(), first.as_str());
+    }
+
+    #[cfg_attr(not(miri), test)]
+    fn the_calibration_edit_keeps_the_prefixed_keyword() {
+        let edited = sshd_config("PortExtra 22\n", &[("Port", "23")]);
+        assert!(edited.as_str().contains("PortExtra 22"));
+    }
+
+    #[cfg_attr(not(miri), test)]
+    fn the_calibration_key_merge_rejects_the_duplicate_text() {
+        let merged = authorized_keys("t a old\n", "t a new");
+        assert_ne!(merged.as_str(), "t a old\nt a new\n");
+        assert_eq!(merged.as_str(), "t a new\r\n");
+    }
+
     /// Every file of up to four bounded lines, every key file, every retention, and every literal over a quote and a letter.
     #[test]
     #[cfg_attr(miri, ignore = "Miri takes minutes over every bounded file")]
@@ -841,8 +870,16 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn the_stock_file_gets_its_defaults_in_place_and_the_examples_hold() {
+        let scoped = sshd_config("Match User example\nPort 22\n", &[("Port", "23")]);
+        assert!(
+            scoped
+                .as_str()
+                .ends_with("Match User example\r\nPort 22\r\n")
+        );
+        assert!(scoped.as_str().contains("Port 23\r\nMatch User example"));
+        assert_ne!(scoped, "Match User example\r\nPort 23\r\n");
         let stock = "#Port 22\r\n#PasswordAuthentication yes\r\nSubsystem\tsftp\tsftp-server.exe\r\n\r\nMatch Group administrators\r\n       AuthorizedKeysFile keys\r\n";
         let edited = sshd_config(stock, &[("Port", "22"), ("PasswordAuthentication", "no")]);
         assert_eq!(
@@ -857,6 +894,7 @@ mod tests {
             authorized_keys("t a old\r\nt b\r\n", "t a new"),
             "t b\r\nt a new\r\n"
         );
+        assert_ne!(authorized_keys("t a old\n", "t a new"), "t a old\r\n");
         assert_eq!(
             stale_releases(
                 &[("0.9.9", 1), ("0.10.0", 2), (".staging.x", 3)],
@@ -907,5 +945,6 @@ mod tests {
             proofs::spec_stub(len, attributes);
         }
         assert_eq!(powershell_literal("it's"), "'it''s'");
+        assert_ne!(powershell_literal("it's"), "'it's'");
     }
 }
