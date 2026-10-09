@@ -531,9 +531,14 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
     let (illegible, minimum) = crate::theme::check_contrast(&source_data)?;
     ensure!(illegible.is_empty(), "{}", illegible.join("\n"));
     println!("Every declared text pair keeps 4.5:1, the lowest {minimum}");
+    let obligations = crate::obligations::manifest(root)?;
+    let unprobed = crate::quality::lint_probes(root, &obligations)?;
+    ensure!(unprobed.is_empty(), "{}", unprobed.join("\n"));
+    let mut shells = std::collections::BTreeSet::new();
     for profile in Profile::ALL {
         let fixture = Fixture::new(root, &scratch.path().join(profile.name()), profile)?;
-        let dump = fixture.render(report)?;
+        let (dump, checked) = fixture.render(report)?;
+        shells.extend(checked);
         let strays = crate::theme::strays(profile.name(), &dump, &colors);
         ensure!(strays.is_empty(), "{}", strays.join("\n"));
         let grids = crate::theme::check_grids(root, profile.name(), &dump, false)?;
@@ -547,6 +552,14 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
             profile.name()
         );
     }
+    let unchecked: Vec<&str> = crate::quality::SHELL_WITNESSES
+        .into_iter()
+        .filter(|target| !shells.contains(*target))
+        .collect();
+    ensure!(
+        unchecked.is_empty(),
+        "no profile checked these shell targets: {unchecked:?}"
+    );
     let differing: Vec<_> = git_policies
         .iter()
         .filter(|(_, policy)| *policy != git_policies[0].1)
@@ -573,7 +586,7 @@ pub fn write_theme_grids(root: &Path, write: bool) -> Result<()> {
     let scratch = tempfile::tempdir()?;
     for profile in Profile::ALL {
         let fixture = Fixture::new(root, &scratch.path().join(profile.name()), profile)?;
-        let dump = fixture.render(None)?;
+        let (dump, _) = fixture.render(None)?;
         crate::theme::check_grids(root, profile.name(), &dump, true)?;
     }
     Ok(())
@@ -637,7 +650,7 @@ impl<'a> Fixture<'a> {
     }
 
     /// The rendered targets, after the availability contracts, the syntax of every rendered file, and the agent memory switches pass.
-    fn render(&self, report: Option<&Path>) -> Result<Value> {
+    fn render(&self, report: Option<&Path>) -> Result<(Value, Vec<String>)> {
         let profile = self.profile;
         let mut command = self.chezmoi();
         command
@@ -671,7 +684,13 @@ impl<'a> Fixture<'a> {
             "{} profile renders no source for these targets of targets.toml: {missing:?}",
             profile.name()
         );
-        crate::quality::rendered(&dump, &self.scope.join("syntax"))?;
+        let shells = crate::quality::rendered(self.root, &dump, &self.scope.join("syntax"))?;
+        println!(
+            "Checked the {} shell targets of {}: {}",
+            shells.len(),
+            profile.name(),
+            shells.join(", ")
+        );
         let memory = crate::agent_memory::violations(&dump)?;
         ensure!(
             memory.is_empty(),
@@ -685,7 +704,7 @@ impl<'a> Fixture<'a> {
                 &result.stdout,
             )?;
         }
-        Ok(dump)
+        Ok((dump, shells))
     }
 
     /// The setup scripts run in dependency order, every entry point has its packages, and no managed directory stays empty.

@@ -83,6 +83,17 @@ pub enum LintTool {
     Psscriptanalyzer,
 }
 
+impl LintTool {
+    /// The settings every gate passes to this linter.
+    #[must_use]
+    pub const fn settings(self) -> &'static str {
+        match self {
+            Self::Shellcheck => crate::quality::SHELLCHECK_SETTINGS,
+            Self::Psscriptanalyzer => crate::lint::SCRIPT_ANALYZER_SETTINGS,
+        }
+    }
+}
+
 /// One obligation and the verifier that discharges it.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(tag = "verifier", rename_all = "kebab-case", deny_unknown_fields)]
@@ -103,9 +114,40 @@ pub enum Obligation {
     /// A vendored JSON Schema, which must keep the recorded digest.
     JsonSchema { schema: String, sha256: String },
     /// A linter run with its committed settings.
-    Lint { tool: LintTool, settings: String },
+    Lint {
+        tool: LintTool,
+        settings: String,
+        probe: String,
+        finding: String,
+    },
     /// A Quint model, which `just proofs` checks offline in its pinned image.
     Quint(QuintModel),
+}
+
+/// The refusals of a lint obligation: missing settings, settings no gate reads, or no probe.
+fn close_lint(
+    root: &Path,
+    tool: LintTool,
+    settings: &str,
+    probe: &str,
+    finding: &str,
+) -> Vec<String> {
+    let mut refusals = Vec::new();
+    if !root.join(settings).is_file() {
+        refusals.push(format!(
+            "{MANIFEST}: the lint settings {settings} are missing"
+        ));
+    }
+    let read = tool.settings();
+    if settings != read {
+        refusals.push(format!("{MANIFEST}: the gates read {read}, not {settings}"));
+    }
+    if probe.trim().is_empty() || finding.trim().is_empty() {
+        refusals.push(format!(
+            "{MANIFEST}: the {settings} obligation has no probe, so nothing shows the linter can fail"
+        ));
+    }
+    refusals
 }
 
 /// A Quint model whose `main` module holds `invariant` in exactly `distinct_states` reachable states and whose `probe` module breaks it.
@@ -875,13 +917,14 @@ pub fn closure(root: &Path, manifest: &Manifest) -> Result<Closure> {
                     .refusals
                     .push(format!("{MANIFEST}: the schema {schema} is missing")),
             },
-            Obligation::Lint { settings, .. } => {
-                if !root.join(settings).is_file() {
-                    result.refusals.push(format!(
-                        "{MANIFEST}: the lint settings {settings} are missing"
-                    ));
-                }
-            }
+            Obligation::Lint {
+                tool,
+                settings,
+                probe,
+                finding,
+            } => result
+                .refusals
+                .extend(close_lint(root, *tool, settings, probe, finding)),
             Obligation::Quint(quint) => result.refusals.extend(close_quint(root, quint)),
         }
     }

@@ -21,7 +21,7 @@ fi
 # Prepend after mise so the ~/.local/bin git wrapper wins over the shims.
 export PATH="${HOME}/.local/bin:${PATH}"
 
-# shellcheck source=dot_config/shell/ssh-agent.sh
+# shellcheck source=/dev/null
 [[ -r "${HOME}/.config/shell/ssh-agent.sh" ]] && . "${HOME}/.config/shell/ssh-agent.sh"
 
 # Load the opam switch.

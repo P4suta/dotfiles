@@ -76,6 +76,7 @@ pub mod ready_push_rules;
 pub mod reaper_rules;
 pub mod review_rules;
 pub mod shape_rules;
+pub mod shell_target_rules;
 pub mod shell_write_rules;
 pub mod skill_rules;
 pub mod source_name_rules;

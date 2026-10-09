@@ -1,0 +1,3 @@
+# The ShellCheck settings of every rendered shell target and of the shellcheck lint obligation.
+# A rendered target sources files that exist only on the host, so ShellCheck reads no file outside the one it checks.
+external-sources=false

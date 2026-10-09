@@ -10,7 +10,7 @@ fi
 
 export PATH="${HOME}/.local/bin:${HOME}/.nix-profile/bin:${PATH}"
 
-# shellcheck source=dot_config/shell/ssh-agent.sh
+# shellcheck source=/dev/null
 [[ -r "${HOME}/.config/shell/ssh-agent.sh" ]] && . "${HOME}/.config/shell/ssh-agent.sh"
 
 if command -v opam >/dev/null 2>&1 && [[ -d "${HOME}/.opam" ]]; then

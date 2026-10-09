@@ -447,7 +447,7 @@
     {"mode":"0644","path":"Documents/PowerShell/Microsoft.PowerShell_profile.ps1","sha256":"42433254ef84ab2a92894d9967f81b03d0ef739e2f552c95597a341ff270c38a","type":"file"}
   ],
   "scripts": [
-    {"condition":"always","phase":"before","position":0,"sha256":"2ce4f1b57d49936c88ca3ad51925670dfa1da642c6b6c3ffec197d8f77e1845d","target":".chezmoiscripts/windows/00-mise.ps1"},
+    {"condition":"always","phase":"before","position":0,"sha256":"5a2792dd6b0e55704b9b194f038cca20a4f2aeee0206f5e049a31e725f416033","target":".chezmoiscripts/windows/00-mise.ps1"},
     {"condition":"always","phase":"before","position":1,"sha256":"5139c7ae7a2c14e92b091d6772ccc7dec0aa383a41fec190e99e29253df0b570","target":".chezmoiscripts/windows/01-runtime.ps1"},
     {"condition":"onchange","phase":"before","position":2,"sha256":"8e3c9a045236db83c0194a87a800dcf592baefa5051327c0d75dfa04a7187589","target":".chezmoiscripts/windows/02-github.ps1"},
     {"condition":"onchange","phase":"after","position":3,"sha256":"e703174ad2dfb8b3b0df0264354d122db8cad5ebf851706571605fcaaeb76165","target":".chezmoiscripts/windows/03-scoop.ps1"},

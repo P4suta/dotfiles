@@ -991,3 +991,39 @@ fn reject_a_literal_without_its_hash() {
     assert!(parse(b"1a1b26").is_some());
 }
 '''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/shell_target_rules.rs"
+probes = '''
+use production::{Checker, Dialect, checker, select};
+#[kani::proof]
+fn reject_skipping_a_startup_file_without_a_shebang() {
+    assert!(select(b".bashrc", b"case $- in", b"").is_none());
+}
+#[kani::proof]
+fn reject_shellchecking_zsh() {
+    assert!(checker(Dialect::Zsh) == Checker::Shellcheck);
+}
+'''
+
+# ShellCheck checks every rendered sh and bash target of every profile, and `just profiles` first runs this probe, whose unquoted expansion must draw SC2086.
+[[obligation]]
+verifier = "lint"
+tool = "shellcheck"
+settings = "policy/shellcheckrc"
+probe = '''
+#!/bin/sh
+echo $1
+'''
+finding = "SC2086"
+
+# The pinned PSScriptAnalyzer checks every rendered Windows script and every script the runtime embeds, and `just profiles` first runs this probe, which must draw PSAvoidUsingWriteHost.
+[[obligation]]
+verifier = "lint"
+tool = "psscriptanalyzer"
+settings = "policy/PSScriptAnalyzerSettings.psd1"
+probe = '''
+Write-Host 'probe'
+'''
+finding = "PSAvoidUsingWriteHost"

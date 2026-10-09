@@ -140,6 +140,12 @@
           "description": "A linter run with its committed settings.",
           "type": "object",
           "properties": {
+            "finding": {
+              "type": "string"
+            },
+            "probe": {
+              "type": "string"
+            },
             "settings": {
               "type": "string"
             },
@@ -155,7 +161,9 @@
           "required": [
             "verifier",
             "tool",
-            "settings"
+            "settings",
+            "probe",
+            "finding"
           ]
         },
         {

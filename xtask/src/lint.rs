@@ -12,9 +12,6 @@ use std::process::Command;
 /// The directory of the baselines, relative to the checkout.
 pub const BASELINES: &str = "policy/lint-baselines";
 
-/// The `PSScriptAnalyzer` release the script analysis stage loads.
-pub const SCRIPT_ANALYZER_VERSION: &str = "1.25.0";
-
 /// Paths per linter process, which keeps a Windows command line under its length limit.
 const CHUNK: usize = 200;
 
@@ -270,49 +267,99 @@ pub fn parse_rustfmt(root: &Path, output: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-fn script_analyzer(root: &Path, paths: &[String]) -> Result<Vec<(String, String)>> {
-    let cache = platform::home::home()
+/// The `PSScriptAnalyzer` settings every PowerShell gate and the lint obligation share.
+pub const SCRIPT_ANALYZER_SETTINGS: &str = "policy/PSScriptAnalyzerSettings.psd1";
+
+/// The pinned `PSScriptAnalyzer` module, saved into the user cache on first use and refused when its assembly differs from the pin.
+fn analyzer_module() -> Result<std::path::PathBuf> {
+    let base = platform::home::home()
         .context("the home is unavailable")?
         .join(".cache/dotfiles/psscriptanalyzer");
-    let script = format!(
-        "$ErrorActionPreference = 'Stop'
-$version = '{SCRIPT_ANALYZER_VERSION}'
-$module = Get-Module -ListAvailable PSScriptAnalyzer | Where-Object {{ $_.Version -eq $version }} | Select-Object -First 1
-if (-not $module) {{
-  $cached = Join-Path $env:DOTFILES_ANALYZER_CACHE \"PSScriptAnalyzer/$version/PSScriptAnalyzer.psd1\"
-  if (-not (Test-Path $cached)) {{
-    New-Item -ItemType Directory -Force $env:DOTFILES_ANALYZER_CACHE | Out-Null
-    Save-PSResource -Name PSScriptAnalyzer -Version $version -Path $env:DOTFILES_ANALYZER_CACHE -TrustRepository -Quiet
-  }}
-  $module = $cached
-}}
-Import-Module $module -Force
-foreach ($path in ($env:DOTFILES_ANALYZER_PATHS -split \"`n\")) {{
-  if ($path) {{
-    foreach ($finding in Invoke-ScriptAnalyzer -Path $path) {{
-      \"$path`t$($finding.RuleName)\"
-    }}
-  }}
-}}"
-    );
+    platform::script_analyzer::save(&base)?;
+    platform::script_analyzer::verified(&base)
+}
+
+/// Runs the pinned analyzer with the committed settings over each `(label, file)` input, reading each file as a script definition when `definitions` holds, and returns each finding as its label and rule.
+fn analyze(
+    root: &Path,
+    inputs: &[(String, String)],
+    definitions: bool,
+) -> Result<Vec<(String, String)>> {
+    let module = analyzer_module()?;
+    let script = "$ErrorActionPreference = 'Stop'
+Import-Module -Name $env:DOTFILES_ANALYZER_MODULE -Force
+foreach ($line in ($env:DOTFILES_ANALYZER_INPUTS -split \"`n\")) {
+  if (-not $line) { continue }
+  $label, $path = $line -split \"`t\", 2
+  if ($env:DOTFILES_ANALYZER_DEFINITIONS -eq '1') {
+    $text = Get-Content -Raw -LiteralPath $path
+    $findings = Invoke-ScriptAnalyzer -ScriptDefinition $text -Settings $env:DOTFILES_ANALYZER_SETTINGS
+  } else {
+    $findings = Invoke-ScriptAnalyzer -Path $path -Settings $env:DOTFILES_ANALYZER_SETTINGS
+  }
+  foreach ($finding in $findings) {
+    \"$label`t$($finding.RuleName)\"
+  }
+}";
+    let listed: Vec<String> = inputs
+        .iter()
+        .map(|(label, path)| format!("{label}\t{path}"))
+        .collect();
     let output = Tool::Pwsh
         .command()
         .current_dir(root)
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .env("DOTFILES_ANALYZER_CACHE", &cache)
-        .env("DOTFILES_ANALYZER_PATHS", paths.join("\n"))
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env("DOTFILES_ANALYZER_MODULE", &module)
+        .env(
+            "DOTFILES_ANALYZER_SETTINGS",
+            root.join(SCRIPT_ANALYZER_SETTINGS),
+        )
+        .env("DOTFILES_ANALYZER_INPUTS", listed.join("\n"))
+        .env(
+            "DOTFILES_ANALYZER_DEFINITIONS",
+            if definitions { "1" } else { "0" },
+        )
+        .stdin(std::process::Stdio::null())
         .output()
         .context("start pwsh")?;
     ensure!(
         output.status.success(),
-        "PSScriptAnalyzer {SCRIPT_ANALYZER_VERSION} failed: {}",
+        "PSScriptAnalyzer {} failed: {}",
+        platform::script_analyzer::VERSION,
         String::from_utf8_lossy(&output.stderr)
     );
     Ok(String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| line.split_once('\t'))
-        .map(|(path, rule)| (path.to_owned(), rule.trim().to_owned()))
+        .map(|(label, rule)| (label.to_owned(), rule.trim().to_owned()))
         .collect())
+}
+
+/// The analyzer's findings over script texts, each named by its label and passed with `-ScriptDefinition`.
+///
+/// # Errors
+///
+/// Returns an error when the pinned analyzer fails to save or verify, or pwsh fails.
+pub fn analyze_definitions(
+    root: &Path,
+    texts: &[(String, String)],
+) -> Result<Vec<(String, String)>> {
+    let scratch = tempfile::tempdir()?;
+    let mut inputs = Vec::new();
+    for (index, (label, text)) in texts.iter().enumerate() {
+        let file = scratch.path().join(format!("{index}.ps1"));
+        fs::write(&file, text)?;
+        inputs.push((label.clone(), file.to_string_lossy().into_owned()));
+    }
+    analyze(root, &inputs, true)
+}
+
+fn script_analyzer(root: &Path, paths: &[String]) -> Result<Vec<(String, String)>> {
+    let inputs: Vec<(String, String)> = paths
+        .iter()
+        .map(|path| (path.clone(), path.clone()))
+        .collect();
+    analyze(root, &inputs, false)
 }
 
 /// The tracked symbolic links among `paths`, which a checkout without link support writes as a file holding the target.
@@ -398,36 +445,7 @@ pub fn findings(root: &Path, stage: Stage, paths: &[String]) -> Result<Counts> {
             },
             &files,
         )?),
-        Stage::Taplo => {
-            let mut found = parse_taplo(
-                root,
-                &chunked(
-                    root,
-                    || {
-                        let mut command = Tool::Taplo.command();
-                        command.args(["fmt", "--check", "--colors", "never", "--"]);
-                        command
-                    },
-                    &files,
-                )?,
-                "format",
-            );
-            found.extend(parse_taplo(
-                root,
-                &chunked(
-                    root,
-                    || {
-                        let mut command = Tool::Taplo.command();
-                        command.args(["lint", "--no-schema", "--colors", "never", "--"]);
-                        command
-                    },
-                    &files,
-                )?,
-                "syntax",
-            ));
-            found.retain(|(path, _)| !path.is_empty() && files.contains(path));
-            found
-        }
+        Stage::Taplo => taplo_findings(root, &files)?,
         Stage::Yamllint => parse_yamllint(&chunked(
             root,
             || {
@@ -449,6 +467,38 @@ pub fn findings(root: &Path, stage: Stage, paths: &[String]) -> Result<Counts> {
         Stage::ScriptAnalyzer => script_analyzer(root, &files)?,
     };
     Ok(count(found))
+}
+
+/// The Taplo format and syntax findings over `files`, which one run each reports.
+fn taplo_findings(root: &Path, files: &[String]) -> Result<Vec<(String, String)>> {
+    let mut found = parse_taplo(
+        root,
+        &chunked(
+            root,
+            || {
+                let mut command = Tool::Taplo.command();
+                command.args(["fmt", "--check", "--colors", "never", "--"]);
+                command
+            },
+            files,
+        )?,
+        "format",
+    );
+    found.extend(parse_taplo(
+        root,
+        &chunked(
+            root,
+            || {
+                let mut command = Tool::Taplo.command();
+                command.args(["lint", "--no-schema", "--colors", "never", "--"]);
+                command
+            },
+            files,
+        )?,
+        "syntax",
+    ));
+    found.retain(|(path, _)| !path.is_empty() && files.contains(path));
+    Ok(found)
 }
 
 /// Reads a baseline's admitted counts from its TOML text.

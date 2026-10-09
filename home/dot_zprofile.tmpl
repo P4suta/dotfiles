@@ -6,7 +6,7 @@ if [ -x /opt/homebrew/bin/brew ]; then
   eval "$(/opt/homebrew/bin/brew shellenv)"
 fi
 
-# shellcheck source=dot_config/shell/ssh-agent.sh
+# shellcheck source=/dev/null
 if [ -r "${HOME}/.config/shell/ssh-agent.sh" ]; then
   . "${HOME}/.config/shell/ssh-agent.sh"
 fi

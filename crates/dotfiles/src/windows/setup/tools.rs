@@ -5,7 +5,8 @@ use anyhow::Result;
 use super::scoop;
 use crate::windows::{env, proc};
 
-const PS_MODULES: &[&str] = &["PSFzf", "PSScriptAnalyzer"];
+/// The gallery modules an interactive shell may do without, whose install failure stays a warning.
+const PS_MODULES: &[&str] = &["PSFzf"];
 
 const PSGALLERY_HELPER: &str = include_str!("../../../assets/psgallery.ps1");
 
@@ -30,6 +31,7 @@ pub fn run(scoop_apps: &[String]) -> Result<i32> {
     }
 
     install_ps_modules()?;
+    install_script_analyzer()?;
 
     println!(">>> git signing config sanity check");
     report(&signing_problems(&SigningConfig::read()));
@@ -51,6 +53,25 @@ fn mise(token: Option<&str>) -> std::process::Command {
         cmd.env("GITHUB_TOKEN", token);
     }
     cmd
+}
+
+/// Saves the pinned `PSScriptAnalyzer` into the user's PowerShell modules and refuses a release whose assembly differs from the pin.
+fn install_script_analyzer() -> Result<()> {
+    let documents = proc::capture(env::command("pwsh").args([
+        "-NoLogo",
+        "-NoProfile",
+        "-Command",
+        "[Environment]::GetFolderPath('MyDocuments')",
+    ]))?;
+    anyhow::ensure!(documents.ok(), "pwsh can't name the Documents folder");
+    let modules = PathBuf::from(documents.stdout_text().trim()).join("PowerShell/Modules");
+    println!(
+        ">>> Save-Module PSScriptAnalyzer -RequiredVersion {}",
+        platform::script_analyzer::VERSION
+    );
+    platform::script_analyzer::save(&modules)?;
+    platform::script_analyzer::verified(&modules)?;
+    Ok(())
 }
 
 fn install_ps_modules() -> Result<()> {

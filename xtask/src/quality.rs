@@ -163,6 +163,11 @@ fn posix_shell() -> Result<Command> {
     if !cfg!(windows) {
         return Ok(Tool::Sh.command());
     }
+    Ok(crate::tool::external(posix_shell_path()?))
+}
+
+/// Git for Windows' `sh.exe`, beside its `bash.exe`.
+fn posix_shell_path() -> Result<PathBuf> {
     let output = Tool::Git
         .command()
         .arg("--exec-path")
@@ -176,12 +181,44 @@ fn posix_shell() -> Result<Command> {
         "Git for Windows shell is missing at {}",
         shell.display()
     );
-    Ok(crate::tool::external(shell))
+    Ok(shell)
 }
 
-pub(crate) fn rendered(dump: &Value, directory: &Path) -> Result<()> {
+/// The word of a `# shellcheck shell=` directive in the leading comments of a shell text, or an empty word.
+#[must_use]
+pub fn shell_directive(contents: &str) -> &str {
+    contents
+        .lines()
+        .map(str::trim)
+        .take_while(|line| line.is_empty() || line.starts_with('#'))
+        .find_map(|line| {
+            line.strip_prefix('#')?
+                .trim_start()
+                .strip_prefix("shellcheck ")?
+                .split_whitespace()
+                .find_map(|setting| setting.strip_prefix("shell="))
+        })
+        .unwrap_or_default()
+}
+
+/// The shell dialect of a rendered target, when the text names a shell script.
+#[must_use]
+pub fn shell_selection(name: &str, contents: &str) -> Option<crate::shell_target_rules::Selection> {
+    let file_name = name.rsplit('/').next().unwrap_or(name);
+    let first_line = contents.lines().next().unwrap_or_default();
+    crate::shell_target_rules::select(
+        file_name.as_bytes(),
+        first_line.as_bytes(),
+        shell_directive(contents).as_bytes(),
+    )
+}
+
+/// Checks every rendered target of one profile and returns the shell targets it checked.
+pub(crate) fn rendered(root: &Path, dump: &Value, directory: &Path) -> Result<Vec<String>> {
     let targets = dump.as_object().context("profile dump must be a mapping")?;
     fs::create_dir(directory)?;
+    let mut shells = Vec::new();
+    let mut powershell = Vec::new();
     for (index, (name, target)) in targets.iter().enumerate() {
         if target["type"] != "file" && target["type"] != "script" {
             continue;
@@ -213,14 +250,127 @@ pub(crate) fn rendered(dump: &Value, directory: &Path) -> Result<()> {
             };
             nushell_file(directory, &file("nu"), name, text)?;
         }
-        if contents.starts_with("#!/bin/sh\n") {
-            shell_file(directory, &file("sh"), name, contents, script)?;
+        if let Some(selection) = shell_selection(name, contents) {
+            shell_file(
+                root,
+                directory,
+                &file("sh"),
+                name,
+                contents,
+                script,
+                selection,
+            )?;
+            shells.push(name.clone());
         }
         if crate::has_extension(name, "ps1") {
             powershell_file(directory, &file("ps1"), name, contents, script)?;
+            powershell.push((name.clone(), contents.to_owned()));
         }
     }
-    Ok(())
+    if !powershell.is_empty() {
+        powershell.extend(runtime_scripts(root)?);
+        let findings = crate::lint::analyze_definitions(root, &powershell)?;
+        ensure!(
+            findings.is_empty(),
+            "PSScriptAnalyzer {} refuses these scripts: {}",
+            platform::script_analyzer::VERSION,
+            findings
+                .iter()
+                .map(|(name, rule)| format!("{name} ({rule})"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    Ok(shells)
+}
+
+/// The rules `shellcheck` reports over one shell text with the committed settings.
+///
+/// # Errors
+///
+/// Returns an error when the text names no shell script or `shellcheck` can't start.
+pub fn shellcheck_findings(root: &Path, name: &str, text: &str) -> Result<Vec<String>> {
+    let selection =
+        shell_selection(name, text).with_context(|| format!("{name} is no shell script"))?;
+    let scratch = tempfile::tempdir()?;
+    let file = scratch.path().join("probe.sh");
+    fs::write(&file, text)?;
+    let mut command = Tool::Shellcheck.command();
+    command
+        .current_dir(scratch.path())
+        .args(["--severity=style", "--format=gcc", "--rcfile"])
+        .arg(root.join(SHELLCHECK_SETTINGS));
+    if selection.needs_shell_flag() {
+        command.arg(format!("--shell={}", selection.dialect.name()));
+    }
+    // A relative path keeps a Windows drive colon out of the `path:line:column` records.
+    let output = command
+        .arg("probe.sh")
+        .output()
+        .context("start ShellCheck")?;
+    Ok(
+        crate::lint::parse_shellcheck(&String::from_utf8_lossy(&output.stdout))
+            .into_iter()
+            .map(|(_, code)| code)
+            .collect(),
+    )
+}
+
+/// Refusals for every lint obligation whose probe draws no finding of its rule, so a gate that stopped finding anything can't pass.
+///
+/// # Errors
+///
+/// Returns an error when a linter can't start.
+pub fn lint_probes(root: &Path, manifest: &crate::obligations::Manifest) -> Result<Vec<String>> {
+    use crate::obligations::{LintTool, Obligation};
+    let mut refusals = Vec::new();
+    for obligation in &manifest.obligations {
+        let Obligation::Lint {
+            tool,
+            probe,
+            finding,
+            ..
+        } = obligation
+        else {
+            continue;
+        };
+        let found = match tool {
+            LintTool::Shellcheck => shellcheck_findings(root, "probe", probe)?,
+            LintTool::Psscriptanalyzer => {
+                crate::lint::analyze_definitions(root, &[("probe".to_owned(), probe.clone())])?
+                    .into_iter()
+                    .map(|(_, rule)| rule)
+                    .collect()
+            }
+        };
+        if !found.contains(finding) {
+            refusals.push(format!(
+                "the {} probe drew {found:?} instead of {finding}, so the gate would pass a script it must refuse",
+                tool.settings()
+            ));
+        }
+    }
+    Ok(refusals)
+}
+
+/// The directory of the PowerShell scripts the Windows runtime embeds.
+pub const RUNTIME_SCRIPTS: &str = "crates/dotfiles/assets";
+
+/// Every PowerShell script the Windows runtime embeds, named by its checkout path.
+fn runtime_scripts(root: &Path) -> Result<Vec<(String, String)>> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir(root.join(RUNTIME_SCRIPTS))? {
+        let path = entry?.path();
+        if path.extension().is_some_and(|extension| extension == "ps1") {
+            let name = format!(
+                "{RUNTIME_SCRIPTS}/{}",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            );
+            found.push((name, fs::read_to_string(&path)?));
+        }
+    }
+    found.sort();
+    Ok(found)
 }
 
 fn toml_file(directory: &Path, file: &Path, name: &str, contents: &str) -> Result<()> {
@@ -277,20 +427,38 @@ fn nushell_file(directory: &Path, file: &Path, name: &str, mut text: String) -> 
 }
 
 fn shell_file(
+    root: &Path,
     directory: &Path,
     file: &Path,
     name: &str,
     contents: &str,
     script: bool,
+    selection: crate::shell_target_rules::Selection,
 ) -> Result<()> {
+    use crate::shell_target_rules::{Checker, checker};
     ensure!(
         !launcher_resolves_through_home(name, contents),
         "launcher {name} finds its program through the runtime HOME, which tools that run Git with another HOME replace; render the installed path"
     );
     fs::write(file, contents)?;
     let path = file.to_str().context("invalid fixture path")?;
-    run(posix_shell()?, directory, "sh", &["-n", path])?;
-    command(directory, Tool::Shellcheck, &["--severity=style", path])?;
+    let dialect = selection.dialect;
+    match checker(dialect) {
+        Checker::Shellcheck => {
+            run(
+                shell_parser(dialect)?,
+                directory,
+                dialect.name(),
+                &["-n", path],
+            )
+            .with_context(|| format!("rendered {name} doesn't parse as {}", dialect.name()))?;
+            shellcheck(root, directory, path, selection)
+                .with_context(|| format!("ShellCheck refuses rendered {name}"))?;
+        }
+        // Exempt as disproportionate: shellcheck reads no zsh per SC1071, so `zsh -n` and the zsh startup exec-count ceiling stand in.
+        Checker::ZshParse => zsh_parse(directory, name, path)
+            .with_context(|| format!("rendered {name} doesn't parse as zsh"))?,
+    }
     if script && !crate::launchers::bootstraps(name) {
         ensure!(
             single_exec(contents),
@@ -298,6 +466,67 @@ fn shell_file(
         );
     }
     Ok(())
+}
+
+/// The shell targets that only a `#!/bin/sh` first line once selected, which the profile gate must check in some profile.
+pub const SHELL_WITNESSES: [&str; 4] = [
+    ".bashrc",
+    ".profile",
+    ".claude/bashenv.sh",
+    ".config/shell/ssh-agent.sh",
+];
+
+/// The `shellcheck` settings every rendered shell target and the lint obligation share.
+pub const SHELLCHECK_SETTINGS: &str = "policy/shellcheckrc";
+
+/// The parser of a dialect's syntax check.
+fn shell_parser(dialect: crate::shell_target_rules::Dialect) -> Result<Command> {
+    use crate::shell_target_rules::Dialect;
+    match dialect {
+        Dialect::Sh => posix_shell(),
+        Dialect::Bash if cfg!(windows) => {
+            let shell = posix_shell_path()?;
+            Ok(crate::tool::external(shell.with_file_name("bash.exe")))
+        }
+        Dialect::Bash => Ok(Tool::Bash.command()),
+        Dialect::Zsh => Ok(Tool::Zsh.command()),
+    }
+}
+
+/// Runs `shellcheck` at style severity with the committed settings, naming the dialect when the text names none.
+///
+/// # Errors
+///
+/// Returns an error when `shellcheck` can't start or reports a finding.
+pub fn shellcheck(
+    root: &Path,
+    directory: &Path,
+    path: &str,
+    selection: crate::shell_target_rules::Selection,
+) -> Result<()> {
+    let settings = root.join(SHELLCHECK_SETTINGS);
+    let mut arguments = vec![
+        "--severity=style".to_owned(),
+        "--rcfile".to_owned(),
+        settings.to_string_lossy().into_owned(),
+    ];
+    if selection.needs_shell_flag() {
+        arguments.push(format!("--shell={}", selection.dialect.name()));
+    }
+    arguments.push(path.to_owned());
+    let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+    command(directory, Tool::Shellcheck, &arguments)
+}
+
+/// Parses a zsh startup file with `zsh -n`, which every Mac has.
+/// A host without zsh leaves the parse to the Mac and Linux gates that have it.
+fn zsh_parse(directory: &Path, name: &str, path: &str) -> Result<()> {
+    let installed = Path::new(Tool::Zsh.program()).is_file();
+    if !installed && !cfg!(target_os = "macos") {
+        println!("zsh is absent on this host, so the Mac gate parses {name} with zsh -n");
+        return Ok(());
+    }
+    run(Tool::Zsh.command(), directory, "zsh", &["-n", path])
 }
 
 /// Whether a shell launcher holds only one `exec`, after an optional `set -eu`.

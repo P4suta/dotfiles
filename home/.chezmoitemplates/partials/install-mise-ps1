@@ -2,7 +2,8 @@ $version = {{ includeTemplate "partials/ps_quote" .mise.version }}
 $sha256 = {{ includeTemplate "partials/ps_quote" (index .mise.sha256 "windows-x64") }}
 $bin = Join-Path $env:USERPROFILE '.local\bin'
 $target = Join-Path $bin 'mise.exe'
-if ((Test-Path $target) -and (((& $target --version 2>$null) -split ' ')[0] -eq $version)) {
+$current = if (Test-Path $target) { ((& $target --version 2>$null) -split ' ')[0] }
+if ($current -eq $version) {
     exit 0
 }
 $scope = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())

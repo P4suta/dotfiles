@@ -9,7 +9,7 @@ esac
 
 export PATH="${HOME}/.local/bin:${HOME}/.nix-profile/bin:${PATH}"
 
-# shellcheck source=dot_config/shell/ssh-agent.sh
+# shellcheck source=/dev/null
 if [[ -r "${HOME}/.config/shell/ssh-agent.sh" ]]; then
   . "${HOME}/.config/shell/ssh-agent.sh"
 fi
@@ -27,7 +27,11 @@ shopt -s checkwinsize
 [ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
 
 if [ -x /usr/bin/dircolors ]; then
-    test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+    if [ -r ~/.dircolors ]; then
+        eval "$(dircolors -b ~/.dircolors)"
+    else
+        eval "$(dircolors -b)"
+    fi
     alias ls='ls --color=auto'
     alias grep='grep --color=auto'
     alias fgrep='fgrep --color=auto'
@@ -39,13 +43,16 @@ alias la='ls -A'
 alias l='ls -CF'
 
 if [ -f ~/.bash_aliases ]; then
+    # shellcheck source=/dev/null
     . ~/.bash_aliases
 fi
 
 if ! shopt -oq posix; then
   if [ -f /usr/share/bash-completion/bash_completion ]; then
+    # shellcheck source=/dev/null
     . /usr/share/bash-completion/bash_completion
   elif [ -f /etc/bash_completion ]; then
+    # shellcheck source=/dev/null
     . /etc/bash_completion
   fi
 fi
@@ -55,6 +62,7 @@ if [ -x "$HOME/.local/bin/mise" ]; then
 fi
 
 if [ -r "$HOME/.opam/opam-init/init.sh" ]; then
+  # shellcheck source=/dev/null
   . "$HOME/.opam/opam-init/init.sh" >/dev/null 2>&1 || true
 fi
 
@@ -64,4 +72,7 @@ command -v atuin    >/dev/null && eval "$(atuin init bash --disable-up-arrow)"
 command -v fzf      >/dev/null && eval "$(fzf --bash)"
 
 command -v bat   >/dev/null && export MANPAGER="sh -c 'col -bx | bat -l man -p'"
-command -v vivid >/dev/null && export LS_COLORS="$(vivid generate tokyonight-night)"
+if command -v vivid >/dev/null; then
+  LS_COLORS="$(vivid generate tokyonight-night)"
+  export LS_COLORS
+fi

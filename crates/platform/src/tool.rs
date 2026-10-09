@@ -59,6 +59,7 @@ pub enum Tool {
     Fcitx5,
     Fcitx5Remote,
     Fleet,
+    Fzf,
     Gh,
     GhStack,
     Ghostty,
@@ -122,7 +123,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 90] = [
+    pub const ALL: [Self; 91] = [
         Self::Actionlint,
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
@@ -153,6 +154,7 @@ impl Tool {
         Self::Fcitx5,
         Self::Fcitx5Remote,
         Self::Fleet,
+        Self::Fzf,
         Self::Gh,
         Self::GhStack,
         Self::Ghostty,
@@ -241,6 +243,7 @@ impl Tool {
             Self::FcCache => "fc-cache",
             Self::Fcitx5 => "fcitx5",
             Self::Fcitx5Remote => "fcitx5-remote",
+            Self::Fzf => "fzf",
             Self::Gh => "gh",
             Self::GhStack => "gh-stack",
             Self::Ghostty => "ghostty",
@@ -358,6 +361,7 @@ impl Tool {
             | Self::Cabal
             | Self::Carapace
             | Self::Doppler
+            | Self::Fzf
             | Self::Erl
             | Self::Gleam
             | Self::Go

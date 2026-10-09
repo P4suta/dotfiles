@@ -20,6 +20,8 @@ pub mod paths;
 #[cfg(feature = "tools")]
 pub mod runtime;
 #[cfg(feature = "tools")]
+pub mod script_analyzer;
+#[cfg(feature = "tools")]
 pub use rules::stale_rules;
 #[cfg(feature = "tools")]
 pub mod step;
