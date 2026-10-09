@@ -283,7 +283,7 @@ fn reject_completing_over_an_exact_spelling() {
 }
 #[kani::proof]
 fn reject_ignoring_a_unique_abbreviation() {
-    assert!(production::spelling(b"re", &[&b"repo"[..], &b"force"[..]]) == production::Spelling::Unknown);
+    assert!(matches!(production::spelling(b"re", &[&b"repo"[..], &b"force"[..]]), production::Spelling::Unknown));
 }
 #[kani::proof]
 fn reject_suggesting_from_an_unread_line() {
@@ -441,15 +441,15 @@ fn reject_executing_a_push() {
 }
 #[kani::proof]
 fn reject_pushing_while_paused() {
-    assert!(decide(State { host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Ahead, push_paused: true, pr: Pr::Draft, checks: Checks::Passing, workflows: true, review_paused: false }) == Step::Push);
+    assert!(decide(State { host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Ahead, push_paused: true, pr: Pr::Draft, checks: Checks::Success, workflows: true, review_paused: false }) == Step::Push);
 }
 #[kani::proof]
 fn reject_pushing_to_a_ready_pr_while_review_is_paused() {
-    assert!(decide(State { host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Ahead, push_paused: false, pr: Pr::Ready, checks: Checks::Passing, workflows: true, review_paused: true }) == Step::Push);
+    assert!(decide(State { host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Ahead, push_paused: false, pr: Pr::Ready, checks: Checks::Success, workflows: true, review_paused: true }) == Step::Push);
 }
 #[kani::proof]
 fn reject_force_pushing_over_commits_the_branch_never_held() {
-    assert!(decide(State { host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Diverged, push_paused: false, pr: Pr::Draft, checks: Checks::Passing, workflows: true, review_paused: false }) == Step::ForcePush);
+    assert!(decide(State { host: Host::Ready, head: Head::Feature, dirty: false, undecided: false, incomplete: false, behind_base: false, ahead_base: true, upstream: Upstream::Diverged, push_paused: false, pr: Pr::Draft, checks: Checks::Success, workflows: true, review_paused: false }) == Step::ForcePush);
 }
 '''
 
@@ -582,11 +582,11 @@ source = "crates/rules/src/pr_rules.rs"
 probes = '''
 #[kani::proof]
 fn reject_ready_local_creation() {
-    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Passing), Ok(production::Effect::CreateReady));
+    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Success), Ok(production::Effect::CreateReady));
 }
 #[kani::proof]
 fn reject_creation_without_a_personal_issue() {
-    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false), production::Checks::Passing).is_ok());
+    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false), production::Checks::Success).is_ok());
 }
 #[kani::proof]
 fn reject_unfinished_summary_as_review_exclusion() {
@@ -621,11 +621,11 @@ fn state(lifecycle: production::Lifecycle, behind: bool, checks: production::Hea
 }
 #[kani::proof]
 fn reject_merging_a_behind_pr() {
-    assert!(production::merge_step(state(production::Lifecycle::Ready, true, production::HeadChecks::Passing, production::Exclusion::Pause), false, true) == production::Step::Merge);
+    assert!(production::merge_step(state(production::Lifecycle::Ready, true, production::HeadChecks::Success, production::Exclusion::Pause), false, true) == production::Step::Merge);
 }
 #[kani::proof]
 fn reject_updating_a_stacked_pr_by_merge() {
-    assert!(production::merge_step(state(production::Lifecycle::Ready, true, production::HeadChecks::Passing, production::Exclusion::Pause), true, true) == production::Step::Update);
+    assert!(production::merge_step(state(production::Lifecycle::Ready, true, production::HeadChecks::Success, production::Exclusion::Pause), true, true) == production::Step::Update);
 }
 #[kani::proof]
 fn reject_merging_with_a_failed_check() {
@@ -633,7 +633,7 @@ fn reject_merging_with_a_failed_check() {
 }
 #[kani::proof]
 fn reject_readying_without_the_pause_lines() {
-    assert!(production::merge_step(state(production::Lifecycle::Draft, false, production::HeadChecks::Passing, production::Exclusion::None), false, true) == production::Step::Ready);
+    assert!(production::merge_step(state(production::Lifecycle::Draft, false, production::HeadChecks::Success, production::Exclusion::None), false, true) == production::Step::Ready);
 }
 #[kani::proof]
 fn reject_opening_a_dependent_branch_independently() {
@@ -810,7 +810,7 @@ fn reject_owner_pause_bypass() {
     assert!(production::service_access(production::pause_scope(false, false, true), false));
 }
 #[kani::proof]
-#[kani::unwind(8)]
+#[kani::unwind(14)]
 fn reject_read_only_paid_usage() {
     assert!(production::classify(&["usage", "--use-credits"]) == production::Invocation::ReadOnly);
 }

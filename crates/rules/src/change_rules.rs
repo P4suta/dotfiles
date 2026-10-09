@@ -361,6 +361,23 @@ mod tests {
     use super::*;
     use alloc::vec::Vec;
 
+    #[cfg(miri)]
+    #[test]
+    fn examples_share_one_miri_test() {
+        a_gate_set_adds_removes_and_covers_exactly_its_own_gates();
+        an_unknown_gate_names_itself();
+        a_markdown_only_change_selects_the_prose_gate_alone();
+        a_rust_change_selects_every_gate_but_the_proofs_because_xtask_validates_and_applies_everything();
+        a_rule_module_or_the_proof_inventory_also_selects_the_proofs();
+        a_skill_change_selects_the_skills_and_profile_gates_without_rust();
+        a_profile_change_selects_the_profile_gate_without_rust();
+        ci_tooling_lock_files_and_the_classifier_select_everything();
+        an_unknown_path_selects_everything();
+        a_change_set_selects_the_union_of_its_paths_and_an_empty_one_selects_nothing();
+        narrow_rules_override_broader_ones();
+        gate_names_round_trip();
+    }
+
     /// Every rule's own text, and that text with a byte before, after, and missing, so each boundary of each rule meets the specification.
     #[test]
     #[cfg_attr(miri, ignore = "Miri takes seconds over every rule and neighbour")]
@@ -386,7 +403,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_gate_set_adds_removes_and_covers_exactly_its_own_gates() {
         for gate in GATES {
             let one = Gates::of(gate);
@@ -406,7 +423,7 @@ mod tests {
         assert_eq!(Gates::default(), Gates::NONE);
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn an_unknown_gate_names_itself() {
         assert_eq!(UnknownGate("heavy").to_string(), "unknown gate: heavy");
     }
@@ -417,12 +434,12 @@ mod tests {
         select(paths.iter().copied()).to_string()
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_markdown_only_change_selects_the_prose_gate_alone() {
         assert_eq!(selected(&["README.md", "docs/windows-host.md"]), "prose");
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_rust_change_selects_every_gate_but_the_proofs_because_xtask_validates_and_applies_everything()
      {
         assert_eq!(
@@ -435,7 +452,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_rule_module_or_the_proof_inventory_also_selects_the_proofs() {
         for path in [
             "crates/rules/src/order_rules.rs",
@@ -455,7 +472,7 @@ mod tests {
         assert!(!select(["README.md", "xtask/src/lint.rs"]).contains(Gate::Proofs));
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_skill_change_selects_the_skills_and_profile_gates_without_rust() {
         assert_eq!(
             selected(&["home/dot_agents/skills/just/SKILL.md"]),
@@ -467,7 +484,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_profile_change_selects_the_profile_gate_without_rust() {
         assert_eq!(selected(&["home/dot_zshrc.tmpl"]), "prose,profiles");
         assert_eq!(
@@ -480,7 +497,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn ci_tooling_lock_files_and_the_classifier_select_everything() {
         for path in [
             ".github/workflows/ci.yml",
@@ -503,14 +520,14 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn an_unknown_path_selects_everything() {
         assert_eq!(select(["mystery/file.bin"]), Gates::ALL);
         assert_eq!(select(["README.md", "mystery"]), Gates::ALL);
         assert_eq!(matched(b"mystery"), None);
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_change_set_selects_the_union_of_its_paths_and_an_empty_one_selects_nothing() {
         assert_eq!(
             selected(&[
@@ -523,7 +540,7 @@ mod tests {
         assert!(select([]).is_empty());
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn narrow_rules_override_broader_ones() {
         assert_eq!(classify(b"docs/skills/x.md"), Class::Skills);
         assert_eq!(
@@ -537,7 +554,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn gate_names_round_trip() {
         let all = Gates::ALL.to_string();
         assert_eq!(all, "prose,skills,rust,profiles,proofs");

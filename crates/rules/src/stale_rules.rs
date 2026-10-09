@@ -116,8 +116,9 @@ mod proofs {
         let recorded: bool = kani::any();
         let matching: bool = kani::any();
         spec_reinstalls(recorded, matching);
-        kani::cover!(reinstalls(recorded, matching));
-        kani::cover!(!reinstalls(recorded, matching) && recorded);
+        let reinstall = reinstalls(recorded, matching);
+        kani::cover!(reinstall);
+        kani::cover!(!reinstall & recorded);
     }
 }
 

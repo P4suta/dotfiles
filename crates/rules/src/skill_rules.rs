@@ -406,8 +406,10 @@ mod proofs {
         spec_outcome(outcome, first, second, third);
         let count: usize = kani::any();
         spec_counts(count, third);
-        kani::cover!(adopted(first, outcome) && decision_complete(outcome, first, second, third));
-        kani::cover!(size_disposition(first, second, third) == Sizing::Unexpected);
+        let adopted = adopted(first, outcome) & decision_complete(outcome, first, second, third);
+        let unexpected = size_disposition(first, second, third) == Sizing::Unexpected;
+        kani::cover!(adopted);
+        kani::cover!(unexpected);
     }
 
     #[cfg(kani)]
@@ -436,8 +438,9 @@ mod proofs {
             threshold: kani::any(),
         };
         spec_maintenance(value);
-        kani::cover!(maintenance_current(value));
-        kani::cover!(!maintenance_current(value) && value.catalog_current);
+        let current = maintenance_current(value);
+        kani::cover!(current);
+        kani::cover!(!current & value.catalog_current);
     }
 
     #[cfg(kani)]

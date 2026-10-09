@@ -635,8 +635,10 @@ mod proofs {
         }
         spec_exemption(&line);
         let result = exemption(&line);
-        kani::cover!(matches!(result, Some(Exemption::Exempt(_))));
-        kani::cover!(result == Some(Exemption::Malformed));
+        let exempt = matches!(result, Some(Exemption::Exempt(_)));
+        let malformed = matches!(result, Some(Exemption::Malformed));
+        kani::cover!(exempt);
+        kani::cover!(malformed);
     }
 
     #[cfg(kani)]

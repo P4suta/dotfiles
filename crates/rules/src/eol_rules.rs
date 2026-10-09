@@ -270,8 +270,9 @@ mod proofs {
         kani::assume(length <= input.len());
         spec_content(&input[..length]);
         let found = content(&input[..length]);
-        kani::cover!(auto_binary(found) && !found.lone_cr && !found.nul);
-        kani::cover!(!auto_binary(found) && found.crlf && length == 4 && input[3] == 0x1a);
+        let binary = auto_binary(found);
+        kani::cover!(binary & !found.lone_cr & !found.nul);
+        kani::cover!(!binary & found.crlf & (length == 4) & (input[3] == END_OF_FILE));
     }
 }
 

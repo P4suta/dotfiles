@@ -1985,6 +1985,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "Miri takes seconds over every global word and successor"
+    )]
     fn every_global_word_matches_its_grammar_facts() {
         for code in 0..proofs::ARGUMENTS.len() {
             let code = u8::try_from(code).unwrap();
@@ -2000,6 +2004,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every override and subcommand")]
     fn the_override_case_partitions_match_the_byte_specification() {
         let keys = [
             (

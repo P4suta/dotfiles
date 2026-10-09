@@ -177,8 +177,9 @@ mod proofs {
         let configured: bool = kani::any();
         let managed: bool = kani::any();
         assert_eq!(hooks_current(configured, managed), configured && managed);
-        kani::cover!(hooks_current(configured, managed));
-        kani::cover!(!hooks_current(configured, managed));
+        let current = hooks_current(configured, managed);
+        kani::cover!(current);
+        kani::cover!(!current);
     }
 
     pub const SYSTEMS: [System; 3] = [System::Mac, System::Linux, System::Windows];
@@ -280,8 +281,9 @@ mod proofs {
         let system = SYSTEMS[usize::from(kani::any::<u8>() % 3)];
         let microsoft: bool = kani::any();
         spec_detected(system, microsoft);
-        kani::cover!(detected(system, microsoft) == Profile::Wsl);
-        kani::cover!(detected(system, microsoft) == Profile::Linux);
+        let profile = detected(system, microsoft);
+        kani::cover!(profile == Profile::Wsl);
+        kani::cover!(profile == Profile::Linux);
     }
 
     #[cfg(kani)]
@@ -314,11 +316,11 @@ mod proofs {
         let listed = &switches[..length];
         spec_memory_off(listed);
         let off = memory_off(listed);
-        kani::cover!(off && length == MEMORY_SWITCHES_PROVED);
-        kani::cover!(!off && length == 0);
-        kani::cover!(
-            !off && length == MEMORY_SWITCHES_PROVED && listed[length - 1] == Memory::Unset
-        );
+        let full = length == MEMORY_SWITCHES_PROVED;
+        let unset = listed.last() == Some(&Memory::Unset);
+        kani::cover!(off & full);
+        kani::cover!(!off & (length == 0));
+        kani::cover!(!off & full & unset);
     }
 }
 

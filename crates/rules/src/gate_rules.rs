@@ -372,9 +372,9 @@ mod proofs {
         spec_signing(refs, reference, merges, only_tip);
         let plan = signing(refs, reference, merges, only_tip);
         kani::cover!(plan == Signing::Amend);
-        kani::cover!(plan == Signing::Rebase && only_tip && !reference.checked_out());
-        kani::cover!(plan == Signing::Inspect && refs == 1 && merges);
-        kani::cover!(plan == Signing::Inspect && refs > 1);
+        kani::cover!((plan == Signing::Rebase) & only_tip & !reference.checked_out());
+        kani::cover!((plan == Signing::Inspect) & (refs == 1) & merges);
+        kani::cover!((plan == Signing::Inspect) & (refs > 1));
     }
 
     #[cfg(kani)]
@@ -386,9 +386,12 @@ mod proofs {
         spec_history(first, second);
         spec_verdict(first, second);
         spec_rebase_refused(first, rewrites);
-        kani::cover!(history(first, second) == History::Integrate);
-        kani::cover!(verdict(first, second) == Verdict::Withhold);
-        kani::cover!(rebase_refused(first, rewrites) && rewrites.is_none());
+        let history = history(first, second);
+        let verdict = verdict(first, second);
+        let refused = rebase_refused(first, rewrites);
+        kani::cover!(history == History::Integrate);
+        kani::cover!(verdict == Verdict::Withhold);
+        kani::cover!(refused & rewrites.is_none());
     }
 
     #[cfg(kani)]
@@ -415,9 +418,9 @@ mod proofs {
         spec_admission(token, lease, stack_rule, bypassed);
         let admitted = admission(stack_rule, stack_tooling(token, lease), bypassed);
         kani::cover!(admitted == Admission::Tooling);
-        kani::cover!(admitted == Admission::Waived && !stack_rule);
+        kani::cover!((admitted == Admission::Waived) & !stack_rule);
         kani::cover!(
-            admitted == Admission::Refused && stack_rule && token.is_some() && lease.is_none()
+            (admitted == Admission::Refused) & stack_rule & token.is_some() & lease.is_none()
         );
     }
 
@@ -439,13 +442,13 @@ mod proofs {
         ];
         spec_spelling(name, &spellings);
         let read = spelling(name, &spellings);
-        kani::cover!(read == Spelling::Ambiguous);
-        kani::cover!(read == Spelling::Unknown);
+        kani::cover!(matches!(read, Spelling::Ambiguous));
+        kani::cover!(matches!(read, Spelling::Unknown));
         kani::cover!(
             matches!(read, Spelling::Is(_))
-                && spellings[0] != name
-                && spellings[1] != name
-                && spellings[2] != name
+                & (spellings[0] != name)
+                & (spellings[1] != name)
+                & (spellings[2] != name)
         );
     }
 
@@ -459,9 +462,9 @@ mod proofs {
         let spellings: [&[u8]; 3] = [b"force", b"force-with-lease", b"force-if-includes"];
         spec_spelling(name, &spellings);
         let read = spelling(name, &spellings);
-        kani::cover!(name == b"force" && read == Spelling::Is(0));
-        kani::cover!(name == b"forc" && read == Spelling::Ambiguous);
-        kani::cover!(read == Spelling::Unknown);
+        kani::cover!((name == b"force") & (read == Spelling::Is(0)));
+        kani::cover!((name == b"forc") & matches!(read, Spelling::Ambiguous));
+        kani::cover!(matches!(read, Spelling::Unknown));
     }
 
     #[cfg(kani)]
@@ -477,10 +480,12 @@ mod proofs {
         let known: bool = kani::any();
         spec_commit_retry(source, picking, known);
         let retry = commit_retry(source, picking, known);
+        let empty_only = retry.is_ok_and(|retry| retry.only & retry.allow_empty);
+        let kept_author = retry.is_ok_and(|retry| !retry.reset_author);
         kani::cover!(retry == Err(Withheld::Picking));
         kani::cover!(retry == Err(Withheld::Authorship));
-        kani::cover!(retry.is_ok_and(|retry| retry.only && retry.allow_empty));
-        kani::cover!(retry.is_ok_and(|retry| !retry.reset_author));
+        kani::cover!(empty_only);
+        kani::cover!(kept_author);
     }
 }
 

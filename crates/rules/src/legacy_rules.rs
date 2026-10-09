@@ -110,7 +110,7 @@ mod proofs {
         let result = verdict(mapped, excepted, bypassed);
         kani::cover!(result == Verdict::Refuse);
         kani::cover!(result == Verdict::Bypassed);
-        kani::cover!(result == Verdict::Admit && mapped);
+        kani::cover!((result == Verdict::Admit) & mapped);
     }
 }
 

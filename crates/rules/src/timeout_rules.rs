@@ -127,8 +127,8 @@ mod proofs {
         spec_timeout(observed, default, requested, limit);
         let decided = timeout(observed, default, requested, limit);
         kani::cover!(matches!(decided, Timeout::Keep(_)));
-        kani::cover!(matches!(decided, Timeout::Set(_)) && requested.is_some());
-        kani::cover!(decided.millis() == limit && observed.is_some());
+        kani::cover!(matches!(decided, Timeout::Set(_)) & requested.is_some());
+        kani::cover!((decided.millis() == limit) & observed.is_some());
     }
 
     #[cfg(kani)]
@@ -137,8 +137,9 @@ mod proofs {
         let expected: Option<u64> = kani::any();
         let took: u64 = kani::any();
         spec_overran(expected, took);
-        kani::cover!(overran(expected, took));
-        kani::cover!(!overran(expected, took) && expected.is_some());
+        let overran = overran(expected, took);
+        kani::cover!(overran);
+        kani::cover!(!overran & expected.is_some());
     }
 
     #[cfg(kani)]
@@ -158,6 +159,17 @@ mod proofs {
 mod tests {
     use super::*;
     use alloc::vec::Vec;
+
+    #[cfg(miri)]
+    #[test]
+    fn examples_share_one_miri_test() {
+        every_history_up_to_two_windows_meets_the_percentile_specification();
+        a_short_timeout_is_raised_to_the_percentile_with_its_margin();
+        the_client_limit_caps_every_timeout();
+        without_history_the_default_applies();
+        the_percentile_is_nearest_rank();
+        only_a_run_beyond_its_expectation_overran();
+    }
 
     const VALUES: [u64; 8] = [0, 1, 2, 9_999, 10_000, 600_000, u64::MAX - 1, u64::MAX];
 
@@ -179,7 +191,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn every_history_up_to_two_windows_meets_the_percentile_specification() {
         let runs: Vec<u64> = (0u64..).take(2 * WINDOW).collect();
         for length in 0..=runs.len() {
@@ -188,7 +200,7 @@ mod tests {
         assert_eq!(percentile(&runs), Some(37));
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_short_timeout_is_raised_to_the_percentile_with_its_margin() {
         assert_eq!(
             timeout(Some(100_000), 120_000, Some(60_000), CLIENT_LIMIT_MS),
@@ -204,7 +216,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn the_client_limit_caps_every_timeout() {
         assert_eq!(
             timeout(Some(590_000), 120_000, None, CLIENT_LIMIT_MS),
@@ -216,7 +228,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn without_history_the_default_applies() {
         assert_eq!(
             timeout(None, 300_000, None, CLIENT_LIMIT_MS),
@@ -228,7 +240,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn the_percentile_is_nearest_rank() {
         let runs: Vec<u64> = (1..=20).collect();
         assert_eq!(percentile(&runs), Some(19));
@@ -236,7 +248,7 @@ mod tests {
         assert_eq!(percentile(&[]), None);
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn only_a_run_beyond_its_expectation_overran() {
         assert!(overran(Some(10), 11));
         assert!(!overran(Some(10), 10));

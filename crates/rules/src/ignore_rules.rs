@@ -227,8 +227,9 @@ mod proofs {
         let found: bool = kani::any();
         let earlier: usize = kani::any();
         spec_verdict(found, earlier);
-        kani::cover!(verdict(found, earlier) == Verdict::Kept);
-        kani::cover!(verdict(found, earlier) == Verdict::Repeated && found);
+        let result = verdict(found, earlier);
+        kani::cover!(result == Verdict::Kept);
+        kani::cover!((result == Verdict::Repeated) & found);
     }
 }
 
@@ -293,8 +294,8 @@ fn a_literal_pattern_matches_only_itself() {
     if !wild {
         assert_eq!(result, same(pattern, path));
     }
-    kani::cover!(result && wild);
-    kani::cover!(!result && wild);
+    kani::cover!(result & wild);
+    kani::cover!(!result & wild);
 }
 
 #[cfg(kani)]
@@ -311,8 +312,8 @@ fn a_two_byte_literal_pattern_matches_only_itself() {
     if !wild {
         assert_eq!(result, same(pattern, path));
     }
-    kani::cover!(result && wild);
-    kani::cover!(!result && wild);
+    kani::cover!(result & wild);
+    kani::cover!(!result & wild);
 }
 
 #[cfg(kani)]
@@ -329,8 +330,8 @@ fn a_three_byte_literal_pattern_matches_only_itself() {
     if !wild {
         assert_eq!(result, same(pattern, path));
     }
-    kani::cover!(result && wild);
-    kani::cover!(!result && wild);
+    kani::cover!(result & wild);
+    kani::cover!(!result & wild);
 }
 
 #[cfg(test)]

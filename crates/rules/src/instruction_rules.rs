@@ -167,8 +167,9 @@ mod proofs {
         let class = CLASSES[usize::from(kani::any::<u8>() % 6)];
         let defined: bool = kani::any();
         spec_admitted(line, class, defined);
-        kani::cover!(admitted(line, class, defined));
-        kani::cover!(!admitted(line, class, defined) && class == Class::FollowUp);
+        let result = admitted(line, class, defined);
+        kani::cover!(result);
+        kani::cover!(!result & (class == Class::FollowUp));
     }
 
     #[cfg(kani)]
@@ -191,8 +192,9 @@ mod proofs {
         let skill: bool = kani::any();
         let retained: bool = kani::any();
         spec_removed_row_held(holder, source, skill, retained);
-        kani::cover!(removed_row_held(holder, source, skill, retained));
-        kani::cover!(!removed_row_held(holder, source, skill, retained) && holder.is_some());
+        let held = removed_row_held(holder, source, skill, retained);
+        kani::cover!(held);
+        kani::cover!(!held & holder.is_some());
     }
 }
 

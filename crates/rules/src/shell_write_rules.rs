@@ -771,7 +771,27 @@ mod proofs {
 
 #[cfg(test)]
 mod tests {
+
+    #[cfg(miri)]
     #[test]
+    fn examples_share_one_miri_test() {
+        every_input_meets_the_verdict_specification();
+        redirects_into_files_are_refused();
+        standard_input_bodies_include_heredocs_and_piped_words();
+        commands_that_send_no_body_have_no_sources();
+        a_program_name_drops_its_directory_case_and_suffixes();
+        refusals_name_a_next_action();
+        the_scanner_reads_quotes_escapes_and_separators_into_tokens();
+        the_scanner_tells_each_redirect_from_a_descriptor_copy();
+        a_heredoc_body_ends_at_its_delimiter_and_stays_out_of_the_words();
+        segments_drop_empty_commands_and_stop_at_a_redirect();
+        an_assignment_names_a_variable_before_its_equals_sign();
+        each_interpreter_runs_inline_only_through_its_own_flags();
+        a_command_prefix_is_skipped_only_for_mise_and_the_wrappers();
+        api_and_command_bodies_come_from_every_flag_form();
+        standard_input_takes_the_words_of_every_other_command();
+    }
+    #[cfg_attr(not(miri), test)]
     fn every_input_meets_the_verdict_specification() {
         for [interpreter, in_place, file] in crate::domain::flags() {
             super::proofs::spec_verdict(interpreter, in_place, file);
@@ -824,7 +844,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn redirects_into_files_are_refused() {
         for command in [
             "cat > notes.txt <<'EOF'\nbody\nEOF",
@@ -985,7 +1005,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn standard_input_bodies_include_heredocs_and_piped_words() {
         assert_eq!(
             body_sources("gh pr create --body-file - <<'EOF'\nline one\nline two\nEOF"),
@@ -1001,7 +1021,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn commands_that_send_no_body_have_no_sources() {
         for command in [
             "gh pr view 3 --json body",
@@ -1018,7 +1038,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_program_name_drops_its_directory_case_and_suffixes() {
         assert_eq!(program("/usr/bin/Python3.12"), "python");
         assert_eq!(program(r"C:\Tools\GIT.EXE"), "git");
@@ -1027,7 +1047,7 @@ mod tests {
         assert_eq!(program("2to3"), "2to");
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn refusals_name_a_next_action() {
         for (reason, start) in [
             (Reason::InlineInterpreter, "Use the Edit"),
@@ -1049,7 +1069,7 @@ mod tests {
         word(text, true)
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn the_scanner_reads_quotes_escapes_and_separators_into_tokens() {
         assert_eq!(scan("'a b'c").tokens, [word("a bc", false)]);
         assert_eq!(scan("'a' 'b'").tokens, [word("a", false), word("b", false)]);
@@ -1083,7 +1103,7 @@ mod tests {
         assert_eq!(scan("a\tb\rc").tokens, [plain("a"), plain("b"), plain("c")]);
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn the_scanner_tells_each_redirect_from_a_descriptor_copy() {
         for command in ["a &> b", "a &>> b", "a > b", "a >> b", "a >| b", "a 2> b"] {
             assert_eq!(
@@ -1115,7 +1135,7 @@ mod tests {
         assert!(here_string.heredoc);
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_heredoc_body_ends_at_its_delimiter_and_stays_out_of_the_words() {
         let found = scan("cat <<'EOF' > f\nline one\n\tEOF\nnext");
         assert!(found.heredoc);
@@ -1148,13 +1168,13 @@ mod tests {
         assert_eq!(bodies, ["a\n"]);
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn segments_drop_empty_commands_and_stop_at_a_redirect() {
         assert_eq!(segments("a b; ;c > f d"), [vec!["a", "b"], vec!["c"]]);
         assert_eq!(segments(" ; "), Vec::<Vec<String>>::new());
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn an_assignment_names_a_variable_before_its_equals_sign() {
         assert!(is_assignment("A_1=x"));
         assert!(is_assignment("a="));
@@ -1163,7 +1183,7 @@ mod tests {
         assert!(!is_assignment("plain"));
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn each_interpreter_runs_inline_only_through_its_own_flags() {
         assert!(runs_inline("node", &["--eval", "x"], false));
         assert!(runs_inline("node", &["-p", "x"], false));
@@ -1184,7 +1204,7 @@ mod tests {
         assert!(!runs_inline("bash", &["-c", "x"], false));
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_command_prefix_is_skipped_only_for_mise_and_the_wrappers() {
         assert_eq!(inspect("foo x python -c 1"), Verdict::Admit);
         assert_eq!(
@@ -1204,7 +1224,7 @@ mod tests {
         assert_eq!(inspect("tee log"), Verdict::Refuse(Reason::FileRedirect));
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn api_and_command_bodies_come_from_every_flag_form() {
         let mut sources = Vec::new();
         api_sources(
@@ -1271,7 +1291,7 @@ mod tests {
         assert_eq!(flag_value(&["x", "-b", "v"], 1, &["-b"]), Some(("v", 2)));
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn standard_input_takes_the_words_of_every_other_command() {
         assert_eq!(
             body_sources("echo hello | env gh pr comment --body-file -"),

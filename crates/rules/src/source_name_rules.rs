@@ -135,8 +135,10 @@ mod proofs {
         let source = &bytes[..length];
         spec_target(entry, source);
         let result = target(entry, source);
-        kani::cover!(result.is_some_and(|found| found.name.len() == source.len()));
-        kani::cover!(result.is_none() && ends_with(source, b".tmpl"));
+        let unprefixed = result.is_some_and(|found| found.name.len() == source.len());
+        let template = result.is_none() & ends_with(source, b".tmpl");
+        kani::cover!(unprefixed);
+        kani::cover!(template);
     }
 
     /// Each entry type gets its own harness, so each stays well inside the proof budget.
@@ -159,6 +161,15 @@ mod proofs {
 mod tests {
     use super::*;
 
+    #[cfg(miri)]
+    #[test]
+    fn examples_share_one_miri_test() {
+        a_name_that_is_exactly_a_prefix_or_suffix_has_no_target();
+        an_empty_file_is_named_without_its_attribute();
+        attributes_strip_only_in_chezmoi_order();
+        entries_without_a_verbatim_copy_have_no_target();
+    }
+
     #[test]
     #[cfg_attr(miri, ignore = "Miri takes minutes over every name")]
     fn every_short_name_over_the_attribute_letters_meets_the_specification() {
@@ -177,7 +188,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_name_that_is_exactly_a_prefix_or_suffix_has_no_target() {
         for source in [&b".tmpl"[..], b".literal", b"run_", b"dot_", b"private_"] {
             assert_eq!(target(Entry::File, source), None, "{source:?}");
@@ -214,7 +225,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn an_empty_file_is_named_without_its_attribute() {
         assert_eq!(
             target(Entry::File, b"empty_vocab.txt"),
@@ -225,7 +236,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn attributes_strip_only_in_chezmoi_order() {
         assert_eq!(
             target(Entry::File, b"private_executable_dot_tool"),
@@ -257,7 +268,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn entries_without_a_verbatim_copy_have_no_target() {
         for source in [
             &b"vale.ini.tmpl"[..],

@@ -48,8 +48,9 @@ mod proofs {
     fn attributed_bodies_are_never_admitted_and_each_refusal_names_the_deletion() {
         let attributed: bool = kani::any();
         spec_verdict(attributed);
-        kani::cover!(verdict(attributed) == Verdict::Admit);
-        kani::cover!(verdict(attributed) == Verdict::Refuse(Reason::Attribution));
+        let result = verdict(attributed);
+        kani::cover!(result == Verdict::Admit);
+        kani::cover!(result == Verdict::Refuse(Reason::Attribution));
     }
 }
 

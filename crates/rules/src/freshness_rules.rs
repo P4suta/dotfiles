@@ -72,10 +72,11 @@ mod proofs {
             touched: facts.3,
         };
         spec_verdict(facts);
-        kani::cover!(verdict(facts) == Verdict::MissingEvidence);
-        kani::cover!(verdict(facts) == Verdict::Outdated);
-        kani::cover!(verdict(facts) == Verdict::Breaking);
-        kani::cover!(verdict(facts) == Verdict::Admit);
+        let result = verdict(facts);
+        kani::cover!(result == Verdict::MissingEvidence);
+        kani::cover!(result == Verdict::Outdated);
+        kani::cover!(result == Verdict::Breaking);
+        kani::cover!(result == Verdict::Admit);
     }
 }
 

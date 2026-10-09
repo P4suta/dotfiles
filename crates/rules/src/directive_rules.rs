@@ -248,7 +248,7 @@ mod proofs {
             }
         }
         kani::cover!(result);
-        kani::cover!(!result && length == bytes.len());
+        kani::cover!(!result & (length == bytes.len()));
     }
 }
 
