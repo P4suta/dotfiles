@@ -110,8 +110,10 @@ pub fn is_attribution(line: &[u8]) -> bool {
 pub fn strip_attribution(text: &str) -> (String, usize) {
     let mut removed = 0;
     let mut rest = text;
-    while !rest.is_empty() {
-        let (line, tail) = next_line(rest);
+    for _ in 0..text.len() {
+        let Some((line, tail)) = next_line(rest) else {
+            break;
+        };
         rest = tail;
         if is_attribution(line.as_bytes()) {
             removed += 1;
@@ -123,8 +125,10 @@ pub fn strip_attribution(text: &str) -> (String, usize) {
     let mut out = String::new();
     let mut last_content = 0;
     let mut rest = text;
-    while !rest.is_empty() {
-        let (line, tail) = next_line(rest);
+    for _ in 0..text.len() {
+        let Some((line, tail)) = next_line(rest) else {
+            break;
+        };
         rest = tail;
         if !is_attribution(line.as_bytes()) {
             out.push_str(line);
@@ -138,16 +142,19 @@ pub fn strip_attribution(text: &str) -> (String, usize) {
     (out, removed)
 }
 
-fn next_line(text: &str) -> (&str, &str) {
+fn next_line(text: &str) -> Option<(&str, &str)> {
+    if text.is_empty() {
+        return None;
+    }
     let Some(index) = text.as_bytes().iter().position(|byte| *byte == b'\n') else {
-        return (text, "");
+        return Some((text, ""));
     };
     let (line, tail) = text.split_at(index);
     let end = line.len() - usize::from(line.as_bytes().last() == Some(&b'\r'));
-    (
+    Some((
         line.get(..end).unwrap_or_default(),
         tail.get(1..).unwrap_or_default(),
-    )
+    ))
 }
 
 /// What a push does to one remote ref.
@@ -1862,7 +1869,7 @@ mod proofs {
     }
 
     #[cfg(kani)]
-    const DATE_PARTITION: i64 = DAYS_PER_ERA / 4;
+    const DATE_PARTITION: i64 = DAYS_PER_CENTURY;
 
     #[cfg(kani)]
     #[kani::proof]
@@ -2056,6 +2063,7 @@ mod tests {
     #[cfg_attr(miri, ignore = "Miri takes seconds over the generated line endings")]
     fn scalar_lines_match_standard_line_endings() {
         const ALPHABET: [char; 3] = ['a', '\r', '\n'];
+        assert_eq!(next_line(""), None);
         for length in 0..=6u32 {
             for mut code in 0..ALPHABET.len().pow(length) {
                 let mut text = String::new();
@@ -2066,7 +2074,8 @@ mod tests {
                 let mut actual = Vec::new();
                 let mut rest = text.as_str();
                 while !rest.is_empty() {
-                    let (line, tail) = next_line(rest);
+                    let (line, tail) = next_line(rest).unwrap();
+                    assert!(tail.len() < rest.len());
                     actual.push(line);
                     rest = tail;
                 }
@@ -2078,6 +2087,15 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore = "Miri takes minutes over every day of an era")]
     fn every_bounded_input_meets_the_specifications() {
+        const EXAMPLE_UNIX_SECONDS: i64 = 1_791_331_200;
+        let mut session = String::from(core::str::from_utf8(SESSION_LINK).unwrap());
+        assert!(!is_attribution(session.as_bytes()));
+        session.push_str("has space");
+        assert!(!is_attribution(session.as_bytes()));
+        assert_eq!(
+            days_from_civil(2026, 10, 7) * SECONDS_PER_DAY,
+            EXAMPLE_UNIX_SECONDS
+        );
         let count = proofs::MESSAGE_LINES.len();
         for length in 0..=4u32 {
             for mut number in 0..count.pow(length) {
@@ -2134,6 +2152,7 @@ mod tests {
         }
         for days in -DAYS_PER_ERA..DAYS_PER_ERA {
             proofs::spec_date(days);
+            proofs::spec_date(days - EPOCH_SHIFT);
         }
     }
 
