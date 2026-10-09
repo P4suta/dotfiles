@@ -175,7 +175,9 @@ fn witness(shell: Shell, home: &Path) -> Result<()> {
     };
     let file = home.join(file);
     let mut contents = fs::read_to_string(&file)?;
-    contents.push_str(&format!("\n{marker}\n"));
+    contents.push('\n');
+    contents.push_str(&marker);
+    contents.push('\n');
     fs::write(file, contents)?;
     Ok(())
 }
