@@ -65,6 +65,105 @@ fn miri_reports_each_test_binary_duration_in_milliseconds() {
     assert!(xtask::skill_proofs::MIRI_CRATES.contains(&"rules"));
 }
 
+fn miri_events(events: &[serde_json::Value]) -> String {
+    events
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn miri_batches_keep_every_discovered_test_and_its_ignore_state() {
+    const TESTS: usize = 75;
+    let mut events = vec![json!({"type":"suite", "event":"discovery"})];
+    let expected: BTreeSet<_> = (0..TESTS)
+        .map(|index| (format!("unit::case_{index:03}"), index % 2 == 0))
+        .collect();
+    events.extend(expected.iter().map(|(name, ignored)| json!({"type":"test", "event":"discovered", "name":name, "ignore":ignored})));
+    events.push(json!({"type":"suite", "event":"completed", "tests":TESTS, "benchmarks":0}));
+    let batches = xtask::skill_proofs::miri_batches(&miri_events(&events)).unwrap();
+    assert!(batches.len() > 1);
+    let count: usize = batches.iter().map(Vec::len).sum();
+    let actual: BTreeSet<_> = batches
+        .into_iter()
+        .flatten()
+        .map(|test| (test.name, test.ignored))
+        .collect();
+    assert_eq!(count, TESTS);
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn miri_discovery_refuses_empty_incomplete_and_duplicate_inventories() {
+    let test = json!({"type":"test", "event":"discovered", "name":"unit::case", "ignore":false});
+    let completed = json!({"type":"suite", "event":"completed", "tests":1, "benchmarks":0});
+    for events in [
+        vec![],
+        vec![test.clone()],
+        vec![completed.clone()],
+        vec![test.clone(), test.clone(), completed.clone()],
+        vec![
+            test.clone(),
+            json!({"type":"suite", "event":"completed", "tests":2, "benchmarks":0}),
+        ],
+        vec![
+            test.clone(),
+            json!({"type":"suite", "event":"completed", "tests":1, "benchmarks":1}),
+        ],
+        vec![
+            json!({"type":"test", "event":"discovered", "name":"unit::case"}),
+            completed,
+        ],
+    ] {
+        assert!(xtask::skill_proofs::miri_batches(&miri_events(&events)).is_err());
+    }
+    assert!(xtask::skill_proofs::miri_batches("not JSON").is_err());
+}
+
+#[test]
+fn miri_batch_results_refuse_missing_changed_duplicate_and_slow_tests() {
+    use xtask::skill_proofs::{MiriTest, validate_miri_batch};
+    let expected = [MiriTest {
+        name: "unit::case".to_owned(),
+        ignored: false,
+    }];
+    let test = json!({"type":"test", "event":"ok", "name":"unit::case"});
+    let suite = json!({"type":"suite", "event":"ok", "failed":0, "exec_time":30.0});
+    validate_miri_batch(&miri_events(&[test.clone(), suite.clone()]), &expected).unwrap();
+    for events in [
+        vec![suite.clone()],
+        vec![test.clone()],
+        vec![test.clone(), test.clone(), suite.clone()],
+        vec![
+            json!({"type":"test", "event":"ignored", "name":"unit::case"}),
+            suite.clone(),
+        ],
+        vec![
+            json!({"type":"test", "event":"ok", "name":"unexpected"}),
+            suite.clone(),
+        ],
+        vec![
+            test.clone(),
+            json!({"type":"suite", "event":"ok", "failed":1, "exec_time":1.0}),
+        ],
+        vec![
+            test.clone(),
+            json!({"type":"suite", "event":"ok", "failed":0, "exec_time":30.001}),
+        ],
+    ] {
+        assert!(validate_miri_batch(&miri_events(&events), &expected).is_err());
+    }
+    assert!(validate_miri_batch(&miri_events(&[test.clone(), suite.clone()]), &[]).is_err());
+    assert!(
+        validate_miri_batch(
+            &miri_events(&[test, suite]),
+            &[expected[0].clone(), expected[0].clone()]
+        )
+        .is_err()
+    );
+}
+
 #[test]
 fn proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results() -> anyhow::Result<()> {
     let expected = ["actual-production-contract"];

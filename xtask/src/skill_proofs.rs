@@ -4,7 +4,7 @@ use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
@@ -756,8 +756,123 @@ pub const MIRI_CRATES: [&str; 1] = ["rules"];
 /// The targets Miri interprets the tests for: the host, and Windows, which the tools also ship to.
 pub const MIRI_TARGETS: [Option<&str>; 2] = [None, Some("x86_64-pc-windows-msvc")];
 
+/// The tests in one Miri invocation, whose whole binary must meet the proof budget.
+const MIRI_BATCH_TESTS: usize = 32;
+
 /// The crate with undefined behavior that Miri must refuse.
 const MIRI_FIXTURE: &str = "xtask/proofs/miri-fixture/Cargo.toml";
+
+/// A discovered test and its existing ignore state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MiriTest {
+    pub name: String,
+    pub ignored: bool,
+}
+
+fn miri_events(output: &str) -> Result<Vec<Value>> {
+    output
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).context("invalid Miri test event"))
+        .collect()
+}
+
+/// Partitions the complete discovered inventory without changing any ignore state.
+///
+/// # Errors
+///
+/// Returns an error for missing, duplicate, empty, or incomplete test discovery.
+pub fn miri_batches(output: &str) -> Result<Vec<Vec<MiriTest>>> {
+    let mut tests = BTreeMap::new();
+    let mut total = 0u64;
+    for event in miri_events(output)? {
+        match (event["type"].as_str(), event["event"].as_str()) {
+            (Some("suite"), Some("discovery")) => {}
+            (Some("suite"), Some("completed")) => {
+                let count = event["tests"].as_u64().context("missing Miri test count")?;
+                ensure!(event["benchmarks"] == 0, "unexpected Miri benchmark");
+                total = total
+                    .checked_add(count)
+                    .context("Miri test count overflow")?;
+            }
+            (Some("test"), Some("discovered")) => {
+                let name = event["name"].as_str().context("missing Miri test name")?;
+                let ignored = event["ignore"]
+                    .as_bool()
+                    .context("missing Miri ignore state")?;
+                ensure!(!name.is_empty(), "empty Miri test name");
+                ensure!(
+                    tests.insert(name.to_owned(), ignored).is_none(),
+                    "duplicate Miri test {name}"
+                );
+            }
+            _ => anyhow::bail!("unexpected Miri discovery event: {event}"),
+        }
+    }
+    ensure!(
+        !tests.is_empty() && tests.len() as u64 == total,
+        "Miri test discovery is empty or incomplete"
+    );
+    let tests: Vec<_> = tests
+        .into_iter()
+        .map(|(name, ignored)| MiriTest { name, ignored })
+        .collect();
+    Ok(tests
+        .chunks(MIRI_BATCH_TESTS)
+        .map(<[MiriTest]>::to_vec)
+        .collect())
+}
+
+/// Checks every selected test's completed outcome, ignore state, and binary duration.
+///
+/// # Errors
+///
+/// Returns an error for a missing, duplicate, changed, failed, or slow result.
+pub fn validate_miri_batch(output: &str, expected: &[MiriTest]) -> Result<()> {
+    let mut completed = BTreeMap::new();
+    let mut suites = 0;
+    for event in miri_events(output)? {
+        match (event["type"].as_str(), event["event"].as_str()) {
+            (Some("suite" | "test"), Some("started")) => {}
+            (Some("test"), Some(outcome @ ("ok" | "ignored"))) => {
+                let name = event["name"].as_str().context("missing Miri result name")?;
+                ensure!(
+                    completed
+                        .insert(name.to_owned(), outcome == "ignored")
+                        .is_none(),
+                    "duplicate Miri result {name}"
+                );
+            }
+            (Some("suite"), Some("ok")) => {
+                ensure!(event["failed"] == 0, "Miri test suite failed");
+                let seconds = event["exec_time"]
+                    .as_number()
+                    .context("missing Miri duration")?
+                    .to_string();
+                ensure!(
+                    proof_budget_rules::verdict(millis_of(&seconds))
+                        == proof_budget_rules::Verdict::Within,
+                    "Miri test binary exceeds {} ms: {seconds}s",
+                    proof_budget_rules::BUDGET_MILLIS
+                );
+                suites += 1;
+            }
+            _ => anyhow::bail!("unexpected Miri result event: {event}"),
+        }
+    }
+    let expected_map: BTreeMap<_, _> = expected
+        .iter()
+        .map(|test| (test.name.clone(), test.ignored))
+        .collect();
+    ensure!(
+        !expected.is_empty()
+            && expected_map.len() == expected.len()
+            && suites > 0
+            && completed == expected_map,
+        "Miri test results are missing, unexpected, or changed their ignore state"
+    );
+    Ok(())
+}
 
 /// The wall time of each test binary that `cargo test` reports, in milliseconds.
 #[must_use]
@@ -806,24 +921,51 @@ fn verify_miri(root: &Path) -> Result<()> {
             if let Some(target) = target {
                 command.args(["--target", target]);
             }
-            let output = command.output().context("start Miri")?;
-            let report = String::from_utf8_lossy(&output.stdout);
+            let output = command
+                .args(["--", "--list", "--format", "json", "-Z", "unstable-options"])
+                .output()
+                .context("list Miri tests")?;
             ensure!(
                 output.status.success(),
-                "Miri refused the tests of {krate} for {}:\n{report}\n{}",
+                "cannot list Miri tests of {krate} for {}:\n{}",
                 target.unwrap_or("the host"),
                 String::from_utf8_lossy(&output.stderr)
             );
-            let durations = test_durations(&report);
-            ensure!(!durations.is_empty(), "Miri ran no test binary of {krate}");
-            ensure!(
-                durations.iter().all(|duration| {
-                    proof_budget_rules::verdict(*duration) == proof_budget_rules::Verdict::Within
-                }),
-                "the Miri tests of {krate} for {} must each finish within {} ms; split a slow test without weakening it:\n{report}",
-                target.unwrap_or("the host"),
-                proof_budget_rules::BUDGET_MILLIS
-            );
+            for batch in miri_batches(&String::from_utf8(output.stdout)?)? {
+                let mut command = miri(root);
+                command.args(["--package", krate]);
+                if let Some(target) = target {
+                    command.args(["--target", target]);
+                }
+                let output = command
+                    .args([
+                        "--",
+                        "--format",
+                        "json",
+                        "-Z",
+                        "unstable-options",
+                        "--exact",
+                    ])
+                    .args(batch.iter().map(|test| &test.name))
+                    .output()
+                    .context("start Miri")?;
+                let report = String::from_utf8_lossy(&output.stdout);
+                ensure!(
+                    output.status.success(),
+                    "Miri refused the tests of {krate} for {}:\n{report}\n{}",
+                    target.unwrap_or("the host"),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                validate_miri_batch(&report, &batch).with_context(|| {
+                    format!("Miri tests of {krate} for {}", target.unwrap_or("the host"))
+                })?;
+                let ignored = batch.iter().filter(|test| test.ignored).count();
+                println!(
+                    "Miri verified {} tests of {krate} for {} within the proof budget and retained {ignored} existing ignores",
+                    batch.len() - ignored,
+                    target.unwrap_or("the host")
+                );
+            }
         }
     }
     let output = miri(root)
