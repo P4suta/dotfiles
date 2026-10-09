@@ -6,6 +6,9 @@ use std::path::Path;
 use xtask::obligations::{Obligation, Vendored, closure, manifest, parse_manifest};
 use xtask::quality::{Contract, PLANTED_KEY, conform, contracts};
 
+#[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
+mod fixture_git;
+
 /// An empty checkout with the directories the closure check reads.
 fn checkout() -> tempfile::TempDir {
     let checkout = tempfile::tempdir().unwrap();
@@ -23,8 +26,7 @@ fn root() -> &'static Path {
 fn vendor_text_keeps_its_spelling_while_authored_and_neighboring_files_are_checked() {
     let checkout = checkout();
     assert!(
-        xtask::tool::Tool::Git
-            .command()
+        fixture_git::command("git", &checkout.path().join("global.gitconfig"))
             .current_dir(checkout.path())
             .args(["init", "--quiet"])
             .status()
