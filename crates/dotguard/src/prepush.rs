@@ -16,31 +16,28 @@ use crate::real_git;
 use crate::refusal::{Refusal, command};
 use std::io::Read;
 
-enum RefUpdate {
-    FastForward,
-    Deletion,
-    NonFastForward,
-    /// This clone lacks the remote-tracking commit, so ancestry stays unknown.
-    /// The gate treats it as a rewrite, the shape a push takes after someone else force-pushed.
-    Unknown,
-    NewRef,
-}
+use crate::guard_rules::{Ancestry, Push as Verdict};
 
-fn classify(local_sha: &str, remote_sha: &str) -> RefUpdate {
-    if local_sha.chars().all(|c| c == '0') {
-        return RefUpdate::Deletion;
+fn classify(local_sha: &str, remote_sha: &str) -> Verdict {
+    let unresolved = crate::guard_rules::push(
+        local_sha.as_bytes(),
+        remote_sha.as_bytes(),
+        Ancestry {
+            known: false,
+            descends: false,
+        },
+    );
+    if unresolved != Verdict::Undecidable {
+        return unresolved;
     }
-    if remote_sha.chars().all(|c| c == '0') {
-        return RefUpdate::NewRef; // A branch new to the remote.
-    }
-    if !real_git::succeeds(&["cat-file", "-e", &format!("{remote_sha}^{{commit}}")]) {
-        return RefUpdate::Unknown;
-    }
-    if real_git::succeeds(&["merge-base", "--is-ancestor", remote_sha, local_sha]) {
-        RefUpdate::FastForward
-    } else {
-        RefUpdate::NonFastForward
-    }
+    let known = real_git::succeeds(&["cat-file", "-e", &format!("{remote_sha}^{{commit}}")]);
+    let descends =
+        known && real_git::succeeds(&["merge-base", "--is-ancestor", remote_sha, local_sha]);
+    crate::guard_rules::push(
+        local_sha.as_bytes(),
+        remote_sha.as_bytes(),
+        Ancestry { known, descends },
+    )
 }
 
 /// Returns the process exit code: 0 to let the push through, 1 to refuse it.
@@ -218,7 +215,7 @@ fn unsigned_refusal(remote: &str, refs: &[Unsigned], head: Option<(&str, &str)>)
 
 /// One ref update the history gate refuses.
 struct Problem {
-    verdict: RefUpdate,
+    verdict: Verdict,
     local_ref: String,
     remote_ref: String,
     detail: String,
@@ -232,15 +229,14 @@ fn branch(reference: &str) -> &str {
 /// Deletions go through the forge, a stale clone fetches first, and a rewrite integrates the remote history instead.
 /// The bypass repeats exactly the refused updates.
 fn history_refusal(remote: &str, problems: &[Problem]) -> Refusal {
-    let rewrite =
-        |p: &&Problem| matches!(p.verdict, RefUpdate::NonFastForward | RefUpdate::Unknown);
+    let rewrite = |p: &&Problem| matches!(p.verdict, Verdict::Rewrite | Verdict::Undecidable);
     let next = match gate_rules::history(
         problems
             .iter()
-            .any(|p| matches!(p.verdict, RefUpdate::Unknown)),
+            .any(|p| matches!(p.verdict, Verdict::Undecidable)),
         problems
             .iter()
-            .any(|p| matches!(p.verdict, RefUpdate::NonFastForward)),
+            .any(|p| matches!(p.verdict, Verdict::Rewrite)),
     ) {
         History::Fetch => command(&["git", "fetch", remote]),
         History::Integrate => {
@@ -273,7 +269,7 @@ fn history_refusal(remote: &str, problems: &[Problem]) -> Refusal {
     }
     bypass.push(remote.to_owned());
     bypass.extend(problems.iter().map(|p| match p.verdict {
-        RefUpdate::Deletion => format!(":{}", p.remote_ref),
+        Verdict::Delete => format!(":{}", p.remote_ref),
         _ => format!("{}:{}", p.local_ref, p.remote_ref),
     }));
     let mut refusal = Refusal::new(
@@ -305,11 +301,11 @@ fn judge(remote: &str, input: &str) -> i32 {
 
         let verdict = classify(local_sha, remote_sha);
         let detail = match verdict {
-            RefUpdate::NewRef | RefUpdate::FastForward => continue,
-            RefUpdate::Deletion => format!(
+            Verdict::Advance => continue,
+            Verdict::Delete => format!(
                 "{remote_ref} on '{remote}' would be DELETED\n  (nothing on this machine can restore a ref the remote no longer has)"
             ),
-            RefUpdate::NonFastForward => {
+            Verdict::Rewrite => {
                 let dropped = real_git::capture(&[
                     "rev-list",
                     "--count",
@@ -322,7 +318,7 @@ fn judge(remote: &str, input: &str) -> i32 {
                      {dropped} commit(s) currently on the remote would stop being reachable"
                 )
             }
-            RefUpdate::Unknown => format!(
+            Verdict::Undecidable => format!(
                 "{remote_ref} on '{remote}' cannot be checked\n  \
                  {remote_sha:.12} is not an object in this clone"
             ),
@@ -344,7 +340,7 @@ fn judge(remote: &str, input: &str) -> i32 {
     // It never deletes a ref.
     let rewrites = problems
         .iter()
-        .all(|p| !matches!(p.verdict, RefUpdate::Deletion));
+        .all(|p| !matches!(p.verdict, Verdict::Delete));
     match gate_rules::admission(
         rewrites,
         rewrites && crate::stack::leased(&[]),
@@ -373,11 +369,9 @@ fn judge(remote: &str, input: &str) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Problem, RefUpdate, Unsigned, classify, history_refusal, pushed, unsigned_refusal,
-    };
+    use super::{Problem, Unsigned, Verdict, classify, history_refusal, pushed, unsigned_refusal};
 
-    fn problem(verdict: RefUpdate, name: &str) -> Problem {
+    fn problem(verdict: Verdict, name: &str) -> Problem {
         Problem {
             verdict,
             local_ref: format!("refs/heads/{name}"),
@@ -396,14 +390,14 @@ mod tests {
             (refusal.next.unwrap(), refusal.bypass.unwrap())
         };
         assert_eq!(
-            refused(&[problem(RefUpdate::Deletion, "a"), problem(RefUpdate::Deletion, "b")]),
+            refused(&[problem(Verdict::Delete, "a"), problem(Verdict::Delete, "b")]),
             (
                 "gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/a' && gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/b'".to_owned(),
                 "ALLOW_FORCE=1 git push origin :refs/heads/a :refs/heads/b".to_owned()
             )
         );
         assert_eq!(
-            refused(&[problem(RefUpdate::Deletion, "a"), problem(RefUpdate::NonFastForward, "b")]),
+            refused(&[problem(Verdict::Delete, "a"), problem(Verdict::Rewrite, "b")]),
             (
                 "git pull --rebase origin b".to_owned(),
                 "ALLOW_FORCE=1 git push --force-with-lease origin :refs/heads/a refs/heads/b:refs/heads/b".to_owned()
@@ -411,8 +405,8 @@ mod tests {
         );
         assert_eq!(
             refused(&[
-                problem(RefUpdate::NonFastForward, "a"),
-                problem(RefUpdate::Unknown, "b")
+                problem(Verdict::Rewrite, "a"),
+                problem(Verdict::Undecidable, "b")
             ])
             .0,
             "git fetch origin"
@@ -513,12 +507,12 @@ mod tests {
 
     #[test]
     fn deleting_a_ref_is_refused() {
-        assert!(matches!(classify(ZERO, "abc123"), RefUpdate::Deletion));
+        assert!(matches!(classify(ZERO, "abc123"), Verdict::Delete));
     }
 
     #[test]
     fn a_brand_new_branch_is_fine() {
-        assert!(matches!(classify("abc123", ZERO), RefUpdate::NewRef));
+        assert!(matches!(classify("abc123", ZERO), Verdict::Advance));
     }
 
     #[test]

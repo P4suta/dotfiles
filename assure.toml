@@ -12,6 +12,11 @@ path = "crates/rules/src/reaper_rules.rs"
 by = "crates/dotguard/tests/reaper_lock_replay.rs"
 
 [[owner]]
+shape = "protocol"
+path = "crates/rules/src/skill_gate_rules.rs"
+by = "crates/skill-ops/tests/skill_gate_replay.rs"
+
+[[owner]]
 shape = "parser"
 path = "crates/model/src/data.rs"
 by = "fuzz/fuzz_targets/chezmoi_data.rs"

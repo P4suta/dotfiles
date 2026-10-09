@@ -1800,3 +1800,32 @@ bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
 name = "Dotfiles.StepOrder.Vectors.windows_transitive"
 module = "Dotfiles.StepOrderVectors"
 bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/guard_rules.rs"
+probes = '''
+use production::{Ancestry, Push, civil_from_days, global_scan, image_is_pinned, overrides_policy, push, strip_attribution};
+const MISSING: Ancestry = Ancestry { known: false, descends: true };
+#[kani::proof]
+#[kani::unwind(90)]
+fn reject_removing_a_human_coauthor() { assert_eq!(strip_attribution("Co-authored-by: Human <human@example.invalid>\n").1, 1); }
+#[kani::proof]
+fn reject_admitting_a_deletion() { assert_eq!(push(b"0000", b"abcd", MISSING), Push::Advance); }
+#[kani::proof]
+fn reject_admitting_an_unknown_remote() { assert_eq!(push(b"abcd", b"ef01", MISSING), Push::Advance); }
+#[kani::proof]
+#[kani::unwind(30)]
+fn reject_a_hook_path_override() { assert!(!overrides_policy(b"core.hooksPath", b"", b"commit")); }
+#[kani::proof]
+#[kani::unwind(90)]
+fn reject_a_mutable_image_tag() { assert!(image_is_pinned(b"renovate/renovate:1.2.3")); }
+#[kani::proof]
+fn reject_the_wrong_epoch_date() { assert_ne!(civil_from_days(0), (1970, 1, 1)); }
+#[kani::proof]
+#[kani::unwind(35)]
+fn reject_losing_an_override_before_the_subcommand() { assert!(global_scan(&["-c", "core.hooksPath=x", "commit"]).next().is_none()); }
+#[kani::proof]
+#[kani::unwind(35)]
+fn reject_losing_the_words_of_a_setting() { let mut scan = global_scan(&["-c", "core.hooksPath=x", "commit"]); let _setting = scan.next(); assert_eq!(scan.index(), 0); }
+'''

@@ -606,20 +606,7 @@ const DEFAULT_IMAGE: &str = "renovate/renovate:44.52.0@sha256:778ff1b404d79ef776
 
 /// The image reference must name an exact `renovate/renovate` version with a sha256 digest, so no caller can fall back to `:latest`.
 fn image_is_pinned(image: &str) -> bool {
-    let Some(rest) = image.strip_prefix("renovate/renovate:") else {
-        return false;
-    };
-    let Some((version, digest)) = rest.split_once("@sha256:") else {
-        return false;
-    };
-    let mut parts = version.split('.');
-    let ok_version = [parts.next(), parts.next(), parts.next()]
-        .iter()
-        .all(|p| p.is_some_and(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())))
-        && parts.next().is_none();
-    ok_version
-        && digest.len() == rules::skill_rules::DIGEST_LENGTH
-        && digest.chars().all(|c| c.is_ascii_hexdigit())
+    crate::guard_rules::image_is_pinned(image.as_bytes())
 }
 
 /// The `docker` argv and the environment removals for one run.
