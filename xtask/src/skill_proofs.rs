@@ -427,7 +427,15 @@ pub fn container_run_arguments(root: &Path, image: &str, target_volume: &str) ->
     let mut mount = OsString::from("type=bind,\"source=");
     mount.push(root);
     mount.push("\",target=/source,readonly");
-    let mut arguments: Vec<OsString> = ["run", "--rm", "--mount"].map(OsString::from).into();
+    // The same image also runs the gungraun benchmarks, whose setarch disables address-space randomization through a personality change the default seccomp profile refuses.
+    let mut arguments: Vec<OsString> = [
+        "run",
+        "--rm",
+        "--security-opt=seccomp=unconfined",
+        "--mount",
+    ]
+    .map(OsString::from)
+    .into();
     arguments.push(mount);
     arguments.extend(
         [
@@ -454,16 +462,7 @@ pub fn container_run_arguments(root: &Path, image: &str, target_volume: &str) ->
 /// Kani has no native build here, so the unchanged proof gate runs on a pinned Linux verification host that mounts this checkout read-only.
 fn verify_in_container(root: &Path) -> Result<()> {
     let root = crate::canonical(root)?;
-    let engine = Tool::Docker
-        .command()
-        .args(["version", "--format", "{{.Server.Os}}"])
-        .stderr(Stdio::null())
-        .output()
-        .context("Kani proofs on this host run in a Linux container; install Docker")?;
-    ensure!(
-        engine.status.success() && String::from_utf8(engine.stdout)?.trim() == "linux",
-        "Kani proofs on this host need a running Docker engine with Linux containers"
-    );
+    ensure_linux_engine().context("Kani proofs on this host run in a Linux container")?;
     let definition = root.join(PROOF_IMAGE);
     let image = proof_image(&root)?;
     ensure_image(&root, &definition, &image)?;
@@ -494,18 +493,43 @@ pub fn verify(root: &Path) -> Result<()> {
     } else {
         verify_in_container(root)?;
     }
-    // The Quint and Alloy models run in their own pinned images without a network on every host, so the container gate leaves them out.
-    if std::env::var_os(INSIDE_CONTAINER).is_none() {
-        let manifest = obligations::manifest(root)?;
-        crate::quint::verify(root, &manifest)?;
-        crate::alloy::verify(root, &manifest)?;
-        crate::lean::verify(root, &manifest)?;
+    if std::env::var_os(INSIDE_CONTAINER).is_some() {
+        // The image pins Valgrind and the gungraun runner, so the budgets run here with them natively.
+        crate::benchmarks::verify(root)?;
+        return Ok(());
     }
+    // The models and native-host benchmarks run in their pinned images.
+    if cfg!(any(target_os = "macos", target_os = "linux")) {
+        crate::benchmarks::verify_in_container(root)?;
+    }
+    let manifest = obligations::manifest(root)?;
+    crate::quint::verify(root, &manifest)?;
+    crate::alloy::verify(root, &manifest)?;
+    crate::lean::verify(root, &manifest)?;
     Ok(())
 }
 
 /// Set inside the Kani container, whose gate leaves the Quint models to the host that started it.
-const INSIDE_CONTAINER: &str = "DOTFILES_PROOFS_CONTAINER";
+pub const INSIDE_CONTAINER: &str = "DOTFILES_PROOFS_CONTAINER";
+
+/// Requires a running Docker engine with Linux containers.
+///
+/// # Errors
+///
+/// Returns an error when the host lacks Docker or its engine serves another operating system.
+pub fn ensure_linux_engine() -> Result<()> {
+    let engine = Tool::Docker
+        .command()
+        .args(["version", "--format", "{{.Server.Os}}"])
+        .stderr(Stdio::null())
+        .output()
+        .context("the proof gates need Docker with Linux containers; install Docker")?;
+    ensure!(
+        engine.status.success() && String::from_utf8(engine.stdout)?.trim() == "linux",
+        "the proof gates need a running Docker engine with Linux containers"
+    );
+    Ok(())
+}
 
 fn verify_native(root: &Path) -> Result<()> {
     let version = Tool::Kani.command().arg("--version").output()?;

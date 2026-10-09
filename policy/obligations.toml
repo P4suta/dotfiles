@@ -1933,6 +1933,34 @@ fn reject_a_schema_no_profile_witnesses() {
 }
 '''
 
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/benchmark_rules.rs"
+probes = '''
+use production::{BENCHMARKS, Counts, complete};
+const ONCE: Counts = Counts { instructions: 1, heap: 1, measurements: 1 };
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_an_unmeasured_benchmark() {
+    let mut counts = [ONCE; BENCHMARKS];
+    counts[0].measurements = 0;
+    assert!(complete(counts, 1, false));
+}
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_a_duplicate_binary_ceiling() {
+    assert!(complete([ONCE; BENCHMARKS], 2, false));
+}
+#[kani::proof]
+fn reject_instructions_above_the_ceiling() {
+    assert!(production::instructions_hold(100, 101));
+}
+#[kani::proof]
+fn reject_an_improvement_beyond_the_instruction_band() {
+    assert!(production::instructions_hold(100, 98));
+}
+'''
+
 # The consumers' schemas, each vendored at the release the repository installs, which `just profiles` checks for every governed target of every profile.
 # Each run also plants an unknown key in every governed target, which the schema must refuse.
 # mise pins 2026.10.0 in home/.chezmoidata/versions.toml.

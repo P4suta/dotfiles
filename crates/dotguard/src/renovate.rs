@@ -509,23 +509,13 @@ pub fn is_manifest(path: &str) -> bool {
     }
     let comps: Vec<&str> = lowered.split('/').collect();
     let name = comps.last().copied().unwrap_or("");
-    let owned_name = name.to_owned();
-    let file = Path::new(&owned_name);
-    let ext = file
+    let file = Path::new(name);
+    let ext = file.extension().unwrap_or_default().to_string_lossy();
+    let stem = file.file_stem().unwrap_or_default().to_string_lossy();
+    let stem_ext = Path::new(stem.as_ref())
         .extension()
         .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
-    let stem = file
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
-    let stem_ext = Path::new(&stem)
-        .extension()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
+        .to_string_lossy();
 
     let exact = [
         "cargo.toml",

@@ -109,6 +109,8 @@ pub fn is_attribution(line: &[u8]) -> bool {
 #[must_use]
 pub fn strip_attribution(text: &str) -> (String, usize) {
     let mut removed = 0;
+    let mut out = String::with_capacity(text.len());
+    let mut last_content = 0;
     let mut rest = text;
     for _ in 0..text.len() {
         let Some((line, tail)) = next_line(rest) else {
@@ -117,20 +119,7 @@ pub fn strip_attribution(text: &str) -> (String, usize) {
         rest = tail;
         if is_attribution(line.as_bytes()) {
             removed += 1;
-        }
-    }
-    if removed == 0 {
-        return (String::from(text), 0);
-    }
-    let mut out = String::new();
-    let mut last_content = 0;
-    let mut rest = text;
-    for _ in 0..text.len() {
-        let Some((line, tail)) = next_line(rest) else {
-            break;
-        };
-        rest = tail;
-        if !is_attribution(line.as_bytes()) {
+        } else {
             out.push_str(line);
             out.push('\n');
             if !line.trim().is_empty() {
@@ -138,7 +127,12 @@ pub fn strip_attribution(text: &str) -> (String, usize) {
             }
         }
     }
-    out.truncate(last_content);
+    if removed == 0 {
+        out.clear();
+        out.push_str(text);
+    } else {
+        out.truncate(last_content);
+    }
     (out, removed)
 }
 

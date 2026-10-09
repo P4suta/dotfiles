@@ -1,0 +1,6 @@
+A clean commit message
+
+The gate reads the message, strips no attribution line from it, and
+scans its body for the managed languages, finding none.
+
+It exits without writing the file back and without starting the retry.

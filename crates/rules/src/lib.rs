@@ -50,6 +50,7 @@ mod domain {
 
 pub mod adr_rules;
 pub mod aside_rules;
+pub mod benchmark_rules;
 pub mod body_rules;
 pub mod boundary_rules;
 pub mod change_rules;

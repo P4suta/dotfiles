@@ -206,6 +206,74 @@
             "hook",
             "exact"
           ]
+        },
+        {
+          "description": "The instructions a benchmark executes under Valgrind.",
+          "type": "object",
+          "properties": {
+            "bench": {
+              "type": "string"
+            },
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "ir"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "bench",
+            "exact"
+          ]
+        },
+        {
+          "description": "The bytes live at a benchmark's peak heap usage.",
+          "type": "object",
+          "properties": {
+            "bench": {
+              "type": "string"
+            },
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "heap-peak"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "bench",
+            "exact"
+          ]
+        },
+        {
+          "description": "The bytes of the stripped binary that every host installs.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "binary-size"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "exact"
+          ]
         }
       ]
     }

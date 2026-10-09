@@ -4,6 +4,7 @@
 pub mod adr;
 pub mod agent_memory;
 pub mod alloy;
+pub mod benchmarks;
 pub mod change;
 pub mod environment;
 pub mod ignore_audit;

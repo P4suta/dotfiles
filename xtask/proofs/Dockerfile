@@ -7,6 +7,13 @@ RUN cargo install --locked kani-verifier --version 0.68.0 \
     && cargo install --locked cargo-fuzz --version 0.13.2 \
     && rm -rf /usr/local/cargo/registry
 
+# The gungraun benchmarks of the budget gate count instructions and heap peaks with Valgrind, which no other host of this repository runs.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends valgrind \
+    && rm -rf /var/lib/apt/lists/* \
+    && cargo install --locked gungraun-runner --version 0.20.0 \
+    && rm -rf /usr/local/cargo/registry
+
 # Miri interprets the pure core's tests for the host and for Windows on the nightly that Kani 0.68.0 pins.
 # Each run builds its sysroots, because a sysroot built here doesn't match the settings of a run.
 RUN rustup toolchain install nightly-2026-08-21 --profile minimal --component miri,rust-src

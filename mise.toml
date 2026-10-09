@@ -15,6 +15,7 @@ powershell = "7.6.6"
 "cargo:kani-verifier" = { version = "0.68.0", os = ["macos", "linux"] }
 "cargo:cargo-mutants" = { version = "27.1.0", os = ["macos", "linux"] }
 "cargo:cargo-fuzz" = { version = "0.13.2", os = ["macos", "linux"] }
+"cargo:gungraun-runner" = { version = "0.20.0", os = ["linux"] }
 "github:github/gh-stack" = { version = "0.2.0", bin = "gh-stack" }
 vale = "3.24.0"
 actionlint = "1.7.12"

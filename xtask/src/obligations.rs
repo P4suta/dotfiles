@@ -523,6 +523,12 @@ pub enum Metric {
     ShellExecCount { shell: String, exact: u64 },
     /// The gate processes one Git hook spawns, which `crates/dotfiles/tests/hook_exec_count.rs` counts through stand-ins.
     ExecCount { hook: String, exact: u64 },
+    /// The instructions a benchmark executes under Valgrind.
+    Ir { bench: String, exact: u64 },
+    /// The bytes live at a benchmark's peak heap usage.
+    HeapPeak { bench: String, exact: u64 },
+    /// The bytes of the stripped binary that every host installs.
+    BinarySize { exact: u64 },
 }
 
 /// The JSON Schema of the manifest.
@@ -1379,7 +1385,10 @@ pub fn metrics(baselines: &Baselines, measured: &Closure, unsafe_sites: u64) -> 
         | Metric::WallMillis { .. }
         | Metric::MinimumContrast { .. }
         | Metric::ShellExecCount { .. }
-        | Metric::ExecCount { .. } => None,
+        | Metric::ExecCount { .. }
+        | Metric::Ir { .. }
+        | Metric::HeapPeak { .. }
+        | Metric::BinarySize { .. } => None,
     })
 }
 

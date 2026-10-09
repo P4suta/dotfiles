@@ -31,6 +31,8 @@ enum Action {
     },
     /// Checks every profile in the pinned Linux container.
     ProfilesLinux,
+    /// Checks instruction, heap, and binary ceilings on the pinned Linux host.
+    Benchmarks,
     /// Writes the generated files: the architecture decision index.
     Gen {
         /// Refuses a stale generated file instead of writing it.
@@ -292,6 +294,7 @@ fn run() -> Result<()> {
             xtask::input_audit::check(&cli.root)?;
         }
         Action::ProfilesLinux => xtask::linux_profiles::check(&cli.root)?,
+        Action::Benchmarks => benchmarks(&cli.root)?,
         Action::Gen { check } => generate(&cli.root, check)?,
         Action::ThemeGrids { write } => xtask::profiles::write_theme_grids(&cli.root, write)?,
         Action::StartupPrograms { profile, home } => {
@@ -543,5 +546,13 @@ fn main() {
     if let Err(error) = environment::check().and_then(|()| run()) {
         xtask::report(&error);
         std::process::exit(1);
+    }
+}
+
+fn benchmarks(root: &Path) -> Result<()> {
+    if cfg!(target_os = "linux") {
+        xtask::benchmarks::verify(root)
+    } else {
+        xtask::benchmarks::verify_in_container(root)
     }
 }

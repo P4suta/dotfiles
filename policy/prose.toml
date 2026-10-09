@@ -5,6 +5,16 @@ reason = "Vendored Vale packages keep their upstream text."
 
 [[exempt]]
 scope = "documents"
+paths = ["benchmarks/corpus/"]
+reason = "The scanner benchmark corpus is test data whose Japanese and Greek text measures non-English input."
+
+[[exempt]]
+scope = "comments"
+paths = ["benchmarks/corpus/"]
+reason = "The scanner benchmark corpus is test data whose Japanese and Greek text measures non-English input."
+
+[[exempt]]
+scope = "documents"
 paths = ["docs/adr/"]
 reason = "Decision records keep the terms of their time, which the glossary at home/dot_config/prose/retired-terms.tsv names as its migration notes."
 
