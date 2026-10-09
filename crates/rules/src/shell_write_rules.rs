@@ -388,7 +388,6 @@ pub fn awk_program_writes(program: &str) -> bool {
             let body = statement.trim_start();
             body.starts_with("print ")
                 || body.starts_with("print(")
-                || body == "print"
                 || body.starts_with("printf ")
                 || body.starts_with("printf(")
         })
@@ -698,12 +697,10 @@ fn inspect_at(command: &str, depth: usize) -> Verdict {
         }
         if name == "xargs"
             && let Some(position) = rest.iter().position(|word| !word.starts_with('-'))
-            && rest.get(position).is_some_and(|word| {
-                in_place_flag(
-                    program(word).as_str(),
-                    rest.get(position + 1..).unwrap_or_default(),
-                )
-            })
+            && rest
+                .get(position..)
+                .and_then(|words| words.split_first())
+                .is_some_and(|(word, arguments)| in_place_flag(program(word).as_str(), arguments))
         {
             in_place = true;
         }
@@ -711,11 +708,11 @@ fn inspect_at(command: &str, depth: usize) -> Verdict {
             && let Some(marker) = rest
                 .iter()
                 .position(|word| matches!(*word, "-exec" | "-execdir" | "-ok" | "-okdir"))
-            && rest.get(marker + 1).copied().is_some_and(|editor| {
-                in_place_flag(
-                    program(editor).as_str(),
-                    rest.get(marker + FLAG_WITH_VALUE..).unwrap_or_default(),
-                )
+            && rest.get(marker..).is_some_and(|words| {
+                let [_, editor, arguments @ ..] = words else {
+                    return false;
+                };
+                in_place_flag(program(editor).as_str(), arguments)
             })
         {
             in_place = true;
@@ -806,6 +803,28 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore = "nested shell regressions allocate parsed command text")]
     fn nested_shells_and_heredocs_cannot_hide_file_writes() {
+        assert_eq!(
+            segments("sh <<'EOF'\nrg x .\nEOF"),
+            [vec!["sh"], vec!["rg", "x", "."]]
+        );
+        assert_eq!(segments("cat <<'EOF'\nrg x .\nEOF"), [vec!["cat"]]);
+        let mut body = String::from("rg x .");
+        for depth in 0..=super::SCRIPT_DEPTH {
+            body = alloc::format!("sh <<'EOF{depth}'\n{body}\nEOF{depth}");
+        }
+        let parsed = segments(&body);
+        assert_eq!(parsed.len(), super::SCRIPT_DEPTH + 1);
+        assert!(
+            !parsed
+                .iter()
+                .any(|words| words.first().is_some_and(|word| word == "rg"))
+        );
+        assert_eq!(inspect(&body), REFUSED_INTERPRETER);
+        let mut body = String::from("sh script.sh");
+        for depth in 0..super::SCRIPT_DEPTH {
+            body = alloc::format!("sh <<'EOF{depth}'\n{body}\nEOF{depth}");
+        }
+        assert_eq!(inspect(&body), Verdict::Admit);
         for command in [
             "bash -c \"cat > notes.md <<'EOF'\nbody\nEOF\"",
             "sh <<'EOF'\nsed -i s/a/b/ f\nEOF",
@@ -877,6 +896,7 @@ mod tests {
             "env sed -i 's/a/b/' file.txt",
             "mise x -- sed -i 's/a/b/' file.txt",
             "find src -name '*.rs' -exec sed -i 's/a/b/' {} +",
+            "find -- src -exec sed -i 's/a/b/' {} +",
             "git ls-files | xargs sed -i 's/a/b/'",
             "git ls-files -z | xargs -0 sed -i 's/a/b/'",
         ] {
@@ -922,6 +942,10 @@ mod tests {
     #[cfg_attr(miri, ignore = "Miri takes seconds over every command")]
     fn reading_and_project_commands_are_admitted() {
         for command in [
+            "sed --help",
+            "sh script.c 'sed -i x f'",
+            "sh -x 'sed -i x f'",
+            "bash --rcfile 'sed -i x f'",
             "cat README.md",
             "grep -rn foo src",
             "git status --short",

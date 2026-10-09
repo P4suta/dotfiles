@@ -1380,87 +1380,87 @@ mutant = "crates/rules/src/ignore_rules.rs:91:15: replace += with *= in segment_
 reason = "the segment cursor stays where it stands, so the search for the separator never ends"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:76:5: replace skip_heredoc_body -> usize with 0"
+mutant = "crates/rules/src/shell_write_rules.rs:83:5: replace skip_heredoc_body -> usize with 0"
 reason = "the scanner restarts at the first character after every heredoc, so it reads the command forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:76:5: replace skip_heredoc_body -> usize with 1"
+mutant = "crates/rules/src/shell_write_rules.rs:83:5: replace skip_heredoc_body -> usize with 1"
 reason = "the scanner restarts at the second character after every heredoc, so it reads the command forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:86:26: replace + with - in skip_heredoc_body"
+mutant = "crates/rules/src/shell_write_rules.rs:93:26: replace + with - in skip_heredoc_body"
 reason = "the body cursor steps back onto the line it read, so it reads that line forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:86:26: replace + with * in skip_heredoc_body"
+mutant = "crates/rules/src/shell_write_rules.rs:93:26: replace + with * in skip_heredoc_body"
 reason = "the body cursor stays at the line feed it read, so it reads that line forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:103:5: replace heredoc_delimiter -> (String, usize) with (String::new(), 0)"
+mutant = "crates/rules/src/shell_write_rules.rs:110:5: replace heredoc_delimiter -> (String, usize) with (String::new(), 0)"
 reason = "the scanner resumes before the heredoc operator, so it reads the operator forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:103:5: replace heredoc_delimiter -> (String, usize) with (String::new(), 1)"
+mutant = "crates/rules/src/shell_write_rules.rs:110:5: replace heredoc_delimiter -> (String, usize) with (String::new(), 1)"
 reason = "the scanner resumes before the heredoc operator, so it reads the operator forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:103:5: replace heredoc_delimiter -> (String, usize) with (\"xyzzy\".into(), 0)"
+mutant = "crates/rules/src/shell_write_rules.rs:110:5: replace heredoc_delimiter -> (String, usize) with (\"xyzzy\".into(), 0)"
 reason = "the scanner resumes before the heredoc operator, so it reads the operator forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:103:5: replace heredoc_delimiter -> (String, usize) with (\"xyzzy\".into(), 1)"
+mutant = "crates/rules/src/shell_write_rules.rs:110:5: replace heredoc_delimiter -> (String, usize) with (\"xyzzy\".into(), 1)"
 reason = "the scanner resumes before the heredoc operator, so it reads the operator forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:107:15: replace += with *= in heredoc_delimiter"
+mutant = "crates/rules/src/shell_write_rules.rs:114:15: replace += with *= in heredoc_delimiter"
 reason = "the cursor stays on the blank before the delimiter, so the loop over blanks never ends"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:117:15: replace += with *= in heredoc_delimiter"
+mutant = "crates/rules/src/shell_write_rules.rs:124:15: replace += with *= in heredoc_delimiter"
 reason = "the cursor stays on the first byte of the delimiter, so the delimiter grows forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:131:15: replace += with *= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:138:15: replace += with *= in scan"
 reason = "the scanner cursor stays on one character, so the scan never ends"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:138:27: replace += with *= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:145:27: replace += with *= in scan"
 reason = "the cursor stays inside a single-quoted word, so the word grows forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:140:23: replace += with -= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:147:23: replace += with -= in scan"
 reason = "the cursor steps back onto the closing quote, so it reopens the same quote forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:152:31: replace += with -= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:159:31: replace += with -= in scan"
 reason = "the cursor steps back over an escape, so it reads the same escape forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:157:27: replace += with *= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:164:27: replace += with *= in scan"
 reason = "the cursor stays inside a double-quoted word, so the word grows forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:159:23: replace += with -= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:166:23: replace += with -= in scan"
 reason = "the cursor steps back onto the closing quote, so it reopens the same quote forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:165:27: replace += with -= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:172:27: replace += with -= in scan"
 reason = "the cursor steps back onto the backslash, so it reads the same escape forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:176:23: replace += with -= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:183:23: replace += with -= in scan"
 reason = "the cursor steps back onto the ampersand, so it reads the same redirect forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:194:27: replace += with -= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:201:27: replace += with -= in scan"
 reason = "the cursor steps back onto the redirect, so it reads the same descriptor copy forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:198:27: replace += with -= in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:205:27: replace += with -= in scan"
 reason = "the cursor steps back onto the redirect, so it reads the same append forever"
 
 [[non-terminating]]
-mutant = "crates/rules/src/shell_write_rules.rs:204:73: replace + with - in scan"
+mutant = "crates/rules/src/shell_write_rules.rs:211:73: replace + with - in scan"
 reason = "the delimiter scan starts on the first `<` and returns there, so the cursor rereads the same here-document operator forever"
 
 [[obligation]]

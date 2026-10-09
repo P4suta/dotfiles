@@ -69,7 +69,7 @@ pub fn marker(value: &str) -> Option<Reference> {
             }
             '%' if matches!(chars.get(name), Some(letter) if letter.is_ascii_alphabetic()) => {
                 let length = name_length(&chars, name);
-                (length > 0 && chars.get(name + length) == Some(&'%')).then_some(name + length + 1)
+                (chars.get(name + length) == Some(&'%')).then_some(name + length + 1)
             }
             _ => None,
         };

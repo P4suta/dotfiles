@@ -299,39 +299,43 @@ fn a_literal_pattern_matches_only_itself() {
 }
 
 #[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(7)]
-fn a_two_byte_literal_pattern_matches_only_itself() {
-    let (pattern, pattern_length) = any_text::<3>(true);
-    kani::assume(pattern_length == 2);
-    let (path, path_length) = any_text::<2>(false);
-    let pattern = &pattern[..pattern_length];
-    let path = &path[..path_length];
-    let wild = count(pattern, b"*?") > 0;
-    let result = matches(pattern, path);
-    if !wild {
-        assert_eq!(result, same(pattern, path));
-    }
-    kani::cover!(result & wild);
-    kani::cover!(!result & wild);
-}
+mod literal_proofs {
+    use super::*;
 
-#[cfg(kani)]
-#[kani::proof]
-#[kani::unwind(7)]
-fn a_three_byte_literal_pattern_matches_only_itself() {
-    let (pattern, pattern_length) = any_text::<3>(true);
-    kani::assume(pattern_length == 3);
-    let (path, path_length) = any_text::<2>(false);
-    let pattern = &pattern[..pattern_length];
-    let path = &path[..path_length];
-    let wild = count(pattern, b"*?") > 0;
-    let result = matches(pattern, path);
-    if !wild {
-        assert_eq!(result, same(pattern, path));
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn a_two_byte_literal_pattern_matches_only_itself() {
+        let (pattern, pattern_length) = any_text::<3>(true);
+        kani::assume(pattern_length == 2);
+        let (path, path_length) = any_text::<2>(false);
+        let pattern = &pattern[..pattern_length];
+        let path = &path[..path_length];
+        let wild = count(pattern, b"*?") > 0;
+        let result = matches(pattern, path);
+        if !wild {
+            assert_eq!(result, same(pattern, path));
+        }
+        kani::cover!(result & wild);
+        kani::cover!(!result & wild);
     }
-    kani::cover!(result & wild);
-    kani::cover!(!result & wild);
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn a_three_byte_literal_pattern_matches_only_itself() {
+        let (pattern, pattern_length) = any_text::<3>(true);
+        kani::assume(pattern_length == 3);
+        let (path, path_length) = any_text::<2>(false);
+        let pattern = &pattern[..pattern_length];
+        let path = &path[..path_length];
+        let wild = count(pattern, b"*?") > 0;
+        let result = matches(pattern, path);
+        if !wild {
+            assert_eq!(result, same(pattern, path));
+        }
+        kani::cover!(result & wild);
+        kani::cover!(!result & wild);
+    }
 }
 
 #[cfg(test)]
