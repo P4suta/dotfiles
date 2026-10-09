@@ -532,6 +532,24 @@ mod tests {
     #[cfg_attr(miri, ignore = "Miri takes seconds over every reachable store")]
     fn the_fixed_store_reaches_exactly_the_states_tlc_counts_and_each_is_safe() {
         let states = reachable(Store::Fixed);
+        let complete = Gate {
+            events: MAX_EVENTS,
+            draft: Some(MAX_EVENTS),
+            reviewed: Some(MAX_EVENTS),
+            ..gate()
+        };
+        assert!(!pending(Store::Fixed, &complete));
+        assert!(pending(
+            Store::Fixed,
+            &Gate {
+                draft: Some(MAX_EVENTS + 1),
+                ..complete
+            }
+        ));
+        assert_eq!(
+            review_complete(true, &[(0, false), (1, false)], &[(0, true)]),
+            Err(Gap::Undecided)
+        );
         assert_eq!(states.len(), DISTINCT_STATES);
         for state in &states {
             assert!(proofs::invariant(state), "{state:?}");

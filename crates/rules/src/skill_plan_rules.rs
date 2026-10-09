@@ -1044,9 +1044,35 @@ mod tests {
                     .collect();
                 let deps = proofs::catalog(&masks);
                 let deps: Vec<&[usize]> = deps.iter().map(Vec::as_slice).collect();
+                let mut edges = [0; WORD_SKILLS];
+                edges[..masks.len()].copy_from_slice(&masks);
+                let graph = WordGraph {
+                    count: deps.len(),
+                    edges,
+                };
+                assert_eq!(word_cyclic(&graph), plan(&deps, &[]) == Err(Failure::Cycle));
                 for requested in 0..=count {
                     let requested = usize::try_from(requested).unwrap_or(0);
                     let planned = proofs::spec_plan(&deps, &[requested]);
+                    let requested_bits = 1u8 << requested;
+                    assert_eq!(
+                        word_unknown(&graph, requested_bits),
+                        requested == deps.len()
+                    );
+                    let word = word_plan(graph, requested_bits).map(|word| {
+                        assert!(word_valid(&graph, requested_bits, &word));
+                        word.skills[..word.length].to_vec()
+                    });
+                    assert_eq!(planned, word);
+                    let requests = [requested];
+                    let in_place = super::input(&deps, &requests).and_then(|input| {
+                        let mut output = alloc::vec![0; deps.len()];
+                        plan_into(input, &mut output).map(|length| {
+                            output.truncate(length);
+                            output
+                        })
+                    });
+                    assert_eq!(planned, in_place);
                     let mut reference = alloc::vec![0; deps.len()];
                     let reference = slice_plan(&deps, &[requested], &mut reference).map(|length| {
                         reference.truncate(length);
@@ -1057,6 +1083,35 @@ mod tests {
             }
         }
         let deps: [&[usize]; 3] = [&[], &[2, 0], &[0]];
+        let graph = WordGraph {
+            count: 2,
+            edges: [0; WORD_SKILLS],
+        };
+        let mut repeated = WordPlan {
+            skills: [0; WORD_SKILLS],
+            length: 2,
+        };
+        assert!(!word_valid(&graph, 1, &repeated));
+        repeated.skills[1] = 1;
+        assert!(word_valid(&graph, 3, &repeated));
+        let mut dependent = graph;
+        dependent.edges[0] = 2;
+        assert!(!word_valid(&dependent, 3, &repeated));
+        let unknown = WordGraph {
+            count: 1,
+            edges: [2; WORD_SKILLS],
+        };
+        assert!(word_unknown(&unknown, 1));
+        assert!(matches!(word_plan(unknown, 1), Err(Failure::Unknown)));
+        let too_large = WordGraph {
+            count: WORD_SKILLS + 1,
+            edges: [0; WORD_SKILLS],
+        };
+        assert!(matches!(word_plan(too_large, 0), Err(Failure::Unknown)));
+        assert_eq!(
+            plan_into(super::input(&[&[]], &[0]).unwrap(), &mut []),
+            Err(Failure::Unknown)
+        );
         assert_eq!(plan(&deps, &[1]), Ok(Vec::from([0, 2, 1])));
         assert_eq!(plan(&deps, &[2]), Ok(Vec::from([0, 2])));
         assert_eq!(plan(&deps, &[]), Ok(Vec::new()));
