@@ -135,6 +135,39 @@ fn the_image_is_named_by_its_definition_and_changes_with_it() {
 }
 
 #[test]
+fn the_image_identity_covers_pins_and_rejects_missing_or_drifting_pins() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let scope = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(scope.path().join("xtask/proofs")).unwrap();
+    for path in ["mise.toml", "mise.lock", "xtask/proofs/Dockerfile"] {
+        std::fs::copy(root.join(path), scope.path().join(path)).unwrap();
+    }
+    let first = xtask::skill_proofs::proof_image(scope.path()).unwrap();
+    let lock = std::fs::read_to_string(scope.path().join("mise.lock")).unwrap();
+    let table: toml::Value = toml::from_str(&lock).unwrap();
+    let digest =
+        table["tools"]["powershell"].as_array().unwrap()[0]["platforms.linux-x64"]["checksum"]
+            .as_str()
+            .unwrap();
+    let altered = lock.replace(digest, &digest.replace('d', "a"));
+    assert_ne!(lock, altered);
+    std::fs::write(scope.path().join("mise.lock"), altered).unwrap();
+    assert_ne!(
+        first,
+        xtask::skill_proofs::proof_image(scope.path()).unwrap()
+    );
+    std::fs::write(scope.path().join("mise.lock"), lock).unwrap();
+    std::fs::write(
+        scope.path().join("mise.toml"),
+        "[tools]\npowershell = '0'\n",
+    )
+    .unwrap();
+    assert!(xtask::skill_proofs::proof_image(scope.path()).is_err());
+    std::fs::write(scope.path().join("mise.lock"), "[tools]\n").unwrap();
+    assert!(xtask::skill_proofs::proof_image(scope.path()).is_err());
+}
+
+#[test]
 fn checkouts_never_share_a_build_cache() {
     let first = container_target_volume(Path::new(r"C:\Users\fixture\dotfiles"));
     assert_eq!(

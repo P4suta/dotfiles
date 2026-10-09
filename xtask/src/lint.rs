@@ -288,6 +288,9 @@ fn analyze(
     let module = analyzer_module()?;
     let script = "$ErrorActionPreference = 'Stop'
 Import-Module -Name $env:DOTFILES_ANALYZER_MODULE -Force
+if ((Get-Module PSScriptAnalyzer).Version.ToString() -ne $env:DOTFILES_ANALYZER_VERSION) {
+  throw 'The loaded analyzer version differs from its pin'
+}
 foreach ($line in ($env:DOTFILES_ANALYZER_INPUTS -split \"`n\")) {
   if (-not $line) { continue }
   $label, $path = $line -split \"`t\", 2
@@ -310,6 +313,10 @@ foreach ($line in ($env:DOTFILES_ANALYZER_INPUTS -split \"`n\")) {
         .current_dir(root)
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .env("DOTFILES_ANALYZER_MODULE", &module)
+        .env(
+            "DOTFILES_ANALYZER_VERSION",
+            platform::script_analyzer::VERSION,
+        )
         .env(
             "DOTFILES_ANALYZER_SETTINGS",
             root.join(SCRIPT_ANALYZER_SETTINGS),

@@ -11,13 +11,46 @@ pub const VERSION: &str = "1.25.0";
 
 /// The SHA-256 of the analyzer assembly that release ships.
 pub const ASSEMBLY_SHA256: &str =
-    "145ba1459672da808757b2bc6c6494926a13d92353ccd6a0354a0d5d8fe14a5f";
+    "c377532a1d8d8975e598891602b5c3ed39ab719f589d054eb889d11eb6ccaea3";
 
 /// The analyzer assembly inside the module directory, whose digest identifies the release.
-pub const ASSEMBLY: &str = "Microsoft.Windows.PowerShell.ScriptAnalyzer.dll";
+pub const ASSEMBLY: &str = "PSv7/Microsoft.Windows.PowerShell.ScriptAnalyzer.dll";
 
 /// The module name PowerShell imports.
 pub const MODULE: &str = "PSScriptAnalyzer";
+
+/// Every entry point and dependency that PowerShell 7 loads from the release.
+const RELEASE_FILES: [(&str, &str); 8] = [
+    (ASSEMBLY, ASSEMBLY_SHA256),
+    (
+        "PSScriptAnalyzer.psd1",
+        "2b219f688bcdd67101040f845e530b22907d39bbf49089b4b5b2afaba7996791",
+    ),
+    (
+        "PSScriptAnalyzer.psm1",
+        "b69773fc9080cfb958dc13c95e42a625553e9bca5dcbedc27231e5c183a4e869",
+    ),
+    (
+        "ScriptAnalyzer.types.ps1xml",
+        "34246566553fe97c96a9ffea8aeefee353c1e07e41a72d3bfe9fdf826cc71d2a",
+    ),
+    (
+        "ScriptAnalyzer.format.ps1xml",
+        "d647e6c1cdfe4052d2382f2d76b899ec596ec71d23d724553b93f74827d49044",
+    ),
+    (
+        "PSv7/Microsoft.PowerShell.CrossCompatibility.dll",
+        "d92cb413e18927bb64d9bac221191fc69cf1659f55c72c27ddf1fe19ef774caf",
+    ),
+    (
+        "PSv7/Microsoft.Windows.PowerShell.ScriptAnalyzer.BuiltinRules.dll",
+        "c8aa9890743a6d9c47ccfee5ec33caaee58c30591454d3ccf379720025a1533c",
+    ),
+    (
+        "PSv7/Pluralize.NET.dll",
+        "eeecdf663a3e854f67bbbb872dc45577e785a581c1ca86ea2ae1d8215b8505d6",
+    ),
+];
 
 /// The directory that `Save-Module -Path base` writes the pinned release into.
 #[must_use]
@@ -65,20 +98,22 @@ pub fn save(base: &Path) -> Result<()> {
 /// Returns an error for a missing release or an assembly digest mismatch.
 pub fn verified(base: &Path) -> Result<PathBuf> {
     let directory = module_directory(base);
-    let assembly = directory.join(ASSEMBLY);
-    let bytes = std::fs::read(&assembly).with_context(|| {
-        format!(
-            "PSScriptAnalyzer {VERSION} is missing at {}",
+    for (name, expected) in RELEASE_FILES {
+        let file = directory.join(name);
+        let bytes = std::fs::read(&file).with_context(|| {
+            format!(
+                "PSScriptAnalyzer {VERSION} is missing at {}",
+                directory.display()
+            )
+        })?;
+        let digest = crate::build_inputs::hex(&Sha256::digest(&bytes));
+        ensure!(
+            digest == expected,
+            "{} has SHA-256 {digest}, not the {expected} of PSScriptAnalyzer {VERSION}; delete {} and save the pinned release again",
+            file.display(),
             directory.display()
-        )
-    })?;
-    let digest = crate::build_inputs::hex(&Sha256::digest(&bytes));
-    ensure!(
-        digest == ASSEMBLY_SHA256,
-        "{} has SHA-256 {digest}, not the {ASSEMBLY_SHA256} of PSScriptAnalyzer {VERSION}; delete {} and save the pinned release again",
-        assembly.display(),
-        directory.display()
-    );
+        );
+    }
     Ok(directory.join(format!("{MODULE}.psd1")))
 }
 
@@ -92,7 +127,7 @@ mod tests {
         let missing = verified(base.path()).unwrap_err();
         assert!(format!("{missing:#}").contains("missing"), "{missing:#}");
         let directory = module_directory(base.path());
-        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::create_dir_all(directory.join("PSv7")).unwrap();
         std::fs::write(directory.join(ASSEMBLY), b"another release").unwrap();
         let mismatched = verified(base.path()).unwrap_err();
         assert!(

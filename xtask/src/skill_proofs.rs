@@ -282,6 +282,115 @@ pub fn container_image(definition: &[u8]) -> String {
     format!("dotfiles-proofs:{}", short_digest(definition))
 }
 
+/// The definition of the Linux verification image.
+pub const PROOF_IMAGE: &str = "xtask/proofs/Dockerfile";
+const MISE_CONFIG: &str = "mise.toml";
+const MISE_LOCK: &str = "mise.lock";
+const POWERSHELL_PLATFORM: &str = "platforms.linux-x64";
+const SHA256_HEX_DIGITS: usize = 64;
+
+#[derive(Debug)]
+struct ImagePins {
+    powershell: String,
+    powershell_sha256: String,
+}
+
+impl ImagePins {
+    fn load(root: &Path) -> Result<Self> {
+        let config: toml::Value = toml::from_str(&fs::read_to_string(root.join(MISE_CONFIG))?)?;
+        let lock: toml::Value = toml::from_str(&fs::read_to_string(root.join(MISE_LOCK))?)?;
+        let pin = lock
+            .get("tools")
+            .and_then(|tools| tools.get("powershell"))
+            .and_then(toml::Value::as_array)
+            .and_then(|entries| entries.first())
+            .context("PowerShell has no locked release")?;
+        let version = pin
+            .get("version")
+            .and_then(toml::Value::as_str)
+            .context("PowerShell has no version")?;
+        ensure!(
+            config
+                .get("tools")
+                .and_then(|tools| tools.get("powershell"))
+                .and_then(toml::Value::as_str)
+                == Some(version),
+            "PowerShell configuration and lockfile versions differ"
+        );
+        let digest = pin
+            .get(POWERSHELL_PLATFORM)
+            .and_then(|platform| platform.get("checksum"))
+            .and_then(toml::Value::as_str)
+            .and_then(|digest| digest.strip_prefix("sha256:"))
+            .context("PowerShell has no Linux SHA-256")?;
+        ensure!(
+            digest.len() == SHA256_HEX_DIGITS
+                && digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "PowerShell has an invalid Linux SHA-256"
+        );
+        Ok(Self {
+            powershell: version.to_owned(),
+            powershell_sha256: digest.to_owned(),
+        })
+    }
+
+    fn arguments(&self) -> [String; 4] {
+        [
+            format!("POWERSHELL_VERSION={}", self.powershell),
+            format!("POWERSHELL_SHA256={}", self.powershell_sha256),
+            format!("ANALYZER_VERSION={}", platform::script_analyzer::VERSION),
+            format!(
+                "ANALYZER_SHA256={}",
+                platform::script_analyzer::ASSEMBLY_SHA256
+            ),
+        ]
+    }
+}
+
+/// The image identity covers its definition and every release pin its build uses.
+///
+/// # Errors
+///
+/// Returns an error when reading a pin or the image definition fails.
+pub fn proof_image(root: &Path) -> Result<String> {
+    let mut definition = fs::read(root.join(PROOF_IMAGE))?;
+    for argument in ImagePins::load(root)?.arguments() {
+        definition.extend_from_slice(argument.as_bytes());
+        definition.push(b'\n');
+    }
+    Ok(container_image(&definition))
+}
+
+/// Builds an absent image with the native gate's release pins.
+///
+/// # Errors
+///
+/// Returns an error when a pin or Docker command fails.
+pub fn ensure_image(root: &Path, definition: &Path, image: &str) -> Result<()> {
+    let present = Tool::Docker
+        .command()
+        .args(["image", "inspect", image])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if present.success() {
+        return Ok(());
+    }
+    let mut command = Tool::Docker.command();
+    command
+        .args(["build", "--tag", image, "--file"])
+        .arg(definition);
+    for pin in ImagePins::load(root)?.arguments() {
+        command.arg("--build-arg").arg(pin);
+    }
+    let status = command.arg(root.join("xtask/proofs")).status()?;
+    ensure!(
+        status.success(),
+        "building the verification image failed: {status}"
+    );
+    Ok(())
+}
+
 #[must_use]
 pub fn container_target_volume(root: &Path) -> String {
     format!(
@@ -335,30 +444,9 @@ fn verify_in_container(root: &Path) -> Result<()> {
         engine.status.success() && String::from_utf8(engine.stdout)?.trim() == "linux",
         "Kani proofs on this host need a running Docker engine with Linux containers"
     );
-    let definition = root.join("xtask/proofs/Dockerfile");
-    let image = container_image(&fs::read(&definition)?);
-    let present = Tool::Docker
-        .command()
-        .args(["image", "inspect"])
-        .arg(&image)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if !present.success() {
-        let status = Tool::Docker
-            .command()
-            .args(["build", "--tag"])
-            .arg(&image)
-            .arg("--file")
-            .arg(&definition)
-            .arg(root.join("xtask/proofs"))
-            .status()
-            .context("build the pinned Kani verification image")?;
-        ensure!(
-            status.success(),
-            "cannot build the pinned Kani verification image: {status}"
-        );
-    }
+    let definition = root.join(PROOF_IMAGE);
+    let image = proof_image(&root)?;
+    ensure_image(&root, &definition, &image)?;
     let status = Tool::Docker
         .command()
         .args(container_run_arguments(

@@ -1,6 +1,24 @@
 # Linux verification host for `xtask proofs` where Kani has no native build.
 FROM docker.io/library/rust:1.99.0-bookworm@sha256:59037199c44290f2befcdd58dcc540164763fc296950255aaefeef096a1866b0
 
+ARG POWERSHELL_VERSION
+ARG POWERSHELL_SHA256
+ARG ANALYZER_VERSION
+ARG ANALYZER_SHA256
+
+# The image saves the analyzer release that the native gate pins.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libicu72 zsh \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/powershell \
+    && curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz" -o /tmp/powershell.tar.gz \
+    && echo "${POWERSHELL_SHA256}  /tmp/powershell.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/powershell.tar.gz -C /opt/powershell \
+    && chmod +x /opt/powershell/pwsh \
+    && ln -s /opt/powershell/pwsh /usr/local/bin/pwsh \
+    && pwsh -NoLogo -NoProfile -NonInteractive -Command '$ErrorActionPreference = "Stop"; Save-Module -Name PSScriptAnalyzer -RequiredVersion $env:ANALYZER_VERSION -Path /root/.cache/dotfiles/psscriptanalyzer -Repository PSGallery -Force; $assembly = "/root/.cache/dotfiles/psscriptanalyzer/PSScriptAnalyzer/$env:ANALYZER_VERSION/PSv7/Microsoft.Windows.PowerShell.ScriptAnalyzer.dll"; if ((Get-FileHash -LiteralPath $assembly -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:ANALYZER_SHA256) { throw "Analyzer checksum mismatch" }' \
+    && rm /tmp/powershell.tar.gz
+
 RUN cargo install --locked kani-verifier --version 0.68.0 \
     && cargo kani setup \
     && cargo install --locked cargo-mutants --version 27.1.0 \
