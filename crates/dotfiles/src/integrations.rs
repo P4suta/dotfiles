@@ -1,8 +1,8 @@
 //! The shell integrations each tool generates and the agent integrations a host installs.
 
-use crate::runtime::{Runner, args, checked, optional, replace};
+use crate::runtime::{Runner, args, checked, initialization, optional, replace};
 use crate::tool::Tool;
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use std::path::Path;
 
@@ -95,7 +95,7 @@ pub fn shell_caches(home: &Path, runner: &mut impl Runner) -> Result<()> {
     ] {
         let target = generated.join(format!("{name}.nu"));
         if runner.available(tool) {
-            let mut bytes = checked(runner, tool, &arguments)?;
+            let mut bytes = initialization(runner, tool, &arguments)?;
             if name == "ls-colors" {
                 let colors = String::from_utf8(bytes)?;
                 ensure!(
@@ -105,14 +105,15 @@ pub fn shell_caches(home: &Path, runner: &mut impl Runner) -> Result<()> {
                 bytes = format!("$env.LS_COLORS = r#'{}'#\n", colors.trim_end()).into_bytes();
             }
             if name == "atuin" {
-                bytes = without_startup_index(&String::from_utf8(bytes)?).into_bytes();
+                bytes = without_startup_index(&String::from_utf8(bytes)?)?.into_bytes();
             }
             replace(&target, &bytes, false)?;
         } else if !target.exists() {
             replace(&target, b"", false)?;
         }
     }
-    zsh_caches(home, runner)
+    zsh_caches(home, runner)?;
+    pwsh_caches(home, runner)
 }
 
 /// The directory of the zsh initialization caches, which `.zshrc` sources so a new shell starts no program.
@@ -123,6 +124,7 @@ pub const ZSH_CACHE: &str = ".cache/zsh";
 fn zsh_caches(home: &Path, runner: &mut impl Runner) -> Result<()> {
     let cache = home.join(ZSH_CACHE);
     for (name, tool, arguments) in [
+        ("brew", Tool::Brew, args(&["shellenv"])),
         ("mise", Tool::Mise, args(&["activate", "zsh"])),
         (
             "starship",
@@ -145,9 +147,10 @@ fn zsh_caches(home: &Path, runner: &mut impl Runner) -> Result<()> {
         if !runner.available(tool) {
             continue;
         }
-        let text = String::from_utf8(checked(runner, tool, &arguments)?)?;
+        let text = String::from_utf8(initialization(runner, tool, &arguments)?)?;
         let script = match name {
             "mise" => deferred_mise(&text),
+            "atuin" => without_atuin_zsh_index(&text),
             "ls-colors" => {
                 ensure!(
                     !text.contains('\''),
@@ -162,52 +165,69 @@ fn zsh_caches(home: &Path, runner: &mut impl Runner) -> Result<()> {
     Ok(())
 }
 
+fn pwsh_caches(home: &Path, runner: &mut impl Runner) -> Result<()> {
+    for (name, tool, arguments) in [
+        ("mise", Tool::Mise, args(&["activate", "pwsh"])),
+        (
+            "starship",
+            Tool::Starship,
+            args(&["init", "powershell", "--print-full-init"]),
+        ),
+        ("zoxide", Tool::Zoxide, args(&["init", "powershell"])),
+    ] {
+        if runner.available(tool) {
+            let text = String::from_utf8(initialization(runner, tool, &arguments)?)?;
+            let script = if name == "mise" {
+                deferred_mise(&text)
+            } else {
+                text
+            };
+            replace(
+                &home.join(format!(".cache/pwsh/{name}.ps1")),
+                script.as_bytes(),
+                false,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 /// Atuin's Nushell initialization without the top-level block that starts `atuin __internal prepare-search-index` in a background job as the shell starts.
 /// Atuin builds its search index on the first search instead, and the hooks that run at each prompt stay.
-#[must_use]
-pub fn without_startup_index(initialization: &str) -> String {
-    let mut kept = String::new();
-    let mut block: Vec<&str> = Vec::new();
-    for line in initialization.lines() {
-        if block.is_empty() && !line.starts_with("if ") {
-            kept.push_str(line);
-            kept.push('\n');
-            continue;
-        }
-        block.push(line);
-        if line == "}" {
-            if !block
-                .iter()
-                .any(|line| line.contains("prepare-search-index"))
-            {
-                for line in &block {
-                    kept.push_str(line);
-                    kept.push('\n');
-                }
-            }
-            block.clear();
-        }
-    }
-    for line in block {
-        kept.push_str(line);
-        kept.push('\n');
-    }
-    kept
+///
+/// # Errors
+///
+/// Returns an error if a selected job doesn't end at a character boundary.
+pub fn without_startup_index(initialization: &str) -> Result<String> {
+    let Some(span) = rules::shell_cache_rules::startup_index(initialization.as_bytes()) else {
+        return Ok(initialization.to_owned());
+    };
+    let before = initialization
+        .get(..span.start)
+        .context("the index job starts at a character boundary")?;
+    let after = initialization
+        .get(span.end..)
+        .context("the index job ends at a character boundary")?;
+    Ok(format!("{before}{after}"))
 }
 
 /// The mise activation without the lines that run `mise hook-env` and pin the generating process's `PATH` as the shell sources it.
 /// The first prompt's hook then computes the environment from the shell's own `PATH`.
 #[must_use]
 pub fn deferred_mise(activation: &str) -> String {
-    activation
+    kept_lines(activation, rules::shell_cache_rules::keep_mise_line)
+}
+
+/// Atuin's zsh initialization with its detached index job deferred to the first search.
+#[must_use]
+pub fn without_atuin_zsh_index(initialization: &str) -> String {
+    kept_lines(initialization, rules::shell_cache_rules::keep_atuin_line)
+}
+
+fn kept_lines(initialization: &str, keep: fn(&[u8]) -> bool) -> String {
+    initialization
         .lines()
-        .filter(|line| {
-            *line != "_mise_hook --force"
-                && !line.starts_with("export PATH='")
-                && !line.starts_with("export __MISE_ORIG_PATH='")
-                && !line.starts_with("export __MISE_ZSH_ACTIVATE_PATH=")
-                && !line.starts_with("export __MISE_ZSH_ACTIVATE_ENV=")
-        })
+        .filter(|line| keep(line.as_bytes()))
         .fold(String::new(), |mut kept, line| {
             kept.push_str(line);
             kept.push('\n');
@@ -297,9 +317,9 @@ mod tests {
 
     #[test]
     fn the_atuin_module_starts_no_index_job_but_keeps_its_prompt_hooks() {
-        let initialization = "if 'ATUIN_SESSION' not-in $env {\n    $env.ATUIN_SESSION = (random uuid -v 7)\n}\nlet _atuin_pre_prompt = {||\n    job spawn { ^atuin history end } | ignore\n}\nif (version).minor >= 104 {\n    with-env { ATUIN_SHELL: nu } {\n        job spawn {\n            atuin __internal prepare-search-index | complete\n        } | ignore\n    }\n}\n$env.config = ($env.config | default [] keybindings)\n";
+        let initialization = "if 'ATUIN_SESSION' not-in $env {\n    $env.ATUIN_SESSION = (random uuid -v 7)\n}\nlet _atuin_pre_prompt = {||\n    job spawn { ^atuin history end } | ignore\n}\nif (version).minor >= 104 or (version).major > 0 {\n    with-env { ATUIN_SHELL: nu } {\n        job spawn {\n            atuin __internal prepare-search-index | complete\n        } | ignore\n    }\n}\n$env.config = ($env.config | default [] keybindings)\n";
         assert_eq!(
-            without_startup_index(initialization),
+            without_startup_index(initialization).unwrap(),
             "if 'ATUIN_SESSION' not-in $env {\n    $env.ATUIN_SESSION = (random uuid -v 7)\n}\nlet _atuin_pre_prompt = {||\n    job spawn { ^atuin history end } | ignore\n}\n$env.config = ($env.config | default [] keybindings)\n"
         );
     }

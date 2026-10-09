@@ -1,4 +1,4 @@
-let home = $nu.home-dir
+let home = ($env.HOME? | default $nu.home-dir)
 let onepassword_agent = (
   $home | path join "Library" "Group Containers" "2BUA8C4S2C.com.1password" "t" "agent.sock"
 )
@@ -14,7 +14,7 @@ def dotfiles-system-path [] {
 }
 
 def --env dotfiles-prepend-path [] {
-  let home = $nu.home-dir
+  let home = ($env.HOME? | default $nu.home-dir)
   $env.PATH = (
     $env.PATH
     | prepend (dotfiles-system-path)

@@ -1,14 +1,15 @@
 # ~/.local/bin holds git.exe, the dotguard copy that applies the Mac and Linux Git policy, so it must precede Git for Windows from the machine PATH.
 $localBin = Join-Path $HOME '.local\bin'
-$env:Path = (@($localBin) + @($env:Path -split ';' | Where-Object { $_ -and $_ -ne $localBin })) -join ';'
+$pathSeparator = [IO.Path]::PathSeparator
+$env:Path = (@($localBin) + @($env:Path -split $pathSeparator | Where-Object { $_ -and $_ -ne $localBin })) -join $pathSeparator
 
 $herdrBin = "$env:LOCALAPPDATA\Programs\Herdr\bin"
 if ($env:Path -notlike "*$herdrBin*") {
-    $env:Path = "$herdrBin;$env:Path"
+    $env:Path = "$herdrBin$pathSeparator$env:Path"
 }
 
 if (-not (Get-Module PSReadLine)) {
-    $env:Path = "$env:Path;$env:LOCALAPPDATA\mise\shims"
+    $env:Path = "$env:Path$pathSeparator$env:LOCALAPPDATA\mise\shims"
     return
 }
 

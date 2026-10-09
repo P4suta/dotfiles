@@ -1894,3 +1894,22 @@ probe = '''
 Write-Host 'probe'
 '''
 finding = "PSAvoidUsingWriteHost"
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/shell_cache_rules.rs"
+probes = '''
+use production::{keep_atuin_line, keep_mise_line, startup_index};
+#[kani::proof]
+fn reject_starting_atuins_zsh_index_job() {
+    assert!(keep_atuin_line(b"(ATUIN_SHELL=zsh atuin __internal prepare-search-index >/dev/null 2>&1 &)"));
+}
+#[kani::proof]
+fn reject_running_the_forced_mise_hook_during_startup() {
+    assert!(keep_mise_line(b"_mise_hook --force"));
+}
+#[kani::proof]
+fn reject_dropping_an_unrelated_index_block() {
+    assert!(startup_index(b"if other {\n    print 'prepare-search-index'\n}\n").is_some());
+}
+'''

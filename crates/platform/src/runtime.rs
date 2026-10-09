@@ -24,6 +24,15 @@ pub trait Runner {
     ///
     /// Returns an error when the tool can't start.
     fn run(&mut self, tool: Tool, arguments: &[OsString]) -> Result<Reply>;
+    /// Generates initialization without a parent shell's mise session.
+    /// Runners with no inherited environment use their ordinary captured reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the generator can't start.
+    fn initialization(&mut self, tool: Tool, arguments: &[OsString]) -> Result<Reply> {
+        self.run(tool, arguments)
+    }
     /// Run a binary this repository installed at a known path, such as a bundle executable it just verified.
     ///
     /// # Errors
@@ -140,7 +149,32 @@ impl Runner for Real {
             bytes: output.stdout,
         })
     }
+
+    fn initialization(&mut self, tool: Tool, arguments: &[OsString]) -> Result<Reply> {
+        let mut command = self.command(tool);
+        for name in MISE_SESSION {
+            command.env_remove(name);
+        }
+        let output = command
+            .args(arguments)
+            .stdin(Stdio::null())
+            .stderr(Stdio::inherit())
+            .output()
+            .with_context(|| format!("generate {} initialization", tool.program()))?;
+        Ok(Reply {
+            success: output.status.success(),
+            bytes: output.stdout,
+        })
+    }
 }
+
+/// A cached initialization belongs to its future shell rather than the generating session.
+pub const MISE_SESSION: &[&str] = &[
+    "__MISE_DIFF",
+    "__MISE_SESSION",
+    "__MISE_ORIG_PATH",
+    "MISE_SHELL",
+];
 
 /// The Cargo target directory every hook gate shares, so a linked worktree never keeps its own build.
 #[must_use]
@@ -206,6 +240,21 @@ fn executable(path: &Path) -> bool {
 pub fn checked(runner: &mut impl Runner, tool: Tool, arguments: &[OsString]) -> Result<Vec<u8>> {
     let reply = runner.run(tool, arguments)?;
     ensure!(reply.success, "{} failed", tool.program());
+    Ok(reply.bytes)
+}
+
+/// Captures a successful initialization without the parent shell's mise session.
+///
+/// # Errors
+///
+/// Returns an error when the generator can't start or fails.
+pub fn initialization(
+    runner: &mut impl Runner,
+    tool: Tool,
+    arguments: &[OsString],
+) -> Result<Vec<u8>> {
+    let reply = runner.initialization(tool, arguments)?;
+    ensure!(reply.success, "{} initialization failed", tool.program());
     Ok(reply.bytes)
 }
 

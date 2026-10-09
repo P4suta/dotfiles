@@ -558,6 +558,24 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
         fixture.check_setup(&dump, &source_data["platforms"][profile.name()])?;
         fixture.apply_files()?;
         fixture.check_merged_targets(&dump)?;
+        let counted = cached_startup_programs(&fixture.destination, &dump)?;
+        let measured = counted
+            .iter()
+            .map(|(shell, programs)| Ok((*shell, u64::try_from(programs.len())?)))
+            .collect::<Result<Vec<_>>>()?;
+        let baselines = crate::obligations::parse_baselines(&fs::read_to_string(
+            root.join(crate::obligations::BASELINES),
+        )?)?;
+        let refusals = crate::obligations::exec_counts(&baselines, &measured);
+        for (shell, programs) in &counted {
+            println!(
+                "{}: {shell} started {} programs: {}",
+                profile.name(),
+                programs.len(),
+                programs.join(", ")
+            );
+        }
+        ensure!(refusals.is_empty(), "{}", refusals.join("\n"));
         git_policies.push((profile, fixture.git_policy()?));
         println!(
             "Rendered, applied twice, and verified {} in an owned fixture",
@@ -631,14 +649,60 @@ pub fn startup_shells(dump: &Value) -> Vec<crate::startup::Shell> {
 /// Returns an error when the profile fails to render or apply, a cache fails to write, or a shell can't start.
 pub fn startup_programs(root: &Path, profile: Profile) -> Result<Vec<(&'static str, Vec<String>)>> {
     let scratch = tempfile::tempdir()?;
-    // mise writes the home into its Nushell activation unquoted, so this home keeps to plain characters.
-    let fixture = Fixture::at(root, &scratch.path().join(profile.name()), profile, "home")?;
+    let fixture = Fixture::new(root, &scratch.path().join(profile.name()), profile)?;
     let (dump, _) = fixture.render(None)?;
     fixture.apply_files()?;
     let home = &fixture.destination;
-    dotfiles::integrations::shell_caches(home, &mut platform::runtime::Real::new(home)?)?;
+    cached_startup_programs(home, &dump)
+}
+
+fn cached_startup_programs(home: &Path, dump: &Value) -> Result<Vec<(&'static str, Vec<String>)>> {
+    for directory in ["AppData/Roaming", "AppData/Local", ".local/share"] {
+        fs::create_dir_all(home.join(directory))?;
+    }
+    let mut runner = platform::runtime::Real::new(home)?;
+    runner.environment.extend([
+        ("HOME".into(), home.as_os_str().to_owned()),
+        ("USERPROFILE".into(), home.as_os_str().to_owned()),
+        (
+            "APPDATA".into(),
+            home.join("AppData/Roaming").into_os_string(),
+        ),
+        (
+            "LOCALAPPDATA".into(),
+            home.join("AppData/Local").into_os_string(),
+        ),
+        (
+            "XDG_CONFIG_HOME".into(),
+            home.join(".config").into_os_string(),
+        ),
+        (
+            "XDG_DATA_HOME".into(),
+            home.join(".local/share").into_os_string(),
+        ),
+    ]);
+    dotfiles::integrations::shell_caches(home, &mut runner)?;
+    for (tool, cache) in [
+        (Tool::Mise, ".config/nushell/generated/mise.nu"),
+        (Tool::Starship, ".config/nushell/generated/starship.nu"),
+        (Tool::Atuin, ".config/nushell/generated/atuin.nu"),
+        (Tool::Television, ".config/nushell/generated/television.nu"),
+        (Tool::Zoxide, ".config/nushell/generated/zoxide.nu"),
+        (Tool::Vivid, ".config/nushell/generated/ls-colors.nu"),
+        (Tool::Mise, ".cache/pwsh/mise.ps1"),
+        (Tool::Starship, ".cache/pwsh/starship.ps1"),
+        (Tool::Zoxide, ".cache/pwsh/zoxide.ps1"),
+    ] {
+        if platform::runtime::Runner::available(&runner, tool) {
+            ensure!(
+                !fs::read(home.join(cache))?.is_empty(),
+                "{cache} has no initialization from {}",
+                tool.program()
+            );
+        }
+    }
     let path = std::env::var_os("PATH").unwrap_or_default();
-    startup_shells(&dump)
+    startup_shells(dump)
         .into_iter()
         .map(|shell| Ok((shell.name(), crate::startup::started(shell, home, &path)?)))
         .collect()

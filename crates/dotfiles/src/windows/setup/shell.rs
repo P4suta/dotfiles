@@ -7,13 +7,6 @@ use anyhow::{Context, Result};
 use super::scoop;
 use crate::windows::{env, proc};
 
-const MISE_SESSION: &[&str] = &[
-    "__MISE_DIFF",
-    "__MISE_SESSION",
-    "__MISE_ORIG_PATH",
-    "MISE_SHELL",
-];
-
 pub fn run() -> Result<i32> {
     let dir = env::home_dir()
         .context("no home directory")?
@@ -28,7 +21,7 @@ pub fn run() -> Result<i32> {
     let mut mise = env::command("mise");
     mise.args(["activate", "pwsh"])
         .env("PATH", without_mise(&env::augmented_path()));
-    for name in MISE_SESSION {
+    for name in platform::runtime::MISE_SESSION {
         mise.env_remove(name);
     }
 
@@ -38,7 +31,7 @@ pub fn run() -> Result<i32> {
         ("zoxide", &mut zoxide),
         ("mise", &mut mise),
     ] {
-        if let Err(err) = cache(&dir.join(format!("{name}.ps1")), cmd) {
+        if let Err(err) = cache(&dir.join(format!("{name}.ps1")), cmd, name == "mise") {
             eprintln!("{name}: {err:#}");
             code = 1;
         }
@@ -66,8 +59,13 @@ fn without_mise(path: &OsStr) -> OsString {
     .unwrap_or_default()
 }
 
-fn cache(path: &Path, cmd: &mut Command) -> Result<()> {
+fn cache(path: &Path, cmd: &mut Command, defer_mise: bool) -> Result<()> {
     let script = proc::capture_ok(cmd)?;
+    let script = if defer_mise {
+        crate::integrations::deferred_mise(&script)
+    } else {
+        script
+    };
     std::fs::write(path, script)?;
     println!(">>> cached {}", path.display());
     Ok(())

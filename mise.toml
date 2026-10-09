@@ -24,6 +24,12 @@ ast-grep = "0.45.3"
 # The theme gate renders the prompt and the pager at these releases, so every host draws the same cell grids.
 starship = "1.26.0"
 bat = "0.26.1"
+# The startup gate fills its caches with the same initialization generators on every host.
+atuin = { version = "18.23.0", libc = "musl" }
+television = { version = "0.15.9", libc = "musl" }
+zoxide = "0.10.0"
+vivid = "0.11.1"
+fzf = "0.74.4"
 rg = "15.2.0"
 fd = "10.5.0"
 sd = "1.1.0"

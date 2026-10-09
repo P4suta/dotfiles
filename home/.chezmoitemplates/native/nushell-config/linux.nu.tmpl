@@ -124,18 +124,19 @@ $env.TRANSIENT_PROMPT_INDICATOR = $"(ansi {fg: "{{ .palette.green }}" attr: b})‚
 $env.TRANSIENT_PROMPT_INDICATOR_VI_INSERT = $env.TRANSIENT_PROMPT_INDICATOR
 $env.TRANSIENT_PROMPT_INDICATOR_VI_NORMAL = $"(ansi {fg: "{{ .palette.magenta }}" attr: b})‚ùÆ(ansi reset) "
 
-use ~/.config/nushell/generated/mise.nu
+const generated = path self generated
+use ($generated | path join mise.nu)
 
 dotfiles-prepend-path
 
-source ~/.config/nushell/generated/starship.nu
+source ($generated | path join starship.nu)
 $env.PROMPT_COMMAND_RIGHT = ""
 $env.PROMPT_INDICATOR_VI_INSERT = ""
 $env.PROMPT_INDICATOR_VI_NORMAL = ""
-source ~/.config/nushell/generated/television.nu
-source ~/.config/nushell/generated/atuin.nu
-source ~/.config/nushell/generated/zoxide.nu
-source ~/.config/nushell/generated/ls-colors.nu
+source ($generated | path join television.nu)
+source ($generated | path join atuin.nu)
+source ($generated | path join zoxide.nu)
+source ($generated | path join ls-colors.nu)
 
 alias ll = eza --long --all --git --icons=auto
 alias la = eza --all --icons=auto

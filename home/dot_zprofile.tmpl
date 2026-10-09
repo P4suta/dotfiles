@@ -2,8 +2,8 @@
 # PATH lives here because path_helper rebuilds it before this file runs and discards .zshenv prefixes.
 
 # Homebrew first, so later lines prepend before it.
-if [ -x /opt/homebrew/bin/brew ]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
+if [ -r "${HOME}/.cache/zsh/brew.zsh" ]; then
+  . "${HOME}/.cache/zsh/brew.zsh"
 fi
 
 # shellcheck source=/dev/null
