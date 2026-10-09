@@ -239,6 +239,19 @@ mod proofs {
         let mut checked = false;
         let mut notified = false;
         for (index, gate) in gates.iter().enumerate() {
+            assert_eq!(
+                takes_input(*gate),
+                matches!(
+                    gate,
+                    Gate::Dotguard
+                        | Gate::PushHosts
+                        | Gate::Verification
+                        | Gate::GlobalLefthook
+                        | Gate::RepositoryLefthook
+                        | Gate::Renovate
+                        | Gate::Storage
+                )
+            );
             assert_eq!(seen & bit(*gate), 0, "each gate once");
             seen |= bit(*gate);
             assert_eq!(*gate == Gate::PushHold, hook == Hook::PrePush && index == 0);
@@ -295,10 +308,9 @@ mod proofs {
     pub fn spec_execute(gates: &[Gate], outcomes: u8) -> bool {
         let passed = |index: usize| outcomes & (1 << index) != 0;
         let (ran, verdict) = execute(gates, passed);
-        let refused = gates
-            .iter()
-            .enumerate()
-            .position(|(index, gate)| !notification(*gate) && !passed(index));
+        let refused = gates.iter().enumerate().position(|(index, gate)| {
+            !matches!(gate, Gate::Reinstall | Gate::Storage) && !passed(index)
+        });
         assert_eq!(verdict, refused.is_none());
         assert_eq!(ran, refused.map_or(gates.len(), |index| index + 1));
         let neutral = gates
