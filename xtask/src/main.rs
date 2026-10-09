@@ -29,6 +29,8 @@ enum Action {
         #[arg(long)]
         output: Option<PathBuf>,
     },
+    /// Checks every profile in the pinned Linux container.
+    ProfilesLinux,
     /// Writes the generated files: the architecture decision index.
     Gen {
         /// Refuses a stale generated file instead of writing it.
@@ -289,6 +291,7 @@ fn run() -> Result<()> {
             xtask::ignore_audit::check(&cli.root)?;
             xtask::input_audit::check(&cli.root)?;
         }
+        Action::ProfilesLinux => xtask::linux_profiles::check(&cli.root)?,
         Action::Gen { check } => generate(&cli.root, check)?,
         Action::ThemeGrids { write } => xtask::profiles::write_theme_grids(&cli.root, write)?,
         Action::StartupPrograms { profile, home } => {

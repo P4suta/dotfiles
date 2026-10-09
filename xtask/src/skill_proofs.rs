@@ -288,11 +288,15 @@ const MISE_CONFIG: &str = "mise.toml";
 const MISE_LOCK: &str = "mise.lock";
 const POWERSHELL_PLATFORM: &str = "platforms.linux-x64";
 const SHA256_HEX_DIGITS: usize = 64;
+const MISE_RELEASES: &str = "home/.chezmoidata/versions.toml";
+const LINUX_ASSET: &str = "linux-x64";
 
 #[derive(Debug)]
 struct ImagePins {
     powershell: String,
     powershell_sha256: String,
+    mise: String,
+    mise_sha256: String,
 }
 
 impl ImagePins {
@@ -328,14 +332,30 @@ impl ImagePins {
                 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
             "PowerShell has an invalid Linux SHA-256"
         );
+        let releases: model::data::Data =
+            toml::from_str(&fs::read_to_string(root.join(MISE_RELEASES))?)?;
+        let mise = releases.mise.context("mise has no release pin")?;
+        let mise_sha256 = mise
+            .sha256
+            .and_then(|mut hashes| hashes.remove(LINUX_ASSET))
+            .context("mise has no Linux SHA-256")?;
+        ensure!(
+            mise_sha256.len() == SHA256_HEX_DIGITS
+                && mise_sha256.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "mise has an invalid Linux SHA-256"
+        );
         Ok(Self {
             powershell: version.to_owned(),
             powershell_sha256: digest.to_owned(),
+            mise: mise.version.context("mise has no version")?,
+            mise_sha256,
         })
     }
 
-    fn arguments(&self) -> [String; 4] {
+    fn arguments(&self) -> [String; 6] {
         [
+            format!("MISE_VERSION={}", self.mise),
+            format!("MISE_SHA256={}", self.mise_sha256),
             format!("POWERSHELL_VERSION={}", self.powershell),
             format!("POWERSHELL_SHA256={}", self.powershell_sha256),
             format!("ANALYZER_VERSION={}", platform::script_analyzer::VERSION),

@@ -13,6 +13,7 @@ pub mod inventory;
 pub mod launchers;
 pub mod lean;
 pub mod lint;
+pub mod linux_profiles;
 pub mod manifest_model;
 pub mod modern;
 pub mod next_action;

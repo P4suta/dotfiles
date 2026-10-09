@@ -139,7 +139,13 @@ fn the_image_identity_covers_pins_and_rejects_missing_or_drifting_pins() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let scope = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(scope.path().join("xtask/proofs")).unwrap();
-    for path in ["mise.toml", "mise.lock", "xtask/proofs/Dockerfile"] {
+    std::fs::create_dir_all(scope.path().join("home/.chezmoidata")).unwrap();
+    for path in [
+        "mise.toml",
+        "mise.lock",
+        "xtask/proofs/Dockerfile",
+        "home/.chezmoidata/versions.toml",
+    ] {
         std::fs::copy(root.join(path), scope.path().join(path)).unwrap();
     }
     let first = xtask::skill_proofs::proof_image(scope.path()).unwrap();

@@ -23,6 +23,9 @@ commit-message file: trust
 profiles: trust
     mise x -- cargo xtask profiles
 
+profiles-linux: trust
+    mise x -- cargo xtask profiles-linux
+
 proofs *args: trust
     mise x -- cargo xtask proofs {{args}}
 
