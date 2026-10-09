@@ -15,6 +15,9 @@ rules = { path = "../rules" }
 
 [dev-dependencies]
 anyhow = "1.0"
+platform = { path = "../platform", default-features = false, features = [
+  "tools",
+] }
 serde_json = "1.0"
 tempfile = "3.27"
 
