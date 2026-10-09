@@ -194,7 +194,10 @@ const COMMAND_AND_OPTION: usize = 2;
 #[must_use]
 pub fn first_command<'a>(args: &[&'a str]) -> Option<&'a str> {
     let mut position = 0;
-    while let Some(argument) = args.get(position) {
+    for _ in 0..args.len() {
+        let Some(argument) = args.get(position) else {
+            break;
+        };
         position += 1;
         if argument.as_bytes().first() != Some(&b'-') {
             return Some(argument);
@@ -210,7 +213,10 @@ pub fn first_command<'a>(args: &[&'a str]) -> Option<&'a str> {
             .and_then(|index| argument.get(..index))
             .map_or((*argument, false), |flag| (flag, true));
         if one_of(flag, &["-c", "--config"]) {
-            while let Some(value) = args.get(position) {
+            for _ in 0..args.len() {
+                let Some(value) = args.get(position) else {
+                    break;
+                };
                 if value.as_bytes().first() == Some(&b'-') {
                     break;
                 }
@@ -451,7 +457,7 @@ pub fn record(guard: Guard, state: Ledger, event: Event) -> Option<Ledger> {
                 && recorded(state.records, tick - i16::from(LEDGER_HOUR) + 1, tick + 1)
                     < u32::from(state.cap)
                 && recorded(state.records, tick - i16::from(LEDGER_DAY) + 1, tick + 1)
-                    < u32::from(state.cap) * u32::from(LEDGER_DAY / LEDGER_HOUR);
+                    < u32::from(state.cap) * u32::from(LEDGER_DAY);
             if admitted {
                 *next.stage.get_mut(who)? = Stage::Reserved;
                 let slot = next.records.get_mut(usize::from(clock))?;
@@ -482,18 +488,37 @@ pub fn record(guard: Guard, state: Ledger, event: Event) -> Option<Ledger> {
 /// No rolling hour holds more than the hourly limit, no rolling day more than a day of hours, and no guard reserved under a pause it took the lock under.
 #[must_use]
 pub fn ledger_safe(state: &Ledger) -> bool {
-    let hours = u32::from(LEDGER_DAY / LEDGER_HOUR);
-    (0..=i16::from(HORIZON)).all(|tick| {
-        recorded(state.records, tick, tick + i16::from(LEDGER_HOUR)) <= u32::from(state.cap)
-            && recorded(state.records, tick, tick + i16::from(LEDGER_DAY))
-                <= u32::from(state.cap) * hours
-    }) && !state.ignored_pause
+    state.records.iter().all(|count| *count <= state.cap) && !state.ignored_pause
 }
 
 /// The properties Kani proves for every input and the tests check over every input they list.
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_ledger_safe(state: &Ledger) -> bool {
+        let expected = (0..=i16::from(HORIZON)).all(|tick| {
+            recorded(state.records, tick, tick + i16::from(LEDGER_HOUR)) <= u32::from(state.cap)
+                && recorded(state.records, tick, tick + i16::from(LEDGER_DAY))
+                    <= u32::from(state.cap) * u32::from(LEDGER_DAY / LEDGER_HOUR)
+        }) && !state.ignored_pause;
+        let safe = ledger_safe(state);
+        assert_eq!(safe, expected);
+        safe
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn every_ledger_keeps_exactly_both_rolling_limits_and_the_pause() {
+        let mut state = ledger(kani::any());
+        state.records = kani::any();
+        state.ignored_pause = kani::any();
+        let safe = spec_ledger_safe(&state);
+        kani::cover!(safe);
+        kani::cover!(!safe & state.ignored_pause);
+        kani::cover!(!safe & (state.records[0] > state.cap));
+    }
 
     /// A count fits the budget exactly when 25 times it stays within 18 times the limit, so the budget floors once.
     pub fn spec_budget(limit: u64, count: u64) -> u64 {
@@ -2025,6 +2050,67 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore = "Miri takes minutes over every reachable ledger")]
     fn the_fixed_guards_reach_exactly_the_states_tlc_counts_and_each_is_safe() {
+        const COUNTS: [u8; 4] = [0, 1, 2, 3];
+        for cap in COUNTS {
+            for mut code in 0..COUNTS.len().pow(u32::try_from(TICKS).unwrap()) {
+                let records: [u8; TICKS] = core::array::from_fn(|_| {
+                    let count = COUNTS[code % COUNTS.len()];
+                    code /= COUNTS.len();
+                    count
+                });
+                for ignored_pause in [false, true] {
+                    proofs::spec_ledger_safe(&Ledger {
+                        records,
+                        ignored_pause,
+                        ..ledger(cap)
+                    });
+                }
+                for now in 0..=HORIZON {
+                    let mut state = ledger(cap);
+                    state.now = now;
+                    state.records = records;
+                    state.stage[0] = Stage::Read;
+                    state.holder = Some(0);
+                    for skew in [0, 1, 2] {
+                        let actual = record(Guard::Fixed, state, Event::Reserve(0, skew));
+                        if skew > 1 {
+                            assert_eq!(actual, None);
+                            continue;
+                        }
+                        let clock = usize::from(now.saturating_sub(skew));
+                        let recent = |window: u8| -> u32 {
+                            records
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(at, count)| {
+                                    clock
+                                        .checked_sub(at)
+                                        .filter(|age| *age < usize::from(window))
+                                        .map(|_| u32::from(*count))
+                                })
+                                .sum()
+                        };
+                        let future = records
+                            .iter()
+                            .enumerate()
+                            .any(|(at, count)| at > clock && *count > 0);
+                        let admitted = !future
+                            && recent(LEDGER_HOUR) < u32::from(cap)
+                            && recent(LEDGER_DAY)
+                                < u32::from(cap) * u32::from(LEDGER_DAY / LEDGER_HOUR);
+                        let mut expected = state;
+                        if admitted {
+                            expected.stage[0] = Stage::Reserved;
+                            expected.records[clock] += 1;
+                        } else {
+                            expected.stage[0] = Stage::Done;
+                            expected.holder = None;
+                        }
+                        assert_eq!(actual, Some(expected), "{state:?}, skew={skew}");
+                    }
+                }
+            }
+        }
         let states = reachable(Guard::Fixed);
         assert_eq!(states.len(), DISTINCT_STATES);
         for state in &states {
@@ -2099,6 +2185,15 @@ mod tests {
         assert_eq!(check_budget(&[100], 99), Budget::Backwards);
         assert_eq!(classify(&["--deep", "x", "code"]), Invocation::Forbidden);
         assert_eq!(classify(&["--dir", "usage", "review"]), Invocation::Review);
+        assert_eq!(classify(&["usage"]), Invocation::ReadOnly);
+        assert!(usage_query(&["usage"]));
+        assert!(!usage_query(&["code"]));
+        let records = [0; DAILY_LIMIT + 1];
+        for now in [0, HOUR_MS - 1, HOUR_MS, DAY_MS - 1, DAY_MS, DAY_MS + 1] {
+            for count in [DAILY_LIMIT - 1, DAILY_LIMIT, DAILY_LIMIT + 1] {
+                proofs::spec_check_budget(&records[..count], now);
+            }
+        }
         assert_eq!(
             first_command(&["-c", "a", "b", "--x", "review"]),
             Some("review")

@@ -819,6 +819,13 @@ fn reject_read_only_paid_usage() {
 fn reject_a_future_record() {
     assert!(production::check_budget(&[1], 0) == production::Budget::Admit);
 }
+#[kani::proof]
+#[kani::unwind(6)]
+fn reject_a_ledger_above_its_hourly_limit() {
+    let mut state = production::ledger(1);
+    state.records[0] = 2;
+    assert!(production::ledger_safe(&state));
+}
 '''
 
 [[obligation]]
