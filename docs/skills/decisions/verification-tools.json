@@ -1,7 +1,7 @@
 {
-  "revision": "001e230fc0482409c77923ec2a7f890a096174de7be8be046b9fce1102a0a268",
+  "revision": "2d0d59a817edb6b70ded25d52a57ca3e74e957097f489c593dacb3918f816e4d",
   "outcome": "implemented",
-  "reason": "Keep actual language and platform coverage, tool adoption, and fail-closed gates separate from theorem selection.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "reason": "Bind gungraun-runner 0.20.0 to the existing verification-tools skill because the instruction and heap budget gate requires that pinned runner.\nKeep tool ownership separate from theorem selection and mutation testing.\nThe existing inventory tests reject missing coverage, changed pins, and incompatible profiles, and the benchmark gate measures production code without changing any exemption.",
   "evidence": [
     "home/dot_agents/skills/verification-tools/SKILL.md",
     "docs/adr/verification-proportional-to-code-shape.md",
@@ -9,7 +9,9 @@
     "crates/rules/src/skill_rules.rs",
     "xtask/src/skill_proofs.rs",
     "home/dot_agents/skills/verification-tools/tools.toml",
-    "xtask/tests/tool_inventory.rs"
+    "xtask/tests/tool_inventory.rs",
+    "xtask/src/benchmarks.rs",
+    "xtask/tests/benchmarks.rs"
   ],
   "revisit": null
 }

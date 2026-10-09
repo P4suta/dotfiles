@@ -1,2 +1,3 @@
 [tools]
 "cargo-fuzz" = "0.13.2"
+"gungraun-runner" = "0.20.0"
