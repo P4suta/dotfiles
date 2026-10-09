@@ -19,6 +19,7 @@ pub mod manifest_model;
 pub mod modern;
 pub mod next_action;
 pub mod obligations;
+pub mod pixels;
 pub mod profile_snapshot;
 pub mod profiles;
 pub mod quality;

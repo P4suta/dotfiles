@@ -49,6 +49,7 @@ fn a_grid_records_each_cell_and_one_changed_color_breaks_the_full_match() {
         ]
     );
     assert_eq!(xtask::theme::match_millis(&golden, &golden), 1000);
+    assert_eq!(xtask::theme::match_millis(&[], &[]), 0);
     let recolored = xtask::theme::grid(b"\x1b[38;2;192;202;246mab\x1b[0m\nc");
     assert!(xtask::theme::match_millis(&golden, &recolored) < 1000);
 }

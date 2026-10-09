@@ -6,7 +6,11 @@ use rules::contrast_rules::{self, Rgb};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// The hexadecimal digits of a `#rrggbb` literal.
 const HEX_DIGITS: usize = 6;
@@ -27,6 +31,12 @@ const PAGER_FIXTURE: &str = "xtask/tests/goldens/fixture.rs";
 
 /// The starship modules whose output depends on the clock, the host, or the previous command, which the grid turns off.
 const VOLATILE_MODULES: [&str; 5] = ["time", "os", "cmd_duration", "hostname", "username"];
+const FZF_ITEMS: [&str; 3] = ["alpha.rs", "beta.toml", "gamma.md"];
+const FZF_READY: &str = "Dotfiles palette fixture";
+const TERMINAL_TIMEOUT: Duration = Duration::from_secs(10);
+const TERMINAL_READ_BYTES: usize = 4096;
+const CURSOR_QUERY: &[u8] = b"\x1b[6n";
+const CONTAINER_OPTIONS_START: usize = 2;
 
 fn color(color: vt100::Color) -> String {
     match color {
@@ -86,7 +96,7 @@ pub fn match_millis(golden: &[String], rendered: &[String]) -> u64 {
     let all = golden.union(&rendered).count();
     let agreed = golden.intersection(&rendered).count();
     if all == 0 {
-        return MILLIS;
+        return 0;
     }
     let agreed = u64::try_from(agreed).unwrap_or(u64::MAX / MILLIS);
     let all = u64::try_from(all).unwrap_or(1);
@@ -155,6 +165,8 @@ fn starship_output(config: &str, scope: &Path) -> Result<Vec<u8>> {
         .env("USERPROFILE", &home)
         .env_remove("STARSHIP_SHELL")
         .env("TERM", "xterm-256color")
+        .env("COLUMNS", GRID_COLUMNS.to_string())
+        .env("LINES", GRID_ROWS.to_string())
         .output()
         .context("start starship")?;
     ensure!(
@@ -182,6 +194,8 @@ fn bat_output(root: &Path, config: &str, scope: &Path) -> Result<Vec<u8>> {
         .env("BAT_CACHE_PATH", scope.join("cache"))
         .env("TERM", "xterm-256color")
         .env("COLORTERM", "truecolor")
+        .env("COLUMNS", GRID_COLUMNS.to_string())
+        .env("LINES", GRID_ROWS.to_string())
         .output()
         .context("start bat")?;
     ensure!(
@@ -190,6 +204,158 @@ fn bat_output(root: &Path, config: &str, scope: &Path) -> Result<Vec<u8>> {
         String::from_utf8_lossy(&output.stderr)
     );
     Ok(output.stdout)
+}
+
+fn fzf_output(config: &str, scope: &Path) -> Result<Vec<u8>> {
+    use portable_pty::{NativePtySystem, PtySize, PtySystem};
+    for file in FZF_ITEMS {
+        fs::write(scope.join(file), "fixture\n")?;
+    }
+    let settings = scope.with_extension("fzfrc");
+    fs::write(&settings, config)?;
+    let pair = NativePtySystem::default().openpty(PtySize {
+        rows: GRID_ROWS,
+        cols: GRID_COLUMNS,
+        pixel_width: 0,
+        pixel_height: 0,
+    })?;
+    let mut command = Tool::Fzf.command();
+    command
+        .current_dir(scope)
+        .args([
+            "--no-clear",
+            "--no-mouse",
+            "--walker=file",
+            "--walker-root=.",
+            "--no-sort",
+            "--bind",
+        ])
+        .arg(format!("load:change-header({FZF_READY})"))
+        .env("FZF_DEFAULT_OPTS_FILE", &settings)
+        .env_remove("FZF_DEFAULT_OPTS")
+        .env_remove("FZF_DEFAULT_COMMAND")
+        .env("TERM", "xterm-256color")
+        .env("COLORTERM", "truecolor")
+        .env("COLUMNS", GRID_COLUMNS.to_string())
+        .env("LINES", GRID_ROWS.to_string());
+    let mut reader = pair.master.try_clone_reader()?;
+    let mut writer = pair.master.take_writer()?;
+    let mut child = pair
+        .slave
+        .spawn_command(platform::process::pty_command(&command))?;
+    drop(pair.slave);
+    let (sender, receiver) = mpsc::channel();
+    let reading = thread::spawn(move || {
+        let mut buffer = [0; TERMINAL_READ_BYTES];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(length) => {
+                    if sender.send(Ok(buffer[..length].to_vec())).is_err() {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    let _sent = sender.send(Err(error));
+                    break;
+                }
+            }
+        }
+    });
+    let capture = (|| -> Result<Vec<u8>> {
+        let deadline = Instant::now() + TERMINAL_TIMEOUT;
+        let mut output = Vec::new();
+        let mut terminal = vt100::Parser::new(GRID_ROWS, GRID_COLUMNS, 0);
+        let mut answered = 0;
+        loop {
+            let chunk = receiver
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .with_context(|| {
+                    format!(
+                        "fzf didn't draw its complete loaded fixture: {:?}",
+                        terminal.screen().contents()
+                    )
+                })??;
+            terminal.process(&chunk);
+            output.extend(chunk);
+            let requested = output
+                .windows(CURSOR_QUERY.len())
+                .filter(|window| *window == CURSOR_QUERY)
+                .count();
+            for _ in answered..requested {
+                let (row, column) = terminal.screen().cursor_position();
+                write!(writer, "\x1b[{};{}R", row + 1, column + 1)?;
+                writer.flush()?;
+            }
+            answered = requested;
+            let contents = terminal.screen().contents();
+            if contents.contains(FZF_READY) && FZF_ITEMS.iter().all(|file| contents.contains(file))
+            {
+                return Ok(output);
+            }
+        }
+    })();
+    platform::cleanup::report(child.kill(), "stop the fzf fixture");
+    platform::cleanup::report(child.wait(), "reap the fzf fixture");
+    drop(writer);
+    drop(pair.master);
+    drop(receiver);
+    ensure!(reading.join().is_ok(), "the fzf terminal reader panicked");
+    capture
+}
+
+/// Renders the fzf fixture on a Unix terminal, using the pinned Linux image on Windows.
+///
+/// # Errors
+///
+/// Returns an error if the configured terminal renderer fails.
+pub fn fzf_grid(root: &Path, config: &str) -> Result<Vec<String>> {
+    if cfg!(windows) {
+        let root = crate::canonical(root)?;
+        let image = crate::skill_proofs::proof_image(&root)?;
+        crate::skill_proofs::ensure_image(
+            &root,
+            &root.join(crate::skill_proofs::PROOF_IMAGE),
+            &image,
+        )?;
+        let volume = crate::skill_proofs::container_target_volume(&root);
+        let mut arguments = crate::skill_proofs::container_run_arguments(&root, &image, &volume);
+        arguments.splice(
+            CONTAINER_OPTIONS_START..CONTAINER_OPTIONS_START,
+            [
+                "-i".into(),
+                "--cpus".into(),
+                "3".into(),
+                "--memory".into(),
+                "6g".into(),
+                "--volume".into(),
+                format!("{volume}-mise:/root/.local/share/mise").into(),
+            ],
+        );
+        *arguments.last_mut().context("the image command has a renderer")? = "set -eo pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -; mise trust --quiet; export MISE_AUTO_INSTALL=false; exec mise x -- cargo xtask fzf-grid".into();
+        let mut child = Tool::Docker
+            .command()
+            .args(arguments)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()?;
+        child
+            .stdin
+            .take()
+            .context("the fzf image has piped input")?
+            .write_all(config.as_bytes())?;
+        let output = child.wait_with_output()?;
+        ensure!(
+            output.status.success(),
+            "the Linux fzf renderer failed: {}",
+            output.status
+        );
+        return serde_json::from_slice(&output.stdout)
+            .context("the Linux fzf renderer returned no cell grid");
+    }
+    let scope = tempfile::tempdir()?;
+    Ok(grid(&fzf_output(config, scope.path())?))
 }
 
 /// The cell grids of one profile's prompt and pager, by golden filename.
@@ -215,6 +381,9 @@ pub fn grids(root: &Path, profile: &str, dump: &Value) -> Result<Vec<(String, Ve
             format!("{profile}-bat.grid"),
             grid(&bat_output(root, config, &directory)?),
         ));
+    }
+    if let Some(config) = dump[".config/fzf/fzfrc"]["contents"].as_str() {
+        found.push((format!("{profile}-fzf.grid"), fzf_grid(root, config)?));
     }
     Ok(found)
 }

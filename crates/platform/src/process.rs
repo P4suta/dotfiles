@@ -13,3 +13,22 @@ use std::process::Command;
 pub fn command(program: impl AsRef<OsStr>) -> Command {
     Command::new(program)
 }
+
+/// The same registered command and child environment on a terminal.
+#[cfg(feature = "pty")]
+#[must_use]
+pub fn pty_command(command: &Command) -> portable_pty::CommandBuilder {
+    let mut terminal = portable_pty::CommandBuilder::new(command.get_program());
+    terminal.args(command.get_args());
+    if let Some(directory) = command.get_current_dir() {
+        terminal.cwd(directory);
+    }
+    for (name, value) in command.get_envs() {
+        if let Some(value) = value {
+            terminal.env(name, value);
+        } else {
+            terminal.env_remove(name);
+        }
+    }
+    terminal
+}

@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use platform::freshness::Built;
 use skill_ops::{export_checks, skill_source_paths, skills, split_frontmatter, validate_tree};
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use xtask::change_rules::{Gate, Gates};
 use xtask::check_build_dir;
@@ -50,6 +50,10 @@ enum Action {
         #[arg(long)]
         write: bool,
     },
+    /// Renders the fzf configuration on stdin as a JSON terminal cell grid.
+    FzfGrid,
+    /// Compares two saved cell grids in the pinned terminal recorder image without gating.
+    ThemePixels(xtask::pixels::Request),
     /// Counts each shell's startup programs in an owned fixture or an applied home.
     StartupPrograms {
         #[arg(long, conflicts_with = "home", required_unless_present = "home")]
@@ -286,17 +290,13 @@ fn run() -> Result<()> {
             );
             xtask::quality::ops(&cli.root)?;
         }
-        Action::Profiles { output } => {
-            xtask::quality::chezmoi_version(&cli.root)?;
-            xtask::profiles::check_profiles(&cli.root, output.as_deref())?;
-            xtask::profile_snapshot::check(&cli.root)?;
-            xtask::ignore_audit::check(&cli.root)?;
-            xtask::input_audit::check(&cli.root)?;
-        }
+        Action::Profiles { output } => profiles(&cli.root, output.as_deref())?,
         Action::ProfilesLinux => xtask::linux_profiles::check(&cli.root)?,
         Action::Benchmarks => benchmarks(&cli.root)?,
         Action::Gen { check } => generate(&cli.root, check)?,
         Action::ThemeGrids { write } => xtask::profiles::write_theme_grids(&cli.root, write)?,
+        Action::FzfGrid => fzf_grid(&cli.root)?,
+        Action::ThemePixels(request) => xtask::pixels::advisory(&request),
         Action::StartupPrograms { profile, home } => {
             xtask::profiles::print_startup(&cli.root, profile.as_deref(), home.as_deref())?;
         }
@@ -540,6 +540,24 @@ fn format_metadata(root: &Path) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+fn fzf_grid(root: &Path) -> Result<()> {
+    let mut config = String::new();
+    std::io::stdin().read_to_string(&mut config)?;
+    println!(
+        "{}",
+        serde_json::to_string(&xtask::theme::fzf_grid(root, &config)?)?
+    );
+    Ok(())
+}
+
+fn profiles(root: &Path, output: Option<&Path>) -> Result<()> {
+    xtask::quality::chezmoi_version(root)?;
+    xtask::profiles::check_profiles(root, output)?;
+    xtask::profile_snapshot::check(root)?;
+    xtask::ignore_audit::check(root)?;
+    xtask::input_audit::check(root)
 }
 
 fn main() {

@@ -20,7 +20,8 @@ jsonschema = { version = "=0.20.0", default-features = false, features = [
   "draft202012",
 ] }
 model = { path = "../crates/model" }
-platform = { path = "../crates/platform" }
+platform = { path = "../crates/platform", features = ["pty"] }
+portable-pty = "0.9.0"
 pr-workflow = { path = "../crates/pr-workflow" }
 proc-macro2 = "1.0.107"
 prose = { path = "../crates/prose" }
