@@ -39,7 +39,7 @@ impl DevReaper {
         if let Some(sub) = args.first().map(String::as_str) {
             Self::run(sub)
         } else {
-            eprintln!("usage: dev-reaper {{reap|cleanup}}");
+            eprintln!("usage: dev-reaper {{reap|prune}}");
             USAGE_ERROR
         }
     }
@@ -48,9 +48,9 @@ impl DevReaper {
         let cfg = DevConfig::load();
         match sub {
             "reap" => Self::reap(&cfg),
-            "cleanup" => Self::cleanup(&cfg),
+            "prune" => Self::prune(&cfg),
             _ => {
-                eprintln!("usage: dev-reaper {{reap|cleanup}}");
+                eprintln!("usage: dev-reaper {{reap|prune}}");
                 USAGE_ERROR
             }
         }
@@ -66,7 +66,7 @@ impl DevReaper {
             return 0;
         }
         let now = util::now();
-        let Some(_lock) = Lock::take(&cfg.state_dir, "dev-reaper", now, &|m| {
+        let Some(_lock) = Lock::take(&cfg.state_dir, &|m| {
             println!("dev-reaper: {m}");
         }) else {
             return 0;
@@ -81,7 +81,7 @@ impl DevReaper {
         0
     }
 
-    fn cleanup(cfg: &DevConfig) -> i32 {
+    fn prune(cfg: &DevConfig) -> i32 {
         let Some(docker) = resolve_docker() else {
             println!("dev-reaper: no docker binary found, skipping");
             return 0;
@@ -91,14 +91,14 @@ impl DevReaper {
             return 0;
         }
         let now = util::now();
-        let Some(_lock) = Lock::take(&cfg.state_dir, "dev-reaper", now, &|m| {
+        let Some(_lock) = Lock::take(&cfg.state_dir, &|m| {
             println!("dev-reaper: {m}");
         }) else {
             return 0;
         };
 
         for fid in exited_dev_containers(&docker, &cfg.select_label) {
-            cleanup_one(cfg, &docker, &fid, now);
+            prune_one(cfg, &docker, &fid, now);
         }
 
         // Safe prune only in full mode: dangling images + bounded build cache.
@@ -293,7 +293,7 @@ fn exited_dev_containers(docker: &Path, label: &str) -> Vec<String> {
     .unwrap_or_default()
 }
 
-/// The inspect line both reap and cleanup consume: `project|restart|started|keep|name`.
+/// The inspect line both reap and prune consume: `project|restart|started|keep|name`.
 fn inspect(docker: &Path, keep_key: &str, fid: &str, extra: bool) -> Option<InspectLine> {
     let format = if extra {
         format!(
@@ -555,7 +555,7 @@ fn heavy_process_running(docker: &Path, fid: &str, regex: &str) -> bool {
     };
     let lines: Vec<String> = out.lines().skip(1).map(str::to_owned).collect();
     // An unanswerable pattern keeps the container rather than treating it as idle.
-    util::grep_matching(regex, &lines).is_none_or(|hits| !hits.is_empty())
+    util::grep_matching(regex, &lines).is_none_or(|diagnostics| !diagnostics.is_empty())
 }
 
 /// `docker stats --no-stream --format '{{.CPUPerc}}'` → the number without the `%`.
@@ -570,7 +570,7 @@ fn cpu_percent(docker: &Path, fid: &str) -> Option<f64> {
     .ok()
 }
 
-fn cleanup_one(cfg: &DevConfig, docker: &Path, fid: &str, now: i64) {
+fn prune_one(cfg: &DevConfig, docker: &Path, fid: &str, now: i64) {
     let Some(info) = inspect(docker, &cfg.keep_key, fid, true) else {
         return;
     };

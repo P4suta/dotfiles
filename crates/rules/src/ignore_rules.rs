@@ -227,8 +227,9 @@ mod proofs {
         let found: bool = kani::any();
         let earlier: usize = kani::any();
         spec_verdict(found, earlier);
-        kani::cover!(verdict(found, earlier) == Verdict::Kept);
-        kani::cover!(verdict(found, earlier) == Verdict::Repeated && found);
+        let result = verdict(found, earlier);
+        kani::cover!(result == Verdict::Kept);
+        kani::cover!((result == Verdict::Repeated) & found);
     }
 }
 
@@ -278,14 +279,13 @@ fn same(left: &[u8], right: &[u8]) -> bool {
     true
 }
 
-/// Every pattern of up to three bytes, wildcards included, matches every path of up to two bytes without fault.
-/// This harness states `proofs::spec_literal` in its own body at the top of the module.
-/// Through the shared specification, Kani takes a fifth longer and leaves too little of the proof budget.
+/// The length partitions keep every pattern of up to three bytes and every path of up to two bytes.
 #[cfg(kani)]
 #[kani::proof]
 #[kani::unwind(7)]
 fn a_literal_pattern_matches_only_itself() {
     let (pattern, pattern_length) = any_text::<3>(true);
+    kani::assume(pattern_length <= 1);
     let (path, path_length) = any_text::<2>(false);
     let pattern = &pattern[..pattern_length];
     let path = &path[..path_length];
@@ -294,8 +294,48 @@ fn a_literal_pattern_matches_only_itself() {
     if !wild {
         assert_eq!(result, same(pattern, path));
     }
-    kani::cover!(result && wild);
-    kani::cover!(!result && wild);
+    kani::cover!(result & wild);
+    kani::cover!(!result & wild);
+}
+
+#[cfg(kani)]
+mod literal_proofs {
+    use super::*;
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn a_two_byte_literal_pattern_matches_only_itself() {
+        let (pattern, pattern_length) = any_text::<3>(true);
+        kani::assume(pattern_length == 2);
+        let (path, path_length) = any_text::<2>(false);
+        let pattern = &pattern[..pattern_length];
+        let path = &path[..path_length];
+        let wild = count(pattern, b"*?") > 0;
+        let result = matches(pattern, path);
+        if !wild {
+            assert_eq!(result, same(pattern, path));
+        }
+        kani::cover!(result & wild);
+        kani::cover!(!result & wild);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn a_three_byte_literal_pattern_matches_only_itself() {
+        let (pattern, pattern_length) = any_text::<3>(true);
+        kani::assume(pattern_length == 3);
+        let (path, path_length) = any_text::<2>(false);
+        let pattern = &pattern[..pattern_length];
+        let path = &path[..path_length];
+        let wild = count(pattern, b"*?") > 0;
+        let result = matches(pattern, path);
+        if !wild {
+            assert_eq!(result, same(pattern, path));
+        }
+        kani::cover!(result & wild);
+        kani::cover!(!result & wild);
+    }
 }
 
 #[cfg(test)]

@@ -10,11 +10,11 @@
 //! `core.hooksPath` in the global Git configuration points every repository at that hooks directory, so no repository needs to opt in.
 
 use dotguard::{
-    attribution, bypass, gate_rules, gitargv, lang, postcommit, prepush, realgit, refusal,
+    attribution, bypass, gate_rules, gitargv, lang, postcommit, prepush, real_git, refusal,
     renovate, stack, staged,
 };
 
-use bypass::Category;
+use bypass::Rule;
 use gate_rules::Admission;
 use std::io::Write;
 use std::path::Path;
@@ -87,30 +87,30 @@ fn git_wrapper(argv: &[String]) -> ExitCode {
             .chain(argv.iter().cloned())
             .collect();
         let tooling = denial.stack && stack::leased(gitargv::global_options(argv));
-        match gate_rules::admission(denial.stack, tooling, bypass::waived(denial.category)) {
+        match gate_rules::admission(denial.stack, tooling, bypass::bypassed(denial.rule)) {
             Admission::Tooling => {
-                bypass::record("STACK", denial.category, &denial.reason, &full);
+                bypass::record("STACK", denial.rule, &denial.reason, &full);
             }
             Admission::Waived => {
-                bypass::record("BYPASS", denial.category, &denial.reason, &full);
+                bypass::record("BYPASS", denial.rule, &denial.reason, &full);
                 eprintln!(
                     "::warning:: {}=1 — allowing {}",
-                    denial.category.env().unwrap_or_default(),
+                    denial.rule.env().unwrap_or_default(),
                     denial.reason
                 );
             }
             Admission::Refused => {
-                bypass::record("REJECT", denial.category, &denial.reason, &full);
+                bypass::record("REJECT", denial.rule, &denial.reason, &full);
                 gitargv::refusal(&denial, argv).emit();
                 return ExitCode::FAILURE;
             }
         }
     }
 
-    let Some(real) = realgit::find() else {
+    let Some(real) = real_git::find() else {
         eprintln!(
             "::error:: no git found at {}",
-            realgit::candidates()
+            real_git::updates()
                 .iter()
                 .map(|p| p.display().to_string())
                 .collect::<Vec<_>>()
@@ -121,12 +121,38 @@ fn git_wrapper(argv: &[String]) -> ExitCode {
     let invoked: Vec<&str> = std::iter::once("git")
         .chain(argv.iter().map(String::as_str))
         .collect();
-    let mut git = realgit::at(&real);
+    let mut git = real_git::at(&real);
     git.args(argv).env(INVOKED, refusal::command(&invoked));
-    delegate(&real, git)
+    let globals = gitargv::global_options(argv);
+    let subcommand = argv
+        .get(globals.len())
+        .map(String::as_str)
+        .unwrap_or_default();
+    let push = subcommand == "push";
+    let rewrite = subcommand == "revert"
+        || subcommand == "commit" && argv.iter().any(|arg| arg == "--amend")
+        || push
+            && argv
+                .iter()
+                .any(|arg| arg.starts_with("--force") || arg == "-f");
+    let published = if push {
+        rewrite
+    } else if rewrite {
+        let mut query: Vec<&str> = globals.iter().map(String::as_str).collect();
+        query.extend([
+            "for-each-ref",
+            "--contains=HEAD",
+            "--format=%(refname)",
+            "refs/remotes/",
+        ]);
+        real_git::capture(&query).is_some_and(|refs| !refs.trim().is_empty())
+    } else {
+        false
+    };
+    delegate(&real, git, push, rewrite, published)
 }
 
-/// Carries the command the wrapper ran to the hooks of that command, so a hook's waiver can repeat it.
+/// Carries the command the wrapper ran to the hooks of that command, so a hook's bypass can repeat it.
 const INVOKED: &str = "DOTGUARD_COMMAND";
 
 /// The shell's statuses for a command it couldn't find and for one it found but couldn't run.
@@ -142,8 +168,17 @@ fn foreign_waiver() -> Option<String> {
 }
 
 #[cfg(unix)]
-fn delegate(real: &Path, mut git: std::process::Command) -> ExitCode {
+fn delegate(
+    real: &Path,
+    mut git: std::process::Command,
+    push: bool,
+    rewrite: bool,
+    published: bool,
+) -> ExitCode {
     use std::os::unix::process::CommandExt;
+    if push || rewrite && published {
+        return observed_delegate(real, git, push, rewrite, published);
+    }
     // `exec` returns only on failure.
     let err = git.exec();
     eprintln!("::error:: could not exec {}: {err}", real.display());
@@ -151,10 +186,55 @@ fn delegate(real: &Path, mut git: std::process::Command) -> ExitCode {
 }
 
 #[cfg(windows)]
-fn delegate(real: &Path, mut git: std::process::Command) -> ExitCode {
+fn delegate(
+    real: &Path,
+    git: std::process::Command,
+    push: bool,
+    rewrite: bool,
+    published: bool,
+) -> ExitCode {
     ignore_console_interrupts();
+    observed_delegate(real, git, push, rewrite, published)
+}
+
+fn observed_delegate(
+    real: &Path,
+    mut git: std::process::Command,
+    push: bool,
+    rewrite: bool,
+    published: bool,
+) -> ExitCode {
+    let invoked = git
+        .get_envs()
+        .find(|(name, _)| *name == INVOKED)
+        .and_then(|(_, value)| value)
+        .map_or_else(String::new, |value| value.to_string_lossy().into_owned());
     match git.status() {
-        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Ok(status) => {
+            if let Some(source) = rules::incident_rules::signal(
+                rules::incident_rules::Operation {
+                    push,
+                    rewrite,
+                    published,
+                },
+                status.success(),
+            ) {
+                let rule = if source == rules::incident_rules::Source::FailedDelivery {
+                    "push.failed"
+                } else {
+                    "git.published-rewrite"
+                };
+                let observation = refusal::Refusal::new(
+                    rule,
+                    "the Git operation produced a failure observation",
+                    "skill-ops discharge --help",
+                )
+                .evidence(invoked)
+                .evidence(status.to_string());
+                platform::incidents::record(&observation, source);
+            }
+            std::process::exit(status.code().unwrap_or(1))
+        }
         Err(err) => {
             eprintln!("::error:: could not run {}: {err}", real.display());
             ExitCode::from(COMMAND_NOT_EXECUTABLE)
@@ -196,11 +276,11 @@ fn ignore_console_interrupts() {
 ///     git config guard.lang japanese
 ///     git config guard.lang off
 fn lang_mode() -> Option<lang::Mode> {
-    lang::Mode::parse(realgit::capture(&["config", "--get", "guard.lang"]).as_deref())
+    lang::Mode::parse(real_git::capture(&["config", "--get", "guard.lang"]).as_deref())
 }
 
 fn comment_char() -> char {
-    realgit::capture(&["config", "--get", "core.commentChar"])
+    real_git::capture(&["config", "--get", "core.commentChar"])
         .and_then(|v| v.trim().chars().next())
         .filter(|c| c.is_ascii() && *c != 'a') // `auto` resolves per message and starts from `#`.
         .unwrap_or('#')
@@ -227,8 +307,8 @@ fn commit_msg(path: &str) -> i32 {
 
     let Some(mode) = lang_mode() else { return 0 };
     let body = lang::commit_message_body(&cleaned, comment_char());
-    let hits = lang::scan(&body, mode);
-    if hits.is_empty() {
+    let diagnostics = lang::scan(&body, mode);
+    if diagnostics.is_empty() {
         return 0;
     }
 
@@ -236,7 +316,7 @@ fn commit_msg(path: &str) -> i32 {
         lang::Mode::Japanese => "English or Japanese",
         _ => "English",
     };
-    lang::report("commit message", &body, &hits);
+    lang::report("commit message", &body, &diagnostics);
     // Git runs the hook from the top of the work tree, and the retry may run from anywhere.
     let message = std::path::absolute(path)
         .map_or_else(|_| path.to_owned(), |file| file.display().to_string());
@@ -258,7 +338,8 @@ fn commit_msg(path: &str) -> i32 {
     refuse_foreign(&lang::refusal(
         "commit.language",
         &cause,
-        hits.iter()
+        diagnostics
+            .iter()
             .map(|hit| lang::evidence("commit message", hit))
             .collect(),
         retry.ok().map(|words| refusal::command(&words)),
@@ -269,7 +350,7 @@ fn commit_msg(path: &str) -> i32 {
 /// The authorship and date of `revision`, as the refused commit took them from it.
 fn authorship(revision: &str) -> Option<gitargv::Authorship> {
     let peeled = format!("{revision}^{{commit}}");
-    let read = realgit::capture(&[
+    let read = real_git::capture(&[
         "log",
         "-1",
         "--no-show-signature",
@@ -297,7 +378,7 @@ fn picking() -> Option<bool> {
 /// `git show-ref --exists` doesn't decide this on every supported Git version.
 /// Git 2.43 reports a missing `MERGE_HEAD` as a lookup error.
 fn exists(name: &str) -> Option<bool> {
-    let path = realgit::capture(&["rev-parse", "--git-path", name])?;
+    let path = real_git::capture(&["rev-parse", "--git-path", name])?;
     std::fs::exists(path.trim_end_matches(['\r', '\n'])).ok()
 }
 
@@ -310,19 +391,19 @@ fn pre_commit() -> i32 {
     };
     let files: Vec<_> = staged::scan_diff(&diff)
         .into_iter()
-        .filter(|f| !staged::is_exempt(&f.path))
+        .filter(|f| !staged::is_suppressed(&f.path))
         .collect();
     if files.is_empty() {
         return 0;
     }
 
-    let hits: Vec<String> = files
+    let diagnostics: Vec<String> = files
         .iter()
         .flat_map(|f| {
-            f.hits.iter().map(|(line, hit)| {
+            f.diagnostics.iter().map(|(line, hit)| {
                 lang::evidence(
                     &f.path,
-                    &lang::Hit {
+                    &lang::Diagnostic {
                         line: *line,
                         ..*hit
                     },
@@ -330,7 +411,7 @@ fn pre_commit() -> i32 {
             })
         })
         .collect();
-    for hit in &hits {
+    for hit in &diagnostics {
         eprintln!("  {hit}");
     }
     let mut inspect = vec!["git", "diff", "--cached", "--"];
@@ -338,26 +419,26 @@ fn pre_commit() -> i32 {
     refuse_foreign(&lang::refusal(
         "commit.language",
         "staged changes add text in a script this machine does not write; remove it, stage the result, and commit again",
-        hits,
+        diagnostics,
         Some(refusal::command(&inspect)),
         foreign_waiver(),
     ))
 }
 
 fn scan_paths(paths: &[String]) -> i32 {
-    let mut hits = Vec::new();
+    let mut diagnostics = Vec::new();
     for p in paths {
         let Ok(text) = std::fs::read_to_string(p) else {
             continue;
         };
-        if staged::exempts_itself(&text) {
+        if staged::suppressed_in_source(&text) {
             continue;
         }
         let found = lang::scan(&text, lang::Mode::Content);
         lang::report(p, &text, &found);
-        hits.extend(found.iter().map(|hit| lang::evidence(p, hit)));
+        diagnostics.extend(found.iter().map(|hit| lang::evidence(p, hit)));
     }
-    if hits.is_empty() {
+    if diagnostics.is_empty() {
         return 0;
     }
     let mut scan = vec!["dotguard", "scan"];
@@ -366,9 +447,9 @@ fn scan_paths(paths: &[String]) -> i32 {
         "scan.language",
         &format!(
             "{} contaminating character(s); remove them and scan again",
-            hits.len()
+            diagnostics.len()
         ),
-        hits,
+        diagnostics,
         Some(refusal::command(&scan)),
         Some(format!("ALLOW_FOREIGN=1 {}", refusal::command(&scan))),
     ))
@@ -377,12 +458,12 @@ fn scan_paths(paths: &[String]) -> i32 {
 /// The shared tail of every language refusal: the recorded override, or the structured refusal.
 fn refuse_foreign(refused: &refusal::Refusal) -> i32 {
     let argv: Vec<String> = std::env::args().collect();
-    if bypass::waived(Category::Foreign) {
-        bypass::record("BYPASS", Category::Foreign, "foreign script", &argv);
+    if bypass::bypassed(Rule::Foreign) {
+        bypass::record("BYPASS", Rule::Foreign, "foreign script", &argv);
         eprintln!("\n::warning:: ALLOW_FOREIGN=1 — allowing it.");
         return 0;
     }
-    bypass::record("REJECT", Category::Foreign, "foreign script", &argv);
+    bypass::record("REJECT", Rule::Foreign, "foreign script", &argv);
     refused.emit();
     1
 }

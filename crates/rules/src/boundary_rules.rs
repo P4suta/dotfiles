@@ -96,9 +96,12 @@ mod proofs {
                 && core.denied & every == every
                 && core.strays == 0
         );
-        assert_eq!(result == Some(Breach::Dependency), core.dependencies > 0);
         assert_eq!(
-            result == Some(Breach::Std),
+            matches!(result, Some(Breach::Dependency)),
+            core.dependencies > 0
+        );
+        assert_eq!(
+            matches!(result, Some(Breach::Std)),
             core.dependencies == 0 && !core.no_std
         );
         if let Some(Breach::Undenied(index)) = result {
@@ -107,7 +110,7 @@ mod proofs {
             assert_eq!(core.denied & ((1 << index) - 1), (1 << index) - 1);
         }
         assert_eq!(
-            result == Some(Breach::Stray),
+            matches!(result, Some(Breach::Stray)),
             core.dependencies == 0
                 && core.no_std
                 && core.denied & every == every
@@ -133,9 +136,9 @@ mod proofs {
         spec_breach(core);
         let result = breach(core);
         kani::cover!(result.is_none());
-        kani::cover!(result == Some(Breach::Stray));
+        kani::cover!(matches!(result, Some(Breach::Stray)));
         kani::cover!(result == Some(Breach::Undenied(DENIED.len() - 1)));
-        kani::cover!(core.dependencies > 0 && !core.no_std);
+        kani::cover!((core.dependencies > 0) & !core.no_std);
     }
 }
 

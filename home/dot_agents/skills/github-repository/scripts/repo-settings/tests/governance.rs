@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 fn state() -> State {
     State {
+        metadata: json!({"current": true}),
         repository: Repository {
             id: 7,
             full_name: "owner/project".into(),
@@ -36,6 +37,26 @@ fn state() -> State {
         security: json!({"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}),
         actions: json!({"enabled":true,"allowed_actions":"selected","sha_pinning_required":true}),
     }
+}
+
+#[test]
+fn missing_or_drifted_generated_metadata_is_a_finding() -> Result<()> {
+    for metadata in [
+        Value::Null,
+        json!({"current":false,"evidence":"repository.generated refused"}),
+    ] {
+        let mut original = state();
+        original.metadata = metadata;
+        let planned = plan(snapshot(original), Profile::baseline()?)?;
+        assert!(
+            planned
+                .findings
+                .iter()
+                .any(|finding| finding.message.contains("dotfiles repository generate"))
+        );
+        assert!(planned.changes.is_empty());
+    }
+    Ok(())
 }
 
 #[test]
@@ -304,6 +325,9 @@ impl ReadOnlyApi {
 }
 
 impl Api for ReadOnlyApi {
+    fn metadata(&self, _: &str) -> Result<Value> {
+        Ok(json!({"current": true}))
+    }
     fn read(&self, endpoint: &str) -> Result<Value> {
         let mut response = self
             .responses
@@ -562,6 +586,9 @@ fn applying_merge_defaults_verifies_only_that_scope_and_preserves_other_gates() 
 }
 
 impl Api for MemoryApi {
+    fn metadata(&self, _: &str) -> Result<Value> {
+        Ok(self.current.borrow().metadata.clone())
+    }
     fn read(&self, endpoint: &str) -> Result<Value> {
         ReadOnlyApi::new(&self.current.borrow()).read(endpoint)
     }

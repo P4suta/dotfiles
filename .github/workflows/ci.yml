@@ -32,7 +32,16 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Read the pinned mise version
+        id: mise
+        shell: bash
+        run: |
+          version="$(sed -n '/^\[mise\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
+        with:
+          version: ${{ steps.mise.outputs.version }}
       - name: Select the gates this change affects
         id: classify
         env:
@@ -69,8 +78,18 @@ jobs:
         if: env.GATES != ''
         with:
           persist-credentials: false
+      - name: Read the pinned mise version
+        id: mise
+        if: env.GATES != ''
+        shell: bash
+        run: |
+          version="$(sed -n '/^\[mise\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
         if: env.GATES != ''
+        with:
+          version: ${{ steps.mise.outputs.version }}
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: env.GATES != ''
         with:
@@ -88,22 +107,42 @@ jobs:
         run: mise x -- just check --gates "$GATES"
       - name: Check Linux system provisioning syntax
         if: runner.os == 'Linux' && contains(needs.classify.outputs.gates, 'profiles')
-        run: mise x -- just ops-check
+        run: mise x -- just ansible-syntax-check
 
   proofs:
     name: proofs
     needs: classify
-    if: contains(needs.classify.outputs.gates, 'proofs')
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       MISE_DISABLE_TOOLS: ""
+      GATES: ${{ needs.classify.outputs.gates }}
     steps:
+      - name: Refuse to pass without a classification
+        if: needs.classify.result != 'success'
+        shell: bash
+        run: |
+          echo "the classify job did not succeed, so no gate was selected" >&2
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: contains(env.GATES, 'proofs')
         with:
           persist-credentials: false
+      - name: Read the pinned mise version
+        id: mise
+        if: contains(env.GATES, 'proofs')
+        shell: bash
+        run: |
+          version="$(sed -n '/^\[mise\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
+        if: contains(env.GATES, 'proofs')
+        with:
+          version: ${{ steps.mise.outputs.version }}
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: contains(env.GATES, 'proofs')
         with:
           path: |
             ~/.cargo/registry
@@ -113,10 +152,13 @@ jobs:
           key: proofs-${{ hashFiles('Cargo.lock', 'mise.toml') }}
           restore-keys: proofs-
       - name: Set up the pinned verifier
+        if: contains(env.GATES, 'proofs')
         run: mise x -- kani setup
       - name: Set up Miri on the nightly the verifier pins
+        if: contains(env.GATES, 'proofs')
         run: rustup toolchain install nightly-2026-08-21 --profile minimal --component miri,rust-src
       - name: Prove the production contracts and reject the counterexamples
+        if: contains(env.GATES, 'proofs')
         run: mise x -- just proofs
 
   minimum-git:
@@ -130,8 +172,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read the pinned mise version
+        id: mise
+        shell: bash
+        run: |
+          version="$(sed -n '/^\[mise\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
         with:
+          version: ${{ steps.mise.outputs.version }}
           install_args: rust
       - name: Build the guard tests
         run: |
@@ -168,8 +218,18 @@ jobs:
         if: contains(needs.classify.outputs.gates, 'profiles')
         with:
           persist-credentials: false
+      - name: Read the pinned mise version
+        id: mise
+        if: contains(needs.classify.outputs.gates, 'profiles')
+        shell: bash
+        run: |
+          version="$(sed -n '/^\[mise\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
         if: contains(needs.classify.outputs.gates, 'profiles')
+        with:
+          version: ${{ steps.mise.outputs.version }}
       - name: Apply, reprovision, and reapply the native profile on this disposable host
         if: contains(needs.classify.outputs.gates, 'profiles')
         run: mise x -- just rehearse --disposable-host
@@ -223,7 +283,7 @@ jobs:
           mise x -- just rehearse --disposable-host
 
   # The one status the ruleset requires.
-  # A job that the change skips counts as passed, and a failed or cancelled one fails this job.
+  # Each job decides its selected steps, and every required job must finish successfully.
   required:
     name: required
     needs: [classify, check, proofs, minimum-git, rehearsal, rehearsal-wsl]
@@ -231,13 +291,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Refuse a failed or cancelled job
+      - name: Refuse a missing, skipped, failed, or cancelled job
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           for result in $RESULTS; do
             case "$result" in
-              success | skipped) ;;
+              success) ;;
               *) echo "a required job ended as $result" >&2; exit 1 ;;
             esac
           done

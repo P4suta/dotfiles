@@ -6,12 +6,15 @@
 {{-   end -}}
 {{- end -}}
 {{- $tools = uniq $tools -}}
+{{- $pins := includeTemplate "partials/modern-pins" . | fromJson -}}
 [tools]
 {{- range $tools }}
+{{- if not (hasKey $pins .) }}
 {{ . | quote }} = {{ if hasKey $.platforms.linux.tool_versions . }}{{ index $.platforms.linux.tool_versions . | quote }}{{ else }}"latest"{{ end }}
 {{- end }}
-{{- if not $nix }}
-"github:tealdeer-rs/tealdeer" = { version = "latest", bin = "tldr" }
+{{- end }}
+{{- range $tool, $version := $pins }}
+{{ $tool | quote }} = {{ $version | quote }}
 {{- end }}
 
 [tools."http:coderabbit"]

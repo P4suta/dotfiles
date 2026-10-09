@@ -5,12 +5,14 @@ A target missing from the first table reaches every profile.
 
 | Target | Set | Profiles |
 | --- | --- | --- |
+| `.agents/skills/orbstack` | mac | mac |
 | `.bashrc` | unix | mac, linux, wsl |
 | `.chezmoiscripts/unix/**` | unix | mac, linux, wsl |
 | `.chezmoiscripts/windows/**` | windows | windows |
 | `.claude/bashenv.sh` | unix | mac, linux, wsl |
 | `.claude/shims` | unix | mac, linux, wsl |
 | `.claude/shims/.keep` | unix | mac, linux, wsl |
+| `.claude/skills/orbstack` | mac | mac |
 | `.config/atuin` | unix | mac, linux, wsl |
 | `.config/atuin/config.toml` | unix | mac, linux, wsl |
 | `.config/bat` | mac | mac |

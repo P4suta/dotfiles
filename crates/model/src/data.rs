@@ -30,6 +30,59 @@ pub struct Data {
     pub retired: Option<BTreeMap<String, String>>,
     /// Setup launchers that only the profiles of the named set run, which `just gen` writes from the setup steps.
     pub scripts: Option<BTreeMap<String, String>>,
+    /// The modern command-line tools that replace legacy ones for agents, pinned on every profile.
+    pub modern: Option<Modern>,
+}
+
+/// The modern tool table: each preferred tool, the bootstrap scripts that keep legacy tools, and the candidates it leaves out.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Modern {
+    pub tools: Vec<ModernTool>,
+    #[serde(default)]
+    pub exceptions: Vec<ModernException>,
+    #[serde(default)]
+    pub rejected: Vec<ModernRejected>,
+}
+
+/// One preferred tool and the legacy commands it replaces.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModernTool {
+    /// The legacy commands the hooks refuse.
+    pub legacy: Vec<String>,
+    /// The flags that mark an invocation as legacy when the tool replaces only some uses, such as `-l` for `wc`.
+    #[serde(default)]
+    pub when: Vec<String>,
+    /// The command the next action names.
+    pub preferred: String,
+    /// The mise tool that installs the preferred command on every profile.
+    pub tool: String,
+    /// The pinned version.
+    pub version: String,
+    pub reason: String,
+    /// When the legacy tool stays correct.
+    pub keep: String,
+    /// The next action, where `{args}` stands for the legacy command's arguments, and `grep` or `find` asks for a flag translation.
+    pub next: String,
+}
+
+/// A script that runs before mise provisions the preferred tools, so it keeps the legacy ones.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModernException {
+    pub path: String,
+    pub reason: String,
+}
+
+/// A candidate the table leaves out, with the condition that would admit it.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModernRejected {
+    pub legacy: String,
+    pub preferred: String,
+    pub reason: String,
+    pub revisit: String,
 }
 
 /// The Tokyo Night colors of every themed tool, each a `#rrggbb` literal.

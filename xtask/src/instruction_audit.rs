@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The partials that every managed `CLAUDE.md` and `AGENTS.md` renders.
+/// The shared templates that every managed `CLAUDE.md` and `AGENTS.md` renders.
 pub const PARTIALS: [&str; 3] = ["agent_policy", "prose_policy", "remote_machines"];
 
 /// The tracked audit that classifies every partial line.
@@ -460,9 +460,9 @@ fn row_finding(
     ))
 }
 
-/// Refusals for a profile instruction template that renders anything besides the audited partials.
+/// Refusals for a profile instruction template that renders anything besides the audited shared templates.
 #[must_use]
-pub fn profile_findings(path: &str, text: &str, partials: &[&str]) -> Vec<String> {
+pub fn profile_findings(path: &str, text: &str, templates: &[&str]) -> Vec<String> {
     text.lines()
         .enumerate()
         .filter(|(_, line)| !line.trim().is_empty())
@@ -471,14 +471,14 @@ pub fn profile_findings(path: &str, text: &str, partials: &[&str]) -> Vec<String
                 .trim()
                 .strip_prefix("{{ includeTemplate \"partials/")
                 .and_then(|rest| rest.strip_suffix("\" . }}"))
-                .is_some_and(|name| partials.contains(&name))
+                .is_some_and(|name| templates.contains(&name))
         })
         .map(|(index, line)| {
             format!(
                 "{path}:{}: `{}` is not an include of an audited partial ({}); move the text into one and classify it in {AUDIT}, then run `just check`.",
                 index + 1,
                 line.trim(),
-                partials.join(", ")
+                templates.join(", ")
             )
         })
         .collect()

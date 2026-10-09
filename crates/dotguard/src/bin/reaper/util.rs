@@ -1,6 +1,7 @@
 //! Helpers shared by both reapers: timestamps, the single-instance lock, desktop notifications, and ERE matching without a regular expression engine.
 
 use platform::process::command;
+use std::fs::{File, TryLockError};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -88,38 +89,43 @@ pub fn etime_seconds(raw: &str) -> i64 {
     days * SECONDS_PER_DAY + secs
 }
 
-/// Single-instance guard: an atomic `mkdir`, because macOS ships no `flock(1)`.
-/// The run steals a lock older than an hour, which a killed run left behind.
+/// The file whose advisory lock admits one run at a time.
+/// The old directory lock lived at `.lock`, so the file takes another name.
+const LOCK_FILE: &str = "run.lock";
+
+/// Single-instance guard: an advisory lock on a file in the state directory.
+/// The operating system releases it when the run exits or dies, so no run ever steals it, and the file stays for the next run.
+/// `specs/reaper_lock.qnt` shows the old directory lock admitting two runs, and mutual exclusion of the new one rests on the operating system.
 pub struct Lock {
-    dir: PathBuf,
+    _file: File,
 }
 
 impl Lock {
-    pub fn take(state_dir: &Path, _name: &str, now: i64, log: &dyn Fn(&str)) -> Option<Lock> {
-        let dir = state_dir.join(".lock");
-        if std::fs::create_dir(&dir).is_ok() {
-            return Some(Lock { dir });
-        }
-        let stale = std::fs::metadata(&dir)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map_or(now, |d| now - i64::try_from(d.as_secs()).unwrap_or(0));
-        if stale > SECONDS_PER_HOUR {
-            log("stealing a stale lock (older than 1h)");
-            platform::cleanup::remove_dir_all(&dir);
-            if std::fs::create_dir(&dir).is_ok() {
-                return Some(Lock { dir });
+    pub fn take(state_dir: &Path, log: &dyn Fn(&str)) -> Option<Lock> {
+        let path = state_dir.join(LOCK_FILE);
+        let file = match File::options()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&path)
+        {
+            Ok(file) => file,
+            Err(error) => {
+                log(&format!("cannot open the lock {}: {error}", path.display()));
+                return None;
+            }
+        };
+        match file.try_lock() {
+            Ok(()) => Some(Lock { _file: file }),
+            Err(TryLockError::WouldBlock) => {
+                log("another instance is running, skipping");
+                None
+            }
+            Err(TryLockError::Error(error)) => {
+                log(&format!("cannot lock {}: {error}", path.display()));
+                None
             }
         }
-        log("another instance is running, skipping");
-        None
-    }
-}
-
-impl Drop for Lock {
-    fn drop(&mut self) {
-        platform::cleanup::remove_dir_all(&self.dir);
     }
 }
 
@@ -201,7 +207,16 @@ pub fn grep_matching(pattern: &str, lines: &[String]) -> Option<Vec<usize>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{epoch_of, etime_seconds};
+    use super::{Lock, epoch_of, etime_seconds};
+
+    #[test]
+    fn a_held_lock_turns_the_next_run_away_until_its_holder_exits() {
+        let state = tempfile::tempdir().unwrap();
+        let first = Lock::take(state.path(), &|_| {}).expect("a free lock");
+        assert!(Lock::take(state.path(), &|_| {}).is_none());
+        drop(first);
+        assert!(Lock::take(state.path(), &|_| {}).is_some());
+    }
 
     #[test]
     fn rfc3339_round_trips_through_known_instants() {
@@ -228,8 +243,8 @@ mod tests {
     fn grep_matching_reports_indices() {
         use super::grep_matching;
         let lines: Vec<String> = vec!["java".into(), "sleep".into(), "gradlew".into()];
-        let hits = grep_matching("java|gradle|kotlin", &lines);
-        assert_eq!(hits, Some(vec![0, 2]));
+        let diagnostics = grep_matching("java|gradle|kotlin", &lines);
+        assert_eq!(diagnostics, Some(vec![0, 2]));
         assert_eq!(grep_matching("nothing", &lines), Some(Vec::new()));
         let dashed: Vec<String> = vec!["-x".into()];
         assert_eq!(grep_matching("-x", &dashed), Some(vec![0]));

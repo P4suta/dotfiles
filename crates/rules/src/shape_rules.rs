@@ -635,8 +635,10 @@ mod proofs {
         }
         spec_exemption(&line);
         let result = exemption(&line);
-        kani::cover!(matches!(result, Some(Exemption::Exempt(_))));
-        kani::cover!(result == Some(Exemption::Malformed));
+        let exempt = matches!(result, Some(Exemption::Exempt(_)));
+        let malformed = matches!(result, Some(Exemption::Malformed));
+        kani::cover!(exempt);
+        kani::cover!(malformed);
     }
 
     #[cfg(kani)]
@@ -815,7 +817,21 @@ mod tests {
         }
     }
 
+    /// Every example below in one test, since Miri pays for each test thread it starts.
     #[test]
+    fn every_example_meets_its_rule() {
+        an_exemption_names_one_closed_reason_and_a_justification();
+        signals_find_their_prefix_after_blanks_and_whole_files_on_the_first_line();
+        segments_match_whole_directories_only();
+        annotations_are_comments_and_attributes();
+        a_site_is_owned_by_an_in_file_marker_or_a_present_owner();
+        an_exemption_stands_alone_and_a_malformed_one_is_a_gap();
+        fresh_counts_the_entries_the_other_side_lacks();
+        a_budget_weakens_when_it_moves_the_wrong_way_or_disappears();
+        old_gaps_never_refuse_a_commit_or_push_but_ready_requires_closing_one();
+        reasons_are_the_closed_set_and_a_key_must_end_at_the_colon();
+    }
+
     fn an_exemption_names_one_closed_reason_and_a_justification() {
         assert_eq!(
             exemption(b"    // Exempt as semantic-boundary: Git decides the merge base"),
@@ -844,7 +860,6 @@ mod tests {
         assert_eq!(exemption(b"// an ordinary comment"), None);
     }
 
-    #[test]
     fn signals_find_their_prefix_after_blanks_and_whole_files_on_the_first_line() {
         let parser = Signal {
             suffix: b".rs",
@@ -869,7 +884,6 @@ mod tests {
         assert!(!found(module, b"src/gate.rs", true, b"//! doc"));
     }
 
-    #[test]
     fn segments_match_whole_directories_only() {
         assert!(within(b"crates/x/tests/a.rs", b"tests"));
         assert!(within(b"tests/a.rs", b"tests"));
@@ -881,7 +895,6 @@ mod tests {
         assert!(!within(b"a/b", b""));
     }
 
-    #[test]
     fn annotations_are_comments_and_attributes() {
         for line in [
             &b"/// doc"[..],
@@ -906,7 +919,6 @@ mod tests {
         exemption: None,
     };
 
-    #[test]
     fn a_site_is_owned_by_an_in_file_marker_or_a_present_owner() {
         assert_eq!(standing(BARE), Standing::Gap(Cause::Unowned));
         assert_eq!(
@@ -940,7 +952,6 @@ mod tests {
         );
     }
 
-    #[test]
     fn an_exemption_stands_alone_and_a_malformed_one_is_a_gap() {
         let exempt = Site {
             exemption: Some(Exemption::Exempt(Reason::Disproportionate)),
@@ -964,7 +975,6 @@ mod tests {
         );
     }
 
-    #[test]
     fn fresh_counts_the_entries_the_other_side_lacks() {
         let before: [&[u8]; 2] = [b"a", b"b"];
         let after: [&[u8]; 3] = [b"b", b"c", b"d"];
@@ -974,7 +984,6 @@ mod tests {
         assert_eq!(fresh(&before, &[]), 0);
     }
 
-    #[test]
     fn a_budget_weakens_when_it_moves_the_wrong_way_or_disappears() {
         assert!(lowered(Bound::Ceiling, 3, Some(4)));
         assert!(!lowered(Bound::Ceiling, 3, Some(3)));
@@ -985,7 +994,6 @@ mod tests {
         assert!(lowered(Bound::Ceiling, 0, None));
     }
 
-    #[test]
     fn old_gaps_never_refuse_a_commit_or_push_but_ready_requires_closing_one() {
         let old = Change {
             before: 4,
@@ -1024,7 +1032,6 @@ mod tests {
         assert!(!Verdict::Report.refuses());
     }
 
-    #[test]
     fn reasons_are_the_closed_set_and_a_key_must_end_at_the_colon() {
         assert_eq!(
             exemption(b"Exempt as semantic-boundary: x"),

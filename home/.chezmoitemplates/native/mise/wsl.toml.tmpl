@@ -1,11 +1,13 @@
+{{- $pins := includeTemplate "partials/modern-pins" . | fromJson -}}
 [tools]
 {{- range (concat .platforms.wsl.tools.common (index .platforms.wsl.tools .role) | uniq) }}
+{{- if not (hasKey $pins .) }}
 {{ . | quote }} = "latest"
 {{- end }}
-
-# The GitHub source renames the single binary asset `tealdeer-linux-x86_64-musl` to the command `tldr`.
-# A single binary release takes `bin`, and an extracted tarball takes `rename_exe`.
-"github:tealdeer-rs/tealdeer" = { version = "latest", bin = "tldr" }
+{{- end }}
+{{- range $tool, $version := $pins }}
+{{ $tool | quote }} = {{ $version | quote }}
+{{- end }}
 
 [settings]
 experimental = true

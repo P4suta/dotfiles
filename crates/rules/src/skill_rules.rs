@@ -204,10 +204,90 @@ pub fn completion(current: bool, already_continued: bool) -> Completion {
     }
 }
 
+/// The rest of `text` after `prefix`, or `None` when `text` doesn't start with it.
+fn after<'a>(mut text: &'a [u8], mut prefix: &[u8]) -> Option<&'a [u8]> {
+    while let [expected, rest @ ..] = prefix {
+        let [actual, tail @ ..] = text else {
+            return None;
+        };
+        if actual != expected {
+            return None;
+        }
+        (text, prefix) = (tail, rest);
+    }
+    Some(text)
+}
+
+/// Whether `text` names `term`, such as a pinned version, as a whole: no digit or `.` comes right before it, and no digit or `.` with a digit after it comes right after.
+/// A skill that names what a gate already pins drifts from the pin, so the skill check refuses it.
+#[must_use]
+pub fn names(text: &[u8], term: &[u8]) -> bool {
+    if term.is_empty() {
+        return false;
+    }
+    let mut extends = false;
+    let mut rest = text;
+    loop {
+        let continued = match after(rest, term) {
+            Some(following) => matches!(following, [b'0'..=b'9', ..] | [b'.', b'0'..=b'9', ..]),
+            None => true,
+        };
+        if !extends && !continued {
+            return true;
+        }
+        let [byte, tail @ ..] = rest else {
+            return false;
+        };
+        extends = matches!(byte, b'0'..=b'9' | b'.');
+        rest = tail;
+    }
+}
+
 /// The properties Kani proves for every input and the tests check over every input they list.
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    /// Whether `term` occurs in `text` at the front of `rest`, with the byte `previous` before it.
+    fn occurs_at(previous: Option<u8>, rest: &[u8], term: &[u8]) -> bool {
+        let mut text = rest;
+        let mut wanted = term;
+        loop {
+            match (text, wanted) {
+                (following, []) => {
+                    return !matches!(previous, Some(b'0'..=b'9' | b'.'))
+                        && !matches!(following, [b'0'..=b'9', ..] | [b'.', b'0'..=b'9', ..]);
+                }
+                ([], [_, ..]) => return false,
+                ([a, text_rest @ ..], [b, wanted_rest @ ..]) => {
+                    if a != b {
+                        return false;
+                    }
+                    (text, wanted) = (text_rest, wanted_rest);
+                }
+            }
+        }
+    }
+
+    /// A term counts at some position whose neighbors don't continue a number, and an empty term never counts.
+    #[expect(
+        clippy::manual_assert_eq,
+        reason = "assert_eq formats its operands, which leaves Kani an unreachable formatting check that fails the proof"
+    )]
+    pub fn spec_names(text: &[u8], term: &[u8]) {
+        let mut expected = false;
+        let mut previous = None;
+        let mut rest = text;
+        loop {
+            expected |= !term.is_empty() && occurs_at(previous, rest, term);
+            let [byte, tail @ ..] = rest else {
+                break;
+            };
+            previous = Some(*byte);
+            rest = tail;
+        }
+        assert!(names(text, term) == expected);
+    }
 
     /// Each two-flag decision takes exactly the state its rule names.
     pub fn spec_pairs(first: bool, second: bool) {
@@ -326,8 +406,10 @@ mod proofs {
         spec_outcome(outcome, first, second, third);
         let count: usize = kani::any();
         spec_counts(count, third);
-        kani::cover!(adopted(first, outcome) && decision_complete(outcome, first, second, third));
-        kani::cover!(size_disposition(first, second, third) == Sizing::Unexpected);
+        let adopted = adopted(first, outcome) & decision_complete(outcome, first, second, third);
+        let unexpected = size_disposition(first, second, third) == Sizing::Unexpected;
+        kani::cover!(adopted);
+        kani::cover!(unexpected);
     }
 
     #[cfg(kani)]
@@ -356,8 +438,20 @@ mod proofs {
             threshold: kani::any(),
         };
         spec_maintenance(value);
-        kani::cover!(maintenance_current(value));
-        kani::cover!(!maintenance_current(value) && value.catalog_current);
+        let current = maintenance_current(value);
+        kani::cover!(current);
+        kani::cover!(!current & value.catalog_current);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn a_term_counts_only_where_no_number_continues_it() {
+        let text: [u8; 5] = kani::any();
+        let term: [u8; 2] = kani::any();
+        spec_names(&text, &term);
+        kani::cover!(names(&text, &term));
+        kani::cover!(!names(&text, &term) && text[1] == term[0] && text[2] == term[1]);
     }
 }
 
@@ -367,6 +461,32 @@ mod tests {
     use crate::domain::flags;
 
     const COUNTS: [usize; 7] = [0, 1, 2, 3, DIGEST_LENGTH, 100, usize::MAX];
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every short text and term")]
+    fn every_short_text_and_term_meets_the_naming_specification() {
+        for text in crate::domain::words(b"0.a", 4) {
+            for term in crate::domain::words(b"0.", 2) {
+                proofs::spec_names(&text, &term);
+            }
+        }
+    }
+
+    #[test]
+    fn a_pinned_version_counts_only_as_a_whole() {
+        assert!(names(b"Kani 0.68.0 runs", b"0.68.0"));
+        assert!(names(b"pinned at 0.68.0.", b"0.68.0"));
+        assert!(names(b"kani-verifier@0.68.0", b"0.68.0"));
+        assert!(names(b"v0.68.0", b"0.68.0"));
+        assert!(names(b"0.68.0", b"0.68.0"));
+        assert!(!names(b"10.68.0", b"0.68.0"));
+        assert!(!names(b"0.68.01", b"0.68.0"));
+        assert!(!names(b"0.68.0.1", b"0.68.0"));
+        assert!(!names(b"1.0.68.0", b"0.68.0"));
+        assert!(!names(b"0.6", b"0.68.0"));
+        assert!(!names(b"anything", b""));
+        assert!(names(b"a 10.68.0 and 0.68.0", b"0.68.0"));
+    }
 
     #[test]
     fn every_input_meets_the_decision_specifications() {

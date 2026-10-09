@@ -85,6 +85,22 @@ fn proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results() -> anyhow:
         .remove("duration_ms");
     assert!(validate_results(&unmeasured, &expected, false).is_err());
     validate_results(&valid, &expected, false)?;
+    let mut impossible = valid.clone();
+    impossible["verification_results"]["results"][0]["checks"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"category":"overflow","status":"Unreachable"}));
+    validate_results(&impossible, &expected, false)?;
+    for status in ["Failure", "Undetermined", "Unknown", "Skipped"] {
+        impossible["verification_results"]["results"][0]["checks"][3]["status"] = json!(status);
+        assert!(validate_results(&impossible, &expected, false).is_err());
+    }
+    let mut unreachable = valid.clone();
+    unreachable["verification_results"]["results"][0]["checks"][0]["status"] = json!("Unreachable");
+    assert!(validate_results(&unreachable, &expected, false).is_err());
+    unreachable = valid.clone();
+    unreachable["verification_results"]["results"][0]["checks"][2]["status"] = json!("Unreachable");
+    assert!(validate_results(&unreachable, &expected, false).is_err());
     assert!(validate_results(&valid, &[], false).is_err());
     let mut missing = valid.clone();
     missing["verification_results"]["results"] = json!([]);
@@ -96,6 +112,17 @@ fn proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results() -> anyhow:
     failed["verification_results"]["results"][0]["status"] = json!("Failure");
     assert!(validate_results(&failed, &expected, false).is_err());
     assert!(validate_results(&valid, &expected, true).is_err());
+    Ok(())
+}
+
+#[test]
+fn the_overflow_fixture_requires_the_actual_checked_add_failure() -> anyhow::Result<()> {
+    let name = "reject_an_overflow_under_checked_mir";
+    let mut receipt = json!({"verification_results":{"summary":{"status":"completed","executed":1,"failed":1,"successful":0},"results":[{"harness_id":name,"status":"Failure","duration_ms":30,"checks":[{"category":"assertion","description":"attempt to add with overflow","status":"Failure"}]}]}});
+    validate_results(&receipt, &[name], true)?;
+    receipt["verification_results"]["results"][0]["checks"][0]["description"] =
+        json!("an unrelated assertion failed");
+    assert!(validate_results(&receipt, &[name], true).is_err());
     Ok(())
 }
 
@@ -233,6 +260,69 @@ fn quint_runs_offline_with_the_checkout_read_only() {
         text[text.len() - 3..],
         ["quint", "typecheck", "/source/specs/pr_ready.qnt"].map(str::to_owned)
     );
+}
+
+#[test]
+fn the_alloy_image_pins_alloy_and_its_base_by_digest() {
+    let definition = include_str!("../proofs/alloy/Dockerfile");
+    assert!(definition.contains(&format!(
+        "ARG ALLOY_VERSION={}\n",
+        xtask::alloy::ALLOY_VERSION
+    )));
+    assert!(definition.contains("ADD --checksum=sha256:${ALLOY_SHA256}"));
+    for line in definition.lines().filter(|line| line.starts_with("FROM ")) {
+        assert!(line.contains("@sha256:"), "{line}");
+    }
+}
+
+#[test]
+fn alloy_runs_one_command_offline_with_the_checkout_read_only() {
+    let arguments = xtask::alloy::run_arguments(
+        Path::new(r"C:\Users\fixture\dotfiles"),
+        Path::new(r"C:\Temp\out"),
+        "dotfiles-alloy:fixture",
+        "specs/transaction.als",
+        "sat4j",
+        "Durable",
+    );
+    let text: Vec<_> = arguments
+        .iter()
+        .map(|value| value.to_string_lossy().into_owned())
+        .collect();
+    let network = text.iter().position(|value| value == "--network").unwrap();
+    assert_eq!(text[network + 1], "none");
+    assert!(text.contains(
+        &r#"type=bind,"source=C:\Users\fixture\dotfiles",target=/source,readonly"#.to_owned()
+    ));
+    let solver = text.iter().position(|value| value == "--solver").unwrap();
+    assert_eq!(text[solver + 1], "sat4j");
+    let command = text.iter().position(|value| value == "--command").unwrap();
+    assert_eq!(text[command + 1], "Durable");
+    assert_eq!(
+        text.last().map(String::as_str),
+        Some("/source/specs/transaction.als")
+    );
+}
+
+#[test]
+fn an_alloy_receipt_with_a_solution_reports_an_instance_or_a_counterexample() {
+    let solved: serde_json::Value = serde_json::from_str(
+        r#"{"commands":{"Bad":{"type":"check","solution":[{"instances":[]}]}}}"#,
+    )
+    .unwrap();
+    let unsolved: serde_json::Value =
+        serde_json::from_str(r#"{"commands":{"Good":{"type":"check"}}}"#).unwrap();
+    assert!(xtask::alloy::solved(&solved, "Bad").unwrap());
+    assert!(!xtask::alloy::solved(&unsolved, "Good").unwrap());
+    assert!(xtask::alloy::solved(&unsolved, "Missing").is_err());
+    for malformed in [
+        json!(null),
+        json!({}),
+        json!({"type":"check", "solution":false}),
+    ] {
+        let receipt = json!({"commands":{"Bad":malformed}});
+        assert!(xtask::alloy::solved(&receipt, "Bad").is_err());
+    }
 }
 
 #[test]

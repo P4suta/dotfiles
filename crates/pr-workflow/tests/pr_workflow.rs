@@ -7,6 +7,8 @@ use std::sync::OnceLock;
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
+use fixture_git::fixture_process;
+
 #[path = "../../dotfiles/tests/support/catalog.rs"]
 mod catalog;
 
@@ -95,7 +97,8 @@ impl Fixture {
         paths.extend(std::env::split_paths(
             &std::env::var_os("PATH").context("PATH")?,
         ));
-        let mut command = platform::process::command(env!("CARGO_BIN_EXE_pr-workflow"));
+        let mut command =
+            fixture_process::command(env!("CARGO_BIN_EXE_pr-workflow"), self.directory.path());
         command
             .current_dir(self.directory.path())
             .env("PATH", std::env::join_paths(paths)?)
@@ -167,13 +170,13 @@ fn refusal(output: &Output) -> serde_json::Value {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let line = stderr.lines().last().unwrap_or_default();
     let json = line
-        .strip_prefix("dotfiles-refusal/1 ")
+        .strip_prefix("dotfiles-refusal/2 ")
         .unwrap_or_else(|| panic!("no refusal record: {stderr}"));
     let record: serde_json::Value = serde_json::from_str(json).unwrap();
     let object = record.as_object().unwrap();
     assert_eq!(
         object.keys().map(String::as_str).collect::<Vec<_>>(),
-        ["cause", "evidence", "next", "rule", "waiver"],
+        ["bypass", "cause", "evidence", "next", "rule"],
         "{line}"
     );
     for key in ["rule", "cause", "next"] {
@@ -194,8 +197,8 @@ fn refusal(output: &Output) -> serde_json::Value {
         "{line}"
     );
     assert!(
-        record["waiver"].is_null(),
-        "pr-workflow has no waiver: {line}"
+        record["bypass"].is_null(),
+        "pr-workflow has no bypass: {line}"
     );
     assert!(
         platform::refusal::Refusal::find(&stderr).is_some_and(|parsed| parsed.is_complete()),

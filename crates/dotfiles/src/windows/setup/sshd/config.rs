@@ -5,113 +5,19 @@
 //! A directive after a `Match` line belongs to that block.
 //! The stock config ends with `Match Group administrators`, which routes administrator logins to `administrators_authorized_keys`, so every edit lands before the first `Match`.
 
-/// Marks directives that this tool appended.
-const MARKER: &str = "# --- managed by dotfiles-win ---";
-/// The `sshd_config` keyword that starts a conditional block.
-const MATCH: &str = "match";
+use crate::host_setup_rules;
+#[cfg(test)]
+use crate::host_setup_rules::SSHD_MARKER as MARKER;
 
-#[derive(Debug, PartialEq, Eq)]
-enum Kind {
-    /// `Port 22`, in force.
-    Active,
-    /// `#Port 22`, the stock file's commented default.
-    Commented,
-    Other,
-}
-
-/// sshd keywords ignore case, and the stock file writes commented defaults with no space after the `#`.
-fn classify(line: &str, name: &str) -> Kind {
-    let trimmed = line.trim_start();
-    let (body, commented) = match trimmed.strip_prefix('#') {
-        Some(rest) => (rest.trim_start(), true),
-        None => (trimmed, false),
-    };
-
-    let Some(rest) = body.get(..name.len()) else {
-        return Kind::Other;
-    };
-    if !rest.eq_ignore_ascii_case(name) {
-        return Kind::Other;
-    }
-    // A keyword needs whitespace and a value, so `PortForwarding` differs from `Port`, and a bare `Port` sets nothing.
-    let after = &body[name.len()..];
-    if !after.starts_with(char::is_whitespace) || after.trim().is_empty() {
-        return Kind::Other;
-    }
-    if commented {
-        Kind::Commented
-    } else {
-        Kind::Active
-    }
-}
-
-/// Applies `directives` to `original`.
-///
+/// Applies `directives` to `original` before its first `Match` block, as `host_setup_rules::sshd_config` decides.
 pub fn apply(original: &str, directives: &[(&str, String)]) -> String {
-    let lines: Vec<&str> = original
-        .split('\n')
-        .map(|l| l.trim_end_matches('\r'))
-        .collect();
-
-    let match_index = lines
+    let directives: Vec<(&str, &str)> = directives
         .iter()
-        .position(|line| {
-            let trimmed = line.trim_start();
-            trimmed
-                .get(..MATCH.len())
-                .is_some_and(|keyword| keyword.eq_ignore_ascii_case(MATCH))
-                && trimmed
-                    .get(MATCH.len()..)
-                    .is_some_and(|rest| rest.starts_with(char::is_whitespace))
-        })
-        .unwrap_or(lines.len());
-
-    let mut head: Vec<String> = lines[..match_index]
-        .iter()
-        .map(|l| (*l).to_owned())
+        .map(|(name, value)| (*name, value.as_str()))
         .collect();
-    let tail: Vec<String> = lines[match_index..]
-        .iter()
-        .map(|l| (*l).to_owned())
-        .collect();
-
-    for (name, value) in directives {
-        let desired = format!("{name} {value}");
-
-        let active: Vec<usize> = head
-            .iter()
-            .enumerate()
-            .filter(|(_, line)| classify(line, name) == Kind::Active)
-            .map(|(index, _)| index)
-            .collect();
-
-        if let Some(&first) = active.first() {
-            head[first] = desired;
-            // sshd honors the first occurrence, so later ones do nothing.
-            for &index in active.iter().skip(1).rev() {
-                head.remove(index);
-            }
-            continue;
-        }
-
-        if let Some(index) = head
-            .iter()
-            .position(|line| classify(line, name) == Kind::Commented)
-        {
-            // Replace the commented default in place, keeping its context.
-            head[index] = desired;
-            continue;
-        }
-
-        if !head.iter().any(|line| line == MARKER) {
-            head.push(MARKER.to_owned());
-        }
-        head.push(desired);
-    }
-
-    let mut out: Vec<String> = head;
-    out.extend(tail);
-    format!("{}\r\n", out.join("\r\n").trim_end())
+    host_setup_rules::sshd_config(original, &directives)
+        .as_str()
+        .to_owned()
 }
 
 /// True when the config still routes administrator logins to `administrators_authorized_keys`.
@@ -269,11 +175,10 @@ Match Group administrators\r
     /// `PortForwarding` starts with `Port`, and a keyword with no value sets nothing.
     #[test]
     fn a_longer_keyword_is_not_the_keyword() {
-        assert_eq!(classify("PortForwarding yes", "Port"), Kind::Other);
-        assert_eq!(classify("Port", "Port"), Kind::Other);
-        assert_eq!(classify("Port   ", "Port"), Kind::Other);
-        assert_eq!(classify("  port 22", "Port"), Kind::Active);
-        assert_eq!(classify("#  PORT 22", "Port"), Kind::Commented);
+        let out = apply("PortForwarding yes\r\nPort\r\n", &wanted(22, false));
+        assert!(lines(&out).contains(&"PortForwarding yes"));
+        assert!(lines(&out).contains(&"Port"));
+        assert!(lines(&out).contains(&"Port 22"));
     }
 
     #[test]

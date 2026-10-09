@@ -1,8 +1,9 @@
-{{- $marker := "chezmoi:modify-template" -}}
+{{- /* chezmoi:modify-template */ -}}
 {{- /*
   Codex reads its hooks from this file, which skill-ops also writes, so each profile sets only the verification hooks and keeps every other group.
   A session starts with the verification report, which lists the repository's code shapes that nothing verifies with their next actions.
   The stop hook refuses to end a turn while a file it changed holds such a shape.
+  The pre-tool hook blocks a malformed or file-writing shell command before Codex runs it, through the decision core every managed client shares.
   skill-ops keeps its own groups last, so these go before them and neither installer reorders the other's.
 */ -}}
 {{- $current := dict -}}
@@ -11,6 +12,14 @@
 {{- if eq .profile "windows" }}{{ $tool = ".local/bin/dotfiles.exe" }}{{ end -}}
 {{- $command := includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool) -}}
 {{- $hooks := dig "hooks" (dict) $current -}}
+{{- $pre := list -}}
+{{- $preLast := list -}}
+{{- range (dig "PreToolUse" (list) $hooks) -}}
+{{-   $text := toJson . -}}
+{{-   if contains " claude-bash" $text -}}{{- else if contains "skill-ops " $text -}}{{- $preLast = append $preLast . -}}{{- else -}}{{- $pre = append $pre . -}}{{- end -}}
+{{- end -}}
+{{- $own_pre := dict "matcher" "shell|exec_command" "hooks" (list (dict "type" "command" "command" (printf "%s claude-bash" $command))) -}}
+{{- $_ := set $hooks "PreToolUse" (concat $pre (list $own_pre) $preLast) -}}
 {{- range $event, $point := dict "SessionStart" "start" "Stop" "stop" -}}
 {{-   $groups := list -}}
 {{-   $last := list -}}

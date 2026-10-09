@@ -94,7 +94,7 @@ const INVISIBLE: &[(u32, u32, &str)] = &[
 ];
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct Hit {
+pub struct Diagnostic {
     pub line: usize,
     pub col: usize,
     pub ch: char,
@@ -203,26 +203,27 @@ fn script_of(c: char) -> &'static str {
 }
 
 /// Every offending character in `text`, in reading order.
-pub fn scan(text: &str, mode: Mode) -> Vec<Hit> {
-    let mut hits = Vec::new();
+pub fn scan(text: &str, mode: Mode) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
 
     for (line_no, line) in text.lines().enumerate() {
         let line_no = line_no + 1;
         let mut greek_run: Option<(usize, char)> = None;
         let mut run_len = 0usize;
 
-        let flush = |run_len: usize, start: Option<(usize, char)>, hits: &mut Vec<Hit>| {
-            if run_len >= GREEK_RUN
-                && let Some((col, ch)) = start
-            {
-                hits.push(Hit {
-                    line: line_no,
-                    col,
-                    ch,
-                    kind: "Greek",
-                });
-            }
-        };
+        let flush =
+            |run_len: usize, start: Option<(usize, char)>, diagnostics: &mut Vec<Diagnostic>| {
+                if run_len >= GREEK_RUN
+                    && let Some((col, ch)) = start
+                {
+                    diagnostics.push(Diagnostic {
+                        line: line_no,
+                        col,
+                        ch,
+                        kind: "Greek",
+                    });
+                }
+            };
 
         for (col, c) in line.chars().enumerate() {
             let col = col + 1;
@@ -234,13 +235,13 @@ pub fn scan(text: &str, mode: Mode) -> Vec<Hit> {
                 run_len += 1;
                 continue;
             }
-            flush(run_len, greek_run, &mut hits);
+            flush(run_len, greek_run, &mut diagnostics);
             greek_run = None;
             run_len = 0;
 
             // Both surfaces refuse invisible text.
             if let Some(kind) = invisible(c) {
-                hits.push(Hit {
+                diagnostics.push(Diagnostic {
                     line: line_no,
                     col,
                     ch: c,
@@ -250,7 +251,7 @@ pub fn scan(text: &str, mode: Mode) -> Vec<Hit> {
             }
             // Both surfaces refuse a form that Japanese lacks, which marks the sentence as Chinese.
             if simplified(c) {
-                hits.push(Hit {
+                diagnostics.push(Diagnostic {
                     line: line_no,
                     col,
                     ch: c,
@@ -265,7 +266,7 @@ pub fn scan(text: &str, mode: Mode) -> Vec<Hit> {
                 Mode::Content => blocked_script(c).is_some(),
             };
             if offends {
-                hits.push(Hit {
+                diagnostics.push(Diagnostic {
                     line: line_no,
                     col,
                     ch: c,
@@ -273,10 +274,10 @@ pub fn scan(text: &str, mode: Mode) -> Vec<Hit> {
                 });
             }
         }
-        flush(run_len, greek_run, &mut hits);
+        flush(run_len, greek_run, &mut diagnostics);
     }
 
-    hits
+    diagnostics
 }
 
 /// The commit message body without the `#` commentary of git and the `--verbose` diff below the scissors line, which would re-flag content that the content gate already passed.
@@ -288,11 +289,11 @@ pub fn commit_message_body(raw: &str, comment_char: char) -> String {
         .join("\n")
 }
 
-/// Render hits for a human, one line each, with the source line beneath.
-pub fn report(label: &str, text: &str, hits: &[Hit]) {
+/// Render diagnostics for a human, one line each, with the source line beneath.
+pub fn report(label: &str, text: &str, diagnostics: &[Diagnostic]) {
     let lines: Vec<&str> = text.lines().collect();
     let mut last_line = 0;
-    for h in hits {
+    for h in diagnostics {
         eprintln!(
             "  {label}:{}:{}  {:?}  U+{:04X}  [{}]",
             h.line, h.col, h.ch, h.ch as u32, h.kind
@@ -308,45 +309,45 @@ pub fn report(label: &str, text: &str, hits: &[Hit]) {
 }
 
 /// The evidence line for one hit, in the same shape as the report.
-pub fn evidence(label: &str, h: &Hit) -> String {
+pub fn evidence(label: &str, h: &Diagnostic) -> String {
     format!(
         "{label}:{}:{}  {:?}  U+{:04X}  [{}]",
         h.line, h.col, h.ch, h.ch as u32, h.kind
     )
 }
 
-/// The most hits a refusal lists, while the preceding report shows every one.
+/// The most diagnostics a refusal lists, while the preceding report shows every one.
 const EVIDENCE_LIMIT: usize = 20;
 
 /// The characters of a source line that a refusal quotes.
 const QUOTED_LINE: usize = 160;
 
 /// The refusal for text in a script this machine doesn't write.
-/// `waiver` repeats the refused command with the recorded override, and stays `None` for an unknown command.
+/// `bypass` repeats the refused command with the recorded override, and stays `None` for an unknown command.
 pub fn refusal(
     rule: &str,
     cause: &str,
-    hits: Vec<String>,
+    diagnostics: Vec<String>,
     next: Option<String>,
-    waiver: Option<String>,
+    bypass: Option<String>,
 ) -> crate::refusal::Refusal {
     let mut cause = format!(
         "{cause}.\n\
          Cyrillic '\u{0441}' and Latin 'c' are indistinguishable on screen, so this is the same check that catches a homoglyph in an identifier and a bidi override in a comment.\n\
          A repository that writes Japanese sets `git config guard.lang japanese`; one that carries multilingual fixtures sets `git config guard.lang off`."
     );
-    if waiver.is_none() {
+    if bypass.is_none() {
         cause.push_str(
-            "\nThe refused Git command did not pass through the git wrapper, so no waiver can repeat it; run that command again with ALLOW_FOREIGN=1 to waive this check once.",
+            "\nThe refused Git command did not pass through the git wrapper, so no bypass can repeat it; run that command again with ALLOW_FOREIGN=1 to bypass this check once.",
         );
     }
     let mut refusal = match next {
         Some(next) => crate::refusal::Refusal::new(rule, cause, next),
         None => crate::refusal::Refusal::without_next(rule, cause),
     };
-    refusal.waiver = waiver;
-    let total = hits.len();
-    for hit in hits.into_iter().take(EVIDENCE_LIMIT) {
+    refusal.bypass = bypass;
+    let total = diagnostics.len();
+    for hit in diagnostics.into_iter().take(EVIDENCE_LIMIT) {
         refusal = refusal.evidence(hit);
     }
     if total > EVIDENCE_LIMIT {
@@ -361,16 +362,16 @@ mod tests {
 
     #[test]
     fn a_language_refusal_is_complete_and_bounded() {
-        let hits: Vec<String> = scan(&"\u{0441}".repeat(25), Mode::Content)
+        let diagnostics: Vec<String> = scan(&"\u{0441}".repeat(25), Mode::Content)
             .iter()
             .map(|hit| evidence("a.txt", hit))
             .collect();
-        assert_eq!(hits.len(), 25);
-        assert_eq!(hits[0], "a.txt:1:1  '\u{441}'  U+0441  [Cyrillic]");
+        assert_eq!(diagnostics.len(), 25);
+        assert_eq!(diagnostics[0], "a.txt:1:1  '\u{441}'  U+0441  [Cyrillic]");
         let refused = refusal(
             "scan.language",
             "a.txt contains text in a script this machine does not write",
-            hits,
+            diagnostics,
             Some("dotguard scan a.txt".into()),
             Some("ALLOW_FOREIGN=1 dotguard scan a.txt".into()),
         );
@@ -466,9 +467,9 @@ mod tests {
     fn a_single_cyrillic_homoglyph_is_caught_in_every_mode() {
         // The `с` here, U+0441, differs from the Latin `c`.
         for mode in [Mode::English, Mode::Japanese, Mode::Content] {
-            let hits = scan("let sourсe = 1;", mode);
-            assert_eq!(hits.len(), 1);
-            assert_eq!(hits[0].kind, "Cyrillic");
+            let diagnostics = scan("let sourсe = 1;", mode);
+            assert_eq!(diagnostics.len(), 1);
+            assert_eq!(diagnostics[0].kind, "Cyrillic");
         }
     }
 

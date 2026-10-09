@@ -4,6 +4,8 @@ description: >-
   Require proof-first, source-bound assurance for implementation changes in any language.
   Prefer a verifier that checks the actual language implementation, and use Lean 4 for general theorems with an explicit implementation refinement.
   Use for implementation, bug fixes, proof gaps, and verification gates.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Proof-first assurance
@@ -53,3 +55,6 @@ Never add computation to compensate for an unverified correctness argument.
 Use `resource-coordination` before a proof run or reference campaign likely to occupy a machine for hours.
 Orchestrate them with maintained Rust tooling instead of shell or Python glue.
 Record consequential model and trust-boundary choices in an ADR.
+
+These machines report a repository's verification gaps when a session starts, and refuse new ones at commit, push, the end of a turn, and `pr-workflow ready`.
+Each refusal names its next action, and the repository's `assure.toml` names the owner of each shape.

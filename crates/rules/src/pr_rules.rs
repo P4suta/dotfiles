@@ -73,7 +73,7 @@ pub fn coderabbit_body_marker_allowed(request: bool, summary: bool, ignore: bool
 /// The head commit's reported checks, which `pr_ready_rules::complete` decides from its report.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Checks {
-    Passing,
+    Success,
     Incomplete,
 }
 
@@ -169,7 +169,7 @@ pub fn review_requirement(paused: bool, exclusion: Exclusion) -> ReviewRequireme
 /// An empty report counts as pending.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum HeadChecks {
-    Passing,
+    Success,
     Pending,
     Failed,
 }
@@ -181,7 +181,7 @@ pub fn head_checks(total: usize, unfinished: usize, failed: usize) -> HeadChecks
     } else if total == 0 || unfinished > 0 {
         HeadChecks::Pending
     } else {
-        HeadChecks::Passing
+        HeadChecks::Success
     }
 }
 
@@ -251,7 +251,7 @@ pub fn merge_step(state: MergeState, stacked: bool, paused: bool) -> Step {
     match state.checks {
         HeadChecks::Failed => return Step::Stop(Stop::FailedChecks),
         HeadChecks::Pending => return Step::Wait,
-        HeadChecks::Passing => {}
+        HeadChecks::Success => {}
     }
     if state.lifecycle == Lifecycle::Draft {
         return if paused && state.exclusion != Exclusion::Pause {
@@ -318,7 +318,7 @@ pub fn plan(
         }),
         Operation::Edit => Ok(Effect::Edit),
         Operation::Ready if !draft => Err(Blocker::NotDraft),
-        Operation::Ready if checks != Checks::Passing => Err(Blocker::UnfinishedChecks),
+        Operation::Ready if checks != Checks::Success => Err(Blocker::UnfinishedChecks),
         Operation::Ready => Ok(Effect::Ready),
     }
 }
@@ -342,7 +342,7 @@ mod proofs {
         Lifecycle::Closed,
     ];
     pub const HEAD_CHECKS: [HeadChecks; 3] =
-        [HeadChecks::Passing, HeadChecks::Pending, HeadChecks::Failed];
+        [HeadChecks::Success, HeadChecks::Pending, HeadChecks::Failed];
 
     /// A rejected document never mutates a PR, local creation starts as a draft, ready needs a validated draft with passing checks, and a refusal names the first unmet condition.
     pub fn spec_plan(
@@ -365,7 +365,7 @@ mod proofs {
                 Operation::Create => Ok(Effect::CreateReady),
                 Operation::Edit => Ok(Effect::Edit),
                 Operation::Ready if !draft => Err(Blocker::NotDraft),
-                Operation::Ready if checks != Checks::Passing => Err(Blocker::UnfinishedChecks),
+                Operation::Ready if checks != Checks::Success => Err(Blocker::UnfinishedChecks),
                 Operation::Ready => Ok(Effect::Ready),
             }
         };
@@ -384,7 +384,7 @@ mod proofs {
             failed == 0 && (total == 0 || unfinished != 0)
         );
         assert_eq!(
-            head == HeadChecks::Passing,
+            head == HeadChecks::Success,
             failed == 0 && total != 0 && unfinished == 0
         );
     }
@@ -494,7 +494,7 @@ mod proofs {
         let generation = Generation::ALL[usize::from(kani::any::<u8>() % 2)];
         let issue = ISSUES[usize::from(kani::any::<u8>() % 3)];
         let checks = if kani::any() {
-            Checks::Passing
+            Checks::Success
         } else {
             Checks::Incomplete
         };
@@ -520,9 +520,10 @@ mod proofs {
         let remaining: u64 = kani::any();
         let reserve: u64 = kani::any();
         spec_quota(remaining, reserve);
-        kani::cover!(head_checks(total, unfinished, failed) == HeadChecks::Passing);
-        kani::cover!(head_checks(total, unfinished, failed) == HeadChecks::Pending && failed == 0);
-        kani::cover!(!api_quota_available(remaining, reserve) && reserve > 0);
+        let checks = head_checks(total, unfinished, failed);
+        kani::cover!(checks == HeadChecks::Success);
+        kani::cover!((checks == HeadChecks::Pending) & (failed == 0));
+        kani::cover!(!api_quota_available(remaining, reserve) & (reserve > 0));
     }
 
     #[cfg(kani)]
@@ -562,10 +563,14 @@ mod proofs {
         };
         spec_merge(state, stacked, paused);
         let step = merge_step(state, stacked, paused);
-        kani::cover!(step == Step::Merge && paused);
-        kani::cover!(step == Step::Restack);
-        kani::cover!(step == Step::Exclude);
-        kani::cover!(step == Step::Wait && state.checks == HeadChecks::Passing);
+        let merge = (step == Step::Merge) & paused;
+        let restack = step == Step::Restack;
+        let exclude = step == Step::Exclude;
+        let wait = (step == Step::Wait) & (state.checks == HeadChecks::Success);
+        kani::cover!(merge);
+        kani::cover!(restack);
+        kani::cover!(exclude);
+        kani::cover!(wait);
     }
 }
 
@@ -580,7 +585,7 @@ mod tests {
         for operation in proofs::OPERATIONS {
             for generation in Generation::ALL {
                 for issue in proofs::ISSUES {
-                    for checks in [Checks::Passing, Checks::Incomplete] {
+                    for checks in [Checks::Success, Checks::Incomplete] {
                         for [validated, draft] in flags() {
                             proofs::spec_plan(
                                 operation, generation, validated, draft, issue, checks,
@@ -655,7 +660,7 @@ mod tests {
         lifecycle: Lifecycle::Ready,
         conflict: false,
         behind: false,
-        checks: HeadChecks::Passing,
+        checks: HeadChecks::Success,
         clean: true,
         exclusion: Exclusion::Pause,
     };
@@ -665,7 +670,7 @@ mod tests {
         assert_eq!(head_checks(0, 0, 0), HeadChecks::Pending);
         assert_eq!(head_checks(3, 1, 0), HeadChecks::Pending);
         assert_eq!(head_checks(3, 1, 1), HeadChecks::Failed);
-        assert_eq!(head_checks(3, 0, 0), HeadChecks::Passing);
+        assert_eq!(head_checks(3, 0, 0), HeadChecks::Success);
     }
 
     #[test]

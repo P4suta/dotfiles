@@ -1,0 +1,6 @@
+# The theorems no bounded checker can state, in Lean 4 core without Mathlib or any other dependency.
+name = "dotfiles"
+defaultTargets = ["Dotfiles"]
+
+[[lean_lib]]
+name = "Dotfiles"

@@ -8,6 +8,8 @@ use self::alloc::vec::Vec;
 pub enum Reason {
     /// An inline interpreter runs code from `-c`, `-e`, or standard input.
     InlineInterpreter,
+    /// An in-place editor flag or an awk program statement writes a named file.
+    InPlaceEdit,
     /// A redirect, `tee`, or heredoc target names a file.
     FileRedirect,
 }
@@ -19,9 +21,11 @@ pub enum Verdict {
 }
 
 #[must_use]
-pub fn verdict(inline_interpreter: bool, file_write: bool) -> Verdict {
+pub fn verdict(inline_interpreter: bool, in_place: bool, file_write: bool) -> Verdict {
     if inline_interpreter {
         Verdict::Refuse(Reason::InlineInterpreter)
+    } else if in_place {
+        Verdict::Refuse(Reason::InPlaceEdit)
     } else if file_write {
         Verdict::Refuse(Reason::FileRedirect)
     } else {
@@ -34,6 +38,9 @@ pub const fn next_action(reason: Reason) -> &'static str {
     match reason {
         Reason::InlineInterpreter => {
             "Use the Edit or Write tool to change files, or add the logic as a project command (`just`, `xtask`, `pr-workflow`) and run that."
+        }
+        Reason::InPlaceEdit => {
+            "Use the Edit tool to change the file, or run a project command (`just`, `xtask`, `pr-workflow`) that applies the change."
         }
         Reason::FileRedirect => {
             "Use the Write tool for new files and the Edit tool for changes, or run a project command (`just`, `xtask`, `pr-workflow`) that produces the file."
@@ -220,10 +227,15 @@ fn scan(command: &str) -> Scan {
 ///
 /// Exempt as disproportionate: a shell parser over unbounded text needs fuzzing, which no verifier here owns yet.
 /// Evidence: `crates/rules/src/shell_write_rules.rs::tests::standard_input_bodies_include_heredocs_and_piped_words`.
-/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+/// Reconsider when a cargo-fuzz target owns this function.
 #[must_use]
 pub fn segments(command: &str) -> Vec<Vec<String>> {
-    scan(command)
+    script_segments(command, 0)
+}
+
+fn script_segments(command: &str, depth: usize) -> Vec<Vec<String>> {
+    let scan = scan(command);
+    let mut result: Vec<Vec<String>> = scan
         .tokens
         .split(|token| *token == Token::Separator)
         .map(|segment| {
@@ -233,7 +245,19 @@ pub fn segments(command: &str) -> Vec<Vec<String>> {
                 .collect::<Vec<_>>()
         })
         .filter(|words| !words.is_empty())
-        .collect()
+        .collect();
+    let shell = result.iter().any(|words| {
+        let words: Vec<&str> = words.iter().map(String::as_str).collect();
+        command_words(&words)
+            .first()
+            .is_some_and(|first| SCRIPT_SHELLS.contains(&program(first).as_str()))
+    });
+    if shell && depth < SCRIPT_DEPTH {
+        for body in scan.heredocs {
+            result.extend(script_segments(&body, depth + 1));
+        }
+    }
+    result
 }
 
 /// The program a command word names: its filename, folded to small letters, without `.exe` or a version suffix.
@@ -257,7 +281,7 @@ impl PartialEq<&str> for Program {
 ///
 /// Exempt as disproportionate: Kani spends past its budget on the string search of even a three-byte word.
 /// Evidence: `crates/rules/src/shell_write_rules.rs::tests::a_program_name_drops_its_directory_case_and_suffixes`.
-/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+/// Reconsider when a cargo-fuzz target owns this function.
 #[must_use]
 pub fn program(text: &str) -> Program {
     let name = text.rsplit(['/', '\\']).next().unwrap_or(text);
@@ -309,6 +333,96 @@ fn runs_inline(name: &str, arguments: &[&str], heredoc: bool) -> bool {
 const DISCARD: &str = "/dev/null";
 const STDOUT: &str = "/dev/stdout";
 const STDERR: &str = "/dev/stderr";
+
+/// Whether the flags of `sed` or `perl` request in-place edits, or `awk` loads the `inplace` extension.
+///
+/// Exempt as disproportionate: Kani spends past its budget on the string search of even a three-byte word.
+/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::in_place_editor_flags_are_refused`.
+/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+#[must_use]
+pub fn in_place_flag(name: &str, arguments: &[&str]) -> bool {
+    let editor = matches!(name, "sed" | "perl");
+    let awk = matches!(name, "awk" | "gawk");
+    if !editor && !awk {
+        return false;
+    }
+    for (index, argument) in arguments.iter().enumerate() {
+        if argument == &"--" {
+            return false;
+        }
+        let Some(flags) = argument.strip_prefix('-').filter(|f| !f.is_empty()) else {
+            continue;
+        };
+        let long = flags.starts_with('-');
+        let found = if editor {
+            long && (flags == "-in-place" || flags.starts_with("-in-place="))
+                || !long && flags.contains('i')
+        } else if long {
+            false
+        } else {
+            (flags == "i"
+                && arguments
+                    .get(index + 1)
+                    .is_some_and(|word| *word == "inplace"))
+                || flags == "iinplace"
+        };
+        if found {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether an awk program text redirects a `print` or `printf` statement into a file.
+///
+/// A `>` in a print statement always names a redirect target under the awk grammar, never a comparison, and `>>` only appends.
+///
+/// Exempt as disproportionate: Kani spends past its budget on the string search of even a three-byte word.
+/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::awk_programs_that_write_files_are_refused`.
+/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+#[must_use]
+pub fn awk_program_writes(program: &str) -> bool {
+    program
+        .split([';', '{', '}', '\n'])
+        .filter(|statement| {
+            let body = statement.trim_start();
+            body.starts_with("print ")
+                || body.starts_with("print(")
+                || body.starts_with("printf ")
+                || body.starts_with("printf(")
+        })
+        .any(statement_redirects)
+}
+
+/// Whether a print statement holds a `>` or `>>` outside its string literals.
+fn statement_redirects(statement: &str) -> bool {
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut chars = statement.chars().peekable();
+    while let Some(c) = chars.next() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => quoted = true,
+            '>' => {
+                if chars.peek() != Some(&'=') {
+                    return true;
+                }
+                chars.next();
+            }
+            _ => {}
+        }
+    }
+    false
+}
 
 /// The words a flag and its separate value take.
 const FLAG_WITH_VALUE: usize = 2;
@@ -456,7 +570,7 @@ fn command_sources(mut arguments: &[&str], sources: &mut Vec<Source>) {
 ///
 /// Exempt as disproportionate: a shell parser over unbounded text needs fuzzing, which no verifier here owns yet.
 /// Evidence: `crates/rules/src/shell_write_rules.rs::tests::gh_body_arguments_are_collected_from_every_spelling`.
-/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+/// Reconsider when a cargo-fuzz target owns this function.
 pub fn body_sources(command: &str) -> Vec<Source> {
     let scan = scan(command);
     let segments: Vec<Vec<&str>> = scan
@@ -502,11 +616,42 @@ pub fn body_sources(command: &str) -> Vec<Source> {
 ///
 /// Exempt as disproportionate: a shell parser over unbounded text needs fuzzing, which no verifier here owns yet.
 /// Evidence: `crates/rules/src/shell_write_rules.rs::tests::inline_interpreters_are_refused`.
-/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+/// Reconsider when a cargo-fuzz target owns this function.
 #[must_use]
 pub fn inspect(command: &str) -> Verdict {
+    inspect_at(command, 0)
+}
+
+/// Inspect recursive shell scripts through this many nested wrappers.
+const SCRIPT_DEPTH: usize = 4;
+const SCRIPT_SHELLS: [&str; 5] = ["sh", "bash", "zsh", "dash", "ksh"];
+
+fn command_words<'a>(mut words: &'a [&'a str]) -> &'a [&'a str] {
+    loop {
+        words = match words {
+            [word, rest @ ..]
+                if is_assignment(word)
+                    || matches!(
+                        program(word).as_str(),
+                        "env" | "command" | "exec" | "time" | "nohup" | "sudo"
+                    ) =>
+            {
+                rest
+            }
+            [word, "x" | "exec", "--", rest @ ..] | [word, "x" | "exec", rest @ ..]
+                if program(word) == "mise" =>
+            {
+                rest
+            }
+            _ => return words,
+        };
+    }
+}
+
+fn inspect_at(command: &str, depth: usize) -> Verdict {
     let scan = scan(command);
     let mut interpreter = false;
+    let mut in_place = false;
     let mut file_write = false;
     for (index, token) in scan.tokens.iter().enumerate() {
         if *token == Token::Redirect && writes_to(scan.tokens.get(index + 1)) {
@@ -515,32 +660,62 @@ pub fn inspect(command: &str) -> Verdict {
     }
     for segment in scan.tokens.split(|token| *token == Token::Separator) {
         let words = segment_words(segment);
-        let mut command = words.as_slice();
-        loop {
-            command = match command {
-                [word, rest @ ..]
-                    if is_assignment(word)
-                        || matches!(
-                            program(word).as_str(),
-                            "env" | "command" | "exec" | "time" | "nohup" | "sudo"
-                        ) =>
-                {
-                    rest
-                }
-                [word, "x" | "exec", "--", rest @ ..] | [word, "x" | "exec", rest @ ..]
-                    if program(word) == "mise" =>
-                {
-                    rest
-                }
-                _ => break,
-            };
-        }
+        let command = command_words(&words);
         let Some((first, rest)) = command.split_first() else {
             continue;
         };
         let name = program(first);
+        if SCRIPT_SHELLS.contains(&name.as_str()) {
+            let flag = rest.iter().position(|word| {
+                word.starts_with('-') && !word.starts_with("--") && word.contains('c')
+            });
+            let scripts: Vec<&str> = match flag {
+                Some(flag) => rest.get(flag + 1).copied().into_iter().collect(),
+                None => scan.heredocs.iter().map(String::as_str).collect(),
+            };
+            if !scripts.is_empty() && depth >= SCRIPT_DEPTH {
+                interpreter = true;
+            } else {
+                for script in scripts {
+                    let found = inspect_at(script, depth + 1);
+                    if matches!(found, Verdict::Refuse(_)) {
+                        return found;
+                    }
+                }
+            }
+        }
         if runs_inline(name.as_str(), rest, scan.heredoc) {
             interpreter = true;
+        }
+        if in_place_flag(name.as_str(), rest) {
+            in_place = true;
+        }
+        if matches!(name.as_str(), "awk" | "gawk" | "mawk" | "nawk")
+            && rest.iter().any(|argument| awk_program_writes(argument))
+        {
+            in_place = true;
+        }
+        if name == "xargs"
+            && let Some(position) = rest.iter().position(|word| !word.starts_with('-'))
+            && rest
+                .get(position..)
+                .and_then(|words| words.split_first())
+                .is_some_and(|(word, arguments)| in_place_flag(program(word).as_str(), arguments))
+        {
+            in_place = true;
+        }
+        if name == "find"
+            && let Some(marker) = rest
+                .iter()
+                .position(|word| matches!(*word, "-exec" | "-execdir" | "-ok" | "-okdir"))
+            && rest.get(marker..).is_some_and(|words| {
+                let [_, editor, arguments @ ..] = words else {
+                    return false;
+                };
+                in_place_flag(program(editor).as_str(), arguments)
+            })
+        {
+            in_place = true;
         }
         if name == "tee"
             && rest
@@ -550,7 +725,7 @@ pub fn inspect(command: &str) -> Verdict {
             file_write = true;
         }
     }
-    verdict(interpreter, file_write)
+    verdict(interpreter, in_place, file_write)
 }
 
 /// The properties Kani proves for every input and the tests check over every input they list.
@@ -558,11 +733,13 @@ pub fn inspect(command: &str) -> Verdict {
 mod proofs {
     use super::*;
 
-    /// The verdict never admits a file-writing command, an inline interpreter names its own refusal first, and each refusal names a file tool.
-    pub fn spec_verdict(interpreter: bool, file: bool) {
-        let result = verdict(interpreter, file);
+    /// The verdict never admits a file-writing command, the refusal reasons keep their precedence, and each refusal names a file tool.
+    pub fn spec_verdict(interpreter: bool, in_place: bool, file: bool) {
+        let result = verdict(interpreter, in_place, file);
         let expected = if interpreter {
             Verdict::Refuse(Reason::InlineInterpreter)
+        } else if in_place {
+            Verdict::Refuse(Reason::InPlaceEdit)
         } else if file {
             Verdict::Refuse(Reason::FileRedirect)
         } else {
@@ -578,30 +755,90 @@ mod proofs {
     #[kani::proof]
     fn file_writing_commands_are_never_admitted_and_every_refusal_names_a_next_action() {
         let interpreter: bool = kani::any();
+        let in_place: bool = kani::any();
         let file: bool = kani::any();
-        spec_verdict(interpreter, file);
-        let result = verdict(interpreter, file);
+        spec_verdict(interpreter, in_place, file);
+        let result = verdict(interpreter, in_place, file);
         kani::cover!(result == Verdict::Admit);
         kani::cover!(result == Verdict::Refuse(Reason::InlineInterpreter));
+        kani::cover!(result == Verdict::Refuse(Reason::InPlaceEdit));
         kani::cover!(result == Verdict::Refuse(Reason::FileRedirect));
     }
 }
 
 #[cfg(test)]
 mod tests {
+
+    #[cfg(miri)]
     #[test]
+    fn examples_share_one_miri_test() {
+        every_input_meets_the_verdict_specification();
+        redirects_into_files_are_refused();
+        standard_input_bodies_include_heredocs_and_piped_words();
+        commands_that_send_no_body_have_no_sources();
+        a_program_name_drops_its_directory_case_and_suffixes();
+        refusals_name_a_next_action();
+        the_scanner_reads_quotes_escapes_and_separators_into_tokens();
+        the_scanner_tells_each_redirect_from_a_descriptor_copy();
+        a_heredoc_body_ends_at_its_delimiter_and_stays_out_of_the_words();
+        segments_drop_empty_commands_and_stop_at_a_redirect();
+        an_assignment_names_a_variable_before_its_equals_sign();
+        each_interpreter_runs_inline_only_through_its_own_flags();
+        a_command_prefix_is_skipped_only_for_mise_and_the_wrappers();
+        api_and_command_bodies_come_from_every_flag_form();
+        standard_input_takes_the_words_of_every_other_command();
+    }
+    #[cfg_attr(not(miri), test)]
     fn every_input_meets_the_verdict_specification() {
-        for [interpreter, file] in crate::domain::flags() {
-            super::proofs::spec_verdict(interpreter, file);
+        for [interpreter, in_place, file] in crate::domain::flags() {
+            super::proofs::spec_verdict(interpreter, in_place, file);
         }
         assert!(super::next_action(super::Reason::InlineInterpreter).starts_with("Use the Edit"));
+        assert!(super::next_action(super::Reason::InPlaceEdit).starts_with("Use the Edit"));
         assert!(super::next_action(super::Reason::FileRedirect).starts_with("Use the Write"));
     }
 
     use super::*;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "nested shell regressions allocate parsed command text")]
+    fn nested_shells_and_heredocs_cannot_hide_file_writes() {
+        assert_eq!(
+            segments("sh <<'EOF'\nrg x .\nEOF"),
+            [vec!["sh"], vec!["rg", "x", "."]]
+        );
+        assert_eq!(segments("cat <<'EOF'\nrg x .\nEOF"), [vec!["cat"]]);
+        let mut body = String::from("rg x .");
+        for depth in 0..=super::SCRIPT_DEPTH {
+            body = alloc::format!("sh <<'EOF{depth}'\n{body}\nEOF{depth}");
+        }
+        let parsed = segments(&body);
+        assert_eq!(parsed.len(), super::SCRIPT_DEPTH + 1);
+        assert!(
+            !parsed
+                .iter()
+                .any(|words| words.first().is_some_and(|word| word == "rg"))
+        );
+        assert_eq!(inspect(&body), REFUSED_INTERPRETER);
+        let mut body = String::from("sh script.sh");
+        for depth in 0..super::SCRIPT_DEPTH {
+            body = alloc::format!("sh <<'EOF{depth}'\n{body}\nEOF{depth}");
+        }
+        assert_eq!(inspect(&body), Verdict::Admit);
+        for command in [
+            "bash -c \"cat > notes.md <<'EOF'\nbody\nEOF\"",
+            "sh <<'EOF'\nsed -i s/a/b/ f\nEOF",
+            "bash -c 'awk \"{print > f}\" input'",
+            "sh -c 'sh -c \"sed -i s/a/b/ f\"'",
+        ] {
+            assert!(matches!(inspect(command), Verdict::Refuse(_)), "{command}");
+        }
+        assert_eq!(inspect("sh <<'EOF'\nrg x .\nEOF"), Verdict::Admit);
+    }
     use alloc::vec;
 
     const REFUSED_INTERPRETER: Verdict = Verdict::Refuse(Reason::InlineInterpreter);
+    const REFUSED_IN_PLACE: Verdict = Verdict::Refuse(Reason::InPlaceEdit);
     const REFUSED_FILE: Verdict = Verdict::Refuse(Reason::FileRedirect);
 
     #[test]
@@ -626,10 +863,12 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn redirects_into_files_are_refused() {
         for command in [
             "cat > notes.txt <<'EOF'\nbody\nEOF",
+            "cat <<EOF >> notes.txt\nbody\nEOF",
+            "echo hi | tee -a notes.txt <<'EOF'\nbody\nEOF",
             "echo hi > out.txt",
             "echo hi >> out.txt",
             "echo hi 2> err.txt",
@@ -644,8 +883,69 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore = "Miri takes seconds over every command")]
+    fn in_place_editor_flags_are_refused() {
+        for command in [
+            "sed -i 's/a/b/' file.txt",
+            "sed --in-place 's/a/b/' file.txt",
+            "sed --in-place=.bak 's/a/b/' file.txt",
+            "sed -i.bak 's/a/b/' file.txt",
+            "sed -ni 's/a/b/p' file.txt",
+            "awk -i inplace '{print $1}' data.tsv",
+            "gawk -iinplace '{print}' data.tsv",
+            "sudo sed -i 's/a/b/' /etc/hosts",
+            "env sed -i 's/a/b/' file.txt",
+            "mise x -- sed -i 's/a/b/' file.txt",
+            "find src -name '*.rs' -exec sed -i 's/a/b/' {} +",
+            "find -- src -exec sed -i 's/a/b/' {} +",
+            "git ls-files | xargs sed -i 's/a/b/'",
+            "git ls-files -z | xargs -0 sed -i 's/a/b/'",
+        ] {
+            assert_eq!(inspect(command), REFUSED_IN_PLACE, "{command}");
+        }
+        assert!(in_place_flag("sed", &["-i", "s/a/b/"]));
+        assert!(in_place_flag("sed", &["--in-place"]));
+        assert!(in_place_flag("sed", &["--in-place=.bak"]));
+        assert!(in_place_flag("perl", &["-pi"]));
+        assert!(in_place_flag("awk", &["-i", "inplace"]));
+        assert!(!in_place_flag("sed", &["-n", "s/a/b/p"]));
+        assert!(!in_place_flag("sed", &["--", "-i"]));
+        assert!(!in_place_flag("awk", &["-i"]));
+        assert!(!in_place_flag("awk", &["-v", "i=x"]));
+        assert!(!in_place_flag("grep", &["-i", "pattern"]));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every command")]
+    fn awk_programs_that_write_files_are_refused() {
+        for command in [
+            "awk '{print $1 > \"out.txt\"}' data.tsv",
+            "awk '{printf \"%s\\n\", $0 >> \"log.txt\"}' data",
+            "awk '{ print > \"out\" }' data",
+            "awk 'NR>1 {print; print $2 > \"out.txt\"}' data",
+            "awk -F, '{print $1 > (\"part\" $2)}' data",
+            "gawk '{print $0 > \"out.txt\"}' data",
+        ] {
+            assert_eq!(inspect(command), REFUSED_IN_PLACE, "{command}");
+        }
+        assert!(awk_program_writes("{print > \"out\"}"));
+        assert!(awk_program_writes("printf(\"x\") > \"f\""));
+        assert!(awk_program_writes("print $1 >> f"));
+        assert!(!awk_program_writes("{print $1}"));
+        assert!(!awk_program_writes("{print \"a>b\"}"));
+        assert!(!awk_program_writes("{print $1 >= $2}"));
+        assert!(!awk_program_writes("if (a > \"b\") print a"));
+        assert!(!awk_program_writes("{ x = 1; print x }"));
+        assert!(!awk_program_writes("data.tsv"));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Miri takes seconds over every command")]
     fn reading_and_project_commands_are_admitted() {
         for command in [
+            "sed --help",
+            "sh script.c 'sed -i x f'",
+            "sh -x 'sed -i x f'",
+            "bash --rcfile 'sed -i x f'",
             "cat README.md",
             "grep -rn foo src",
             "git status --short",
@@ -668,6 +968,10 @@ mod tests {
             "node script.js",
             "node --version",
             "ls | grep foo",
+            "sed -n 's/a/b/p' file.txt",
+            "sed 's/a/b/' file.txt",
+            "awk '{print $1}' data.tsv",
+            "awk '$1 > 1 {print}' data.tsv",
             "if [ 1 -lt 2 ]; then echo yes; fi",
             "tee --help",
             "",
@@ -725,7 +1029,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn standard_input_bodies_include_heredocs_and_piped_words() {
         assert_eq!(
             body_sources("gh pr create --body-file - <<'EOF'\nline one\nline two\nEOF"),
@@ -741,7 +1045,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn commands_that_send_no_body_have_no_sources() {
         for command in [
             "gh pr view 3 --json body",
@@ -758,7 +1062,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_program_name_drops_its_directory_case_and_suffixes() {
         assert_eq!(program("/usr/bin/Python3.12"), "python");
         assert_eq!(program(r"C:\Tools\GIT.EXE"), "git");
@@ -767,10 +1071,14 @@ mod tests {
         assert_eq!(program("2to3"), "2to");
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn refusals_name_a_next_action() {
-        for reason in [Reason::InlineInterpreter, Reason::FileRedirect] {
-            assert!(next_action(reason).contains("Write"));
+        for (reason, start) in [
+            (Reason::InlineInterpreter, "Use the Edit"),
+            (Reason::InPlaceEdit, "Use the Edit"),
+            (Reason::FileRedirect, "Use the Write"),
+        ] {
+            assert!(next_action(reason).starts_with(start), "{reason:?}");
         }
     }
 
@@ -785,7 +1093,7 @@ mod tests {
         word(text, true)
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn the_scanner_reads_quotes_escapes_and_separators_into_tokens() {
         assert_eq!(scan("'a b'c").tokens, [word("a bc", false)]);
         assert_eq!(scan("'a' 'b'").tokens, [word("a", false), word("b", false)]);
@@ -819,7 +1127,7 @@ mod tests {
         assert_eq!(scan("a\tb\rc").tokens, [plain("a"), plain("b"), plain("c")]);
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn the_scanner_tells_each_redirect_from_a_descriptor_copy() {
         for command in ["a &> b", "a &>> b", "a > b", "a >> b", "a >| b", "a 2> b"] {
             assert_eq!(
@@ -851,7 +1159,7 @@ mod tests {
         assert!(here_string.heredoc);
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_heredoc_body_ends_at_its_delimiter_and_stays_out_of_the_words() {
         let found = scan("cat <<'EOF' > f\nline one\n\tEOF\nnext");
         assert!(found.heredoc);
@@ -884,13 +1192,13 @@ mod tests {
         assert_eq!(bodies, ["a\n"]);
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn segments_drop_empty_commands_and_stop_at_a_redirect() {
         assert_eq!(segments("a b; ;c > f d"), [vec!["a", "b"], vec!["c"]]);
         assert_eq!(segments(" ; "), Vec::<Vec<String>>::new());
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn an_assignment_names_a_variable_before_its_equals_sign() {
         assert!(is_assignment("A_1=x"));
         assert!(is_assignment("a="));
@@ -899,7 +1207,7 @@ mod tests {
         assert!(!is_assignment("plain"));
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn each_interpreter_runs_inline_only_through_its_own_flags() {
         assert!(runs_inline("node", &["--eval", "x"], false));
         assert!(runs_inline("node", &["-p", "x"], false));
@@ -920,7 +1228,7 @@ mod tests {
         assert!(!runs_inline("bash", &["-c", "x"], false));
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_command_prefix_is_skipped_only_for_mise_and_the_wrappers() {
         assert_eq!(inspect("foo x python -c 1"), Verdict::Admit);
         assert_eq!(
@@ -940,7 +1248,7 @@ mod tests {
         assert_eq!(inspect("tee log"), Verdict::Refuse(Reason::FileRedirect));
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn api_and_command_bodies_come_from_every_flag_form() {
         let mut sources = Vec::new();
         api_sources(
@@ -1007,7 +1315,7 @@ mod tests {
         assert_eq!(flag_value(&["x", "-b", "v"], 1, &["-b"]), Some(("v", 2)));
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn standard_input_takes_the_words_of_every_other_command() {
         assert_eq!(
             body_sources("echo hello | env gh pr comment --body-file -"),

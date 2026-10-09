@@ -5,7 +5,9 @@ mod tree;
 
 pub use platform::paths::canonical;
 pub use platform::{aside, build_inputs, freshness, refusal, report, tool};
-pub use rules::skill_rules;
+pub use rules::{
+    incident_rules, proof_budget_rules, skill_gate_rules, skill_plan_rules, skill_rules,
+};
 pub(crate) use tree::collect;
 pub use tree::{
     Metadata, export_checks, metadata, skill_source_paths, skills, split_frontmatter,
@@ -17,7 +19,7 @@ use crate::skill_rules::{
     gate_complete, maintenance_current, size_disposition, tracked_decision, triage_complete,
 };
 pub use crate::skill_rules::{Outcome, decision_complete};
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use pulldown_cmark::{Event as MarkdownEvent, Parser};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -30,7 +32,8 @@ use std::path::{Component, Path};
 #[serde(deny_unknown_fields)]
 pub struct Requirement {
     pub skill: String,
-    pub also: Vec<String>,
+    #[serde(alias = "also")]
+    pub dependencies: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -141,53 +144,47 @@ pub fn dependency_plan(
         );
         ensure!(
             graph
-                .insert(&requirement.skill, &requirement.also)
+                .insert(&requirement.skill, &requirement.dependencies)
                 .is_none(),
             "duplicate dependency declaration"
         );
         let mut unique = BTreeSet::new();
-        for name in &requirement.also {
+        for name in &requirement.dependencies {
             ensure!(
                 available.contains(name) && unique.insert(name),
                 "unknown or duplicate dependency: {name}"
             );
         }
     }
-    let mut plan = Vec::new();
-    let mut visiting = BTreeSet::new();
-    let mut done = BTreeSet::new();
+    // `skill_plan_rules` names each skill by its index in the sorted catalog.
+    let names: Vec<&String> = available.iter().collect();
+    let index = |name: &str| names.iter().position(|candidate| *candidate == name);
+    let deps: Vec<Vec<usize>> = names
+        .iter()
+        .map(|name| {
+            graph
+                .get(name)
+                .into_iter()
+                .flat_map(|also| also.iter())
+                .filter_map(|dependency| index(dependency))
+                .collect()
+        })
+        .collect();
+    let deps: Vec<&[usize]> = deps.iter().map(Vec::as_slice).collect();
+    let mut wanted = Vec::new();
     for name in requested {
-        visit(name, available, &graph, &mut visiting, &mut done, &mut plan)?;
+        wanted.push(index(name).with_context(|| format!("unknown skill: {name}"))?);
     }
-    Ok(plan)
-}
-
-/// Appends `name` to `plan` after every skill it depends on, refusing a cycle.
-fn visit(
-    name: &str,
-    available: &BTreeSet<String>,
-    graph: &BTreeMap<&String, &Vec<String>>,
-    visiting: &mut BTreeSet<String>,
-    done: &mut BTreeSet<String>,
-    plan: &mut Vec<String>,
-) -> Result<()> {
-    ensure!(available.contains(name), "unknown skill: {name}");
-    if done.contains(name) {
-        return Ok(());
+    match skill_plan_rules::input(&deps, &wanted).and_then(skill_plan_rules::plan) {
+        Ok(plan) => Ok(plan
+            .skills()
+            .iter()
+            .copied()
+            .filter_map(|skill| names.get(skill).map(|name| (*name).clone()))
+            .collect()),
+        Err(skill_plan_rules::Failure::Cycle) => bail!("cyclic skill dependency"),
+        Err(skill_plan_rules::Failure::Unknown) => bail!("unknown skill dependency"),
     }
-    ensure!(
-        visiting.insert(name.into()),
-        "cyclic skill dependency at {name}"
-    );
-    if let Some(dependencies) = graph.get(&name.to_string()) {
-        for dependency in *dependencies {
-            visit(dependency, available, graph, visiting, done, plan)?;
-        }
-    }
-    visiting.remove(name);
-    done.insert(name.into());
-    plan.push(name.into());
-    Ok(())
 }
 
 #[must_use]
@@ -238,39 +235,68 @@ pub fn check_review(
     review: &Review,
     evidence_root: &Path,
 ) -> Result<()> {
-    ensure!(
-        report_hash == review.report_hash,
-        "stale skill analysis; analyze the current catalog and evidence"
-    );
-    let known: BTreeSet<_> = findings.iter().map(|finding| &finding.id).collect();
-    ensure!(known.len() == findings.len(), "duplicate analysis finding");
-    let mut found = BTreeSet::new();
+    // `skill_gate_rules::review_complete` names each finding by its index and each decision by the index of its finding.
+    let index = |id: &str| {
+        findings
+            .iter()
+            .position(|finding| finding.id == id)
+            .unwrap_or(findings.len())
+    };
+    let facts: Vec<(usize, bool)> = findings
+        .iter()
+        .map(|finding| (index(&finding.id), adopted.contains(&finding.id)))
+        .collect();
+    let decisions: Vec<(usize, bool)> = review
+        .decisions
+        .iter()
+        .map(|decision| {
+            (
+                index(&decision.id),
+                complete(
+                    decision.outcome,
+                    &decision.reason,
+                    &decision.evidence,
+                    decision.revisit.as_ref(),
+                ),
+            )
+        })
+        .collect();
+    match skill_gate_rules::review_complete(report_hash == review.report_hash, &facts, &decisions) {
+        Ok(()) => {}
+        Err(skill_gate_rules::Gap::Stale) => {
+            bail!("stale skill analysis; analyze the current catalog and evidence")
+        }
+        Err(skill_gate_rules::Gap::RepeatedFinding) => bail!("duplicate analysis finding"),
+        Err(skill_gate_rules::Gap::UnknownDecision) => {
+            bail!("unknown or duplicate skill decision")
+        }
+        Err(skill_gate_rules::Gap::IncompleteDecision) => bail!("incomplete decision"),
+        Err(skill_gate_rules::Gap::Undecided) => {
+            bail!("unprocessed skill recommendations; record every disposition with evidence")
+        }
+    }
     let root = crate::canonical(evidence_root)?;
     for decision in &review.decisions {
-        ensure!(
-            known.contains(&decision.id) && found.insert(&decision.id),
-            "unknown or duplicate skill decision: {}",
-            decision.id
-        );
-        ensure!(
-            complete(
-                decision.outcome,
-                &decision.reason,
-                &decision.evidence,
-                decision.revisit.as_ref()
-            ),
-            "incomplete decision: {}",
-            decision.id
-        );
         check_evidence(&decision.evidence, &root)?;
     }
-    ensure!(
-        known
-            .iter()
-            .all(|id| found.contains(id) || adopted.contains(*id)),
-        "unprocessed skill recommendations; record every disposition with evidence"
-    );
     Ok(())
+}
+
+/// Holds the store lock of `state` until the returned file drops, so an analysis and a triage never interleave.
+///
+/// # Errors
+///
+/// Returns an error when opening or locking the lock file fails.
+pub fn lock_store(state: &Path) -> Result<fs::File> {
+    fs::create_dir_all(state)?;
+    let file = fs::File::options()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(state.join("store.lock"))
+        .context("open the skill-ops store lock")?;
+    file.lock().context("lock the skill-ops store")?;
+    Ok(file)
 }
 
 /// Reads the tracked decisions, one `<skill>.json` file per skill.
@@ -1126,6 +1152,17 @@ fn sync_directory(path: &Path) -> Result<()> {
 /// Returns an error when the path has no parent, or creating, writing, or syncing a directory or the file fails.
 /// It also returns an error when the file exists and `replace` holds false.
 pub fn write_json(path: &Path, value: &impl Serialize, replace: bool) -> Result<()> {
+    let mut text = serde_json::to_vec_pretty(value)?;
+    text.push(b'\n');
+    write_file(path, &text, replace)
+}
+
+/// Writes `bytes` durably through a temporary file, creating missing directories and replacing an existing file only when `replace` holds.
+///
+/// # Errors
+///
+/// Returns an error when creating the directories or the file fails, or the file exists and `replace` holds false.
+pub fn write_file(path: &Path, bytes: &[u8], replace: bool) -> Result<()> {
     let absolute = std::path::absolute(path)?;
     let path = absolute.as_path();
     let directory = path.parent().context("missing output directory")?;
@@ -1147,8 +1184,7 @@ pub fn write_json(path: &Path, value: &impl Serialize, replace: bool) -> Result<
         )?;
     }
     let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
-    serde_json::to_writer_pretty(&mut temporary, value)?;
-    writeln!(temporary)?;
+    temporary.write_all(bytes)?;
     temporary.as_file().sync_all()?;
     if replace {
         temporary.persist(path)?;
@@ -1358,10 +1394,12 @@ pub fn analyze(
     }
     for requirement in &policy.requirements {
         let primary = &report.usage[&requirement.skill].sessions;
-        for also in &requirement.also {
-            let missing = primary.difference(&report.usage[also].sessions).count();
+        for dependency in &requirement.dependencies {
+            let missing = primary
+                .difference(&report.usage[dependency].sessions)
+                .count();
             if missing > 0 {
-                report.findings.push(Finding { id: format!("dependency:{}:{also}", requirement.skill), kind: "dependency-observation-gap".into(), skills: vec![requirement.skill.clone(), also.clone()], detail: format!("{missing} sessions lack an observed dependency load; inspect collection coverage and use the dependency-aware loader.") });
+                report.findings.push(Finding { id: format!("dependency:{}:{dependency}", requirement.skill), kind: "dependency-observation-gap".into(), skills: vec![requirement.skill.clone(), dependency.clone()], detail: format!("{missing} sessions lack an observed dependency load; inspect collection coverage and use the dependency-aware loader.") });
             }
         }
     }
@@ -1396,6 +1434,72 @@ pub fn analyze(
     Ok(report)
 }
 
+/// The milliseconds in a second, which turn the proof budget into the words a skill would use.
+const MILLIS_PER_SECOND: u64 = 1000;
+
+/// The texts the checkout's gates pin, which a skill points at instead of repeating: each tool version of `mise.toml`, and the proof budget.
+///
+/// # Errors
+///
+/// Returns an error when `mise.toml` exists but doesn't parse.
+pub fn pinned_terms(root: &Path) -> Result<Vec<String>> {
+    let mut terms = Vec::new();
+    let manifest = root.join("mise.toml");
+    if manifest.is_file() {
+        let value: toml::Table = toml::from_str(&fs::read_to_string(&manifest)?)
+            .with_context(|| manifest.display().to_string())?;
+        for spec in value
+            .get("tools")
+            .and_then(toml::Value::as_table)
+            .into_iter()
+            .flat_map(toml::Table::values)
+        {
+            let version = match spec {
+                toml::Value::String(version) => Some(version.as_str()),
+                toml::Value::Table(table) => table.get("version").and_then(toml::Value::as_str),
+                _ => None,
+            };
+            if let Some(version) = version.filter(|version| version.contains('.')) {
+                terms.push(version.to_owned());
+            }
+        }
+    }
+    let seconds = proof_budget_rules::BUDGET_MILLIS / MILLIS_PER_SECOND;
+    terms.push(format!("{seconds}-second"));
+    terms.push(format!("{seconds} seconds"));
+    terms.sort();
+    terms.dedup();
+    Ok(terms)
+}
+
+/// Refuses a skill document that names a pin of the checkout's gates, since it drifts once the pin moves.
+///
+/// # Errors
+///
+/// Returns an error naming each document and pin, or when reading the skill tree or `mise.toml` fails.
+pub fn check_pins(root: &Path) -> Result<()> {
+    let terms = pinned_terms(root)?;
+    let mut files = Vec::new();
+    collect(root, Path::new(SKILL_TREES[0]), &mut files)?;
+    let mut found = Vec::new();
+    for (path, bytes) in &files {
+        if path.extension().is_none_or(|extension| extension != "md") {
+            continue;
+        }
+        for term in &terms {
+            if skill_rules::names(bytes, term.as_bytes()) {
+                found.push(format!("{}: names `{term}`", path.display()));
+            }
+        }
+    }
+    ensure!(
+        found.is_empty(),
+        "a skill repeats what a gate pins, which drifts once the pin moves; point at the gate or the file that holds the pin instead:\n{}",
+        found.join("\n")
+    );
+    Ok(())
+}
+
 /// Validates the checkout's skill tree, catalog, policy, and tracked decisions.
 ///
 /// # Errors
@@ -1403,6 +1507,7 @@ pub fn analyze(
 /// Returns an error when the tree or catalog fails validation, reading or validating the policy fails, or a skill lacks a current and complete tracked decision.
 pub fn check_catalog(root: &Path) -> Result<()> {
     crate::validate_tree(root)?;
+    check_pins(root)?;
     let catalog = catalog(&root.join(SKILL_TREES[0]))?;
     let policy: Policy = read_json(&root.join("home/dot_config/skill-ops/policy.json"))?;
     validate_policy(&policy, &catalog)?;
@@ -1530,4 +1635,613 @@ pub fn notes(state: &Path) -> Result<Vec<Note>> {
         )
     });
     Ok(result)
+}
+
+/// One recorded incident: a failure that needs a prevention decision for its rule.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Incident {
+    pub schema: u32,
+    pub id: String,
+    pub rule: String,
+    pub session: String,
+    #[serde(with = "incident_source_key")]
+    pub source: incident_rules::Source,
+    pub evidence: Vec<String>,
+}
+
+/// Stores an incident source as the name its rule module gives it.
+mod incident_source_key {
+    use super::incident_rules::Source;
+    use serde::{Deserialize, Deserializer, Serializer, de::Error as _};
+
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde passes every field to a serializer by reference"
+    )]
+    pub fn serialize<S: Serializer>(source: &Source, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(source.key())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Source, D::Error> {
+        let key = String::deserialize(deserializer)?;
+        Source::from_key(&key).ok_or_else(|| {
+            D::Error::custom(format!(
+                "unknown incident source `{key}`, expected one of {:?}",
+                Source::ALL.map(Source::key)
+            ))
+        })
+    }
+}
+
+impl Incident {
+    /// A new incident of `rule`, identified by the content that makes a retry of the same failure deduplicate.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the rule or the session holds no name.
+    pub fn new(
+        rule: &str,
+        session: &str,
+        source: incident_rules::Source,
+        evidence: Vec<String>,
+    ) -> Result<Self> {
+        ensure!(!rule.trim().is_empty(), "an incident names its rule");
+        ensure!(
+            platform::refusal::Refusal::new(rule, "failure observation", "inspect the failure")
+                .evidence("native event")
+                .is_complete(),
+            "an incident names a valid dotted rule"
+        );
+        ensure!(!session.trim().is_empty(), "an incident names its session");
+        Ok(Self {
+            schema: 1,
+            id: hash(&(rule, session, source.key(), &evidence))?,
+            rule: rule.into(),
+            session: session.into(),
+            source,
+            evidence,
+        })
+    }
+}
+
+/// Records failed native tool events and structured verification diagnostics.
+///
+/// # Errors
+///
+/// Returns an error for an unknown source or a recording failure.
+pub fn record_native_failure(
+    state: &Path,
+    client: &str,
+    event: &serde_json::Value,
+) -> Result<bool> {
+    let response = event
+        .get("error")
+        .or_else(|| event.get("tool_response"))
+        .or_else(|| event.get("output"));
+    let output = response
+        .and_then(|response| {
+            response.as_str().or_else(|| {
+                response["output"]
+                    .as_str()
+                    .or_else(|| response["stderr"].as_str())
+            })
+        })
+        .unwrap_or_default();
+    let refusal = platform::refusal::Refusal::find(output);
+    let failed = event["hook_event_name"] == "PostToolUseFailure"
+        || event["status"] == "error"
+        || event["status"] == "failed"
+        || event["is_error"].as_bool().unwrap_or(false)
+        || response.is_some_and(|response| {
+            response["is_error"].as_bool().unwrap_or(false)
+                || response["exit_code"].as_i64().is_some_and(|code| code != 0)
+        });
+    let source = match event["failure_source"].as_str() {
+        Some(source) => {
+            incident_rules::Source::from_key(source).context("unknown native failure source")?
+        }
+        None if refusal.is_some() => incident_rules::Source::GateRefusal,
+        None if failed => incident_rules::Source::FailedDelivery,
+        None => return Ok(false),
+    };
+    let session = event["session_id"]
+        .as_str()
+        .or_else(|| event["thread_id"].as_str())
+        .filter(|session| !session.is_empty())
+        .unwrap_or("no-session");
+    let rule = refusal.as_ref().map_or_else(
+        || "native.tool-failure".to_owned(),
+        |refusal| refusal.rule.clone(),
+    );
+    let evidence = vec![
+        format!("{client} native event {}", hash(event)?),
+        refusal.map_or_else(|| source.key().to_owned(), |refusal| refusal.cause),
+    ];
+    let expected = event["expected_failure"].as_str().unwrap_or_default();
+    record_incident(
+        state,
+        &Incident::new(&rule, session, source, evidence)?,
+        incident_rules::Expected {
+            red_test: expected == "red-test",
+            counterexample: expected == "counterexample",
+            dry_run: expected == "dry-run",
+        },
+    )
+}
+
+/// Records one incident under `incidents/` unless the recorder marks the failure expected, returning whether the store lacked it before.
+///
+/// # Errors
+///
+/// Returns an error when the incident has an invalid schema or identity, a stored incident with the same identity differs, or writing the file fails.
+pub fn record_incident(
+    state: &Path,
+    incident: &Incident,
+    expected: incident_rules::Expected,
+) -> Result<bool> {
+    if incident_rules::excluded(expected) {
+        return Ok(false);
+    }
+    ensure!(
+        incident.schema == 1
+            && incident.id.len() == skill_rules::DIGEST_LENGTH
+            && incident.id.bytes().all(|byte| byte.is_ascii_hexdigit())
+            && !incident.rule.trim().is_empty(),
+        "invalid incident identity"
+    );
+    ensure!(
+        Incident::new(
+            &incident.rule,
+            &incident.session,
+            incident.source,
+            incident.evidence.clone()
+        )?
+        .id == incident.id,
+        "incident content differs from its identity"
+    );
+    let directory = state.join("incidents");
+    let destination = directory.join(format!("{}.json", incident.id));
+    if let Ok(existing) = read_json::<Incident>(&destination) {
+        ensure!(
+            existing == *incident,
+            "conflicting replay of an incident record"
+        );
+        return Ok(false);
+    }
+    match write_json(&destination, incident, false) {
+        Ok(()) => Ok(true),
+        Err(error) => match read_json::<Incident>(&destination) {
+            Ok(existing) if existing == *incident => Ok(false),
+            Ok(_) => Err(anyhow::anyhow!(
+                "conflicting concurrent incident record: {error}"
+            )),
+            Err(_) => Err(error),
+        },
+    }
+}
+
+/// Reads the recorded incidents under `incidents/`, sorted by rule, session, and identity.
+///
+/// # Errors
+///
+/// Returns an error when reading the directory fails, a `.json` entry names something other than a regular file or fails validation, or a filename differs from its incident's identity.
+pub fn incidents(state: &Path) -> Result<Vec<Incident>> {
+    let directory = state.join("incidents");
+    if !directory.try_exists()? {
+        return Ok(Vec::new());
+    }
+    let mut result = Vec::new();
+    for entry in fs::read_dir(&directory)? {
+        let entry = entry?;
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|value| value == "json")
+        {
+            ensure!(
+                entry.file_type()?.is_file(),
+                "incident record must be a regular file"
+            );
+            let incident: Incident = read_json(&entry.path())?;
+            ensure!(
+                entry.file_name().to_str() == Some(&format!("{}.json", incident.id)),
+                "incident identity does not match its file"
+            );
+            result.push(incident);
+        }
+    }
+    result.sort_by_cached_key(|incident| {
+        (
+            incident.rule.clone(),
+            incident.session.clone(),
+            incident.id.clone(),
+        )
+    });
+    Ok(result)
+}
+
+/// The disposition of one recorded incident: mechanized prevention, or an exemption.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Discharge {
+    pub schema: u32,
+    pub rule: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incident: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    /// `mechanized` names gate or test evidence, and `exempt` names a reason with a reconsideration condition.
+    pub outcome: String,
+    pub evidence: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconsideration: Option<String>,
+}
+
+/// Reads the recorded discharges under `discharges/`, sorted by rule.
+///
+/// # Errors
+///
+/// Returns an error when reading the directory fails, a `.json` entry names something other than a regular file or fails validation, or a filename differs from its discharge's identity.
+pub fn discharges(state: &Path) -> Result<Vec<Discharge>> {
+    let directory = state.join("discharges");
+    if !directory.try_exists()? {
+        return Ok(Vec::new());
+    }
+    let mut result = Vec::new();
+    for entry in fs::read_dir(&directory)? {
+        let entry = entry?;
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|value| value == "json")
+        {
+            ensure!(
+                entry.file_type()?.is_file(),
+                "discharge record must be a regular file"
+            );
+            let discharge: Discharge = read_json(&entry.path())?;
+            ensure!(discharge.schema == 1, "unknown discharge schema");
+            if let Some(incident) = &discharge.incident {
+                ensure!(
+                    incident.len() == skill_rules::DIGEST_LENGTH
+                        && incident.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                    "invalid discharge incident identity"
+                );
+                let outcome = match discharge.outcome.as_str() {
+                    "mechanized" => incident_rules::Outcome::Mechanized {
+                        evidence_present: !discharge.evidence.is_empty()
+                            && discharge.evidence.iter().all(|evidence| {
+                                evidence.split_once(EVIDENCE_SEPARATOR).is_some_and(
+                                    |(path, test)| !path.is_empty() && !test.is_empty(),
+                                )
+                            }),
+                        reproduces: discharge.commit.as_ref().is_some_and(|commit| {
+                            GIT_COMMIT_HEX_LENGTHS.contains(&commit.len())
+                                && commit.bytes().all(|byte| byte.is_ascii_hexdigit())
+                        }),
+                    },
+                    "exempt" => incident_rules::Outcome::Exempt {
+                        reason: discharge
+                            .reason
+                            .as_deref()
+                            .and_then(incident_rules::Reason::from_key),
+                        reconsideration: discharge
+                            .reconsideration
+                            .as_deref()
+                            .is_some_and(|text| !text.trim().is_empty()),
+                    },
+                    other => anyhow::bail!("unknown discharge outcome `{other}`"),
+                };
+                ensure!(
+                    incident_rules::complete(outcome),
+                    "incomplete discharge record"
+                );
+            }
+            ensure!(
+                entry.file_name().to_str()
+                    == Some(&format!(
+                        "{}.json",
+                        discharge.incident.as_deref().unwrap_or(&discharge.rule)
+                    )),
+                "discharge identity does not match its file"
+            );
+            result.push(discharge);
+        }
+    }
+    result.sort_by_cached_key(|discharge| discharge.rule.clone());
+    Ok(result)
+}
+
+/// The gate and test evidence a mechanized discharge names, each as `path::test`.
+const EVIDENCE_SEPARATOR: &str = "::";
+const GIT_COMMIT_HEX_LENGTHS: [usize; 2] = [40, 64];
+pub const INCIDENT_EVIDENCE_ROOT: &str = "SKILL_OPS_INCIDENT_EVIDENCE_ROOT";
+
+/// The path half of one evidence entry, or an empty path when the entry names no test.
+fn evidence_path(evidence: &str) -> &str {
+    evidence
+        .split_once(EVIDENCE_SEPARATOR)
+        .map_or("", |(path, _)| path)
+}
+
+fn evidence_at_commit(root: &Path, evidence: &str, commit: &str) -> bool {
+    if !GIT_COMMIT_HEX_LENGTHS.contains(&commit.len())
+        || !commit.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return false;
+    }
+    let Ok(root) = platform::paths::canonical(root) else {
+        return false;
+    };
+    let Ok(path) = platform::paths::canonical(&root.join(evidence_path(evidence))) else {
+        return false;
+    };
+    let Ok(relative) = path.strip_prefix(&root) else {
+        return false;
+    };
+    let relative = relative.to_string_lossy().replace('\\', "/");
+    let Ok(contents) = fs::read(&path) else {
+        return false;
+    };
+    let Ok(kind) = platform::tool::Tool::Git
+        .command()
+        .current_dir(&root)
+        .args(["cat-file", "-t", commit])
+        .output()
+    else {
+        return false;
+    };
+    if !kind.status.success() || kind.stdout != b"commit\n" {
+        return false;
+    }
+    let Ok(source) = platform::tool::Tool::Git
+        .command()
+        .current_dir(&root)
+        .args(["show", &format!("{commit}:{relative}")])
+        .output()
+    else {
+        return false;
+    };
+    source.status.success() && source.stdout == contents
+}
+
+fn evidence_incident(root: &Path, rule: &str) -> bool {
+    let Ok(root) = platform::paths::canonical(root) else {
+        return false;
+    };
+    let Ok(entries) = fs::read_dir(&root) else {
+        return false;
+    };
+    entries.filter_map(std::result::Result::ok).any(|entry| {
+        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            return false;
+        }
+        let Ok(state) = platform::paths::canonical(&entry.path().join("state")) else {
+            return false;
+        };
+        state.starts_with(&root)
+            && incidents(&state).is_ok_and(|incidents| {
+                incidents.into_iter().any(|incident| {
+                    incident.rule == rule
+                        && incident.schema == 1
+                        && !incident.evidence.is_empty()
+                        && Incident::new(
+                            &incident.rule,
+                            &incident.session,
+                            incident.source,
+                            incident.evidence.clone(),
+                        )
+                        .is_ok_and(|recorded| recorded.id == incident.id)
+                })
+            })
+    })
+}
+
+/// Whether one mechanized evidence entry exists under `root` and names a test that reproduces the incident.
+fn evidence_reproduces(root: &Path, evidence: &str, rule: &str) -> bool {
+    let Some((path, test)) = evidence.split_once(EVIDENCE_SEPARATOR) else {
+        return false;
+    };
+    if test.is_empty()
+        || !test
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_:".contains(&byte))
+    {
+        return false;
+    }
+    let Ok(root) = platform::paths::canonical(root) else {
+        return false;
+    };
+    let Ok(path) = platform::paths::canonical(&root.join(path)) else {
+        return false;
+    };
+    if !path.starts_with(&root) {
+        return false;
+    }
+    let Some(package) = path
+        .ancestors()
+        .skip(1)
+        .take_while(|parent| parent.starts_with(&root))
+        .find(|parent| parent.join("Cargo.toml").is_file())
+    else {
+        return false;
+    };
+    let Ok(target) = tempfile::tempdir() else {
+        return false;
+    };
+    let Ok(incident_evidence) = tempfile::tempdir() else {
+        return false;
+    };
+    let mut command = platform::tool::Tool::Cargo.command();
+    command
+        .current_dir(package)
+        .args(["test", "--offline", "--manifest-path"])
+        .arg(package.join("Cargo.toml"))
+        .env("CARGO_TARGET_DIR", target.path())
+        .env(INCIDENT_EVIDENCE_ROOT, incident_evidence.path())
+        .env("SKILL_OPS_STATE", incident_evidence.path().join("state"))
+        .env("DOTFILES_EXPECTED_FAILURE", "counterexample");
+    if path
+        .parent()
+        .is_some_and(|parent| parent == package.join("tests"))
+    {
+        let Some(name) = path.file_stem() else {
+            return false;
+        };
+        command.arg("--test").arg(name);
+    } else {
+        command.arg("--lib");
+    }
+    let Ok(output) = command
+        .arg(test)
+        .args(["--", "--nocapture", "--test-threads=1"])
+        .output()
+    else {
+        return false;
+    };
+    let transcript = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    if !output.status.success() {
+        eprintln!("incident evidence validator failed: {transcript}");
+    }
+    output.status.success()
+        && transcript.contains("test result: ok. 1 passed; 0 failed;")
+        && (platform::refusal::Refusal::find(&transcript)
+            .is_some_and(|refusal| refusal.rule == rule)
+            || evidence_incident(incident_evidence.path(), rule))
+}
+
+/// Records one discharge after its evidence holds, replacing that incident's previous disposition.
+///
+/// # Errors
+///
+/// Refuses mismatched identities and rules, unknown outcomes, changed prevention evidence, and tests that fail to reproduce the incident.
+/// An exemption must name its reason and reconsideration condition.
+pub fn record_discharge(state: &Path, root: &Path, discharge: &Discharge) -> Result<()> {
+    record_discharges(state, root, core::slice::from_ref(discharge))
+}
+
+/// Records each incident's disposition and checks shared evidence once per batch.
+///
+/// # Errors
+///
+/// Refuses unknown incident identities, mismatched rules, uncommitted evidence, and incomplete prevention.
+pub fn record_discharges(state: &Path, root: &Path, discharges: &[Discharge]) -> Result<()> {
+    let recorded = incidents(state)?;
+    let mut verified: BTreeMap<(String, String, String), bool> = BTreeMap::new();
+    for discharge in discharges {
+        ensure!(discharge.schema == 1, "unknown discharge schema");
+        let incident = recorded
+            .iter()
+            .find(|incident| Some(&incident.id) == discharge.incident.as_ref())
+            .context("a discharge must name one recorded incident identity")?;
+        ensure!(
+            incident.rule == discharge.rule,
+            "the discharge rule differs from its incident"
+        );
+        ensure!(
+            !discharge.rule.trim().is_empty(),
+            "a discharge names its rule"
+        );
+        ensure!(
+            platform::refusal::Refusal::new(
+                &discharge.rule,
+                "failure observation",
+                "inspect the failure"
+            )
+            .evidence("native event")
+            .is_complete(),
+            "a discharge names a valid dotted rule"
+        );
+        let outcome = match discharge.outcome.as_str() {
+            "mechanized" => incident_rules::Outcome::Mechanized {
+                evidence_present: !discharge.evidence.is_empty()
+                    && discharge
+                        .evidence
+                        .iter()
+                        .all(|evidence| root.join(evidence_path(evidence)).is_file()),
+                reproduces: !discharge.evidence.is_empty()
+                    && discharge.evidence.iter().all(|evidence| {
+                        let Some(commit) = discharge.commit.as_ref() else {
+                            return false;
+                        };
+                        let key = (commit.clone(), evidence.clone(), discharge.rule.clone());
+                        *verified.entry(key).or_insert_with(|| {
+                            evidence_at_commit(root, evidence, commit)
+                                && evidence_reproduces(root, evidence, &discharge.rule)
+                        })
+                    }),
+            },
+            "exempt" => incident_rules::Outcome::Exempt {
+                reason: discharge
+                    .reason
+                    .as_deref()
+                    .and_then(incident_rules::Reason::from_key),
+                reconsideration: discharge
+                    .reconsideration
+                    .as_deref()
+                    .is_some_and(|text| !text.trim().is_empty()),
+            },
+            other => anyhow::bail!("unknown discharge outcome `{other}`"),
+        };
+        let explanation = match outcome {
+            incident_rules::Outcome::Exempt {
+                reason: Some(reason),
+                ..
+            } => {
+                format!(" Exemption: {}.", incident_rules::reason_text(reason))
+            }
+            _ => String::new(),
+        };
+        ensure!(
+            incident_rules::complete(outcome),
+            "the discharge of `{}` holds no complete prevention: mechanized evidence names an existing gate or test that reproduces the incident, and an exemption names a closed-set reason with a reconsideration condition{explanation}",
+            discharge.rule
+        );
+        write_json(
+            &state
+                .join("discharges")
+                .join(format!("{}.json", incident.id)),
+            discharge,
+            true,
+        )?;
+    }
+    Ok(())
+}
+
+/// The rules whose recorded incidents still lack a complete disposition, ranked by repetition first.
+///
+/// # Errors
+///
+/// Returns an error when reading the incidents or the discharges fails.
+pub fn open_incident_rules(state: &Path) -> Result<Vec<(String, u64, incident_rules::Rank)>> {
+    let discharged: BTreeSet<_> = discharges(state)?
+        .into_iter()
+        .filter_map(|discharge| {
+            discharge
+                .incident
+                .map(|incident| (discharge.rule, incident))
+        })
+        .collect();
+    let mut counts: BTreeMap<String, u64> = BTreeMap::new();
+    for incident in incidents(state)? {
+        if !discharged.contains(&(incident.rule.clone(), incident.id)) {
+            *counts.entry(incident.rule).or_default() += 1;
+        }
+    }
+    let mut open: Vec<_> = counts
+        .into_iter()
+        .map(|(rule, repetitions)| {
+            let rank = incident_rules::rank(repetitions);
+            (rule, repetitions, rank)
+        })
+        .collect();
+    open.sort_by(|(_, _, first), (_, _, second)| second.cmp(first));
+    Ok(open)
 }

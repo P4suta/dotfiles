@@ -7,6 +7,8 @@ use std::sync::OnceLock;
 
 #[path = "support/fixture_git.rs"]
 mod fixture_git;
+
+use fixture_git::fixture_process;
 #[path = "support/wrapper.rs"]
 mod wrapper;
 
@@ -48,19 +50,19 @@ fn fixtures() -> &'static Fixtures {
 }
 
 /// A command for dotguard itself, which starts only after the fixtures stand in place.
-fn dotguard() -> Command {
+fn dotguard(scope: &Path) -> Command {
     fixtures();
-    platform::process::command(env!("CARGO_BIN_EXE_dotguard"))
+    fixture_process::command(env!("CARGO_BIN_EXE_dotguard"), scope)
 }
 
 #[test]
-fn a_contaminated_file_is_refused_with_a_rescan_and_a_recorded_waiver() {
+fn a_contaminated_file_is_refused_with_a_rescan_and_a_recorded_bypass() {
     let scope = std::env::temp_dir().join(format!("dotguard-language-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&scope);
     std::fs::create_dir_all(&scope).unwrap();
     let cyrillic = char::from_u32(0x0441).unwrap();
     std::fs::write(scope.join("a.txt"), format!("plain\nmixed {cyrillic}\n")).unwrap();
-    let output = dotguard()
+    let output = dotguard(&scope)
         .current_dir(&scope)
         .env("HOME", &scope)
         .env("USERPROFILE", &scope)
@@ -79,7 +81,7 @@ fn a_contaminated_file_is_refused_with_a_rescan_and_a_recorded_waiver() {
         "dotguard scan a.txt"
     );
     assert_eq!(
-        refusal.waiver.as_deref(),
+        refusal.bypass.as_deref(),
         Some("ALLOW_FOREIGN=1 dotguard scan a.txt")
     );
     assert_eq!(
@@ -145,18 +147,18 @@ impl Checkout {
         command
     }
 
-    /// Runs the wrapper copy with each named waiver set.
-    fn run(&self, arguments: &[&str], waivers: &[&str]) -> std::process::Output {
+    /// Runs the wrapper copy with each named bypass set.
+    fn run(&self, arguments: &[&str], bypasses: &[&str]) -> std::process::Output {
         let mut command = self.command(self.git);
         command.args(arguments);
-        for waiver in waivers {
-            command.env(waiver, "1");
+        for bypass in bypasses {
+            command.env(bypass, "1");
         }
         command.output().unwrap()
     }
 
-    fn succeeds(&self, arguments: &[&str], waivers: &[&str]) -> String {
-        let output = self.run(arguments, waivers);
+    fn succeeds(&self, arguments: &[&str], bypasses: &[&str]) -> String {
+        let output = self.run(arguments, bypasses);
         assert!(
             output.status.success(),
             "git {arguments:?}: {}",
@@ -177,7 +179,7 @@ fn last_record(output: &std::process::Output) -> Refusal {
 }
 
 #[test]
-fn a_foreign_staged_line_is_refused_with_a_waiver_that_repeats_the_commit() {
+fn a_foreign_staged_line_is_refused_with_a_bypass_that_repeats_the_commit() {
     let checkout = Checkout::new("staged");
     let cyrillic = char::from_u32(0x0441).unwrap();
     std::fs::write(checkout.path().join("a.txt"), format!("mixed {cyrillic}\n")).unwrap();
@@ -189,7 +191,7 @@ fn a_foreign_staged_line_is_refused_with_a_waiver_that_repeats_the_commit() {
         "git diff --cached -- a.txt"
     );
     assert_eq!(
-        refused.waiver.as_deref(),
+        refused.bypass.as_deref(),
         Some("ALLOW_FOREIGN=1 git commit -q -m 'add a'")
     );
     checkout.succeeds(&["commit", "-q", "-m", "add a"], &["ALLOW_FOREIGN"]);
@@ -236,17 +238,17 @@ fn a_foreign_message_is_refused_with_a_retry_that_keeps_the_amend() {
     );
 }
 
-/// The waiver repeats the refused amend exactly.
+/// The bypass repeats the refused amend exactly.
 #[test]
-fn a_foreign_message_is_refused_with_a_waiver_that_repeats_the_commit() {
-    let checkout = Checkout::new("waived");
+fn a_foreign_message_is_refused_with_a_bypass_that_repeats_the_commit() {
+    let checkout = Checkout::new("bypassed");
     std::fs::write(checkout.path().join("a.txt"), "plain\n").unwrap();
     checkout.succeeds(&["add", "a.txt"], &[]);
     checkout.succeeds(&["commit", "-q", "-m", "add a"], &[]);
     let message = format!("fix {}", char::from_u32(0x0441).unwrap());
     let refused = last_record(&checkout.run(&["commit", "-q", "--amend", "-m", &message], &[]));
     assert_eq!(
-        refused.waiver.as_deref(),
+        refused.bypass.as_deref(),
         Some(format!("ALLOW_FOREIGN=1 git commit -q --amend -m '{message}'").as_str())
     );
     checkout.succeeds(
@@ -261,9 +263,9 @@ fn a_foreign_message_is_refused_with_a_waiver_that_repeats_the_commit() {
 }
 
 /// A hook run by a Git that didn't pass through the wrapper can't know the refused command.
-/// It names the override in its cause instead of guessing a waiver.
+/// It names the override in its cause instead of guessing a bypass.
 #[test]
-fn a_language_refusal_outside_the_wrapper_names_the_override_without_a_waiver() {
+fn a_language_refusal_outside_the_wrapper_names_the_override_without_a_bypass() {
     let checkout = Checkout::new("unwrapped");
     let message = checkout.path().join("MESSAGE");
     std::fs::write(
@@ -279,7 +281,7 @@ fn a_language_refusal_outside_the_wrapper_names_the_override_without_a_waiver() 
         .unwrap();
     let refused = last_record(&output);
     assert_eq!(refused.rule, "commit.language");
-    assert_eq!(refused.waiver, None);
+    assert_eq!(refused.bypass, None);
     assert!(
         refused.cause.contains("ALLOW_FOREIGN=1"),
         "{}",

@@ -38,3 +38,6 @@ Use CI to confirm the hosted-only checks after local assurance, and never push a
 Use `concise-source` to express intent in code and keep exceptions narrow.
 Finish known necessary corrections through `ideal-first-development`.
 Report what passed, the evidence for it, and any unverified boundary.
+
+These machines report a repository's verification gaps when a session starts, and refuse new ones at commit, push, the end of a turn, and `pr-workflow ready`.
+Each refusal names its next action, and the repository's `assure.toml` names the owner of each shape.

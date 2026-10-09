@@ -25,8 +25,8 @@ pub const IMAGE_DIRECTORY: &str = "xtask/proofs/quint";
 const IMAGE_INPUTS: [&str; 3] = ["Dockerfile", "package.json", "package-lock.json"];
 
 /// Where the container mounts the read-only checkout and the writable output directory.
-const SOURCE: &str = "/source";
-const OUTPUT: &str = "/out";
+pub const SOURCE: &str = "/source";
+pub const OUTPUT: &str = "/out";
 
 /// Apalache writes its run directory under the working directory, which the read-only checkout can't hold.
 const WORKDIR: &str = "/tmp";
@@ -39,6 +39,9 @@ const PROBE_SAMPLES: &str = "1000";
 
 /// One worker keeps the model checker's state count exact and the run repeatable.
 const TLC_CONFIG: &str = r#"{"workers": 1}"#;
+
+/// The steps of the bounded Apalache check that backs an inductive invariant.
+pub const APALACHE_STEPS: &str = "16";
 
 /// The verbosity at which Quint passes on the model checker's own report, which holds the state count.
 const TLC_REPORT: &str = "3";
@@ -60,7 +63,12 @@ pub fn image(root: &Path) -> Result<String> {
     ))
 }
 
-fn build(root: &Path, image: &str) -> Result<()> {
+/// Builds the pinned image unless it exists.
+///
+/// # Errors
+///
+/// Returns an error when Docker can't build it.
+pub fn build(root: &Path, image: &str) -> Result<()> {
     let present = Tool::Docker
         .command()
         .args(["image", "inspect", image])
@@ -86,6 +94,19 @@ fn build(root: &Path, image: &str) -> Result<()> {
 /// The arguments that run `quint` in the image with no network, the checkout read-only, and `output` writable.
 #[must_use]
 pub fn run_arguments(root: &Path, output: &Path, image: &str, quint: &[&str]) -> Vec<OsString> {
+    let mut command = vec!["quint"];
+    command.extend_from_slice(quint);
+    container_arguments(root, output, image, &command)
+}
+
+/// The arguments that run `command` in the image with no network, the checkout read-only, and `output` writable.
+#[must_use]
+pub fn container_arguments(
+    root: &Path,
+    output: &Path,
+    image: &str,
+    command: &[&str],
+) -> Vec<OsString> {
     let mount = |source: &Path, target: &str, readonly: bool| {
         // Docker reads `--mount` as one CSV record, so quoting keeps a comma in the path inside the field.
         let mut mount = OsString::from("type=bind,\"source=");
@@ -102,8 +123,8 @@ pub fn run_arguments(root: &Path, output: &Path, image: &str, quint: &[&str]) ->
     arguments.push(mount(root, SOURCE, true));
     arguments.push("--mount".into());
     arguments.push(mount(output, OUTPUT, false));
-    arguments.extend(["--workdir", WORKDIR, image, "quint"].map(OsString::from));
-    arguments.extend(quint.iter().map(OsString::from));
+    arguments.extend(["--workdir", WORKDIR, image].map(OsString::from));
+    arguments.extend(command.iter().map(OsString::from));
     arguments
 }
 
@@ -216,6 +237,51 @@ impl Runner<'_> {
             obligations::MANIFEST,
             quint.distinct_states
         );
+        if let Some(inductive) = &quint.inductive {
+            let main = quint
+                .symbolic
+                .as_ref()
+                .map_or(&quint.main, |symbolic| &symbolic.main);
+            let mut options = Vec::new();
+            if let Some(symbolic) = &quint.symbolic {
+                fs::write(
+                    self.output.join("apalache.json"),
+                    serde_json::to_vec(
+                        &serde_json::json!({"checker": {"cinit": symbolic.constants}}),
+                    )?,
+                )?;
+                options.extend(["--apalache-config", "/out/apalache.json"]);
+            }
+            let mut arguments = vec!["verify", model, "--main", main, "--backend", "apalache"];
+            arguments.extend(options);
+            // Apalache proves the invariant inductive, so it holds after any number of steps, and a bounded run backs it with concrete runs.
+            self.passing(
+                &format!("the inductive check of {inductive} in {}", quint.main),
+                &[
+                    arguments.as_slice(),
+                    &[
+                        "--inductive-invariant",
+                        inductive,
+                        "--invariant",
+                        &quint.invariant,
+                    ],
+                ]
+                .concat(),
+            )?;
+            self.passing(
+                &format!("the bounded Apalache check of {}", quint.main),
+                &[
+                    arguments.as_slice(),
+                    &[
+                        "--max-steps",
+                        APALACHE_STEPS,
+                        "--invariant",
+                        &quint.invariant,
+                    ],
+                ]
+                .concat(),
+            )?;
+        }
         let probed = self.tlc(model, &quint.probe, &quint.invariant)?;
         ensure!(
             !probed.status.success()
@@ -359,8 +425,9 @@ pub fn verify(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
             verified += 1;
         }
     }
+    let graphs = crate::state_graph::check(&root, output.path(), &runner.image, manifest)?;
     println!(
-        "Verified all {verified} Quint models offline: each typechecks, passes its tests, holds its invariant under TLC with its recorded state count, witnesses every outcome, and reproduces its traces, and each probe breaks the invariant"
+        "Verified all {verified} Quint models offline: each typechecks, passes its tests, holds its invariant under TLC with its recorded state count, witnesses every outcome, and reproduces its traces, each probe breaks the invariant, and TLC dumps the committed state graph of {graphs}"
     );
     Ok(())
 }

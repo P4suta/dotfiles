@@ -37,6 +37,12 @@ pub enum System {
     Windows,
 }
 
+/// Whether the effective Git hooks path resolves to the managed directory.
+#[must_use]
+pub const fn hooks_current(configured: bool, managed: bool) -> bool {
+    configured && managed
+}
+
 /// The profile a host's operating system and kernel imply.
 /// WSL runs Linux on a Microsoft kernel, the rule that chezmoi's Windows guide and the configuration template both apply.
 #[must_use]
@@ -165,6 +171,17 @@ pub fn host_edit_refused(changed: bool, merged: bool, keeps_host_keys: bool) -> 
 mod proofs {
     use super::*;
 
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_hooks_installation_requires_the_effective_managed_path() {
+        let configured: bool = kani::any();
+        let managed: bool = kani::any();
+        assert_eq!(hooks_current(configured, managed), configured && managed);
+        let current = hooks_current(configured, managed);
+        kani::cover!(current);
+        kani::cover!(!current);
+    }
+
     pub const SYSTEMS: [System; 3] = [System::Mac, System::Linux, System::Windows];
     pub const MEMORY: [Memory; 3] = [Memory::Unset, Memory::Enabled, Memory::Disabled];
 
@@ -264,8 +281,9 @@ mod proofs {
         let system = SYSTEMS[usize::from(kani::any::<u8>() % 3)];
         let microsoft: bool = kani::any();
         spec_detected(system, microsoft);
-        kani::cover!(detected(system, microsoft) == Profile::Wsl);
-        kani::cover!(detected(system, microsoft) == Profile::Linux);
+        let profile = detected(system, microsoft);
+        kani::cover!(profile == Profile::Wsl);
+        kani::cover!(profile == Profile::Linux);
     }
 
     #[cfg(kani)]
@@ -298,11 +316,11 @@ mod proofs {
         let listed = &switches[..length];
         spec_memory_off(listed);
         let off = memory_off(listed);
-        kani::cover!(off && length == MEMORY_SWITCHES_PROVED);
-        kani::cover!(!off && length == 0);
-        kani::cover!(
-            !off && length == MEMORY_SWITCHES_PROVED && listed[length - 1] == Memory::Unset
-        );
+        let full = length == MEMORY_SWITCHES_PROVED;
+        let unset = listed.last() == Some(&Memory::Unset);
+        kani::cover!(off & full);
+        kani::cover!(!off & (length == 0));
+        kani::cover!(!off & full & unset);
     }
 }
 
@@ -314,6 +332,9 @@ mod tests {
 
     #[test]
     fn every_input_meets_the_profile_specifications() {
+        for [configured, managed] in flags() {
+            assert_eq!(hooks_current(configured, managed), configured && managed);
+        }
         for system in proofs::SYSTEMS {
             for microsoft in [false, true] {
                 proofs::spec_detected(system, microsoft);

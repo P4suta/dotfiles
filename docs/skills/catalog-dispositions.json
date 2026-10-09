@@ -1,0 +1,687 @@
+{
+  "report_hash": "ea4a25e3fd289c786c3a7c222b3c3d0249e9bfae575385a938cdcb4f7efdbcaf",
+  "decisions": [
+    {
+      "id": "catalog:adr:2e849650d59cdbc34ff582cebab2313a6d2bcf414535758001165fec83dc84d6",
+      "outcome": "keep",
+      "reason": "Durable contract or trust-boundary decisions; routine edits need no record.\nSeparate from specification writing; decision status and linked implementation evidence govern maintenance.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/adr/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:apple-notarization:b9cb094cfae4de3c7adbef190eb0ced8e7d64f04f1b191f00c5b2580e6b40e13",
+      "outcome": "keep",
+      "reason": "Submit or resume one preserved signed distribution.\nSeparate from executable signing; native receipts and stapling identify completion.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/apple-notarization/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:apple-signing:cbea6f0ec258936cc9cfda170f9412d729ec18216b9eb729177bbc4b9870c51e",
+      "outcome": "keep",
+      "reason": "Choose and verify an existing Developer ID identity.\nSeparate from notarization and packaging; native signature checks own verification.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/apple-signing/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:approval-boundaries:6ebd019fe985b8e6fb2a38a7ea2eb6e1e90aabc23d34be8a69a510f42d47d27b",
+      "outcome": "keep",
+      "reason": "Evaluate an explicitly authorized exact approval scope.\nKeep independent of implementation and publication; a changed head or candidate invalidates approval.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/approval-boundaries/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:ci-budget:60f6ed70f99edab6a75e8cc0c86d904cea9b4423f51c25c177f5f69bb0b383bf",
+      "outcome": "keep",
+      "reason": "Control authorized publication and avoid duplicate hosted runs.\nKeep independent of native execution; local evidence cannot replace hosted-only checks.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/ci-budget/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:code-signing:cad5e4766d8afc92a89b335357201089bd6a1504e131d447e142eac4d7daece0",
+      "outcome": "keep",
+      "reason": "Coordinate publisher, credentials, and signing verification.\nUse platform references conditionally; never duplicate private inputs or grant release authority.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/code-signing/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:coderabbit-review:fa847c72ccf0a7b0f54814fd5c3ee0c16e487a24aaa04f7285c75dd44f210234",
+      "outcome": "keep",
+      "reason": "Assess local or current-head PR findings and apply supported fixes.\nKeep separate from settings and billing; stale or skipped service reviews stay pending.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/coderabbit-review/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:coderabbit:cbde97c63821fb5176b2c21c898e4d2b0f396123ed5c36e82dbc8e44bf772c55",
+      "outcome": "implemented",
+      "reason": "Configure service behavior within the existing subscription.\nKeep separate from applying review findings; guarded capacity and current service evidence govern changes.\nKeep service configuration, billing boundaries, and review capacity decisions separate from applying review findings.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/coderabbit/SKILL.md",
+        "crates/coderabbit-guard/src/lib.rs",
+        "docs/adr/0008-layered-review-capacity.md",
+        "docs/adr/0015-scoped-coderabbit-pause.md",
+        "crates/rules/src/review_rules.rs",
+        "home/dot_agents/skills/coderabbit/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:concise-source:783a57fe70ff1e7bf1c3570d235c2f30e01968ecbe4e8d11fb0bc55ea421d645",
+      "outcome": "keep",
+      "reason": "Choose comments that explain a contract the code leaves unsaid.\nKeep separate from automated comment disposition; semantic invariants replace explanatory patches.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/concise-source/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:delegation:888f5ede6c7d3a7ad9a1e7f1b9fac40e711b48ff03fb8355e698e1a0609cac12",
+      "outcome": "keep",
+      "reason": "Choose execution capability and model tier within current permission.\nKeep independent of background execution authority; project commands own procedural work.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/delegation/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:development-assurance:f616e860e84beae250b0041e5c05d6415504ef82f68df1b99e3fe3352328dbef",
+      "outcome": "keep",
+      "reason": "Design realistic regressions and reproducible implementation evidence.\nKeep separate from theorem selection; no retroactive TDD claim or test for prose-only edits.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/development-assurance/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:domyjob:594617a1b5543fcd94d1cc7e95622b6b48ba0a9464514d1bd73e65d6bb14cb31",
+      "outcome": "implemented",
+      "reason": "Execute persistent remote jobs with snapshot and submission identity.\nKeep separate from host synchronization; uncertain submissions are resolved rather than repeated.\nKeep persistent remote job identity, snapshot transport, and remote exit status separate from machine synchronization.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/domyjob/SKILL.md",
+        "home/dot_agents/skills/domyjob/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:doppler:c4f056ad2df66b37caa91853f17a28e8bcc596c6ca88b1feb6337564b6a61a77",
+      "outcome": "implemented",
+      "reason": "Deliver purpose-scoped existing secrets without exposing values.\nKeep separate from signing and approval; names-only readiness never proves consuming behavior.\nKeep scoped secret delivery and owner authentication separate from release authorization.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/doppler/SKILL.md",
+        "home/dot_agents/skills/doppler/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:dotfiles:83834802c6952688c715c310a6bcf660b3011704e4ebedd5eee9a10778860a59",
+      "outcome": "implemented",
+      "reason": "Apply intended configuration through each native profile.\nKeep separate from runtime-state synchronization; render, application, and native verification remain distinct.\nKeep native profile application and state preservation separate from remote transport and skill discovery.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/dotfiles/SKILL.md",
+        "home/dot_agents/skills/dotfiles/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:executable-policy:91f8a2ceaec85c180c1da6dacdcc83045c0d671c7fc3cd43d679c802b162a119",
+      "outcome": "keep",
+      "reason": "Move mechanical requirements into one authoritative gate.\nKeep separate from selecting assurance tools; rejection tests verify the actual entry point.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/executable-policy/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:formal-assurance:f15fe33f0c5c8c7e8a6a8425606325be989fbdf0fc7ef0ea0c30029ebe455614",
+      "outcome": "implemented",
+      "reason": "Select source-bound proofs and explicitly supported alternatives.\nKeep separate from installation and test design; changed implementation invalidates proof evidence.\nKeep proof selection and implementation refinement separate from installing verification tools.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/formal-assurance/SKILL.md",
+        "docs/adr/verification-proportional-to-code-shape.md",
+        "home/dot_agents/skills/formal-assurance/references/scoping.md",
+        "docs/skills/assurance-scope-evaluation.md",
+        "docs/adr/0012-windows-proofs-in-a-linux-container.md",
+        "xtask/tests/container_proofs.rs",
+        "home/dot_agents/skills/formal-assurance/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:functional-architecture:1a7da6223ce3419b879fe59c51bed1eb74e610091eb9bdfd86a6c8bf4766b8aa",
+      "outcome": "keep",
+      "reason": "Place value decisions behind ports and effects in adapters.\nKeep separate from proof selection; structural gates own dependency and effect restrictions.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/functional-architecture/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:gcp:24ae14be71728b3573de7091c46c61d685e3aff7194fd15acfa091f77fd29f94",
+      "outcome": "implemented",
+      "reason": "Operate explicit projects, locations, and bounded paid resources.\nKeep independent of generic SSH transport; official interfaces and resource receipts govern completion.\nKeep explicit project, location, and paid resource decisions separate from generic remote execution.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/gcp/SKILL.md",
+        "docs/adr/0003-local-skill-operations.md",
+        "home/dot_agents/skills/gcp/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:github-repository:0a38aac369d75e4a4a12e5ce8b8a0fa036b909358cce22cdc377eaa526f3734f",
+      "outcome": "implemented",
+      "reason": "Audit repository settings and generated metadata drift.\nKeep independent of release publication; the maintained helper and its governance tests own mechanics.\nAudit metadata, generated artifacts, licenses, and the live GitHub description through the same installed checker, while reporting drift without mutating settings.\nThe governance tests reject absent and stale metadata evidence.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/github-repository/SKILL.md",
+        "home/dot_agents/skills/github-repository/assets/baseline.json",
+        "home/dot_agents/skills/github-repository/scripts/repo-settings/tests/governance.rs",
+        "crates/dotfiles/src/repository.rs",
+        "docs/adr/repository-metadata-and-generated-artifacts.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:ideal-first-development:13f0dfcc4bc24245ebd3cbe292ba9d056b64b5dc7beec4066b91c65811770542",
+      "outcome": "keep",
+      "reason": "Finish a coherent authorized behavior across affected paths.\nKeep independent of specification prose and defect diagnosis; real blockers never become completion claims.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/ideal-first-development/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:ideal-specification:6704cca07a2e6af1b364abc9d4ccaf145fa2dbed18f512f8a905f6e9b8dcfe2d",
+      "outcome": "keep",
+      "reason": "Derive a persisted specification from governing requirements.\nKeep independent of ADR status and implementation; requirements need concrete observable outcomes.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/ideal-specification/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:just:6f246c58f5cbd6459b954c8da0171b82e408c88080850f3b7e4af6008fdd72ce",
+      "outcome": "implemented",
+      "reason": "Expose a small portable command surface.\nKeep independent of procedural orchestration; project command behavior verifies arguments and failures.\nKeep command discovery and argument preservation separate from typed orchestration.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/just/SKILL.md",
+        "home/dot_agents/skills/just/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:lefthook:3e027b20985c6fd883d16e23bc51667abb5f18586f1af2dcd41c61570dadc7ff",
+      "outcome": "implemented",
+      "reason": "Diagnose effective hook dispatch and exact staged scope.\nKeep independent of bypasses; real hook failure propagation verifies changes.\nKeep effective hook diagnosis and staged scopes separate from gate implementations.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/lefthook/SKILL.md",
+        "home/dot_agents/skills/lefthook/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:macos-pkg:f3aa60e24297fec11e0655802eea8d8110cb4b9b0fc83e2c47dcf53267712ab6",
+      "outcome": "keep",
+      "reason": "Build and verify native installer contents and upgrades.\nKeep separate from executable signing; receipts, installation, and staple checks identify the deliverable.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/macos-pkg/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:mise:b0898fa55b73120f0a1361360b6cd133e5c0970616da20132924378976dfa483",
+      "outcome": "implemented",
+      "reason": "Resolve exact versions, backends, and configuration precedence.\nKeep separate from update policy; installed versions and platform resolution verify pins.\nKeep backend resolution, exact versions, and configuration precedence separate from dependency update policy.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/mise/SKILL.md",
+        "home/dot_agents/skills/mise/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:multi-machine:dd45b34001500486947a4dafd9851931a8f30cf98cbb7ee35f1f1e267a6dd2eb",
+      "outcome": "keep",
+      "reason": "Synchronize and check native host families through existing jobs.\nKeep separate from job transport and network diagnosis; machine topology remains local.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/multi-machine/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:mutation-testing:779746608176f9db1ca10b929445804da6c45fc2df8b44042bd0ad86c8c8ccec",
+      "outcome": "implemented",
+      "reason": "Classify survivors and repair the missed invariant.\nKeep separate from theorem selection; zero survivors and unchanged budgets remain enforced.\nKeep survivor classification and invariant repair separate from proof completion.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/mutation-testing/SKILL.md",
+        "docs/adr/verification-proportional-to-code-shape.md",
+        "home/dot_agents/skills/mutation-testing/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:nas:ae111b51c885a5e1bc51827c5d092ec1f7c72319293f942007620df212f40f8c",
+      "outcome": "implemented",
+      "reason": "Transfer immutable artifacts and verify an independent restore.\nKeep separate from local cache cleanup; upload acknowledgment and remote restoration are distinct.\nKeep independent archive verification and restoration separate from local cache cleanup.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/nas/SKILL.md",
+        "home/dot_agents/skills/nas/references/synology-drive.md",
+        "docs/skills/nas-evaluation.md",
+        "home/dot_agents/skills/nas/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:ocomment:e5ebcf7865ea2929200f24991aae7629f5c6623089d92dfad8d79bac4defa3a1",
+      "outcome": "implemented",
+      "reason": "Use the maintained comment disposition tool without losing staging.\nKeep separate from comment-writing judgment; tool findings and preserved legal text govern edits.\nKeep comment disposition and partial staging separate from prose policy implementation.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/ocomment/SKILL.md",
+        "home/dot_agents/skills/ocomment/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:orbstack:b36e4fd0238cc84cc210534b91b65d25c346888df364500b4a78c3c99dc0d2ca",
+      "outcome": "implemented",
+      "reason": "Run the Mac profile's Docker engine and Linux machines.\nAdd the missing Mac-only skill; shared resources and machine deletion require explicit scope.\nCover the Mac's shared Docker engine, memory and disk resources, and machine deletion boundary, with installed help and upstream documentation.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/orbstack/SKILL.md",
+        "home/dot_agents/skills/orbstack/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:oss-readme:b358c0e60ed1ab6dfa796e2de909ef07dc6cd2ef500bf28e757e83e9d257cf75",
+      "outcome": "implemented",
+      "reason": "Write metadata that generates a minimal usable introduction.\nMove mechanical artifact checks into the generator; retain purpose, installation, and usage judgment.\nRoute README and licensing work through checked repository metadata and its generator; retain judgment about purpose and working examples.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/oss-readme/SKILL.md",
+        "docs/adr/0016-one-writing-standard.md",
+        "crates/prose/tests/prose.rs",
+        "home/dot_agents/skills/oss-readme/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:portable-skills:9c59d6d0a1efa993a3e0b9a825fe09314f38d7c4284c702a70a500196ecb6d52",
+      "outcome": "keep",
+      "reason": "Maintain canonical discovery across supported clients.\nKeep separate from maintenance analysis and native deployment; no duplicate bodies or temporary permanent links.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/portable-skills/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:pull-request:2437c19fed21dc366983d92d1ec6e7acc95d1acaace9238b74989d247258e0ec",
+      "outcome": "implemented",
+      "reason": "Prepare one exact destination and issue-scoped PR operation.\nKeep separate from service reviews; checked local tooling owns prerequisites and state transitions.\nKeep exact destination prerequisites, issue scope, documents, and ready transitions separate from review services.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/pull-request/SKILL.md",
+        "docs/adr/0004-checked-pull-request-authoring.md",
+        "docs/adr/0006-global-personal-issue-prerequisite.md",
+        "crates/pr-workflow/tests/pr_workflow.rs",
+        "crates/rules/src/pr_rules.rs",
+        "crates/rules/src/review_rules.rs",
+        "home/dot_agents/skills/pull-request/references/workflow.md",
+        "docs/adr/0008-layered-review-capacity.md",
+        "docs/adr/0013-ready-only-after-passing-checks.md",
+        "docs/adr/0015-scoped-coderabbit-pause.md",
+        "docs/adr/0016-one-writing-standard.md",
+        "crates/pr-workflow/src/lib.rs",
+        "crates/rules/src/prose_rules.rs",
+        "crates/dotguard/src/stack.rs",
+        "crates/rules/src/wip_rules.rs",
+        "home/dot_agents/skills/pull-request/assets/workflow-policy.json",
+        "home/dot_agents/skills/pull-request/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:registry-publishing:100445b8b6e7c4d2ffe3dfcf9af6fe6c24340afda99d04b2aadc4284c0602594",
+      "outcome": "keep",
+      "reason": "Verify registry-specific identities and publication evidence.\nKeep separate from release preparation; conditional registry references preserve different trust contracts.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/registry-publishing/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:release-evidence:2edce60d3bfddcc3f95a81d19b2dc61eca389e71023b81efe4b5962e881cdf25",
+      "outcome": "keep",
+      "reason": "Bind final distributed bytes to provenance and consumer checks.\nKeep separate from publication authority; signing transformations preserve original build identity.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/release-evidence/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:release-workflow:c17bd436cb3ecfc9cf4724d67755950cf262c9602db4689bfd3a843aa8b2f87d",
+      "outcome": "keep",
+      "reason": "Design isolated candidate, signing, and publication stages.\nKeep separate from registry details; exact candidate identity and protected boundaries own transitions.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/release-workflow/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:reliability:10f600a4f960294ad191986635e6266889ee2418fdafb28f61f3edb2c3ded396",
+      "outcome": "keep",
+      "reason": "Control actual time, concurrency, state, and external dependencies.\nKeep separate from blanket serialization or retries; deterministic reproductions verify the responsible boundary.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/reliability/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:renovate:819d63d845c78cc165ade982ee978bfb10b8e29ff3299474cb748521b3437505",
+      "outcome": "keep",
+      "reason": "Maintain tested updates and exact shared configuration.\nKeep separate from one project's pin resolution; extraction and consumer checks verify update behavior.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/renovate/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:resource-coordination:c3676fd1b7c0acea63bca3c2d848e46bba26cabe892f4d4cd18f998e18185110",
+      "outcome": "keep",
+      "reason": "Bound expensive work on shared machines within owner permission.\nKeep separate from verifier selection; no new workload is authorized by a useful tool alone.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/resource-coordination/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:rust-invariants:73acbdb747d5676c42a06880f56a4cbab1eb5655ccf34ee4c7e64453a9e001ec",
+      "outcome": "keep",
+      "reason": "Represent important Rust states and transitions through types.\nKeep separate from generic type-checker configuration; validated construction and exhaustive variants own invariants.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/rust-invariants/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:rust-release:b66a70a5b795a20faeaae2361e7d1e68c9b7eeaea035590f64ca439560601247",
+      "outcome": "keep",
+      "reason": "Handle Rust-specific version proposals and crates.io publication.\nKeep separate from generic release stages; exact workspace candidate and registry identity govern retries.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/rust-release/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:rust-tooling:1bdb81b72101db03b54625b38a4635f742e183f2da9ddc7b27f65668e824dae9",
+      "outcome": "keep",
+      "reason": "Implement maintained typed automation instead of throwaway scripts.\nKeep separate from command discovery; concrete project commands own effects and cleanup.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/rust-tooling/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:skill-operations:a7dbe2988a0e9719aa64f78e096d863c6330c843ea82943bc69d301db3cad190",
+      "outcome": "implemented",
+      "reason": "Load, observe, assess, and disposition the current shared catalog.\nKeep separate from native installation; immutable report and evidence identities invalidate stale maintenance.\nKeep catalog discovery, dependency loading, observations, and evidence-backed maintenance separate from native installation.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/skill-operations/SKILL.md",
+        "home/dot_agents/skills/skill-operations/references/operations.md",
+        "docs/adr/0003-local-skill-operations.md",
+        "docs/adr/0014-per-skill-decision-records.md",
+        "crates/skill-ops/tests/skill_ops.rs",
+        "crates/skill-ops/tests/skill_runtime.rs",
+        "home/dot_agents/skills/skill-operations/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:sslcom-esigner:4c3fe9904c40439777416a58adb91da7b17f5da346845f6bddc1906b50ebda71",
+      "outcome": "keep",
+      "reason": "Verify existing Windows signing enrollment and persistent certificate TOTP.\nKeep separate from account MFA and Apple identities; native Authenticode establishes publisher evidence.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/sslcom-esigner/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:storage-scout:ce8d11c9a358f76dc40f9495f5fe1abbca05b930b2f32261586c29e7161a0ed5",
+      "outcome": "implemented",
+      "reason": "Select owned local build artifacts through the maintained tool.\nKeep separate from NAS retention; refused cleanup cannot become recursive deletion.\nKeep owned artifact selection and tool refusals separate from NAS retention and transfer.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/storage-scout/SKILL.md",
+        "home/dot_agents/skills/storage-scout/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:systematic-fixes:c69f54964112402cee5d6e3c766ef9e5504527352cb04aefb72dff95f90954fa",
+      "outcome": "keep",
+      "reason": "Remove the observed defect's architectural cause and related cases.\nKeep separate from speculative redesign; regressions and an enforced invariant establish prevention.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/systematic-fixes/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:tailscale:e3da4a99f376ca3a001dc7397086381ea2f208cf7a9f02a32c40518db9ee8666",
+      "outcome": "implemented",
+      "reason": "Diagnose connectivity and narrow access policy without broadening it.\nKeep separate from authenticated command execution; positive and negative connectivity cases verify changes.\nKeep reachability and narrow access decisions separate from authenticated remote job transport.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/tailscale/SKILL.md",
+        "home/dot_agents/skills/tailscale/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:type-contracts:ecb88e9a6d2cebc680099e87627795a5db547802bf2736a959eb5a3b6a02ce83",
+      "outcome": "keep",
+      "reason": "Check owned code and validate external inputs in its real language.\nKeep separate from Rust-specific modeling; mandatory coverage and narrow interop boundaries own enforcement.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/type-contracts/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:verification-tools:001e230fc0482409c77923ec2a7f890a096174de7be8be046b9fce1102a0a268",
+      "outcome": "implemented",
+      "reason": "Adopt fitting tools for actual language and platform obligations.\nKeep separate from proof selection; missing, empty, unsupported, and stale work cannot pass.\nKeep actual language and platform coverage, tool adoption, and fail-closed gates separate from theorem selection.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/verification-tools/SKILL.md",
+        "docs/adr/verification-proportional-to-code-shape.md",
+        "docs/adr/0003-local-skill-operations.md",
+        "crates/rules/src/skill_rules.rs",
+        "xtask/src/skill_proofs.rs",
+        "home/dot_agents/skills/verification-tools/tools.toml",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "catalog:xtask:4263a7a1a02e1783301717cf398390d2b0065a1081a147e57b6a0ebbf33f53a6",
+      "outcome": "keep",
+      "reason": "Implement typed repository-specific gates and orchestration.\nKeep separate from application logic and thin recipes; the same command executes locally and in CI.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_agents/skills/xtask/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "dependency:formal-assurance:functional-architecture",
+      "outcome": "keep",
+      "reason": "Keep the required dependency.\nHistorical loads and weaker shell references do not establish that the current dependency-aware loader omitted it.\nThe graph and native loader regressions verify present loading without inventing retrospective counts.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_config/skill-ops/policy.json",
+        "crates/skill-ops/tests/skill_ops.rs",
+        "crates/skill-ops/tests/skill_runtime.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "dependency:verification-tools:executable-policy",
+      "outcome": "keep",
+      "reason": "Keep the required dependency.\nHistorical loads and weaker shell references do not establish that the current dependency-aware loader omitted it.\nThe graph and native loader regressions verify present loading without inventing retrospective counts.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_config/skill-ops/policy.json",
+        "crates/skill-ops/tests/skill_ops.rs",
+        "crates/skill-ops/tests/skill_runtime.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "dependency:verification-tools:type-contracts",
+      "outcome": "keep",
+      "reason": "Keep the required dependency.\nHistorical loads and weaker shell references do not establish that the current dependency-aware loader omitted it.\nThe graph and native loader regressions verify present loading without inventing retrospective counts.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_config/skill-ops/policy.json",
+        "crates/skill-ops/tests/skill_ops.rs",
+        "crates/skill-ops/tests/skill_runtime.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "observation:2a933528683b37b4bbf8fcbee4d23a38a368b172fa7f42807f43295ce912c0c3",
+      "outcome": "implemented",
+      "reason": "Use one command policy for native client and subagent shell events, including nested scripts, sed, awk, heredocs, and mandatory native syntax validation.\nThe real hook regression rejects actual ShellCheck errors and file writes.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "crates/dotfiles/tests/incident_recording.rs",
+        "crates/rules/src/shell_write_rules.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "observation:39525bfde766737bc28d6d699cb95a838f69dea96ea8f03ce0679feb18b1b2f4",
+      "outcome": "implemented",
+      "reason": "The Mac-only OrbStack skill now covers shared Docker resources and machine operations, points at installed help and upstream documentation, and passes the inventory placement regression.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "xtask/tests/tool_inventory.rs",
+        "home/dot_agents/skills/orbstack/SKILL.md"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "observation:403523783b85f6bf7af2742ff7b7fd3afb9fe448ad94659069c0721009045a09",
+      "outcome": "implemented",
+      "reason": "Generate README and license artifacts from checked repository metadata and reuse its checker in the governance audit.\nNative artifact checks and the governance tests reject drift and missing evidence.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "crates/dotfiles/src/repository.rs",
+        "home/dot_agents/skills/github-repository/scripts/repo-settings/tests/governance.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "observation:46babaca8ebdc5eb9bb280d3ebefe4d118e44a599bd85b5d3531c51ceab8b3b7",
+      "outcome": "keep",
+      "reason": "Keep proof selection, verification-tool adoption, and canonical skill discovery separate.\nThe independent seven-session sample supplies no composition finding, and mandatory loader co-use is not merger evidence.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "home/dot_config/skill-ops/policy.json"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "observation:921db4f59a8a67e73743389f617e8c4a5b36e37bb76cb2cc70f01962231ff333",
+      "outcome": "implemented",
+      "reason": "Observe structured failures and real Git failures automatically and require executed reproducing evidence for a mechanized discharge.\nThe regression rejects missing evidence, a nonexistent test, and an unrelated passing test.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "crates/dotguard/tests/git_wrapper.rs",
+        "crates/skill-ops/tests/skill_ops.rs"
+      ],
+      "revisit": null
+    },
+    {
+      "id": "observation:a5cbe72acd32341dc9fd37cdfae16e1554b537888f0608517f1e39cc2fa87861",
+      "outcome": "implemented",
+      "reason": "Compute tool installations from their actual sources and bind every inventoried version to reviewed skill resources or an explicit no-skill decision.\nChanged pins and profile placement are rejected by the inventory regressions.",
+      "evidence": [
+        "docs/skills/independent-catalog-assessment.md",
+        "xtask/src/inventory.rs",
+        "xtask/tests/tool_inventory.rs"
+      ],
+      "revisit": null
+    }
+  ]
+}

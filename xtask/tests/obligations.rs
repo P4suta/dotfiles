@@ -22,6 +22,41 @@ fn the_repository_manifest_covers_every_subject_and_holds_every_metric() {
 }
 
 #[test]
+fn an_alloy_check_needs_its_three_commands_at_the_recorded_scope() {
+    let parsed = parse_manifest(
+        "[[obligation]]\nverifier = \"alloy\"\nspec = \"specs/m.als\"\nsolver = \"sat4j\"\nchecks = [{ assertion = \"Holds\", instance = \"Exists\", counterexample = \"Breaks\", scope = \"for 3 but 4 steps\" }]\n",
+    )
+    .unwrap();
+    let Obligation::Alloy(model) = &parsed.obligations[0] else {
+        panic!("an Alloy obligation");
+    };
+    let scope = tempfile::tempdir().unwrap();
+    fs::create_dir_all(scope.path().join("specs")).unwrap();
+    let complete = "Holds: check { P } for 3 but 4 steps\nExists: run { Q } for 3 but 4 steps\nBreaks: check { R } for 3 but 4 steps\n";
+    fs::write(scope.path().join("specs/m.als"), complete).unwrap();
+    assert_eq!(xtask::obligations::close_alloy(scope.path(), model), NONE);
+    fs::write(
+        scope.path().join("specs/m.als"),
+        complete.replace(
+            "Exists: run { Q } for 3 but 4 steps",
+            "Exists: run { Q } for 2",
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        xtask::obligations::close_alloy(scope.path(), model).len(),
+        1
+    );
+    assert!(
+        parse_manifest(
+            "[[obligation]]\nverifier = \"alloy\"\nspec = \"specs/m.als\"\nsolver = \"minisat\"\nchecks = []\n"
+        )
+        .is_err(),
+        "a solver with a native library stays outside the image"
+    );
+}
+
+#[test]
 fn a_verifier_outside_the_toolbox_fails_to_parse() {
     let error =
         parse_manifest("[[obligation]]\nverifier = \"z3\"\nsource = \"a.smt2\"\n").unwrap_err();
@@ -230,6 +265,34 @@ fn a_pilot_whose_issue_closed_without_a_decision_fails() {
     )
     .unwrap();
     assert_eq!(pilots(checkout.path(), &decided, &closed).unwrap(), NONE);
+}
+
+#[test]
+fn a_quint_model_whose_state_graph_is_missing_fails() {
+    let checkout = fixture(PROVED, CALLER);
+    fs::create_dir_all(checkout.path().join("specs")).unwrap();
+    fs::write(
+        checkout.path().join("specs/m.qnt"),
+        "module m {}\nmodule m_buggy {}\n",
+    )
+    .unwrap();
+    let model = |graph: &str| {
+        parse_manifest(&format!(
+            "[[obligation]]\nverifier = \"quint\"\nspec = \"specs/m.qnt\"\nmain = \"m\"\nprobe = \"m_buggy\"\ninvariant = \"safe\"\nwitnesses = [\"w\"]\nseed = \"0x1\"\nsamples = 1\nsteps = 1\ndistinct_states = 1\ntraces = []\n{graph}"
+        ))
+        .unwrap()
+    };
+    let missing = |manifest| -> bool {
+        closure(checkout.path(), &manifest)
+            .unwrap()
+            .refusals
+            .iter()
+            .any(|refusal| refusal.contains("the state graph specs/m.json is missing"))
+    };
+    assert!(!missing(model("")));
+    assert!(missing(model("graph = \"specs/m.json\"\n")));
+    fs::write(checkout.path().join("specs/m.json"), "{}").unwrap();
+    assert!(!missing(model("graph = \"specs/m.json\"\n")));
 }
 
 #[test]

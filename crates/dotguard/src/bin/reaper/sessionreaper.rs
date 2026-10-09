@@ -13,6 +13,7 @@
 
 use super::config;
 use super::util::{self, Lock};
+use dotguard::reaper_rules::{self, Action, Mode, Reaper, Snapshot, Target, Thresholds, Verdict};
 use platform::process::command;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -61,7 +62,7 @@ impl SessionReaper {
         }
         let cfg = SessionConfig::load();
         let now = util::now();
-        let Some(_lock) = Lock::take(&cfg.state_dir, "session-reaper", now, &|m| {
+        let Some(_lock) = Lock::take(&cfg.state_dir, &|m| {
             println!("session-reaper: {m}");
         }) else {
             return 0;
@@ -168,18 +169,20 @@ fn tier_a(
         );
         return;
     }
-    if cfg.mode == "reap" {
-        let same_identity =
-            !p.identity.is_empty() && native_identity(&p.pid).as_deref() == Some(&p.identity);
-        let allowed = dotguard::reaper_rules::killable(
-            true,
-            matches!(p.state.chars().next(), Some('T' | 't')),
-            p.ppid == "1",
-            age >= cfg.stopped_min_age,
-            now.saturating_sub(firstseen) >= cfg.grace_seconds,
-            same_identity,
-        );
-        if allowed && kill_kill(&p.pid, &p.identity) {
+    let mode = if cfg.mode == "reap" {
+        Mode::Reap
+    } else {
+        Mode::Report
+    };
+    let thresholds = Thresholds {
+        min_age: seconds(cfg.stopped_min_age),
+        grace: seconds(cfg.grace_seconds),
+    };
+    // A listing this old can misname the process, so the verdict rests on the process as it stands right before the signal.
+    let snapshot = native_snapshot(&p.pid, &p.identity);
+    let waited = seconds(now.saturating_sub(firstseen));
+    match reaper_rules::verdict(mode, snapshot, seconds(age), waited, thresholds) {
+        Verdict::Kill if model_admits(snapshot) && kill(&p.pid) => {
             *reaped += 1;
             println!("reaped {ucomm}({}) stopped+orphaned age {age}s", p.pid);
             util::notify(
@@ -187,15 +190,40 @@ fn tier_a(
                 &format!("killed {ucomm}({}), stopped and orphaned for {age}s", p.pid),
                 cfg.notify,
             );
-        } else {
-            println!("session-reaper: failed to kill {ucomm}({})", p.pid);
         }
-    } else {
-        println!(
+        Verdict::Kill => println!("session-reaper: failed to kill {ucomm}({})", p.pid),
+        Verdict::WouldKill => println!(
             "would reap {ucomm}({}) stopped+orphaned age {age}s (mode=report)",
             p.pid
-        );
+        ),
+        Verdict::Spare => println!(
+            "spared {ucomm}({}): it resumed, gained a parent, or exited since the listing",
+            p.pid
+        ),
     }
+}
+
+/// A count of seconds that a clock jump can't turn negative.
+fn seconds(value: i64) -> u64 {
+    u64::try_from(value).unwrap_or(0)
+}
+
+/// Whether `specs/reaper_lock.qnt` lets a holder that observed the process reap it as `snapshot` shows it now.
+fn model_admits(snapshot: Snapshot) -> bool {
+    [Action::Take(0), Action::Observe(0)]
+        .into_iter()
+        .try_fold(reaper_rules::initial(), |state, action| {
+            reaper_rules::step(Reaper::Fixed, state, action)
+        })
+        .and_then(|mut state| {
+            state.target = Target {
+                identity: u8::from(!snapshot.same_identity),
+                stopped: snapshot.stopped,
+                orphan: snapshot.orphan,
+            };
+            reaper_rules::step(Reaper::Fixed, state, Action::Kill(0))
+        })
+        .is_some_and(|state| state.kill.is_some() && reaper_rules::safe(&state))
 }
 
 /// Tier B: report a running orphan in user space with no tty, and never signal it.
@@ -339,7 +367,7 @@ fn mac_processes() -> Vec<Process> {
         .lines()
         .filter_map(parse_ps_line)
         .filter_map(|mut process| {
-            process.identity = native_identity(&process.pid)?;
+            process.identity = native_status(&process.pid)?.2;
             Some(process)
         })
         .collect()
@@ -385,7 +413,7 @@ fn whoami_uid() -> String {
 /// A grep error protects the process.
 fn matches_allow(ucomm: &str, allow_regex: &str) -> bool {
     let lines = vec![ucomm.to_owned()];
-    util::grep_matching(allow_regex, &lines).is_none_or(|hits| !hits.is_empty())
+    util::grep_matching(allow_regex, &lines).is_none_or(|diagnostics| !diagnostics.is_empty())
 }
 
 /// Tier B's "orphaned" substitute: the executable lives under one of the user-space prefixes rather than under `/System` or `/usr/lib`.
@@ -393,40 +421,62 @@ fn user_space_exe(comm: &str, prefixes: &[String]) -> bool {
     prefixes.iter().any(|p| comm.starts_with(p.as_str()))
 }
 
-fn kill_kill(pid: &str, identity: &str) -> bool {
-    if identity.is_empty() || native_identity(pid).as_deref() != Some(identity) {
-        return false;
+/// The process behind `pid` read again: whether it keeps the identity the listing read, and whether it stays stopped and orphaned.
+/// A process that exited, or one the reading can't reach, shows no identity, which spares it.
+fn native_snapshot(pid: &str, identity: &str) -> Snapshot {
+    let spared = Snapshot {
+        same_identity: false,
+        stopped: false,
+        orphan: false,
+    };
+    if identity.is_empty() {
+        return spared;
     }
+    native_status(pid).map_or(spared, |(state, parent, current)| Snapshot {
+        same_identity: current == identity,
+        stopped: matches!(state.chars().next(), Some('T' | 't')),
+        orphan: parent == "1",
+    })
+}
+
+/// The state, the parent ID, and the identity of a process.
+fn native_status(pid: &str) -> Option<(String, String, String)> {
+    #[cfg(target_os = "linux")]
+    {
+        let stat =
+            std::fs::read_to_string(std::path::Path::new(PROC).join(pid).join("stat")).ok()?;
+        let fields: Vec<&str> = stat.rsplit_once(") ")?.1.split_whitespace().collect();
+        Some((
+            (*fields.first()?).to_owned(),
+            (*fields.get(STAT_PARENT)?).to_owned(),
+            (*fields.get(STAT_START_TIME)?).to_owned(),
+        ))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // `lstart` holds spaces, so it comes last and takes the rest of the line.
+        let output = command(PS)
+            .args(["-p", pid, "-o", "state=,ppid=,lstart="])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let text = String::from_utf8(output.stdout).ok()?;
+        let (state, rest) = text.trim_start().split_once(char::is_whitespace)?;
+        let (parent, rest) = rest.trim_start().split_once(char::is_whitespace)?;
+        let identity = rest.trim();
+        (!identity.is_empty()).then(|| (state.to_owned(), parent.to_owned(), identity.to_owned()))
+    }
+}
+
+fn kill(pid: &str) -> bool {
     command(KILL)
         .args(["-KILL", pid])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
-}
-
-fn native_identity(pid: &str) -> Option<String> {
-    #[cfg(target_os = "linux")]
-    {
-        let stat =
-            std::fs::read_to_string(std::path::Path::new(PROC).join(pid).join("stat")).ok()?;
-        Some(
-            stat.rsplit_once(") ")?
-                .1
-                .split_whitespace()
-                .nth(STAT_START_TIME)?
-                .to_owned(),
-        )
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let output = command(PS)
-            .args(["-p", pid, "-o", "lstart="])
-            .output()
-            .ok()?;
-        let identity = String::from_utf8(output.stdout).ok()?.trim().to_owned();
-        (output.status.success() && !identity.is_empty()).then_some(identity)
-    }
 }
 
 #[cfg(target_os = "linux")]

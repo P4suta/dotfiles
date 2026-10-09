@@ -88,6 +88,22 @@
       # Dev box: keep active pages in RAM and suppress thrashing.
       vm.swappiness = 10
 
+# A hung kernel reboots on its own instead of waiting for someone to restart the host by hand.
+# The watchdog panics on a soft lockup or a task blocked for ten minutes, and the panic reboots after ten seconds.
+- name: Reboot a hung kernel after a timeout
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-hang-reboot.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      kernel.panic = 10
+      kernel.panic_on_oops = 1
+      kernel.softlockup_panic = 1
+      kernel.hung_task_timeout_secs = 600
+      kernel.hung_task_panic = 1
+
 - name: Reload sysctl.d settings (no service restart)
   become: true
   ansible.builtin.command:

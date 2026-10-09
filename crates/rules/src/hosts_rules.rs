@@ -216,9 +216,12 @@ mod proofs {
         ];
         spec_admit(required, evidence);
         let result = admit(required, evidence);
-        kani::cover!(result == Verdict::Admit && required[0] && required[1] && required[2]);
-        kani::cover!(result == Verdict::Failed(Family::Mac));
-        kani::cover!(result == Verdict::Missing(Family::Windows));
+        let passed = matches!(result, Verdict::Admit) & required[0] & required[1] & required[2];
+        let failed = matches!(result, Verdict::Failed(Family::Mac));
+        let missing = matches!(result, Verdict::Missing(Family::Windows));
+        kani::cover!(passed);
+        kani::cover!(failed);
+        kani::cover!(missing);
     }
 
     #[cfg(kani)]
@@ -232,8 +235,8 @@ mod proofs {
             second_tree,
             second_passed,
         );
-        kani::cover!(first_tree && first_passed && second_tree && evidence == Evidence::Failed);
-        kani::cover!(!first_tree && first_passed && !second_tree && evidence == Evidence::Missing);
+        kani::cover!(first_tree & first_passed & second_tree & (evidence == Evidence::Failed));
+        kani::cover!(!first_tree & first_passed & !second_tree & (evidence == Evidence::Missing));
     }
 
     #[cfg(kani)]
@@ -244,7 +247,7 @@ mod proofs {
         spec_gated(github, branch, deletion);
         spec_pin(key, deletion);
         kani::cover!(gated(github, branch, deletion));
-        kani::cover!(key == Key::Changed && !pin(key, deletion));
+        kani::cover!((key == Key::Changed) & !pin(key, deletion));
     }
 
     #[cfg(kani)]
@@ -255,7 +258,7 @@ mod proofs {
         let ready: [bool; 3] = [kani::any(), kani::any(), kani::any()];
         spec_start(clean, required, ready);
         let result = start(clean, required, ready);
-        kani::cover!(result == Start::Run && required[0] && required[1] && required[2]);
+        kani::cover!((result == Start::Run) & required[0] & required[1] & required[2]);
         kani::cover!(result == Start::Unready(Family::Windows));
         kani::cover!(result == Start::Dirty);
     }

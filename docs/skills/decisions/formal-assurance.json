@@ -1,13 +1,16 @@
 {
-  "revision": "848495d40d614a3f5af9f4270a8fa9bbada88d3033c5ea2b99aeb304e0ad41b5",
+  "revision": "f15fe33f0c5c8c7e8a6a8425606325be989fbdf0fc7ef0ea0c30029ebe455614",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Keep proof selection and implementation refinement separate from installing verification tools.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
     "home/dot_agents/skills/formal-assurance/SKILL.md",
+    "docs/adr/verification-proportional-to-code-shape.md",
     "home/dot_agents/skills/formal-assurance/references/scoping.md",
     "docs/skills/assurance-scope-evaluation.md",
     "docs/adr/0012-windows-proofs-in-a-linux-container.md",
-    "xtask/tests/container_proofs.rs"
+    "xtask/tests/container_proofs.rs",
+    "home/dot_agents/skills/formal-assurance/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

@@ -1,5 +1,5 @@
 use crate::profile_rules::{Mode, Profile, permitted};
-use crate::runtime::{Native, Runner, args, checked, optional, replace};
+use crate::runtime::{Real, Runner, args, checked, optional, replace};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
@@ -10,14 +10,14 @@ use std::path::{Path, PathBuf};
 pub use platform::step::Step;
 
 #[derive(Debug)]
-pub struct ContextData {
+pub struct TemplateData {
     pub source: PathBuf,
     pub home: PathBuf,
     pub profile: Profile,
     pub data: Value,
 }
 
-impl ContextData {
+impl TemplateData {
     /// The JSON pointer to `pointer` under this profile's `platforms` entry.
     #[must_use]
     pub fn platform(&self, pointer: &str) -> String {
@@ -25,7 +25,7 @@ impl ContextData {
     }
 }
 
-pub(crate) fn load(source: &Path, config: &Path, home: &Path) -> Result<ContextData> {
+pub(crate) fn load(source: &Path, config: &Path, home: &Path) -> Result<TemplateData> {
     let scope = tempfile::tempdir()?;
     let output = crate::profiles::chezmoi(source, scope.path(), config, home)
         .args(["data", "--format", "json"])
@@ -36,7 +36,7 @@ pub(crate) fn load(source: &Path, config: &Path, home: &Path) -> Result<ContextD
     );
     let data: Value = serde_json::from_slice(&output.stdout)?;
     let profile = crate::profiles::configured_profile(&data)?;
-    Ok(ContextData {
+    Ok(TemplateData {
         source: source.to_path_buf(),
         home: home.to_path_buf(),
         profile,
@@ -68,7 +68,7 @@ pub fn run(source: &Path, config: &Path, step: Step, live: bool) -> Result<()> {
         ),
         "setup requires --live and this host's machine-local native profile"
     );
-    let mut native = Native::new(&context.home)?;
+    let mut native = Real::new(&context.home)?;
     native.directory = Some(context.home.clone());
     native
         .environment
@@ -140,18 +140,49 @@ pub fn entry_requirements(rendered: &str) -> Vec<Tool> {
     tools
 }
 
-/// Dependency pairs `(step, prerequisite)` that a run order breaks: the prerequisite runs later, or only later.
+/// A way a run order of the setup steps breaks their declarations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Violation {
+    /// The step runs before a prerequisite that the profile runs.
+    Early(Step, Step),
+    /// The profile runs the prerequisite of a step, and the order leaves it out.
+    Missing(Step, Step),
+    /// The order runs the step more than once.
+    Repeated(Step),
+    /// A step that runs before the files comes after one that runs after them.
+    Phase(Step, Step),
+}
+
+/// Every way `sequence` breaks the declarations on `profile`, checked at every occurrence of each step.
+/// The order must run each step once, after every prerequisite the profile runs, and every before-phase step before every after-phase step.
 #[must_use]
-pub fn ordering_violations(sequence: &[Step]) -> Vec<(Step, Step)> {
+pub fn ordering_violations(profile: Profile, sequence: &[Step]) -> Vec<Violation> {
     let mut violations = Vec::new();
     for (index, step) in sequence.iter().enumerate() {
-        for prerequisite in step.after() {
-            let first = sequence
+        if sequence.iter().take(index).any(|earlier| earlier == step) {
+            violations.push(Violation::Repeated(*step));
+        }
+        for prerequisite in step.prerequisites() {
+            match sequence
                 .iter()
-                .position(|candidate| candidate == prerequisite);
-            if first.is_some_and(|first| first > index) {
-                violations.push((*step, *prerequisite));
+                .position(|candidate| *candidate == prerequisite)
+            {
+                Some(first) if first > index => {
+                    violations.push(Violation::Early(*step, prerequisite));
+                }
+                None if prerequisite.runs_on(profile) => {
+                    violations.push(Violation::Missing(*step, prerequisite));
+                }
+                _ => {}
             }
+        }
+        if step.phase() == platform::step::Phase::Before
+            && let Some(after) = sequence
+                .iter()
+                .take(index)
+                .find(|earlier| earlier.phase() == platform::step::Phase::After)
+        {
+            violations.push(Violation::Phase(*step, *after));
         }
     }
     violations
@@ -180,7 +211,7 @@ pub fn scripted_steps(scripts: &str) -> Vec<Step> {
 
 /// Requirements checked for every scripted step before apply changes anything.
 pub(crate) fn preflight(
-    context: &ContextData,
+    context: &TemplateData,
     runner: &mut impl Runner,
     steps: &[Step],
 ) -> Result<()> {
@@ -207,7 +238,7 @@ pub(crate) fn preflight(
     }
     ensure!(
         unmet.is_empty(),
-        "setup cannot complete on this host; run from a session that satisfies it or name the script in setup.skip:\n{}",
+        "setup cannot complete on this host; run from a session that satisfies it or name the script in setup.ignore:\n{}",
         unmet.join("\n")
     );
     Ok(())
@@ -222,7 +253,7 @@ fn owner_source(step: Step) -> Option<OwnerSource> {
     }
 }
 
-fn owner_checkout(context: &ContextData, source: OwnerSource) -> Result<PathBuf> {
+fn owner_checkout(context: &TemplateData, source: OwnerSource) -> Result<PathBuf> {
     let projects = string(&context.data, "/paths/projects")?;
     ensure!(
         !projects.is_empty(),
@@ -300,7 +331,7 @@ const OWNER_HTTPS: &str = "https://github.com/P4suta";
 
 /// `cargo install` overwrites each binary in place, which Windows refuses while that binary runs, so each one moves aside first.
 fn install_crate(
-    context: &ContextData,
+    context: &TemplateData,
     runner: &mut impl Runner,
     relative: &str,
     binaries: &[&str],
@@ -368,7 +399,7 @@ pub(crate) fn vendor_installer(
     Ok(())
 }
 
-pub(crate) fn execute(context: &ContextData, runner: &mut impl Runner, step: Step) -> Result<()> {
+pub(crate) fn execute(context: &TemplateData, runner: &mut impl Runner, step: Step) -> Result<()> {
     match step {
         Step::Runtime => runtime(context, runner)?,
         Step::Adapters => {
@@ -457,7 +488,7 @@ pub(crate) fn execute(context: &ContextData, runner: &mut impl Runner, step: Ste
 }
 
 /// The installed runtime, the Git guard, and on the Mac the `CodeRabbit` guard, all built from this checkout.
-fn runtime(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+fn runtime(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     install_crate(context, runner, RUNTIME_CRATE, &["dotfiles"])?;
     install_crate(context, runner, "crates/skill-ops", &["skill-ops"])?;
     install_crate(context, runner, "crates/pr-workflow", &["pr-workflow"])?;
@@ -508,7 +539,7 @@ fn github(runner: &mut impl Runner) -> Result<()> {
     Ok(())
 }
 
-fn nix(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+fn nix(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     let nix = Tool::Nix;
     if !runner.available(nix) {
         return Ok(());
@@ -524,7 +555,7 @@ fn nix(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     Ok(())
 }
 
-fn integrations(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+fn integrations(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     if context.profile == Profile::Windows {
         #[cfg(windows)]
         crate::windows::steps::run(context, Step::Integrations)?;
@@ -543,7 +574,7 @@ fn integrations(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     crate::integrations::integrations(&context.home, runner, gui)
 }
 
-fn macos_defaults(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+fn macos_defaults(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     ensure!(
         context.profile == Profile::Mac,
         "macOS defaults require the Mac profile"
@@ -575,7 +606,7 @@ fn macos_defaults(context: &ContextData, runner: &mut impl Runner) -> Result<()>
     Ok(())
 }
 
-fn tools(context: &ContextData, runner: &mut impl Runner, upgrade: bool) -> Result<()> {
+fn tools(context: &TemplateData, runner: &mut impl Runner, upgrade: bool) -> Result<()> {
     if context.profile == Profile::Windows {
         #[cfg(windows)]
         crate::windows::steps::run(context, Step::Tools)?;
@@ -652,7 +683,7 @@ pub fn reload_agent(
     Ok(())
 }
 
-fn services(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+fn services(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     fs::create_dir_all(context.home.join(".local/state/dotfiles/log"))?;
     if context.profile == Profile::Mac {
         let uid = String::from_utf8(checked(runner, Tool::Id, &args(&["-u"]))?)?;
@@ -709,7 +740,7 @@ fn services(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     Ok(())
 }
 
-fn ocaml(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+fn ocaml(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     let compiler = string(&context.data, "/ocaml/compiler")?;
     let switch = string(&context.data, "/ocaml/switch")?;
     let mut initialization = args(&[
@@ -765,7 +796,7 @@ fn ocaml(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     Ok(())
 }
 
-fn haskell(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+fn haskell(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     checked(runner, Tool::Cabal, &args(&["update"]))?;
     let config = std::env::var_os("CABAL_CONFIG")
         .map_or_else(|| context.home.join(".config/cabal/config"), PathBuf::from);
@@ -894,7 +925,7 @@ impl OwnerSource {
     }
 }
 
-fn source_tool(context: &ContextData, runner: &mut impl Runner, step: Step) -> Result<()> {
+fn source_tool(context: &TemplateData, runner: &mut impl Runner, step: Step) -> Result<()> {
     let (source, relative, binary) = match step {
         Step::Ocomment => (OwnerSource::Ocomment, "rust/ocomment", Tool::Ocomment),
         Step::Domyjob => (OwnerSource::Domyjob, "crates/domyjob", Tool::Domyjob),
@@ -1018,7 +1049,7 @@ fn forge_keys(runner: &mut impl Runner) -> Result<()> {
     Ok(())
 }
 
-fn fcitx(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+fn fcitx(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     if !runner.available(Tool::ImConfig) || !runner.available(Tool::Fcitx5) {
         return Ok(());
     }
@@ -1044,7 +1075,7 @@ fn fcitx(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     Ok(())
 }
 
-fn retire_tmux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+fn retire_tmux(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     if runner.available(Tool::Tmux) && runner.run(Tool::Tmux, &args(&["list-sessions"]))?.success {
         return Ok(());
     }
@@ -1113,7 +1144,7 @@ mod tests {
         for profile in [Profile::Mac, Profile::Linux, Profile::Wsl] {
             for upgrade in [false, true] {
                 let scope = tempfile::tempdir().unwrap();
-                let context = ContextData {
+                let context = TemplateData {
                     source: scope.path().into(),
                     home: scope.path().into(),
                     profile,
@@ -1144,14 +1175,14 @@ mod tests {
     #[test]
     fn a_private_source_without_credentials_stops_before_application() {
         let scope = tempfile::tempdir().unwrap();
-        let context = ContextData {
+        let context = TemplateData {
             source: scope.path().into(),
             home: scope.path().into(),
             profile: Profile::Mac,
             data: serde_json::json!({"paths": {"projects": scope.path()}}),
         };
         let refused = preflight(&context, &mut Refusing, &[Step::Runtime, Step::Fleet]);
-        assert!(refused.unwrap_err().to_string().contains("setup.skip"));
+        assert!(refused.unwrap_err().to_string().contains("setup.ignore"));
         preflight(&context, &mut Refusing, &[Step::Runtime, Step::Ocomment]).unwrap();
         std::fs::create_dir_all(scope.path().join("github.com/P4suta/fleet/.git")).unwrap();
         preflight(&context, &mut Refusing, &[Step::Fleet]).unwrap();

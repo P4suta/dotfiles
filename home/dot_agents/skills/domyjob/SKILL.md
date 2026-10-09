@@ -3,6 +3,8 @@ name: domyjob
 description: >-
   Use the personal domyjob client for persistent remote commands and cross-platform project checks.
   Use when a command must run on another machine or survive the client disconnecting.
+metadata:
+  tools: "tools.toml"
 ---
 
 # domyjob

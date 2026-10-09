@@ -14,6 +14,8 @@ pub const KANI_VERSION: &str = "0.68.0";
 
 /// Every proof covers a reachable acceptance and a reachable refusal.
 const WITNESSES: usize = 2;
+const OVERFLOW_PROBE: &str = "reject_an_overflow_under_checked_mir";
+const CHECKED_ADD_OVERFLOW: &str = "attempt to add with overflow";
 
 /// Compares a Kani results document with the expected harnesses and the proof budget.
 ///
@@ -79,47 +81,107 @@ pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) 
             ),
             "expected assertion counterexample is missing"
         );
+        for result in results.iter().filter(|result| {
+            result["harness_id"]
+                .as_str()
+                .is_some_and(|name| name.rsplit("::").next() == Some(OVERFLOW_PROBE))
+        }) {
+            ensure!(
+                result["checks"]
+                    .as_array()
+                    .is_some_and(|checks| checks.iter().any(|check| {
+                        check["category"] == "assertion"
+                            && check["description"] == CHECKED_ADD_OVERFLOW
+                            && check["status"] == "Failure"
+                    })),
+                "checked MIR did not reject arithmetic overflow"
+            );
+        }
     } else {
         ensure!(
             summary["failed"] == 0 && summary["successful"] == expected.len(),
             "required proof failed"
         );
         for result in results {
-            ensure!(
-                result["status"] == "Success",
-                "proof was unsupported, skipped, or failed"
-            );
-            let checks = result["checks"]
-                .as_array()
-                .context("missing proof properties")?;
-            ensure!(
-                checks.iter().any(|check| check["category"] == "assertion"),
-                "proof has no assertion"
-            );
-            ensure!(
-                checks
-                    .iter()
-                    .filter(|check| check["category"] == "cover" && check["status"] == "Satisfied")
-                    .count()
-                    >= WITNESSES,
-                "proof lacks reachable acceptance and refusal witnesses"
-            );
-            ensure!(
-                checks.iter().all(|check| if check["category"] == "cover" {
-                    check["status"] == "Satisfied"
-                } else {
-                    check["status"] == "Success"
-                }),
-                "proof property is unverified"
-            );
+            validate_proof(result).with_context(|| {
+                format!(
+                    "unverified harness {}",
+                    result["harness_id"].as_str().unwrap_or_default()
+                )
+            })?;
         }
     }
+    Ok(())
+}
+
+fn validate_proof(result: &Value) -> Result<()> {
+    ensure!(
+        result["status"] == "Success",
+        "proof was unsupported, skipped, or failed"
+    );
+    let checks = result["checks"]
+        .as_array()
+        .context("missing proof properties")?;
+    ensure!(
+        checks
+            .iter()
+            .any(|check| check["category"] == "assertion" && check["status"] == "Success"),
+        "proof has no successful reachable assertion"
+    );
+    ensure!(
+        checks
+            .iter()
+            .filter(|check| check["category"] == "cover" && check["status"] == "Satisfied")
+            .count()
+            >= WITNESSES,
+        "proof lacks reachable acceptance and refusal witnesses"
+    );
+    let unverified: Vec<String> = checks
+        .iter()
+        .filter(|check| {
+            use proof_budget_rules::Check;
+            let status = match check["status"].as_str() {
+                Some("Success") => Check::Proven,
+                Some("Unreachable") => Check::Impossible,
+                Some("Satisfied") => Check::Witness,
+                _ => Check::Unverified,
+            };
+            !proof_budget_rules::verified(check["category"] == "cover", status)
+        })
+        .map(|check| {
+            format!(
+                "{} {}: {}",
+                check["category"], check["status"], check["description"]
+            )
+        })
+        .collect();
+    ensure!(
+        unverified.is_empty(),
+        "proof property is unverified:\n{}",
+        unverified.join("\n")
+    );
     Ok(())
 }
 
 /// The unstable features a Kani run enables: stubbing always, and the ones a contract obligation adds.
 fn features(flags: &BTreeSet<&'static str>) -> Vec<&'static str> {
     flags.iter().flat_map(|flag| ["-Z", flag]).collect()
+}
+
+fn standalone_kani(features: &BTreeSet<&'static str>) -> std::process::Command {
+    const CHECKED_MIR: &str =
+        "--edition=2024 -C overflow-checks=yes -C debug-assertions=yes -Z mir-opt-level=3";
+    let mut flags = std::env::var_os("RUSTFLAGS").unwrap_or_default();
+    if !flags.is_empty() {
+        flags.push(" ");
+    }
+    flags.push(CHECKED_MIR);
+    if features.contains(KaniFlag::FunctionContracts.argument()) {
+        flags.push(" -Z mir-enable-passes=-Inline");
+    }
+    let mut command = Tool::Kani.command();
+    command.env("RUSTFLAGS", flags);
+    command
 }
 
 fn verify_file(
@@ -129,30 +191,42 @@ fn verify_file(
     counterexample: bool,
     flags: &BTreeSet<&'static str>,
 ) -> Result<()> {
+    ensure!(
+        !expected.is_empty(),
+        "proof execution is incomplete or empty"
+    );
+    for name in expected {
+        verify_harness(source, directory, name, counterexample, flags)?;
+    }
+    Ok(())
+}
+
+fn verify_harness(
+    source: &Path,
+    directory: &Path,
+    name: &str,
+    counterexample: bool,
+    flags: &BTreeSet<&'static str>,
+) -> Result<()> {
     let output = directory.join("results.json");
-    let mut command = Tool::Kani.command();
+    let mut command = standalone_kani(flags);
     command
         .current_dir(directory)
         .arg(source)
         .args(["--output-format", "terse", "-Z", "unstable-options"])
         .args(features(flags))
+        .args(["--harness", name, "--exact"])
         .arg("--harness-timeout")
         .arg(format!("{}s", proof_budget_rules::TIMEOUT_SECONDS))
         .arg("--export-json")
         .arg(&output);
-    if counterexample {
-        for name in expected {
-            command.args(["--harness", name]);
-        }
-        command.arg("--exact");
-    }
     let status = command.status().context("start pinned Kani verifier")?;
     ensure!(
         status.success() != counterexample,
         "Kani returned an unexpected outcome: {status}"
     );
     let result: Value = skill_ops::read_json(&output)?;
-    validate_results(&result, expected, counterexample)
+    validate_results(&result, &[name], counterexample)
 }
 
 /// The harnesses that `kani list` finds in `source`, which every run must then pass.
@@ -161,8 +235,7 @@ fn verify_inventory(
     directory: &Path,
     flags: &BTreeSet<&'static str>,
 ) -> Result<BTreeSet<String>> {
-    let status = Tool::Kani
-        .command()
+    let status = standalone_kani(flags)
         .current_dir(directory)
         .args(["list", "--format", "json"])
         .args(features(flags))
@@ -313,9 +386,12 @@ pub fn verify(root: &Path) -> Result<()> {
     } else {
         verify_in_container(root)?;
     }
-    // The Quint models run in their own pinned image without a network on every host, so the container gate leaves them out.
+    // The Quint and Alloy models run in their own pinned images without a network on every host, so the container gate leaves them out.
     if std::env::var_os(INSIDE_CONTAINER).is_none() {
-        crate::quint::verify(root, &obligations::manifest(root)?)?;
+        let manifest = obligations::manifest(root)?;
+        crate::quint::verify(root, &manifest)?;
+        crate::alloy::verify(root, &manifest)?;
+        crate::lean::verify(root, &manifest)?;
     }
     Ok(())
 }
@@ -664,7 +740,7 @@ fn verify_rules(
             path.to_string_lossy()
         ),
     )?;
-    // One run compiles the module once for every probe, and the result check still requires each one to fail on an assertion.
+    // Each bounded receipt must reject its exact probe on an assertion.
     let probe_names: Vec<&str> = rejected.iter().map(String::as_str).collect();
     if !probe_names.is_empty() {
         verify_file(&file, probe.path(), &probe_names, true, flags)?;

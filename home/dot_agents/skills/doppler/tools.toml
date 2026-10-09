@@ -1,0 +1,5 @@
+[tools]
+"doppler" = "latest"
+"1password-cli" = "latest"
+"sops" = "latest"
+"age" = "latest"

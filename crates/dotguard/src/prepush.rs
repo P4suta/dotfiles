@@ -10,36 +10,34 @@
 //!
 //! This hook, and not the `~/.local/bin/git` wrapper, enforces the rule, because the wrapper only handles commands that resolve `git` through `PATH`.
 
-use crate::bypass::{self, Category};
+use crate::bypass::{self, Rule};
 use crate::gate_rules::{self, Admission, History, Reference, Signing};
-use crate::realgit;
+use crate::real_git;
 use crate::refusal::{Refusal, command};
 use std::io::Read;
 
-enum Verdict {
-    Ok,
-    Delete,
-    Rewrite,
-    /// This clone lacks the remote-tracking commit, so ancestry stays unknown.
-    /// The gate treats it as a rewrite, the shape a push takes after someone else force-pushed.
-    Undecidable,
-}
+use crate::guard_rules::{Ancestry, Push as Verdict};
 
 fn classify(local_sha: &str, remote_sha: &str) -> Verdict {
-    if local_sha.chars().all(|c| c == '0') {
-        return Verdict::Delete;
+    let unresolved = crate::guard_rules::push(
+        local_sha.as_bytes(),
+        remote_sha.as_bytes(),
+        Ancestry {
+            known: false,
+            descends: false,
+        },
+    );
+    if unresolved != Verdict::Undecidable {
+        return unresolved;
     }
-    if remote_sha.chars().all(|c| c == '0') {
-        return Verdict::Ok; // A branch new to the remote.
-    }
-    if !realgit::succeeds(&["cat-file", "-e", &format!("{remote_sha}^{{commit}}")]) {
-        return Verdict::Undecidable;
-    }
-    if realgit::succeeds(&["merge-base", "--is-ancestor", remote_sha, local_sha]) {
-        Verdict::Ok
-    } else {
-        Verdict::Rewrite
-    }
+    let known = real_git::succeeds(&["cat-file", "-e", &format!("{remote_sha}^{{commit}}")]);
+    let descends =
+        known && real_git::succeeds(&["merge-base", "--is-ancestor", remote_sha, local_sha]);
+    crate::guard_rules::push(
+        local_sha.as_bytes(),
+        remote_sha.as_bytes(),
+        Ancestry { known, descends },
+    )
 }
 
 /// Returns the process exit code: 0 to let the push through, 1 to refuse it.
@@ -89,7 +87,7 @@ struct Unsigned {
 /// The backstop for branches from another machine or with mixed signing state, because `post-commit` re-signs only the commits of this machine.
 /// Without signing configured on this machine, the gate skips verification, so a fresh Mac without the 1Password SSH agent can still push.
 fn signatures(remote: &str, input: &str) -> i32 {
-    let configured = realgit::capture(&["config", "--get", "commit.gpgsign"])
+    let configured = real_git::capture(&["config", "--get", "commit.gpgsign"])
         .is_some_and(|v| v.trim() == "true");
     if !configured {
         eprintln!(
@@ -104,16 +102,16 @@ fn signatures(remote: &str, input: &str) -> i32 {
         // Verify what this push introduces: commits reachable from the new tip that no ref on this remote already carries.
         // A new branch and a force push use the same range.
         let Some(range) =
-            realgit::capture(&["rev-list", "--topo-order", &sha, "--not", &not_remote])
+            real_git::capture(&["rev-list", "--topo-order", &sha, "--not", &not_remote])
         else {
             continue;
         };
         let commits: Vec<(String, String)> = range
             .lines()
             .filter(|l| !l.trim().is_empty())
-            .filter(|commit| !realgit::succeeds(&["verify-commit", commit]))
+            .filter(|commit| !real_git::succeeds(&["verify-commit", commit]))
             .map(|commit| {
-                let summary = realgit::capture(&[
+                let summary = real_git::capture(&[
                     "log",
                     "-1",
                     "--pretty=format:  %h %s%n  author: %an <%ae>",
@@ -126,7 +124,7 @@ fn signatures(remote: &str, input: &str) -> i32 {
         let Some((oldest, _)) = commits.last() else {
             continue;
         };
-        let merges = realgit::capture(&[
+        let merges = real_git::capture(&[
             "rev-list",
             "--merges",
             "--count",
@@ -135,7 +133,7 @@ fn signatures(remote: &str, input: &str) -> i32 {
             &not_remote,
         ])
         .is_none_or(|count| count.trim() != "0");
-        let base = realgit::capture(&["rev-parse", "--verify", "--quiet", &format!("{oldest}^")])
+        let base = real_git::capture(&["rev-parse", "--verify", "--quiet", &format!("{oldest}^")])
             .map(|parent| parent.trim().to_owned());
         refs.push(Unsigned {
             local_ref,
@@ -149,8 +147,8 @@ fn signatures(remote: &str, input: &str) -> i32 {
     if refs.is_empty() {
         return 0;
     }
-    let head = realgit::capture(&["rev-parse", "HEAD"]).map(|head| head.trim().to_owned());
-    let head_ref = realgit::capture(&["symbolic-ref", "-q", "HEAD"])
+    let head = real_git::capture(&["rev-parse", "HEAD"]).map(|head| head.trim().to_owned());
+    let head_ref = real_git::capture(&["symbolic-ref", "-q", "HEAD"])
         .map(|reference| reference.trim().to_owned());
     unsigned_refusal(
         remote,
@@ -229,7 +227,7 @@ fn branch(reference: &str) -> &str {
 }
 
 /// Deletions go through the forge, a stale clone fetches first, and a rewrite integrates the remote history instead.
-/// The waiver repeats exactly the refused updates.
+/// The bypass repeats exactly the refused updates.
 fn history_refusal(remote: &str, problems: &[Problem]) -> Refusal {
     let rewrite = |p: &&Problem| matches!(p.verdict, Verdict::Rewrite | Verdict::Undecidable);
     let next = match gate_rules::history(
@@ -265,12 +263,12 @@ fn history_refusal(remote: &str, problems: &[Problem]) -> Refusal {
             .collect::<Vec<_>>()
             .join(" && "),
     };
-    let mut waiver = vec!["git".to_owned(), "push".to_owned()];
+    let mut bypass = vec!["git".to_owned(), "push".to_owned()];
     if problems.iter().any(|p| rewrite(&p)) {
-        waiver.push("--force-with-lease".to_owned());
+        bypass.push("--force-with-lease".to_owned());
     }
-    waiver.push(remote.to_owned());
-    waiver.extend(problems.iter().map(|p| match p.verdict {
+    bypass.push(remote.to_owned());
+    bypass.extend(problems.iter().map(|p| match p.verdict {
         Verdict::Delete => format!(":{}", p.remote_ref),
         _ => format!("{}:{}", p.local_ref, p.remote_ref),
     }));
@@ -281,11 +279,11 @@ fn history_refusal(remote: &str, problems: &[Problem]) -> Refusal {
          still points at commits the remote no longer has, and the next `git pull` quietly\n\
          merges the two histories back together.\n\
          --force-with-lease refuses if someone else pushed since your last fetch, which is\n\
-         the only part of this that plain --force gives up. The waiver is recorded in\n\
+         the only part of this that plain --force gives up. The bypass is recorded in\n\
          ~/.local/state/git-bypass.log.",
         next,
     )
-    .waiver(format!("ALLOW_FORCE=1 {}", command(&waiver)));
+    .bypass(format!("ALLOW_FORCE=1 {}", command(&bypass)));
     for problem in problems {
         refusal = refusal.evidence(problem.detail.clone());
     }
@@ -303,12 +301,12 @@ fn judge(remote: &str, input: &str) -> i32 {
 
         let verdict = classify(local_sha, remote_sha);
         let detail = match verdict {
-            Verdict::Ok => continue,
+            Verdict::Advance => continue,
             Verdict::Delete => format!(
                 "{remote_ref} on '{remote}' would be DELETED\n  (nothing on this machine can restore a ref the remote no longer has)"
             ),
             Verdict::Rewrite => {
-                let dropped = realgit::capture(&[
+                let dropped = real_git::capture(&[
                     "rev-list",
                     "--count",
                     &format!("{local_sha}..{remote_sha}"),
@@ -346,19 +344,14 @@ fn judge(remote: &str, input: &str) -> i32 {
     match gate_rules::admission(
         rewrites,
         rewrites && crate::stack::leased(&[]),
-        bypass::waived(Category::Force),
+        bypass::bypassed(Rule::Force),
     ) {
         Admission::Tooling => {
-            bypass::record("STACK", Category::Force, "pre-push non-fast-forward", &argv);
+            bypass::record("STACK", Rule::Force, "pre-push non-fast-forward", &argv);
             return 0;
         }
         Admission::Waived => {
-            bypass::record(
-                "BYPASS",
-                Category::Force,
-                "pre-push non-fast-forward",
-                &argv,
-            );
+            bypass::record("BYPASS", Rule::Force, "pre-push non-fast-forward", &argv);
             let summary: Vec<&str> = problems.iter().map(|p| p.detail.as_str()).collect();
             eprintln!(
                 "::warning:: ALLOW_FORCE=1 — pushing a rewrite:\n{}",
@@ -369,12 +362,7 @@ fn judge(remote: &str, input: &str) -> i32 {
         Admission::Refused => {}
     }
 
-    bypass::record(
-        "REJECT",
-        Category::Force,
-        "pre-push non-fast-forward",
-        &argv,
-    );
+    bypass::record("REJECT", Rule::Force, "pre-push non-fast-forward", &argv);
     history_refusal(remote, &problems).emit();
     1
 }
@@ -399,7 +387,7 @@ mod tests {
             let refusal = history_refusal("origin", problems);
             assert!(refusal.is_complete(), "{refusal:?}");
             assert_eq!(refusal.rule, "push.history");
-            (refusal.next.unwrap(), refusal.waiver.unwrap())
+            (refusal.next.unwrap(), refusal.bypass.unwrap())
         };
         assert_eq!(
             refused(&[problem(Verdict::Delete, "a"), problem(Verdict::Delete, "b")]),
@@ -507,7 +495,7 @@ mod tests {
             let refusal = unsigned_refusal("origin", &refs, head);
             assert!(refusal.is_complete(), "{refusal:?}");
             assert_eq!(refusal.next.as_deref(), Some(next));
-            assert_eq!(refusal.waiver, None);
+            assert_eq!(refusal.bypass, None);
             assert_eq!(
                 refusal.evidence.len(),
                 refs.iter().map(|r| r.commits.len()).sum::<usize>()
@@ -524,7 +512,7 @@ mod tests {
 
     #[test]
     fn a_brand_new_branch_is_fine() {
-        assert!(matches!(classify("abc123", ZERO), Verdict::Ok));
+        assert!(matches!(classify("abc123", ZERO), Verdict::Advance));
     }
 
     #[test]

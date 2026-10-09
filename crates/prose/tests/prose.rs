@@ -12,6 +12,8 @@ use std::process::Stdio;
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
+use fixture_git::fixture_process;
+
 const ATTRIBUTED: &str = "As requested, the parser keeps every edit.";
 const COMPLIANT: &str = "The parser keeps every edit.";
 
@@ -37,7 +39,7 @@ fn attribution_reported(findings: &[Finding], sentence: &str) -> bool {
 }
 
 fn binary(arguments: &[&str], input: &str, runtime: &Path) -> Result<(i32, String, String)> {
-    let mut child = platform::process::command(env!("CARGO_BIN_EXE_prose"))
+    let mut child = fixture_process::command(env!("CARGO_BIN_EXE_prose"), runtime)
         .args(arguments)
         .env("PROSE_CONFIG", root().join("home/dot_config/prose"))
         .env("PROSE_RUNTIME", runtime)
@@ -244,7 +246,9 @@ fn comments_from_ocomment_map_findings_to_source_lines() -> Result<()> {
         "report": {"comments": [
             {"line": 1, "column": 1, "end_line": 1, "kind": "line", "text": "// Parses the header."},
             {"line": 2, "column": 1, "end_line": 2, "kind": "line", "text": format!("// {ATTRIBUTED}")},
+            {"line": 3, "column": 5, "end_line": 3, "kind": "block", "text": "/* chezmoi:modify-template */"},
             {"line": 4, "column": 1, "end_line": 4, "kind": "directive", "text": "// SAFETY-IGNORED: kept"},
+            {"line": 4, "column": 30, "end_line": 4, "kind": "line", "text": "// shellcheck disable=SC2034"},
             {"line": 5, "column": 1, "end_line": 5, "kind": "doc-line", "text": "/// Returns the count."},
             {"line": 6, "column": 25, "end_line": 6, "kind": "line", "text": "// Holds the count."}
         ]}
@@ -315,7 +319,7 @@ fn claude_and_codex_hooks_request_one_rewrite_of_a_failing_reply() -> Result<()>
         "ending the turn clears this hook's mark"
     );
     let missing = tempfile::tempdir()?;
-    let mut command = platform::process::command(env!("CARGO_BIN_EXE_prose"));
+    let mut command = fixture_process::command(env!("CARGO_BIN_EXE_prose"), missing.path());
     let output = command
         .args(["reply", "--client", "claude"])
         .env("PROSE_CONFIG", missing.path())
@@ -415,7 +419,7 @@ fn the_opencode_plugin_requests_one_rewrite_through_the_native_checker() -> Resu
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/opencode-prose.ts");
     let empty = tempfile::tempdir()?;
     let run_with = |executable: &Path, reply: &str| -> Result<(Vec<String>, Vec<String>)> {
-        let output = platform::process::command(&bun)
+        let output = fixture_process::command(&bun, empty.path())
             .current_dir(root())
             .arg(&fixture)
             .arg(executable)
@@ -647,7 +651,7 @@ fn repository(files: &[(&str, &str)]) -> Result<tempfile::TempDir> {
     Ok(directory)
 }
 
-/// The prose arguments that a command in the repository's `lefthook.yml` runs through its just recipe.
+/// The prose arguments of the hook's CLI or library entry point.
 /// A recipe parameter becomes the argument lefthook passes in its place, such as `{1}`.
 fn hook_arguments(hook: &str, command: &str) -> Result<Vec<String>> {
     let documents =
@@ -671,6 +675,23 @@ fn hook_arguments(hook: &str, command: &str) -> Result<Vec<String>> {
         .find(|signature| signature.split_whitespace().next() == Some(recipe))
         .expect("the recipe the hook names");
     let parameters: Vec<&str> = header.split_whitespace().skip(1).collect();
+    if recipe == "check-staged" {
+        assert!(lines.any(|line| line.trim() == "mise x -- cargo xtask check --staged"));
+        let source = fs::read_to_string(root().join("xtask/src/main.rs"))?;
+        let check = source
+            .split("fn check_staged(root: &Path)")
+            .nth(1)
+            .expect("staged checker");
+        let check = check
+            .split("\nfn check(")
+            .next()
+            .expect("staged checker body");
+        assert!(check.contains("xtask::staged_snapshot::export(root)?"));
+        assert!(check.contains("prose::Scope::Comments"));
+        return Ok(["--source", ".", "repository", "--scope", "comments"]
+            .map(str::to_owned)
+            .into());
+    }
     let body = lines
         .take_while(|line| line.starts_with("    "))
         .find(|line| line.contains(" --bin prose -- "))
@@ -713,7 +734,7 @@ fn run_in(directory: &Path, arguments: &[String]) -> Result<(i32, String)> {
     paths.extend(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     ));
-    let output = platform::process::command(env!("CARGO_BIN_EXE_prose"))
+    let output = fixture_process::command(env!("CARGO_BIN_EXE_prose"), directory)
         .current_dir(directory)
         .env("PATH", std::env::join_paths(paths)?)
         .args(arguments)

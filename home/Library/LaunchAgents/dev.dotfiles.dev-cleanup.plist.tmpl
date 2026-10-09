@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   Daily: remove long-exited dev containers and run a dangling-only prune.
-  Replaces dev-cleanup.timer AND docker-prune.timer — dev-reaper's cleanup subcommand already performs the bounded prune, so a separate prune unit would only duplicate it.
+  Replaces dev-cleanup.timer AND docker-prune.timer — dev-reaper's prune subcommand already performs the bounded prune, so a separate unit would only duplicate it.
 -->
 <plist version="1.0">
 <dict>
@@ -12,7 +12,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>{{ .chezmoi.homeDir }}/.local/bin/dev-reaper</string>
-    <string>cleanup</string>
+    <string>prune</string>
   </array>
 
   <key>EnvironmentVariables</key>

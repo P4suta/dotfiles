@@ -1,9 +1,11 @@
 {
-  "revision": "a16e9937dde6435c7270f403f07bc43d8cffdf98d1470cbeb92d6fdd0e9a27d5",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "e5ebcf7865ea2929200f24991aae7629f5c6623089d92dfad8d79bac4defa3a1",
+  "outcome": "implemented",
+  "reason": "Keep comment disposition and partial staging separate from prose policy implementation.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
-    "home/dot_agents/skills/ocomment/SKILL.md"
+    "home/dot_agents/skills/ocomment/SKILL.md",
+    "home/dot_agents/skills/ocomment/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

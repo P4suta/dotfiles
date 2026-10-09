@@ -10,11 +10,15 @@ struct Cli {
     #[arg(long, default_value = ".")]
     root: PathBuf,
     #[command(subcommand)]
-    command: Action,
+    command: Commands,
 }
 
 #[derive(Subcommand)]
-enum Action {
+enum Commands {
+    Repository {
+        #[command(subcommand)]
+        request: RepositoryRequest,
+    },
     Agent {
         agent: dotfiles::secrets::Agent,
         #[arg(long, env = "DOTFILES_CONFIG")]
@@ -131,21 +135,44 @@ enum Action {
     },
 }
 
+#[derive(Subcommand)]
+enum RepositoryRequest {
+    Generate {
+        #[arg(long)]
+        remote: Option<String>,
+    },
+    Check {
+        #[arg(long)]
+        remote: Option<String>,
+    },
+}
+
 fn run() -> Result<()> {
     let mut cli = Cli::parse();
     cli.root = dotfiles::canonical(&cli.root)?;
     let exit = dotfiles::secrets::exit;
     match cli.command {
-        Action::Agent {
+        Commands::Repository { request } => match request {
+            RepositoryRequest::Generate { remote } => {
+                dotfiles::repository::write(&cli.root)?;
+                if let Some(remote) = remote {
+                    dotfiles::repository::write_description(&cli.root, &remote)?;
+                }
+            }
+            RepositoryRequest::Check { remote } => {
+                dotfiles::repository::check(&cli.root, remote.as_deref())?;
+            }
+        },
+        Commands::Agent {
             agent,
             config,
             arguments,
         } => exit(dotfiles::secrets::agent(
             &cli.root, &config, agent, &arguments,
         )?),
-        Action::Doctor { strict } => dotfiles::terminal::doctor(strict)?,
-        Action::Touchid { live, elevated } => dotfiles::terminal::touchid(live, elevated)?,
-        Action::Terminal {
+        Commands::Doctor { strict } => dotfiles::terminal::doctor(strict)?,
+        Commands::Touchid { live, elevated } => dotfiles::terminal::touchid(live, elevated)?,
+        Commands::Terminal {
             emulator,
             session,
             child,
@@ -153,21 +180,21 @@ fn run() -> Result<()> {
         } => exit(dotfiles::terminal::run(
             emulator, session, child, &arguments,
         )?),
-        Action::ClaudeBash => dotfiles::claude_hook::run()?,
-        Action::ClaudeTiming => dotfiles::claude_timing::run()?,
-        Action::Assure { point } => dotfiles::assure::hook(point)?,
-        Action::Health { session } => health(session)?,
-        Action::Hook { hook, arguments } => dotfiles::hooks::run(hook, &arguments)?,
-        Action::LineEndings { request } => dotfiles::line_endings::run(request)?,
-        Action::Git { arguments } => exit(dotfiles::hooks::git(&arguments)?),
-        Action::GitAudit {
+        Commands::ClaudeBash => dotfiles::claude_hook::run()?,
+        Commands::ClaudeTiming => dotfiles::claude_timing::run()?,
+        Commands::Assure { point } => dotfiles::assure::hook(point)?,
+        Commands::Health { session } => health(session)?,
+        Commands::Hook { hook, arguments } => dotfiles::hooks::run(hook, &arguments)?,
+        Commands::LineEndings { request } => dotfiles::line_endings::run(request)?,
+        Commands::Git { arguments } => exit(dotfiles::hooks::git(&arguments)?),
+        Commands::GitAudit {
             directory,
             fix_stale_hooks,
         } => dotfiles::hooks::audit(&directory, fix_stale_hooks)?,
-        Action::Setup { step, config, live } => {
+        Commands::Setup { step, config, live } => {
             dotfiles::setup::run(&cli.root, &config, step, live)?;
         }
-        Action::Refresh { config, live } => {
+        Commands::Refresh { config, live } => {
             for step in [
                 dotfiles::setup::Step::Integrations,
                 dotfiles::setup::Step::Desktop,
@@ -175,17 +202,17 @@ fn run() -> Result<()> {
                 dotfiles::setup::run(&cli.root, &config, step, live)?;
             }
         }
-        Action::WslSign { arguments } => exit(dotfiles::wsl::run(&arguments)?),
-        Action::RunSecrets {
+        Commands::WslSign { arguments } => exit(dotfiles::wsl::run(&arguments)?),
+        Commands::RunSecrets {
             project,
             config,
             names,
             command,
         } => exit(dotfiles::secrets::run(&project, &config, &names, &command)?),
-        Action::RequireSecrets { names, command } => {
+        Commands::RequireSecrets { names, command } => {
             exit(dotfiles::secrets::consume(&names, &command)?);
         }
-        Action::Profile {
+        Commands::Profile {
             action,
             config,
             destination,
@@ -201,8 +228,8 @@ fn run() -> Result<()> {
             state.as_deref(),
             backup.as_deref(),
         )?,
-        Action::Hosts { action } => dotfiles::hosts::run(action)?,
-        Action::Windows { arguments } => windows(arguments)?,
+        Commands::Hosts { action } => dotfiles::hosts::run(action)?,
+        Commands::Windows { arguments } => windows(arguments)?,
     }
     Ok(())
 }

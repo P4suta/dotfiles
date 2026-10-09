@@ -5,9 +5,11 @@ use platform::freshness::{
 };
 use platform::refusal::Refusal;
 use platform::stale_rules::{Freshness, Origin, freshness, origin, reinstalls, runs};
-use platform::tool::external;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+
+#[path = "../../platform/tests/support/fixture_process.rs"]
+mod fixture_process;
 
 fn repository() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -297,8 +299,9 @@ fn a_recorded_installation_is_rebuilt_only_after_its_sources_change() -> Result<
 
 #[test]
 fn the_installed_binary_refuses_stale_sources_and_runs_current_ones() -> Result<()> {
+    let scope = tempfile::tempdir()?;
     let program = env!("CARGO_BIN_EXE_pr-workflow");
-    let current = external(program)
+    let current = fixture_process::command(program, scope.path())
         .arg("--help")
         .env(SOURCE_VARIABLE, repository())
         .output()?;
@@ -308,7 +311,7 @@ fn the_installed_binary_refuses_stale_sources_and_runs_current_ones() -> Result<
         String::from_utf8_lossy(&current.stderr)
     );
     let newer = fixture("pub fn rule() { /* merged after the build */ }")?;
-    let stale = external(program)
+    let stale = fixture_process::command(program, scope.path())
         .arg("--help")
         .env(SOURCE_VARIABLE, newer.path())
         .output()?;

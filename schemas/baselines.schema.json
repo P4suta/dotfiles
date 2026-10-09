@@ -170,7 +170,7 @@
             },
             "metric": {
               "type": "string",
-              "const": "exec-count"
+              "const": "shell-exec-count"
             },
             "shell": {
               "type": "string"
@@ -180,6 +180,30 @@
           "required": [
             "metric",
             "shell",
+            "exact"
+          ]
+        },
+        {
+          "description": "The gate processes one Git hook spawns, which `crates/dotfiles/tests/hook_exec_count.rs` counts through stand-ins.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "hook": {
+              "type": "string"
+            },
+            "metric": {
+              "type": "string",
+              "const": "exec-count"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "hook",
             "exact"
           ]
         }

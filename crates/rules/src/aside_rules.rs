@@ -140,8 +140,8 @@ mod proofs {
         spec_is_aside(name, entry);
         let aside = is_aside(name, entry);
         assert!(aside);
-        kani::cover!(aside && length == 2);
-        kani::cover!(aside && length == 0);
+        kani::cover!(aside & (length == 2));
+        kani::cover!(aside & (length == 0));
     }
 
     #[cfg(kani)]
@@ -163,7 +163,7 @@ mod proofs {
         spec_is_aside(name, entry);
         let aside = is_aside(name, entry);
         kani::cover!(aside);
-        kani::cover!(!aside && entry_length == bytes.len());
+        kani::cover!(!aside & (entry_length == bytes.len()));
     }
 }
 

@@ -3,6 +3,8 @@ name: dotfiles
 description: >-
   Maintain and apply personal dotfiles with matching behavior on Mac, Linux, and Windows using each machine's native chezmoi profile.
   Use for dotfiles changes, tool setup, and per-machine rollout, not runtime-state synchronization or unrelated system administration.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Dotfiles across machines

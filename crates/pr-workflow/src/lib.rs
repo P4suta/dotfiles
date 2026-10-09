@@ -66,11 +66,11 @@ fn generation_parser() -> impl clap::builder::TypedValueParser<Value = Generatio
 #[command(about = "Validate PR documents before invoking gh; local creation always uses draft")]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Action,
+    pub command: Commands,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum Action {
+pub enum Commands {
     /// Inspect repository scope and the issue before starting GitHub-bound work.
     Start {
         #[command(flatten)]
@@ -232,7 +232,7 @@ pub struct IssueDocument {
     body_file: PathBuf,
 }
 
-impl Action {
+impl Commands {
     fn name(&self) -> &'static str {
         match self {
             Self::Start { .. } => "start",
@@ -775,7 +775,7 @@ fn recheck(target: &Target, title: Option<&str>) -> String {
 /// # Errors
 ///
 /// Returns a refusal when `action` fails, either its own or one that names the failure and the command to rerun.
-pub fn execute(action: Action, arguments: &[String]) -> Result<()> {
+pub fn execute(action: Commands, arguments: &[String]) -> Result<()> {
     let name = action.name();
     let rerun = command(
         &std::iter::once("pr-workflow")
@@ -1527,9 +1527,9 @@ fn live_document(_github: &Github, target: &Target, pr: u64) -> Result<LiveDocum
     serde_json::from_str(&gh(&args)?).context("invalid gh PR document")
 }
 
-fn run(action: Action, rerun: &str) -> Result<()> {
+fn run(action: Commands, rerun: &str) -> Result<()> {
     match action {
-        Action::Start { target } => {
+        Commands::Start { target } => {
             target.conventional_required()?;
             let github = Github::connect()?;
             let destination = destination(&github, &target.repo)?;
@@ -1539,7 +1539,7 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 "Repository prerequisites accepted ({gate:?}); inspect the destination rules and issue scope before implementation"
             );
         }
-        Action::Check {
+        Commands::Check {
             target,
             title,
             body_file,
@@ -1564,15 +1564,15 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 "PR document accepted; local-file checks do not inspect issues and validation claims still require execution evidence"
             );
         }
-        Action::Create {
+        Commands::Create {
             document,
             head,
             base,
             draft,
             independent,
         } => create(document, head, base, draft, independent, rerun)?,
-        Action::Edit { document, pr } => edit(document, pr, rerun)?,
-        Action::Ready { target, pr } => {
+        Commands::Edit { document, pr } => edit(document, pr, rerun)?,
+        Commands::Ready { target, pr } => {
             target.conventional_required()?;
             let github = Github::connect()?;
             let live = live_document(&github, &target, pr)?;
@@ -1611,7 +1611,7 @@ fn run(action: Action, rerun: &str) -> Result<()> {
             )?;
             report_review_requirement(&body)?;
         }
-        Action::Merge {
+        Commands::Merge {
             target,
             prs,
             polling,
@@ -1622,8 +1622,8 @@ fn run(action: Action, rerun: &str) -> Result<()> {
                 merge_independent(&github, &target, pr, polling, rerun)?;
             }
         }
-        Action::Stack { action } => stack(action, rerun)?,
-        Action::Issue { action } => issue(action)?,
+        Commands::Stack { action } => stack(action, rerun)?,
+        Commands::Issue { action } => issue(action)?,
     }
     Ok(())
 }
@@ -1775,7 +1775,7 @@ fn make_ready(
         rerun,
     )?;
     let checks = if pr_ready_rules::complete(Workflow::Fixed, report) {
-        Checks::Passing
+        Checks::Success
     } else {
         Checks::Incomplete
     };
@@ -2619,10 +2619,10 @@ pub fn deploy(
         None => approved.reviewed.remove("pull-request"),
     };
     let tree = source.join("home/dot_agents/skills/pull-request");
-    let alias = source.join("home/dot_claude/skills/symlink_pull-request");
+    let symlink = source.join("home/dot_claude/skills/symlink_pull-request");
     let paths: Vec<_> = skill_ops::skill_source_paths(source)?
         .into_iter()
-        .filter(|path| path.starts_with(&tree) || *path == alias)
+        .filter(|path| path.starts_with(&tree) || *path == symlink)
         .collect();
     ensure!(
         paths.len() >= SKILL_WITH_ALIAS,

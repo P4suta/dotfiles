@@ -5,9 +5,9 @@ use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 pub use dotfiles::profiles::{
     NativeAction, SkippedScript, Store, chezmoi, chezmoi_with, configured_profile, declared_skips,
-    externally_changed, forget_script_runs, host_edit_refusal, keeps_host_keys, managed_paths,
-    merged_targets, native_action_arguments, native_profile, operate, output,
-    pending_onchange_scripts, script_order, source_data, uncommitted_host_edits,
+    externally_changed, host_edit_refusal, keeps_host_keys, managed_paths, merged_targets,
+    native_action_arguments, native_profile, operate, output, pending_onchange_scripts,
+    reset_entry_and_script_state, script_order, source_data, uncommitted_host_edits,
 };
 use serde_json::{Value, json};
 use std::fs;
@@ -497,6 +497,17 @@ pub const DATA_SCHEMA: &str = "schemas/chezmoidata.schema.json";
 ///
 /// Returns an error when writing the schema fails, or with `check` when the committed schema differs from the model.
 pub fn data_schema(root: &Path, check: bool) -> Result<()> {
+    let repository_schema = root.join("schemas/repository.schema.json");
+    let repository_wanted = model::repository::schema();
+    if check {
+        ensure!(
+            fs::read_to_string(&repository_schema)
+                .is_ok_and(|current| current == repository_wanted),
+            "repository schema differs from its model; run `just gen`"
+        );
+    } else {
+        fs::write(repository_schema, repository_wanted)?;
+    }
     let path = root.join(DATA_SCHEMA);
     let wanted = model::data::schema();
     if check {
@@ -525,6 +536,7 @@ pub fn check_profiles(root: &Path, report: Option<&Path>) -> Result<()> {
     let scratch = tempfile::tempdir()?;
     let mut git_policies = Vec::new();
     let source_data = source_data(root)?;
+    crate::manifest_model::verify(root, &source_data)?;
     let findings = manifest_findings(&source_data);
     ensure!(findings.is_empty(), "{}", findings.join("\n"));
     let colors = crate::theme::palette(&source_data)?;
@@ -624,7 +636,7 @@ pub fn startup_programs(root: &Path, profile: Profile) -> Result<Vec<(&'static s
     let (dump, _) = fixture.render(None)?;
     fixture.apply_files()?;
     let home = &fixture.destination;
-    dotfiles::integrations::shell_caches(home, &mut platform::runtime::Native::new(home)?)?;
+    dotfiles::integrations::shell_caches(home, &mut platform::runtime::Real::new(home)?)?;
     let path = std::env::var_os("PATH").unwrap_or_default();
     startup_shells(&dump)
         .into_iter()
@@ -818,14 +830,18 @@ impl<'a> Fixture<'a> {
                 )?
                 .stdout,
         )?;
-        let sequence: Vec<_> = order
+        // The launchers map each rendered script to the step it runs, which the bootstrap launchers of `mise` and the runtime can't name through `dotfiles setup`.
+        let launchers = crate::launchers::launchers()?;
+        let sequence: Vec<platform::step::Step> = order
             .iter()
-            .flat_map(|target| {
-                dotfiles::setup::scripted_steps(
-                    dump[target]["contents"].as_str().unwrap_or_default(),
-                )
+            .map(|target| {
+                launchers
+                    .iter()
+                    .find(|launcher| launcher.target == *target)
+                    .map(|launcher| launcher.step)
+                    .with_context(|| format!("{target} names no setup launcher"))
             })
-            .collect();
+            .collect::<Result<_>>()?;
         let scripts: String = order
             .iter()
             .filter_map(|target| dump[target]["contents"].as_str())
@@ -845,10 +861,10 @@ impl<'a> Fixture<'a> {
             "{} profile runs setup or installs entry points that need packages its data does not install: {unprovisioned:?}",
             profile.name()
         );
-        let violations = dotfiles::setup::ordering_violations(&sequence);
+        let violations = dotfiles::setup::ordering_violations(profile, &sequence);
         ensure!(
             violations.is_empty(),
-            "{} profile runs a setup step before a step it relies on: {violations:?} in {order:?}",
+            "{} profile runs its setup steps out of their declared order: {violations:?} in {order:?}",
             profile.name()
         );
         let empty = empty_directories(&self.managed("dirs")?, &self.managed("files,symlinks")?);
@@ -863,6 +879,7 @@ impl<'a> Fixture<'a> {
 
     /// Applies and verifies the files twice, and checks that a retired target leaves the host.
     fn apply_files(&self) -> Result<()> {
+        let preserved = crate::rehearsal::seed_history(&self.destination)?;
         let retired = self.destination.join(".config/shell/github-token.sh");
         fs::create_dir_all(retired.parent().context("fixture parent is missing")?)?;
         fs::write(&retired, "obsolete credential exporter fixture")?;
@@ -883,6 +900,13 @@ impl<'a> Fixture<'a> {
             self.profile == Profile::Windows || !retired.exists(),
             "obsolete credential exporter was preserved"
         );
+        for (path, contents) in preserved {
+            ensure!(
+                fs::read(&path)? == contents,
+                "profile application changed machine-local state: {}",
+                path.display()
+            );
+        }
         Ok(())
     }
 

@@ -5,6 +5,7 @@ name = "dotfiles-fuzz"
 version = "0.0.0"
 edition = "2024"
 publish = false
+license = "MIT OR Apache-2.0"
 
 [package.metadata]
 cargo-fuzz = true
@@ -62,4 +63,10 @@ doc = false
 bench = false
 
 [workspace]
+[[bin]]
+name = "repository_metadata"
+path = "fuzz_targets/repository_metadata.rs"
+test = false
+doc = false
+bench = false
 members = ["."]

@@ -9,7 +9,8 @@ description: >-
 
 Read project instructions and inspect the live repository before changing settings.
 Use the Rust `repo-settings` CLI in [scripts/repo-settings](scripts/repo-settings/Cargo.toml) with `gh` authentication.
-It reads governance metadata only and never reads credentials, publishes releases, rewrites refs, deletes protections, or turns off Immutable Releases.
+Its audit checks the remote default branch with `dotfiles repository check --remote OWNER/REPO`, so install the reviewed `dotfiles` checker first.
+Resolve metadata, README, description, and license drift through `repository.toml` and `dotfiles repository generate --remote OWNER/REPO`.
 The [baseline](assets/baseline.json) defines the personal convention: squash-only merges, PR-title commits, an empty default commit body, branch cleanup, signed linear protected default branches, and protected version tags.
 Web signoff differs from cryptographic commit signing.
 

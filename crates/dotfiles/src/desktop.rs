@@ -1,6 +1,6 @@
 use crate::profile_rules::Profile;
 use crate::runtime::{Runner, args, checked, optional, replace};
-use crate::setup::ContextData;
+use crate::setup::TemplateData;
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::fs;
@@ -23,7 +23,7 @@ fn text(data: &serde_json::Value, pointer: &str) -> Result<String> {
         .to_owned())
 }
 
-pub(crate) fn refresh(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+pub(crate) fn refresh(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     match context.profile {
         Profile::Mac => mac(context, runner),
         Profile::Linux => linux(context, runner),
@@ -77,7 +77,7 @@ pub fn bundle_shim(target: &Path, binary: &Path) -> Result<()> {
     )
 }
 
-fn mac(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+fn mac(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     let brewfile = context.home.join(".config/homebrew/Brewfile");
     ensure!(
         runner.available(Tool::Brew) && brewfile.is_file(),
@@ -140,7 +140,7 @@ fn gsetting(runner: &mut impl Runner, schema: &str, key: &str, value: &str) -> R
     Ok(())
 }
 
-fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+fn linux(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     let kitty_channel = text(&context.data, &context.platform("/desktop/kitty_channel"))?;
     ensure!(
         matches!(kitty_channel.as_str(), "stable" | "nightly"),
@@ -192,7 +192,7 @@ fn linux(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
     Ok(())
 }
 
-fn kitty(context: &ContextData, runner: &mut impl Runner, kitty_channel: &str) -> Result<()> {
+fn kitty(context: &TemplateData, runner: &mut impl Runner, kitty_channel: &str) -> Result<()> {
     let destination = format!("dest={}", context.home.join(".local").display());
     let channel = format!("installer={kitty_channel}");
     let mut arguments = vec!["launch=n", destination.as_str()];
@@ -210,7 +210,7 @@ fn kitty(context: &ContextData, runner: &mut impl Runner, kitty_channel: &str) -
 }
 
 fn zed(
-    context: &ContextData,
+    context: &TemplateData,
     runner: &mut impl Runner,
     zed_channel: &str,
     suffix: &str,
@@ -296,7 +296,7 @@ fn zed(
     Ok(())
 }
 
-fn nerd_font(context: &ContextData, runner: &mut impl Runner, font_version: &str) -> Result<()> {
+fn nerd_font(context: &TemplateData, runner: &mut impl Runner, font_version: &str) -> Result<()> {
     let fonts = context
         .home
         .join(".local/share/fonts/JetBrainsMonoNerdFont");
@@ -370,7 +370,7 @@ fn palette_rgb(data: &serde_json::Value, name: &str) -> Result<String> {
 }
 
 /// The `gnome-terminal` profile colors and font, the keyboard repeat timing, and the Cinnamon terminal.
-fn gnome(context: &ContextData, runner: &mut impl Runner) -> Result<()> {
+fn gnome(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     let profile = runner.run(
         Tool::Gsettings,
         &args(&["get", "org.gnome.Terminal.ProfilesList", "default"]),

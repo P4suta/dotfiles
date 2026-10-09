@@ -218,8 +218,9 @@ mod proofs {
         let closed: bool = kani::any();
         let decided: bool = kani::any();
         spec_pilot(closed, decided);
-        kani::cover!(pilot(closed, decided) == Pilot::Undecided);
-        kani::cover!(pilot(closed, decided) == Pilot::Running);
+        let result = pilot(closed, decided);
+        kani::cover!(result == Pilot::Undecided);
+        kani::cover!(result == Pilot::Running);
     }
 
     #[cfg(kani)]
@@ -229,8 +230,8 @@ mod proofs {
         let baseline: u64 = kani::any();
         let measured: u64 = kani::any();
         spec_standing(lower, baseline, measured);
-        kani::cover!(lower && measured > baseline);
-        kani::cover!(!lower && measured > baseline);
+        kani::cover!(lower & (measured > baseline));
+        kani::cover!(!lower & (measured > baseline));
     }
 }
 
@@ -238,7 +239,17 @@ mod proofs {
 mod tests {
     use super::*;
 
+    #[cfg(miri)]
     #[test]
+    fn examples_share_one_miri_test() {
+        every_input_meets_the_specifications();
+        a_proved_subject_needs_a_caller_and_no_exemption();
+        an_exemption_holds_only_while_its_reason_and_evidence_do();
+        a_pilot_runs_until_its_issue_closes_and_then_needs_a_decision();
+        a_metric_refuses_both_a_regression_and_an_unrecorded_improvement();
+    }
+
+    #[cfg_attr(not(miri), test)]
     fn every_input_meets_the_specifications() {
         for exemption in proofs::REASONS {
             for [proved, decides, pure, evidence, called] in crate::domain::flags() {
@@ -282,7 +293,7 @@ mod tests {
         called: true,
     };
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_proved_subject_needs_a_caller_and_no_exemption() {
         assert_eq!(verdict(OWNED), Verdict::Proved);
         assert_eq!(
@@ -302,7 +313,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn an_exemption_holds_only_while_its_reason_and_evidence_do() {
         let exempt = Subject {
             proved: false,
@@ -342,14 +353,14 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_pilot_runs_until_its_issue_closes_and_then_needs_a_decision() {
         assert_eq!(pilot(false, false), Pilot::Running);
         assert_eq!(pilot(true, false), Pilot::Undecided);
         assert_eq!(pilot(true, true), Pilot::Decided);
     }
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn a_metric_refuses_both_a_regression_and_an_unrecorded_improvement() {
         assert_eq!(standing(Better::Lower, 3, 3), Standing::Holds);
         assert_eq!(standing(Better::Lower, 3, 4), Standing::Regressed);

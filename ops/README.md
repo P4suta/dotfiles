@@ -5,7 +5,7 @@ The playbook targets native Linux and refuses WSL.
 Keep host names, addresses, workspace identity, and credentials in a private inventory and extra-vars file outside this checkout.
 The required `workspace_user` has no public default.
 
-From an administrator-owned copy of the reviewed checkout, install the pinned tools with mise and run `just ops-check`, which validates the playbook without applying it.
+From an administrator-owned copy of the reviewed checkout, install the pinned tools with mise and run `just ansible-syntax-check`, which validates the playbook without applying it.
 
 To provision, run these commands from `ops/` with absolute paths to the private inventory and variables file:
 

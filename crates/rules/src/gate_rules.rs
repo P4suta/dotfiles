@@ -88,17 +88,17 @@ pub fn rebase_refused(control: bool, rewrites: Option<bool>) -> bool {
 pub enum Admission {
     /// The stack tooling runs it while it holds the repository's stack lease.
     Tooling,
-    /// The owner's waiver, recorded in the bypass log.
+    /// The owner's bypass, recorded in the bypass log.
     Waived,
     Refused,
 }
 
 /// `stack_rule` says the refusal concerns a rebase or a leased force push, the only rewrites the stack tooling makes.
 #[must_use]
-pub fn admission(stack_rule: bool, tooling: bool, waived: bool) -> Admission {
+pub fn admission(stack_rule: bool, tooling: bool, bypassed: bool) -> Admission {
     if stack_rule && tooling {
         Admission::Tooling
-    } else if waived {
+    } else if bypassed {
         Admission::Waived
     } else {
         Admission::Refused
@@ -287,27 +287,27 @@ mod proofs {
         assert_eq!(result == Verdict::Withhold, refused && !read);
     }
 
-    /// A published rewrite runs only through the leased stack tooling or a waiver.
+    /// A published rewrite runs only through the leased stack tooling or a bypass.
     pub fn spec_admission(
         token: Option<&[u8]>,
         lease: Option<&[u8]>,
         stack_rule: bool,
-        waived: bool,
+        bypassed: bool,
     ) {
         let tooling = stack_tooling(token, lease);
         assert_eq!(
             tooling,
             token.is_some_and(|token| !token.is_empty() && Some(token) == lease)
         );
-        let admitted = admission(stack_rule, tooling, waived);
+        let admitted = admission(stack_rule, tooling, bypassed);
         assert_eq!(admitted == Admission::Tooling, stack_rule && tooling);
         assert_eq!(
             admitted == Admission::Waived,
-            waived && !(stack_rule && tooling)
+            bypassed && !(stack_rule && tooling)
         );
         assert_eq!(
             admitted == Admission::Refused,
-            !(waived || stack_rule && tooling)
+            !(bypassed || stack_rule && tooling)
         );
     }
 
@@ -372,9 +372,9 @@ mod proofs {
         spec_signing(refs, reference, merges, only_tip);
         let plan = signing(refs, reference, merges, only_tip);
         kani::cover!(plan == Signing::Amend);
-        kani::cover!(plan == Signing::Rebase && only_tip && !reference.checked_out());
-        kani::cover!(plan == Signing::Inspect && refs == 1 && merges);
-        kani::cover!(plan == Signing::Inspect && refs > 1);
+        kani::cover!((plan == Signing::Rebase) & only_tip & !reference.checked_out());
+        kani::cover!((plan == Signing::Inspect) & (refs == 1) & merges);
+        kani::cover!((plan == Signing::Inspect) & (refs > 1));
     }
 
     #[cfg(kani)]
@@ -386,9 +386,12 @@ mod proofs {
         spec_history(first, second);
         spec_verdict(first, second);
         spec_rebase_refused(first, rewrites);
-        kani::cover!(history(first, second) == History::Integrate);
-        kani::cover!(verdict(first, second) == Verdict::Withhold);
-        kani::cover!(rebase_refused(first, rewrites) && rewrites.is_none());
+        let history = history(first, second);
+        let verdict = verdict(first, second);
+        let refused = rebase_refused(first, rewrites);
+        kani::cover!(history == History::Integrate);
+        kani::cover!(verdict == Verdict::Withhold);
+        kani::cover!(refused & rewrites.is_none());
     }
 
     #[cfg(kani)]
@@ -411,13 +414,13 @@ mod proofs {
             None
         };
         let stack_rule: bool = kani::any();
-        let waived: bool = kani::any();
-        spec_admission(token, lease, stack_rule, waived);
-        let admitted = admission(stack_rule, stack_tooling(token, lease), waived);
+        let bypassed: bool = kani::any();
+        spec_admission(token, lease, stack_rule, bypassed);
+        let admitted = admission(stack_rule, stack_tooling(token, lease), bypassed);
         kani::cover!(admitted == Admission::Tooling);
-        kani::cover!(admitted == Admission::Waived && !stack_rule);
+        kani::cover!((admitted == Admission::Waived) & !stack_rule);
         kani::cover!(
-            admitted == Admission::Refused && stack_rule && token.is_some() && lease.is_none()
+            (admitted == Admission::Refused) & stack_rule & token.is_some() & lease.is_none()
         );
     }
 
@@ -439,14 +442,29 @@ mod proofs {
         ];
         spec_spelling(name, &spellings);
         let read = spelling(name, &spellings);
-        kani::cover!(read == Spelling::Ambiguous);
-        kani::cover!(read == Spelling::Unknown);
+        kani::cover!(matches!(read, Spelling::Ambiguous));
+        kani::cover!(matches!(read, Spelling::Unknown));
         kani::cover!(
             matches!(read, Spelling::Is(_))
-                && spellings[0] != name
-                && spellings[1] != name
-                && spellings[2] != name
+                & (spellings[0] != name)
+                & (spellings[1] != name)
+                & (spellings[2] != name)
         );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn a_force_prefix_reaches_the_full_and_ambiguous_spellings() {
+        let bytes: [u8; 5] = kani::any();
+        let length = usize::from(kani::any::<u8>() % 6);
+        let name = &bytes[..length];
+        let spellings: [&[u8]; 3] = [b"force", b"force-with-lease", b"force-if-includes"];
+        spec_spelling(name, &spellings);
+        let read = spelling(name, &spellings);
+        kani::cover!((name == b"force") & (read == Spelling::Is(0)));
+        kani::cover!((name == b"forc") & matches!(read, Spelling::Ambiguous));
+        kani::cover!(matches!(read, Spelling::Unknown));
     }
 
     #[cfg(kani)]
@@ -462,10 +480,12 @@ mod proofs {
         let known: bool = kani::any();
         spec_commit_retry(source, picking, known);
         let retry = commit_retry(source, picking, known);
+        let empty_only = retry.is_ok_and(|retry| retry.only & retry.allow_empty);
+        let kept_author = retry.is_ok_and(|retry| !retry.reset_author);
         kani::cover!(retry == Err(Withheld::Picking));
         kani::cover!(retry == Err(Withheld::Authorship));
-        kani::cover!(retry.is_ok_and(|retry| retry.only && retry.allow_empty));
-        kani::cover!(retry.is_ok_and(|retry| !retry.reset_author));
+        kani::cover!(empty_only);
+        kani::cover!(kept_author);
     }
 }
 
@@ -520,8 +540,8 @@ mod tests {
             .collect();
         for &token in &options {
             for &lease in &options {
-                for [stack_rule, waived] in flags() {
-                    proofs::spec_admission(token, lease, stack_rule, waived);
+                for [stack_rule, bypassed] in flags() {
+                    proofs::spec_admission(token, lease, stack_rule, bypassed);
                 }
             }
         }

@@ -26,7 +26,15 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - run: exit 0
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            case \"$result\" in
+              success) ;;
+              *) exit 1 ;;
+            esac
+          done
 ";
 
 #[test]
@@ -58,6 +66,16 @@ fn a_workflow_the_ruleset_cannot_rely_on_is_refused() {
             "if: always()",
             "if: success()",
             "must run with `if: always()`",
+        ),
+        (
+            "success) ;;",
+            "success | skipped) ;;",
+            "must refuse every result other than success",
+        ),
+        (
+            "    runs-on: ubuntu-latest",
+            "    continue-on-error: true\n    runs-on: ubuntu-latest",
+            "suppresses failure",
         ),
         ("just proofs", "cargo run -- proofs", "calls `cargo run`"),
         (

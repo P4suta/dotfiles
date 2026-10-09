@@ -13,7 +13,6 @@ check *args: trust
 
 check-staged: trust
     mise x -- cargo xtask check --staged
-    mise x -- cargo run --locked --package prose --bin prose -- --source . repository --scope comments
 
 baselines *args: trust
     mise x -- cargo xtask baselines {{args}}
@@ -27,6 +26,9 @@ profiles: trust
 proofs *args: trust
     mise x -- cargo xtask proofs {{args}}
 
+graphs: trust
+    mise x -- cargo xtask graphs
+
 classify *args: trust
     mise x -- cargo xtask classify {{args}}
 
@@ -35,6 +37,9 @@ rehearse *args: trust
 
 skills: trust
     mise x -- cargo xtask skills
+
+inventory: trust
+    mise x -- cargo xtask inventory
 
 adapters: trust
     mise x -- cargo xtask check-adapters
@@ -72,8 +77,8 @@ doctor: trust
 prose: trust
     mise x -- cargo run --locked --package prose --bin prose -- --source . repository --scope documents --scope comments
 
-ops-check: trust
-    mise x -- cargo xtask ops-check
+ansible-syntax-check: trust
+    mise x -- cargo xtask ansible-syntax-check
 
 install-review-guard: trust
     mise x -- cargo xtask install-review-guard

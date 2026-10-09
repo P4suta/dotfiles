@@ -1,7 +1,7 @@
 {
   "revision": "dd45b34001500486947a4dafd9851931a8f30cf98cbb7ee35f1f1e267a6dd2eb",
   "outcome": "implemented",
-  "reason": "Point host inventory, readiness, and pre-push cross-platform verification at `dotfiles hosts` sync, doctor, and check, under the installed runtime's new name, whose notes pre-push and pr-workflow ready require, in the minimal prose of the writing standard; keep the native-path, job-identity, 1Password, hub, and agent-dispatch judgment.",
+  "reason": "Point host inventory, readiness, and pre-push cross-platform verification at `dotfiles hosts` sync, doctor, and check, under the installed runtime's new name, whose notes pre-push and pr-workflow ready require, in the minimal prose of the writing standard; keep the native-path, job-identity, 1Password, central-bare-repository, and agent-dispatch judgment.",
   "evidence": [
     "home/dot_agents/skills/multi-machine/SKILL.md",
     "crates/dotfiles/src/hosts.rs",

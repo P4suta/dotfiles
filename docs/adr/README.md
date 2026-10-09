@@ -33,4 +33,17 @@
 | [2026-10-07 Name new decision records after their decision and place them by date](dated-decision-record-names.md) | accepted |  |
 | [2026-10-07 Refuse generic anti-patterns through one catalog of checks](generic-anti-pattern-catalog.md) | accepted |  |
 | [2026-10-07 Keep every decision in one pure core crate behind its adapters](pure-decision-core-behind-adapters.md) | accepted |  |
+| [2026-10-07 Replay the whole reachable state graph of each finite Quint model](state-graph-replay-of-finite-quint-models.md) | accepted |  |
 | [2026-10-07 Require verification in proportion to code shape on every repository](verification-proportional-to-code-shape.md) | accepted |  |
+| [2026-10-08 Drop Aeneas extraction for the plan and ordering cores and try Verus next](aeneas-extraction-pilot.md) | accepted |  |
+| [2026-10-08 Record rule failures at their execution boundaries](automatic-rule-failure-observations.md) | proposed |  |
+| [2026-10-08 Keep bounded harnesses instead of Kani loop contracts for the Git argument scan](bounded-harness-over-kani-loop-contracts.md) | accepted |  |
+| [2026-10-08 Bind installed tools to reviewed skills](installed-tools-and-reviewed-skills.md) | proposed |  |
+| [2026-10-08 Keep property fuzzing in the fuzz targets instead of bolero](no-bolero-beside-kani.md) | accepted |  |
+| [2026-10-08 Generate repository artifacts from checked metadata](repository-metadata-and-generated-artifacts.md) | proposed |  |
+| [2026-10-09 Compose the bounded Git argument proofs through a scalar cursor](compose-bounded-git-argument-proofs.md) | accepted |  |
+| [2026-10-09 Check review postconditions directly on bounded production calls](direct-bounded-review-postconditions.md) | accepted |  |
+| [2026-10-09 Bind incident prevention to exact records and committed evidence](incident-dispositions-bind-exact-records.md) | accepted |  |
+| [2026-10-09 Optimize checked MIR for the pinned Kani verifier](optimize-checked-kani-mir.md) | accepted |  |
+| [2026-10-09 Preserve source witnesses under checked Kani MIR](preserve-kani-source-covers.md) | accepted |  |
+| [2026-10-09 Validate skill catalogs before planning](validated-skill-plan-inputs.md) | accepted |  |

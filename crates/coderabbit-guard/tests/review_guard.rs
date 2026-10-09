@@ -1,10 +1,13 @@
-use coderabbit_guard::review_rules::{capacity_budget, included_allowance};
+use coderabbit_guard::review_rules::{budget, within_budget};
 use coderabbit_guard::{
     DAY_MS, HOUR_MS, HOURLY_LIMIT, Invocation, PROBE_GAP_MS, PauseScope, check_budget, check_usage,
     classify, execute_admitted, execute_probe, execute_reserved, install, reserve,
     review_directory, usage_query, validate_policy,
 };
 use std::fs;
+
+#[path = "../../platform/tests/support/fixture_process.rs"]
+mod fixture_process;
 use std::io::{Read, Seek};
 
 fn invocation(args: &[&str]) -> Invocation {
@@ -14,10 +17,10 @@ fn invocation(args: &[&str]) -> Invocation {
 #[test]
 fn layered_capacity_uses_exact_single_rounding_for_small_and_maximum_limits() {
     for (capacity, expected) in [(0, 0), (1, 0), (2, 1), (3, 2), (10, 7), (49, 35), (50, 36)] {
-        assert_eq!(capacity_budget(capacity), expected);
+        assert_eq!(budget(capacity), expected);
     }
     assert_eq!(
-        u128::from(capacity_budget(u64::MAX)),
+        u128::from(budget(u64::MAX)),
         u128::from(u64::MAX) * 72 / 100
     );
 }
@@ -28,13 +31,13 @@ fn admission_matches_the_final_decimal_budget_at_capacity_boundaries() {
         let budget = u128::from(limit) * 72 / 100;
         for remaining in 0..=limit + 1 {
             let expected = remaining <= limit && u128::from(limit - remaining) < budget;
-            assert_eq!(included_allowance(limit, remaining), expected);
+            assert_eq!(within_budget(limit, remaining), expected);
         }
     }
     let limit = u64::MAX;
     let budget = u64::try_from(u128::from(limit) * 72 / 100).unwrap();
-    assert!(included_allowance(limit, limit - budget + 1));
-    assert!(!included_allowance(limit, limit - budget));
+    assert!(within_budget(limit, limit - budget + 1));
+    assert!(!within_budget(limit, limit - budget));
 }
 
 #[test]
@@ -122,7 +125,7 @@ fn rolling_hour_daily_budget_and_clock_rollback_fail_closed() {
 const USAGE: &str = r#"{"type":"status","phase":"usage","status":"complete","organization":"P4suta","includedReviews":{"state":"available","repository":"P4suta/dotfiles","fullCapacityInMs":0,"limit":10,"remaining":10,"rollingWindowMs":3600000},"billingPeriod":{"state":"available","scope":"user","usageBillingStatus":"inactive","user":"P4suta","reviewsCount":0}}"#;
 
 #[test]
-fn only_known_included_allowance_with_inactive_paid_usage_is_accepted() {
+fn only_known_within_budget_with_inactive_paid_usage_is_accepted() {
     assert!(check_usage(USAGE, "P4suta").is_ok());
     assert!(check_usage(USAGE, "other").is_err());
     assert!(
@@ -466,7 +469,7 @@ fn owner_pause_blocks_the_real_entry_point_before_vendor_lookup_and_survives_ins
         vec!["pullrequest", "18"],
         vec!["review", "findings"],
     ] {
-        let output = platform::process::command(binary)
+        let output = fixture_process::command(binary, &home)
             .args(args)
             .env("HOME", &home)
             .env("USERPROFILE", &home)
@@ -475,7 +478,7 @@ fn owner_pause_blocks_the_real_entry_point_before_vendor_lookup_and_survives_ins
         assert_eq!(output.status.code(), Some(75));
         assert!(String::from_utf8_lossy(&output.stderr).contains("paused by the owner"));
     }
-    let output = platform::process::command(binary)
+    let output = fixture_process::command(binary, &home)
         .arg("--guard-status")
         .env("HOME", &home)
         .env("USERPROFILE", &home)
@@ -518,7 +521,7 @@ fn each_pause_scope_is_reported_and_only_cli_scopes_block_the_guard() {
         }
         assert_eq!(coderabbit_guard::pause(&home).unwrap().name(), scope);
         let run = |args: &[&str]| {
-            platform::process::command(binary)
+            fixture_process::command(binary, &home)
                 .args(args)
                 .env("HOME", &home)
                 .env("USERPROFILE", &home)
@@ -565,8 +568,12 @@ fn a_pr_pause_admits_a_guarded_review_through_reservation_preflight_and_executio
         fs::write(&probes, "").unwrap();
         let preflight = std::cell::Cell::new(false);
         let launched = std::cell::Cell::new(false);
+        // The pause reads under the ledger lock, so a second guard can't take the lock meanwhile.
         let result = execute_admitted(
-            scope,
+            || {
+                assert!(coderabbit_guard::reserve(&ledger, 100).is_err());
+                Ok(scope)
+            },
             &ledger,
             &probes,
             100,

@@ -1,7 +1,7 @@
 //! Cross-platform push evidence: managed SSH access to one host per OS family, gate runs through domyjob, and Git notes that pre-push and `pr-workflow ready` require.
 
 use crate::hosts_rules::{Evidence, Family, Key, Start, Verdict, admit, gated, pin, record, start};
-use crate::runtime::Native;
+use crate::runtime::Real;
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
@@ -324,8 +324,8 @@ pub fn push_gate(repository: &Path, url: &str, input: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn native(home: &Path) -> Result<Native> {
-    let mut native = Native::new(home)?;
+fn native(home: &Path) -> Result<Real> {
+    let mut native = Real::new(home)?;
     if cfg!(windows) {
         // Only the system OpenSSH reaches the 1Password agent pipe.
         let root = std::env::var_os("SystemRoot")
@@ -337,7 +337,7 @@ fn native(home: &Path) -> Result<Native> {
     Ok(native)
 }
 
-fn command(native: &Native, tool: Tool) -> Command {
+fn command(native: &Real, tool: Tool) -> Command {
     let mut command = native.command(tool);
     if cfg!(windows) {
         command.env_remove("SSH_AUTH_SOCK");
@@ -599,7 +599,7 @@ pub fn outcome(alias: &str, output: &str) -> Option<i32> {
         .ok()
 }
 
-fn tailnet_status(native: &Native) -> Result<Tailnet> {
+fn tailnet_status(native: &Real) -> Result<Tailnet> {
     let output = command(native, Tool::Tailscale)
         .args(["status", "--json"])
         .stderr(Stdio::inherit())
@@ -625,7 +625,7 @@ fn read_or_empty(path: &Path) -> Result<String> {
     }
 }
 
-fn fingerprint(native: &Native, key: &str) -> Result<String> {
+fn fingerprint(native: &Real, key: &str) -> Result<String> {
     let file = tempfile::NamedTempFile::new()?;
     fs::write(file.path(), format!("{key}\n"))?;
     let output = command(native, Tool::SshKeygen)
@@ -645,7 +645,7 @@ fn fingerprint(native: &Native, key: &str) -> Result<String> {
 
 /// The ed25519 key the host presents to the SSH client that later connects, which `ssh-keyscan` can't always negotiate.
 /// The scan offers no identity, so at most a host that admits anyone runs `true`.
-fn scan(native: &Native, user: &str, address: &str) -> Result<Option<String>> {
+fn scan(native: &Real, user: &str, address: &str) -> Result<Option<String>> {
     let directory = tempfile::tempdir()?;
     let file = directory.path().join("known_hosts");
     let known = file.display().to_string().replace('\\', "/");
@@ -769,7 +769,7 @@ fn targets(home: &Path, tailnet: &Tailnet) -> Result<[Option<Target>; 3]> {
 }
 
 fn domyjob(
-    native: &Native,
+    native: &Real,
     alias: &str,
     arguments: &[&str],
     program: &[String],
@@ -793,7 +793,7 @@ fn domyjob(
 
 /// `Ok` when the host can run the gate, or the next action that would make it able to.
 fn probe(
-    native: &Native,
+    native: &Real,
     tailnet: &Tailnet,
     family: Family,
     target: &Target,
@@ -843,7 +843,7 @@ fn probe(
     })
 }
 
-fn on_path(native: &Native, program: &str) -> bool {
+fn on_path(native: &Real, program: &str) -> bool {
     std::env::split_paths(&native.path).any(|directory| {
         directory.join(program).is_file()
             || (cfg!(windows)
@@ -1035,7 +1035,7 @@ fn record_run(
 
 /// One family's gate on its host, with its exit status when the job finished and its combined output.
 fn run_gate(
-    native: &Native,
+    native: &Real,
     root: &Path,
     snapshot: &Path,
     family: Family,

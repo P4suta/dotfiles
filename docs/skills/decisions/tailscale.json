@@ -1,9 +1,11 @@
 {
-  "revision": "541a427fb2fabd0f2c683ba18313893d3ed70b00faaccf6ef55b61e9e715611f",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "e3da4a99f376ca3a001dc7397086381ea2f208cf7a9f02a32c40518db9ee8666",
+  "outcome": "implemented",
+  "reason": "Keep reachability and narrow access decisions separate from authenticated remote job transport.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
-    "home/dot_agents/skills/tailscale/SKILL.md"
+    "home/dot_agents/skills/tailscale/SKILL.md",
+    "home/dot_agents/skills/tailscale/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

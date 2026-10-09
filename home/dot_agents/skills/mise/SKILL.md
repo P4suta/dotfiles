@@ -3,6 +3,8 @@ name: mise
 description: >-
   Manage reproducible tool versions and execution with mise across development, CI, and dotfiles-managed machines.
   Use for mise setup, pins, lockfiles, or version-resolution failures.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Tool versions with mise

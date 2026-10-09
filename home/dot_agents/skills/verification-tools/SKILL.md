@@ -3,6 +3,8 @@ name: verification-tools
 description: >-
   Install and maintain mandatory verification tools for the actual language, risks, and supported targets of a project.
   Use for implementation, project setup, assurance gaps, or propagating a proven new check across existing projects.
+metadata:
+  tools: "tools.toml"
 ---
 
 # Required verification tools
@@ -43,3 +45,6 @@ Carry the proven behavior to compatible projects in small independent changes, a
 Track adoption, incompatibility with concrete evidence, and pending work instead of assuming every repository migrated.
 New projects inherit the current capability baseline, and an old project's absence from a recent task grants no permanent exemption.
 Use `skill-operations` to record adoption evidence and proposals that move repeated assurance work into maintained checks.
+
+These machines report a repository's verification gaps when a session starts, and refuse new ones at commit, push, the end of a turn, and `pr-workflow ready`.
+Each refusal names its next action, and the repository's `assure.toml` names the owner of each shape.

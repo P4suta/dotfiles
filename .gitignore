@@ -1,4 +1,6 @@
 **/target/
+# The build outputs of the Lean package, which `just proofs` writes.
+specs/lean/.lake/
 **/__pycache__/
 node_modules/
 .migration-imported
