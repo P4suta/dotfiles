@@ -67,7 +67,7 @@ The `pre-commit` and `pre-push` hooks refuse a change that adds a gap.
 | `just check-staged` | The pre-commit check: the lint stages over the staged files, then the prose of documents and of the comments `OComment` reads. |
 | `just baselines` | The refusal of a lint baseline under `policy/lint-baselines/` that grew since a base, which CI runs from the merge base. |
 | `just profiles` | Every profile's rendering, an isolated apply and verification, the committed manifests, the ignore and remove audit, and the script input audit. |
-| `just proofs` | The Kani obligations of `policy/obligations.toml`, Miri over the pure core's tests for the host and Windows, and a mutation campaign over the core. It also replays the corpus of every fuzz target under `fuzz/`, and checks the Quint and Alloy models under `specs/`. |
+| `just proofs` | The Kani obligations of `policy/obligations.toml`, Miri over the pure core's tests for the host and Windows, and a mutation campaign over the core. It also replays the corpus of every fuzz target under `fuzz/`, checks the Quint and Alloy models under `specs/`, and builds and checks the Lean package under `specs/lean/`. |
 | `just prose` | The writing standard over documents and comments. |
 
 The Rust gate of `just check` also runs the obligation closure, which holds `policy/obligations.toml` to the source.
@@ -87,6 +87,8 @@ The gate writes those traces again at the fixed seed to show they still match.
 
 Each Alloy assertion has an instance and a mutated fact that yields a counterexample at the same recorded scope.
 `just gen` exports the actual profile manifests as an Alloy instance, so the model checks the deployed target, retirement, directory, and hook relations.
+Lean proves the general skill plan and setup order theorems.
+Generated vectors compare its definitions with the Rust functions, and the gate checks each module in a fresh kernel and refuses any axiom outside the three standard axioms.
 
 `crates/rules/src/change_rules.rs` maps each changed path to the gates it selects, and a path no rule names selects every gate.
 Only a rule module, the proof inventory, or the tooling selects the proofs, because each harness compiles one rule module alone.

@@ -1752,3 +1752,51 @@ fn reject_validating_a_dependency_outside_the_catalog() {
     assert!(input(&deps, &[0]).is_ok());
 }
 '''
+
+[[obligation]]
+verifier = "lean"
+package = "specs/lean"
+[[obligation.theorems]]
+name = "Dotfiles.SkillPlan.plan_correct"
+module = "Dotfiles.SkillPlan"
+bridge = "crates/rules/src/skill_plan_rules.rs::every_five_skill_plan_equals_the_lean_algorithm"
+[[obligation.theorems]]
+name = "Dotfiles.SkillPlan.Vectors.plan_implementation_assurance"
+module = "Dotfiles.SkillPlanVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.SkillPlan.Vectors.plan_skill_maintenance"
+module = "Dotfiles.SkillPlanVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.SkillPlan.Vectors.plan_every_skill"
+module = "Dotfiles.SkillPlanVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.SkillPlan.Vectors.plan_cycle"
+module = "Dotfiles.SkillPlanVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.SkillPlan.Vectors.plan_unknown"
+module = "Dotfiles.SkillPlanVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.StepOrder.direct_edges_suffice"
+module = "Dotfiles.StepOrder"
+bridge = "crates/dotfiles/src/setup.rs::ordering_violations"
+[[obligation.theorems]]
+name = "Dotfiles.StepOrder.Vectors.unix_respected"
+module = "Dotfiles.StepOrderVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.StepOrder.Vectors.unix_transitive"
+module = "Dotfiles.StepOrderVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.StepOrder.Vectors.windows_respected"
+module = "Dotfiles.StepOrderVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"
+[[obligation.theorems]]
+name = "Dotfiles.StepOrder.Vectors.windows_transitive"
+module = "Dotfiles.StepOrderVectors"
+bridge = "xtask/tests/lean.rs::the_lean_vectors_equal_the_rust_results"

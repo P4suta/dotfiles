@@ -251,6 +251,7 @@ fn generate(root: &Path, check: bool) -> Result<()> {
     xtask::adr::generate(root, check)?;
     xtask::profiles::data_schema(root, check)?;
     xtask::obligations::schemas(root, check)?;
+    xtask::lean::vectors(root, check)?;
     xtask::manifest_model::instance(root, check)?;
     xtask::launchers::generate(root, check)?;
     xtask::profiles::targets_page(root, check)

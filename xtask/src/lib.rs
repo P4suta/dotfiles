@@ -11,6 +11,7 @@ pub mod input_audit;
 pub mod instruction_audit;
 pub mod inventory;
 pub mod launchers;
+pub mod lean;
 pub mod lint;
 pub mod manifest_model;
 pub mod modern;

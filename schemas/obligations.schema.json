@@ -70,6 +70,30 @@
         "stubbing"
       ]
     },
+    "LeanTheorem": {
+      "description": "One theorem and the bridge that binds it to the Rust code.",
+      "type": "object",
+      "properties": {
+        "bridge": {
+          "description": "The Kani harness or Rust test that binds it, as `<path>::<function>`.",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module that states it, such as `Dotfiles.SkillPlan`.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The full name, such as `Dotfiles.SkillPlan.plan_correct`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "module",
+        "bridge"
+      ]
+    },
     "LintTool": {
       "description": "The linters a `lint` obligation may name.",
       "type": "string",
@@ -314,6 +338,32 @@
             "spec",
             "solver",
             "checks"
+          ]
+        },
+        {
+          "description": "A Lean 4 package, which `just proofs` builds and checks offline in its pinned image.",
+          "type": "object",
+          "properties": {
+            "package": {
+              "description": "The package directory, which holds `lean-toolchain`, the lakefile, and `Axioms.lean`.",
+              "type": "string"
+            },
+            "theorems": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/LeanTheorem"
+              }
+            },
+            "verifier": {
+              "type": "string",
+              "const": "lean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "package",
+            "theorems"
           ]
         }
       ]

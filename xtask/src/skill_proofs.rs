@@ -318,6 +318,7 @@ pub fn verify(root: &Path) -> Result<()> {
         let manifest = obligations::manifest(root)?;
         crate::quint::verify(root, &manifest)?;
         crate::alloy::verify(root, &manifest)?;
+        crate::lean::verify(root, &manifest)?;
     }
     Ok(())
 }
