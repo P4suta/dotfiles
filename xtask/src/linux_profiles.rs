@@ -5,7 +5,7 @@ use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::path::Path;
 
-const GATE: &str = "set -o pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -; mise trust --quiet; mise install chezmoi shellcheck nu starship bat; exec mise x -- cargo xtask profiles";
+const GATE: &str = "set -o pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -; mise trust --quiet; mise install chezmoi shellcheck nu starship bat; export MISE_AUTO_INSTALL=false; exec mise x -- cargo xtask profiles";
 
 /// Runs every rendered profile and its shell checks in an owned Linux container.
 ///
