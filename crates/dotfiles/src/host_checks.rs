@@ -11,6 +11,9 @@ use std::process::{Command, Stdio};
 const CONFIG: &str = ".config/chezmoi/chezmoi.toml";
 const GIT_CONFIG: &str = ".config/git/config";
 const MISE_CONFIG: &str = ".config/mise/config.toml";
+const MISE_DATA: &str = ".local/share/mise";
+const CHEZMOI_INSTALLS: &str = "installs/chezmoi";
+const PROJECT_CONFIG: &str = "mise.toml";
 const EMPTY_CONFIG: &str = "empty-config.toml";
 const RUNTIME_BIN: &str = ".local/bin";
 const MAC_SHELL: &str = "/bin/zsh";
@@ -112,6 +115,7 @@ impl Scratch {
         for (name, _) in std::env::vars_os() {
             let text = name.to_string_lossy();
             if text.starts_with("MISE_")
+                || text.starts_with("__MISE_")
                 || text.starts_with("CARGO_")
                 || text.starts_with("RUSTUP_")
                 || text.starts_with("GIT_CONFIG_")
@@ -144,7 +148,7 @@ impl Scratch {
             ("CARGO_HOME", self.home.join(".cargo")),
             ("RUSTUP_HOME", self.home.join(".rustup")),
             ("CARGO_TARGET_DIR", self.home.join("target")),
-            ("MISE_DATA_DIR", self.home.join(".local/share/mise")),
+            ("MISE_DATA_DIR", self.home.join(MISE_DATA)),
             ("MISE_CONFIG_DIR", self.home.join(".config/mise")),
             ("MISE_GLOBAL_CONFIG_FILE", self.home.join(MISE_CONFIG)),
             (
@@ -176,6 +180,72 @@ impl Scratch {
         }
     }
 
+    /// Select the project's exact renderer, installing a missing pin only in scratch storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid pin, failed installation, or mismatched executable.
+    pub fn renderer(
+        &self,
+        root: &Path,
+        installed: &platform::code_environment::Installations,
+    ) -> Result<PathBuf> {
+        let table: toml::Table = toml::from_str(&fs::read_to_string(root.join(PROJECT_CONFIG))?)?;
+        let tool = table
+            .get("tools")
+            .and_then(|tools| tools.get("chezmoi"))
+            .context("mise.toml pins no chezmoi version")?;
+        let pin = tool
+            .as_str()
+            .or_else(|| tool.get("version").and_then(toml::Value::as_str))
+            .context("chezmoi requires an exact version string")?;
+        ensure!(
+            Path::new(pin)
+                .components()
+                .eq(std::iter::once(std::path::Component::Normal(OsStr::new(
+                    pin
+                )))),
+            "chezmoi pin must name one installation directory"
+        );
+        let relative = Path::new(CHEZMOI_INSTALLS)
+            .join(pin)
+            .join(format!("chezmoi{}", std::env::consts::EXE_SUFFIX));
+        let mut renderer = installed.data.join(&relative);
+        if !renderer.is_file() {
+            let status = self
+                .command(&installed.mise)
+                .env(
+                    "MISE_GLOBAL_CONFIG_FILE",
+                    self.scope.path().join(EMPTY_CONFIG),
+                )
+                .env("MISE_TRUSTED_CONFIG_PATHS", &self.home)
+                .env("MISE_CEILING_PATHS", self.scope.path())
+                .args(["install", "--yes", &format!("chezmoi@{pin}")])
+                .status()?;
+            ensure!(status.success(), "install chezmoi pin {pin}: {status}");
+            renderer = self.home.join(MISE_DATA).join(relative);
+        }
+        let renderer = platform::paths::canonical(&renderer)?;
+        let version = self.command(&renderer).arg("--version").output()?;
+        ensure!(
+            version.status.success()
+                && std::str::from_utf8(&version.stdout)?
+                    .starts_with(&format!("chezmoi version v{pin},")),
+            "the renderer does not match chezmoi pin {pin}: {}{}",
+            String::from_utf8_lossy(&version.stdout),
+            String::from_utf8_lossy(&version.stderr)
+        );
+        Ok(renderer)
+    }
+
+    fn chezmoi(&self, root: &Path, renderer: &Path) -> Command {
+        let configured =
+            crate::profiles::chezmoi(root, self.scope.path(), &self.config, &self.home);
+        let mut command = self.command(renderer);
+        command.args(configured.get_args());
+        command
+    }
+
     /// Install the candidate worker that the rendered hooks reference.
     ///
     /// # Errors
@@ -196,7 +266,7 @@ impl Scratch {
     /// # Errors
     ///
     /// Returns an error when rendering or running the pinned launcher fails.
-    pub fn provision_mise(&self, root: &Path) -> Result<PathBuf> {
+    pub fn provision_mise(&self, root: &Path, renderer: &Path) -> Result<PathBuf> {
         const PARTIALS: &str = "home/.chezmoitemplates/partials";
         let (partial, script, program, arguments): (_, _, _, &[&str]) = if cfg!(windows) {
             (
@@ -213,20 +283,18 @@ impl Scratch {
                 &[],
             )
         };
-        let mut render =
-            crate::profiles::chezmoi(root, self.scope.path(), &self.config, &self.home);
-        self.configure(&mut render);
-        let rendered = render
+        let output = self
+            .chezmoi(root, renderer)
             .args(["execute-template", "--file"])
             .arg(root.join(PARTIALS).join(partial))
             .output()?;
         ensure!(
-            rendered.status.success(),
+            output.status.success(),
             "mise launcher render failed: {}",
-            String::from_utf8_lossy(&rendered.stderr)
+            String::from_utf8_lossy(&output.stderr)
         );
         let script = self.scope.path().join(script);
-        fs::write(&script, rendered.stdout)?;
+        fs::write(&script, output.stdout)?;
         let status = self
             .command(program.program())
             .args(arguments)
@@ -239,11 +307,9 @@ impl Scratch {
             .join(format!("mise{}", std::env::consts::EXE_SUFFIX)))
     }
 
-    fn profile(&self, root: &Path, action: &str) -> Result<()> {
-        let mut command =
-            crate::profiles::chezmoi(root, self.scope.path(), &self.config, &self.home);
-        self.configure(&mut command);
-        let status = command
+    fn profile(&self, root: &Path, action: &str, renderer: &Path) -> Result<()> {
+        let status = self
+            .chezmoi(root, renderer)
             .args([action, "--exclude", "scripts,externals"])
             .status()?;
         ensure!(
@@ -366,11 +432,27 @@ pub fn check(root: &Path, home: &Path) -> Report {
     let candidate = (|| {
         let scratch = Scratch::new(&config)?;
         let mut candidate = Checks::default();
-        candidate.run("host.profile-apply", || scratch.profile(root, "apply"));
+        let mut renderer = None;
+        candidate.run("host.renderer", || {
+            renderer = Some(scratch.renderer(
+                root,
+                &platform::code_environment::Installations::discover(home)?,
+            )?);
+            Ok(())
+        });
+        candidate.run("host.profile-apply", || {
+            scratch.profile(root, "apply", renderer.as_deref().context("host renderer")?)
+        });
         candidate.run("host.runtime", || {
             scratch.provision_runtime(&std::env::current_exe()?)
         });
-        candidate.run("host.scratch-verify", || scratch.profile(root, "verify"));
+        candidate.run("host.scratch-verify", || {
+            scratch.profile(
+                root,
+                "verify",
+                renderer.as_deref().context("host renderer")?,
+            )
+        });
         candidate.run("host.toolchain", || scratch.install(&scratch.home));
         candidate.run("host.project-tools", || scratch.install(root));
         for url in PUBLIC_SOURCES {
@@ -441,7 +523,11 @@ mod tests {
         fs::create_dir(&project)?;
         fs::write(project.join("mise.toml"), "[tools]\nuv = '0.12.22'\n")?;
         let scratch = Scratch::new(&config)?;
-        scratch.profile(&source, "apply")?;
+        scratch.profile(
+            &source,
+            "apply",
+            Path::new(platform::tool::Tool::Chezmoi.program()),
+        )?;
         let output = scratch
             .toolchain_command(&project, "mise ls --json")?
             .output()?;
@@ -514,8 +600,9 @@ mod tests {
         };
         fs::write(candidate.join(launcher), script)?;
         let scratch = Scratch::new(&config)?;
-        scratch.profile(&candidate, "apply")?;
-        scratch.profile(&candidate, "verify")?;
+        let renderer = Path::new(platform::tool::Tool::Chezmoi.program());
+        scratch.profile(&candidate, "apply", renderer)?;
+        scratch.profile(&candidate, "verify", renderer)?;
         let rendered = fs::read_to_string(scratch.home.join(".candidate"))?;
         assert!(!rendered.contains(&host.to_string_lossy().replace('\\', "/")));
         assert_eq!(rendered.lines().count(), 3);

@@ -728,7 +728,8 @@ fn code_environment(
     )?;
     let bootstrap = crate::host_checks::Scratch::new(&config)?;
     installed.mise = bootstrap
-        .provision_mise(root)
+        .renderer(root, &installed)
+        .and_then(|renderer| bootstrap.provision_mise(root, &renderer))
         .with_context(|| format!("resolve mise release pin {pin}"))?;
     platform::code_environment::CodeEnvironment::build(root, &installed)
 }

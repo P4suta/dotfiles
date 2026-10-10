@@ -111,6 +111,41 @@ fn code_fixture() -> Result<CodeFixture> {
     })
 }
 
+fn seed_renderer(fixture: &CodeFixture) -> Result<()> {
+    let output = platform::tool::Tool::Mise
+        .command()
+        .args(["which", "chezmoi"])
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "resolve the pinned renderer fixture"
+    );
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let table: toml::Table = toml::from_str(&fs::read_to_string(root.join("mise.toml"))?)?;
+    let pin = table["tools"]["chezmoi"]
+        .as_str()
+        .context("the fixture needs a chezmoi pin")?;
+    fs::write(
+        fixture.root.join("mise.toml"),
+        format!("[tools]\npython = '3.14.8'\nchezmoi = {pin:?}\n"),
+    )?;
+    let directory = fixture.host.join("data/installs/chezmoi").join(pin);
+    fs::create_dir_all(&directory)?;
+    fs::copy(
+        String::from_utf8(output.stdout)?.trim(),
+        directory.join(format!("chezmoi{}", std::env::consts::EXE_SUFFIX)),
+    )?;
+    fs::copy(
+        fixture
+            .host
+            .join(format!("mise{}", std::env::consts::EXE_SUFFIX)),
+        fixture
+            .old
+            .join(format!("chezmoi{}", std::env::consts::EXE_SUFFIX)),
+    )?;
+    Ok(())
+}
+
 #[test]
 fn the_code_gate_and_its_children_ignore_the_fixture_host_environment() -> Result<()> {
     let CodeFixture {
@@ -234,6 +269,7 @@ fn a_mise_bootstrap_with_a_different_release_pin_stops_before_the_gate() -> Resu
 #[test]
 fn a_different_native_mise_uses_the_source_launcher_only_in_scratch() -> Result<()> {
     let fixture = code_fixture()?;
+    seed_renderer(&fixture)?;
     let native = fixture
         .host
         .join(format!("mise{}", std::env::consts::EXE_SUFFIX));
@@ -262,7 +298,7 @@ fn a_different_native_mise_uses_the_source_launcher_only_in_scratch() -> Result<
         )
     };
     fs::write(partials.join(partial), script)?;
-    let mut paths = vec![fixture.host.clone()];
+    let mut paths = vec![fixture.old.clone(), fixture.host.clone()];
     paths.extend(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     ));
@@ -272,6 +308,8 @@ fn a_different_native_mise_uses_the_source_launcher_only_in_scratch() -> Result<
         .env("HOME", &fixture.host)
         .env("USERPROFILE", &fixture.host)
         .env("MISE_DATA_DIR", fixture.host.join("data"))
+        .env("__MISE_DIFF", "inherited-host-activation")
+        .env("__MISE_ORIG_PATH", &fixture.old)
         .env("PATH", std::env::join_paths(paths)?)
         .output()?;
     ensure!(
@@ -287,6 +325,47 @@ fn a_different_native_mise_uses_the_source_launcher_only_in_scratch() -> Result<
     assert_eq!(fs::read(native)?, fs::read(pinned)?);
     assert!(!fixture.host.join(".local/bin/mise").exists());
     assert!(!fixture.host.join(".local/bin/mise.exe").exists());
+    Ok(())
+}
+
+#[test]
+fn a_missing_pinned_renderer_installs_only_in_the_candidate_home() -> Result<()> {
+    let fixture = code_fixture()?;
+    seed_renderer(&fixture)?;
+    let table: toml::Table = toml::from_str(&fs::read_to_string(fixture.root.join("mise.toml"))?)?;
+    let pin = table["tools"]["chezmoi"].as_str().context("renderer pin")?;
+    let native = fixture
+        .host
+        .join(format!("mise{}", std::env::consts::EXE_SUFFIX));
+    let directory = fixture.host.join("data/installs/chezmoi").join(pin);
+    let installed = directory.join(format!("chezmoi{}", std::env::consts::EXE_SUFFIX));
+    let stored = fixture
+        .root
+        .join(format!("renderer{}", std::env::consts::EXE_SUFFIX));
+    fs::rename(&installed, &stored)?;
+    fs::write(
+        native.with_extension("renderer"),
+        stored.to_string_lossy().as_bytes(),
+    )?;
+    let config = fixture.scope.path().join("chezmoi.toml");
+    fs::write(
+        &config,
+        format!(
+            "[data]\nprofile = {:?}\n",
+            dotfiles::profiles::native_profile()?.name()
+        ),
+    )?;
+    let scratch = dotfiles::host_checks::Scratch::new(&config)?;
+    let storage = platform::code_environment::Installations {
+        mise: native,
+        data: fixture.host.join("data"),
+        cargo: fixture.host.join(".cargo"),
+        rustup: fixture.host.join(".rustup"),
+    };
+    let renderer = scratch.renderer(&fixture.root, &storage)?;
+    assert_eq!(fs::read(&renderer)?, fs::read(stored)?);
+    assert!(!renderer.starts_with(&fixture.host));
+    assert!(!installed.exists());
     Ok(())
 }
 

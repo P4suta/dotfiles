@@ -17,6 +17,29 @@ fn main() {
             let data = std::path::PathBuf::from(std::env::var_os("MISE_DATA_DIR").unwrap());
             let installation = data.join("installs/python/3.14.8");
             if arguments[0] == "install" {
+                if let Some(pin) = arguments[2].strip_prefix("chezmoi@") {
+                    assert_eq!(arguments[..2], ["install", "--yes"]);
+                    assert!(data.starts_with(std::env::var_os("HOME").unwrap()));
+                    assert!(
+                        std::env::vars_os()
+                            .all(|(name, _)| { !name.to_string_lossy().starts_with("__MISE_") })
+                    );
+                    assert!(
+                        std::fs::read(std::env::var_os("MISE_GLOBAL_CONFIG_FILE").unwrap())
+                            .unwrap()
+                            .is_empty()
+                    );
+                    let source =
+                        std::fs::read_to_string(executable.with_extension("renderer")).unwrap();
+                    let directory = data.join("installs/chezmoi").join(pin);
+                    std::fs::create_dir_all(&directory).unwrap();
+                    std::fs::copy(
+                        source,
+                        directory.join(format!("chezmoi{}", std::env::consts::EXE_SUFFIX)),
+                    )
+                    .unwrap();
+                    return;
+                }
                 assert_eq!(arguments, ["install", "--yes", "python@3.14.8"]);
                 assert!(data.starts_with(std::env::var_os("HOME").unwrap()));
                 std::fs::create_dir_all(&installation).unwrap();
