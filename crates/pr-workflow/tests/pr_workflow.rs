@@ -1879,6 +1879,8 @@ fn a_body_without_the_closing_reference_names_the_edit_that_adds_it() -> Result<
 
 #[test]
 fn ready_requires_a_passing_note_for_every_os_family_in_the_ci_matrix() -> Result<()> {
+    use dotfiles::hosts::Stage::{Code, Real};
+
     let mut fixture = Fixture::new(BODY)?;
     let root = fixture.directory.path().to_path_buf();
     fs::create_dir_all(root.join(".github/workflows"))?;
@@ -1898,8 +1900,15 @@ fn ready_requires_a_passing_note_for_every_os_family_in_the_ci_matrix() -> Resul
             .env("GH_FIXTURE_VIEW", view.to_string())
             .output()?)
     };
-    let note = |os: &str, status: i32| -> Result<()> {
-        let record = serde_json::json!({"host":"fixture","os":os,"tree":tree,"status":status,"gate":"just check"});
+    let note = |os: &str, stage, status: i32| -> Result<()> {
+        let record = dotfiles::hosts::Note {
+            host: "fixture".to_owned(),
+            os: os.to_owned(),
+            tree: tree.clone(),
+            status,
+            gate: "just check".to_owned(),
+            stage,
+        };
         git(
             &root,
             &[
@@ -1908,19 +1917,22 @@ fn ready_requires_a_passing_note_for_every_os_family_in_the_ci_matrix() -> Resul
                 "refs/notes/hosts",
                 "append",
                 "-m",
-                &record.to_string(),
+                &serde_json::to_string(&record)?,
                 "HEAD",
             ],
         )?;
         Ok(())
     };
-    for (os, status, refusal) in [
-        (None, 0, "no linux gate result"),
-        (Some("linux"), 0, "no windows gate result"),
-        (Some("windows"), 1, "the windows gate failed"),
+    for (os, stage, status, refusal) in [
+        (None, None, 0, "no linux gate result"),
+        (Some("linux"), None, 0, "no linux gate result"),
+        (Some("linux"), Some(Code), 0, "no linux gate result"),
+        (Some("linux"), Some(Real), 0, "no windows gate result"),
+        (Some("windows"), Some(Code), 0, "no windows gate result"),
+        (Some("windows"), Some(Real), 1, "the windows gate failed"),
     ] {
         if let Some(os) = os {
-            note(os, status)?;
+            note(os, stage, status)?;
         }
         let output = ready()?;
         assert!(!output.status.success());
@@ -1931,7 +1943,7 @@ fn ready_requires_a_passing_note_for_every_os_family_in_the_ci_matrix() -> Resul
         );
         assert!(!fixture.log()?.contains("\nready\n"));
     }
-    note("windows", 0)?;
+    note("windows", Some(Real), 0)?;
     let output = ready()?;
     assert!(
         output.status.success(),
