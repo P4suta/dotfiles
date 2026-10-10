@@ -64,6 +64,18 @@ fn main() {
                     contents.replace(original, installation.to_str().unwrap())
                 };
             }
+            if installation.is_dir() {
+                let paths = std::fs::read_to_string("paths").unwrap();
+                let original = paths.lines().next().unwrap();
+                contents = if file == "tools.json" {
+                    contents.replace(
+                        &format!("{original:?}"),
+                        &format!("{:?}", installation.to_str().unwrap()),
+                    )
+                } else {
+                    contents.replace(original, installation.to_str().unwrap())
+                };
+            }
             print!("{contents}");
         }
         "unrelated-application" => panic!("the host application reached the code gate"),

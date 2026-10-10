@@ -178,6 +178,36 @@ fn the_code_gate_and_its_children_ignore_the_fixture_host_environment() -> Resul
 }
 
 #[test]
+fn a_code_gate_can_construct_another_isolated_code_gate() -> Result<()> {
+    let fixture = code_fixture()?;
+    let installed = platform::code_environment::Installations {
+        mise: fixture
+            .host
+            .join(format!("mise{}", std::env::consts::EXE_SUFFIX)),
+        data: fixture.host.join("data"),
+        cargo: fixture.host.join(".cargo"),
+        rustup: fixture.host.join(".rustup"),
+    };
+    let environment =
+        platform::code_environment::CodeEnvironment::build(&fixture.root, &installed)?;
+    let output = environment
+        .command(env!("CARGO_BIN_EXE_dotfiles"))
+        .args(["hosts", "code", "--gate", "python"])
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout)?.replace("\r\n", "\n"),
+        "pinned parent\npinned child\nhttps://github.com/third-party/project.git\n"
+    );
+    assert!(!fixture.host.join("data/gate-state").exists());
+    Ok(())
+}
+
+#[test]
 fn a_mise_bootstrap_with_a_different_release_pin_stops_before_the_gate() -> Result<()> {
     let fixture = code_fixture()?;
     fs::write(
@@ -198,6 +228,37 @@ fn a_mise_bootstrap_with_a_different_release_pin_stops_before_the_gate() -> Resu
     assert!(!output.status.success());
     assert!(String::from_utf8(output.stderr)?.contains("release pin 2026.9.0"));
     assert_eq!(output.stdout, [] as [u8; 0]);
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+fn invalid_registered_compiler_data_stops_before_the_gate() -> Result<()> {
+    let fixture = code_fixture()?;
+    let mut path = vec![fixture.host.clone()];
+    path.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    for data in [
+        "{}".to_owned(),
+        serde_json::json!({
+            "executable": "cl.exe", "directories": [], "libraries": [],
+            "includes": [], "library_paths": []
+        })
+        .to_string(),
+    ] {
+        let output = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), fixture.scope.path())
+            .args(["hosts", "code", "--gate", "python"])
+            .current_dir(&fixture.root)
+            .env("HOME", &fixture.host)
+            .env("USERPROFILE", &fixture.host)
+            .env("PATH", std::env::join_paths(&path)?)
+            .env("DOTFILES_HOST_COMPILER", data)
+            .output()?;
+        assert!(!output.status.success());
+        assert!(String::from_utf8(output.stderr)?.contains("registered compiler"));
+        assert_eq!(output.stdout, [] as [u8; 0]);
+    }
     Ok(())
 }
 

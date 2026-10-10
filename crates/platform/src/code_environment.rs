@@ -17,6 +17,10 @@ const CARGO_BIN: &str = "bin";
 const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
 const GITHUB_HOSTS: &str = "github.com: {}\n";
 const BACKEND_METADATA: &str = ".mise.backend.toml";
+#[cfg(windows)]
+const REGISTERED_COMPILER: &str = "DOTFILES_HOST_COMPILER";
+#[cfg(windows)]
+const MSVC_COMPILER: &str = "cl.exe";
 
 /// Installed tool storage without host configuration or credentials.
 #[derive(Debug)]
@@ -78,6 +82,61 @@ struct Installation {
     installed: bool,
     active: bool,
     symlinked_to: Option<PathBuf>,
+}
+
+#[cfg(windows)]
+#[derive(Debug, serde::Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Compiler {
+    executable: PathBuf,
+    directories: Vec<PathBuf>,
+    libraries: Vec<PathBuf>,
+    includes: Vec<PathBuf>,
+    library_paths: Vec<PathBuf>,
+}
+
+#[cfg(windows)]
+impl Compiler {
+    fn discover(environment: &CodeEnvironment) -> Result<Self> {
+        let base: Vec<_> = std::env::split_paths(
+            environment
+                .variables
+                .get(OsStr::new("PATH"))
+                .context("code PATH is missing")?,
+        )
+        .collect();
+        let tool =
+            find_msvc_tools::find_tool_with_env(std::env::consts::ARCH, MSVC_COMPILER, environment)
+                .context("the Windows code stage requires an installed MSVC toolchain and SDK")?;
+        let mut compiler = Self {
+            executable: tool.path().to_path_buf(),
+            directories: vec![
+                tool.path()
+                    .parent()
+                    .context("MSVC compiler directory")?
+                    .into(),
+            ],
+            libraries: Vec::new(),
+            includes: Vec::new(),
+            library_paths: Vec::new(),
+        };
+        for (name, value) in tool.env() {
+            let directories = match name.to_str() {
+                Some("PATH") => &mut compiler.directories,
+                Some("LIB") => &mut compiler.libraries,
+                Some("INCLUDE") => &mut compiler.includes,
+                Some("LIBPATH") => &mut compiler.library_paths,
+                _ => anyhow::bail!(
+                    "MSVC returned an unexpected environment key: {}",
+                    name.display()
+                ),
+            };
+            directories.extend(std::env::split_paths(value).filter(|path| {
+                !path.as_os_str().is_empty() && (name != "PATH" || !base.contains(path))
+            }));
+        }
+        Ok(compiler)
+    }
 }
 
 /// Owns the scratch home for as long as a gate or one of its child processes runs.
@@ -321,40 +380,65 @@ impl CodeEnvironment {
 
     #[cfg(windows)]
     fn compiler_directories(&mut self) -> Result<Vec<PathBuf>> {
-        let compiler = find_msvc_tools::find_tool_with_env(std::env::consts::ARCH, "cl.exe", self)
-            .context("the Windows code stage requires an installed MSVC toolchain and SDK")?;
+        let mut compiler: Compiler = match std::env::var_os(REGISTERED_COMPILER) {
+            Some(value) => serde_json::from_str(
+                value
+                    .to_str()
+                    .context("registered compiler environment is not Unicode")?,
+            )
+            .context("invalid registered compiler environment")?,
+            None => Compiler::discover(self)?,
+        };
         ensure!(
-            compiler.path().is_absolute(),
-            "MSVC returned a relative compiler"
+            compiler.executable.is_absolute()
+                && compiler.executable.file_name() == Some(OsStr::new(MSVC_COMPILER))
+                && compiler.executable.is_file(),
+            "registered compiler must name an installed MSVC compiler"
         );
-        let mut directories = vec![canonical(
-            compiler
-                .path()
-                .parent()
-                .context("MSVC compiler directory")?,
-        )?];
-        for (name, value) in compiler.env() {
-            match name.to_str() {
-                Some("PATH") => {
-                    for directory in std::env::split_paths(value) {
-                        ensure!(
-                            directory.is_absolute(),
-                            "MSVC returned a relative tool directory"
-                        );
-                        let directory = canonical(&directory)?;
-                        if !directories.contains(&directory) {
-                            directories.push(directory);
-                        }
-                    }
-                }
-                Some(name @ ("LIB" | "LIBPATH" | "INCLUDE")) => self.set(name, value),
-                _ => anyhow::bail!(
-                    "MSVC returned an unexpected environment key: {}",
-                    name.display()
-                ),
+        ensure!(
+            !compiler.directories.is_empty()
+                && !compiler.libraries.is_empty()
+                && !compiler.includes.is_empty(),
+            "registered compiler requires tool, library, and include directories"
+        );
+        compiler.executable = canonical(&compiler.executable)?;
+        for directory in &mut compiler.directories {
+            ensure!(
+                directory.is_absolute() && directory.is_dir(),
+                "registered compiler tool directory must be absolute and installed"
+            );
+            *directory = canonical(directory)?;
+        }
+        for directories in [
+            &compiler.libraries,
+            &compiler.includes,
+            &compiler.library_paths,
+        ] {
+            for directory in directories {
+                ensure!(
+                    directory.is_absolute(),
+                    "registered compiler library and include directories must be absolute"
+                );
             }
         }
-        Ok(directories)
+        ensure!(
+            compiler.directories.first().map(PathBuf::as_path) == compiler.executable.parent(),
+            "registered compiler must lead its tool directories"
+        );
+        for (name, directories) in [
+            ("LIB", &compiler.libraries),
+            ("INCLUDE", &compiler.includes),
+            ("LIBPATH", &compiler.library_paths),
+        ] {
+            self.set(name, std::env::join_paths(directories)?);
+        }
+        self.set(REGISTERED_COMPILER, serde_json::to_string(&compiler)?);
+        compiler.directories.extend(std::env::split_paths(
+            self.variables
+                .get(OsStr::new("PATH"))
+                .context("code PATH is missing")?,
+        ));
+        Ok(compiler.directories)
     }
 
     fn prepare_tools(
