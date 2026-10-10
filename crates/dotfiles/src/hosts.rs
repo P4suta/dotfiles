@@ -1369,7 +1369,7 @@ mod job_tests {
     use super::*;
 
     #[test]
-    fn a_stalled_request_is_stopped_and_reports_its_deadline() -> Result<()> {
+    fn a_stalled_request_is_stopped_and_reports_its_deadline() {
         let mut request =
             platform::process::command(if cfg!(windows) { "pwsh" } else { CODE_SHELL });
         if cfg!(windows) {
@@ -1388,6 +1388,5 @@ mod job_tests {
             error.to_string().contains("did not exit within"),
             "{error:#}"
         );
-        Ok(())
     }
 }
