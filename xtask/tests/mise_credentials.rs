@@ -26,7 +26,7 @@ fn runtime(scope: &Path) -> Result<std::path::PathBuf> {
     Ok(directory.join(format!("dotfiles{}", std::env::consts::EXE_SUFFIX)))
 }
 
-fn isolated(command: &mut Command, scope: &Path, path: &OsStr) {
+fn isolated(command: &mut Command, scope: &Path, path: &OsStr) -> Result<()> {
     command.env_clear().env("PATH", path).current_dir(scope);
     for name in ["SystemRoot", "COMSPEC", "PATHEXT"] {
         if let Some(value) = std::env::var_os(name) {
@@ -45,8 +45,11 @@ fn isolated(command: &mut Command, scope: &Path, path: &OsStr) {
         "MISE_STATE_DIR",
         "GH_CONFIG_DIR",
     ] {
-        command.env(name, scope.join(name));
+        let directory = scope.join(name);
+        fs::create_dir_all(&directory)?;
+        command.env(name, directory);
     }
+    Ok(())
 }
 
 fn lock_result(child: &mut Child, state: &Path) -> Result<(bool, ExitStatus)> {
@@ -158,7 +161,7 @@ fn mise_uses_a_keyring_login_and_falls_back_when_the_cli_has_no_login() -> Resul
     for (login, expected) in [("yes", "fixture-keyring-token\n"), ("no", "")] {
         for host in ["github.com", "github.fixture.invalid"] {
             let mut command = platform::process::command("mise");
-            isolated(&mut command, scope.path(), &path);
+            isolated(&mut command, scope.path(), &path)?;
             let output = command
                 .env("MISE_GLOBAL_CONFIG_FILE", &global)
                 .env("MISE_SYSTEM_CONFIG_FILE", &empty)
@@ -245,7 +248,7 @@ fn a_credential_lookup_finishes_while_mise_install_holds_the_lock() -> Result<()
         let log = state.join("output.log");
         let output = fs::File::create(&log)?;
         let mut command = platform::process::command(&mise);
-        isolated(&mut command, scope.path(), &path);
+        isolated(&mut command, scope.path(), &path)?;
         let reentered = state.join("reentered");
         let mut child = command
             .env("MISE_GLOBAL_CONFIG_FILE", &global)
