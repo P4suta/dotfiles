@@ -193,6 +193,27 @@ fn an_ignore_pattern_that_matches_nothing_is_refused() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn an_aliased_checkout_keeps_the_ignore_and_remove_verdicts() {
+    let snapshot = source_snapshot();
+    let scope = tempfile::tempdir().unwrap();
+    let alias = scope.path().join("checkout");
+    std::os::unix::fs::symlink(xtask::canonical(snapshot.path()).unwrap(), &alias).unwrap();
+    xtask::ignore_audit::check(&alias).unwrap();
+    let ignore = snapshot.path().join("home/.chezmoiignore");
+    let mut text = fs::read_to_string(&ignore).unwrap();
+    text.push_str("\n.config/never-declared\n.config/never-declared\n");
+    fs::write(&ignore, text).unwrap();
+    let original = format!(
+        "{:#}",
+        xtask::ignore_audit::check(snapshot.path()).unwrap_err()
+    );
+    let aliased = format!("{:#}", xtask::ignore_audit::check(&alias).unwrap_err());
+    assert!(original.contains("Unjustified") && original.contains("Repeated"));
+    assert_eq!(aliased, original);
+}
+
 #[test]
 fn a_rendering_that_differs_from_its_manifest_is_refused() {
     let snapshot = source_snapshot();

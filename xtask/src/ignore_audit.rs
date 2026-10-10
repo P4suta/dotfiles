@@ -55,12 +55,14 @@ fn source_paths(root: &Path) -> Result<Vec<String>> {
 
 /// Every target name the source declares for any profile, with each of its parent directories.
 pub(crate) fn source_targets(root: &Path, scope: &Path) -> Result<BTreeSet<String>> {
-    let (config, destination) = configure(root, scope, Profile::Mac)?;
+    let root = crate::canonical(root)?;
+    let scope = crate::canonical(scope)?;
+    let (config, destination) = configure(&root, &scope, Profile::Mac)?;
     let prefix = format!("{}/", chezmoi_path(&destination));
     let mut targets = BTreeSet::new();
-    let source = crate::source_state(root);
+    let source = crate::source_state(&root);
     for batch in source_paths(&source)?.chunks(PATHS_PER_CALL) {
-        let output = chezmoi(root, scope, &config, &destination)
+        let output = chezmoi(&root, &scope, &config, &destination)
             .current_dir(&source)
             .args(["target-path", "--source-path"])
             .args(batch)
