@@ -24,7 +24,7 @@ fn code_fixture() -> Result<CodeFixture> {
     let scope = tempfile::tempdir()?;
     let root = scope.path().join("project");
     let host = scope.path().join("host");
-    let installed = scope.path().join("pinned");
+    let installed = host.join("data/installs/python/3.14.8");
     let old = scope.path().join("old");
     for directory in [&root, &host, &installed, &old] {
         fs::create_dir_all(directory)?;
@@ -129,6 +129,7 @@ fn the_code_gate_and_its_children_ignore_the_fixture_host_environment() -> Resul
             .current_dir(&root)
             .env("HOME", &host)
             .env("USERPROFILE", &host)
+            .env("MISE_DATA_DIR", host.join("data"))
             .env("PATH", std::env::join_paths(path)?);
         for name in [
             "GH_TOKEN",
@@ -168,6 +169,7 @@ fn the_code_gate_and_its_children_ignore_the_fixture_host_environment() -> Resul
         String::from_utf8(clean.stdout)?.replace("\r\n", "\n"),
         "pinned parent\npinned child\nhttps://github.com/third-party/project.git\n"
     );
+    assert!(!host.join("data/gate-state").exists());
     Ok(())
 }
 
@@ -238,11 +240,13 @@ fn a_missing_exact_pin_installs_only_in_the_code_scratch_home() -> Result<()> {
     let listing = fixture.root.join("tools.json");
     let mut tools: serde_json::Value = serde_json::from_slice(&fs::read(&listing)?)?;
     tools["python"][0]["installed"] = false.into();
+    tools["python"][0]["active"] = false.into();
     let existing = fixture.host.join("data/installs/uv/0.12.22");
     fs::create_dir_all(&existing)?;
     fs::write(existing.join("kept"), "read-only installation")?;
     tools["uv"] = tools["python"].clone();
     tools["uv"][0]["installed"] = true.into();
+    tools["uv"][0]["active"] = true.into();
     tools["uv"][0]["version"] = "0.12.22".into();
     tools["uv"][0]["requested_version"] = "0.12.22".into();
     tools["uv"][0]["install_path"] = existing.to_string_lossy().into_owned().into();
@@ -279,7 +283,7 @@ fn a_missing_exact_pin_installs_only_in_the_code_scratch_home() -> Result<()> {
         fs::read_to_string(existing.join("kept"))?,
         "read-only installation"
     );
-    assert!(!fixture.host.join("data/installs/python").exists());
+    assert!(fixture.host.join("data/installs/python/3.14.8").is_dir());
     assert_eq!(fs::read(&listing)?, original);
     assert_eq!(fs::read(fixture.root.join("paths"))?, paths);
     fs::remove_file(fixture.root.join("installed-at"))?;
@@ -287,6 +291,41 @@ fn a_missing_exact_pin_installs_only_in_the_code_scratch_home() -> Result<()> {
     fs::write(&listing, serde_json::to_vec(&tools)?)?;
     assert!(!run()?.status.success());
     assert!(!fixture.root.join("installed-at").exists());
+    Ok(())
+}
+
+#[test]
+fn an_unusable_installation_link_is_replaced_only_in_scratch() -> Result<()> {
+    let fixture = code_fixture()?;
+    fs::write(fixture.root.join("relocate"), "")?;
+    let binary = fixture
+        .host
+        .join("data/installs/python/3.14.8")
+        .join(format!("python{}", std::env::consts::EXE_SUFFIX));
+    let original = fs::read(&binary)?;
+    let mut path = vec![fixture.host.clone()];
+    path.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let output = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), fixture.scope.path())
+        .args(["hosts", "code", "--gate", "python"])
+        .current_dir(&fixture.root)
+        .env("HOME", &fixture.host)
+        .env("USERPROFILE", &fixture.host)
+        .env("MISE_DATA_DIR", fixture.host.join("data"))
+        .env("PATH", std::env::join_paths(path)?)
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8(output.stdout)?.contains("pinned child"));
+    let installed = PathBuf::from(fs::read_to_string(fixture.root.join("installed-at"))?);
+    assert!(!installed.starts_with(&fixture.host));
+    assert!(!installed.exists());
+    assert!(!fixture.host.join("data/gate-state").exists());
+    assert_eq!(fs::read(binary)?, original);
     Ok(())
 }
 

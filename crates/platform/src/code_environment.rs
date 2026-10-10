@@ -15,6 +15,7 @@ const WINDOWS_GIT: &str = "Git";
 const MISE_CONFIG: &str = "mise.toml";
 const CARGO_BIN: &str = "bin";
 const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
+const GITHUB_HOSTS: &str = "github.com: {}\n";
 
 /// Installed tool storage without host configuration or credentials.
 #[derive(Debug)]
@@ -107,6 +108,9 @@ impl CodeEnvironment {
         fs::write(&empty, "")?;
         let mise = bootstrap.join(format!("mise{}", std::env::consts::EXE_SUFFIX));
         fs::copy(&installed.mise, &mise)?;
+        let github = home.join(".config/gh");
+        fs::create_dir_all(&github)?;
+        fs::write(github.join("hosts.yml"), GITHUB_HOSTS)?;
         let mut base = base_directories();
         let mut environment = Self {
             scope,
@@ -180,6 +184,7 @@ impl CodeEnvironment {
             ("XDG_DATA_HOME", home.join(".local/share")),
             ("XDG_STATE_HOME", home.join(".local/state")),
             ("SKILL_OPS_STATE", home.join(".local/state/skill-ops")),
+            ("GH_CONFIG_DIR", home.join(".config/gh")),
             ("DOTFILES_ONEPASSWORD_APP", home.join("absent-app")),
             ("CARGO_TARGET_DIR", self.root.join("target/hosts")),
         ] {
@@ -223,7 +228,7 @@ impl CodeEnvironment {
             );
             for tool in versions {
                 ensure!(
-                    tool.active
+                    (tool.active || !tool.installed)
                         && tool.source.r#type == MISE_CONFIG
                         && canonical(&tool.source.path)? == self.root.join(MISE_CONFIG)
                         && tool.version == tool.requested_version,
@@ -231,8 +236,8 @@ impl CodeEnvironment {
                 );
             }
         }
-        if tools.values().flatten().any(|tool| !tool.installed) {
-            self.install_missing(mise, installed, &tools)?;
+        self.prepare_tools(mise, installed, &tools)?;
+        {
             let resolved: BTreeMap<String, Vec<Installation>> =
                 serde_json::from_slice(&self.output(mise, &["ls", "--local", "--json"])?)?;
             ensure!(
@@ -261,7 +266,7 @@ impl CodeEnvironment {
                             && canonical(&tool.source.path)? == self.root.join(MISE_CONFIG),
                         tool.version == tool.requested_version,
                     ]),
-                    "{name} does not resolve to its installed project pin"
+                    "{name} does not resolve to its installed project pin: {tool:?}"
                 );
                 ensure!(
                     tool.install_path.is_absolute(),
@@ -351,7 +356,7 @@ impl CodeEnvironment {
         Ok(directories)
     }
 
-    fn install_missing(
+    fn prepare_tools(
         &mut self,
         mise: &Path,
         installed: &Installations,
@@ -363,24 +368,7 @@ impl CodeEnvironment {
                 .context("code HOME is missing")?,
         );
         let data = home.join(".local/share/mise");
-        let mut requests = Vec::new();
-        for (name, versions) in tools {
-            for tool in versions {
-                if tool.installed {
-                    let relative = tool
-                        .install_path
-                        .strip_prefix(installed.data.join("installs"))
-                        .with_context(|| {
-                            format!("{name} installation belongs outside the tool store")
-                        })?;
-                    let link = data.join("installs").join(relative);
-                    fs::create_dir_all(link.parent().context("installation link has no parent")?)?;
-                    link_directory(&tool.install_path, &link)?;
-                } else {
-                    requests.push(format!("{name}@{}", tool.version));
-                }
-            }
-        }
+        link_installations(&data, installed, tools)?;
         let mut bootstrap = Vec::new();
         if let Some(rust) = tools.get("rust").and_then(|versions| versions.first()) {
             self.set("RUSTUP_TOOLCHAIN", &rust.version);
@@ -426,11 +414,45 @@ impl CodeEnvironment {
             self.set("RUSTUP_HOME", home.join(".rustup"));
             self.set("MISE_RUSTUP_HOME", home.join(".rustup"));
         }
+        let staged: BTreeMap<String, Vec<Installation>> =
+            serde_json::from_slice(&self.output(mise, &["ls", "--local", "--json"])?)?;
+        ensure!(
+            tools.keys().eq(staged.keys())
+                && tools.iter().all(|(name, versions)| versions
+                    .iter()
+                    .map(|tool| &tool.requested_version)
+                    .eq(staged[name].iter().map(|tool| &tool.requested_version))),
+            "scratch storage changed the project pin inventory"
+        );
+        let mut requests = Vec::new();
+        for (name, versions) in tools {
+            for (tool, staged) in versions.iter().zip(&staged[name]) {
+                if !staged.installed {
+                    if tool.installed {
+                        let relative = tool
+                            .install_path
+                            .strip_prefix(installed.data.join("installs"))?;
+                        let link = data.join("installs").join(relative);
+                        ensure!(
+                            fs::symlink_metadata(&link)?.file_type().is_symlink(),
+                            "an invalid scratch installation must be an owned link"
+                        );
+                        #[cfg(unix)]
+                        fs::remove_file(&link)?;
+                        #[cfg(windows)]
+                        fs::remove_dir(&link)?;
+                    }
+                    requests.push(format!("{name}@{}", tool.requested_version));
+                }
+            }
+        }
         let arguments: Vec<_> = ["install", "--yes"]
             .into_iter()
             .chain(requests.iter().map(String::as_str))
             .collect();
-        self.output(mise, &arguments)?;
+        if !requests.is_empty() {
+            self.output(mise, &arguments)?;
+        }
         Ok(())
     }
 
@@ -467,6 +489,25 @@ impl find_msvc_tools::EnvGetter for CodeEnvironment {
             .cloned()
             .map(find_msvc_tools::Env::Owned)
     }
+}
+
+fn link_installations(
+    data: &Path,
+    installed: &Installations,
+    tools: &BTreeMap<String, Vec<Installation>>,
+) -> Result<()> {
+    for (name, versions) in tools {
+        for tool in versions.iter().filter(|tool| tool.installed) {
+            let relative = tool
+                .install_path
+                .strip_prefix(installed.data.join("installs"))
+                .with_context(|| format!("{name} installation belongs outside the tool store"))?;
+            let link = data.join("installs").join(relative);
+            fs::create_dir_all(link.parent().context("installation link has no parent")?)?;
+            link_directory(&tool.install_path, &link)?;
+        }
+    }
+    Ok(())
 }
 
 fn link_directory(source: &Path, destination: &Path) -> Result<()> {

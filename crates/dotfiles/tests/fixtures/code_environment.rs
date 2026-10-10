@@ -32,12 +32,25 @@ fn main() {
                 _ => panic!("unexpected mise command: {arguments:?}"),
             };
             let mut contents = std::fs::read_to_string(file).unwrap();
-            if Path::new("missing").exists() && installation.is_dir() {
+            if file == "tools.json"
+                && Path::new("relocate").exists()
+                && data.starts_with(std::env::var_os("HOME").unwrap())
+                && !Path::new("installed-at").exists()
+            {
+                contents = contents
+                    .replace("\"installed\":true", "\"installed\":false")
+                    .replace("\"active\":true", "\"active\":false");
+            }
+            if (Path::new("missing").exists() || Path::new("relocate").exists())
+                && Path::new("installed-at").exists()
+                && installation.is_dir()
+            {
                 let paths = std::fs::read_to_string("paths").unwrap();
                 let original = paths.lines().next().unwrap();
                 contents = if file == "tools.json" {
                     contents
                         .replace("\"installed\":false", "\"installed\":true")
+                        .replace("\"active\":false", "\"active\":true")
                         .replace(
                             &format!("{original:?}"),
                             &format!("{:?}", installation.to_str().unwrap()),
@@ -60,6 +73,15 @@ fn main() {
                 assert!(std::env::var_os(name).is_none(), "inherited {name}");
             }
             let home = std::env::var_os("HOME").unwrap();
+            let data = std::path::PathBuf::from(std::env::var_os("MISE_DATA_DIR").unwrap());
+            assert!(data.starts_with(&home));
+            std::fs::write(data.join("gate-state"), "scratch write").unwrap();
+            let github = std::path::PathBuf::from(std::env::var_os("GH_CONFIG_DIR").unwrap());
+            assert!(github.starts_with(&home));
+            assert_eq!(
+                std::fs::read_to_string(github.join("hosts.yml")).unwrap(),
+                "github.com: {}\n"
+            );
             if cfg!(windows) {
                 for name in ["ProgramData", "ALLUSERSPROFILE"] {
                     assert!(Path::new(&std::env::var_os(name).unwrap()).starts_with(&home));
