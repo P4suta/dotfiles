@@ -1,5 +1,6 @@
 [tools]
 rust = { version = "1.99.0", components = ["clippy", "rustfmt"] }
+python = "3.14.8"
 bun = "1.4.2"
 chezmoi = "2.73.0"
 uv = "0.12.22"
