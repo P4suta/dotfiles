@@ -192,6 +192,8 @@ pub fn dependencies(root: &Path) -> Result<()> {
         root,
         "git",
         &[
+            "-c",
+            &format!("url.{RUSTSEC_URL}.insteadOf={RUSTSEC_URL}"),
             "clone",
             "--depth",
             ADVISORY_CLONE_DEPTH,
