@@ -213,6 +213,62 @@ fn the_code_gate_and_its_children_ignore_the_fixture_host_environment() -> Resul
 }
 
 #[test]
+fn concurrent_code_gates_reuse_installed_tools_with_independent_writable_state() -> Result<()> {
+    const CONCURRENT_BUILDS: usize = 8;
+    let fixture = code_fixture()?;
+    let installed = platform::code_environment::Installations {
+        mise: fixture
+            .host
+            .join(format!("mise{}", std::env::consts::EXE_SUFFIX)),
+        data: fixture.host.join("data"),
+        cargo: fixture.host.join(".cargo"),
+        rustup: fixture.host.join(".rustup"),
+    };
+    let barrier = std::sync::Barrier::new(CONCURRENT_BUILDS);
+    std::thread::scope(|scope| -> Result<()> {
+        let threads: Vec<_> = (0..CONCURRENT_BUILDS)
+            .map(|_| {
+                scope.spawn(|| -> Result<_> {
+                    barrier.wait();
+                    let environment = platform::code_environment::CodeEnvironment::build(
+                        &fixture.root,
+                        &installed,
+                    )?;
+                    let output = environment.command("python").output()?;
+                    ensure!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    let home = environment
+                        .command("python")
+                        .get_envs()
+                        .find_map(|(name, value)| (name == "HOME").then_some(value).flatten())
+                        .context("code home")?
+                        .to_owned();
+                    Ok((environment, home, output.stdout))
+                })
+            })
+            .collect();
+        let environments: Vec<_> = threads
+            .into_iter()
+            .map(|thread| thread.join().expect("the code builder completed"))
+            .collect::<Result<_>>()?;
+        let homes: std::collections::BTreeSet<_> =
+            environments.iter().map(|(_, home, _)| home).collect();
+        assert_eq!(homes.len(), CONCURRENT_BUILDS);
+        for (_, _, output) in &environments {
+            assert_eq!(
+                String::from_utf8_lossy(output).replace("\r\n", "\n"),
+                "pinned parent\npinned child\nhttps://github.com/third-party/project.git\n"
+            );
+        }
+        assert!(!fixture.host.join("data/gate-state").exists());
+        Ok(())
+    })
+}
+
+#[test]
 fn a_code_gate_can_construct_another_isolated_code_gate() -> Result<()> {
     let fixture = code_fixture()?;
     let installed = platform::code_environment::Installations {

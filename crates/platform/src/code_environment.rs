@@ -167,7 +167,7 @@ impl CodeEnvironment {
         let empty = directory.join("empty-config.toml");
         fs::write(&empty, "")?;
         let mise = bootstrap.join(format!("mise{}", std::env::consts::EXE_SUFFIX));
-        fs::copy(&installed.mise, &mise)?;
+        link_entry(&installed.mise, &mise).context("link the mise bootstrap")?;
         let github = home.join(".config/gh");
         fs::create_dir_all(&github)?;
         fs::write(github.join("hosts.yml"), GITHUB_HOSTS)?;
@@ -552,7 +552,11 @@ impl CodeEnvironment {
     }
 
     fn output(&self, program: &Path, arguments: &[&str]) -> Result<Vec<u8>> {
-        let output = self.command(program).args(arguments).output()?;
+        let output = self
+            .command(program)
+            .args(arguments)
+            .output()
+            .with_context(|| format!("start {} {arguments:?}", program.display()))?;
         ensure!(
             output.status.success(),
             "{} {arguments:?}: {}",
