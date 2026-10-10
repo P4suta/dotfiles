@@ -9,6 +9,8 @@ use std::process::{Command, Stdio};
 
 const CONFIG: &str = ".config/chezmoi/chezmoi.toml";
 const GIT_CONFIG: &str = ".config/git/config";
+const MAC_SHELL: &str = "/bin/zsh";
+const UNIX_SHELL: &str = "/bin/bash";
 const PUBLIC_SOURCES: [&str; 3] = [
     "https://github.com/eza-community/eza.git",
     "https://github.com/RustSec/advisory-db.git",
@@ -271,9 +273,9 @@ pub fn shell(command: &str) -> Result<Command> {
     } else {
         let shell = std::env::var_os("SHELL").unwrap_or_else(|| {
             if cfg!(target_os = "macos") {
-                "/bin/zsh".into()
+                MAC_SHELL.into()
             } else {
-                "/bin/bash".into()
+                UNIX_SHELL.into()
             }
         });
         ensure!(

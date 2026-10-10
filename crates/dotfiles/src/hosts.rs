@@ -16,6 +16,7 @@ pub const NOTES: &str = "refs/notes/hosts";
 const STATE: &str = ".local/state/hosts";
 const DEFAULT_GATE: &str = "just check";
 const STAGE_REPORT: &str = "DOTFILES_HOST_STAGES ";
+const CODE_SHELL: &str = "/bin/sh";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -691,7 +692,7 @@ fn code_shell(gate: &str) -> Vec<String> {
     let shell: &[&str] = if cfg!(windows) {
         &["pwsh", "-NoLogo", "-NoProfile", "-Command"]
     } else {
-        &["/bin/sh", "-c"]
+        &[CODE_SHELL, "-c"]
     };
     shell
         .iter()
