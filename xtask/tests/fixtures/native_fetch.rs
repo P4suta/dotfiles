@@ -11,7 +11,7 @@ fn copy(from: &Path, to: &Path) {
         let target = to.join(entry.file_name());
         if entry.file_type().unwrap().is_dir() {
             copy(&entry.path(), &target);
-        } else {
+        } else if !target.exists() {
             fs::copy(entry.path(), target).unwrap();
         }
     }

@@ -41,8 +41,7 @@ fn tools(scope: &Path) -> Result<PathBuf> {
 }
 
 #[test]
-fn applied_git_profiles_keep_owner_fetches_and_every_push_on_ssh_and_public_fetches_on_https()
--> Result<()> {
+fn applied_git_profiles_keep_scoped_owner_fetches_and_all_pushes_on_ssh() -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let scope = tempfile::tempdir()?;
     let initial = scope.path().join("initial.gitconfig");
@@ -124,13 +123,12 @@ fn check_profile(
     git(&repository, initial, &["init", "--quiet", "--bare"])?;
     assert_urls(&repository, &applied)?;
     let log = fixture.join("transport");
-    let run = || -> Result<std::process::Output> {
+    let run = |url: &str| -> Result<std::process::Output> {
         let mut path = vec![tools.to_path_buf()];
         path.extend(std::env::split_paths(
             &std::env::var_os("PATH").unwrap_or_default(),
         ));
-        let mut command =
-            scratch.fetch_command(&repository, "https://github.com/third-party/public.git");
+        let mut command = scratch.fetch_command(&repository, url);
         command
             .env("GIT_CONFIG_GLOBAL", &applied)
             .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -148,16 +146,26 @@ fn check_profile(
         "insteadOf = https://github.com/",
     );
     fs::write(&applied, broken)?;
-    assert!(!run()?.status.success());
+    assert!(
+        !run("https://github.com/third-party/public.git")?
+            .status
+            .success()
+    );
     assert_eq!(fs::read_to_string(&log)?, "ssh without an agent");
     fs::write(&applied, clean)?;
-    let output = run()?;
-    ensure!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(fs::read_to_string(log)?, "https without credentials");
+    for url in [
+        "https://github.com/third-party/public.git",
+        "https://github.com/P4suta/OComment",
+        "https://github.com/P4suta/OComment.git",
+    ] {
+        let output = run(url)?;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fs::read_to_string(&log)?, "https without credentials");
+    }
     assert_eq!(
         git(&repository, initial, &["rev-parse", "FETCH_HEAD"])?,
         head
@@ -167,6 +175,16 @@ fn check_profile(
 
 fn assert_urls(repository: &Path, applied: &Path) -> Result<()> {
     for (url, fetch, push) in [
+        (
+            "https://github.com/P4suta/OComment",
+            "https://github.com/P4suta/OComment",
+            "git@github.com:P4suta/OComment",
+        ),
+        (
+            "https://github.com/P4suta/OComment.git",
+            "https://github.com/P4suta/OComment.git",
+            "git@github.com:P4suta/OComment.git",
+        ),
         (
             "https://github.com/P4suta/private-fixture.git",
             "git@github.com:P4suta/private-fixture.git",
