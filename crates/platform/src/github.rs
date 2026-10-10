@@ -87,7 +87,11 @@ pub fn executable(path: &OsStr) -> io::Result<PathBuf> {
 /// Returns an error if PATH lacks an installed CLI or reading its installation fails.
 pub fn command(host: &OsStr) -> io::Result<Command> {
     let path = std::env::var_os("PATH").unwrap_or_default();
-    let mut command = crate::process::command(executable(&path)?);
+    let directories =
+        std::env::split_paths(&path).chain(crate::process::mise_shims(std::env::var_os));
+    let discovery = std::env::join_paths(directories)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    let mut command = crate::process::command(executable(&discovery)?);
     command.args(["auth", "token", "--hostname"]).arg(host);
     Ok(command)
 }

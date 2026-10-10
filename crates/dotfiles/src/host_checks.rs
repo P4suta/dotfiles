@@ -233,16 +233,16 @@ impl Scratch {
             .join(format!("chezmoi{}", std::env::consts::EXE_SUFFIX));
         let mut renderer = installed.data.join(&relative);
         if !renderer.is_file() {
-            let status = self
-                .command(&installed.mise)
+            let mut command = self.command(&installed.mise);
+            command
                 .env(
                     "MISE_GLOBAL_CONFIG_FILE",
                     self.scope.path().join(EMPTY_CONFIG),
                 )
                 .env("MISE_TRUSTED_CONFIG_PATHS", &self.home)
                 .env("MISE_CEILING_PATHS", self.scope.path())
-                .args(["install", "--yes", &format!("chezmoi@{pin}")])
-                .status()?;
+                .args(["install", "--yes", &format!("chezmoi@{pin}")]);
+            let status = platform::process::mise_install(command)?.status()?;
             ensure!(status.success(), "install chezmoi pin {pin}: {status}");
             renderer = self.home.join(MISE_DATA).join(relative);
         }
@@ -366,9 +366,13 @@ impl Scratch {
     }
 
     fn install(&self, directory: &Path) -> Result<()> {
-        let status = self
-            .toolchain_command(directory, "mise install -y")?
-            .status()?;
+        let invocation = if cfg!(windows) {
+            "& (Join-Path $env:USERPROFILE '.local/bin/dotfiles.exe') mise-install -y"
+        } else {
+            "\"$HOME/.local/bin/dotfiles\" mise-install -y"
+        };
+        let command = self.toolchain_command(directory, invocation)?;
+        let status = platform::process::mise_install(command)?.status()?;
         ensure!(status.success(), "mise install failed with {status}");
         Ok(())
     }

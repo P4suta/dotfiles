@@ -51,3 +51,4 @@
 | [2026-10-10 Isolate code gates and retain native provisioning checks](isolated-code-and-native-host-gates.md) | amended | [2026-10-10](advisory-applied-profile-observations.md) |
 | [2026-10-10 Check prose before persistence](persisted-prose-gates.md) | accepted |  |
 | [2026-10-11 Read GitHub credentials without mise shims](github-credentials-without-mise-shims.md) | proposed |  |
+| [2026-10-11 Start mise installations without mise shims](shim-free-mise-installation.md) | proposed |  |

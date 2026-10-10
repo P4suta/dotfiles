@@ -69,6 +69,17 @@ impl Real {
         self.prepare(tool.command(), tool == Tool::Codex)
     }
 
+    /// Prepare an installation after applying the runner's final environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when preparing a shim-free installation environment fails.
+    pub fn mise_install(&self, arguments: &[OsString]) -> Result<crate::process::MiseInstall> {
+        let mut command = self.command(Tool::Mise);
+        command.arg("install").args(arguments);
+        Ok(crate::process::mise_install(command)?)
+    }
+
     /// A Git hook gate, which keeps the hook's repository variables to inspect the commit in progress.
     pub fn hook_command(&self, tool: Tool) -> Command {
         let mut command = self.prepare(tool.hook_command(), tool == Tool::Codex);
@@ -123,13 +134,21 @@ impl Runner for Real {
 
     fn run(&mut self, tool: Tool, arguments: &[OsString]) -> Result<Reply> {
         let name = tool.program();
-        let output = self
-            .command(tool)
+        let mut command = self.command(tool);
+        command
             .args(arguments)
             .stdin(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .output()
-            .with_context(|| format!("start {name}"))?;
+            .stderr(Stdio::inherit());
+        let output = if tool == Tool::Mise
+            && arguments
+                .first()
+                .is_some_and(|argument| argument == "install")
+        {
+            crate::process::mise_install(command)?.output()
+        } else {
+            command.output()
+        }
+        .with_context(|| format!("start {name}"))?;
         Ok(Reply {
             success: output.status.success(),
             bytes: output.stdout,

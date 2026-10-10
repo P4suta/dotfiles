@@ -555,11 +555,14 @@ impl CodeEnvironment {
     }
 
     fn output(&self, program: &Path, arguments: &[&str]) -> Result<Vec<u8>> {
-        let output = self
-            .command(program)
-            .args(arguments)
-            .output()
-            .with_context(|| format!("start {} {arguments:?}", program.display()))?;
+        let mut command = self.command(program);
+        command.args(arguments);
+        let output = if arguments.first() == Some(&"install") {
+            crate::process::mise_install(command)?.output()
+        } else {
+            command.output()
+        }
+        .with_context(|| format!("start {} {arguments:?}", program.display()))?;
         ensure!(
             output.status.success(),
             "{} {arguments:?}: {}",

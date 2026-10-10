@@ -6,10 +6,14 @@ use std::time::Duration;
 
 #[path = "../../../crates/platform/src/github.rs"]
 mod github;
+#[path = "../../../crates/platform/src/home.rs"]
+pub mod home;
 #[path = "../../../crates/platform/src/paths.rs"]
 pub mod paths;
 #[path = "../../../crates/platform/src/process.rs"]
-mod process;
+pub mod process;
+#[path = "../../../crates/rules/src/process_rules.rs"]
+pub mod process_rules;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 

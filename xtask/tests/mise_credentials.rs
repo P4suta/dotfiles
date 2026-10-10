@@ -324,6 +324,51 @@ fn github_credentials_resolve_only_installed_cli_executables() -> Result<()> {
 }
 
 #[test]
+fn keyring_discovery_remains_available_without_shims_on_path() -> Result<()> {
+    let scope = tempfile::tempdir()?;
+    let data = scope.path().join("mise");
+    let installed = data.join("installs/gh/latest/bin");
+    let shims = data.join("shims");
+    let bin = scope.path().join("bin");
+    for directory in [&installed, &shims, &bin] {
+        fs::create_dir_all(directory)?;
+    }
+    let gh = installed.join(format!("gh{}", std::env::consts::EXE_SUFFIX));
+    compile_fixture(&gh)?;
+    let runtime = runtime(scope.path())?;
+    fs::copy(&gh, &runtime)?;
+    fs::copy(
+        &gh,
+        shims.join(format!("gh{}", std::env::consts::EXE_SUFFIX)),
+    )?;
+    let path = std::env::join_paths([&bin])?;
+    let mut command = platform::process::command(&runtime);
+    isolated(&mut command, scope.path(), &path)?;
+    let output = command
+        .env("MISE_DATA_DIR", &data)
+        .env("MISE_CREDENTIAL_HOST", "github.com")
+        .env("MISE_CREDENTIAL_PROVIDER", "github")
+        .env("GH_FIXTURE_LOG", scope.path().join("gh.log"))
+        .env("GH_FIXTURE_LOGIN", "yes")
+        .arg("github-token")
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout)?.replace("\r\n", "\n"),
+        "fixture-keyring-token\n"
+    );
+    assert_eq!(
+        fs::read_to_string(scope.path().join("gh.log"))?,
+        "auth token --hostname github.com"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_mise_alias_file_selects_its_cli_when_other_versions_remain() -> Result<()> {
     let scope = tempfile::tempdir()?;
     let shims = scope.path().join("data/shims");

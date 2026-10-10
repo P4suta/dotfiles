@@ -85,12 +85,12 @@ fn the_mac_ghc_pin_installs_without_bootstrapping_during_version_listing() -> Re
     ]);
     fs::write(global, toml::to_string(&tools)?)?;
     let listing = scope.path().join("listing");
-    let output = candidate
-        .command("mise")
+    let mut command = candidate.command("mise");
+    command
         .args(["install", "--yes", "ghc"])
         .env("HOST_GHC_VERSION", version)
-        .env("HOST_GHC_LISTING", &listing)
-        .output()?;
+        .env("HOST_GHC_LISTING", &listing);
+    let output = platform::process::mise_install(command)?.output()?;
     ensure!(
         output.status.success(),
         "{}",
@@ -112,12 +112,12 @@ fn the_mac_ghc_pin_installs_without_bootstrapping_during_version_listing() -> Re
         .context("fixture tool configuration")?
         .insert("ghc", toml::Value::String(version.into()));
     fs::write(global, toml::to_string(&tools)?)?;
-    let broken = candidate
-        .command("mise")
+    let mut command = candidate.command("mise");
+    command
         .args(["install", "--yes", "ghc"])
         .env("HOST_GHC_VERSION", version)
-        .env("HOST_GHC_LISTING", &listing)
-        .output()?;
+        .env("HOST_GHC_LISTING", &listing);
+    let broken = platform::process::mise_install(command)?.output()?;
     assert!(
         !broken.status.success(),
         "the broken pin installed successfully"

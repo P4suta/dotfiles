@@ -279,7 +279,7 @@ jobs:
           set -eu
           export PATH="$HOME/.local/bin:$PATH"
           mise trust "$PWD/mise.toml"
-          mise install
+          mise x rust just -- just mise-install
           mise x -- just rehearse --disposable-host
 
   # The one status the ruleset requires.

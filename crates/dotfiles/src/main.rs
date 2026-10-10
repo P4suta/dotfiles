@@ -15,6 +15,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Install mise tools with no mise shims on PATH.
+    MiseInstall {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        arguments: Vec<OsString>,
+    },
     /// Read mise's requested GitHub host from an installed CLI without executing its mise shim.
     GithubToken,
     Repository {
@@ -154,6 +159,14 @@ fn run() -> Result<()> {
     cli.root = dotfiles::canonical(&cli.root)?;
     let exit = dotfiles::secrets::exit;
     match cli.command {
+        Commands::MiseInstall { arguments } => {
+            let home = platform::home::home().context("native home is unavailable")?;
+            exit(
+                platform::runtime::Real::new(&home)?
+                    .mise_install(&arguments)?
+                    .status()?,
+            );
+        }
         Commands::GithubToken => {
             let host = std::env::var_os("MISE_CREDENTIAL_HOST")
                 .context("mise credential host unavailable")?;

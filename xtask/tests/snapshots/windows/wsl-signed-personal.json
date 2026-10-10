@@ -464,7 +464,7 @@
     {"mode":"0644","path":".config/starship.toml","sha256":"b209492a779d0894c7dae63df8d4833083b4d3bcc341caabe2526f5dbac7f1db","type":"file"},
     {"mode":"0755","path":".config/systemd","sha256":null,"type":"dir"},
     {"mode":"0755","path":".config/systemd/user","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".config/systemd/user/mise-upgrade.service","sha256":"24fba72b8d615fb5fc817ad70f5c2806bc7ee7f1021ecf0c1ed6f9bd14b4ef34","type":"file"},
+    {"mode":"0644","path":".config/systemd/user/mise-upgrade.service","sha256":"ad8371ad83802b079bfbafdab65e3005f266a57033cd546e516d1462bc51ed6f","type":"file"},
     {"mode":"0644","path":".config/systemd/user/mise-upgrade.timer","sha256":"da48438bf695a6d0c98abce33ffe9121cc0f65e5fe67f25cdf8f08482492a9f6","type":"file"},
     {"mode":"0755","path":".local","sha256":null,"type":"dir"},
     {"mode":"0755","path":".local/bin","sha256":null,"type":"dir"},
@@ -473,7 +473,7 @@
   ],
   "scripts": [
     {"condition":"always","phase":"before","position":0,"sha256":"2f00922824f4efa71ace3432a01e7155f8876d8789c0f75d52e9b48a8e9a0192","target":".chezmoiscripts/unix/00-mise.sh"},
-    {"condition":"always","phase":"before","position":1,"sha256":"929fc8ba37c90bea140b32b48ca9fb721c7bed171fba8da74fc9392a31a7f592","target":".chezmoiscripts/unix/01-runtime.sh"},
+    {"condition":"always","phase":"before","position":1,"sha256":"18c93726e5cc04bf6abcc0170fca31fb549c3cc49bb64b0642b4dcd7aea297f6","target":".chezmoiscripts/unix/01-runtime.sh"},
     {"condition":"onchange","phase":"before","position":2,"sha256":"6d7ed7f72a136550609bd1e627c210694053116696033e4bb990511bac94d455","target":".chezmoiscripts/unix/02-github.sh"},
     {"condition":"onchange","phase":"after","position":3,"sha256":"1bdd16811fb21bde32bed5756b1b7cfb49f4b996c64144ba0dcd2214c6e8122b","target":".chezmoiscripts/unix/05-tools.sh"},
     {"condition":"always","phase":"after","position":4,"sha256":"d778e07ae8319a305c213bf8df6c8bffface302947a9d870a6d4d28ab8d48b2e","target":".chezmoiscripts/unix/06-integrations.sh"},

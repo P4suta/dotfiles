@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 
 use super::scoop;
 use crate::windows::{env, proc};
@@ -16,7 +16,10 @@ pub fn run(scoop_apps: &[String]) -> Result<i32> {
 
     // Installing converges to the reviewed pins, and version changes arrive only as pull requests.
     println!(">>> mise install");
-    proc::run(mise(token).args(["install", "-y"]))?;
+    let mut command = mise(token);
+    command.args(["install", "-y"]);
+    let status = platform::process::mise_install(command)?.status()?;
+    ensure!(status.success(), "mise install failed with {status}");
 
     let absent = scoop::absent(scoop_apps);
     if absent.is_empty() {

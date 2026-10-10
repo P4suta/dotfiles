@@ -6,6 +6,21 @@
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/process_rules.rs"
+probes = '''
+use production::{InstallPath, install_path};
+#[kani::proof]
+fn reject_retaining_a_configured_mise_shim() {
+    assert!(install_path([true, false, false]) == InstallPath::Direct);
+}
+#[kani::proof]
+fn reject_retaining_a_standard_mise_shim() {
+    assert!(install_path([false, true, true]) == InstallPath::Direct);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/legacy_rules.rs"
 probes = '''
 use production::{Verdict, verdict};

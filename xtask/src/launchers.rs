@@ -93,7 +93,7 @@ fn unix(step: Step) -> String {
         Launch::SourceRuntime => text.push_str(concat!(
             "mise=\"$HOME/.local/bin/mise\"\n",
             "\"$mise\" trust --quiet \"$CHEZMOI_WORKING_TREE/mise.toml\"\n",
-            "exec \"$mise\" -C \"$CHEZMOI_WORKING_TREE\" x -- cargo run --locked --manifest-path \"$CHEZMOI_WORKING_TREE/crates/dotfiles/Cargo.toml\" -- --root \"$CHEZMOI_WORKING_TREE\" setup runtime --config \"$CHEZMOI_CONFIG_FILE\" --live\n",
+            "exec \"$mise\" -C \"$CHEZMOI_WORKING_TREE\" x rust -- cargo run --locked --manifest-path \"$CHEZMOI_WORKING_TREE/crates/dotfiles/Cargo.toml\" -- --root \"$CHEZMOI_WORKING_TREE\" setup runtime --config \"$CHEZMOI_CONFIG_FILE\" --live\n",
         )),
         Launch::InstalledRuntime => text.extend([
             "exec \"$HOME/.local/bin/dotfiles\" --root \"$CHEZMOI_WORKING_TREE\" setup ",
@@ -117,7 +117,7 @@ fn windows(step: Step) -> String {
             "$mise = Join-Path $env:USERPROFILE '.local\\bin\\mise.exe'\n",
             "& $mise trust --quiet (Join-Path $env:CHEZMOI_WORKING_TREE 'mise.toml')\n",
             "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n",
-            "& $mise -C $env:CHEZMOI_WORKING_TREE x -- cargo run --locked --manifest-path (Join-Path $env:CHEZMOI_WORKING_TREE 'crates\\dotfiles\\Cargo.toml') -- --root $env:CHEZMOI_WORKING_TREE setup runtime --config $env:CHEZMOI_CONFIG_FILE --live\n",
+            "& $mise -C $env:CHEZMOI_WORKING_TREE x rust -- cargo run --locked --manifest-path (Join-Path $env:CHEZMOI_WORKING_TREE 'crates\\dotfiles\\Cargo.toml') -- --root $env:CHEZMOI_WORKING_TREE setup runtime --config $env:CHEZMOI_CONFIG_FILE --live\n",
             "exit $LASTEXITCODE\n",
         )),
         Launch::InstalledRuntime => text.extend([

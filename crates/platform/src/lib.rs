@@ -7,6 +7,7 @@ pub mod home;
 pub mod incidents;
 pub mod paths;
 pub mod process;
+pub use rules::process_rules;
 pub mod refusal;
 pub use rules::{cycle_rules, order_rules};
 
