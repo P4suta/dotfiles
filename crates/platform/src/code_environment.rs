@@ -167,7 +167,7 @@ impl CodeEnvironment {
         let empty = directory.join("empty-config.toml");
         fs::write(&empty, "")?;
         let mise = bootstrap.join(format!("mise{}", std::env::consts::EXE_SUFFIX));
-        link_executable(&installed.mise, &mise).context("link the mise bootstrap")?;
+        fs::copy(&installed.mise, &mise).context("copy the mise bootstrap")?;
         let github = home.join(".config/gh");
         fs::create_dir_all(&github)?;
         fs::write(github.join("hosts.yml"), GITHUB_HOSTS)?;

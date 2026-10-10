@@ -269,6 +269,47 @@ fn concurrent_code_gates_reuse_installed_tools_with_independent_writable_state()
 }
 
 #[test]
+fn the_code_environment_owns_mise_after_its_installation_is_removed() -> Result<()> {
+    const LOCATIONS: [&str; 5] = [
+        ".local/bin",
+        "opt/homebrew/Cellar/mise/pinned/bin",
+        "usr/local/Cellar/mise/pinned/bin",
+        "opt/local/bin",
+        "nix/store/pinned-mise/bin",
+    ];
+    let fixture = code_fixture()?;
+    let executable = format!("mise{}", std::env::consts::EXE_SUFFIX);
+    for location in LOCATIONS {
+        let installation = tempfile::tempdir_in(fixture.scope.path())?;
+        let directory = installation.path().join(location);
+        fs::create_dir_all(&directory)?;
+        let mise = directory.join(&executable);
+        fs::copy(fixture.host.join(&executable), &mise)?;
+        let installed = platform::code_environment::Installations {
+            mise,
+            data: fixture.host.join("data"),
+            cargo: fixture.host.join(".cargo"),
+            rustup: fixture.host.join(".rustup"),
+        };
+        let environment =
+            platform::code_environment::CodeEnvironment::build(&fixture.root, &installed)?;
+        installation.close()?;
+        let output = environment.command("mise").arg("--version").output()?;
+        ensure!(
+            output.status.success(),
+            "{location}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout)?.replace("\r\n", "\n"),
+            "2026.10.0 fixture-platform (2026-10-01)\n",
+            "{location}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn a_code_gate_can_construct_another_isolated_code_gate() -> Result<()> {
     let fixture = code_fixture()?;
     let installed = platform::code_environment::Installations {
@@ -359,7 +400,7 @@ fn a_different_native_mise_uses_the_source_launcher_only_in_scratch() -> Result<
         &std::env::var_os("PATH").unwrap_or_default(),
     ));
     let output = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), fixture.scope.path())
-        .args(["hosts", "code", "--gate", "python"])
+        .args(["hosts", "code", "--gate", "mise --version && python"])
         .current_dir(&fixture.root)
         .env("HOME", &fixture.host)
         .env("USERPROFILE", &fixture.host)
@@ -375,7 +416,7 @@ fn a_different_native_mise_uses_the_source_launcher_only_in_scratch() -> Result<
     );
     assert_eq!(
         String::from_utf8(output.stdout)?.replace("\r\n", "\n"),
-        "pinned parent\npinned child\nhttps://github.com/third-party/project.git\n"
+        "2026.10.0 fixture-platform (2026-10-01)\npinned parent\npinned child\nhttps://github.com/third-party/project.git\n"
     );
     assert_eq!(fs::read(native.with_extension("version"))?, b"2026.10.2");
     assert_eq!(fs::read(native)?, fs::read(pinned)?);
