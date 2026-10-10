@@ -302,8 +302,8 @@ mod debsig {
     #[test]
     fn production_keyring_conversion_tracks_key_updates_and_missing_output() -> Result<()> {
         let fixture = Fixture::new()?;
-        let original = root().join("xtask/tests/fixtures/debsig-original.asc");
-        let updated = root().join("xtask/tests/fixtures/debsig-updated.asc");
+        let original = root().join("crates/dotfiles/tests/fixtures/debsig-original.asc");
+        let updated = root().join("crates/dotfiles/tests/fixtures/debsig-updated.asc");
         let home = fixture.directory.path().join("gnupg");
         let expected_original = expected_keyring(
             &original,
