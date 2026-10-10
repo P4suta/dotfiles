@@ -293,7 +293,7 @@
     {"mode":"0755","path":".config/jj","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/jj/config.toml","sha256":"8a0bf40fa4671d8413fdfd2919837aade53a83b4beeb20118ab99f85c4b2926e","type":"file"},
     {"mode":"0755","path":".config/mise","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".config/mise/config.toml","sha256":"e1fa6bba1b6e34f2cade7f3884af0d091abf097317cbde266fe4e82d57497bc4","type":"file"},
+    {"mode":"0644","path":".config/mise/config.toml","sha256":"c85e10c43feb2cf53f7ba14adcb0ec7605564e62e57eb0a7d08c8146820cfd21","type":"file"},
     {"mode":"0755","path":".config/mise/tasks","sha256":null,"type":"dir"},
     {"mode":"0755","path":".config/mise/tasks/git-audit","sha256":"647cab69b80ed1b10bb952c611f244337f35bbf4ec9ab92de311f1612291e8cc","type":"file"},
     {"mode":"0755","path":".config/opencode","sha256":null,"type":"dir"},
@@ -475,7 +475,7 @@
     {"condition":"always","phase":"before","position":0,"sha256":"2f00922824f4efa71ace3432a01e7155f8876d8789c0f75d52e9b48a8e9a0192","target":".chezmoiscripts/unix/00-mise.sh"},
     {"condition":"always","phase":"before","position":1,"sha256":"929fc8ba37c90bea140b32b48ca9fb721c7bed171fba8da74fc9392a31a7f592","target":".chezmoiscripts/unix/01-runtime.sh"},
     {"condition":"onchange","phase":"before","position":2,"sha256":"6d7ed7f72a136550609bd1e627c210694053116696033e4bb990511bac94d455","target":".chezmoiscripts/unix/02-github.sh"},
-    {"condition":"onchange","phase":"after","position":3,"sha256":"d1579da1385a6f28699d7bf6bb0da8a49018f6bd1d3103637de46f43c47b568c","target":".chezmoiscripts/unix/05-tools.sh"},
+    {"condition":"onchange","phase":"after","position":3,"sha256":"7aa4b7be933a3503f1bf25d1a5ed7e917289dd54b0a5a3ac12a7afc01d904c46","target":".chezmoiscripts/unix/05-tools.sh"},
     {"condition":"always","phase":"after","position":4,"sha256":"d778e07ae8319a305c213bf8df6c8bffface302947a9d870a6d4d28ab8d48b2e","target":".chezmoiscripts/unix/06-integrations.sh"},
     {"condition":"always","phase":"after","position":5,"sha256":"632d15985bc32da6916abaa22dc65ddc9b48ed965e483142375e608a6b1c4018","target":".chezmoiscripts/unix/19-adapters.sh"}
   ]

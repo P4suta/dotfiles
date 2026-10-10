@@ -16,3 +16,6 @@ paranoid = true
 # domyjob runs the owner's own projects in this work area, and each new workspace path would otherwise have its mise.toml refused.
 trusted_config_paths = [{{ joinPath (env "LOCALAPPDATA") "domyjob/state/v3/work" | quote }}]
 cargo.binstall = true
+
+[settings.github]
+credential_command = 'gh auth token --hostname %MISE_CREDENTIAL_HOST%'
