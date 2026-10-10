@@ -41,6 +41,11 @@ pub enum Action {
         #[arg(long, default_value = DEFAULT_GATE)]
         gate: String,
     },
+    /// Run the code stage in the environment built from this checkout's installed pins.
+    Code {
+        #[arg(long, default_value = DEFAULT_GATE)]
+        gate: String,
+    },
     /// Refuse pushed GitHub branches that lack a passing note for an operating system family in their CI matrix.
     /// Reads pre-push input.
     Gate { remote: String, url: String },
@@ -56,6 +61,7 @@ pub fn run(action: Action) -> Result<()> {
         Action::Doctor { gate } => doctor(&home()?, &gate),
         Action::Sync { host, user, accept } => sync(&home()?, &host, user, &accept),
         Action::Check { gate } => check(&home()?, &gate),
+        Action::Code { gate } => code(&home()?, &gate),
         Action::Gate { url, .. } => {
             let mut input = Vec::new();
             std::io::Read::read_to_end(&mut std::io::stdin(), &mut input)?;
@@ -568,16 +574,51 @@ pub fn wrap(family: Family, gate: &str) -> Vec<String> {
 #[must_use]
 pub fn remote_gate(family: Family, gate: &str) -> String {
     const CLONE: &str = "git -c advice.detachedHead=false clone --quiet head.bundle checkout";
+    let quoted = match family {
+        Family::Windows => format!("'{}'", gate.replace('\'', "''")),
+        Family::Linux | Family::Mac => format!("'{}'", gate.replace('\'', "'\"'\"'")),
+    };
+    let worker = format!(
+        "mise x -- cargo run --locked --package dotfiles --bin dotfiles -- hosts code --gate {quoted}"
+    );
     match family {
         Family::Windows => format!(
-            "$env:MISE_TRUSTED_CONFIG_PATHS = Join-Path $PWD.Path checkout; {CLONE}; if (-not $?) {{ exit 1 }}; Set-Location checkout; {gate}; exit $LASTEXITCODE"
+            "$env:MISE_TRUSTED_CONFIG_PATHS = Join-Path $PWD.Path checkout; {CLONE}; if (-not $?) {{ exit 1 }}; Set-Location checkout; {worker}; exit $LASTEXITCODE"
         ),
         Family::Linux | Family::Mac => {
             format!(
-                "export MISE_TRUSTED_CONFIG_PATHS=\"$PWD/checkout\" && {CLONE} && cd checkout && {gate}"
+                "export MISE_TRUSTED_CONFIG_PATHS=\"$PWD/checkout\" && {CLONE} && cd checkout && {worker}"
             )
         }
     }
+}
+
+fn code(home: &Path, gate: &str) -> Result<()> {
+    let environment = platform::code_environment::CodeEnvironment::build(
+        Path::new("."),
+        &platform::code_environment::Installations::discover(home)?,
+    )?;
+    let argv = code_shell(gate);
+    let status = environment
+        .command(&argv[0])
+        .args(&argv[1..])
+        .stdin(Stdio::null())
+        .status()?;
+    ensure!(status.success(), "code stage failed with {status}");
+    Ok(())
+}
+
+fn code_shell(gate: &str) -> Vec<String> {
+    let shell: &[&str] = if cfg!(windows) {
+        &["pwsh", "-NoLogo", "-NoProfile", "-Command"]
+    } else {
+        &["/bin/sh", "-c"]
+    };
+    shell
+        .iter()
+        .map(|word| (*word).to_owned())
+        .chain([gate.to_owned()])
+        .collect()
 }
 
 /// The exit status domyjob reports for a finished job.
@@ -1062,8 +1103,14 @@ fn run_gate(
             Ok((outcome(alias, &text), text))
         }
         Target::Local(_) => {
-            let argv = wrap(family, gate);
-            let output = crate::tool::external(&argv[0])
+            let home = platform::home::home().context("native home is unavailable")?;
+            let environment = platform::code_environment::CodeEnvironment::build(
+                root,
+                &platform::code_environment::Installations::discover(&home)?,
+            )?;
+            let argv = code_shell(gate);
+            let output = environment
+                .command(&argv[0])
                 .args(&argv[1..])
                 .current_dir(root)
                 .stdin(Stdio::null())

@@ -1,8 +1,11 @@
 {
-  "revision": "2d0d59a817edb6b70ded25d52a57ca3e74e957097f489c593dacb3918f816e4d",
+  "revision": "adcd3589953208683ae52eddc38c6baf03b9696fb161359994e176b9e390fcf9",
   "outcome": "implemented",
-  "reason": "Bind gungraun-runner 0.20.0 to the existing verification-tools skill because the instruction and heap budget gate requires that pinned runner.\nKeep tool ownership separate from theorem selection and mutation testing.\nThe existing inventory tests reject missing coverage, changed pins, and incompatible profiles, and the benchmark gate measures production code without changing any exemption.",
+  "reason": "Bind Docker CLI 29.8.2 to verification-tools because the native profile and proof checks use the container boundary.\nThe code gate must resolve the CLI from an exact project installation rather than the host PATH.\nThe inventory tests reject stale bindings, and the isolated environment fixture rejects unrelated host applications.",
   "evidence": [
+    "crates/platform/src/code_environment.rs",
+    "crates/dotfiles/tests/hosts.rs",
+    "mise.toml",
     "home/dot_agents/skills/verification-tools/SKILL.md",
     "docs/adr/verification-proportional-to-code-shape.md",
     "docs/adr/0003-local-skill-operations.md",

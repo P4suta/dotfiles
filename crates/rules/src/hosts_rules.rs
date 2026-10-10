@@ -34,6 +34,13 @@ pub enum Evidence {
     Passed,
 }
 
+/// Admit only an installed active version matching the checkout's exact pin.
+#[must_use]
+pub const fn pinned_tool(facts: [bool; 4]) -> bool {
+    let [installed, active, source_matches, version_matches] = facts;
+    installed & active & source_matches & version_matches
+}
+
 /// Fold the next record in note order.
 /// The newest record for the own tree of the commit decides, and a record for another tree says nothing.
 #[must_use]
@@ -133,6 +140,21 @@ mod proofs {
 
     pub const EVIDENCE: [Evidence; 3] = [Evidence::Missing, Evidence::Failed, Evidence::Passed];
     pub const KEYS: [Key; 3] = [Key::New, Key::Same, Key::Changed];
+
+    pub fn spec_pinned_tool(facts: [bool; 4]) {
+        assert_eq!(pinned_tool(facts), facts.iter().all(|fact| *fact));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_an_installed_active_project_pin_is_usable() {
+        let facts: [bool; 4] = kani::any();
+        spec_pinned_tool(facts);
+        let [installed, active, source, version] = facts;
+        let result = pinned_tool(facts);
+        kani::cover!(result);
+        kani::cover!(!result & installed & active & !source & version);
+    }
 
     /// The families from last to first, so the gap a reverse walk records last matches the one a check names first.
     const LAST_FIRST: [Family; 3] = [Family::Windows, Family::Mac, Family::Linux];
@@ -287,6 +309,7 @@ mod tests {
         }
         for records in flags() {
             proofs::spec_record(records);
+            proofs::spec_pinned_tool(records);
         }
         for [github, branch, deletion] in flags() {
             proofs::spec_gated(github, branch, deletion);

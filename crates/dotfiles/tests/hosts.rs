@@ -4,13 +4,170 @@ use dotfiles::hosts::{
     remote_gate, render, required, scanned, select, tailnet, wrap,
 };
 use dotfiles::hosts_rules::{Evidence, Family};
+use std::fmt::Write as _;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
 use fixture_git::fixture_process;
+
+struct CodeFixture {
+    scope: tempfile::TempDir,
+    root: PathBuf,
+    host: PathBuf,
+    old: PathBuf,
+}
+
+fn code_fixture() -> Result<CodeFixture> {
+    let scope = tempfile::tempdir()?;
+    let root = scope.path().join("project");
+    let host = scope.path().join("host");
+    let installed = scope.path().join("pinned");
+    let old = scope.path().join("old");
+    for directory in [&root, &host, &installed, &old] {
+        fs::create_dir_all(directory)?;
+    }
+    let mise = host.join(format!("mise{}", std::env::consts::EXE_SUFFIX));
+    let compiled = platform::process::command("rustc")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/code_environment.rs"
+        ))
+        .args(["--edition", "2024"])
+        .arg("-o")
+        .arg(&mise)
+        .status()?;
+    ensure!(compiled.success(), "compile the code environment fixture");
+    for directory in [&installed, &old] {
+        fs::copy(
+            &mise,
+            directory.join(format!("python{}", std::env::consts::EXE_SUFFIX)),
+        )?;
+    }
+    fs::copy(
+        &mise,
+        old.join(format!(
+            "unrelated-application{}",
+            std::env::consts::EXE_SUFFIX
+        )),
+    )?;
+    fs::write(root.join("mise.toml"), "[tools]\npython = '3.14.8'\n")?;
+    fs::create_dir_all(root.join("home/.chezmoidata"))?;
+    fs::write(
+        root.join("home/.chezmoidata/versions.toml"),
+        "[mise]\nversion = '2026.10.0'\n",
+    )?;
+    fs::write(root.join("gitconfig"), "")?;
+    fs::write(
+        host.join(".gitconfig"),
+        "[url \"git@github.com:\"]\n insteadOf = https://github.com/\n[credential]\n helper = broken-fixture\n",
+    )?;
+    git(&root, &["init", "--quiet"])?;
+    git(
+        &root,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/third-party/project.git",
+        ],
+    )?;
+    let source = platform::paths::canonical(&root.join("mise.toml"))?;
+    let tools = serde_json::json!({"python": [{"version": "3.14.8", "requested_version": "3.14.8", "install_path": installed, "source": {"type": "mise.toml", "path": source}, "installed": true, "active": true}]});
+    fs::write(root.join("tools.json"), serde_json::to_vec(&tools)?)?;
+    let mut paths = vec![installed];
+    if cfg!(windows) {
+        let pwsh = platform::tool::Tool::Mise
+            .command()
+            .args(["which", "pwsh"])
+            .output()?;
+        ensure!(
+            pwsh.status.success(),
+            "resolve the pinned PowerShell fixture shell"
+        );
+        paths.push(
+            Path::new(String::from_utf8(pwsh.stdout)?.trim())
+                .parent()
+                .unwrap()
+                .to_path_buf(),
+        );
+    }
+    let mut resolved = String::new();
+    for path in paths {
+        writeln!(resolved, "{}", path.display())?;
+    }
+    fs::write(root.join("paths"), resolved)?;
+    Ok(CodeFixture {
+        scope,
+        root,
+        host,
+        old,
+    })
+}
+
+#[test]
+fn the_code_gate_and_its_children_ignore_the_fixture_host_environment() -> Result<()> {
+    let CodeFixture {
+        scope,
+        root,
+        host,
+        old,
+    } = code_fixture()?;
+    let run = |polluted: bool| -> Result<std::process::Output> {
+        let mut path = vec![host.clone()];
+        if polluted {
+            path.insert(0, old.clone());
+        }
+        path.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+        let mut command = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), scope.path());
+        command
+            .args(["hosts", "code", "--gate", "python"])
+            .current_dir(&root)
+            .env("HOME", &host)
+            .env("USERPROFILE", &host)
+            .env("PATH", std::env::join_paths(path)?);
+        for name in [
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "SSH_AUTH_SOCK",
+            "UNRELATED_SETTING",
+        ] {
+            if polluted {
+                command.env(name, "fixture-host-value");
+            } else {
+                command.env_remove(name);
+            }
+        }
+        command.env(
+            "GIT_CONFIG_GLOBAL",
+            if polluted {
+                host.join(".gitconfig")
+            } else {
+                root.join("gitconfig")
+            },
+        );
+        Ok(command.output()?)
+    };
+    let clean = run(false)?;
+    let polluted = run(true)?;
+    for output in [&clean, &polluted] {
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert_eq!(clean.stdout, polluted.stdout);
+    assert_eq!(
+        String::from_utf8(clean.stdout)?.replace("\r\n", "\n"),
+        "pinned parent\npinned child\nhttps://github.com/third-party/project.git\n"
+    );
+    Ok(())
+}
 
 fn workflow(text: &str) -> Vec<(String, String)> {
     vec![("ci.yml".to_owned(), text.to_owned())]

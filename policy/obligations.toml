@@ -327,6 +327,14 @@ fn reject_the_lease_admitting_a_plain_force_push() {
 verifier = "kani"
 source = "crates/rules/src/hosts_rules.rs"
 probes = '''
+#[kani::proof]
+fn reject_a_global_or_uninstalled_tool() {
+    assert!(production::pinned_tool([true, true, false, true]));
+}
+#[kani::proof]
+fn reject_an_older_tool() {
+    assert!(production::pinned_tool([true, true, true, false]));
+}
 use production::*;
 #[kani::proof]
 fn reject_admitting_a_failed_family() {

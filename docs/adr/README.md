@@ -47,4 +47,5 @@
 | [2026-10-09 Optimize checked MIR for the pinned Kani verifier](optimize-checked-kani-mir.md) | accepted |  |
 | [2026-10-09 Preserve source witnesses under checked Kani MIR](preserve-kani-source-covers.md) | accepted |  |
 | [2026-10-09 Validate skill catalogs before planning](validated-skill-plan-inputs.md) | accepted |  |
+| [2026-10-10 Isolate code gates and retain native provisioning checks](isolated-code-and-native-host-gates.md) | accepted |  |
 | [2026-10-10 Check prose before persistence](persisted-prose-gates.md) | accepted |  |

@@ -14,6 +14,21 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
     Command::new(program)
 }
 
+/// A process that inherits only the explicitly constructed environment.
+#[must_use]
+pub fn isolated_command<K, V>(
+    program: impl AsRef<OsStr>,
+    environment: impl IntoIterator<Item = (K, V)>,
+) -> Command
+where
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
+    let mut command = command(program);
+    command.env_clear().envs(environment);
+    command
+}
+
 /// The same registered command and child environment on a terminal.
 #[cfg(feature = "pty")]
 #[must_use]

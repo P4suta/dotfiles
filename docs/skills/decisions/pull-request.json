@@ -1,8 +1,11 @@
 {
-  "revision": "2437c19fed21dc366983d92d1ec6e7acc95d1acaace9238b74989d247258e0ec",
+  "revision": "25a52aa2e4cb2b31354e278af13682a7d312a1b554e979401d89dbd283a7ea7f",
   "outcome": "implemented",
-  "reason": "Keep exact destination prerequisites, issue scope, documents, and ready transitions separate from review services.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "reason": "Bind the GitHub CLI used by repository checks to the exact project pin while retaining the native profile's installed version.\nThe isolated code environment resolves the pin without host configuration, and the inventory tests reject stale tool bindings.",
   "evidence": [
+    "crates/platform/src/code_environment.rs",
+    "crates/dotfiles/tests/hosts.rs",
+    "mise.toml",
     "home/dot_agents/skills/pull-request/SKILL.md",
     "docs/adr/0004-checked-pull-request-authoring.md",
     "docs/adr/0006-global-personal-issue-prerequisite.md",

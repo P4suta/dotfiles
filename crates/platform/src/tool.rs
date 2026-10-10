@@ -335,6 +335,8 @@ impl Tool {
             Self::Chezmoi => Provision::Pinned("chezmoi"),
             Self::GhStack => Provision::Pinned("github:github/gh-stack"),
             Self::Gitleaks => Provision::Pinned("gitleaks"),
+            Self::Gh => Provision::Pinned("gh"),
+            Self::Docker => Provision::Pinned("docker-cli"),
             Self::Kani => Provision::Pinned("cargo:kani-verifier"),
             Self::Nu => Provision::Pinned("nu"),
             Self::Pwsh => Provision::Pinned("powershell"),
@@ -391,7 +393,6 @@ impl Tool {
             Self::Domyjob => Provision::Setup(Step::Domyjob),
             Self::Dotguard => Provision::Setup(Step::Guard),
             Self::Fleet => Provision::Setup(Step::Fleet),
-            Self::Gh => Provision::Setup(Step::Github),
             Self::Mise => Provision::Setup(Step::Mise),
             Self::Ocaml => Provision::Setup(Step::Ocaml),
             Self::Ocomment => Provision::Setup(Step::Ocomment),
@@ -399,7 +400,6 @@ impl Tool {
             | Self::Code
             | Self::Codex
             | Self::DesktopFileValidate
-            | Self::Docker
             | Self::FcCache
             | Self::Fcitx5
             | Self::Fcitx5Remote

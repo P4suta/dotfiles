@@ -15,6 +15,8 @@ pub use rules::aside_rules;
 #[cfg(feature = "tools")]
 pub mod build_inputs;
 #[cfg(feature = "tools")]
+pub mod code_environment;
+#[cfg(feature = "tools")]
 pub mod freshness;
 #[cfg(feature = "tools")]
 pub mod paths;
