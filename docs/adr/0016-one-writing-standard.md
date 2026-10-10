@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [persisted-prose-gates.md]
 ---
 # Enforce one writing standard on persisted prose and replies
 

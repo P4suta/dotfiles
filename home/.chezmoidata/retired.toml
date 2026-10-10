@@ -17,6 +17,7 @@
 ".config/nushell/autoload/zoxide.nu" = "mac"
 ".config/nushell/login.nu" = "linux"
 ".config/nushell/mise.nu" = "desktop"
+".config/opencode/plugins/prose.ts" = "unix"
 ".config/shell/github-token.sh" = "unix"
 ".config/sketchybar" = "mac"
 ".config/systemd/user/mise-upgrade.service" = "linux"

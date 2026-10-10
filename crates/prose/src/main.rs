@@ -1,17 +1,14 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use prose::{self, Bundle, Channel, Client, Scope};
+use prose::{self, Bundle, Channel, Scope};
 use std::io::Read;
 use std::path::PathBuf;
-
-/// One byte past the largest native hook input the checker reads, 8 MiB, so a longer input fails to parse.
-const HOOK_INPUT_READ: u64 = 8 * 1024 * 1024 + 1;
 
 /// The exit status of a run that failed before it could check anything, distinct from a refusal.
 const FAILED: i32 = 2;
 
 #[derive(Parser)]
-#[command(about = "Check persisted prose and final replies against the pinned writing standard")]
+#[command(about = "Check persisted prose against the pinned writing standard")]
 struct Cli {
     /// Read the configuration from this dotfiles checkout instead of the installed one.
     #[arg(long, global = true)]
@@ -38,11 +35,6 @@ enum Commands {
         /// Print each finding that no exemption covers instead of judging them.
         #[arg(long)]
         findings: bool,
-    },
-    /// Answer a client's end-of-turn hook for its final reply.
-    Reply {
-        #[arg(long, value_enum)]
-        client: Client,
     },
 }
 
@@ -124,15 +116,6 @@ fn run(cli: Cli) -> Result<i32> {
                     prose::repository(&root, scope, &bundle)?;
                 }
             }
-            Ok(0)
-        }
-        Commands::Reply { client: _ } => {
-            let mut text = String::new();
-            std::io::stdin()
-                .take(HOOK_INPUT_READ)
-                .read_to_string(&mut text)?;
-            let input = serde_json::from_str(&text).context("invalid native hook input")?;
-            println!("{}", prose::stop(&input, bundle()));
             Ok(0)
         }
     }

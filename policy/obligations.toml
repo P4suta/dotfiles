@@ -706,12 +706,24 @@ verifier = "kani"
 source = "crates/rules/src/prose_rules.rs"
 probes = '''
 #[kani::proof]
-fn reject_allowing_a_failing_reply() {
-    assert!(production::reply(false, false) == production::Reply::Allow);
+fn reject_retaining_a_managed_reply_handler() {
+    assert!(!production::reply_hook(production::HOOK_PREFIX));
 }
 #[kani::proof]
-fn reject_ending_after_another_hooks_continuation() {
-    assert!(production::reply(false, production::rewritten_by_this_hook(true, Some(false))) == production::Reply::EndUnchecked);
+fn reject_removing_an_unrelated_handler() {
+    assert!(production::reply_hook(b"skill-ops stop"));
+}
+#[kani::proof]
+fn reject_preserving_a_group_emptied_by_reply_removal() {
+    assert!(production::keep_hook_group(1, 0));
+}
+#[kani::proof]
+fn reject_dropping_an_existing_empty_group() {
+    assert!(!production::keep_hook_group(0, 0));
+}
+#[kani::proof]
+fn reject_dropping_other_handlers() {
+    assert!(!production::keep_hook_group(1, 1));
 }
 #[kani::proof]
 fn reject_the_standard_on_a_fork() {

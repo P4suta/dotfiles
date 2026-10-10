@@ -409,6 +409,7 @@ pub(crate) fn execute(context: &TemplateData, runner: &mut impl Runner, step: St
                 std::env::consts::EXE_SUFFIX
             ));
             skill_ops::skill_install::install(&context.source, &binary, &context.home)?;
+            prose::remove_reply_checks(&context.home)?;
         }
         Step::Mise => mise(runner)?,
         Step::Github => github(runner)?,

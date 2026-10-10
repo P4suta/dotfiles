@@ -70,6 +70,9 @@ The `pre-commit` and `pre-push` hooks refuse a change that adds a gap.
 | `just proofs` | The Kani obligations of `policy/obligations.toml`, Miri over the pure core's tests for the host and Windows, and a mutation campaign over the core. It also replays the corpus of every fuzz target under `fuzz/`, checks the Quint and Alloy models under `specs/`, and builds and checks the Lean package under `specs/lean/`. |
 | `just prose` | The writing standard over documents and comments. |
 
+Prose gates check persisted files, comments, Markdown, commit messages, issues, pull requests, and release notes.
+The adapters setup step and `just install-prose` remove retired Claude Code and Codex reply hooks and the OpenCode reply plugin.
+
 The Rust gate of `just check` also runs the obligation closure, which holds `policy/obligations.toml` to the source.
 It refuses a rule module without a Kani obligation, a harness outside the listed modules, and a public rule function that no harness mentions and no exemption beside it covers.
 It also refuses a proved function that no production code calls, a pilot whose issue closed without a decision record, and a metric of `policy/baselines.toml` that moved.

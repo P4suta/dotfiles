@@ -252,13 +252,7 @@ fn every_profile_holds_what_the_installers_apply() {
         .unwrap();
         for (source, targets) in [
             (true, vec![root.join(coderabbit_guard::SOURCE_POLICY)]),
-            (
-                false,
-                vec![
-                    home.join(".config/prose"),
-                    home.join(".config/opencode/plugins/prose.ts"),
-                ],
-            ),
+            (false, vec![home.join(".config/prose")]),
         ] {
             let mut command = profiles::chezmoi(&root, scope.path(), &config, &home);
             command.args(["apply", "--dry-run", "--force", "--include", "dirs,files"]);
