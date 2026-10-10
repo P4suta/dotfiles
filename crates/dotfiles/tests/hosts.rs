@@ -189,7 +189,43 @@ fn a_mise_bootstrap_with_a_different_release_pin_stops_before_the_gate() -> Resu
         .output()?;
     assert!(!output.status.success());
     assert!(String::from_utf8(output.stderr)?.contains("release pin 2026.9.0"));
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+fn the_code_environment_links_with_the_registered_windows_toolchain() -> Result<()> {
+    let fixture = code_fixture()?;
+    let sysroot = platform::tool::Tool::Rustc
+        .command()
+        .args(["--print", "sysroot"])
+        .output()?;
+    ensure!(sysroot.status.success(), "resolve the pinned Rust compiler");
+    let compiler = Path::new(String::from_utf8(sysroot.stdout)?.trim()).join("bin/rustc.exe");
+    let installed = platform::code_environment::Installations {
+        mise: fixture.host.join("mise.exe"),
+        data: fixture.host.join("data"),
+        cargo: fixture.host.join(".cargo"),
+        rustup: fixture.host.join(".rustup"),
+    };
+    let environment =
+        platform::code_environment::CodeEnvironment::build(&fixture.root, &installed)?;
+    let source = fixture.root.join("native.rs");
+    let binary = fixture.root.join("native.exe");
+    fs::write(&source, "fn main() {}\n")?;
+    let linked = environment
+        .command(&compiler)
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .output()?;
+    ensure!(
+        linked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&linked.stderr)
+    );
+    assert!(environment.command(&binary).status()?.success());
     Ok(())
 }
 

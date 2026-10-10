@@ -116,6 +116,11 @@ impl CodeEnvironment {
         environment.seed(installed, &home, &temporary, &empty)?;
         base.insert(0, bootstrap);
         environment.set("PATH", std::env::join_paths(&base)?);
+        #[cfg(windows)]
+        {
+            base = environment.compiler_directories()?;
+            environment.set("PATH", std::env::join_paths(&base)?);
+        }
         let releases = model::data::parse(
             RELEASE_PINS,
             &fs::read_to_string(environment.root.join(RELEASE_PINS))?,
@@ -306,6 +311,44 @@ impl CodeEnvironment {
         Ok(directories)
     }
 
+    #[cfg(windows)]
+    fn compiler_directories(&mut self) -> Result<Vec<PathBuf>> {
+        let compiler = find_msvc_tools::find_tool_with_env(std::env::consts::ARCH, "cl.exe", self)
+            .context("the Windows code stage requires an installed MSVC toolchain and SDK")?;
+        ensure!(
+            compiler.path().is_absolute(),
+            "MSVC returned a relative compiler"
+        );
+        let mut directories = vec![canonical(
+            compiler
+                .path()
+                .parent()
+                .context("MSVC compiler directory")?,
+        )?];
+        for (name, value) in compiler.env() {
+            match name.to_str() {
+                Some("PATH") => {
+                    for directory in std::env::split_paths(value) {
+                        ensure!(
+                            directory.is_absolute(),
+                            "MSVC returned a relative tool directory"
+                        );
+                        let directory = canonical(&directory)?;
+                        if !directories.contains(&directory) {
+                            directories.push(directory);
+                        }
+                    }
+                }
+                Some(name @ ("LIB" | "LIBPATH" | "INCLUDE")) => self.set(name, value),
+                _ => anyhow::bail!(
+                    "MSVC returned an unexpected environment key: {}",
+                    name.display()
+                ),
+            }
+        }
+        Ok(directories)
+    }
+
     fn install_missing(
         &mut self,
         mise: &Path,
@@ -411,6 +454,16 @@ impl CodeEnvironment {
             String::from_utf8_lossy(&output.stderr)
         );
         Ok(output.stdout)
+    }
+}
+
+#[cfg(windows)]
+impl find_msvc_tools::EnvGetter for CodeEnvironment {
+    fn get_env(&self, name: &'static str) -> Option<find_msvc_tools::Env> {
+        self.variables
+            .get(OsStr::new(name))
+            .cloned()
+            .map(find_msvc_tools::Env::Owned)
     }
 }
 
