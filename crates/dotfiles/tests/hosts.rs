@@ -170,6 +170,30 @@ fn the_code_gate_and_its_children_ignore_the_fixture_host_environment() -> Resul
 }
 
 #[test]
+fn a_mise_bootstrap_with_a_different_release_pin_stops_before_the_gate() -> Result<()> {
+    let fixture = code_fixture()?;
+    fs::write(
+        fixture.root.join("home/.chezmoidata/versions.toml"),
+        "[mise]\nversion = '2026.9.0'\n",
+    )?;
+    let mut path = vec![fixture.host.clone()];
+    path.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let output = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), fixture.scope.path())
+        .args(["hosts", "code", "--gate", "python"])
+        .current_dir(&fixture.root)
+        .env("HOME", &fixture.host)
+        .env("USERPROFILE", &fixture.host)
+        .env("PATH", std::env::join_paths(path)?)
+        .output()?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8(output.stderr)?.contains("release pin 2026.9.0"));
+    assert!(output.stdout.is_empty());
+    Ok(())
+}
+
+#[test]
 fn a_missing_exact_pin_installs_only_in_the_code_scratch_home() -> Result<()> {
     let fixture = code_fixture()?;
     fs::write(fixture.root.join("missing"), "")?;

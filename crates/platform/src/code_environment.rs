@@ -127,7 +127,7 @@ impl CodeEnvironment {
             .context("mise has no release pin")?;
         let version = environment.output(&mise, &["--version"])?;
         ensure!(
-            std::str::from_utf8(&version)?.split_whitespace().nth(1) == Some(pin.as_str()),
+            std::str::from_utf8(&version)?.split_whitespace().next() == Some(pin.as_str()),
             "the mise bootstrap does not match release pin {pin}"
         );
         let mut directories = environment.resolve(&mise, installed)?;
