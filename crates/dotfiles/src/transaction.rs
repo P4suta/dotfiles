@@ -282,6 +282,9 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    #[cfg(unix)]
+    const MODE_MASK: u32 = 0o7777;
+
     /// What a path holds: a directory, a file's bytes and Unix mode, or a link's target.
     #[derive(Debug, PartialEq)]
     enum Node {
@@ -290,36 +293,27 @@ mod tests {
         Link(PathBuf),
     }
 
-    fn mode(metadata: &fs::Metadata) -> Option<u32> {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            Some(metadata.permissions().mode() & 0o7777)
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = metadata;
-            None
-        }
-    }
-
     /// Every path under `root` with its bytes, mode, or link target.
     fn tree(root: &Path) -> BTreeMap<PathBuf, Node> {
         fn walk(root: &Path, directory: &Path, found: &mut BTreeMap<PathBuf, Node>) {
             for entry in fs::read_dir(directory).unwrap() {
                 let path = entry.unwrap().path();
                 let metadata = fs::symlink_metadata(&path).unwrap();
+                #[cfg(unix)]
+                let mode = {
+                    use std::os::unix::fs::PermissionsExt;
+                    Some(metadata.permissions().mode() & MODE_MASK)
+                };
+                #[cfg(not(unix))]
+                let mode = None;
                 let relative = path.strip_prefix(root).unwrap().to_path_buf();
                 if metadata.is_symlink() {
                     found.insert(relative, Node::Link(fs::read_link(&path).unwrap()));
                 } else if metadata.is_dir() {
-                    found.insert(relative, Node::Directory(mode(&metadata)));
+                    found.insert(relative, Node::Directory(mode));
                     walk(root, &path, found);
                 } else {
-                    found.insert(
-                        relative,
-                        Node::File(fs::read(&path).unwrap(), mode(&metadata)),
-                    );
+                    found.insert(relative, Node::File(fs::read(&path).unwrap(), mode));
                 }
             }
         }
