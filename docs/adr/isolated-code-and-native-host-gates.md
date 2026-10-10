@@ -18,6 +18,8 @@ It uses their installation directories, the OS base directories, and a directory
 Rust uses the pinned toolchain's actual bin directory rather than a directory of shared rustup proxies.
 Home, user configuration, caches, Git configuration, and canonical temporary storage belong to the run.
 The installation store supplies binaries and the Rust toolchain, never credentials or user configuration.
+When an exact project pin lacks an installation, the builder provisions it in scratch storage and links only the selected existing installations into that store.
+It validates the resolved pins again before admitting the gate, so a missing installation never justifies a global tool or a version mismatch.
 
 The native stage applies the candidate profile's files to an owned scratch destination and verifies them there.
 Native and project tool installation use that destination's HOME and Git global configuration, the host's PATH and shell, and its system Git, without an SSH agent or interactive input.

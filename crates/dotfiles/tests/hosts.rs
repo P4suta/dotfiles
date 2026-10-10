@@ -169,6 +169,65 @@ fn the_code_gate_and_its_children_ignore_the_fixture_host_environment() -> Resul
     Ok(())
 }
 
+#[test]
+fn a_missing_exact_pin_installs_only_in_the_code_scratch_home() -> Result<()> {
+    let fixture = code_fixture()?;
+    fs::write(fixture.root.join("missing"), "")?;
+    let listing = fixture.root.join("tools.json");
+    let mut tools: serde_json::Value = serde_json::from_slice(&fs::read(&listing)?)?;
+    tools["python"][0]["installed"] = false.into();
+    let existing = fixture.host.join("data/installs/uv/0.12.22");
+    fs::create_dir_all(&existing)?;
+    fs::write(existing.join("kept"), "read-only installation")?;
+    tools["uv"] = tools["python"].clone();
+    tools["uv"][0]["installed"] = true.into();
+    tools["uv"][0]["version"] = "0.12.22".into();
+    tools["uv"][0]["requested_version"] = "0.12.22".into();
+    tools["uv"][0]["install_path"] = existing.to_string_lossy().into_owned().into();
+    fs::write(&listing, serde_json::to_vec(&tools)?)?;
+    let original = fs::read(&listing)?;
+    let paths = fs::read(fixture.root.join("paths"))?;
+    let mut path = vec![fixture.host.clone()];
+    path.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let run = || -> Result<std::process::Output> {
+        Ok(
+            fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), fixture.scope.path())
+                .args(["hosts", "code", "--gate", "python"])
+                .current_dir(&fixture.root)
+                .env("HOME", &fixture.host)
+                .env("USERPROFILE", &fixture.host)
+                .env("MISE_DATA_DIR", fixture.host.join("data"))
+                .env("PATH", std::env::join_paths(&path)?)
+                .output()?,
+        )
+    };
+    let output = run()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8(output.stdout)?.contains("pinned child"));
+    let installed = PathBuf::from(fs::read_to_string(fixture.root.join("installed-at"))?);
+    assert!(!installed.starts_with(&fixture.host));
+    assert!(!installed.exists());
+    assert_eq!(
+        fs::read_to_string(existing.join("kept"))?,
+        "read-only installation"
+    );
+    assert!(!fixture.host.join("data/installs/python").exists());
+    assert_eq!(fs::read(&listing)?, original);
+    assert_eq!(fs::read(fixture.root.join("paths"))?, paths);
+    fs::remove_file(fixture.root.join("installed-at"))?;
+    tools["python"][0]["source"]["type"] = "global".into();
+    fs::write(&listing, serde_json::to_vec(&tools)?)?;
+    assert!(!run()?.status.success());
+    assert!(!fixture.root.join("installed-at").exists());
+    Ok(())
+}
+
 fn workflow(text: &str) -> Vec<(String, String)> {
     vec![("ci.yml".to_owned(), text.to_owned())]
 }

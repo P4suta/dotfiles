@@ -207,8 +207,37 @@ impl CodeEnvironment {
 
     fn resolve(&mut self, mise: &Path, installed: &Installations) -> Result<Vec<PathBuf>> {
         let listing = self.output(mise, &["ls", "--local", "--json"])?;
-        let tools: BTreeMap<String, Vec<Installation>> = serde_json::from_slice(&listing)?;
+        let mut tools: BTreeMap<String, Vec<Installation>> = serde_json::from_slice(&listing)?;
         ensure!(!tools.is_empty(), "the checkout has no pinned tools");
+        for (name, versions) in &tools {
+            ensure!(
+                versions.len() == 1,
+                "{name} must resolve to exactly one pinned version"
+            );
+            for tool in versions {
+                ensure!(
+                    tool.active
+                        && tool.source.r#type == MISE_CONFIG
+                        && canonical(&tool.source.path)? == self.root.join(MISE_CONFIG)
+                        && tool.version == tool.requested_version,
+                    "{name} does not resolve to its exact active project pin"
+                );
+            }
+        }
+        if tools.values().flatten().any(|tool| !tool.installed) {
+            self.install_missing(mise, installed, &tools)?;
+            let resolved: BTreeMap<String, Vec<Installation>> =
+                serde_json::from_slice(&self.output(mise, &["ls", "--local", "--json"])?)?;
+            ensure!(
+                tools.keys().eq(resolved.keys())
+                    && tools.iter().all(|(name, versions)| versions
+                        .iter()
+                        .map(|tool| &tool.requested_version)
+                        .eq(resolved[name].iter().map(|tool| &tool.requested_version))),
+                "installation changed the project pin inventory"
+            );
+            tools = resolved;
+        }
         let mut requests = Vec::new();
         let mut rust = None;
         for (name, versions) in tools {
@@ -277,6 +306,89 @@ impl CodeEnvironment {
         Ok(directories)
     }
 
+    fn install_missing(
+        &mut self,
+        mise: &Path,
+        installed: &Installations,
+        tools: &BTreeMap<String, Vec<Installation>>,
+    ) -> Result<()> {
+        let home = PathBuf::from(
+            self.variables
+                .get(OsStr::new("HOME"))
+                .context("code HOME is missing")?,
+        );
+        let data = home.join(".local/share/mise");
+        let mut requests = Vec::new();
+        for (name, versions) in tools {
+            for tool in versions {
+                if tool.installed {
+                    let relative = tool
+                        .install_path
+                        .strip_prefix(installed.data.join("installs"))
+                        .with_context(|| {
+                            format!("{name} installation belongs outside the tool store")
+                        })?;
+                    let link = data.join("installs").join(relative);
+                    fs::create_dir_all(link.parent().context("installation link has no parent")?)?;
+                    link_directory(&tool.install_path, &link)?;
+                } else {
+                    requests.push(format!("{name}@{}", tool.version));
+                }
+            }
+        }
+        let mut bootstrap = Vec::new();
+        if let Some(rust) = tools.get("rust").and_then(|versions| versions.first()) {
+            self.set("RUSTUP_TOOLCHAIN", &rust.version);
+            if rust.installed {
+                let rustc = installed
+                    .cargo
+                    .join(CARGO_BIN)
+                    .join(format!("rustc{}", std::env::consts::EXE_SUFFIX));
+                let output = self.output(&rustc, &["--print", "sysroot"])?;
+                bootstrap.push(
+                    canonical(Path::new(std::str::from_utf8(&output)?.trim()))?.join(CARGO_BIN),
+                );
+            }
+        }
+        for (name, versions) in tools {
+            if name == "rust" {
+                continue;
+            }
+            for tool in versions.iter().filter(|tool| tool.installed) {
+                let request = format!("{name}@{}", tool.version);
+                let output = self.output(mise, &["bin-paths", &request])?;
+                for directory in std::str::from_utf8(&output)?.lines() {
+                    ensure!(
+                        Path::new(directory).is_absolute(),
+                        "mise returned a relative bootstrap directory"
+                    );
+                    bootstrap.push(canonical(Path::new(directory))?);
+                }
+            }
+        }
+        bootstrap.extend(std::env::split_paths(
+            self.variables
+                .get(OsStr::new("PATH"))
+                .context("code PATH is missing")?,
+        ));
+        self.set("PATH", std::env::join_paths(bootstrap)?);
+        self.set("MISE_DATA_DIR", &data);
+        self.set("MISE_CARGO_HOME", home.join(".cargo"));
+        if tools
+            .get("rust")
+            .is_some_and(|tools| tools.iter().any(|tool| !tool.installed))
+        {
+            self.set("RUSTUP_HOME", home.join(".rustup"));
+            self.set("MISE_RUSTUP_HOME", home.join(".rustup"));
+        }
+        let arguments: Vec<_> = ["install", "--yes"]
+            .into_iter()
+            .chain(requests.iter().map(String::as_str))
+            .collect();
+        self.output(mise, &arguments)?;
+        Ok(())
+    }
+
     fn set(&mut self, name: &str, value: impl AsRef<OsStr>) {
         self.variables
             .insert(name.into(), value.as_ref().to_owned());
@@ -300,6 +412,14 @@ impl CodeEnvironment {
         );
         Ok(output.stdout)
     }
+}
+
+fn link_directory(source: &Path, destination: &Path) -> Result<()> {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(source, destination)?;
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(source, destination)?;
+    Ok(())
 }
 
 impl Drop for CodeEnvironment {

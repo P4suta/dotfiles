@@ -12,12 +12,41 @@ fn main() {
                 println!("mise 2026.10.0");
                 return;
             }
+            let data = std::path::PathBuf::from(std::env::var_os("MISE_DATA_DIR").unwrap());
+            let installation = data.join("installs/python/3.14.8");
+            if arguments[0] == "install" {
+                assert_eq!(arguments, ["install", "--yes", "python@3.14.8"]);
+                assert!(data.starts_with(std::env::var_os("HOME").unwrap()));
+                std::fs::create_dir_all(&installation).unwrap();
+                std::fs::copy(
+                    &executable,
+                    installation.join(format!("python{}", std::env::consts::EXE_SUFFIX)),
+                )
+                .unwrap();
+                std::fs::write("installed-at", data.to_string_lossy().as_bytes()).unwrap();
+                return;
+            }
             let file = match arguments[0].as_str() {
                 "ls" => "tools.json",
                 "bin-paths" => "paths",
                 _ => panic!("unexpected mise command: {arguments:?}"),
             };
-            print!("{}", std::fs::read_to_string(file).unwrap());
+            let mut contents = std::fs::read_to_string(file).unwrap();
+            if Path::new("missing").exists() && installation.is_dir() {
+                let paths = std::fs::read_to_string("paths").unwrap();
+                let original = paths.lines().next().unwrap();
+                contents = if file == "tools.json" {
+                    contents
+                        .replace("\"installed\":false", "\"installed\":true")
+                        .replace(
+                            &format!("{original:?}"),
+                            &format!("{:?}", installation.to_str().unwrap()),
+                        )
+                } else {
+                    contents.replace(original, installation.to_str().unwrap())
+                };
+            }
+            print!("{contents}");
         }
         "unrelated-application" => panic!("the host application reached the code gate"),
         "python" => {
