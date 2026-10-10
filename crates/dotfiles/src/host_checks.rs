@@ -11,6 +11,7 @@ const CONFIG: &str = ".config/chezmoi/chezmoi.toml";
 const GIT_CONFIG: &str = ".config/git/config";
 const MISE_CONFIG: &str = ".config/mise/config.toml";
 const EMPTY_CONFIG: &str = "empty-config.toml";
+const RUNTIME_BIN: &str = ".local/bin";
 const MAC_SHELL: &str = "/bin/zsh";
 const UNIX_SHELL: &str = "/bin/bash";
 const PUBLIC_SOURCES: [&str; 3] = [
@@ -147,6 +148,21 @@ impl Scratch {
         }
     }
 
+    /// Install the candidate worker that the rendered hooks reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the directory creation or binary copy fails.
+    pub fn provision_runtime(&self, binary: &Path) -> Result<()> {
+        let directory = self.home.join(RUNTIME_BIN);
+        fs::create_dir_all(&directory)?;
+        fs::copy(
+            binary,
+            directory.join(format!("dotfiles{}", std::env::consts::EXE_SUFFIX)),
+        )?;
+        Ok(())
+    }
+
     fn profile(&self, root: &Path, action: &str) -> Result<()> {
         let mut command =
             crate::profiles::chezmoi(root, self.scope.path(), &self.config, &self.home);
@@ -270,6 +286,9 @@ pub fn check(root: &Path, home: &Path) -> Result<()> {
         let scratch = Scratch::new(&config)?;
         let mut candidate = Checks::default();
         candidate.run("host.profile-apply", || scratch.profile(root, "apply"));
+        candidate.run("host.runtime", || {
+            scratch.provision_runtime(&std::env::current_exe()?)
+        });
         candidate.run("host.scratch-verify", || scratch.profile(root, "verify"));
         candidate.run("host.toolchain", || scratch.install(&scratch.home));
         candidate.run("host.project-tools", || scratch.install(root));
