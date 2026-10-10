@@ -105,6 +105,8 @@ impl Scratch {
             ("XDG_STATE_HOME", self.home.join(".local/state")),
             ("APPDATA", self.home.join("AppData/Roaming")),
             ("LOCALAPPDATA", self.home.join("AppData/Local")),
+            ("ProgramData", self.home.join("ProgramData")),
+            ("ALLUSERSPROFILE", self.home.join("ProgramData")),
             ("CARGO_HOME", self.home.join(".cargo")),
             ("RUSTUP_HOME", self.home.join(".rustup")),
             ("CARGO_TARGET_DIR", self.home.join("target")),
@@ -354,6 +356,8 @@ mod tests {
                 Some(
                     "HOME"
                         | "USERPROFILE"
+                        | "ProgramData"
+                        | "ALLUSERSPROFILE"
                         | "CARGO_HOME"
                         | "RUSTUP_HOME"
                         | "MISE_DATA_DIR"

@@ -135,6 +135,8 @@ fn the_code_gate_and_its_children_ignore_the_fixture_host_environment() -> Resul
             "GITHUB_TOKEN",
             "SSH_AUTH_SOCK",
             "UNRELATED_SETTING",
+            "ProgramData",
+            "ALLUSERSPROFILE",
         ] {
             if polluted {
                 command.env(name, "fixture-host-value");

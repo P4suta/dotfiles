@@ -60,6 +60,11 @@ fn main() {
                 assert!(std::env::var_os(name).is_none(), "inherited {name}");
             }
             let home = std::env::var_os("HOME").unwrap();
+            if cfg!(windows) {
+                for name in ["ProgramData", "ALLUSERSPROFILE"] {
+                    assert!(Path::new(&std::env::var_os(name).unwrap()).starts_with(&home));
+                }
+            }
             assert!(!Path::new(&home).join(".gitconfig").exists());
             for name in ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"] {
                 assert!(

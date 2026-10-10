@@ -205,6 +205,8 @@ impl CodeEnvironment {
             self.set("PATHEXT", ".COM;.EXE;.BAT;.CMD");
             self.set("APPDATA", home.join("AppData/Roaming"));
             self.set("LOCALAPPDATA", home.join("AppData/Local"));
+            self.set("ProgramData", home.join("ProgramData"));
+            self.set("ALLUSERSPROFILE", home.join("ProgramData"));
             self.set("ProgramFiles", program_files());
         }
         Ok(())
