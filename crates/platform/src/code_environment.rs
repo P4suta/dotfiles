@@ -266,7 +266,7 @@ impl CodeEnvironment {
             let system = system_root();
             self.set("SystemRoot", &system);
             self.set("WINDIR", &system);
-            self.set("ComSpec", system.join("System32/cmd.exe"));
+            self.set("ComSpec", system.join("System32").join("cmd.exe"));
             self.set("PATHEXT", ".COM;.EXE;.BAT;.CMD");
             self.set("APPDATA", home.join("AppData/Roaming"));
             self.set("LOCALAPPDATA", home.join("AppData/Local"));

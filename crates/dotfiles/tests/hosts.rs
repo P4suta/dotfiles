@@ -264,6 +264,32 @@ fn invalid_registered_compiler_data_stops_before_the_gate() -> Result<()> {
 
 #[cfg(windows)]
 #[test]
+fn the_code_environment_runs_batch_commands_from_powershell() -> Result<()> {
+    let fixture = code_fixture()?;
+    let installed = platform::code_environment::Installations {
+        mise: fixture.host.join("mise.exe"),
+        data: fixture.host.join("data"),
+        cargo: fixture.host.join(".cargo"),
+        rustup: fixture.host.join(".rustup"),
+    };
+    let environment =
+        platform::code_environment::CodeEnvironment::build(&fixture.root, &installed)?;
+    fs::write(fixture.root.join("native.cmd"), "@echo batch gate\r\n")?;
+    let output = environment
+        .command(platform::tool::Tool::Pwsh.program())
+        .args(["-NoProfile", "-Command", "& ./native.cmd"])
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout)?.trim(), "batch gate");
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
 fn the_code_environment_links_with_the_registered_windows_toolchain() -> Result<()> {
     let fixture = code_fixture()?;
     let sysroot = platform::tool::Tool::Rustc
