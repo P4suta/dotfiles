@@ -9,6 +9,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use xtask::change_rules::{Gate, Gates};
 use xtask::check_build_dir;
+use xtask::checks::Checks;
 use xtask::environment;
 use xtask::tool::Tool;
 
@@ -147,46 +148,56 @@ fn cargo(root: &Path, manifest: &Path, args: &[&str]) -> Result<()> {
 }
 
 /// Formats, lints, and tests every crate of the root workspace under its one lint policy.
-fn check_workspace(root: &Path) -> Result<()> {
+fn check_workspace(root: &Path, checks: &mut Checks) {
     let manifest = Path::new("Cargo.toml");
-    cargo(root, manifest, &["fmt", "--all", "--check"])?;
-    cargo(
-        root,
-        manifest,
-        &[
-            "clippy",
-            "--locked",
-            "--workspace",
-            "--all-targets",
-            "--",
-            "-D",
-            "warnings",
-        ],
-    )
-    .context("clippy failed")?;
-    cargo(
-        root,
-        manifest,
-        &["test", "--locked", "--workspace", "--all-targets"],
-    )
+    checks.run("rust.fmt", || {
+        cargo(root, manifest, &["fmt", "--all", "--check"])
+    });
+    checks.run("rust.clippy", || {
+        cargo(
+            root,
+            manifest,
+            &[
+                "clippy",
+                "--locked",
+                "--workspace",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ],
+        )
+    });
+    checks.run("rust.tests", || {
+        cargo(
+            root,
+            manifest,
+            &["test", "--locked", "--workspace", "--all-targets"],
+        )
+    });
 }
 
-fn check_package(root: &Path, manifest: &Path) -> Result<()> {
-    cargo(root, manifest, &["fmt", "--check"])?;
-    let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
-    let status = Tool::Cargo
-        .command()
-        .current_dir(root)
-        .env(
-            "CARGO_TARGET_DIR",
-            check_build_dir(root, configured.as_deref()),
+fn check_package(root: &Path, manifest: &Path, checks: &mut Checks) {
+    checks.run("settings.fmt", || {
+        cargo(root, manifest, &["fmt", "--check"])
+    });
+    checks.run("settings.clippy", || {
+        cargo(
+            root,
+            manifest,
+            &[
+                "clippy",
+                "--locked",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ],
         )
-        .args(["clippy", "--locked", "--all-targets", "--manifest-path"])
-        .arg(manifest)
-        .args(["--", "-D", "warnings"])
-        .status()?;
-    ensure!(status.success(), "clippy failed with {status}");
-    cargo(root, manifest, &["test", "--locked", "--all-targets"])
+    });
+    checks.run("settings.tests", || {
+        cargo(root, manifest, &["test", "--locked", "--all-targets"])
+    });
 }
 
 /// The pre-commit check validates lint, document prose, and comments from the index snapshot.
@@ -211,60 +222,100 @@ fn check_staged(root: &Path) -> Result<()> {
 /// Runs the checks of each selected gate.
 /// A change that selects fewer gates skips only the checks it can't affect.
 fn check(root: &Path, gates: Gates, reference: &str) -> Result<()> {
+    let mut checks = Checks::default();
     if gates.contains(Gate::Prose) {
-        xtask::lint::check(root, &xtask::lint::tracked(root)?, true, reference)?;
-        xtask::adr::generate(root, true)?;
-        xtask::quality::editorconfig(root)?;
-        xtask::quality::comment_scopes(root)?;
-        xtask::instruction_audit::check(root)?;
-        dotfiles::line_endings::check(root)?;
-        let unknown = xtask::quality::unknown_recipes(root)?;
-        anyhow::ensure!(
-            unknown.is_empty(),
-            "references to recipes the justfile does not define: {unknown:#?}"
-        );
-        xtask::quality::secrets(root)?;
-        prose::repository(root, prose::Scope::Documents, &prose::Bundle::source(root)?)?;
-        dotfiles::repository::check(root, None)?;
+        check_prose(root, reference, &mut checks);
     }
     if gates.contains(Gate::Skills) {
-        skill_ops::check_catalog(root)?;
-        xtask::inventory::check(root)?;
-        println!(
-            "Validated {} shared skills and aliases",
-            validate_tree(root)?
-        );
-        xtask::quality::adapters(root)?;
+        checks.run("skills.catalog", || skill_ops::check_catalog(root));
+        checks.run("skills.inventory", || xtask::inventory::check(root));
+        checks.run("skills.validation", || {
+            println!(
+                "Validated {} shared skills and aliases",
+                validate_tree(root)?
+            );
+            Ok(())
+        });
+        checks.run("skills.adapters", || xtask::quality::adapters(root));
     }
     if gates.contains(Gate::Rust) {
-        xtask::profiles::data_schema(root, true)?;
-        xtask::obligations::check(root, &xtask::obligations::github_issue_closed)?;
-        xtask::quality::workflows(root)?;
-        xtask::quality::dependencies(root)?;
-        check_workspace(root)?;
+        checks.run("rust.data-schema", || {
+            xtask::profiles::data_schema(root, true)
+        });
+        checks.run("rust.obligations", || {
+            xtask::obligations::check(root, &xtask::obligations::github_issue_closed)
+        });
+        checks.run("rust.workflows", || xtask::quality::workflows(root));
+        checks.run("rust.dependencies", || xtask::quality::dependencies(root));
+        check_workspace(root, &mut checks);
         check_package(
             root,
             Path::new("home/dot_agents/skills/github-repository/scripts/repo-settings/Cargo.toml"),
-        )?;
+            &mut checks,
+        );
     }
     // The catalog deploys with the profiles, and the core it checks builds with the Rust packages.
     if gates.contains(Gate::Rust) || gates.contains(Gate::Profiles) {
-        xtask::structure::check(root)?;
+        checks.run("structure", || xtask::structure::check(root));
     }
     if gates.contains(Gate::Profiles) {
-        xtask::profiles::source_data(root)?;
-        xtask::launchers::generate(root, true)?;
-        xtask::profiles::targets_page(root, true)?;
-        xtask::quality::chezmoi_version(root)?;
-        let templates = xtask::quality::template_findings(root)?;
-        anyhow::ensure!(templates.is_empty(), "{}", templates.join("\n"));
-        xtask::profiles::check_profiles(root, None)?;
-        xtask::profile_snapshot::check(root)?;
-        xtask::ignore_audit::check(root)?;
-        xtask::input_audit::check(root)?;
+        check_profiles(root, &mut checks);
     }
+    checks.finish()?;
     println!("Checked the gates: {gates}");
     Ok(())
+}
+
+fn check_prose(root: &Path, reference: &str, checks: &mut Checks) {
+    checks.run("prose.lint", || {
+        xtask::lint::check(root, &xtask::lint::tracked(root)?, true, reference)
+    });
+    checks.run("prose.adr", || xtask::adr::generate(root, true));
+    checks.run("prose.editorconfig", || xtask::quality::editorconfig(root));
+    checks.run("prose.comments", || xtask::quality::comment_scopes(root));
+    checks.run("prose.instructions", || {
+        xtask::instruction_audit::check(root)
+    });
+    checks.run("prose.line-endings", || dotfiles::line_endings::check(root));
+    checks.run("prose.recipes", || {
+        let unknown = xtask::quality::unknown_recipes(root)?;
+        ensure!(
+            unknown.is_empty(),
+            "references to recipes the justfile does not define: {unknown:#?}"
+        );
+        Ok(())
+    });
+    checks.run("prose.secrets", || xtask::quality::secrets(root));
+    checks.run("prose.documents", || {
+        prose::repository(root, prose::Scope::Documents, &prose::Bundle::source(root)?)
+    });
+    checks.run("prose.repository", || {
+        dotfiles::repository::check(root, None)
+    });
+}
+
+fn check_profiles(root: &Path, checks: &mut Checks) {
+    checks.run("profiles.data", || xtask::profiles::source_data(root));
+    checks.run("profiles.launchers", || {
+        xtask::launchers::generate(root, true)
+    });
+    checks.run("profiles.targets", || {
+        xtask::profiles::targets_page(root, true)
+    });
+    checks.run("profiles.chezmoi", || xtask::quality::chezmoi_version(root));
+    checks.run("profiles.templates", || {
+        let templates = xtask::quality::template_findings(root)?;
+        ensure!(templates.is_empty(), "{}", templates.join("\n"));
+        Ok(())
+    });
+    checks.run("profiles.rendering", || {
+        xtask::profiles::check_profiles(root, None)
+    });
+    checks.run("profiles.snapshots", || {
+        xtask::profile_snapshot::check(root)
+    });
+    checks.run("profiles.ignore", || xtask::ignore_audit::check(root));
+    checks.run("profiles.inputs", || xtask::input_audit::check(root));
 }
 
 fn generate(root: &Path, check: bool) -> Result<()> {

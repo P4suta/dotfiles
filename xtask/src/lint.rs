@@ -710,7 +710,9 @@ pub fn tracked(root: &Path) -> Result<Vec<String>> {
 ///
 /// Returns an error listing every refusal, or when a linter or Git fails.
 pub fn check(root: &Path, scope: &[String], every_file: bool, reference: &str) -> Result<()> {
-    check_content(root, scope, every_file, baseline_growth(root, reference)?)
+    let growth = baseline_growth(root, reference)
+        .unwrap_or_else(|error| vec![format!("baseline comparison: {error:#}")]);
+    check_content(root, scope, every_file, growth)
 }
 
 /// Checks content in an isolated staged snapshot with baseline growth measured in its source checkout.
@@ -724,24 +726,31 @@ pub fn check_content(
     every_file: bool,
     mut refusals: Vec<String>,
 ) -> Result<()> {
+    let mut checks = crate::checks::Checks::default();
     for stage in Stage::ALL {
-        let admitted = baseline(root, stage)?;
-        let found = findings(root, stage, scope)?;
-        refusals.extend(compare(stage, scope, &admitted, &found));
-        if every_file {
-            refusals.extend(
-                admitted
-                    .keys()
-                    .filter(|path| !scope.contains(path))
-                    .map(|path| {
-                        format!(
-                            "{}: {} names {path}, which Git no longer tracks; remove its entry",
-                            stage.name(),
-                            stage.baseline()
-                        )
-                    }),
-            );
-        }
+        checks.run(stage.name(), || {
+            let admitted = baseline(root, stage)?;
+            let found = findings(root, stage, scope)?;
+            refusals.extend(compare(stage, scope, &admitted, &found));
+            if every_file {
+                refusals.extend(
+                    admitted
+                        .keys()
+                        .filter(|path| !scope.contains(path))
+                        .map(|path| {
+                            format!(
+                                "{}: {} names {path}, which Git no longer tracks; remove its entry",
+                                stage.name(),
+                                stage.baseline()
+                            )
+                        }),
+                );
+            }
+            Ok(())
+        });
+    }
+    if let Err(error) = checks.finish() {
+        refusals.push(error.to_string());
     }
     ensure!(refusals.is_empty(), "{}", refusals.join("\n"));
     println!(

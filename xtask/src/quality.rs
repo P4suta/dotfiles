@@ -41,18 +41,27 @@ fn run(mut command: Command, root: &Path, name: &str, arguments: &[&str]) -> Res
 ///
 /// Returns an error when either checker can't start or reports a finding.
 pub fn workflows(root: &Path) -> Result<()> {
-    let findings = workflow_findings(
-        &fs::read_to_string(root.join(".github/workflows/ci.yml"))?,
-        &fs::read_to_string(root.join("policy/github.toml"))?,
-    )?;
-    ensure!(findings.is_empty(), "{}", findings.join("\n"));
-    run(Tool::Actionlint.command(), root, "actionlint", &[])?;
-    run(
-        Tool::Zizmor.command(),
-        root,
-        "zizmor",
-        &["--offline", ".github/workflows"],
-    )
+    let mut checks = crate::checks::Checks::default();
+    checks.run("workflows.policy", || {
+        let findings = workflow_findings(
+            &fs::read_to_string(root.join(".github/workflows/ci.yml"))?,
+            &fs::read_to_string(root.join("policy/github.toml"))?,
+        )?;
+        ensure!(findings.is_empty(), "{}", findings.join("\n"));
+        Ok(())
+    });
+    checks.run("workflows.actionlint", || {
+        run(Tool::Actionlint.command(), root, "actionlint", &[])
+    });
+    checks.run("workflows.zizmor", || {
+        run(
+            Tool::Zizmor.command(),
+            root,
+            "zizmor",
+            &["--offline", ".github/workflows"],
+        )
+    });
+    checks.finish()
 }
 
 /// Refusals for a CI workflow that the settings in `policy/github.toml` can't rely on.
