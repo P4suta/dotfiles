@@ -104,7 +104,7 @@
     {"mode":"0644","path":".agents/skills/nas/tools.toml","sha256":"0b81f022e2840065ea68e75b8cb6ab289d9f9be13225b68bf9d08559fdf4fb3a","type":"file"},
     {"mode":"0755","path":".agents/skills/ocomment","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/ocomment/SKILL.md","sha256":"db9d8c1a18071d5b7d220b1fbc1a32b9ef657c40e4c671f302f1ed5ef4343453","type":"file"},
-    {"mode":"0644","path":".agents/skills/ocomment/tools.toml","sha256":"694d156efaf3fa56f2477d1d6b46450f98e6280c7debcfac1b493129e5503375","type":"file"},
+    {"mode":"0644","path":".agents/skills/ocomment/tools.toml","sha256":"4795222eb4cccea132179bd27dae580f56462074084887aae0d5376237ce36bd","type":"file"},
     {"mode":"0755","path":".agents/skills/orbstack","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/orbstack/SKILL.md","sha256":"d34a6ff1c74bf3b71797971e36e9a46fcbe2d5695fd39c0d061eddcefa4111a0","type":"file"},
     {"mode":"0644","path":".agents/skills/orbstack/tools.toml","sha256":"81f814121e90defd6ca861903b93155a60563e1a0c0f9c7a6ed7c172ea99b3fb","type":"file"},

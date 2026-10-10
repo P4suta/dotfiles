@@ -728,6 +728,15 @@ version = "0.20.0"
 backend = "cargo:gungraun-runner"
 specifiers = ["0.20.0"]
 
+[[tools."cargo:https://github.com/P4suta/OComment"]]
+version = "rev:f8dbfbb67fc7178aa22a44f572d332b7d9b17d0d"
+backend = "cargo:https://github.com/P4suta/OComment"
+specifiers = ["rev:f8dbfbb67fc7178aa22a44f572d332b7d9b17d0d"]
+
+[tools."cargo:https://github.com/P4suta/OComment".options]
+crate = "ocomment"
+locked = "true"
+
 [[tools."cargo:kani-verifier"]]
 version = "0.68.0"
 backend = "cargo:kani-verifier"

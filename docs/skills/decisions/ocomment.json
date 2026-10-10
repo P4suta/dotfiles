@@ -1,11 +1,13 @@
 {
-  "revision": "e5ebcf7865ea2929200f24991aae7629f5c6623089d92dfad8d79bac4defa3a1",
+  "revision": "a6041d4fd0965340f81c57e551952d47b97bb7814ccf9eb3538c532b565ecd6a",
   "outcome": "implemented",
-  "reason": "Keep comment disposition and partial staging separate from prose policy implementation.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "reason": "Bind the project checker to the public source revision that supports the existing policy mode and flat scan positions.\nThe native installation still uses its setup provider, so the reviewed binding covers that selector and the immutable project pin.\nThe skill's check, explain, staging, and preservation procedures apply to both providers, and the inventory gate rejects an unreviewed version.",
   "evidence": [
     "home/dot_agents/skills/ocomment/SKILL.md",
     "home/dot_agents/skills/ocomment/tools.toml",
-    "xtask/tests/tool_inventory.rs"
+    "xtask/tests/tool_inventory.rs",
+    "mise.toml",
+    "crates/prose/src/lib.rs"
   ],
   "revisit": null
 }

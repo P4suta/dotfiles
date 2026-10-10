@@ -9,6 +9,7 @@ const NIX: &str = "/nix/var/nix/profiles/default/bin/nix";
 
 /// Bash at its fixed system path, so a user's `PATH` can't substitute another.
 const BASH: &str = "/bin/bash";
+const OCOMMENT_PIN: &str = "cargo:https://github.com/P4suta/OComment";
 #[cfg(target_os = "linux")]
 const ZSH: &str = "zsh";
 #[cfg(not(target_os = "linux"))]
@@ -334,6 +335,7 @@ impl Tool {
             Self::Yamllint => Provision::Pinned("yamllint"),
             Self::Chezmoi => Provision::Pinned("chezmoi"),
             Self::GhStack => Provision::Pinned("github:github/gh-stack"),
+            Self::Ocomment => Provision::Pinned(OCOMMENT_PIN),
             Self::Gitleaks => Provision::Pinned("gitleaks"),
             Self::Gh => Provision::Pinned("gh"),
             Self::Docker => Provision::Pinned("docker-cli"),
@@ -395,7 +397,6 @@ impl Tool {
             Self::Fleet => Provision::Setup(Step::Fleet),
             Self::Mise => Provision::Setup(Step::Mise),
             Self::Ocaml => Provision::Setup(Step::Ocaml),
-            Self::Ocomment => Provision::Setup(Step::Ocomment),
             Self::Brew
             | Self::Code
             | Self::Codex
