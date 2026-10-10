@@ -9,7 +9,9 @@ fn main() {
     match executable.file_stem().unwrap().to_str().unwrap() {
         "mise" => {
             if arguments == ["--version"] {
-                println!("2026.10.0 fixture-platform (2026-10-01)");
+                let version = std::fs::read_to_string(executable.with_extension("version"))
+                    .unwrap_or_else(|_| "2026.10.0".into());
+                println!("{version} fixture-platform (2026-10-01)");
                 return;
             }
             let data = std::path::PathBuf::from(std::env::var_os("MISE_DATA_DIR").unwrap());

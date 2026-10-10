@@ -231,6 +231,65 @@ fn a_mise_bootstrap_with_a_different_release_pin_stops_before_the_gate() -> Resu
     Ok(())
 }
 
+#[test]
+fn a_different_native_mise_uses_the_source_launcher_only_in_scratch() -> Result<()> {
+    let fixture = code_fixture()?;
+    let native = fixture
+        .host
+        .join(format!("mise{}", std::env::consts::EXE_SUFFIX));
+    let pinned = fixture
+        .root
+        .join(format!("pinned-mise{}", std::env::consts::EXE_SUFFIX));
+    fs::copy(&native, &pinned)?;
+    fs::write(native.with_extension("version"), "2026.10.2")?;
+    let partials = fixture.root.join("home/.chezmoitemplates/partials");
+    fs::create_dir_all(&partials)?;
+    let (partial, script) = if cfg!(windows) {
+        (
+            "install-mise-ps1",
+            format!(
+                "$bin = Join-Path $env:USERPROFILE '.local/bin'; New-Item -ItemType Directory -Force $bin | Out-Null; Copy-Item -LiteralPath '{}' -Destination (Join-Path $bin mise.exe)",
+                pinned.to_string_lossy().replace('\'', "''")
+            ),
+        )
+    } else {
+        (
+            "install-mise-sh",
+            format!(
+                "mkdir -p \"$HOME/.local/bin\" && cp '{}' \"$HOME/.local/bin/mise\"",
+                pinned.to_string_lossy().replace('\'', "'\"'\"'")
+            ),
+        )
+    };
+    fs::write(partials.join(partial), script)?;
+    let mut paths = vec![fixture.host.clone()];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let output = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), fixture.scope.path())
+        .args(["hosts", "code", "--gate", "python"])
+        .current_dir(&fixture.root)
+        .env("HOME", &fixture.host)
+        .env("USERPROFILE", &fixture.host)
+        .env("MISE_DATA_DIR", fixture.host.join("data"))
+        .env("PATH", std::env::join_paths(paths)?)
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout)?.replace("\r\n", "\n"),
+        "pinned parent\npinned child\nhttps://github.com/third-party/project.git\n"
+    );
+    assert_eq!(fs::read(native.with_extension("version"))?, b"2026.10.2");
+    assert_eq!(fs::read(native)?, fs::read(pinned)?);
+    assert!(!fixture.host.join(".local/bin/mise").exists());
+    assert!(!fixture.host.join(".local/bin/mise.exe").exists());
+    Ok(())
+}
+
 #[cfg(windows)]
 #[test]
 fn invalid_registered_compiler_data_stops_before_the_gate() -> Result<()> {

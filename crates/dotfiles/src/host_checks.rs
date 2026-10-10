@@ -163,6 +163,54 @@ impl Scratch {
         Ok(())
     }
 
+    /// Run the source's checksum-verified mise launcher in the owned home.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when rendering or running the pinned launcher fails.
+    pub fn provision_mise(&self, root: &Path) -> Result<PathBuf> {
+        const PARTIALS: &str = "home/.chezmoitemplates/partials";
+        let (partial, script, program, arguments): (_, _, _, &[&str]) = if cfg!(windows) {
+            (
+                "install-mise-ps1",
+                "install-mise.ps1",
+                platform::tool::Tool::Pwsh,
+                &["-NoProfile", "-File"],
+            )
+        } else {
+            (
+                "install-mise-sh",
+                "install-mise.sh",
+                platform::tool::Tool::Sh,
+                &[],
+            )
+        };
+        let mut render =
+            crate::profiles::chezmoi(root, self.scope.path(), &self.config, &self.home);
+        self.configure(&mut render);
+        let rendered = render
+            .args(["execute-template", "--file"])
+            .arg(root.join(PARTIALS).join(partial))
+            .output()?;
+        ensure!(
+            rendered.status.success(),
+            "mise launcher render failed: {}",
+            String::from_utf8_lossy(&rendered.stderr)
+        );
+        let script = self.scope.path().join(script);
+        fs::write(&script, rendered.stdout)?;
+        let status = self
+            .command(program.program())
+            .args(arguments)
+            .arg(&script)
+            .status()?;
+        ensure!(status.success(), "mise launcher failed with {status}");
+        Ok(self
+            .home
+            .join(RUNTIME_BIN)
+            .join(format!("mise{}", std::env::consts::EXE_SUFFIX)))
+    }
+
     fn profile(&self, root: &Path, action: &str) -> Result<()> {
         let mut command =
             crate::profiles::chezmoi(root, self.scope.path(), &self.config, &self.home);

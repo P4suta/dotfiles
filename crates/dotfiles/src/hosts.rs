@@ -17,6 +17,7 @@ const STATE: &str = ".local/state/hosts";
 const DEFAULT_GATE: &str = "just check";
 const STAGE_REPORT: &str = "DOTFILES_HOST_STAGES ";
 const CODE_SHELL: &str = "/bin/sh";
+const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -674,10 +675,7 @@ fn worker(home: &Path, gate: &str) -> Result<()> {
 }
 
 fn code(home: &Path, gate: &str) -> Result<()> {
-    let environment = platform::code_environment::CodeEnvironment::build(
-        Path::new("."),
-        &platform::code_environment::Installations::discover(home)?,
-    )?;
+    let environment = code_environment(&std::env::current_dir()?, home)?;
     let argv = code_shell(gate);
     let status = environment
         .command(&argv[0])
@@ -686,6 +684,44 @@ fn code(home: &Path, gate: &str) -> Result<()> {
         .status()?;
     ensure!(status.success(), "code stage failed with {status}");
     Ok(())
+}
+
+fn code_environment(
+    root: &Path,
+    home: &Path,
+) -> Result<platform::code_environment::CodeEnvironment> {
+    let mut installed = platform::code_environment::Installations::discover(home)?;
+    let releases = model::data::parse(RELEASE_PINS, &fs::read_to_string(root.join(RELEASE_PINS))?)
+        .map_err(anyhow::Error::msg)?;
+    let pin = releases
+        .mise
+        .and_then(|release| release.version)
+        .context("mise has no release pin")?;
+    let version = platform::process::command(&installed.mise)
+        .arg("--version")
+        .output()?;
+    ensure!(version.status.success(), "query the installed mise release");
+    if std::str::from_utf8(&version.stdout)?
+        .split_whitespace()
+        .next()
+        == Some(pin.as_str())
+    {
+        return platform::code_environment::CodeEnvironment::build(root, &installed);
+    }
+    let scope = tempfile::tempdir()?;
+    let config = scope.path().join("chezmoi.toml");
+    fs::write(
+        &config,
+        format!(
+            "[data]\nprofile = {:?}\n",
+            crate::profiles::native_profile()?.name()
+        ),
+    )?;
+    let bootstrap = crate::host_checks::Scratch::new(&config)?;
+    installed.mise = bootstrap
+        .provision_mise(root)
+        .with_context(|| format!("resolve mise release pin {pin}"))?;
+    platform::code_environment::CodeEnvironment::build(root, &installed)
 }
 
 fn code_shell(gate: &str) -> Vec<String> {
