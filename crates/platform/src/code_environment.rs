@@ -17,6 +17,8 @@ const CARGO_BIN: &str = "bin";
 const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
 const GITHUB_HOSTS: &str = "github.com: {}\n";
 const BACKEND_METADATA: &str = ".mise.backend.toml";
+#[cfg(unix)]
+const BOOTSTRAP_COPY: &str = "/bin/cp";
 #[cfg(windows)]
 const REGISTERED_COMPILER: &str = "DOTFILES_HOST_COMPILER";
 #[cfg(windows)]
@@ -167,7 +169,7 @@ impl CodeEnvironment {
         let empty = directory.join("empty-config.toml");
         fs::write(&empty, "")?;
         let mise = bootstrap.join(format!("mise{}", std::env::consts::EXE_SUFFIX));
-        fs::copy(&installed.mise, &mise).context("copy the mise bootstrap")?;
+        copy_bootstrap(&installed.mise, &mise).context("copy the mise bootstrap")?;
         let github = home.join(".config/gh");
         fs::create_dir_all(&github)?;
         fs::write(github.join("hosts.yml"), GITHUB_HOSTS)?;
@@ -576,6 +578,28 @@ impl find_msvc_tools::EnvGetter for CodeEnvironment {
             .cloned()
             .map(find_msvc_tools::Env::Owned)
     }
+}
+
+fn copy_bootstrap(source: &Path, destination: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        // Only the copy worker opens the executable for writing, so concurrent forks can't inherit its writer.
+        let output = crate::process::command(canonical(Path::new(BOOTSTRAP_COPY))?)
+            .env_clear()
+            .arg("--")
+            .arg(source)
+            .arg(destination)
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{BOOTSTRAP_COPY}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        fs::set_permissions(destination, fs::metadata(source)?.permissions())?;
+    }
+    #[cfg(windows)]
+    fs::copy(source, destination)?;
+    Ok(())
 }
 
 fn link_installations(
