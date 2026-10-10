@@ -18,6 +18,11 @@ fn main() {
                 assert_eq!(arguments, ["install", "--yes", "python@3.14.8"]);
                 assert!(data.starts_with(std::env::var_os("HOME").unwrap()));
                 std::fs::create_dir_all(&installation).unwrap();
+                std::fs::write(
+                    installation.parent().unwrap().join(".mise.backend.toml"),
+                    "short = 'python'\nfull = 'core:python'\n",
+                )
+                .unwrap();
                 std::fs::copy(
                     &executable,
                     installation.join(format!("python{}", std::env::consts::EXE_SUFFIX)),
@@ -75,6 +80,10 @@ fn main() {
             let home = std::env::var_os("HOME").unwrap();
             let data = std::path::PathBuf::from(std::env::var_os("MISE_DATA_DIR").unwrap());
             assert!(data.starts_with(&home));
+            assert_eq!(
+                std::fs::read_to_string(data.join("installs/python/.mise.backend.toml")).unwrap(),
+                "short = 'python'\nfull = 'core:python'\n"
+            );
             std::fs::write(data.join("gate-state"), "scratch write").unwrap();
             let github = std::path::PathBuf::from(std::env::var_os("GH_CONFIG_DIR").unwrap());
             assert!(github.starts_with(&home));

@@ -56,6 +56,10 @@ fn code_fixture() -> Result<CodeFixture> {
     fs::write(root.join("mise.toml"), "[tools]\npython = '3.14.8'\n")?;
     fs::create_dir_all(root.join("home/.chezmoidata"))?;
     fs::write(
+        installed.parent().unwrap().join(".mise.backend.toml"),
+        "short = 'python'\nfull = 'core:python'\n",
+    )?;
+    fs::write(
         root.join("home/.chezmoidata/versions.toml"),
         "[mise]\nversion = '2026.10.0'\n",
     )?;

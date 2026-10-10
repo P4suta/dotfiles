@@ -16,6 +16,7 @@ const MISE_CONFIG: &str = "mise.toml";
 const CARGO_BIN: &str = "bin";
 const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
 const GITHUB_HOSTS: &str = "github.com: {}\n";
+const BACKEND_METADATA: &str = ".mise.backend.toml";
 
 /// Installed tool storage without host configuration or credentials.
 #[derive(Debug)]
@@ -434,13 +435,10 @@ impl CodeEnvironment {
                             .strip_prefix(installed.data.join("installs"))?;
                         let link = data.join("installs").join(relative);
                         ensure!(
-                            fs::symlink_metadata(&link)?.file_type().is_symlink(),
-                            "an invalid scratch installation must be an owned link"
+                            canonical(&link)?.starts_with(&data),
+                            "an invalid scratch installation must belong to scratch storage"
                         );
-                        #[cfg(unix)]
-                        fs::remove_file(&link)?;
-                        #[cfg(windows)]
-                        fs::remove_dir(&link)?;
+                        fs::remove_dir_all(&link)?;
                     }
                     requests.push(format!("{name}@{}", tool.requested_version));
                 }
@@ -503,18 +501,36 @@ fn link_installations(
                 .strip_prefix(installed.data.join("installs"))
                 .with_context(|| format!("{name} installation belongs outside the tool store"))?;
             let link = data.join("installs").join(relative);
-            fs::create_dir_all(link.parent().context("installation link has no parent")?)?;
-            link_directory(&tool.install_path, &link)?;
+            let directory = link.parent().context("installation link has no parent")?;
+            fs::create_dir_all(directory)?;
+            let metadata = tool
+                .install_path
+                .parent()
+                .context("installation has no parent")?
+                .join(BACKEND_METADATA);
+            if metadata.try_exists()? {
+                fs::copy(metadata, directory.join(BACKEND_METADATA))?;
+            }
+            fs::create_dir(&link)?;
+            for entry in fs::read_dir(&tool.install_path)? {
+                let entry = entry?;
+                let destination = link.join(entry.file_name());
+                link_entry(&entry.path(), &destination)?;
+            }
         }
     }
     Ok(())
 }
 
-fn link_directory(source: &Path, destination: &Path) -> Result<()> {
+fn link_entry(source: &Path, destination: &Path) -> Result<()> {
     #[cfg(unix)]
     std::os::unix::fs::symlink(source, destination)?;
     #[cfg(windows)]
-    std::os::windows::fs::symlink_dir(source, destination)?;
+    if source.is_dir() {
+        std::os::windows::fs::symlink_dir(source, destination)?;
+    } else {
+        std::os::windows::fs::symlink_file(source, destination)?;
+    }
     Ok(())
 }
 
