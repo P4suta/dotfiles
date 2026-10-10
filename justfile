@@ -8,13 +8,17 @@ default:
 trust:
     mise trust --quiet {{quote(justfile_directory() / "mise.toml")}}
 
-check *args: trust
+[private]
+lint-tools: trust
+    mise install python uv yamllint
+
+check *args: lint-tools
     mise x -- cargo xtask check {{args}}
 
-check-staged: trust
+check-staged: lint-tools
     mise x -- cargo xtask check --staged
 
-baselines *args: trust
+baselines *args: lint-tools
     mise x -- cargo xtask baselines {{args}}
 
 commit-message file: trust
