@@ -198,7 +198,7 @@ fn copy_tree(source: &Path, target: &Path) -> Result<()> {
 }
 
 /// The command that starts `shell` interactively over the startup files under `home` and exits at once.
-fn startup(shell: Shell, home: &Path, path: &OsStr) -> Result<Command> {
+fn startup(shell: Shell, home: &Path, path: &OsStr, shims: &Path) -> Result<Command> {
     Ok(match shell {
         Shell::Zsh => {
             let mut command = crate::tool::external(located(Tool::Zsh, path)?);
@@ -223,10 +223,12 @@ fn startup(shell: Shell, home: &Path, path: &OsStr) -> Result<Command> {
         }
         Shell::Pwsh => {
             let mut command = crate::tool::external(located(Tool::Pwsh, path)?);
+            // Initialize the host's PSReadLine before instrumenting the complete managed profile.
             command
                 .args(["-NoLogo", "-NoProfile", "-Command"])
                 .arg(format!(
-                    "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; Import-Module PSReadLine; . '{}'; exit",
+                    "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; Import-Module PSReadLine; Get-PSReadLineOption | Out-Null; $env:PATH = '{}'; . '{}'; exit",
+                    shims.to_string_lossy().replace('\'', "''"),
                     home.join("Documents/PowerShell/Microsoft.PowerShell_profile.ps1")
                         .to_string_lossy()
                         .replace('\'', "''")
@@ -256,10 +258,17 @@ pub fn started(shell: Shell, home: &Path, path: &OsStr) -> Result<Vec<String>> {
     let log = scope.path().join("started");
     fs::write(&log, "")?;
     write_shims(path, &shims, &log)?;
-    let mut command = startup(shell, &measured, path)?;
+    let mut command = startup(shell, &measured, path, &shims)?;
     let output = command
         .current_dir(&measured)
-        .env("PATH", &shims)
+        .env(
+            "PATH",
+            if shell == Shell::Pwsh {
+                path
+            } else {
+                shims.as_os_str()
+            },
+        )
         .env("HOME", &measured)
         .env("USERPROFILE", &measured)
         .env("APPDATA", measured.join("AppData/Roaming"))
@@ -350,6 +359,45 @@ mod tests {
         fs::write(profile, "throw 'startup probe'\n").unwrap();
         let path = std::env::var_os("PATH").unwrap();
         assert!(started(Shell::Pwsh, home.path(), &path).is_err());
+    }
+
+    #[test]
+    fn a_powershell_profile_counts_only_the_programs_it_starts() {
+        let home = tempfile::tempdir().unwrap();
+        let profile = home
+            .path()
+            .join("Documents/PowerShell/Microsoft.PowerShell_profile.ps1");
+        fs::create_dir_all(profile.parent().unwrap()).unwrap();
+        fs::write(
+            profile,
+            "Get-PSReadLineOption | Out-Null\n& git --version | Out-Null\n",
+        )
+        .unwrap();
+        let path = std::env::var_os("PATH").unwrap();
+        assert_eq!(
+            started(Shell::Pwsh, home.path(), &path).unwrap(),
+            ["git --version"]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_powershell_profile_still_counts_the_hosts_accessibility_program() {
+        let home = tempfile::tempdir().unwrap();
+        let profile = home
+            .path()
+            .join("Documents/PowerShell/Microsoft.PowerShell_profile.ps1");
+        fs::create_dir_all(profile.parent().unwrap()).unwrap();
+        fs::write(
+            profile,
+            "Get-PSReadLineOption | Out-Null\n& defaults help | Out-Null\n",
+        )
+        .unwrap();
+        let path = std::env::var_os("PATH").unwrap();
+        assert_eq!(
+            started(Shell::Pwsh, home.path(), &path).unwrap(),
+            ["defaults help"]
+        );
     }
 
     #[test]
