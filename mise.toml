@@ -55,6 +55,7 @@ yq = "4.54.1"
 delta = "0.20.1"
 
 [settings]
+activate_aggressive = true
 # mise.lock records each tool's version, download URL, and checksum for every host platform.
 lockfile = true
 
