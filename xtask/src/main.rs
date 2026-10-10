@@ -168,6 +168,13 @@ fn check_workspace(root: &Path, checks: &mut Checks) {
             ],
         )
     });
+    checks.run("rust.guard", || {
+        cargo(
+            root,
+            manifest,
+            &["check", "--locked", "--package", "dotguard", "--bins"],
+        )
+    });
     checks.run("rust.tests", || {
         cargo(
             root,
