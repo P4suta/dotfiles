@@ -34,7 +34,7 @@ pub struct Installed {
     pub versions: BTreeSet<String>,
 }
 
-/// Every tool an install source places on a profile, by command name.
+/// Every tool an install source places on a profile, by canonical name.
 pub type Inventory = BTreeMap<String, Installed>;
 
 /// Why a tool needs no skill, from a closed set.
@@ -89,13 +89,14 @@ pub fn policy(root: &Path) -> Result<Policy> {
     .with_context(|| format!("{POLICY} is invalid"))
 }
 
-/// The command name a tool specification installs: `aqua:dalance/procs` installs `procs`, and `go:golang.org/x/tools/gopls` installs `gopls`.
+/// The canonical inventory name: `aqua:dalance/procs` names `procs`, and the renamed `github:pvolok/dekit` keeps the `mprocs` identity.
 #[must_use]
 pub fn name(spec: &str) -> String {
     let spec = spec.split_once(':').map_or(spec, |(_, rest)| rest);
     let spec = spec.rsplit('/').next().unwrap_or(spec);
     let name = spec.split('@').next().unwrap_or(spec).to_ascii_lowercase();
     match name.as_str() {
+        "dekit" => "mprocs".to_owned(),
         "rg" => "ripgrep".to_owned(),
         "nu" => "nushell".to_owned(),
         _ => name,

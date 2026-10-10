@@ -1,7 +1,9 @@
 mod inventory {
     use std::collections::{BTreeMap, BTreeSet};
     use std::path::Path;
-    use xtask::inventory::{Installed, Inventory, NoSkill, Policy, Reason, declared, refusals};
+    use xtask::inventory::{
+        Installed, Inventory, NoSkill, Policy, Reason, declared, name, refusals,
+    };
 
     fn inventory(pin: &str) -> Inventory {
         let mut inventory = Inventory::new();
@@ -45,6 +47,34 @@ mod inventory {
 
     fn mac_only() -> BTreeSet<String> {
         BTreeSet::from(["mac".to_owned()])
+    }
+
+    #[test]
+    fn a_renamed_release_keeps_the_existing_tool_decision_required() {
+        let installed = Inventory::from([(
+            name("github:pvolok/dekit@0.10.1"),
+            Installed {
+                profiles: BTreeSet::from(["linux"]),
+                versions: BTreeSet::from(["latest".to_owned()]),
+            },
+        )]);
+        let decided = policy(vec![NoSkill {
+            reason: Reason::Desktop,
+            why: "An application the owner drives.".into(),
+            tools: vec!["mprocs".into()],
+        }]);
+        assert_eq!(
+            refusals(&installed, &BTreeMap::new(), &decided, &BTreeMap::new()),
+            Vec::<String>::new()
+        );
+        let without = refusals(
+            &installed,
+            &BTreeMap::new(),
+            &policy(Vec::new()),
+            &BTreeMap::new(),
+        );
+        assert_eq!(without.len(), 1, "{without:?}");
+        assert!(without[0].starts_with("mprocs installs on linux with no skill"));
     }
 
     #[test]
