@@ -10,7 +10,10 @@
 [tools]
 {{- range $tools }}
 {{- if not (hasKey $pins .) }}
-{{ . | quote }} = {{ if hasKey $.platforms.linux.tool_versions . }}{{ index $.platforms.linux.tool_versions . | quote }}{{ else }}"latest"{{ end }}
+{{- if eq . "erlang" }}
+# A bootstrap shim must not recursively install Erlang while its installer holds the lock.
+{{- end }}
+{{ . | quote }} = {{ if eq . "erlang" }}{ version = {{ end }}{{ if hasKey $.platforms.linux.tool_versions . }}{{ index $.platforms.linux.tool_versions . | quote }}{{ else }}"latest"{{ end }}{{ if eq . "erlang" }}, install_env = { MISE_AUTO_INSTALL = "false" } }{{ end }}
 {{- end }}
 {{- end }}
 {{- range $tool, $version := $pins }}
