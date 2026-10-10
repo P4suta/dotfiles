@@ -1329,8 +1329,6 @@ pub fn github_issue_closed(issue: u32) -> Result<bool> {
         .args([
             "api",
             &format!("repos/{GITHUB_REPOSITORY}/issues/{issue}"),
-            "--header",
-            "Authorization:",
             "--jq",
             "if .pull_request.merged_at then \"MERGED\" else .state | ascii_upcase end",
         ])
