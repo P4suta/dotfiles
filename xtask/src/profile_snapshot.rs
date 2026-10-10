@@ -99,7 +99,10 @@ fn isolated(command: &mut Command, home: &Path) -> Result<()> {
         .find(|directory| directory.join(&name).is_file())
         .context("chezmoi is not on PATH")?;
     command.env_clear().env("PATH", directory);
-    command.env("HOME", home).env("USERPROFILE", home);
+    command
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("DOTFILES_ONEPASSWORD_APP", home.join("absent-app"));
     if let Some(system) = std::env::var_os("SystemRoot") {
         command.env("SystemRoot", system);
     }
@@ -484,6 +487,32 @@ mod tests {
             ["targets a", "targets b", "scripts s"]
         );
         assert_eq!(differences(&rendered, &rendered), Vec::<String>::new());
+    }
+
+    #[test]
+    fn an_isolated_render_uses_its_owned_desktop_app_probe() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let combination = Combination {
+            profile: Profile::Mac,
+            signing: false,
+            role: Role::Personal,
+        };
+        let data = combination.data(root).unwrap();
+        let scope = Scope::new(&data).unwrap();
+        let host_app = scope.root.join("host-app");
+        fs::create_dir(&host_app).unwrap();
+        let template = format!(
+            "{{{{ $app := default {} (env \"DOTFILES_ONEPASSWORD_APP\") }}}}{{{{ if stat $app }}}}present{{{{ else }}}}absent{{{{ end }}}}",
+            serde_json::to_string(&host_app).unwrap()
+        );
+        let render = || {
+            scope
+                .run(root, &data, &["execute-template", &template])
+                .unwrap()
+        };
+        assert_eq!(render(), b"absent");
+        fs::create_dir(scope.root.join("absent-app")).unwrap();
+        assert_eq!(render(), b"present");
     }
 
     #[test]
