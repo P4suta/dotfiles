@@ -146,18 +146,34 @@ fn text_files(root: &Path, paths: &[String]) -> Result<Vec<String>> {
     Ok(text)
 }
 
-/// Runs `program` over `paths` in chunks and returns the combined output of every run.
-/// A linter exits with a failure when it finds something, so only a failure to start counts as an error.
-fn chunked(root: &Path, command: impl Fn() -> Command, paths: &[String]) -> Result<String> {
+/// Runs each chunk and accepts a failed exit only when its output holds parsable findings.
+fn chunked(
+    root: &Path,
+    command: impl Fn() -> Command,
+    paths: &[String],
+    parse: impl Fn(&str) -> Vec<(String, String)>,
+) -> Result<String> {
     let mut text = String::new();
     for chunk in paths.chunks(CHUNK) {
-        let output = command()
+        let mut command = command();
+        let output = command
             .current_dir(root)
             .args(chunk)
             .output()
             .context("start a linter")?;
-        text.push_str(&String::from_utf8_lossy(&output.stdout));
-        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        let run = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        ensure!(
+            lint_rules::completed(output.status.success(), !parse(&run).is_empty()),
+            "{} failed with {} without parsable findings:\n{}",
+            command.get_program().to_string_lossy(),
+            output.status,
+            run.trim()
+        );
+        text.push_str(&run);
     }
     Ok(text)
 }
@@ -441,6 +457,7 @@ pub fn findings(root: &Path, stage: Stage, paths: &[String]) -> Result<Counts> {
                     command
                 },
                 &files,
+                |output| parse_rustfmt(root, output),
             )?,
         ),
         Stage::Typos => parse_typos(&chunked(
@@ -458,6 +475,7 @@ pub fn findings(root: &Path, stage: Stage, paths: &[String]) -> Result<Counts> {
                 command
             },
             &files,
+            parse_typos,
         )?),
         Stage::Taplo => taplo_findings(root, &files)?,
         Stage::Yamllint => parse_yamllint(&chunked(
@@ -468,6 +486,7 @@ pub fn findings(root: &Path, stage: Stage, paths: &[String]) -> Result<Counts> {
                 command
             },
             &files,
+            parse_yamllint,
         )?),
         Stage::Shellcheck => parse_shellcheck(&chunked(
             root,
@@ -477,6 +496,7 @@ pub fn findings(root: &Path, stage: Stage, paths: &[String]) -> Result<Counts> {
                 command
             },
             &files,
+            parse_shellcheck,
         )?),
         Stage::ScriptAnalyzer => script_analyzer(root, &files)?,
     };
@@ -495,6 +515,7 @@ fn taplo_findings(root: &Path, files: &[String]) -> Result<Vec<(String, String)>
                 command
             },
             files,
+            |output| parse_taplo(root, output, "format"),
         )?,
         "format",
     );
@@ -508,6 +529,7 @@ fn taplo_findings(root: &Path, files: &[String]) -> Result<Vec<(String, String)>
                 command
             },
             files,
+            |output| parse_taplo(root, output, "syntax"),
         )?,
         "syntax",
     ));
@@ -749,6 +771,116 @@ pub fn write_baselines(root: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fixture_linter(root: &Path) -> impl Fn() -> Command {
+        let script = root.join("linter.ps1");
+        fs::write(
+            &script,
+            r"param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Paths)
+if ($Paths -contains 'clean.yml') { exit 0 }
+if ($Paths -contains 'broken.yml') {
+    [Console]::Out.WriteLine('summary without findings')
+    [Console]::Error.WriteLine('No version is set for shim: python')
+    exit 1
+}
+if ($Paths -contains 'silent.yml') { exit 1 }
+$finding = 'a.yml:7:21: [error] too many spaces after colon (colons)'
+if ($Paths -contains 'stderr.yml') {
+    [Console]::Error.WriteLine($finding)
+} else {
+    [Console]::Out.WriteLine($finding)
+}
+exit 1
+",
+        )
+        .unwrap();
+        move || {
+            let mut command = Tool::Pwsh.command();
+            command
+                .args(["-NoProfile", "-NonInteractive", "-File"])
+                .arg(&script);
+            command
+        }
+    }
+
+    #[test]
+    fn successful_runs_and_failed_runs_with_findings_keep_their_results() {
+        let root = tempfile::tempdir().unwrap();
+        let command = fixture_linter(root.path());
+        for path in ["a.yml", "stderr.yml"] {
+            let output =
+                chunked(root.path(), &command, &[path.to_owned()], parse_yamllint).unwrap();
+            assert_eq!(
+                parse_yamllint(&output),
+                [("a.yml".to_owned(), "colons".to_owned())]
+            );
+        }
+        let output = chunked(
+            root.path(),
+            &command,
+            &["clean.yml".to_owned()],
+            parse_yamllint,
+        )
+        .unwrap();
+        assert_eq!(parse_yamllint(&output), Vec::<(String, String)>::new());
+    }
+
+    #[test]
+    fn findings_from_an_earlier_chunk_cannot_hide_a_later_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let command = fixture_linter(root.path());
+        let mut paths = vec!["a.yml".to_owned(); CHUNK];
+        paths.push("broken.yml".to_owned());
+        let error = chunked(root.path(), command, &paths, parse_yamllint)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("No version is set for shim: python"),
+            "{error}"
+        );
+        assert!(error.contains("summary without findings"), "{error}");
+    }
+
+    #[test]
+    fn a_silent_failure_and_a_missing_executable_are_errors() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(
+            chunked(
+                root.path(),
+                fixture_linter(root.path()),
+                &["silent.yml".to_owned()],
+                parse_yamllint,
+            )
+            .is_err()
+        );
+        let error = chunked(
+            root.path(),
+            || platform::process::command(root.path().join("missing-linter")),
+            &["a.yml".to_owned()],
+            parse_yamllint,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("start a linter"));
+    }
+
+    #[test]
+    fn a_failed_linter_without_findings_reports_its_stderr() {
+        let root = tempfile::tempdir().unwrap();
+        let error = chunked(
+            root.path(),
+            || {
+                let mut command = Tool::Git.command();
+                command.arg("--invalid-linter-option");
+                command
+            },
+            &["a.yml".to_owned()],
+            parse_yamllint,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("git"), "{error}");
+        assert!(error.contains("invalid-linter-option"), "{error}");
+    }
 
     #[test]
     fn each_linter_record_names_its_path_and_rule() {

@@ -131,6 +131,12 @@ pub const fn shrinks(before: u32, after: u32) -> bool {
     after <= before
 }
 
+/// Whether a linter completed successfully or reported findings through its parser.
+#[must_use]
+pub const fn completed(success: bool, has_findings: bool) -> bool {
+    success || has_findings
+}
+
 /// The properties Kani proves for every input and the tests check over every input they list.
 #[cfg(any(test, kani))]
 mod proofs {
@@ -171,6 +177,26 @@ mod proofs {
         assert_eq!(standing == Standing::Exceeded, found > after);
         assert_eq!(standing == Standing::Shrunk, found < after);
         assert_eq!(standing == Standing::Within, found == after);
+    }
+
+    pub fn spec_completed(success: bool, has_findings: bool) {
+        let accepted = completed(success, has_findings);
+        if success {
+            assert!(accepted);
+        } else {
+            assert_eq!(accepted, has_findings);
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_failed_linter_requires_parsable_findings() {
+        let success: bool = kani::any();
+        let has_findings: bool = kani::any();
+        spec_completed(success, has_findings);
+        kani::cover!(!success && has_findings);
+        kani::cover!(!success && !has_findings);
+        kani::cover!(success && !has_findings);
     }
 
     #[cfg(kani)]
@@ -234,6 +260,15 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_exit_and_findings_state_meets_the_completion_specification() {
+        for success in [false, true] {
+            for has_findings in [false, true] {
+                proofs::spec_completed(success, has_findings);
+            }
+        }
+    }
 
     /// Bytes at every boundary of the UTF-8 encoding forms.
     const BOUNDARIES: &[u8] =

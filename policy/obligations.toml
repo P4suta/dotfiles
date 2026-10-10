@@ -417,6 +417,10 @@ source = "crates/rules/src/lint_rules.rs"
 probes = '''
 use production::{Fault, fault, shrinks};
 #[kani::proof]
+fn reject_a_failed_linter_without_findings() {
+    assert!(production::completed(false, false));
+}
+#[kani::proof]
 fn reject_a_file_without_its_final_newline() {
     assert!(fault(b"text").is_none());
 }
