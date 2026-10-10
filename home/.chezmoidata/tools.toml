@@ -92,7 +92,7 @@ work = []
 common = [
   "ast-grep",
   "bat",
-  "eza",
+  "cargo:eza",
   "fd",
   "fzf",
   "ripgrep",

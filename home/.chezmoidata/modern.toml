@@ -83,7 +83,7 @@ next = "the Read tool for a file, or `bat --plain {args}` in a pipeline"
 [[modern.tools]]
 legacy = ["ls", "tree"]
 preferred = "eza"
-tool = "eza"
+tool = "cargo:eza"
 # renovate: datasource=github-releases depName=eza-community/eza extractVersion=^v(?<version>.+)$
 version = "0.23.5"
 reason = "Its output and flags match on every host, and `eza --tree` replaces tree."
