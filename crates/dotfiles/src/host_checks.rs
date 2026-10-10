@@ -12,6 +12,10 @@ const CONFIG: &str = ".config/chezmoi/chezmoi.toml";
 const GIT_CONFIG: &str = ".config/git/config";
 const MISE_CONFIG: &str = ".config/mise/config.toml";
 const MISE_DATA: &str = ".local/share/mise";
+const GH_CONFIG: &str = ".config/gh";
+const GH_DIRECTORY: &str = "gh";
+const WINDOWS_GH_DIRECTORY: &str = "GitHub CLI";
+const GH_LOGIN_FILES: [&str; 2] = ["hosts.yml", "config.yml"];
 const CHEZMOI_INSTALLS: &str = "installs/chezmoi";
 const PROJECT_CONFIG: &str = "mise.toml";
 const EMPTY_CONFIG: &str = "empty-config.toml";
@@ -107,6 +111,19 @@ impl Scratch {
         })
     }
 
+    fn github(&self, source: &Path) -> Result<()> {
+        let destination = self.home.join(GH_CONFIG);
+        fs::create_dir_all(&destination)?;
+        for name in GH_LOGIN_FILES {
+            match fs::copy(source.join(name), destination.join(name)) {
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error).context("snapshot GitHub CLI login"),
+            }
+        }
+        Ok(())
+    }
+
     /// Keep native executable resolution while redirecting writable user state.
     #[must_use]
     pub fn command(&self, program: impl AsRef<OsStr>) -> Command {
@@ -129,6 +146,7 @@ impl Scratch {
         for name in [
             "GH_TOKEN",
             "GITHUB_TOKEN",
+            "GITHUB_API_TOKEN",
             "GH_ENTERPRISE_TOKEN",
             "GITHUB_ENTERPRISE_TOKEN",
             "GIT_ASKPASS",
@@ -160,6 +178,7 @@ impl Scratch {
             ("MISE_CACHE_DIR", self.home.join(".cache/mise")),
             ("MISE_STATE_DIR", self.home.join(".local/state/mise")),
             ("GIT_CONFIG_GLOBAL", self.home.join(GIT_CONFIG)),
+            ("GH_CONFIG_DIR", self.home.join(GH_CONFIG)),
             ("SKILL_OPS_STATE", self.home.join(".local/state/skill-ops")),
             ("TMPDIR", self.scope.path().to_path_buf()),
             ("TMP", self.scope.path().to_path_buf()),
@@ -394,6 +413,20 @@ impl Scratch {
     }
 }
 
+fn github_config(home: &Path) -> PathBuf {
+    for (variable, suffix) in [("GH_CONFIG_DIR", ""), ("XDG_CONFIG_HOME", GH_DIRECTORY)] {
+        if let Some(directory) = std::env::var_os(variable).filter(|value| !value.is_empty()) {
+            return PathBuf::from(directory).join(suffix);
+        }
+    }
+    if cfg!(windows)
+        && let Some(directory) = std::env::var_os("APPDATA").filter(|value| !value.is_empty())
+    {
+        return PathBuf::from(directory).join(WINDOWS_GH_DIRECTORY);
+    }
+    home.join(GH_CONFIG)
+}
+
 impl Drop for Scratch {
     fn drop(&mut self) {
         platform::cleanup::report(
@@ -475,6 +508,7 @@ pub fn check(root: &Path, home: &Path) -> Report {
     let mut applied = None;
     let candidate = (|| {
         let scratch = Scratch::new(&config)?;
+        scratch.github(&github_config(home))?;
         let mut candidate = Checks::default();
         let mut renderer = None;
         candidate.run("host.renderer", || {
@@ -551,6 +585,105 @@ pub fn shell(command: &str) -> Result<Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn candidate_cli_configuration_is_explicitly_confined_to_scratch() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let config = scope.path().join("chezmoi.toml");
+        fs::write(
+            &config,
+            format!(
+                "[data]\nprofile = {:?}\n",
+                crate::profiles::native_profile()?.name()
+            ),
+        )?;
+        let scratch = Scratch::new(&config)?;
+        let command = scratch.command("gh");
+        let directory = command
+            .get_envs()
+            .find_map(|(name, value)| (name == "GH_CONFIG_DIR").then_some(value).flatten());
+        assert_eq!(directory, Some(scratch.home.join(".config/gh").as_os_str()));
+        Ok(())
+    }
+
+    #[test]
+    fn candidate_reads_the_cli_login_without_a_writable_path_to_host_files() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let host = scope.path().join("host");
+        let github = host.join(GH_CONFIG);
+        fs::create_dir_all(&github)?;
+        fs::create_dir_all(host.join(".ssh"))?;
+        fs::write(host.join(".ssh/id_ed25519"), "fixture SSH key")?;
+        fs::write(host.join(".git-credentials"), "fixture Git credential")?;
+        let login = "github.com:\n  user: fixture-gh-auth\n  oauth_token: fixture-cli-token\n  git_protocol: https\n";
+        let settings = "prompt: enabled\n";
+        fs::write(github.join(GH_LOGIN_FILES[0]), login)?;
+        fs::write(github.join(GH_LOGIN_FILES[1]), settings)?;
+        fs::write(github.join("unrelated"), "must not reach the candidate")?;
+        let config = host.join("chezmoi.toml");
+        fs::write(
+            &config,
+            format!(
+                "[data]\nprofile = {:?}\n",
+                crate::profiles::native_profile()?.name()
+            ),
+        )?;
+        let scratch = Scratch::new(&config)?;
+        scratch.github(&github)?;
+        let output = scratch
+            .command("gh")
+            .env("GH_NO_UPDATE_NOTIFIER", "1")
+            .args(["auth", "token", "--hostname", "github.com"])
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            std::str::from_utf8(&output.stdout)?.trim(),
+            "fixture-cli-token"
+        );
+        assert!(!scratch.home.join(".ssh").exists());
+        assert!(!scratch.home.join(".git-credentials").exists());
+        assert!(!scratch.home.join(GH_CONFIG).join("unrelated").exists());
+        let status = scratch
+            .command("gh")
+            .env("GH_NO_UPDATE_NOTIFIER", "1")
+            .args(["config", "set", "prompt", "disabled"])
+            .status()?;
+        ensure!(status.success(), "change the copied CLI configuration");
+        assert_eq!(fs::read_to_string(github.join(GH_LOGIN_FILES[0]))?, login);
+        assert_eq!(
+            fs::read_to_string(github.join(GH_LOGIN_FILES[1]))?,
+            settings
+        );
+        assert!(
+            fs::read_to_string(scratch.home.join(GH_CONFIG).join(GH_LOGIN_FILES[1]))?
+                .contains("disabled")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_missing_cli_login_is_optional_but_a_failed_snapshot_is_reported() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let config = scope.path().join("chezmoi.toml");
+        fs::write(
+            &config,
+            format!(
+                "[data]\nprofile = {:?}\n",
+                crate::profiles::native_profile()?.name()
+            ),
+        )?;
+        let scratch = Scratch::new(&config)?;
+        scratch.github(&scope.path().join("absent"))?;
+        assert!(fs::read_dir(scratch.home.join(GH_CONFIG))?.next().is_none());
+        let invalid = scope.path().join("invalid");
+        fs::create_dir_all(invalid.join(GH_LOGIN_FILES[0]))?;
+        assert!(scratch.github(&invalid).is_err());
+        Ok(())
+    }
 
     #[test]
     fn applied_verification_finds_the_native_default_source_read_only() -> Result<()> {

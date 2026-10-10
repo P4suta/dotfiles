@@ -639,7 +639,7 @@ pub fn remote_gate(family: Family, gate: &str) -> String {
     let worker = format!(
         "mise x -- cargo run --locked --package dotfiles --bin dotfiles -- hosts worker --gate {quoted}"
     );
-    match family {
+    let bootstrap = match family {
         Family::Windows => format!(
             "$nativeHome = $env:USERPROFILE; $env:DOTFILES_HOST_PATH = $env:PATH; $env:DOTFILES_HOST_CARGO_HOME = if ($env:CARGO_HOME) {{ $env:CARGO_HOME }} else {{ Join-Path $nativeHome .cargo }}; $jobRoot = $PWD.Path; $env:MISE_DATA_DIR = Join-Path $env:LOCALAPPDATA mise; $env:RUSTUP_HOME = Join-Path $nativeHome .rustup; $env:HOME = Join-Path $jobRoot bootstrap; $env:USERPROFILE = $env:HOME; New-Item -ItemType Directory -Force $env:HOME | Out-Null; $env:APPDATA = Join-Path $env:HOME AppData/Roaming; $env:LOCALAPPDATA = Join-Path $env:HOME AppData/Local; $env:CARGO_HOME = Join-Path $env:HOME .cargo; $env:MISE_CARGO_HOME = $env:CARGO_HOME; New-Item -ItemType Directory -Force $env:CARGO_HOME | Out-Null; New-Item -ItemType Junction -Path (Join-Path $env:CARGO_HOME bin) -Target (Join-Path $env:DOTFILES_HOST_CARGO_HOME bin) -ErrorAction Stop | Out-Null; $env:CARGO_TARGET_DIR = Join-Path $jobRoot build; $env:MISE_CONFIG_DIR = Join-Path $env:HOME .config/mise; $env:MISE_CACHE_DIR = Join-Path $env:HOME .cache/mise; $env:MISE_STATE_DIR = Join-Path $env:HOME .local/state/mise; $env:MISE_TRUSTED_CONFIG_PATHS = Join-Path $jobRoot checkout; $env:MISE_AUTO_INSTALL = 'false'; $env:GIT_CONFIG_GLOBAL = Join-Path $env:HOME empty.toml; Set-Content -LiteralPath $env:GIT_CONFIG_GLOBAL -Value '' -NoNewline; $env:MISE_GLOBAL_CONFIG_FILE = $env:GIT_CONFIG_GLOBAL; $env:MISE_SYSTEM_CONFIG_FILE = $env:GIT_CONFIG_GLOBAL; $env:GIT_CONFIG_NOSYSTEM = '1'; & '{WINDOWS_GIT}' -c advice.detachedHead=false clone --quiet head.bundle checkout; if (-not $?) {{ exit 1 }}; Set-Location checkout; {worker} --home $nativeHome; exit $LASTEXITCODE"
         ),
@@ -648,7 +648,16 @@ pub fn remote_gate(family: Family, gate: &str) -> String {
                 "nativeHome=\"$HOME\"; export DOTFILES_HOST_PATH=\"$PATH\" DOTFILES_HOST_CARGO_HOME=\"${{CARGO_HOME:-$HOME/.cargo}}\" MISE_DATA_DIR=\"$HOME/.local/share/mise\" RUSTUP_HOME=\"$HOME/.rustup\"; export HOME=\"$PWD/bootstrap\" CARGO_TARGET_DIR=\"$PWD/build\" MISE_TRUSTED_CONFIG_PATHS=\"$PWD/checkout\" MISE_AUTO_INSTALL=false; mkdir -p \"$HOME/.cargo\" && ln -s \"$DOTFILES_HOST_CARGO_HOME/bin\" \"$HOME/.cargo/bin\" && export CARGO_HOME=\"$HOME/.cargo\" MISE_CARGO_HOME=\"$HOME/.cargo\" XDG_CONFIG_HOME=\"$HOME/.config\" XDG_CACHE_HOME=\"$HOME/.cache\" XDG_DATA_HOME=\"$HOME/.local/share\" XDG_STATE_HOME=\"$HOME/.local/state\" MISE_CONFIG_DIR=\"$HOME/.config/mise\" MISE_CACHE_DIR=\"$HOME/.cache/mise\" MISE_STATE_DIR=\"$HOME/.local/state/mise\" GIT_CONFIG_GLOBAL=\"$HOME/empty.toml\" GIT_CONFIG_NOSYSTEM=1 && : > \"$GIT_CONFIG_GLOBAL\" && export MISE_GLOBAL_CONFIG_FILE=\"$GIT_CONFIG_GLOBAL\" MISE_SYSTEM_CONFIG_FILE=\"$GIT_CONFIG_GLOBAL\" && {UNIX_GIT} -c advice.detachedHead=false clone --quiet head.bundle checkout && cd checkout && {worker} --home \"$nativeHome\""
             )
         }
-    }
+    };
+    let github = match family {
+        Family::Windows => {
+            "$env:GH_CONFIG_DIR = if ($env:GH_CONFIG_DIR) { $env:GH_CONFIG_DIR } elseif ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME gh } elseif ($env:APPDATA) { Join-Path $env:APPDATA 'GitHub CLI' } else { Join-Path $env:USERPROFILE .config/gh }; "
+        }
+        Family::Linux | Family::Mac => {
+            "export GH_CONFIG_DIR=\"${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}\"; "
+        }
+    };
+    format!("{github}{bootstrap}")
 }
 
 fn worker(home: &Path, gate: &str) -> Result<()> {
