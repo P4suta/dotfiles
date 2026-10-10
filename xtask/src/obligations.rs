@@ -1327,21 +1327,18 @@ pub fn github_issue_closed(issue: u32) -> Result<bool> {
     let output = Tool::Gh
         .command()
         .args([
-            "issue",
-            "view",
-            &issue.to_string(),
-            "--repo",
-            GITHUB_REPOSITORY,
-            "--json",
-            "state",
+            "api",
+            &format!("repos/{GITHUB_REPOSITORY}/issues/{issue}"),
+            "--header",
+            "Authorization:",
             "--jq",
-            ".state",
+            ".state | ascii_upcase",
         ])
         .output()
         .context("start the GitHub CLI")?;
     ensure!(
         output.status.success(),
-        "the GitHub CLI can't read issue {issue}; run `gh auth login`: {}",
+        "the GitHub CLI can't read issue {issue} in {GITHUB_REPOSITORY}: {}",
         String::from_utf8_lossy(&output.stderr).trim()
     );
     Ok(String::from_utf8(output.stdout)?.trim() == "CLOSED")
