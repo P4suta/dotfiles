@@ -1117,6 +1117,7 @@ url = "https://download.docker.com/linux/static/stable/x86_64/docker-29.8.2.tgz"
 url = "https://download.docker.com/linux/static/stable/x86_64/docker-29.8.2.tgz"
 
 [tools.docker-cli."platforms.macos-arm64"]
+checksum = "blake3:0a6e98de62d113b046f264cbca213b562801fb87ca21e1cdf842e903665c9299"
 url = "https://download.docker.com/mac/static/stable/aarch64/docker-29.8.2.tgz"
 
 [tools.docker-cli."platforms.macos-x64"]
@@ -2426,6 +2427,7 @@ url = "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-linux-x86
 url_api = "https://api.github.com/repos/tamasfe/taplo/releases/assets/257322600"
 
 [tools.taplo."platforms.macos-arm64"]
+checksum = "blake3:353ecb1ed7d279dec5e2fd388d292ef97db08a651405fa664ffec1b2896c05f0"
 url = "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-darwin-aarch64.gz"
 url_api = "https://api.github.com/repos/tamasfe/taplo/releases/assets/257323110"
 

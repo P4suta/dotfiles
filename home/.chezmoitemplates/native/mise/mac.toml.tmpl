@@ -1,7 +1,7 @@
 {{- $pins := includeTemplate "partials/modern-pins" . | fromJson -}}
 [tools]
 {{- range (concat .platforms.mac.tools.common (index .platforms.mac.tools .role) | uniq) }}
-{{- if not (hasKey $pins .) }}
+{{- if not (or (eq . "ghc") (hasKey $pins .)) }}
 {{ . | quote }} = {{ if hasKey $.platforms.mac.tool_versions . }}{{ index $.platforms.mac.tool_versions . | quote }}{{ else }}"latest"{{ end }}
 {{- end }}
 {{- end }}
@@ -9,6 +9,9 @@
 {{ $tool | quote }} = {{ $version | quote }}
 {{- end }}
 
+# GHCup's version listing bootstraps its installer.
+# A ref installs the exact release directly.
+ghc = {{ printf "ref:%s" .platforms.mac.tool_versions.ghc | quote }}
 "github:haskell/haskell-language-server" = { version = {{ index .platforms.mac.tool_versions "haskell-language-server" | quote }}, bin = ["haskell-language-server-wrapper", {{ printf "haskell-language-server-%s" .platforms.mac.tool_versions.ghc | quote }}] }
 
 [tool_alias]
