@@ -1,8 +1,6 @@
-// `dotguard:allow-foreign` covers the Chinese reply that the language gate test refuses.
-
 use anyhow::Result;
 use prose::prose_rules::Standard;
-use prose::{Bundle, Channel, Client, Exempt, Finding, Policy, Scope};
+use prose::{Bundle, Channel, Exempt, Finding, Policy, Scope};
 use serde_json::{Value, json};
 use std::fs;
 use std::io::Write;
@@ -279,189 +277,6 @@ fn comments_from_ocomment_map_findings_to_source_lines() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn claude_and_codex_hooks_request_one_rewrite_of_a_failing_reply() -> Result<()> {
-    let runtime = tempfile::tempdir()?;
-    for client in ["claude", "codex"] {
-        let arguments = ["reply", "--client", client];
-        let failing = json!({"last_assistant_message": ATTRIBUTED, "stop_hook_active": false});
-        let (code, stdout, stderr) = binary(&arguments, &failing.to_string(), runtime.path())?;
-        assert_eq!(code, 0, "{stderr}");
-        let response: Value = serde_json::from_str(&stdout)?;
-        assert_eq!(response["decision"], "block");
-        let reason = response["reason"].as_str().unwrap_or_default();
-        assert!(reason.contains("Dotfiles.Attribution") && reason.contains(ATTRIBUTED));
-        let continued = json!({"last_assistant_message": ATTRIBUTED, "stop_hook_active": true});
-        let (_, stdout, _) = binary(&arguments, &continued.to_string(), runtime.path())?;
-        let response: Value = serde_json::from_str(&stdout)?;
-        assert_eq!(response["continue"], false);
-        let passing = json!({"last_assistant_message": COMPLIANT});
-        let (_, stdout, _) = binary(&arguments, &passing.to_string(), runtime.path())?;
-        assert_eq!(serde_json::from_str::<Value>(&stdout)?, json!({}));
-    }
-    let session = |active: bool| {
-        json!({"session_id": "session-1", "last_assistant_message": ATTRIBUTED, "stop_hook_active": active})
-            .to_string()
-    };
-    let arguments = ["reply", "--client", "claude"];
-    let (_, stdout, _) = binary(&arguments, &session(true), runtime.path())?;
-    assert_eq!(
-        serde_json::from_str::<Value>(&stdout)?["decision"],
-        "block",
-        "another hook's continuation still earns one rewrite request"
-    );
-    let (_, stdout, _) = binary(&arguments, &session(true), runtime.path())?;
-    assert_eq!(serde_json::from_str::<Value>(&stdout)?["continue"], false);
-    let (_, stdout, _) = binary(&arguments, &session(true), runtime.path())?;
-    assert_eq!(
-        serde_json::from_str::<Value>(&stdout)?["decision"],
-        "block",
-        "ending the turn clears this hook's mark"
-    );
-    let missing = tempfile::tempdir()?;
-    let mut command = fixture_process::command(env!("CARGO_BIN_EXE_prose"), missing.path());
-    let output = command
-        .args(["reply", "--client", "claude"])
-        .env("PROSE_CONFIG", missing.path())
-        .env("PROSE_RUNTIME", missing.path())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            child.stdin.take().expect("piped input").write_all(
-                json!({"last_assistant_message": COMPLIANT})
-                    .to_string()
-                    .as_bytes(),
-            )?;
-            child.wait_with_output()
-        })?;
-    let response: Value = serde_json::from_slice(&output.stdout)?;
-    assert_eq!(response["decision"], "block");
-    assert!(
-        response["reason"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("just install-prose")
-    );
-    Ok(())
-}
-
-#[test]
-fn japanese_replies_pass_through_textlint_and_the_japanese_rules() {
-    let bundle = || source();
-    let refused = prose::stop(
-        &json!({"last_assistant_message": "ご依頼どおりパーサーを修正しました。"}),
-        bundle(),
-    );
-    assert_eq!(refused["decision"], "block");
-    assert!(
-        refused["reason"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("Dotfiles.Attribution")
-    );
-    let redundant = prose::stop(
-        &json!({"last_assistant_message": "このコマンドを実行することができます。"}),
-        bundle(),
-    );
-    assert!(
-        redundant["reason"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("textlint.ja-technical-writing/ja-no-redundant-expression"),
-        "{redundant}"
-    );
-    let accepted = prose::stop(
-        &json!({"last_assistant_message": "パーサーを修正しました。"}),
-        bundle(),
-    );
-    assert_eq!(accepted, json!({}));
-    let chinese = prose::stop(
-        &json!({"last_assistant_message": "这个提交信息是中文的。"}),
-        bundle(),
-    );
-    assert_eq!(chinese["decision"], "block");
-}
-
-#[test]
-fn the_reply_falls_back_to_the_last_assistant_turn_of_the_transcript() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let transcript = directory.path().join("session.jsonl");
-    let lines = [
-        json!({"type": "user", "message": {"content": "Fix it."}}),
-        json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "Old reply."}]}}),
-        json!({"type": "user", "message": {"content": [{"type": "text", "text": "Again."}]}}),
-        json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "First part."}, {"type": "tool_use"}]}}),
-        json!({"type": "user", "message": {"content": [{"type": "tool_result"}]}}),
-        json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "Second part."}]}}),
-    ];
-    fs::write(
-        &transcript,
-        lines
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n"),
-    )?;
-    let input = json!({"transcript_path": transcript});
-    assert_eq!(prose::reply_text(&input)?, "First part.\n\nSecond part.");
-    Ok(())
-}
-
-#[test]
-fn the_opencode_plugin_requests_one_rewrite_through_the_native_checker() -> Result<()> {
-    let runtime = platform::process::command("mise")
-        .current_dir(root())
-        .args(["which", "bun"])
-        .output()?;
-    assert!(runtime.status.success());
-    let bun = PathBuf::from(String::from_utf8(runtime.stdout)?.trim());
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/opencode-prose.ts");
-    let empty = tempfile::tempdir()?;
-    let run_with = |executable: &Path, reply: &str| -> Result<(Vec<String>, Vec<String>)> {
-        let output = fixture_process::command(&bun, empty.path())
-            .current_dir(root())
-            .arg(&fixture)
-            .arg(executable)
-            .arg(reply)
-            .env("PROSE_CONFIG", root().join("home/dot_config/prose"))
-            .env("PROSE_RUNTIME", empty.path())
-            .output()?;
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let result: Value = serde_json::from_slice(&output.stdout)?;
-        let list = |name: &str| -> Vec<String> {
-            result[name]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|item| item.as_str().map(str::to_owned))
-                .collect()
-        };
-        Ok((list("prompts"), list("toasts")))
-    };
-    let run = |reply: &str| run_with(Path::new(env!("CARGO_BIN_EXE_prose")), reply);
-    let (prompts, toasts) = run(ATTRIBUTED)?;
-    assert_eq!(prompts.len(), 1, "{prompts:?}");
-    assert!(prompts[0].contains("Dotfiles.Attribution") && prompts[0].contains(ATTRIBUTED));
-    assert_eq!(
-        toasts.len(),
-        1,
-        "the second failure shows its findings: {toasts:?}"
-    );
-    assert!(toasts[0].contains("Dotfiles.Attribution") && toasts[0].contains(ATTRIBUTED));
-    assert_eq!(run(COMPLIANT)?, (Vec::new(), Vec::new()));
-    let missing = empty.path().join("bin").join("prose");
-    let (prompts, toasts) = run_with(&missing, ATTRIBUTED)?;
-    assert!(prompts.is_empty(), "{prompts:?}");
-    assert_eq!(toasts.len(), 1, "{toasts:?}");
-    assert!(toasts[0].contains("just install-prose"));
-    Ok(())
-}
-
 fn finding(path: &str, rule: &str, sentence: &str) -> Finding {
     Finding {
         path: path.into(),
@@ -582,22 +397,120 @@ fn the_pinned_vale_matches_the_mise_pin() -> Result<()> {
 }
 
 #[test]
-fn hook_registration_is_idempotent_and_keeps_other_handlers() -> Result<()> {
+fn hook_removal_is_idempotent_and_keeps_other_handlers() -> Result<()> {
     let settings = json!({"hooks": {"Stop": [
         {"hooks": [{"type": "command", "command": "skill-ops stop", "timeout": 10}]},
+        {"matcher": "*", "hooks": [
+            {"type": "command", "command": "prose reply --client claude", "timeout": 120},
+            {"type": "prompt", "prompt": "Check the task."},
+            {"type": "command", "command": "prose check --channel document guide.md"}
+        ]},
+        {"hooks": []},
         {"hooks": [{"type": "command", "command": "prose reply --client codex", "timeout": 5}]}
+    ], "PreToolUse": [{"hooks": [{"type": "command", "command": "dotfiles hook claude"}]}]}, "theme": "auto"});
+    let expected = json!({"hooks": {"Stop": [
+        {"hooks": [{"type": "command", "command": "skill-ops stop", "timeout": 10}]},
+        {"matcher": "*", "hooks": [
+            {"type": "prompt", "prompt": "Check the task."},
+            {"type": "command", "command": "prose check --channel document guide.md"}
+        ]},
+        {"hooks": []}
+    ], "PreToolUse": [{"hooks": [{"type": "command", "command": "dotfiles hook claude"}]}]}, "theme": "auto"});
+    let merged = prose::remove_reply_hooks(settings)?;
+    assert_eq!(merged, expected);
+    assert_eq!(prose::remove_reply_hooks(merged.clone())?, merged);
+    Ok(())
+}
+
+#[test]
+fn hook_removal_keeps_absent_events_and_refuses_malformed_settings() -> Result<()> {
+    for settings in [
+        json!({}),
+        json!({"hooks": {}}),
+        json!({"hooks": {"Stop": []}}),
+    ] {
+        assert_eq!(prose::remove_reply_hooks(settings.clone())?, settings);
+    }
+    for settings in [
+        json!([]),
+        json!({"hooks": []}),
+        json!({"hooks": {"Stop": {}}}),
+        json!({"hooks": {"Stop": [{}]}}),
+        json!({"hooks": {"Stop": [{"hooks": {}}]}}),
+    ] {
+        assert!(prose::remove_reply_hooks(settings).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn apply_and_install_cleanup_remove_existing_reply_checks() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    let expected = json!({"hooks": {"Stop": [
+        {"hooks": [{"type": "command", "command": "skill-ops stop"}]}
     ]}, "theme": "auto"});
-    let merged = prose::merge_hooks(settings, Client::Claude)?;
-    assert_eq!(prose::merge_hooks(merged.clone(), Client::Claude)?, merged);
-    let stop = merged["hooks"]["Stop"].as_array().expect("Stop hooks");
-    assert_eq!(stop.len(), 2);
-    assert_eq!(stop[0]["hooks"][0]["command"], "skill-ops stop");
-    assert_eq!(
-        stop[1]["hooks"][0]["command"],
-        "prose reply --client claude"
+    for (client, relative) in [
+        ("claude", ".claude/settings.json"),
+        ("codex", ".codex/hooks.json"),
+    ] {
+        let path = home.path().join(relative);
+        fs::create_dir_all(path.parent().expect("settings parent"))?;
+        let settings = json!({"hooks": {"Stop": [
+            {"hooks": [{"type": "command", "command": "skill-ops stop"}]},
+            {"hooks": [{"type": "command", "command": format!("prose reply --client {client}"), "timeout": 120}]}
+        ]}, "theme": "auto"});
+        fs::write(&path, serde_json::to_vec(&settings)?)?;
+    }
+    let plugin = home.path().join(prose::REPLY_PLUGIN);
+    fs::create_dir_all(plugin.parent().expect("plugin parent"))?;
+    fs::write(&plugin, "retired reply plugin")?;
+    let other_plugin = plugin.with_file_name("other.ts");
+    fs::write(&other_plugin, "other plugin")?;
+    for _ in 0..2 {
+        prose::remove_reply_checks(home.path())?;
+        assert!(!plugin.try_exists()?);
+        assert_eq!(fs::read_to_string(&other_plugin)?, "other plugin");
+        for relative in [".claude/settings.json", ".codex/hooks.json"] {
+            assert_eq!(
+                skill_ops::read_json::<Value>(&home.path().join(relative))?,
+                expected
+            );
+        }
+    }
+    let untouched = "{\"theme\":\"auto\"}\n";
+    let settings = home.path().join(".claude/settings.json");
+    fs::write(&settings, untouched)?;
+    prose::remove_reply_checks(home.path())?;
+    assert_eq!(fs::read_to_string(&settings)?, untouched);
+    let fresh = tempfile::tempdir()?;
+    prose::remove_reply_checks(fresh.path())?;
+    assert_eq!(fs::read_dir(fresh.path())?.count(), 0);
+    Ok(())
+}
+
+#[test]
+fn reply_cleanup_reports_a_plugin_that_cannot_be_removed() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    let plugin = home.path().join(prose::REPLY_PLUGIN);
+    fs::create_dir_all(&plugin)?;
+    let error = format!(
+        "{:#}",
+        prose::remove_reply_checks(home.path()).expect_err("a directory at the plugin path")
     );
-    assert_eq!(merged["theme"], "auto");
-    assert!(prose::merge_hooks(json!({}), Client::Opencode).is_err());
+    assert!(error.contains("remove the retired reply plugin"));
+    Ok(())
+}
+
+#[test]
+fn the_cli_no_longer_accepts_replies() -> Result<()> {
+    let runtime = tempfile::tempdir()?;
+    for arguments in [
+        vec!["reply", "--client", "claude"],
+        vec!["check", "--channel", "reply"],
+    ] {
+        let (code, _, stderr) = binary(&arguments, "", runtime.path())?;
+        assert_eq!(code, 2, "{stderr}");
+    }
     Ok(())
 }
 

@@ -108,7 +108,7 @@ enum Action {
     InstallReviewGuard,
     InstallSkillOps,
     InstallPrWorkflow,
-    /// Install the prose checker, its pinned linters, and the reply hook of each client.
+    /// Install the persisted prose checker and its pinned linters, and remove retired reply checks.
     InstallProse,
     /// Refuse a lint baseline that admits more than it did at `--base`, or rewrite every baseline from the tracked files with `--write`.
     Baselines {
@@ -452,7 +452,6 @@ fn install_prose(root: &Path) -> Result<()> {
         .arg(&user_directory)
         .args(["apply", "--include", "dirs,files", "--parent-dirs"])
         .arg(user_directory.join(".config/prose"))
-        .arg(user_directory.join(".config/opencode/plugins/prose.ts"))
         .status()?;
     ensure!(
         status.success(),

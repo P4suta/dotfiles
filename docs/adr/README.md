@@ -19,7 +19,7 @@
 | [0013 Mark a PR ready only after every check passes](0013-ready-only-after-passing-checks.md) | accepted |  |
 | [0014 Bind tracked skill decisions to each skill revision](0014-per-skill-decision-records.md) | accepted |  |
 | [0015 Scope the CodeRabbit owner pause](0015-scoped-coderabbit-pause.md) | accepted |  |
-| [0016 Enforce one writing standard on persisted prose and replies](0016-one-writing-standard.md) | accepted |  |
+| [0016 Enforce one writing standard on persisted prose and replies](0016-one-writing-standard.md) | amended | [2026-10-10](persisted-prose-gates.md) |
 | [0017 Normalize line endings to LF on every host and agent write](0017-lf-line-endings-everywhere.md) | accepted |  |
 | [0018 Turn off persistent agent memory in the native client profiles](0018-agent-memory-off.md) | accepted |  |
 | [0019 Recommend the next workflow step from inspected state](0019-state-inspecting-next-action.md) | accepted |  |
@@ -47,3 +47,4 @@
 | [2026-10-09 Optimize checked MIR for the pinned Kani verifier](optimize-checked-kani-mir.md) | accepted |  |
 | [2026-10-09 Preserve source witnesses under checked Kani MIR](preserve-kani-source-covers.md) | accepted |  |
 | [2026-10-09 Validate skill catalogs before planning](validated-skill-plan-inputs.md) | accepted |  |
+| [2026-10-10 Check prose before persistence](persisted-prose-gates.md) | accepted |  |

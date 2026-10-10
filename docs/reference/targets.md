@@ -164,6 +164,7 @@ Each profile in the set removes the target when it applies.
 | `.config/nushell/autoload/zoxide.nu` | mac | mac |
 | `.config/nushell/login.nu` | linux | linux |
 | `.config/nushell/mise.nu` | desktop | mac, linux |
+| `.config/opencode/plugins/prose.ts` | unix | mac, linux, wsl |
 | `.config/shell/github-token.sh` | unix | mac, linux, wsl |
 | `.config/sketchybar` | mac | mac |
 | `.config/systemd/user/mise-upgrade.service` | linux | linux |

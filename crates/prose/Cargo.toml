@@ -1,6 +1,6 @@
 [package]
 name = "prose"
-description = "The writing standard's checker, its pinned linters, and the reply hooks of each client"
+description = "The persisted writing standard's checker and its pinned linters"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

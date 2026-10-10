@@ -301,7 +301,6 @@
     {"mode":"0644","path":".config/opencode/opencode.json","sha256":"8820b8dd768c155a50f7dd7efd1358698f15a04aac91e73cb27325e471508665","type":"file"},
     {"mode":"0755","path":".config/opencode/plugins","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/opencode/plugins/line-endings.ts","sha256":"fdb7056ccb3106fe9f65d4a22cb1a95f35ce8c97851cd5b8708673f7ce251471","type":"file"},
-    {"mode":"0644","path":".config/opencode/plugins/prose.ts","sha256":"6b0dae5645fca94e59dc97d63cac2a690ca65cb81453c8f28888bba96d101246","type":"file"},
     {"mode":"0644","path":".config/opencode/plugins/shell-guard.ts","sha256":"20fe3980af4936c4b365738a8f9ef8a9c60456ee592f8ffce9d0e416f0a36ea3","type":"file"},
     {"mode":"0644","path":".config/opencode/plugins/skill-ops.ts","sha256":"ca64b9fae7c7e069724d663df980824dcd93eef1695230cc97c91002de22ea54","type":"file"},
     {"mode":"0755","path":".config/prose","sha256":null,"type":"dir"},

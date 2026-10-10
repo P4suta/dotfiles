@@ -1,4 +1,4 @@
-//! The writing standard: the prose checker, its pinned linters, and the reply hooks of each client.
+//! The writing standard: the persisted prose checker and its pinned linters.
 
 pub use platform::paths::{canonical, has_extension};
 pub use platform::{aside, build_inputs, tool};
@@ -6,7 +6,7 @@ pub use rules::{directive_rules, prose_rules, source_name_rules};
 
 use crate::build_inputs::hex;
 use crate::prose_rules::{
-    Owner, Reply, Standard, exemption_valid, reply, repository_standard, rewritten_by_this_hook,
+    Owner, Standard, exemption_valid, keep_hook_group, reply_hook, repository_standard,
 };
 use crate::source_name_rules::Entry;
 use crate::tool::Tool;
@@ -33,16 +33,10 @@ const MIN_ABBREVIATED_HASH: usize = 7;
 /// An ISO 8601 date, `YYYY-MM-DD`, and the positions of its hyphens.
 const DATE_LENGTH: usize = 10;
 const DATE_SEPARATORS: [usize; 2] = [4, 7];
-/// The Hiragana and Katakana blocks.
-const KANA: std::ops::RangeInclusive<u32> = 0x3040..=0x30FF;
 /// `OComment` exits with this status when it found comments to report, and with a higher one when it failed.
 const OCOMMENT_FINDINGS: i32 = 1;
-/// The longest session identifier a client sends.
-const MAX_SESSION_ID: usize = 128;
 /// A remote with a one-letter authority names a Windows drive letter, not an SSH host.
 const MIN_SSH_AUTHORITY: usize = 2;
-/// The seconds a client waits for the reply hook.
-const REPLY_HOOK_TIMEOUT_SECONDS: u64 = 120;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum Channel {
@@ -51,7 +45,6 @@ pub enum Channel {
     Pr,
     Issue,
     Comment,
-    Reply,
 }
 
 #[derive(
@@ -61,13 +54,6 @@ pub enum Channel {
 pub enum Scope {
     Documents,
     Comments,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
-pub enum Client {
-    Claude,
-    Codex,
-    Opencode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -122,27 +108,12 @@ struct Tools {
     bun: Option<PathBuf>,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TokenRules {
-    rules: BTreeMap<String, TokenRule>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TokenRule {
-    message: String,
-    tokens: Vec<String>,
-}
-
 /// The configuration, the pinned linters, and the textlint installation one check runs with.
 #[derive(Debug)]
 pub struct Bundle {
     pub config: PathBuf,
     pub textlint: PathBuf,
     vale: Option<PathBuf>,
-    bun: Option<PathBuf>,
-    installs_textlint: bool,
 }
 
 fn home() -> Result<PathBuf> {
@@ -176,8 +147,6 @@ impl Bundle {
             )),
             config,
             vale: None,
-            bun: None,
-            installs_textlint: true,
         })
     }
 
@@ -201,8 +170,6 @@ impl Bundle {
             config,
             textlint: runtime.join("textlint"),
             vale: tools.vale,
-            bun: tools.bun,
-            installs_textlint: false,
         })
     }
 
@@ -210,12 +177,6 @@ impl Bundle {
         self.vale
             .as_ref()
             .map_or_else(|| Tool::Vale.command(), crate::tool::external)
-    }
-
-    fn bun(&self) -> Command {
-        self.bun
-            .as_ref()
-            .map_or_else(|| Tool::Bun.command(), crate::tool::external)
     }
 
     /// Refuses a missing configuration, a changed style package, or another Vale version.
@@ -603,30 +564,6 @@ fn vale(bundle: &Bundle, inputs: &[Input]) -> Result<Vec<Finding>> {
     Ok(findings)
 }
 
-fn token_rules(bundle: &Bundle, input: &Input) -> Result<Vec<Finding>> {
-    let rules: TokenRules =
-        toml::from_str(&fs::read_to_string(bundle.config.join("japanese.toml"))?)
-            .context("read the Japanese repository rules")?;
-    let visible = masked(&input.text);
-    let mut findings = Vec::new();
-    for (index, line) in visible.lines().enumerate() {
-        for (name, rule) in &rules.rules {
-            for token in &rule.tokens {
-                for (offset, _) in line.match_indices(token.as_str()) {
-                    let column = line[..offset].chars().count() + 1;
-                    findings.push(input.finding(
-                        index + 1,
-                        column,
-                        name,
-                        &format!("{} ({token})", rule.message),
-                    ));
-                }
-            }
-        }
-    }
-    Ok(findings)
-}
-
 /// Installs the pinned textlint packages into `target` unless the same lockfile already produced it.
 pub(crate) fn install_textlint(package: &Path, target: &Path, bun: Command) -> Result<()> {
     let lock = fs::read(package.join("bun.lock"))?;
@@ -683,74 +620,6 @@ pub(crate) fn install_textlint(package: &Path, target: &Path, bun: Command) -> R
         );
     }
     Ok(())
-}
-
-#[derive(Deserialize)]
-struct TextlintFile {
-    messages: Vec<TextlintMessage>,
-}
-
-#[derive(Deserialize)]
-struct TextlintMessage {
-    #[serde(rename = "ruleId")]
-    rule: String,
-    message: String,
-    line: usize,
-    column: usize,
-}
-
-fn textlint(bundle: &Bundle, input: &Input) -> Result<Vec<Finding>> {
-    if bundle.installs_textlint {
-        install_textlint(
-            &bundle.config.join("textlint"),
-            &bundle.textlint,
-            bundle.bun(),
-        )?;
-    }
-    let script = bundle
-        .textlint
-        .join("node_modules/textlint/bin/textlint.js");
-    ensure!(
-        script.is_file(),
-        "textlint is not installed at {}; run `{INSTALL}` in the dotfiles source",
-        bundle.textlint.display()
-    );
-    let directory = tempfile::tempdir()?;
-    let file = directory.path().join("reply.md");
-    fs::write(&file, &input.text)?;
-    let output = bundle
-        .bun()
-        .current_dir(&bundle.textlint)
-        .arg(&script)
-        .arg("--config")
-        .arg(bundle.config.join("textlint/textlintrc.json"))
-        .arg("--rules-base-directory")
-        .arg(bundle.textlint.join("node_modules"))
-        .args(["--format", "json"])
-        .arg(&file)
-        .stdin(Stdio::null())
-        .output()
-        .with_context(|| {
-            format!("start bun for textlint; run `{INSTALL}` in the dotfiles source")
-        })?;
-    let report: Vec<TextlintFile> = serde_json::from_slice(&output.stdout).with_context(|| {
-        format!(
-            "textlint failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )
-    })?;
-    Ok(report
-        .into_iter()
-        .flat_map(|file| file.messages)
-        .map(|message| {
-            input.finding(
-                message.line,
-                message.column,
-                &format!("textlint.{}", message.rule),
-                message.message.lines().next().unwrap_or_default(),
-            )
-        })
-        .collect())
 }
 
 /// Removes a Conventional Commits prefix such as `feat(scope)!: `, which carries structure rather than prose.
@@ -926,11 +795,6 @@ pub fn publication(title: Option<&str>, body: &str) -> String {
     text
 }
 
-#[must_use]
-pub fn japanese(text: &str) -> bool {
-    text.chars().any(|c| KANA.contains(&u32::from(c)))
-}
-
 /// Checks one text for one channel and returns every finding.
 ///
 /// # Errors
@@ -943,17 +807,6 @@ pub fn check(bundle: &Bundle, channel: Channel, path: &str, text: &str) -> Resul
         Channel::Comment => bail!(
             "comments are read from source files through OComment; pass the source paths instead"
         ),
-        Channel::Reply if japanese(text) => {
-            let input = Input::new(path, text, false);
-            findings.extend(language(&input, lang::Mode::Japanese));
-            findings.extend(token_rules(bundle, &input)?);
-            findings.extend(textlint(bundle, &input)?);
-        }
-        Channel::Reply => {
-            let input = Input::new(path, text, false);
-            findings.extend(language(&input, lang::Mode::English));
-            findings.extend(vale(bundle, std::slice::from_ref(&input))?);
-        }
         Channel::Document | Channel::Commit | Channel::Pr | Channel::Issue => {
             let text = match channel {
                 Channel::Commit => commit_message(text),
@@ -1457,115 +1310,6 @@ pub fn findings(root: &Path, scope: Scope, bundle: &Bundle) -> Result<Vec<Findin
     Ok(unexempted(scope, findings, &policy, &mut used))
 }
 
-/// The final reply text from a Stop hook input, falling back to the transcript.
-///
-/// # Errors
-///
-/// Returns an error when the input names an unreadable transcript.
-pub fn reply_text(input: &Value) -> Result<String> {
-    if let Some(text) = input["last_assistant_message"].as_str() {
-        return Ok(text.to_owned());
-    }
-    let Some(path) = input["transcript_path"].as_str() else {
-        return Ok(String::new());
-    };
-    let transcript = fs::read_to_string(path).context("read the session transcript")?;
-    let mut parts = Vec::new();
-    for line in transcript.lines().rev() {
-        let Ok(entry) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        let content = &entry["message"]["content"];
-        match entry["type"].as_str() {
-            Some("assistant") => {
-                for block in content.as_array().into_iter().flatten().rev() {
-                    if block["type"] == "text"
-                        && let Some(text) = block["text"].as_str()
-                    {
-                        parts.push(text.to_owned());
-                    }
-                }
-            }
-            Some("user") => {
-                let prompt = content.is_string()
-                    || content
-                        .as_array()
-                        .is_some_and(|blocks| blocks.iter().any(|block| block["type"] == "text"));
-                if prompt {
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    parts.reverse();
-    Ok(parts.join("\n\n"))
-}
-
-/// The file that records this hook's rewrite request for one session, when the client names the session.
-fn rewrite_marker(input: &Value) -> Option<PathBuf> {
-    let session = input["session_id"].as_str()?;
-    let valid = !session.is_empty()
-        && session.len() <= MAX_SESSION_ID
-        && session
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'));
-    valid.then(|| Some(runtime_directory().ok()?.join("replies").join(session)))?
-}
-
-/// The hook response for a finished turn, which passes it, requests one rewrite, or ends with the findings.
-#[must_use]
-pub fn stop(input: &Value, bundle: Result<Bundle>) -> Value {
-    let marker = rewrite_marker(input);
-    let continued = rewritten_by_this_hook(
-        input["stop_hook_active"] == true,
-        marker.as_ref().map(|path| path.is_file()),
-    );
-    let checked = bundle.and_then(|bundle| {
-        let text = reply_text(input)?;
-        if text.trim().is_empty() {
-            return Ok(Vec::new());
-        }
-        check(&bundle, Channel::Reply, "reply", &text)
-    });
-    let reason = match &checked {
-        Ok(findings) if findings.is_empty() => String::new(),
-        Ok(findings) => format!(
-            "The final reply fails the prose checker:\n{}\nRewrite the reply so that `prose check --channel reply` accepts it.",
-            render(findings)
-        ),
-        Err(error) => format!("The prose checker cannot judge the final reply: {error:#}"),
-    };
-    let ended = |reason: &str, message: &str| serde_json::json!({"continue": false, "stopReason": reason, "systemMessage": message});
-    let action = reply(reason.is_empty(), continued);
-    if action != Reply::Rewrite
-        && let Some(path) = &marker
-    {
-        platform::cleanup::remove_file(path);
-    }
-    match action {
-        Reply::Allow => serde_json::json!({}),
-        Reply::Rewrite => {
-            let recorded = marker.as_ref().map_or(Ok(()), |path| {
-                fs::create_dir_all(path.parent().unwrap_or(path)).and_then(|()| fs::write(path, ""))
-            });
-            match recorded {
-                Ok(()) => serde_json::json!({"decision": "block", "reason": reason}),
-                Err(error) => ended(
-                    &reason,
-                    &format!(
-                        "The prose checker cannot record its rewrite request ({error}), so it ends the turn instead of requesting one."
-                    ),
-                ),
-            }
-        }
-        Reply::EndUnchecked => ended(
-            &reason,
-            "The final reply still fails the prose checker after one rewrite.",
-        ),
-    }
-}
-
 /// The GitHub owner that a remote address names, in HTTPS, SSH, or scp-like form.
 /// `resolve` maps an SSH host to the host name it connects to, so an SSH host entry for github.com names its owner too.
 pub fn github_owner(url: &str, resolve: impl Fn(&str) -> Option<String>) -> Option<String> {
@@ -1750,32 +1494,29 @@ pub fn commit_gate(
     Ok(())
 }
 
-const HOOK_PREFIX: &str = "prose reply --client ";
+const CLIENT_SETTINGS: [&str; 2] = [".codex/hooks.json", ".claude/settings.json"];
+pub const REPLY_PLUGIN: &str = ".config/opencode/plugins/prose.ts";
 
-/// Registers the reply check as the client's Stop hook and drops earlier registrations of it.
+/// Removes retired reply handlers from Stop groups and keeps every other setting.
 ///
 /// # Errors
 ///
-/// Returns an error for `OpenCode`, which reads the reply check from its plugin.
 /// Returns an error when the settings hold no top-level JSON object, `hooks` holds a non-object value, `Stop` holds a non-array value, or a Stop group has no handler array.
-pub fn merge_hooks(mut value: Value, client: Client) -> Result<Value> {
-    let name = match client {
-        Client::Claude => "claude",
-        Client::Codex => "codex",
-        Client::Opencode => {
-            bail!("OpenCode reads the reply check from its plugin, not from hook settings")
-        }
-    };
-    let hooks = value
+pub fn remove_reply_hooks(mut value: Value) -> Result<Value> {
+    let Some(hooks) = value
         .as_object_mut()
         .context("client settings must be a JSON object")?
-        .entry("hooks")
-        .or_insert_with(|| serde_json::json!({}))
+        .get_mut("hooks")
+    else {
+        return Ok(value);
+    };
+    let hooks = hooks
         .as_object_mut()
         .context("native hooks must be an object")?;
-    let entries = hooks
-        .entry("Stop")
-        .or_insert_with(|| serde_json::json!([]))
+    let Some(entries) = hooks.get_mut("Stop") else {
+        return Ok(value);
+    };
+    let entries = entries
         .as_array_mut()
         .context("the native Stop hook must be an array")?;
     let mut retained = Vec::new();
@@ -1787,15 +1528,36 @@ pub fn merge_hooks(mut value: Value, client: Client) -> Result<Value> {
         handlers.retain(|handler| {
             !handler["command"]
                 .as_str()
-                .is_some_and(|command| command.starts_with(HOOK_PREFIX))
+                .is_some_and(|command| reply_hook(command.as_bytes()))
         });
-        if !handlers.is_empty() || handlers.len() == before {
+        if keep_hook_group(before, handlers.len()) {
             retained.push(entry);
         }
     }
-    retained.push(serde_json::json!({"hooks": [{"type": "command", "command": format!("{HOOK_PREFIX}{name}"), "timeout": REPLY_HOOK_TIMEOUT_SECONDS}]}));
     *entries = retained;
     Ok(value)
+}
+
+/// Removes installed reply hooks and the retired `OpenCode` plugin.
+///
+/// # Errors
+///
+/// Returns an error when reading, validating, or writing client settings fails, or removing the plugin fails.
+pub fn remove_reply_checks(user_directory: &Path) -> Result<()> {
+    for relative in CLIENT_SETTINGS {
+        let path = user_directory.join(relative);
+        if !path.try_exists()? {
+            continue;
+        }
+        let value: Value = skill_ops::read_json(&path)?;
+        let next = remove_reply_hooks(value.clone())?;
+        if next != value {
+            skill_ops::write_json(&path, &next, true)?;
+        }
+    }
+    let plugin = user_directory.join(REPLY_PLUGIN);
+    platform::cleanup::absent_ok(fs::remove_file(&plugin))
+        .with_context(|| format!("remove the retired reply plugin {}", plugin.display()))
 }
 
 /// Locates a tool the source checkout pins, for the installed checker to run outside that checkout.
@@ -1813,12 +1575,12 @@ fn pinned_path(source: &Path, tool: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(String::from_utf8(output.stdout)?.trim()))
 }
 
-/// Installs the reply checker, its linters, and the Claude Code and Codex Stop hooks.
+/// Installs the persisted prose checker and its linters, and removes retired reply checks.
 ///
 /// # Errors
 ///
 /// Returns an error when the built executable doesn't exist, copying or writing a file fails, mise can't locate the pinned Vale or Bun, or the textlint installation fails.
-/// Returns an error when the installed bundle fails verification or reading, merging, or writing a client's hook settings fails.
+/// Returns an error when the installed bundle fails verification or removing a retired reply check fails.
 pub fn install(source: &Path, binary: &Path, user_directory: &Path) -> Result<()> {
     ensure!(binary.is_file(), "the built prose executable is missing");
     let directory = user_directory.join(".local/bin");
@@ -1847,25 +1609,9 @@ pub fn install(source: &Path, binary: &Path, user_directory: &Path) -> Result<()
             .map_or_else(|| Tool::Bun.command(), crate::tool::external),
     )?;
     Bundle::installed()?.verify()?;
-    for (client, path) in [
-        (Client::Codex, user_directory.join(".codex/hooks.json")),
-        (Client::Claude, user_directory.join(".claude/settings.json")),
-    ] {
-        let value: Value = if path.try_exists()? {
-            skill_ops::read_json(&path)?
-        } else {
-            serde_json::json!({})
-        };
-        let next = merge_hooks(value.clone(), client)?;
-        if next != value {
-            skill_ops::write_json(&path, &next, true)?;
-        }
-    }
+    remove_reply_checks(user_directory)?;
     println!(
-        "Installed the prose checker, its pinned linters, and the Claude Code and Codex reply hooks"
-    );
-    println!(
-        "Verify the clients' hook trust and the OpenCode plugin activation before relying on the reply check"
+        "Installed the persisted prose checker and its pinned linters; removed retired reply checks"
     );
     Ok(())
 }

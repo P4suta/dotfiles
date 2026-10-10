@@ -46,31 +46,19 @@ pub fn repository_standard(
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Reply {
-    Allow,
-    Rewrite,
-    EndUnchecked,
+pub const HOOK_PREFIX: &[u8] = b"prose reply --client ";
+
+/// The command prefix that the retired prose installer registered.
+#[must_use]
+pub fn reply_hook(command: &[u8]) -> bool {
+    command.starts_with(HOOK_PREFIX)
 }
 
-/// A continued turn counts as this hook's rewrite only when this hook marked the session.
-/// Another hook's continuation still earns one rewrite request.
-/// Without a session to mark, the client's continuation flag decides, which keeps the loop bounded.
+/// A hook group stays unless removing its reply handlers emptied it.
+/// An existing empty group stays unchanged.
 #[must_use]
-pub fn rewritten_by_this_hook(stop_hook_active: bool, marked: Option<bool>) -> bool {
-    stop_hook_active && marked.unwrap_or(true)
-}
-
-/// A failing reply gets one rewrite request, and a second failure ends the turn with the findings instead of looping.
-#[must_use]
-pub fn reply(passed: bool, already_continued: bool) -> Reply {
-    if passed {
-        Reply::Allow
-    } else if already_continued {
-        Reply::EndUnchecked
-    } else {
-        Reply::Rewrite
-    }
+pub fn keep_hook_group(before: usize, after: usize) -> bool {
+    before == 0 || after != 0
 }
 
 /// The properties Kani proves for every input and the tests check over every input they list.
@@ -124,14 +112,27 @@ mod proofs {
         }
     }
 
-    /// A failing reply gets one rewrite request, and a continuation this hook marked ends the turn instead.
-    pub fn spec_reply(passed: bool, active: bool, marked: Option<bool>) {
-        let continued = rewritten_by_this_hook(active, marked);
-        assert_eq!(continued, active && marked != Some(false));
-        let action = reply(passed, continued);
-        assert_eq!(action == Reply::Allow, passed);
-        assert_eq!(action == Reply::Rewrite, !passed && !continued);
-        assert_eq!(action == Reply::EndUnchecked, !passed && continued);
+    pub fn spec_hook_group(before: usize, after: usize) {
+        assert_eq!(!keep_hook_group(before, after), before != 0 && after == 0);
+    }
+
+    pub fn spec_reply_hook(command: &[u8]) {
+        assert_eq!(
+            reply_hook(command),
+            command.get(..HOOK_PREFIX.len()) == Some(HOOK_PREFIX)
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(23)]
+    fn reply_hook_matching_checks_the_complete_prefix_and_preserves_other_commands() {
+        const LENGTH: usize = HOOK_PREFIX.len() + 1;
+        let command: [u8; LENGTH] = kani::any();
+        let length = usize::from(kani::any::<u8>()) % (LENGTH + 1);
+        spec_reply_hook(&command[..length]);
+        kani::cover!(reply_hook(&command));
+        kani::cover!(!reply_hook(&command));
     }
 
     #[cfg(kani)]
@@ -164,21 +165,22 @@ mod proofs {
 
     #[cfg(kani)]
     #[kani::proof]
-    fn failing_replies_are_rewritten_once_and_never_allowed() {
-        let passed: bool = kani::any();
-        let active: bool = kani::any();
-        let marked: Option<bool> = kani::any();
-        spec_reply(passed, active, marked);
-        let action = reply(passed, rewritten_by_this_hook(active, marked));
-        kani::cover!(action == Reply::Allow);
-        kani::cover!((action == Reply::Rewrite) & active);
-        kani::cover!(action == Reply::EndUnchecked);
+    fn only_groups_emptied_by_reply_removal_are_dropped() {
+        let before: usize = kani::any();
+        let after: usize = kani::any();
+        spec_hook_group(before, after);
+        let keep = keep_hook_group(before, after);
+        let has_handlers = keep & (after != 0);
+        let originally_empty = keep & (before == 0);
+        kani::cover!(has_handlers);
+        kani::cover!(originally_empty);
+        kani::cover!(!keep);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::proofs;
+    use super::{HOOK_PREFIX, proofs, reply_hook};
     use crate::domain::flags;
 
     #[test]
@@ -191,8 +193,25 @@ mod tests {
                 for origin in proofs::ORIGINS {
                     proofs::spec_repository_standard(declared, origin, first, second);
                 }
-                proofs::spec_reply(first, second, declared);
             }
         }
+        for before in [0, 1, usize::MAX] {
+            for after in [0, 1, usize::MAX] {
+                proofs::spec_hook_group(before, after);
+            }
+        }
+        for command in [
+            &b"prose reply --client claude"[..],
+            &b"prose reply --client codex"[..],
+            &b"skill-ops stop"[..],
+            &b"prose check --channel document guide.md"[..],
+            &b"echo prose reply --client claude"[..],
+        ] {
+            proofs::spec_reply_hook(command);
+        }
+        for length in 0..HOOK_PREFIX.len() {
+            assert!(!reply_hook(&HOOK_PREFIX[..length]));
+        }
+        assert!(reply_hook(HOOK_PREFIX));
     }
 }
