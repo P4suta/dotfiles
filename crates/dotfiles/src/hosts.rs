@@ -10,6 +10,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 use yaml_rust2::{Yaml, YamlLoader};
 
 pub const NOTES: &str = "refs/notes/hosts";
@@ -18,6 +19,9 @@ const DEFAULT_GATE: &str = "just check";
 const STAGE_REPORT: &str = "DOTFILES_HOST_STAGES ";
 const CODE_SHELL: &str = "/bin/sh";
 const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
+const JOB_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const REQUEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const REQUEST_LIMIT: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -950,21 +954,94 @@ fn domyjob(
     arguments: &[&str],
     program: &[String],
 ) -> Result<(Option<i32>, String)> {
-    let output = command(native, Tool::Domyjob)
+    let mut submission = command(native, Tool::Domyjob);
+    submission
         .args(arguments)
         .arg(alias)
-        .arg("--wait")
         .arg("--")
-        .args(program)
+        .args(program);
+    remote_job(native, alias, submission)
+}
+
+/// Collects output from a file when the child exits.
+fn job_output(
+    mut request: Command,
+    limit: Option<Duration>,
+) -> Result<(std::process::ExitStatus, String)> {
+    let log = tempfile::NamedTempFile::new()?;
+    let mut child = request
         .stdin(Stdio::null())
-        .output()
-        .context("start domyjob")?;
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        .stdout(log.as_file().try_clone()?)
+        .stderr(log.as_file().try_clone()?)
+        .spawn()
+        .context("start host check process")?;
+    let Some(limit) = limit else {
+        let status = child.wait()?;
+        return Ok((
+            status,
+            String::from_utf8_lossy(&fs::read(log.path())?).into_owned(),
+        ));
+    };
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok((
+                status,
+                String::from_utf8_lossy(&fs::read(log.path())?).into_owned(),
+            ));
+        }
+        if started.elapsed() >= limit {
+            platform::cleanup::report(child.kill(), "stop a stalled domyjob request");
+            platform::cleanup::report(child.wait(), "reap a stalled domyjob request");
+            bail!(
+                "domyjob request did not exit within {limit:?}; inspect the remote job before rerunning"
+            );
+        }
+        std::thread::sleep(REQUEST_POLL_INTERVAL);
+    }
+}
+
+fn remote_job(native: &Real, alias: &str, submission: Command) -> Result<(Option<i32>, String)> {
+    let (status, mut text) = job_output(submission, Some(REQUEST_LIMIT))?;
+    ensure!(
+        status.success(),
+        "{alias}: submit remote job: {text}; inspect `domyjob ls {alias}` before rerunning"
     );
-    Ok((outcome(alias, &text), text))
+    let prefix = format!("{alias}:");
+    let reference = text.lines()
+        .find_map(|line| line.strip_prefix(&prefix).and_then(|rest| rest.split_whitespace().next()))
+        .filter(|job| !job.is_empty())
+        .map(|job| format!("{prefix}{job}"))
+        .with_context(|| format!("{alias}: submission returned no job identity: {text}; inspect `domyjob ls {alias}` before rerunning"))?;
+    println!("{reference}: submitted");
+    loop {
+        let mut request = command(native, Tool::Domyjob);
+        request.args(["status", &reference]);
+        let (status, current) = job_output(request, Some(REQUEST_LIMIT))
+            .with_context(|| format!("inspect {reference} with `domyjob status {reference}`"))?;
+        ensure!(status.success(), "{reference}: read job status: {current}");
+        let state_prefix = format!("{reference} ");
+        let state = current
+            .lines()
+            .find_map(|line| line.strip_prefix(&state_prefix))
+            .with_context(|| format!("{reference}: status returned no matching job: {current}"))?;
+        if state.starts_with("finished ") {
+            let result = outcome(alias, &current);
+            text.push_str(&current);
+            let mut request = command(native, Tool::Domyjob);
+            request.args(["logs", &reference]);
+            let (status, logs) = job_output(request, Some(REQUEST_LIMIT))
+                .with_context(|| format!("read {reference} with `domyjob logs {reference}`"))?;
+            ensure!(status.success(), "{reference}: read job logs: {logs}");
+            text.push_str(&logs);
+            return Ok((result, text));
+        }
+        ensure!(
+            matches!(state, "accepted" | "queued" | "starting" | "running"),
+            "{reference}: unknown job state: {state}"
+        );
+        std::thread::sleep(JOB_POLL_INTERVAL);
+    }
 }
 
 /// `Ok` when the host can run the gate, or the next action that would make it able to.
@@ -1267,33 +1344,50 @@ fn run_gate(
     target: &Target,
     gate: &str,
 ) -> Result<(Option<i32>, String)> {
-    let combined = |output: &std::process::Output| {
-        format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        )
-    };
     match target {
         Target::Remote(alias) => {
-            let output = command(native, Tool::Domyjob)
+            let mut submission = command(native, Tool::Domyjob);
+            submission
                 .current_dir(snapshot)
-                .args(["run", alias, "--wait", "--"])
-                .args(wrap(family, &remote_gate(family, gate)))
-                .stdin(Stdio::null())
-                .output()
-                .context("start domyjob")?;
-            let text = combined(&output);
-            Ok((outcome(alias, &text), text))
+                .args(["run", alias, "--"])
+                .args(wrap(family, &remote_gate(family, gate)));
+            remote_job(native, alias, submission)
         }
         Target::Local(_) => {
-            let output = crate::host_checks::unattended(std::env::current_exe()?)
+            let mut request = crate::host_checks::unattended(std::env::current_exe()?);
+            request
                 .args(["hosts", "worker", "--gate", gate])
-                .current_dir(root)
-                .stdin(Stdio::null())
-                .output()
-                .context("start the local gate")?;
-            Ok((output.status.code(), combined(&output)))
+                .current_dir(root);
+            let (status, text) = job_output(request, None).context("run the local gate")?;
+            Ok((status.code(), text))
         }
+    }
+}
+
+#[cfg(test)]
+mod job_tests {
+    use super::*;
+
+    #[test]
+    fn a_stalled_request_is_stopped_and_reports_its_deadline() -> Result<()> {
+        let mut request =
+            platform::process::command(if cfg!(windows) { "pwsh" } else { CODE_SHELL });
+        if cfg!(windows) {
+            request.args([
+                "-NoLogo",
+                "-NoProfile",
+                "-Command",
+                "Start-Sleep -Seconds 30",
+            ]);
+        } else {
+            request.args(["-c", "sleep 30"]);
+        }
+        let error = job_output(request, Some(Duration::ZERO))
+            .expect_err("the request must reach its deadline");
+        assert!(
+            error.to_string().contains("did not exit within"),
+            "{error:#}"
+        );
+        Ok(())
     }
 }

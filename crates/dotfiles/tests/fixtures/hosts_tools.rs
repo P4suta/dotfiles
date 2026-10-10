@@ -15,15 +15,23 @@ fn main() {
             std::process::exit(1);
         }
         "doctor" => println!("{alias}: ready"),
-        "run" => {
+        "on" => println!("{alias}:probe"),
+        "run" => println!("{alias}:job"),
+        "status" if alias.ends_with(":probe") => println!("{alias} finished succeeded"),
+        "status" => {
+            let stages = std::env::var("HOSTS_FIXTURE_STAGES")
+                .unwrap_or_else(|_| "{\"code\":0,\"real\":0,\"applied\":{\"drifted_targets\":[],\"verification_error\":null}}".to_owned());
+            if stages.starts_with("{\"code\":0,\"real\":0,") {
+                println!("{alias} finished succeeded");
+            } else {
+                println!("{alias} finished failed (1)");
+            }
+        }
+        "logs" if alias.ends_with(":probe") => {}
+        "logs" => {
             let stages = std::env::var("HOSTS_FIXTURE_STAGES")
                 .unwrap_or_else(|_| "{\"code\":0,\"real\":0,\"applied\":{\"drifted_targets\":[],\"verification_error\":null}}".to_owned());
             println!("DOTFILES_HOST_STAGES {stages}");
-            if stages.starts_with("{\"code\":0,\"real\":0,") {
-                println!("{alias}:job finished succeeded");
-            } else {
-                println!("{alias}:job finished failed (1)");
-            }
         }
         _ => println!("{alias}:job finished succeeded"),
     }
