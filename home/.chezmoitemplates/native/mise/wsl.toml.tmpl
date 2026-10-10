@@ -15,4 +15,4 @@ experimental = true
 paranoid = true
 
 [settings.github]
-credential_command = 'gh auth token --hostname "$MISE_CREDENTIAL_HOST"'
+credential_command = {{ includeTemplate "partials/mise-github-credential" . }}

@@ -15,6 +15,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Read mise's requested GitHub host from an installed CLI without executing its mise shim.
+    GithubToken,
     Repository {
         #[command(subcommand)]
         request: RepositoryRequest,
@@ -152,6 +154,11 @@ fn run() -> Result<()> {
     cli.root = dotfiles::canonical(&cli.root)?;
     let exit = dotfiles::secrets::exit;
     match cli.command {
+        Commands::GithubToken => {
+            let host = std::env::var_os("MISE_CREDENTIAL_HOST")
+                .context("mise credential host unavailable")?;
+            exit(platform::github::command(&host)?.status()?);
+        }
         Commands::Repository { request } => match request {
             RepositoryRequest::Generate { remote } => {
                 dotfiles::repository::write(&cli.root)?;

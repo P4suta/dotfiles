@@ -2,8 +2,10 @@
 //! With the default tools feature it adds the tool registry, the setup steps, the process runner, and the build stamp of the installed tools.
 
 pub mod cleanup;
+pub mod github;
 pub mod home;
 pub mod incidents;
+pub mod paths;
 pub mod process;
 pub mod refusal;
 pub use rules::{cycle_rules, order_rules};
@@ -20,8 +22,6 @@ pub mod checks;
 pub mod code_environment;
 #[cfg(feature = "tools")]
 pub mod freshness;
-#[cfg(feature = "tools")]
-pub mod paths;
 #[cfg(feature = "tools")]
 pub mod runtime;
 #[cfg(feature = "tools")]

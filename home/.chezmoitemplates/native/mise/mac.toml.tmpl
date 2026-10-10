@@ -30,4 +30,4 @@ chpwd_only = true
 
 [settings.github]
 gh_cli_tokens = true
-credential_command = 'gh auth token --hostname "$MISE_CREDENTIAL_HOST"'
+credential_command = {{ includeTemplate "partials/mise-github-credential" . }}

@@ -1,6 +1,6 @@
 //! Path spellings the tools agree on across hosts.
 
-use anyhow::Result;
+use std::io::Result;
 use std::path::{Path, PathBuf};
 
 /// The chezmoi source state of a checkout, which `.chezmoiroot` names.
