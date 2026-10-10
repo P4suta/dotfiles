@@ -984,6 +984,7 @@ fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
                 .env("GIT_COMMITTER_EMAIL", "fixture@example.com")
                 .env("HOSTS_FIXTURE_STATUS", status(online))
                 .env("HOSTS_FIXTURE_DOCTOR", doctor)
+                .env("HOSTS_FIXTURE_STAGES", r#"{"code":0,"real":0,"applied":{"drifted_targets":[".first",".nested/target with spaces"],"verification_error":"fixture verification error"}}"#)
                 .output()?,
         )
     };
@@ -1020,7 +1021,44 @@ fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
             String::from_utf8_lossy(&output.stdout).contains(&format!("linux box {stage}: passed"))
         );
     }
+    assert_applied_evidence(&root, &output.stdout)?;
     push_gate(&root, "https://github.com/owner/project", update.as_bytes())?;
+    Ok(())
+}
+
+fn assert_applied_evidence(root: &Path, stdout: &[u8]) -> Result<()> {
+    let stdout = String::from_utf8_lossy(stdout);
+    for target in [".first", ".nested/target with spaces"] {
+        assert!(
+            stdout.contains(&format!("linux box applied drift: {target}")),
+            "{stdout}"
+        );
+    }
+    assert!(
+        stdout.contains("linux box applied verification error: fixture verification error"),
+        "{stdout}"
+    );
+    let notes = git(
+        root,
+        &["notes", "--ref", "refs/notes/hosts", "show", "HEAD"],
+    )?;
+    let notes: Vec<serde_json::Value> = notes
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(serde_json::from_str)
+        .collect::<std::result::Result<_, _>>()?;
+    let real = notes
+        .iter()
+        .find(|note| note["stage"] == "real")
+        .context("real note")?;
+    assert_eq!(
+        real["applied"]["drifted_targets"],
+        serde_json::json!([".first", ".nested/target with spaces"])
+    );
+    assert_eq!(
+        real["applied"]["verification_error"],
+        "fixture verification error"
+    );
     Ok(())
 }
 
@@ -1071,7 +1109,7 @@ fn one_head_reports_every_failing_host_and_stage() -> Result<()> {
         .env("GIT_COMMITTER_EMAIL", "fixture@example.com")
         .env("HOSTS_FIXTURE_STATUS", status)
         .env("HOSTS_FIXTURE_DOCTOR", "ok")
-        .env("HOSTS_FIXTURE_STAGES", "{\"code\":7,\"real\":9}")
+        .env("HOSTS_FIXTURE_STAGES", r#"{"code":7,"real":9,"applied":{"drifted_targets":[".drift"],"verification_error":null}}"#)
         .output()?;
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr)?;

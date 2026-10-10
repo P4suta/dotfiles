@@ -17,9 +17,9 @@ fn main() {
         "doctor" => println!("{alias}: ready"),
         "run" => {
             let stages = std::env::var("HOSTS_FIXTURE_STAGES")
-                .unwrap_or_else(|_| "{\"code\":0,\"real\":0}".to_owned());
+                .unwrap_or_else(|_| "{\"code\":0,\"real\":0,\"applied\":{\"drifted_targets\":[],\"verification_error\":null}}".to_owned());
             println!("DOTFILES_HOST_STAGES {stages}");
-            if stages == "{\"code\":0,\"real\":0}" {
+            if stages.starts_with("{\"code\":0,\"real\":0,") {
                 println!("{alias}:job finished succeeded");
             } else {
                 println!("{alias}:job finished failed (1)");

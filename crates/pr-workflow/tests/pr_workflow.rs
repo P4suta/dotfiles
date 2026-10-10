@@ -1908,6 +1908,7 @@ fn ready_requires_a_passing_note_for_every_os_family_in_the_ci_matrix() -> Resul
             status,
             gate: "just check".to_owned(),
             stage,
+            applied: None,
         };
         git(
             &root,

@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result, ensure};
 use platform::checks::Checks;
+use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,6 +21,33 @@ const PUBLIC_SOURCES: [&str; 3] = [
     "https://github.com/embarkstudios/std-replacement-data.git",
 ];
 const UNATTENDED_SSH: &str = "ssh -o BatchMode=yes -o IdentityAgent=none -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no";
+
+/// Read-only observations of the installed profile.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Applied {
+    pub drifted_targets: Vec<String>,
+    pub verification_error: Option<String>,
+}
+
+impl Applied {
+    pub fn report(&self, prefix: &str) {
+        for target in &self.drifted_targets {
+            println!("{prefix} drift: {target}");
+        }
+        if let Some(error) = &self.verification_error {
+            println!("{prefix} verification error: {error}");
+        } else if self.drifted_targets.is_empty() {
+            println!("{prefix}: matched");
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Report {
+    pub candidate: Result<()>,
+    pub applied: Applied,
+}
 
 #[must_use]
 pub fn unattended(program: impl AsRef<OsStr>) -> Command {
@@ -292,7 +320,7 @@ fn system_git() -> PathBuf {
     }
 }
 
-fn verify_applied(config: &Path, home: &Path) -> Result<()> {
+fn verify_applied(config: &Path, home: &Path) -> Result<Applied> {
     let answers: toml::Table = toml::from_str(&fs::read_to_string(config)?)?;
     let source = Path::new(
         answers
@@ -311,26 +339,31 @@ fn verify_applied(config: &Path, home: &Path) -> Result<()> {
     if let Some(path) = std::env::var_os("DOTFILES_HOST_PATH") {
         command.env("PATH", path);
     }
-    let status = command
-        .args(["verify", "--exclude", "scripts,externals"])
-        .status()?;
-    ensure!(
-        status.success(),
-        "applied profile verification failed with {status}"
-    );
-    Ok(())
+    let output = command
+        .args(["status", "--exclude", "scripts,externals", "--keep-going"])
+        .output()?;
+    Ok(Applied {
+        drifted_targets: crate::profiles::target_changes(std::str::from_utf8(&output.stdout)?),
+        verification_error: (!output.status.success()).then(|| {
+            format!(
+                "applied profile verification failed with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            )
+        }),
+    })
 }
 
 /// Apply the candidate in scratch storage and inspect the applied profile without changing host files.
-///
-/// # Errors
-///
-/// Returns every failed profile, installation, and network check.
-pub fn check(root: &Path, home: &Path) -> Result<()> {
+#[must_use]
+pub fn check(root: &Path, home: &Path) -> Report {
     let config = home.join(CONFIG);
-    let mut checks = Checks::default();
-    checks.run("host.profile-verify", || verify_applied(&config, home));
-    checks.run("host.candidate", || {
+    let applied = verify_applied(&config, home).unwrap_or_else(|error| Applied {
+        drifted_targets: Vec::new(),
+        verification_error: Some(format!("{error:#}")),
+    });
+    applied.report("host.applied");
+    let candidate = (|| {
         let scratch = Scratch::new(&config)?;
         let mut candidate = Checks::default();
         candidate.run("host.profile-apply", || scratch.profile(root, "apply"));
@@ -344,8 +377,8 @@ pub fn check(root: &Path, home: &Path) -> Result<()> {
             candidate.run(url, || scratch.fetch(url));
         }
         candidate.finish()
-    });
-    checks.finish()
+    })();
+    Report { candidate, applied }
 }
 
 /// Run a command in the user's native login shell.
@@ -490,7 +523,9 @@ mod tests {
             Path::new(rendered.lines().next().context("rendered destination")?),
             Path::new(rendered.lines().nth(1).context("rendered HOME")?)
         );
-        verify_applied(&config, &host)?;
+        let applied_report = verify_applied(&config, &host)?;
+        assert_eq!(applied_report.drifted_targets, Vec::<String>::new());
+        assert!(applied_report.verification_error.is_none());
         assert_eq!(fs::read_to_string(&config)?, contents);
         assert_eq!(
             fs::read_to_string(host.join(".existing"))?,
@@ -525,8 +560,13 @@ mod tests {
             }
         }
         fs::write(host.join(".existing"), "host drift\n")?;
-        assert!(verify_applied(&config, &host).is_err());
+        fs::write(applied.join("dot_other"), "expected\n")?;
+        fs::write(host.join(".other"), "other drift\n")?;
+        let applied_report = verify_applied(&config, &host)?;
+        assert_eq!(applied_report.drifted_targets, [".existing", ".other"]);
+        assert!(applied_report.verification_error.is_none());
         assert_eq!(fs::read_to_string(host.join(".existing"))?, "host drift\n");
+        assert_eq!(fs::read_to_string(host.join(".other"))?, "other drift\n");
         Ok(())
     }
 }

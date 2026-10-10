@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [advisory-applied-profile-observations.md]
 date: 2026-10-10
 ---
 # Isolate code gates and retain native provisioning checks

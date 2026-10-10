@@ -5,6 +5,22 @@ use xtask::{
     profiles, quality,
 };
 
+#[test]
+fn source_drift_uses_the_target_column_without_last_apply_state() {
+    assert_eq!(
+        dotfiles::profiles::target_changes(
+            "M  .matched\n M .changed\n A .missing\n D .removed\nMM .both\n M .nested/target with spaces\n"
+        ),
+        [
+            ".changed",
+            ".missing",
+            ".removed",
+            ".both",
+            ".nested/target with spaces"
+        ]
+    );
+}
+
 #[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 

@@ -49,6 +49,7 @@ impl Stage {
 struct Stages {
     code: i32,
     real: i32,
+    applied: crate::host_checks::Applied,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -106,7 +107,7 @@ pub fn run(action: Action) -> Result<()> {
         Action::Sync { host, user, accept } => sync(&home()?, &host, user, &accept),
         Action::Check { gate } => check(&home()?, &gate),
         Action::Code { gate } => code(&home()?, &gate),
-        Action::Real => crate::host_checks::check(&std::env::current_dir()?, &home()?),
+        Action::Real => crate::host_checks::check(&std::env::current_dir()?, &home()?).candidate,
         Action::Worker {
             gate,
             home: native_home,
@@ -237,6 +238,8 @@ pub struct Note {
     pub gate: String,
     #[serde(default)]
     pub stage: Option<Stage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied: Option<crate::host_checks::Applied>,
 }
 
 /// Judge one commit's note, one JSON record per line in append order.
@@ -656,7 +659,9 @@ fn worker(home: &Path, gate: &str) -> Result<()> {
             1
         }
     };
-    let real = match crate::host_checks::check(&std::env::current_dir()?, home) {
+    let crate::host_checks::Report { candidate, applied } =
+        crate::host_checks::check(&std::env::current_dir()?, home);
+    let real = match candidate {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("real: {error:#}");
@@ -665,7 +670,11 @@ fn worker(home: &Path, gate: &str) -> Result<()> {
     };
     println!(
         "{STAGE_REPORT}{}",
-        serde_json::to_string(&Stages { code, real })?
+        serde_json::to_string(&Stages {
+            code,
+            real,
+            applied
+        })?
     );
     ensure!(
         code == 0 && real == 0,
@@ -1190,6 +1199,9 @@ fn record_run(
         "the job status disagrees with its stage report"
     );
     let mut failures = Vec::new();
+    report
+        .applied
+        .report(&format!("{} {} applied", family.name(), target.name()));
     for (stage, status) in Stage::ALL.into_iter().zip(statuses) {
         let note = serde_json::to_string(&Note {
             host: target.name().to_owned(),
@@ -1198,6 +1210,10 @@ fn record_run(
             status,
             gate: gate.to_owned(),
             stage: Some(stage),
+            applied: match stage {
+                Stage::Code => None,
+                Stage::Real => Some(report.applied.clone()),
+            },
         })?;
         if let Err(error) = git(
             root,

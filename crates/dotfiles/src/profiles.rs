@@ -115,6 +115,16 @@ pub fn externally_changed(status: &str) -> Vec<String> {
         .collect()
 }
 
+/// Targets that differ from their rendered source, from the second status column.
+#[must_use]
+pub fn target_changes(status: &str) -> Vec<String> {
+    status
+        .lines()
+        .filter(|line| line.chars().nth(1).is_some_and(|status| status != ' '))
+        .filter_map(status_target)
+        .collect()
+}
+
 /// `chezmoi status` starts each line with its two status columns and a space.
 const STATUS_COLUMNS: usize = 3;
 
