@@ -1332,7 +1332,7 @@ pub fn github_issue_closed(issue: u32) -> Result<bool> {
             "--header",
             "Authorization:",
             "--jq",
-            ".state | ascii_upcase",
+            "if .pull_request.merged_at then \"MERGED\" else .state | ascii_upcase end",
         ])
         .output()
         .context("start the GitHub CLI")?;
