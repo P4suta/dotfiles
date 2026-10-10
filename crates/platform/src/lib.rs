@@ -1,6 +1,7 @@
 //! The host facts every dotfiles crate shares: the home and its known folders, the managed `PATH`, the one process constructor, and the refusal format.
 //! With the default tools feature it adds the tool registry, the setup steps, the process runner, and the build stamp of the installed tools.
 
+pub mod checks;
 pub mod cleanup;
 pub mod home;
 pub mod incidents;

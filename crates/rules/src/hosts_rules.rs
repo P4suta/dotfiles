@@ -34,6 +34,16 @@ pub enum Evidence {
     Passed,
 }
 
+/// Combine the independent code and real-host results.
+#[must_use]
+pub const fn stages(evidence: [Evidence; 2]) -> Evidence {
+    match evidence {
+        [Evidence::Passed, Evidence::Passed] => Evidence::Passed,
+        [Evidence::Failed, _] | [_, Evidence::Failed] => Evidence::Failed,
+        _ => Evidence::Missing,
+    }
+}
+
 /// Admit only an installed active version matching the checkout's exact pin.
 #[must_use]
 pub const fn pinned_tool(facts: [bool; 4]) -> bool {
@@ -140,6 +150,32 @@ mod proofs {
 
     pub const EVIDENCE: [Evidence; 3] = [Evidence::Missing, Evidence::Failed, Evidence::Passed];
     pub const KEYS: [Key; 3] = [Key::New, Key::Same, Key::Changed];
+
+    pub fn spec_stages(evidence: [Evidence; 2]) {
+        let result = stages(evidence);
+        assert_eq!(
+            result == Evidence::Passed,
+            evidence.iter().all(|stage| *stage == Evidence::Passed)
+        );
+        assert_eq!(
+            result == Evidence::Failed,
+            evidence.contains(&Evidence::Failed)
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn both_host_stages_must_pass() {
+        let evidence = [
+            EVIDENCE[usize::from(kani::any::<u8>() % 3)],
+            EVIDENCE[usize::from(kani::any::<u8>() % 3)],
+        ];
+        spec_stages(evidence);
+        let result = stages(evidence);
+        kani::cover!(result == Evidence::Passed);
+        kani::cover!(result == Evidence::Missing);
+        kani::cover!(result == Evidence::Failed);
+    }
 
     pub fn spec_pinned_tool(facts: [bool; 4]) {
         assert_eq!(pinned_tool(facts), facts.iter().all(|fact| *fact));
@@ -323,5 +359,14 @@ mod tests {
     fn each_family_has_its_own_index_and_name() {
         assert_eq!(Family::ALL.map(Family::index), [0, 1, 2]);
         assert_eq!(Family::ALL.map(Family::name), ["linux", "macos", "windows"]);
+    }
+
+    #[test]
+    fn every_stage_pair_meets_the_specification() {
+        for code in proofs::EVIDENCE {
+            for real in proofs::EVIDENCE {
+                proofs::spec_stages([code, real]);
+            }
+        }
     }
 }

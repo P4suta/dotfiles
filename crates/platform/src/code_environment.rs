@@ -50,7 +50,8 @@ impl Installations {
         Ok(Self {
             mise: canonical(&mise)?,
             data,
-            cargo: std::env::var_os("CARGO_HOME")
+            cargo: std::env::var_os("DOTFILES_HOST_CARGO_HOME")
+                .or_else(|| std::env::var_os("CARGO_HOME"))
                 .map_or_else(|| home.join(".cargo"), PathBuf::from),
             rustup: std::env::var_os("RUSTUP_HOME")
                 .map_or_else(|| home.join(".rustup"), PathBuf::from),

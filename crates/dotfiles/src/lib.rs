@@ -6,6 +6,7 @@ pub mod claude_timing;
 pub mod desktop;
 pub mod health;
 pub mod hooks;
+pub mod host_checks;
 pub mod hosts;
 pub mod integrations;
 pub mod legacy;

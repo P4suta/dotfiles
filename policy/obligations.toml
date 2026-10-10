@@ -328,6 +328,14 @@ verifier = "kani"
 source = "crates/rules/src/hosts_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_a_missing_real_host_result() {
+    assert!(production::stages([production::Evidence::Passed, production::Evidence::Missing]) == production::Evidence::Passed);
+}
+#[kani::proof]
+fn reject_a_failed_real_host_result() {
+    assert!(production::stages([production::Evidence::Passed, production::Evidence::Failed]) == production::Evidence::Passed);
+}
+#[kani::proof]
 fn reject_a_global_or_uninstalled_tool() {
     assert!(production::pinned_tool([true, true, false, true]));
 }

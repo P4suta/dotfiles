@@ -15,6 +15,39 @@ use yaml_rust2::{Yaml, YamlLoader};
 pub const NOTES: &str = "refs/notes/hosts";
 const STATE: &str = ".local/state/hosts";
 const DEFAULT_GATE: &str = "just check";
+const STAGE_REPORT: &str = "DOTFILES_HOST_STAGES ";
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Stage {
+    Code,
+    Real,
+}
+
+impl Stage {
+    const ALL: [Self; 2] = [Self::Code, Self::Real];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Code => 0,
+            Self::Real => 1,
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Code => "code",
+            Self::Real => "real",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Stages {
+    code: i32,
+    real: i32,
+}
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Action {
@@ -46,6 +79,15 @@ pub enum Action {
         #[arg(long, default_value = DEFAULT_GATE)]
         gate: String,
     },
+    /// Verify native provisioning and network access without an SSH agent.
+    Real,
+    #[command(hide = true)]
+    Worker {
+        #[arg(long, default_value = DEFAULT_GATE)]
+        gate: String,
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
     /// Refuse pushed GitHub branches that lack a passing note for an operating system family in their CI matrix.
     /// Reads pre-push input.
     Gate { remote: String, url: String },
@@ -62,6 +104,11 @@ pub fn run(action: Action) -> Result<()> {
         Action::Sync { host, user, accept } => sync(&home()?, &host, user, &accept),
         Action::Check { gate } => check(&home()?, &gate),
         Action::Code { gate } => code(&home()?, &gate),
+        Action::Real => crate::host_checks::check(&std::env::current_dir()?, &home()?),
+        Action::Worker {
+            gate,
+            home: native_home,
+        } => worker(&native_home.map_or_else(home, Ok)?, &gate),
         Action::Gate { url, .. } => {
             let mut input = Vec::new();
             std::io::Read::read_to_end(&mut std::io::stdin(), &mut input)?;
@@ -186,6 +233,8 @@ pub struct Note {
     pub tree: String,
     pub status: i32,
     pub gate: String,
+    #[serde(default)]
+    pub stage: Option<Stage>,
 }
 
 /// Judge one commit's note, one JSON record per line in append order.
@@ -194,7 +243,7 @@ pub struct Note {
 ///
 /// Returns an error when a line holds no valid note or names an unknown OS family.
 pub fn evidence(notes: &str, tree: &str) -> Result<[Evidence; 3]> {
-    let mut evidence = [Evidence::Missing; 3];
+    let mut evidence = [[Evidence::Missing; 2]; 3];
     for line in notes.lines().filter(|line| !line.trim().is_empty()) {
         let note: Note = serde_json::from_str(line).context("malformed hosts note")?;
         let family = Family::ALL
@@ -202,9 +251,12 @@ pub fn evidence(notes: &str, tree: &str) -> Result<[Evidence; 3]> {
             .find(|family| family.name() == note.os)
             .with_context(|| format!("hosts note names an unknown OS family: {}", note.os))?;
         let index = family.index();
-        evidence[index] = record(evidence[index], note.tree == tree, note.status == 0);
+        if let Some(stage) = note.stage {
+            let previous = &mut evidence[index][stage.index()];
+            *previous = record(*previous, note.tree == tree, note.status == 0);
+        }
     }
-    Ok(evidence)
+    Ok(evidence.map(crate::hosts_rules::stages))
 }
 
 fn git(repository: &Path, arguments: &[&str]) -> Result<Vec<u8>> {
@@ -573,24 +625,51 @@ pub fn wrap(family: Family, gate: &str) -> Vec<String> {
 /// Trust covers only that checkout and starts before the clone, because checkout hooks already run mise there.
 #[must_use]
 pub fn remote_gate(family: Family, gate: &str) -> String {
-    const CLONE: &str = "git -c advice.detachedHead=false clone --quiet head.bundle checkout";
+    const UNIX_GIT: &str = "/usr/bin/git";
+    const WINDOWS_GIT: &str = "C:/Program Files/Git/cmd/git.exe";
     let quoted = match family {
         Family::Windows => format!("'{}'", gate.replace('\'', "''")),
         Family::Linux | Family::Mac => format!("'{}'", gate.replace('\'', "'\"'\"'")),
     };
     let worker = format!(
-        "mise x -- cargo run --locked --package dotfiles --bin dotfiles -- hosts code --gate {quoted}"
+        "mise x -- cargo run --locked --package dotfiles --bin dotfiles -- hosts worker --gate {quoted}"
     );
     match family {
         Family::Windows => format!(
-            "$env:MISE_TRUSTED_CONFIG_PATHS = Join-Path $PWD.Path checkout; {CLONE}; if (-not $?) {{ exit 1 }}; Set-Location checkout; {worker}; exit $LASTEXITCODE"
+            "$nativeHome = $env:USERPROFILE; $env:DOTFILES_HOST_PATH = $env:PATH; $env:DOTFILES_HOST_CARGO_HOME = if ($env:CARGO_HOME) {{ $env:CARGO_HOME }} else {{ Join-Path $nativeHome .cargo }}; $jobRoot = $PWD.Path; $env:MISE_DATA_DIR = Join-Path $env:LOCALAPPDATA mise; $env:RUSTUP_HOME = Join-Path $nativeHome .rustup; $env:HOME = Join-Path $jobRoot bootstrap; $env:USERPROFILE = $env:HOME; New-Item -ItemType Directory -Force $env:HOME | Out-Null; $env:APPDATA = Join-Path $env:HOME AppData/Roaming; $env:LOCALAPPDATA = Join-Path $env:HOME AppData/Local; $env:CARGO_HOME = Join-Path $env:HOME .cargo; $env:CARGO_TARGET_DIR = Join-Path $jobRoot build; $env:MISE_CONFIG_DIR = Join-Path $env:HOME .config/mise; $env:MISE_CACHE_DIR = Join-Path $env:HOME .cache/mise; $env:MISE_STATE_DIR = Join-Path $env:HOME .local/state/mise; $env:MISE_TRUSTED_CONFIG_PATHS = Join-Path $jobRoot checkout; $env:MISE_AUTO_INSTALL = 'false'; $env:GIT_CONFIG_GLOBAL = Join-Path $env:HOME empty; Set-Content -LiteralPath $env:GIT_CONFIG_GLOBAL -Value '' -NoNewline; $env:GIT_CONFIG_NOSYSTEM = '1'; & '{WINDOWS_GIT}' -c advice.detachedHead=false clone --quiet head.bundle checkout; if (-not $?) {{ exit 1 }}; Set-Location checkout; {worker} --home $nativeHome; exit $LASTEXITCODE"
         ),
         Family::Linux | Family::Mac => {
             format!(
-                "export MISE_TRUSTED_CONFIG_PATHS=\"$PWD/checkout\" && {CLONE} && cd checkout && {worker}"
+                "nativeHome=\"$HOME\"; export DOTFILES_HOST_PATH=\"$PATH\" DOTFILES_HOST_CARGO_HOME=\"${{CARGO_HOME:-$HOME/.cargo}}\" MISE_DATA_DIR=\"$HOME/.local/share/mise\" RUSTUP_HOME=\"$HOME/.rustup\"; export HOME=\"$PWD/bootstrap\" CARGO_TARGET_DIR=\"$PWD/build\" MISE_TRUSTED_CONFIG_PATHS=\"$PWD/checkout\" MISE_AUTO_INSTALL=false; mkdir -p \"$HOME\" && export CARGO_HOME=\"$HOME/.cargo\" XDG_CONFIG_HOME=\"$HOME/.config\" XDG_CACHE_HOME=\"$HOME/.cache\" XDG_DATA_HOME=\"$HOME/.local/share\" XDG_STATE_HOME=\"$HOME/.local/state\" MISE_CONFIG_DIR=\"$HOME/.config/mise\" MISE_CACHE_DIR=\"$HOME/.cache/mise\" MISE_STATE_DIR=\"$HOME/.local/state/mise\" GIT_CONFIG_GLOBAL=\"$HOME/empty\" GIT_CONFIG_NOSYSTEM=1 && : > \"$GIT_CONFIG_GLOBAL\" && {UNIX_GIT} -c advice.detachedHead=false clone --quiet head.bundle checkout && cd checkout && {worker} --home \"$nativeHome\""
             )
         }
     }
+}
+
+fn worker(home: &Path, gate: &str) -> Result<()> {
+    let code = match code(home, gate) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("code: {error:#}");
+            1
+        }
+    };
+    let real = match crate::host_checks::check(&std::env::current_dir()?, home) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("real: {error:#}");
+            1
+        }
+    };
+    println!(
+        "{STAGE_REPORT}{}",
+        serde_json::to_string(&Stages { code, real })?
+    );
+    ensure!(
+        code == 0 && real == 0,
+        "host stages failed: code={code}, real={real}"
+    );
+    Ok(())
 }
 
 fn code(home: &Path, gate: &str) -> Result<()> {
@@ -956,7 +1035,6 @@ pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
             if let Err(action) = verdict {
                 ready[index] = false;
                 actions[index] = Some(action);
-                break;
             }
         }
     }
@@ -964,10 +1042,15 @@ pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
         Start::Dirty => bail!(
             "the tree has uncommitted or untracked files; notes bind to a commit, so commit first"
         ),
-        Start::Unready(family) => bail!(
-            "{}: {}",
-            family.name(),
-            actions[family.index()].as_deref().unwrap_or("not ready")
+        Start::Unready(_) => bail!(
+            "{}",
+            Family::ALL
+                .into_iter()
+                .filter_map(|family| actions[family.index()]
+                    .as_ref()
+                    .map(|action| format!("{}: {action}", family.name())))
+                .collect::<Vec<_>>()
+                .join("\n")
         ),
         Start::Run => {}
     }
@@ -1011,8 +1094,9 @@ pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
     });
     let mut failed = Vec::new();
     for run in runs {
-        if let Some(failure) = record_run(&root, &commit, &tree, gate, &run?)? {
-            failed.push(failure);
+        match run.and_then(|run| record_run(&root, &commit, &tree, gate, &run)) {
+            Ok(failures) => failed.extend(failures),
+            Err(error) => failed.push(format!("host gate: {error:#}")),
         }
     }
     ensure!(failed.is_empty(), "{}", failed.join("\n"));
@@ -1034,7 +1118,7 @@ fn record_run(
     tree: &str,
     gate: &str,
     run: &GateRun,
-) -> Result<Option<String>> {
+) -> Result<Vec<String>> {
     let GateRun {
         family,
         target,
@@ -1043,35 +1127,72 @@ fn record_run(
     } = run;
     let Some(status) = *status else {
         eprintln!("{output}");
-        return Ok(Some(format!(
+        return Ok(vec![format!(
             "{} {}: the job did not finish; inspect it with `domyjob ls {}` before rerunning",
             family.name(),
             target.name(),
             target.name()
-        )));
+        )]);
     };
-    let note = serde_json::to_string(&Note {
-        host: target.name().to_owned(),
-        os: family.name().to_owned(),
-        tree: tree.to_owned(),
-        status,
-        gate: gate.to_owned(),
-    })?;
-    git(
-        root,
-        &["notes", "--ref", NOTES, "append", "-m", &note, commit],
-    )?;
-    if status == 0 {
-        println!("{} {}: passed", family.name(), target.name());
-        Ok(None)
-    } else {
+    let reports: Vec<_> = output
+        .lines()
+        .filter_map(|line| line.strip_prefix(STAGE_REPORT))
+        .collect();
+    let [report] = reports.as_slice() else {
         eprintln!("{output}");
-        Ok(Some(format!(
-            "{} {}: failed with {status}",
+        bail!(
+            "{} {}: the job returned {status} without exactly one complete stage report",
             family.name(),
             target.name()
-        )))
+        );
+    };
+    let report: Stages = serde_json::from_str(report).context("malformed host stage report")?;
+    let statuses = [report.code, report.real];
+    ensure!(
+        (status == 0) == statuses.iter().all(|status| *status == 0),
+        "the job status disagrees with its stage report"
+    );
+    let mut failures = Vec::new();
+    for (stage, status) in Stage::ALL.into_iter().zip(statuses) {
+        let note = serde_json::to_string(&Note {
+            host: target.name().to_owned(),
+            os: family.name().to_owned(),
+            tree: tree.to_owned(),
+            status,
+            gate: gate.to_owned(),
+            stage: Some(stage),
+        })?;
+        if let Err(error) = git(
+            root,
+            &["notes", "--ref", NOTES, "append", "-m", &note, commit],
+        ) {
+            failures.push(format!(
+                "{} {} {}: record note: {error:#}",
+                family.name(),
+                target.name(),
+                stage.name()
+            ));
+        }
+        if status == 0 {
+            println!(
+                "{} {} {}: passed",
+                family.name(),
+                target.name(),
+                stage.name()
+            );
+        } else {
+            failures.push(format!(
+                "{} {} {}: failed with {status}",
+                family.name(),
+                target.name(),
+                stage.name()
+            ));
+        }
     }
+    if !failures.is_empty() {
+        eprintln!("{output}");
+    }
+    Ok(failures)
 }
 
 /// One family's gate on its host, with its exit status when the job finished and its combined output.
@@ -1103,15 +1224,8 @@ fn run_gate(
             Ok((outcome(alias, &text), text))
         }
         Target::Local(_) => {
-            let home = platform::home::home().context("native home is unavailable")?;
-            let environment = platform::code_environment::CodeEnvironment::build(
-                root,
-                &platform::code_environment::Installations::discover(&home)?,
-            )?;
-            let argv = code_shell(gate);
-            let output = environment
-                .command(&argv[0])
-                .args(&argv[1..])
+            let output = crate::host_checks::unattended(std::env::current_exe()?)
+                .args(["hosts", "worker", "--gate", gate])
                 .current_dir(root)
                 .stdin(Stdio::null())
                 .output()

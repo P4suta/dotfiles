@@ -19,7 +19,12 @@ Rust uses the pinned toolchain's actual bin directory rather than a directory of
 Home, user configuration, caches, Git configuration, and canonical temporary storage belong to the run.
 The installation store supplies binaries and the Rust toolchain, never credentials or user configuration.
 
-The native stage uses the host's profile, Git configuration, PATH, and shell, without an SSH agent or interactive input.
+The native stage applies the candidate profile's files to an owned scratch destination and verifies them there.
+Native and project tool installation use that destination's HOME and Git global configuration, the host's PATH and shell, and its system Git, without an SSH agent or interactive input.
+Installer state and caches stay in scratch storage.
+Public repository fetches exercise the transport paths that exposed the original leaks.
+The currently applied profile is verified read-only against its configured source, with chezmoi state and cache in scratch storage.
+The gate never applies the candidate to the real home; the normal apply after merge remains its only rollout.
 Provisioning and network failures remain host failures and require corrections to dotfiles source.
 Each selected check runs after another fails, and the final report preserves every failure.
 Git notes bind both stages to the checked commit and tree.

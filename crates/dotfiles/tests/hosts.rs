@@ -195,7 +195,7 @@ fn the_ci_matrix_names_the_required_os_families() -> Result<()> {
 }
 
 fn record(os: &str, tree: &str, status: i32) -> String {
-    format!(r#"{{"host":"h","os":"{os}","tree":"{tree}","status":{status},"gate":"just check"}}"#)
+    ["code", "real"].map(|stage| format!(r#"{{"host":"h","os":"{os}","tree":"{tree}","status":{status},"gate":"just check","stage":"{stage}"}}"#)).join("\n")
 }
 
 #[test]
@@ -213,6 +213,22 @@ fn the_latest_note_for_the_commit_tree_decides_each_family() -> Result<()> {
     );
     assert!(evidence("not json", "t").is_err());
     assert!(evidence(&record("plan9", "t", 0), "t").is_err());
+    assert_eq!(
+        evidence(
+            r#"{"host":"h","os":"linux","tree":"t","status":0,"gate":"just check"}"#,
+            "t"
+        )?,
+        [Evidence::Missing; 3]
+    );
+    let code =
+        r#"{"host":"h","os":"linux","tree":"t","status":0,"gate":"just check","stage":"code"}"#;
+    assert_eq!(evidence(code, "t")?, [Evidence::Missing; 3]);
+    let real =
+        r#"{"host":"h","os":"linux","tree":"t","status":1,"gate":"just check","stage":"real"}"#;
+    assert_eq!(
+        evidence(&format!("{code}\n{real}"), "t")?,
+        [Evidence::Failed, Evidence::Missing, Evidence::Missing]
+    );
     Ok(())
 }
 
@@ -510,7 +526,81 @@ fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("linux box: passed"));
+    for stage in ["code", "real"] {
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains(&format!("linux box {stage}: passed"))
+        );
+    }
     push_gate(&root, "https://github.com/owner/project", update.as_bytes())?;
+    Ok(())
+}
+
+#[test]
+fn one_head_reports_every_failing_host_and_stage() -> Result<()> {
+    let tools = tools()?;
+    let scope = tempfile::tempdir()?;
+    let root = scope.path().join("project");
+    let home = scope.path().join("home");
+    fs::create_dir_all(root.join(".github/workflows"))?;
+    fs::create_dir_all(home.join(".local/state/hosts"))?;
+    fs::write(
+        home.join(".local/state/hosts/ssh_config"),
+        render(
+            &["box".into(), "mac".into(), "pc".into()],
+            "owner",
+            &home.join("known_hosts"),
+        ),
+    )?;
+    fs::write(
+        root.join("gitconfig"),
+        "[user]\nname = Fixture\nemail = fixture@example.com\n[commit]\ngpgsign = false\n",
+    )?;
+    fs::write(root.join(".gitignore"), "gitconfig\n")?;
+    fs::write(
+        root.join(".github/workflows/ci.yml"),
+        "jobs:\n  test:\n    strategy:\n      matrix:\n        os: [ubuntu-latest, macos-latest, windows-latest]\n    runs-on: ${{ matrix.os }}\n",
+    )?;
+    git(&root, &["init", "--quiet"])?;
+    git(&root, &["add", "."])?;
+    git(&root, &["commit", "--quiet", "-m", "ci"])?;
+    let mut paths = vec![tools.path().to_path_buf()];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let status = r#"{"Self":{"DNSName":"phone.example.ts.net.","OS":"android","Online":true},"Peer":{"a":{"DNSName":"box.example.ts.net.","OS":"linux","TailscaleIPs":["100.64.0.2"],"Online":true},"b":{"DNSName":"mac.example.ts.net.","OS":"macOS","TailscaleIPs":["100.64.0.3"],"Online":true},"c":{"DNSName":"pc.example.ts.net.","OS":"windows","TailscaleIPs":["100.64.0.4"],"Online":true}}}"#;
+    let output = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), scope.path())
+        .args(["hosts", "check"])
+        .current_dir(&root)
+        .env("PATH", std::env::join_paths(paths)?)
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("GIT_CONFIG_GLOBAL", root.join("gitconfig"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_AUTHOR_NAME", "Fixture")
+        .env("GIT_AUTHOR_EMAIL", "fixture@example.com")
+        .env("GIT_COMMITTER_NAME", "Fixture")
+        .env("GIT_COMMITTER_EMAIL", "fixture@example.com")
+        .env("HOSTS_FIXTURE_STATUS", status)
+        .env("HOSTS_FIXTURE_DOCTOR", "ok")
+        .env("HOSTS_FIXTURE_STAGES", "{\"code\":7,\"real\":9}")
+        .output()?;
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr)?;
+    for (os, host) in [("linux", "box"), ("macos", "mac"), ("windows", "pc")] {
+        for (stage, status) in [("code", 7), ("real", 9)] {
+            assert!(
+                stderr.contains(&format!("{os} {host} {stage}: failed with {status}")),
+                "{stderr}"
+            );
+        }
+    }
+    let notes = git(
+        &root,
+        &["notes", "--ref", "refs/notes/hosts", "show", "HEAD"],
+    )?;
+    assert_eq!(
+        evidence(&notes, &git(&root, &["rev-parse", "HEAD^{tree}"])?)?,
+        [Evidence::Failed; 3]
+    );
     Ok(())
 }
