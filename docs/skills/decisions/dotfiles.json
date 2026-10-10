@@ -1,11 +1,14 @@
 {
-  "revision": "83834802c6952688c715c310a6bcf660b3011704e4ebedd5eee9a10778860a59",
+  "revision": "5dabd828c7e1dbca06c8c5f77e000fa01fe5ca67d4346187f59e5fd63e37b9e0",
   "outcome": "implemented",
-  "reason": "Keep native profile application and state preservation separate from remote transport and skill discovery.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "reason": "Keep native profile application and state preservation separate from remote transport and skill discovery.\nOwn the pinned zsh used by the Linux startup and syntax gates in the existing dotfiles tool contract.\nThe inventory gate rejects missing coverage and incompatible versions, and the native shell regressions exercise this provider.",
   "evidence": [
     "home/dot_agents/skills/dotfiles/SKILL.md",
     "home/dot_agents/skills/dotfiles/tools.toml",
-    "xtask/tests/tool_inventory.rs"
+    "xtask/tests/tool_inventory.rs",
+    "crates/platform/src/tool.rs",
+    "xtask/src/quality.rs",
+    "xtask/src/startup.rs"
   ],
   "revisit": null
 }
