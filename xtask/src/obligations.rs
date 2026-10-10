@@ -34,6 +34,8 @@ pub const CORE_SOURCES: &str = "crates/rules/src";
 /// The directories whose Rust sources the gate reads for callers and unsafe sites.
 const SOURCE_ROOTS: [&str; 2] = ["crates", "xtask"];
 
+const GITHUB_REPOSITORY: &str = "P4suta/dotfiles";
+
 /// The mutation configuration, whose exclusions count as exemptions.
 pub const MUTANTS_CONFIG: &str = ".cargo/mutants.toml";
 
@@ -1328,6 +1330,8 @@ pub fn github_issue_closed(issue: u32) -> Result<bool> {
             "issue",
             "view",
             &issue.to_string(),
+            "--repo",
+            GITHUB_REPOSITORY,
             "--json",
             "state",
             "--jq",
