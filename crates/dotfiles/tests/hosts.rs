@@ -1,4 +1,4 @@
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use dotfiles::hosts::{
     Managed, Peer, Tailnet, evidence, hub_user, label_family, managed, outcome, pinned, push_gate,
     remote_gate, render, required, scanned, select, tailnet, wrap,
@@ -494,6 +494,185 @@ fn git(directory: &Path, arguments: &[&str]) -> Result<String> {
         String::from_utf8_lossy(&output.stderr)
     );
     Ok(String::from_utf8(output.stdout)?.trim().to_owned())
+}
+
+fn link_directory(source: &Path, destination: &Path) -> Result<()> {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(source, destination)?;
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(source, destination)?;
+    Ok(())
+}
+
+struct BootstrapFixture {
+    scope: tempfile::TempDir,
+    cargo: PathBuf,
+    rustup: PathBuf,
+    mise: PathBuf,
+    pin: String,
+}
+
+fn bootstrap_fixture() -> Result<BootstrapFixture> {
+    let scope = tempfile::tempdir()?;
+    let root = scope.path().join("project");
+    let host = scope.path().join("host");
+    let job = scope.path().join("job");
+    for directory in [&root, &host, &job] {
+        fs::create_dir_all(directory)?;
+    }
+    let home = platform::home::home().context("native tool home")?;
+    let installed = platform::code_environment::Installations::discover(&home)?;
+    let rust = platform::tool::Tool::Mise
+        .command()
+        .args(["where", "rust"])
+        .output()?;
+    ensure!(rust.status.success(), "resolve the installed Rust proxies");
+    let rustup = platform::paths::canonical(
+        &Path::new(String::from_utf8(rust.stdout)?.trim())
+            .join(format!("rustup{}", std::env::consts::EXE_SUFFIX)),
+    )?;
+    let cargo = rustup
+        .parent()
+        .and_then(Path::parent)
+        .context("Rust proxy Cargo home")?;
+    link_directory(&installed.rustup, &host.join(".rustup"))?;
+    let data = if cfg!(windows) {
+        host.join("AppData/Local/mise")
+    } else {
+        host.join(".local/share/mise")
+    };
+    let versions: toml::Value = toml::from_str(&fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../mise.toml"
+    ))?)?;
+    let pin = versions["tools"]["rust"]["version"]
+        .as_str()
+        .context("project Rust pin")?;
+    let installs = data.join("installs/rust");
+    fs::create_dir_all(&installs)?;
+    fs::write(
+        installs.join(".mise.backend.toml"),
+        "short = 'rust'\nfull = 'core:rust'\n",
+    )?;
+    link_directory(cargo.join("bin").as_path(), &installs.join(pin))?;
+    fs::write(root.join("mise.toml"), format!("[tools]\nrust = {pin:?}\n"))?;
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = 'dotfiles'\nversion = '0.0.0'\nedition = '2024'\n",
+    )?;
+    fs::write(
+        root.join("Cargo.lock"),
+        "version = 4\n[[package]]\nname = 'dotfiles'\nversion = '0.0.0'\n",
+    )?;
+    fs::create_dir(root.join("src"))?;
+    fs::copy(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/bootstrap.rs"),
+        root.join("src/main.rs"),
+    )?;
+    fs::write(
+        root.join("gitconfig"),
+        "[user]\nname = Fixture\nemail = fixture@example.com\n[commit]\ngpgsign = false\n",
+    )?;
+    git(&root, &["init", "--quiet"])?;
+    git(
+        &root,
+        &["add", "Cargo.toml", "Cargo.lock", "mise.toml", "src"],
+    )?;
+    git(&root, &["commit", "--quiet", "-m", "bootstrap"])?;
+    git(
+        &root,
+        &[
+            "bundle",
+            "create",
+            job.join("head.bundle").to_str().context("bundle path")?,
+            "HEAD",
+        ],
+    )?;
+    Ok(BootstrapFixture {
+        scope,
+        cargo: cargo.to_path_buf(),
+        rustup,
+        mise: installed.mise,
+        pin: pin.to_owned(),
+    })
+}
+
+#[test]
+fn the_remote_bootstrap_uses_native_rust_tools_with_owned_writable_state() -> Result<()> {
+    let BootstrapFixture {
+        scope,
+        cargo,
+        rustup,
+        mise,
+        pin,
+    } = bootstrap_fixture()?;
+    let root = scope.path().join("project");
+    let host = scope.path().join("host");
+    let job = scope.path().join("job");
+    let global = host.join("untrusted.toml");
+    fs::write(&global, "[tools]\nrust = 'invalid-native-version'\n")?;
+    let family = if cfg!(windows) {
+        Family::Windows
+    } else if cfg!(target_os = "macos") {
+        Family::Mac
+    } else {
+        Family::Linux
+    };
+    let argv = wrap(family, &remote_gate(family, "bootstrap fixture"));
+    let mut paths = vec![mise.parent().context("mise directory")?.to_path_buf()];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let output = fixture_git::command(&argv[0], &root.join("gitconfig"))
+        .args(&argv[1..])
+        .current_dir(&job)
+        .env("HOME", &host)
+        .env("USERPROFILE", &host)
+        .env("LOCALAPPDATA", host.join("AppData/Local"))
+        .env("CARGO_HOME", &cargo)
+        .env("MISE_GLOBAL_CONFIG_FILE", &global)
+        .env("PATH", std::env::join_paths(paths)?)
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout)?;
+    let values: std::collections::BTreeMap<_, _> = stdout
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .collect();
+    for (name, expected) in [
+        ("HOME", job.join("bootstrap")),
+        ("CARGO_HOME", job.join("bootstrap/.cargo")),
+        ("MISE_CARGO_HOME", job.join("bootstrap/.cargo")),
+        ("MISE_GLOBAL_CONFIG_FILE", job.join("bootstrap/empty.toml")),
+        ("MISE_SYSTEM_CONFIG_FILE", job.join("bootstrap/empty.toml")),
+    ] {
+        assert_eq!(Path::new(values[name]), expected);
+    }
+    let compiler = platform::tool::Tool::Rustc.command().arg("-vV").output()?;
+    ensure!(compiler.status.success(), "resolve the Rust host triple");
+    let compiler = String::from_utf8(compiler.stdout)?;
+    let triple = compiler
+        .lines()
+        .find_map(|line| line.strip_prefix("host: "))
+        .context("Rust host triple")?;
+    assert_eq!(values["RUSTUP_TOOLCHAIN"], format!("{pin}-{triple}"));
+    assert_eq!(
+        platform::paths::canonical(
+            &job.join("bootstrap/.cargo/bin")
+                .join(format!("rustup{}", std::env::consts::EXE_SUFFIX))
+        )?,
+        rustup
+    );
+    assert_eq!(
+        fs::read_to_string(&global)?,
+        "[tools]\nrust = 'invalid-native-version'\n"
+    );
+    assert!(!host.join(".cargo").exists());
+    Ok(())
 }
 
 #[test]
