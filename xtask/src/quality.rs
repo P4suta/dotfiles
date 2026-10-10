@@ -889,11 +889,11 @@ pub fn shellcheck(
     command(directory, Tool::Shellcheck, &arguments)
 }
 
-/// Parses a zsh startup file with `zsh -n`, which every Mac has.
-/// A host without zsh leaves the parse to the Mac and Linux gates that have it.
+/// Parses a zsh startup file with macOS's system shell or Linux's pinned shell.
+/// Windows leaves the parse to the Mac and Linux gates when it has no zsh.
 fn zsh_parse(directory: &Path, name: &str, path: &str) -> Result<()> {
     let installed = Path::new(Tool::Zsh.program()).is_file();
-    if !installed && !cfg!(target_os = "macos") {
+    if !installed && cfg!(windows) {
         println!("zsh is absent on this host, so the Mac gate parses {name} with zsh -n");
         return Ok(());
     }
@@ -1413,6 +1413,18 @@ mod tests {
     }
 
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_pinned_zsh_rejects_invalid_startup_syntax() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = "startup.zsh";
+        fs::write(directory.path().join(path), "if true; then\nfi\n").unwrap();
+        zsh_parse(directory.path(), path, path).unwrap();
+        fs::write(directory.path().join(path), "if true; then\n").unwrap();
+        let error = zsh_parse(directory.path(), path, path).unwrap_err();
+        assert_eq!(error.to_string(), "zsh failed with exit status: 1");
+    }
 
     #[test]
     fn the_chezmoi_pin_reads_a_plain_or_a_table_version() {

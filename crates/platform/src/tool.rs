@@ -7,8 +7,11 @@ use std::process::Command;
 /// The Nix installer's default profile, which a login shell may not have on its `PATH` yet.
 const NIX: &str = "/nix/var/nix/profiles/default/bin/nix";
 
-/// The shells at their fixed system paths, so a user's `PATH` can't substitute another.
+/// Bash at its fixed system path, so a user's `PATH` can't substitute another.
 const BASH: &str = "/bin/bash";
+#[cfg(target_os = "linux")]
+const ZSH: &str = "zsh";
+#[cfg(not(target_os = "linux"))]
 const ZSH: &str = "/bin/zsh";
 
 /// The JSON pointer of the Nix package list in the chezmoi data.
@@ -338,6 +341,13 @@ impl Tool {
             Self::Shellcheck => Provision::Pinned("shellcheck"),
             Self::Taplo => Provision::Pinned("taplo"),
             Self::Vale => Provision::Pinned("vale"),
+            Self::Zsh => {
+                if cfg!(target_os = "linux") {
+                    Provision::Pinned("conda:zsh")
+                } else {
+                    Provision::Host
+                }
+            }
             Self::Bash
             | Self::Curl
             | Self::CurlExe
@@ -355,8 +365,7 @@ impl Tool {
             | Self::TarExe
             | Self::Unzip
             | Self::Winget
-            | Self::Wslpath
-            | Self::Zsh => Provision::Host,
+            | Self::Wslpath => Provision::Host,
             Self::Atuin
             | Self::Cabal
             | Self::Carapace

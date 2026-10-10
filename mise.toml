@@ -12,6 +12,7 @@ typos = "1.50.3"
 yamllint = "1.38.0"
 nu = "0.116.0"
 powershell = "7.6.6"
+"conda:zsh" = { version = "5.9", channel = "conda-forge", os = ["linux"] }
 "pypi:ansible-core" = { version = "2.21.4", os = ["linux"] }
 "cargo:kani-verifier" = { version = "0.68.0", os = ["macos", "linux"] }
 "cargo:cargo-mutants" = { version = "27.1.0", os = ["macos", "linux"] }
