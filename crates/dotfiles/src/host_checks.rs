@@ -9,6 +9,8 @@ use std::process::{Command, Stdio};
 
 const CONFIG: &str = ".config/chezmoi/chezmoi.toml";
 const GIT_CONFIG: &str = ".config/git/config";
+const MISE_CONFIG: &str = ".config/mise/config.toml";
+const EMPTY_CONFIG: &str = "empty-config.toml";
 const MAC_SHELL: &str = "/bin/zsh";
 const UNIX_SHELL: &str = "/bin/bash";
 const PUBLIC_SOURCES: [&str; 3] = [
@@ -50,6 +52,7 @@ impl Scratch {
         let directory = platform::paths::canonical(scope.path())?;
         let home = directory.join("home");
         fs::create_dir_all(&home)?;
+        fs::write(directory.join(EMPTY_CONFIG), "")?;
         let mut answers: toml::Table = toml::from_str(&fs::read_to_string(config)?)?;
         let data = answers
             .get_mut("data")
@@ -114,6 +117,11 @@ impl Scratch {
             ("CARGO_TARGET_DIR", self.home.join("target")),
             ("MISE_DATA_DIR", self.home.join(".local/share/mise")),
             ("MISE_CONFIG_DIR", self.home.join(".config/mise")),
+            ("MISE_GLOBAL_CONFIG_FILE", self.home.join(MISE_CONFIG)),
+            (
+                "MISE_SYSTEM_CONFIG_FILE",
+                self.scope.path().join(EMPTY_CONFIG),
+            ),
             ("MISE_CACHE_DIR", self.home.join(".cache/mise")),
             ("MISE_STATE_DIR", self.home.join(".local/state/mise")),
             ("GIT_CONFIG_GLOBAL", self.home.join(GIT_CONFIG)),
@@ -154,14 +162,27 @@ impl Scratch {
     }
 
     fn install(&self, directory: &Path) -> Result<()> {
-        let mut command = shell("mise install -y")?;
-        self.configure(&mut command);
-        let status = command
-            .current_dir(directory)
-            .env("MISE_TRUSTED_CONFIG_PATHS", directory)
+        let status = self
+            .toolchain_command(directory, "mise install -y")?
             .status()?;
         ensure!(status.success(), "mise install failed with {status}");
         Ok(())
+    }
+
+    fn toolchain_command(&self, directory: &Path, invocation: &str) -> Result<Command> {
+        let directory = platform::paths::canonical(directory)?;
+        let mut command = shell(invocation)?;
+        self.configure(&mut command);
+        command
+            .current_dir(&directory)
+            .env("MISE_TRUSTED_CONFIG_PATHS", &directory)
+            .env(
+                "MISE_CEILING_PATHS",
+                directory
+                    .parent()
+                    .context("toolchain directory has no parent")?,
+            );
+        Ok(command)
     }
 
     fn fetch(&self, url: &str) -> Result<()> {
@@ -295,6 +316,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn candidate_mise_reads_only_the_rendered_global_and_current_project() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let config = scope.path().join("chezmoi.toml");
+        fs::write(
+            &config,
+            format!(
+                "[data]\nprofile = {:?}\n",
+                crate::profiles::native_profile()?.name()
+            ),
+        )?;
+        let source = scope.path().join("candidate");
+        fs::create_dir_all(source.join("dot_config/mise"))?;
+        fs::write(
+            source.join("dot_config/mise/config.toml"),
+            "[tools]\npython = '3.14.8'\n",
+        )?;
+        fs::create_dir_all(scope.path().join(".config/mise"))?;
+        fs::write(
+            scope.path().join(".config/mise/config.toml"),
+            "[tools]\npython = 'invalid-ancestor-version'\n",
+        )?;
+        let project = scope.path().join("project");
+        fs::create_dir(&project)?;
+        fs::write(project.join("mise.toml"), "[tools]\nuv = '0.12.22'\n")?;
+        let scratch = Scratch::new(&config)?;
+        scratch.profile(&source, "apply")?;
+        let output = scratch
+            .toolchain_command(&project, "mise ls --json")?
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let tools: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_slice(&output.stdout)?;
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools["python"][0]["requested_version"], "3.14.8");
+        assert_eq!(
+            Path::new(
+                tools["python"][0]["source"]["path"]
+                    .as_str()
+                    .context("mise source")?
+            ),
+            scratch.home.join(".config/mise/config.toml")
+        );
+        assert_eq!(tools["uv"][0]["requested_version"], "0.12.22");
+        assert_eq!(
+            Path::new(
+                tools["uv"][0]["source"]["path"]
+                    .as_str()
+                    .context("project mise source")?
+            ),
+            project.join("mise.toml")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn candidate_application_and_applied_verification_preserve_the_host_home() -> Result<()> {
         let scope = tempfile::tempdir()?;
         let host = scope.path().join("host");
@@ -364,6 +444,8 @@ mod tests {
                         | "RUSTUP_HOME"
                         | "MISE_DATA_DIR"
                         | "MISE_CONFIG_DIR"
+                        | "MISE_GLOBAL_CONFIG_FILE"
+                        | "MISE_SYSTEM_CONFIG_FILE"
                         | "MISE_CACHE_DIR"
                         | "MISE_STATE_DIR"
                         | "GIT_CONFIG_GLOBAL"
