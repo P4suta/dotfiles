@@ -73,10 +73,12 @@
 	helper =
 	helper = !gh auth git-credential
 
-# Git sends every github.com web address over SSH, so Git transport always uses the 1Password SSH agent.
-# Downloads that never read Git configuration, such as release tarballs, keep their HTTPS URLs.
+# Owner repositories fetch and push over SSH.
+[url "git@github.com:P4suta/"]
+	insteadOf = https://github.com/P4suta/
+# Every GitHub push uses SSH, while third-party HTTPS fetches need no credentials.
 [url "git@github.com:"]
-	insteadOf = https://github.com/
+	pushInsteadOf = https://github.com/
 {{- if .signing.enabled }}
 
 [gpg]

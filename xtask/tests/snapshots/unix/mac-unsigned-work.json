@@ -291,7 +291,7 @@
     {"mode":"0644","path":".config/ghostty/config","sha256":"676ce7cb7ec791daeea8fdbf15d2dee12e800cef91d565602a004fa8aa097617","type":"file"},
     {"mode":"0755","path":".config/git","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/git/attributes","sha256":"c9066b7104dba3adf0a04fbbf208bc812467fb6a5ba922efb92706b594c0f7e3","type":"file"},
-    {"mode":"0644","path":".config/git/config","sha256":"e1260654fb8a7a88dfc1d078a88c25a4deb7165a0dad21c0c6093f9559cf969b","type":"file"},
+    {"mode":"0644","path":".config/git/config","sha256":"a61f7c6c9edddf0a2dce787d156176abb34c260f003d89b3721f043431c9b8c0","type":"file"},
     {"mode":"0755","path":".config/git/hooks","sha256":null,"type":"dir"},
     {"mode":"0755","path":".config/git/hooks/commit-msg","sha256":"abde5ea2591c59c3eabd4cb6b94749517f3707d4a30a6d197ae0bed21e857942","type":"file"},
     {"mode":"0755","path":".config/git/hooks/post-checkout","sha256":"f667ae19dc77d21f11727b6385e8cc9803a6845b31b4b19bb084c4e6a6942c40","type":"file"},
