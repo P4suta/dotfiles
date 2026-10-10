@@ -660,9 +660,9 @@ mod tests {
         };
         fs::write(candidate.join(launcher), script)?;
         let scratch = Scratch::new(&config)?;
-        let renderer = Path::new(platform::tool::Tool::Chezmoi.program());
-        scratch.profile(&candidate, "apply", renderer)?;
-        scratch.profile(&candidate, "verify", renderer)?;
+        let program = Path::new(platform::tool::Tool::Chezmoi.program());
+        scratch.profile(&candidate, "apply", program)?;
+        scratch.profile(&candidate, "verify", program)?;
         let rendered = fs::read_to_string(scratch.home.join(".candidate"))?;
         assert!(!rendered.contains(&host.to_string_lossy().replace('\\', "/")));
         assert_eq!(rendered.lines().count(), 3);
@@ -670,7 +670,7 @@ mod tests {
             Path::new(rendered.lines().next().context("rendered destination")?),
             Path::new(rendered.lines().nth(1).context("rendered HOME")?)
         );
-        let applied_report = verify_applied(&config, &host, renderer)?;
+        let applied_report = verify_applied(&config, &host, program)?;
         assert_eq!(applied_report.drifted_targets, Vec::<String>::new());
         assert!(applied_report.verification_error.is_none());
         assert_eq!(fs::read_to_string(&config)?, contents);
@@ -709,7 +709,7 @@ mod tests {
         fs::write(host.join(".existing"), "host drift\n")?;
         fs::write(applied.join("dot_other"), "expected\n")?;
         fs::write(host.join(".other"), "other drift\n")?;
-        let applied_report = verify_applied(&config, &host, renderer)?;
+        let applied_report = verify_applied(&config, &host, program)?;
         assert_eq!(applied_report.drifted_targets, [".existing", ".other"]);
         assert!(applied_report.verification_error.is_none());
         assert_eq!(fs::read_to_string(host.join(".existing"))?, "host drift\n");
