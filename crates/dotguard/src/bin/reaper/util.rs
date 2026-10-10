@@ -94,10 +94,17 @@ pub fn etime_seconds(raw: &str) -> i64 {
 const LOCK_FILE: &str = "run.lock";
 
 /// Single-instance guard: an advisory lock on a file in the state directory.
-/// The operating system releases it when the run exits or dies, so no run ever steals it, and the file stays for the next run.
+/// The guard releases it on drop, and the operating system releases it when all descriptors close after a crash.
+/// No run ever steals it, and the file stays for the next run.
 /// `specs/reaper_lock.qnt` shows the old directory lock admitting two runs, and mutual exclusion of the new one rests on the operating system.
 pub struct Lock {
-    _file: File,
+    file: File,
+}
+
+impl Drop for Lock {
+    fn drop(&mut self) {
+        platform::cleanup::report(self.file.unlock(), "unlock the reaper lock");
+    }
 }
 
 impl Lock {
@@ -116,7 +123,7 @@ impl Lock {
             }
         };
         match file.try_lock() {
-            Ok(()) => Some(Lock { _file: file }),
+            Ok(()) => Some(Lock { file }),
             Err(TryLockError::WouldBlock) => {
                 log("another instance is running, skipping");
                 None
@@ -214,8 +221,10 @@ mod tests {
         let state = tempfile::tempdir().unwrap();
         let first = Lock::take(state.path(), &|_| {}).expect("a free lock");
         assert!(Lock::take(state.path(), &|_| {}).is_none());
+        let inherited = first.file.try_clone().expect("an inherited descriptor");
         drop(first);
         assert!(Lock::take(state.path(), &|_| {}).is_some());
+        drop(inherited);
     }
 
     #[test]
