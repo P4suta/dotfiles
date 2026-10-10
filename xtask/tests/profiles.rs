@@ -510,24 +510,18 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
 }
 
 #[test]
-fn public_owner_sources_clone_over_https_despite_a_host_ssh_rewrite() {
+fn every_owner_source_clones_over_ssh_without_transport_overrides() {
     use dotfiles::setup::OwnerSource;
     let scope = tempfile::tempdir().unwrap();
     let global = scope.path().join("gitconfig");
     fs::write(
         &global,
-        "[url \"git@github.com:\"]\n\tinsteadOf = https://github.com/\n",
+        "[url \"git@github.com:P4suta/\"]\n\tinsteadOf = https://github.com/P4suta/\n[url \"git@github.com:\"]\n\tpushInsteadOf = https://github.com/\n",
     )
     .unwrap();
     for (source, expected) in [
-        (
-            OwnerSource::Ocomment,
-            "https://github.com/P4suta/OComment.git",
-        ),
-        (
-            OwnerSource::Domyjob,
-            "https://github.com/P4suta/domyjob.git",
-        ),
+        (OwnerSource::Ocomment, "git@github.com:P4suta/OComment"),
+        (OwnerSource::Domyjob, "git@github.com:P4suta/domyjob"),
         (OwnerSource::Fleet, "git@github.com:P4suta/fleet"),
     ] {
         let mut arguments = source.clone_arguments(&scope.path().join("checkout"));

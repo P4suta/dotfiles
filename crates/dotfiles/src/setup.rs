@@ -218,7 +218,6 @@ pub(crate) fn preflight(
     let mut unmet = Vec::new();
     for &step in steps {
         if let Some(source) = owner_source(step)
-            && !source.public()
             && !owner_checkout(context, source)?.join(".git").exists()
         {
             let mut arguments = args(&[
@@ -326,8 +325,7 @@ pub const GUARD_PROFILE: &str = "release-guard";
 
 const CLAUDE_INSTALLER: &str = "https://claude.ai/install.sh";
 const ONEPASSWORD_APP: &str = "/Applications/1Password.app";
-/// The owner's public repositories clone over HTTPS.
-const OWNER_HTTPS: &str = "https://github.com/P4suta";
+const OWNER_SSH: &str = "git@github.com:P4suta";
 
 /// `cargo install` overwrites each binary in place, which Windows refuses while that binary runs, so each one moves aside first.
 fn install_crate(
@@ -885,14 +883,6 @@ impl OwnerSource {
         }
     }
 
-    /// Public sources must clone without credentials, so an unattended or remote apply never needs the owner's SSH key.
-    fn public(self) -> bool {
-        match self {
-            Self::Ocomment | Self::Domyjob => true,
-            Self::Fleet => false,
-        }
-    }
-
     /// An argument the installed binary accepts without side effects, since domyjob lacks `--version`.
     fn probe(self) -> &'static str {
         match self {
@@ -902,27 +892,13 @@ impl OwnerSource {
     }
 
     fn clone_url(self) -> String {
-        if self.public() {
-            format!("{OWNER_HTTPS}/{}.git", self.repository())
-        } else {
-            format!("git@github.com:P4suta/{}", self.repository())
-        }
+        format!("{OWNER_SSH}/{}", self.repository())
     }
 
     /// `git` arguments that clone this source into `checkout`.
-    /// Mapping a public URL onto itself beats a host-wide HTTPS-to-SSH rewrite, because git applies the longest matching `insteadOf`.
     #[must_use]
     pub fn clone_arguments(self, checkout: &Path) -> Vec<OsString> {
-        let mut arguments = Vec::new();
-        let url = self.clone_url();
-        if self.public() {
-            arguments.push("-c".into());
-            arguments.push(format!("url.{url}.insteadOf={url}").into());
-        }
-        arguments.push("clone".into());
-        arguments.push(url.into());
-        arguments.push(checkout.into());
-        arguments
+        vec!["clone".into(), self.clone_url().into(), checkout.into()]
     }
 }
 
@@ -1174,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    fn a_private_source_without_credentials_stops_before_application() {
+    fn every_owner_source_without_credentials_stops_before_application() {
         let scope = tempfile::tempdir().unwrap();
         let context = TemplateData {
             source: scope.path().into(),
@@ -1182,11 +1158,21 @@ mod tests {
             profile: Profile::Mac,
             data: serde_json::json!({"paths": {"projects": scope.path()}}),
         };
-        let refused = preflight(&context, &mut Refusing, &[Step::Runtime, Step::Fleet]);
-        assert!(refused.unwrap_err().to_string().contains("setup.ignore"));
-        preflight(&context, &mut Refusing, &[Step::Runtime, Step::Ocomment]).unwrap();
-        std::fs::create_dir_all(scope.path().join("github.com/P4suta/fleet/.git")).unwrap();
-        preflight(&context, &mut Refusing, &[Step::Fleet]).unwrap();
+        for (step, repository) in [
+            (Step::Fleet, "fleet"),
+            (Step::Ocomment, "OComment"),
+            (Step::Domyjob, "domyjob"),
+        ] {
+            let refused = preflight(&context, &mut Refusing, &[Step::Runtime, step]);
+            assert!(refused.unwrap_err().to_string().contains("setup.ignore"));
+            std::fs::create_dir_all(
+                scope
+                    .path()
+                    .join(format!("github.com/P4suta/{repository}/.git")),
+            )
+            .unwrap();
+            preflight(&context, &mut Refusing, &[step]).unwrap();
+        }
     }
 
     #[test]

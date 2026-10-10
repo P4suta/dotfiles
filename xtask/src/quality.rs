@@ -12,8 +12,6 @@ const GIT_EXEC_PATH_DEPTH: usize = 3;
 const JUST: &str = "just ";
 const DENY_CONFIG: &str = "deny.toml";
 const RUSTSEC_URL: &str = "https://github.com/RustSec/advisory-db";
-const STD_REPLACEMENT_URL: &str = "https://github.com/embarkstudios/std-replacement-data";
-const PUBLIC_FETCH_CONFIG_COUNT: &str = "1";
 /// The directory the pinned cargo-deny derives from its default advisory URL.
 const RUSTSEC_DATABASE: &str = "advisory-db-3157b0e258782691";
 const ADVISORY_ROOT: &str = "advisories";
@@ -203,8 +201,6 @@ pub fn dependencies(root: &Path) -> Result<()> {
         root,
         "git",
         &[
-            "-c",
-            &format!("url.{RUSTSEC_URL}.insteadOf={RUSTSEC_URL}"),
             "clone",
             "--depth",
             ADVISORY_CLONE_DEPTH,
@@ -216,13 +212,6 @@ pub fn dependencies(root: &Path) -> Result<()> {
     let checker = || {
         let mut command = Tool::CargoDeny.command();
         command.envs(TEMP_ENVIRONMENT.map(|key| (key, scope.path())));
-        command
-            .env("GIT_CONFIG_COUNT", PUBLIC_FETCH_CONFIG_COUNT)
-            .env(
-                "GIT_CONFIG_KEY_0",
-                format!("url.{STD_REPLACEMENT_URL}.insteadOf"),
-            )
-            .env("GIT_CONFIG_VALUE_0", STD_REPLACEMENT_URL);
         command
     };
     run(
