@@ -332,7 +332,7 @@ pub fn fzf_grid(root: &Path, config: &str) -> Result<Vec<String>> {
                 format!("{volume}-mise:/root/.local/share/mise").into(),
             ],
         );
-        *arguments.last_mut().context("the image command has a renderer")? = "set -eo pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -; mise trust --quiet; export MISE_AUTO_INSTALL=false; exec mise x -- cargo xtask fzf-grid".into();
+        *arguments.last_mut().context("the image command has a renderer")? = "set -eo pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -; mise trust --quiet; mise install fzf; export MISE_AUTO_INSTALL=false; exec mise x -- cargo xtask fzf-grid".into();
         let mut child = Tool::Docker
             .command()
             .args(arguments)
