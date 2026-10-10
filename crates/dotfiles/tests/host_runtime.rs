@@ -8,6 +8,8 @@ use std::process::Command;
 mod fixture_git;
 
 const REFERENCE: &str = "refs/tags/fixture";
+#[cfg(unix)]
+const EXECUTABLE_MODE: u32 = 0o755;
 
 fn candidate_git(environment: &Command, repository: &Path) -> Result<Command> {
     let global = environment
@@ -24,6 +26,75 @@ fn candidate_git(environment: &Command, repository: &Path) -> Result<Command> {
     }
     command.current_dir(repository);
     Ok(command)
+}
+
+fn render_template(
+    root: &Path,
+    scope: &Path,
+    config: &Path,
+    home: &Path,
+    environment: &Command,
+    template: &str,
+) -> Result<Vec<u8>> {
+    let mut render = dotfiles::profiles::chezmoi(root, scope, config, home);
+    for (name, value) in environment.get_envs() {
+        if let Some(value) = value {
+            render.env(name, value);
+        } else {
+            render.env_remove(name);
+        }
+    }
+    let rendered = render
+        .args(["execute-template", "--file"])
+        .arg(root.join(template))
+        .output()?;
+    ensure!(
+        rendered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rendered.stderr)
+    );
+    Ok(rendered.stdout)
+}
+
+#[cfg(unix)]
+fn render_git_launcher(
+    root: &Path,
+    scope: &Path,
+    config: &Path,
+    home: &Path,
+    environment: &Command,
+) -> Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let wrapper = home.join(".local/bin/git");
+    fs::create_dir_all(wrapper.parent().context("Git launcher directory")?)?;
+    fs::write(
+        &wrapper,
+        render_template(
+            root,
+            scope,
+            config,
+            home,
+            environment,
+            "home/dot_local/bin/executable_git.tmpl",
+        )?,
+    )?;
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(EXECUTABLE_MODE))?;
+    Ok(wrapper)
+}
+
+#[cfg(unix)]
+fn assert_git_launcher(scratch: &Scratch, home: &Path) -> Result<()> {
+    let output = scratch
+        .command(home.join(".local/bin/git"))
+        .arg("--version")
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8(output.stdout)?.starts_with("git version "));
+    Ok(())
 }
 
 #[test]
@@ -46,32 +117,33 @@ fn candidate_git_runs_the_rendered_hook_with_the_candidate_runtime() -> Result<(
             .find_map(|(name, value)| (name == "HOME").then_some(value).flatten())
             .context("candidate home")?,
     );
-    let mut render = dotfiles::profiles::chezmoi(&root, scope.path(), &config, &home);
-    for (name, value) in environment.get_envs() {
-        if let Some(value) = value {
-            render.env(name, value);
-        } else {
-            render.env_remove(name);
-        }
-    }
-    let rendered = render
-        .args(["execute-template", "--file"])
-        .arg(root.join("home/dot_config/git/hooks/executable_reference-transaction.tmpl"))
-        .output()?;
-    ensure!(
-        rendered.status.success(),
-        "{}",
-        String::from_utf8_lossy(&rendered.stderr)
-    );
     let hooks = home.join(".config/git/hooks");
     fs::create_dir_all(&hooks)?;
     let hook = hooks.join("reference-transaction");
-    fs::write(&hook, rendered.stdout)?;
+    fs::write(
+        &hook,
+        render_template(
+            &root,
+            scope.path(),
+            &config,
+            &home,
+            &environment,
+            "home/dot_config/git/hooks/executable_reference-transaction.tmpl",
+        )?,
+    )?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        const EXECUTABLE_MODE: u32 = 0o755;
         fs::set_permissions(&hook, fs::Permissions::from_mode(EXECUTABLE_MODE))?;
+        let wrapper = render_git_launcher(&root, scope.path(), &config, &home, &environment)?;
+        assert!(
+            !scratch
+                .command(&wrapper)
+                .arg("--version")
+                .output()?
+                .status
+                .success()
+        );
     }
     fs::write(home.join(".config/git/config"), "")?;
     let repository = scope.path().join("repository");
@@ -103,11 +175,17 @@ fn candidate_git_runs_the_rendered_hook_with_the_candidate_runtime() -> Result<(
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("dotfiles"));
     let binary = Path::new(env!("CARGO_BIN_EXE_dotfiles"));
-    scratch.provision_runtime(binary)?;
+    scratch.provision_runtime(
+        &root,
+        binary,
+        &platform::home::home().context("native tool storage home")?,
+    )?;
     let installed = home
         .join(".local/bin")
         .join(format!("dotfiles{}", std::env::consts::EXE_SUFFIX));
     assert_eq!(fs::read(&installed)?, fs::read(binary)?);
+    #[cfg(unix)]
+    assert_git_launcher(&scratch, &home)?;
     let output = run()?;
     ensure!(
         output.status.success(),

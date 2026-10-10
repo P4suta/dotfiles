@@ -167,7 +167,7 @@ impl CodeEnvironment {
         let empty = directory.join("empty-config.toml");
         fs::write(&empty, "")?;
         let mise = bootstrap.join(format!("mise{}", std::env::consts::EXE_SUFFIX));
-        link_entry(&installed.mise, &mise).context("link the mise bootstrap")?;
+        link_executable(&installed.mise, &mise).context("link the mise bootstrap")?;
         let github = home.join(".config/gh");
         fs::create_dir_all(&github)?;
         fs::write(github.join("hosts.yml"), GITHUB_HOSTS)?;
@@ -217,6 +217,7 @@ impl CodeEnvironment {
             ("HOME", home.to_path_buf()),
             ("USERPROFILE", home.to_path_buf()),
             ("CARGO_HOME", home.join(".cargo")),
+            ("DOTFILES_HOST_CARGO_HOME", installed.cargo.clone()),
             ("RUSTUP_HOME", installed.rustup.clone()),
             ("MISE_RUSTUP_HOME", installed.rustup.clone()),
             ("MISE_CARGO_HOME", installed.cargo.clone()),
@@ -608,6 +609,15 @@ fn link_installations(
         }
     }
     Ok(())
+}
+
+/// Borrow an existing executable without opening a new executable for writing.
+///
+/// # Errors
+///
+/// Returns an error when resolving the source or creating the native link fails.
+pub fn link_executable(source: &Path, destination: &Path) -> Result<()> {
+    link_entry(&canonical(source)?, destination)
 }
 
 fn link_entry(source: &Path, destination: &Path) -> Result<()> {

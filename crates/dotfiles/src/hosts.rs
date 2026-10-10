@@ -695,7 +695,7 @@ fn code(home: &Path, gate: &str) -> Result<()> {
     Ok(())
 }
 
-fn code_environment(
+pub(crate) fn code_environment(
     root: &Path,
     home: &Path,
 ) -> Result<platform::code_environment::CodeEnvironment> {

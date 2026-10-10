@@ -16,6 +16,8 @@ const CHEZMOI_INSTALLS: &str = "installs/chezmoi";
 const PROJECT_CONFIG: &str = "mise.toml";
 const EMPTY_CONFIG: &str = "empty-config.toml";
 const RUNTIME_BIN: &str = ".local/bin";
+const RUNTIME_BUILD: &str = "target/hosts/runtime";
+const DEBUG_OUTPUT: &str = "debug";
 const MAC_SHELL: &str = "/bin/zsh";
 const UNIX_SHELL: &str = "/bin/bash";
 const PUBLIC_SOURCES: [&str; 3] = [
@@ -246,18 +248,43 @@ impl Scratch {
         command
     }
 
-    /// Install the candidate worker that the rendered hooks reference.
+    /// Install this worker and build the Git guard its candidate hooks and launcher require.
     ///
     /// # Errors
     ///
-    /// Returns an error when the directory creation or binary copy fails.
-    pub fn provision_runtime(&self, binary: &Path) -> Result<()> {
+    /// Returns an error when building the pinned guard or installing a runtime entry point fails.
+    pub fn provision_runtime(&self, root: &Path, binary: &Path, native_home: &Path) -> Result<()> {
         let directory = self.home.join(RUNTIME_BIN);
         fs::create_dir_all(&directory)?;
-        fs::copy(
+        platform::code_environment::link_executable(
             binary,
-            directory.join(format!("dotfiles{}", std::env::consts::EXE_SUFFIX)),
+            &directory.join(format!("dotfiles{}", std::env::consts::EXE_SUFFIX)),
         )?;
+        let guard = platform::tool::Tool::Dotguard.program();
+        let environment = crate::hosts::code_environment(root, native_home)?;
+        let build = root.join(RUNTIME_BUILD);
+        let status = environment
+            .command(platform::tool::Tool::Cargo.program())
+            .args([
+                "build",
+                "--locked",
+                "--package",
+                guard,
+                "--bin",
+                guard,
+                "--target-dir",
+            ])
+            .arg(&build)
+            .status()?;
+        ensure!(status.success(), "build candidate Git guard: {status}");
+        let executable = format!("{guard}{}", std::env::consts::EXE_SUFFIX);
+        platform::code_environment::link_executable(
+            &build.join(DEBUG_OUTPUT).join(&executable),
+            &directory.join(executable),
+        )?;
+        if cfg!(windows) {
+            crate::setup::git_wrapper(&directory)?;
+        }
         Ok(())
     }
 
@@ -467,7 +494,7 @@ pub fn check(root: &Path, home: &Path) -> Report {
             scratch.profile(root, "apply", renderer.as_deref().context("host renderer")?)
         });
         candidate.run("host.runtime", || {
-            scratch.provision_runtime(&std::env::current_exe()?)
+            scratch.provision_runtime(root, &std::env::current_exe()?, home)
         });
         candidate.run("host.scratch-verify", || {
             scratch.profile(
