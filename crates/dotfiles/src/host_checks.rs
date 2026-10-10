@@ -386,26 +386,47 @@ fn system_git() -> PathBuf {
     }
 }
 
-fn verify_applied(config: &Path, home: &Path) -> Result<Applied> {
-    let answers: toml::Table = toml::from_str(&fs::read_to_string(config)?)?;
-    let source = Path::new(
-        answers
-            .get("sourceDir")
-            .and_then(toml::Value::as_str)
-            .context("applied configuration requires sourceDir")?,
-    );
-    ensure!(source.is_absolute(), "applied source must be absolute");
-    let scope = tempfile::tempdir()?;
-    let mut command = crate::profiles::chezmoi(source, scope.path(), config, home);
+fn applied_command(config: &Path, home: &Path, scope: &Path, renderer: &Path) -> Command {
+    let store = crate::profiles::Store::scoped(scope);
+    let mut command = unattended(renderer);
     command
+        .arg("--config")
+        .arg(config)
+        .arg("--destination")
+        .arg(home)
+        .arg("--persistent-state")
+        .arg(store.database)
+        .args(["--refresh-externals=never", "--no-tty"])
         .env("HOME", home)
         .env("USERPROFILE", home)
-        .env("LOCALAPPDATA", platform::home::local_app_data(home))
-        .env("APPDATA", home.join("AppData/Roaming"));
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("XDG_STATE_HOME", scope)
+        .env("XDG_CACHE_HOME", scope)
+        .env("LOCALAPPDATA", home.join("AppData/Local"))
+        .env("APPDATA", home.join("AppData/Roaming"))
+        .current_dir(home);
+    if let Some(cache) = store.cache {
+        command.arg("--cache").arg(cache);
+    }
     if let Some(path) = std::env::var_os("DOTFILES_HOST_PATH") {
         command.env("PATH", path);
     }
-    let output = command
+    command
+}
+
+fn verify_applied(config: &Path, home: &Path, renderer: &Path) -> Result<Applied> {
+    let scope = tempfile::tempdir()?;
+    let output = crate::profiles::output(
+        applied_command(config, home, scope.path(), renderer).arg("source-path"),
+        "find applied profile source",
+    )?;
+    let source = String::from_utf8(output.stdout)?;
+    let source = Path::new(source.trim());
+    ensure!(source.is_absolute(), "applied source must be absolute");
+    let output = applied_command(config, home, scope.path(), renderer)
+        .arg("--source")
+        .arg(source)
         .args(["status", "--exclude", "scripts,externals", "--keep-going"])
         .output()?;
     Ok(Applied {
@@ -424,11 +445,7 @@ fn verify_applied(config: &Path, home: &Path) -> Result<Applied> {
 #[must_use]
 pub fn check(root: &Path, home: &Path) -> Report {
     let config = home.join(CONFIG);
-    let applied = verify_applied(&config, home).unwrap_or_else(|error| Applied {
-        drifted_targets: Vec::new(),
-        verification_error: Some(format!("{error:#}")),
-    });
-    applied.report("host.applied");
+    let mut applied = None;
     let candidate = (|| {
         let scratch = Scratch::new(&config)?;
         let mut candidate = Checks::default();
@@ -440,6 +457,12 @@ pub fn check(root: &Path, home: &Path) -> Report {
             )?);
             Ok(())
         });
+        let inspection =
+            || verify_applied(&config, home, renderer.as_deref().context("host renderer")?);
+        applied = Some(inspection().unwrap_or_else(|error| Applied {
+            drifted_targets: Vec::new(),
+            verification_error: Some(format!("{error:#}")),
+        }));
         candidate.run("host.profile-apply", || {
             scratch.profile(root, "apply", renderer.as_deref().context("host renderer")?)
         });
@@ -460,6 +483,11 @@ pub fn check(root: &Path, home: &Path) -> Report {
         }
         candidate.finish()
     })();
+    let applied = applied.unwrap_or_else(|| Applied {
+        drifted_targets: Vec::new(),
+        verification_error: Some(format!("applied inspection unavailable: {candidate:?}")),
+    });
+    applied.report("host.applied");
     Report { candidate, applied }
 }
 
@@ -496,6 +524,38 @@ pub fn shell(command: &str) -> Result<Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn applied_verification_finds_the_native_default_source_read_only() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let home = scope.path().join("host");
+        let source = home.join(".local/share/chezmoi");
+        let config = home.join(CONFIG);
+        fs::create_dir_all(source.join("home"))?;
+        fs::create_dir_all(config.parent().context("configuration directory")?)?;
+        fs::write(source.join(".chezmoiroot"), "home\n")?;
+        fs::write(source.join("home/dot_existing"), "source\n")?;
+        fs::write(source.join("home/dot_missing"), "source\n")?;
+        fs::write(home.join(".existing"), "host drift\n")?;
+        let answers = format!(
+            "[data]\nprofile = {:?}\n",
+            crate::profiles::native_profile()?.name()
+        );
+        fs::write(&config, &answers)?;
+        let applied = verify_applied(
+            &config,
+            &home,
+            Path::new(platform::tool::Tool::Chezmoi.program()),
+        )?;
+        assert_eq!(applied.drifted_targets, [".existing", ".missing"]);
+        assert!(applied.verification_error.is_none());
+        assert_eq!(fs::read_to_string(&config)?, answers);
+        assert_eq!(fs::read_to_string(home.join(".existing"))?, "host drift\n");
+        assert!(!home.join(".missing").exists());
+        assert!(!config.with_file_name("chezmoistate.boltdb").exists());
+        assert!(!home.join(".cache/chezmoi").exists());
+        Ok(())
+    }
 
     #[test]
     fn candidate_mise_reads_only_the_rendered_global_and_current_project() -> Result<()> {
@@ -610,7 +670,7 @@ mod tests {
             Path::new(rendered.lines().next().context("rendered destination")?),
             Path::new(rendered.lines().nth(1).context("rendered HOME")?)
         );
-        let applied_report = verify_applied(&config, &host)?;
+        let applied_report = verify_applied(&config, &host, renderer)?;
         assert_eq!(applied_report.drifted_targets, Vec::<String>::new());
         assert!(applied_report.verification_error.is_none());
         assert_eq!(fs::read_to_string(&config)?, contents);
@@ -649,7 +709,7 @@ mod tests {
         fs::write(host.join(".existing"), "host drift\n")?;
         fs::write(applied.join("dot_other"), "expected\n")?;
         fs::write(host.join(".other"), "other drift\n")?;
-        let applied_report = verify_applied(&config, &host)?;
+        let applied_report = verify_applied(&config, &host, renderer)?;
         assert_eq!(applied_report.drifted_targets, [".existing", ".other"]);
         assert!(applied_report.verification_error.is_none());
         assert_eq!(fs::read_to_string(host.join(".existing"))?, "host drift\n");
