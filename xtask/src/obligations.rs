@@ -1360,7 +1360,7 @@ pub fn pilots(root: &Path, manifest: &Manifest, closed: IssueState<'_>) -> Resul
                 entry.tool
             ));
         }
-        if obligation_rules::pilot(closed(entry.issue)?, decided) == Pilot::Undecided {
+        if !decided && obligation_rules::pilot(closed(entry.issue)?, decided) == Pilot::Undecided {
             refusals.push(format!(
                 "the {} pilot's issue {} closed without a decision record; record whether to adopt, reject, or defer it and name the record in {MANIFEST}",
                 entry.tool, entry.issue

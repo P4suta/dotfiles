@@ -265,6 +265,12 @@ fn a_pilot_whose_issue_closed_without_a_decision_fails() {
     )
     .unwrap();
     assert_eq!(pilots(checkout.path(), &decided, &closed).unwrap(), NONE);
+    let unavailable = |_: u32| Err(anyhow::anyhow!("the issue service is unavailable"));
+    assert_eq!(
+        pilots(checkout.path(), &decided, &unavailable).unwrap(),
+        NONE
+    );
+    assert!(pilots(checkout.path(), &manifest, &unavailable).is_err());
 }
 
 #[test]
