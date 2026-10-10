@@ -1,7 +1,6 @@
 #![cfg(target_os = "macos")]
 
 use std::path::Path;
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 /// Boots the probe out even when an assertion fails, so a failed run leaves no agent behind.
