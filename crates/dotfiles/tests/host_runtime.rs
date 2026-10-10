@@ -3,6 +3,9 @@ use dotfiles::host_checks::Scratch;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[path = "../../dotguard/tests/support/fixture_git.rs"]
+mod fixture_git;
+
 #[test]
 fn candidate_git_runs_the_rendered_hook_with_the_candidate_runtime() -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -57,8 +60,15 @@ fn candidate_git_runs_the_rendered_hook_with_the_candidate_runtime() -> Result<(
     let repository = scope.path().join("repository");
     fs::create_dir(&repository)?;
     let run = || {
-        scratch
-            .command(platform::tool::Tool::Git.program())
+        let mut command = fixture_git::command("git", &home.join(".config/git/config"));
+        for (name, value) in environment.get_envs() {
+            if let Some(value) = value {
+                command.env(name, value);
+            } else {
+                command.env_remove(name);
+            }
+        }
+        command
             .current_dir(&repository)
             .args(["init", "--bare", "--quiet"])
             .output()
