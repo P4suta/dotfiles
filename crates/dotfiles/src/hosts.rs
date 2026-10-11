@@ -1081,6 +1081,43 @@ fn remote_gate_stages(family: Family, gate: &str, skipped: [bool; 2]) -> String 
     format!("{github}{bootstrap}")
 }
 
+fn run_stages<C, R>(
+    skipped: [bool; 2],
+    concurrent: bool,
+    code: C,
+    real: R,
+) -> (Result<()>, Option<crate::host_checks::Report>)
+where
+    C: FnOnce() -> Result<()> + Send,
+    R: FnOnce() -> crate::host_checks::Report,
+{
+    let code = || if skipped[0] { Ok(()) } else { code() };
+    let real = || (!skipped[1]).then(real);
+    if concurrent && skipped == [false; 2] {
+        std::thread::scope(|scope| {
+            let code = scope.spawn(code);
+            let real = real();
+            (
+                code.join()
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("code stage panicked"))),
+                real,
+            )
+        })
+    } else {
+        (code(), real())
+    }
+}
+
+fn concurrent_capacity(home: &Path) -> Result<bool> {
+    let cores = std::thread::available_parallelism()?.get();
+    let family = Family::ALL
+        .into_iter()
+        .find(|family| family.name() == std::env::consts::OS)
+        .context("native host family")?;
+    let available = capacity(&native(home)?, family, &Target::Local("worker".into()))?;
+    Ok(crate::hosts_rules::concurrent_stages(cores, available))
+}
+
 fn worker(home: &Path, gate: &str, skipped: [bool; 2], workspace: Option<&Path>) -> Result<()> {
     let workspace = workspace
         .map(|path| -> Result<_> {
@@ -1092,19 +1129,28 @@ fn worker(home: &Path, gate: &str, skipped: [bool; 2], workspace: Option<&Path>)
             Ok(path.to_string_lossy().replace('\\', "/"))
         })
         .transpose()?;
-    let code = match if skipped[0] { Ok(()) } else { code(home, gate) } {
+    let concurrent = skipped == [false; 2]
+        && concurrent_capacity(home).unwrap_or_else(|error| {
+            eprintln!("stages run sequentially: measure capacity: {error:#}");
+            false
+        });
+    let root = std::env::current_dir()?;
+    let (code, real) = run_stages(
+        skipped,
+        concurrent,
+        || code(home, gate),
+        || crate::host_checks::check(&root, home),
+    );
+    let code = match code {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("code: {error:#}");
             1
         }
     };
-    let (candidate, applied) = if skipped[1] {
-        (Ok(()), None)
-    } else {
-        let crate::host_checks::Report { candidate, applied } =
-            crate::host_checks::check(&std::env::current_dir()?, home);
-        (candidate, Some(applied))
+    let (candidate, applied) = match real {
+        Some(crate::host_checks::Report { candidate, applied }) => (candidate, Some(applied)),
+        None => (Ok(()), None),
     };
     let real = match candidate {
         Ok(()) => 0,
@@ -1942,6 +1988,76 @@ fn run_gate(
 #[cfg(test)]
 mod job_tests {
     use super::*;
+
+    const STAGE_START_LIMIT: Duration = Duration::from_secs(5);
+
+    fn failed_real() -> crate::host_checks::Report {
+        crate::host_checks::Report {
+            candidate: Err(anyhow::anyhow!("real failure")),
+            applied: crate::host_checks::Applied {
+                drifted_targets: Vec::new(),
+                verification_error: Some("observed drift".into()),
+            },
+        }
+    }
+
+    #[test]
+    fn concurrent_stages_start_together_and_preserve_both_failures() -> Result<()> {
+        let (code_started, await_code) = std::sync::mpsc::channel();
+        let (real_started, await_real) = std::sync::mpsc::channel();
+        let (code, real) = run_stages(
+            [false; 2],
+            true,
+            move || {
+                code_started.send(())?;
+                await_real.recv_timeout(STAGE_START_LIMIT)?;
+                bail!("code failure")
+            },
+            move || {
+                real_started.send(()).expect("code stage is present");
+                await_code
+                    .recv_timeout(STAGE_START_LIMIT)
+                    .expect("code stage starts before real finishes");
+                failed_real()
+            },
+        );
+        assert_eq!(code.unwrap_err().to_string(), "code failure");
+        let real = real.context("real stage result")?;
+        assert_eq!(real.candidate.unwrap_err().to_string(), "real failure");
+        assert_eq!(
+            real.applied.verification_error.as_deref(),
+            Some("observed drift")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sequential_stages_finish_code_before_real_and_skip_reused_stages() {
+        for skipped in [[false; 2], [true, false], [false, true], [true; 2]] {
+            let (events, received) = std::sync::mpsc::channel();
+            let code_events = events.clone();
+            let (code, real) = run_stages(
+                skipped,
+                false,
+                move || {
+                    code_events.send("code").expect("event receiver");
+                    bail!("code failure")
+                },
+                move || {
+                    events.send("real").expect("event receiver");
+                    failed_real()
+                },
+            );
+            assert_eq!(code.is_ok(), skipped[0]);
+            assert_eq!(real.is_none(), skipped[1]);
+            let expected: Vec<_> = skipped
+                .into_iter()
+                .zip(["code", "real"])
+                .filter_map(|(skip, name)| (!skip).then_some(name))
+                .collect();
+            assert_eq!(received.into_iter().collect::<Vec<_>>(), expected);
+        }
+    }
 
     #[test]
     fn workspace_receipts_keep_passed_failed_and_interrupted_jobs_pending() -> Result<()> {

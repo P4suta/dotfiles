@@ -72,6 +72,15 @@ pub const fn workspace_fits(available: u64) -> bool {
     available >= WORKSPACE_BYTES
 }
 
+pub const CONCURRENT_CORES: usize = 4;
+pub const CONCURRENT_BYTES: u64 = 2 * WORKSPACE_BYTES;
+
+/// Run both stages together only with capacity for both workloads.
+#[must_use]
+pub const fn concurrent_stages(cores: usize, available: u64) -> bool {
+    cores >= CONCURRENT_CORES && available >= CONCURRENT_BYTES
+}
+
 /// Admit only an installed active version matching the checkout's exact pin.
 #[must_use]
 pub const fn pinned_tool(facts: [bool; 4]) -> bool {
@@ -178,6 +187,21 @@ mod proofs {
 
     pub const EVIDENCE: [Evidence; 3] = [Evidence::Missing, Evidence::Failed, Evidence::Passed];
     pub const KEYS: [Key; 3] = [Key::New, Key::Same, Key::Changed];
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn concurrent_stages_require_cores_and_space() {
+        let cores: usize = kani::any();
+        let available: u64 = kani::any();
+        let concurrent = concurrent_stages(cores, available);
+        assert_eq!(
+            concurrent,
+            cores >= CONCURRENT_CORES && available >= CONCURRENT_BYTES
+        );
+        kani::cover!(concurrent);
+        kani::cover!(!concurrent && cores < CONCURRENT_CORES);
+        kani::cover!(!concurrent && available < CONCURRENT_BYTES);
+    }
 
     #[cfg(kani)]
     #[kani::proof]
@@ -398,6 +422,14 @@ mod proofs {
 mod tests {
     use super::*;
     use crate::domain::flags;
+
+    #[test]
+    fn concurrent_stages_require_both_resource_boundaries() {
+        assert!(!concurrent_stages(CONCURRENT_CORES - 1, u64::MAX));
+        assert!(!concurrent_stages(usize::MAX, CONCURRENT_BYTES - 1));
+        assert!(concurrent_stages(CONCURRENT_CORES, CONCURRENT_BYTES));
+        assert!(concurrent_stages(usize::MAX, u64::MAX));
+    }
 
     #[test]
     fn workspace_capacity_admission_includes_the_exact_boundary() {

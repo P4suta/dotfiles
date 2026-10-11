@@ -343,6 +343,10 @@ verifier = "kani"
 source = "crates/rules/src/hosts_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_parallel_stages_without_capacity() {
+    assert!(production::concurrent_stages(production::CONCURRENT_CORES - 1, production::CONCURRENT_BYTES));
+}
+#[kani::proof]
 fn reject_a_workspace_without_free_space() {
     assert!(production::workspace_fits(production::WORKSPACE_BYTES - 1));
 }
