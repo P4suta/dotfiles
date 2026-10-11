@@ -79,6 +79,9 @@ fn completed_jobs_record_every_result_and_exit_without_a_waiting_session() -> Re
         ("no", 0, 0, Evidence::Passed),
         ("yes", 7, 9, Evidence::Failed),
     ] {
+        if failed == "yes" {
+            git(&root, &["notes", "--ref", NOTES, "remove", "HEAD"])?;
+        }
         let state = scope.path().join(failed);
         fs::create_dir(&state)?;
         let release = state.join("release");
@@ -115,10 +118,7 @@ fn completed_jobs_record_every_result_and_exit_without_a_waiting_session() -> Re
             fs::read_to_string(&log)?
         );
         let notes = git(&root, &["notes", "--ref", NOTES, "show", "HEAD"])?;
-        assert_eq!(
-            notes.lines().filter(|line| !line.is_empty()).count(),
-            if failed == "no" { 6 } else { 12 }
-        );
+        assert_eq!(notes.lines().filter(|line| !line.is_empty()).count(), 6);
         assert_eq!(
             evidence(&notes, &git(&root, &["rev-parse", "HEAD^{tree}"])?)?,
             [expected; 3]

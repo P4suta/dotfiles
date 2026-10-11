@@ -1199,6 +1199,68 @@ fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
     }
     assert_applied_evidence(&root, &output.stdout)?;
     push_gate(&root, "https://github.com/owner/project", update.as_bytes())?;
+    assert_reuse(&root, &head, check)
+}
+
+fn assert_reuse(
+    root: &Path,
+    head: &str,
+    check: impl Fn(bool, &str) -> Result<std::process::Output>,
+) -> Result<()> {
+    let reused = check(false, "fail")?;
+    ensure!(
+        reused.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reused.stderr)
+    );
+    let stdout = String::from_utf8(reused.stdout)?;
+    for stage in ["code", "real"] {
+        assert!(
+            stdout.contains(&format!("linux box {stage}: reused {head}:")),
+            "{stdout}"
+        );
+    }
+    assert!(!stdout.contains("submitted"));
+    let notes = git(
+        root,
+        &["notes", "--ref", "refs/notes/hosts", "show", "HEAD"],
+    )?;
+    let records: Vec<serde_json::Value> = notes
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(serde_json::from_str)
+        .collect::<std::result::Result<_, _>>()?;
+    assert_eq!(records.len(), 4);
+    for (first, reused) in records[..2].iter().zip(&records[2..]) {
+        assert_eq!(reused["inputs"], first["inputs"]);
+        assert_eq!(reused["reused"]["commit"], head);
+        assert_eq!(reused["status"], 0);
+    }
+    fs::create_dir(root.join("home"))?;
+    fs::write(root.join("home/dot_profile"), "candidate profile")?;
+    git(root, &["add", "."])?;
+    git(root, &["commit", "--quiet", "-m", "profile"])?;
+    let profile = check(true, "ok")?;
+    ensure!(
+        profile.status.success(),
+        "{}",
+        String::from_utf8_lossy(&profile.stderr)
+    );
+    let stdout = String::from_utf8(profile.stdout)?;
+    assert!(stdout.contains("linux box code: reused"), "{stdout}");
+    assert!(stdout.contains("linux box real: passed"), "{stdout}");
+    fs::write(root.join("lib.rs"), "candidate code")?;
+    git(root, &["add", "."])?;
+    git(root, &["commit", "--quiet", "-m", "code"])?;
+    let code = check(true, "ok")?;
+    ensure!(
+        code.status.success(),
+        "{}",
+        String::from_utf8_lossy(&code.stderr)
+    );
+    let stdout = String::from_utf8(code.stdout)?;
+    assert!(stdout.contains("linux box code: passed"), "{stdout}");
+    assert!(stdout.contains("linux box real: reused"), "{stdout}");
     Ok(())
 }
 

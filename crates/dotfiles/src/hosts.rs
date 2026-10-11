@@ -5,6 +5,7 @@ use crate::runtime::Real;
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
@@ -22,8 +23,17 @@ const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
 const JOB_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const REQUEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const REQUEST_LIMIT: Duration = Duration::from_secs(300);
+const INPUT_SCHEMA: &[u8] = b"hosts-stage-inputs-v1\0";
+const SHARED_INPUTS: [&str; 6] = [
+    "mise.toml",
+    "mise.lock",
+    RELEASE_PINS,
+    "crates/dotfiles/src/hosts.rs",
+    "crates/dotfiles/src/host_checks.rs",
+    "crates/platform/src/code_environment.rs",
+];
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Stage {
     Code,
@@ -53,7 +63,7 @@ impl Stage {
 struct Stages {
     code: i32,
     real: i32,
-    applied: crate::host_checks::Applied,
+    applied: Option<crate::host_checks::Applied>,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -94,6 +104,10 @@ pub enum Action {
         gate: String,
         #[arg(long)]
         home: Option<PathBuf>,
+        #[arg(long)]
+        skip_code: bool,
+        #[arg(long)]
+        skip_real: bool,
     },
     /// Refuse pushed GitHub branches that lack a passing note for an operating system family in their CI matrix.
     /// Reads pre-push input.
@@ -115,7 +129,13 @@ pub fn run(action: Action) -> Result<()> {
         Action::Worker {
             gate,
             home: native_home,
-        } => worker(&native_home.map_or_else(home, Ok)?, &gate),
+            skip_code,
+            skip_real,
+        } => worker(
+            &native_home.map_or_else(home, Ok)?,
+            &gate,
+            [skip_code, skip_real],
+        ),
         Action::Gate { url, .. } => {
             let mut input = Vec::new();
             std::io::Read::read_to_end(&mut std::io::stdin(), &mut input)?;
@@ -244,6 +264,114 @@ pub struct Note {
     pub stage: Option<Stage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied: Option<crate::host_checks::Applied>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inputs: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reused: Option<Reused>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Reused {
+    pub commit: String,
+    pub line: usize,
+    pub host: String,
+}
+
+fn input_hashes(root: &Path, commit: &str, gate: &str) -> Result<[String; 2]> {
+    let listing = git(root, &["ls-tree", "-r", "-z", commit])?;
+    let mut hashes = [Sha256::new(), Sha256::new()];
+    for hash in &mut hashes {
+        hash.update(INPUT_SCHEMA);
+    }
+    hashes[0].update(gate.as_bytes());
+    hashes[0].update([0]);
+    for entry in listing
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+    {
+        let (_, path) = entry.split_at(
+            entry
+                .iter()
+                .position(|byte| *byte == b'\t')
+                .context("git tree entry has no path")?
+                + 1,
+        );
+        let path = std::str::from_utf8(path)?;
+        let selected = crate::hosts_rules::stage_inputs(
+            path.starts_with("home/"),
+            SHARED_INPUTS.contains(&path),
+        );
+        for (hash, selected) in hashes.iter_mut().zip(selected) {
+            if selected {
+                hash.update(entry);
+                hash.update([0]);
+            }
+        }
+    }
+    Ok(hashes.map(|hash| crate::build_inputs::hex(&hash.finalize())))
+}
+
+fn reusable(
+    notes: &[(String, String)],
+    family: Family,
+    stage: Stage,
+    inputs: &str,
+    gate: &str,
+) -> Result<Option<Reused>> {
+    for (commit, text) in notes {
+        for (line, text) in text
+            .lines()
+            .enumerate()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+        {
+            if text.trim().is_empty() {
+                continue;
+            }
+            let note: Note = serde_json::from_str(text).context("malformed hosts note")?;
+            let matches = [
+                note.os == family.name(),
+                note.stage == Some(stage),
+                note.inputs.as_deref() == Some(inputs),
+                stage == Stage::Real || note.gate == gate,
+            ];
+            let [family_matches, stage_matches, inputs_match, gate_matches] = matches;
+            if crate::hosts_rules::reuse([
+                note.status == 0,
+                family_matches,
+                stage_matches,
+                inputs_match,
+                gate_matches,
+            ]) {
+                return Ok(Some(Reused {
+                    commit: commit.clone(),
+                    line: line + 1,
+                    host: note.host,
+                }));
+            }
+            if matches.iter().all(|fact| *fact) {
+                break;
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn all_notes(root: &Path) -> Result<Vec<(String, String)>> {
+    git_text(root, &["notes", "--ref", NOTES, "list"])?
+        .lines()
+        .map(|line| {
+            let (blob, commit) = line
+                .split_once(' ')
+                .context("malformed git notes listing")?;
+            Ok((
+                commit.to_owned(),
+                String::from_utf8(git(root, &["cat-file", "blob", blob])?)?,
+            ))
+        })
+        .collect()
 }
 
 /// Judge one commit's note, one JSON record per line in append order.
@@ -634,15 +762,24 @@ pub fn wrap(family: Family, gate: &str) -> Vec<String> {
 /// Trust covers only that checkout and starts before the clone, because checkout hooks already run mise there.
 #[must_use]
 pub fn remote_gate(family: Family, gate: &str) -> String {
+    remote_gate_stages(family, gate, [false; 2])
+}
+
+fn remote_gate_stages(family: Family, gate: &str, skipped: [bool; 2]) -> String {
     const UNIX_GIT: &str = "/usr/bin/git";
     const WINDOWS_GIT: &str = "C:/Program Files/Git/cmd/git.exe";
     let quoted = match family {
         Family::Windows => format!("'{}'", gate.replace('\'', "''")),
         Family::Linux | Family::Mac => format!("'{}'", gate.replace('\'', "'\"'\"'")),
     };
-    let worker = format!(
+    let mut worker = format!(
         "mise x -- cargo run --locked --package dotfiles --bin dotfiles -- hosts worker --gate {quoted}"
     );
+    for (skip, flag) in skipped.into_iter().zip([" --skip-code", " --skip-real"]) {
+        if skip {
+            worker.push_str(flag);
+        }
+    }
     let bootstrap = match family {
         Family::Windows => format!(
             "$nativeHome = $env:USERPROFILE; $env:DOTFILES_HOST_PATH = $env:PATH; $env:DOTFILES_HOST_CARGO_HOME = if ($env:CARGO_HOME) {{ $env:CARGO_HOME }} else {{ Join-Path $nativeHome .cargo }}; $jobRoot = $PWD.Path; $env:MISE_DATA_DIR = Join-Path $env:LOCALAPPDATA mise; $env:RUSTUP_HOME = Join-Path $nativeHome .rustup; $env:HOME = Join-Path $jobRoot bootstrap; $env:USERPROFILE = $env:HOME; New-Item -ItemType Directory -Force $env:HOME | Out-Null; $env:APPDATA = Join-Path $env:HOME AppData/Roaming; $env:LOCALAPPDATA = Join-Path $env:HOME AppData/Local; $env:CARGO_HOME = Join-Path $env:HOME .cargo; $env:MISE_CARGO_HOME = $env:CARGO_HOME; New-Item -ItemType Directory -Force $env:CARGO_HOME | Out-Null; New-Item -ItemType Junction -Path (Join-Path $env:CARGO_HOME bin) -Target (Join-Path $env:DOTFILES_HOST_CARGO_HOME bin) -ErrorAction Stop | Out-Null; $env:CARGO_TARGET_DIR = Join-Path $jobRoot build; $env:MISE_CONFIG_DIR = Join-Path $env:HOME .config/mise; $env:MISE_CACHE_DIR = Join-Path $env:HOME .cache/mise; $env:MISE_STATE_DIR = Join-Path $env:HOME .local/state/mise; $env:MISE_TRUSTED_CONFIG_PATHS = Join-Path $jobRoot checkout; $env:MISE_AUTO_INSTALL = 'false'; $env:GIT_CONFIG_GLOBAL = Join-Path $env:HOME empty.toml; Set-Content -LiteralPath $env:GIT_CONFIG_GLOBAL -Value '' -NoNewline; $env:MISE_GLOBAL_CONFIG_FILE = $env:GIT_CONFIG_GLOBAL; $env:MISE_SYSTEM_CONFIG_FILE = $env:GIT_CONFIG_GLOBAL; $env:GIT_CONFIG_NOSYSTEM = '1'; & '{WINDOWS_GIT}' -c advice.detachedHead=false clone --quiet head.bundle checkout; if (-not $?) {{ exit 1 }}; Set-Location checkout; {worker} --home $nativeHome; exit $LASTEXITCODE"
@@ -664,16 +801,21 @@ pub fn remote_gate(family: Family, gate: &str) -> String {
     format!("{github}{bootstrap}")
 }
 
-fn worker(home: &Path, gate: &str) -> Result<()> {
-    let code = match code(home, gate) {
+fn worker(home: &Path, gate: &str, skipped: [bool; 2]) -> Result<()> {
+    let code = match if skipped[0] { Ok(()) } else { code(home, gate) } {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("code: {error:#}");
             1
         }
     };
-    let crate::host_checks::Report { candidate, applied } =
-        crate::host_checks::check(&std::env::current_dir()?, home);
+    let (candidate, applied) = if skipped[1] {
+        (Ok(()), None)
+    } else {
+        let crate::host_checks::Report { candidate, applied } =
+            crate::host_checks::check(&std::env::current_dir()?, home);
+        (candidate, Some(applied))
+    };
     let real = match candidate {
         Ok(()) => 0,
         Err(error) => {
@@ -1138,32 +1280,28 @@ pub(crate) fn doctor(home: &Path, gate: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
-    let root = PathBuf::from(git_text(Path::new("."), &["rev-parse", "--show-toplevel"])?);
-    let clean = git(&root, &["status", "--porcelain", "--untracked-files=all"])?.is_empty();
-    let commit = git_text(&root, &["rev-parse", "HEAD"])?;
-    let tree = git_text(&root, &["rev-parse", "HEAD^{tree}"])?;
-    let required = required(&workflows_at(&root, &commit)?)?;
-    if required == [false; 3] {
-        println!("The CI matrix requires no OS family; nothing to check");
-        return Ok(());
-    }
-    let native = native(home)?;
+fn ready_hosts(
+    native: &Real,
+    home: &Path,
+    gate: &str,
+    clean: bool,
+    pending: [bool; 3],
+) -> Result<[Option<Target>; 3]> {
     let mut ready = [true; 3];
     let mut actions: [Option<String>; 3] = Default::default();
     let mut hosts: [Option<Target>; 3] = Default::default();
-    if clean {
-        let tailnet = tailnet_status(&native)?;
+    if clean && pending.iter().any(|pending| *pending) {
+        let tailnet = tailnet_status(native)?;
         hosts = targets(home, &tailnet)?;
         let program = program(gate)?;
         for family in Family::ALL
             .into_iter()
-            .filter(|family| required[family.index()])
+            .filter(|family| pending[family.index()])
         {
             let index = family.index();
             let verdict = match &hosts[index] {
                 None => Err("no managed host; run `dotfiles hosts sync`".to_owned()),
-                Some(target) => probe(&native, &tailnet, family, target, program)?,
+                Some(target) => probe(native, &tailnet, family, target, program)?,
             };
             if let Err(action) = verdict {
                 ready[index] = false;
@@ -1171,7 +1309,7 @@ pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
             }
         }
     }
-    match start(clean, required, ready) {
+    match start(clean, pending, ready) {
         Start::Dirty => bail!(
             "the tree has uncommitted or untracked files; notes bind to a commit, so commit first"
         ),
@@ -1185,28 +1323,84 @@ pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
                 .collect::<Vec<_>>()
                 .join("\n")
         ),
-        Start::Run => {}
+        Start::Run => Ok(hosts),
     }
+}
+
+pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
+    let root = PathBuf::from(git_text(Path::new("."), &["rev-parse", "--show-toplevel"])?);
+    let clean = git(&root, &["status", "--porcelain", "--untracked-files=all"])?.is_empty();
+    let commit = git_text(&root, &["rev-parse", "HEAD"])?;
+    let tree = git_text(&root, &["rev-parse", "HEAD^{tree}"])?;
+    let required = required(&workflows_at(&root, &commit)?)?;
+    if required == [false; 3] {
+        println!("The CI matrix requires no OS family; nothing to check");
+        return Ok(());
+    }
+    let inputs = input_hashes(&root, &commit, gate)?;
+    let notes = all_notes(&root)?;
+    let mut reused: [[Option<Reused>; 2]; 3] = Default::default();
+    for family in Family::ALL
+        .into_iter()
+        .filter(|family| required[family.index()])
+    {
+        for stage in Stage::ALL {
+            reused[family.index()][stage.index()] =
+                reusable(&notes, family, stage, &inputs[stage.index()], gate)?;
+        }
+    }
+    let pending = Family::ALL.map(|family| {
+        required[family.index()] && reused[family.index()].iter().any(Option::is_none)
+    });
+    let native = native(home)?;
+    let hosts = ready_hosts(&native, home, gate, clean, pending)?;
     let snapshot = tempfile::tempdir()?;
-    let bundle = snapshot.path().join("head.bundle");
-    git(
-        &root,
-        &["bundle", "create", &bundle.to_string_lossy(), "HEAD"],
-    )?;
+    if pending.iter().any(|pending| *pending) {
+        let bundle = snapshot.path().join("head.bundle");
+        git(
+            &root,
+            &["bundle", "create", &bundle.to_string_lossy(), "HEAD"],
+        )?;
+    }
     let runs: Vec<_> = std::thread::scope(|scope| {
         let handles: Vec<_> = Family::ALL
             .into_iter()
             .filter(|family| required[family.index()])
-            .filter_map(|family| hosts[family.index()].clone().map(|target| (family, target)))
-            .map(|(family, target)| {
+            .map(|family| {
                 let (native, root, snapshot) = (&native, &root, snapshot.path());
+                let reused = reused[family.index()].clone();
+                let target = hosts[family.index()].clone();
                 let thread = scope.spawn(move || {
-                    run_gate(native, root, snapshot, family, &target, gate).map(
+                    if reused.iter().all(Option::is_some) {
+                        let host = reused[0]
+                            .as_ref()
+                            .context("reused code record")?
+                            .host
+                            .clone();
+                        return Ok(GateRun {
+                            family,
+                            target: Target::Local(host),
+                            status: Some(0),
+                            output: format!(
+                                "{STAGE_REPORT}{}",
+                                serde_json::to_string(&Stages {
+                                    code: 0,
+                                    real: 0,
+                                    applied: None
+                                })?
+                            ),
+                            reused,
+                        });
+                    }
+                    let target = target.context("managed host is unavailable")?;
+                    let skipped = reused.each_ref().map(Option::is_some);
+                    run_gate(native, root, snapshot, family, &target, gate, skipped).map(
                         |(status, output)| GateRun {
                             family,
                             target,
                             status,
                             output,
+                            reused,
                         },
                     )
                 });
@@ -1227,7 +1421,7 @@ pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
     });
     let mut failed = Vec::new();
     for run in runs {
-        match run.and_then(|run| record_run(&root, &commit, &tree, gate, &run)) {
+        match run.and_then(|run| record_run(&root, &commit, &tree, gate, &inputs, &run)) {
             Ok(failures) => failed.extend(failures),
             Err(error) => failed.push(format!("host gate: {error:#}")),
         }
@@ -1242,6 +1436,7 @@ struct GateRun {
     target: Target,
     status: Option<i32>,
     output: String,
+    reused: [Option<Reused>; 2],
 }
 
 /// Appends the note of one finished gate to the commit, returning the failure to report when the gate didn't pass.
@@ -1250,6 +1445,7 @@ fn record_run(
     commit: &str,
     tree: &str,
     gate: &str,
+    inputs: &[String; 2],
     run: &GateRun,
 ) -> Result<Vec<String>> {
     let GateRun {
@@ -1257,6 +1453,7 @@ fn record_run(
         target,
         status,
         output,
+        reused,
     } = run;
     let Some(status) = *status else {
         eprintln!("{output}");
@@ -1286,10 +1483,17 @@ fn record_run(
         "the job status disagrees with its stage report"
     );
     let mut failures = Vec::new();
-    report
-        .applied
-        .report(&format!("{} {} applied", family.name(), target.name()));
+    if reused[1].is_none()
+        && let Some(applied) = &report.applied
+    {
+        applied.report(&format!("{} {} applied", family.name(), target.name()));
+    }
     for (stage, status) in Stage::ALL.into_iter().zip(statuses) {
+        let reuse = &reused[stage.index()];
+        ensure!(
+            reuse.is_none() || status == 0,
+            "a reused stage reported failure"
+        );
         let note = serde_json::to_string(&Note {
             host: target.name().to_owned(),
             os: family.name().to_owned(),
@@ -1299,8 +1503,10 @@ fn record_run(
             stage: Some(stage),
             applied: match stage {
                 Stage::Code => None,
-                Stage::Real => Some(report.applied.clone()),
+                Stage::Real => report.applied.clone(),
             },
+            inputs: Some(inputs[stage.index()].clone()),
+            reused: reuse.clone(),
         })?;
         if let Err(error) = git(
             root,
@@ -1313,7 +1519,16 @@ fn record_run(
                 stage.name()
             ));
         }
-        if status == 0 {
+        if let Some(reuse) = reuse {
+            println!(
+                "{} {} {}: reused {}:{}",
+                family.name(),
+                target.name(),
+                stage.name(),
+                reuse.commit,
+                reuse.line
+            );
+        } else if status == 0 {
             println!(
                 "{} {} {}: passed",
                 family.name(),
@@ -1343,6 +1558,7 @@ fn run_gate(
     family: Family,
     target: &Target,
     gate: &str,
+    skipped: [bool; 2],
 ) -> Result<(Option<i32>, String)> {
     match target {
         Target::Remote(alias) => {
@@ -1350,7 +1566,7 @@ fn run_gate(
             submission
                 .current_dir(snapshot)
                 .args(["run", alias, "--"])
-                .args(wrap(family, &remote_gate(family, gate)));
+                .args(wrap(family, &remote_gate_stages(family, gate, skipped)));
             remote_job(native, alias, submission)
         }
         Target::Local(_) => {
@@ -1358,6 +1574,11 @@ fn run_gate(
             request
                 .args(["hosts", "worker", "--gate", gate])
                 .current_dir(root);
+            for (skip, flag) in skipped.into_iter().zip(["--skip-code", "--skip-real"]) {
+                if skip {
+                    request.arg(flag);
+                }
+            }
             let (status, text) = job_output(request, None).context("run the local gate")?;
             Ok((status.code(), text))
         }
@@ -1367,6 +1588,100 @@ fn run_gate(
 #[cfg(test)]
 mod job_tests {
     use super::*;
+
+    fn tree(root: &Path) -> Result<String> {
+        git(root, &["add", "."])?;
+        git_text(root, &["write-tree"])
+    }
+
+    #[test]
+    fn stage_hashes_follow_their_inputs_and_the_code_gate() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let root = scope.path();
+        git(root, &["init", "--quiet"])?;
+        fs::create_dir_all(root.join("home"))?;
+        fs::create_dir_all(root.join("crates/example/src"))?;
+        fs::write(root.join("home/dot_profile"), "first")?;
+        fs::write(root.join("crates/example/src/lib.rs"), "first")?;
+        fs::write(root.join("mise.toml"), "first")?;
+        let first = input_hashes(root, &tree(root)?, DEFAULT_GATE)?;
+        assert_eq!(first, input_hashes(root, &tree(root)?, DEFAULT_GATE)?);
+        fs::write(root.join("home/dot_profile"), "second")?;
+        let profile = input_hashes(root, &tree(root)?, DEFAULT_GATE)?;
+        assert_eq!(first[0], profile[0]);
+        assert_ne!(first[1], profile[1]);
+        fs::write(root.join("crates/example/src/lib.rs"), "second")?;
+        let code = input_hashes(root, &tree(root)?, DEFAULT_GATE)?;
+        assert_ne!(profile[0], code[0]);
+        assert_eq!(profile[1], code[1]);
+        let gate = input_hashes(root, &tree(root)?, "just proofs")?;
+        assert_ne!(code[0], gate[0]);
+        assert_eq!(code[1], gate[1]);
+        fs::write(root.join("mise.toml"), "second")?;
+        let pins = input_hashes(root, &tree(root)?, DEFAULT_GATE)?;
+        assert_ne!(code[0], pins[0]);
+        assert_ne!(code[1], pins[1]);
+        fs::remove_file(root.join("home/dot_profile"))?;
+        assert_ne!(pins[1], input_hashes(root, &tree(root)?, DEFAULT_GATE)?[1]);
+        Ok(())
+    }
+
+    #[test]
+    fn reuse_requires_a_passing_matching_family_stage_hash_and_gate() -> Result<()> {
+        let note = |os: &str, stage: &str, status: i32, hash: Option<&str>, gate: &str| {
+            serde_json::json!({"host":"box","os":os,"stage":stage,"status":status,
+                "tree":"old-tree","gate":gate,"inputs":hash})
+            .to_string()
+        };
+        for record in [
+            note("macos", "code", 0, Some("hash"), DEFAULT_GATE),
+            note("linux", "real", 0, Some("hash"), DEFAULT_GATE),
+            note("linux", "code", 1, Some("hash"), DEFAULT_GATE),
+            note("linux", "code", 0, Some("other"), DEFAULT_GATE),
+            note("linux", "code", 0, None, DEFAULT_GATE),
+            note("linux", "code", 0, Some("hash"), "just proofs"),
+        ] {
+            assert!(
+                reusable(
+                    &[("old".into(), record)],
+                    Family::Linux,
+                    Stage::Code,
+                    "hash",
+                    DEFAULT_GATE
+                )?
+                .is_none()
+            );
+        }
+        let notes = [(
+            "old".into(),
+            note("linux", "code", 0, Some("hash"), DEFAULT_GATE),
+        )];
+        let reused = reusable(&notes, Family::Linux, Stage::Code, "hash", DEFAULT_GATE)?.unwrap();
+        assert_eq!(reused.commit, "old");
+        assert_eq!(reused.line, 1);
+        let failed = [(
+            "old".into(),
+            format!(
+                "{}\n{}",
+                notes[0].1,
+                note("linux", "code", 1, Some("hash"), DEFAULT_GATE)
+            ),
+        )];
+        assert!(reusable(&failed, Family::Linux, Stage::Code, "hash", DEFAULT_GATE)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn partial_reuse_skips_only_its_worker_stage() {
+        for family in Family::ALL {
+            let code = remote_gate_stages(family, DEFAULT_GATE, [true, false]);
+            assert!(code.contains(" --skip-code"));
+            assert!(!code.contains(" --skip-real"));
+            let real = remote_gate_stages(family, DEFAULT_GATE, [false, true]);
+            assert!(real.contains(" --skip-real"));
+            assert!(!real.contains(" --skip-code"));
+        }
+    }
 
     #[test]
     fn a_stalled_request_is_stopped_and_reports_its_deadline() {

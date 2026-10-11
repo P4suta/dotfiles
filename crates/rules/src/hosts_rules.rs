@@ -44,6 +44,20 @@ pub const fn stages(evidence: [Evidence; 2]) -> Evidence {
     }
 }
 
+/// Profile files belong to the real stage.
+/// Shared pins and stage adapters affect both stages.
+#[must_use]
+pub const fn stage_inputs(profile: bool, shared: bool) -> [bool; 2] {
+    [!profile || shared, profile || shared]
+}
+
+/// Reuse only a passing record with the same family, stage, inputs, and gate.
+#[must_use]
+pub const fn reuse(facts: [bool; 5]) -> bool {
+    let [passed, family, stage, inputs, gate] = facts;
+    passed && family && stage && inputs && gate
+}
+
 /// Admit only an installed active version matching the checkout's exact pin.
 #[must_use]
 pub const fn pinned_tool(facts: [bool; 4]) -> bool {
@@ -150,6 +164,22 @@ mod proofs {
 
     pub const EVIDENCE: [Evidence; 3] = [Evidence::Missing, Evidence::Failed, Evidence::Passed];
     pub const KEYS: [Key; 3] = [Key::New, Key::Same, Key::Changed];
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn stage_inputs_and_reuse_preserve_stage_boundaries() {
+        let profile: bool = kani::any();
+        let shared: bool = kani::any();
+        let inputs = stage_inputs(profile, shared);
+        assert_eq!(inputs[0], shared || !profile);
+        assert_eq!(inputs[1], shared || profile);
+        let facts: [bool; 5] = kani::any();
+        assert_eq!(reuse(facts), facts.iter().all(|fact| *fact));
+        kani::cover!(reuse(facts));
+        kani::cover!(inputs == [false, true]);
+        kani::cover!(inputs == [true, false]);
+    }
 
     pub fn spec_stages(evidence: [Evidence; 2]) {
         let result = stages(evidence);
@@ -326,6 +356,19 @@ mod proofs {
 mod tests {
     use super::*;
     use crate::domain::flags;
+
+    #[test]
+    fn every_stage_input_and_reuse_combination_preserves_boundaries() {
+        for [profile, shared] in flags() {
+            assert_eq!(
+                stage_inputs(profile, shared),
+                [shared || !profile, shared || profile]
+            );
+        }
+        for facts in flags::<5>() {
+            assert_eq!(reuse(facts), facts.iter().all(|fact| *fact));
+        }
+    }
 
     #[test]
     #[cfg_attr(miri, ignore = "Miri takes seconds over every input")]
