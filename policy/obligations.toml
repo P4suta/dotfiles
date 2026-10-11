@@ -359,6 +359,54 @@ verifier = "kani"
 source = "crates/rules/src/hosts_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_an_unsequenced_receipt_authorizing_reuse() {
+    assert!(production::newest_receipt(None, None).is_some());
+}
+#[kani::proof]
+fn reject_an_older_success_overriding_a_newer_failure() {
+    let older = production::Receipt { generation: 1, passed: true };
+    let failed = production::Receipt { generation: 2, passed: false };
+    assert!(production::newest_receipt(Some(failed), Some(older)) == Some(older));
+}
+#[kani::proof]
+fn reject_an_older_failure_overriding_a_newer_success() {
+    let older = production::Receipt { generation: 1, passed: false };
+    let passed = production::Receipt { generation: 2, passed: true };
+    assert!(production::newest_receipt(Some(passed), Some(older)) == Some(older));
+}
+#[kani::proof]
+fn reject_success_overriding_a_failure_at_the_same_generation() {
+    let passed = production::Receipt { generation: 1, passed: true };
+    let failed = production::Receipt { generation: 1, passed: false };
+    assert!(production::newest_receipt(Some(failed), Some(passed)) == Some(passed));
+}
+#[kani::proof]
+fn reject_a_generation_wrapping_after_its_maximum() {
+    assert!(production::next_generation(u64::MAX) == Some(0));
+}
+#[kani::proof]
+fn reject_a_failed_global_receipt_authorizing_a_candidate() {
+    let current = production::Receipt { generation: 1, passed: true };
+    let latest = production::Receipt { generation: 1, passed: false };
+    assert!(production::receipt_evidence(Some(current), Some(latest)) == production::Evidence::Passed);
+}
+#[kani::proof]
+fn reject_an_older_candidate_receipt_authorizing_a_newer_global_success() {
+    let current = production::Receipt { generation: 1, passed: true };
+    let latest = production::Receipt { generation: 2, passed: true };
+    assert!(production::receipt_evidence(Some(current), Some(latest)) == production::Evidence::Passed);
+}
+#[kani::proof]
+fn reject_a_missing_global_receipt_authorizing_a_candidate() {
+    let current = production::Receipt { generation: 1, passed: true };
+    assert!(production::receipt_evidence(Some(current), None) == production::Evidence::Passed);
+}
+#[kani::proof]
+fn reject_a_missing_candidate_receipt_reusing_a_global_success() {
+    let latest = production::Receipt { generation: 1, passed: true };
+    assert!(production::receipt_evidence(None, Some(latest)) == production::Evidence::Passed);
+}
+#[kani::proof]
 fn reject_profile_evidence_for_a_repository_without_the_runtime() {
     assert!(production::profile_gate(true, false));
 }

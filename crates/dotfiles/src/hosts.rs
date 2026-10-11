@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use yaml_rust2::{Yaml, YamlLoader};
 
 pub const NOTES: &str = "refs/notes/hosts";
+const NOTES_LOCK: &str = "hosts-notes.lock";
 const STATE: &str = ".local/state/hosts";
 pub const DEFAULT_GATE: &str = "just push-check";
 const STAGE_REPORT: &str = "DOTFILES_HOST_STAGES ";
@@ -25,7 +26,7 @@ const PROFILE_RUNTIME: &str = "crates/dotfiles/Cargo.toml";
 const JOB_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const REQUEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const REQUEST_LIMIT: Duration = Duration::from_secs(300);
-const INPUT_SCHEMA: &[u8] = b"hosts-stage-inputs-v1\0";
+const INPUT_SCHEMA: &[u8] = b"hosts-stage-inputs-v2\0";
 const REMOVE_WORKSPACE: &str = "/bin/rm";
 const DISK_SPACE: &str = "/bin/df";
 const BYTES_PER_KIB: u64 = 1024;
@@ -264,7 +265,7 @@ pub fn required(workflows: &[(String, String)]) -> Result<[bool; 3]> {
 }
 
 /// One gate run, appended to the note of the commit it ran for.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Note {
     pub host: String,
@@ -278,6 +279,8 @@ pub struct Note {
     pub applied: Option<crate::host_checks::Applied>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inputs: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reused: Option<Reused>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -371,6 +374,91 @@ fn cleanup_arguments(family: Family, workspace: &Workspace) -> Result<Vec<String
 }
 
 fn append_note(root: &Path, commit: &str, note: &Note) -> Result<()> {
+    let _lock = notes_lock(root)?;
+    let mut note = note.clone();
+    if note.stage.is_some() {
+        if let Some(reused) = &note.reused {
+            let receipts = receipts(&all_notes(root)?)?;
+            let source = source(&receipts, reused).context("missing reused execution receipt")?;
+            let receipt = actual_receipt(&source.note)
+                .context("reused origin is not a sequenced actual execution")?;
+            ensure!(
+                note.generation.is_none() || note.generation == Some(receipt.generation),
+                "reused generation differs from its execution receipt"
+            );
+            note.generation = Some(receipt.generation);
+            ensure!(
+                verified_receipt(&note, &receipts) == Some(receipt),
+                "reused execution receipt does not match the stage"
+            );
+            let family = Family::ALL
+                .into_iter()
+                .find(|family| family.name() == note.os)
+                .context("unknown reused OS family")?;
+            ensure!(
+                latest_execution(
+                    &receipts,
+                    family,
+                    note.stage.context("reused stage")?,
+                    note.inputs.as_deref().context("reused inputs")?,
+                    &note.gate,
+                ) == Some(receipt),
+                "reused execution is no longer the latest successful stage; run `dotfiles hosts check` again"
+            );
+        } else {
+            let mut anchor = None;
+            if let Some(workspace) = &note.workspace {
+                let receipts = receipts(&all_notes(root)?)?;
+                for existing in receipts.iter().filter(|existing| {
+                    existing.origin.commit == commit
+                        && existing.note.host == note.host
+                        && existing.note.stage.is_some()
+                        && existing.note.reused.is_none()
+                        && existing.note.workspace.as_ref().is_some_and(|previous| {
+                            previous.job == workspace.job && previous.path == workspace.path
+                        })
+                }) {
+                    let receipt = actual_receipt(&existing.note)
+                        .context("workspace execution anchor has no generation")?;
+                    ensure!(
+                        anchor.is_none() || anchor == Some(receipt.generation),
+                        "workspace execution has conflicting generations"
+                    );
+                    ensure!(
+                        note.os == existing.note.os
+                            && note.tree == existing.note.tree
+                            && note.gate == existing.note.gate,
+                        "workspace execution has conflicting source facts"
+                    );
+                    anchor = Some(receipt.generation);
+                    if note.stage == existing.note.stage {
+                        note.generation = anchor;
+                        ensure!(
+                            serde_json::to_value(&note)? == serde_json::to_value(&existing.note)?,
+                            "workspace stage execution has conflicting results"
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+            if let Some(generation) = anchor {
+                note.generation = Some(generation);
+            } else {
+                let references = git_text(root, &["for-each-ref", "--format=%(refname)", NOTES])?;
+                let count = if references.lines().any(|reference| reference == NOTES) {
+                    git_text(root, &["rev-list", "--count", NOTES])?.parse()?
+                } else {
+                    0
+                };
+                note.generation = Some(
+                    crate::hosts_rules::next_generation(count)
+                        .context("hosts receipt generation overflow")?,
+                );
+            }
+        }
+    } else {
+        note.generation = None;
+    }
     git(
         root,
         &[
@@ -379,11 +467,30 @@ fn append_note(root: &Path, commit: &str, note: &Note) -> Result<()> {
             NOTES,
             "append",
             "-m",
-            &serde_json::to_string(note)?,
+            &serde_json::to_string(&note)?,
             commit,
         ],
     )?;
     Ok(())
+}
+
+fn notes_lock(root: &Path) -> Result<fs::File> {
+    let lock = notes_file(root)?;
+    lock.lock().context("lock shared hosts receipts")?;
+    Ok(lock)
+}
+
+fn notes_file(root: &Path) -> Result<fs::File> {
+    let common = git_text(
+        root,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    Ok(fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(Path::new(&common).join(NOTES_LOCK))?)
 }
 
 fn clean_recorded_workspace(native: &Real, root: &Path, commit: &str, note: &Note) -> Result<()> {
@@ -419,6 +526,7 @@ fn clean_recorded_workspace(native: &Real, root: &Path, commit: &str, note: &Not
             stage: None,
             applied: None,
             inputs: None,
+            generation: None,
             reused: None,
             workspace: Some(workspace.clone()),
         },
@@ -592,51 +700,111 @@ pub fn input_hashes(root: &Path, commit: &str, gate: &str) -> Result<[String; 2]
     Ok(hashes.map(|hash| crate::build_inputs::hex(&hash.finalize())))
 }
 
-fn reusable(
-    notes: &[(String, String)],
-    family: Family,
-    stage: Stage,
-    inputs: &str,
-    gate: &str,
-) -> Result<Option<Reused>> {
+struct Recorded {
+    origin: Reused,
+    note: Note,
+}
+
+fn receipts(notes: &[(String, String)]) -> Result<Vec<Recorded>> {
+    let mut receipts = Vec::new();
     for (commit, text) in notes {
-        for (line, text) in text
-            .lines()
-            .enumerate()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-        {
+        for (line, text) in text.lines().enumerate() {
             if text.trim().is_empty() {
                 continue;
             }
             let note: Note = serde_json::from_str(text).context("malformed hosts note")?;
-            let matches = [
-                note.os == family.name(),
-                note.stage == Some(stage),
-                note.inputs.as_deref() == Some(inputs),
-                stage == Stage::Real || note.gate == gate,
-            ];
-            let [family_matches, stage_matches, inputs_match, gate_matches] = matches;
-            if crate::hosts_rules::reuse([
-                note.status == 0,
-                family_matches,
-                stage_matches,
-                inputs_match,
-                gate_matches,
-            ]) {
-                return Ok(Some(Reused {
+            receipts.push(Recorded {
+                origin: Reused {
                     commit: commit.clone(),
                     line: line + 1,
-                    host: note.host,
-                }));
-            }
-            if matches.iter().all(|fact| *fact) {
-                break;
-            }
+                    host: note.host.clone(),
+                },
+                note,
+            });
         }
     }
-    Ok(None)
+    Ok(receipts)
+}
+
+fn matching(note: &Note, family: Family, stage: Stage, inputs: &str, gate: &str) -> bool {
+    crate::hosts_rules::reuse([
+        true,
+        note.os == family.name(),
+        note.stage == Some(stage),
+        note.inputs.as_deref() == Some(inputs),
+        stage == Stage::Real || note.gate == gate,
+    ])
+}
+
+fn actual_receipt(note: &Note) -> Option<crate::hosts_rules::Receipt> {
+    if note.reused.is_some() {
+        return None;
+    }
+    note.generation
+        .filter(|generation| *generation > 0)
+        .map(|generation| crate::hosts_rules::Receipt {
+            generation,
+            passed: note.status == 0,
+        })
+}
+
+fn source<'a>(receipts: &'a [Recorded], reused: &Reused) -> Option<&'a Recorded> {
+    receipts.iter().find(|record| {
+        record.origin.commit == reused.commit
+            && record.origin.line == reused.line
+            && record.origin.host == reused.host
+    })
+}
+
+fn verified_receipt(note: &Note, receipts: &[Recorded]) -> Option<crate::hosts_rules::Receipt> {
+    let Some(reused) = &note.reused else {
+        return actual_receipt(note);
+    };
+    let original = &source(receipts, reused)?.note;
+    let receipt = actual_receipt(original)?;
+    let stage = note.stage?;
+    crate::hosts_rules::reuse([
+        note.status == 0 && receipt.passed && note.generation == Some(receipt.generation),
+        note.os == original.os,
+        note.stage == original.stage,
+        note.inputs.is_some() && note.inputs == original.inputs,
+        stage == Stage::Real || note.gate == original.gate,
+    ])
+    .then_some(receipt)
+}
+
+fn latest_execution(
+    receipts: &[Recorded],
+    family: Family,
+    stage: Stage,
+    inputs: &str,
+    gate: &str,
+) -> Option<crate::hosts_rules::Receipt> {
+    receipts
+        .iter()
+        .filter(|record| matching(&record.note, family, stage, inputs, gate))
+        .map(|record| actual_receipt(&record.note))
+        .fold(None, crate::hosts_rules::newest_receipt)
+}
+
+fn reusable(
+    receipts: &[Recorded],
+    family: Family,
+    stage: Stage,
+    inputs: &str,
+    gate: &str,
+) -> Option<Reused> {
+    let latest = latest_execution(receipts, family, stage, inputs, gate)?;
+    if !latest.passed {
+        return None;
+    }
+    receipts
+        .iter()
+        .find(|record| {
+            matching(&record.note, family, stage, inputs, gate)
+                && actual_receipt(&record.note) == Some(latest)
+        })
+        .map(|record| record.origin.clone())
 }
 
 fn all_notes(root: &Path) -> Result<Vec<(String, String)>> {
@@ -738,21 +906,6 @@ fn workflows_at(repository: &Path, commit: &str) -> Result<Vec<(String, String)>
     Ok(workflows)
 }
 
-fn note(repository: &Path, commit: &str) -> Result<String> {
-    let listing = git_text(repository, &["notes", "--ref", NOTES, "list"])?;
-    for line in listing.lines() {
-        if let Some((blob, annotated)) = line.split_once(' ')
-            && annotated == commit
-        {
-            return Ok(String::from_utf8(git(
-                repository,
-                &["cat-file", "blob", blob],
-            )?)?);
-        }
-    }
-    Ok(String::new())
-}
-
 /// The verdict on a profile commit's notes for every family its own workflows require.
 pub(crate) fn admission(repository: &Path, commit: &str) -> Result<Verdict> {
     let commit = git_text(
@@ -781,15 +934,37 @@ pub(crate) fn admission(repository: &Path, commit: &str) -> Result<Verdict> {
     let tree = git_text(repository, &["rev-parse", &format!("{commit}^{{tree}}")])?;
     let required = required(&workflows_at(repository, &commit)?)?;
     let inputs = input_hashes(repository, &commit, DEFAULT_GATE)?;
-    Ok(admit(
-        required,
-        scoped_evidence(&note(repository, &commit)?, &tree, |note| {
-            note.stage.is_some_and(|stage| {
-                note.inputs.as_deref() == Some(inputs[stage.index()].as_str())
-                    && (stage == Stage::Real || note.gate == DEFAULT_GATE)
-            })
-        })?,
-    ))
+    let receipts = receipts(&all_notes(repository)?)?;
+    let evidence = Family::ALL.map(|family| {
+        crate::hosts_rules::stages(Stage::ALL.map(|stage| {
+            let current = receipts
+                .iter()
+                .filter(|record| {
+                    record.origin.commit == commit
+                        && record.note.tree == tree
+                        && matching(
+                            &record.note,
+                            family,
+                            stage,
+                            &inputs[stage.index()],
+                            DEFAULT_GATE,
+                        )
+                })
+                .map(|record| verified_receipt(&record.note, &receipts))
+                .fold(None, crate::hosts_rules::newest_receipt);
+            crate::hosts_rules::receipt_evidence(
+                current,
+                latest_execution(
+                    &receipts,
+                    family,
+                    stage,
+                    &inputs[stage.index()],
+                    DEFAULT_GATE,
+                ),
+            )
+        }))
+    });
+    Ok(admit(required, evidence))
 }
 
 /// Refuses a profile `commit` unless every required host family recorded a passing gate for it.
@@ -1717,7 +1892,7 @@ fn reuse_plan(
     inputs: &[String; 2],
     gate: &str,
 ) -> Result<[[Option<Reused>; 2]; 3]> {
-    let notes = all_notes(root)?;
+    let receipts = receipts(&all_notes(root)?)?;
     let mut reused: [[Option<Reused>; 2]; 3] = Default::default();
     for family in Family::ALL
         .into_iter()
@@ -1725,7 +1900,7 @@ fn reuse_plan(
     {
         for stage in Stage::ALL {
             reused[family.index()][stage.index()] =
-                reusable(&notes, family, stage, &inputs[stage.index()], gate)?;
+                reusable(&receipts, family, stage, &inputs[stage.index()], gate);
         }
     }
     Ok(reused)
@@ -1914,7 +2089,6 @@ fn record_run(
     } = run;
     let statuses = [report.code, report.real];
     let mut failures = Vec::new();
-    let mut recorded = true;
     let mut receipt = None;
     if reused[1].is_none()
         && let Some(applied) = &report.applied
@@ -1939,11 +2113,11 @@ fn record_run(
                 Stage::Real => report.applied.clone(),
             },
             inputs: Some(inputs[stage.index()].clone()),
+            generation: None,
             reused: reuse.clone(),
             workspace: workspace.clone(),
         };
         if let Err(error) = append_note(root, commit, &note) {
-            recorded = false;
             failures.push(format!(
                 "{} {} {}: record note: {error:#}",
                 family.name(),
@@ -1977,8 +2151,7 @@ fn record_run(
             ));
         }
     }
-    if recorded
-        && workspace.is_some()
+    if workspace.is_some()
         && let Some(receipt) = receipt
     {
         let cleanup = clean_recorded_workspace(native, root, commit, &receipt);
@@ -2191,6 +2364,151 @@ mod job_tests {
         git_text(root, &["write-tree"])
     }
 
+    const RECEIPT_WRITER_ROLE: &str = "HOSTS_RECEIPT_WRITER_FIXTURE";
+    const RECEIPT_WRITER_TEST: &str = "hosts::job_tests::linked_worktree_process_writers_share_the_lock_and_allocate_unique_generations";
+    const RECEIPT_WRITER_LIMIT: Duration = Duration::from_secs(30);
+    const RECEIPT_WRITER_READY: &str = "writer-ready";
+
+    fn receipt_writer(root: &Path) -> Result<()> {
+        let root = platform::paths::canonical(root)?;
+        let temporary = platform::paths::canonical(&std::env::temp_dir())?;
+        ensure!(
+            root.starts_with(&temporary) && root != temporary,
+            "the writer owns a temporary repository"
+        );
+        let probe = notes_file(&root)?;
+        assert!(matches!(
+            probe.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        drop(probe);
+        fs::write(root.join(RECEIPT_WRITER_READY), "ready")?;
+        let commit = git_text(&root, &["rev-parse", "HEAD"])?;
+        append_note(
+            &root,
+            &commit,
+            &Note {
+                host: "fixture".into(),
+                os: "linux".into(),
+                tree: git_text(&root, &["rev-parse", "HEAD^{tree}"])?,
+                status: 0,
+                gate: DEFAULT_GATE.into(),
+                stage: Some(Stage::Code),
+                applied: None,
+                inputs: Some(input_hashes(&root, &commit, DEFAULT_GATE)?[0].clone()),
+                generation: None,
+                reused: None,
+                workspace: None,
+            },
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn linked_worktree_process_writers_share_the_lock_and_allocate_unique_generations() -> Result<()>
+    {
+        if let Some(root) = std::env::var_os(RECEIPT_WRITER_ROLE) {
+            return receipt_writer(Path::new(&root));
+        }
+        let owned = tempfile::tempdir()?;
+        let root = owned.path().join("project");
+        let linked = owned.path().join("linked");
+        fs::create_dir(&root)?;
+        git(&root, &["init", "--quiet"])?;
+        git(&root, &["config", "--local", "user.name", "Owned Fixture"])?;
+        git(
+            &root,
+            &["config", "--local", "user.email", "fixture@example.invalid"],
+        )?;
+        git(
+            &root,
+            &[
+                "config",
+                "--local",
+                "core.hooksPath",
+                owned
+                    .path()
+                    .join("no-hooks")
+                    .to_str()
+                    .context("owned hooks path")?,
+            ],
+        )?;
+        let tree = tree(&root)?;
+        let commit = git_text(
+            &root,
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "commit-tree",
+                &tree,
+                "-m",
+                "fixture",
+            ],
+        )?;
+        git(&root, &["update-ref", "HEAD", &commit])?;
+        git(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "-b",
+                "linked",
+                linked.to_str().context("linked path")?,
+                &commit,
+            ],
+        )?;
+        let lock = notes_lock(&root)?;
+        std::thread::scope(|scope| -> Result<()> {
+            let writers: Vec<_> = [&root, &linked]
+                .into_iter()
+                .map(|repository| {
+                    let mut command = platform::process::command(
+                        std::env::current_exe().expect("test executable"),
+                    );
+                    command
+                        .args(["--exact", RECEIPT_WRITER_TEST, "--nocapture"])
+                        .current_dir(repository)
+                        .env(RECEIPT_WRITER_ROLE, repository)
+                        .env("GIT_CONFIG_GLOBAL", owned.path().join("gitconfig"))
+                        .env("GIT_CONFIG_NOSYSTEM", "1")
+                        .env("XDG_CONFIG_HOME", owned.path().join("config"));
+                    scope.spawn(move || job_output(command, Some(RECEIPT_WRITER_LIMIT)))
+                })
+                .collect();
+            let started = Instant::now();
+            while [&root, &linked]
+                .into_iter()
+                .any(|repository| !repository.join(RECEIPT_WRITER_READY).is_file())
+                && started.elapsed() < RECEIPT_WRITER_LIMIT
+            {
+                std::thread::sleep(REQUEST_POLL_INTERVAL);
+            }
+            let ready = [&root, &linked]
+                .into_iter()
+                .all(|repository| repository.join(RECEIPT_WRITER_READY).is_file());
+            drop(lock);
+            for writer in writers {
+                let (status, output) = writer.join().expect("writer joins")?;
+                ensure!(status.success(), "owned writer: {output}");
+            }
+            ensure!(
+                ready,
+                "both linked-worktree writers observed the shared lock within their bound"
+            );
+            Ok(())
+        })?;
+        let snapshot = receipts(&all_notes(&root)?)?;
+        let mut generations: Vec<_> = snapshot
+            .iter()
+            .filter_map(|record| record.note.generation)
+            .collect();
+        generations.sort_unstable();
+        assert_eq!(generations, [1, 2]);
+        assert_eq!(git_text(&root, &["rev-list", "--count", NOTES])?, "2");
+        Ok(())
+    }
+
     #[test]
     fn stage_hashes_follow_their_inputs_and_the_code_gate() -> Result<()> {
         let scope = tempfile::tempdir()?;
@@ -2224,10 +2542,266 @@ mod job_tests {
     }
 
     #[test]
+    fn the_latest_execution_failure_requires_a_new_run_across_commit_transitions() -> Result<()> {
+        for head_first in [false, true] {
+            let scope = tempfile::tempdir()?;
+            let root = scope.path();
+            git(root, &["init", "--quiet"])?;
+            git(root, &["config", "--local", "user.name", "Owned Fixture"])?;
+            git(
+                root,
+                &["config", "--local", "user.email", "fixture@example.invalid"],
+            )?;
+            let tree = tree(root)?;
+            let inputs = input_hashes(root, &tree, DEFAULT_GATE)?;
+            let commits = ["first", "second", "candidate"]
+                .into_iter()
+                .map(|message| {
+                    git_text(
+                        root,
+                        &[
+                            "-c",
+                            "commit.gpgsign=false",
+                            "commit-tree",
+                            &tree,
+                            "-m",
+                            message,
+                        ],
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let note = |os: &str, stage, status, inputs: &str, gate: &str| Note {
+                host: "fixture".into(),
+                os: os.into(),
+                tree: tree.clone(),
+                status,
+                gate: gate.into(),
+                stage: Some(stage),
+                applied: None,
+                inputs: Some(inputs.into()),
+                generation: None,
+                reused: None,
+                workspace: None,
+            };
+            for commit in &commits[..2] {
+                append_note(
+                    root,
+                    commit,
+                    &note("linux", Stage::Code, 0, &inputs[0], DEFAULT_GATE),
+                )?;
+            }
+            let ordered = all_notes(root)?;
+            let planned = reuse_plan(root, [true, false, false], &inputs, DEFAULT_GATE)?[0][0]
+                .clone()
+                .context("the latest initial execution passed")?;
+            let index = usize::from(!head_first);
+            let head = &ordered[index].0;
+            let other = &ordered[usize::from(head_first)].0;
+            git(root, &["update-ref", "HEAD", head])?;
+            let failed = note("linux", Stage::Code, 1, &inputs[0], DEFAULT_GATE);
+            append_note(root, head, &failed)?;
+            assert!(
+                reuse_plan(root, [true, false, false], &inputs, DEFAULT_GATE)?[0][0].is_none(),
+                "HEAD {head} failed after passing; another passing commit {other} cannot replace its result"
+            );
+            let candidate = &commits[2];
+            git(root, &["update-ref", "HEAD", candidate])?;
+            assert!(
+                reuse_plan(root, [true, false, false], &inputs, DEFAULT_GATE)?[0][0].is_none(),
+                "a new commit without notes cannot reuse success before a matching failure"
+            );
+            let mut copied = note("linux", Stage::Code, 0, &inputs[0], DEFAULT_GATE);
+            copied.reused = Some(planned);
+            let before = all_notes(root)?;
+            let stale = append_note(root, candidate, &copied).unwrap_err();
+            assert!(
+                stale.to_string().contains("no longer the latest"),
+                "{stale:#}"
+            );
+            assert_eq!(all_notes(root)?, before);
+            append_note(
+                root,
+                candidate,
+                &note("linux", Stage::Code, 0, &inputs[0], DEFAULT_GATE),
+            )?;
+            assert_eq!(
+                reuse_plan(root, [true, false, false], &inputs, DEFAULT_GATE)?[0][0]
+                    .as_ref()
+                    .context("a new actual run recovers the cache")?
+                    .commit,
+                *candidate
+            );
+            assert_recovery_sources(root, [candidate, other, head], &inputs, copied, &failed)?;
+        }
+        Ok(())
+    }
+
+    fn assert_recovery_sources(
+        root: &Path,
+        commits: [&str; 3],
+        inputs: &[String; 2],
+        mut copied: Note,
+        failed: &Note,
+    ) -> Result<()> {
+        let [candidate, other, head] = commits;
+        let base = copied.clone();
+        let note = |os: &str, stage, status, inputs: &str, gate: &str| Note {
+            os: os.into(),
+            stage: Some(stage),
+            status,
+            inputs: Some(inputs.into()),
+            gate: gate.into(),
+            reused: None,
+            ..base.clone()
+        };
+        let recovered = reuse_plan(root, [true, false, false], inputs, DEFAULT_GATE)?[0][0]
+            .clone()
+            .context("the actual recovery is reusable")?;
+        copied.reused = Some(recovered.clone());
+        append_note(root, other, &copied)?;
+        let snapshot = receipts(&all_notes(root)?)?;
+        let original = source(&snapshot, &recovered).context("original recovery receipt")?;
+        let inherited = snapshot
+            .iter()
+            .rev()
+            .find(|record| record.origin.commit == other && record.note.reused.is_some())
+            .context("inherited recovery receipt")?;
+        assert_eq!(inherited.note.generation, original.note.generation);
+        assert!(inherited.note.generation.is_some());
+        copied.reused = Some(inherited.origin.clone());
+        assert!(append_note(root, candidate, &copied).is_err());
+        assert_eq!(
+            reuse_plan(root, [true, false, false], inputs, DEFAULT_GATE)?[0][0]
+                .as_ref()
+                .context("synthetic receipts cannot replace the actual origin")?
+                .commit,
+            candidate
+        );
+        append_note(
+            root,
+            head,
+            &note("linux", Stage::Code, 0, &inputs[0], DEFAULT_GATE),
+        )?;
+        for unrelated in [
+            note("macos", Stage::Code, 1, &inputs[0], DEFAULT_GATE),
+            note("linux", Stage::Real, 1, &inputs[1], DEFAULT_GATE),
+            note("linux", Stage::Code, 1, "other-inputs", DEFAULT_GATE),
+            note("linux", Stage::Code, 1, &inputs[0], "just proofs"),
+        ] {
+            append_note(root, head, &unrelated)?;
+            let plan = reuse_plan(root, [true, false, false], inputs, DEFAULT_GATE)?;
+            assert_eq!(
+                plan[0][0]
+                    .as_ref()
+                    .context("the current matching pass remains reusable")?
+                    .commit,
+                head
+            );
+        }
+        append_note(root, head, failed)?;
+        assert!(
+            reuse_plan(root, [true, false, false], inputs, DEFAULT_GATE)?[0][0].is_none(),
+            "a later matching failure requires another code run"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn recovery_keeps_the_original_job_generation_and_never_restamps_completed_stages() -> Result<()>
+    {
+        let scope = tempfile::tempdir()?;
+        let root = scope.path();
+        git(root, &["init", "--quiet"])?;
+        git(root, &["config", "--local", "user.name", "Owned Fixture"])?;
+        git(
+            root,
+            &["config", "--local", "user.email", "fixture@example.invalid"],
+        )?;
+        let tree = tree(root)?;
+        let commit = git_text(
+            root,
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "commit-tree",
+                &tree,
+                "-m",
+                "fixture",
+            ],
+        )?;
+        let inputs = input_hashes(root, &commit, DEFAULT_GATE)?;
+        let note = |stage: Stage, status, job: &str| Note {
+            host: "fixture".into(),
+            os: "linux".into(),
+            tree: tree.clone(),
+            status,
+            gate: DEFAULT_GATE.into(),
+            stage: Some(stage),
+            applied: None,
+            inputs: Some(inputs[stage.index()].clone()),
+            generation: None,
+            reused: None,
+            workspace: Some(Workspace {
+                path: format!("/owned/jobs/{job}/workspace"),
+                job: job.into(),
+                reused: [None, None],
+            }),
+        };
+        let code = note(Stage::Code, 0, "old");
+        append_note(root, &commit, &code)?;
+        append_note(root, &commit, &note(Stage::Real, 1, "newer"))?;
+        let before = all_notes(root)?;
+        append_note(root, &commit, &code)?;
+        assert_eq!(all_notes(root)?, before);
+        let real = note(Stage::Real, 0, "old");
+        append_note(root, &commit, &real)?;
+        let recovered = all_notes(root)?;
+        let snapshot = receipts(&recovered)?;
+        let old: Vec<_> = snapshot
+            .iter()
+            .filter(|record| {
+                record
+                    .note
+                    .workspace
+                    .as_ref()
+                    .is_some_and(|workspace| workspace.job == "old")
+            })
+            .collect();
+        assert_eq!(old.len(), 2);
+        assert_eq!(old[0].note.generation, old[1].note.generation);
+        assert!(
+            reusable(
+                &snapshot,
+                Family::Linux,
+                Stage::Real,
+                &inputs[1],
+                DEFAULT_GATE
+            )
+            .is_none()
+        );
+        append_note(root, &commit, &real)?;
+        assert_eq!(all_notes(root)?, recovered);
+        assert!(append_note(root, &commit, &note(Stage::Code, 1, "old")).is_err());
+        assert_eq!(all_notes(root)?, recovered);
+        append_note(root, &commit, &note(Stage::Real, 0, "recovery"))?;
+        assert!(
+            reusable(
+                &receipts(&all_notes(root)?)?,
+                Family::Linux,
+                Stage::Real,
+                &inputs[1],
+                DEFAULT_GATE
+            )
+            .is_some()
+        );
+        Ok(())
+    }
+
+    #[test]
     fn reuse_requires_a_passing_matching_family_stage_hash_and_gate() -> Result<()> {
         let note = |os: &str, stage: &str, status: i32, hash: Option<&str>, gate: &str| {
             serde_json::json!({"host":"box","os":os,"stage":stage,"status":status,
-                "tree":"old-tree","gate":gate,"inputs":hash})
+                "tree":"old-tree","gate":gate,"inputs":hash,"generation":1})
             .to_string()
         };
         for record in [
@@ -2240,12 +2814,12 @@ mod job_tests {
         ] {
             assert!(
                 reusable(
-                    &[("old".into(), record)],
+                    &receipts(&[("old".into(), record)])?,
                     Family::Linux,
                     Stage::Code,
                     "hash",
                     DEFAULT_GATE
-                )?
+                )
                 .is_none()
             );
         }
@@ -2253,9 +2827,32 @@ mod job_tests {
             "old".into(),
             note("linux", "code", 0, Some("hash"), DEFAULT_GATE),
         )];
-        let reused = reusable(&notes, Family::Linux, Stage::Code, "hash", DEFAULT_GATE)?.unwrap();
+        let reused = reusable(
+            &receipts(&notes)?,
+            Family::Linux,
+            Stage::Code,
+            "hash",
+            DEFAULT_GATE,
+        )
+        .unwrap();
         assert_eq!(reused.commit, "old");
         assert_eq!(reused.line, 1);
+        let mut legacy: serde_json::Value = serde_json::from_str(&notes[0].1)?;
+        legacy
+            .as_object_mut()
+            .context("legacy record")?
+            .remove("generation");
+        let legacy = [("old".into(), serde_json::to_string(&legacy)?)];
+        assert!(
+            reusable(
+                &receipts(&legacy)?,
+                Family::Linux,
+                Stage::Code,
+                "hash",
+                DEFAULT_GATE
+            )
+            .is_none()
+        );
         let failed = [(
             "old".into(),
             format!(
@@ -2264,7 +2861,38 @@ mod job_tests {
                 note("linux", "code", 1, Some("hash"), DEFAULT_GATE)
             ),
         )];
-        assert!(reusable(&failed, Family::Linux, Stage::Code, "hash", DEFAULT_GATE)?.is_none());
+        assert!(
+            reusable(
+                &receipts(&failed)?,
+                Family::Linux,
+                Stage::Code,
+                "hash",
+                DEFAULT_GATE
+            )
+            .is_none()
+        );
+        for reversed in [false, true] {
+            let mut tied = vec![
+                ("passed".into(), notes[0].1.clone()),
+                (
+                    "failed".into(),
+                    note("linux", "code", 1, Some("hash"), DEFAULT_GATE),
+                ),
+            ];
+            if reversed {
+                tied.reverse();
+            }
+            assert!(
+                reusable(
+                    &receipts(&tied)?,
+                    Family::Linux,
+                    Stage::Code,
+                    "hash",
+                    DEFAULT_GATE
+                )
+                .is_none()
+            );
+        }
         Ok(())
     }
 

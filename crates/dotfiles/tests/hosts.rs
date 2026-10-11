@@ -806,13 +806,21 @@ fn record(os: &str, tree: &str, status: i32) -> String {
 fn candidate_record(root: &Path, os: &str, tree: &str, status: i32) -> Result<String> {
     let gate = dotfiles::hosts::DEFAULT_GATE;
     let inputs = dotfiles::hosts::input_hashes(root, "HEAD", gate)?;
+    let count = if git(root, &["rev-parse", "--verify", dotfiles::hosts::NOTES]).is_ok() {
+        git(root, &["rev-list", "--count", dotfiles::hosts::NOTES])?.parse::<u64>()?
+    } else {
+        0
+    };
+    let generation = count
+        .checked_add(1)
+        .context("fixture generation overflow")?;
     ["code", "real"]
         .into_iter()
         .zip(inputs)
         .map(|(stage, inputs)| {
             serde_json::to_string(&serde_json::json!({
                 "host": "fixture", "os": os, "tree": tree, "status": status,
-                "gate": gate, "stage": stage, "inputs": inputs
+                "gate": gate, "stage": stage, "inputs": inputs, "generation": generation
             }))
             .map_err(Into::into)
         })
@@ -1107,20 +1115,7 @@ fn a_push_is_refused_until_every_os_family_note_passes() -> Result<()> {
             "{error}"
         );
     };
-    refused("no linux gate result");
-    git(
-        root,
-        &[
-            "notes",
-            "--ref",
-            "refs/notes/hosts",
-            "append",
-            "-m",
-            &record("linux", &tree, 0),
-            "HEAD",
-        ],
-    )?;
-    refused("no linux gate result");
+    assert_unsequenced_candidates_are_refused(root, &tree, refused)?;
     push_gate(root, "ssh://hub/~/git/project.git", update.as_bytes())?;
     push_gate(
         root,
@@ -1156,6 +1151,108 @@ fn a_push_is_refused_until_every_os_family_note_passes() -> Result<()> {
     note("macos", &tree, 0)?;
     push_gate(root, github, update.as_bytes())?;
     assert!(push_gate(root, github, b"malformed\n").is_err());
+    assert_newer_failure_invalidates_candidate(root, &tree, &head, note, refused)
+}
+
+fn assert_unsequenced_candidates_are_refused(
+    root: &Path,
+    tree: &str,
+    refused: impl Fn(&str),
+) -> Result<()> {
+    refused("no linux gate result");
+    git(
+        root,
+        &[
+            "notes",
+            "--ref",
+            "refs/notes/hosts",
+            "append",
+            "-m",
+            &record("linux", tree, 0),
+            "HEAD",
+        ],
+    )?;
+    refused("no linux gate result");
+    let legacy = candidate_record(root, "linux", tree, 0)?
+        .lines()
+        .map(|line| -> Result<String> {
+            let mut note: serde_json::Value = serde_json::from_str(line)?;
+            note.as_object_mut()
+                .context("legacy fixture")?
+                .remove("generation");
+            Ok(serde_json::to_string(&note)?)
+        })
+        .collect::<Result<Vec<_>>>()?
+        .join("\n");
+    git(
+        root,
+        &[
+            "notes",
+            "--ref",
+            dotfiles::hosts::NOTES,
+            "append",
+            "-m",
+            &legacy,
+            "HEAD",
+        ],
+    )?;
+    refused("no linux gate result");
+    Ok(())
+}
+
+fn assert_newer_failure_invalidates_candidate(
+    root: &Path,
+    tree: &str,
+    head: &str,
+    note: impl Fn(&str, &str, i32) -> Result<()>,
+    refused: impl Fn(&str),
+) -> Result<()> {
+    let previous = git(
+        root,
+        &["notes", "--ref", dotfiles::hosts::NOTES, "show", head],
+    )?;
+    git(
+        root,
+        &["commit", "--quiet", "--allow-empty", "-m", "failed run"],
+    )?;
+    note("linux", tree, 1)?;
+    refused("the linux gate failed");
+    git(
+        root,
+        &["commit", "--quiet", "--allow-empty", "-m", "new candidate"],
+    )?;
+    let candidate = git(root, &["rev-parse", "HEAD"])?;
+    assert!(require_admission(root, &candidate).is_err());
+    let mut copies = Vec::new();
+    for (line, text) in previous
+        .lines()
+        .enumerate()
+        .filter(|(_, text)| !text.is_empty())
+    {
+        let mut record: serde_json::Value = serde_json::from_str(text)?;
+        if record["status"] == 0 && record["generation"].is_u64() {
+            record["reused"] = serde_json::json!({
+                "commit": head, "line": line + 1, "host": record["host"]
+            });
+            copies.push(serde_json::to_string(&record)?);
+        }
+    }
+    git(
+        root,
+        &[
+            "notes",
+            "--ref",
+            dotfiles::hosts::NOTES,
+            "append",
+            "-m",
+            &copies.join("\n"),
+            "HEAD",
+        ],
+    )?;
+    assert!(require_admission(root, &candidate).is_err());
+    note("linux", tree, 0)?;
+    require_admission(root, &candidate)?;
+    assert!(require_admission(root, head).is_err());
     Ok(())
 }
 
@@ -1334,12 +1431,7 @@ fn tools() -> Result<tempfile::TempDir> {
     Ok(directory)
 }
 
-#[test]
-fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
-    let tools = tools()?;
-    let scope = tempfile::tempdir()?;
-    let root = scope.path().join("project");
-    let home = scope.path().join("home");
+fn prepare_host_check_project(root: &Path, home: &Path) -> Result<()> {
     fs::create_dir_all(root.join(".github/workflows"))?;
     fs::create_dir_all(root.join("crates/dotfiles"))?;
     fs::write(root.join(".chezmoiroot"), "home\n")?;
@@ -1361,9 +1453,19 @@ fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
         root.join(".github/workflows/ci.yml"),
         "jobs:\n  test:\n    runs-on: ubuntu-latest\n",
     )?;
-    git(&root, &["init", "--quiet"])?;
-    git(&root, &["add", "."])?;
-    git(&root, &["commit", "--quiet", "-m", "ci"])?;
+    git(root, &["init", "--quiet"])?;
+    git(root, &["add", "."])?;
+    git(root, &["commit", "--quiet", "-m", "ci"])?;
+    Ok(())
+}
+
+#[test]
+fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
+    let tools = tools()?;
+    let scope = tempfile::tempdir()?;
+    let root = scope.path().join("project");
+    let home = scope.path().join("home");
+    prepare_host_check_project(&root, &home)?;
     let mut paths = vec![tools.path().to_path_buf()];
     paths.extend(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
@@ -1373,6 +1475,7 @@ fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
             r#"{{"Self":{{"DNSName":"phone.example.ts.net.","OS":"android","Online":true}},"Peer":{{"a":{{"DNSName":"box.example.ts.net.","OS":"linux","TailscaleIPs":["100.64.0.2"],"Online":{online}}}}}}}"#
         )
     };
+    let stages = std::cell::RefCell::new(r#"{"code":0,"real":0,"applied":{"drifted_targets":[".first",".nested/target with spaces"],"verification_error":"fixture verification error"}}"#.to_owned());
     let check = |online: bool, doctor: &str| -> Result<std::process::Output> {
         Ok(
             fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), scope.path())
@@ -1389,8 +1492,15 @@ fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
                 .env("GIT_COMMITTER_EMAIL", "fixture@example.com")
                 .env("HOSTS_FIXTURE_STATUS", status(online))
                 .env("HOSTS_FIXTURE_DOCTOR", doctor)
-                .env("HOSTS_FIXTURE_SPACE", if doctor == "full" { "1" } else { "100000000000" })
-                .env("HOSTS_FIXTURE_STAGES", r#"{"code":0,"real":0,"applied":{"drifted_targets":[".first",".nested/target with spaces"],"verification_error":"fixture verification error"}}"#)
+                .env(
+                    "HOSTS_FIXTURE_SPACE",
+                    if doctor == "full" {
+                        "1"
+                    } else {
+                        "100000000000"
+                    },
+                )
+                .env("HOSTS_FIXTURE_STAGES", stages.borrow().clone())
                 .output()?,
         )
     };
@@ -1434,7 +1544,143 @@ fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
     }
     assert_applied_evidence(&root, &output.stdout)?;
     push_gate(&root, "https://github.com/owner/project", update.as_bytes())?;
-    assert_reuse(&root, &head, check)
+    assert_reuse(&root, &head, check)?;
+    assert_stale_workspace_recovery(&root, &stages, check)?;
+    Ok(())
+}
+
+const RECOVERY_WORKSPACE: &str = "/owned/jobs/job/workspace";
+
+fn record_stale_completed_workspace(root: &Path) -> Result<()> {
+    let previous = git(
+        root,
+        &["notes", "--ref", dotfiles::hosts::NOTES, "show", "HEAD"],
+    )?;
+    let notes: Vec<serde_json::Value> = previous
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(serde_json::from_str)
+        .collect::<std::result::Result<_, _>>()?;
+    let mut completed = notes
+        .iter()
+        .find(|note| note["stage"] == "code" && note["reused"].is_null())
+        .context("completed code fixture")?
+        .clone();
+    let reused = notes
+        .iter()
+        .find(|note| note["stage"] == "real" && note["reused"].is_object())
+        .context("reused real fixture")?;
+    completed["workspace"] =
+        serde_json::json!({"path":RECOVERY_WORKSPACE,"job":"job","reused":[null,reused["reused"]]});
+    git(
+        root,
+        &[
+            "notes",
+            "--ref",
+            dotfiles::hosts::NOTES,
+            "append",
+            "-m",
+            &serde_json::to_string(&completed)?,
+            "HEAD",
+        ],
+    )?;
+    let mut failure = reused.clone();
+    failure
+        .as_object_mut()
+        .context("failed actual fixture")?
+        .remove("reused");
+    failure["status"] = 1.into();
+    failure["generation"] = git(root, &["rev-list", "--count", dotfiles::hosts::NOTES])?
+        .parse::<u64>()?
+        .checked_add(1)
+        .context("fixture generation overflow")?
+        .into();
+    git(
+        root,
+        &[
+            "notes",
+            "--ref",
+            dotfiles::hosts::NOTES,
+            "append",
+            "-m",
+            &serde_json::to_string(&failure)?,
+            "HEAD",
+        ],
+    )?;
+    Ok(())
+}
+
+fn assert_stale_workspace_recovery(
+    root: &Path,
+    stages: &std::cell::RefCell<String>,
+    check: impl Fn(bool, &str) -> Result<std::process::Output>,
+) -> Result<()> {
+    #[derive(serde::Serialize)]
+    struct Completed<'a> {
+        code: i32,
+        real: i32,
+        applied: &'a serde_json::Value,
+        workspace: &'a str,
+    }
+    record_stale_completed_workspace(root)?;
+    let normal = stages.borrow().clone();
+    let report: serde_json::Value = serde_json::from_str(&normal)?;
+    *stages.borrow_mut() = serde_json::to_string(&Completed {
+        code: 0,
+        real: 0,
+        applied: &report["applied"],
+        workspace: RECOVERY_WORKSPACE,
+    })?;
+    let recovery = check(false, "ok")?;
+    let diagnostic = String::from_utf8_lossy(&recovery.stderr);
+    assert!(!recovery.status.success());
+    assert!(
+        diagnostic.contains("offline on the tailnet"),
+        "{diagnostic}"
+    );
+    let recovered = git(
+        root,
+        &["notes", "--ref", dotfiles::hosts::NOTES, "show", "HEAD"],
+    )?;
+    let recovered: Vec<serde_json::Value> = recovered
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(serde_json::from_str)
+        .collect::<std::result::Result<_, _>>()?;
+    assert_eq!(
+        recovered
+            .iter()
+            .filter(|note| note["workspace"]["job"] == "job"
+                && note["stage"].is_null()
+                && note["status"] == 0)
+            .count(),
+        1
+    );
+    assert_eq!(
+        recovered
+            .iter()
+            .filter(|note| note["workspace"]["job"] == "job" && note["stage"] == "code")
+            .count(),
+        1
+    );
+    assert_eq!(
+        recovered
+            .iter()
+            .filter(|note| note["workspace"]["job"] == "job" && note["stage"] == "real")
+            .count(),
+        0
+    );
+    assert!(require_admission(root, "HEAD").is_err());
+    *stages.borrow_mut() = normal;
+    let retried = check(true, "ok")?;
+    ensure!(
+        retried.status.success(),
+        "{}",
+        String::from_utf8_lossy(&retried.stderr)
+    );
+    assert!(String::from_utf8_lossy(&retried.stdout).contains("linux box real: passed"));
+    require_admission(root, "HEAD")?;
+    Ok(())
 }
 
 fn assert_reuse(
@@ -1470,6 +1716,8 @@ fn assert_reuse(
         assert_eq!(reused["inputs"], first["inputs"]);
         assert_eq!(reused["reused"]["commit"], head);
         assert_eq!(reused["status"], 0);
+        assert!(first["generation"].is_u64());
+        assert_eq!(reused["generation"], first["generation"]);
     }
     fs::create_dir(root.join("home"))?;
     fs::write(root.join("home/dot_profile"), "candidate profile")?;

@@ -283,6 +283,9 @@ fn check_prose(root: &Path, reference: &str, checks: &mut Checks) {
     checks.run("prose.adr", || xtask::adr::generate(root, true));
     checks.run("prose.editorconfig", || xtask::quality::editorconfig(root));
     checks.run("prose.comments", || xtask::quality::comment_scopes(root));
+    checks.run("prose.comment-style", || {
+        prose::repository(root, prose::Scope::Comments, &prose::Bundle::source(root)?)
+    });
     checks.run("prose.instructions", || {
         xtask::instruction_audit::check(root)
     });

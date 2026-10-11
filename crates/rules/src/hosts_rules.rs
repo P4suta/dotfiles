@@ -34,6 +34,52 @@ pub enum Evidence {
     Passed,
 }
 
+/// The ordered outcome of one actual execution whose inputs match the candidate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Receipt {
+    pub generation: u64,
+    pub passed: bool,
+}
+
+/// Keep the highest generation, with every tied failure dominating success.
+/// Unsequenced records supply no receipt.
+#[must_use]
+pub const fn newest_receipt(
+    previous: Option<Receipt>,
+    incoming: Option<Receipt>,
+) -> Option<Receipt> {
+    match (previous, incoming) {
+        (None, receipt) | (receipt, None) => receipt,
+        (Some(left), Some(right)) if left.generation > right.generation => Some(left),
+        (Some(left), Some(right)) if right.generation > left.generation => Some(right),
+        (Some(left), Some(right)) => Some(Receipt {
+            generation: left.generation,
+            passed: left.passed && right.passed,
+        }),
+    }
+}
+
+/// Assign the next execution generation, refusing an exhausted counter.
+#[must_use]
+pub const fn next_generation(count: u64) -> Option<u64> {
+    count.checked_add(1)
+}
+
+/// Accept a candidate receipt only at the highest successful execution generation.
+/// A failure at that generation refuses the candidate, and missing evidence stays missing.
+#[must_use]
+pub const fn receipt_evidence(current: Option<Receipt>, latest: Option<Receipt>) -> Evidence {
+    match (current, latest) {
+        (_, Some(Receipt { passed: false, .. })) => Evidence::Failed,
+        (Some(current), Some(latest))
+            if current.generation == latest.generation && current.passed =>
+        {
+            Evidence::Passed
+        }
+        _ => Evidence::Missing,
+    }
+}
+
 /// Combine the independent code and real-host results.
 #[must_use]
 pub const fn stages(evidence: [Evidence; 2]) -> Evidence {
@@ -192,6 +238,120 @@ mod proofs {
 
     pub const EVIDENCE: [Evidence; 3] = [Evidence::Missing, Evidence::Failed, Evidence::Passed];
     pub const KEYS: [Key; 3] = [Key::New, Key::Same, Key::Changed];
+
+    pub fn spec_newest_receipt(previous: Option<Receipt>, incoming: Option<Receipt>) {
+        let selected = newest_receipt(previous, incoming);
+        match (previous, incoming, selected) {
+            (None, None, None) => {}
+            (Some(receipt), None, Some(selected)) | (None, Some(receipt), Some(selected)) => {
+                assert_eq!(selected, receipt);
+            }
+            (Some(left), Some(right), Some(selected)) => {
+                assert_eq!(selected.generation, left.generation.max(right.generation));
+                assert_eq!(
+                    selected.passed,
+                    (left.generation < selected.generation || left.passed)
+                        && (right.generation < selected.generation || right.passed)
+                );
+            }
+            _ => assert_eq!(selected.is_none(), previous.is_none() && incoming.is_none()),
+        }
+        assert_eq!(selected, newest_receipt(incoming, previous));
+        assert_eq!(newest_receipt(previous, previous), previous);
+        assert_eq!(newest_receipt(incoming, incoming), incoming);
+    }
+
+    pub fn spec_receipt_groups(
+        first: Option<Receipt>,
+        second: Option<Receipt>,
+        third: Option<Receipt>,
+    ) {
+        assert_eq!(
+            newest_receipt(newest_receipt(first, second), third),
+            newest_receipt(first, newest_receipt(second, third))
+        );
+    }
+
+    pub fn spec_receipt_evidence(current: Option<Receipt>, latest: Option<Receipt>) {
+        let evidence = receipt_evidence(current, latest);
+        assert_eq!(
+            evidence == Evidence::Failed,
+            latest.is_some_and(|receipt| !receipt.passed)
+        );
+        assert_eq!(
+            evidence == Evidence::Passed,
+            current == latest && latest.is_some_and(|receipt| receipt.passed)
+        );
+        assert_eq!(
+            evidence == Evidence::Missing,
+            latest.is_none() || (latest.is_some_and(|receipt| receipt.passed) && current != latest)
+        );
+    }
+
+    #[cfg(kani)]
+    fn any_receipt() -> Option<Receipt> {
+        if kani::any() {
+            Some(Receipt {
+                generation: kani::any(),
+                passed: kani::any(),
+            })
+        } else {
+            None
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn receipt_selection_is_order_independent_and_refuses_the_latest_failures() {
+        let previous = any_receipt();
+        let incoming = any_receipt();
+        spec_newest_receipt(previous, incoming);
+        let selected = newest_receipt(previous, incoming);
+        kani::cover!(selected.is_some_and(|receipt| receipt.passed));
+        kani::cover!(selected.is_some_and(|receipt| !receipt.passed));
+        kani::cover!(selected.is_none());
+        kani::cover!(
+            matches!((previous, incoming), (Some(left), Some(right)) if left.generation == right.generation && left.passed != right.passed)
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn receipt_selection_is_associative_for_every_generation() {
+        let first = any_receipt();
+        let second = any_receipt();
+        let third = any_receipt();
+        spec_receipt_groups(first, second, third);
+        let selected = newest_receipt(newest_receipt(first, second), third);
+        kani::cover!(selected.is_some_and(|receipt| receipt.passed));
+        kani::cover!(selected.is_some_and(|receipt| !receipt.passed));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_the_current_latest_success_authorizes_a_candidate() {
+        let current = any_receipt();
+        let latest = any_receipt();
+        spec_receipt_evidence(current, latest);
+        let evidence = receipt_evidence(current, latest);
+        kani::cover!(evidence == Evidence::Passed);
+        kani::cover!(evidence == Evidence::Failed);
+        kani::cover!(evidence == Evidence::Missing);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn generation_increment_is_checked_and_never_wraps() {
+        let count: u64 = kani::any();
+        let next = next_generation(count);
+        if count == u64::MAX {
+            assert_eq!(next, None);
+        } else {
+            assert_eq!(next, Some(count + 1));
+        }
+        kani::cover!(next.is_some());
+        kani::cover!(next.is_none());
+    }
 
     #[cfg(kani)]
     #[kani::proof]
@@ -443,6 +603,67 @@ mod proofs {
 mod tests {
     use super::*;
     use crate::domain::flags;
+
+    #[test]
+    fn a_newer_failure_refuses_an_older_success_and_a_later_success_recovers() {
+        let older = Some(Receipt {
+            generation: 1,
+            passed: true,
+        });
+        let failed = Some(Receipt {
+            generation: 2,
+            passed: false,
+        });
+        let recovered = Some(Receipt {
+            generation: 3,
+            passed: true,
+        });
+        assert_eq!(newest_receipt(older, failed), failed);
+        assert_eq!(newest_receipt(failed, older), failed);
+        assert_eq!(newest_receipt(failed, recovered), recovered);
+        assert_eq!(newest_receipt(recovered, failed), recovered);
+        assert_eq!(newest_receipt(None, None), None);
+    }
+
+    #[test]
+    fn a_tied_failure_dominates_a_success_in_both_orders() {
+        let passed = Some(Receipt {
+            generation: u64::MAX,
+            passed: true,
+        });
+        let failed = Some(Receipt {
+            generation: u64::MAX,
+            passed: false,
+        });
+        assert_eq!(newest_receipt(passed, failed), failed);
+        assert_eq!(newest_receipt(failed, passed), failed);
+    }
+
+    #[test]
+    fn generation_increment_refuses_wraparound() {
+        assert_eq!(next_generation(0), Some(1));
+        assert_eq!(next_generation(u64::MAX - 1), Some(u64::MAX));
+        assert_eq!(next_generation(u64::MAX), None);
+    }
+
+    #[test]
+    fn receipt_boundaries_preserve_selection_and_grouping() {
+        let mut receipts = alloc::vec![None];
+        for generation in [0, 1, 2, u64::MAX - 1, u64::MAX] {
+            for passed in [false, true] {
+                receipts.push(Some(Receipt { generation, passed }));
+            }
+        }
+        for &first in &receipts {
+            for &second in &receipts {
+                proofs::spec_newest_receipt(first, second);
+                proofs::spec_receipt_evidence(first, second);
+                for &third in &receipts {
+                    proofs::spec_receipt_groups(first, second, third);
+                }
+            }
+        }
+    }
 
     #[test]
     fn timed_proofs_do_not_overlap_native_setup() {

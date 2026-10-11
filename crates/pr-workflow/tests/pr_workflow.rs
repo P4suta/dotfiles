@@ -1879,6 +1879,11 @@ fn a_body_without_the_closing_reference_names_the_edit_that_adds_it() -> Result<
     Ok(())
 }
 
+fn next_host_generation(root: &std::path::Path) -> Result<u64> {
+    let count: u64 = git(root, &["rev-list", "--count", dotfiles::hosts::NOTES])?.parse()?;
+    dotfiles::hosts_rules::next_generation(count).context("fixture generation")
+}
+
 #[test]
 fn ready_requires_a_passing_note_for_every_os_family_in_the_ci_matrix() -> Result<()> {
     use dotfiles::hosts::Stage::{Code, Real};
@@ -1908,7 +1913,7 @@ fn ready_requires_a_passing_note_for_every_os_family_in_the_ci_matrix() -> Resul
             .env("GH_FIXTURE_VIEW", view.to_string())
             .output()?)
     };
-    let note = |os: &str, stage, status: i32| -> Result<()> {
+    let note = |os: &str, stage: Option<dotfiles::hosts::Stage>, status: i32| -> Result<()> {
         let record = dotfiles::hosts::Note {
             host: "fixture".to_owned(),
             os: os.to_owned(),
@@ -1926,6 +1931,7 @@ fn ready_requires_a_passing_note_for_every_os_family_in_the_ci_matrix() -> Resul
                     [index]
                     .clone()
             }),
+            generation: stage.map(|_| next_host_generation(&root)).transpose()?,
             reused: None,
             workspace: None,
         };

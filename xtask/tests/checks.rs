@@ -31,6 +31,22 @@ const COMMENT_CASES: [(&str, usize, &str, &str); 3] = [
     ),
 ];
 
+const GATE_COMMENT_PATH: &str = "crates/rules/src/hosts_rules.rs";
+const GATE_COMMENT_CASES: [(&str, &str); 3] = [
+    (
+        "Allocate the next execution generation, refusing an exhausted counter.",
+        "Assign the next execution generation, refusing an exhausted counter.",
+    ),
+    (
+        "Authorize only a candidate receipt matching the latest actual success.",
+        "Accept a candidate receipt only at the highest successful execution generation.",
+    ),
+    (
+        "A latest failure refuses the candidate, and missing evidence stays missing.",
+        "A failure at that generation refuses the candidate, and missing evidence stays missing.",
+    ),
+];
+
 fn write_comment_fixture(root: &Path, corrected: bool) -> Result<()> {
     let mut files = BTreeMap::<&str, Vec<String>>::new();
     for (path, line, bad, good) in COMMENT_CASES {
@@ -44,6 +60,150 @@ fn write_comment_fixture(root: &Path, corrected: bool) -> Result<()> {
         fs::create_dir_all(target.parent().context("fixture file has a parent")?)?;
         fs::write(target, format!("{}\n", lines.join("\n")))?;
     }
+    Ok(())
+}
+
+fn write_gate_comment_fixture(root: &Path, corrected: bool) -> Result<()> {
+    write_comment_fixture(root, corrected)?;
+    let mut lines = Vec::new();
+    for (index, (bad, good)) in GATE_COMMENT_CASES.into_iter().enumerate() {
+        lines.push(format!("/// {}", if corrected { good } else { bad }));
+        lines.push(format!("pub fn fixture_{index}() {{}}"));
+    }
+    let target = root.join(GATE_COMMENT_PATH);
+    fs::create_dir_all(target.parent().context("fixture file has a parent")?)?;
+    fs::write(target, format!("{}\n", lines.join("\n")))?;
+    Ok(())
+}
+
+fn copy_prose_bundle(source: &Path, target: &Path) -> Result<()> {
+    fs::create_dir_all(target)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let destination = target.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_prose_bundle(&entry.path(), &destination)?;
+        } else {
+            fs::copy(entry.path(), destination)?;
+        }
+    }
+    Ok(())
+}
+
+fn prose_gate(root: &Path) -> Result<std::process::Output> {
+    Ok(fixture_process::command(env!("CARGO_BIN_EXE_xtask"), root)
+        .arg("--root")
+        .arg(root)
+        .args(["check", "--gates", "prose"])
+        .env("DOTFILES_EXPECTED_FAILURE", "")
+        .output()?)
+}
+
+fn assert_gate_comment_findings(stderr: &str) {
+    assert!(
+        stderr.contains("prose.comment-style: the Comments prose check failed"),
+        "{stderr}"
+    );
+    for (path, line, rule) in [
+        (GATE_COMMENT_PATH, 1, "write-good.TooWordy"),
+        (GATE_COMMENT_PATH, 3, "write-good.TooWordy"),
+        (GATE_COMMENT_PATH, 3, "Google.Timeless"),
+        (GATE_COMMENT_PATH, 5, "Google.Timeless"),
+        (
+            COMMENT_CASES[0].0,
+            COMMENT_CASES[0].1,
+            "Microsoft.Contractions",
+        ),
+        (COMMENT_CASES[1].0, COMMENT_CASES[1].1, "write-good.E-Prime"),
+        (
+            COMMENT_CASES[2].0,
+            COMMENT_CASES[2].1,
+            "Microsoft.Contractions",
+        ),
+    ] {
+        assert!(
+            stderr
+                .lines()
+                .any(|entry| entry.starts_with(&format!("{path}:{line}:")) && entry.contains(rule)),
+            "{stderr}"
+        );
+    }
+}
+
+fn assert_gate_comment_incident(root: &Path) -> Result<()> {
+    let recorded = skill_ops::incidents(&root.join("state"))?;
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].rule, "tool.failure");
+    assert!(recorded[0].evidence.iter().any(|evidence| {
+        evidence.contains("prose.comment-style")
+            && evidence.contains("write-good.TooWordy")
+            && evidence.contains("Google.Timeless")
+    }));
+    Ok(())
+}
+
+#[test]
+fn the_prose_gate_checks_original_comments_and_accepts_their_corrections() -> Result<()> {
+    let scope = incident_fixture::scope()?;
+    let root = scope.path();
+    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .context("xtask has a repository parent")?;
+    copy_prose_bundle(
+        &source.join(prose::SOURCE_CONFIG),
+        &root.join(prose::SOURCE_CONFIG),
+    )?;
+    write_gate_comment_fixture(root, false)?;
+    fs::create_dir(root.join("policy"))?;
+    fs::write(root.join("policy/prose.toml"), "exempt = []\n")?;
+    fs::write(root.join(".ocomment.toml"), "version = 1\noverrides = []\n")?;
+    for arguments in [
+        vec!["init", "--quiet"],
+        vec![
+            "add",
+            "xtask/src",
+            "crates/rules/src",
+            "crates/dotfiles/src",
+            "policy",
+            ".ocomment.toml",
+        ],
+    ] {
+        let output = platform::tool::Tool::Git
+            .command()
+            .current_dir(root)
+            .args(arguments)
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let refused = prose_gate(root)?;
+    assert!(!refused.status.success());
+    let stdout = String::from_utf8(refused.stdout)?;
+    let stderr = String::from_utf8(refused.stderr)?;
+    assert!(stdout.contains("Checking prose.comment-style"), "{stdout}");
+    assert_gate_comment_findings(&stderr);
+    assert_gate_comment_incident(root)?;
+    write_gate_comment_fixture(root, true)?;
+    let corrected = prose_gate(root)?;
+    assert!(
+        !corrected.status.success(),
+        "unrelated fixture stages still fail"
+    );
+    let stdout = String::from_utf8(corrected.stdout)?;
+    let stderr = String::from_utf8(corrected.stderr)?;
+    assert!(
+        stdout.contains("Validated repository Comments prose against policy/prose.toml"),
+        "{stdout}"
+    );
+    let (_, summary) = stderr
+        .rsplit_once("selected stages failed:")
+        .context("unrelated fixture failures")?;
+    assert!(summary.contains("prose.adr:"), "{stderr}");
+    assert!(!summary.contains("prose.comment-style:"), "{stderr}");
+    incident_fixture::preserve(scope);
     Ok(())
 }
 
@@ -185,6 +345,7 @@ fn the_check_command_reports_multiple_selected_gate_failures_in_one_run() -> Res
             "Checking prose.adr",
             "Checking prose.editorconfig",
             "Checking prose.comments",
+            "Checking prose.comment-style",
             "Checking prose.instructions",
             "Checking prose.line-endings",
             "Checking prose.recipes",

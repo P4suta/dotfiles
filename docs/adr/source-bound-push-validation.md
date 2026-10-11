@@ -17,6 +17,7 @@ Reporting pending incident maintenance as a new tool failure also enlarged the w
 The hosts gate runs `just push-check` through its isolated code environment.
 That command runs every existing check on each required native family and collects the complete proof suite on Linux, the target of the CI proof job and the former Windows pre-push proof container.
 Both stages must complete, even when one fails.
+The prose gate checks both document and source comment style, matching the staged check and the standalone prose command.
 Pre-push validates those recorded results instead of rerunning a different check or proof command.
 The global signature, history, health, owner pause, assurance, and PR state gates still inspect the current push.
 
@@ -26,6 +27,13 @@ The code stage hashes every checked file, including profiles.
 Its scratch home borrows only the selected Kani release bundle, preserving fixed verifier storage without inheriting host configuration or repeating setup downloads.
 The real stage hashes profile files, runtime sources, manifests, and shared pins.
 An unchanged stage retains the existing passing-result reuse, while changed inputs require another run.
+Each completed job records its execution order under a short lock shared by the repository's worktrees.
+The latest matching execution determines whether a stage can be reused, and a failure wins an equal-order conflict.
+A reused receipt retains the original execution's order and provenance, so copying an old success cannot cover a later failure.
+Recovering a partially recorded job retains its first execution order and never allocates a newer one for a replay.
+Writing reused evidence rechecks that execution's freshness, and admission checks it across all commits.
+Legacy receipts without an execution order cannot authorize reuse or admission.
+After a new execution passes, subsequent matching candidates can reuse that verified result again.
 The workflow matrix must retain Linux so the proof suite participates in admission.
 The ordinary Rust checks discover every independent Cargo workspace from tracked manifests and validate every lockfile with Cargo before the expensive proof and benchmark stages.
 Missing and stale lockfiles fail together, including those of auxiliary tools and proof fixtures.
