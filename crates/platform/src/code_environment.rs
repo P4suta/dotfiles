@@ -17,6 +17,7 @@ const CARGO_BIN: &str = "bin";
 const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
 const GITHUB_HOSTS: &str = "github.com: {}\n";
 const BACKEND_METADATA: &str = ".mise.backend.toml";
+pub const HOST_CACHE: &str = ".cache/dotfiles/hosts";
 #[cfg(unix)]
 const BOOTSTRAP_COPY: &str = "/bin/cp";
 #[cfg(windows)]
@@ -31,6 +32,7 @@ pub struct Installations {
     pub data: PathBuf,
     pub cargo: PathBuf,
     pub rustup: PathBuf,
+    pub cache: PathBuf,
 }
 
 impl Installations {
@@ -63,6 +65,8 @@ impl Installations {
                 .map_or_else(|| home.join(".cargo"), PathBuf::from),
             rustup: std::env::var_os("RUSTUP_HOME")
                 .map_or_else(|| home.join(".rustup"), PathBuf::from),
+            cache: std::env::var_os("DOTFILES_HOST_CACHE")
+                .map_or_else(|| home.join(HOST_CACHE), PathBuf::from),
         })
     }
 }
@@ -218,7 +222,7 @@ impl CodeEnvironment {
         for (name, value) in [
             ("HOME", home.to_path_buf()),
             ("USERPROFILE", home.to_path_buf()),
-            ("CARGO_HOME", home.join(".cargo")),
+            ("CARGO_HOME", installed.cache.join("cargo")),
             ("DOTFILES_HOST_CARGO_HOME", installed.cargo.clone()),
             ("RUSTUP_HOME", installed.rustup.clone()),
             ("MISE_RUSTUP_HOME", installed.rustup.clone()),
@@ -249,7 +253,8 @@ impl CodeEnvironment {
             ("SKILL_OPS_STATE", home.join(".local/state/skill-ops")),
             ("GH_CONFIG_DIR", home.join(".config/gh")),
             ("DOTFILES_ONEPASSWORD_APP", home.join("absent-app")),
-            ("CARGO_TARGET_DIR", self.root.join("target/hosts")),
+            ("CARGO_TARGET_DIR", installed.cache.join("code")),
+            ("DOTFILES_HOST_CACHE", installed.cache.clone()),
         ] {
             self.set(name, value.as_os_str());
         }

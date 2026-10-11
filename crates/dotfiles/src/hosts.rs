@@ -780,6 +780,15 @@ fn remote_gate_stages(family: Family, gate: &str, skipped: [bool; 2]) -> String 
             worker.push_str(flag);
         }
     }
+    let cache = platform::code_environment::HOST_CACHE;
+    let worker = match family {
+        Family::Windows => format!(
+            "$env:DOTFILES_HOST_CACHE = Join-Path $nativeHome '{cache}'; $env:CARGO_TARGET_DIR = Join-Path $env:DOTFILES_HOST_CACHE worker; $env:CARGO_HOME = Join-Path $env:DOTFILES_HOST_CACHE cargo; $env:MISE_CARGO_HOME = $env:CARGO_HOME; New-Item -ItemType Directory -Force $env:CARGO_HOME | Out-Null; {worker}"
+        ),
+        Family::Linux | Family::Mac => format!(
+            "export DOTFILES_HOST_CACHE=\"$nativeHome/{cache}\" CARGO_TARGET_DIR=\"$nativeHome/{cache}/worker\" CARGO_HOME=\"$nativeHome/{cache}/cargo\" MISE_CARGO_HOME=\"$nativeHome/{cache}/cargo\"; mkdir -p \"$CARGO_HOME\" && {worker}"
+        ),
+    };
     let bootstrap = match family {
         Family::Windows => format!(
             "$nativeHome = $env:USERPROFILE; $env:DOTFILES_HOST_PATH = $env:PATH; $env:DOTFILES_HOST_CARGO_HOME = if ($env:CARGO_HOME) {{ $env:CARGO_HOME }} else {{ Join-Path $nativeHome .cargo }}; $jobRoot = $PWD.Path; $env:MISE_DATA_DIR = Join-Path $env:LOCALAPPDATA mise; $env:RUSTUP_HOME = Join-Path $nativeHome .rustup; $env:HOME = Join-Path $jobRoot bootstrap; $env:USERPROFILE = $env:HOME; New-Item -ItemType Directory -Force $env:HOME | Out-Null; $env:APPDATA = Join-Path $env:HOME AppData/Roaming; $env:LOCALAPPDATA = Join-Path $env:HOME AppData/Local; $env:CARGO_HOME = Join-Path $env:HOME .cargo; $env:MISE_CARGO_HOME = $env:CARGO_HOME; New-Item -ItemType Directory -Force $env:CARGO_HOME | Out-Null; New-Item -ItemType Junction -Path (Join-Path $env:CARGO_HOME bin) -Target (Join-Path $env:DOTFILES_HOST_CARGO_HOME bin) -ErrorAction Stop | Out-Null; $env:CARGO_TARGET_DIR = Join-Path $jobRoot build; $env:MISE_CONFIG_DIR = Join-Path $env:HOME .config/mise; $env:MISE_CACHE_DIR = Join-Path $env:HOME .cache/mise; $env:MISE_STATE_DIR = Join-Path $env:HOME .local/state/mise; $env:MISE_TRUSTED_CONFIG_PATHS = Join-Path $jobRoot checkout; $env:MISE_AUTO_INSTALL = 'false'; $env:GIT_CONFIG_GLOBAL = Join-Path $env:HOME empty.toml; Set-Content -LiteralPath $env:GIT_CONFIG_GLOBAL -Value '' -NoNewline; $env:MISE_GLOBAL_CONFIG_FILE = $env:GIT_CONFIG_GLOBAL; $env:MISE_SYSTEM_CONFIG_FILE = $env:GIT_CONFIG_GLOBAL; $env:GIT_CONFIG_NOSYSTEM = '1'; & '{WINDOWS_GIT}' -c advice.detachedHead=false clone --quiet head.bundle checkout; if (-not $?) {{ exit 1 }}; Set-Location checkout; {worker} --home $nativeHome; exit $LASTEXITCODE"

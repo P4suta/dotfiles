@@ -223,6 +223,7 @@ fn concurrent_code_gates_reuse_installed_tools_with_independent_writable_state()
         data: fixture.host.join("data"),
         cargo: fixture.host.join(".cargo"),
         rustup: fixture.host.join(".rustup"),
+        cache: fixture.host.join(".cache/dotfiles/hosts"),
     };
     let barrier = std::sync::Barrier::new(CONCURRENT_BUILDS);
     std::thread::scope(|scope| -> Result<()> {
@@ -269,6 +270,49 @@ fn concurrent_code_gates_reuse_installed_tools_with_independent_writable_state()
 }
 
 #[test]
+fn code_builds_survive_scratch_cleanup_and_stay_host_local() -> Result<()> {
+    let fixture = code_fixture()?;
+    let mut installed = platform::code_environment::Installations {
+        mise: fixture
+            .host
+            .join(format!("mise{}", std::env::consts::EXE_SUFFIX)),
+        data: fixture.host.join("data"),
+        cargo: fixture.host.join(".cargo"),
+        rustup: fixture.host.join(".rustup"),
+        cache: fixture.host.join(".cache/dotfiles/hosts"),
+    };
+    let target = |environment: &platform::code_environment::CodeEnvironment| -> Result<PathBuf> {
+        Ok(environment
+            .command("cargo")
+            .get_envs()
+            .find_map(|(name, value)| (name == "CARGO_TARGET_DIR").then_some(value).flatten())
+            .context("code target")?
+            .into())
+    };
+    let first = platform::code_environment::CodeEnvironment::build(&fixture.root, &installed)?;
+    let build = target(&first)?;
+    assert!(
+        build.starts_with(fixture.host.join(".cache")),
+        "{}",
+        build.display()
+    );
+    fs::create_dir_all(&build)?;
+    fs::write(build.join("cached-output"), "built")?;
+    drop(first);
+    let second = platform::code_environment::CodeEnvironment::build(&fixture.root, &installed)?;
+    assert_eq!(build, target(&second)?);
+    assert_eq!(fs::read(build.join("cached-output"))?, b"built");
+    installed.cargo = fixture.scope.path().join("other-host/.cargo");
+    installed.cache = fixture
+        .scope
+        .path()
+        .join("other-host/.cache/dotfiles/hosts");
+    let other = platform::code_environment::CodeEnvironment::build(&fixture.root, &installed)?;
+    assert_ne!(build, target(&other)?);
+    Ok(())
+}
+
+#[test]
 fn the_code_environment_owns_mise_after_its_installation_is_removed() -> Result<()> {
     const LOCATIONS: [&str; 5] = [
         ".local/bin",
@@ -290,6 +334,7 @@ fn the_code_environment_owns_mise_after_its_installation_is_removed() -> Result<
             data: fixture.host.join("data"),
             cargo: fixture.host.join(".cargo"),
             rustup: fixture.host.join(".rustup"),
+            cache: fixture.host.join(".cache/dotfiles/hosts"),
         };
         let environment =
             platform::code_environment::CodeEnvironment::build(&fixture.root, &installed)?;
@@ -319,6 +364,7 @@ fn a_code_gate_can_construct_another_isolated_code_gate() -> Result<()> {
         data: fixture.host.join("data"),
         cargo: fixture.host.join(".cargo"),
         rustup: fixture.host.join(".rustup"),
+        cache: fixture.host.join(".cache/dotfiles/hosts"),
     };
     let environment =
         platform::code_environment::CodeEnvironment::build(&fixture.root, &installed)?;
@@ -458,6 +504,7 @@ fn a_missing_pinned_renderer_installs_only_in_the_candidate_home() -> Result<()>
         data: fixture.host.join("data"),
         cargo: fixture.host.join(".cargo"),
         rustup: fixture.host.join(".rustup"),
+        cache: fixture.host.join(".cache/dotfiles/hosts"),
     };
     let renderer = scratch.renderer(&fixture.root, &storage)?;
     assert_eq!(fs::read(&renderer)?, fs::read(stored)?);
@@ -506,6 +553,7 @@ fn the_code_environment_runs_batch_commands_from_powershell() -> Result<()> {
         data: fixture.host.join("data"),
         cargo: fixture.host.join(".cargo"),
         rustup: fixture.host.join(".rustup"),
+        cache: fixture.host.join(".cache/dotfiles/hosts"),
     };
     let environment =
         platform::code_environment::CodeEnvironment::build(&fixture.root, &installed)?;
@@ -538,6 +586,7 @@ fn the_code_environment_links_with_the_registered_windows_toolchain() -> Result<
         data: fixture.host.join("data"),
         cargo: fixture.host.join(".cargo"),
         rustup: fixture.host.join(".rustup"),
+        cache: fixture.host.join(".cache/dotfiles/hosts"),
     };
     let environment =
         platform::code_environment::CodeEnvironment::build(&fixture.root, &installed)?;
@@ -880,8 +929,8 @@ fn the_remote_bootstrap_uses_native_rust_tools_with_owned_writable_state() -> Re
         .collect();
     for (name, expected) in [
         ("HOME", job.join("bootstrap")),
-        ("CARGO_HOME", job.join("bootstrap/.cargo")),
-        ("MISE_CARGO_HOME", job.join("bootstrap/.cargo")),
+        ("CARGO_HOME", host.join(".cache/dotfiles/hosts/cargo")),
+        ("MISE_CARGO_HOME", host.join(".cache/dotfiles/hosts/cargo")),
         ("MISE_GLOBAL_CONFIG_FILE", job.join("bootstrap/empty.toml")),
         ("MISE_SYSTEM_CONFIG_FILE", job.join("bootstrap/empty.toml")),
     ] {

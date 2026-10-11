@@ -20,7 +20,7 @@ const CHEZMOI_INSTALLS: &str = "installs/chezmoi";
 const PROJECT_CONFIG: &str = "mise.toml";
 const EMPTY_CONFIG: &str = "empty-config.toml";
 const RUNTIME_BIN: &str = ".local/bin";
-const RUNTIME_BUILD: &str = "target/hosts/runtime";
+const RUNTIME_BUILD: &str = "runtime";
 const DEBUG_OUTPUT: &str = "debug";
 const MAC_SHELL: &str = "/bin/zsh";
 const UNIX_SHELL: &str = "/bin/bash";
@@ -77,6 +77,7 @@ pub struct Scratch {
     scope: tempfile::TempDir,
     home: PathBuf,
     config: PathBuf,
+    download_cache: Option<PathBuf>,
 }
 
 impl Scratch {
@@ -108,7 +109,19 @@ impl Scratch {
             scope,
             home,
             config,
+            download_cache: None,
         })
+    }
+
+    /// Keep downloads on this host while configurations and installations stay in scratch storage.
+    #[must_use]
+    pub fn cache_downloads(mut self, native_home: &Path) -> Self {
+        self.download_cache = Some(
+            native_home
+                .join(platform::code_environment::HOST_CACHE)
+                .join("real-mise"),
+        );
+        self
     }
 
     fn github(&self, source: &Path) -> Result<()> {
@@ -185,6 +198,12 @@ impl Scratch {
             ("TEMP", self.scope.path().to_path_buf()),
         ] {
             command.env(name, value);
+        }
+        if let Some(cache) = &self.download_cache {
+            command
+                .env("MISE_CACHE_DIR", cache)
+                .env("MISE_DOWNLOADS_DIR", cache.join("downloads"))
+                .env("MISE_ALWAYS_KEEP_DOWNLOAD", "true");
         }
         command.current_dir(&self.home);
         command
@@ -281,7 +300,9 @@ impl Scratch {
         )?;
         let guard = platform::tool::Tool::Dotguard.program();
         let environment = crate::hosts::code_environment(root, native_home)?;
-        let build = root.join(RUNTIME_BUILD);
+        let build = native_home
+            .join(platform::code_environment::HOST_CACHE)
+            .join(RUNTIME_BUILD);
         let status = environment
             .command(platform::tool::Tool::Cargo.program())
             .args([
@@ -511,7 +532,7 @@ pub fn check(root: &Path, home: &Path) -> Report {
     let config = home.join(CONFIG);
     let mut applied = None;
     let candidate = (|| {
-        let scratch = Scratch::new(&config)?;
+        let scratch = Scratch::new(&config)?.cache_downloads(home);
         scratch.github(&github_config(home))?;
         let mut candidate = Checks::default();
         let mut renderer = None;
@@ -589,6 +610,42 @@ pub fn shell(command: &str) -> Result<Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn real_downloads_survive_scratch_and_installations_remain_owned() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let host = scope.path().join("host");
+        let config = scope.path().join("chezmoi.toml");
+        fs::write(
+            &config,
+            format!(
+                "[data]\nprofile = {:?}\n",
+                crate::profiles::native_profile()?.name()
+            ),
+        )?;
+        let scratch = Scratch::new(&config)?.cache_downloads(&host);
+        let command = scratch.command("mise");
+        let value = |name: &str| -> Result<PathBuf> {
+            Ok(command
+                .get_envs()
+                .find_map(|(key, value)| (key == name).then_some(value).flatten())
+                .context("mise directory")?
+                .into())
+        };
+        let cache = value("MISE_CACHE_DIR")?;
+        let downloads = value("MISE_DOWNLOADS_DIR")?;
+        assert!(cache.starts_with(host.join(".cache")));
+        assert!(downloads.starts_with(host.join(".cache")));
+        assert!(value("MISE_DATA_DIR")?.starts_with(&scratch.home));
+        assert!(value("MISE_CONFIG_DIR")?.starts_with(&scratch.home));
+        fs::create_dir_all(&downloads)?;
+        fs::write(downloads.join("archive"), "downloaded")?;
+        drop(scratch);
+        let next = Scratch::new(&config)?.cache_downloads(&host);
+        assert_eq!(fs::read(downloads.join("archive"))?, b"downloaded");
+        assert_eq!(next.download_cache.as_ref(), Some(&cache));
+        Ok(())
+    }
 
     #[test]
     fn candidate_cli_configuration_is_explicitly_confined_to_scratch() -> Result<()> {
