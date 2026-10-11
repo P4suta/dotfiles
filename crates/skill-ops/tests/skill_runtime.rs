@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result, ensure};
 use model::Profile;
 use serde_json::{Value, json};
 use skill_ops::skill_install::{deploy, install};
@@ -10,6 +10,12 @@ use std::process::{Output, Stdio};
 
 #[path = "../../platform/tests/support/fixture_process.rs"]
 mod fixture_process;
+
+#[path = "../../../xtask/tests/support/incident_fixture.rs"]
+mod incident_fixture;
+
+#[path = "fixtures/chezmoi_state_holder.rs"]
+mod chezmoi_state_holder;
 
 fn fixture() -> Result<tempfile::TempDir> {
     let directory = match std::env::var_os(ops::INCIDENT_EVIDENCE_ROOT) {
@@ -732,6 +738,97 @@ fn native(
     }
     drop(stdin);
     Ok(child.wait_with_output()?)
+}
+
+#[test]
+fn native_installation_retries_after_the_persistent_state_lock_releases() -> Result<()> {
+    if chezmoi_state_holder::block_if_requested()?
+        || incident_fixture::run(chezmoi_state_holder::TEST)?
+    {
+        return Ok(());
+    }
+    let fixture = fixture()?;
+    let (source, user, _) = native_source(fixture.path())?;
+    let policy = user.join(".config/skill-ops/policy.json");
+    let bytes = fs::read_to_string(&policy)?;
+    fs::write(&policy, format!("{bytes}\n\n"))?;
+    fs::write(source.join(".chezmoiroot"), "home\n")?;
+    let adapter_path = source.join("home/dot_config/opencode/plugins/skill-ops.ts");
+    fs::create_dir_all(adapter_path.parent().context("the adapter has a parent")?)?;
+    fs::write(&adapter_path, "owned fixture adapter")?;
+    chezmoi_state_holder::write_script(&source.join("home"))?;
+    fs::write(
+        fixture.path().join("chezmoi.toml"),
+        "[data]\nprofile = 'windows'\n",
+    )?;
+    let chezmoi = || chezmoi_state_holder::command(fixture.path(), &source, &user);
+    success(
+        chezmoi()
+            .args([
+                "state", "set", "--bucket", "fixture", "--key", "ready", "--value", "ready",
+            ])
+            .output()?,
+    )?;
+    assert!(fixture.path().join("state.boltdb").is_file());
+    let mut holder = chezmoi_state_holder::Holder::start(
+        {
+            let mut command = chezmoi();
+            command.args(["apply", "--include", "scripts"]);
+            command
+        },
+        fixture.path(),
+    )?;
+    let binary = Path::new(env!("CARGO_BIN_EXE_skill-ops"));
+    let installed = user
+        .join(".local/bin")
+        .join(format!("skill-ops{}", std::env::consts::EXE_SUFFIX));
+    let adapter = user.join(".config/opencode/plugins/skill-ops.ts");
+    let policy_path = source.join("home/dot_config/skill-ops/policy.json");
+    let mut applied = Vec::new();
+    let mut apply = |path: &Path| -> Result<()> {
+        applied.push(path.to_path_buf());
+        let output = chezmoi()
+            .args([
+                "apply",
+                "--include",
+                "dirs,files",
+                "--source-path",
+                "--parent-dirs",
+            ])
+            .arg(path)
+            .output()?;
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        ensure!(
+            output.status.success(),
+            "chezmoi apply failed with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
+    };
+    let failure = deploy(&source, binary, &user, Profile::Windows, &mut apply)
+        .with_context(|| format!("installation failed for {}", policy_path.display()))
+        .expect_err("another native apply owns the persistent state");
+    let detail = format!("{failure:#}");
+    assert!(
+        detail.contains("timeout obtaining persistent state lock"),
+        "{detail}"
+    );
+    assert!(!installed.exists() && !adapter.exists());
+    assert_eq!(fs::read_to_string(&policy)?, format!("{bytes}\n\n"));
+    platform::report(&failure);
+    let state = std::env::var_os("SKILL_OPS_STATE").context("the child owns its incident state")?;
+    let incidents = ops::incidents(Path::new(&state))?;
+    assert_eq!(incidents.len(), 1);
+    assert_eq!(incidents[0].rule, "tool.failure");
+    success(holder.release()?)?;
+    deploy(&source, binary, &user, Profile::Windows, &mut apply)?;
+    assert_eq!(fs::read(&policy)?, fs::read(&policy_path)?);
+    assert_eq!(applied, [policy_path.clone(), policy_path, adapter_path]);
+    assert!(installed.is_file());
+    assert_eq!(fs::read_to_string(adapter)?, "owned fixture adapter");
+    assert_eq!(ops::incidents(Path::new(&state))?, incidents);
+    Ok(())
 }
 
 #[test]

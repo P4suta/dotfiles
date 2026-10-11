@@ -17,6 +17,8 @@
       "*": "allow",
       "*memory.instruction.md*": "deny"
     }
-  },
-  "plugin": ["@upstash/context7-opencode"]
+  }{{ if .domyjobMcp }},
+  "mcp": {
+    "domyjob": {{ .domyjobMcp }}
+  }{{ end }}
 }

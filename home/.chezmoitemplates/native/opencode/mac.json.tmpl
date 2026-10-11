@@ -69,7 +69,8 @@
       },
       "enabled": true,
       "timeout": 30000
-    }{{ end }}
+    }{{ end }}{{ if .domyjobMcp }},
+    "domyjob": {{ .domyjobMcp }}{{ end }}
   }{{ if $hasOnePassword }},
   "plugin": ["@upstash/context7-opencode"]{{ end }}
 }

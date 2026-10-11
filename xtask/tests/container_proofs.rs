@@ -1,6 +1,7 @@
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use xtask::skill_proofs::{
     FUZZ_VERSION, KANI_VERSION, MUTANTS_VERSION, container_image, container_run_arguments,
@@ -220,7 +221,6 @@ fn proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results() -> anyhow:
     Ok(())
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 #[ignore = "the proofs gate runs this test with its pinned Kani installation"]
 fn a_kani_batch_verifies_every_harness_and_rejects_every_counterexample() -> anyhow::Result<()> {
@@ -239,7 +239,13 @@ fn a_kani_batch_verifies_every_harness_and_rejects_every_counterexample() -> any
             .to_string()
             .contains("duplicate proof harness")
     );
-    let valid: String = names.iter().map(|name| format!("#[kani::proof] fn {name}() {{ let value: bool = kani::any(); assert_eq!(value, !(!value)); kani::cover!(value); kani::cover!(!value); }}\n")).collect();
+    let mut valid = String::new();
+    for name in &names {
+        writeln!(
+            valid,
+            "#[kani::proof] fn {name}() {{ let value: bool = kani::any(); assert_eq!(value, !(!value)); kani::cover!(value); kani::cover!(!value); }}"
+        )?;
+    }
     std::fs::write(&source, &valid)?;
     xtask::skill_proofs::verify_file(&source, scope.path(), &expected, false, &flags)?;
     let mut missing = expected.clone();

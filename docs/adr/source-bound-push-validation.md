@@ -48,11 +48,17 @@ The proof gate runs the real Kani driver regression explicitly and refuses a mis
 Bounded classifier inputs select any member of the same word set directly, and each prefix materializes the selected case before checking the production classifier against its specification.
 This preserves every three-word case while removing symbolic string-table aliasing and remainder arithmetic.
 The result validator still checks every harness, property, cover witness, counterexample, and individual time budget.
+Linux's timed code stage finishes before real provisioning begins, so setup compilation cannot consume its proof budget.
+Other families retain concurrent stages only with the existing core and storage capacity.
 Credential fixtures construct their tool lookup path instead of copying the caller's unrelated tools.
 A regression verifies the fixture under a parent PATH beyond the [Windows command interpreter's limit](https://learn.microsoft.com/en-us/troubleshoot/windows-client/shell-experience/command-line-string-limitation).
 The shared mise installation constructor removes duplicate PATH entries while preserving their first occurrence and lookup order.
 On Windows it counts the resulting UTF-16 code units and refuses a PATH that cmd would silently discard, before starting the installer or taking its lock.
 The pure length decision has an exhaustive Kani harness and rejecting boundary probes, and native tests check supplementary characters and duplicate reduction.
+OpenCode's desired configuration declares domyjob's MCP server from the installed build pin and its regular executable.
+The renderer rejects malformed or incomplete installations and writes the same compact server value as domyjob's normal setup, so both converge on the declared configuration.
+Without an installed pin, every profile retains its previous rendering.
+Configuration regeneration records the actual working tree as `sourceDir`, preserving the rooted source for subsequent commands.
 
 ## Alternatives
 

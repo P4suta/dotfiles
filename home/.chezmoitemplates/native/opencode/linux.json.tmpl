@@ -19,6 +19,9 @@
       "*": "allow",
       "*memory.instruction.md*": "deny"
     }
-  }{{ if $hasNativeOnePassword }},
+  }{{ if .domyjobMcp }},
+  "mcp": {
+    "domyjob": {{ .domyjobMcp }}
+  }{{ end }}{{ if $hasNativeOnePassword }},
   "plugin": ["@upstash/context7-opencode"]{{ end }}
 }

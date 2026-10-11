@@ -284,8 +284,7 @@ fn same(left: &[u8], right: &[u8]) -> bool {
 #[kani::proof]
 #[kani::unwind(7)]
 fn a_literal_pattern_matches_only_itself() {
-    let (pattern, pattern_length) = any_text::<3>(true);
-    kani::assume(pattern_length <= 1);
+    let (pattern, pattern_length) = any_text::<1>(true);
     let (path, path_length) = any_text::<2>(false);
     let pattern = &pattern[..pattern_length];
     let path = &path[..path_length];

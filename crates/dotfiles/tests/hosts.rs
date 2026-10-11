@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
+#[path = "../../../xtask/tests/support/incident_fixture.rs"]
+mod incident_fixture;
+
 use fixture_git::fixture_process;
 
 struct CodeFixture {
@@ -1534,8 +1537,11 @@ fn assert_applied_evidence(root: &Path, stdout: &[u8]) -> Result<()> {
 
 #[test]
 fn one_head_reports_every_failing_host_and_stage() -> Result<()> {
+    if incident_fixture::run("one_head_reports_every_failing_host_and_stage")? {
+        return Ok(());
+    }
     let tools = tools()?;
-    let scope = tempfile::tempdir()?;
+    let scope = incident_fixture::scope()?;
     let root = scope.path().join("project");
     let home = scope.path().join("home");
     fs::create_dir_all(root.join(".github/workflows"))?;
@@ -1580,9 +1586,12 @@ fn one_head_reports_every_failing_host_and_stage() -> Result<()> {
         .env("HOSTS_FIXTURE_STATUS", status)
         .env("HOSTS_FIXTURE_DOCTOR", "ok")
         .env("HOSTS_FIXTURE_STAGES", r#"{"code":7,"real":9,"applied":{"drifted_targets":[".drift"],"verification_error":null}}"#)
+        .env("DOTFILES_EXPECTED_FAILURE", "")
         .output()?;
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr)?;
+    print!("{}", String::from_utf8(output.stdout)?);
+    eprint!("{stderr}");
     for (os, host) in [("linux", "box"), ("macos", "mac"), ("windows", "pc")] {
         for (stage, status) in [("code", 7), ("real", 9)] {
             assert!(
@@ -1599,5 +1608,9 @@ fn one_head_reports_every_failing_host_and_stage() -> Result<()> {
         evidence(&notes, &git(&root, &["rev-parse", "HEAD^{tree}"])?)?,
         [Evidence::Failed; 3]
     );
+    let recorded = skill_ops::incidents(&scope.path().join("state"))?;
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].rule, "tool.failure");
+    incident_fixture::preserve(scope);
     Ok(())
 }

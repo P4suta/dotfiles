@@ -74,10 +74,10 @@ pub const fn workspace_fits(available: u64) -> bool {
 pub const CONCURRENT_CORES: usize = 4;
 pub const CONCURRENT_BYTES: u64 = 2 * WORKSPACE_BYTES;
 
-/// Run both stages together only with capacity for both workloads.
+/// Run both stages together with capacity, while keeping Linux's timed proofs apart from setup.
 #[must_use]
-pub const fn concurrent_stages(cores: usize, available: u64) -> bool {
-    cores >= CONCURRENT_CORES && available >= CONCURRENT_BYTES
+pub const fn concurrent_stages(family: Family, cores: usize, available: u64) -> bool {
+    !matches!(family, Family::Linux) && cores >= CONCURRENT_CORES && available >= CONCURRENT_BYTES
 }
 
 /// Admit only an installed active version matching the checkout's exact pin.
@@ -196,14 +196,20 @@ mod proofs {
     #[cfg(kani)]
     #[kani::proof]
     fn concurrent_stages_require_cores_and_space() {
+        let family = match kani::any::<u8>() {
+            0 => Family::Linux,
+            1 => Family::Mac,
+            _ => Family::Windows,
+        };
         let cores: usize = kani::any();
         let available: u64 = kani::any();
-        let concurrent = concurrent_stages(cores, available);
+        let concurrent = concurrent_stages(family, cores, available);
         assert_eq!(
             concurrent,
-            cores >= CONCURRENT_CORES && available >= CONCURRENT_BYTES
+            family != Family::Linux && cores >= CONCURRENT_CORES && available >= CONCURRENT_BYTES
         );
         kani::cover!(concurrent);
+        kani::cover!(!concurrent && family == Family::Linux);
         kani::cover!(!concurrent && cores < CONCURRENT_CORES);
         kani::cover!(!concurrent && available < CONCURRENT_BYTES);
     }
@@ -439,11 +445,22 @@ mod tests {
     use crate::domain::flags;
 
     #[test]
+    fn timed_proofs_do_not_overlap_native_setup() {
+        assert!(!concurrent_stages(Family::Linux, usize::MAX, u64::MAX));
+    }
+
+    #[test]
     fn concurrent_stages_require_both_resource_boundaries() {
-        assert!(!concurrent_stages(CONCURRENT_CORES - 1, u64::MAX));
-        assert!(!concurrent_stages(usize::MAX, CONCURRENT_BYTES - 1));
-        assert!(concurrent_stages(CONCURRENT_CORES, CONCURRENT_BYTES));
-        assert!(concurrent_stages(usize::MAX, u64::MAX));
+        for family in [Family::Mac, Family::Windows] {
+            assert!(!concurrent_stages(family, CONCURRENT_CORES - 1, u64::MAX));
+            assert!(!concurrent_stages(family, usize::MAX, CONCURRENT_BYTES - 1));
+            assert!(concurrent_stages(
+                family,
+                CONCURRENT_CORES,
+                CONCURRENT_BYTES
+            ));
+            assert!(concurrent_stages(family, usize::MAX, u64::MAX));
+        }
     }
 
     #[test]

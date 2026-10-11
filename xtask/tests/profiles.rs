@@ -974,6 +974,104 @@ fn the_working_tree_is_the_checkout_root_under_a_chezmoiroot() {
 }
 
 #[test]
+fn initialization_keeps_the_selected_checkout_and_existing_prompt_answers() {
+    use std::process::Stdio;
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let template = fs::read(root.join("home/.chezmoi.toml.tmpl")).unwrap();
+    for rooted in [false, true] {
+        let scope = tempfile::tempdir().unwrap();
+        let checkout = scope.path().join(if cfg!(windows) {
+            "checkout with spaces and 'quotes'"
+        } else {
+            "checkout with spaces and \"quotes\""
+        });
+        let source = if rooted {
+            checkout.join("home")
+        } else {
+            checkout.clone()
+        };
+        fs::create_dir_all(&source).unwrap();
+        let global = scope.path().join("gitconfig");
+        fs::write(&global, "").unwrap();
+        if rooted {
+            fs::write(checkout.join(".chezmoiroot"), "home\n").unwrap();
+        }
+        fs::write(source.join(".chezmoi.toml.tmpl"), &template).unwrap();
+        let destination = scope.path().join("destination");
+        let config_home = destination.join(".config");
+        let config = config_home.join("chezmoi/chezmoi.toml");
+        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        let mut answers = profiles::Answers::fixture(Profile::Linux, "owned projects".into());
+        answers.role = "work";
+        answers.name = "Kept \"Author\"";
+        answers.public_key = "ssh-ed25519 AAAA owned-fixture".into();
+        let mut previous: toml::Table =
+            toml::from_str(&profiles::configuration(&root, &answers).unwrap()).unwrap();
+        let expected = previous["data"].clone();
+        previous.insert(
+            "sourceDir".into(),
+            toml::Value::String(profiles::chezmoi_path(&scope.path().join("old source"))),
+        );
+        fs::write(&config, toml::to_string(&previous).unwrap()).unwrap();
+        let chezmoi = || {
+            let mut command = fixture_git::inheriting(
+                "chezmoi",
+                &global,
+                std::env::vars_os()
+                    .filter(|(name, _)| !name.to_string_lossy().starts_with("CHEZMOI_")),
+            );
+            command
+                .current_dir(scope.path())
+                .env("HOME", &destination)
+                .env("USERPROFILE", &destination)
+                .env("XDG_CONFIG_HOME", &config_home)
+                .env("XDG_CACHE_HOME", destination.join(".cache"))
+                .env("XDG_DATA_HOME", destination.join(".local/share"))
+                .env("XDG_STATE_HOME", destination.join(".local/state"))
+                .env("APPDATA", destination.join("AppData/Roaming"))
+                .env("LOCALAPPDATA", destination.join("AppData/Local"))
+                .stdin(Stdio::null());
+            command
+        };
+        let initialized = chezmoi()
+            .arg("--source")
+            .arg(&checkout)
+            .args(["init", "--no-tty"])
+            .output()
+            .unwrap();
+        assert!(
+            initialized.status.success(),
+            "{}",
+            String::from_utf8_lossy(&initialized.stderr)
+        );
+        let written: toml::Table = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(written["data"], expected);
+        let canonical = |path: &Path| profiles::chezmoi_path(&xtask::canonical(path).unwrap());
+        assert_eq!(
+            written.get("sourceDir").and_then(toml::Value::as_str),
+            Some(canonical(&checkout).as_str())
+        );
+        let resumed = chezmoi()
+            .args([
+                "execute-template",
+                "{{ .chezmoi.workingTree }}|{{ .chezmoi.sourceDir }}",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            resumed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&resumed.stderr)
+        );
+        let rendered = String::from_utf8(resumed.stdout).unwrap();
+        let (working_tree, source_dir) = rendered.split_once('|').unwrap();
+        assert_eq!(canonical(Path::new(working_tree)), canonical(&checkout));
+        assert_eq!(canonical(Path::new(source_dir)), canonical(&source));
+    }
+}
+
+#[test]
 fn recipe_references_are_commands_rather_than_prose() {
     let found = |text: &str, markdown: bool| -> Vec<String> {
         quality::recipe_references(text, markdown)

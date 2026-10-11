@@ -1,5 +1,2 @@
-{{- if has .profile (list "mac" "linux") -}}
-{{ includeTemplate (printf "native/opencode/%s.json.tmpl" .profile) . }}
-{{- else -}}
-{{ include (printf ".chezmoitemplates/native/opencode/%s.json" .profile) }}
-{{- end -}}
+{{- $context := dict "profile" .profile "chezmoi" .chezmoi "domyjobMcp" (includeTemplate "partials/domyjob_mcp" .) -}}
+{{ includeTemplate (printf "native/opencode/%s.json.tmpl" .profile) $context -}}

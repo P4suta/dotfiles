@@ -1160,7 +1160,9 @@ fn concurrent_capacity(home: &Path) -> Result<bool> {
         .find(|family| family.name() == std::env::consts::OS)
         .context("native host family")?;
     let available = capacity(&native(home)?, family, &Target::Local("worker".into()))?;
-    Ok(crate::hosts_rules::concurrent_stages(cores, available))
+    Ok(crate::hosts_rules::concurrent_stages(
+        family, cores, available,
+    ))
 }
 
 fn worker(home: &Path, gate: &str, skipped: [bool; 2], workspace: Option<&Path>) -> Result<()> {
