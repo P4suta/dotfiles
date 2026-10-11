@@ -709,9 +709,30 @@ mod proofs {
         }
     }
 
+    #[derive(Debug, Eq, PartialEq)]
+    struct ScanConfig {
+        kind: ConfigKind,
+        next: bool,
+        start: u8,
+        end: u8,
+    }
+
+    struct ScanEntry {
+        config: ScanConfig,
+        span: core::ops::Range<u8>,
+    }
+
+    fn scan_offset(value: usize) -> u8 {
+        let compact = u8::try_from(value);
+        assert!(compact.is_ok());
+        let compact = compact.unwrap_or_default();
+        assert_eq!(usize::from(compact), value);
+        compact
+    }
+
     pub struct ScanResult {
         index: usize,
-        settings: [Option<Entry>; 4],
+        settings: [Option<ScanEntry>; 4],
         length: usize,
     }
 
@@ -724,8 +745,17 @@ mod proofs {
             }
         }
 
-        fn push(&mut self, setting: Entry) {
+        fn push(&mut self, setting: &Entry) {
             assert!(self.length < self.settings.len());
+            let setting = ScanEntry {
+                config: ScanConfig {
+                    kind: setting.config.kind,
+                    next: setting.config.next,
+                    start: scan_offset(setting.config.start),
+                    end: scan_offset(setting.config.end),
+                },
+                span: scan_offset(setting.span.start)..scan_offset(setting.span.end),
+            };
             if let Some(slot) = self.settings.get_mut(self.length) {
                 *slot = Some(setting);
             }
@@ -762,7 +792,7 @@ mod proofs {
                     },
                     setting.config,
                 );
-                actual.push(Entry {
+                actual.push(&Entry {
                     config,
                     span: setting.span,
                 });
@@ -845,7 +875,7 @@ mod proofs {
                 break;
             };
             if let Some(setting) = cursor.advance(word) {
-                actual.push(setting);
+                actual.push(&setting);
             }
             if cursor.done {
                 break;
@@ -870,7 +900,7 @@ mod proofs {
                 2 => {
                     index += 1;
                     if let Some(code) = codes.get(index) {
-                        expected.push(Entry {
+                        expected.push(&Entry {
                             config: ConfigValue {
                                 kind: ConfigKind::Inline,
                                 next: true,
@@ -881,18 +911,18 @@ mod proofs {
                         });
                     }
                 }
-                4 => expected.push(Entry {
+                4 => expected.push(&Entry {
                     config: inline_setting(),
                     span: start..index + 1,
                 }),
-                5 => expected.push(Entry {
+                5 => expected.push(&Entry {
                     config: environment_setting(5),
                     span: start..index + 1,
                 }),
                 6 => {
                     index += 1;
                     if matches!(codes.get(index), Some(3 | 7)) {
-                        expected.push(Entry {
+                        expected.push(&Entry {
                             config: environment_setting(
                                 codes.get(index).copied().unwrap_or_default(),
                             ),

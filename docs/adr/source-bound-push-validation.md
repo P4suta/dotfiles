@@ -17,6 +17,9 @@ Reporting pending incident maintenance as a new tool failure also enlarged the w
 The hosts gate runs `just push-check` through its isolated code environment.
 That command runs every existing check on each required native family and collects the complete proof suite on Linux, the target of the CI proof job and the former Windows pre-push proof container.
 Both stages must complete, even when one fails.
+Independent proof batches, modules, and verifier stages collect their failures before refusing the candidate.
+Invalid shared prerequisites refuse their dependent work, while unrelated verifiers still run.
+Only a complete successful inventory contributes verified counts.
 The prose gate checks both document and source comment style, matching the staged check and the standalone prose command.
 Pre-push validates those recorded results instead of rerunning a different check or proof command.
 The global signature, history, health, owner pause, assurance, and PR state gates still inspect the current push.

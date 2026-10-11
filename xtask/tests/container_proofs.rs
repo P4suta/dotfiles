@@ -11,6 +11,26 @@ use xtask::skill_proofs::{
 #[path = "support/incident_fixture.rs"]
 mod incident_fixture;
 
+const KANI_DRIVER_FIXTURE: &str = "DOTFILES_KANI_DRIVER_FIXTURE";
+
+fn run_kani_driver_fixture(test: &str) -> anyhow::Result<bool> {
+    if std::env::var(KANI_DRIVER_FIXTURE).is_ok_and(|value| value == test) {
+        return Ok(false);
+    }
+    let scope = incident_fixture::scope()?;
+    let output = platform::process::command(std::env::current_exe()?)
+        .args(["--ignored", "--exact", test, "--nocapture"])
+        .env(KANI_DRIVER_FIXTURE, test)
+        .env("SKILL_OPS_STATE", scope.path().join("state"))
+        .env("DOTFILES_EXPECTED_FAILURE", "")
+        .output()?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    anyhow::ensure!(output.status.success(), "owned Kani driver fixture failed");
+    incident_fixture::preserve(scope);
+    Ok(true)
+}
+
 /// Every `*_rules.rs` file under `directory`, as a checkout-relative path with forward slashes.
 fn rule_modules(root: &Path, directory: &Path, found: &mut BTreeSet<String>) {
     for entry in std::fs::read_dir(directory).unwrap() {
@@ -222,8 +242,43 @@ fn proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results() -> anyhow:
 }
 
 #[test]
+fn proof_results_collect_budget_and_other_harness_failures() -> anyhow::Result<()> {
+    if incident_fixture::run("proof_results_collect_budget_and_other_harness_failures")? {
+        return Ok(());
+    }
+    let expected = ["slow", "broken"];
+    let mut receipt = json!({"verification_results":{"summary":{"status":"completed","executed":2,"failed":0,"successful":2},"results":[]}});
+    for name in expected {
+        receipt["verification_results"]["results"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"harness_id":name,"status":"Success","duration_ms":1200,"checks":[{"category":"assertion","status":"Success"},{"category":"cover","status":"Satisfied"},{"category":"cover","status":"Satisfied"}]}));
+    }
+    validate_results(&receipt, &expected, false)?;
+    let mut failed = receipt.clone();
+    failed["verification_results"]["results"][0]["duration_ms"] = json!(30_001);
+    failed["verification_results"]["summary"]["failed"] = json!(1);
+    failed["verification_results"]["summary"]["successful"] = json!(1);
+    failed["verification_results"]["results"][1]["status"] = json!("Failure");
+    failed["verification_results"]["results"][1]["checks"][0]["status"] = json!("Failure");
+    let failure = validate_results(&failed, &expected, false).unwrap_err();
+    let diagnostic = format!("{failure:#}");
+    assert!(diagnostic.contains("slow took 30001 ms"), "{diagnostic}");
+    assert!(diagnostic.contains("broken"), "{diagnostic}");
+    assert!(diagnostic.contains("required proof failed"), "{diagnostic}");
+    platform::report(&failure);
+    validate_results(&receipt, &expected, false)?;
+    Ok(())
+}
+
+#[test]
 #[ignore = "the proofs gate runs this test with its pinned Kani installation"]
 fn a_kani_batch_verifies_every_harness_and_rejects_every_counterexample() -> anyhow::Result<()> {
+    if run_kani_driver_fixture(
+        "a_kani_batch_verifies_every_harness_and_rejects_every_counterexample",
+    )? {
+        return Ok(());
+    }
     let scope = tempfile::tempdir()?;
     let source = scope.path().join("proof.rs");
     let flags = BTreeSet::from(["stubbing"]);
@@ -246,8 +301,7 @@ fn a_kani_batch_verifies_every_harness_and_rejects_every_counterexample() -> any
             "#[kani::proof] fn {name}() {{ let value: bool = kani::any(); assert_eq!(value, !(!value)); kani::cover!(value); kani::cover!(!value); }}"
         )?;
     }
-    std::fs::write(&source, &valid)?;
-    xtask::skill_proofs::verify_file(&source, scope.path(), &expected, false, &flags)?;
+    verify_failed_kani_batches(&source, scope.path(), &expected, &flags, &valid)?;
     let mut missing = expected.clone();
     *missing.last_mut().unwrap() = "missing";
     assert!(
@@ -261,6 +315,10 @@ fn a_kani_batch_verifies_every_harness_and_rejects_every_counterexample() -> any
     std::fs::write(&source, "this source cannot compile")?;
     assert!(
         xtask::skill_proofs::verify_file(&source, scope.path(), &expected, true, &flags).is_err()
+    );
+    assert_eq!(
+        std::fs::read_to_string(scope.path().join("results.json"))?,
+        ""
     );
     let last = valid.lines().last().unwrap();
     std::fs::write(
@@ -281,6 +339,61 @@ fn a_kani_batch_verifies_every_harness_and_rejects_every_counterexample() -> any
     assert!(
         xtask::skill_proofs::verify_file(&source, scope.path(), &expected, false, &flags).is_err()
     );
+    Ok(())
+}
+
+fn verify_failed_kani_batches(
+    source: &Path,
+    directory: &Path,
+    expected: &[&str],
+    flags: &BTreeSet<&'static str>,
+    valid: &str,
+) -> anyhow::Result<()> {
+    let last = expected.last().unwrap();
+    let failed = valid
+        .lines()
+        .enumerate()
+        .map(|(index, line)| {
+            if index == 0 || index + 1 == expected.len() {
+                line.replace("assert_eq!(value, !(!value))", "assert!(value)")
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(source, failed)?;
+    let failure =
+        xtask::skill_proofs::verify_file(source, directory, expected, false, flags).unwrap_err();
+    let diagnostic = format!("{failure:#}");
+    for name in [expected[0], last] {
+        assert!(
+            diagnostic.contains(&format!("harness {name}:")),
+            "{diagnostic}"
+        );
+    }
+    let report: serde_json::Value = skill_ops::read_json(&directory.join("results.json"))?;
+    assert_eq!(report["verification_results"]["summary"]["executed"], 1);
+    assert_eq!(
+        report["verification_results"]["results"][0]["harness_id"],
+        *last
+    );
+    assert_eq!(
+        report["verification_results"]["results"][0]["status"],
+        "Failure"
+    );
+    platform::report(&failure);
+    let state = std::env::var_os("SKILL_OPS_STATE").unwrap();
+    let incidents = skill_ops::incidents(Path::new(&state))?;
+    assert_eq!(incidents.len(), 1);
+    assert_eq!(incidents[0].rule, "tool.failure");
+    assert!(incidents[0].evidence.iter().any(|evidence| {
+        evidence.contains(&format!("harness {}:", expected[0]))
+            && evidence.contains(&format!("harness {last}:"))
+    }));
+    std::fs::write(source, valid)?;
+    xtask::skill_proofs::verify_file(source, directory, expected, false, flags)?;
+    assert_eq!(skill_ops::incidents(Path::new(&state))?, incidents);
     Ok(())
 }
 

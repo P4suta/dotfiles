@@ -394,7 +394,9 @@ mod proofs {
         let mut pending = [0u8; CAPACITY];
         for index in 0..graph.count {
             if let Some(slot) = pending.get_mut(index) {
-                *slot = u8::try_from(index).unwrap();
+                let skill = u8::try_from(index).unwrap_or_default();
+                assert_eq!(usize::from(skill), index);
+                *slot = skill;
             }
         }
         let mut remaining = graph.count;

@@ -1,3 +1,4 @@
+use crate::checks::Checks;
 use crate::obligations::{self, KaniFlag, Obligation};
 use crate::proof_budget_rules;
 use crate::tool::Tool;
@@ -66,54 +67,67 @@ pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) 
             )
         })
         .collect();
-    ensure!(
-        slow.is_empty(),
-        "each proof harness must finish within {} ms; shrink its bounds or split it without weakening its assertions:\n{}",
-        proof_budget_rules::BUDGET_MILLIS,
-        slow.join("\n")
-    );
+    let mut checks = Checks::default();
+    checks.run("budget", || {
+        ensure!(
+            slow.is_empty(),
+            "each proof harness must finish within {} ms; shrink its bounds or split it without weakening its assertions:\n{}",
+            proof_budget_rules::BUDGET_MILLIS,
+            slow.join("\n")
+        );
+        Ok(())
+    });
     if counterexample {
-        ensure!(
-            summary["failed"] == expected.len(),
-            "counterexample was not rejected"
-        );
-        ensure!(
-            results.iter().all(
-                |result| result["checks"].as_array().is_some_and(|checks| checks
-                    .iter()
-                    .any(|check| check["category"] == "assertion" && check["status"] == "Failure"))
-            ),
-            "expected assertion counterexample is missing"
-        );
-        for result in results.iter().filter(|result| {
-            result["harness_id"]
-                .as_str()
-                .is_some_and(|name| name.rsplit("::").next() == Some(OVERFLOW_PROBE))
-        }) {
+        checks.run("counterexample summary", || {
             ensure!(
-                result["checks"]
-                    .as_array()
-                    .is_some_and(|checks| checks.iter().any(|check| {
-                        check["category"] == "assertion"
-                            && check["description"] == CHECKED_ADD_OVERFLOW
-                            && check["status"] == "Failure"
-                    })),
-                "checked MIR did not reject arithmetic overflow"
+                summary["failed"] == expected.len(),
+                "counterexample was not rejected"
             );
-        }
+            Ok(())
+        });
     } else {
+        checks.run("production summary", || {
+            ensure!(
+                summary["failed"] == 0 && summary["successful"] == expected.len(),
+                "required proof failed"
+            );
+            Ok(())
+        });
+    }
+    for result in results {
+        let name = result["harness_id"].as_str().unwrap_or_default();
+        checks.run(&format!("harness {name}"), || {
+            if counterexample {
+                validate_counterexample(result)
+            } else {
+                validate_proof(result)
+            }
+        });
+    }
+    checks.finish()
+}
+
+fn validate_counterexample(result: &Value) -> Result<()> {
+    ensure!(
+        result["checks"].as_array().is_some_and(|checks| checks
+            .iter()
+            .any(|check| check["category"] == "assertion" && check["status"] == "Failure")),
+        "expected assertion counterexample is missing"
+    );
+    if result["harness_id"]
+        .as_str()
+        .is_some_and(|name| name.rsplit("::").next() == Some(OVERFLOW_PROBE))
+    {
         ensure!(
-            summary["failed"] == 0 && summary["successful"] == expected.len(),
-            "required proof failed"
+            result["checks"]
+                .as_array()
+                .is_some_and(|checks| checks.iter().any(|check| {
+                    check["category"] == "assertion"
+                        && check["description"] == CHECKED_ADD_OVERFLOW
+                        && check["status"] == "Failure"
+                })),
+            "checked MIR did not reject arithmetic overflow"
         );
-        for result in results {
-            validate_proof(result).with_context(|| {
-                format!(
-                    "unverified harness {}",
-                    result["harness_id"].as_str().unwrap_or_default()
-                )
-            })?;
-        }
     }
     Ok(())
 }
@@ -205,10 +219,14 @@ pub fn verify_file(
         expected.iter().copied().collect::<BTreeSet<_>>().len() == expected.len(),
         "duplicate proof harness"
     );
+    let mut checks = Checks::default();
     for batch in expected.chunks(KANI_BATCH_SIZE) {
-        verify_batch(source, directory, batch, counterexample, flags)?;
+        checks.run(
+            &format!("{} [{}]", source.display(), batch.join(", ")),
+            || verify_batch(source, directory, batch, counterexample, flags),
+        );
     }
-    Ok(())
+    checks.finish()
 }
 
 fn verify_batch(
@@ -235,12 +253,19 @@ fn verify_batch(
         command.args(["--harness", name]);
     }
     let status = command.status().context("start pinned Kani verifier")?;
-    ensure!(
-        status.success() != counterexample,
-        "Kani returned an unexpected outcome: {status}"
-    );
-    let result: Value = skill_ops::read_json(&output)?;
-    validate_results(&result, expected, counterexample)
+    let mut checks = Checks::default();
+    checks.run("Kani exit", || {
+        ensure!(
+            status.success() != counterexample,
+            "Kani returned an unexpected outcome: {status}"
+        );
+        Ok(())
+    });
+    checks.run("Kani report", || {
+        let result: Value = skill_ops::read_json(&output)?;
+        validate_results(&result, expected, counterexample)
+    });
+    checks.finish()
 }
 
 /// The harnesses that `kani list` finds in `source`, which every run must then pass.
@@ -502,25 +527,32 @@ fn verify_in_container(root: &Path) -> Result<()> {
 ///
 /// Returns an error when the pinned Kani version or Docker engine can't run, Docker can't build the verification image, or any proof or counterexample check fails.
 pub fn verify(root: &Path) -> Result<()> {
+    let mut checks = Checks::default();
     if cfg!(any(target_os = "macos", target_os = "linux")) {
-        verify_native(root)?;
+        checks.run("native proofs", || verify_native(root));
     } else {
-        verify_in_container(root)?;
+        checks.run("container proofs", || verify_in_container(root));
     }
     if std::env::var_os(INSIDE_CONTAINER).is_some() {
         // The image pins Valgrind and the gungraun runner, so the budgets run here with them natively.
-        crate::benchmarks::verify(root)?;
-        return Ok(());
+        checks.run("benchmarks", || crate::benchmarks::verify(root));
+        return checks.finish();
     }
     // The models and native-host benchmarks run in their pinned images.
     if cfg!(any(target_os = "macos", target_os = "linux")) {
-        crate::benchmarks::verify_in_container(root)?;
+        checks.run("benchmarks", || {
+            crate::benchmarks::verify_in_container(root)
+        });
     }
-    let manifest = obligations::manifest(root)?;
-    crate::quint::verify(root, &manifest)?;
-    crate::alloy::verify(root, &manifest)?;
-    crate::lean::verify(root, &manifest)?;
-    Ok(())
+    checks.run("models", || {
+        let manifest = obligations::manifest(root)?;
+        let mut models = Checks::default();
+        models.run("Quint", || crate::quint::verify(root, &manifest));
+        models.run("Alloy", || crate::alloy::verify(root, &manifest));
+        models.run("Lean", || crate::lean::verify(root, &manifest));
+        models.finish()
+    });
+    checks.finish()
 }
 
 /// Set inside the Kani container, whose gate leaves the Quint models to the host that started it.
@@ -546,6 +578,26 @@ pub fn ensure_linux_engine() -> Result<()> {
 }
 
 fn verify_native(root: &Path) -> Result<()> {
+    let manifest = obligations::manifest(root);
+    let mut checks = Checks::default();
+    checks.run("Kani", || {
+        let manifest = manifest
+            .as_ref()
+            .map_err(|error| anyhow::anyhow!("{error:#}"))?;
+        verify_kani(root, manifest)
+    });
+    checks.run("Miri", || verify_miri(root));
+    checks.run("fuzz", || verify_fuzz(root));
+    checks.run("mutation", || {
+        let manifest = manifest
+            .as_ref()
+            .map_err(|error| anyhow::anyhow!("{error:#}"))?;
+        verify_mutants(root, manifest)
+    });
+    checks.finish()
+}
+
+fn verify_kani(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
     let version = Tool::Kani.command().arg("--version").output()?;
     ensure!(
         version.status.success()
@@ -554,23 +606,25 @@ fn verify_native(root: &Path) -> Result<()> {
         "the pinned Kani version is unavailable"
     );
     verify_kani_driver(root)?;
-    let manifest = obligations::manifest(root)?;
     let mut verified = 0;
     let mut rejected = 0;
+    let mut checks = Checks::default();
     for obligation in &manifest.obligations {
         if let Obligation::Kani { source, probes } = obligation {
-            let flags = flags(&manifest, source);
-            let (proved, refused) = verify_rules(root, source, probes, &flags)?;
-            verified += proved;
-            rejected += refused;
+            checks.run(source, || {
+                let flags = flags(manifest, source);
+                let (proved, refused) = verify_rules(root, source, probes, &flags)?;
+                verified += proved;
+                rejected += refused;
+                Ok(())
+            });
         }
     }
+    checks.finish()?;
     println!(
         "Verified all {verified} production policy harnesses with their reachable outcomes, and rejected all {rejected} counterexamples"
     );
-    verify_miri(root)?;
-    verify_fuzz(root)?;
-    verify_mutants(root, &manifest)
+    Ok(())
 }
 
 fn verify_kani_driver(root: &Path) -> Result<()> {
@@ -654,25 +708,33 @@ fn verify_fuzz(root: &Path) -> Result<()> {
     );
     let targets = fuzz_targets(&root.join(FUZZ_DIRECTORY))?;
     ensure!(!targets.is_empty(), "{FUZZ_DIRECTORY} holds no fuzz target");
+    let mut checks = Checks::default();
     for target in &targets {
-        let corpus = root.join(FUZZ_DIRECTORY).join("corpus").join(target);
-        ensure!(
-            fs::read_dir(&corpus).is_ok_and(|mut entries| entries.next().is_some()),
-            "the fuzz target {target} has no corpus under {}",
-            corpus.display()
-        );
-        let output = replay(root, FUZZ_DIRECTORY, target)?;
-        ensure!(
-            output.status.success(),
-            "replaying the corpus of {target} failed:\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        checks.run(&format!("fuzz target {target}"), || {
+            let corpus = root.join(FUZZ_DIRECTORY).join("corpus").join(target);
+            ensure!(
+                fs::read_dir(&corpus).is_ok_and(|mut entries| entries.next().is_some()),
+                "the fuzz target {target} has no corpus under {}",
+                corpus.display()
+            );
+            let output = replay(root, FUZZ_DIRECTORY, target)?;
+            ensure!(
+                output.status.success(),
+                "replaying the corpus of {target} failed:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            Ok(())
+        });
     }
-    let output = replay(root, FUZZ_FIXTURE, "crash")?;
-    ensure!(
-        !output.status.success() && String::from_utf8_lossy(&output.stderr).contains("panicked"),
-        "the corpus replay admitted {FUZZ_FIXTURE}, whose corpus makes its target panic, so the gate proves nothing"
-    );
+    checks.run("fuzz fixture", || {
+        let output = replay(root, FUZZ_FIXTURE, "crash")?;
+        ensure!(
+            !output.status.success() && String::from_utf8_lossy(&output.stderr).contains("panicked"),
+            "the corpus replay admitted {FUZZ_FIXTURE}, whose corpus makes its target panic, so the gate proves nothing"
+        );
+        Ok(())
+    });
+    checks.finish()?;
     println!(
         "Replayed the corpus of every fuzz target, {}, and refused its fixture",
         targets.join(", ")
@@ -732,6 +794,29 @@ fn verify_mutants(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
                 .contains(&format!("cargo-mutants {MUTANTS_VERSION}")),
         "the pinned cargo-mutants {MUTANTS_VERSION} is unavailable"
     );
+    let mut checks = Checks::default();
+    checks.run("production mutants", || {
+        verify_mutant_results(root, manifest)
+    });
+    checks.run("mutation fixture", || {
+        let fixture = tempfile::tempdir()?;
+        mutants(&root.join(MUTANTS_FIXTURE), fixture.path())
+            .status()
+            .context("start cargo-mutants on its fixture")?;
+        ensure!(
+            lines(&outcome(fixture.path(), "missed.txt")) > 0,
+            "the mutation gate admitted {MUTANTS_FIXTURE}, whose specification asserts nothing, so the gate proves nothing"
+        );
+        Ok(())
+    });
+    checks.finish()?;
+    println!(
+        "Every mutant of {MUTATED_PACKAGE} died or holds its baseline, and the fixture without an assertion let its mutants survive"
+    );
+    Ok(())
+}
+
+fn verify_mutant_results(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
     let output = tempfile::tempdir()?;
     let status = mutants(root, output.path())
         .args(["--package", MUTATED_PACKAGE])
@@ -760,17 +845,6 @@ fn verify_mutants(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
         refusals.join("\n"),
         obligations::MANIFEST,
         unexplained.join("\n")
-    );
-    let fixture = tempfile::tempdir()?;
-    mutants(&root.join(MUTANTS_FIXTURE), fixture.path())
-        .status()
-        .context("start cargo-mutants on its fixture")?;
-    ensure!(
-        lines(&outcome(fixture.path(), "missed.txt")) > 0,
-        "the mutation gate admitted {MUTANTS_FIXTURE}, whose specification asserts nothing, so the gate proves nothing"
-    );
-    println!(
-        "Every mutant of {MUTATED_PACKAGE} died or holds its baseline, and the fixture without an assertion let its mutants survive"
     );
     Ok(())
 }
@@ -959,75 +1033,92 @@ fn miri(root: &Path) -> std::process::Command {
 
 /// Interprets the pure crates' tests under Miri for every target, each test binary within the proof budget, and refuses a fixture with undefined behavior.
 fn verify_miri(root: &Path) -> Result<()> {
+    let mut checks = Checks::default();
     for target in MIRI_TARGETS {
         for krate in MIRI_CRATES {
+            checks.run(
+                &format!("Miri {krate} for {}", target.unwrap_or("the host")),
+                || verify_miri_crate(root, krate, target),
+            );
+        }
+    }
+    checks.run("Miri fixture", || {
+        let output = miri(root)
+            .arg("--manifest-path")
+            .arg(root.join(MIRI_FIXTURE))
+            .output()
+            .context("start Miri on its fixture")?;
+        ensure!(
+            !output.status.success()
+                && String::from_utf8_lossy(&output.stderr).contains("Undefined Behavior"),
+            "Miri admitted the out-of-bounds read in {MIRI_FIXTURE}, so the gate proves nothing"
+        );
+        Ok(())
+    });
+    checks.finish()?;
+    println!(
+        "Miri interpreted the tests of {} for the host and Windows without undefined behavior, and refused its fixture",
+        MIRI_CRATES.join(", ")
+    );
+    Ok(())
+}
+
+fn verify_miri_crate(root: &Path, krate: &str, target: Option<&str>) -> Result<()> {
+    let mut command = miri(root);
+    command.args(["--package", krate]);
+    if let Some(target) = target {
+        command.args(["--target", target]);
+    }
+    let output = command
+        .args(["--", "--list", "--format", "json", "-Z", "unstable-options"])
+        .output()
+        .context("list Miri tests")?;
+    ensure!(
+        output.status.success(),
+        "cannot list Miri tests of {krate} for {}:\n{}",
+        target.unwrap_or("the host"),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let batches = miri_batches(&String::from_utf8(output.stdout)?)?;
+    let mut checks = Checks::default();
+    for batch in batches {
+        let names: Vec<_> = batch.iter().map(|test| test.name.as_str()).collect();
+        checks.run(&format!("tests [{}]", names.join(", ")), || {
             let mut command = miri(root);
             command.args(["--package", krate]);
             if let Some(target) = target {
                 command.args(["--target", target]);
             }
             let output = command
-                .args(["--", "--list", "--format", "json", "-Z", "unstable-options"])
+                .args([
+                    "--",
+                    "--format",
+                    "json",
+                    "-Z",
+                    "unstable-options",
+                    "--exact",
+                ])
+                .args(&names)
                 .output()
-                .context("list Miri tests")?;
+                .context("start Miri")?;
+            let report = String::from_utf8_lossy(&output.stdout);
             ensure!(
                 output.status.success(),
-                "cannot list Miri tests of {krate} for {}:\n{}",
+                "Miri refused the tests of {krate} for {}:\n{report}\n{}",
                 target.unwrap_or("the host"),
                 String::from_utf8_lossy(&output.stderr)
             );
-            for batch in miri_batches(&String::from_utf8(output.stdout)?)? {
-                let mut command = miri(root);
-                command.args(["--package", krate]);
-                if let Some(target) = target {
-                    command.args(["--target", target]);
-                }
-                let output = command
-                    .args([
-                        "--",
-                        "--format",
-                        "json",
-                        "-Z",
-                        "unstable-options",
-                        "--exact",
-                    ])
-                    .args(batch.iter().map(|test| &test.name))
-                    .output()
-                    .context("start Miri")?;
-                let report = String::from_utf8_lossy(&output.stdout);
-                ensure!(
-                    output.status.success(),
-                    "Miri refused the tests of {krate} for {}:\n{report}\n{}",
-                    target.unwrap_or("the host"),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                validate_miri_batch(&report, &batch).with_context(|| {
-                    format!("Miri tests of {krate} for {}", target.unwrap_or("the host"))
-                })?;
-                let ignored = batch.iter().filter(|test| test.ignored).count();
-                println!(
-                    "Miri verified {} tests of {krate} for {} within the proof budget and retained {ignored} existing ignores",
-                    batch.len() - ignored,
-                    target.unwrap_or("the host")
-                );
-            }
-        }
+            validate_miri_batch(&report, &batch)?;
+            let ignored = batch.iter().filter(|test| test.ignored).count();
+            println!(
+                "Miri verified {} tests of {krate} for {} within the proof budget and retained {ignored} existing ignores",
+                batch.len() - ignored,
+                target.unwrap_or("the host")
+            );
+            Ok(())
+        });
     }
-    let output = miri(root)
-        .arg("--manifest-path")
-        .arg(root.join(MIRI_FIXTURE))
-        .output()
-        .context("start Miri on its fixture")?;
-    ensure!(
-        !output.status.success()
-            && String::from_utf8_lossy(&output.stderr).contains("Undefined Behavior"),
-        "Miri admitted the out-of-bounds read in {MIRI_FIXTURE}, so the gate proves nothing"
-    );
-    println!(
-        "Miri interpreted the tests of {} for the host and Windows without undefined behavior, and refused its fixture",
-        MIRI_CRATES.join(", ")
-    );
-    Ok(())
+    checks.finish()
 }
 
 /// Verifies one rule module and its probes, and returns how many harnesses it proved and how many probes it rejected.
@@ -1048,25 +1139,73 @@ fn verify_rules(
         "Kani lists other harnesses in {source} than the source declares: {harnesses:?} against {declared:?}"
     );
     let names: Vec<&str> = harnesses.iter().map(String::as_str).collect();
-    verify_file(&path, directory.path(), &names, false, flags)?;
-    let rejected = obligations::probe_harnesses(probes)?;
-    let probe = tempfile::tempdir()?;
-    let file = probe.path().join("counterexample.rs");
-    fs::write(
-        &file,
-        format!(
-            "#[path = {:?}]\nmod production;\n{probes}",
-            path.to_string_lossy()
-        ),
-    )?;
-    // Each bounded receipt must reject its exact probe on an assertion.
-    let probe_names: Vec<&str> = rejected.iter().map(String::as_str).collect();
-    if !probe_names.is_empty() {
-        verify_file(&file, probe.path(), &probe_names, true, flags)?;
+    let mut checks = Checks::default();
+    checks.run("production harnesses", || {
+        verify_file(&path, directory.path(), &names, false, flags)
+    });
+    let mut rejected = 0;
+    checks.run("counterexamples", || {
+        let harnesses = obligations::probe_harnesses(probes)?;
+        let probe = tempfile::tempdir()?;
+        let file = probe.path().join("counterexample.rs");
+        fs::write(
+            &file,
+            format!(
+                "#[path = {:?}]\nmod production;\n{probes}",
+                path.to_string_lossy()
+            ),
+        )?;
+        // Each bounded receipt must reject its exact probe on an assertion.
+        let probe_names: Vec<&str> = harnesses.iter().map(String::as_str).collect();
+        if !probe_names.is_empty() {
+            verify_file(&file, probe.path(), &probe_names, true, flags)?;
+        }
+        rejected = harnesses.len();
+        Ok(())
+    });
+    checks.run("source binding", || {
+        ensure!(
+            fs::read(&path)? == original,
+            "production proof source {source} changed during verification"
+        );
+        Ok(())
+    });
+    checks.finish()?;
+    Ok((names.len(), rejected))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NATIVE_FIXTURE: &str = "DOTFILES_NATIVE_PROOF_FIXTURE";
+    const NATIVE_TEST: &str =
+        "skill_proofs::tests::missing_manifest_cannot_skip_independent_native_checks";
+
+    #[test]
+    fn missing_manifest_cannot_skip_independent_native_checks() -> Result<()> {
+        if std::env::var(NATIVE_FIXTURE).is_ok_and(|value| value == NATIVE_TEST) {
+            let root = tempfile::tempdir()?;
+            let failure = verify_native(root.path()).unwrap_err();
+            let diagnostic = format!("{failure:#}");
+            for stage in ["Kani:", "Miri:", "fuzz:", "mutation:"] {
+                assert!(diagnostic.contains(stage), "{diagnostic}");
+            }
+            assert!(diagnostic.contains(obligations::MANIFEST), "{diagnostic}");
+            return Ok(());
+        }
+        let sysroot = tempfile::tempdir()?;
+        let output = platform::process::command(std::env::current_exe()?)
+            .args(["--exact", NATIVE_TEST, "--nocapture"])
+            .env(NATIVE_FIXTURE, NATIVE_TEST)
+            .env("RUSTUP_AUTO_INSTALL", "0")
+            .env("MIRI_SYSROOT", sysroot.path())
+            .env("CARGO_NET_OFFLINE", "true")
+            .env("MISE_AUTO_INSTALL", "false")
+            .output()?;
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        ensure!(output.status.success(), "owned native proof fixture failed");
+        Ok(())
     }
-    ensure!(
-        fs::read(&path)? == original,
-        "production proof source {source} changed during verification"
-    );
-    Ok((names.len(), rejected.len()))
 }

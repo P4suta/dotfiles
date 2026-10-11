@@ -926,6 +926,18 @@ fn moving_an_onchange_script_into_chezmoiscripts_reruns_it_once() {
     assert_eq!(apply(), 2);
 }
 
+fn initialize_fixture_repository(repository: &Path, global: &Path) {
+    assert!(
+        fixture_git::command("git", global)
+            .arg("-C")
+            .arg(repository)
+            .args(["init", "--quiet"])
+            .status()
+            .unwrap()
+            .success()
+    );
+}
+
 /// Launchers pass the checkout root, which `.chezmoi.workingTree` names even when `.chezmoiroot` moves the source state below it.
 #[test]
 fn the_working_tree_is_the_checkout_root_under_a_chezmoiroot() {
@@ -933,15 +945,7 @@ fn the_working_tree_is_the_checkout_root_under_a_chezmoiroot() {
     let checkout = scope.path().join("checkout");
     let home = checkout.join("home");
     fs::create_dir_all(&home).unwrap();
-    assert!(
-        fixture_git::command("git", &scope.path().join("gitconfig"))
-            .arg("-C")
-            .arg(&checkout)
-            .args(["init", "--quiet"])
-            .status()
-            .unwrap()
-            .success()
-    );
+    initialize_fixture_repository(&checkout, &scope.path().join("gitconfig"));
     fs::write(checkout.join(".chezmoiroot"), "home\n").unwrap();
     fs::write(
         home.join("probe.tmpl"),
@@ -994,6 +998,9 @@ fn initialization_keeps_the_selected_checkout_and_existing_prompt_answers() {
         fs::create_dir_all(&source).unwrap();
         let global = scope.path().join("gitconfig");
         fs::write(&global, "").unwrap();
+        for repository in [scope.path(), checkout.as_path()] {
+            initialize_fixture_repository(repository, &global);
+        }
         if rooted {
             fs::write(checkout.join(".chezmoiroot"), "home\n").unwrap();
         }
