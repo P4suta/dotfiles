@@ -169,8 +169,8 @@ fn features(flags: &BTreeSet<&'static str>) -> Vec<&'static str> {
 }
 
 fn standalone_kani() -> std::process::Command {
-    // Inlining duplicates cover intrinsics along unsatisfiable paths.
-    const CHECKED_MIR: &str = "--edition=2024 -C overflow-checks=yes -C debug-assertions=yes -Z mir-opt-level=3 -Z mir-enable-passes=-Inline";
+    // Inlining and jump threading duplicate cover intrinsics along unsatisfiable paths.
+    const CHECKED_MIR: &str = "--edition=2024 -C overflow-checks=yes -C debug-assertions=yes -Z mir-opt-level=3 -Z mir-enable-passes=-Inline,-JumpThreading";
     let mut flags = std::env::var_os("RUSTFLAGS").unwrap_or_default();
     if !flags.is_empty() {
         flags.push(" ");
