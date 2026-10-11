@@ -406,7 +406,12 @@ pub(crate) fn execute(context: &TemplateData, runner: &mut impl Runner, step: St
                 ".local/bin/skill-ops{}",
                 std::env::consts::EXE_SUFFIX
             ));
-            skill_ops::skill_install::install(&context.source, &binary, &context.home)?;
+            skill_ops::skill_install::install(
+                &context.source,
+                &binary,
+                &context.home,
+                context.profile,
+            )?;
             prose::remove_reply_checks(&context.home)?;
         }
         Step::Mise => mise(runner)?,

@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.6", features = ["derive", "env"] }
+model = { path = "../model" }
 platform = { path = "../platform" }
 pulldown-cmark = "0.13"
 rules = { path = "../rules" }

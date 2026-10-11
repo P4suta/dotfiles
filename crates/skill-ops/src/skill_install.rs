@@ -1,10 +1,14 @@
 use anyhow::{Context, Result, ensure};
+use model::Profile;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
 
 /// The seconds a client waits for a skill-ops hook before it gives up on it.
 const HOOK_TIMEOUT_SECONDS: u64 = 10;
+const TARGETS_DATA: &str = "home/.chezmoidata/targets.toml";
+const PROFILES_DATA: &str = "home/.chezmoidata/profiles.toml";
+const SKILL_TARGET_PREFIX: &str = ".agents/skills/";
 
 /// Registers the skill-ops observe and stop hooks in a Codex or Claude settings value, replacing earlier skill-ops handlers.
 ///
@@ -61,16 +65,21 @@ pub fn merge_hooks(mut value: Value, client: &str) -> Result<Value> {
     Ok(value)
 }
 
-/// Installs `binary` as skill-ops, records the approved catalog and policy, and registers the client hooks.
+/// Installs `binary` as skill-ops, records the approved catalog for `profile` and policy, and registers the client hooks.
 ///
 /// # Errors
 ///
 /// Returns an error when the source catalog fails its check, when the installed catalog or policy differs from the source, or when `binary` doesn't name a file.
 /// Returns an error when copying the binary, writing the approval, or reading or writing a client settings file fails.
-pub fn install(source: &Path, binary: &Path, user_directory: &Path) -> Result<()> {
+pub fn install(
+    source: &Path,
+    binary: &Path,
+    user_directory: &Path,
+    profile: Profile,
+) -> Result<()> {
     use crate as ops;
     ops::check_catalog(source)?;
-    let expected = ops::catalog(&source.join("home/dot_agents/skills"))?;
+    let expected = profile_catalog(source, profile)?;
     let installed = ops::catalog_owned(&user_directory.join(".agents/skills"), &expected)?;
     ensure!(
         expected == installed,
@@ -143,6 +152,7 @@ pub fn deploy(
     source: &Path,
     binary: &Path,
     user_directory: &Path,
+    profile: Profile,
     mut apply: impl FnMut(&Path) -> Result<()>,
 ) -> Result<()> {
     use crate::skill_rules::{InstallationStage, installation_stage};
@@ -155,12 +165,94 @@ pub fn deploy(
                 policy_applied = true;
             }
             InstallationStage::Runtime => {
-                install(source, binary, user_directory)?;
+                install(source, binary, user_directory, profile)?;
                 runtime_installed = true;
             }
             InstallationStage::Adapter => {
                 return apply(&source.join("home/dot_config/opencode/plugins/skill-ops.ts"));
             }
         }
+    }
+}
+
+fn profile_catalog(source: &Path, profile: Profile) -> Result<crate::Catalog> {
+    let targets = model::data::parse(
+        TARGETS_DATA,
+        &fs::read_to_string(source.join(TARGETS_DATA))?,
+    )
+    .map_err(anyhow::Error::msg)?
+    .targets
+    .context("skill installation requires target declarations")?;
+    let profiles = model::data::parse(
+        PROFILES_DATA,
+        &fs::read_to_string(source.join(PROFILES_DATA))?,
+    )
+    .map_err(anyhow::Error::msg)?
+    .profiles
+    .context("skill installation requires profile sets")?;
+    let mut expected = crate::catalog(&source.join("home/dot_agents/skills"))?;
+    for (target, set) in targets {
+        if let Some(name) = target.strip_prefix(SKILL_TARGET_PREFIX) {
+            let members = profiles.get(&set).with_context(|| {
+                format!("skill target {target} names unknown profile set {set}")
+            })?;
+            if !members.iter().any(|member| member == profile.name()) {
+                expected.skills.remove(name);
+            }
+        }
+    }
+    let available: std::collections::BTreeSet<_> = expected.skills.keys().cloned().collect();
+    for skill in expected.skills.values_mut() {
+        skill.references.retain(|name| available.contains(name));
+    }
+    Ok(expected)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn profile_scope_excludes_only_declared_skills_and_preserves_missing_skill_errors() -> Result<()>
+    {
+        let fixture = tempfile::tempdir()?;
+        let source = fixture.path().join("source");
+        let native = fixture.path().join("native");
+        for name in ["common", "mac-only"] {
+            let skill = source.join("home/dot_agents/skills").join(name);
+            fs::create_dir_all(&skill)?;
+            fs::write(
+                skill.join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: Fixture skill.\n---\nRead `mac-only`.\n"),
+            )?;
+        }
+        fs::create_dir_all(source.join("home/.chezmoidata"))?;
+        fs::write(
+            source.join("home/.chezmoidata/targets.toml"),
+            "[targets]\n\".agents/skills/mac-only\" = \"mac\"\n",
+        )?;
+        fs::write(
+            source.join("home/.chezmoidata/profiles.toml"),
+            "[profiles]\nmac = [\"mac\"]\n",
+        )?;
+        fs::create_dir_all(native.join("common"))?;
+        fs::copy(
+            source.join("home/dot_agents/skills/common/SKILL.md"),
+            native.join("common/SKILL.md"),
+        )?;
+        for profile in Profile::ALL {
+            let expected = profile_catalog(&source, profile)?;
+            if profile == Profile::Mac {
+                assert!(expected.skills.contains_key("mac-only"));
+                assert!(crate::catalog_owned(&native, &expected).is_err());
+            } else {
+                assert_eq!(expected.skills.len(), 1);
+                assert_eq!(crate::catalog_owned(&native, &expected)?, expected);
+            }
+        }
+        fs::remove_file(native.join("common/SKILL.md"))?;
+        let expected = profile_catalog(&source, Profile::Windows)?;
+        assert!(crate::catalog_owned(&native, &expected).is_err());
+        Ok(())
     }
 }

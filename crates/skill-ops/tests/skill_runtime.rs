@@ -1,5 +1,7 @@
 use anyhow::Result;
+use model::Profile;
 use serde_json::{Value, json};
+use skill_ops::skill_install::{deploy, install};
 use skill_ops::{self as ops, Decision, Outcome, Policy, Review};
 use std::fs;
 use std::io::Write;
@@ -593,6 +595,11 @@ fn opencode_adapter_records_a_native_sdk_read_without_retaining_private_payloads
 fn native_source(fixture: &Path) -> Result<(PathBuf, PathBuf, ops::Catalog)> {
     let source = fixture.join("source");
     let user = fixture.join("native-user");
+    fs::create_dir_all(source.join("home/.chezmoidata"))?;
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/.chezmoidata");
+    for file in ["targets.toml", "profiles.toml"] {
+        fs::copy(data.join(file), source.join("home/.chezmoidata").join(file))?;
+    }
     for name in ["alpha", "beta"] {
         for tree in [
             source.join("home/dot_agents/skills"),
@@ -709,10 +716,10 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
     let native_skill = user.join(".agents/skills/alpha/SKILL.md");
     let native_bytes = fs::read(&native_skill)?;
     fs::write(&native_skill, "unrelated first-install edit")?;
-    assert!(skill_ops::skill_install::deploy(&source, binary, &user, &mut apply).is_err());
+    assert!(deploy(&source, binary, &user, Profile::Windows, &mut apply).is_err());
     assert!(!adapter.exists() && !installed.exists());
     fs::write(&native_skill, native_bytes)?;
-    skill_ops::skill_install::deploy(&source, binary, &user, &mut apply)?;
+    deploy(&source, binary, &user, Profile::Windows, &mut apply)?;
     assert_eq!(applied, [policy_path.clone(), policy_path, adapter_path]);
     let manifest: ops::Approved = ops::read_json(&user.join(".config/skill-ops/approved.json"))?;
     assert_eq!(
@@ -747,7 +754,7 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
         first["hooks"]["SessionStart"],
         existing["hooks"]["SessionStart"]
     );
-    skill_ops::skill_install::install(&source, binary, &user)?;
+    install(&source, binary, &user, Profile::Windows)?;
     assert_eq!(
         ops::read_json::<Value>(&user.join(".codex/hooks.json"))?,
         first
@@ -763,7 +770,7 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
         user.join(".agents/skills/alpha/SKILL.md"),
         "unrelated native edit",
     )?;
-    assert!(skill_ops::skill_install::install(&source, binary, &user).is_err());
+    assert!(install(&source, binary, &user, Profile::Windows).is_err());
     assert_eq!(
         fs::read_to_string(user.join(".agents/skills/alpha/SKILL.md"))?,
         "unrelated native edit"

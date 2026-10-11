@@ -537,10 +537,16 @@ fn install_skill_ops(root: &Path) -> Result<()> {
     skill_ops::check_catalog(root)?;
     let binary = release_binary(root, "skill-ops", "skill-ops")?;
     let user_directory = user_directory()?;
-    skill_ops::skill_install::deploy(root, &binary, &user_directory, |path| {
-        apply_sources(root, "dirs,files", [path])
-            .with_context(|| format!("installation failed for {}", path.display()))
-    })?;
+    skill_ops::skill_install::deploy(
+        root,
+        &binary,
+        &user_directory,
+        xtask::profiles::native_profile()?,
+        |path| {
+            apply_sources(root, "dirs,files", [path])
+                .with_context(|| format!("installation failed for {}", path.display()))
+        },
+    )?;
     platform::freshness::record_installation(&user_directory, root, Built::SkillOps)
 }
 
