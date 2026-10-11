@@ -1066,14 +1066,6 @@ fn retire_tmux(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
         let (_file, destination) = unique.keep()?;
         fs::rename(config, destination)?;
     }
-    if runner.available(Tool::Mise) && runner.run(Tool::Mise, &args(&["current", "tmux"]))?.success
-    {
-        checked(
-            runner,
-            Tool::Mise,
-            &args(&["uninstall", "--all", "tmux", "-y"]),
-        )?;
-    }
     Ok(())
 }
 
@@ -1114,6 +1106,21 @@ mod tests {
         fn run_installed(&mut self, _: &Path, _: &[OsString]) -> Result<crate::runtime::Reply> {
             unreachable!()
         }
+    }
+
+    #[test]
+    fn retiring_tmux_preserves_installed_versions() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let context = TemplateData {
+            source: scope.path().into(),
+            home: scope.path().into(),
+            profile: Profile::Linux,
+            data: serde_json::json!({}),
+        };
+        let mut runner = Recording(Vec::new());
+        retire_tmux(&context, &mut runner)?;
+        assert!(runner.0.is_empty(), "{:?}", runner.0);
+        Ok(())
     }
 
     #[test]

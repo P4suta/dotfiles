@@ -4,8 +4,55 @@ use anyhow::Result;
 use rules::boundary_rules::{Breach, breach};
 use std::fs;
 use std::path::{Path, PathBuf};
+use syn::visit::Visit;
 use xtask::structure::{CATALOG, CORE, core};
 use xtask::tool::Tool;
+
+#[derive(Default)]
+struct ToolRemoval(Vec<String>);
+
+impl<'ast> Visit<'ast> for ToolRemoval {
+    fn visit_item_mod(&mut self, module: &'ast syn::ItemMod) {
+        if module.attrs.iter().any(|attribute| {
+            matches!(&attribute.meta, syn::Meta::List(list) if list.path.is_ident("cfg") && list.tokens.to_string() == "test")
+        }) {
+            return;
+        }
+        syn::visit::visit_item_mod(self, module);
+    }
+
+    fn visit_lit_str(&mut self, literal: &'ast syn::LitStr) {
+        let value = literal.value();
+        if matches!(value.as_str(), "prune" | "uninstall" | "implode") {
+            self.0.push(value);
+        }
+    }
+}
+
+#[test]
+fn apply_setup_cannot_delete_mise_versions() -> Result<()> {
+    let root = root();
+    for path in [
+        "crates/dotfiles/src/setup.rs",
+        "crates/dotfiles/src/windows/setup/tools.rs",
+    ] {
+        let mut removals = ToolRemoval::default();
+        removals.visit_file(&syn::parse_file(&fs::read_to_string(root.join(path))?)?);
+        assert!(
+            removals.0.is_empty(),
+            "{path} removes tool versions: {:?}",
+            removals.0
+        );
+    }
+    for operation in ["prune", "uninstall", "implode"] {
+        let mut removals = ToolRemoval::default();
+        removals.visit_file(&syn::parse_file(&format!(
+            "fn install() {{ command().arg({operation:?}); }}"
+        ))?);
+        assert_eq!(removals.0, [operation]);
+    }
+    Ok(())
+}
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

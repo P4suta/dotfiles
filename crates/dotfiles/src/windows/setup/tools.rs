@@ -14,23 +14,10 @@ pub fn run(scoop_apps: &[String]) -> Result<i32> {
     let token = github_token();
     let token = token.as_deref();
 
-    // Installing converges to the reviewed pins, and version changes arrive only as pull requests.
-    println!(">>> mise install");
-    let mut command = mise(token);
-    command.args(["install", "-y"]);
-    let status = platform::process::mise_install(command)?.status()?;
-    ensure!(status.success(), "mise install failed with {status}");
-
+    install_mise(|| mise(token))?;
     let absent = scoop::absent(scoop_apps);
-    if absent.is_empty() {
-        println!(">>> mise prune");
-        proc::run(mise(token).args(["prune", "-y"]))?;
-        proc::run(mise(token).arg("reshim"))?;
-    } else {
-        eprintln!(
-            "mise prune waits for scoop to install {}",
-            absent.join(", ")
-        );
+    if !absent.is_empty() {
+        eprintln!("scoop has not installed {}", absent.join(", "));
     }
 
     install_ps_modules()?;
@@ -39,6 +26,18 @@ pub fn run(scoop_apps: &[String]) -> Result<i32> {
     println!(">>> git signing config sanity check");
     report(&signing_problems(&SigningConfig::read()));
     Ok(0)
+}
+
+fn install_mise(mut command: impl FnMut() -> std::process::Command) -> Result<()> {
+    // Installing converges to the reviewed pins, and version changes arrive only as pull requests.
+    println!(">>> mise install");
+    let mut install = command();
+    install.args(["install", "-y"]);
+    let status = platform::process::mise_install(install)?.status()?;
+    ensure!(status.success(), "mise install failed with {status}");
+
+    proc::run(command().arg("reshim"))?;
+    Ok(())
 }
 
 fn github_token() -> Option<String> {
@@ -211,6 +210,79 @@ fn expand_home(path: &str, home: Option<&Path>) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
+
+    #[test]
+    fn applying_paranoid_settings_preserves_a_tracked_project_pin() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let config = scope.path().join("chezmoi.toml");
+        std::fs::write(&config, "[data]\nprofile = 'windows'\n")?;
+        let scratch = crate::host_checks::Scratch::new(&config)?;
+        let environment = scratch.command("mise");
+        let variable = |name: &str| -> Result<PathBuf> {
+            environment
+                .get_envs()
+                .find_map(|(key, value)| (key == name).then_some(value).flatten())
+                .map(PathBuf::from)
+                .ok_or_else(|| anyhow::anyhow!("missing {name}"))
+        };
+        let global = variable("MISE_GLOBAL_CONFIG_FILE")?;
+        std::fs::create_dir_all(global.parent().context("global config directory")?)?;
+        std::fs::write(&global, "[settings]\nparanoid = false\n")?;
+        let project = scope.path().join("project");
+        std::fs::create_dir(&project)?;
+        let pin = project.join("mise.toml");
+        std::fs::write(&pin, "[tools]\nrg = '15.2.0'\n")?;
+        let installation = variable("MISE_DATA_DIR")?.join("installs/rg/15.2.0");
+        std::fs::create_dir_all(&installation)?;
+        std::fs::write(installation.join("project-tool"), "installed project pin\n")?;
+        std::fs::write(
+            installation
+                .parent()
+                .context("backend directory")?
+                .join(".mise.backend.toml"),
+            "short = 'rg'\nfull = 'aqua:BurntSushi/ripgrep'\n",
+        )?;
+        for arguments in [
+            vec!["trust", pin.to_str().context("project pin path")?],
+            vec!["ls", "--json"],
+        ] {
+            let output = scratch
+                .command("mise")
+                .current_dir(&project)
+                .args(arguments)
+                .output()?;
+            ensure!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let state = variable("MISE_STATE_DIR")?;
+        assert!(
+            std::fs::read_dir(state.join("tracked-configs"))?
+                .next()
+                .is_some()
+        );
+        std::fs::write(&global, "[settings]\nparanoid = true\n")?;
+        let preview = scratch
+            .command("mise")
+            .args(["prune", "--dry-run"])
+            .output()?;
+        ensure!(
+            preview.status.success(),
+            "{}",
+            String::from_utf8_lossy(&preview.stderr)
+        );
+        assert!(String::from_utf8_lossy(&preview.stderr).contains("rg@15.2.0"));
+        install_mise(|| scratch.command("mise"))?;
+        assert_eq!(
+            std::fs::read_to_string(installation.join("project-tool"))?,
+            "installed project pin\n"
+        );
+        assert!(pin.is_file());
+        Ok(())
+    }
 
     fn healthy() -> SigningConfig {
         SigningConfig {
