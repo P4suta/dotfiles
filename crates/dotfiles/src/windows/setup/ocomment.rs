@@ -5,6 +5,7 @@
 //! Every apply runs this step, and it rebuilds only when the checkout's revision differs from the recorded revision of the installed binary.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{Context, Result};
 
@@ -74,6 +75,17 @@ fn install(built: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
+fn build_command(checkout: &Path, target: &Path) -> Command {
+    let mut build = env::command("cargo");
+    build
+        .args(["build", "--release", "--locked", "-p", "ocomment"])
+        .arg("--manifest-path")
+        .arg(checkout.join("rust/Cargo.toml"))
+        .arg("--target-dir")
+        .arg(target);
+    build
+}
+
 fn build(options: &Options) -> Result<()> {
     let home = std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
@@ -104,19 +116,10 @@ fn build(options: &Options) -> Result<()> {
     let revision = head(&checkout)?.context("the OComment checkout has no Rust workspace")?;
 
     // `--locked` builds the committed lockfile, the same one the tests used.
-    let manifest = checkout.join("rust").join("Cargo.toml");
-    let mut build = env::command("cargo");
-    build
-        .args(["build", "--release", "--locked", "-p", "ocomment"])
-        .arg("--manifest-path")
-        .arg(&manifest);
-    proc::run(&mut build).context("building ocomment")?;
+    let target = checkout.join("rust/target");
+    proc::run(&mut build_command(&checkout, &target)).context("building ocomment")?;
 
-    let binary = checkout
-        .join("rust")
-        .join("target")
-        .join("release")
-        .join("ocomment.exe");
+    let binary = target.join("release/ocomment.exe");
     install(&binary, &dest)?;
 
     let mut version = env::command(&dest.display().to_string());
@@ -125,4 +128,36 @@ fn build(options: &Options) -> Result<()> {
     std::fs::create_dir_all(stamp.parent().context("no state parent")?)?;
     std::fs::write(&stamp, format!("{revision}\n")).context("recording the ocomment revision")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn installation_uses_its_build_output_despite_an_inherited_cargo_target() -> Result<()> {
+        let fixture = tempfile::tempdir()?;
+        let checkout = fixture.path().join("checkout");
+        let target = checkout.join("rust/target");
+        let shared = fixture.path().join("shared-target");
+        std::fs::create_dir_all(checkout.join("rust/src"))?;
+        std::fs::write(
+            checkout.join("rust/Cargo.toml"),
+            "[package]\nname = \"ocomment\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )?;
+        std::fs::write(
+            checkout.join("rust/Cargo.lock"),
+            "version = 4\n[[package]]\nname = \"ocomment\"\nversion = \"0.1.0\"\n",
+        )?;
+        std::fs::write(checkout.join("rust/src/main.rs"), "fn main() {}\n")?;
+        let mut command = build_command(&checkout, &target);
+        command.env("CARGO_TARGET_DIR", &shared);
+        proc::run(&mut command)?;
+        let binary = target.join("release/ocomment.exe");
+        let destination = fixture.path().join("installed/ocomment.exe");
+        install(&binary, &destination)?;
+        assert_eq!(std::fs::read(destination)?, std::fs::read(binary)?);
+        assert!(!shared.exists());
+        Ok(())
+    }
 }
