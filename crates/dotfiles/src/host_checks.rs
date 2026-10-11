@@ -8,6 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+mod storage;
+
 const CONFIG: &str = ".config/chezmoi/chezmoi.toml";
 const GIT_CONFIG: &str = ".config/git/config";
 const MISE_CONFIG: &str = ".config/mise/config.toml";
@@ -22,6 +24,8 @@ const EMPTY_CONFIG: &str = "empty-config.toml";
 const RUNTIME_BIN: &str = ".local/bin";
 const RUNTIME_BUILD: &str = "target/hosts/runtime";
 const DEBUG_OUTPUT: &str = "debug";
+const CANDIDATE_SOURCE: &str = "DOTFILES_CANDIDATE_SOURCE";
+const CANDIDATE_CONFIG: &str = "DOTFILES_CANDIDATE_CONFIG";
 const MAC_SHELL: &str = "/bin/zsh";
 const UNIX_SHELL: &str = "/bin/bash";
 const PUBLIC_SOURCES: [&str; 3] = [
@@ -77,6 +81,7 @@ pub struct Scratch {
     scope: tempfile::TempDir,
     home: PathBuf,
     config: PathBuf,
+    path: Option<std::ffi::OsString>,
 }
 
 impl Scratch {
@@ -108,6 +113,73 @@ impl Scratch {
             scope,
             home,
             config,
+            path: None,
+        })
+    }
+
+    fn snapshot_mise(&mut self, home: &Path) -> Result<platform::code_environment::Installations> {
+        let native = storage::Mise::discover(home);
+        let mut installed = platform::code_environment::Installations::discover(home)?;
+        if let Some(rustup) = std::env::var_os("DOTFILES_HOST_RUSTUP_HOME") {
+            installed.rustup = rustup.into();
+        }
+        self.snapshot_installations(&native, &installed)
+    }
+
+    fn snapshot_installations(
+        &mut self,
+        native: &storage::Mise,
+        installed: &platform::code_environment::Installations,
+    ) -> Result<platform::code_environment::Installations> {
+        for (source, destination) in [
+            (&native.data, self.home.join(MISE_DATA)),
+            (&native.cache, self.home.join(".cache/mise")),
+            (&native.config, self.home.join(".config/mise")),
+            (&native.global, self.home.join(MISE_CONFIG)),
+            (&native.system, self.scope.path().join(EMPTY_CONFIG)),
+            (&installed.cargo.join("bin"), self.home.join(".cargo/bin")),
+            (
+                &installed.cargo.join("config.toml"),
+                self.home.join(".cargo/config.toml"),
+            ),
+            (&installed.rustup, self.home.join(".rustup")),
+        ] {
+            storage::copy(source, &destination)?;
+        }
+        for ((_, relative), source) in storage::DATA_CHILDREN.into_iter().zip(&native.children) {
+            if source != &native.data.join(relative) {
+                storage::copy(source, &self.home.join(MISE_DATA).join(relative))?;
+            }
+        }
+        storage::tracking(
+            &native.state,
+            &self.home.join(".local/state/mise"),
+            &native.global,
+            &self.home.join(MISE_CONFIG),
+        )?;
+        let mise = self
+            .home
+            .join(RUNTIME_BIN)
+            .join(format!("mise{}", std::env::consts::EXE_SUFFIX));
+        storage::copy(&installed.mise, &mise)?;
+        let inherited = std::env::var_os("DOTFILES_HOST_PATH")
+            .or_else(|| std::env::var_os("PATH"))
+            .unwrap_or_default();
+        let directories = std::env::split_paths(&inherited).map(|directory| {
+            directory.strip_prefix(&native.data).map_or_else(
+                |_| directory.clone(),
+                |relative| self.home.join(MISE_DATA).join(relative),
+            )
+        });
+        self.path = Some(platform::home::path_with(
+            &self.home,
+            &std::env::join_paths(directories)?,
+        )?);
+        Ok(platform::code_environment::Installations {
+            mise,
+            data: self.home.join(MISE_DATA),
+            cargo: self.home.join(".cargo"),
+            rustup: self.home.join(".rustup"),
         })
     }
 
@@ -133,8 +205,9 @@ impl Scratch {
         }
         for (name, _) in std::env::vars_os() {
             let text = name.to_string_lossy();
-            if text.starts_with("MISE_")
+            if (self.path.is_none() && text.starts_with("MISE_"))
                 || text.starts_with("__MISE_")
+                || platform::runtime::MISE_SESSION.contains(&text.as_ref())
                 || text.starts_with("CARGO_")
                 || text.starts_with("RUSTUP_")
                 || text.starts_with("GIT_CONFIG_")
@@ -166,11 +239,14 @@ impl Scratch {
             ("ProgramData", self.home.join("ProgramData")),
             ("ALLUSERSPROFILE", self.home.join("ProgramData")),
             ("CARGO_HOME", self.home.join(".cargo")),
+            ("MISE_CARGO_HOME", self.home.join(".cargo")),
             ("RUSTUP_HOME", self.home.join(".rustup")),
+            ("MISE_RUSTUP_HOME", self.home.join(".rustup")),
             ("CARGO_TARGET_DIR", self.home.join("target")),
             ("MISE_DATA_DIR", self.home.join(MISE_DATA)),
             ("MISE_CONFIG_DIR", self.home.join(".config/mise")),
             ("MISE_GLOBAL_CONFIG_FILE", self.home.join(MISE_CONFIG)),
+            ("MISE_GLOBAL_CONFIG_ROOT", self.home.clone()),
             (
                 "MISE_SYSTEM_CONFIG_FILE",
                 self.scope.path().join(EMPTY_CONFIG),
@@ -186,7 +262,23 @@ impl Scratch {
         ] {
             command.env(name, value);
         }
+        for (name, relative) in storage::DATA_CHILDREN {
+            command.env(name, self.home.join(MISE_DATA).join(relative));
+        }
+        for (name, relative) in [
+            ("MISE_TMP_DIR", "mise-tmp"),
+            ("MISE_SYSTEM_CONFIG_DIR", "system-mise"),
+            ("MISE_SYSTEM_DIR", "system-mise"),
+            ("MISE_SYSTEM_DATA_DIR", "system-mise-data"),
+            ("MISE_SYSTEM_INSTALLS_DIR", "system-mise-data/installs"),
+            ("MISE_LOG_FILE", "mise.log"),
+        ] {
+            command.env(name, self.scope.path().join(relative));
+        }
         command.current_dir(&self.home);
+        if let Some(path) = &self.path {
+            command.env("PATH", path);
+        }
         command
     }
 
@@ -365,6 +457,88 @@ impl Scratch {
         Ok(())
     }
 
+    fn versions(&self) -> Result<Vec<PathBuf>> {
+        let root = self.home.join(MISE_DATA).join("installs");
+        let mut versions = Vec::new();
+        if root.try_exists()? {
+            for backend in fs::read_dir(&root)? {
+                let backend = backend?;
+                if backend.file_type()?.is_dir() {
+                    for version in fs::read_dir(backend.path())? {
+                        let version = version?;
+                        if version.path().is_dir() {
+                            versions.push(version.path().strip_prefix(&root)?.to_path_buf());
+                        }
+                    }
+                }
+            }
+        }
+        Ok(versions)
+    }
+
+    fn apply_with(
+        &self,
+        root: &Path,
+        renderer: &Path,
+        tools: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        let listed = crate::profiles::output(
+            self.chezmoi(root, renderer).args([
+                "managed",
+                "--include",
+                "files,symlinks,remove",
+                "--exclude",
+                "externals",
+                "--nul-path-separator",
+            ]),
+            "list candidate backup targets",
+        )?;
+        let targets = crate::profiles::managed_paths(&listed.stdout)?
+            .into_iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>();
+        let versions = self.versions()?;
+        crate::transaction::apply_profile(
+            &self.home,
+            &self.scope.path().join("backup"),
+            &targets,
+            &crate::profiles::Store::scoped(self.scope.path()).database,
+            || {
+                self.profile(root, "apply", renderer)?;
+                tools()?;
+                let installed = self.home.join(MISE_DATA).join("installs");
+                for version in versions {
+                    ensure!(
+                        installed.join(&version).is_dir(),
+                        "candidate apply removed installed tool {}",
+                        version.display()
+                    );
+                }
+                self.profile(root, "apply", renderer)
+            },
+            || self.profile(root, "verify", renderer),
+        )
+    }
+
+    fn apply(&self, root: &Path, renderer: &Path) -> Result<()> {
+        self.apply_with(root, renderer, || {
+            let invocation = if cfg!(windows) {
+                "& (Join-Path $env:USERPROFILE '.local/bin/dotfiles.exe') hosts toolchain --source $env:DOTFILES_CANDIDATE_SOURCE --config $env:DOTFILES_CANDIDATE_CONFIG"
+            } else {
+                "\"$HOME/.local/bin/dotfiles\" hosts toolchain --source \"$DOTFILES_CANDIDATE_SOURCE\" --config \"$DOTFILES_CANDIDATE_CONFIG\""
+            };
+            let status = self.toolchain_command(&self.home, invocation)?
+                .env(CANDIDATE_SOURCE, root)
+                .env(CANDIDATE_CONFIG, &self.config)
+                .status()?;
+            ensure!(
+                status.success(),
+                "candidate tools setup failed with {status}"
+            );
+            Ok(())
+        })
+    }
+
     fn install(&self, directory: &Path) -> Result<()> {
         let invocation = if cfg!(windows) {
             "& (Join-Path $env:USERPROFILE '.local/bin/dotfiles.exe') mise-install -y"
@@ -511,15 +685,19 @@ pub fn check(root: &Path, home: &Path) -> Report {
     let config = home.join(CONFIG);
     let mut applied = None;
     let candidate = (|| {
-        let scratch = Scratch::new(&config)?;
+        let mut scratch = Scratch::new(&config)?;
         scratch.github(&github_config(home))?;
         let mut candidate = Checks::default();
+        let mut installations = None;
+        candidate.run("host.mise-snapshot", || {
+            installations = Some(scratch.snapshot_mise(home)?);
+            Ok(())
+        });
         let mut renderer = None;
         candidate.run("host.renderer", || {
-            renderer = Some(scratch.renderer(
-                root,
-                &platform::code_environment::Installations::discover(home)?,
-            )?);
+            renderer = Some(
+                scratch.renderer(root, installations.as_ref().context("host mise snapshot")?)?,
+            );
             Ok(())
         });
         let inspection =
@@ -528,11 +706,25 @@ pub fn check(root: &Path, home: &Path) -> Report {
             drifted_targets: Vec::new(),
             verification_error: Some(format!("{error:#}")),
         }));
-        candidate.run("host.profile-apply", || {
-            scratch.profile(root, "apply", renderer.as_deref().context("host renderer")?)
-        });
         candidate.run("host.runtime", || {
             scratch.provision_runtime(root, &std::env::current_exe()?, home)
+        });
+        candidate.run("host.apply-trust", || {
+            let output = scratch
+                .command("mise")
+                .current_dir(root)
+                .args(["trust", "--quiet"])
+                .arg(root.join(PROJECT_CONFIG))
+                .output()?;
+            ensure!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            Ok(())
+        });
+        candidate.run("host.profile-apply", || {
+            scratch.apply(root, renderer.as_deref().context("host renderer")?)
         });
         candidate.run("host.scratch-verify", || {
             scratch.profile(
@@ -541,7 +733,6 @@ pub fn check(root: &Path, home: &Path) -> Report {
                 renderer.as_deref().context("host renderer")?,
             )
         });
-        candidate.run("host.toolchain", || scratch.install(&scratch.home));
         candidate.run("host.project-tools", || scratch.install(root));
         for url in PUBLIC_SOURCES {
             candidate.run(url, || scratch.fetch(url));
@@ -589,6 +780,198 @@ pub fn shell(command: &str) -> Result<Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct MiseFixture {
+        native: Scratch,
+        candidate: Scratch,
+        source: PathBuf,
+        pin: PathBuf,
+    }
+
+    fn mise_fixture() -> Result<MiseFixture> {
+        let scope = tempfile::tempdir()?;
+        let config = scope.path().join("chezmoi.toml");
+        fs::write(
+            &config,
+            format!(
+                "[data]\nprofile = {:?}\n",
+                crate::profiles::native_profile()?.name()
+            ),
+        )?;
+        let native = Scratch::new(&config)?;
+        let config_directory = native.home.join(".config/mise");
+        fs::create_dir_all(&config_directory)?;
+        let global = native.home.join(MISE_CONFIG);
+        fs::write(&global, "[settings]\nparanoid = false\n")?;
+        let project = native.scope.path().join("project");
+        fs::create_dir(&project)?;
+        let pin = project.join(PROJECT_CONFIG);
+        fs::write(&pin, "[tools]\nrg = '15.2.0'\n")?;
+        let version = native.home.join(MISE_DATA).join("installs/rg/15.2.0");
+        fs::create_dir_all(&version)?;
+        fs::write(version.join("tool"), "project tool\n")?;
+        fs::write(
+            version
+                .parent()
+                .context("backend directory")?
+                .join(".mise.backend.toml"),
+            "short = 'rg'\nfull = 'aqua:BurntSushi/ripgrep'\n",
+        )?;
+        for arguments in [
+            vec!["trust", pin.to_str().context("fixture pin")?],
+            vec!["ls", "--json"],
+        ] {
+            let output = native
+                .command("mise")
+                .current_dir(&project)
+                .args(arguments)
+                .output()?;
+            ensure!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let native_storage = storage::Mise {
+            data: native.home.join(MISE_DATA),
+            state: native.home.join(".local/state/mise"),
+            cache: native.home.join(".cache/mise"),
+            config: config_directory,
+            global,
+            system: native.scope.path().join(EMPTY_CONFIG),
+            children: storage::DATA_CHILDREN
+                .map(|(_, relative)| native.home.join(MISE_DATA).join(relative)),
+        };
+        let home = platform::home::home().context("native test home")?;
+        let installed = platform::code_environment::Installations {
+            mise: platform::code_environment::Installations::discover(&home)?.mise,
+            data: native.home.join(MISE_DATA),
+            cargo: native.home.join(".cargo"),
+            rustup: native.home.join(".rustup"),
+        };
+        let mut candidate = Scratch::new(&config)?;
+        candidate.snapshot_installations(&native_storage, &installed)?;
+        let source = native.scope.path().join("candidate");
+        fs::create_dir_all(source.join("dot_config/mise"))?;
+        fs::write(
+            source.join("dot_config/mise/config.toml"),
+            "[settings]\nparanoid = true\n",
+        )?;
+        Ok(MiseFixture {
+            native,
+            candidate,
+            source,
+            pin,
+        })
+    }
+
+    #[test]
+    fn candidate_apply_retains_native_project_tools_and_tracking_without_host_writes() -> Result<()>
+    {
+        let fixture = mise_fixture()?;
+        let candidate = &fixture.candidate;
+        let mut ran = false;
+        candidate.apply_with(
+            &fixture.source,
+            Path::new(platform::tool::Tool::Chezmoi.program()),
+            || {
+                ran = true;
+                let preview = candidate
+                    .command("mise")
+                    .args(["prune", "--dry-run"])
+                    .output()?;
+                ensure!(
+                    preview.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&preview.stderr)
+                );
+                assert!(String::from_utf8_lossy(&preview.stderr).contains("rg@15.2.0"));
+                #[cfg(windows)]
+                crate::windows::setup::tools::install_mise(|| candidate.command("mise"))?;
+                #[cfg(not(windows))]
+                {
+                    let mut command = candidate.command("mise");
+                    command.args(["install", "-y"]);
+                    let status = platform::process::mise_install(command)?.status()?;
+                    ensure!(
+                        status.success(),
+                        "fixture installation failed with {status}"
+                    );
+                }
+                Ok(())
+            },
+        )?;
+        assert!(ran);
+        for home in [&candidate.home, &fixture.native.home] {
+            assert_eq!(
+                fs::read_to_string(home.join(MISE_DATA).join("installs/rg/15.2.0/tool"))?,
+                "project tool\n"
+            );
+        }
+        assert!(fixture.pin.is_file());
+        assert_eq!(
+            fs::read_to_string(fixture.native.home.join(MISE_CONFIG))?,
+            "[settings]\nparanoid = false\n"
+        );
+        assert_eq!(
+            fs::read_to_string(candidate.home.join(MISE_CONFIG))?,
+            "[settings]\nparanoid = true\n"
+        );
+        assert!(
+            fs::read_dir(candidate.home.join(".local/state/mise/tracked-configs"))?
+                .next()
+                .is_some()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn candidate_apply_rejects_real_pruning_and_rolls_back_only_scratch() -> Result<()> {
+        let fixture = mise_fixture()?;
+        let candidate = &fixture.candidate;
+        let result = candidate.apply_with(
+            &fixture.source,
+            Path::new(platform::tool::Tool::Chezmoi.program()),
+            || {
+                let status = candidate
+                    .command("mise")
+                    .args(["prune", "--yes"])
+                    .status()?;
+                ensure!(status.success(), "fixture prune failed with {status}");
+                Ok(())
+            },
+        );
+        let error = result.expect_err("pruning must fail the real-host candidate");
+        assert!(
+            format!("{error:#}").contains("candidate apply removed installed tool rg"),
+            "{error:#}"
+        );
+        assert_eq!(
+            fs::read_to_string(candidate.home.join(MISE_CONFIG))?,
+            "[settings]\nparanoid = false\n"
+        );
+        assert_eq!(
+            fs::read_to_string(
+                fixture
+                    .native
+                    .home
+                    .join(MISE_DATA)
+                    .join("installs/rg/15.2.0/tool")
+            )?,
+            "project tool\n"
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.native.home.join(MISE_CONFIG))?,
+            "[settings]\nparanoid = false\n"
+        );
+        assert!(
+            !crate::profiles::Store::scoped(candidate.scope.path())
+                .database
+                .exists()
+        );
+        assert!(fixture.pin.is_file());
+        Ok(())
+    }
 
     #[test]
     fn candidate_cli_configuration_is_explicitly_confined_to_scratch() -> Result<()> {

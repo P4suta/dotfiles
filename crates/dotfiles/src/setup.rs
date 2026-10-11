@@ -68,6 +68,11 @@ pub fn run(source: &Path, config: &Path, step: Step, live: bool) -> Result<()> {
         ),
         "setup requires --live and this host's machine-local native profile"
     );
+    let mut native = native_runner(&context)?;
+    execute(&context, &mut native, step)
+}
+
+pub(crate) fn native_runner(context: &TemplateData) -> Result<Real> {
     let mut native = Real::new(&context.home)?;
     native.directory = Some(context.home.clone());
     native
@@ -96,7 +101,7 @@ pub fn run(source: &Path, config: &Path, step: Step, live: bool) -> Result<()> {
             .environment
             .push(("MISE_JOBS".into(), jobs.to_string().into()));
     }
-    execute(&context, &mut native, step)
+    Ok(native)
 }
 
 /// Packaged tools the setup steps of the rendered scripts require.
@@ -619,7 +624,7 @@ fn tools(context: &TemplateData, runner: &mut impl Runner, upgrade: bool) -> Res
     if upgrade && context.profile != Profile::Mac && runner.available(Tool::Nix) {
         optional(runner, Tool::Nix, &["profile", "upgrade", "--all"]);
     }
-    checked(runner, Tool::Mise, &args(&["install", "-y"]))?;
+    install_mise(runner)?;
     if !context.home.join(".local/share/atuin/history.db").exists() {
         optional(runner, Tool::Atuin, &["import", "auto"]);
     }
@@ -630,6 +635,11 @@ fn tools(context: &TemplateData, runner: &mut impl Runner, upgrade: bool) -> Res
     } else {
         services(context, runner)?;
     }
+    Ok(())
+}
+
+pub(crate) fn install_mise(runner: &mut impl Runner) -> Result<()> {
+    checked(runner, Tool::Mise, &args(&["install", "-y"]))?;
     Ok(())
 }
 
@@ -1106,6 +1116,36 @@ mod tests {
         fn run_installed(&mut self, _: &Path, _: &[OsString]) -> Result<crate::runtime::Reply> {
             unreachable!()
         }
+    }
+
+    #[test]
+    fn native_tool_installation_keeps_the_setup_environment() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let context = TemplateData {
+            source: scope.path().into(),
+            home: scope.path().into(),
+            profile: Profile::Linux,
+            data: serde_json::json!({"platforms": {"linux": {"mise": {"jobs": 3}}}}),
+        };
+        let runner = native_runner(&context)?;
+        let command = runner.command(Tool::Mise);
+        for (name, expected) in [
+            ("KERL_BUILD_DOCS", "no"),
+            (
+                "KERL_CONFIGURE_OPTIONS",
+                "--without-javac --without-wx --without-odbc",
+            ),
+            ("MISE_JOBS", "3"),
+        ] {
+            assert!(
+                command.get_envs().any(
+                    |(key, value)| key == name && value == Some(std::ffi::OsStr::new(expected))
+                ),
+                "{name}"
+            );
+        }
+        assert_eq!(command.get_current_dir(), Some(context.home.as_path()));
+        Ok(())
     }
 
     #[test]

@@ -53,3 +53,4 @@
 | [2026-10-11 Read GitHub credentials without mise shims](github-credentials-without-mise-shims.md) | proposed |  |
 | [2026-10-11 Preserve tool versions during application](preserve-tool-versions-during-apply.md) | proposed |  |
 | [2026-10-11 Start mise installations without mise shims](shim-free-mise-installation.md) | proposed |  |
+| [2026-10-11 Verify application with native tool state](verify-apply-with-native-tool-state.md) | proposed |  |

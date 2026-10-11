@@ -277,6 +277,42 @@ pub(crate) fn apply(
     Ok(())
 }
 
+pub(crate) fn apply_profile(
+    destination: &Path,
+    backup: &Path,
+    targets: &[PathBuf],
+    state_file: &Path,
+    apply_files: impl FnOnce() -> Result<()>,
+    verify: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let previous = match fs::read(state_file) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    let result = apply(
+        destination,
+        backup,
+        targets,
+        || {
+            if let Some(bytes) = &previous {
+                fs::write(backup.join("previous-state.boltdb"), bytes)?;
+            }
+            apply_files()
+        },
+        verify,
+    );
+    if let Err(error) = result {
+        if let Some(bytes) = previous {
+            crate::runtime::replace(state_file, &bytes, false)?;
+        } else if state_file.exists() {
+            fs::remove_file(state_file)?;
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -485,6 +521,51 @@ mod tests {
             );
             assert!(backup.join("manifest.json").is_file());
         }
+    }
+
+    #[test]
+    fn profile_failure_restores_existing_state_or_removes_new_state() -> Result<()> {
+        for existing_state in [false, true] {
+            for apply_fails in [false, true] {
+                let scope = tempfile::tempdir()?;
+                let destination = scope.path().join("home");
+                fs::create_dir(&destination)?;
+                fs::write(destination.join("config"), "original configuration")?;
+                let state = scope.path().join("state.boltdb");
+                if existing_state {
+                    fs::write(&state, "original state")?;
+                }
+                let backup = scope.path().join("backup");
+                let result = apply_profile(
+                    &destination,
+                    &backup,
+                    &["config".into()],
+                    &state,
+                    || {
+                        fs::write(destination.join("config"), "candidate configuration")?;
+                        fs::write(&state, "candidate state")?;
+                        ensure!(!apply_fails, "injected apply failure");
+                        Ok(())
+                    },
+                    || anyhow::bail!("injected verification failure"),
+                );
+                assert!(result.is_err());
+                assert_eq!(
+                    fs::read_to_string(destination.join("config"))?,
+                    "original configuration"
+                );
+                if existing_state {
+                    assert_eq!(fs::read_to_string(&state)?, "original state");
+                    assert_eq!(
+                        fs::read_to_string(backup.join("previous-state.boltdb"))?,
+                        "original state"
+                    );
+                } else {
+                    assert!(!state.exists());
+                }
+            }
+        }
+        Ok(())
     }
 
     #[test]

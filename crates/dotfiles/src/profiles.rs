@@ -626,11 +626,6 @@ fn apply_live(
         host_edit_refusal(&changed, config, destination)
     );
     let state_file = store.database.as_path();
-    let previous_state = match fs::read(state_file) {
-        Ok(bytes) => Some(bytes),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => return Err(error.into()),
-    };
     let listed = output(
         chezmoi(root, scope, config, destination).args([
             "managed",
@@ -646,14 +641,12 @@ fn apply_live(
         .into_iter()
         .map(PathBuf::from)
         .collect();
-    let result = crate::transaction::apply(
+    crate::transaction::apply_profile(
         destination,
         backup,
         &targets,
+        state_file,
         || {
-            if let Some(bytes) = &previous_state {
-                fs::write(backup.join("previous-state.boltdb"), bytes)?;
-            }
             execute("apply")?;
             // Scripts can install programs that templates probe for, so render the files again on the resulting machine before verification.
             let status = chezmoi_with(root, store, config, destination)
@@ -687,15 +680,7 @@ fn apply_live(
                 ))
             })
         },
-    );
-    if let Err(error) = result {
-        if let Some(bytes) = previous_state {
-            crate::runtime::replace(state_file, &bytes, false)?;
-        } else if state_file.exists() {
-            fs::remove_file(state_file)?;
-        }
-        return Err(error);
-    }
+    )?;
     println!(
         "Application verified; managed-file backup retained at {}",
         backup.display()
