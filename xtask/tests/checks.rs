@@ -49,6 +49,109 @@ const GATE_COMMENT_CASES: [(&str, &str); 3] = [
     ),
 ];
 
+const FORMATTER_TEST: &str =
+    "the_formatter_gate_rejects_unformatted_rust_and_accepts_real_formatting";
+const FORMATTER_FIXTURE: &str = "DOTFILES_FORMATTER_FIXTURE";
+const FORMATTER_FILE: &str = "src/fixture.rs";
+const FORMATTER_REFUSAL: &str =
+    "rustfmt: src/fixture.rs holds 1 format findings, and the baseline admits 0";
+
+fn formatter_fixture(root: &Path) -> Result<()> {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .context("xtask has a repository parent")?;
+    let source_typos = fs::read(source.join(".typos.toml"))?;
+    let baseline = xtask::lint::Stage::Rustfmt.baseline();
+    let source_baseline = fs::read(source.join(&baseline))?;
+    fs::create_dir_all(root.join("src"))?;
+    fs::create_dir_all(root.join(xtask::lint::BASELINES))?;
+    fs::write(root.join(".typos.toml"), &source_typos)?;
+    let empty_baseline = b"[findings]\n";
+    fs::write(root.join(&baseline), empty_baseline)?;
+    let unformatted = b"pub fn fixture(){println!(\"hello\");}\n";
+    fs::write(root.join(FORMATTER_FILE), unformatted)?;
+    let global = root
+        .parent()
+        .context("the checkout has an owned parent")?
+        .join("global.gitconfig");
+    for arguments in [vec!["init", "--quiet"], vec!["add", FORMATTER_FILE]] {
+        let output = fixture_git::command("git", &global)
+            .current_dir(root)
+            .args(arguments)
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let scope = xtask::lint::tracked(root)?;
+    assert_eq!(scope, [FORMATTER_FILE]);
+    let failure = xtask::lint::check_content(root, &scope, false, Vec::new())
+        .expect_err("the tracked Rust fixture requires formatting");
+    assert_eq!(failure.to_string(), FORMATTER_REFUSAL);
+    platform::report(&failure);
+    let output = xtask::tool::Tool::Rustfmt
+        .command()
+        .current_dir(root)
+        .args([
+            "--edition",
+            "2024",
+            "--color",
+            "never",
+            "--",
+            FORMATTER_FILE,
+        ])
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_ne!(fs::read(root.join(FORMATTER_FILE))?, unformatted);
+    xtask::lint::check_content(root, &scope, false, Vec::new())?;
+    assert_eq!(fs::read(root.join(&baseline))?, empty_baseline);
+    assert_eq!(fs::read(root.join(".typos.toml"))?, source_typos);
+    assert_eq!(fs::read(source.join(&baseline))?, source_baseline);
+    assert_eq!(fs::read(source.join(".typos.toml"))?, source_typos);
+    Ok(())
+}
+
+#[test]
+fn the_formatter_gate_rejects_unformatted_rust_and_accepts_real_formatting() -> Result<()> {
+    if std::env::var(FORMATTER_FIXTURE).is_ok_and(|value| value == FORMATTER_TEST) {
+        let state = std::env::var_os(fixture_process::INCIDENT_STATE)
+            .context("the child fixture owns its incident state")?;
+        let root = Path::new(&state)
+            .parent()
+            .context("the state has an owned parent")?
+            .join("checkout");
+        return formatter_fixture(&root);
+    }
+    let scope = incident_fixture::scope()?;
+    let global = scope.path().join("global.gitconfig");
+    fs::write(&global, "")?;
+    let output = fixture_git::command(std::env::current_exe()?, &global)
+        .args(["--exact", FORMATTER_TEST, "--nocapture"])
+        .env(FORMATTER_FIXTURE, FORMATTER_TEST)
+        .env("DOTFILES_EXPECTED_FAILURE", "")
+        .output()?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    ensure!(output.status.success(), "owned formatter fixture failed");
+    let recorded = skill_ops::incidents(&scope.path().join("state"))?;
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].rule, "tool.failure");
+    assert!(
+        recorded[0]
+            .evidence
+            .iter()
+            .any(|evidence| evidence == FORMATTER_REFUSAL)
+    );
+    incident_fixture::preserve(scope);
+    Ok(())
+}
+
 fn write_comment_fixture(root: &Path, corrected: bool) -> Result<()> {
     let mut files = BTreeMap::<&str, Vec<String>>::new();
     for (path, line, bad, good) in COMMENT_CASES {
