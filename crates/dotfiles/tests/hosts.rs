@@ -1209,6 +1209,7 @@ fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
                 .env("GIT_COMMITTER_EMAIL", "fixture@example.com")
                 .env("HOSTS_FIXTURE_STATUS", status(online))
                 .env("HOSTS_FIXTURE_DOCTOR", doctor)
+                .env("HOSTS_FIXTURE_SPACE", if doctor == "full" { "1" } else { "100000000000" })
                 .env("HOSTS_FIXTURE_STAGES", r#"{"code":0,"real":0,"applied":{"drifted_targets":[".first",".nested/target with spaces"],"verification_error":"fixture verification error"}}"#)
                 .output()?,
         )
@@ -1221,6 +1222,11 @@ fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
     for (online, doctor, action) in [
         (false, "ok", "box is offline on the tailnet"),
         (true, "fail", "run `ssh -o BatchMode=yes box true`"),
+        (
+            true,
+            "full",
+            "box has 1024 bytes free; one more workspace requires",
+        ),
     ] {
         let output = check(online, doctor)?;
         assert!(!output.status.success());

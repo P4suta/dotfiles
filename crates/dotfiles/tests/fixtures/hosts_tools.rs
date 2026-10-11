@@ -15,9 +15,16 @@ fn main() {
             std::process::exit(1);
         }
         "doctor" => println!("{alias}: ready"),
+        "on" if args.iter().any(|argument| {
+            argument.contains("df -Pk") || argument.contains("AvailableFreeSpace")
+        }) =>
+        {
+            println!("{alias}:space")
+        }
         "on" => println!("{alias}:probe"),
         "run" => println!("{alias}:job"),
         "status" if alias.ends_with(":probe") => println!("{alias} finished succeeded"),
+        "status" if alias.ends_with(":space") => println!("{alias} finished succeeded"),
         "status" => {
             let stages = std::env::var("HOSTS_FIXTURE_STAGES")
                 .unwrap_or_else(|_| "{\"code\":0,\"real\":0,\"applied\":{\"drifted_targets\":[],\"verification_error\":null}}".to_owned());
@@ -28,6 +35,15 @@ fn main() {
             }
         }
         "logs" if alias.ends_with(":probe") => {}
+        "logs" if alias.ends_with(":space") => {
+            let free =
+                std::env::var("HOSTS_FIXTURE_SPACE").unwrap_or_else(|_| "100000000000".into());
+            if alias.starts_with("pc:") {
+                println!("{free}");
+            } else {
+                println!("/dev/fixture 0 0 {free} 0% /fixture");
+            }
+        }
         "logs" => {
             let stages = std::env::var("HOSTS_FIXTURE_STAGES")
                 .unwrap_or_else(|_| "{\"code\":0,\"real\":0,\"applied\":{\"drifted_targets\":[],\"verification_error\":null}}".to_owned());

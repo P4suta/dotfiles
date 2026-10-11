@@ -1911,6 +1911,7 @@ fn ready_requires_a_passing_note_for_every_os_family_in_the_ci_matrix() -> Resul
             applied: None,
             inputs: None,
             reused: None,
+            workspace: None,
         };
         git(
             &root,

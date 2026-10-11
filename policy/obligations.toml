@@ -343,6 +343,14 @@ verifier = "kani"
 source = "crates/rules/src/hosts_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_a_workspace_without_free_space() {
+    assert!(production::workspace_fits(production::WORKSPACE_BYTES - 1));
+}
+#[kani::proof]
+fn reject_forgetting_failed_workspace_cleanup() {
+    assert!(!production::workspace_pending(true, false, false));
+}
+#[kani::proof]
 fn reject_reusing_failed_inputs() {
     assert!(production::reuse([false, true, true, true, true]));
 }

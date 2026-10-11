@@ -58,6 +58,20 @@ pub const fn reuse(facts: [bool; 5]) -> bool {
     passed && family && stage && inputs && gate
 }
 
+/// A stage receipt stays pending until the gate records a successful workspace cleanup.
+#[must_use]
+pub const fn workspace_pending(previous: bool, stage: bool, passed: bool) -> bool {
+    stage || (previous && !passed)
+}
+
+pub const WORKSPACE_BYTES: u64 = 12 * 1024 * 1024 * 1024;
+
+/// Leave enough free space for one more gate workspace.
+#[must_use]
+pub const fn workspace_fits(available: u64) -> bool {
+    available >= WORKSPACE_BYTES
+}
+
 /// Admit only an installed active version matching the checkout's exact pin.
 #[must_use]
 pub const fn pinned_tool(facts: [bool; 4]) -> bool {
@@ -164,6 +178,34 @@ mod proofs {
 
     pub const EVIDENCE: [Evidence; 3] = [Evidence::Missing, Evidence::Failed, Evidence::Passed];
     pub const KEYS: [Key; 3] = [Key::New, Key::Same, Key::Changed];
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn workspace_admission_requires_its_free_space() {
+        let available: u64 = kani::any();
+        assert_eq!(workspace_fits(available), available >= WORKSPACE_BYTES);
+        kani::cover!(workspace_fits(available));
+        kani::cover!(!workspace_fits(available));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn workspace_receipts_require_successful_cleanup() {
+        let [previous, stage, passed]: [bool; 3] = kani::any();
+        let pending = workspace_pending(previous, stage, passed);
+        assert_eq!(
+            pending,
+            if stage {
+                true
+            } else if passed {
+                false
+            } else {
+                previous
+            }
+        );
+        kani::cover!(pending && stage && !passed);
+        kani::cover!(!pending && previous && !stage && passed);
+    }
 
     #[cfg(kani)]
     #[kani::proof]
@@ -358,6 +400,13 @@ mod tests {
     use crate::domain::flags;
 
     #[test]
+    fn workspace_capacity_admission_includes_the_exact_boundary() {
+        assert!(!workspace_fits(WORKSPACE_BYTES - 1));
+        assert!(workspace_fits(WORKSPACE_BYTES));
+        assert!(workspace_fits(u64::MAX));
+    }
+
+    #[test]
     fn every_stage_input_and_reuse_combination_preserves_boundaries() {
         for [profile, shared] in flags() {
             assert_eq!(
@@ -367,6 +416,22 @@ mod tests {
         }
         for facts in flags::<5>() {
             assert_eq!(reuse(facts), facts.iter().all(|fact| *fact));
+        }
+    }
+
+    #[test]
+    fn every_workspace_receipt_combination_requires_successful_cleanup() {
+        for [previous, stage, passed] in flags() {
+            assert_eq!(
+                workspace_pending(previous, stage, passed),
+                if stage {
+                    true
+                } else if passed {
+                    false
+                } else {
+                    previous
+                }
+            );
         }
     }
 

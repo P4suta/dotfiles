@@ -24,6 +24,10 @@ const JOB_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const REQUEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const REQUEST_LIMIT: Duration = Duration::from_secs(300);
 const INPUT_SCHEMA: &[u8] = b"hosts-stage-inputs-v1\0";
+const REMOVE_WORKSPACE: &str = "/bin/rm";
+const DISK_SPACE: &str = "/bin/df";
+const BYTES_PER_KIB: u64 = 1024;
+const DF_AVAILABLE_COLUMN: usize = 3;
 const SHARED_INPUTS: [&str; 6] = [
     "mise.toml",
     "mise.lock",
@@ -64,6 +68,8 @@ struct Stages {
     code: i32,
     real: i32,
     applied: Option<crate::host_checks::Applied>,
+    #[serde(default)]
+    workspace: Option<String>,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -108,6 +114,8 @@ pub enum Action {
         skip_code: bool,
         #[arg(long)]
         skip_real: bool,
+        #[arg(long)]
+        workspace: Option<PathBuf>,
     },
     /// Refuse pushed GitHub branches that lack a passing note for an operating system family in their CI matrix.
     /// Reads pre-push input.
@@ -131,10 +139,12 @@ pub fn run(action: Action) -> Result<()> {
             home: native_home,
             skip_code,
             skip_real,
+            workspace,
         } => worker(
             &native_home.map_or_else(home, Ok)?,
             &gate,
             [skip_code, skip_real],
+            workspace.as_deref(),
         ),
         Action::Gate { url, .. } => {
             let mut input = Vec::new();
@@ -268,6 +278,8 @@ pub struct Note {
     pub inputs: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reused: Option<Reused>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<Workspace>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -276,6 +288,265 @@ pub struct Reused {
     pub commit: String,
     pub line: usize,
     pub host: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Workspace {
+    pub path: String,
+    pub job: String,
+    pub reused: [Option<Reused>; 2],
+}
+
+fn pending_workspaces(notes: &[(String, String)]) -> Result<BTreeMap<(String, String), Note>> {
+    let mut pending = BTreeMap::new();
+    for (commit, text) in notes {
+        for line in text.lines().filter(|line| !line.trim().is_empty()) {
+            let note: Note = serde_json::from_str(line).context("malformed hosts note")?;
+            if let Some(workspace) = &note.workspace {
+                let key = (commit.clone(), format!("{}:{}", note.host, workspace.job));
+                if crate::hosts_rules::workspace_pending(
+                    pending.contains_key(&key),
+                    note.stage.is_some(),
+                    note.status == 0,
+                ) {
+                    pending.insert(key, note);
+                } else {
+                    pending.remove(&key);
+                }
+            }
+        }
+    }
+    Ok(pending)
+}
+
+fn cleanup_arguments(family: Family, workspace: &Workspace) -> Result<Vec<String>> {
+    ensure!(
+        workspace
+            .job
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+            && !workspace.job.is_empty(),
+        "invalid workspace job identity"
+    );
+    let path = &workspace.path;
+    ensure!(
+        path.ends_with(&format!("/jobs/{}/workspace", workspace.job))
+            && !path
+                .split('/')
+                .any(|component| matches!(component, "." | "..")),
+        "cleanup requires the recorded job's workspace directory"
+    );
+    match family {
+        Family::Linux | Family::Mac => {
+            ensure!(path.starts_with('/'), "workspace path must be absolute");
+            Ok(vec![
+                REMOVE_WORKSPACE.into(),
+                "-rf".into(),
+                "--".into(),
+                path.clone(),
+            ])
+        }
+        Family::Windows => {
+            ensure!(
+                path.starts_with("//")
+                    || path
+                        .split_once(':')
+                        .is_some_and(|(drive, rest)| drive.len() == 1
+                            && drive.chars().all(|letter| letter.is_ascii_alphabetic())
+                            && rest.starts_with('/')),
+                "workspace path must be absolute"
+            );
+            Ok(wrap(
+                family,
+                &format!(
+                    "$ErrorActionPreference = 'Stop'; $workspace = '{}'; if (Test-Path -LiteralPath $workspace) {{ Remove-Item -LiteralPath $workspace -Recurse -Force }}",
+                    path.replace('\'', "''")
+                ),
+            ))
+        }
+    }
+}
+
+fn append_note(root: &Path, commit: &str, note: &Note) -> Result<()> {
+    git(
+        root,
+        &[
+            "notes",
+            "--ref",
+            NOTES,
+            "append",
+            "-m",
+            &serde_json::to_string(note)?,
+            commit,
+        ],
+    )?;
+    Ok(())
+}
+
+fn clean_recorded_workspace(native: &Real, root: &Path, commit: &str, note: &Note) -> Result<()> {
+    let workspace = note
+        .workspace
+        .as_ref()
+        .context("workspace receipt is missing")?;
+    let family = Family::ALL
+        .into_iter()
+        .find(|family| family.name() == note.os)
+        .context("unknown workspace host family")?;
+    let (status, output) = domyjob(
+        native,
+        &note.host,
+        &["on"],
+        &cleanup_arguments(family, workspace)?,
+    )?;
+    ensure!(
+        status == Some(0),
+        "{} {}: cleanup workspace: {output}",
+        note.os,
+        note.host
+    );
+    append_note(
+        root,
+        commit,
+        &Note {
+            host: note.host.clone(),
+            os: note.os.clone(),
+            tree: note.tree.clone(),
+            status: 0,
+            gate: note.gate.clone(),
+            stage: None,
+            applied: None,
+            inputs: None,
+            reused: None,
+            workspace: Some(workspace.clone()),
+        },
+    )
+}
+
+fn disk_arguments(family: Family, home: Option<&Path>) -> Vec<String> {
+    let paths = home.map_or_else(
+        || match family {
+            Family::Windows => ["$env:USERPROFILE".into(), "$env:TEMP".into()],
+            Family::Linux | Family::Mac => ["\"$HOME\"".into(), "\"${TMPDIR:-/tmp}\"".into()],
+        },
+        |home| {
+            [home.to_path_buf(), std::env::temp_dir()].map(|path| {
+                let path = path.to_string_lossy();
+                match family {
+                    Family::Windows => format!("'{}'", path.replace('\'', "''")),
+                    Family::Linux | Family::Mac => format!("'{}'", path.replace('\'', "'\"'\"'")),
+                }
+            })
+        },
+    );
+    let [home, temporary] = paths;
+    let script = match family {
+        Family::Linux | Family::Mac => format!("LC_ALL=C {DISK_SPACE} -Pk {home} {temporary}"),
+        Family::Windows => format!(
+            "$ErrorActionPreference = 'Stop'; @({home}, {temporary}) | ForEach-Object {{ [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($_)).AvailableFreeSpace }}"
+        ),
+    };
+    wrap(family, &script)
+}
+
+fn space_available(family: Family, output: &str) -> Result<u64> {
+    let mut available = None;
+    for line in output.lines() {
+        let value = match family {
+            Family::Windows => line.trim().parse::<u64>().ok(),
+            Family::Linux | Family::Mac => {
+                if let Some(kib) = line
+                    .split_whitespace()
+                    .nth(DF_AVAILABLE_COLUMN)
+                    .and_then(|value| value.parse::<u64>().ok())
+                {
+                    Some(
+                        kib.checked_mul(BYTES_PER_KIB)
+                            .context("free-space byte count overflow")?,
+                    )
+                } else {
+                    None
+                }
+            }
+        };
+        if let Some(value) = value {
+            available = Some(available.map_or(value, |previous: u64| previous.min(value)));
+        }
+    }
+    available.context("host returned no free-space measurement")
+}
+
+fn capacity(native: &Real, family: Family, target: &Target) -> Result<u64> {
+    let (status, output) = match target {
+        Target::Remote(alias) => domyjob(native, alias, &["on"], &disk_arguments(family, None))?,
+        Target::Local(_) => {
+            let arguments = disk_arguments(family, Some(&native.home));
+            let mut command = platform::process::command(&arguments[0]);
+            command.args(&arguments[1..]);
+            let (status, output) = job_output(command, Some(REQUEST_LIMIT))?;
+            (status.code(), output)
+        }
+    };
+    ensure!(
+        status == Some(0),
+        "{}: free-space measurement failed: {output}",
+        target.name()
+    );
+    space_available(family, &output).with_context(|| format!("{}: read free space", target.name()))
+}
+
+fn require_capacity(native: &Real, family: Family, target: &Target) -> Result<()> {
+    let available = capacity(native, family, target)?;
+    ensure!(
+        crate::hosts_rules::workspace_fits(available),
+        "{} has {available} bytes free; one more workspace requires {} bytes",
+        target.name(),
+        crate::hosts_rules::WORKSPACE_BYTES
+    );
+    Ok(())
+}
+
+fn recover_workspaces(native: &Real, root: &Path) -> Result<()> {
+    for ((commit, reference), note) in pending_workspaces(&all_notes(root)?)? {
+        let workspace = note
+            .workspace
+            .as_ref()
+            .context("workspace receipt is missing")?;
+        let family = Family::ALL
+            .into_iter()
+            .find(|family| family.name() == note.os)
+            .context("unknown workspace host family")?;
+        cleanup_arguments(family, workspace)?;
+        let mut status = command(native, Tool::Domyjob);
+        status.args(["status", &reference]);
+        let (exit, status) = job_output(status, Some(REQUEST_LIMIT))?;
+        ensure!(exit.success(), "{reference}: recover job status: {status}");
+        let mut logs = command(native, Tool::Domyjob);
+        logs.args(["logs", &reference]);
+        let (exit, logs) = job_output(logs, Some(REQUEST_LIMIT))?;
+        ensure!(exit.success(), "{reference}: recover job log: {logs}");
+        let failures = record_run(
+            native,
+            root,
+            &commit,
+            &note.tree,
+            &note.gate,
+            &input_hashes(root, &commit, &note.gate)?,
+            &GateRun {
+                family,
+                target: Target::Remote(note.host.clone()),
+                status: outcome(&note.host, &status),
+                output: format!("{reference}\n{status}\n{logs}"),
+                reused: workspace.reused.clone(),
+            },
+        )?;
+        ensure!(
+            !pending_workspaces(&all_notes(root)?)?.contains_key(&(commit, reference)),
+            "workspace recovery failed: {}",
+            failures.join("\n")
+        );
+    }
+    Ok(())
 }
 
 fn input_hashes(root: &Path, commit: &str, gate: &str) -> Result<[String; 2]> {
@@ -773,7 +1044,7 @@ fn remote_gate_stages(family: Family, gate: &str, skipped: [bool; 2]) -> String 
         Family::Linux | Family::Mac => format!("'{}'", gate.replace('\'', "'\"'\"'")),
     };
     let mut worker = format!(
-        "mise x -- cargo run --locked --package dotfiles --bin dotfiles -- hosts worker --gate {quoted}"
+        "mise x -- cargo run --locked --package dotfiles --bin dotfiles -- hosts worker --gate {quoted} --workspace .."
     );
     for (skip, flag) in skipped.into_iter().zip([" --skip-code", " --skip-real"]) {
         if skip {
@@ -810,7 +1081,17 @@ fn remote_gate_stages(family: Family, gate: &str, skipped: [bool; 2]) -> String 
     format!("{github}{bootstrap}")
 }
 
-fn worker(home: &Path, gate: &str, skipped: [bool; 2]) -> Result<()> {
+fn worker(home: &Path, gate: &str, skipped: [bool; 2], workspace: Option<&Path>) -> Result<()> {
+    let workspace = workspace
+        .map(|path| -> Result<_> {
+            let path = platform::paths::canonical(path)?;
+            ensure!(
+                path.join("checkout") == platform::paths::canonical(&std::env::current_dir()?)?,
+                "workspace must own this checkout"
+            );
+            Ok(path.to_string_lossy().replace('\\', "/"))
+        })
+        .transpose()?;
     let code = match if skipped[0] { Ok(()) } else { code(home, gate) } {
         Ok(()) => 0,
         Err(error) => {
@@ -837,7 +1118,8 @@ fn worker(home: &Path, gate: &str, skipped: [bool; 2]) -> Result<()> {
         serde_json::to_string(&Stages {
             code,
             real,
-            applied
+            applied,
+            workspace
         })?
     );
     ensure!(
@@ -1205,7 +1487,7 @@ fn probe(
 ) -> Result<Result<(), String>> {
     let Target::Remote(alias) = target else {
         return Ok(if on_path(native, program) {
-            Ok(())
+            require_capacity(native, family, target).map_err(|error| format!("{error:#}"))
         } else {
             Err(format!(
                 "`{program}` is not on this machine's PATH; apply its dotfiles profile"
@@ -1239,7 +1521,7 @@ fn probe(
         &wrap(family, &format!("{program} --version")),
     )?;
     Ok(if status == Some(0) {
-        Ok(())
+        require_capacity(native, family, target).map_err(|error| format!("{error:#}"))
     } else {
         Err(format!(
             "{alias} has no `{program}` on its login PATH; apply its dotfiles profile"
@@ -1336,18 +1618,13 @@ fn ready_hosts(
     }
 }
 
-pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
-    let root = PathBuf::from(git_text(Path::new("."), &["rev-parse", "--show-toplevel"])?);
-    let clean = git(&root, &["status", "--porcelain", "--untracked-files=all"])?.is_empty();
-    let commit = git_text(&root, &["rev-parse", "HEAD"])?;
-    let tree = git_text(&root, &["rev-parse", "HEAD^{tree}"])?;
-    let required = required(&workflows_at(&root, &commit)?)?;
-    if required == [false; 3] {
-        println!("The CI matrix requires no OS family; nothing to check");
-        return Ok(());
-    }
-    let inputs = input_hashes(&root, &commit, gate)?;
-    let notes = all_notes(&root)?;
+fn reuse_plan(
+    root: &Path,
+    required: [bool; 3],
+    inputs: &[String; 2],
+    gate: &str,
+) -> Result<[[Option<Reused>; 2]; 3]> {
+    let notes = all_notes(root)?;
     let mut reused: [[Option<Reused>; 2]; 3] = Default::default();
     for family in Family::ALL
         .into_iter()
@@ -1358,10 +1635,28 @@ pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
                 reusable(&notes, family, stage, &inputs[stage.index()], gate)?;
         }
     }
+    Ok(reused)
+}
+
+pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
+    let root = PathBuf::from(git_text(Path::new("."), &["rev-parse", "--show-toplevel"])?);
+    let clean = git(&root, &["status", "--porcelain", "--untracked-files=all"])?.is_empty();
+    let commit = git_text(&root, &["rev-parse", "HEAD"])?;
+    let tree = git_text(&root, &["rev-parse", "HEAD^{tree}"])?;
+    let required = required(&workflows_at(&root, &commit)?)?;
+    if required == [false; 3] {
+        println!("The CI matrix requires no OS family; nothing to check");
+        return Ok(());
+    }
+    let native = native(home)?;
+    if clean {
+        recover_workspaces(&native, &root)?;
+    }
+    let inputs = input_hashes(&root, &commit, gate)?;
+    let reused = reuse_plan(&root, required, &inputs, gate)?;
     let pending = Family::ALL.map(|family| {
         required[family.index()] && reused[family.index()].iter().any(Option::is_none)
     });
-    let native = native(home)?;
     let hosts = ready_hosts(&native, home, gate, clean, pending)?;
     let snapshot = tempfile::tempdir()?;
     if pending.iter().any(|pending| *pending) {
@@ -1395,7 +1690,8 @@ pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
                                 serde_json::to_string(&Stages {
                                     code: 0,
                                     real: 0,
-                                    applied: None
+                                    applied: None,
+                                    workspace: None
                                 })?
                             ),
                             reused,
@@ -1430,7 +1726,7 @@ pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
     });
     let mut failed = Vec::new();
     for run in runs {
-        match run.and_then(|run| record_run(&root, &commit, &tree, gate, &inputs, &run)) {
+        match run.and_then(|run| record_run(&native, &root, &commit, &tree, gate, &inputs, &run)) {
             Ok(failures) => failed.extend(failures),
             Err(error) => failed.push(format!("host gate: {error:#}")),
         }
@@ -1449,14 +1745,7 @@ struct GateRun {
 }
 
 /// Appends the note of one finished gate to the commit, returning the failure to report when the gate didn't pass.
-fn record_run(
-    root: &Path,
-    commit: &str,
-    tree: &str,
-    gate: &str,
-    inputs: &[String; 2],
-    run: &GateRun,
-) -> Result<Vec<String>> {
+fn reported(run: &GateRun) -> Result<(Stages, Option<Workspace>)> {
     let GateRun {
         family,
         target,
@@ -1466,12 +1755,12 @@ fn record_run(
     } = run;
     let Some(status) = *status else {
         eprintln!("{output}");
-        return Ok(vec![format!(
+        bail!(
             "{} {}: the job did not finish; inspect it with `domyjob ls {}` before rerunning",
             family.name(),
             target.name(),
             target.name()
-        )]);
+        );
     };
     let reports: Vec<_> = output
         .lines()
@@ -1486,12 +1775,54 @@ fn record_run(
         );
     };
     let report: Stages = serde_json::from_str(report).context("malformed host stage report")?;
+    let workspace = if let (Target::Remote(alias), Some(path)) = (target, &report.workspace) {
+        let prefix = format!("{alias}:");
+        let job = output
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix(&prefix)
+                    .and_then(|text| text.split_whitespace().next())
+            })
+            .context("workspace job identity is missing")?;
+        let workspace = Workspace {
+            path: path.clone(),
+            job: job.to_owned(),
+            reused: reused.clone(),
+        };
+        cleanup_arguments(*family, &workspace)?;
+        Some(workspace)
+    } else {
+        None
+    };
     let statuses = [report.code, report.real];
     ensure!(
         (status == 0) == statuses.iter().all(|status| *status == 0),
         "the job status disagrees with its stage report"
     );
+    Ok((report, workspace))
+}
+
+fn record_run(
+    native: &Real,
+    root: &Path,
+    commit: &str,
+    tree: &str,
+    gate: &str,
+    inputs: &[String; 2],
+    run: &GateRun,
+) -> Result<Vec<String>> {
+    let (report, workspace) = reported(run)?;
+    let GateRun {
+        family,
+        target,
+        output,
+        reused,
+        ..
+    } = run;
+    let statuses = [report.code, report.real];
     let mut failures = Vec::new();
+    let mut recorded = true;
+    let mut receipt = None;
     if reused[1].is_none()
         && let Some(applied) = &report.applied
     {
@@ -1503,7 +1834,7 @@ fn record_run(
             reuse.is_none() || status == 0,
             "a reused stage reported failure"
         );
-        let note = serde_json::to_string(&Note {
+        let note = Note {
             host: target.name().to_owned(),
             os: family.name().to_owned(),
             tree: tree.to_owned(),
@@ -1516,11 +1847,10 @@ fn record_run(
             },
             inputs: Some(inputs[stage.index()].clone()),
             reused: reuse.clone(),
-        })?;
-        if let Err(error) = git(
-            root,
-            &["notes", "--ref", NOTES, "append", "-m", &note, commit],
-        ) {
+            workspace: workspace.clone(),
+        };
+        if let Err(error) = append_note(root, commit, &note) {
+            recorded = false;
             failures.push(format!(
                 "{} {} {}: record note: {error:#}",
                 family.name(),
@@ -1528,6 +1858,7 @@ fn record_run(
                 stage.name()
             ));
         }
+        receipt = Some(note);
         if let Some(reuse) = reuse {
             println!(
                 "{} {} {}: reused {}:{}",
@@ -1552,6 +1883,20 @@ fn record_run(
                 stage.name()
             ));
         }
+    }
+    if recorded
+        && workspace.is_some()
+        && let Some(receipt) = receipt
+    {
+        let cleanup = clean_recorded_workspace(native, root, commit, &receipt);
+        if cleanup.is_err() {
+            failures.push(format!(
+                "{} {}: workspace cleanup is pending",
+                family.name(),
+                target.name()
+            ));
+        }
+        platform::cleanup::report(cleanup, "remove the recorded host workspace");
     }
     if !failures.is_empty() {
         eprintln!("{output}");
@@ -1597,6 +1942,86 @@ fn run_gate(
 #[cfg(test)]
 mod job_tests {
     use super::*;
+
+    #[test]
+    fn workspace_receipts_keep_passed_failed_and_interrupted_jobs_pending() -> Result<()> {
+        let record = |stage: Option<&str>, status| {
+            serde_json::json!({
+            "host":"box","os":"linux","tree":"tree","gate":"just check","status":status,
+            "stage":stage,"workspace":{"path":"/state/jobs/gate/workspace","job":"gate","reused":[null,null]}
+        }).to_string()
+        };
+        let stages = format!("{}\n{}", record(Some("code"), 0), record(Some("real"), 9));
+        let notes = [("commit".into(), stages.clone())];
+        assert_eq!(pending_workspaces(&notes)?.len(), 1);
+        let interrupted = [("commit".into(), record(Some("code"), 0))];
+        assert_eq!(pending_workspaces(&interrupted)?.len(), 1);
+        let cleaned = [("commit".into(), format!("{stages}\n{}", record(None, 0)))];
+        assert!(pending_workspaces(&cleaned)?.is_empty());
+        let failed_cleanup = [("commit".into(), format!("{stages}\n{}", record(None, 1)))];
+        assert_eq!(pending_workspaces(&failed_cleanup)?.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn cleanup_addresses_one_workspace_and_preserves_its_job() -> Result<()> {
+        let workspace = Workspace {
+            path: "/state/jobs/gate/workspace".into(),
+            job: "gate".into(),
+            reused: [None, None],
+        };
+        let arguments = cleanup_arguments(Family::Linux, &workspace)?;
+        assert_eq!(
+            arguments,
+            ["/bin/rm", "-rf", "--", "/state/jobs/gate/workspace"]
+        );
+        assert!(
+            cleanup_arguments(
+                Family::Linux,
+                &Workspace {
+                    path: "/state/jobs/gate".into(),
+                    ..workspace
+                }
+            )
+            .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn capacity_uses_the_least_free_volume_and_rejects_missing_or_overflowing_data() -> Result<()> {
+        assert_eq!(
+            space_available(
+                Family::Linux,
+                "Filesystem 1024-blocks Used Available Capacity Mounted\n/dev/home 100 20 80 20% /home\n/dev/tmp 100 90 10 90% /tmp"
+            )?,
+            10 * BYTES_PER_KIB
+        );
+        assert_eq!(
+            space_available(Family::Windows, "host:job finished succeeded\n80000\n10000")?,
+            10000
+        );
+        assert!(space_available(Family::Mac, "no disk data").is_err());
+        assert!(
+            space_available(Family::Linux, &format!("/dev/home 0 0 {} 0% /", u64::MAX)).is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn native_free_space_is_measured_for_home_and_scratch_storage() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let family = Family::ALL
+            .into_iter()
+            .find(|family| family.name() == std::env::consts::OS)
+            .context("native family")?;
+        capacity(
+            &native(scope.path())?,
+            family,
+            &Target::Local("fixture".into()),
+        )?;
+        Ok(())
+    }
 
     fn tree(root: &Path) -> Result<String> {
         git(root, &["add", "."])?;
