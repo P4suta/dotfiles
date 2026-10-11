@@ -1,9 +1,18 @@
 //! Every theme renders from the one palette, and every pair a theme draws text with stays legible.
 
+use anyhow::Result;
 use rules::contrast_rules::LINEAR;
 use serde_json::json;
+use std::fs;
 use std::path::Path;
 use xtask::theme::{check_contrast, contrasts, literals, palette, strays};
+
+#[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
+mod fixture_git;
+
+const GIT_CONTEXT_FIXTURE: &str = "DOTFILES_THEME_GIT_CONTEXT_FIXTURE";
+const GIT_CONTEXT_TEST: &str = "a_prompt_renders_its_fixture_repository_in_a_foreign_git_context";
+const CALLER_BRANCH: &str = "caller-branch";
 
 fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
@@ -52,6 +61,56 @@ fn a_grid_records_each_cell_and_one_changed_color_breaks_the_full_match() {
     assert_eq!(xtask::theme::match_millis(&[], &[]), 0);
     let recolored = xtask::theme::grid(b"\x1b[38;2;192;202;246mab\x1b[0m\nc");
     assert!(xtask::theme::match_millis(&golden, &recolored) < 1000);
+}
+
+#[test]
+fn a_prompt_renders_its_fixture_repository_in_a_foreign_git_context() -> Result<()> {
+    if std::env::var_os(GIT_CONTEXT_FIXTURE).is_some() {
+        let dump = json!({
+            ".config/starship.toml": {"contents": r#"
+format = "$directory|$git_branch"
+add_newline = false
+[directory]
+format = "$path"
+[git_branch]
+format = "$branch"
+"#}
+        });
+        let rendered = xtask::theme::grids(root(), "fixture", &dump)?;
+        assert_eq!(
+            rendered,
+            [(
+                "fixture-starship.grid".to_owned(),
+                xtask::theme::grid(b"project|main")
+            )]
+        );
+        return Ok(());
+    }
+    let scope = tempfile::tempdir()?;
+    let caller = scope.path().join("caller");
+    fs::create_dir(&caller)?;
+    let status = fixture_git::command("git", &scope.path().join("global.gitconfig"))
+        .current_dir(&caller)
+        .args(["init", "--quiet", "--initial-branch", CALLER_BRANCH])
+        .status()?;
+    assert!(status.success(), "initialize the caller repository");
+    let output = fixture_git::command(
+        std::env::current_exe()?,
+        &scope.path().join("global.gitconfig"),
+    )
+    .current_dir(scope.path())
+    .args([GIT_CONTEXT_TEST, "--exact", "--nocapture"])
+    .env(GIT_CONTEXT_FIXTURE, "1")
+    .env("GIT_DIR", caller.join(".git"))
+    .env("GIT_WORK_TREE", &caller)
+    .output()?;
+    assert!(
+        output.status.success(),
+        "the prompt inherited the caller repository:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
 }
 
 #[test]

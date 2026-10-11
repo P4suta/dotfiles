@@ -141,7 +141,8 @@ fn starship_output(config: &str, scope: &Path) -> Result<Vec<u8>> {
     ensure!(status.success(), "git init failed for the prompt fixture");
     let file = scope.join("starship.toml");
     fs::write(&file, toml::to_string(&table)?)?;
-    let output = crate::tool::external("starship")
+    let output = Tool::Starship
+        .command()
         .current_dir(&project)
         .args([
             "prompt",
