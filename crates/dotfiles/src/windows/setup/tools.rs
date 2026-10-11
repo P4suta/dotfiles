@@ -11,7 +11,10 @@ const PS_MODULES: &[&str] = &["PSFzf"];
 const PSGALLERY_HELPER: &str = include_str!("../../../assets/psgallery.ps1");
 
 pub fn run(scoop_apps: &[String]) -> Result<i32> {
-    provision_mise()?;
+    let token = github_token();
+    let token = token.as_deref();
+
+    install_mise(|| mise(token))?;
     let absent = scoop::absent(scoop_apps);
     if !absent.is_empty() {
         eprintln!("scoop has not installed {}", absent.join(", "));
@@ -25,24 +28,7 @@ pub fn run(scoop_apps: &[String]) -> Result<i32> {
     Ok(0)
 }
 
-pub(crate) fn provision_mise() -> Result<()> {
-    provision_mise_with(&[])
-}
-
-pub(crate) fn provision_mise_with(
-    environment: &[(std::ffi::OsString, std::ffi::OsString)],
-) -> Result<()> {
-    let token = github_token();
-    let token = token.as_deref();
-
-    install_mise(|| {
-        let mut command = mise(token);
-        command.envs(environment.iter().cloned());
-        command
-    })
-}
-
-pub(crate) fn install_mise(mut command: impl FnMut() -> std::process::Command) -> Result<()> {
+fn install_mise(mut command: impl FnMut() -> std::process::Command) -> Result<()> {
     // Installing converges to the reviewed pins, and version changes arrive only as pull requests.
     println!(">>> mise install");
     let mut install = command();

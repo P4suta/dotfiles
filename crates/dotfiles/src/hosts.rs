@@ -89,13 +89,6 @@ pub enum Action {
     /// Verify native provisioning and network access without an SSH agent.
     Real,
     #[command(hide = true)]
-    Toolchain {
-        #[arg(long)]
-        source: PathBuf,
-        #[arg(long)]
-        config: PathBuf,
-    },
-    #[command(hide = true)]
     Worker {
         #[arg(long, default_value = DEFAULT_GATE)]
         gate: String,
@@ -119,26 +112,6 @@ pub fn run(action: Action) -> Result<()> {
         Action::Check { gate } => check(&home()?, &gate),
         Action::Code { gate } => code(&home()?, &gate),
         Action::Real => crate::host_checks::check(&std::env::current_dir()?, &home()?).candidate,
-        Action::Toolchain { source, config } => {
-            ensure!(
-                config.is_absolute() && !crate::canonical(&config)?.starts_with(&source),
-                "setup requires machine-local config outside the public source"
-            );
-            let context = crate::setup::load(&source, &config, &home()?)?;
-            ensure!(
-                context.profile == crate::profiles::native_profile()?,
-                "toolchain setup requires this host's native profile"
-            );
-            let runner = crate::setup::native_runner(&context)?;
-            #[cfg(windows)]
-            crate::windows::setup::tools::provision_mise_with(&runner.environment)?;
-            #[cfg(not(windows))]
-            {
-                let mut runner = runner;
-                crate::setup::install_mise(&mut runner)?;
-            }
-            Ok(())
-        }
         Action::Worker {
             gate,
             home: native_home,
@@ -688,24 +661,7 @@ pub fn remote_gate(family: Family, gate: &str) -> String {
             "export GH_CONFIG_DIR=\"${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}\"; "
         }
     };
-    let storage = match family {
-        Family::Windows => {
-            "$env:DOTFILES_HOST_RUSTUP_HOME = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-Path $env:USERPROFILE .rustup }; $env:DOTFILES_HOST_MISE_DATA_DIR = if ($env:MISE_DATA_DIR) { $env:MISE_DATA_DIR } elseif ($env:XDG_DATA_HOME) { Join-Path $env:XDG_DATA_HOME mise } elseif ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA mise } else { Join-Path $env:USERPROFILE AppData/Local/mise }; $env:DOTFILES_HOST_MISE_STATE_DIR = if ($env:MISE_STATE_DIR) { $env:MISE_STATE_DIR } elseif ($env:XDG_STATE_HOME) { Join-Path $env:XDG_STATE_HOME mise } else { Join-Path $env:USERPROFILE .local/state/mise }; $env:DOTFILES_HOST_MISE_CACHE_DIR = if ($env:MISE_CACHE_DIR) { $env:MISE_CACHE_DIR } elseif ($env:XDG_CACHE_HOME) { Join-Path $env:XDG_CACHE_HOME mise } elseif ($env:TEMP) { Join-Path $env:TEMP mise } else { Join-Path ([IO.Path]::GetTempPath()) mise }; $env:DOTFILES_HOST_MISE_CONFIG_DIR = if ($env:MISE_CONFIG_DIR) { $env:MISE_CONFIG_DIR } elseif ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME mise } else { Join-Path $env:USERPROFILE .config/mise }; $env:DOTFILES_HOST_MISE_GLOBAL_CONFIG_FILE = if ($env:MISE_GLOBAL_CONFIG_FILE) { $env:MISE_GLOBAL_CONFIG_FILE } elseif ($env:MISE_CONFIG_FILE) { $env:MISE_CONFIG_FILE } else { Join-Path $env:DOTFILES_HOST_MISE_CONFIG_DIR config.toml }; $env:DOTFILES_HOST_MISE_SYSTEM_CONFIG_FILE = if ($env:MISE_SYSTEM_CONFIG_FILE) { $env:MISE_SYSTEM_CONFIG_FILE } elseif ($env:MISE_SYSTEM_CONFIG_DIR) { Join-Path $env:MISE_SYSTEM_CONFIG_DIR config.toml } elseif ($env:MISE_SYSTEM_DIR) { Join-Path $env:MISE_SYSTEM_DIR config.toml } else { '/etc/mise/config.toml' }; $env:DOTFILES_HOST_MISE_INSTALLS_DIR = if ($env:MISE_INSTALLS_DIR) { $env:MISE_INSTALLS_DIR } else { Join-Path $env:DOTFILES_HOST_MISE_DATA_DIR installs }; $env:DOTFILES_HOST_MISE_DOWNLOADS_DIR = if ($env:MISE_DOWNLOADS_DIR) { $env:MISE_DOWNLOADS_DIR } else { Join-Path $env:DOTFILES_HOST_MISE_DATA_DIR downloads }; $env:DOTFILES_HOST_MISE_PLUGINS_DIR = if ($env:MISE_PLUGINS_DIR) { $env:MISE_PLUGINS_DIR } else { Join-Path $env:DOTFILES_HOST_MISE_DATA_DIR plugins }; $env:DOTFILES_HOST_MISE_SHIMS_DIR = if ($env:MISE_SHIMS_DIR) { $env:MISE_SHIMS_DIR } else { Join-Path $env:DOTFILES_HOST_MISE_DATA_DIR shims }; "
-        }
-        Family::Linux | Family::Mac => {
-            "export DOTFILES_HOST_RUSTUP_HOME=\"${RUSTUP_HOME:-$HOME/.rustup}\" DOTFILES_HOST_MISE_DATA_DIR=\"${MISE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mise}\" DOTFILES_HOST_MISE_STATE_DIR=\"${MISE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mise}\" DOTFILES_HOST_MISE_CONFIG_DIR=\"${MISE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/mise}\" DOTFILES_HOST_MISE_SYSTEM_CONFIG_FILE=\"${MISE_SYSTEM_CONFIG_FILE:-${MISE_SYSTEM_CONFIG_DIR:-${MISE_SYSTEM_DIR:-/etc/mise}}/config.toml}\"; export DOTFILES_HOST_MISE_GLOBAL_CONFIG_FILE=\"${MISE_GLOBAL_CONFIG_FILE:-${MISE_CONFIG_FILE:-$DOTFILES_HOST_MISE_CONFIG_DIR/config.toml}}\" DOTFILES_HOST_MISE_INSTALLS_DIR=\"${MISE_INSTALLS_DIR:-$DOTFILES_HOST_MISE_DATA_DIR/installs}\" DOTFILES_HOST_MISE_DOWNLOADS_DIR=\"${MISE_DOWNLOADS_DIR:-$DOTFILES_HOST_MISE_DATA_DIR/downloads}\" DOTFILES_HOST_MISE_PLUGINS_DIR=\"${MISE_PLUGINS_DIR:-$DOTFILES_HOST_MISE_DATA_DIR/plugins}\" DOTFILES_HOST_MISE_SHIMS_DIR=\"${MISE_SHIMS_DIR:-$DOTFILES_HOST_MISE_DATA_DIR/shims}\"; "
-        }
-    };
-    let cache = match family {
-        Family::Windows => "",
-        Family::Mac => {
-            "export DOTFILES_HOST_MISE_CACHE_DIR=\"${MISE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/Library/Caches}/mise}\"; "
-        }
-        Family::Linux => {
-            "export DOTFILES_HOST_MISE_CACHE_DIR=\"${MISE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/mise}\"; "
-        }
-    };
-    format!("{github}{storage}{cache}{bootstrap}")
+    format!("{github}{bootstrap}")
 }
 
 fn worker(home: &Path, gate: &str) -> Result<()> {
