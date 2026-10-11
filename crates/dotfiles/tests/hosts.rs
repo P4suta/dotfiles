@@ -223,6 +223,7 @@ fn concurrent_code_gates_reuse_installed_tools_with_independent_writable_state()
         data: fixture.host.join("data"),
         cargo: fixture.host.join(".cargo"),
         rustup: fixture.host.join(".rustup"),
+        kani: fixture.host.join(".kani"),
         cache: fixture.host.join(".cache/dotfiles/hosts"),
     };
     let barrier = std::sync::Barrier::new(CONCURRENT_BUILDS);
@@ -279,6 +280,7 @@ fn code_builds_survive_scratch_cleanup_and_stay_host_local() -> Result<()> {
         data: fixture.host.join("data"),
         cargo: fixture.host.join(".cargo"),
         rustup: fixture.host.join(".rustup"),
+        kani: fixture.host.join(".kani"),
         cache: fixture.host.join(".cache/dotfiles/hosts"),
     };
     let target = |environment: &platform::code_environment::CodeEnvironment| -> Result<PathBuf> {
@@ -334,6 +336,7 @@ fn the_code_environment_owns_mise_after_its_installation_is_removed() -> Result<
             data: fixture.host.join("data"),
             cargo: fixture.host.join(".cargo"),
             rustup: fixture.host.join(".rustup"),
+            kani: fixture.host.join(".kani"),
             cache: fixture.host.join(".cache/dotfiles/hosts"),
         };
         let environment =
@@ -355,6 +358,66 @@ fn the_code_environment_owns_mise_after_its_installation_is_removed() -> Result<
 }
 
 #[test]
+fn code_proofs_reuse_only_the_pinned_kani_bundle_without_host_configuration() -> Result<()> {
+    let fixture = code_fixture()?;
+    let kani = fixture.host.join(".kani");
+    let selected = kani.join("kani-0.68.0");
+    let other = kani.join("kani-0.67.0");
+    for bundle in [&selected, &other] {
+        fs::create_dir_all(bundle)?;
+        fs::write(bundle.join("verifier"), "fixed release")?;
+    }
+    fs::write(kani.join("kani.toml"), "private host settings")?;
+    let tools = fixture.root.join("tools.json");
+    let mut inventory: serde_json::Value = serde_json::from_slice(&fs::read(&tools)?)?;
+    let mut entry = inventory["python"][0].clone();
+    let verifier = fixture
+        .host
+        .join("data/installs/cargo-kani-verifier/0.68.0");
+    fs::create_dir_all(&verifier)?;
+    fs::write(
+        verifier.parent().unwrap().join(".mise.backend.toml"),
+        "short = 'kani-verifier'\nfull = 'cargo:kani-verifier'\n",
+    )?;
+    entry["version"] = "0.68.0".into();
+    entry["requested_version"] = "0.68.0".into();
+    entry["install_path"] = serde_json::json!(verifier);
+    inventory["cargo:kani-verifier"] = serde_json::json!([entry]);
+    fs::write(tools, serde_json::to_vec(&inventory)?)?;
+    let installed = platform::code_environment::Installations {
+        mise: fixture
+            .host
+            .join(format!("mise{}", std::env::consts::EXE_SUFFIX)),
+        data: fixture.host.join("data"),
+        cargo: fixture.host.join(".cargo"),
+        rustup: fixture.host.join(".rustup"),
+        kani,
+        cache: fixture.host.join(".cache/dotfiles/hosts"),
+    };
+    let environment =
+        platform::code_environment::CodeEnvironment::build(&fixture.root, &installed)?;
+    let command = environment.command("kani");
+    let home = command
+        .get_envs()
+        .find_map(|(name, value)| (name == "HOME").then_some(value).flatten())
+        .unwrap();
+    let borrowed = Path::new(home).join(".kani");
+    assert_eq!(
+        fs::read(borrowed.join("kani-0.68.0/verifier"))?,
+        b"fixed release"
+    );
+    assert!(!borrowed.join("kani-0.67.0").exists());
+    assert!(!borrowed.join("kani.toml").exists());
+    drop(environment);
+    assert_eq!(fs::read(selected.join("verifier"))?, b"fixed release");
+    assert_eq!(
+        fs::read(installed.kani.join("kani.toml"))?,
+        b"private host settings"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_code_gate_can_construct_another_isolated_code_gate() -> Result<()> {
     let fixture = code_fixture()?;
     let installed = platform::code_environment::Installations {
@@ -364,6 +427,7 @@ fn a_code_gate_can_construct_another_isolated_code_gate() -> Result<()> {
         data: fixture.host.join("data"),
         cargo: fixture.host.join(".cargo"),
         rustup: fixture.host.join(".rustup"),
+        kani: fixture.host.join(".kani"),
         cache: fixture.host.join(".cache/dotfiles/hosts"),
     };
     let environment =
@@ -504,6 +568,7 @@ fn a_missing_pinned_renderer_installs_only_in_the_candidate_home() -> Result<()>
         data: fixture.host.join("data"),
         cargo: fixture.host.join(".cargo"),
         rustup: fixture.host.join(".rustup"),
+        kani: fixture.host.join(".kani"),
         cache: fixture.host.join(".cache/dotfiles/hosts"),
     };
     let renderer = scratch.renderer(&fixture.root, &storage)?;
@@ -553,6 +618,7 @@ fn the_code_environment_runs_batch_commands_from_powershell() -> Result<()> {
         data: fixture.host.join("data"),
         cargo: fixture.host.join(".cargo"),
         rustup: fixture.host.join(".rustup"),
+        kani: fixture.host.join(".kani"),
         cache: fixture.host.join(".cache/dotfiles/hosts"),
     };
     let environment =
@@ -586,6 +652,7 @@ fn the_code_environment_links_with_the_registered_windows_toolchain() -> Result<
         data: fixture.host.join("data"),
         cargo: fixture.host.join(".cargo"),
         rustup: fixture.host.join(".rustup"),
+        kani: fixture.host.join(".kani"),
         cache: fixture.host.join(".cache/dotfiles/hosts"),
     };
     let environment =
@@ -731,6 +798,23 @@ fn the_ci_matrix_names_the_required_os_families() -> Result<()> {
 
 fn record(os: &str, tree: &str, status: i32) -> String {
     ["code", "real"].map(|stage| format!(r#"{{"host":"h","os":"{os}","tree":"{tree}","status":{status},"gate":"just check","stage":"{stage}"}}"#)).join("\n")
+}
+
+fn candidate_record(root: &Path, os: &str, tree: &str, status: i32) -> Result<String> {
+    let gate = dotfiles::hosts::DEFAULT_GATE;
+    let inputs = dotfiles::hosts::input_hashes(root, "HEAD", gate)?;
+    ["code", "real"]
+        .into_iter()
+        .zip(inputs)
+        .map(|(stage, inputs)| {
+            serde_json::to_string(&serde_json::json!({
+                "host": "fixture", "os": os, "tree": tree, "status": status,
+                "gate": gate, "stage": stage, "inputs": inputs
+            }))
+            .map_err(Into::into)
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(|notes| notes.join("\n"))
 }
 
 #[test]
@@ -1005,7 +1089,7 @@ fn a_push_is_refused_until_every_os_family_note_passes() -> Result<()> {
                 "refs/notes/hosts",
                 "append",
                 "-m",
-                &record(os, tree, status),
+                &candidate_record(root, os, tree, status)?,
                 "HEAD",
             ],
         )?;
@@ -1021,6 +1105,19 @@ fn a_push_is_refused_until_every_os_family_note_passes() -> Result<()> {
         );
     };
     refused("no linux gate result");
+    git(
+        root,
+        &[
+            "notes",
+            "--ref",
+            "refs/notes/hosts",
+            "append",
+            "-m",
+            &record("linux", &tree, 0),
+            "HEAD",
+        ],
+    )?;
+    refused("no linux gate result");
     push_gate(root, "ssh://hub/~/git/project.git", update.as_bytes())?;
     push_gate(
         root,
@@ -1032,6 +1129,21 @@ fn a_push_is_refused_until_every_os_family_note_passes() -> Result<()> {
         github,
         format!("refs/tags/v1 {head} refs/tags/v1 {zero}\n").as_bytes(),
     )?;
+    let wrong_gate = candidate_record(root, "linux", &tree, 0)?
+        .replace(dotfiles::hosts::DEFAULT_GATE, "just check");
+    git(
+        root,
+        &[
+            "notes",
+            "--ref",
+            "refs/notes/hosts",
+            "append",
+            "-m",
+            &wrong_gate,
+            "HEAD",
+        ],
+    )?;
+    refused("no linux gate result");
     note("linux", &tree, 0)?;
     refused("no macos gate result");
     note("macos", "another-tree", 0)?;
@@ -1367,7 +1479,7 @@ fn assert_reuse(
         String::from_utf8_lossy(&profile.stderr)
     );
     let stdout = String::from_utf8(profile.stdout)?;
-    assert!(stdout.contains("linux box code: reused"), "{stdout}");
+    assert!(stdout.contains("linux box code: passed"), "{stdout}");
     assert!(stdout.contains("linux box real: passed"), "{stdout}");
     fs::write(root.join("lib.rs"), "candidate code")?;
     git(root, &["add", "."])?;

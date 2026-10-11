@@ -61,7 +61,7 @@ pub enum Gate {
     /// Refuses a commit whose staged tree a gate changed.
     StagedTreeCheck,
     Renovate,
-    /// Reinstalls tools built from sources a merge changed.
+    /// Reinstalls tools built from sources a commit or merge changed.
     Reinstall,
     /// Runs storage-scout after the event.
     Storage,
@@ -84,7 +84,7 @@ pub struct Configured {
     pub committed: bool,
     /// The storage-scout executable and automatic policy exist.
     pub storage: bool,
-    /// The merge ran in a checkout of this repository.
+    /// The commit or merge ran in a checkout of this repository.
     pub working_copy: bool,
 }
 
@@ -146,7 +146,9 @@ pub fn plan(hook: Hook, configured: Configured) -> Plan {
             .then(Gate::Verification, true)
             .then(Gate::RepositoryLefthook, configured.repository)
             .then(Gate::Renovate, true),
-        Hook::PostCommit => plan.then(Gate::Dotguard, true),
+        Hook::PostCommit => plan
+            .then(Gate::Dotguard, true)
+            .then(Gate::Reinstall, configured.working_copy),
         Hook::PostCheckout => plan
             .then(Gate::RepositoryLefthook, configured.repository)
             .then(Gate::Storage, configured.storage),
@@ -289,6 +291,10 @@ mod proofs {
         );
         assert_eq!(has(Gate::GlobalLefthook), commits && configured.global);
         assert_eq!(
+            has(Gate::Reinstall),
+            configured.working_copy && matches!(hook, Hook::PostCommit | Hook::PostMerge)
+        );
+        assert_eq!(
             has(Gate::RepositoryLefthook),
             configured.repository && !matches!(hook, Hook::PostCommit | Hook::ReferenceTransaction)
         );
@@ -384,6 +390,25 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_commit_refreshes_recorded_tools_after_the_signing_gate() {
+        assert_eq!(
+            plan(
+                Hook::PostCommit,
+                Configured {
+                    working_copy: true,
+                    ..Configured::default()
+                }
+            )
+            .gates(),
+            [Gate::Dotguard, Gate::Reinstall]
+        );
+        assert_eq!(
+            plan(Hook::PostCommit, Configured::default()).gates(),
+            [Gate::Dotguard]
+        );
+    }
 
     #[test]
     #[cfg_attr(miri, ignore = "Miri takes seconds over every plan and outcome")]

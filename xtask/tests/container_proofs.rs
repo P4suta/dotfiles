@@ -7,6 +7,9 @@ use xtask::skill_proofs::{
     container_target_volume, validate_results,
 };
 
+#[path = "support/incident_fixture.rs"]
+mod incident_fixture;
+
 /// Every `*_rules.rs` file under `directory`, as a checkout-relative path with forward slashes.
 fn rule_modules(root: &Path, directory: &Path, found: &mut BTreeSet<String>) {
     for entry in std::fs::read_dir(directory).unwrap() {
@@ -166,13 +169,16 @@ fn miri_batch_results_refuse_missing_changed_duplicate_and_slow_tests() {
 
 #[test]
 fn proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results() -> anyhow::Result<()> {
+    if incident_fixture::run("proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results")? {
+        return Ok(());
+    }
     let expected = ["actual-production-contract"];
     let valid = json!({"verification_results":{"summary":{"status":"completed","executed":1,"failed":0,"successful":1},"results":[{"harness_id":expected[0],"status":"Success","duration_ms":1200,"checks":[{"category":"assertion","status":"Success"},{"category":"cover","status":"Satisfied"},{"category":"cover","status":"Satisfied"}]}]}});
     let mut slow = valid.clone();
     slow["verification_results"]["results"][0]["duration_ms"] = json!(30_001);
-    let error = validate_results(&slow, &expected, false)
-        .unwrap_err()
-        .to_string();
+    let failure = validate_results(&slow, &expected, false).unwrap_err();
+    platform::report(&failure);
+    let error = failure.to_string();
     assert!(
         error.contains("actual-production-contract took 30001 ms"),
         "{error}"
@@ -211,6 +217,64 @@ fn proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results() -> anyhow:
     failed["verification_results"]["results"][0]["status"] = json!("Failure");
     assert!(validate_results(&failed, &expected, false).is_err());
     assert!(validate_results(&valid, &expected, true).is_err());
+    Ok(())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+#[ignore = "the proofs gate runs this test with its pinned Kani installation"]
+fn a_kani_batch_verifies_every_harness_and_rejects_every_counterexample() -> anyhow::Result<()> {
+    let scope = tempfile::tempdir()?;
+    let source = scope.path().join("proof.rs");
+    let flags = BTreeSet::from(["stubbing"]);
+    let names: Vec<_> = (0..=xtask::skill_proofs::KANI_BATCH_SIZE)
+        .map(|index| format!("case_{index}"))
+        .collect();
+    let expected: Vec<_> = names.iter().map(String::as_str).collect();
+    let mut duplicate = expected.clone();
+    *duplicate.last_mut().unwrap() = expected[0];
+    assert!(
+        xtask::skill_proofs::verify_file(&source, scope.path(), &duplicate, false, &flags)
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate proof harness")
+    );
+    let valid: String = names.iter().map(|name| format!("#[kani::proof] fn {name}() {{ let value: bool = kani::any(); assert_eq!(value, !(!value)); kani::cover!(value); kani::cover!(!value); }}\n")).collect();
+    std::fs::write(&source, &valid)?;
+    xtask::skill_proofs::verify_file(&source, scope.path(), &expected, false, &flags)?;
+    let mut missing = expected.clone();
+    *missing.last_mut().unwrap() = "missing";
+    assert!(
+        xtask::skill_proofs::verify_file(&source, scope.path(), &missing, false, &flags).is_err()
+    );
+    std::fs::write(
+        &source,
+        valid.replace("assert_eq!(value, !(!value))", "assert!(value)"),
+    )?;
+    xtask::skill_proofs::verify_file(&source, scope.path(), &expected, true, &flags)?;
+    std::fs::write(&source, "this source cannot compile")?;
+    assert!(
+        xtask::skill_proofs::verify_file(&source, scope.path(), &expected, true, &flags).is_err()
+    );
+    let last = valid.lines().last().unwrap();
+    std::fs::write(
+        &source,
+        format!(
+            "{}\n{last}\n",
+            valid
+                .lines()
+                .take(names.len() - 1)
+                .collect::<Vec<_>>()
+                .join("\n")
+                .replace("assert_eq!(value, !(!value))", "assert!(value)")
+        ),
+    )?;
+    assert!(
+        xtask::skill_proofs::verify_file(&source, scope.path(), &expected, true, &flags).is_err()
+    );
+    assert!(
+        xtask::skill_proofs::verify_file(&source, scope.path(), &expected, false, &flags).is_err()
+    );
     Ok(())
 }
 

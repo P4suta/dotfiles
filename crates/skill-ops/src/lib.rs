@@ -1729,6 +1729,17 @@ pub fn record_native_failure(
         })
         .unwrap_or_default();
     let refusal = platform::refusal::Refusal::find(output);
+    let report = if refusal
+        .as_ref()
+        .is_some_and(|refusal| refusal.rule == incident_rules::MAINTENANCE_PENDING_RULE)
+    {
+        incident_rules::NativeReport::MaintenancePending
+    } else {
+        incident_rules::NativeReport::Failure
+    };
+    if !incident_rules::record_native(report) {
+        return Ok(false);
+    }
     let failed = event["hook_event_name"] == "PostToolUseFailure"
         || event["status"] == "error"
         || event["status"] == "failed"
@@ -2069,9 +2080,6 @@ fn evidence_reproduces(root: &Path, evidence: &str, rule: &str) -> bool {
     else {
         return false;
     };
-    let Ok(target) = tempfile::tempdir() else {
-        return false;
-    };
     let Ok(incident_evidence) = tempfile::tempdir() else {
         return false;
     };
@@ -2080,7 +2088,7 @@ fn evidence_reproduces(root: &Path, evidence: &str, rule: &str) -> bool {
         .current_dir(package)
         .args(["test", "--offline", "--manifest-path"])
         .arg(package.join("Cargo.toml"))
-        .env("CARGO_TARGET_DIR", target.path())
+        .env("CARGO_TARGET_DIR", root.join("target/incident-evidence"))
         .env(INCIDENT_EVIDENCE_ROOT, incident_evidence.path())
         .env("SKILL_OPS_STATE", incident_evidence.path().join("state"))
         .env("DOTFILES_EXPECTED_FAILURE", "counterexample");

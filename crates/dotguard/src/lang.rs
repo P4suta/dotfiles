@@ -282,11 +282,14 @@ pub fn scan(text: &str, mode: Mode) -> Vec<Diagnostic> {
 
 /// The commit message body without the `#` commentary of git and the `--verbose` diff below the scissors line, which would re-flag content that the content gate already passed.
 pub fn commit_message_body(raw: &str, comment_char: char) -> String {
-    raw.lines()
-        .take_while(|l| !l.starts_with(&format!("{comment_char} ------------------------ >8 ")))
-        .filter(|l| !l.starts_with(comment_char))
-        .collect::<Vec<_>>()
-        .join("\n")
+    let lines = {
+        let scissors = format!("{comment_char} ------------------------ >8 ");
+        raw.lines()
+            .take_while(|l| !l.starts_with(&scissors))
+            .filter(|l| !l.starts_with(comment_char))
+            .collect::<Vec<_>>()
+    };
+    lines.join("\n")
 }
 
 /// Render diagnostics for a human, one line each, with the source line beneath.

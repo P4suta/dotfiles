@@ -29,6 +29,47 @@ fn the_cleared_variables_are_exactly_gits_repository_local_variables() {
 }
 
 const FIXTURE_CHILD: &str = "DOTFILES_FIXTURE_GIT_CHILD";
+const DIRECT_CHILD: &str = "DOTFILES_DIRECT_GIT_CHILD";
+
+#[test]
+fn directly_constructed_children_ignore_the_invoking_repository() {
+    if std::env::var_os(DIRECT_CHILD).is_some() {
+        let scope = tempfile::tempdir().unwrap();
+        let global = scope.path().join("gitconfig");
+        fs::write(&global, "").unwrap();
+        let output = fixture_git::constructor("git", &global)
+            .current_dir(scope.path())
+            .args(["init", "--quiet"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(scope.path().join(".git").is_dir());
+        return;
+    }
+    let scope = tempfile::tempdir().unwrap();
+    let output = platform::process::command(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "directly_constructed_children_ignore_the_invoking_repository",
+            "--nocapture",
+        ])
+        .env(DIRECT_CHILD, "1")
+        .env("GIT_DIR", scope.path().join("hook.git"))
+        .env("GIT_INDEX_FILE", scope.path().join("hook-index"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!scope.path().join("hook.git").exists());
+}
 
 /// Stages CRLF text in a fixture repository whose configuration declares no conversion.
 /// It runs only inside the next test.
@@ -180,19 +221,67 @@ fn fixture_git_processes_start_from_the_shared_helper() {
 
 #[test]
 fn tool_processes_never_inherit_a_hooks_repository() {
-    let command = Tool::Cargo.command();
-    let removed: BTreeSet<&OsStr> = command
-        .get_envs()
-        .filter(|(_, value)| value.is_none())
-        .map(|(name, _)| name)
-        .collect();
-    for name in GIT_LOCAL_ENVIRONMENT {
-        assert!(removed.contains(OsStr::new(name)), "{name} is inherited");
+    for command in [
+        Tool::Cargo.command(),
+        platform::process::command("cargo"),
+        platform::tool::external("cargo"),
+        platform::runtime::Real::new(Path::new("fixture-home"))
+            .unwrap()
+            .command_installed(Path::new("fixture-tool")),
+    ] {
+        let removed: BTreeSet<&OsStr> = command
+            .get_envs()
+            .filter(|(_, value)| value.is_none())
+            .map(|(name, _)| name)
+            .collect();
+        for name in GIT_LOCAL_ENVIRONMENT {
+            assert!(removed.contains(OsStr::new(name)), "{name} is inherited");
+        }
     }
 }
 
 #[test]
 fn hook_gates_keep_the_commit_in_progress() {
-    let command = Tool::Lefthook.hook_command();
-    assert_eq!(command.get_envs().count(), 0);
+    const REPOSITORY_CHILD: &str = "DOTFILES_REPOSITORY_GIT_CHILD";
+    if let Some(repository) = std::env::var_os(REPOSITORY_CHILD) {
+        let output = Tool::Git
+            .hook_command()
+            .args(["rev-parse", "--absolute-git-dir"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            platform::paths::canonical(Path::new(String::from_utf8(output.stdout).unwrap().trim()))
+                .unwrap(),
+            platform::paths::canonical(Path::new(&repository)).unwrap()
+        );
+        return;
+    }
+    let scope = tempfile::tempdir().unwrap();
+    let global = scope.path().join("gitconfig");
+    fs::write(&global, "").unwrap();
+    let initialized = fixture_git::command("git", &global)
+        .current_dir(scope.path())
+        .args(["init", "--quiet"])
+        .status()
+        .unwrap();
+    assert!(initialized.success());
+    let git = scope.path().join(".git");
+    let output = platform::process::command(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "hook_gates_keep_the_commit_in_progress",
+            "--nocapture",
+        ])
+        .env(REPOSITORY_CHILD, &git)
+        .env("GIT_DIR", &git)
+        .env("GIT_CONFIG_GLOBAL", &global)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

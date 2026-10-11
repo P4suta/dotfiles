@@ -17,6 +17,9 @@ mise-install *args: trust
 check *args: lint-tools
     mise x -- cargo xtask check {{args}}
 
+push-check: lint-tools
+    mise x -- cargo xtask push-check
+
 check-staged: lint-tools
     mise x -- cargo xtask check --staged
 

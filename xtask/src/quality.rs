@@ -17,6 +17,9 @@ const RUSTSEC_DATABASE: &str = "advisory-db-3157b0e258782691";
 const ADVISORY_ROOT: &str = "advisories";
 const ADVISORY_CLONE_DEPTH: &str = "1";
 const TEMP_ENVIRONMENT: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
+const HOSTS_PUSH_GATE: &str = "mise x -- just hosts gate {1} {2}";
+const CARGO_MANIFEST: &str = "Cargo.toml";
+const CARGO_LOCK: &str = "Cargo.lock";
 
 pub(crate) fn command(root: &Path, tool: Tool, arguments: &[&str]) -> Result<()> {
     run(tool.command(), root, tool.program(), arguments)
@@ -48,6 +51,11 @@ pub fn workflows(root: &Path) -> Result<()> {
         ensure!(findings.is_empty(), "{}", findings.join("\n"));
         Ok(())
     });
+    checks.run("hooks.policy", || {
+        let findings = push_hook_findings(&fs::read_to_string(root.join("lefthook.yml"))?)?;
+        ensure!(findings.is_empty(), "{}", findings.join("\n"));
+        Ok(())
+    });
     checks.run("workflows.actionlint", || {
         run(Tool::Actionlint.command(), root, "actionlint", &[])
     });
@@ -60,6 +68,33 @@ pub fn workflows(root: &Path) -> Result<()> {
         )
     });
     checks.finish()
+}
+
+/// Requires pre-push to admit the canonical hosts evidence without a second validation environment.
+///
+/// # Errors
+///
+/// Returns an error when parsing the hook configuration fails.
+pub fn push_hook_findings(configuration: &str) -> Result<Vec<String>> {
+    use yaml_rust2::YamlLoader;
+    let document = YamlLoader::load_from_str(configuration)?
+        .into_iter()
+        .next()
+        .context("lefthook.yml holds no document")?;
+    let expected = YamlLoader::load_from_str(&format!(
+        "commands:\n  hosts:\n    use_stdin: true\n    run: {HOSTS_PUSH_GATE}\n"
+    ))?
+    .into_iter()
+    .next()
+    .context("the canonical push hook holds a document")?;
+    Ok(if document["pre-push"] == expected {
+        Vec::new()
+    } else {
+        vec![
+            "pre-push must consume the canonical hosts evidence and preserve its ref-update input"
+                .into(),
+        ]
+    })
 }
 
 /// Refusals for a CI workflow that the settings in `policy/github.toml` can't rely on.
@@ -83,6 +118,9 @@ pub fn workflow_findings(workflow: &str, policy: &str) -> Result<Vec<String>> {
         }
     }
     let jobs = document["jobs"].as_hash().context("ci.yml holds no jobs")?;
+    if !proofs_run_on_linux(&document) {
+        found.push("the proofs job must run on Linux, the push gate's proof target".into());
+    }
     let required: Vec<&str> = policy
         .get("ruleset")
         .and_then(|ruleset| ruleset.get("main"))
@@ -166,6 +204,77 @@ pub fn workflow_findings(workflow: &str, policy: &str) -> Result<Vec<String>> {
         }
     }
     Ok(found)
+}
+
+fn proofs_run_on_linux(document: &yaml_rust2::Yaml) -> bool {
+    document["jobs"]["proofs"]["runs-on"]
+        .as_str()
+        .and_then(dotfiles::hosts::label_family)
+        == Some(dotfiles::hosts_rules::Family::Linux)
+}
+
+/// The tracked Cargo manifests that declare independent workspaces.
+///
+/// # Errors
+///
+/// Returns an error when listing or parsing a tracked manifest fails.
+pub fn workspace_manifests(root: &Path) -> Result<Vec<String>> {
+    let mut workspaces = Vec::new();
+    for path in crate::lint::tracked(root)? {
+        if Path::new(&path)
+            .file_name()
+            .is_some_and(|name| name == CARGO_MANIFEST)
+        {
+            let manifest: toml::Table = toml::from_str(&fs::read_to_string(root.join(&path))?)?;
+            if manifest.contains_key("workspace") {
+                workspaces.push(path);
+            }
+        }
+    }
+    ensure!(
+        !workspaces.is_empty(),
+        "the checkout has no tracked Cargo workspace"
+    );
+    workspaces.sort();
+    Ok(workspaces)
+}
+
+/// Validate each workspace's lockfile before building or running its tools.
+///
+/// # Errors
+///
+/// Reports every workspace with a missing or stale lockfile.
+pub fn locked_workspaces(root: &Path) -> Result<()> {
+    let mut checks = crate::checks::Checks::default();
+    for manifest in workspace_manifests(root)? {
+        checks.run(&manifest, || {
+            let path = root.join(&manifest);
+            ensure!(
+                path.with_file_name(CARGO_LOCK).is_file(),
+                "missing {CARGO_LOCK}"
+            );
+            let output = Tool::Cargo
+                .command()
+                .current_dir(root)
+                .args([
+                    "metadata",
+                    "--locked",
+                    "--format-version",
+                    "1",
+                    "--manifest-path",
+                ])
+                .arg(&path)
+                .stdout(Stdio::null())
+                .output()?;
+            ensure!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            Ok(())
+        });
+    }
+    checks.finish()
 }
 
 /// Refuses a dependency of the root workspace that `deny.toml` rejects: an advisory, a yanked release, an unlisted license, or an unknown source.

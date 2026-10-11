@@ -11,9 +11,10 @@ use std::io;
 use std::path::Path;
 
 /// The crates whose sources build the installed tools.
-pub const CRATES: [&str; 8] = [
+pub const CRATES: [&str; 9] = [
     "crates/coderabbit-guard",
     "crates/dotfiles",
+    "crates/dotguard",
     "crates/model",
     "crates/platform",
     "crates/pr-workflow",

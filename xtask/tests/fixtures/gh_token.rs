@@ -27,6 +27,8 @@ fn install() {
     fs::write(fixture_path("GH_FIXTURE_HELD"), "install holds the lock").unwrap();
     let mut child =
         process::isolated_command(fixture_path("GH_FIXTURE_REAL_MISE"), std::env::vars_os())
+            .env("MISE_LOG_LEVEL", "debug")
+            .stderr(File::create(fixture_path("GH_FIXTURE_MISE_LOG")).unwrap())
             .args(["token", "github", "--raw", "github.com"])
             .spawn()
             .unwrap();
@@ -66,6 +68,21 @@ fn reenter(arguments: &[String]) {
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let executable = std::env::current_exe().unwrap();
+    if let Some(trace) = std::env::var_os("GH_FIXTURE_TRACE") {
+        use std::io::Write as _;
+        let mut output = File::options()
+            .create(true)
+            .append(true)
+            .open(trace)
+            .unwrap();
+        writeln!(
+            output,
+            "{} {arguments:?}; PATH length {}",
+            executable.display(),
+            std::env::var("PATH").unwrap().encode_utf16().count()
+        )
+        .unwrap();
+    }
     if executable.file_stem().unwrap() == "dotfiles" {
         assert_eq!(arguments, ["github-token"]);
         let status = github::command(&std::env::var_os("MISE_CREDENTIAL_HOST").unwrap())

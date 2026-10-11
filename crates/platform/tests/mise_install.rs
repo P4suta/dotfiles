@@ -219,6 +219,57 @@ fn an_explicitly_removed_path_is_not_inherited_by_the_installer() -> Result<()> 
     Ok(())
 }
 
+#[test]
+fn installation_paths_remove_duplicates_without_changing_lookup_order() -> Result<()> {
+    let scope = tempfile::tempdir()?;
+    let first = scope.path().join("first");
+    let second = scope.path().join("second");
+    let directories: Vec<_> = (0..1_000).flat_map(|_| [&first, &second]).collect();
+    let mut command = platform::process::command("mise");
+    command.env("PATH", std::env::join_paths(directories)?);
+    let install = platform::process::mise_install(command)?;
+    let path = install
+        .get_envs()
+        .find_map(|(key, value)| (key == "PATH").then_some(value).flatten())
+        .context("PATH")?;
+    assert_eq!(
+        std::env::split_paths(path).collect::<Vec<_>>(),
+        [first, second]
+    );
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+fn an_installer_refuses_a_path_cmd_would_discard_before_starting() -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    use platform::process_rules::CMD_PATH_LIMIT;
+    let scope = tempfile::tempdir()?;
+    let mut directories = Vec::new();
+    let mut path = std::ffi::OsString::new();
+    while path.encode_wide().count() <= CMD_PATH_LIMIT {
+        directories.push(
+            scope
+                .path()
+                .join(format!("{}-{}", directories.len(), "🦀".repeat(64))),
+        );
+        path = std::env::join_paths(&directories)?;
+    }
+    assert!(path.to_string_lossy().chars().count() < CMD_PATH_LIMIT);
+    let mut command = platform::process::command("mise");
+    command.env("PATH", &path);
+    let error = platform::process::mise_install(command).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(
+        error
+            .to_string()
+            .contains(&path.encode_wide().count().to_string())
+    );
+    assert!(error.to_string().contains(&CMD_PATH_LIMIT.to_string()));
+    Ok(())
+}
+
 #[cfg(windows)]
 #[test]
 fn native_windows_shim_names_are_case_insensitive() -> Result<()> {

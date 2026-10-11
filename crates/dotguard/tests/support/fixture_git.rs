@@ -14,6 +14,17 @@ pub fn command(program: impl AsRef<OsStr>, global: &Path) -> Command {
     inheriting(program, global, std::env::vars_os())
 }
 
+/// A fixture Git process that tests the production constructor's repository isolation.
+#[must_use]
+pub fn constructor(program: impl AsRef<OsStr>, global: &Path) -> Command {
+    let mut command = fixture_process::command(program, global.parent().expect("fixture parent"));
+    command
+        .env("GIT_CONFIG_GLOBAL", global)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("XDG_CONFIG_HOME", global.with_extension("config-home"));
+    command
+}
+
 /// Starts `program` from `environment` instead of this process's, so a test varies what a caller exports without mutating state that concurrent tests read.
 /// A commit hook exports its repository through the variables `git rev-parse --local-env-vars` lists, and a caller may pass configuration through other `GIT_CONFIG_*` variables.
 /// The command drops every inherited `GIT_` variable, which covers both.
@@ -24,7 +35,7 @@ pub fn inheriting(
     global: &Path,
     environment: impl IntoIterator<Item = (OsString, OsString)>,
 ) -> Command {
-    let mut command = fixture_process::command(program, global.parent().expect("fixture parent"));
+    let mut command = constructor(program, global);
     let incident_state = command
         .get_envs()
         .find_map(|(name, value)| (name == fixture_process::INCIDENT_STATE).then_some(value))

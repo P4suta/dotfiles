@@ -29,7 +29,11 @@ struct Wrapper {
 
 impl Drop for Wrapper {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.scope);
+        if std::env::var_os("SKILL_OPS_INCIDENT_EVIDENCE_ROOT")
+            .is_none_or(|root| !self.scope.starts_with(root))
+        {
+            platform::cleanup::remove_dir_all(&self.scope);
+        }
     }
 }
 
@@ -45,9 +49,10 @@ impl Wrapper {
 
     fn starting(name: &str, environment: Option<Vec<(OsString, OsString)>>) -> Self {
         let git = wrapper_binary();
-        let scope =
-            std::env::temp_dir().join(format!("dotguard-wrapper-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&scope);
+        let temporary = std::env::var_os("SKILL_OPS_INCIDENT_EVIDENCE_ROOT")
+            .map_or_else(std::env::temp_dir, PathBuf::from);
+        let scope = temporary.join(format!("dotguard-wrapper-{}-{name}", std::process::id()));
+        platform::cleanup::remove_dir_all(&scope);
         std::fs::create_dir_all(scope.join("repository")).unwrap();
         let wrapper = Self {
             scope,
@@ -122,7 +127,7 @@ fn text(bytes: &[u8]) -> String {
 #[test]
 fn a_failed_real_push_records_its_rule_status_and_invocation() {
     let wrapper = Wrapper::new("failed-push-observation");
-    let state = wrapper.scope.join("observations");
+    let state = wrapper.scope.join("state");
     let output = wrapper.run_env(
         &["push", "origin", "main"],
         None,

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, ensure};
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 use xtask::profile_rules::Profile;
@@ -9,6 +9,31 @@ use xtask::{profile_snapshot::Combination, profiles};
 
 const COMPLETION_LIMIT: Duration = Duration::from_secs(10);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
+const WINDOWS_SYSTEM_BIN: &str = "System32";
+const UNIX_SHELL_BIN: &str = "/bin";
+
+fn lookup_path(directories: impl IntoIterator<Item = PathBuf>) -> Result<OsString> {
+    let system = if cfg!(windows) {
+        PathBuf::from(std::env::var_os("SystemRoot").context("SystemRoot")?)
+            .join(WINDOWS_SYSTEM_BIN)
+    } else {
+        PathBuf::from(UNIX_SHELL_BIN)
+    };
+    Ok(std::env::join_paths(
+        directories.into_iter().chain([system]),
+    )?)
+}
+
+fn executable(directory: &Path, name: &str) -> std::path::PathBuf {
+    directory.join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
+}
+
+fn real_mise(path: &OsStr) -> Result<std::path::PathBuf> {
+    std::env::split_paths(path)
+        .map(|directory| executable(&directory, "mise"))
+        .find(|candidate| candidate.is_file())
+        .context("real mise")
+}
 
 fn compile_fixture(executable: &Path) -> Result<()> {
     let compiled = platform::process::command("rustc")
@@ -153,14 +178,11 @@ fn mise_uses_a_keyring_login_and_falls_back_when_the_cli_has_no_login() -> Resul
     )?;
     let empty = scope.path().join("empty.toml");
     fs::write(&empty, "")?;
-    let mut paths = vec![bin];
-    paths.extend(std::env::split_paths(
-        &std::env::var_os("PATH").context("PATH")?,
-    ));
-    let path = std::env::join_paths(paths)?;
+    let real_mise = real_mise(&std::env::var_os("PATH").context("PATH")?)?;
+    let path = lookup_path([bin])?;
     for (login, expected) in [("yes", "fixture-keyring-token\n"), ("no", "")] {
         for host in ["github.com", "github.fixture.invalid"] {
-            let mut command = platform::process::command("mise");
+            let mut command = platform::process::command(&real_mise);
             isolated(&mut command, scope.path(), &path)?;
             let output = command
                 .env("MISE_GLOBAL_CONFIG_FILE", &global)
@@ -202,9 +224,6 @@ fn a_credential_lookup_finishes_while_mise_install_holds_the_lock() -> Result<()
     for directory in [&bin, &shims, &installed] {
         fs::create_dir_all(directory)?;
     }
-    let executable = |directory: &Path, name: &str| {
-        directory.join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
-    };
     let mise = executable(&bin, "mise");
     compile_fixture(&mise)?;
     for (directory, name) in [(&shims, "gh"), (&installed, "gh")] {
@@ -212,10 +231,7 @@ fn a_credential_lookup_finishes_while_mise_install_holds_the_lock() -> Result<()
     }
     fs::copy(&mise, runtime(scope.path())?)?;
     let inherited = std::env::var_os("PATH").context("PATH")?;
-    let real_mise = std::env::split_paths(&inherited)
-        .map(|directory| executable(&directory, "mise"))
-        .find(|candidate| candidate.is_file())
-        .context("real mise")?;
+    let real_mise = real_mise(&inherited)?;
     let combination = Combination::all()
         .into_iter()
         .find(|combination| combination.profile == dotfiles::profiles::native_profile().unwrap())
@@ -224,11 +240,7 @@ fn a_credential_lookup_finishes_while_mise_install_holds_the_lock() -> Result<()
     let global = scope.path().join("global.toml");
     let empty = scope.path().join("empty.toml");
     fs::write(&empty, "")?;
-    let path = std::env::join_paths(
-        [bin, shims]
-            .into_iter()
-            .chain(std::env::split_paths(&inherited)),
-    )?;
+    let path = lookup_path([bin, shims])?;
     for (scenario, expected) in [("legacy", false), ("candidate", true)] {
         let state = scope.path().join(scenario);
         fs::create_dir(&state)?;
@@ -256,6 +268,8 @@ fn a_credential_lookup_finishes_while_mise_install_holds_the_lock() -> Result<()
             .env("MISE_GLOBAL_CONFIG_FILE", &global)
             .env("MISE_SYSTEM_CONFIG_FILE", &empty)
             .env("GH_FIXTURE_LOG", state.join("gh.log"))
+            .env("GH_FIXTURE_TRACE", state.join("trace.log"))
+            .env("GH_FIXTURE_MISE_LOG", state.join("mise.log"))
             .env("GH_FIXTURE_LOGIN", "yes")
             .env("GH_FIXTURE_MISE", &mise)
             .env("GH_FIXTURE_REAL_MISE", &real_mise)
@@ -276,8 +290,11 @@ fn a_credential_lookup_finishes_while_mise_install_holds_the_lock() -> Result<()
         );
         ensure!(
             completed == expected && reentered.exists() != expected,
-            "{scenario}: the credential command did not respect the install-lock boundary: {}",
-            fs::read_to_string(&log)?
+            "{scenario}: the credential command did not respect the install-lock boundary: {}\nreal mise: {}\nfixture calls: {}\nmise diagnostics: {}",
+            fs::read_to_string(&log)?,
+            real_mise.display(),
+            fs::read_to_string(state.join("trace.log"))?,
+            fs::read_to_string(state.join("mise.log"))?
         );
         ensure!(status.success(), "{}", fs::read_to_string(&log)?);
         assert_eq!(
@@ -289,6 +306,35 @@ fn a_credential_lookup_finishes_while_mise_install_holds_the_lock() -> Result<()
             "fixture-keyring-token\n"
         );
     }
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+fn credential_fixtures_are_independent_of_an_over_limit_parent_path() -> Result<()> {
+    use platform::process_rules::CMD_PATH_LIMIT;
+    let scope = tempfile::tempdir()?;
+    let inherited = std::env::var_os("PATH").context("PATH")?;
+    let mut paths: Vec<_> = std::env::split_paths(&inherited).collect();
+    let mut path = std::env::join_paths(&paths)?;
+    while path.to_string_lossy().encode_utf16().count() <= CMD_PATH_LIMIT {
+        paths.push(scope.path().join(format!("unrelated-{}", paths.len())));
+        path = std::env::join_paths(&paths)?;
+    }
+    let output = platform::process::command(std::env::current_exe()?)
+        .args([
+            "--exact",
+            "a_credential_lookup_finishes_while_mise_install_holds_the_lock",
+            "--nocapture",
+        ])
+        .env("PATH", path)
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     Ok(())
 }
 

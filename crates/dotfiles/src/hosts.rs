@@ -16,7 +16,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 
 pub const NOTES: &str = "refs/notes/hosts";
 const STATE: &str = ".local/state/hosts";
-const DEFAULT_GATE: &str = "just check";
+pub const DEFAULT_GATE: &str = "just push-check";
 const STAGE_REPORT: &str = "DOTFILES_HOST_STAGES ";
 const CODE_SHELL: &str = "/bin/sh";
 const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
@@ -551,7 +551,12 @@ fn recover_workspaces(native: &Real, root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn input_hashes(root: &Path, commit: &str, gate: &str) -> Result<[String; 2]> {
+/// Hashes the committed inputs of the code and real stages for `gate`.
+///
+/// # Errors
+///
+/// Returns an error when reading or parsing the committed tree fails.
+pub fn input_hashes(root: &Path, commit: &str, gate: &str) -> Result<[String; 2]> {
     let listing = git(root, &["ls-tree", "-r", "-z", commit])?;
     let mut hashes = [Sha256::new(), Sha256::new()];
     for hash in &mut hashes {
@@ -573,7 +578,9 @@ fn input_hashes(root: &Path, commit: &str, gate: &str) -> Result<[String; 2]> {
         let path = std::str::from_utf8(path)?;
         let selected = crate::hosts_rules::stage_inputs(
             path.starts_with("home/"),
-            SHARED_INPUTS.contains(&path),
+            SHARED_INPUTS.contains(&path)
+                || path.starts_with("crates/")
+                || matches!(path, "Cargo.toml" | "Cargo.lock" | ".cargo/config.toml"),
         );
         for (hash, selected) in hashes.iter_mut().zip(selected) {
             if selected {
@@ -653,6 +660,14 @@ fn all_notes(root: &Path) -> Result<Vec<(String, String)>> {
 ///
 /// Returns an error when a line holds no valid note or names an unknown OS family.
 pub fn evidence(notes: &str, tree: &str) -> Result<[Evidence; 3]> {
+    scoped_evidence(notes, tree, |_| true)
+}
+
+fn scoped_evidence(
+    notes: &str,
+    tree: &str,
+    accepts: impl Fn(&Note) -> bool,
+) -> Result<[Evidence; 3]> {
     let mut evidence = [[Evidence::Missing; 2]; 3];
     for line in notes.lines().filter(|line| !line.trim().is_empty()) {
         let note: Note = serde_json::from_str(line).context("malformed hosts note")?;
@@ -663,7 +678,11 @@ pub fn evidence(notes: &str, tree: &str) -> Result<[Evidence; 3]> {
         let index = family.index();
         if let Some(stage) = note.stage {
             let previous = &mut evidence[index][stage.index()];
-            *previous = record(*previous, note.tree == tree, note.status == 0);
+            *previous = record(
+                *previous,
+                note.tree == tree && accepts(&note),
+                note.status == 0,
+            );
         }
     }
     Ok(evidence.map(crate::hosts_rules::stages))
@@ -761,9 +780,15 @@ pub(crate) fn admission(repository: &Path, commit: &str) -> Result<Verdict> {
     }
     let tree = git_text(repository, &["rev-parse", &format!("{commit}^{{tree}}")])?;
     let required = required(&workflows_at(repository, &commit)?)?;
+    let inputs = input_hashes(repository, &commit, DEFAULT_GATE)?;
     Ok(admit(
         required,
-        evidence(&note(repository, &commit)?, &tree)?,
+        scoped_evidence(&note(repository, &commit)?, &tree, |note| {
+            note.stage.is_some_and(|stage| {
+                note.inputs.as_deref() == Some(inputs[stage.index()].as_str())
+                    && (stage == Stage::Real || note.gate == DEFAULT_GATE)
+            })
+        })?,
     ))
 }
 
@@ -2178,12 +2203,12 @@ mod job_tests {
         assert_eq!(first, input_hashes(root, &tree(root)?, DEFAULT_GATE)?);
         fs::write(root.join("home/dot_profile"), "second")?;
         let profile = input_hashes(root, &tree(root)?, DEFAULT_GATE)?;
-        assert_eq!(first[0], profile[0]);
+        assert_ne!(first[0], profile[0]);
         assert_ne!(first[1], profile[1]);
         fs::write(root.join("crates/example/src/lib.rs"), "second")?;
         let code = input_hashes(root, &tree(root)?, DEFAULT_GATE)?;
         assert_ne!(profile[0], code[0]);
-        assert_eq!(profile[1], code[1]);
+        assert_ne!(profile[1], code[1]);
         let gate = input_hashes(root, &tree(root)?, "just proofs")?;
         assert_ne!(code[0], gate[0]);
         assert_eq!(code[1], gate[1]);

@@ -150,10 +150,105 @@ fn a_child_refusal_stays_last_and_a_bare_failure_gets_its_own_record() -> Result
         "nothing follows a relayed refusal"
     );
     let failed = refusal(&host.hook(&["post-commit"])?);
+    eprintln!("{}", failed.line());
     assert_eq!(failed.rule, "hook.gate");
     assert_eq!(
         failed.next.as_deref().unwrap_or_default(),
         "dotguard post-commit"
+    );
+    Ok(())
+}
+
+#[test]
+fn post_commit_refreshes_changed_tools_once_and_keeps_failed_installations_stale() -> Result<()> {
+    use platform::build_inputs::{CRATES, content_hash};
+    use platform::freshness::{Built, Embedded, lagging, record_installation, verify};
+
+    let host = Host::new()?;
+    for krate in CRATES {
+        fs::create_dir_all(host.repository().join(krate).join("src"))?;
+    }
+    let library = host.repository().join("crates/platform/src/lib.rs");
+    fs::write(
+        host.repository().join("crates/platform/Cargo.toml"),
+        "[package]\nname = \"platform\"\n",
+    )?;
+    fs::write(&library, "pub fn current() {}\n")?;
+    for built in Built::ALL {
+        record_installation(&host.home(), &host.repository(), built)?;
+    }
+    let stamp = Embedded {
+        revision: "fixture".into(),
+        root: host.repository(),
+        hash: content_hash(&host.repository())?,
+    };
+    let just = host
+        .home()
+        .join(".local/bin")
+        .join(format!("just{}", std::env::consts::EXE_SUFFIX));
+    let status = platform::process::command("rustc")
+        .args(["--edition", "2024"])
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/just.rs"))
+        .args(["-o"])
+        .arg(&just)
+        .status()?;
+    ensure!(status.success(), "fixture just compilation failed");
+    let events = host.scope.path().join("hook-events");
+    let run = |failure: Option<&str>| -> Result<Output> {
+        let mut command = host.command(env!("CARGO_BIN_EXE_dotfiles"));
+        let mut path = vec![just.parent().unwrap().to_path_buf()];
+        path.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+        command
+            .args(["hook", "post-commit"])
+            .env("PATH", std::env::join_paths(path)?)
+            .env("FIXTURE_HOOK_LOG", &events)
+            .env("FIXTURE_BUILD_HASH", content_hash(&host.repository())?);
+        if let Some(failure) = failure {
+            command.env("FIXTURE_INSTALL_FAILURE", failure);
+        } else {
+            command.env_remove("FIXTURE_INSTALL_FAILURE");
+        }
+        Ok(command.output()?)
+    };
+    fs::write(&library, "pub fn changed() {}\n")?;
+    let stale = verify(Built::SkillOps, &stamp, None, Some(&host.repository())).unwrap_err();
+    let stale = stale.downcast_ref::<platform::refusal::Refusal>().unwrap();
+    assert_eq!(stale.rule, "tool.stale");
+    println!("\n{}", stale.line());
+    let refreshed = run(None)?;
+    assert!(
+        refreshed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&refreshed.stderr)
+    );
+    assert_eq!(
+        lagging(&host.home(), &host.repository())?,
+        Vec::<Built>::new()
+    );
+    let installed = "dotguard\ninstall-review-guard\ninstall-pr-workflow\ninstall-skill-ops\n";
+    assert_eq!(fs::read_to_string(&events)?, installed);
+    assert!(run(None)?.status.success());
+    assert_eq!(
+        fs::read_to_string(&events)?,
+        format!("{installed}dotguard\n")
+    );
+    fs::write(&library, "pub fn changed_again() {}\n")?;
+    let failed = run(Some("install-skill-ops"))?;
+    assert!(failed.status.success());
+    assert!(
+        String::from_utf8_lossy(&failed.stderr)
+            .contains("reinstalling tools built from changed sources failed")
+    );
+    assert_eq!(
+        lagging(&host.home(), &host.repository())?,
+        [Built::SkillOps]
+    );
+    assert!(run(None)?.status.success());
+    assert_eq!(
+        lagging(&host.home(), &host.repository())?,
+        Vec::<Built>::new()
     );
     Ok(())
 }

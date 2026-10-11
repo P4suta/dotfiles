@@ -837,6 +837,8 @@ fn issue_bodies_pass_the_checker_before_gh_publishes_them() -> Result<()> {
                 && stderr.contains("pr-workflow issue check"),
             "{stderr}"
         );
+        assert_eq!(refusal(&output)["rule"], "pr.failed");
+        eprintln!("{}", stderr.lines().last().unwrap_or_default());
         let log = if refused.log.try_exists()? {
             refused.log()?
         } else {
@@ -1912,10 +1914,18 @@ fn ready_requires_a_passing_note_for_every_os_family_in_the_ci_matrix() -> Resul
             os: os.to_owned(),
             tree: tree.clone(),
             status,
-            gate: "just check".to_owned(),
+            gate: dotfiles::hosts::DEFAULT_GATE.to_owned(),
             stage,
             applied: None,
-            inputs: None,
+            inputs: stage.map(|stage| {
+                let index = match stage {
+                    Code => 0,
+                    Real => 1,
+                };
+                dotfiles::hosts::input_hashes(&root, "HEAD", dotfiles::hosts::DEFAULT_GATE).unwrap()
+                    [index]
+                    .clone()
+            }),
             reused: None,
             workspace: None,
         };

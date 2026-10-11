@@ -5,6 +5,9 @@ use std::path::Path;
 use xtask::benchmarks::{FUNCTIONS, Measured, budgets, coverage, measured};
 use xtask::obligations::{parse_baselines, parse_manifest};
 
+#[path = "support/incident_fixture.rs"]
+mod incident_fixture;
+
 fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
 }
@@ -47,7 +50,13 @@ fn every_summary_line_yields_its_instructions_and_heap_peak() {
 }
 
 #[test]
-fn a_raised_ceiling_a_missing_measurement_and_an_unrecorded_improvement_all_fail() {
+fn a_raised_ceiling_a_missing_measurement_and_an_unrecorded_improvement_all_fail()
+-> anyhow::Result<()> {
+    if incident_fixture::run(
+        "a_raised_ceiling_a_missing_measurement_and_an_unrecorded_improvement_all_fail",
+    )? {
+        return Ok(());
+    }
     let baselines = parse_baselines(
         "[[metric]]\nmetric = \"ir\"\nbench = \"scan\"\nexact = 100\n[[metric]]\nmetric = \"heap-peak\"\nbench = \"scan\"\nexact = 50\n[[metric]]\nmetric = \"binary-size\"\nexact = 1000\n",
     )
@@ -75,6 +84,7 @@ fn a_raised_ceiling_a_missing_measurement_and_an_unrecorded_improvement_all_fail
         refusals.iter().all(|refusal| refusal.contains("record")),
         "{refusals:?}"
     );
+    platform::report(&anyhow::anyhow!(refusals.join("\n")));
     assert_eq!(budgets(&baselines, &holds, 1001).len(), 1);
     assert_eq!(
         budgets(&baselines, &holds, 999).len(),
@@ -91,6 +101,7 @@ fn a_raised_ceiling_a_missing_measurement_and_an_unrecorded_improvement_all_fail
         1000,
     );
     assert_eq!(missing.len(), 3, "{missing:?}");
+    Ok(())
 }
 
 #[test]

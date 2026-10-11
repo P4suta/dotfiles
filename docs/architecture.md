@@ -47,7 +47,7 @@ The plan runs, in order:
    A repository with its own Lefthook configuration first has its mise configuration trusted, because mise runs in paranoid mode and the hook runs that repository's commands anyway.
 8. For `pre-commit`, a refusal when a hook changed the staged tree.
 9. For `pre-push`, the Renovate freshness gate.
-10. For `post-merge`, the reinstallation of tools built from changed sources.
+10. For `post-commit` and `post-merge`, the reinstallation of tools built from changed sources.
 11. For `post-checkout`, `post-merge`, and a committed `reference-transaction`, the storage maintenance notification.
 
 ## Verification on every repository
@@ -64,6 +64,7 @@ The `pre-commit` and `pre-push` hooks refuse a change that adds a gap.
 | Command | Runs |
 | --- | --- |
 | `just check` | The gates a change selects: the lint stages, prose, links, and generated files, the shared skills, the core boundary and the structural catalog, the Rust packages, and the profiles. |
+| `just push-check` | Every check on the native host, plus the complete proof suite on Linux. The hosts gate records these results, and pre-push admits only matching candidate evidence. |
 | `just check-staged` | The pre-commit check: the lint stages over the staged files, then the prose of documents and of the comments `OComment` reads. |
 | `just baselines` | The refusal of a lint baseline under `policy/lint-baselines/` that grew since a base, which CI runs from the merge base. |
 | `just profiles` | Every profile's rendering, an isolated apply and verification, the committed manifests, the ignore and remove audit, and the script input audit. |
@@ -74,6 +75,9 @@ Prose gates check persisted files, comments, Markdown, commit messages, issues, 
 The adapters setup step and `just install-prose` remove retired Claude Code and Codex reply hooks and the OpenCode reply plugin.
 
 The Rust gate of `just check` also runs the obligation closure, which holds `policy/obligations.toml` to the source.
+The workflow gate refuses a pre-push configuration that adds a different validation environment or loses the ref-update input.
+The code stage hashes every checked file, and the real stage also hashes the runtime sources its installation builds.
+An unchanged stage reuses passing evidence, while changed inputs require another run.
 It refuses a rule module without a Kani obligation, a harness outside the listed modules, and a public rule function that no harness mentions and no exemption beside it covers.
 It also refuses a proved function that no production code calls, a pilot whose issue closed without a decision record, and a metric of `policy/baselines.toml` that moved.
 

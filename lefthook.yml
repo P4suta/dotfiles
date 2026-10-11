@@ -12,7 +12,3 @@ pre-push:
     hosts:
       use_stdin: true
       run: mise x -- just hosts gate {1} {2}
-    check:
-      run: mise x -- just check --base origin/main
-    proofs:
-      run: mise x -- just proofs --base origin/main

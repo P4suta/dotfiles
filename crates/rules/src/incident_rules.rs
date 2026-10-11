@@ -1,5 +1,51 @@
 extern crate alloc;
 
+pub const MAINTENANCE_PENDING_RULE: &str = "skill-ops.maintenance-pending";
+
+/// A failed native operation or the checked status of existing maintenance.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeReport {
+    Failure,
+    MaintenancePending,
+}
+
+/// Whether the report observes a new failure instead of an existing incomplete obligation.
+#[must_use]
+pub const fn record_native(report: NativeReport) -> bool {
+    matches!(report, NativeReport::Failure)
+}
+
+#[cfg(any(test, kani))]
+mod native_proofs {
+    use super::*;
+
+    fn spec(report: NativeReport) -> bool {
+        let recorded = record_native(report);
+        assert_eq!(recorded, report != NativeReport::MaintenancePending);
+        recorded
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn native_reports_record_failures_without_recording_pending_maintenance() {
+        let report = if kani::any() {
+            NativeReport::Failure
+        } else {
+            NativeReport::MaintenancePending
+        };
+        let recorded = spec(report);
+        kani::cover!(recorded);
+        kani::cover!(!recorded);
+    }
+
+    #[test]
+    fn every_native_report_keeps_its_incident_decision() {
+        for report in [NativeReport::Failure, NativeReport::MaintenancePending] {
+            spec(report);
+        }
+    }
+}
+
 /// A Git operation that can produce a failure observation.
 #[derive(Clone, Copy, Debug)]
 pub struct Operation {

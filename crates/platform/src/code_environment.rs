@@ -14,6 +14,8 @@ const UNIX_BASE: [&str; 4] = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
 const WINDOWS_GIT: &str = "Git";
 const MISE_CONFIG: &str = "mise.toml";
 const CARGO_BIN: &str = "bin";
+const KANI_HOME: &str = ".kani";
+const KANI_TOOL: &str = "cargo:kani-verifier";
 const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
 const GITHUB_HOSTS: &str = "github.com: {}\n";
 const BACKEND_METADATA: &str = ".mise.backend.toml";
@@ -32,6 +34,7 @@ pub struct Installations {
     pub data: PathBuf,
     pub cargo: PathBuf,
     pub rustup: PathBuf,
+    pub kani: PathBuf,
     pub cache: PathBuf,
 }
 
@@ -65,6 +68,7 @@ impl Installations {
                 .map_or_else(|| home.join(".cargo"), PathBuf::from),
             rustup: std::env::var_os("RUSTUP_HOME")
                 .map_or_else(|| home.join(".rustup"), PathBuf::from),
+            kani: home.join(KANI_HOME),
             cache: std::env::var_os("DOTFILES_HOST_CACHE")
                 .map_or_else(|| home.join(HOST_CACHE), PathBuf::from),
         })
@@ -462,6 +466,14 @@ impl CodeEnvironment {
         );
         let data = home.join(".local/share/mise");
         link_installations(&data, installed, tools)?;
+        if let Some(kani) = tools.get(KANI_TOOL).and_then(|versions| versions.first()) {
+            let bundle = format!("kani-{}", kani.version);
+            let source = installed.kani.join(&bundle);
+            if source.is_dir() {
+                fs::create_dir_all(home.join(KANI_HOME))?;
+                link_entry(&source, &home.join(KANI_HOME).join(bundle))?;
+            }
+        }
         let mut bootstrap = Vec::new();
         if let Some(rust) = tools.get("rust").and_then(|versions| versions.first()) {
             self.set("RUSTUP_TOOLCHAIN", &rust.version);

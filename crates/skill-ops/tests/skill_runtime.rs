@@ -204,7 +204,39 @@ fn fixture_failures_preserve_the_machine_incident_log() -> Result<()> {
         }
         Ok(records)
     }
-    let home = platform::home::home().expect("the machine home");
+    const MACHINE_HOME: &str = "SKILL_OPS_FIXTURE_MACHINE_HOME";
+    if std::env::var_os(MACHINE_HOME).is_none() {
+        let scope = fixture()?;
+        let home = scope.path().join("machine");
+        let incidents = home.join(fixture_process::MACHINE_STATE).join("incidents");
+        fs::create_dir_all(&incidents)?;
+        fs::write(incidents.join("sentinel.json"), "owned foreign incident")?;
+        let output = fixture_process::command(std::env::current_exe()?, scope.path())
+            .args([
+                "--exact",
+                "fixture_failures_preserve_the_machine_incident_log",
+                "--nocapture",
+            ])
+            .env(MACHINE_HOME, &home)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env(
+                fixture_process::INCIDENT_STATE,
+                home.join(fixture_process::MACHINE_STATE),
+            )
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if std::env::var_os(ops::INCIDENT_EVIDENCE_ROOT).is_some() {
+            let _ = scope.keep();
+        }
+        return Ok(());
+    }
+    let home = PathBuf::from(std::env::var_os(MACHINE_HOME).expect("the owned machine home"));
     let machine_state = home.join(fixture_process::MACHINE_STATE);
     let before = snapshot(&machine_state)?;
     let fixture = fixture()?;
@@ -214,6 +246,34 @@ fn fixture_failures_preserve_the_machine_incident_log() -> Result<()> {
     assert_eq!(incidents.len(), 1);
     assert_eq!(incidents[0].rule, "tool.failure");
     assert_eq!(snapshot(&machine_state)?, before);
+    if std::env::var_os(ops::INCIDENT_EVIDENCE_ROOT).is_some() {
+        let _ = fixture.keep();
+    }
+    Ok(())
+}
+
+#[test]
+fn checking_open_incidents_does_not_record_another_failure() -> Result<()> {
+    let fixture = fixture()?;
+    assert!(
+        !run(fixture.path(), &["load", "unknown"], None)?
+            .status
+            .success()
+    );
+    let before = ops::incidents(&fixture.path().join("state"))?;
+    assert_eq!(before.len(), 1);
+    for _ in 0..2 {
+        let output = run(fixture.path(), &["check"], None)?;
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("tool.failure"));
+        let event = json!({"session_id":"maintenance-check", "status":"failed", "tool_response":{"stderr":String::from_utf8_lossy(&output.stderr), "exit_code":1}});
+        assert!(!ops::record_native_failure(
+            &fixture.path().join("state"),
+            "codex",
+            &event
+        )?);
+        assert_eq!(ops::incidents(&fixture.path().join("state"))?, before);
+    }
     if std::env::var_os(ops::INCIDENT_EVIDENCE_ROOT).is_some() {
         let _ = fixture.keep();
     }

@@ -304,7 +304,7 @@ struct Run<'a> {
     arguments: &'a [OsString],
     /// The repository whose own Lefthook configuration runs.
     repository: Option<PathBuf>,
-    /// The checkout of this repository a merge ran in.
+    /// The checkout of this repository a commit or merge ran in.
     working_copy: Option<PathBuf>,
     /// The standard input, read once and passed unchanged to every gate that takes it.
     input: Vec<u8>,
@@ -323,7 +323,7 @@ impl Run<'_> {
     fn configured(&mut self) -> Result<Configured> {
         let home = self.native.home.clone();
         self.repository = lefthook_repository(&mut self.native, self.hook)?;
-        if matches!(self.hook, Hook::PostMerge) {
+        if matches!(self.hook, Hook::PostCommit | Hook::PostMerge) {
             self.working_copy = std::env::current_dir()
                 .ok()
                 .and_then(|directory| crate::freshness::working_copy(&directory));

@@ -177,7 +177,7 @@ fn record_path(home: &Path, built: Built) -> PathBuf {
 }
 
 /// Records the content hash of the sources that produced the installed `built`.
-/// A later apply or merge compares that hash with the checkout.
+/// A later apply, commit, or merge compares that hash with the checkout.
 ///
 /// # Errors
 ///

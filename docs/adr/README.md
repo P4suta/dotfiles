@@ -23,9 +23,9 @@
 | [0017 Normalize line endings to LF on every host and agent write](0017-lf-line-endings-everywhere.md) | accepted |  |
 | [0018 Turn off persistent agent memory in the native client profiles](0018-agent-memory-off.md) | accepted |  |
 | [0019 Recommend the next workflow step from inspected state](0019-state-inspecting-next-action.md) | accepted |  |
-| [0020 Require a passing gate on every operating system family before push](0020-os-family-push-evidence.md) | amended | [2026-10-11](profile-evidence-scope.md) |
+| [0020 Require a passing gate on every operating system family before push](0020-os-family-push-evidence.md) | amended | [2026-10-11](profile-evidence-scope.md), [2026-10-11](source-bound-push-validation.md) |
 | [0021 Check that every agent instruction line has a class](0021-checked-agent-instruction-audit.md) | accepted |  |
-| [0022 Refuse installed tools built from stale sources](0022-refuse-tools-built-from-stale-sources.md) | accepted |  |
+| [0022 Refuse installed tools built from stale sources](0022-refuse-tools-built-from-stale-sources.md) | amended | [2026-10-11](source-bound-push-validation.md) |
 | [0023 Give the repository a layout that shows what it manages](0023-repository-layout-and-target-architecture.md) | accepted |  |
 | [2026-10-05 Reuse the `gh` login for the remote GitHub tool server](github-mcp-uses-the-github-cli-login.md) | accepted |  |
 | [2026-10-06 Report every gate refusal as one structured record](structured-gate-refusals.md) | accepted |  |
@@ -54,3 +54,4 @@
 | [2026-10-11 Preserve tool versions during application](preserve-tool-versions-during-apply.md) | proposed |  |
 | [2026-10-11 Bind profile evidence to repositories that own the profile runtime](profile-evidence-scope.md) | proposed |  |
 | [2026-10-11 Start mise installations without mise shims](shim-free-mise-installation.md) | proposed |  |
+| [2026-10-11 Push the candidate its gates already verified](source-bound-push-validation.md) | accepted |  |

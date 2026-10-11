@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::Path;
-use xtask::quality::workflow_findings;
+use xtask::quality::{push_hook_findings, workflow_findings};
 
 fn repository(path: &str) -> String {
     fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(path)).unwrap()
@@ -36,6 +36,23 @@ jobs:
             esac
           done
 ";
+
+#[test]
+fn pre_push_cannot_diverge_from_the_verified_hosts_gate() {
+    let hook = repository("lefthook.yml");
+    assert_eq!(push_hook_findings(&hook).unwrap(), Vec::<String>::new());
+    assert_eq!(dotfiles::hosts::DEFAULT_GATE, "just push-check");
+    for candidate in [
+        hook.replace("hosts gate {1} {2}", "check"),
+        hook.replace("use_stdin: true", "use_stdin: false"),
+        format!("{hook}\n  scripts:\n    duplicate:\n      runner: bash\n      run: just check\n"),
+    ] {
+        assert_ne!(
+            push_hook_findings(&candidate).unwrap(),
+            Vec::<String>::new()
+        );
+    }
+}
 
 #[test]
 fn the_ci_workflow_provides_what_the_ruleset_requires() {
@@ -78,6 +95,11 @@ fn a_workflow_the_ruleset_cannot_rely_on_is_refused() {
             "suppresses failure",
         ),
         ("just proofs", "cargo run -- proofs", "calls `cargo run`"),
+        (
+            "  proofs:\n    runs-on: ubuntu-latest",
+            "  proofs:\n    runs-on: macos-latest",
+            "the proofs job must run on Linux",
+        ),
         (
             "name: required\n",
             "name: aggregate\n",

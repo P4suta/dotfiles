@@ -20,6 +20,12 @@ fn main() {
         }
         // Fails without a record.
         "post-commit" => {
+            if let Ok(log) = std::env::var("FIXTURE_HOOK_LOG") {
+                let mut events = std::fs::read_to_string(&log).unwrap_or_default();
+                events.push_str("dotguard\n");
+                std::fs::write(log, events).unwrap();
+                return;
+            }
             eprintln!("fixture failure");
             std::process::exit(1);
         }

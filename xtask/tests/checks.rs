@@ -31,11 +31,15 @@ fn empty_and_successful_selections_succeed() -> Result<()> {
 
 #[test]
 fn the_check_command_reports_multiple_selected_gate_failures_in_one_run() -> Result<()> {
-    let scope = tempfile::tempdir()?;
+    let scope = match std::env::var_os(skill_ops::INCIDENT_EVIDENCE_ROOT) {
+        Some(directory) => tempfile::tempdir_in(directory)?,
+        None => tempfile::tempdir()?,
+    };
     let output = fixture_process::command(env!("CARGO_BIN_EXE_xtask"), scope.path())
         .arg("--root")
         .arg(scope.path())
         .args(["check", "--gates", "prose,skills"])
+        .env("DOTFILES_EXPECTED_FAILURE", "")
         .output()?;
     assert!(!output.status.success());
     let stdout = String::from_utf8(output.stdout)?;
@@ -63,6 +67,7 @@ fn the_check_command_reports_multiple_selected_gate_failures_in_one_run() -> Res
         ]
     );
     let stderr = String::from_utf8(output.stderr)?;
+    eprint!("{stderr}");
     let (_, summary) = stderr
         .rsplit_once("selected stages failed:")
         .expect("the final failure summary");
@@ -73,6 +78,9 @@ fn the_check_command_reports_multiple_selected_gate_failures_in_one_run() -> Res
         "skills.adapters:",
     ] {
         assert!(summary.contains(failure), "{stderr}");
+    }
+    if std::env::var_os(skill_ops::INCIDENT_EVIDENCE_ROOT).is_some() {
+        let _ = scope.keep();
     }
     Ok(())
 }

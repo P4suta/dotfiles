@@ -146,26 +146,88 @@ pub fn mise_install(mut command: Command) -> io::Result<MiseInstall> {
     let path = variable(&command, "PATH").unwrap_or_default();
     let mut directories = Vec::new();
     for directory in std::env::split_paths(&path) {
-        if !shim(&directory, &configured) && !shim(&canonical(&directory, &working)?, &configured) {
+        if !directories.contains(&directory)
+            && !shim(&directory, &configured)
+            && !shim(&canonical(&directory, &working)?, &configured)
+        {
             directories.push(directory);
         }
     }
-    command.env(
-        "PATH",
-        std::env::join_paths(directories)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?,
-    );
+    let path = std::env::join_paths(directories)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    #[cfg(windows)]
+    validate_shell_path(&path)?;
+    command.env("PATH", path);
     Ok(MiseInstall(command))
 }
 
-/// A process for `program`, which callers name through a registry or a path they verified.
+#[cfg(windows)]
+fn validate_shell_path(path: &OsStr) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    let code_units = path.encode_wide().count();
+    match crate::process_rules::shell_path(code_units) {
+        crate::process_rules::ShellPath::Usable => Ok(()),
+        crate::process_rules::ShellPath::Discarded => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "installation PATH has {code_units} UTF-16 code units after removing shims and duplicates; cmd discards PATH above {}; shorten the configured tool directories before installing",
+                crate::process_rules::CMD_PATH_LIMIT
+            ),
+        )),
+    }
+}
+
 #[expect(
     clippy::disallowed_methods,
     reason = "the workspace's one process constructor"
 )]
+fn construct<const ISOLATE_REPOSITORY: bool>(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    if ISOLATE_REPOSITORY {
+        for name in GIT_LOCAL_ENVIRONMENT_TEXT.split(' ') {
+            command.env_remove(name);
+        }
+    }
+    command
+}
+
+/// A process for `program`, which callers name through a registry or a path they verified.
 #[must_use]
 pub fn command(program: impl AsRef<OsStr>) -> Command {
-    Command::new(program)
+    construct::<true>(program)
+}
+
+macro_rules! git_local_environment {
+    ($first:literal $(, $name:literal)* $(,)?) => {
+        /// The repository-local variables listed by `git rev-parse --local-env-vars`.
+        pub const GIT_LOCAL_ENVIRONMENT: [&str; [$first $(, $name)*].len()] = [$first $(, $name)*];
+        const GIT_LOCAL_ENVIRONMENT_TEXT: &str = concat!($first $(, " ", $name)*);
+    };
+}
+
+git_local_environment![
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+];
+
+/// A repository operation that explicitly receives the invoking Git context.
+#[must_use]
+pub fn repository_command(program: impl AsRef<OsStr>) -> Command {
+    construct::<false>(program)
 }
 
 /// A process that inherits only the explicitly constructed environment.

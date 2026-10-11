@@ -8,7 +8,7 @@
 verifier = "kani"
 source = "crates/rules/src/process_rules.rs"
 probes = '''
-use production::{InstallPath, install_path};
+use production::{CMD_PATH_LIMIT, InstallPath, ShellPath, install_path, shell_path};
 #[kani::proof]
 fn reject_retaining_a_configured_mise_shim() {
     assert!(install_path([true, false, false]) == InstallPath::Direct);
@@ -16,6 +16,14 @@ fn reject_retaining_a_configured_mise_shim() {
 #[kani::proof]
 fn reject_retaining_a_standard_mise_shim() {
     assert!(install_path([false, true, true]) == InstallPath::Direct);
+}
+#[kani::proof]
+fn reject_discarding_a_path_at_the_command_interpreters_limit() {
+    assert!(shell_path(CMD_PATH_LIMIT) == ShellPath::Discarded);
+}
+#[kani::proof]
+fn reject_retaining_a_path_beyond_the_command_interpreters_limit() {
+    assert!(shell_path(CMD_PATH_LIMIT + 1) == ShellPath::Usable);
 }
 '''
 
@@ -251,6 +259,14 @@ verifier = "kani"
 source = "crates/rules/src/incident_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_recording_existing_maintenance_as_a_native_failure() {
+    assert!(production::record_native(production::NativeReport::MaintenancePending));
+}
+#[kani::proof]
+fn reject_ignoring_an_actual_native_failure() {
+    assert!(!production::record_native(production::NativeReport::Failure));
+}
+#[kani::proof]
 fn reject_ignoring_a_failed_push() {
     assert!(production::signal(production::Operation { push: true, rewrite: false, published: false }, false).is_none());
 }
@@ -363,8 +379,8 @@ fn reject_reusing_failed_inputs() {
     assert!(production::reuse([false, true, true, true, true]));
 }
 #[kani::proof]
-fn reject_profile_changes_invalidating_code() {
-    assert!(production::stage_inputs(true, false)[0]);
+fn reject_reusing_code_after_a_profile_change() {
+    assert!(!production::stage_inputs(true, false)[0]);
 }
 #[kani::proof]
 fn reject_a_missing_real_host_result() {

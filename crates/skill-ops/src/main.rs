@@ -12,6 +12,30 @@ use std::path::{Path, PathBuf};
 /// The largest native hook input the engine reads, 8 MiB.
 const HOOK_INPUT_LIMIT: usize = 8 * 1024 * 1024;
 
+#[derive(Debug)]
+struct MaintenancePending(Refusal);
+
+impl MaintenancePending {
+    fn new(cause: impl Into<String>) -> Self {
+        Self(
+            Refusal::new(
+                ops::incident_rules::MAINTENANCE_PENDING_RULE,
+                cause,
+                "inspect the pending skill maintenance and complete its prevention evidence",
+            )
+            .evidence("the maintenance check observed existing incomplete obligations"),
+        )
+    }
+}
+
+impl std::fmt::Display for MaintenancePending {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0.cause)
+    }
+}
+
+impl std::error::Error for MaintenancePending {}
+
 #[derive(Parser)]
 #[command(about = "Load, observe, analyze, and verify the owner's shared skills locally")]
 struct Cli {
@@ -438,12 +462,13 @@ fn execute(cli: Cli) -> Result<()> {
         }
         Commands::Check => {
             if let Some(open) = session.open_incidents()? {
-                anyhow::bail!("{open}");
+                return Err(MaintenancePending::new(open).into());
             }
-            ensure!(
-                !session.pending()?,
-                "skill maintenance is pending; run skill-ops analyze --out FILE and triage the findings it lists with skill-ops triage --decisions FILE"
-            );
+            if session.pending()? {
+                return Err(MaintenancePending::new(
+                    "skill maintenance is pending; run skill-ops analyze --out FILE and triage the findings it lists with skill-ops triage --decisions FILE"
+                ).into());
+            }
         }
         Commands::Stop => unreachable!("Stop is translated into a checked completion request"),
         Commands::Doctor => session.doctor()?,
@@ -757,7 +782,11 @@ fn main() {
         skill_ops::freshness::require_current(Built::SkillOps).and_then(|()| execute(cli))
     };
     if let Err(error) = result {
-        skill_ops::report(&error);
+        if let Some(pending) = error.downcast_ref::<MaintenancePending>() {
+            eprint!("{}", pending.0.render());
+        } else {
+            skill_ops::report(&error);
+        }
         std::process::exit(1);
     }
 }

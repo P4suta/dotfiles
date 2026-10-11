@@ -4,6 +4,24 @@ pub enum InstallPath {
     Shim,
 }
 
+pub const CMD_PATH_LIMIT: usize = 8_191;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShellPath {
+    Usable,
+    Discarded,
+}
+
+/// Whether cmd retains an inherited PATH of this many UTF-16 code units.
+#[must_use]
+pub const fn shell_path(code_units: usize) -> ShellPath {
+    if code_units <= CMD_PATH_LIMIT {
+        ShellPath::Usable
+    } else {
+        ShellPath::Discarded
+    }
+}
+
 /// Classify a configured shim or a native mise/shims directory before installation.
 #[must_use]
 pub const fn install_path(facts: [bool; 3]) -> InstallPath {
@@ -18,6 +36,40 @@ pub const fn install_path(facts: [bool; 3]) -> InstallPath {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_shell_path(code_units: usize) {
+        assert_eq!(
+            shell_path(code_units) == ShellPath::Usable,
+            code_units < 8_192
+        );
+        assert_eq!(
+            shell_path(code_units) == ShellPath::Discarded,
+            code_units >= 8_192
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn every_shell_path_respects_the_command_interpreters_limit() {
+        let code_units = kani::any();
+        spec_shell_path(code_units);
+        kani::cover!(shell_path(code_units) == ShellPath::Usable);
+        kani::cover!(shell_path(code_units) == ShellPath::Discarded);
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn shell_paths_cover_empty_boundary_and_overflow_lengths() {
+        for code_units in [
+            0,
+            CMD_PATH_LIMIT - 1,
+            CMD_PATH_LIMIT,
+            CMD_PATH_LIMIT + 1,
+            usize::MAX,
+        ] {
+            spec_shell_path(code_units);
+        }
+    }
 
     pub fn spec_install_path(facts: [bool; 3]) {
         let result = install_path(facts);

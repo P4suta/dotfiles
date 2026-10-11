@@ -447,11 +447,7 @@ impl Tool {
     /// A Git hook exports its repository through these variables, and a check's fixture repositories would otherwise write to the hook's real index.
     #[must_use]
     pub fn command(self) -> Command {
-        let mut command = self.hook_command();
-        for name in GIT_LOCAL_ENVIRONMENT {
-            command.env_remove(name);
-        }
-        command
+        crate::process::command(self.program())
     }
 
     /// A chezmoi run that reads the invoking checkout.
@@ -466,28 +462,12 @@ impl Tool {
     /// A process for this program that keeps a Git hook's repository variables.
     #[must_use]
     pub fn hook_command(self) -> Command {
-        crate::process::command(self.program())
+        crate::process::repository_command(self.program())
     }
 }
 
 /// The repository-local variables that `git rev-parse --local-env-vars` lists.
-pub const GIT_LOCAL_ENVIRONMENT: [&str; 15] = [
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_CONFIG",
-    "GIT_CONFIG_PARAMETERS",
-    "GIT_CONFIG_COUNT",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_IMPLICIT_WORK_TREE",
-    "GIT_GRAFT_FILE",
-    "GIT_INDEX_FILE",
-    "GIT_NO_REPLACE_OBJECTS",
-    "GIT_REPLACE_REF_BASE",
-    "GIT_PREFIX",
-    "GIT_SHALLOW_FILE",
-    "GIT_COMMON_DIR",
-];
+pub use crate::process::GIT_LOCAL_ENVIRONMENT;
 
 /// A program chosen at run time rather than from the registry: a consumer command the owner passes through, or a verified vendor installer.
 #[must_use]

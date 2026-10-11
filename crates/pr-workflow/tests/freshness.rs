@@ -5,6 +5,7 @@ use platform::freshness::{
 };
 use platform::refusal::Refusal;
 use platform::stale_rules::{Freshness, Origin, freshness, origin, reinstalls, runs};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -198,6 +199,56 @@ fn the_inputs_cover_every_executable_the_tools_compile_in() -> Result<()> {
     let mut sorted = listed.clone();
     sorted.sort();
     assert_eq!(listed, sorted);
+    Ok(())
+}
+
+#[test]
+fn every_local_dependency_of_an_installed_tool_is_a_build_input() -> Result<()> {
+    let scope = tempfile::tempdir()?;
+    let root = repository();
+    let output = fixture_process::command("cargo", scope.path())
+        .current_dir(&root)
+        .args([
+            "metadata",
+            "--offline",
+            "--no-deps",
+            "--format-version",
+            "1",
+        ])
+        .output()?;
+    assert!(output.status.success());
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let packages = metadata["packages"].as_array().unwrap();
+    let listed = inputs(&root)?;
+    let mut pending = vec!["coderabbit-guard", "pr-workflow", "skill-ops"];
+    let mut visited = BTreeSet::new();
+    while let Some(name) = pending.pop() {
+        if !visited.insert(name) {
+            continue;
+        }
+        let package = packages
+            .iter()
+            .find(|package| package["name"] == name)
+            .unwrap();
+        let manifest = Path::new(package["manifest_path"].as_str().unwrap());
+        let directory = manifest.parent().unwrap();
+        for source in rust_files(directory.join("src"))? {
+            let source = source
+                .strip_prefix(&root)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            assert!(
+                listed.contains(&source),
+                "{name} compiles {source} outside its freshness stamp"
+            );
+        }
+        for dependency in package["dependencies"].as_array().unwrap() {
+            if dependency["kind"].is_null() && dependency["path"].is_string() {
+                pending.push(dependency["name"].as_str().unwrap());
+            }
+        }
+    }
+    assert!(visited.contains("dotguard"));
     Ok(())
 }
 

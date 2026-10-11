@@ -44,11 +44,10 @@ pub const fn stages(evidence: [Evidence; 2]) -> Evidence {
     }
 }
 
-/// Profile files belong to the real stage.
-/// Shared pins and stage adapters affect both stages.
+/// The code stage checks every file, and the real stage checks the profile and its runtime.
 #[must_use]
 pub const fn stage_inputs(profile: bool, shared: bool) -> [bool; 2] {
-    [!profile || shared, profile || shared]
+    [true, profile || shared]
 }
 
 /// Reuse only a passing record with the same family, stage, inputs, and gate.
@@ -244,12 +243,12 @@ mod proofs {
         let profile: bool = kani::any();
         let shared: bool = kani::any();
         let inputs = stage_inputs(profile, shared);
-        assert_eq!(inputs[0], shared || !profile);
+        assert!(inputs[0]);
         assert_eq!(inputs[1], shared || profile);
         let facts: [bool; 5] = kani::any();
         assert_eq!(reuse(facts), facts.iter().all(|fact| *fact));
         kani::cover!(reuse(facts));
-        kani::cover!(inputs == [false, true]);
+        kani::cover!(inputs == [true, true]);
         kani::cover!(inputs == [true, false]);
     }
 
@@ -457,10 +456,7 @@ mod tests {
     #[test]
     fn every_stage_input_and_reuse_combination_preserves_boundaries() {
         for [profile, shared] in flags() {
-            assert_eq!(
-                stage_inputs(profile, shared),
-                [shared || !profile, shared || profile]
-            );
+            assert_eq!(stage_inputs(profile, shared), [true, shared || profile]);
         }
         for facts in flags::<5>() {
             assert_eq!(reuse(facts), facts.iter().all(|fact| *fact));

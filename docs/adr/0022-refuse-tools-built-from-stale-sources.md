@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [source-bound-push-validation.md]
 ---
 # Refuse installed tools built from stale sources
 

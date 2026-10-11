@@ -16,6 +16,10 @@ pub const KANI_VERSION: &str = "0.68.0";
 const WITNESSES: usize = 2;
 const OVERFLOW_PROBE: &str = "reject_an_overflow_under_checked_mir";
 const CHECKED_ADD_OVERFLOW: &str = "attempt to add with overflow";
+/// The most harnesses sharing one bounded report.
+pub const KANI_BATCH_SIZE: usize = 16;
+const KANI_BATCH_TEST: &str =
+    "a_kani_batch_verifies_every_harness_and_rejects_every_counterexample";
 
 /// Compares a Kani results document with the expected harnesses and the proof budget.
 ///
@@ -181,7 +185,12 @@ fn standalone_kani() -> std::process::Command {
     command
 }
 
-fn verify_file(
+/// Verifies every named harness in bounded compilation batches and validates its individual result.
+///
+/// # Errors
+///
+/// Refuses an empty set, an incomplete inventory, an unexpected exit, or an unverified property.
+pub fn verify_file(
     source: &Path,
     directory: &Path,
     expected: &[&str],
@@ -192,38 +201,46 @@ fn verify_file(
         !expected.is_empty(),
         "proof execution is incomplete or empty"
     );
-    for name in expected {
-        verify_harness(source, directory, name, counterexample, flags)?;
+    ensure!(
+        expected.iter().copied().collect::<BTreeSet<_>>().len() == expected.len(),
+        "duplicate proof harness"
+    );
+    for batch in expected.chunks(KANI_BATCH_SIZE) {
+        verify_batch(source, directory, batch, counterexample, flags)?;
     }
     Ok(())
 }
 
-fn verify_harness(
+fn verify_batch(
     source: &Path,
     directory: &Path,
-    name: &str,
+    expected: &[&str],
     counterexample: bool,
     flags: &BTreeSet<&'static str>,
 ) -> Result<()> {
     let output = directory.join("results.json");
+    fs::write(&output, "")?;
     let mut command = standalone_kani();
     command
         .current_dir(directory)
         .arg(source)
         .args(["--output-format", "terse", "-Z", "unstable-options"])
         .args(features(flags))
-        .args(["--harness", name, "--exact"])
+        .arg("--exact")
         .arg("--harness-timeout")
         .arg(format!("{}s", proof_budget_rules::TIMEOUT_SECONDS))
         .arg("--export-json")
         .arg(&output);
+    for name in expected {
+        command.args(["--harness", name]);
+    }
     let status = command.status().context("start pinned Kani verifier")?;
     ensure!(
         status.success() != counterexample,
         "Kani returned an unexpected outcome: {status}"
     );
     let result: Value = skill_ops::read_json(&output)?;
-    validate_results(&result, &[name], counterexample)
+    validate_results(&result, expected, counterexample)
 }
 
 /// The harnesses that `kani list` finds in `source`, which every run must then pass.
@@ -536,6 +553,7 @@ fn verify_native(root: &Path) -> Result<()> {
                 .contains(&format!("Kani Rust Verifier {KANI_VERSION}")),
         "the pinned Kani version is unavailable"
     );
+    verify_kani_driver(root)?;
     let manifest = obligations::manifest(root)?;
     let mut verified = 0;
     let mut rejected = 0;
@@ -553,6 +571,36 @@ fn verify_native(root: &Path) -> Result<()> {
     verify_miri(root)?;
     verify_fuzz(root)?;
     verify_mutants(root, &manifest)
+}
+
+fn verify_kani_driver(root: &Path) -> Result<()> {
+    let output = Tool::Cargo
+        .command()
+        .current_dir(root)
+        .args([
+            "test",
+            "--locked",
+            "--package",
+            "xtask",
+            "--test",
+            "container_proofs",
+            "--",
+            "--ignored",
+            "--exact",
+            KANI_BATCH_TEST,
+        ])
+        .output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    print!("{stdout}");
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    ensure!(
+        output.status.success()
+            && stdout
+                .lines()
+                .any(|line| line.starts_with("test result: ok. 1 passed; 0 failed;")),
+        "the Kani driver regression did not pass"
+    );
+    Ok(())
 }
 
 /// The cargo-fuzz release that `mise.toml` and the proof image pin.

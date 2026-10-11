@@ -80,6 +80,8 @@ enum Action {
         #[command(flatten)]
         scope: xtask::change::Scope,
     },
+    /// Checks the complete candidate, including the CI proof suite on Linux.
+    PushCheck,
     /// Print `gates=<names>`: the gates the change set selects, or every gate without a scope.
     Classify {
         #[command(flatten)]
@@ -253,6 +255,7 @@ fn check(root: &Path, gates: Gates, reference: &str) -> Result<()> {
             xtask::obligations::check(root, &xtask::obligations::github_issue_closed)
         });
         checks.run("rust.workflows", || xtask::quality::workflows(root));
+        checks.run("rust.lockfiles", || xtask::quality::locked_workspaces(root));
         checks.run("rust.dependencies", || xtask::quality::dependencies(root));
         check_workspace(root, &mut checks);
         check_package(
@@ -339,6 +342,7 @@ fn run() -> Result<()> {
     let mut cli = Cli::parse();
     cli.root = xtask::canonical(&cli.root)?;
     match cli.command {
+        Action::PushCheck => push_check(&cli.root)?,
         Action::CheckSecrets => xtask::quality::secrets(&cli.root)?,
         Action::CheckAdapters => xtask::quality::adapters(&cli.root)?,
         Action::AnsibleSyntaxCheck => {
@@ -431,6 +435,15 @@ fn run() -> Result<()> {
         Action::InstallSkillOps => install_skill_ops(&cli.root)?,
     }
     Ok(())
+}
+
+fn push_check(root: &Path) -> Result<()> {
+    let mut checks = Checks::default();
+    checks.run("check", || check(root, Gates::ALL, "HEAD"));
+    if cfg!(target_os = "linux") {
+        checks.run("proofs", || xtask::skill_proofs::verify(root));
+    }
+    checks.finish()
 }
 
 fn user_directory() -> Result<PathBuf> {

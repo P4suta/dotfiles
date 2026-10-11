@@ -1421,9 +1421,16 @@ mod proofs {
     }
 
     #[cfg(kani)]
+    fn any_word() -> u8 {
+        let selected = kani::any::<u8>();
+        kani::assume(usize::from(selected) < WORDS.len());
+        selected
+    }
+
+    #[cfg(kani)]
     fn bounded_classify<const N: usize>(first: u8) -> (Invocation, usize) {
-        let second = usize::from(kani::any::<u8>() % 12);
-        let third = kani::any::<u8>() % 12;
+        let second = usize::from(any_word());
+        let third = any_word();
         let codes = [first, u8::try_from(second).unwrap_or_default(), third];
         let kind = spec_classify_codes(codes.get(..N).unwrap_or_default());
         (kind, second)
@@ -1454,7 +1461,7 @@ mod proofs {
             assert_classify_result(&[first], actual);
         }
         kinds
-            .get(usize::from(kani::any::<u8>() % 12))
+            .get(usize::from(any_word()))
             .copied()
             .unwrap_or(Invocation::Review)
     }
@@ -1884,37 +1891,17 @@ mod proofs {
 
     #[cfg(kani)]
     fn classify_prefix<const FIRST: u8, const SECOND: u8>() -> (Invocation, u8) {
-        let first = WORDS.get(usize::from(FIRST)).copied().unwrap_or_default();
-        let second = WORDS.get(usize::from(SECOND)).copied().unwrap_or_default();
-        let kinds = [
-            super::classify(&[first, second, "review"]),
-            super::classify(&[first, second, "--use-credits"]),
-            super::classify(&[first, second, "--api-key=k"]),
-            super::classify(&[first, second, "--remote"]),
-            super::classify(&[first, second, "--remote=x"]),
-            super::classify(&[first, second, "code"]),
-            super::classify(&[first, second, "usage"]),
-            super::classify(&[first, second, "--usage"]),
-            super::classify(&[first, second, "-c"]),
-            super::classify(&[first, second, "--dir"]),
-            super::classify(&[first, second, "findings"]),
-            super::classify(&[first, second, "--help"]),
-        ];
-        for third in 0..12u8 {
-            let actual = kinds
-                .get(usize::from(third))
-                .copied()
-                .unwrap_or(Invocation::Review);
-            assert_classify_result(&[FIRST, SECOND, third], actual);
+        macro_rules! cases {
+            ($word:expr; $($third:literal),+) => {
+                match $word {
+                    $($third => spec_classify_codes(&[FIRST, SECOND, $third]),)+
+                    _ => unreachable!(),
+                }
+            };
         }
-        let selected = kani::any::<u8>() % 12;
-        (
-            kinds
-                .get(usize::from(selected))
-                .copied()
-                .unwrap_or(Invocation::Review),
-            selected,
-        )
+        let selected = any_word();
+        let kind = cases!(selected; 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
+        (kind, selected)
     }
 
     #[cfg(kani)]

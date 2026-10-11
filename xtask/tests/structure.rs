@@ -61,6 +61,54 @@ fn root() -> PathBuf {
         .to_path_buf()
 }
 
+#[test]
+fn the_compiler_refuses_a_process_that_bypasses_git_environment_isolation() -> Result<()> {
+    let fixture = tempfile::tempdir()?;
+    fs::create_dir(fixture.path().join("src"))?;
+    fs::write(
+        fixture.path().join("Cargo.toml"),
+        "[package]\nname = 'process-boundary-fixture'\nversion = '0.0.0'\nedition = '2024'\n",
+    )?;
+    fs::copy(
+        root().join("clippy.toml"),
+        fixture.path().join("clippy.toml"),
+    )?;
+    let run = || {
+        Tool::Cargo
+            .command()
+            .current_dir(fixture.path())
+            .args([
+                "clippy",
+                "--offline",
+                "--quiet",
+                "--",
+                "-D",
+                "clippy::disallowed_methods",
+            ])
+            .output()
+    };
+    for source in [
+        "pub fn spawn() { let _ = std::process::Command::new(\"cargo\"); }",
+        "use std::process::Command as Child; pub fn spawn() { let _ = Child::new(\"cargo\"); }",
+    ] {
+        fs::write(fixture.path().join("src/lib.rs"), source)?;
+        let output = run()?;
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("disallowed"));
+    }
+    fs::write(
+        fixture.path().join("src/lib.rs"),
+        "pub fn spawn(command: &mut std::process::Command) -> std::io::Result<std::process::Child> { command.spawn() }",
+    )?;
+    let output = run()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
 /// Whether the catalog admits `files` written into a fixture repository, and its report.
 fn scan(files: &[(&str, &str)]) -> Result<(bool, String)> {
     let fixture = tempfile::tempdir()?;
