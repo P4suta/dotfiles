@@ -20,6 +20,8 @@ const DEFAULT_GATE: &str = "just check";
 const STAGE_REPORT: &str = "DOTFILES_HOST_STAGES ";
 const CODE_SHELL: &str = "/bin/sh";
 const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
+const PROFILE_ROOT: &str = ".chezmoiroot";
+const PROFILE_RUNTIME: &str = "crates/dotfiles/Cargo.toml";
 const JOB_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const REQUEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const REQUEST_LIMIT: Duration = Duration::from_secs(300);
@@ -732,13 +734,31 @@ fn note(repository: &Path, commit: &str) -> Result<String> {
     Ok(String::new())
 }
 
-/// The verdict on a commit's notes for every family its own workflows require.
+/// The verdict on a profile commit's notes for every family its own workflows require.
 pub(crate) fn admission(repository: &Path, commit: &str) -> Result<Verdict> {
     let commit = git_text(
         repository,
         &["rev-parse", "--verify", &format!("{commit}^{{commit}}")],
     )
     .with_context(|| format!("commit {commit} is not in this checkout; fetch it first"))?;
+    let paths = git_text(
+        repository,
+        &[
+            "ls-tree",
+            "--name-only",
+            "-r",
+            &commit,
+            "--",
+            PROFILE_ROOT,
+            PROFILE_RUNTIME,
+        ],
+    )?;
+    if !crate::hosts_rules::profile_gate(
+        paths.lines().any(|path| path == PROFILE_ROOT),
+        paths.lines().any(|path| path == PROFILE_RUNTIME),
+    ) {
+        return Ok(admit([false; 3], [Evidence::Missing; 3]));
+    }
     let tree = git_text(repository, &["rev-parse", &format!("{commit}^{{tree}}")])?;
     let required = required(&workflows_at(repository, &commit)?)?;
     Ok(admit(
@@ -747,7 +767,7 @@ pub(crate) fn admission(repository: &Path, commit: &str) -> Result<Verdict> {
     ))
 }
 
-/// Refuses `commit` unless every required host family recorded a passing gate for it.
+/// Refuses a profile `commit` unless every required host family recorded a passing gate for it.
 ///
 /// # Errors
 ///

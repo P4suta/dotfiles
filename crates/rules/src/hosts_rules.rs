@@ -138,6 +138,12 @@ pub const fn gated(github: bool, branch: bool, deletion: bool) -> bool {
     github && branch && !deletion
 }
 
+/// Profile evidence requires the source root and runtime in the checked commit.
+#[must_use]
+pub const fn profile_gate(profile_root: bool, runtime: bool) -> bool {
+    profile_root && runtime
+}
+
 /// How a scanned host key relates to the pinned one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
@@ -406,6 +412,16 @@ mod proofs {
 
     #[cfg(kani)]
     #[kani::proof]
+    fn only_a_repository_with_the_profile_root_and_runtime_requires_profile_evidence() {
+        let profile_root: bool = kani::any();
+        let runtime: bool = kani::any();
+        assert_eq!(profile_gate(profile_root, runtime), profile_root && runtime);
+        kani::cover!(profile_gate(profile_root, runtime));
+        kani::cover!(!profile_gate(profile_root, runtime) && runtime);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
     fn checks_start_only_from_a_clean_tree_with_every_required_host_ready() {
         let clean: bool = kani::any();
         let required: [bool; 3] = [kani::any(), kani::any(), kani::any()];
@@ -499,6 +515,13 @@ mod tests {
     fn each_family_has_its_own_index_and_name() {
         assert_eq!(Family::ALL.map(Family::index), [0, 1, 2]);
         assert_eq!(Family::ALL.map(Family::name), ["linux", "macos", "windows"]);
+    }
+
+    #[test]
+    fn profile_evidence_requires_both_committed_profile_paths() {
+        for [profile_root, runtime] in flags() {
+            assert_eq!(profile_gate(profile_root, runtime), profile_root && runtime);
+        }
     }
 
     #[test]

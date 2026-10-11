@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [profile-evidence-scope.md]
 ---
 # Require a passing gate on every operating system family before push
 

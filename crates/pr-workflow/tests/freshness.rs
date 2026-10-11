@@ -319,6 +319,8 @@ fn the_installed_binary_refuses_stale_sources_and_runs_current_ones() -> Result<
     let stderr = String::from_utf8_lossy(&stale.stderr);
     assert!(stderr.contains("tool.stale"), "{stderr}");
     assert!(stderr.contains("just install-pr-workflow"), "{stderr}");
+    let refusal = Refusal::find(&stderr).expect("the stale binary emits a structured refusal");
+    println!("{}", refusal.line());
     assert_eq!(embedded().hash.len(), 64, "the build embeds a sha-256 hash");
     Ok(())
 }

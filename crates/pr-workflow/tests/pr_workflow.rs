@@ -1884,11 +1884,17 @@ fn ready_requires_a_passing_note_for_every_os_family_in_the_ci_matrix() -> Resul
     let mut fixture = Fixture::new(BODY)?;
     let root = fixture.directory.path().to_path_buf();
     fs::create_dir_all(root.join(".github/workflows"))?;
+    fs::create_dir_all(root.join("crates/dotfiles"))?;
+    fs::write(root.join(".chezmoiroot"), "home\n")?;
+    fs::write(
+        root.join("crates/dotfiles/Cargo.toml"),
+        "[package]\nname = 'dotfiles'\n",
+    )?;
     fs::write(
         root.join(".github/workflows/ci.yml"),
         "on: pull_request\njobs:\n  test:\n    strategy:\n      matrix:\n        os: [ubuntu-latest, windows-latest]\n    runs-on: ${{ matrix.os }}\n    steps: []\n",
     )?;
-    git(&root, &["add", ".github"])?;
+    git(&root, &["add", ".github", ".chezmoiroot", "crates"])?;
     git(&root, &["commit", "--quiet", "-m", "ci"])?;
     fixture.head = git(&root, &["rev-parse", "HEAD"])?;
     let tree = git(&root, &["rev-parse", "HEAD^{tree}"])?;

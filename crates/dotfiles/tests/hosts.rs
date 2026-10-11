@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, ensure};
 use dotfiles::hosts::{
     Managed, Peer, Tailnet, evidence, hub_user, label_family, managed, outcome, pinned, push_gate,
-    remote_gate, render, required, scanned, select, tailnet, wrap,
+    remote_gate, render, require_admission, required, scanned, select, tailnet, wrap,
 };
 use dotfiles::hosts_rules::{Evidence, Family};
 use std::fmt::Write as _;
@@ -943,7 +943,17 @@ fn the_remote_bootstrap_uses_native_rust_tools_with_owned_writable_state() -> Re
         .lines()
         .find_map(|line| line.strip_prefix("host: "))
         .context("Rust host triple")?;
-    assert_eq!(values["RUSTUP_TOOLCHAIN"], format!("{pin}-{triple}"));
+    let active = fixture_git::command(&rustup, &root.join("gitconfig"))
+        .env("RUSTUP_HOME", host.join(".rustup"))
+        .env("RUSTUP_TOOLCHAIN", values["RUSTUP_TOOLCHAIN"])
+        .args(["show", "active-toolchain"])
+        .output()?;
+    ensure!(active.status.success(), "resolve the bootstrap toolchain");
+    let active = String::from_utf8(active.stdout)?;
+    assert_eq!(
+        active.split_whitespace().next(),
+        Some(format!("{pin}-{triple}").as_str())
+    );
     assert_eq!(
         platform::paths::canonical(
             &job.join("bootstrap/.cargo/bin")
@@ -968,12 +978,18 @@ fn a_push_is_refused_until_every_os_family_note_passes() -> Result<()> {
         "[user]\n\tname = Fixture\n\temail = fixture@example.com\n[commit]\n\tgpgsign = false\n",
     )?;
     fs::create_dir_all(root.join(".github/workflows"))?;
+    fs::create_dir_all(root.join("crates/dotfiles"))?;
+    fs::write(root.join(".chezmoiroot"), "home\n")?;
+    fs::write(
+        root.join("crates/dotfiles/Cargo.toml"),
+        "[package]\nname = 'dotfiles'\n",
+    )?;
     fs::write(
         root.join(".github/workflows/ci.yml"),
         "jobs:\n  test:\n    strategy:\n      matrix:\n        os: [ubuntu-latest, macos-latest]\n    runs-on: ${{ matrix.os }}\n",
     )?;
     git(root, &["init", "--quiet"])?;
-    git(root, &["add", ".github"])?;
+    git(root, &["add", ".github", ".chezmoiroot", "crates"])?;
     git(root, &["commit", "--quiet", "-m", "ci"])?;
     let head = git(root, &["rev-parse", "HEAD"])?;
     let tree = git(root, &["rev-parse", "HEAD^{tree}"])?;
@@ -1025,6 +1041,49 @@ fn a_push_is_refused_until_every_os_family_note_passes() -> Result<()> {
     note("macos", &tree, 0)?;
     push_gate(root, github, update.as_bytes())?;
     assert!(push_gate(root, github, b"malformed\n").is_err());
+    Ok(())
+}
+
+#[test]
+fn profile_admission_uses_the_commit_and_leaves_other_repositories_to_their_gates() -> Result<()> {
+    let scope = tempfile::tempdir()?;
+    let root = scope.path();
+    fs::write(
+        root.join("gitconfig"),
+        "[user]\n\tname = Fixture\n\temail = fixture@example.com\n[commit]\n\tgpgsign = false\n",
+    )?;
+    fs::create_dir_all(root.join(".github/workflows"))?;
+    fs::write(
+        root.join(".github/workflows/ci.yml"),
+        "jobs:\n  test:\n    strategy:\n      matrix:\n        os: ${{ fromJSON(needs.changes.outputs.test_os) }}\n    runs-on: ${{ matrix.os }}\n",
+    )?;
+    git(root, &["init", "--quiet"])?;
+    git(root, &["add", ".github"])?;
+    git(root, &["commit", "--quiet", "-m", "ci"])?;
+    let head = git(root, &["rev-parse", "HEAD"])?;
+    let update = format!(
+        "refs/heads/feature {head} refs/heads/feature {}\n",
+        "0".repeat(40)
+    );
+    let github = "git@github.com:owner/project.git";
+    push_gate(root, github, update.as_bytes())?;
+    require_admission(root, &head)?;
+    assert!(require_admission(root, "missing-commit").is_err());
+    fs::create_dir_all(root.join("crates/dotfiles"))?;
+    fs::write(root.join(".chezmoiroot"), "home\n")?;
+    fs::write(
+        root.join("crates/dotfiles/Cargo.toml"),
+        "[package]\nname = 'dotfiles'\n",
+    )?;
+    require_admission(root, &head)?;
+    git(root, &["add", ".chezmoiroot", "crates"])?;
+    git(root, &["commit", "--quiet", "-m", "profile"])?;
+    let profile = git(root, &["rev-parse", "HEAD"])?;
+    assert!(require_admission(root, &profile).is_err());
+    fs::remove_file(root.join(".chezmoiroot"))?;
+    fs::remove_file(root.join("crates/dotfiles/Cargo.toml"))?;
+    assert!(require_admission(root, &profile).is_err());
+    require_admission(root, &head)?;
     Ok(())
 }
 
@@ -1167,6 +1226,12 @@ fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
     let root = scope.path().join("project");
     let home = scope.path().join("home");
     fs::create_dir_all(root.join(".github/workflows"))?;
+    fs::create_dir_all(root.join("crates/dotfiles"))?;
+    fs::write(root.join(".chezmoiroot"), "home\n")?;
+    fs::write(
+        root.join("crates/dotfiles/Cargo.toml"),
+        "[package]\nname = 'dotfiles'\n",
+    )?;
     fs::create_dir_all(home.join(".local/state/hosts"))?;
     fs::write(
         home.join(".local/state/hosts/ssh_config"),
