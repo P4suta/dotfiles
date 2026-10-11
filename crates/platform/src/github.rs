@@ -21,18 +21,41 @@ fn direct(candidate: &Path, name: &OsStr) -> io::Result<Option<PathBuf>> {
     .then_some(executable))
 }
 
+fn installation(directory: &Path, name: &OsStr) -> io::Result<Option<PathBuf>> {
+    if let Some(executable) = direct(&directory.join(BIN).join(name), name)? {
+        return Ok(Some(executable));
+    }
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(error),
+    };
+    let mut archives = entries.collect::<io::Result<Vec<_>>>()?;
+    archives.sort_by_key(fs::DirEntry::file_name);
+    for archive in archives {
+        if let Some(executable) = direct(&archive.path().join(BIN).join(name), name)? {
+            return Ok(Some(executable));
+        }
+    }
+    Ok(None)
+}
+
 fn installed(data: &Path, name: &OsStr) -> io::Result<Option<PathBuf>> {
     let installations = data.join(INSTALLATIONS);
     let alias = installations.join(LATEST);
-    if let Some(executable) = direct(&alias.join(BIN).join(name), name)? {
+    if let Some(executable) = installation(&alias, name)? {
         return Ok(Some(executable));
     }
     if alias.is_file() {
         let target = fs::read_to_string(&alias)?;
-        if let Some(executable) = direct(
-            &installations.join(target.trim()).join(BIN).join(name),
-            name,
-        )? {
+        if let Some(executable) = installation(&installations.join(target.trim()), name)? {
             return Ok(Some(executable));
         }
     }
@@ -44,7 +67,7 @@ fn installed(data: &Path, name: &OsStr) -> io::Result<Option<PathBuf>> {
     let mut versions = entries.collect::<io::Result<Vec<_>>>()?;
     versions.sort_by_key(fs::DirEntry::file_name);
     for version in versions.into_iter().rev() {
-        if let Some(executable) = direct(&version.path().join(BIN).join(name), name)? {
+        if let Some(executable) = installation(&version.path(), name)? {
             return Ok(Some(executable));
         }
     }
@@ -94,4 +117,37 @@ pub fn command(host: &OsStr) -> io::Result<Command> {
     let mut command = crate::process::command(executable(&discovery)?);
     command.args(["auth", "token", "--hostname"]).arg(host);
     Ok(command)
+}
+
+#[cfg(all(test, feature = "tools"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn installed_cli_discovery_respects_aliases_inside_release_archives() -> io::Result<()> {
+        for archive in [
+            "gh_2.87.3_macOS_arm64",
+            "gh_2.87.3_linux_amd64",
+            "gh_2.87.3_windows_amd64",
+        ] {
+            let scope = tempfile::tempdir()?;
+            let data = scope.path().join("mise");
+            let shims = data.join(SHIMS);
+            let installations = data.join(INSTALLATIONS);
+            let name = format!("gh{}", std::env::consts::EXE_SUFFIX);
+            let selected = installations.join("2.87.3").join(archive).join(BIN);
+            let other = installations.join("2.9.0").join(BIN);
+            for directory in [&shims, &selected, &other] {
+                fs::create_dir_all(directory)?;
+                fs::write(directory.join(&name), "fixture executable")?;
+            }
+            fs::write(installations.join(LATEST), "./2.87.3")?;
+            let discovery = std::env::join_paths([shims]).unwrap();
+            assert_eq!(
+                executable(&discovery)?,
+                crate::paths::canonical(&selected.join(&name))?
+            );
+        }
+        Ok(())
+    }
 }

@@ -196,7 +196,9 @@ fn a_credential_lookup_finishes_while_mise_install_holds_the_lock() -> Result<()
     let scope = tempfile::tempdir()?;
     let bin = scope.path().join("bin");
     let shims = scope.path().join("data/shims");
-    let installed = scope.path().join("data/installs/gh/2.87.3/bin");
+    let installed = scope
+        .path()
+        .join("data/installs/gh/2.87.3/gh_2.87.3_macOS_arm64/bin");
     for directory in [&bin, &shims, &installed] {
         fs::create_dir_all(directory)?;
     }
@@ -327,7 +329,7 @@ fn github_credentials_resolve_only_installed_cli_executables() -> Result<()> {
 fn keyring_discovery_remains_available_without_shims_on_path() -> Result<()> {
     let scope = tempfile::tempdir()?;
     let data = scope.path().join("mise");
-    let installed = data.join("installs/gh/latest/bin");
+    let installed = data.join("installs/gh/latest/gh_2.87.3_macOS_arm64/bin");
     let shims = data.join("shims");
     let bin = scope.path().join("bin");
     for directory in [&installed, &shims, &bin] {
