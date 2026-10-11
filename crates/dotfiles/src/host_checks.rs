@@ -21,6 +21,17 @@ const PROJECT_CONFIG: &str = "mise.toml";
 const EMPTY_CONFIG: &str = "empty-config.toml";
 const RUNTIME_BIN: &str = ".local/bin";
 const RUNTIME_BUILD: &str = "runtime";
+const GO_PATH: &str = "go";
+const GO_MODULE_CACHE: &str = "go/pkg/mod";
+const GO_BUILD_CACHE: &str = ".cache/go-build";
+const GO_ENVIRONMENT_PREFIX: &str = "GO";
+#[cfg(unix)]
+const PRIVATE_SCOPE_MODE: u32 = 0o700;
+#[cfg(unix)]
+const DIRECTORY_FLAGS: rustix::fs::OFlags = rustix::fs::OFlags::RDONLY
+    .union(rustix::fs::OFlags::DIRECTORY)
+    .union(rustix::fs::OFlags::NOFOLLOW)
+    .union(rustix::fs::OFlags::CLOEXEC);
 const DEBUG_OUTPUT: &str = "debug";
 const MAC_SHELL: &str = "/bin/zsh";
 const UNIX_SHELL: &str = "/bin/bash";
@@ -75,6 +86,8 @@ pub fn unattended(program: impl AsRef<OsStr>) -> Command {
 #[derive(Debug)]
 pub struct Scratch {
     scope: tempfile::TempDir,
+    #[cfg(unix)]
+    directory: fs::File,
     home: PathBuf,
     config: PathBuf,
     download_cache: Option<PathBuf>,
@@ -87,8 +100,22 @@ impl Scratch {
     ///
     /// Returns an error for missing or malformed configuration or unavailable scratch storage.
     pub fn new(config: &Path) -> Result<Self> {
+        #[cfg(unix)]
+        let scope = {
+            use std::os::unix::fs::PermissionsExt as _;
+            tempfile::Builder::new()
+                .permissions(fs::Permissions::from_mode(PRIVATE_SCOPE_MODE))
+                .tempdir()?
+        };
+        #[cfg(not(unix))]
         let scope = tempfile::tempdir()?;
         let directory = platform::paths::canonical(scope.path())?;
+        #[cfg(unix)]
+        let descriptor = fs::File::from(rustix::fs::open(
+            &directory,
+            DIRECTORY_FLAGS,
+            rustix::fs::Mode::empty(),
+        )?);
         let home = directory.join("home");
         fs::create_dir_all(&home)?;
         fs::write(directory.join(EMPTY_CONFIG), "")?;
@@ -107,6 +134,8 @@ impl Scratch {
         fs::write(&config, toml::to_string(&answers)?)?;
         Ok(Self {
             scope,
+            #[cfg(unix)]
+            directory: descriptor,
             home,
             config,
             download_cache: None,
@@ -150,6 +179,9 @@ impl Scratch {
                 || text.starts_with("__MISE_")
                 || text.starts_with("CARGO_")
                 || text.starts_with("RUSTUP_")
+                || text
+                    .get(..GO_ENVIRONMENT_PREFIX.len())
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(GO_ENVIRONMENT_PREFIX))
                 || text.starts_with("GIT_CONFIG_")
                 || platform::tool::GIT_LOCAL_ENVIRONMENT.contains(&text.as_ref())
             {
@@ -181,6 +213,11 @@ impl Scratch {
             ("CARGO_HOME", self.home.join(".cargo")),
             ("RUSTUP_HOME", self.home.join(".rustup")),
             ("CARGO_TARGET_DIR", self.home.join("target")),
+            ("GOPATH", self.home.join(GO_PATH)),
+            ("GOMODCACHE", self.home.join(GO_MODULE_CACHE)),
+            ("GOCACHE", self.home.join(GO_BUILD_CACHE)),
+            ("GOBIN", self.home.join(RUNTIME_BIN)),
+            ("GOTMPDIR", self.scope.path().to_path_buf()),
             ("MISE_DATA_DIR", self.home.join(MISE_DATA)),
             ("MISE_CONFIG_DIR", self.home.join(".config/mise")),
             ("MISE_GLOBAL_CONFIG_FILE", self.home.join(MISE_CONFIG)),
@@ -199,6 +236,7 @@ impl Scratch {
         ] {
             command.env(name, value);
         }
+        command.env("GOENV", "off").env("GOWORK", "off");
         if let Some(cache) = &self.download_cache {
             command
                 .env("MISE_CACHE_DIR", cache)
@@ -454,11 +492,65 @@ fn github_config(home: &Path) -> PathBuf {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
+        #[cfg(unix)]
         platform::cleanup::report(
-            fs::remove_dir_all(self.scope.path()),
-            "remove candidate host environment",
+            writable_directories(&self.directory, self.scope.path())
+                .map_err(|error| format!("{error:#}")),
+            format_args!(
+                "prepare candidate host environment {}",
+                self.scope.path().display()
+            ),
+        );
+        platform::cleanup::report(
+            platform::cleanup::absent_ok(fs::remove_dir_all(self.scope.path())),
+            format_args!(
+                "remove candidate host environment {}",
+                self.scope.path().display()
+            ),
         );
     }
+}
+
+#[cfg(unix)]
+fn writable_directories(directory: &fs::File, path: &Path) -> Result<()> {
+    use std::os::unix::ffi::OsStrExt as _;
+    use std::os::unix::fs::PermissionsExt as _;
+    let mode = directory
+        .metadata()
+        .with_context(|| format!("read directory mode {}", path.display()))?
+        .permissions()
+        .mode();
+    let writable = rules::hosts_rules::cleanup_directory_mode(mode);
+    if writable != mode {
+        directory
+            .set_permissions(fs::Permissions::from_mode(writable))
+            .with_context(|| format!("prepare directory {}", path.display()))?;
+    }
+    let entries = match rustix::fs::Dir::read_from(directory) {
+        Ok(entries) => entries,
+        Err(rustix::io::Errno::NOENT) => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("read directory {}", path.display()));
+        }
+    };
+    for entry in entries {
+        let entry = entry.with_context(|| format!("read entry in {}", path.display()))?;
+        let name = entry.file_name();
+        if matches!(name.to_bytes(), b"." | b"..") {
+            continue;
+        }
+        let child_path = path.join(OsStr::from_bytes(name.to_bytes()));
+        match rustix::fs::openat(directory, name, DIRECTORY_FLAGS, rustix::fs::Mode::empty()) {
+            Ok(descriptor) => writable_directories(&fs::File::from(descriptor), &child_path)?,
+            Err(rustix::io::Errno::NOENT | rustix::io::Errno::NOTDIR | rustix::io::Errno::LOOP) => {
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("open directory {}", child_path.display()));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn system_git() -> PathBuf {
@@ -610,6 +702,95 @@ pub fn shell(command: &str) -> Result<Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn an_already_removed_scratch_needs_no_permission_preparation() -> Result<()> {
+        let fixture = tempfile::tempdir()?;
+        let config = fixture.path().join("chezmoi.toml");
+        fs::write(
+            &config,
+            format!(
+                "[data]\nprofile = {:?}\n",
+                crate::profiles::native_profile()?.name()
+            ),
+        )?;
+        let scratch = Scratch::new(&config)?;
+        fs::remove_dir_all(scratch.scope.path())?;
+        writable_directories(&scratch.directory, scratch.scope.path())?;
+        drop(scratch);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn directory_permissions_stay_bound_to_the_open_descriptor_after_replacement() -> Result<()> {
+        use std::os::unix::fs::{PermissionsExt as _, symlink};
+        const READ_ONLY_MODE: u32 = 0o555;
+        const WRITABLE_MODE: u32 = 0o755;
+        let fixture = tempfile::tempdir()?;
+        let owned = fixture.path().join("owned");
+        let parked = fixture.path().join("parked");
+        let outside = fixture.path().join("outside");
+        fs::create_dir(&owned)?;
+        fs::create_dir(&outside)?;
+        fs::write(outside.join("sentinel"), "outside bytes")?;
+        let descriptor = fs::File::from(rustix::fs::open(
+            &owned,
+            DIRECTORY_FLAGS,
+            rustix::fs::Mode::empty(),
+        )?);
+        let outside_descriptor = fs::File::from(rustix::fs::open(
+            &outside,
+            DIRECTORY_FLAGS,
+            rustix::fs::Mode::empty(),
+        )?);
+        descriptor.set_permissions(fs::Permissions::from_mode(READ_ONLY_MODE))?;
+        outside_descriptor.set_permissions(fs::Permissions::from_mode(READ_ONLY_MODE))?;
+        let outside_mode = outside_descriptor.metadata()?.permissions().mode();
+        fs::rename(&owned, &parked)?;
+        symlink(&outside, &owned)?;
+        writable_directories(&descriptor, &owned)?;
+        let preserved_mode = outside_descriptor.metadata()?.permissions().mode();
+        let parked_mode = descriptor.metadata()?.permissions().mode();
+        outside_descriptor.set_permissions(fs::Permissions::from_mode(WRITABLE_MODE))?;
+        assert_eq!(preserved_mode, outside_mode);
+        assert_eq!(
+            parked_mode,
+            rules::hosts_rules::cleanup_directory_mode(outside_mode)
+        );
+        assert_eq!(fs::read(outside.join("sentinel"))?, b"outside bytes");
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn an_unreadable_directory_reports_the_actual_entry_without_changing_other_permissions()
+    -> Result<()> {
+        use std::os::unix::fs::PermissionsExt as _;
+        const INACCESSIBLE_MODE: u32 = 0;
+        const WRITABLE_MODE: u32 = 0o755;
+        let fixture = tempfile::tempdir()?;
+        let unreadable = fixture.path().join("unreadable");
+        fs::create_dir(&unreadable)?;
+        let descriptor = fs::File::from(rustix::fs::open(
+            fixture.path(),
+            DIRECTORY_FLAGS,
+            rustix::fs::Mode::empty(),
+        )?);
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(INACCESSIBLE_MODE))?;
+        let original_mode = fs::metadata(&unreadable)?.permissions().mode();
+        let result = writable_directories(&descriptor, fixture.path());
+        let unchanged = fs::metadata(&unreadable)?.permissions().mode();
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(WRITABLE_MODE))?;
+        let error =
+            result.expect_err("an inaccessible child must report the operating-system failure");
+        let diagnosis = format!("{error:#}");
+        assert!(diagnosis.contains(&unreadable.display().to_string()));
+        assert!(diagnosis.contains("Permission denied"));
+        assert_eq!(unchanged, original_mode);
+        Ok(())
+    }
 
     #[test]
     fn real_downloads_survive_scratch_and_installations_remain_owned() -> Result<()> {

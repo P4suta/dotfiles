@@ -55,6 +55,9 @@ Each report retains the existing JSON size limit, and validation rejects duplica
 The proof gate runs the real Kani driver regression explicitly and refuses a missing or unsuccessful test.
 Bounded classifier inputs select any member of the same word set directly, and each prefix materializes the selected case before checking the production classifier against its specification.
 This preserves every three-word case while removing symbolic string-table aliasing and remainder arithmetic.
+The refinement of the skill plan uses the same independent Lean algorithm with temporary arrays sized for the existing proof domain of five skills.
+Its temporary skill indices use checked one-byte values for the same zero-through-seven domain, and the result restores every slot to the original representation.
+Its native reference retains the original eight-slot capacity, and the public implementation and every proof input, assertion, cover witness, and unwind bound remain unchanged.
 The result validator still checks every harness, property, cover witness, counterexample, and individual time budget.
 Linux's timed code stage finishes before real provisioning begins, so setup compilation cannot consume its proof budget.
 Other families retain concurrent stages only with the existing core and storage capacity.
@@ -67,6 +70,13 @@ OpenCode's desired configuration declares domyjob's MCP server from the installe
 The renderer rejects malformed or incomplete installations and writes the same compact server value as domyjob's normal setup, so both converge on the declared configuration.
 Without an installed pin, every profile retains its previous rendering.
 Configuration regeneration records the actual working tree as `sourceDir`, preserving the rooted source for subsequent commands.
+Candidate commands redirect Go's writable paths into their owned environment and discard inherited Go configuration that could redirect those writes.
+Candidate cleanup retains a directory descriptor from that environment's creation and prepares its directories only after its child processes finish.
+The operating system's directory descriptors and no-follow opens keep this traversal inside the owned tree without following links.
+The proved permission rule adds only the owner's write and search permissions, preserving every other bit.
+Regular files and link targets retain their permissions throughout cleanup, including files linked from outside the environment.
+The ordinary symlink-safe directory removal performs deletion, and preparation or removal failures report the affected path without replacing the candidate's original result.
+Native regressions check actual read-only directories, partial installations, outside targets, descriptor-bound replacements, and inherited Go settings.
 
 ## Alternatives
 

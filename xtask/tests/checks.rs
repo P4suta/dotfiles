@@ -4,8 +4,10 @@ use std::fs;
 use std::path::Path;
 use xtask::checks::Checks;
 
-#[path = "../../crates/platform/tests/support/fixture_process.rs"]
-mod fixture_process;
+#[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
+mod fixture_git;
+
+use fixture_git::fixture_process;
 
 #[path = "support/incident_fixture.rs"]
 mod incident_fixture;
@@ -91,12 +93,14 @@ fn copy_prose_bundle(source: &Path, target: &Path) -> Result<()> {
 }
 
 fn prose_gate(root: &Path) -> Result<std::process::Output> {
-    Ok(fixture_process::command(env!("CARGO_BIN_EXE_xtask"), root)
-        .arg("--root")
-        .arg(root)
-        .args(["check", "--gates", "prose"])
-        .env("DOTFILES_EXPECTED_FAILURE", "")
-        .output()?)
+    Ok(
+        fixture_git::command(env!("CARGO_BIN_EXE_xtask"), &root.join("global.gitconfig"))
+            .arg("--root")
+            .arg(root)
+            .args(["check", "--gates", "prose"])
+            .env("DOTFILES_EXPECTED_FAILURE", "")
+            .output()?,
+    )
 }
 
 fn assert_gate_comment_findings(stderr: &str) {
@@ -157,6 +161,8 @@ fn the_prose_gate_checks_original_comments_and_accepts_their_corrections() -> Re
     fs::create_dir(root.join("policy"))?;
     fs::write(root.join("policy/prose.toml"), "exempt = []\n")?;
     fs::write(root.join(".ocomment.toml"), "version = 1\noverrides = []\n")?;
+    let global = root.join("global.gitconfig");
+    fs::write(&global, "")?;
     for arguments in [
         vec!["init", "--quiet"],
         vec![
@@ -168,8 +174,7 @@ fn the_prose_gate_checks_original_comments_and_accepts_their_corrections() -> Re
             ".ocomment.toml",
         ],
     ] {
-        let output = platform::tool::Tool::Git
-            .command()
+        let output = fixture_git::command("git", &global)
             .current_dir(root)
             .args(arguments)
             .output()?;
@@ -219,9 +224,10 @@ fn original_comment_style_failures_are_reported_and_corrected_comments_pass() ->
     write_comment_fixture(root, false)?;
     fs::create_dir(root.join("policy"))?;
     fs::write(root.join("policy/prose.toml"), "exempt = []\n")?;
+    let global = root.join("global.gitconfig");
+    fs::write(&global, "")?;
     for arguments in [vec!["init", "--quiet"], vec!["add", "."]] {
-        let output = platform::tool::Tool::Git
-            .command()
+        let output = fixture_git::command("git", &global)
             .current_dir(root)
             .args(arguments)
             .output()?;

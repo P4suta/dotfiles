@@ -359,6 +359,14 @@ verifier = "kani"
 source = "crates/rules/src/hosts_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_cleanup_leaving_owner_write_and_search_unavailable() {
+    assert!(production::cleanup_directory_mode(0o555) == 0o555);
+}
+#[kani::proof]
+fn reject_cleanup_replacing_restricted_group_and_other_permissions() {
+    assert!(production::cleanup_directory_mode(0o550) == 0o777);
+}
+#[kani::proof]
 fn reject_an_unsequenced_receipt_authorizing_reuse() {
     assert!(production::newest_receipt(None, None).is_some());
 }

@@ -1,3 +1,4 @@
+use anyhow::{Context, Result, ensure};
 use platform::tool::{GIT_LOCAL_ENVIRONMENT, Tool};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
@@ -184,39 +185,124 @@ fn the_bypass_check_finds_every_way_to_start_git() {
     }
 }
 
-/// Every test process that runs Git on a fixture starts from `crates/dotguard/tests/support/fixture_git.rs`.
-#[test]
-fn fixture_git_processes_start_from_the_shared_helper() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .unwrap();
+fn check_fixture_git(root: &Path) -> Result<()> {
     let mut suites = vec![root.join("xtask/tests")];
-    for entry in fs::read_dir(root.join("crates")).unwrap() {
-        let tests = entry.unwrap().path().join("tests");
+    for entry in fs::read_dir(root.join("crates"))? {
+        let tests = entry?.path().join("tests");
         if tests.is_dir() {
             suites.push(tests);
         }
     }
     let mut found = Vec::new();
     for suite in suites {
-        for entry in fs::read_dir(suite).unwrap() {
-            let path = entry.unwrap().path();
+        for entry in fs::read_dir(suite)? {
+            let path = entry?.path();
             if path.extension().is_none_or(|extension| extension != "rs") {
                 continue;
             }
             // This suite tests the tool registry's Git command itself.
             let tool_allowed = path.file_name() == Some(OsStr::new("tool_environment.rs"));
-            for line in bypasses(&fs::read_to_string(&path).unwrap(), tool_allowed) {
+            for line in bypasses(&fs::read_to_string(&path)?, tool_allowed) {
                 found.push(format!("{}: {line}", path.display()));
             }
         }
     }
-    assert!(
+    ensure!(
         found.is_empty(),
         "start these through fixture_git::command:\n{}",
         found.join("\n")
     );
+    Ok(())
+}
+
+const FIXTURE_GUARD_CHILD: &str = "DOTFILES_FIXTURE_GIT_GUARD_CHILD";
+const INCIDENT_EVIDENCE_ROOT: &str = "SKILL_OPS_INCIDENT_EVIDENCE_ROOT";
+const RAW_FIXTURE_GIT: &str = "platform::tool::Tool::Git";
+
+fn report_fixture_git_violation() -> Result<()> {
+    let fixture = tempfile::tempdir()?;
+    let root = fixture.path();
+    fs::create_dir_all(root.join("xtask/tests"))?;
+    fs::create_dir(root.join("crates"))?;
+    let source = root.join("xtask/tests/checks.rs");
+    fs::write(
+        &source,
+        format!(
+            "fn original_fixture() {{ let output = {RAW_FIXTURE_GIT}\n.command(); }}\nfn canonical_fixture() {{ let output = {RAW_FIXTURE_GIT}\n.command(); }}\n"
+        ),
+    )?;
+    let error = check_fixture_git(root).expect_err("both fixture Git calls bypass isolation");
+    let diagnostic = format!("{error:#}");
+    assert!(diagnostic.contains("start these through fixture_git::command"));
+    assert_eq!(diagnostic.matches(RAW_FIXTURE_GIT).count(), 2);
+    platform::report(&error);
+    fs::write(
+        source,
+        "fn fixture(global: &std::path::Path) {\nlet first = fixture_git::command(\"git\", global);\nlet second = fixture_git::command(\"git\", global);\n}\n",
+    )?;
+    check_fixture_git(root)
+}
+
+fn check_fixture_git_incident(scope: &Path) -> Result<()> {
+    let records =
+        fs::read_dir(scope.join("state/incidents"))?.collect::<std::io::Result<Vec<_>>>()?;
+    assert_eq!(records.len(), 1);
+    let record: serde_json::Value = serde_json::from_slice(&fs::read(records[0].path())?)?;
+    assert_eq!(record["schema"], 1);
+    assert_eq!(record["rule"], "tool.failure");
+    assert_eq!(
+        record["source"],
+        rules::incident_rules::Source::MalformedInput.key()
+    );
+    let evidence = record["evidence"].as_array().context("incident evidence")?;
+    assert!(
+        evidence
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .any(
+                |item| item.contains("start these through fixture_git::command")
+                    && item.replace('\\', "/").contains("xtask/tests/checks.rs")
+                    && item.matches(RAW_FIXTURE_GIT).count() == 2
+            )
+    );
+    Ok(())
+}
+
+/// Every test process that runs Git on a fixture starts from `crates/dotguard/tests/support/fixture_git.rs`.
+#[test]
+fn fixture_git_processes_start_from_the_shared_helper() -> Result<()> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .context("platform has a repository ancestor")?;
+    check_fixture_git(root)?;
+    if std::env::var(FIXTURE_GUARD_CHILD).is_ok_and(|role| role == "1") {
+        return report_fixture_git_violation();
+    }
+    let scope = match std::env::var_os(INCIDENT_EVIDENCE_ROOT) {
+        Some(directory) => tempfile::tempdir_in(directory)?,
+        None => tempfile::tempdir()?,
+    };
+    let output = fixture_git::fixture_process::command(std::env::current_exe()?, scope.path())
+        .args([
+            "--exact",
+            "fixture_git_processes_start_from_the_shared_helper",
+            "--nocapture",
+        ])
+        .env(FIXTURE_GUARD_CHILD, "1")
+        .env("DOTFILES_EXPECTED_FAILURE", "")
+        .output()?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    ensure!(
+        output.status.success(),
+        "owned fixture Git counterexample failed"
+    );
+    check_fixture_git_incident(scope.path())?;
+    if std::env::var_os(INCIDENT_EVIDENCE_ROOT).is_some() {
+        let _ = scope.keep();
+    }
+    Ok(())
 }
 
 #[test]

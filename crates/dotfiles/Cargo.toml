@@ -29,6 +29,9 @@ tempfile = "3.27"
 toml = "1.0"
 yaml-rust2 = "0.13"
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["fs"] }
+
 [target.'cfg(windows)'.dependencies]
 jiff = "0.2.37"
 junction = "2.0.0"

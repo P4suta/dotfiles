@@ -111,6 +111,14 @@ pub const fn workspace_pending(previous: bool, stage: bool, passed: bool) -> boo
 
 pub const WORKSPACE_BYTES: u64 = 12 * 1024 * 1024 * 1024;
 
+pub const CLEANUP_OWNER_ACCESS: u32 = 0o300;
+
+/// Add owner write and search access while keeping every other mode bit.
+#[must_use]
+pub const fn cleanup_directory_mode(mode: u32) -> u32 {
+    mode | CLEANUP_OWNER_ACCESS
+}
+
 /// Leave enough free space for one more gate workspace.
 #[must_use]
 pub const fn workspace_fits(available: u64) -> bool {
@@ -238,6 +246,26 @@ mod proofs {
 
     pub const EVIDENCE: [Evidence; 3] = [Evidence::Missing, Evidence::Failed, Evidence::Passed];
     pub const KEYS: [Key; 3] = [Key::New, Key::Same, Key::Changed];
+
+    pub fn spec_cleanup_directory_mode(mode: u32) {
+        let writable = cleanup_directory_mode(mode);
+        assert_eq!(writable & CLEANUP_OWNER_ACCESS, CLEANUP_OWNER_ACCESS);
+        assert_eq!(
+            writable & !CLEANUP_OWNER_ACCESS,
+            mode & !CLEANUP_OWNER_ACCESS
+        );
+        assert_eq!(cleanup_directory_mode(writable), writable);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn cleanup_adds_only_owner_write_and_search_access() {
+        let mode: u32 = kani::any();
+        spec_cleanup_directory_mode(mode);
+        let writable = cleanup_directory_mode(mode);
+        kani::cover!(writable == mode);
+        kani::cover!(writable != mode);
+    }
 
     pub fn spec_newest_receipt(previous: Option<Receipt>, incoming: Option<Receipt>) {
         let selected = newest_receipt(previous, incoming);
@@ -603,6 +631,15 @@ mod proofs {
 mod tests {
     use super::*;
     use crate::domain::flags;
+
+    #[test]
+    fn cleanup_preserves_restricted_and_special_mode_bits() {
+        for mode in [0, 0o555, 0o550, 0o700, 0o1750, 0o2750, 0o4750, u32::MAX] {
+            proofs::spec_cleanup_directory_mode(mode);
+        }
+        assert_eq!(cleanup_directory_mode(0o555), 0o755);
+        assert_eq!(cleanup_directory_mode(0o550), 0o750);
+    }
 
     #[test]
     fn a_newer_failure_refuses_an_older_success_and_a_later_success_recovers() {

@@ -382,18 +382,23 @@ mod proofs {
     /// The most skills the bounded checks hold.
     pub const SKILLS: usize = 5;
 
-    fn lean_plan(graph: WordGraph, requested: u8) -> Result<WordPlan, Failure> {
+    fn lean_plan<const CAPACITY: usize>(
+        graph: WordGraph,
+        requested: u8,
+    ) -> Result<WordPlan, Failure> {
+        assert!(CAPACITY <= WORD_SKILLS);
+        assert!(graph.count <= CAPACITY);
         if word_unknown(&graph, requested) {
             return Err(Failure::Unknown);
         }
-        let mut pending = [0; WORD_SKILLS];
+        let mut pending = [0u8; CAPACITY];
         for index in 0..graph.count {
             if let Some(slot) = pending.get_mut(index) {
-                *slot = index;
+                *slot = u8::try_from(index).unwrap();
             }
         }
         let mut remaining = graph.count;
-        let mut full = [0; WORD_SKILLS];
+        let mut full = [0u8; CAPACITY];
         let mut placed = 0u8;
         for round in 0..graph.count {
             let mut first = None;
@@ -401,7 +406,7 @@ mod proofs {
                 let skill = pending.get(position).copied().unwrap_or_default();
                 if graph
                     .edges
-                    .get(skill)
+                    .get(usize::from(skill))
                     .is_some_and(|edges| *edges & !placed == 0)
                 {
                     first = Some(position);
@@ -424,19 +429,16 @@ mod proofs {
             }
             remaining -= 1;
         }
-        let mut needed = WordPlan {
-            skills: [0; WORD_SKILLS],
-            length: 0,
-        };
+        let mut needed = [0u8; CAPACITY];
         let mut start = graph.count;
         for position in (0..graph.count).rev() {
             let skill = full.get(position).copied().unwrap_or_default();
             let mut keep = requested & (1u8 << skill) != 0;
             for later in start..graph.count {
-                let dependent = needed.skills.get(later).copied().unwrap_or_default();
+                let dependent = needed.get(later).copied().unwrap_or_default();
                 if graph
                     .edges
-                    .get(dependent)
+                    .get(usize::from(dependent))
                     .is_some_and(|edges| *edges & (1u8 << skill) != 0)
                 {
                     keep = true;
@@ -444,23 +446,28 @@ mod proofs {
             }
             if keep {
                 start -= 1;
-                if let Some(slot) = needed.skills.get_mut(start) {
+                if let Some(slot) = needed.get_mut(start) {
                     *slot = skill;
                 }
             }
         }
-        needed.length = graph.count - start;
-        for index in 0..needed.length {
-            let skill = needed
-                .skills
-                .get(start + index)
-                .copied()
-                .unwrap_or_default();
-            if let Some(slot) = needed.skills.get_mut(index) {
+        let length = graph.count - start;
+        for index in 0..length {
+            let skill = needed.get(start + index).copied().unwrap_or_default();
+            if let Some(slot) = needed.get_mut(index) {
                 *slot = skill;
             }
         }
-        Ok(needed)
+        let mut out = WordPlan {
+            skills: [0; WORD_SKILLS],
+            length,
+        };
+        for index in 0..CAPACITY {
+            if let Some(slot) = out.skills.get_mut(index) {
+                *slot = usize::from(needed.get(index).copied().unwrap_or_default());
+            }
+        }
+        Ok(out)
     }
 
     #[cfg(kani)]
@@ -531,7 +538,7 @@ mod proofs {
         }
         let requested = kani::any::<u8>() % 64;
         let actual = plan(Input(InputKind::Word(graph, requested)));
-        let reference = lean_plan(graph, requested);
+        let reference = lean_plan::<SKILLS>(graph, requested);
         match (&actual, &reference) {
             (Ok(actual), Ok(reference)) => {
                 let actual = actual.skills();
@@ -674,7 +681,7 @@ mod proofs {
                         word.skills.get(..word.length).unwrap_or_default(),
                         out.as_slice()
                     );
-                    let reference = lean_plan(graph, wanted)
+                    let reference = lean_plan::<WORD_SKILLS>(graph, wanted)
                         .map(|plan| plan.skills.get(..plan.length).unwrap_or_default().to_vec());
                     assert_eq!(reference, planned);
                 }

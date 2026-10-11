@@ -351,6 +351,7 @@ dependencies = [
  "platform",
  "prose",
  "rules",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",
