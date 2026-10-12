@@ -6,6 +6,9 @@ use std::process::{Command, Stdio};
 use xtask::quality::{push_hook_findings, workflow_findings};
 use yaml_rust2::YamlLoader;
 
+#[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
+mod fixture_git;
+
 fn repository(path: &str) -> String {
     fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(path)).unwrap()
 }
@@ -130,12 +133,11 @@ fn pinned_mise(text: &str) -> Result<String> {
         .context("the source data must declare mise.version")
 }
 
-fn producer_bash() -> Result<Command> {
+fn producer_bash(global: &Path) -> Result<Command> {
     if !cfg!(windows) {
         return Ok(platform::tool::Tool::Bash.command());
     }
-    let git = platform::tool::Tool::Git
-        .command()
+    let git = fixture_git::command("git", global)
         .arg("--exec-path")
         .output()?;
     ensure!(git.status.success(), "git --exec-path failed");
@@ -152,7 +154,7 @@ fn produced_mise(script: &str, pins: &str) -> Result<String> {
     let source = fixture.path().join(MISE_PINS);
     fs::create_dir_all(source.parent().context("pin source parent is missing")?)?;
     fs::write(source, pins)?;
-    let mut command = producer_bash()?;
+    let mut command = producer_bash(&fixture.path().join("gitconfig"))?;
     let path = if cfg!(windows) {
         std::env::join_paths([Path::new(command.get_program())
             .parent()

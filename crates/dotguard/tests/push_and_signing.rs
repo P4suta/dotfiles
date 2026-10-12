@@ -211,6 +211,20 @@ fn renovate_fixture(name: &str) -> (Repository, String, String) {
 }
 
 fn renovate_variables(repository: &Repository) -> Vec<(&'static str, String)> {
+    let output = fixture_git::command("mise", &repository.scope.join("gitconfig"))
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args(["which", "jq"])
+        .output()
+        .expect("mise resolves the project's jq");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let resolved = String::from_utf8(output.stdout).expect("mise's jq path is UTF-8");
+    let jq = Path::new(resolved.trim());
+    assert!(jq.is_absolute() && jq.is_file(), "{}", jq.display());
+    let jq = platform::paths::canonical(jq).expect("the project's concrete jq");
     vec![
         (
             "RENOVATE_FIXTURE_ARGS",
@@ -229,13 +243,7 @@ fn renovate_variables(repository: &Repository) -> Vec<(&'static str, String)> {
                 .to_string_lossy()
                 .into_owned(),
         ),
-        (
-            "RENOVATE_FIXTURE_JQ",
-            dotguard::locate::which("jq")
-                .expect("the gate's required jq")
-                .to_string_lossy()
-                .into_owned(),
-        ),
+        ("RENOVATE_FIXTURE_JQ", jq.to_string_lossy().into_owned()),
         ("RENOVATE_LOCAL_SKIP", String::new()),
         ("RENOVATE_GITHUB_COM_TOKEN", String::new()),
     ]
