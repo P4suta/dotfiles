@@ -349,11 +349,20 @@ fn validate_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
-    child
+    let written = child
         .stdin
         .take()
-        .context("syntax validator has no stdin")?
-        .write_all(command.as_bytes())?;
+        .context("syntax validator has no stdin")
+        .and_then(|mut input| {
+            input
+                .write_all(command.as_bytes())
+                .context("write the command to its syntax validator")
+        });
+    if let Err(error) = written {
+        platform::cleanup::report(child.kill(), "stop the syntax validator");
+        platform::cleanup::report(child.wait(), "wait for the syntax validator");
+        return Err(error);
+    }
     Ok(child.wait_with_output()?)
 }
 
@@ -370,7 +379,10 @@ fn checked_event(event: &str) -> Result<Option<Blocked>> {
     }
     let command = shell_command(&value)?;
     let validation = (|| -> Result<(bool, bool)> {
-        let validator = if powershell(&value) {
+        let cache = powershell(&value)
+            .then(platform::process::PowerShellCache::new)
+            .transpose()?;
+        let mut validator = if powershell(&value) {
             let mut validator = crate::tool::Tool::Pwsh.command();
             validator.args([
                 "-NoLogo",
@@ -385,6 +397,9 @@ fn checked_event(event: &str) -> Result<Option<Blocked>> {
             validator.args(["--shell=bash", "--severity=error", "--format=json", "-"]);
             validator
         };
+        if let Some(cache) = &cache {
+            cache.apply(&mut validator);
+        }
         let output = validate_command(validator, &command)?;
         let result: Value = serde_json::from_slice(&output.stdout)?;
         let (findings, file_write) = if powershell(&value) {

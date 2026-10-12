@@ -145,6 +145,9 @@ impl Runner for Real {
                 .is_some_and(|argument| argument == "install")
         {
             crate::process::mise_install(command)?.output()
+        } else if tool == Tool::Pwsh {
+            let cache = crate::process::PowerShellCache::new()?;
+            cache.apply(&mut command).output()
         } else {
             command.output()
         }

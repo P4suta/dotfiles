@@ -68,8 +68,9 @@ pub fn save(base: &Path) -> Result<()> {
         return Ok(());
     }
     std::fs::create_dir_all(base)?;
-    let output = Tool::Pwsh
-        .command()
+    let cache = crate::process::PowerShellCache::new()?;
+    let mut command = Tool::Pwsh.command();
+    command
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -80,7 +81,9 @@ pub fn save(base: &Path) -> Result<()> {
         .env("DOTFILES_MODULE", MODULE)
         .env("DOTFILES_MODULE_VERSION", VERSION)
         .env("DOTFILES_MODULE_BASE", base)
-        .stdin(std::process::Stdio::null())
+        .stdin(std::process::Stdio::null());
+    let output = cache
+        .apply(&mut command)
         .output()
         .context("start pwsh to save PSScriptAnalyzer")?;
     ensure!(

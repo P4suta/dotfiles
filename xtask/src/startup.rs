@@ -258,8 +258,11 @@ pub fn started(shell: Shell, home: &Path, path: &OsStr) -> Result<Vec<String>> {
     let log = scope.path().join("started");
     fs::write(&log, "")?;
     write_shims(path, &shims, &log)?;
+    let cache = (shell == Shell::Pwsh)
+        .then(platform::process::PowerShellCache::new)
+        .transpose()?;
     let mut command = startup(shell, &measured, path, &shims)?;
-    let output = command
+    command
         .current_dir(&measured)
         .env(
             "PATH",
@@ -278,7 +281,11 @@ pub fn started(shell: Shell, home: &Path, path: &OsStr) -> Result<Vec<String>> {
         .env("TERM", "dumb")
         .env_remove("SSH_CONNECTION")
         .env_remove("HERDR_ENV")
-        .stdin(Stdio::null())
+        .stdin(Stdio::null());
+    if let Some(cache) = &cache {
+        cache.apply(&mut command);
+    }
+    let output = command
         .output()
         .with_context(|| format!("start {}", shell.name()))?;
     ensure!(

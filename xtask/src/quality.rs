@@ -1062,9 +1062,12 @@ fn powershell_file(
         );
     }
     fs::write(file, contents)?;
-    let status = Tool::Pwsh.command().current_dir(directory).args(["-NoProfile", "-NonInteractive", "-Command",
+    let cache = platform::process::PowerShellCache::new()?;
+    let mut command = Tool::Pwsh.command();
+    command.current_dir(directory).args(["-NoProfile", "-NonInteractive", "-Command",
         "$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile($env:DOTFILES_PARSE_FILE,[ref]$tokens,[ref]$errors) > $null; if($errors.Count){$errors | Out-String | Write-Error; exit 1}"])
-        .env("DOTFILES_PARSE_FILE", file).stdin(Stdio::null()).status()?;
+        .env("DOTFILES_PARSE_FILE", file).stdin(Stdio::null());
+    let status = cache.apply(&mut command).status()?;
     ensure!(status.success(), "invalid rendered PowerShell: {name}");
     Ok(())
 }

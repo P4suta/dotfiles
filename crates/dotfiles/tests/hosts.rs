@@ -312,6 +312,28 @@ fn a_code_gate_exposes_only_its_captured_rustup_manager() -> Result<()> {
             expected
         );
     }
+    let miri = environment.command("cargo-miri");
+    let path = miri
+        .get_envs()
+        .find_map(|(name, value)| (name == "PATH").then_some(value).flatten())
+        .context("owned bootstrap PATH")?;
+    let bootstrap = std::env::split_paths(path)
+        .next()
+        .context("the owned bootstrap precedes every tool")?;
+    assert_ne!(bootstrap, installed.cargo.join("bin"));
+    let captured = installed
+        .cargo
+        .join("bin")
+        .join(format!("rustup{}", std::env::consts::EXE_SUFFIX));
+    for name in ["rustup", "cargo-miri"] {
+        let proxy = bootstrap.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+        assert!(proxy.is_file(), "the owned bootstrap must supply {name}");
+        assert_eq!(
+            platform::paths::canonical(&proxy)?,
+            platform::paths::canonical(&captured)?
+        );
+        assert_eq!(fs::read(&proxy)?, fs::read(&captured)?);
+    }
     let mut nightly = environment.command(platform::tool::Tool::Rustup.program());
     assert_eq!(
         nightly

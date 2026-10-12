@@ -324,8 +324,9 @@ foreach ($line in ($env:DOTFILES_ANALYZER_INPUTS -split \"`n\")) {
         .iter()
         .map(|(label, path)| format!("{label}\t{path}"))
         .collect();
-    let output = Tool::Pwsh
-        .command()
+    let cache = platform::process::PowerShellCache::new()?;
+    let mut command = Tool::Pwsh.command();
+    command
         .current_dir(root)
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .env("DOTFILES_ANALYZER_MODULE", &module)
@@ -342,9 +343,8 @@ foreach ($line in ($env:DOTFILES_ANALYZER_INPUTS -split \"`n\")) {
             "DOTFILES_ANALYZER_DEFINITIONS",
             if definitions { "1" } else { "0" },
         )
-        .stdin(std::process::Stdio::null())
-        .output()
-        .context("start pwsh")?;
+        .stdin(std::process::Stdio::null());
+    let output = cache.apply(&mut command).output().context("start pwsh")?;
     ensure!(
         output.status.success(),
         "PSScriptAnalyzer {} failed: {}",
@@ -803,11 +803,13 @@ exit 1
 ",
         )
         .unwrap();
+        let cache = platform::process::PowerShellCache::new().unwrap();
         move || {
             let mut command = Tool::Pwsh.command();
             command
                 .args(["-NoProfile", "-NonInteractive", "-File"])
                 .arg(&script);
+            cache.apply(&mut command);
             command
         }
     }

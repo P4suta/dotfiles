@@ -5,6 +5,120 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
+#[cfg(windows)]
+#[test]
+fn powershell_cache_preserves_the_native_windows_environment() -> Result<()> {
+    let cache = platform::process::PowerShellCache::new()?;
+    let mut command = Tool::Pwsh.command();
+    command.env("LOCALAPPDATA", "native-local");
+    command.env("XDG_CACHE_HOME", "native-xdg");
+    let before: Vec<_> = command
+        .get_envs()
+        .map(|(name, value)| (name.to_owned(), value.map(OsStr::to_owned)))
+        .collect();
+    cache.apply(&mut command);
+    let after: Vec<_> = command
+        .get_envs()
+        .map(|(name, value)| (name.to_owned(), value.map(OsStr::to_owned)))
+        .collect();
+    assert_eq!(after, before);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn powershell_cache_cleanup_preserves_failed_runs_and_launch_errors() -> Result<()> {
+    let cache = platform::process::PowerShellCache::new()?;
+    let mut command = Tool::Pwsh.command();
+    command.args([
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "[Console]::Write($env:XDG_CACHE_HOME); [Console]::Error.Write('retained diagnostic'); exit 7",
+    ]);
+    let output = cache.apply(&mut command).output()?;
+    assert_eq!(output.status.code(), Some(7));
+    assert_eq!(output.stderr, b"retained diagnostic");
+    let path = std::path::PathBuf::from(std::str::from_utf8(&output.stdout)?);
+    assert!(path.is_dir());
+    drop(cache);
+    assert!(!path.exists());
+
+    let scope = tempfile::tempdir()?;
+    let cache = platform::process::PowerShellCache::new()?;
+    let mut missing = platform::process::command(scope.path().join("missing-pwsh"));
+    cache.apply(&mut missing);
+    let path = missing
+        .get_envs()
+        .find(|(name, _)| name == &OsStr::new("XDG_CACHE_HOME"))
+        .and_then(|(_, value)| value)
+        .context("the cache was applied")?
+        .to_owned();
+    assert_eq!(
+        missing.output().unwrap_err().kind(),
+        std::io::ErrorKind::NotFound
+    );
+    drop(cache);
+    assert!(!Path::new(&path).exists());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn simultaneous_powershell_children_own_their_caches_and_preserve_shared_state() -> Result<()> {
+    const CLIENTS: usize = 4;
+    let scope = tempfile::tempdir()?;
+    let shared = scope.path().join("shared-cache");
+    fs::create_dir_all(&shared)?;
+    let sentinel = shared.join("sentinel");
+    fs::write(&sentinel, b"preserved shared state")?;
+    let barrier = std::sync::Barrier::new(CLIENTS);
+    let paths = std::thread::scope(|threads| -> Result<Vec<std::path::PathBuf>> {
+        let children: Vec<_> = (0..CLIENTS)
+            .map(|client| {
+                let shared = &shared;
+                let barrier = &barrier;
+                threads.spawn(move || -> Result<std::path::PathBuf> {
+                    barrier.wait();
+                    let cache = platform::process::PowerShellCache::new()?;
+                    let mut command = Tool::Pwsh.command();
+                    command
+                        .args([
+                            "-NoLogo",
+                            "-NoProfile",
+                            "-NonInteractive",
+                            "-Command",
+                            "$ErrorActionPreference = 'Stop'; [IO.File]::WriteAllText((Join-Path $env:XDG_CACHE_HOME 'owner'), $env:DOTFILES_CACHE_OWNER); [Console]::Write($env:XDG_CACHE_HOME)",
+                        ])
+                        .env("XDG_CACHE_HOME", shared)
+                        .env("DOTFILES_CACHE_OWNER", client.to_string());
+                    let output = cache.apply(&mut command).output()?;
+                    ensure!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    let path = std::path::PathBuf::from(std::str::from_utf8(&output.stdout)?);
+                    assert_ne!(&path, shared);
+                    assert_eq!(fs::read_to_string(path.join("owner"))?, client.to_string());
+                    drop(cache);
+                    assert!(!path.exists());
+                    Ok(path)
+                })
+            })
+            .collect();
+        children
+            .into_iter()
+            .map(|child| child.join().expect("cache child panicked"))
+            .collect()
+    })?;
+    assert_eq!(paths.iter().collect::<BTreeSet<_>>().len(), CLIENTS);
+    assert_eq!(fs::read(sentinel)?, b"preserved shared state");
+    assert_eq!(fs::read_dir(&shared)?.count(), 1);
+    Ok(())
+}
+
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 

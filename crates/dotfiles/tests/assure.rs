@@ -20,7 +20,7 @@ fn catalog() -> Result<Catalog> {
 }
 
 struct Fixture {
-    _scope: tempfile::TempDir,
+    scope: tempfile::TempDir,
     root: std::path::PathBuf,
     config: std::path::PathBuf,
 }
@@ -36,7 +36,7 @@ impl Fixture {
         let root = scope.path().join("repository");
         fs::create_dir(&root)?;
         let fixture = Self {
-            _scope: scope,
+            scope,
             root,
             config,
         };
@@ -193,7 +193,7 @@ fn an_unowned_parser_is_refused_at_every_point_and_admitted_once_its_fuzz_target
         emitted_rule(assure::ready(root, &catalog, "main", &unowned)).as_deref(),
         Some("assure.added")
     );
-    incident_fixture::preserve(fixture._scope);
+    incident_fixture::preserve(fixture.scope);
     Ok(())
 }
 
@@ -384,7 +384,7 @@ fn each_anti_pattern_is_refused_at_every_point_with_its_rule_and_next_action_unt
         emitted_rule(assure::ready(root, &catalog, "main", &fixed)),
         None
     );
-    incident_fixture::preserve(fixture._scope);
+    incident_fixture::preserve(fixture.scope);
     Ok(())
 }
 

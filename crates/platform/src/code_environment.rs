@@ -14,6 +14,7 @@ const UNIX_BASE: [&str; 4] = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
 const WINDOWS_GIT: &str = "Git";
 const MISE_CONFIG: &str = "mise.toml";
 const CARGO_BIN: &str = "bin";
+const RUSTUP_COMPONENT_PROXY: &str = "cargo-miri";
 const KANI_HOME: &str = ".kani";
 const KANI_TOOL: &str = "cargo:kani-verifier";
 const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
@@ -831,14 +832,15 @@ fn link_rust_proxies(mise: &Path, installed: &Installations) -> Result<()> {
         Tool::Rustup.program(),
         std::env::consts::EXE_SUFFIX
     ));
-    for tool in [Tool::Rustup, Tool::Cargo, Tool::Rustc] {
+    for program in [
+        Tool::Rustup.program(),
+        Tool::Cargo.program(),
+        Tool::Rustc.program(),
+        RUSTUP_COMPONENT_PROXY,
+    ] {
         link_executable(
             &source,
-            &mise.with_file_name(format!(
-                "{}{}",
-                tool.program(),
-                std::env::consts::EXE_SUFFIX
-            )),
+            &mise.with_file_name(format!("{}{}", program, std::env::consts::EXE_SUFFIX)),
         )?;
     }
     Ok(())

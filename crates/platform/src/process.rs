@@ -245,6 +245,51 @@ where
     command
 }
 
+/// An owned Unix PowerShell cache, retained until its child exits.
+/// Concurrent PowerShell processes can corrupt a shared startup profile.
+#[cfg(feature = "tools")]
+#[derive(Debug)]
+pub struct PowerShellCache {
+    directory: Option<tempfile::TempDir>,
+    path: PathBuf,
+}
+
+#[cfg(feature = "tools")]
+impl PowerShellCache {
+    /// Create a cache that no other invocation shares.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when creating the cache fails.
+    pub fn new() -> io::Result<Self> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().to_path_buf();
+        Ok(Self {
+            directory: Some(directory),
+            path,
+        })
+    }
+
+    /// Keep native Windows configuration and direct Unix cache writes to this scope.
+    pub fn apply<'a>(&self, command: &'a mut Command) -> &'a mut Command {
+        #[cfg(unix)]
+        command.env("XDG_CACHE_HOME", &self.path);
+        command
+    }
+}
+
+#[cfg(feature = "tools")]
+impl Drop for PowerShellCache {
+    fn drop(&mut self) {
+        if let Some(directory) = self.directory.take() {
+            crate::cleanup::report(
+                directory.close(),
+                format_args!("remove PowerShell cache {}", self.path.display()),
+            );
+        }
+    }
+}
+
 /// The same registered command and child environment on a terminal.
 #[cfg(feature = "pty")]
 #[must_use]
