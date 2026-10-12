@@ -321,7 +321,9 @@ fn renovate_backend_refuses_a_different_or_missing_source_hash_before_dispatch()
             &[],
             &values,
         );
-        assert_eq!(refusal(&refused).rule, "tool.stale");
+        let record = refusal(&refused);
+        assert_eq!(record.rule, "tool.stale");
+        eprintln!("{}", record.line());
         assert!(!repository.scope.join("arguments").exists());
     }
 }

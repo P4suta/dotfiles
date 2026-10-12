@@ -69,6 +69,7 @@ The `pre-commit` and `pre-push` hooks refuse a change that adds a gap.
 | `just baselines` | The refusal of a lint baseline under `policy/lint-baselines/` that grew since a base, which CI runs from the merge base. |
 | `just profiles` | Every profile's rendering, an isolated apply and verification, the committed manifests, the ignore and remove audit, and the script input audit. |
 | `just proofs` | The Kani obligations of `policy/obligations.toml`, Miri over the pure core's tests for the host and Windows, with Linux also interpreted on Mac, and a mutation campaign over the core. It also replays every fuzz corpus and verifies the Quint, Alloy, and Lean models. Linux also runs the fixed CPU budgets, while Mac reports their separate mandatory Linux Code gate. |
+| `just proofs-ci` | The required hosted Linux campaign: Kani, Miri, fuzz corpus replay, fixed CPU budgets, Quint, Alloy, and Lean. The local Mac candidate gate retains mutation testing while the owner pauses its hosted execution pending njutest. |
 | `just prose` | The writing standard over documents and comments. |
 
 Prose gates check persisted files, comments, Markdown, commit messages, issues, pull requests, and release notes.

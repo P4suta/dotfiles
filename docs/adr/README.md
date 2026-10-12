@@ -55,9 +55,10 @@
 | [2026-10-11 Bind profile evidence to repositories that own the profile runtime](profile-evidence-scope.md) | proposed |  |
 | [2026-10-11 Start mise installations without mise shims](shim-free-mise-installation.md) | proposed |  |
 | [2026-10-11 Push the candidate its gates already verified](source-bound-push-validation.md) | amended | [2026-10-12](local-proof-campaigns-on-mac.md) |
-| [2026-10-12 Keep fixed processor budgets beside Mac proof campaigns](fixed-cpu-budgets-beside-mac-proof-campaigns.md) | accepted |  |
+| [2026-10-12 Keep fixed processor budgets beside Mac proof campaigns](fixed-cpu-budgets-beside-mac-proof-campaigns.md) | amended | [2026-10-13](local-mutation-and-scoped-ci-proofs.md) |
 | [2026-10-12 Run local proof campaigns on Mac and keep Linux CI](local-proof-campaigns-on-mac.md) | amended | [2026-10-12](fixed-cpu-budgets-beside-mac-proof-campaigns.md) |
 | [2026-10-12 Classify native failures from delivery signals before output replays](native-failure-signals-before-output-replays.md) | proposed |  |
 | [2026-10-12 Recover native PATH before constructing candidate environments](native-path-before-candidate-environments.md) | proposed |  |
 | [2026-10-12 Persist remote execution ownership before submission](persist-remote-execution-ownership.md) | proposed |  |
+| [2026-10-13 Keep mutation testing local while CI verifies its declared proof campaign](local-mutation-and-scoped-ci-proofs.md) | accepted |  |
 | [2026-10-13 Run Renovate through a process from the same source build](renovate-behind-a-source-matched-process.md) | proposed |  |

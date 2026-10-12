@@ -1,6 +1,7 @@
 use crate::checks::Checks;
 use crate::obligations::{self, KaniFlag, Obligation};
 use crate::proof_budget_rules;
+use crate::proof_budget_rules::ProofCampaign;
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
@@ -482,9 +483,19 @@ pub fn container_target_volume(root: &Path) -> String {
 }
 
 /// Kani writes temporary files beside the source it compiles, so the gate runs on a container-local copy of the read-only checkout.
-const CONTAINER_GATE: &str = "set -o pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -; exec cargo run --locked --manifest-path xtask/Cargo.toml -- proofs";
+const CONTAINER_GATE: &str = "set -o pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -; exec cargo run --locked --manifest-path xtask/Cargo.toml --";
 
+#[must_use]
 pub fn container_run_arguments(root: &Path, image: &str, target_volume: &str) -> Vec<OsString> {
+    container_campaign_arguments(root, image, target_volume, ProofCampaign::Full)
+}
+
+fn container_campaign_arguments(
+    root: &Path,
+    image: &str,
+    target_volume: &str,
+    campaign: ProofCampaign,
+) -> Vec<OsString> {
     // Docker reads `--mount` as one CSV record, so quoting keeps a comma in the path inside the field, and Windows forbids the quote character in paths.
     let mut mount = OsString::from("type=bind,\"source=");
     mount.push(root);
@@ -518,7 +529,13 @@ pub fn container_run_arguments(root: &Path, image: &str, target_volume: &str) ->
             image,
             "bash",
             "-ec",
-            CONTAINER_GATE,
+            &format!(
+                "{CONTAINER_GATE} {}",
+                match campaign {
+                    ProofCampaign::Full => "proofs",
+                    ProofCampaign::Ci => "proofs-ci",
+                }
+            ),
         ]
         .map(OsString::from),
     );
@@ -526,7 +543,7 @@ pub fn container_run_arguments(root: &Path, image: &str, target_volume: &str) ->
 }
 
 /// Kani has no native build here, so the unchanged proof gate runs on a pinned Linux verification host that mounts this checkout read-only.
-fn verify_in_container(root: &Path) -> Result<()> {
+fn verify_in_container(root: &Path, campaign: ProofCampaign) -> Result<()> {
     let root = crate::canonical(root)?;
     ensure_linux_engine().context("Kani proofs on this host run in a Linux container")?;
     let definition = root.join(PROOF_IMAGE);
@@ -534,10 +551,11 @@ fn verify_in_container(root: &Path) -> Result<()> {
     ensure_image(&root, &definition, &image)?;
     let status = Tool::Docker
         .command()
-        .args(container_run_arguments(
+        .args(container_campaign_arguments(
             &root,
             &image,
             &container_target_volume(&root),
+            campaign,
         ))
         .status()
         .context("start the Kani verification container")?;
@@ -554,17 +572,36 @@ fn verify_in_container(root: &Path) -> Result<()> {
 ///
 /// Returns an error when the pinned Kani version or Docker engine can't run, Docker can't build the verification image, or any proof or counterexample check fails.
 pub fn verify(root: &Path) -> Result<()> {
+    verify_campaign(root, ProofCampaign::Full)
+}
+
+/// Runs the CI campaign, which retains the proof checks and defers mutation to the full native campaign.
+///
+/// # Errors
+///
+/// Returns every failed proof, counterexample, model, or measurement check after the independent checks finish.
+pub fn verify_ci(root: &Path) -> Result<()> {
+    verify_campaign(root, ProofCampaign::Ci)
+}
+
+fn verify_campaign(root: &Path, campaign: ProofCampaign) -> Result<()> {
     let mut checks = Checks::default();
-    if cfg!(target_os = "macos") {
+    if campaign == ProofCampaign::Ci {
+        println!(
+            "CI proof campaign: Kani, Miri, fuzz, benchmarks, and models; mutation and its fixture are deferred to the full native campaign."
+        );
+    } else if cfg!(target_os = "macos") {
         println!("Mac proof campaign: Kani, Miri, fuzz, mutation, and models.");
+    }
+    if cfg!(target_os = "macos") {
         println!(
             "Fixed Linux x86_64 benchmark budgets require the Linux code-stage result from `dotfiles hosts check`."
         );
     }
     if cfg!(any(target_os = "macos", target_os = "linux")) {
-        checks.run("native proofs", || verify_native(root));
+        checks.run("native proofs", || verify_native(root, campaign));
     } else {
-        checks.run("container proofs", || verify_in_container(root));
+        checks.run("container proofs", || verify_in_container(root, campaign));
     }
     if std::env::var_os(INSIDE_CONTAINER).is_some() {
         // The image pins Valgrind and the gungraun runner, so the budgets run here with them natively.
@@ -610,24 +647,42 @@ pub fn ensure_linux_engine() -> Result<()> {
     Ok(())
 }
 
-fn verify_native(root: &Path) -> Result<()> {
-    let manifest = obligations::manifest(root);
+fn run_native_checks(
+    campaign: ProofCampaign,
+    kani: impl FnOnce() -> Result<()>,
+    miri: impl FnOnce() -> Result<()>,
+    fuzz: impl FnOnce() -> Result<()>,
+    mutation: impl FnOnce() -> Result<()>,
+) -> Result<()> {
     let mut checks = Checks::default();
-    checks.run("Kani", || {
-        let manifest = manifest
-            .as_ref()
-            .map_err(|error| anyhow::anyhow!("{error:#}"))?;
-        verify_kani(root, manifest)
-    });
-    checks.run("Miri", || verify_miri(root));
-    checks.run("fuzz", || verify_fuzz(root));
-    checks.run("mutation", || {
-        let manifest = manifest
-            .as_ref()
-            .map_err(|error| anyhow::anyhow!("{error:#}"))?;
-        verify_mutants(root, manifest)
-    });
+    checks.run("Kani", kani);
+    checks.run("Miri", miri);
+    checks.run("fuzz", fuzz);
+    if proof_budget_rules::mutation_required(campaign) {
+        checks.run("mutation", mutation);
+    }
     checks.finish()
+}
+
+fn verify_native(root: &Path, campaign: ProofCampaign) -> Result<()> {
+    let manifest = obligations::manifest(root);
+    run_native_checks(
+        campaign,
+        || {
+            let manifest = manifest
+                .as_ref()
+                .map_err(|error| anyhow::anyhow!("{error:#}"))?;
+            verify_kani(root, manifest)
+        },
+        || verify_miri(root),
+        || verify_fuzz(root),
+        || {
+            let manifest = manifest
+                .as_ref()
+                .map_err(|error| anyhow::anyhow!("{error:#}"))?;
+            verify_mutants(root, manifest)
+        },
+    )
 }
 
 fn verify_kani(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
@@ -1751,6 +1806,73 @@ mod tests {
     }
 
     #[test]
+    fn ci_campaign_runs_all_common_checks_and_excludes_only_both_mutation_checks() {
+        use std::cell::RefCell;
+        for (campaign, expected) in [
+            (
+                ProofCampaign::Full,
+                vec![
+                    "Kani",
+                    "Miri",
+                    "fuzz",
+                    "production mutants",
+                    "mutation fixture",
+                ],
+            ),
+            (ProofCampaign::Ci, vec!["Kani", "Miri", "fuzz"]),
+        ] {
+            for fail in [false, true] {
+                let calls = RefCell::new(Vec::new());
+                let check = |name| {
+                    calls.borrow_mut().push(name);
+                    ensure!(!fail, "{name} fixture failed");
+                    Ok(())
+                };
+                let result = run_native_checks(
+                    campaign,
+                    || check("Kani"),
+                    || check("Miri"),
+                    || check("fuzz"),
+                    || {
+                        let mut checks = Checks::default();
+                        checks.run("production mutants", || check("production mutants"));
+                        checks.run("mutation fixture", || check("mutation fixture"));
+                        checks.finish()
+                    },
+                );
+                assert_eq!(*calls.borrow(), expected, "{campaign:?}, fail={fail}");
+                assert_eq!(result.is_err(), fail);
+                if fail {
+                    let failure = format!("{:#}", result.unwrap_err());
+                    for check in &expected {
+                        assert!(failure.contains(check), "{failure}");
+                    }
+                    if campaign == ProofCampaign::Ci {
+                        assert!(!failure.contains("mutation"), "{failure}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn containers_preserve_the_selected_campaign_and_all_common_boundaries() {
+        for (campaign, entry) in [
+            (ProofCampaign::Full, "proofs"),
+            (ProofCampaign::Ci, "proofs-ci"),
+        ] {
+            let full = container_run_arguments(Path::new("source"), "image", "target");
+            let arguments =
+                container_campaign_arguments(Path::new("source"), "image", "target", campaign);
+            assert_eq!(arguments[..arguments.len() - 1], full[..full.len() - 1]);
+            assert_eq!(
+                arguments.last().unwrap(),
+                &OsString::from(format!("{CONTAINER_GATE} {entry}"))
+            );
+        }
+    }
+
+    #[test]
     fn mutation_commands_bind_worker_build_and_test_pools() {
         const OBSERVED_MAC_CORES: usize = 18;
         for (cores, workers) in [
@@ -1948,7 +2070,7 @@ mod tests {
     fn missing_manifest_cannot_skip_independent_native_checks() -> Result<()> {
         if std::env::var(NATIVE_FIXTURE).is_ok_and(|value| value == NATIVE_TEST) {
             let root = tempfile::tempdir()?;
-            let failure = verify_native(root.path()).unwrap_err();
+            let failure = verify_native(root.path(), ProofCampaign::Full).unwrap_err();
             let diagnostic = format!("{failure:#}");
             for stage in ["Kani:", "Miri:", "fuzz:", "mutation:"] {
                 assert!(diagnostic.contains(stage), "{diagnostic}");

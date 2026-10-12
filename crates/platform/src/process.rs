@@ -125,6 +125,7 @@ impl MiseInstall {
 
 /// Prepare a fully configured command before it can hold a mise installation lock.
 /// The child retains direct tool directories and excludes configured shim directories and their filesystem aliases.
+/// The child ignores parent activation metadata before applying its configured environment.
 ///
 /// # Errors
 ///
@@ -157,7 +158,7 @@ pub fn mise_install(mut command: Command) -> io::Result<MiseInstall> {
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     #[cfg(windows)]
     validate_shell_path(&path)?;
-    command.env("PATH", path);
+    command.env_remove("__MISE_DIFF").env("PATH", path);
     Ok(MiseInstall(command))
 }
 

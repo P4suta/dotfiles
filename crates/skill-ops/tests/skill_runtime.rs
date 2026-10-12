@@ -553,6 +553,7 @@ fn a_path_only_review_whose_checkout_is_gone_is_refused_with_the_next_action() -
         .find_map(platform::refusal::Refusal::parse)
         .unwrap_or_else(|| panic!("no structured refusal: {stderr}"));
     assert_eq!(line.rule, "skill-ops.review-evidence");
+    eprintln!("{}", line.line());
     assert!(
         line.next
             .as_deref()

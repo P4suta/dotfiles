@@ -248,12 +248,19 @@ fn runs_the_runtime(command: &str) -> bool {
 #[test]
 fn the_timing_hook_joins_the_shell_events_and_keeps_other_post_tool_groups() {
     let host = json!({"hooks": {
+        "PreToolUse": [
+            {"matcher": "Read", "hooks": [{"type": "command", "command": "custom-observer"}]},
+            {"matcher": "Bash|PowerShell", "hooks": [{"type": "command", "command": "/old/dotfiles-xtask claude-timing"}]},
+            {"hooks": [{"type": "command", "command": "skill-ops observe-tool"}]}
+        ],
         "PostToolUse": [
             {"matcher": "Write", "hooks": [{"type": "command", "command": "dotfiles line-endings hook"}]},
             {"matcher": "Bash|PowerShell", "hooks": [{"type": "command", "command": "/old/dotfiles-xtask claude-timing"}]}
         ]
-    }})
-    .to_string();
+    }});
+    let host = skill_ops::skill_install::merge_hooks(host, "claude")
+        .unwrap()
+        .to_string();
     for profile in ["mac", "linux", "windows", "wsl"] {
         let rendered: Value = serde_json::from_str(&render_merged(
             profile,
@@ -273,8 +280,28 @@ fn the_timing_hook_joins_the_shell_events_and_keeps_other_post_tool_groups() {
                 })
         };
         assert!(
-            timing(&rendered["hooks"]["PreToolUse"][0]),
+            timing(&rendered["hooks"]["PreToolUse"][1]),
             "{profile}: {rendered}"
+        );
+        let pre = rendered["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(pre.len(), 3, "{profile}: {rendered}");
+        assert_eq!(pre[0]["hooks"][0]["command"], json!("custom-observer"));
+        assert_eq!(
+            pre[2]["hooks"][0]["command"],
+            json!("skill-ops observe-tool")
+        );
+        let repeated: Value = serde_json::from_str(&render_merged(
+            profile,
+            "dot_claude/modify_settings.json",
+            ".claude/settings.json",
+            &rendered.to_string(),
+        ))
+        .unwrap();
+        assert_eq!(repeated, rendered, "{profile}");
+        assert_eq!(
+            skill_ops::skill_install::merge_hooks(rendered.clone(), "claude").unwrap(),
+            rendered,
+            "{profile}: the native installer must preserve the rendered hook order"
         );
         for event in ["PostToolUse", "PostToolUseFailure"] {
             let groups = rendered["hooks"][event].as_array().unwrap();

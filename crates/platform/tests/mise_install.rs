@@ -9,6 +9,7 @@ use platform::runtime::Runner;
 
 const COMPLETION_LIMIT: Duration = Duration::from_secs(10);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
+const ACTIVATION_FIXTURE: &str = "DOTFILES_INSTALL_ACTIVATION_FIXTURE";
 
 fn executable(directory: &Path, name: &str) -> PathBuf {
     directory.join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
@@ -236,6 +237,164 @@ fn installation_paths_remove_duplicates_without_changing_lookup_order() -> Resul
         std::env::split_paths(path).collect::<Vec<_>>(),
         [first, second]
     );
+    Ok(())
+}
+
+#[test]
+fn a_finalized_install_preserves_tools_added_by_the_parent_mise_activation() -> Result<()> {
+    if let Some(scope) = std::env::var_os(ACTIVATION_FIXTURE) {
+        return activated_install(Path::new(&scope));
+    }
+    let scope = tempfile::tempdir()?;
+    let root = platform::paths::canonical(scope.path())?;
+    let native = root.join("native");
+    fs::create_dir(&native)?;
+    let project = root.join("parent");
+    fs::create_dir(&project)?;
+    let cargo = executable(&native, "cargo");
+    let compiled = platform::process::command("rustc")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mise_install.rs"))
+        .args(["--edition", "2024", "-o"])
+        .arg(&cargo)
+        .status()?;
+    ensure!(compiled.success(), "compile the activation fixture");
+    let home = platform::home::home().context("native home")?;
+    let mise = platform::code_environment::Installations::discover(&home)?.mise;
+    let version = platform::process::command(&mise)
+        .arg("--version")
+        .output()?;
+    ensure!(
+        version.status.success(),
+        "read the regression's mise version"
+    );
+    println!(
+        "Activation regression: mise {}",
+        std::str::from_utf8(&version.stdout)?.trim()
+    );
+    fs::write(root.join("mise-path"), mise.to_string_lossy().as_bytes())?;
+    fs::write(root.join("empty.toml"), "")?;
+    fs::write(
+        project.join("mise.toml"),
+        format!("[env]\n_.path = [{}]\n", serde_json::to_string(&native)?),
+    )?;
+    let mut parent = platform::process::command(&mise);
+    parent.env_clear();
+    for name in ["PATH", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT"] {
+        if let Some(value) = std::env::var_os(name) {
+            parent.env(name, value);
+        }
+    }
+    for (name, relative) in [
+        ("HOME", "home"),
+        ("USERPROFILE", "home"),
+        ("TEMP", "tmp"),
+        ("TMP", "tmp"),
+        ("TMPDIR", "tmp"),
+        ("MISE_DATA_DIR", "data"),
+        ("MISE_CACHE_DIR", "cache"),
+        ("MISE_STATE_DIR", "state"),
+        ("MISE_CONFIG_DIR", "config"),
+        ("MISE_SYSTEM_CONFIG_DIR", "system-config"),
+        ("MISE_SYSTEM_DATA_DIR", "system-data"),
+        ("MISE_GLOBAL_CONFIG_FILE", "empty.toml"),
+        ("MISE_SYSTEM_CONFIG_FILE", "empty.toml"),
+        ("SKILL_OPS_STATE", "incidents"),
+    ] {
+        parent.env(name, root.join(relative));
+    }
+    for relative in ["home", "tmp", "config"] {
+        fs::create_dir(root.join(relative))?;
+    }
+    let output = parent
+        .env("MISE_AUTO_INSTALL", "false")
+        .env("MISE_TRUSTED_CONFIG_PATHS", &root)
+        .env("MISE_CEILING_PATHS", &root)
+        .env("MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES", "none")
+        .env(ACTIVATION_FIXTURE, &root)
+        .current_dir(&project)
+        .args(["exec", "--"])
+        .arg(std::env::current_exe()?)
+        .args([
+            "--exact",
+            "a_finalized_install_preserves_tools_added_by_the_parent_mise_activation",
+            "--nocapture",
+        ])
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "activation fixture failed:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+fn activated_install(root: &Path) -> Result<()> {
+    ensure!(
+        std::env::var_os("__MISE_DIFF").is_some(),
+        "parent activation metadata"
+    );
+    let native = root.join("native");
+    let shims = root.join("mise/shims");
+    fs::create_dir_all(&shims)?;
+    let inherited = std::env::var_os("PATH").context("parent activation PATH")?;
+    let remaining: Vec<_> = std::env::split_paths(&inherited)
+        .filter(|directory| directory != &native)
+        .collect();
+    let unique = std::env::join_paths(std::iter::once(&native).chain(&remaining))?;
+    let repeated = std::env::join_paths([&native, &shims, &native].into_iter().chain(&remaining))?;
+    let mise = fs::read_to_string(root.join("mise-path"))?;
+    let query = |path: &OsStr| {
+        let mut command = platform::process::command(&mise);
+        command
+            .current_dir(root.join("home"))
+            .env("MISE_CONFIG_FILE", root.join("empty.toml"))
+            .env("PATH", path)
+            .env("DOTFILES_INSTALL_ENV", "finalized")
+            .args(["env", "--json"]);
+        command
+    };
+    let legacy = query(&unique).output()?;
+    ensure!(legacy.status.success(), "legacy environment query");
+    let legacy: serde_json::Value = serde_json::from_slice(&legacy.stdout)?;
+    let legacy_path = legacy["PATH"].as_str().context("legacy PATH")?;
+    assert!(!std::env::split_paths(OsStr::new(legacy_path)).any(|path| path == native));
+
+    let mut command = query(&repeated);
+    command.env_remove("DOTFILES_INSTALL_REMOVED");
+    let mut installed = platform::process::mise_install(command)?;
+    assert!(installed.get_envs().any(
+        |(key, value)| key == "DOTFILES_INSTALL_ENV" && value == Some(OsStr::new("finalized"))
+    ));
+    assert!(
+        installed
+            .get_envs()
+            .any(|(key, value)| key == "DOTFILES_INSTALL_REMOVED" && value.is_none())
+    );
+    let output = installed.output()?;
+    ensure!(output.status.success(), "finalized environment query");
+    let environment: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let path = environment["PATH"].as_str().context("finalized PATH")?;
+    let directories: Vec<_> = std::env::split_paths(OsStr::new(path)).collect();
+    assert!(
+        directories.contains(&native),
+        "parent activation removed the finalized Cargo directory"
+    );
+    assert!(!directories.contains(&shims));
+    let state = root.join("cargo-state");
+    fs::create_dir(&state)?;
+    let cargo = platform::process::command("cargo")
+        .env("PATH", path)
+        .env("BACKEND_FIXTURE_TOOL", "cargo")
+        .env("BACKEND_FIXTURE_STATE", state)
+        .arg("--version")
+        .output()?;
+    ensure!(
+        cargo.status.success(),
+        "the finalized installer must reach Cargo: {}",
+        String::from_utf8_lossy(&cargo.stderr)
+    );
+    assert_eq!(cargo.stdout, b"fixture-native-cargo\n");
     Ok(())
 }
 

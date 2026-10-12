@@ -882,6 +882,14 @@ source = "crates/rules/src/proof_budget_rules.rs"
 probes = '''
 use production::{BUDGET_MILLIS, Verdict, verdict};
 #[kani::proof]
+fn reject_a_ci_campaign_requiring_mutation() {
+    assert!(production::mutation_required(production::ProofCampaign::Ci));
+}
+#[kani::proof]
+fn reject_a_full_campaign_omitting_mutation() {
+    assert!(!production::mutation_required(production::ProofCampaign::Full));
+}
+#[kani::proof]
 fn reject_a_mutation_campaign_with_zero_workers() {
     assert!(production::mutant_jobs(0) == 0);
 }

@@ -13,6 +13,8 @@ mod fixture_git;
 const GIT_CONTEXT_FIXTURE: &str = "DOTFILES_THEME_GIT_CONTEXT_FIXTURE";
 const GIT_CONTEXT_TEST: &str = "a_prompt_renders_its_fixture_repository_in_a_foreign_git_context";
 const CALLER_BRANCH: &str = "caller-branch";
+const FZF_TARGET: &str = ".config/fzf/fzfrc";
+const RECOLORED_FZF_FOREGROUND: &str = "#ff0000";
 
 fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
@@ -61,6 +63,49 @@ fn a_grid_records_each_cell_and_one_changed_color_breaks_the_full_match() {
     assert_eq!(xtask::theme::match_millis(&[], &[]), 0);
     let recolored = xtask::theme::grid(b"\x1b[38;2;192;202;246mab\x1b[0m\nc");
     assert!(xtask::theme::match_millis(&golden, &recolored) < 1000);
+}
+
+#[test]
+fn the_rendered_fzf_grid_matches_and_rejects_a_changed_foreground() -> Result<()> {
+    let scope = tempfile::tempdir()?;
+    let home = scope.path().join("home");
+    fs::create_dir(&home)?;
+    let config = scope.path().join("chezmoi.json");
+    let data = xtask::profiles::fixture(xtask::profile_rules::Profile::Mac, root(), &home)?;
+    fs::write(&config, serde_json::to_vec(&json!({"data": data}))?)?;
+    let rendered = xtask::profiles::chezmoi(root(), scope.path(), &config, &home)
+        .arg("--override-data")
+        .arg(data.to_string())
+        .args(["dump", "--include", "files", "--format", "json"])
+        .output()?;
+    assert!(
+        rendered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rendered.stderr)
+    );
+    let dump: serde_json::Value = serde_json::from_slice(&rendered.stdout)?;
+    let config = dump[FZF_TARGET]["contents"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("the rendered profile has no fzf configuration"))?;
+    let candidate = json!({FZF_TARGET: {"contents": config}});
+    assert_eq!(
+        xtask::theme::check_grids(root(), "mac", &candidate, false)?,
+        Vec::<String>::new()
+    );
+    let source = xtask::profiles::source_data(root())?;
+    let foreground = source["palette"]["fg_dim"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("the palette has no fzf foreground"))?;
+    let recolored = config.replace(foreground, RECOLORED_FZF_FOREGROUND);
+    assert_ne!(
+        config, recolored,
+        "the control must change the fzf foreground"
+    );
+    let changed = json!({FZF_TARGET: {"contents": recolored}});
+    let refusals = xtask::theme::check_grids(root(), "mac", &changed, false)?;
+    assert_eq!(refusals.len(), 1, "{refusals:?}");
+    assert!(refusals[0].contains("mac-fzf.grid"), "{refusals:?}");
+    Ok(())
 }
 
 #[test]

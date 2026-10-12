@@ -212,12 +212,41 @@ mod tests {
     use super::*;
     use anyhow::Context as _;
 
+    const PROJECT_CONFIG: &str = "mise.toml";
+
+    fn assert_ancestor_isolation(
+        scratch: &crate::host_checks::Scratch,
+        project: &Path,
+        root: &Path,
+    ) -> Result<()> {
+        let ancestor = root.join(PROJECT_CONFIG);
+        std::fs::write(&ancestor, "[tools\n")?;
+        let unbounded = scratch
+            .command("mise")
+            .current_dir(project)
+            .env_remove("MISE_CEILING_PATHS")
+            .args(["ls", "--json"])
+            .output()?;
+        assert!(!unbounded.status.success());
+        let error = String::from_utf8(unbounded.stderr)?;
+        assert!(
+            error.contains(ancestor.to_string_lossy().as_ref()),
+            "{error}"
+        );
+        assert!(error.contains("error parsing config file"), "{error}");
+        eprintln!("owned ancestor control: {error}");
+        Ok(())
+    }
+
     #[test]
     fn applying_paranoid_settings_preserves_a_tracked_project_pin() -> Result<()> {
         let scope = tempfile::tempdir()?;
         let config = scope.path().join("chezmoi.toml");
         std::fs::write(&config, "[data]\nprofile = 'windows'\n")?;
         let scratch = crate::host_checks::Scratch::new(&config)?;
+        let version = scratch.command("mise").arg("--version").output()?;
+        ensure!(version.status.success(), "mise version failed");
+        eprintln!("test mise: {}", String::from_utf8_lossy(&version.stdout));
         let environment = scratch.command("mise");
         let variable = |name: &str| -> Result<PathBuf> {
             environment
@@ -229,10 +258,12 @@ mod tests {
         let global = variable("MISE_GLOBAL_CONFIG_FILE")?;
         std::fs::create_dir_all(global.parent().context("global config directory")?)?;
         std::fs::write(&global, "[settings]\nparanoid = false\n")?;
-        let project = scope.path().join("project");
+        let project = variable("HOME")?.join("project");
         std::fs::create_dir(&project)?;
-        let pin = project.join("mise.toml");
+        let project = platform::paths::canonical(&project)?;
+        let pin = project.join(PROJECT_CONFIG);
         std::fs::write(&pin, "[tools]\nrg = '15.2.0'\n")?;
+        assert_ancestor_isolation(&scratch, &project, &variable("MISE_CEILING_PATHS")?)?;
         let installation = variable("MISE_DATA_DIR")?.join("installs/rg/15.2.0");
         std::fs::create_dir_all(&installation)?;
         std::fs::write(installation.join("project-tool"), "installed project pin\n")?;
@@ -274,7 +305,17 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&preview.stderr)
         );
-        assert!(String::from_utf8_lossy(&preview.stderr).contains("rg@15.2.0"));
+        eprintln!(
+            "mise prune preview stdout: {}; stderr: {}",
+            String::from_utf8_lossy(&preview.stdout),
+            String::from_utf8_lossy(&preview.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&preview.stderr).contains("rg@15.2.0"),
+            "mise prune preview stdout: {}; stderr: {}",
+            String::from_utf8_lossy(&preview.stdout),
+            String::from_utf8_lossy(&preview.stderr)
+        );
         install_mise(|| scratch.command("mise"))?;
         assert_eq!(
             std::fs::read_to_string(installation.join("project-tool"))?,

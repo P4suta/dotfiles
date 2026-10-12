@@ -14,7 +14,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Kani and cargo-mutants install only in the proofs job, which clears this list.
+  # Only the proofs job enables Kani.
+  # The owner paused hosted mutation execution pending njutest.
   MISE_DISABLE_TOOLS: "cargo:kani-verifier,cargo:cargo-mutants"
   # Every managed host runs mise in paranoid mode, which loads a project configuration only once it trusts that exact file.
   MISE_PARANOID: "1"
@@ -99,11 +100,29 @@ jobs:
             target
           key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
           restore-keys: cargo-${{ runner.os }}-
+      - uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
+        if: runner.os == 'Windows' && (contains(env.GATES, 'rust') || contains(env.GATES, 'profiles'))
+        with:
+          distribution: Ubuntu-24.04
+          additional-packages: build-essential ca-certificates curl git
+      - name: Install the pinned mise release for the Windows FZF renderer
+        if: runner.os == 'Windows' && (contains(env.GATES, 'rust') || contains(env.GATES, 'profiles'))
+        shell: wsl-bash {0}
+        run: |
+          set -eu
+          version=$(sed -n '/^\[mise\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)
+          digest=$(sed -n 's/^linux-x64 = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)
+          mkdir -p "$HOME/.local/bin"
+          curl --fail --location --silent --show-error --output "$HOME/.local/bin/mise" \
+            "https://github.com/jdx/mise/releases/download/v$version/mise-v$version-linux-x64"
+          echo "$digest  $HOME/.local/bin/mise" | sha256sum --check --strict
+          chmod +x "$HOME/.local/bin/mise"
       - name: Check the selected gates
         if: env.GATES != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          DOTFILES_FZF_WSL_DISTRIBUTION: ${{ runner.os == 'Windows' && 'Ubuntu-24.04' || '' }}
         run: mise x -- just check --gates "$GATES"
       - name: Check Linux system provisioning syntax
         if: runner.os == 'Linux' && contains(needs.classify.outputs.gates, 'profiles')
@@ -116,7 +135,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      MISE_DISABLE_TOOLS: ""
+      MISE_DISABLE_TOOLS: "cargo:cargo-mutants"
       GATES: ${{ needs.classify.outputs.gates }}
     steps:
       - name: Refuse to pass without a classification
@@ -157,9 +176,9 @@ jobs:
       - name: Set up Miri on the nightly the verifier pins
         if: contains(env.GATES, 'proofs')
         run: rustup toolchain install nightly-2026-08-21 --profile minimal --component miri,rust-src
-      - name: Prove the production contracts and reject the counterexamples
+      - name: Prove contracts and models without the paused mutation campaign
         if: contains(env.GATES, 'proofs')
-        run: mise x -- just proofs
+        run: mise x -- just proofs-ci
 
   minimum-git:
     # Git 2.43 comes from Ubuntu 24.04 and ranks as the oldest Git on a managed host.
@@ -182,18 +201,30 @@ jobs:
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
         with:
           version: ${{ steps.mise.outputs.version }}
-          install_args: rust
+          install_args: rust jq
       - name: Build the guard tests
+        shell: bash
         run: |
-          mise x -- cargo test --locked --package dotguard --no-run --message-format=json \
-            | jq -r 'select(.profile.test == true and .executable != null) | .executable' > guard-tests.txt
+          mise x rust jq -- cargo test --locked --package dotguard --no-run --message-format=json \
+            | mise x jq -- jq -r 'select(.profile.test == true and .executable != null) | .executable' > guard-tests.txt
           test -s guard-tests.txt
       - name: Run the guard tests on Git 2.43
+        shell: bash
         run: |
-          docker run --rm --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE/crates/dotguard" \
+          rust_sysroot="$(readlink -f "$(mise x rust -- rustc --print sysroot)")"
+          mise_executable="$(readlink -f "$(command -v mise)")"
+          mise_data="${MISE_DATA_DIR:-$HOME/.local/share/mise}"
+          docker run --rm --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+            --volume "$rust_sysroot:$rust_sysroot:ro" --volume "$mise_data:$mise_data:ro" \
+            --volume "$mise_executable:/usr/local/bin/mise:ro" \
+            --env "PATH=$rust_sysroot/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+            --env "MISE_DATA_DIR=$mise_data" --env MISE_PARANOID --env MISE_TRUSTED_CONFIG_PATHS \
+            --workdir "$GITHUB_WORKSPACE/crates/dotguard" \
             ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55 \
-            bash -euc 'apt-get update -qq && apt-get install --yes --no-install-recommends -qq git openssh-client > /dev/null
+            bash -euo pipefail -c 'apt-get update -qq && apt-get install --yes --no-install-recommends -qq git openssh-client gcc libc6-dev > /dev/null
               git --version | grep -Fx "git version 2.43.0"
+              rustc --version
+              test -x "$(mise which jq)"
               while read -r test; do "$test"; done < ../../guard-tests.txt'
 
   # The ruleset still requires these matrix contexts, so this job keeps their names and always reports, like the check job.
@@ -232,7 +263,14 @@ jobs:
           version: ${{ steps.mise.outputs.version }}
       - name: Apply, reprovision, and reapply the native profile on this disposable host
         if: contains(needs.classify.outputs.gates, 'profiles')
-        run: mise x -- just rehearse --disposable-host
+        shell: bash
+        env:
+          GIT_CONFIG_GLOBAL: ${{ runner.temp }}/dotfiles-rehearsal.gitconfig
+        run: |
+          git config --file "$GIT_CONFIG_GLOBAL" include.path "$HOME/.config/git/config"
+          git config --file "$GIT_CONFIG_GLOBAL" url.https://github.com/P4suta/OComment.insteadOf git@github.com:P4suta/OComment
+          git config --file "$GIT_CONFIG_GLOBAL" url.https://github.com/P4suta/domyjob.insteadOf git@github.com:P4suta/domyjob
+          mise x -- just rehearse --disposable-host
 
   # The wsl profile rehearses inside a fresh WSL distribution on a disposable Windows host.
   rehearsal-wsl:
@@ -278,6 +316,11 @@ jobs:
         run: |
           set -eu
           export PATH="$HOME/.local/bin:$PATH"
+          export GIT_CONFIG_GLOBAL="$(mktemp /tmp/dotfiles-rehearsal-git.XXXXXX)"
+          trap 'rm -f -- "$GIT_CONFIG_GLOBAL"' EXIT
+          git config --file "$GIT_CONFIG_GLOBAL" include.path "$HOME/.config/git/config"
+          git config --file "$GIT_CONFIG_GLOBAL" url.https://github.com/P4suta/OComment.insteadOf git@github.com:P4suta/OComment
+          git config --file "$GIT_CONFIG_GLOBAL" url.https://github.com/P4suta/domyjob.insteadOf git@github.com:P4suta/domyjob
           mise trust "$PWD/mise.toml"
           mise x rust just -- just mise-install
           mise x -- just rehearse --disposable-host

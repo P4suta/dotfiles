@@ -130,6 +130,8 @@ enum Action {
         #[command(flatten)]
         scope: xtask::change::Scope,
     },
+    /// Run the CI proof campaign, deferring mutation and its fixture to the full native campaign.
+    ProofsCi,
     /// Write the reachable state graph of every Quint model that records one, as `TLC` dumps it in the pinned image.
     Graphs,
 }
@@ -390,6 +392,7 @@ fn run() -> Result<()> {
                 );
             }
         }
+        Action::ProofsCi => xtask::skill_proofs::verify_ci(&cli.root)?,
         Action::Graphs => xtask::state_graph::write(&cli.root)?,
         Action::Classify { scope } => xtask::change::run(&cli.root, &scope)?,
         Action::Skills => {
@@ -662,5 +665,19 @@ fn benchmarks(root: &Path, container: bool) -> Result<()> {
         xtask::benchmarks::verify_in_container(root)
     } else {
         xtask::benchmarks::verify(root)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_ci_proof_entry_runs_the_complete_ci_campaign_without_a_scope() {
+        let cli = Cli::try_parse_from(["xtask", "proofs-ci"]).unwrap();
+        assert!(matches!(cli.command, Action::ProofsCi));
+        for option in ["--staged", "--base", "--no-verify"] {
+            assert!(Cli::try_parse_from(["xtask", "proofs-ci", option]).is_err());
+        }
     }
 }

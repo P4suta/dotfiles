@@ -17,6 +17,7 @@ const POLICY: &str = "[ruleset.main]\nrequired_status_checks = [\"required\"]\n"
 const MISE_PINS: &str = "home/.chezmoidata/versions.toml";
 const CONTROL_VERSION: &str = "0.0.1";
 const PRODUCER_SYSTEM_PATH: &str = "/usr/bin:/bin";
+const CI_PROOFS_ENTRY: &str = "mise x -- just proofs-ci";
 
 const WORKFLOW: &str = "on:
   pull_request:
@@ -29,7 +30,7 @@ jobs:
   proofs:
     runs-on: ubuntu-latest
     steps:
-      - run: mise x -- just proofs
+      - run: mise x -- just proofs-ci
   required:
     name: required
     needs: [check, proofs]
@@ -81,6 +82,26 @@ fn the_ci_workflow_provides_what_the_ruleset_requires() {
 }
 
 #[test]
+fn ci_uses_the_explicit_proof_entry_for_the_paused_mutation_campaign() -> Result<()> {
+    for text in [repository(".github/workflows/ci.yml"), WORKFLOW.to_owned()] {
+        let workflow = YamlLoader::load_from_str(&text)?;
+        let [workflow] = workflow.as_slice() else {
+            bail!("CI must contain one workflow document")
+        };
+        let steps = workflow["jobs"]["proofs"]["steps"]
+            .as_vec()
+            .context("the proofs job has no steps")?;
+        assert!(
+            steps
+                .iter()
+                .any(|step| step["run"].as_str() == Some(CI_PROOFS_ENTRY)),
+            "the proofs job must call its explicit CI entry"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn a_workflow_the_ruleset_cannot_rely_on_is_refused() {
     for (from, to, expected) in [
         ("  merge_group:\n", "", "does not run on merge_group"),
@@ -104,7 +125,11 @@ fn a_workflow_the_ruleset_cannot_rely_on_is_refused() {
             "    continue-on-error: true\n    runs-on: ubuntu-latest",
             "suppresses failure",
         ),
-        ("just proofs", "cargo run -- proofs", "calls `cargo run`"),
+        (
+            "just proofs-ci",
+            "cargo run -- proofs-ci",
+            "calls `cargo run`",
+        ),
         (
             "  proofs:\n    runs-on: ubuntu-latest",
             "  proofs:\n    runs-on: macos-latest",

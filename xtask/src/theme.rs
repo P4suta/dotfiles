@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -37,6 +38,12 @@ const TERMINAL_TIMEOUT: Duration = Duration::from_secs(10);
 const TERMINAL_READ_BYTES: usize = 4096;
 const CURSOR_QUERY: &[u8] = b"\x1b[6n";
 const CONTAINER_OPTIONS_START: usize = 2;
+#[cfg(windows)]
+const FZF_WSL_DISTRIBUTION: &str = "DOTFILES_FZF_WSL_DISTRIBUTION";
+#[cfg(windows)]
+const WSL_EXECUTABLE: &str = "wsl.exe";
+#[cfg(windows)]
+const WSL_FZF_GATE: &str = "set -euo pipefail; export PATH=\"$HOME/.local/bin:$PATH\"; export MISE_PARANOID=1 MISE_TRUSTED_CONFIG_PATHS=\"$PWD/mise.toml\" MISE_CEILING_PATHS=\"$(dirname \"$PWD\")\"; export CARGO_TARGET_DIR=\"$HOME/.cache/dotfiles/fzf-wsl/target\" CARGO_BUILD_JOBS=2; rust=\"$(mise config get --file mise.toml tools.rust.version)\"; fzf=\"$(mise config get --file mise.toml tools.fzf)\"; test \"$(mise tool rust --requested)\" = \"$rust\"; test \"$(mise tool fzf --requested)\" = \"$fzf\"; exec mise --locked x \"rust@$rust\" \"fzf@$fzf\" -- cargo xtask fzf-grid";
 
 fn color(color: vt100::Color) -> String {
     match color {
@@ -305,12 +312,53 @@ fn fzf_output(config: &str, scope: &Path) -> Result<Vec<u8>> {
     capture
 }
 
-/// Renders the fzf fixture on a Unix terminal, using the pinned Linux image on Windows.
+fn transported_fzf_grid(mut command: Command, config: &str) -> Result<Vec<String>> {
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .context("start the Linux fzf renderer")?;
+    child
+        .stdin
+        .take()
+        .context("the fzf renderer has piped input")?
+        .write_all(config.as_bytes())?;
+    let output = child.wait_with_output()?;
+    ensure!(
+        output.status.success(),
+        "the Linux fzf renderer failed: {}",
+        output.status
+    );
+    serde_json::from_slice(&output.stdout).context("the Linux fzf renderer returned no cell grid")
+}
+
+#[cfg(windows)]
+fn wsl_fzf_grid(root: &Path, distribution: &std::ffi::OsStr, config: &str) -> Result<Vec<String>> {
+    ensure!(
+        !distribution.is_empty(),
+        "{FZF_WSL_DISTRIBUTION} must name the owned renderer distribution"
+    );
+    let mut command = platform::process::command(WSL_EXECUTABLE);
+    command
+        .arg("--distribution")
+        .arg(distribution)
+        .arg("--cd")
+        .arg(crate::canonical(root)?)
+        .args(["--exec", "bash", "-lc", WSL_FZF_GATE]);
+    transported_fzf_grid(command, config)
+}
+
+/// Renders the fzf fixture on a Unix terminal, using the declared WSL distribution or the pinned Linux image on Windows.
 ///
 /// # Errors
 ///
 /// Returns an error if the configured terminal renderer fails.
 pub fn fzf_grid(root: &Path, config: &str) -> Result<Vec<String>> {
+    #[cfg(windows)]
+    if let Some(distribution) = std::env::var_os(FZF_WSL_DISTRIBUTION) {
+        return wsl_fzf_grid(root, &distribution, config);
+    }
     if cfg!(windows) {
         let root = crate::canonical(root)?;
         let image = crate::skill_proofs::proof_image(&root)?;
@@ -334,26 +382,9 @@ pub fn fzf_grid(root: &Path, config: &str) -> Result<Vec<String>> {
             ],
         );
         *arguments.last_mut().context("the image command has a renderer")? = "set -eo pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -; mise trust --quiet; cargo run --locked --package dotfiles --bin dotfiles -- mise-install fzf; export MISE_AUTO_INSTALL=false; exec mise x -- cargo xtask fzf-grid".into();
-        let mut child = Tool::Docker
-            .command()
-            .args(arguments)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::inherit())
-            .spawn()?;
-        child
-            .stdin
-            .take()
-            .context("the fzf image has piped input")?
-            .write_all(config.as_bytes())?;
-        let output = child.wait_with_output()?;
-        ensure!(
-            output.status.success(),
-            "the Linux fzf renderer failed: {}",
-            output.status
-        );
-        return serde_json::from_slice(&output.stdout)
-            .context("the Linux fzf renderer returned no cell grid");
+        let mut command = Tool::Docker.command();
+        command.args(arguments);
+        return transported_fzf_grid(command, config);
     }
     let scope = tempfile::tempdir()?;
     Ok(grid(&fzf_output(config, scope.path())?))
@@ -546,4 +577,68 @@ pub fn check_contrast(data: &Value) -> Result<(Vec<String>, String)> {
         })
         .collect();
     Ok((refusals, minimum))
+}
+
+#[cfg(test)]
+mod terminal_tests {
+    use super::*;
+
+    const JQ_EXECUTABLE: &str = "jq";
+    const TRANSPORT_CONFIG: &str = "owned configuration with ' quotes\nand a newline\n";
+
+    #[test]
+    #[cfg(windows)]
+    fn the_wsl_fzf_transport_refuses_an_empty_or_missing_distribution() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .context("workspace root")?;
+        let empty = wsl_fzf_grid(root, std::ffi::OsStr::new(""), TRANSPORT_CONFIG).unwrap_err();
+        assert!(format!("{empty:#}").contains(FZF_WSL_DISTRIBUTION));
+        let missing = format!("dotfiles-fzf-missing-{}", std::process::id());
+        let failure =
+            wsl_fzf_grid(root, std::ffi::OsStr::new(&missing), TRANSPORT_CONFIG).unwrap_err();
+        if let Some(cause) = failure.downcast_ref::<std::io::Error>() {
+            assert_eq!(cause.kind(), std::io::ErrorKind::NotFound, "{failure:#}");
+            assert!(format!("{failure:#}").contains("start the Linux fzf renderer"));
+            return Ok(());
+        }
+        assert!(
+            format!("{failure:#}").contains("renderer failed"),
+            "{failure:#}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_fzf_transport_preserves_input_and_refuses_missing_malformed_or_failed_renderers()
+    -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let missing = platform::process::command(scope.path().join("missing-fzf-renderer"));
+        let failure = transported_fzf_grid(missing, TRANSPORT_CONFIG).unwrap_err();
+        assert!(format!("{failure:#}").contains("start the Linux fzf renderer"));
+        for (filter, expected) in [
+            ("\"malformed\"", "returned no cell grid"),
+            ("[1]", "returned no cell grid"),
+            ("error(\"owned renderer refusal\")", "renderer failed"),
+        ] {
+            let mut command = crate::tool::external(JQ_EXECUTABLE);
+            command.args(["--raw-input", "--slurp", "--raw-output", filter]);
+            let failure = transported_fzf_grid(command, TRANSPORT_CONFIG).unwrap_err();
+            assert!(format!("{failure:#}").contains(expected), "{failure:#}");
+        }
+        let mut command = crate::tool::external(JQ_EXECUTABLE);
+        command.args([
+            "--raw-input",
+            "--slurp",
+            "--arg",
+            "expected",
+            TRANSPORT_CONFIG,
+            "if . == $expected then [\"owned cell\"] else error(\"input changed\") end",
+        ]);
+        assert_eq!(
+            transported_fzf_grid(command, TRANSPORT_CONFIG)?,
+            ["owned cell"]
+        );
+        Ok(())
+    }
 }

@@ -7,6 +7,18 @@ pub const TIMEOUT_SECONDS: u64 = 60;
 /// The largest mutation worker pool and shared Cargo jobserver pool.
 pub const MUTANT_JOB_LIMIT: usize = 8;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum ProofCampaign {
+    Full,
+    Ci,
+}
+
+#[must_use]
+pub const fn mutation_required(campaign: ProofCampaign) -> bool {
+    matches!(campaign, ProofCampaign::Full)
+}
+
 #[must_use]
 pub const fn mutant_jobs(available: usize) -> usize {
     match available {
@@ -115,6 +127,19 @@ pub const fn verdict(duration_millis: Option<u64>) -> Verdict {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_mutation_required(campaign: ProofCampaign) {
+        assert_eq!(mutation_required(campaign), campaign == ProofCampaign::Full);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_the_full_campaign_requires_mutation() {
+        let campaign: ProofCampaign = kani::any();
+        spec_mutation_required(campaign);
+        kani::cover!(mutation_required(campaign));
+        kani::cover!(!mutation_required(campaign));
+    }
 
     #[cfg(kani)]
     #[kani::proof]
@@ -244,6 +269,13 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ci_defers_mutation_while_the_full_campaign_preserves_it() {
+        for campaign in [ProofCampaign::Full, ProofCampaign::Ci] {
+            proofs::spec_mutation_required(campaign);
+        }
+    }
 
     #[test]
     fn mutation_phase_results_require_the_completed_test_or_a_failed_build() {

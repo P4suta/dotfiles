@@ -17,16 +17,27 @@ It runs the same runtime binary the git hooks use.
 {{- $hook := dict "type" "command" "command" (printf "%s claude-bash" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
 {{- /*
 The timing hook sets each shell command timeout from its measured durations.
-The post-tool events keep every group another installer added and replace only the timing one.
+The tool events keep every group another installer added and replace only their own.
 */ -}}
 {{- $timing := dict "type" "command" "command" (printf "%s claude-timing" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
-{{- $hooks := dict "PreToolUse" (list (dict "matcher" "Bash|PowerShell" "hooks" (list $hook $timing))) -}}
+{{- $hooks := dict -}}
+{{- $pre := list -}}
+{{- $preLast := list -}}
+{{- range (dig "hooks" "PreToolUse" (list) $current) -}}
+{{-   $text := toJson . -}}
+{{-   if contains "skill-ops " $text -}}{{- $preLast = append $preLast . -}}
+{{-   else if not (or (contains " claude-bash" $text) (contains " claude-timing" $text)) -}}{{- $pre = append $pre . -}}{{- end -}}
+{{- end -}}
+{{- $_ := set $hooks "PreToolUse" (concat $pre (list (dict "matcher" "Bash|PowerShell" "hooks" (list $hook $timing))) $preLast) -}}
 {{- range $event := list "PostToolUse" "PostToolUseFailure" -}}
 {{-   $groups := list -}}
+{{-   $last := list -}}
 {{-   range (dig "hooks" $event (list) $current) -}}
-{{-     if not (contains " claude-timing" (toJson .)) -}}{{- $groups = append $groups . -}}{{- end -}}
+{{-     $text := toJson . -}}
+{{-     if contains "skill-ops " $text -}}{{- $last = append $last . -}}
+{{-     else if not (contains " claude-timing" $text) -}}{{- $groups = append $groups . -}}{{- end -}}
 {{-   end -}}
-{{-   $_ := set $hooks $event (append $groups (dict "matcher" "Bash|PowerShell" "hooks" (list $timing))) -}}
+{{-   $_ := set $hooks $event (concat $groups (list (dict "matcher" "Bash|PowerShell" "hooks" (list $timing))) $last) -}}
 {{- end -}}
 {{- /*
 A session starts with the verification report, which lists the repository's code shapes that nothing verifies with their next actions.

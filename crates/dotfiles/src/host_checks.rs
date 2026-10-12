@@ -86,6 +86,7 @@ pub fn unattended(program: impl AsRef<OsStr>) -> Command {
 #[derive(Debug)]
 pub struct Scratch {
     scope: tempfile::TempDir,
+    root: PathBuf,
     #[cfg(unix)]
     directory: fs::File,
     home: PathBuf,
@@ -138,6 +139,7 @@ impl Scratch {
         fs::write(&config, toml::to_string(&answers)?)?;
         Ok(Self {
             scope,
+            root: directory,
             #[cfg(unix)]
             directory: descriptor,
             home,
@@ -220,22 +222,20 @@ impl Scratch {
             ("GOMODCACHE", self.home.join(GO_MODULE_CACHE)),
             ("GOCACHE", self.home.join(GO_BUILD_CACHE)),
             ("GOBIN", self.home.join(RUNTIME_BIN)),
-            ("GOTMPDIR", self.scope.path().to_path_buf()),
+            ("GOTMPDIR", self.root.clone()),
             ("MISE_DATA_DIR", self.home.join(MISE_DATA)),
             ("MISE_CONFIG_DIR", self.home.join(".config/mise")),
             ("MISE_GLOBAL_CONFIG_FILE", self.home.join(MISE_CONFIG)),
-            (
-                "MISE_SYSTEM_CONFIG_FILE",
-                self.scope.path().join(EMPTY_CONFIG),
-            ),
+            ("MISE_SYSTEM_CONFIG_FILE", self.root.join(EMPTY_CONFIG)),
+            ("MISE_CEILING_PATHS", self.root.clone()),
             ("MISE_CACHE_DIR", self.home.join(".cache/mise")),
             ("MISE_STATE_DIR", self.home.join(".local/state/mise")),
             ("GIT_CONFIG_GLOBAL", self.home.join(GIT_CONFIG)),
             ("GH_CONFIG_DIR", self.home.join(GH_CONFIG)),
             ("SKILL_OPS_STATE", self.home.join(".local/state/skill-ops")),
-            ("TMPDIR", self.scope.path().to_path_buf()),
-            ("TMP", self.scope.path().to_path_buf()),
-            ("TEMP", self.scope.path().to_path_buf()),
+            ("TMPDIR", self.root.clone()),
+            ("TMP", self.root.clone()),
+            ("TEMP", self.root.clone()),
         ] {
             command.env(name, value);
         }
@@ -295,12 +295,9 @@ impl Scratch {
         if !renderer.is_file() {
             let mut command = self.command(&installed.mise);
             command
-                .env(
-                    "MISE_GLOBAL_CONFIG_FILE",
-                    self.scope.path().join(EMPTY_CONFIG),
-                )
+                .env("MISE_GLOBAL_CONFIG_FILE", self.root.join(EMPTY_CONFIG))
                 .env("MISE_TRUSTED_CONFIG_PATHS", &self.home)
-                .env("MISE_CEILING_PATHS", self.scope.path())
+                .env("MISE_CEILING_PATHS", &self.root)
                 .args(["install", "--yes", &format!("chezmoi@{pin}")]);
             let status = platform::process::mise_install(command)?.status()?;
             ensure!(status.success(), "install chezmoi pin {pin}: {status}");
@@ -990,6 +987,7 @@ mod tests {
         )?;
         let project = scope.path().join("project");
         fs::create_dir(&project)?;
+        let project = platform::paths::canonical(&project)?;
         fs::write(project.join("mise.toml"), "[tools]\nuv = '0.12.22'\n")?;
         let scratch = Scratch::new(&config)?;
         scratch.profile(
@@ -1111,7 +1109,9 @@ mod tests {
             ) {
                 assert!(
                     Path::new(value.unwrap())
-                        .starts_with(scratch.home.parent().context("scratch root")?)
+                        .starts_with(scratch.home.parent().context("scratch root")?),
+                    "candidate {name:?} path {value:?} escapes owned scratch {}",
+                    scratch.home.parent().context("scratch root")?.display()
                 );
             }
         }

@@ -38,6 +38,9 @@ profiles-linux: trust
 proofs *args: trust
     mise x -- cargo xtask proofs {{args}}
 
+proofs-ci: trust
+    mise x -- cargo xtask proofs-ci
+
 graphs: trust
     mise x -- cargo xtask graphs
 
