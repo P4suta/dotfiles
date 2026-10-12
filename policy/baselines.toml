@@ -27,7 +27,7 @@ pair = "comment on bg"
 [[metric]]
 metric = "ir"
 bench = "scan"
-exact = 1920326
+exact = 1913162
 
 [[metric]]
 metric = "heap-peak"
@@ -47,7 +47,7 @@ exact = 663
 [[metric]]
 metric = "ir"
 bench = "classify"
-exact = 73256
+exact = 64728
 
 [[metric]]
 metric = "heap-peak"
@@ -97,7 +97,7 @@ exact = 8554
 # The size, in bytes, of the stripped release-guard binary of the local policy gate.
 [[metric]]
 metric = "binary-size"
-exact = 623848
+exact = 623768
 
 # The mutation campaign of `just proofs` over the decision core.
 [[metric]]

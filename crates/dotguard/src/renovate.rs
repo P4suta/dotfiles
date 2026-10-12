@@ -530,14 +530,12 @@ pub fn is_manifest(path: &str) -> bool {
     let file = Path::new(name);
     let ext = file.extension().unwrap_or_default().to_string_lossy();
     let stem = file.file_stem().unwrap_or_default().to_string_lossy();
-    let stem_ext = Path::new(stem.as_ref())
-        .extension()
-        .unwrap_or_default()
-        .to_string_lossy();
     if name.starts_with("requirements") && ext == "txt" {
         return true;
     }
-    if ext == "gradle" || (ext == "kts" && stem_ext == "gradle") {
+    if ext == "gradle"
+        || (ext == "kts" && stem.ends_with(".gradle") && stem.len() > ".gradle".len())
+    {
         return true;
     }
     // `Dockerfile` and suffixed variants such as `Dockerfile.prod`, but no other word that starts with it.
@@ -1033,6 +1031,10 @@ mod tests {
             "gradle/libs.versions.toml",
             "build.gradle",
             "build.gradle.kts",
+            "settings.gradle.kts",
+            "..gradle.kts",
+            "Build.GRADLE.KTS",
+            "İ.gradle.kts",
             "Dockerfile",
             "apps/api/Dockerfile",
             "apps/api/Dockerfile.prod",
@@ -1065,6 +1067,10 @@ mod tests {
             "commise.toml",
             "miseo.toml/backups",
             "app.devcontainer.jsonx",
+            ".gradle.kts",
+            "gradle.kts",
+            "build.gradle..kts",
+            "build.gradle.kts.old",
         ];
         for p in no {
             assert!(!is_manifest(p), "should not match: {p}");
