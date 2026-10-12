@@ -190,6 +190,56 @@ fn miri_batch_results_refuse_missing_changed_duplicate_and_slow_tests() {
 }
 
 #[test]
+fn miri_batch_durations_accept_json_numbers_and_refuse_invalid_or_over_budget_values() {
+    use xtask::skill_proofs::{MiriTest, validate_miri_batch};
+    let expected = [MiriTest {
+        name: "unit::case".to_owned(),
+        ignored: false,
+    }];
+    let test = json!({"type":"test", "event":"ok", "name":"unit::case"});
+    let report = |seconds: &str| {
+        format!(
+            "{test}\n{{\"type\":\"suite\",\"event\":\"ok\",\"passed\":1,\"failed\":0,\"ignored\":0,\"measured\":0,\"filtered_out\":0,\"exec_time\":{seconds}}}"
+        )
+    };
+    for seconds in [
+        "9.75e-6",
+        "0",
+        "0.0",
+        "1e-9",
+        "29.999999999",
+        "30",
+        "30.0",
+        "3e1",
+        "30000e-3",
+    ] {
+        validate_miri_batch(&report(seconds), &expected)
+            .unwrap_or_else(|error| panic!("duration {seconds}: {error}"));
+    }
+    for seconds in [
+        "-1",
+        "-9.75e-6",
+        "-0.0",
+        "null",
+        "\"9.75e-6\"",
+        "1e309",
+        "1e17",
+        "18446744073709551615",
+        "30.000000000000004",
+        "30.0000000001",
+        "30.0001",
+        "3.00000000001e1",
+    ] {
+        assert!(
+            validate_miri_batch(&report(seconds), &expected).is_err(),
+            "duration {seconds} must be refused"
+        );
+    }
+    let missing = format!("{test}\n{{\"type\":\"suite\",\"event\":\"ok\",\"failed\":0}}");
+    assert!(validate_miri_batch(&missing, &expected).is_err());
+}
+
+#[test]
 fn proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results() -> anyhow::Result<()> {
     if incident_fixture::run("proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results")? {
         return Ok(());

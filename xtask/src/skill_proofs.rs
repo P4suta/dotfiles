@@ -1299,6 +1299,8 @@ pub fn miri_batches(output: &str) -> Result<Vec<Vec<MiriTest>>> {
 ///
 /// Returns an error for a missing, duplicate, changed, failed, or slow result.
 pub fn validate_miri_batch(output: &str, expected: &[MiriTest]) -> Result<()> {
+    const NANOS_PER_MILLI: u32 = 1_000_000;
+    const ROUNDING_TICK: std::time::Duration = std::time::Duration::from_nanos(1);
     let mut completed = BTreeMap::new();
     let mut suites = 0;
     for event in miri_events(output)? {
@@ -1317,11 +1319,23 @@ pub fn validate_miri_batch(output: &str, expected: &[MiriTest]) -> Result<()> {
                 ensure!(event["failed"] == 0, "Miri test suite failed");
                 let seconds = event["exec_time"]
                     .as_number()
-                    .context("missing Miri duration")?
-                    .to_string();
+                    .context("missing Miri duration")?;
+                let millis = seconds
+                    .as_f64()
+                    .filter(|seconds| !seconds.is_sign_negative())
+                    .and_then(|seconds| {
+                        let duration = std::time::Duration::try_from_secs_f64(seconds).ok()?;
+                        let duration = if duration.as_secs_f64() < seconds {
+                            duration.checked_add(ROUNDING_TICK)?
+                        } else {
+                            duration
+                        };
+                        u64::try_from(duration.as_millis())
+                            .ok()?
+                            .checked_add(u64::from(duration.subsec_nanos() % NANOS_PER_MILLI != 0))
+                    });
                 ensure!(
-                    proof_budget_rules::verdict(millis_of(&seconds))
-                        == proof_budget_rules::Verdict::Within,
+                    proof_budget_rules::verdict(millis) == proof_budget_rules::Verdict::Within,
                     "Miri test binary exceeds {} ms: {seconds}s",
                     proof_budget_rules::BUDGET_MILLIS
                 );
