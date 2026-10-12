@@ -558,7 +558,9 @@ pub fn is_manifest(path: &str) -> bool {
     }
     if (ext == "yml" || ext == "yaml")
         && matches!(comps.as_slice(), [.., "workflows", _])
-        && comps.contains(&".github")
+        && comps
+            .iter()
+            .any(|component| matches!(component.as_bytes(), b".github"))
     {
         return true;
     }
@@ -1036,6 +1038,8 @@ mod tests {
             "apps/api/Dockerfile.prod",
             ".github/workflows/ci.yml",
             ".github/workflows/release.yaml",
+            ".GITHUB/WORKFLOWS/CI.YML",
+            "nested/.github/workflows/ci.yml",
             "mise.toml",
             "home/.chezmoidata/versions.toml",
             "home/.chezmoidata/modern.toml",
@@ -1056,6 +1060,8 @@ mod tests {
             "requirements.d/notes.md",
             "notebook/DockerfileReadme.md",
             "docs/workflows/ci.yml", // no .github component
+            ".githubx/workflows/ci.yml",
+            "x.github/workflows/ci.yml",
             "commise.toml",
             "miseo.toml/backups",
             "app.devcontainer.jsonx",
