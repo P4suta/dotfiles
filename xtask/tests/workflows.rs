@@ -1,12 +1,19 @@
+use anyhow::{Context, Result, bail, ensure};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
+use std::process::{Command, Stdio};
 use xtask::quality::{push_hook_findings, workflow_findings};
+use yaml_rust2::YamlLoader;
 
 fn repository(path: &str) -> String {
     fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(path)).unwrap()
 }
 
 const POLICY: &str = "[ruleset.main]\nrequired_status_checks = [\"required\"]\n";
+const MISE_PINS: &str = "home/.chezmoidata/versions.toml";
+const CONTROL_VERSION: &str = "0.0.1";
+const PRODUCER_SYSTEM_PATH: &str = "/usr/bin:/bin";
 
 const WORKFLOW: &str = "on:
   pull_request:
@@ -113,4 +120,133 @@ fn a_workflow_the_ruleset_cannot_rely_on_is_refused() {
             "{expected} missing from {found:?}"
         );
     }
+}
+
+fn pinned_mise(text: &str) -> Result<String> {
+    model::data::parse(MISE_PINS, text)
+        .map_err(anyhow::Error::msg)?
+        .mise
+        .and_then(|release| release.version)
+        .context("the source data must declare mise.version")
+}
+
+fn producer_bash() -> Result<Command> {
+    if !cfg!(windows) {
+        return Ok(platform::tool::Tool::Bash.command());
+    }
+    let git = platform::tool::Tool::Git
+        .command()
+        .arg("--exec-path")
+        .output()?;
+    ensure!(git.status.success(), "git --exec-path failed");
+    let directory = String::from_utf8(git.stdout)?;
+    let shell = xtask::quality::git_for_windows_shell(Path::new(directory.trim()))
+        .context("unexpected Git for Windows layout")?
+        .with_file_name("bash.exe");
+    ensure!(shell.is_file(), "native Git Bash is missing");
+    Ok(platform::process::command(shell))
+}
+
+fn produced_mise(script: &str, pins: &str) -> Result<String> {
+    let fixture = tempfile::tempdir()?;
+    let source = fixture.path().join(MISE_PINS);
+    fs::create_dir_all(source.parent().context("pin source parent is missing")?)?;
+    fs::write(source, pins)?;
+    let mut command = producer_bash()?;
+    let path = if cfg!(windows) {
+        std::env::join_paths([Path::new(command.get_program())
+            .parent()
+            .context("native Bash directory is missing")?])?
+    } else {
+        PRODUCER_SYSTEM_PATH.into()
+    };
+    command
+        .env_clear()
+        .env("PATH", path)
+        .env("HOME", fixture.path())
+        .env("USERPROFILE", fixture.path())
+        .env("TMPDIR", fixture.path())
+        .env("TEMP", fixture.path())
+        .env("TMP", fixture.path())
+        .env("GITHUB_OUTPUT", "mise output")
+        .current_dir(fixture.path())
+        .args([
+            "--noprofile",
+            "--norc",
+            "-e",
+            "-o",
+            "pipefail",
+            "-c",
+            script,
+        ])
+        .stdin(Stdio::null());
+    if cfg!(windows) {
+        command.env(
+            "SystemRoot",
+            std::env::var_os("SystemRoot").context("Windows system root is missing")?,
+        );
+    }
+    let output = command.output()?;
+    ensure!(
+        output.status.success(),
+        "CI mise producer failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::read_to_string(fixture.path().join("mise output")).context("read CI producer output")
+}
+
+#[test]
+fn every_ci_mise_producer_executes_against_the_typed_release_pin() -> Result<()> {
+    // Native Bash executes the CI source.
+    // GitHub expression evaluation and WSL installation remain separate boundaries.
+    let workflow = YamlLoader::load_from_str(&repository(".github/workflows/ci.yml"))?;
+    let [workflow] = workflow.as_slice() else {
+        bail!("CI must contain one workflow document")
+    };
+    let mut producers = BTreeMap::new();
+    for (name, job) in workflow["jobs"].as_hash().context("CI jobs are missing")? {
+        for step in job["steps"].as_vec().context("CI job steps are missing")? {
+            if step["id"].as_str() != Some("mise") {
+                continue;
+            }
+            ensure!(
+                step["shell"].as_str() == Some("bash"),
+                "mise producer requires bash"
+            );
+            let name = name.as_str().context("CI job name must be a string")?;
+            let script = step["run"]
+                .as_str()
+                .context("mise producer has no run block")?;
+            ensure!(
+                producers.insert(name, script).is_none(),
+                "duplicate mise producer"
+            );
+        }
+    }
+    assert_eq!(
+        producers.keys().copied().collect::<Vec<_>>(),
+        ["check", "classify", "minimum-git", "proofs", "rehearsal"]
+    );
+    let pins = repository(MISE_PINS);
+    ensure!(
+        pinned_mise(&pins)? != CONTROL_VERSION,
+        "control must change the actual pin"
+    );
+    let mut changed: toml::Table = toml::from_str(&pins)?;
+    changed
+        .get_mut("mise")
+        .and_then(toml::Value::as_table_mut)
+        .context("mise source table is missing")?
+        .insert(
+            "version".into(),
+            toml::Value::String(CONTROL_VERSION.into()),
+        );
+    let changed = toml::to_string(&changed)?;
+    for (job, script) in producers {
+        for source in [&pins, &changed] {
+            let expected = format!("version={}\n", pinned_mise(source)?);
+            assert_eq!(produced_mise(script, source)?, expected, "{job}");
+        }
+    }
+    Ok(())
 }

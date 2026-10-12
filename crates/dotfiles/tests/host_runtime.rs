@@ -521,9 +521,12 @@ fn render_template(
     config: &Path,
     home: &Path,
     environment: &Command,
+    renderer: &Path,
     template: &str,
 ) -> Result<Vec<u8>> {
-    let mut render = dotfiles::profiles::chezmoi(root, scope, config, home);
+    let configured = dotfiles::profiles::chezmoi(root, scope, config, home);
+    let mut render = platform::process::command(renderer);
+    render.args(configured.get_args());
     for (name, value) in environment.get_envs() {
         if let Some(value) = value {
             render.env(name, value);
@@ -531,16 +534,16 @@ fn render_template(
             render.env_remove(name);
         }
     }
-    let rendered = render
+    let output = render
         .args(["execute-template", "--file"])
         .arg(root.join(template))
         .output()?;
     ensure!(
-        rendered.status.success(),
+        output.status.success(),
         "{}",
-        String::from_utf8_lossy(&rendered.stderr)
+        String::from_utf8_lossy(&output.stderr)
     );
-    Ok(rendered.stdout)
+    Ok(output.stdout)
 }
 
 #[cfg(unix)]
@@ -550,6 +553,7 @@ fn render_git_launcher(
     config: &Path,
     home: &Path,
     environment: &Command,
+    renderer: &Path,
 ) -> Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt as _;
     let wrapper = home.join(".local/bin/git");
@@ -562,6 +566,7 @@ fn render_git_launcher(
             config,
             home,
             environment,
+            renderer,
             "home/dot_local/bin/executable_git.tmpl",
         )?,
     )?;
@@ -597,6 +602,9 @@ fn candidate_git_runs_the_rendered_hook_with_the_candidate_runtime() -> Result<(
         ),
     )?;
     let scratch = Scratch::new(&config)?;
+    let native_home = platform::home::home().context("native tool storage home")?;
+    let native = platform::code_environment::Installations::discover(&native_home)?;
+    let renderer = scratch.renderer(&root, &native)?;
     let environment = scratch.command("git");
     let home = PathBuf::from(
         environment
@@ -615,6 +623,7 @@ fn candidate_git_runs_the_rendered_hook_with_the_candidate_runtime() -> Result<(
             &config,
             &home,
             &environment,
+            &renderer,
             "home/dot_config/git/hooks/executable_reference-transaction.tmpl",
         )?,
     )?;
@@ -622,7 +631,8 @@ fn candidate_git_runs_the_rendered_hook_with_the_candidate_runtime() -> Result<(
     {
         use std::os::unix::fs::PermissionsExt as _;
         fs::set_permissions(&hook, fs::Permissions::from_mode(EXECUTABLE_MODE))?;
-        let wrapper = render_git_launcher(&root, scope.path(), &config, &home, &environment)?;
+        let wrapper =
+            render_git_launcher(&root, scope.path(), &config, &home, &environment, &renderer)?;
         assert!(
             !scratch
                 .command(&wrapper)
@@ -662,15 +672,12 @@ fn candidate_git_runs_the_rendered_hook_with_the_candidate_runtime() -> Result<(
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("dotfiles"));
     let binary = Path::new(env!("CARGO_BIN_EXE_dotfiles"));
-    scratch.provision_runtime(
-        &root,
-        binary,
-        &platform::home::home().context("native tool storage home")?,
-    )?;
+    scratch.provision_runtime(&root, binary, &native_home)?;
     let installed = home
         .join(".local/bin")
         .join(format!("dotfiles{}", std::env::consts::EXE_SUFFIX));
     assert_eq!(fs::read(&installed)?, fs::read(binary)?);
+    assert_candidate_backend(&scratch, &home)?;
     #[cfg(unix)]
     assert_git_launcher(&scratch, &home)?;
     let output = run()?;
@@ -680,5 +687,30 @@ fn candidate_git_runs_the_rendered_hook_with_the_candidate_runtime() -> Result<(
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(!scope.path().join(".local/bin").exists());
+    Ok(())
+}
+
+fn assert_candidate_backend(scratch: &Scratch, home: &Path) -> Result<()> {
+    let guard = home
+        .join(".local/bin")
+        .join(format!("dotguard{}", std::env::consts::EXE_SUFFIX));
+    let backend = guard.with_file_name(format!(
+        "{}{}",
+        dotguard::RENOVATE_BINARY,
+        std::env::consts::EXE_SUFFIX
+    ));
+    assert!(backend.is_file(), "candidate Renovate backend is missing");
+    let delegated = scratch
+        .command(&guard)
+        .args(["renovate", "unsupported"])
+        .output()?;
+    assert_eq!(delegated.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&delegated.stderr).contains("usage: dotguard renovate run"));
+    let mismatched = scratch
+        .command(&backend)
+        .args(["different-source", "renovate", "run"])
+        .output()?;
+    assert_eq!(mismatched.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&mismatched.stderr).contains("\"rule\":\"tool.stale\""));
     Ok(())
 }

@@ -443,7 +443,12 @@ pub(crate) fn execute(context: &TemplateData, runner: &mut impl Runner, step: St
                 context,
                 runner,
                 GUARD_CRATE,
-                &["dotguard", "reaper", "herdr-agent"],
+                &[
+                    "dotguard",
+                    dotguard::RENOVATE_BINARY,
+                    "reaper",
+                    "herdr-agent",
+                ],
             )?;
             let reaper = context.home.join(".local/bin/reaper");
             for name in ["dev-reaper", "session-reaper"] {
@@ -497,14 +502,24 @@ fn runtime(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     install_crate(context, runner, "crates/skill-ops", &["skill-ops"])?;
     install_crate(context, runner, "crates/pr-workflow", &["pr-workflow"])?;
     if context.profile == Profile::Windows {
-        install_crate(context, runner, GUARD_CRATE, &["dotguard"])?;
+        install_crate(
+            context,
+            runner,
+            GUARD_CRATE,
+            &["dotguard", dotguard::RENOVATE_BINARY],
+        )?;
         git_wrapper(&context.home.join(".local/bin"))?;
     } else {
         install_crate(
             context,
             runner,
             GUARD_CRATE,
-            &["dotguard", "reaper", "herdr-agent"],
+            &[
+                "dotguard",
+                dotguard::RENOVATE_BINARY,
+                "reaper",
+                "herdr-agent",
+            ],
         )?;
     }
     if context.profile == Profile::Mac {

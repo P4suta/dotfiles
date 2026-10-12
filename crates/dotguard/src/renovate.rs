@@ -28,8 +28,6 @@ const USAGE_ERROR: i32 = 2;
 const SHORT_DIGEST: usize = 12;
 /// The image's tool directory, which Renovate writes inside its read-only container.
 const CONTAINERBASE: &str = "/tmp/containerbase";
-/// `dotguard renovate run` precedes the arguments that pass through to Renovate.
-const PASSTHROUGH_AFTER: usize = 3;
 /// The first user's and the `staff` group's identifiers on macOS, when `id` can't tell.
 const DEFAULT_UID: u32 = 501;
 const DEFAULT_GID: u32 = 20;
@@ -49,7 +47,7 @@ struct Update {
 
 pub fn dispatch(args: &[String]) -> i32 {
     if args.first().map(String::as_str) == Some("run") {
-        run_local()
+        run_local(&args[1..])
     } else {
         eprintln!("usage: dotguard renovate run");
         USAGE_ERROR
@@ -136,14 +134,19 @@ fn gate_ref(remote: &str, input: &str) -> i32 {
         return unavailable("the required report could not be validated");
     };
     if out.lines().any(|line| {
-        let fields: Vec<_> = line.split('\u{1f}').collect();
-        fields.len() != UPDATE_FIELDS
-            || fields.first().is_none_or(|file| file.is_empty())
-            || !matches!(fields.last(), Some(&"true" | &"false"))
+        let mut fields = line.split('\u{1f}');
+        fields.clone().count() != UPDATE_FIELDS
+            || fields.next().is_none_or(str::is_empty)
+            || !matches!(fields.next_back(), Some("true" | "false"))
     }) {
         return unavailable("the dependency report contains malformed compatibility evidence");
     }
-    let (blocked, outdated) = classify(&parse_updates(&out), &found);
+    let updates = parse_updates(&out);
+    let contexts = match replacement_contexts(&updates, &found) {
+        Ok(contexts) => contexts,
+        Err(cause) => return unavailable(cause),
+    };
+    let (blocked, outdated) = classify(&updates, &found, &contexts);
 
     if !outdated.is_empty() {
         eprintln!(
@@ -179,8 +182,15 @@ fn outdated_refusal(blocked: &[String]) -> Refusal {
 struct Found {
     changed_files: Vec<String>,
     added_by_file: BTreeMap<String, String>,
+    baselines_by_file: BTreeMap<String, String>,
     offered: Option<String>,
     scope_unknown: bool,
+}
+
+struct SourceContext<'a> {
+    package_file: &'a str,
+    before: String,
+    after: String,
 }
 
 /// The manifest gate over one push.
@@ -188,6 +198,7 @@ struct Found {
 fn scope(remote: &str, input: &str) -> Result<Option<Found>, String> {
     let mut changed_files: Vec<String> = Vec::new();
     let mut added_by_file: BTreeMap<String, String> = BTreeMap::new();
+    let mut baselines_by_file = BTreeMap::new();
     let mut offered: Option<String> = None;
     let mut scope_unknown = false;
 
@@ -215,6 +226,9 @@ fn scope(remote: &str, input: &str) -> Result<Option<Found>, String> {
             continue;
         }
         if let Some(b) = &base {
+            for file in &files {
+                baselines_by_file.insert(file.clone(), b.clone());
+            }
             for (file, added) in diff_added_lines(b, local_sha, &files)? {
                 added_by_file
                     .entry(file)
@@ -235,13 +249,18 @@ fn scope(remote: &str, input: &str) -> Result<Option<Found>, String> {
     Ok(Some(Found {
         changed_files,
         added_by_file,
+        baselines_by_file,
         offered,
         scope_unknown,
     }))
 }
 
 /// Splits the updates into blocking ones, which this push touched, and outdated ones, which stay with Renovate.
-fn classify(updates: &[Update], found: &Found) -> (Vec<String>, Vec<String>) {
+fn classify(
+    updates: &[Update],
+    found: &Found,
+    contexts: &[SourceContext<'_>],
+) -> (Vec<String>, Vec<String>) {
     let mut blocked = Vec::new();
     let mut outdated = Vec::new();
     for c in updates {
@@ -264,7 +283,15 @@ fn classify(updates: &[Update], found: &Found) -> (Vec<String>, Vec<String>) {
                 c,
                 found.added_by_file.get(&c.package_file).map(String::as_str),
                 found.scope_unknown,
-            ),
+            ) || contexts
+                .iter()
+                .find(|context| context.package_file == c.package_file)
+                .is_some_and(|context| {
+                    let replacement = protocol_text(&c.replace_string);
+                    !replacement.is_empty()
+                        && context.after.matches(&replacement).count()
+                            > context.before.matches(&replacement).count()
+                }),
         }) == rules::freshness_rules::Verdict::Outdated
         {
             blocked.push(line);
@@ -273,6 +300,62 @@ fn classify(updates: &[Update], found: &Found) -> (Vec<String>, Vec<String>) {
         }
     }
     (blocked, outdated)
+}
+
+fn replacement_contexts<'a>(
+    updates: &'a [Update],
+    found: &Found,
+) -> Result<Vec<SourceContext<'a>>, &'static str> {
+    let mut contexts: Vec<SourceContext<'a>> = Vec::new();
+    for candidate in updates {
+        if candidate.breaking
+            || candidate.replace_string.is_empty()
+            || !found.changed_files.contains(&candidate.package_file)
+            || touched(
+                candidate,
+                found
+                    .added_by_file
+                    .get(&candidate.package_file)
+                    .map(String::as_str),
+                found.scope_unknown,
+            )
+            || contexts
+                .iter()
+                .any(|context| context.package_file == candidate.package_file)
+        {
+            continue;
+        }
+        let base = found
+            .baselines_by_file
+            .get(&candidate.package_file)
+            .ok_or("the dependency source baseline is unavailable")?;
+        let offered = found
+            .offered
+            .as_deref()
+            .ok_or("the offered source is unavailable")?;
+        let before = real_git::capture(&["show", &format!("{base}:{}", candidate.package_file)])
+            .ok_or("Git could not inspect the original dependency source")?;
+        let after = real_git::capture(&["show", &format!("{offered}:{}", candidate.package_file)])
+            .ok_or("Git could not inspect the offered dependency source")?;
+        contexts.push(SourceContext {
+            package_file: &candidate.package_file,
+            before: protocol_text(&before),
+            after: protocol_text(&after),
+        });
+    }
+    Ok(contexts)
+}
+
+fn protocol_text(source: &str) -> String {
+    let mut text = String::with_capacity(source.len());
+    for character in source.chars() {
+        match character {
+            '\r' => (),
+            '\u{1f}' | '\n' => text.push(' '),
+            _ => text.push(character),
+        }
+    }
+    text
 }
 
 /// The diff base for one pushed ref: the remote tip it updates, or the fork point from the default branch for a new branch.
@@ -376,7 +459,8 @@ fn touched(c: &Update, added_lines: Option<&str>, scope_unknown: bool) -> bool {
     let Some(added_lines) = added_lines else {
         return false;
     };
-    if !c.replace_string.is_empty() && added_lines.contains(&c.replace_string) {
+    let replacement = protocol_text(&c.replace_string);
+    if !replacement.is_empty() && protocol_text(added_lines).contains(&replacement) {
         return true;
     }
     let needle = if c.current_value.is_empty() {
@@ -416,7 +500,7 @@ fn renovate_report(offered: Option<&str>) -> Option<PathBuf> {
     std::fs::create_dir_all(&dir).ok()?;
     let report = dir.join("report.json");
 
-    let mut cfg = prepare(offered)?;
+    let mut cfg = prepare(offered, &[])?;
     cfg.report_file = Some(report.clone());
     cfg.log_level =
         Some(std::env::var("RENOVATE_LOCAL_LOG_LEVEL").unwrap_or_else(|_| "warn".into()));
@@ -432,19 +516,71 @@ fn renovate_report(offered: Option<&str>) -> Option<PathBuf> {
 }
 
 /// The jq program that flattens the report into candidate lines joined by the unit separator `U+001F`, which keeps empty fields intact.
-const JQ_UPDATES: &str = r#"
-    ($types | split(" ") | map(select(length > 0))) as $blocking
-    | if (.repositories.local.packageFiles | type) != "object" then error("missing packageFiles") else .repositories.local.packageFiles end | to_entries[] | .value[]
-    | .packageFile as $file
-    | (.deps // [])[]
-    | .depName as $dep | (.currentValue // "") as $cur | (.currentDigest // "") as $dig
-    | (.replaceString // "") as $rep
-    | (.updates // [])[]
-    | (.updateType // .bucket // "") as $type
-    | select(($blocking | index($type)) != null)
-    | [$file, $dep, $cur, $dig, $rep, $type, (.newValue // ""), (.newDigest // ""), (.isBreaking // false)]
-    | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")
-"#;
+const JQ_UPDATES: &str = concat!(
+    r#"def nullable_string($key): .[$key]==null or (.[$key]|type)=="string";"#,
+    r#"def nonempty_string: if type=="string" then length>0 else false end;"#,
+    r#"def optional_type($key;$kind): if has($key) then (.[$key]|type)==$kind else true end;"#,
+    r#"def report_warnings: if has("warnings") then .warnings else [] end;"#,
+    r#"def excluded: .enabled==false or (.skipReason as $reason|(["path-dependency","internal-package","file-dependency","file","local-dependency","local","local-chart","ignored","disabled","is-pinned"]|index($reason))!=null);"#,
+    r#"def valid_update: if type!="object" then false else"#,
+    r#" ((.updateType//.bucket)|nonempty_string)"#,
+    r#" and (if has("updateType") then (.updateType|nonempty_string) else true end)"#,
+    r#" and (if has("bucket") then (.bucket|nonempty_string) else true end)"#,
+    r#" and optional_type("isBreaking";"boolean") and optional_type("pendingChecks";"boolean")"#,
+    r#" and nullable_string("newValue") and nullable_string("newDigest") end;"#,
+    r#"def valid_dependency: if type!="object" then false else"#,
+    r#" (.depName|nonempty_string) and (.updates|type)=="array" and (report_warnings|type)=="array""#,
+    r#" and optional_type("enabled";"boolean")"#,
+    r#" and nullable_string("currentValue") and nullable_string("currentDigest") and nullable_string("replaceString")"#,
+    r#" and all(.updates[];valid_update) end;"#,
+    r#"def mise_backend_providers: {"#,
+    r#""nu":{"datasource":"github-releases","packageName":"nushell/nushell"},"#,
+    r#""conda:zsh":{"datasource":"conda","packageName":"conda-forge/zsh"},"#,
+    r#""pypi:ansible-core":{"datasource":"pypi","packageName":"ansible-core"},"#,
+    r#""cargo-deny":{"datasource":"crate","packageName":"cargo-deny"}};"#,
+    r#"def counterpart($records;$file;$dep):"#,
+    r#" [$records[]|select(.manager=="regex" and .packageFile==$file and .dependency.depName==$dep)]"#,
+    r#"|if length==1 then .[0].dependency else null end;"#,
+    r#"def verified_lookup: (.currentValue|nonempty_string) and (.currentVersion|nonempty_string)"#,
+    r#" and .skipReason==null and (excluded|not) and (report_warnings|length)==0;"#,
+    r#"def covered_mise_backend($records;$record):"#,
+    r#" $record.dependency as $source|mise_backend_providers[$source.depName] as $provider"#,
+    r#"|if $record.manager!="mise" or $source.skipReason!="unsupported-datasource" or $provider==null then false else"#,
+    r#" counterpart($records;$record.packageFile;$source.depName) as $verified"#,
+    r#"|if $verified==null then false else"#,
+    r#" ($source.lockedVersion|nonempty_string) and $verified.currentValue==$source.lockedVersion"#,
+    r#" and $verified.datasource==$provider.datasource and $verified.packageName==$provider.packageName"#,
+    r#" and ($verified|verified_lookup) end end;"#,
+    r#"def hosted_channel: .datasource=="github-runners" and .depType=="github-runner""#,
+    r#" and (.depName=="ubuntu" or .depName=="windows") and .currentValue=="latest""#,
+    r#" and .skipReason=="invalid-version" and (.updates|length)==0 and (report_warnings|length)==0;"#,
+    r#"def covered_mise_ci_alias($records;$record): $record.dependency as $alias"#,
+    r#"|if $record.manager!="github-actions" or $record.packageFile!=".github/workflows/ci.yml""#,
+    r#" or $alias.datasource!="github-release-attachments" or $alias.depType!="uses-with""#,
+    r#" or $alias.depName!="jdx/mise" or $alias.packageName!="jdx/mise""#,
+    r#" or $alias.currentValue!="${{ steps.mise.outputs.version }}" or $alias.skipReason!="invalid-value""#,
+    r#" or ($alias.updates|length)!=0 or ($alias|report_warnings|length)!=0 then false else"#,
+    r#" counterpart($records;"home/.chezmoidata/versions.toml";"jdx/mise") as $verified"#,
+    r#"|if $verified==null then false else"#,
+    r#" $verified.datasource=="github-releases" and $verified.packageName=="jdx/mise""#,
+    r#" and ($verified|verified_lookup) end end;"#,
+    r#"($types|split(" ")|map(select(length>0))) as $blocking"#,
+    r#"|if ((.repositories.local.problems//[])|length)!=0 then error("repository problems prevent verified lookup evidence") else . end"#,
+    r#"|if (.repositories.local.packageFiles|type)!="object" then error("missing packageFiles") else .repositories.local.packageFiles end"#,
+    r#"|[to_entries[]|.key as $manager"#,
+    r#"|if (.value|type)!="array" then error("invalid manager packageFiles") else .value[] end"#,
+    r#"|if (.packageFile|nonempty_string|not) or (.deps|type)!="array" then error("invalid packageFile dependency evidence") else . end"#,
+    r#"|.packageFile as $file|.deps[]"#,
+    r#"|if valid_dependency then {manager:$manager,packageFile:$file,dependency:.} else error("invalid dependency lookup evidence") end] as $records"#,
+    r#"|$records[] as $record|$record.dependency"#,
+    r#"|if excluded or hosted_channel or covered_mise_backend($records;$record) or covered_mise_ci_alias($records;$record) then empty"#,
+    r#" elif .skipReason!=null or (report_warnings|length)!=0 then error("incomplete dependency lookup evidence") else . end"#,
+    r#"|$record.packageFile as $file|.depName as $dep|(.currentValue//"") as $cur|(.currentDigest//"") as $dig"#,
+    r#"|(.replaceString//"") as $rep|.updates[]|(.updateType//.bucket) as $type"#,
+    r#"|select(.pendingChecks!=true)|select(($blocking|index($type))!=null)"#,
+    r#"|[$file,$dep,$cur,$dig,$rep,$type,(.newValue//""),(.newDigest//""),(.isBreaking//false)]"#,
+    r#"|map(tostring|gsub("[\u001f\n]";" "))|join("\u001f")"#,
+);
 
 fn jq_updates(types: &str, report: &Path) -> Option<String> {
     let out = locate::child("jq")
@@ -507,8 +643,8 @@ pub fn is_manifest(path: &str) -> bool {
     ) {
         return true;
     }
-    let comps: Vec<&str> = lowered.split('/').collect();
-    let name = comps.last().copied().unwrap_or("");
+    let comps = lowered.split('/');
+    let name = comps.clone().next_back().unwrap_or("");
 
     let exact = [
         "cargo.toml",
@@ -539,8 +675,8 @@ pub fn is_manifest(path: &str) -> bool {
         return true;
     }
     // `Dockerfile` and suffixed variants such as `Dockerfile.prod`, but no other word that starts with it.
-    if comps.iter().any(|c| {
-        *c == "dockerfile"
+    if comps.clone().any(|c| {
+        c == "dockerfile"
             || c.strip_prefix("dockerfile")
                 .is_some_and(|r| r.starts_with('.'))
     }) {
@@ -555,18 +691,18 @@ pub fn is_manifest(path: &str) -> bool {
         return true;
     }
     if (ext == "yml" || ext == "yaml")
-        && matches!(comps.as_slice(), [.., "workflows", _])
+        && comps.clone().rev().nth(1) == Some("workflows")
         && comps
-            .iter()
+            .clone()
             .any(|component| matches!(component.as_bytes(), b".github"))
     {
         return true;
     }
     if ext == "toml"
         && comps
-            .iter()
-            .zip(comps.iter().skip(1))
-            .any(|pair| pair == (&".config", &"mise"))
+            .clone()
+            .zip(comps.skip(1))
+            .any(|pair| pair == (".config", "mise"))
     {
         return true;
     }
@@ -678,7 +814,7 @@ fn docker_plan(c: &RunConfig) -> (Vec<String>, Vec<&'static str>) {
 
 /// Gather the config from the environment and build the snapshot.
 /// `offered` names the commit the gate reads instead of the index, so the report describes exactly what the push would publish.
-fn prepare(offered: Option<&str>) -> Option<RunConfig> {
+fn prepare(offered: Option<&str>, passthrough: &[String]) -> Option<RunConfig> {
     if locate::which("docker").is_none() {
         eprintln!("error: docker is required.");
         return None;
@@ -714,7 +850,7 @@ fn prepare(offered: Option<&str>) -> Option<RunConfig> {
         dedicated_token: std::env::var("RENOVATE_GITHUB_COM_TOKEN")
             .ok()
             .filter(|s| !s.is_empty()),
-        passthrough: std::env::args().skip(PASSTHROUGH_AFTER).collect(),
+        passthrough: passthrough.to_vec(),
     })
 }
 
@@ -761,20 +897,31 @@ fn checkout_snapshot(root: &str, offered: Option<&str>) -> Option<PathBuf> {
         platform::cleanup::remove_file(&offered_index);
     }
     let ok = staged
-        && real_git::succeeds(&[
-            "-C",
-            &prefix,
-            "init",
-            "--quiet",
-            "--initial-branch=main",
-            "--template=",
-        ])
-        && real_git::succeeds(&["-C", &prefix, "add", "--all"]);
+        && snapshot_git(
+            &snapshot,
+            &["init", "--quiet", "--initial-branch=main", "--template="],
+        )
+        && snapshot_git(&snapshot, &["add", "--all"]);
     if !ok {
         platform::cleanup::remove_dir_all(&snapshot);
         return None;
     }
     Some(snapshot)
+}
+
+fn snapshot_git(snapshot: &Path, arguments: &[&str]) -> bool {
+    real_git::find()
+        .and_then(|git| {
+            platform::process::command(git)
+                .arg("-C")
+                .arg(snapshot)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .ok()
+        })
+        .is_some_and(|status| status.success())
 }
 
 fn uid_gid() -> (u32, u32) {
@@ -793,8 +940,8 @@ fn uid_gid() -> (u32, u32) {
     (read("-u"), read("-g"))
 }
 
-pub fn run_local() -> i32 {
-    let Some(cfg) = prepare(None) else {
+pub fn run_local(passthrough: &[String]) -> i32 {
+    let Some(cfg) = prepare(None, passthrough) else {
         return 1;
     };
     let code = run_prepared(&cfg, false).unwrap_or(1);
@@ -805,9 +952,8 @@ pub fn run_local() -> i32 {
 /// Spawn docker per the plan.
 fn run_prepared(cfg: &RunConfig, quiet_stdout: bool) -> Option<i32> {
     let (args, removed) = docker_plan(cfg);
-    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut cmd = locate::child("docker");
-    cmd.args(&refs);
+    cmd.args(&args);
     for r in removed {
         cmd.env_remove(r);
     }

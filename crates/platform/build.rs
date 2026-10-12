@@ -1,8 +1,7 @@
 //! Embeds the revision, checkout, and content hash of the sources that produce each installed tool.
 //! A tool can then notice that its sources changed.
-//! The Git guard builds without the tools feature and embeds nothing.
+//! Every binary can bind a delegated process to the same source build.
 
-#[cfg(feature = "tools")]
 #[path = "src/build_inputs.rs"]
 mod build_inputs;
 
@@ -25,12 +24,10 @@ fn revision(root: &std::path::Path) -> String {
 }
 
 /// The levels from the platform crate's manifest directory up to its checkout: `crates/platform`.
-#[cfg(feature = "tools")]
 const CHECKOUT_DEPTH: usize = 2;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    #[cfg(feature = "tools")]
     {
         let manifest = std::path::PathBuf::from(
             std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets the manifest directory"),
@@ -48,8 +45,11 @@ fn main() {
         for path in build_inputs::inputs(root).expect("the build inputs are readable") {
             println!("cargo:rerun-if-changed={}", root.join(path).display());
         }
-        println!("cargo:rustc-env=DOTFILES_BUILD_REVISION={}", revision(root));
-        println!("cargo:rustc-env=DOTFILES_BUILD_ROOT={}", root.display());
+        #[cfg(feature = "tools")]
+        {
+            println!("cargo:rustc-env=DOTFILES_BUILD_REVISION={}", revision(root));
+            println!("cargo:rustc-env=DOTFILES_BUILD_ROOT={}", root.display());
+        }
         println!(
             "cargo:rustc-env=DOTFILES_BUILD_HASH={}",
             build_inputs::content_hash(root).expect("the build inputs are readable")

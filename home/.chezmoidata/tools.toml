@@ -84,6 +84,7 @@ common = [
   "deno",
   "bun",
   "yamllint",
+  "doppler",
 ]
 personal = []
 work = []

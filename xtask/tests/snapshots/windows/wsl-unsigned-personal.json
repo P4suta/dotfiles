@@ -472,7 +472,7 @@
     {"mode":"0755","path":".local/bin/git","sha256":"7053afbde0b294f6917b44c99d67daaa5aeeb649e78688c0c1598c4df45a48a7","type":"file"}
   ],
   "scripts": [
-    {"condition":"always","phase":"before","position":0,"sha256":"2f00922824f4efa71ace3432a01e7155f8876d8789c0f75d52e9b48a8e9a0192","target":".chezmoiscripts/unix/00-mise.sh"},
+    {"condition":"always","phase":"before","position":0,"sha256":"daf2f01dad14512b1881de1abf4648f677fc2164a2238d29262c59df39673eec","target":".chezmoiscripts/unix/00-mise.sh"},
     {"condition":"always","phase":"before","position":1,"sha256":"18c93726e5cc04bf6abcc0170fca31fb549c3cc49bb64b0642b4dcd7aea297f6","target":".chezmoiscripts/unix/01-runtime.sh"},
     {"condition":"onchange","phase":"before","position":2,"sha256":"6d7ed7f72a136550609bd1e627c210694053116696033e4bb990511bac94d455","target":".chezmoiscripts/unix/02-github.sh"},
     {"condition":"onchange","phase":"after","position":3,"sha256":"1bdd16811fb21bde32bed5756b1b7cfb49f4b996c64144ba0dcd2214c6e8122b","target":".chezmoiscripts/unix/05-tools.sh"},

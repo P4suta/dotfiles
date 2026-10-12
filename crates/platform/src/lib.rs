@@ -11,6 +11,9 @@ pub use rules::process_rules;
 pub mod refusal;
 pub use rules::{cycle_rules, order_rules};
 
+/// The source hash shared by binaries compiled in the same build.
+pub const BUILD_HASH: &str = env!("DOTFILES_BUILD_HASH");
+
 #[cfg(feature = "tools")]
 pub mod aside;
 #[cfg(feature = "tools")]

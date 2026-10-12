@@ -60,3 +60,4 @@
 | [2026-10-12 Classify native failures from delivery signals before output replays](native-failure-signals-before-output-replays.md) | proposed |  |
 | [2026-10-12 Recover native PATH before constructing candidate environments](native-path-before-candidate-environments.md) | proposed |  |
 | [2026-10-12 Persist remote execution ownership before submission](persist-remote-execution-ownership.md) | proposed |  |
+| [2026-10-13 Run Renovate through a process from the same source build](renovate-behind-a-source-matched-process.md) | proposed |  |

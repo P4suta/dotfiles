@@ -528,7 +528,7 @@
     {"mode":"0644","path":"Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist","sha256":"23d2659fda306176b6841a3e58f234d4f5c63451a00778e3b69d1b660cca87b8","type":"file"}
   ],
   "scripts": [
-    {"condition":"always","phase":"before","position":0,"sha256":"2f00922824f4efa71ace3432a01e7155f8876d8789c0f75d52e9b48a8e9a0192","target":".chezmoiscripts/unix/00-mise.sh"},
+    {"condition":"always","phase":"before","position":0,"sha256":"daf2f01dad14512b1881de1abf4648f677fc2164a2238d29262c59df39673eec","target":".chezmoiscripts/unix/00-mise.sh"},
     {"condition":"always","phase":"before","position":1,"sha256":"18c93726e5cc04bf6abcc0170fca31fb549c3cc49bb64b0642b4dcd7aea297f6","target":".chezmoiscripts/unix/01-runtime.sh"},
     {"condition":"onchange","phase":"before","position":2,"sha256":"6d7ed7f72a136550609bd1e627c210694053116696033e4bb990511bac94d455","target":".chezmoiscripts/unix/02-github.sh"},
     {"condition":"onchange","phase":"after","position":3,"sha256":"5e7f94f9794e745624ac29cf2b2fc6d2dca0213348ba4a5057f2981cd5d09ae0","target":".chezmoiscripts/unix/04-desktop.sh"},

@@ -353,16 +353,20 @@ impl Scratch {
                 guard,
                 "--bin",
                 guard,
+                "--bin",
+                dotguard::RENOVATE_BINARY,
                 "--target-dir",
             ])
             .arg(&build)
             .status()?;
         ensure!(status.success(), "build candidate Git guard: {status}");
-        let executable = format!("{guard}{}", std::env::consts::EXE_SUFFIX);
-        platform::code_environment::link_executable(
-            &build.join(DEBUG_OUTPUT).join(&executable),
-            &directory.join(executable),
-        )?;
+        for binary in [guard, dotguard::RENOVATE_BINARY] {
+            let executable = format!("{binary}{}", std::env::consts::EXE_SUFFIX);
+            platform::code_environment::link_executable(
+                &build.join(DEBUG_OUTPUT).join(&executable),
+                &directory.join(executable),
+            )?;
+        }
         if cfg!(windows) {
             crate::setup::git_wrapper(&directory)?;
         }

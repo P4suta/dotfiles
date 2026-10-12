@@ -10,37 +10,37 @@
 //! `core.hooksPath` in the global Git configuration points every repository at that hooks directory, so no repository needs to opt in.
 
 use dotguard::{
-    attribution, bypass, gate_rules, gitargv, lang, postcommit, prepush, real_git, refusal,
-    renovate, stack, staged,
+    attribution, bypass, gate_rules, gitargv, lang, postcommit, prepush, real_git, refusal, stack,
+    staged,
 };
 
 use bypass::Rule;
 use gate_rules::Admission;
 use std::io::Write;
 use std::path::Path;
-use std::process::ExitCode;
+use std::process::{ExitCode, Stdio};
 
 fn main() -> ExitCode {
     let mut process_args = std::env::args();
     let invoked = process_args.next().unwrap_or_default();
-    let args: Vec<String> = process_args.collect();
     if invoked_as_git(&invoked) {
-        return git_wrapper(&args);
+        return git_wrapper(&process_args.collect::<Vec<_>>());
     }
-    let Some(cmd) = args.first().map(String::as_str) else {
+    let Some(cmd) = process_args.next() else {
         usage();
         return ExitCode::FAILURE;
     };
 
-    match cmd {
-        "git" => git_wrapper(&args[1..]),
-        "pre-push" => code(prepush::run(args.get(1).map_or("origin", String::as_str))),
-        "commit-msg" => code(commit_msg(args.get(1).map_or("", String::as_str))),
+    match cmd.as_str() {
+        "git" => git_wrapper(&process_args.collect::<Vec<_>>()),
+        "pre-push" => code(prepush::run(
+            process_args.next().as_deref().unwrap_or("origin"),
+        )),
+        "commit-msg" => code(commit_msg(process_args.next().as_deref().unwrap_or(""))),
         "pre-commit" => code(pre_commit()),
         "post-commit" => code(postcommit::run()),
-        "renovate-gate" => code(renovate::run(args.get(1).map_or("origin", String::as_str))),
-        "renovate" => code(renovate::dispatch(&args[1..])),
-        "scan" => code(scan_paths(&args[1..])),
+        "renovate-gate" | "renovate" => renovate_backend(&cmd, process_args),
+        "scan" => code(scan_paths(&process_args.collect::<Vec<_>>())),
         "--version" | "-V" | "version" => {
             println!("dotguard {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -61,6 +61,48 @@ fn invoked_as_git(argv0: &str) -> bool {
 
 fn code(n: i32) -> ExitCode {
     ExitCode::from(u8::try_from(n).unwrap_or(1))
+}
+
+fn renovate_backend(mode: &str, arguments: impl Iterator<Item = String>) -> ExitCode {
+    let program = match std::env::current_exe() {
+        Ok(executable) => executable.with_file_name(format!(
+            "{}{}",
+            dotguard::RENOVATE_BINARY,
+            std::env::consts::EXE_SUFFIX
+        )),
+        Err(error) => return backend_failure(&error),
+    };
+    let mut command = platform::process::repository_command(program);
+    command
+        .arg(platform::BUILD_HASH)
+        .arg(mode)
+        .args(arguments)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        backend_failure(&command.exec())
+    }
+    #[cfg(windows)]
+    {
+        match command.status() {
+            Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+            Err(error) => backend_failure(&error),
+        }
+    }
+}
+
+fn backend_failure(error: &std::io::Error) -> ExitCode {
+    refusal::Refusal::new(
+        "tool.failure",
+        "the matching Renovate backend could not be started",
+        "chezmoi apply",
+    )
+    .evidence(error.to_string())
+    .emit();
+    ExitCode::FAILURE
 }
 
 fn usage() {
