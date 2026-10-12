@@ -41,7 +41,12 @@ pub fn image(root: &Path) -> Result<String> {
     ))
 }
 
-fn build(root: &Path, image: &str) -> Result<()> {
+/// Builds the pinned image unless it exists.
+///
+/// # Errors
+///
+/// Returns an error when Docker can't build it.
+pub fn build(root: &Path, image: &str) -> Result<()> {
     let present = Tool::Docker
         .command()
         .args(["image", "inspect", image])
@@ -84,9 +89,8 @@ pub fn run_arguments(
         }
         mount
     };
-    let mut arguments: Vec<OsString> = ["run", "--rm", "--network", "none", "--mount"]
-        .map(OsString::from)
-        .into();
+    let mut arguments = crate::container::run_arguments();
+    arguments.push("--mount".into());
     arguments.push(mount(root, SOURCE, true));
     arguments.push("--mount".into());
     arguments.push(mount(output, OUTPUT, false));

@@ -270,7 +270,7 @@ fn every_profile_holds_what_the_installers_apply() {
             (true, vec![root.join(coderabbit_guard::SOURCE_POLICY)]),
             (false, vec![home.join(".config/prose")]),
         ] {
-            let mut command = profiles::chezmoi(&root, scope.path(), &config, &home);
+            let mut command = virtual_chezmoi(&root, scope.path(), &config, profile, &home);
             command.args(["apply", "--dry-run", "--force", "--include", "dirs,files"]);
             if source {
                 command.arg("--source-path");
@@ -389,15 +389,15 @@ fn skipped_setup_scripts_need_a_target_name_and_a_reason() {
 /// How many `jq` entries the mise configuration renders when the personal list repeats the common one.
 fn rendered_tool_entries(
     mut chezmoi: std::process::Command,
+    root: &Path,
     profile: Profile,
     home: &Path,
 ) -> usize {
+    let mut overrides = virtual_host(root, profile, home);
+    overrides["platforms"] = serde_json::json!({profile.name(): {"tools": {"personal": ["jq"]}}});
     let mise = chezmoi
         .arg("--override-data")
-        .arg(format!(
-            r#"{{"platforms":{{"{0}":{{"tools":{{"personal":["jq"]}}}}}}}}"#,
-            profile.name()
-        ))
+        .arg(overrides.to_string())
         .args(["cat"])
         .arg(home.join(".config/mise/config.toml"))
         .output()
@@ -427,6 +427,28 @@ fn assert_no_retired_runtime(profile: Profile, rendered: &serde_json::Value) {
     }
 }
 
+fn virtual_host(root: &Path, profile: Profile, home: &Path) -> serde_json::Value {
+    serde_json::json!({"chezmoi": profiles::fixture_host(
+        profile,
+        &profiles::chezmoi_path(root),
+        &profiles::chezmoi_path(home),
+    )})
+}
+
+fn virtual_chezmoi(
+    root: &Path,
+    scope: &Path,
+    config: &Path,
+    profile: Profile,
+    home: &Path,
+) -> std::process::Command {
+    let mut command = profiles::chezmoi(root, scope, config, home);
+    command
+        .arg("--override-data")
+        .arg(virtual_host(root, profile, home).to_string());
+    command
+}
+
 #[test]
 fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
     let snapshot = source_snapshot();
@@ -441,7 +463,7 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
             xtask::rehearsal::configuration(root, profile, &home).unwrap(),
         )
         .unwrap();
-        let output = profiles::chezmoi(root, scope.path(), &config, &home)
+        let output = virtual_chezmoi(root, scope.path(), &config, profile, &home)
             .args(["data", "--format", "json"])
             .output()
             .unwrap();
@@ -468,7 +490,8 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
         }
         assert_eq!(
             rendered_tool_entries(
-                profiles::chezmoi(root, scope.path(), &config, &home),
+                virtual_chezmoi(root, scope.path(), &config, profile, &home),
+                root,
                 profile,
                 &home
             ),
@@ -476,7 +499,7 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
             "a tool listed twice must render once"
         );
         let platform = &data["platforms"][profile.name()];
-        let rendered = profiles::chezmoi(root, scope.path(), &config, &home)
+        let rendered = virtual_chezmoi(root, scope.path(), &config, profile, &home)
             .args(["dump", "--include", "files,scripts", "--format", "json"])
             .output()
             .unwrap();
@@ -504,7 +527,7 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
             matches!(profile, Profile::Windows | Profile::Wsl),
             "{skips:?}"
         );
-        let listed = profiles::chezmoi(root, scope.path(), &config, &home)
+        let listed = virtual_chezmoi(root, scope.path(), &config, profile, &home)
             .args(["managed", "--include", "scripts", "--nul-path-separator"])
             .output()
             .unwrap();
@@ -522,6 +545,92 @@ fn rehearsal_configuration_is_read_by_the_pinned_chezmoi_as_intended() {
                 skip.script
             );
         }
+    }
+}
+
+#[test]
+fn rehearsal_configuration_ignores_unrelated_native_pins() {
+    const TEST: &str = "rehearsal_configuration_ignores_unrelated_native_pins";
+    const FIXTURE: &str = "DOTFILES_REHEARSAL_HOME_FIXTURE";
+    if std::env::var(FIXTURE).is_ok_and(|value| value == TEST) {
+        assert_rehearsal_home_isolation();
+        return;
+    }
+    let evidence = std::env::var_os(skill_ops::INCIDENT_EVIDENCE_ROOT);
+    let scope = match &evidence {
+        Some(directory) => tempfile::tempdir_in(directory),
+        None => tempfile::tempdir(),
+    }
+    .unwrap();
+    let native = platform::paths::canonical(scope.path())
+        .unwrap()
+        .join("native");
+    let versions = native.join(".cargo/domyjob/versions");
+    fs::create_dir_all(&versions).unwrap();
+    fs::write(versions.join("pinned"), "malformed native pin\n").unwrap();
+    let output = platform::process::command(std::env::current_exe().unwrap())
+        .args(["--exact", TEST, "--nocapture"])
+        .env(FIXTURE, TEST)
+        .env("HOME", &native)
+        .env("USERPROFILE", &native)
+        .env("SKILL_OPS_STATE", scope.path().join("state"))
+        .env("DOTFILES_EXPECTED_FAILURE", "")
+        .output()
+        .unwrap();
+    fs::write(scope.path().join("stdout.log"), &output.stdout).unwrap();
+    fs::write(scope.path().join("stderr.log"), &output.stderr).unwrap();
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    if evidence.is_some() {
+        let _ = scope.keep();
+    }
+    assert!(
+        output.status.success(),
+        "owned rehearsal home fixture failed"
+    );
+}
+
+fn assert_rehearsal_home_isolation() {
+    let snapshot = source_snapshot();
+    let root = snapshot.path();
+    let native = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+    let rejected =
+        xtask::rehearsal::configuration(root, profiles::native_profile().unwrap(), &native)
+            .unwrap_err();
+    assert!(
+        rejected
+            .to_string()
+            .contains("16 lowercase hexadecimal digits"),
+        "{rejected:#}"
+    );
+    for profile in Profile::ALL {
+        let scope = tempfile::tempdir().unwrap();
+        let directory = platform::paths::canonical(scope.path()).unwrap();
+        let home = directory.join("home");
+        fs::create_dir(&home).unwrap();
+        let config = directory.join("chezmoi.toml");
+        fs::write(
+            &config,
+            xtask::rehearsal::configuration(root, profile, &home).unwrap(),
+        )
+        .unwrap();
+        let rendered = virtual_chezmoi(root, &directory, &config, profile, &home)
+            .args(["dump", "--include", "files,scripts", "--format", "json"])
+            .output()
+            .unwrap();
+        assert!(
+            rendered.status.success(),
+            "{}: {}",
+            profile.name(),
+            String::from_utf8_lossy(&rendered.stderr)
+        );
+        let dump: serde_json::Value = serde_json::from_slice(&rendered.stdout).unwrap();
+        assert!(dump.as_object().is_some_and(|targets| !targets.is_empty()));
+        assert!(
+            !String::from_utf8(rendered.stdout)
+                .unwrap()
+                .contains(&profiles::chezmoi_path(&native))
+        );
     }
 }
 
@@ -985,7 +1094,8 @@ fn initialization_keeps_the_selected_checkout_and_existing_prompt_answers() {
     let template = fs::read(root.join("home/.chezmoi.toml.tmpl")).unwrap();
     for rooted in [false, true] {
         let scope = tempfile::tempdir().unwrap();
-        let checkout = scope.path().join(if cfg!(windows) {
+        let directory = xtask::canonical(scope.path()).unwrap();
+        let checkout = directory.join(if cfg!(windows) {
             "checkout with spaces and 'quotes'"
         } else {
             "checkout with spaces and \"quotes\""
@@ -996,16 +1106,16 @@ fn initialization_keeps_the_selected_checkout_and_existing_prompt_answers() {
             checkout.clone()
         };
         fs::create_dir_all(&source).unwrap();
-        let global = scope.path().join("gitconfig");
+        let global = directory.join("gitconfig");
         fs::write(&global, "").unwrap();
-        for repository in [scope.path(), checkout.as_path()] {
+        for repository in [directory.as_path(), checkout.as_path()] {
             initialize_fixture_repository(repository, &global);
         }
         if rooted {
             fs::write(checkout.join(".chezmoiroot"), "home\n").unwrap();
         }
         fs::write(source.join(".chezmoi.toml.tmpl"), &template).unwrap();
-        let destination = scope.path().join("destination");
+        let destination = directory.join("destination");
         let config_home = destination.join(".config");
         let config = config_home.join("chezmoi/chezmoi.toml");
         fs::create_dir_all(config.parent().unwrap()).unwrap();
@@ -1018,7 +1128,7 @@ fn initialization_keeps_the_selected_checkout_and_existing_prompt_answers() {
         let expected = previous["data"].clone();
         previous.insert(
             "sourceDir".into(),
-            toml::Value::String(profiles::chezmoi_path(&scope.path().join("old source"))),
+            toml::Value::String(profiles::chezmoi_path(&directory.join("old source"))),
         );
         fs::write(&config, toml::to_string(&previous).unwrap()).unwrap();
         let chezmoi = || {
@@ -1029,7 +1139,7 @@ fn initialization_keeps_the_selected_checkout_and_existing_prompt_answers() {
                     .filter(|(name, _)| !name.to_string_lossy().starts_with("CHEZMOI_")),
             );
             command
-                .current_dir(scope.path())
+                .current_dir(&directory)
                 .env("HOME", &destination)
                 .env("USERPROFILE", &destination)
                 .env("XDG_CONFIG_HOME", &config_home)

@@ -46,6 +46,11 @@ shape = "parser"
 path = "crates/platform/src/refusal.rs"
 by = "fuzz/fuzz_targets/refusal_line.rs"
 
+[[owner]]
+shape = "parser"
+path = "crates/platform/src/code_environment.rs"
+by = "fuzz/fuzz_targets/native_path_response.rs"
+
 # The mutation campaign of `just proofs` over the decision core.
 [[owner]]
 shape = "parser"

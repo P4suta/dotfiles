@@ -99,6 +99,7 @@ pub enum Tool {
     Raco,
     Rustc,
     Rustfmt,
+    Rustup,
     Sh,
     Shellcheck,
     Ssh,
@@ -127,7 +128,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 91] = [
+    pub const ALL: [Self; 92] = [
         Self::Actionlint,
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
@@ -194,6 +195,7 @@ impl Tool {
         Self::Raco,
         Self::Rustc,
         Self::Rustfmt,
+        Self::Rustup,
         Self::Sh,
         Self::Shellcheck,
         Self::Ssh,
@@ -279,6 +281,7 @@ impl Tool {
             Self::Typos => "typos",
             Self::Yamllint => "yamllint",
             Self::Rustfmt => "rustfmt",
+            Self::Rustup => "rustup",
             Self::Tldr => "tldr",
             Self::Tmux => "tmux",
             Self::Wslpath => "wslpath",
@@ -385,6 +388,7 @@ impl Tool {
             | Self::Opam
             | Self::Opencode
             | Self::Rustc
+            | Self::Rustup
             | Self::Starship
             | Self::Television
             | Self::Tldr

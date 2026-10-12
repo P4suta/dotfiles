@@ -1259,6 +1259,16 @@ pub fn remote_gate(family: Family, gate: &str) -> String {
 fn remote_gate_stages(family: Family, gate: &str, skipped: [bool; 2]) -> String {
     const UNIX_GIT: &str = "/usr/bin/git";
     const WINDOWS_GIT: &str = "C:/Program Files/Git/cmd/git.exe";
+    let diff = platform::code_environment::NATIVE_PATH_DIFF;
+    let presence = platform::code_environment::NATIVE_PATH_DIFF_PRESENT;
+    let origin = match family {
+        Family::Windows => format!(
+            "$env:DOTFILES_HOST_PATH = $env:PATH; $env:{presence} = if (Test-Path Env:__MISE_DIFF) {{ '1' }} else {{ '0' }}; $env:{diff} = if ($env:{presence} -eq '1') {{ $env:__MISE_DIFF }} else {{ '' }}; "
+        ),
+        Family::Linux | Family::Mac => format!(
+            "export DOTFILES_HOST_PATH=\"$PATH\" {diff}=\"${{__MISE_DIFF-}}\" {presence}=0; if [ \"${{__MISE_DIFF+x}}\" = x ]; then export {presence}=1; fi; "
+        ),
+    };
     let quoted = match family {
         Family::Windows => format!("'{}'", gate.replace('\'', "''")),
         Family::Linux | Family::Mac => format!("'{}'", gate.replace('\'', "'\"'\"'")),
@@ -1282,11 +1292,11 @@ fn remote_gate_stages(family: Family, gate: &str, skipped: [bool; 2]) -> String 
     };
     let bootstrap = match family {
         Family::Windows => format!(
-            "$nativeHome = $env:USERPROFILE; $env:DOTFILES_HOST_PATH = $env:PATH; $env:DOTFILES_HOST_CARGO_HOME = if ($env:CARGO_HOME) {{ $env:CARGO_HOME }} else {{ Join-Path $nativeHome .cargo }}; $jobRoot = $PWD.Path; $env:MISE_DATA_DIR = Join-Path $env:LOCALAPPDATA mise; $env:RUSTUP_HOME = Join-Path $nativeHome .rustup; $env:HOME = Join-Path $jobRoot bootstrap; $env:USERPROFILE = $env:HOME; New-Item -ItemType Directory -Force $env:HOME | Out-Null; $env:APPDATA = Join-Path $env:HOME AppData/Roaming; $env:LOCALAPPDATA = Join-Path $env:HOME AppData/Local; $env:CARGO_HOME = Join-Path $env:HOME .cargo; $env:MISE_CARGO_HOME = $env:CARGO_HOME; New-Item -ItemType Directory -Force $env:CARGO_HOME | Out-Null; New-Item -ItemType Junction -Path (Join-Path $env:CARGO_HOME bin) -Target (Join-Path $env:DOTFILES_HOST_CARGO_HOME bin) -ErrorAction Stop | Out-Null; $env:CARGO_TARGET_DIR = Join-Path $jobRoot build; $env:MISE_CONFIG_DIR = Join-Path $env:HOME .config/mise; $env:MISE_CACHE_DIR = Join-Path $env:HOME .cache/mise; $env:MISE_STATE_DIR = Join-Path $env:HOME .local/state/mise; $env:MISE_TRUSTED_CONFIG_PATHS = Join-Path $jobRoot checkout; $env:MISE_AUTO_INSTALL = 'false'; $env:GIT_CONFIG_GLOBAL = Join-Path $env:HOME empty.toml; Set-Content -LiteralPath $env:GIT_CONFIG_GLOBAL -Value '' -NoNewline; $env:MISE_GLOBAL_CONFIG_FILE = $env:GIT_CONFIG_GLOBAL; $env:MISE_SYSTEM_CONFIG_FILE = $env:GIT_CONFIG_GLOBAL; $env:GIT_CONFIG_NOSYSTEM = '1'; & '{WINDOWS_GIT}' -c advice.detachedHead=false clone --quiet head.bundle checkout; if (-not $?) {{ exit 1 }}; Set-Location checkout; {worker} --home $nativeHome; exit $LASTEXITCODE"
+            "$nativeHome = $env:USERPROFILE; $env:DOTFILES_HOST_PATH = $env:PATH; $env:DOTFILES_HOST_CARGO_HOME = if ($env:CARGO_HOME) {{ $env:CARGO_HOME }} else {{ Join-Path $nativeHome .cargo }}; $jobRoot = $PWD.Path; $env:MISE_DATA_DIR = Join-Path $env:LOCALAPPDATA mise; $env:RUSTUP_HOME = Join-Path $nativeHome .rustup; $env:HOME = Join-Path $jobRoot bootstrap; $env:USERPROFILE = $env:HOME; New-Item -ItemType Directory -Force $env:HOME | Out-Null; $env:APPDATA = Join-Path $env:HOME AppData/Roaming; $env:LOCALAPPDATA = Join-Path $env:HOME AppData/Local; $env:CARGO_HOME = Join-Path $env:HOME .cargo; $env:MISE_CARGO_HOME = $env:CARGO_HOME; New-Item -ItemType Directory -Force $env:CARGO_HOME | Out-Null; New-Item -ItemType Junction -Path (Join-Path $env:CARGO_HOME bin) -Target (Join-Path $env:DOTFILES_HOST_CARGO_HOME bin) -ErrorAction Stop | Out-Null; $env:PATH = (Join-Path $env:CARGO_HOME bin) + ';' + $env:PATH; $env:CARGO_TARGET_DIR = Join-Path $jobRoot build; $env:MISE_CONFIG_DIR = Join-Path $env:HOME .config/mise; $env:MISE_CACHE_DIR = Join-Path $env:HOME .cache/mise; $env:MISE_STATE_DIR = Join-Path $env:HOME .local/state/mise; $env:MISE_TRUSTED_CONFIG_PATHS = Join-Path $jobRoot checkout; $env:MISE_AUTO_INSTALL = 'false'; $env:GIT_CONFIG_GLOBAL = Join-Path $env:HOME empty.toml; Set-Content -LiteralPath $env:GIT_CONFIG_GLOBAL -Value '' -NoNewline; $env:MISE_GLOBAL_CONFIG_FILE = $env:GIT_CONFIG_GLOBAL; $env:MISE_SYSTEM_CONFIG_FILE = $env:GIT_CONFIG_GLOBAL; $env:GIT_CONFIG_NOSYSTEM = '1'; & '{WINDOWS_GIT}' -c advice.detachedHead=false clone --quiet head.bundle checkout; if (-not $?) {{ exit 1 }}; Set-Location checkout; {worker} --home $nativeHome; exit $LASTEXITCODE"
         ),
         Family::Linux | Family::Mac => {
             format!(
-                "nativeHome=\"$HOME\"; export DOTFILES_HOST_PATH=\"$PATH\" DOTFILES_HOST_CARGO_HOME=\"${{CARGO_HOME:-$HOME/.cargo}}\" MISE_DATA_DIR=\"$HOME/.local/share/mise\" RUSTUP_HOME=\"$HOME/.rustup\"; export HOME=\"$PWD/bootstrap\" CARGO_TARGET_DIR=\"$PWD/build\" MISE_TRUSTED_CONFIG_PATHS=\"$PWD/checkout\" MISE_AUTO_INSTALL=false; mkdir -p \"$HOME/.cargo\" && ln -s \"$DOTFILES_HOST_CARGO_HOME/bin\" \"$HOME/.cargo/bin\" && export CARGO_HOME=\"$HOME/.cargo\" MISE_CARGO_HOME=\"$HOME/.cargo\" XDG_CONFIG_HOME=\"$HOME/.config\" XDG_CACHE_HOME=\"$HOME/.cache\" XDG_DATA_HOME=\"$HOME/.local/share\" XDG_STATE_HOME=\"$HOME/.local/state\" MISE_CONFIG_DIR=\"$HOME/.config/mise\" MISE_CACHE_DIR=\"$HOME/.cache/mise\" MISE_STATE_DIR=\"$HOME/.local/state/mise\" GIT_CONFIG_GLOBAL=\"$HOME/empty.toml\" GIT_CONFIG_NOSYSTEM=1 && : > \"$GIT_CONFIG_GLOBAL\" && export MISE_GLOBAL_CONFIG_FILE=\"$GIT_CONFIG_GLOBAL\" MISE_SYSTEM_CONFIG_FILE=\"$GIT_CONFIG_GLOBAL\" && {UNIX_GIT} -c advice.detachedHead=false clone --quiet head.bundle checkout && cd checkout && {worker} --home \"$nativeHome\""
+                "nativeHome=\"$HOME\"; export DOTFILES_HOST_PATH=\"$PATH\" DOTFILES_HOST_CARGO_HOME=\"${{CARGO_HOME:-$HOME/.cargo}}\" MISE_DATA_DIR=\"$HOME/.local/share/mise\" RUSTUP_HOME=\"$HOME/.rustup\"; export HOME=\"$PWD/bootstrap\" CARGO_TARGET_DIR=\"$PWD/build\" MISE_TRUSTED_CONFIG_PATHS=\"$PWD/checkout\" MISE_AUTO_INSTALL=false; mkdir -p \"$HOME/.cargo\" && ln -s \"$DOTFILES_HOST_CARGO_HOME/bin\" \"$HOME/.cargo/bin\" && export PATH=\"$HOME/.cargo/bin:$PATH\" CARGO_HOME=\"$HOME/.cargo\" MISE_CARGO_HOME=\"$HOME/.cargo\" XDG_CONFIG_HOME=\"$HOME/.config\" XDG_CACHE_HOME=\"$HOME/.cache\" XDG_DATA_HOME=\"$HOME/.local/share\" XDG_STATE_HOME=\"$HOME/.local/state\" MISE_CONFIG_DIR=\"$HOME/.config/mise\" MISE_CACHE_DIR=\"$HOME/.cache/mise\" MISE_STATE_DIR=\"$HOME/.local/state/mise\" GIT_CONFIG_GLOBAL=\"$HOME/empty.toml\" GIT_CONFIG_NOSYSTEM=1 && : > \"$GIT_CONFIG_GLOBAL\" && export MISE_GLOBAL_CONFIG_FILE=\"$GIT_CONFIG_GLOBAL\" MISE_SYSTEM_CONFIG_FILE=\"$GIT_CONFIG_GLOBAL\" && {UNIX_GIT} -c advice.detachedHead=false clone --quiet head.bundle checkout && cd checkout && {worker} --home \"$nativeHome\""
             )
         }
     };
@@ -1298,7 +1308,7 @@ fn remote_gate_stages(family: Family, gate: &str, skipped: [bool; 2]) -> String 
             "export GH_CONFIG_DIR=\"${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}\"; "
         }
     };
-    format!("{github}{bootstrap}")
+    format!("{origin}{github}{bootstrap}")
 }
 
 fn run_stages<C, R>(
@@ -1409,7 +1419,12 @@ fn code(home: &Path, gate: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn code_environment(
+/// Build the code gate's environment from this checkout's exact tool pins.
+///
+/// # Errors
+///
+/// Returns an error for missing native tools, failed pinned mise setup, or unresolved isolated tools.
+pub fn code_environment(
     root: &Path,
     home: &Path,
 ) -> Result<platform::code_environment::CodeEnvironment> {
@@ -2905,6 +2920,40 @@ mod job_tests {
             let real = remote_gate_stages(family, DEFAULT_GATE, [false, true]);
             assert!(real.contains(" --skip-real"));
             assert!(!real.contains(" --skip-code"));
+        }
+    }
+
+    #[test]
+    fn remote_bootstrap_pairs_native_path_before_activation_and_home_changes() {
+        for family in Family::ALL {
+            let script = remote_gate(family, DEFAULT_GATE);
+            let (captured_path, diff, presence, changed_home) = match family {
+                Family::Windows => {
+                    assert!(script.contains("Test-Path Env:__MISE_DIFF"));
+                    (
+                        "$env:DOTFILES_HOST_PATH = $env:PATH",
+                        "$env:DOTFILES_HOST_MISE_DIFF = if",
+                        "$env:DOTFILES_HOST_MISE_DIFF_PRESENT = if",
+                        "$env:HOME = Join-Path",
+                    )
+                }
+                Family::Linux | Family::Mac => {
+                    assert!(script.contains("[ \"${__MISE_DIFF+x}\" = x ]"));
+                    (
+                        "DOTFILES_HOST_PATH=\"$PATH\"",
+                        "DOTFILES_HOST_MISE_DIFF=\"${__MISE_DIFF-}\"",
+                        "DOTFILES_HOST_MISE_DIFF_PRESENT=0",
+                        "export HOME=",
+                    )
+                }
+            };
+            let activation = script.find("mise x --").unwrap();
+            let changed_home = script.find(changed_home).unwrap();
+            for field in [captured_path, diff, presence] {
+                let captured = script.find(field).unwrap();
+                assert!(captured < changed_home);
+                assert!(captured < activation);
+            }
         }
     }
 

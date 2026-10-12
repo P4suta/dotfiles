@@ -864,6 +864,30 @@ mod proofs {
         actual
     }
 
+    pub fn spec_environment_word(next: Option<u8>) -> Global {
+        match next {
+            None => spec_word(6, None),
+            Some(0) => spec_word(6, Some(0)),
+            Some(1) => spec_word(6, Some(1)),
+            Some(2) => spec_word(6, Some(2)),
+            Some(3) => spec_word(6, Some(3)),
+            Some(4) => spec_word(6, Some(4)),
+            Some(5) => spec_word(6, Some(5)),
+            Some(6) => spec_word(6, Some(6)),
+            Some(7) => spec_word(6, Some(7)),
+            Some(8) => spec_word(6, Some(8)),
+            Some(9) => spec_word(6, Some(9)),
+            Some(10) => spec_word(6, Some(10)),
+            Some(11) => spec_word(6, Some(11)),
+            Some(12) => spec_word(6, Some(12)),
+            Some(13) => spec_word(6, Some(13)),
+            Some(code) => {
+                assert!(usize::from(code) < ARGUMENTS.len());
+                Global::Option(None)
+            }
+        }
+    }
+
     pub fn spec_scan_words(codes: &[u8]) -> ScanResult {
         let mut cursor = Cursor {
             index: 0,
@@ -1067,7 +1091,10 @@ mod proofs {
     #[kani::proof]
     #[kani::unwind(35)]
     fn the_separate_environment_config_word_has_its_exact_grammar_facts() {
-        bounded_word(6);
+        let next = kani::any::<bool>().then(|| kani::any::<u8>() % 14);
+        let _word = spec_environment_word(next);
+        kani::cover!(next.is_none());
+        kani::cover!(next.is_some());
     }
 
     #[cfg(kani)]
@@ -2031,6 +2058,21 @@ mod tests {
             for next in 0..proofs::ARGUMENTS.len() {
                 let _word = proofs::spec_word(code, Some(u8::try_from(next).unwrap()));
             }
+        }
+    }
+
+    #[test]
+    fn every_environment_successor_keeps_the_same_grammar_facts() {
+        assert_eq!(
+            proofs::spec_environment_word(None),
+            proofs::spec_word(6, None)
+        );
+        for next in 0..proofs::ARGUMENTS.len() {
+            let next = Some(u8::try_from(next).unwrap());
+            assert_eq!(
+                proofs::spec_environment_word(next),
+                proofs::spec_word(6, next)
+            );
         }
     }
 

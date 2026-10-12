@@ -15,6 +15,11 @@ fn spec_admits(limit: u32, used: u32) {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn each_mutation_worker_uses_one_test_thread() {
+        assert_eq!(std::env::var("RUST_TEST_THREADS").as_deref(), Ok("1"));
+    }
+
+    #[test]
     fn the_specification_runs_over_its_domain() {
         for limit in 0..4 {
             for used in 0..4 {

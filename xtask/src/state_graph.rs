@@ -208,7 +208,8 @@ pub fn dump(root: &Path, output: &Path, image: &str, model: &QuintModel) -> Resu
     fs::write(output.join(format!("{main}.tla")), compiled)?;
     fs::write(output.join(format!("{main}.cfg")), CONFIGURATION)?;
     let jar = format!(
-        "/root/.quint/apalache-dist-{}/apalache/lib/apalache.jar",
+        "{}/apalache-dist-{}/apalache/lib/apalache.jar",
+        quint::QUINT_HOME,
         quint::APALACHE_VERSION
     );
     let base = format!("{}/{main}", quint::OUTPUT);

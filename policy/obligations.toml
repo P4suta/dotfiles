@@ -259,6 +259,51 @@ verifier = "kani"
 source = "crates/rules/src/incident_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_recording_a_zero_exit_refusal_as_a_native_failure() {
+    assert!(production::native_source(production::NativeSignal {
+        failed: false,
+        refusal: true,
+        declared_source: None,
+        delivery: production::NativeDelivery::ZeroExit,
+    }).is_some());
+}
+#[kani::proof]
+fn reject_recording_output_only_as_a_native_failure() {
+    assert!(production::native_source(production::NativeSignal {
+        failed: false,
+        refusal: true,
+        declared_source: None,
+        delivery: production::NativeDelivery::OutputOnly,
+    }).is_some());
+}
+#[kani::proof]
+fn reject_ignoring_a_failure_with_a_zero_exit() {
+    assert!(production::native_source(production::NativeSignal {
+        failed: true,
+        refusal: false,
+        declared_source: None,
+        delivery: production::NativeDelivery::ZeroExit,
+    }).is_none());
+}
+#[kani::proof]
+fn reject_ignoring_an_unknown_delivery_refusal() {
+    assert!(production::native_source(production::NativeSignal {
+        failed: false,
+        refusal: true,
+        declared_source: None,
+        delivery: production::NativeDelivery::Unknown,
+    }).is_none());
+}
+#[kani::proof]
+fn reject_ignoring_an_explicit_verification_report() {
+    assert!(production::native_source(production::NativeSignal {
+        failed: false,
+        refusal: false,
+        declared_source: Some(production::Source::VerificationDefect),
+        delivery: production::NativeDelivery::OutputOnly,
+    }).is_none());
+}
+#[kani::proof]
 fn reject_recording_existing_maintenance_as_a_native_failure() {
     assert!(production::record_native(production::NativeReport::MaintenancePending));
 }

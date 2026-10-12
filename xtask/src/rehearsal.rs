@@ -152,7 +152,14 @@ fn required_packages(
     let scope = tempfile::tempdir()?;
     let config = scope.path().join("chezmoi.toml");
     fs::write(&config, identity)?;
+    let host = crate::profiles::fixture_host(
+        profile,
+        &crate::profiles::chezmoi_path(root),
+        &crate::profiles::chezmoi_path(home),
+    );
     let rendered = crate::profiles::chezmoi(root, scope.path(), &config, home)
+        .arg("--override-data")
+        .arg(serde_json::json!({"chezmoi": host}).to_string())
         .args(["dump", "--include", "files,scripts", "--format", "json"])
         .output()?;
     ensure!(

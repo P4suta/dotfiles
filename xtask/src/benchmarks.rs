@@ -7,6 +7,7 @@ use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use rules::obligation_rules::{Better, Standing, standing};
 use serde_json::Value;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -306,6 +307,10 @@ pub fn verify(root: &Path) -> Result<()> {
         .env("DOTGUARD_BIN", &binary)
         .output()
         .context("start the gungraun benchmarks")?;
+    std::io::stdout()
+        .lock()
+        .write_all(&output.stdout)
+        .context("write the original gungraun summaries")?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let measured = measured(&stdout);
     ensure!(

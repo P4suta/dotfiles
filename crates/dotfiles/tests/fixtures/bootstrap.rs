@@ -5,6 +5,7 @@ fn main() {
         "MISE_CARGO_HOME",
         "MISE_GLOBAL_CONFIG_FILE",
         "MISE_SYSTEM_CONFIG_FILE",
+        "PATH",
     ] {
         println!(
             "{name}={}",

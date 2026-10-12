@@ -20,6 +20,15 @@ const GO_ENVIRONMENT_FIXTURE: &str = "DOTFILES_HOSTS_GO_FIXTURE";
 const GO_ENVIRONMENT_ROLE: &str = "DOTFILES_HOSTS_GO_ROLE";
 const GO_ENVIRONMENT_HOME: &str = "DOTFILES_HOSTS_GO_HOME";
 const GO_ENVIRONMENT_TEST: &str = "candidate_go_writes_and_settings_are_confined_to_scratch";
+const NATIVE_PATH_TEST: &str =
+    "candidate_paths_remove_parent_activation_without_reloading_native_configuration";
+const NATIVE_PATH_ROLE: &str = "DOTFILES_NATIVE_PATH_FIXTURE_ROLE";
+const NATIVE_PATH_SCOPE: &str = "DOTFILES_NATIVE_PATH_FIXTURE_SCOPE";
+const NATIVE_CAPABILITY: &str = "native-path-capability";
+const NATIVE_ORIGIN_TEST: &str = "native_path_origins_keep_path_and_metadata_paired";
+const NATIVE_ORIGIN_ROLE: &str = "DOTFILES_NATIVE_PATH_ORIGIN_ROLE";
+const NATIVE_ORIGIN_INHERITED: &str = "inherited-native-directory";
+const NATIVE_ORIGIN_CAPTURED: &str = "captured-native-directory";
 const GO_OVERRIDES: [&str; 12] = [
     "GOPATH",
     "GOMODCACHE",
@@ -54,6 +63,289 @@ fn candidate_home(scratch: &Scratch) -> Result<PathBuf> {
         .find_map(|(name, value)| (name == "HOME").then_some(value).flatten())
         .context("candidate home")?
         .into())
+}
+
+fn inspect_native_path_role(role: &std::ffi::OsStr) -> Result<()> {
+    let scope = PathBuf::from(std::env::var_os(NATIVE_PATH_SCOPE).context("native path scope")?);
+    let native = scope.join("native");
+    let activated = scope.join("activated");
+    if role == "capability" {
+        return Ok(());
+    }
+    if role == "inspect" {
+        let paths: Vec<_> =
+            std::env::split_paths(&std::env::var_os("PATH").context("PATH")?).collect();
+        assert!(paths.contains(&native));
+        assert!(paths.iter().all(|path| !path.starts_with(&activated)));
+        assert!(std::env::var_os("__MISE_DIFF").is_none());
+        let mut capability = platform::process::command(NATIVE_CAPABILITY);
+        capability.args(["--exact", NATIVE_PATH_TEST, "--ignored"]);
+        capability.env(NATIVE_PATH_ROLE, "capability");
+        ensure!(
+            capability.status()?.success(),
+            "the native capability remains available"
+        );
+        return Ok(());
+    }
+    let native_config = scope.join("home/.config/mise");
+    fs::create_dir_all(&native_config)?;
+    fs::write(native_config.join("miserc.toml"), "unclosed = [\n")?;
+    fs::write(
+        native_config.join("config.toml"),
+        "[tools]\nnode = 'missing-private-fixture'\n",
+    )?;
+    if role == "invalid" {
+        let error =
+            owned_scratch(&scope).expect_err("malformed activation metadata must be refused");
+        let diagnostic = format!("{error:#}");
+        assert!(!diagnostic.contains("private-metadata-sentinel"));
+        assert!(!diagnostic.contains("missing-private-fixture"));
+        return Ok(());
+    }
+    assert_eq!(role, "activated");
+    assert!(
+        std::env::split_paths(&std::env::var_os("PATH").context("PATH")?)
+            .any(|path| path.starts_with(&activated))
+    );
+    let scratch = owned_scratch(&scope)?;
+    let output = scratch
+        .command(std::env::current_exe()?)
+        .args(["--exact", NATIVE_PATH_TEST, "--ignored"])
+        .env(NATIVE_PATH_ROLE, "inspect")
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "native PATH inspection failed: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+fn assert_pinned_mise(mise: &Path) -> Result<()> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let pins: toml::Table = toml::from_str(&fs::read_to_string(
+        root.join("home/.chezmoidata/versions.toml"),
+    )?)?;
+    let version = platform::process::command(mise).arg("--version").output()?;
+    ensure!(version.status.success(), "read the installed mise version");
+    assert_eq!(
+        std::str::from_utf8(&version.stdout)?
+            .split_whitespace()
+            .next(),
+        pins["mise"]["version"].as_str()
+    );
+    Ok(())
+}
+
+fn native_path_fixture(scope: &Path, mise: &Path) -> Result<std::ffi::OsString> {
+    let native = scope.join("native");
+    let activated = scope.join("activated");
+    for directory in [
+        &native,
+        &activated.join("bin"),
+        &scope.join("home"),
+        &scope.join("outer-config"),
+    ] {
+        fs::create_dir_all(directory)?;
+    }
+    fs::copy(
+        std::env::current_exe()?,
+        native.join(format!(
+            "{NATIVE_CAPABILITY}{}",
+            std::env::consts::EXE_SUFFIX
+        )),
+    )?;
+    fs::copy(
+        std::env::current_exe()?,
+        if cfg!(windows) {
+            activated.join("node.exe")
+        } else {
+            activated.join("bin/node")
+        },
+    )?;
+    let mut table = toml::Table::new();
+    let mut tools = toml::Table::new();
+    tools.insert(
+        "node".into(),
+        format!("path:{}", activated.display()).into(),
+    );
+    table.insert("tools".into(), tools.into());
+    fs::write(scope.join("mise.toml"), toml::to_string(&table)?)?;
+    fs::write(scope.join("empty.toml"), "")?;
+    Ok(std::env::join_paths([
+        native.as_path(),
+        mise.parent().context("mise directory")?,
+    ])?)
+}
+
+#[test]
+#[ignore = "uses the installed pinned mise in isolated native processes"]
+fn candidate_paths_remove_parent_activation_without_reloading_native_configuration() -> Result<()> {
+    if let Some(role) = std::env::var_os(NATIVE_PATH_ROLE) {
+        return inspect_native_path_role(&role);
+    }
+    let scope = tempfile::tempdir()?;
+    let installed = platform::code_environment::Installations::discover(
+        &platform::home::home().context("native home")?,
+    )?;
+    assert_pinned_mise(&installed.mise)?;
+    let path = native_path_fixture(scope.path(), &installed.mise)?;
+    let native = scope.path().join("native");
+    let home = scope.path().join("home");
+    let config = scope.path().join("outer-config");
+    let empty = scope.path().join("empty.toml");
+    for role in ["activated", "invalid"] {
+        let mut command = platform::process::command(&installed.mise);
+        for (name, _) in std::env::vars_os() {
+            let text = name.to_string_lossy();
+            if text.starts_with("MISE_") || text.starts_with("__MISE_") {
+                command.env_remove(name);
+            }
+        }
+        command
+            .current_dir(scope.path())
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .env("MISE_CONFIG_DIR", &config)
+            .env("MISE_GLOBAL_CONFIG_FILE", &empty)
+            .env("MISE_SYSTEM_CONFIG_FILE", &empty)
+            .env("MISE_SYSTEM_CONFIG_DIR", scope.path().join("system-config"))
+            .env("MISE_DATA_DIR", scope.path().join("data"))
+            .env("MISE_STATE_DIR", scope.path().join("state"))
+            .env("MISE_CACHE_DIR", scope.path().join("cache"))
+            .env(
+                "MISE_CEILING_PATHS",
+                scope.path().parent().context("scope parent")?,
+            )
+            .env("MISE_TRUSTED_CONFIG_PATHS", scope.path())
+            .env("MISE_AUTO_INSTALL", "false")
+            .env("PATH", &path)
+            .env_remove("DOTFILES_HOST_PATH")
+            .env_remove("DOTFILES_HOST_MISE_DIFF")
+            .env_remove("DOTFILES_HOST_MISE_DIFF_PRESENT")
+            .env(NATIVE_PATH_ROLE, role)
+            .env(NATIVE_PATH_SCOPE, scope.path());
+        if role == "activated" {
+            command.args(["exec", "--"]).arg(std::env::current_exe()?);
+        } else {
+            command = platform::process::command(std::env::current_exe()?);
+            command
+                .env("HOME", &home)
+                .env("USERPROFILE", &home)
+                .env(
+                    "PATH",
+                    std::env::join_paths([
+                        native.as_path(),
+                        installed.mise.parent().context("mise directory")?,
+                    ])?,
+                )
+                .env("__MISE_DIFF", "private-metadata-sentinel")
+                .env_remove("DOTFILES_HOST_PATH")
+                .env_remove("DOTFILES_HOST_MISE_DIFF")
+                .env_remove("DOTFILES_HOST_MISE_DIFF_PRESENT")
+                .env(NATIVE_PATH_ROLE, role)
+                .env(NATIVE_PATH_SCOPE, scope.path());
+        }
+        command.args(["--exact", NATIVE_PATH_TEST, "--ignored"]);
+        let output = command.output()?;
+        ensure!(
+            output.status.success(),
+            "{role} native PATH regression failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn native_path_origins_keep_path_and_metadata_paired() -> Result<()> {
+    use platform::code_environment::{NATIVE_PATH_DIFF, NATIVE_PATH_DIFF_PRESENT, NativePath};
+
+    if let Ok(role) = std::env::var(NATIVE_ORIGIN_ROLE) {
+        let scope = tempfile::tempdir()?;
+        let result = NativePath::capture(scope.path());
+        let expected = match role.as_str() {
+            "direct" => Some(NATIVE_ORIGIN_INHERITED),
+            "explicit" | "absent-origin" | "empty-origin" => Some(NATIVE_ORIGIN_CAPTURED),
+            _ => None,
+        };
+        if let Some(expected) = expected {
+            assert_eq!(result?.as_os_str(), expected);
+        } else {
+            let error = result.expect_err("unpaired metadata must be refused before querying");
+            assert!(!format!("{error:#}").contains("private-metadata-sentinel"));
+        }
+        return Ok(());
+    }
+    for (role, presence, diff, captured, current) in [
+        ("direct", None, None, false, false),
+        ("explicit", None, None, true, false),
+        ("absent-origin", Some("0"), None, true, true),
+        ("empty-origin", Some("0"), Some(""), true, true),
+        ("mixed-origin", None, None, true, true),
+        (
+            "missing-marker",
+            None,
+            Some("private-metadata-sentinel"),
+            true,
+            false,
+        ),
+        (
+            "missing-path",
+            Some("1"),
+            Some("private-metadata-sentinel"),
+            false,
+            false,
+        ),
+        ("missing-diff", Some("1"), None, true, false),
+        (
+            "invalid-presence",
+            Some("2"),
+            Some("private-metadata-sentinel"),
+            true,
+            false,
+        ),
+        (
+            "false-presence",
+            Some("0"),
+            Some("private-metadata-sentinel"),
+            true,
+            false,
+        ),
+    ] {
+        let mut command = platform::process::command(std::env::current_exe()?);
+        command
+            .args(["--exact", NATIVE_ORIGIN_TEST])
+            .env(NATIVE_ORIGIN_ROLE, role)
+            .env("PATH", NATIVE_ORIGIN_INHERITED)
+            .env_remove("DOTFILES_HOST_PATH")
+            .env_remove("__MISE_DIFF")
+            .env_remove(NATIVE_PATH_DIFF)
+            .env_remove(NATIVE_PATH_DIFF_PRESENT);
+        if captured {
+            command.env("DOTFILES_HOST_PATH", NATIVE_ORIGIN_CAPTURED);
+        }
+        if current {
+            command.env("__MISE_DIFF", "private-metadata-sentinel");
+        }
+        if let Some(presence) = presence {
+            command.env(NATIVE_PATH_DIFF_PRESENT, presence);
+        }
+        if let Some(diff) = diff {
+            command.env(NATIVE_PATH_DIFF, diff);
+        }
+        let output = command.output()?;
+        ensure!(
+            output.status.success(),
+            "{role} native origin regression failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
 }
 
 #[cfg(unix)]

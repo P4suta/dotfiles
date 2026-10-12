@@ -13,6 +13,9 @@ mod fixture_git;
 #[path = "support/catalog.rs"]
 mod catalog;
 
+#[path = "../../../xtask/tests/support/incident_fixture.rs"]
+mod incident_fixture;
+
 /// An isolated home with stand-ins for dotguard and lefthook, and a repository holding one staged file.
 struct Host {
     scope: tempfile::TempDir,
@@ -20,7 +23,7 @@ struct Host {
 
 impl Host {
     fn new() -> Result<Self> {
-        let scope = tempfile::tempdir()?;
+        let scope = incident_fixture::scope()?;
         let bin = scope.path().join("home/.local/bin");
         fs::create_dir_all(&bin)?;
         fs::create_dir_all(scope.path().join("repository"))?;
@@ -156,6 +159,43 @@ fn a_child_refusal_stays_last_and_a_bare_failure_gets_its_own_record() -> Result
         failed.next.as_deref().unwrap_or_default(),
         "dotguard post-commit"
     );
+    Ok(())
+}
+
+#[test]
+fn native_output_replays_preserve_the_real_hook_failure_without_new_incidents() -> Result<()> {
+    const TEST: &str = "native_output_replays_preserve_the_real_hook_failure_without_new_incidents";
+    if incident_fixture::run(TEST)? {
+        return Ok(());
+    }
+    let host = Host::new()?;
+    let failed = host.hook(&["post-commit"])?;
+    assert_eq!(refusal(&failed).rule, "hook.gate");
+    let state = host.scope.path().join("state");
+    let primary = skill_ops::incidents(&state)?;
+    assert_eq!(primary.len(), 1);
+    assert_eq!(primary[0].rule, "hook.gate");
+    let body = String::from_utf8(failed.stderr)?;
+    let mut event = serde_json::json!({
+        "hook_event_name": "PostToolUse",
+        "session_id": "owned-native-delivery",
+        "tool_use_id": "failed-hook",
+        "tool_name": "Bash",
+        "tool_input": {"command": "dotfiles hook post-commit"},
+        "tool_response": body,
+    });
+    assert!(!skill_ops::record_native_failure(&state, "codex", &event)?);
+    assert_eq!(skill_ops::incidents(&state)?, primary);
+    fs::write(host.repository().join("past.log"), &body)?;
+    host.run("git", &["add", "past.log"])?;
+    let viewed = host.run("git", &["show", ":past.log"])?;
+    assert_eq!(viewed.status.code(), Some(0));
+    assert_eq!(String::from_utf8(viewed.stdout)?, body);
+    event["tool_use_id"] = serde_json::json!("successful-log-read");
+    event["tool_input"] = serde_json::json!({"command": "git show :past.log"});
+    assert!(!skill_ops::record_native_failure(&state, "codex", &event)?);
+    assert_eq!(skill_ops::incidents(&state)?, primary);
+    incident_fixture::preserve(host.scope);
     Ok(())
 }
 

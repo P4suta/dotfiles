@@ -33,7 +33,11 @@ enum Action {
     /// Checks every profile in the pinned Linux container.
     ProfilesLinux,
     /// Checks instruction, heap, and binary ceilings on the pinned Linux host.
-    Benchmarks,
+    Benchmarks {
+        /// Run the benchmarks in the pinned Linux container.
+        #[arg(long)]
+        container: bool,
+    },
     /// Writes the generated files: the architecture decision index.
     Gen {
         /// Refuses a stale generated file instead of writing it.
@@ -357,7 +361,7 @@ fn run() -> Result<()> {
         }
         Action::Profiles { output } => profiles(&cli.root, output.as_deref())?,
         Action::ProfilesLinux => xtask::linux_profiles::check(&cli.root)?,
-        Action::Benchmarks => benchmarks(&cli.root)?,
+        Action::Benchmarks { container } => benchmarks(&cli.root, container)?,
         Action::Gen { check } => generate(&cli.root, check)?,
         Action::ThemeGrids { write } => xtask::profiles::write_theme_grids(&cli.root, write)?,
         Action::FzfGrid => fzf_grid(&cli.root)?,
@@ -646,10 +650,10 @@ fn main() {
     }
 }
 
-fn benchmarks(root: &Path) -> Result<()> {
-    if cfg!(target_os = "linux") {
-        xtask::benchmarks::verify(root)
-    } else {
+fn benchmarks(root: &Path, container: bool) -> Result<()> {
+    if container || !cfg!(target_os = "linux") {
         xtask::benchmarks::verify_in_container(root)
+    } else {
+        xtask::benchmarks::verify(root)
     }
 }

@@ -91,6 +91,7 @@ pub struct Scratch {
     home: PathBuf,
     config: PathBuf,
     download_cache: Option<PathBuf>,
+    native_path: platform::code_environment::NativePath,
 }
 
 impl Scratch {
@@ -100,6 +101,9 @@ impl Scratch {
     ///
     /// Returns an error for missing or malformed configuration or unavailable scratch storage.
     pub fn new(config: &Path) -> Result<Self> {
+        let native_path = platform::code_environment::NativePath::capture(
+            &platform::home::home().context("native home is unavailable")?,
+        )?;
         #[cfg(unix)]
         let scope = {
             use std::os::unix::fs::PermissionsExt as _;
@@ -139,6 +143,7 @@ impl Scratch {
             home,
             config,
             download_cache: None,
+            native_path,
         })
     }
 
@@ -170,9 +175,7 @@ impl Scratch {
     #[must_use]
     pub fn command(&self, program: impl AsRef<OsStr>) -> Command {
         let mut command = unattended(program);
-        if let Some(path) = std::env::var_os("DOTFILES_HOST_PATH") {
-            command.env("PATH", path);
-        }
+        command.env("PATH", self.native_path.as_os_str());
         for (name, _) in std::env::vars_os() {
             let text = name.to_string_lossy();
             if text.starts_with("MISE_")

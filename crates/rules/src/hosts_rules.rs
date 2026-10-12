@@ -247,6 +247,11 @@ mod proofs {
     pub const EVIDENCE: [Evidence; 3] = [Evidence::Missing, Evidence::Failed, Evidence::Passed];
     pub const KEYS: [Key; 3] = [Key::New, Key::Same, Key::Changed];
 
+    /// The independent byte count for the twelve-GiB workspace policy.
+    pub const WORKSPACE_CAPACITY_BYTES: u64 = 12_884_901_888;
+    /// The independent byte count for the twenty-four-GiB concurrent-stage policy.
+    pub const CONCURRENT_CAPACITY_BYTES: u64 = 25_769_803_776;
+
     pub fn spec_cleanup_directory_mode(mode: u32) {
         let writable = cleanup_directory_mode(mode);
         assert_eq!(writable & CLEANUP_OWNER_ACCESS, CLEANUP_OWNER_ACCESS);
@@ -392,9 +397,12 @@ mod proofs {
         let cores: usize = kani::any();
         let available: u64 = kani::any();
         let concurrent = concurrent_stages(family, cores, available);
+        assert_eq!(CONCURRENT_BYTES, CONCURRENT_CAPACITY_BYTES);
         assert_eq!(
             concurrent,
-            family != Family::Linux && cores >= CONCURRENT_CORES && available >= CONCURRENT_BYTES
+            family != Family::Linux
+                && cores >= CONCURRENT_CORES
+                && available >= CONCURRENT_CAPACITY_BYTES
         );
         kani::cover!(concurrent);
         kani::cover!(!concurrent && family == Family::Linux);
@@ -406,7 +414,11 @@ mod proofs {
     #[kani::proof]
     fn workspace_admission_requires_its_free_space() {
         let available: u64 = kani::any();
-        assert_eq!(workspace_fits(available), available >= WORKSPACE_BYTES);
+        assert_eq!(WORKSPACE_BYTES, WORKSPACE_CAPACITY_BYTES);
+        assert_eq!(
+            workspace_fits(available),
+            available >= WORKSPACE_CAPACITY_BYTES
+        );
         kani::cover!(workspace_fits(available));
         kani::cover!(!workspace_fits(available));
     }
@@ -711,11 +723,15 @@ mod tests {
     fn concurrent_stages_require_both_resource_boundaries() {
         for family in [Family::Mac, Family::Windows] {
             assert!(!concurrent_stages(family, CONCURRENT_CORES - 1, u64::MAX));
-            assert!(!concurrent_stages(family, usize::MAX, CONCURRENT_BYTES - 1));
+            assert!(!concurrent_stages(
+                family,
+                usize::MAX,
+                proofs::CONCURRENT_CAPACITY_BYTES - 1
+            ));
             assert!(concurrent_stages(
                 family,
                 CONCURRENT_CORES,
-                CONCURRENT_BYTES
+                proofs::CONCURRENT_CAPACITY_BYTES
             ));
             assert!(concurrent_stages(family, usize::MAX, u64::MAX));
         }
@@ -723,8 +739,8 @@ mod tests {
 
     #[test]
     fn workspace_capacity_admission_includes_the_exact_boundary() {
-        assert!(!workspace_fits(WORKSPACE_BYTES - 1));
-        assert!(workspace_fits(WORKSPACE_BYTES));
+        assert!(!workspace_fits(proofs::WORKSPACE_CAPACITY_BYTES - 1));
+        assert!(workspace_fits(proofs::WORKSPACE_CAPACITY_BYTES));
         assert!(workspace_fits(u64::MAX));
     }
 

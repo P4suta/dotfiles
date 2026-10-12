@@ -4,14 +4,33 @@ use std::path::Path;
 use std::process::Command;
 
 fn main() {
-    let executable = std::env::current_exe().unwrap();
+    let executable = std::fs::canonicalize(std::env::current_exe().unwrap()).unwrap();
     let arguments: Vec<_> = std::env::args().skip(1).collect();
-    match executable.file_stem().unwrap().to_str().unwrap() {
+    let invoked = std::path::PathBuf::from(std::env::args_os().next().unwrap());
+    match invoked.file_stem().unwrap().to_str().unwrap() {
         "mise" => {
             if arguments == ["--version"] {
                 let version = std::fs::read_to_string(executable.with_extension("version"))
                     .unwrap_or_else(|_| "2026.10.0".into());
                 println!("{version} fixture-platform (2026-10-01)");
+                return;
+            }
+            if arguments == ["env", "--json"] {
+                assert!(std::env::var_os("__MISE_DIFF").is_some());
+                let scope = std::fs::canonicalize(std::env::current_dir().unwrap()).unwrap();
+                for name in [
+                    "MISE_CONFIG_FILE",
+                    "MISE_GLOBAL_CONFIG_FILE",
+                    "MISE_SYSTEM_CONFIG_FILE",
+                ] {
+                    let config = std::path::PathBuf::from(std::env::var_os(name).unwrap());
+                    assert!(std::fs::canonicalize(&config).unwrap().starts_with(&scope));
+                    assert!(std::fs::read(config).unwrap().is_empty());
+                }
+                print!(
+                    "{}",
+                    std::fs::read_to_string(executable.with_extension("native-path.json")).unwrap()
+                );
                 return;
             }
             let data = std::path::PathBuf::from(std::env::var_os("MISE_DATA_DIR").unwrap());
@@ -102,6 +121,46 @@ fn main() {
                 };
             }
             print!("{contents}");
+        }
+        "rustc" => match arguments.as_slice() {
+            [version] if version == "--version" => {
+                let toolchain = if executable.file_stem().unwrap() == "rustup" {
+                    std::env::var("RUSTUP_TOOLCHAIN").unwrap()
+                } else {
+                    "1.99.0".into()
+                };
+                println!("rustc {toolchain} fixture");
+            }
+            [print, sysroot] if print == "--print" && sysroot == "sysroot" => {
+                println!("{}", std::fs::read_to_string("rust-sysroot").unwrap());
+            }
+            _ => panic!("unexpected rustc command: {arguments:?}"),
+        },
+        "rustup" => {
+            if arguments == ["--version"] {
+                println!("captured rustup");
+            } else {
+                assert_eq!(arguments[0], "run");
+                let status = Command::new(&arguments[2])
+                    .env("RUSTUP_TOOLCHAIN", &arguments[1])
+                    .args(&arguments[3..])
+                    .status()
+                    .unwrap();
+                std::process::exit(status.code().unwrap());
+            }
+        }
+        "cargo" => {
+            assert_eq!(executable.file_stem().unwrap(), "rustup");
+            if arguments == ["--version"] {
+                println!(
+                    "cargo {} fixture",
+                    std::env::var("RUSTUP_TOOLCHAIN").unwrap()
+                );
+            } else {
+                assert_eq!(arguments, ["--rustc-version"]);
+                let status = Command::new("rustc").arg("--version").status().unwrap();
+                std::process::exit(status.code().unwrap());
+            }
         }
         "unrelated-application" => panic!("the host application reached the code gate"),
         "python" => {

@@ -15,6 +15,45 @@ pub const fn record_native(report: NativeReport) -> bool {
     matches!(report, NativeReport::Failure)
 }
 
+/// The execution status a native delivery establishes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeDelivery {
+    /// The delivery establishes no execution status.
+    Unknown,
+    /// A numeric exit code confirms zero.
+    ZeroExit,
+    /// The delivery carries tool output without execution status.
+    OutputOnly,
+}
+
+/// The facts carried by one native event.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeSignal {
+    pub failed: bool,
+    pub refusal: bool,
+    pub declared_source: Option<Source>,
+    pub delivery: NativeDelivery,
+}
+
+/// The incident source established by the native event.
+#[must_use]
+pub const fn native_source(signal: NativeSignal) -> Option<Source> {
+    if let Some(source) = signal.declared_source {
+        return Some(source);
+    }
+    if signal.failed {
+        return Some(if signal.refusal {
+            Source::GateRefusal
+        } else {
+            Source::FailedDelivery
+        });
+    }
+    match signal.delivery {
+        NativeDelivery::Unknown if signal.refusal => Some(Source::GateRefusal),
+        NativeDelivery::Unknown | NativeDelivery::ZeroExit | NativeDelivery::OutputOnly => None,
+    }
+}
+
 #[cfg(any(test, kani))]
 mod native_proofs {
     use super::*;
@@ -42,6 +81,104 @@ mod native_proofs {
     fn every_native_report_keeps_its_incident_decision() {
         for report in [NativeReport::Failure, NativeReport::MaintenancePending] {
             spec(report);
+        }
+    }
+}
+
+#[cfg(any(test, kani))]
+mod native_source_proofs {
+    use super::*;
+
+    fn spec(signal: NativeSignal) -> Option<Source> {
+        let result = native_source(signal);
+        if let Some(source) = signal.declared_source {
+            assert_eq!(result, Some(source));
+        } else {
+            let unknown = signal.delivery == NativeDelivery::Unknown;
+            assert_eq!(
+                result == Some(Source::GateRefusal),
+                signal.refusal && (signal.failed || unknown)
+            );
+            assert_eq!(
+                result == Some(Source::FailedDelivery),
+                signal.failed && !signal.refusal
+            );
+            assert_eq!(
+                result.is_none(),
+                !signal.failed && (!signal.refusal || !unknown)
+            );
+        }
+        result
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn native_sources_preserve_failures_and_do_not_promote_output() {
+        let source_index: usize = kani::any();
+        kani::assume(source_index <= Source::ALL.len());
+        let delivery = if kani::any() {
+            NativeDelivery::Unknown
+        } else if kani::any() {
+            NativeDelivery::ZeroExit
+        } else {
+            NativeDelivery::OutputOnly
+        };
+        let signal = NativeSignal {
+            failed: kani::any(),
+            refusal: kani::any(),
+            declared_source: Source::ALL.get(source_index).copied(),
+            delivery,
+        };
+        let result = spec(signal);
+        kani::cover!(signal.declared_source.is_some() && result == signal.declared_source);
+        kani::cover!(
+            signal.failed
+                && signal.delivery == NativeDelivery::ZeroExit
+                && result == Some(Source::FailedDelivery)
+        );
+        kani::cover!(
+            signal.failed
+                && signal.delivery == NativeDelivery::OutputOnly
+                && result == Some(Source::GateRefusal)
+        );
+        kani::cover!(
+            !signal.failed
+                && signal.refusal
+                && signal.delivery == NativeDelivery::ZeroExit
+                && result.is_none()
+        );
+        kani::cover!(
+            !signal.failed
+                && signal.refusal
+                && signal.delivery == NativeDelivery::OutputOnly
+                && result.is_none()
+        );
+        kani::cover!(
+            !signal.failed
+                && signal.refusal
+                && signal.delivery == NativeDelivery::Unknown
+                && result == Some(Source::GateRefusal)
+        );
+        kani::cover!(!signal.failed && !signal.refusal && result.is_none());
+    }
+
+    #[test]
+    fn every_native_delivery_keeps_its_incident_source() {
+        for declared_source in core::iter::once(None).chain(Source::ALL.into_iter().map(Some)) {
+            for [failed, refusal] in crate::domain::flags() {
+                for delivery in [
+                    NativeDelivery::Unknown,
+                    NativeDelivery::ZeroExit,
+                    NativeDelivery::OutputOnly,
+                ] {
+                    spec(NativeSignal {
+                        failed,
+                        refusal,
+                        declared_source,
+                        delivery,
+                    });
+                }
+            }
         }
     }
 }

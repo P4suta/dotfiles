@@ -554,6 +554,8 @@ fn the_quint_image_pins_quint_its_apalache_and_every_base_by_digest() {
     assert!(definition.contains(&format!("ARG APALACHE_VERSION={APALACHE_VERSION}\n")));
     assert!(definition.contains("ADD --checksum=sha256:${APALACHE_SHA256}"));
     assert!(definition.contains("sha256sum.txt"));
+    assert!(definition.contains(&format!("ENV QUINT_HOME={}\n", xtask::quint::QUINT_HOME)));
+    assert!(definition.contains("${QUINT_HOME}/apalache-dist-${APALACHE_VERSION}/apalache"));
     for line in definition.lines().filter(|line| line.starts_with("FROM ")) {
         assert!(line.contains("@sha256:"), "{line}");
     }
@@ -623,6 +625,113 @@ fn alloy_runs_one_command_offline_with_the_checkout_read_only() {
         text.last().map(String::as_str),
         Some("/source/specs/transaction.als")
     );
+}
+
+#[test]
+#[ignore = "requires Docker on a native host"]
+fn proof_containers_leave_native_owned_removable_outputs() -> anyhow::Result<()> {
+    const MODEL: &str = "/source/specs/pr_ready.qnt";
+    const TRACE: &str = "/out/owner.{seq}.itf.json";
+    const SEED: &str = "0x2a";
+    const ONE: &str = "1";
+    let root = xtask::canonical(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").as_path())?;
+    let alloy_image = xtask::alloy::image(&root)?;
+    xtask::alloy::build(&root, &alloy_image)?;
+    let quint_image = xtask::quint::image(&root)?;
+    xtask::quint::build(&root, &quint_image)?;
+    let alloy = tempfile::tempdir()?;
+    let quint = tempfile::tempdir()?;
+    let commands = [
+        xtask::alloy::run_arguments(
+            &root,
+            alloy.path(),
+            &alloy_image,
+            "specs/manifest.als",
+            "sat4j",
+            "Disjoint",
+        ),
+        xtask::quint::run_arguments(
+            &root,
+            quint.path(),
+            &quint_image,
+            &[
+                "run",
+                MODEL,
+                "--backend",
+                "typescript",
+                "--main",
+                "pr_ready",
+                "--seed",
+                SEED,
+                "--max-samples",
+                ONE,
+                "--n-traces",
+                ONE,
+                "--max-steps",
+                ONE,
+                "--mbt",
+                "--out-itf",
+                TRACE,
+            ],
+        ),
+    ];
+    for arguments in commands {
+        let output = platform::tool::Tool::Docker
+            .command()
+            .args(arguments)
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "proof output producer failed: {}\n{}\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(alloy.path().join("Disjoint/receipt.json"))?)?;
+    assert!(!xtask::alloy::solved(&receipt, "Disjoint")?);
+    let trace: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(quint.path().join("owner.0.itf.json"))?)?;
+    assert!(
+        trace["states"]
+            .as_array()
+            .is_some_and(|states| !states.is_empty())
+    );
+    for output in [alloy, quint] {
+        assert_native_output_ownership(output.path())?;
+        let path = output.path().to_path_buf();
+        output.close()?;
+        assert!(!path.exists());
+    }
+    Ok(())
+}
+
+fn assert_native_output_ownership(path: &Path) -> anyhow::Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    assert!(!metadata.file_type().is_symlink(), "{}", path.display());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(
+            metadata.uid(),
+            rustix::process::geteuid().as_raw(),
+            "{}",
+            path.display()
+        );
+        assert_eq!(
+            metadata.gid(),
+            rustix::process::getegid().as_raw(),
+            "{}",
+            path.display()
+        );
+    }
+    if metadata.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            assert_native_output_ownership(&entry?.path())?;
+        }
+    }
+    Ok(())
 }
 
 #[test]

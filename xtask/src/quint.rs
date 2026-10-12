@@ -28,6 +28,9 @@ const IMAGE_INPUTS: [&str; 3] = ["Dockerfile", "package.json", "package-lock.jso
 pub const SOURCE: &str = "/source";
 pub const OUTPUT: &str = "/out";
 
+/// The image's readable Quint installation and bundled model checker.
+pub const QUINT_HOME: &str = "/opt/quint";
+
 /// Apalache writes its run directory under the working directory, which the read-only checkout can't hold.
 const WORKDIR: &str = "/tmp";
 
@@ -117,9 +120,8 @@ pub fn container_arguments(
         }
         mount
     };
-    let mut arguments: Vec<OsString> = ["run", "--rm", "--network", "none", "--mount"]
-        .map(OsString::from)
-        .into();
+    let mut arguments = crate::container::run_arguments();
+    arguments.push("--mount".into());
     arguments.push(mount(root, SOURCE, true));
     arguments.push("--mount".into());
     arguments.push(mount(output, OUTPUT, false));

@@ -39,5 +39,8 @@ toml = "1.0"
 vt100 = "0.16.2"
 yaml-rust2 = "0.13"
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["process"] }
+
 [lints]
 workspace = true

@@ -685,13 +685,42 @@ pub fn fuzz_targets(directory: &Path) -> Result<Vec<String>> {
     Ok(targets)
 }
 
-/// Replays the committed corpus of `target` once, with no new input, and returns the run's output.
-fn replay(root: &Path, directory: &str, target: &str) -> Result<std::process::Output> {
-    Tool::Cargo
+fn nightly_host(root: &Path) -> Result<String> {
+    let output = Tool::Rustup
         .command()
         .current_dir(root)
-        .arg(format!("+{MIRI_TOOLCHAIN}"))
-        .args(["fuzz", "run", "--fuzz-dir", directory, target])
+        .args(["run", MIRI_TOOLCHAIN, Tool::Rustc.program(), "-vV"])
+        .output()
+        .context("query the pinned nightly host")?;
+    ensure!(
+        output.status.success(),
+        "cannot resolve the pinned nightly host:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout)?;
+    let mut hosts = stdout
+        .lines()
+        .filter_map(|line| line.strip_prefix("host: "));
+    let host = hosts.next().context("the pinned nightly has no host")?;
+    ensure!(
+        !host.is_empty() && hosts.next().is_none(),
+        "the pinned nightly must name exactly one nonempty host"
+    );
+    Ok(host.to_owned())
+}
+
+/// Replays the committed corpus of `target` once for the pinned compiler's host, with no new input.
+fn replay(root: &Path, directory: &str, target: &str, host: &str) -> Result<std::process::Output> {
+    nightly_cargo(root)
+        .args([
+            "fuzz",
+            "run",
+            "--target",
+            host,
+            "--fuzz-dir",
+            directory,
+            target,
+        ])
         .arg(format!("{directory}/corpus/{target}"))
         .args(["--", "-runs=0"])
         .output()
@@ -708,6 +737,7 @@ fn verify_fuzz(root: &Path) -> Result<()> {
     );
     let targets = fuzz_targets(&root.join(FUZZ_DIRECTORY))?;
     ensure!(!targets.is_empty(), "{FUZZ_DIRECTORY} holds no fuzz target");
+    let host = nightly_host(root)?;
     let mut checks = Checks::default();
     for target in &targets {
         checks.run(&format!("fuzz target {target}"), || {
@@ -717,7 +747,7 @@ fn verify_fuzz(root: &Path) -> Result<()> {
                 "the fuzz target {target} has no corpus under {}",
                 corpus.display()
             );
-            let output = replay(root, FUZZ_DIRECTORY, target)?;
+            let output = replay(root, FUZZ_DIRECTORY, target, &host)?;
             ensure!(
                 output.status.success(),
                 "replaying the corpus of {target} failed:\n{}",
@@ -727,7 +757,7 @@ fn verify_fuzz(root: &Path) -> Result<()> {
         });
     }
     checks.run("fuzz fixture", || {
-        let output = replay(root, FUZZ_FIXTURE, "crash")?;
+        let output = replay(root, FUZZ_FIXTURE, "crash", &host)?;
         ensure!(
             !output.status.success() && String::from_utf8_lossy(&output.stderr).contains("panicked"),
             "the corpus replay admitted {FUZZ_FIXTURE}, whose corpus makes its target panic, so the gate proves nothing"
@@ -758,11 +788,15 @@ const MUTANTS_FIXTURE: &str = "xtask/proofs/mutants-fixture";
 /// The package whose tests must catch every mutant of its code.
 const MUTATED_PACKAGE: &str = "rules";
 
+/// Each mutation worker runs its tests serially while the campaign schedules workers.
+const MUTANT_TEST_THREADS: &str = "1";
+
 fn mutants(directory: &Path, output: &Path) -> std::process::Command {
     let mut command = Tool::Cargo.command();
     // Each mutant builds in its own copy of the tree, which a shared target directory would serialize.
     command
         .env_remove("CARGO_TARGET_DIR")
+        .env("RUST_TEST_THREADS", MUTANT_TEST_THREADS)
         .args(["mutants", "--no-shuffle", "--jobs"])
         .arg(mutant_jobs())
         .arg("--dir")
@@ -1022,12 +1056,17 @@ fn millis_of(seconds: &str) -> Option<u64> {
         .checked_add(millis)
 }
 
-fn miri(root: &Path) -> std::process::Command {
-    let mut command = Tool::Cargo.command();
+fn nightly_cargo(root: &Path) -> std::process::Command {
+    let mut command = Tool::Rustup.command();
     command
         .current_dir(root)
-        .arg(format!("+{MIRI_TOOLCHAIN}"))
-        .args(["miri", "test", "--locked"]);
+        .args(["run", MIRI_TOOLCHAIN, Tool::Cargo.program()]);
+    command
+}
+
+fn miri(root: &Path) -> std::process::Command {
+    let mut command = nightly_cargo(root);
+    command.args(["miri", "test", "--locked"]);
     command
 }
 
@@ -1181,6 +1220,91 @@ mod tests {
     const NATIVE_FIXTURE: &str = "DOTFILES_NATIVE_PROOF_FIXTURE";
     const NATIVE_TEST: &str =
         "skill_proofs::tests::missing_manifest_cannot_skip_independent_native_checks";
+    const NIGHTLY_TEST: &str =
+        "skill_proofs::tests::the_code_environment_dispatches_the_pinned_nightly_verifiers";
+    const MUTATION_TEST: &str =
+        "skill_proofs::tests::mutation_workers_do_not_multiply_the_test_pool";
+
+    #[test]
+    #[ignore = "requires the installed pinned cargo-mutants"]
+    fn mutation_workers_do_not_multiply_the_test_pool() -> Result<()> {
+        let root = crate::canonical(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").as_path())?;
+        if std::env::var(NATIVE_FIXTURE).is_ok_and(|value| value == MUTATION_TEST) {
+            let output = tempfile::tempdir()?;
+            mutants(&root.join(MUTANTS_FIXTURE), output.path())
+                .status()
+                .context("start the mutation worker fixture")?;
+            ensure!(
+                lines(&outcome(output.path(), "missed.txt")) > 0,
+                "the mutation worker fixture failed its baseline or caught its assertionless rule"
+            );
+            return Ok(());
+        }
+        let home = platform::home::home().context("native tool home")?;
+        let environment = dotfiles::hosts::code_environment(&root, &home)?;
+        let output = environment
+            .command(std::env::current_exe()?)
+            .args(["--ignored", "--exact", MUTATION_TEST, "--nocapture"])
+            .env(NATIVE_FIXTURE, MUTATION_TEST)
+            .env("RUST_TEST_THREADS", "2")
+            .output()?;
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        ensure!(
+            output.status.success(),
+            "owned mutation worker fixture failed"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires the installed pinned nightly, Miri, and cargo-fuzz"]
+    fn the_code_environment_dispatches_the_pinned_nightly_verifiers() -> Result<()> {
+        let root = crate::canonical(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").as_path())?;
+        if std::env::var(NATIVE_FIXTURE).is_ok_and(|value| value == NIGHTLY_TEST) {
+            let mut checks = Checks::default();
+            checks.run("Miri nightly fixture", || {
+                let output = miri(&root)
+                    .arg("--manifest-path")
+                    .arg(root.join(MIRI_FIXTURE))
+                    .output()?;
+                ensure!(
+                    !output.status.success()
+                        && String::from_utf8_lossy(&output.stderr).contains("Undefined Behavior"),
+                    "Miri did not interpret its undefined-behavior fixture:\n{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                Ok(())
+            });
+            checks.run("fuzz nightly fixture", || {
+                let host = nightly_host(&root)?;
+                let output = replay(&root, FUZZ_FIXTURE, "crash", &host)?;
+                ensure!(
+                    !output.status.success()
+                        && String::from_utf8_lossy(&output.stderr).contains("panicked"),
+                    "fuzz did not replay its crashing corpus:\n{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                Ok(())
+            });
+            return checks.finish();
+        }
+        let home = platform::home::home().context("native tool home")?;
+        let environment = dotfiles::hosts::code_environment(&root, &home)?;
+        let output = environment
+            .command(std::env::current_exe()?)
+            .args(["--ignored", "--exact", NIGHTLY_TEST, "--nocapture"])
+            .env(NATIVE_FIXTURE, NIGHTLY_TEST)
+            .env("RUSTUP_AUTO_INSTALL", "0")
+            .output()?;
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        ensure!(
+            output.status.success(),
+            "owned nightly verifier fixture failed"
+        );
+        Ok(())
+    }
 
     #[test]
     fn missing_manifest_cannot_skip_independent_native_checks() -> Result<()> {

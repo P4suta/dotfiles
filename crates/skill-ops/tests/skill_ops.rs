@@ -1273,6 +1273,127 @@ fn native_failures_record_automatically_and_expected_signals_do_not() -> Result<
     Ok(())
 }
 
+fn native_refusal_event() -> serde_json::Value {
+    let refusal =
+        platform::refusal::Refusal::new("hook.gate", "a child failed", "inspect the child")
+            .evidence("fixture");
+    serde_json::json!({
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_response": {"output": refusal.line()}
+    })
+}
+
+fn assert_native_source(
+    client: &str,
+    event: &serde_json::Value,
+    expected: Option<skill_ops::incident_rules::Source>,
+) -> Result<()> {
+    let state = tempfile::tempdir()?;
+    assert_eq!(
+        skill_ops::record_native_failure(state.path(), client, event)?,
+        expected.is_some(),
+        "{client}: {event}"
+    );
+    let recorded = incidents(state.path())?;
+    assert_eq!(recorded.len(), usize::from(expected.is_some()));
+    assert_eq!(recorded.first().map(|incident| incident.source), expected);
+    Ok(())
+}
+
+#[test]
+fn native_exit_status_and_explicit_failures_keep_their_priority() -> Result<()> {
+    use skill_ops::incident_rules::Source;
+    let mut successful = native_refusal_event();
+    successful["tool_response"]["exit_code"] = serde_json::json!(0);
+    assert_native_source("codex", &successful, None)?;
+    let mut failed = successful.clone();
+    failed["tool_response"]["exit_code"] = serde_json::json!(1);
+    assert_native_source("codex", &failed, Some(Source::GateRefusal))?;
+    for field in ["hook_event_name", "status", "is_error", "response_error"] {
+        let mut event = successful.clone();
+        match field {
+            "hook_event_name" => event[field] = serde_json::json!("PostToolUseFailure"),
+            "status" => event[field] = serde_json::json!("failed"),
+            "is_error" => event[field] = serde_json::json!(true),
+            _ => event["tool_response"]["is_error"] = serde_json::json!(true),
+        }
+        assert_native_source("codex", &event, Some(Source::GateRefusal))?;
+        event["tool_response"] = serde_json::json!({"exit_code": 0});
+        if field == "response_error" {
+            event["tool_response"]["is_error"] = serde_json::json!(true);
+        }
+        assert_native_source("codex", &event, Some(Source::FailedDelivery))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn native_output_only_delivery_is_limited_to_the_official_codex_shape() -> Result<()> {
+    use skill_ops::incident_rules::Source;
+    let mut output_only = native_refusal_event();
+    output_only["tool_response"] = output_only["tool_response"]["output"].clone();
+    assert_native_source("codex", &output_only, None)?;
+    for client in ["claude", "opencode"] {
+        assert_native_source(client, &output_only, Some(Source::GateRefusal))?;
+    }
+    for (field, value) in [
+        ("tool_name", serde_json::json!("Read")),
+        ("hook_event_name", serde_json::Value::Null),
+    ] {
+        let mut event = output_only.clone();
+        event[field] = value;
+        assert_native_source("codex", &event, Some(Source::GateRefusal))?;
+    }
+    let mut fallback = output_only.clone();
+    fallback["output"] = fallback["tool_response"].clone();
+    fallback.as_object_mut().unwrap().remove("tool_response");
+    assert_native_source("codex", &fallback, Some(Source::GateRefusal))?;
+    let mut error = output_only.clone();
+    error["error"] = error["tool_response"].clone();
+    error["tool_response"] = serde_json::json!("ordinary output");
+    assert_native_source("codex", &error, Some(Source::GateRefusal))?;
+    let mut failed = output_only.clone();
+    failed["is_error"] = serde_json::json!(true);
+    assert_native_source("codex", &failed, Some(Source::GateRefusal))?;
+    for value in [serde_json::json!("0"), serde_json::Value::Null] {
+        let mut event = native_refusal_event();
+        event["tool_response"]["exit_code"] = value;
+        assert_native_source("codex", &event, Some(Source::GateRefusal))?;
+    }
+    for status in ["completed", "success"] {
+        let mut event = native_refusal_event();
+        event["status"] = serde_json::json!(status);
+        assert_native_source("codex", &event, Some(Source::GateRefusal))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn native_declared_sources_survive_zero_and_output_only_delivery() -> Result<()> {
+    use skill_ops::incident_rules::Source;
+    for source in Source::ALL {
+        let mut event = native_refusal_event();
+        event["failure_source"] = serde_json::json!(source.key());
+        event["tool_response"]["exit_code"] = serde_json::json!(0);
+        assert_native_source("codex", &event, Some(source))?;
+        event["tool_response"] = event["tool_response"]["output"].clone();
+        assert_native_source("codex", &event, Some(source))?;
+    }
+    for output_only in [false, true] {
+        let state = tempfile::tempdir()?;
+        let mut event = native_refusal_event();
+        event["failure_source"] = serde_json::json!("unknown-source");
+        event["tool_response"]["exit_code"] = serde_json::json!(0);
+        if output_only {
+            event["tool_response"] = event["tool_response"]["output"].clone();
+        }
+        assert!(skill_ops::record_native_failure(state.path(), "codex", &event).is_err());
+        assert_eq!(incidents(state.path())?, Vec::new());
+    }
+    Ok(())
+}
+
 fn write_evidence_fixture(root: &std::path::Path) -> Result<()> {
     fs::create_dir_all(root.join("tests"))?;
     let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../platform");

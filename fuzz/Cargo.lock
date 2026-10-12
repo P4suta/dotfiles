@@ -1907,6 +1907,7 @@ dependencies = [
  "pulldown-cmark",
  "quote",
  "rules",
+ "rustix",
  "schemars",
  "serde",
  "serde_json",

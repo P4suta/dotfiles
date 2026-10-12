@@ -43,6 +43,15 @@ fn code_fixture() -> Result<CodeFixture> {
         .arg(&mise)
         .status()?;
     ensure!(compiled.success(), "compile the code environment fixture");
+    let native_path = std::env::join_paths(std::iter::once(host.clone()).chain(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+    ))?;
+    fs::write(
+        mise.with_extension("native-path.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "PATH": native_path.to_str().context("fixture native PATH")?
+        }))?,
+    )?;
     for directory in [&installed, &old] {
         fs::copy(
             &mise,
@@ -212,6 +221,131 @@ fn the_code_gate_and_its_children_ignore_the_fixture_host_environment() -> Resul
         "pinned parent\npinned child\nhttps://github.com/third-party/project.git\n"
     );
     assert!(!host.join("data/gate-state").exists());
+    Ok(())
+}
+
+fn rust_code_fixture() -> Result<(CodeFixture, platform::code_environment::Installations)> {
+    const RUST_PIN: &str = "1.99.0";
+    let fixture = code_fixture()?;
+    let cargo = fixture.host.join(".cargo");
+    let bin = cargo.join("bin");
+    let proxy = fixture.host.join("data/installs/rust").join(RUST_PIN);
+    let sysroot = fixture.host.join("sysroot");
+    for directory in [&bin, &proxy, &sysroot.join("bin")] {
+        fs::create_dir_all(directory)?;
+    }
+    let mise = fixture
+        .host
+        .join(format!("mise{}", std::env::consts::EXE_SUFFIX));
+    for name in ["rustc", "rustup"] {
+        let program = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+        fs::copy(&mise, bin.join(&program))?;
+        fs::copy(&mise, proxy.join(program))?;
+    }
+    for (directory, name) in [
+        (&bin, "unrelated-application"),
+        (&sysroot.join("bin"), "cargo"),
+        (&sysroot.join("bin"), "rustc"),
+    ] {
+        fs::copy(
+            &mise,
+            directory.join(format!("{name}{}", std::env::consts::EXE_SUFFIX)),
+        )?;
+    }
+    fs::write(
+        fixture.root.join("rust-sysroot"),
+        sysroot.to_string_lossy().as_bytes(),
+    )?;
+    fs::write(
+        proxy
+            .parent()
+            .context("Rust installation parent")?
+            .join(".mise.backend.toml"),
+        "short = 'rust'\nfull = 'core:rust'\n",
+    )?;
+    let inventory = fixture.root.join("tools.json");
+    let mut tools: serde_json::Value = serde_json::from_slice(&fs::read(&inventory)?)?;
+    let mut rust = tools["python"][0].clone();
+    rust["version"] = RUST_PIN.into();
+    rust["requested_version"] = RUST_PIN.into();
+    rust["install_path"] = serde_json::json!(proxy);
+    tools["rust"] = serde_json::json!([rust]);
+    fs::write(inventory, serde_json::to_vec(&tools)?)?;
+    fs::write(
+        fixture.root.join("mise.toml"),
+        format!("[tools]\npython = '3.14.8'\nrust = {RUST_PIN:?}\n"),
+    )?;
+    let installed = platform::code_environment::Installations {
+        mise,
+        data: fixture.host.join("data"),
+        cargo,
+        rustup: fixture.host.join(".rustup"),
+        kani: fixture.host.join(".kani"),
+        cache: fixture.host.join(".cache/dotfiles/hosts"),
+    };
+    Ok((fixture, installed))
+}
+
+#[test]
+fn a_code_gate_exposes_only_its_captured_rustup_manager() -> Result<()> {
+    const RUST_PIN: &str = "1.99.0";
+    const NIGHTLY: &str = "nightly-2026-08-21";
+    let (fixture, installed) = rust_code_fixture()?;
+    let environment =
+        platform::code_environment::CodeEnvironment::build(&fixture.root, &installed)?;
+    for (tool, expected) in [
+        (platform::tool::Tool::Rustup, "captured rustup\n"),
+        (platform::tool::Tool::Cargo, "cargo 1.99.0 fixture\n"),
+        (platform::tool::Tool::Rustc, "rustc 1.99.0 fixture\n"),
+    ] {
+        let output = environment
+            .command(tool.program())
+            .arg("--version")
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout)?.replace("\r\n", "\n"),
+            expected
+        );
+    }
+    let mut nightly = environment.command(platform::tool::Tool::Rustup.program());
+    assert_eq!(
+        nightly
+            .get_envs()
+            .find_map(|(name, value)| { (name == "RUSTUP_TOOLCHAIN").then_some(value).flatten() }),
+        Some(std::ffi::OsStr::new(RUST_PIN))
+    );
+    let output = nightly
+        .args(["run", NIGHTLY, "cargo", "--rustc-version"])
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout)?.replace("\r\n", "\n"),
+        format!("rustc {NIGHTLY} fixture\n")
+    );
+    assert!(
+        environment
+            .command("unrelated-application")
+            .output()
+            .is_err()
+    );
+    assert_eq!(
+        fs::read(
+            installed
+                .cargo
+                .join("bin")
+                .join(format!("rustup{}", std::env::consts::EXE_SUFFIX))
+        )?,
+        fs::read(&installed.mise)?
+    );
     Ok(())
 }
 
@@ -893,27 +1027,21 @@ struct BootstrapFixture {
 
 fn bootstrap_fixture() -> Result<BootstrapFixture> {
     let scope = tempfile::tempdir()?;
-    let root = scope.path().join("project");
-    let host = scope.path().join("host");
-    let job = scope.path().join("job");
+    let directory = platform::paths::canonical(scope.path())?;
+    let root = directory.join("project");
+    let host = directory.join("host");
+    let job = directory.join("job");
     for directory in [&root, &host, &job] {
         fs::create_dir_all(directory)?;
     }
     let home = platform::home::home().context("native tool home")?;
     let installed = platform::code_environment::Installations::discover(&home)?;
-    let rust = platform::tool::Tool::Mise
-        .command()
-        .args(["where", "rust"])
-        .output()?;
-    ensure!(rust.status.success(), "resolve the installed Rust proxies");
+    let cargo = installed.cargo.clone();
     let rustup = platform::paths::canonical(
-        &Path::new(String::from_utf8(rust.stdout)?.trim())
+        &cargo
+            .join("bin")
             .join(format!("rustup{}", std::env::consts::EXE_SUFFIX)),
     )?;
-    let cargo = rustup
-        .parent()
-        .and_then(Path::parent)
-        .context("Rust proxy Cargo home")?;
     link_directory(&installed.rustup, &host.join(".rustup"))?;
     let data = if cfg!(windows) {
         host.join("AppData/Local/mise")
@@ -969,11 +1097,28 @@ fn bootstrap_fixture() -> Result<BootstrapFixture> {
     )?;
     Ok(BootstrapFixture {
         scope,
-        cargo: cargo.to_path_buf(),
+        cargo,
         rustup,
         mise: installed.mise,
         pin: pin.to_owned(),
     })
+}
+
+fn assert_bootstrap_cargo(path: &str, job: &Path, cargo: &Path) -> Result<()> {
+    let program = format!("cargo{}", std::env::consts::EXE_SUFFIX);
+    let proxy = std::env::split_paths(path)
+        .map(|directory| directory.join(&program))
+        .find(|executable| executable.is_file())
+        .context("bootstrap Cargo executable")?;
+    assert_eq!(
+        proxy.parent(),
+        Some(job.join("bootstrap/.cargo/bin").as_path())
+    );
+    assert_eq!(
+        platform::paths::canonical(&proxy)?,
+        platform::paths::canonical(&cargo.join("bin").join(program))?
+    );
+    Ok(())
 }
 
 #[test]
@@ -985,9 +1130,10 @@ fn the_remote_bootstrap_uses_native_rust_tools_with_owned_writable_state() -> Re
         mise,
         pin,
     } = bootstrap_fixture()?;
-    let root = scope.path().join("project");
-    let host = scope.path().join("host");
-    let job = scope.path().join("job");
+    let directory = platform::paths::canonical(scope.path())?;
+    let root = directory.join("project");
+    let host = directory.join("host");
+    let job = directory.join("job");
     let global = host.join("untrusted.toml");
     fs::write(&global, "[tools]\nrust = 'invalid-native-version'\n")?;
     let family = if cfg!(windows) {
@@ -1031,6 +1177,8 @@ fn the_remote_bootstrap_uses_native_rust_tools_with_owned_writable_state() -> Re
     ] {
         assert_eq!(Path::new(values[name]), expected);
     }
+    assert_bootstrap_cargo(values["PATH"], &job, &cargo)?;
+    assert!(!Path::new(values["CARGO_HOME"]).join("bin").exists());
     let compiler = platform::tool::Tool::Rustc.command().arg("-vV").output()?;
     ensure!(compiler.status.success(), "resolve the Rust host triple");
     let compiler = String::from_utf8(compiler.stdout)?;

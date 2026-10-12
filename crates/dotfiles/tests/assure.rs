@@ -10,6 +10,9 @@ use std::path::Path;
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
+#[path = "../../../xtask/tests/support/incident_fixture.rs"]
+mod incident_fixture;
+
 fn catalog() -> Result<Catalog> {
     assure::catalog(
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/dot_config/assure/shapes.toml"),
@@ -24,7 +27,7 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Result<Self> {
-        let scope = tempfile::tempdir()?;
+        let scope = incident_fixture::scope()?;
         let config = scope.path().join("gitconfig");
         fs::write(
             &config,
@@ -86,6 +89,15 @@ fn rule(result: Result<()>) -> Option<String> {
         })
 }
 
+fn emitted_rule(result: Result<()>) -> Option<String> {
+    if let Err(error) = &result
+        && let Some(refusal) = error.downcast_ref::<Refusal>()
+    {
+        refusal.emit();
+    }
+    rule(result)
+}
+
 const PARSER: &str = "pub fn parse(text: &str) -> Option<u8> {\n    text.parse().ok()\n}\n";
 const TARGET: &str = "#![no_main]\nlibfuzzer_sys::fuzz_target!(|data: &[u8]| {});\n";
 const OWNERS: &str =
@@ -94,6 +106,11 @@ const OWNERS: &str =
 #[test]
 fn an_unowned_parser_is_refused_at_every_point_and_admitted_once_its_fuzz_target_and_corpus_exist()
 -> Result<()> {
+    if incident_fixture::run(
+        "an_unowned_parser_is_refused_at_every_point_and_admitted_once_its_fuzz_target_and_corpus_exist",
+    )? {
+        return Ok(());
+    }
     let catalog = catalog()?;
     let fixture = Fixture::new()?;
     let root = &fixture.root;
@@ -119,7 +136,7 @@ fn an_unowned_parser_is_refused_at_every_point_and_admitted_once_its_fuzz_target
     assert_eq!(assure::stop_response(Some("gap"), true)["continue"], false);
     fixture.stage()?;
     assert_eq!(
-        rule(assure::commit(root, &catalog)).as_deref(),
+        emitted_rule(assure::commit(root, &catalog)).as_deref(),
         Some("assure.added")
     );
 
@@ -133,20 +150,20 @@ fn an_unowned_parser_is_refused_at_every_point_and_admitted_once_its_fuzz_target
         Some(Kind::Shape(Cause::BrokenOwner))
     );
     assert_eq!(
-        rule(assure::commit(root, &catalog)).as_deref(),
+        emitted_rule(assure::commit(root, &catalog)).as_deref(),
         Some("assure.added")
     );
 
     fixture.write("fuzz/corpus/parse/seed", "7")?;
     fixture.stage()?;
-    assert_eq!(rule(assure::commit(root, &catalog)), None);
+    assert_eq!(emitted_rule(assure::commit(root, &catalog)), None);
     assert_eq!(assure::stop(root, &catalog)?.verdict, Verdict::Admit);
     assert_eq!(assure::start(root, &catalog)?, None);
     let owned = fixture.commit("own the parser")?;
 
     let push = |from: &str, to: &str| format!("refs/heads/main {to} refs/heads/main {from}\n");
     assert_eq!(
-        rule(assure::push(
+        emitted_rule(assure::push(
             root,
             &catalog,
             "origin",
@@ -155,12 +172,15 @@ fn an_unowned_parser_is_refused_at_every_point_and_admitted_once_its_fuzz_target
         None
     );
     fixture.git(&["update-ref", "refs/remotes/origin/main", &base])?;
-    assert_eq!(rule(assure::ready(root, &catalog, "main", &owned)), None);
+    assert_eq!(
+        emitted_rule(assure::ready(root, &catalog, "main", &owned)),
+        None
+    );
 
     fixture.write("src/other.rs", PARSER)?;
     let unowned = fixture.commit("add a second parser")?;
     assert_eq!(
-        rule(assure::push(
+        emitted_rule(assure::push(
             root,
             &catalog,
             "origin",
@@ -170,9 +190,10 @@ fn an_unowned_parser_is_refused_at_every_point_and_admitted_once_its_fuzz_target
         Some("assure.added")
     );
     assert_eq!(
-        rule(assure::ready(root, &catalog, "main", &unowned)).as_deref(),
+        emitted_rule(assure::ready(root, &catalog, "main", &unowned)).as_deref(),
         Some("assure.added")
     );
+    incident_fixture::preserve(fixture._scope);
     Ok(())
 }
 
@@ -298,6 +319,11 @@ const FIXED: [(&str, &str); 7] = [
 #[test]
 fn each_anti_pattern_is_refused_at_every_point_with_its_rule_and_next_action_until_fixed()
 -> Result<()> {
+    if incident_fixture::run(
+        "each_anti_pattern_is_refused_at_every_point_with_its_rule_and_next_action_until_fixed",
+    )? {
+        return Ok(());
+    }
     let catalog = catalog()?;
     let fixture = Fixture::new()?;
     let root = &fixture.root;
@@ -313,6 +339,7 @@ fn each_anti_pattern_is_refused_at_every_point_with_its_rule_and_next_action_unt
     let refused = assure::commit(root, &catalog).unwrap_err();
     let refused = refused.downcast_ref::<Refusal>().expect("a refusal");
     assert_eq!(refused.rule, "assure.added");
+    refused.emit();
     for (path, _, rule) in ANTI_PATTERNS {
         let line = format!("{path}:");
         assert!(
@@ -332,11 +359,11 @@ fn each_anti_pattern_is_refused_at_every_point_with_its_rule_and_next_action_unt
     let violating = fixture.commit("violations without the machine hooks")?;
     let push = format!("refs/heads/main {violating} refs/heads/main {base}\n");
     assert_eq!(
-        rule(assure::push(root, &catalog, "origin", push.as_bytes())).as_deref(),
+        emitted_rule(assure::push(root, &catalog, "origin", push.as_bytes())).as_deref(),
         Some("assure.added")
     );
     assert_eq!(
-        rule(assure::ready(root, &catalog, "main", &violating)).as_deref(),
+        emitted_rule(assure::ready(root, &catalog, "main", &violating)).as_deref(),
         Some("assure.added")
     );
 
@@ -345,15 +372,19 @@ fn each_anti_pattern_is_refused_at_every_point_with_its_rule_and_next_action_unt
     }
     assert_eq!(assure::stop(root, &catalog)?.verdict, Verdict::Admit);
     fixture.stage()?;
-    assert_eq!(rule(assure::commit(root, &catalog)), None);
+    assert_eq!(emitted_rule(assure::commit(root, &catalog)), None);
     assert_eq!(assure::start(root, &catalog)?, None);
     let fixed = fixture.commit("fix every violation")?;
     let push = format!("refs/heads/main {fixed} refs/heads/main {violating}\n");
     assert_eq!(
-        rule(assure::push(root, &catalog, "origin", push.as_bytes())),
+        emitted_rule(assure::push(root, &catalog, "origin", push.as_bytes())),
         None
     );
-    assert_eq!(rule(assure::ready(root, &catalog, "main", &fixed)), None);
+    assert_eq!(
+        emitted_rule(assure::ready(root, &catalog, "main", &fixed)),
+        None
+    );
+    incident_fixture::preserve(fixture._scope);
     Ok(())
 }
 

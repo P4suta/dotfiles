@@ -1,5 +1,5 @@
-//! The instruction and heap work of the gate's own process at the four entry points a Git call meets.
-//! The tools follow no child, so the budgets cover the gate alone and not the Git it delegates to.
+//! Instruction and heap measurements through four Git and gate entry points.
+//! The wrapper measurements include the gate and its delegated Git processes.
 
 use gungraun::prelude::*;
 use gungraun::{ExitWith, Pipe, Sandbox, Stdin};

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::paths::canonical;
 
@@ -19,6 +19,10 @@ const KANI_TOOL: &str = "cargo:kani-verifier";
 const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
 const GITHUB_HOSTS: &str = "github.com: {}\n";
 const BACKEND_METADATA: &str = ".mise.backend.toml";
+const MISE_DIFF: &str = "__MISE_DIFF";
+const NATIVE_QUERY_CONFIG: &str = "empty.toml";
+pub const NATIVE_PATH_DIFF: &str = "DOTFILES_HOST_MISE_DIFF";
+pub const NATIVE_PATH_DIFF_PRESENT: &str = "DOTFILES_HOST_MISE_DIFF_PRESENT";
 pub const HOST_CACHE: &str = ".cache/dotfiles/hosts";
 #[cfg(unix)]
 const BOOTSTRAP_COPY: &str = "/bin/cp";
@@ -26,6 +30,223 @@ const BOOTSTRAP_COPY: &str = "/bin/cp";
 const REGISTERED_COMPILER: &str = "DOTFILES_HOST_COMPILER";
 #[cfg(windows)]
 const MSVC_COMPILER: &str = "cl.exe";
+
+/// The native PATH recovered before candidate configuration replaces its origin.
+#[derive(Debug)]
+pub struct NativePath {
+    path: OsString,
+    mise: Option<PathBuf>,
+}
+
+/// A checked environment response retaining only its native PATH.
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+pub struct NativePathResponse {
+    #[serde(rename = "PATH")]
+    path: String,
+}
+
+impl NativePathResponse {
+    /// Parse a response without retaining unrelated environment values.
+    ///
+    /// # Errors
+    ///
+    /// Reports only the JSON error category for malformed or ambiguous responses.
+    pub fn parse(bytes: &[u8]) -> Result<Self> {
+        serde_json::from_slice(bytes).map_err(|error| {
+            anyhow::anyhow!("native PATH response is invalid ({:?})", error.classify())
+        })
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.path
+    }
+
+    fn read(output: &std::process::Output) -> Result<Self> {
+        ensure!(
+            output.status.success(),
+            "native PATH query failed with {}",
+            output.status
+        );
+        ensure!(
+            output.stderr.is_empty(),
+            "native PATH query produced diagnostics"
+        );
+        Self::parse(&output.stdout)
+    }
+}
+
+impl<'de> Deserialize<'de> for NativePathResponse {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        struct Response;
+
+        impl<'de> serde::de::Visitor<'de> for Response {
+            type Value = NativePathResponse;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("an environment with one native PATH")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut values: A,
+            ) -> std::result::Result<Self::Value, A::Error> {
+                use serde::de::Error as _;
+                let mut path = None;
+                while let Some(name) = values.next_key::<String>()? {
+                    if name == "PATH" || (cfg!(windows) && name.eq_ignore_ascii_case("PATH")) {
+                        if path.is_some() {
+                            return Err(A::Error::duplicate_field("PATH"));
+                        }
+                        path = Some(values.next_value::<String>()?);
+                    } else {
+                        values.next_value::<serde::de::IgnoredAny>()?;
+                    }
+                }
+                path.map(|path| NativePathResponse { path })
+                    .ok_or_else(|| A::Error::missing_field("PATH"))
+            }
+        }
+        deserializer.deserialize_map(Response)
+    }
+}
+
+impl NativePath {
+    /// Recover parent activation through mise while keeping every query write in owned storage.
+    ///
+    /// # Errors
+    ///
+    /// Refuses incomplete provenance, unavailable mise, and any unsuccessful or malformed query.
+    pub fn capture(home: &Path) -> Result<Self> {
+        let explicit = std::env::var_os("DOTFILES_HOST_PATH");
+        let inherited = std::env::var_os("PATH").unwrap_or_default();
+        let path = explicit.clone().unwrap_or_else(|| inherited.clone());
+        let diff = match (
+            std::env::var_os(NATIVE_PATH_DIFF_PRESENT),
+            std::env::var_os(NATIVE_PATH_DIFF),
+        ) {
+            (Some(present), diff) => {
+                ensure!(
+                    explicit.is_some(),
+                    "native PATH metadata has no captured PATH"
+                );
+                if present == "1" {
+                    Some(diff.context("native PATH metadata is missing")?)
+                } else {
+                    ensure!(
+                        present == "0" && diff.as_ref().is_none_or(|value| value.is_empty()),
+                        "native PATH metadata presence is invalid"
+                    );
+                    None
+                }
+            }
+            (None, None) => {
+                let diff = std::env::var_os(MISE_DIFF);
+                ensure!(
+                    diff.is_none() || explicit.is_none() || path == inherited,
+                    "native PATH and activation metadata have different origins"
+                );
+                diff
+            }
+            _ => anyhow::bail!("native PATH metadata is incomplete"),
+        };
+        let Some(diff) = diff else {
+            return Ok(Self { path, mise: None });
+        };
+        let mise = mise_executable(home, &path)?;
+        let capability = match crate::github::executable(&path) {
+            Ok(executable) => Some(executable),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error).context("resolve the native GitHub CLI"),
+        };
+        let scope = tempfile::tempdir()?;
+        let result = Self::query(scope.path(), &mise, &path, &diff, capability.as_deref());
+        crate::cleanup::report(scope.close(), "remove the native PATH query");
+        result
+    }
+
+    fn query(
+        scope: &Path,
+        mise: &Path,
+        path: &OsStr,
+        diff: &OsStr,
+        capability: Option<&Path>,
+    ) -> Result<Self> {
+        let scope = canonical(scope)?;
+        let empty = scope.join(NATIVE_QUERY_CONFIG);
+        fs::write(&empty, "")?;
+        let mut command = crate::process::command(mise);
+        for (name, _) in std::env::vars_os() {
+            let text = name.to_string_lossy().to_ascii_uppercase();
+            if text.starts_with("MISE_") || text.starts_with("__MISE_") {
+                command.env_remove(name);
+            }
+        }
+        for (name, directory) in [
+            ("MISE_CONFIG_FILE", empty.clone()),
+            ("MISE_GLOBAL_CONFIG_FILE", empty.clone()),
+            ("MISE_SYSTEM_CONFIG_FILE", empty),
+            ("MISE_CONFIG_DIR", scope.join("config")),
+            ("MISE_SYSTEM_CONFIG_DIR", scope.join("system-config")),
+            ("MISE_DATA_DIR", scope.join("data")),
+            ("MISE_SYSTEM_DATA_DIR", scope.join("system-data")),
+            ("MISE_STATE_DIR", scope.join("state")),
+            ("MISE_CACHE_DIR", scope.join("cache")),
+            ("MISE_CEILING_PATHS", scope.clone()),
+            ("MISE_TRUSTED_CONFIG_PATHS", scope.clone()),
+            ("MISE_CD", scope.clone()),
+            ("TMPDIR", scope.clone()),
+            ("TEMP", scope.clone()),
+            ("TMP", scope.clone()),
+        ] {
+            command.env(name, directory);
+        }
+        let output = command
+            .current_dir(&scope)
+            .args(["env", "--json"])
+            .env("PATH", path)
+            .env(MISE_DIFF, diff)
+            .env_remove("DOTFILES_HOST_PATH")
+            .env_remove(NATIVE_PATH_DIFF)
+            .env_remove(NATIVE_PATH_DIFF_PRESENT)
+            .env("MISE_AUTO_INSTALL", "false")
+            .env("MISE_ENV_CACHE", "false")
+            .env("MISE_AUTO_ENV", "false")
+            .env("MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES", "none")
+            .stdin(Stdio::null())
+            .output()
+            .context("query the native PATH")?;
+        let response = NativePathResponse::read(&output)?;
+        let mut directories: Vec<_> =
+            std::env::split_paths(OsStr::new(response.as_str())).collect();
+        if let Some(capability) = capability {
+            let directory = capability.parent().context("native GitHub CLI directory")?;
+            if !directories.iter().any(|candidate| candidate == directory) {
+                directories.push(directory.to_path_buf());
+            }
+        }
+        Ok(Self {
+            path: std::env::join_paths(directories)?,
+            mise: Some(mise.to_path_buf()),
+        })
+    }
+
+    #[must_use]
+    pub fn as_os_str(&self) -> &OsStr {
+        &self.path
+    }
+}
+
+fn mise_executable(home: &Path, path: &OsStr) -> Result<PathBuf> {
+    let path = crate::home::path_with(home, path)?;
+    let mise = std::env::split_paths(&path)
+        .map(|directory| directory.join(format!("mise{}", std::env::consts::EXE_SUFFIX)))
+        .find(|path| path.is_file())
+        .context("mise is unavailable; apply the host profile")?;
+    Ok(canonical(&mise)?)
+}
 
 /// Installed tool storage without host configuration or credentials.
 #[derive(Debug)]
@@ -45,11 +266,10 @@ impl Installations {
     ///
     /// Returns an error when the managed tool path contains no mise executable.
     pub fn discover(home: &Path) -> Result<Self> {
-        let path = crate::home::managed_path(home)?;
-        let mise = std::env::split_paths(&path)
-            .map(|directory| directory.join(format!("mise{}", std::env::consts::EXE_SUFFIX)))
-            .find(|path| path.is_file())
-            .context("mise is unavailable; apply the host profile")?;
+        let native = NativePath::capture(home)?;
+        let mise = native
+            .mise
+            .map_or_else(|| mise_executable(home, &native.path), Ok)?;
         let data = std::env::var_os("MISE_DATA_DIR").map_or_else(
             || {
                 if cfg!(windows) {
@@ -188,7 +408,7 @@ impl CodeEnvironment {
             variables: BTreeMap::new(),
         };
         environment.seed(installed, &home, &temporary, &empty)?;
-        base.insert(0, bootstrap);
+        base.insert(0, bootstrap.clone());
         environment.set("PATH", std::env::join_paths(&base)?);
         #[cfg(windows)]
         {
@@ -211,6 +431,8 @@ impl CodeEnvironment {
         );
         let mut directories = environment.resolve(&mise, installed)?;
         directories.extend(base);
+        directories.retain(|directory| directory != &bootstrap);
+        directories.insert(0, bootstrap);
         environment.set("PATH", std::env::join_paths(directories)?);
         environment.set("MISE_CARGO_HOME", home.join(".cargo"));
         Ok(environment)
@@ -476,6 +698,7 @@ impl CodeEnvironment {
         }
         let mut bootstrap = Vec::new();
         if let Some(rust) = tools.get("rust").and_then(|versions| versions.first()) {
+            link_rust_proxies(mise, installed)?;
             self.set("RUSTUP_TOOLCHAIN", &rust.version);
             if rust.installed {
                 let rustc = installed
@@ -600,6 +823,27 @@ impl find_msvc_tools::EnvGetter for CodeEnvironment {
     }
 }
 
+fn link_rust_proxies(mise: &Path, installed: &Installations) -> Result<()> {
+    use crate::tool::Tool;
+
+    let source = installed.cargo.join(CARGO_BIN).join(format!(
+        "{}{}",
+        Tool::Rustup.program(),
+        std::env::consts::EXE_SUFFIX
+    ));
+    for tool in [Tool::Rustup, Tool::Cargo, Tool::Rustc] {
+        link_executable(
+            &source,
+            &mise.with_file_name(format!(
+                "{}{}",
+                tool.program(),
+                std::env::consts::EXE_SUFFIX
+            )),
+        )?;
+    }
+    Ok(())
+}
+
 fn copy_bootstrap(source: &Path, destination: &Path) -> Result<()> {
     #[cfg(unix)]
     {
@@ -710,5 +954,90 @@ fn base_directories() -> Vec<PathBuf> {
         ]
     } else {
         UNIX_BASE.map(PathBuf::from).into()
+    }
+}
+
+#[cfg(test)]
+mod native_path_tests {
+    use super::*;
+
+    fn response(stdout: &str, stderr: &str, status: i32) -> std::process::Output {
+        #[cfg(windows)]
+        let status = {
+            use std::os::windows::process::ExitStatusExt as _;
+            std::process::ExitStatus::from_raw(status.unsigned_abs())
+        };
+        #[cfg(unix)]
+        let status = {
+            use std::os::unix::process::ExitStatusExt as _;
+            std::process::ExitStatus::from_raw(status)
+        };
+        std::process::Output {
+            status,
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    fn native_response_retains_only_the_platform_path() -> Result<()> {
+        let path = NativePathResponse::read(&response(
+            r#"{"PATH":"native","private":{"token":[1,2,null]}}"#,
+            "",
+            0,
+        ))?;
+        assert_eq!(path.as_str(), "native");
+        let mixed = response(r#"{"Path":"native"}"#, "", 0);
+        assert_eq!(NativePathResponse::read(&mixed).is_ok(), cfg!(windows));
+        #[cfg(unix)]
+        {
+            let path = NativePathResponse::read(&response(
+                r#"{"Path":"ignored","PATH":"native"}"#,
+                "",
+                0,
+            ))?;
+            assert_eq!(path.as_str(), "native");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn native_response_refuses_missing_nonstring_and_duplicate_paths() {
+        for body in [
+            r#"{"private":"private-response-sentinel"}"#,
+            r#"{"PATH":null}"#,
+            r#"{"PATH":3}"#,
+            r#"{"PATH":["private-response-sentinel"]}"#,
+            r#"{"PATH":"first","PATH":"second"}"#,
+            "[\"private-response-sentinel\"]",
+            "private-response-sentinel",
+        ] {
+            let error = NativePathResponse::read(&response(body, "", 0))
+                .expect_err("an invalid native PATH response must be refused");
+            let diagnostic = error.to_string();
+            assert!(diagnostic.starts_with("native PATH response is invalid ("));
+            assert!(!diagnostic.contains("private-response-sentinel"));
+        }
+        let ambiguous = response(r#"{"PATH":"first","Path":"second"}"#, "", 0);
+        assert_eq!(NativePathResponse::read(&ambiguous).is_err(), cfg!(windows));
+    }
+
+    #[test]
+    fn native_response_refuses_failure_or_diagnostics_without_payloads() {
+        for (stderr, status, expected) in [
+            ("private-diagnostic-sentinel", 0, "produced diagnostics"),
+            ("", 1, "failed with"),
+        ] {
+            let error = NativePathResponse::read(&response(
+                r#"{"PATH":"private-response-sentinel"}"#,
+                stderr,
+                status,
+            ))
+            .expect_err("only a silent successful query is authoritative");
+            let diagnostic = error.to_string();
+            assert!(diagnostic.contains(expected));
+            assert!(!diagnostic.contains("private-response-sentinel"));
+            assert!(!diagnostic.contains("private-diagnostic-sentinel"));
+        }
     }
 }

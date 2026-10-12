@@ -1748,13 +1748,31 @@ pub fn record_native_failure(
             response["is_error"].as_bool().unwrap_or(false)
                 || response["exit_code"].as_i64().is_some_and(|code| code != 0)
         });
-    let source = match event["failure_source"].as_str() {
-        Some(source) => {
-            incident_rules::Source::from_key(source).context("unknown native failure source")?
-        }
-        None if refusal.is_some() => incident_rules::Source::GateRefusal,
-        None if failed => incident_rules::Source::FailedDelivery,
-        None => return Ok(false),
+    let declared_source = event["failure_source"]
+        .as_str()
+        .map(|source| {
+            incident_rules::Source::from_key(source).context("unknown native failure source")
+        })
+        .transpose()?;
+    let delivery = if response.is_some_and(|response| response["exit_code"].as_i64() == Some(0)) {
+        incident_rules::NativeDelivery::ZeroExit
+    } else if client == "codex"
+        && event["hook_event_name"] == "PostToolUse"
+        && event["tool_name"] == "Bash"
+        && event.get("error").is_none()
+        && event["tool_response"].is_string()
+    {
+        incident_rules::NativeDelivery::OutputOnly
+    } else {
+        incident_rules::NativeDelivery::Unknown
+    };
+    let Some(source) = incident_rules::native_source(incident_rules::NativeSignal {
+        failed,
+        refusal: refusal.is_some(),
+        declared_source,
+        delivery,
+    }) else {
+        return Ok(false);
     };
     let session = event["session_id"]
         .as_str()
