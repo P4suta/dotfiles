@@ -768,6 +768,8 @@ Closes #23.
         assert!(stderr.contains("Dotfiles.Attribution"), "{stderr}");
         assert!(stderr.contains("As the owner requested, the parser keeps edits."));
         assert!(stderr.contains("pr-workflow check"), "{stderr}");
+        assert_eq!(refusal(&output)["rule"], "pr.failed");
+        eprint!("{stderr}");
         let log = if fixture.log.try_exists()? {
             fixture.log()?
         } else {

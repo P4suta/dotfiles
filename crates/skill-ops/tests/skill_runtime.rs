@@ -905,8 +905,42 @@ fn native_installation_retries_after_the_persistent_state_lock_releases() -> Res
     Ok(())
 }
 
+fn refuse_native_catalog_edit(
+    source: &Path,
+    binary: &Path,
+    user: &Path,
+    apply: &mut impl FnMut(&Path) -> Result<()>,
+) -> Result<()> {
+    let state =
+        std::env::var_os(fixture_process::INCIDENT_STATE).context("owned incident state")?;
+    let native_skill = user.join(".agents/skills/alpha/SKILL.md");
+    let native_bytes = fs::read(&native_skill)?;
+    let mut edited = native_bytes.clone();
+    edited.extend_from_slice(b"\nUnrelated first-install edit.\n");
+    fs::write(&native_skill, edited)?;
+    let failure = deploy(source, binary, user, Profile::Windows, apply)
+        .expect_err("the installed catalog must match the source");
+    let detail = format!("{failure:#}");
+    assert!(
+        detail.contains("installed skill catalog differs"),
+        "{detail}"
+    );
+    platform::report(&failure);
+    let records = ops::incidents(Path::new(&state))?;
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].rule, "tool.failure");
+    assert_eq!(records[0].source.key(), "malformed-input");
+    assert!(records[0].evidence.iter().any(|entry| entry == &detail));
+    fs::write(native_skill, native_bytes)?;
+    Ok(())
+}
+
 #[test]
 fn native_installation_preserves_settings_and_history_across_reinstall() -> Result<()> {
+    const TEST: &str = "native_installation_preserves_settings_and_history_across_reinstall";
+    if incident_fixture::run(TEST)? {
+        return Ok(());
+    }
     let fixture = fixture()?;
     let (source, user, source_catalog) = native_source(fixture.path())?;
     let existing = json!({"model":"owner-choice","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"existing-helper session"}]}]}});
@@ -944,12 +978,8 @@ fn native_installation_preserves_settings_and_history_across_reinstall() -> Resu
         fs::copy(path, destination)?;
         Ok(())
     };
-    let native_skill = user.join(".agents/skills/alpha/SKILL.md");
-    let native_bytes = fs::read(&native_skill)?;
-    fs::write(&native_skill, "unrelated first-install edit")?;
-    assert!(deploy(&source, binary, &user, Profile::Windows, &mut apply).is_err());
+    refuse_native_catalog_edit(&source, binary, &user, &mut apply)?;
     assert!(!adapter.exists() && !installed.exists());
-    fs::write(&native_skill, native_bytes)?;
     deploy(&source, binary, &user, Profile::Windows, &mut apply)?;
     assert_eq!(applied, [policy_path.clone(), policy_path, adapter_path]);
     let manifest: ops::Approved = ops::read_json(&user.join(".config/skill-ops/approved.json"))?;
