@@ -1,6 +1,7 @@
 ---
 date: 2026-10-11
-status: accepted
+status: amended
+changed_by: [local-proof-campaigns-on-mac.md]
 ---
 # Push the candidate its gates already verified
 

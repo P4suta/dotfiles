@@ -10,7 +10,6 @@ use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
-use std::process::Stdio;
 
 /// The Lean release that the image pins by digest and the package's `lean-toolchain` names.
 pub const LEAN_VERSION: &str = "4.34.1";
@@ -86,18 +85,18 @@ pub fn image(root: &Path) -> Result<String> {
 }
 
 fn build(root: &Path, image: &str) -> Result<()> {
-    let present = Tool::Docker
-        .command()
-        .args(["image", "inspect", image])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if present.success() {
+    if crate::container::amd64_image_present(image)? {
         return Ok(());
     }
     let status = Tool::Docker
         .command()
-        .args(["build", "--tag", image])
+        .args([
+            "build",
+            "--platform",
+            crate::container::LINUX_AMD64,
+            "--tag",
+            image,
+        ])
         .arg(root.join(IMAGE_DIRECTORY))
         .status()
         .context("build the pinned Lean image")?;
@@ -131,9 +130,17 @@ pub fn run_arguments(root: &Path, image: &str, script: &str) -> Vec<OsString> {
     let mut mount = OsString::from("type=bind,\"source=");
     mount.push(root);
     mount.push(format!("\",target={SOURCE},readonly"));
-    let mut arguments: Vec<OsString> = ["run", "--rm", "--network", "none", "--mount"]
-        .map(OsString::from)
-        .into();
+    let mut arguments: Vec<OsString> = [
+        "run",
+        "--rm",
+        "--platform",
+        crate::container::LINUX_AMD64,
+        "--network",
+        "none",
+        "--mount",
+    ]
+    .map(OsString::from)
+    .into();
     arguments.push(mount);
     arguments.extend([image, "bash", "-c", script].map(OsString::from));
     arguments

@@ -347,7 +347,14 @@ pub fn verify_in_container(root: &Path) -> Result<()> {
     mount.push("\",target=/source,readonly");
     let status = Tool::Docker
         .command()
-        .args(["run", "--rm", SECCOMP, "--mount"])
+        .args([
+            "run",
+            "--rm",
+            "--platform",
+            crate::container::LINUX_AMD64,
+            SECCOMP,
+            "--mount",
+        ])
         .arg(mount)
         .args([
             "--volume",

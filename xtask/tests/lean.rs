@@ -35,3 +35,28 @@ fn a_theorem_on_sorry_native_decide_or_a_user_axiom_is_refused() {
     }
     assert_eq!(axiom_refusals("garbage").len(), 1);
 }
+
+#[test]
+fn the_linux_x86_64_kernel_runs_offline_with_read_only_source_on_every_host() {
+    let arguments = xtask::lean::run_arguments(
+        Path::new("checkout"),
+        "dotfiles-lean:fixture",
+        "lake build --wfail",
+    );
+    let values: Vec<_> = arguments
+        .iter()
+        .map(|value| value.to_string_lossy())
+        .collect();
+    for (option, expected) in [("--platform", "linux/amd64"), ("--network", "none")] {
+        let position = values
+            .iter()
+            .position(|value| value == option)
+            .expect(option);
+        assert_eq!(values[position + 1], expected);
+    }
+    assert!(values.contains(&r#"type=bind,"source=checkout",target=/source,readonly"#.into()));
+    assert_eq!(
+        values[values.len() - 3..],
+        ["bash", "-c", "lake build --wfail"]
+    );
+}

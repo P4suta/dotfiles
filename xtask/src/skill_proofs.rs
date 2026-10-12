@@ -426,18 +426,19 @@ pub fn proof_image(root: &Path) -> Result<String> {
 ///
 /// Returns an error when a pin or Docker command fails.
 pub fn ensure_image(root: &Path, definition: &Path, image: &str) -> Result<()> {
-    let present = Tool::Docker
-        .command()
-        .args(["image", "inspect", image])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if present.success() {
+    if crate::container::amd64_image_present(image)? {
         return Ok(());
     }
     let mut command = Tool::Docker.command();
     command
-        .args(["build", "--tag", image, "--file"])
+        .args([
+            "build",
+            "--platform",
+            crate::container::LINUX_AMD64,
+            "--tag",
+            image,
+            "--file",
+        ])
         .arg(definition);
     for pin in ImagePins::load(root)?.arguments() {
         command.arg("--build-arg").arg(pin);
@@ -470,6 +471,8 @@ pub fn container_run_arguments(root: &Path, image: &str, target_volume: &str) ->
     let mut arguments: Vec<OsString> = [
         "run",
         "--rm",
+        "--platform",
+        crate::container::LINUX_AMD64,
         "--security-opt=seccomp=unconfined",
         "--mount",
     ]
@@ -906,8 +909,16 @@ pub const MIRI_TOOLCHAIN: &str = "nightly-2026-08-21";
 /// The crates whose tests need no foreign interface, process, or network, so Miri can interpret every one.
 pub const MIRI_CRATES: [&str; 1] = ["rules"];
 
-/// The targets Miri interprets the tests for: the host, and Windows, which the tools also ship to.
-pub const MIRI_TARGETS: [Option<&str>; 2] = [None, Some("x86_64-pc-windows-msvc")];
+/// The host and Windows, with Linux retained when macOS runs the proof suite.
+pub const MIRI_TARGETS: &[Option<&str>] = if cfg!(target_os = "macos") {
+    &[
+        None,
+        Some("x86_64-unknown-linux-gnu"),
+        Some("x86_64-pc-windows-msvc"),
+    ]
+} else {
+    &[None, Some("x86_64-pc-windows-msvc")]
+};
 
 /// The tests in one Miri invocation, whose whole binary must meet the proof budget.
 const MIRI_BATCH_TESTS: usize = 32;
@@ -1073,7 +1084,7 @@ fn miri(root: &Path) -> std::process::Command {
 /// Interprets the pure crates' tests under Miri for every target, each test binary within the proof budget, and refuses a fixture with undefined behavior.
 fn verify_miri(root: &Path) -> Result<()> {
     let mut checks = Checks::default();
-    for target in MIRI_TARGETS {
+    for &target in MIRI_TARGETS {
         for krate in MIRI_CRATES {
             checks.run(
                 &format!("Miri {krate} for {}", target.unwrap_or("the host")),
@@ -1096,7 +1107,7 @@ fn verify_miri(root: &Path) -> Result<()> {
     });
     checks.finish()?;
     println!(
-        "Miri interpreted the tests of {} for the host and Windows without undefined behavior, and refused its fixture",
+        "Miri interpreted the tests of {} for {MIRI_TARGETS:?} without undefined behavior, and refused its fixture",
         MIRI_CRATES.join(", ")
     );
     Ok(())
@@ -1264,17 +1275,25 @@ mod tests {
         if std::env::var(NATIVE_FIXTURE).is_ok_and(|value| value == NIGHTLY_TEST) {
             let mut checks = Checks::default();
             checks.run("Miri nightly fixture", || {
-                let output = miri(&root)
-                    .arg("--manifest-path")
-                    .arg(root.join(MIRI_FIXTURE))
-                    .output()?;
-                ensure!(
-                    !output.status.success()
-                        && String::from_utf8_lossy(&output.stderr).contains("Undefined Behavior"),
-                    "Miri did not interpret its undefined-behavior fixture:\n{}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                Ok(())
+                let mut targets = Checks::default();
+                for &target in MIRI_TARGETS {
+                    targets.run(target.unwrap_or("the host"), || {
+                        let mut command = miri(&root);
+                        command.arg("--manifest-path").arg(root.join(MIRI_FIXTURE));
+                        if let Some(target) = target {
+                            command.args(["--target", target]);
+                        }
+                        let output = command.output()?;
+                        ensure!(
+                            !output.status.success()
+                                && String::from_utf8_lossy(&output.stderr).contains("Undefined Behavior"),
+                            "Miri did not interpret its undefined-behavior fixture for {target:?}:\n{}",
+                            String::from_utf8_lossy(&output.stderr)
+                        );
+                        Ok(())
+                    });
+                }
+                targets.finish()
             });
             checks.run("fuzz nightly fixture", || {
                 let host = nightly_host(&root)?;

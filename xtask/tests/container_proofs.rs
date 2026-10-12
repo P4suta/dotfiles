@@ -12,6 +12,7 @@ use xtask::skill_proofs::{
 mod incident_fixture;
 
 const KANI_DRIVER_FIXTURE: &str = "DOTFILES_KANI_DRIVER_FIXTURE";
+const IMAGE_PLATFORM_FIXTURE: &str = "DOTFILES_IMAGE_PLATFORM_FIXTURE";
 
 fn run_kani_driver_fixture(test: &str) -> anyhow::Result<bool> {
     if std::env::var(KANI_DRIVER_FIXTURE).is_ok_and(|value| value == test) {
@@ -456,6 +457,74 @@ fn the_image_identity_covers_pins_and_rejects_missing_or_drifting_pins() {
 }
 
 #[test]
+fn a_cached_image_is_reused_only_for_the_pinned_linux_x86_64_semantics() -> anyhow::Result<()> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    if let Some(directory) = std::env::var_os(IMAGE_PLATFORM_FIXTURE) {
+        let executable =
+            PathBuf::from(directory).join(format!("docker{}", std::env::consts::EXE_SUFFIX));
+        let platform = executable.with_extension("platform");
+        let built = executable.with_extension("built");
+        for installed in [
+            None,
+            Some("linux/arm64"),
+            Some("windows/amd64"),
+            Some("linux/amd64"),
+        ] {
+            if let Some(installed) = installed {
+                std::fs::write(&platform, installed)?;
+            } else if platform.exists() {
+                std::fs::remove_file(&platform)?;
+            }
+            if built.exists() {
+                std::fs::remove_file(&built)?;
+            }
+            xtask::skill_proofs::ensure_image(
+                root,
+                &root.join(xtask::skill_proofs::PROOF_IMAGE),
+                "dotfiles-proofs:fixture",
+            )?;
+            assert_eq!(std::fs::read_to_string(&platform)?, "linux/amd64");
+            assert_eq!(built.exists(), installed != Some("linux/amd64"));
+        }
+        return Ok(());
+    }
+    let scope = incident_fixture::scope()?;
+    let executable = scope
+        .path()
+        .join(format!("docker{}", std::env::consts::EXE_SUFFIX));
+    let status = platform::process::command("rustc")
+        .args(["--edition", "2024"])
+        .arg(root.join("xtask/tests/fixtures/docker_image.rs"))
+        .arg("-o")
+        .arg(executable)
+        .status()?;
+    anyhow::ensure!(status.success(), "compile the Docker platform fixture");
+    let mut path = vec![scope.path().to_path_buf()];
+    path.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let output = platform::process::command(std::env::current_exe()?)
+        .args([
+            "--exact",
+            "a_cached_image_is_reused_only_for_the_pinned_linux_x86_64_semantics",
+            "--nocapture",
+        ])
+        .env(IMAGE_PLATFORM_FIXTURE, scope.path())
+        .env("PATH", std::env::join_paths(path)?)
+        .env("SKILL_OPS_STATE", scope.path().join("state"))
+        .env("DOTFILES_EXPECTED_FAILURE", "")
+        .output()?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    anyhow::ensure!(
+        output.status.success(),
+        "owned Docker platform fixture failed"
+    );
+    incident_fixture::preserve(scope);
+    Ok(())
+}
+
+#[test]
 fn checkouts_never_share_a_build_cache() {
     let first = container_target_volume(Path::new(r"C:\Users\fixture\dotfiles"));
     assert_eq!(
@@ -497,6 +566,11 @@ fn the_container_reads_the_checkout_and_runs_the_unchanged_proof_gate() {
         OsString::from(r#"type=bind,"source=C:\Users\Jane, Doe\dotfiles",target=/source,readonly"#)
     );
     assert!(text.contains(&"--rm".into()));
+    let platform = text
+        .iter()
+        .position(|value| value == "--platform")
+        .expect("platform of the pinned x86_64 tools");
+    assert_eq!(text[platform + 1], "linux/amd64");
     assert!(text.contains(&"dotfiles-proofs-target-fixture:/cache".into()));
     let image = text
         .iter()

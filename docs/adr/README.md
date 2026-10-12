@@ -54,6 +54,7 @@
 | [2026-10-11 Preserve tool versions during application](preserve-tool-versions-during-apply.md) | proposed |  |
 | [2026-10-11 Bind profile evidence to repositories that own the profile runtime](profile-evidence-scope.md) | proposed |  |
 | [2026-10-11 Start mise installations without mise shims](shim-free-mise-installation.md) | proposed |  |
-| [2026-10-11 Push the candidate its gates already verified](source-bound-push-validation.md) | accepted |  |
+| [2026-10-11 Push the candidate its gates already verified](source-bound-push-validation.md) | amended | [2026-10-12](local-proof-campaigns-on-mac.md) |
+| [2026-10-12 Run local proof campaigns on Mac and keep Linux CI](local-proof-campaigns-on-mac.md) | accepted |  |
 | [2026-10-12 Classify native failures from delivery signals before output replays](native-failure-signals-before-output-replays.md) | proposed |  |
 | [2026-10-12 Recover native PATH before constructing candidate environments](native-path-before-candidate-environments.md) | proposed |  |

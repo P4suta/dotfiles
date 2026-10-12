@@ -84,7 +84,7 @@ enum Action {
         #[command(flatten)]
         scope: xtask::change::Scope,
     },
-    /// Checks the complete candidate, including the CI proof suite on Linux.
+    /// Checks the complete candidate, including the proof suite on macOS.
     PushCheck,
     /// Print `gates=<names>`: the gates the change set selects, or every gate without a scope.
     Classify {
@@ -447,7 +447,7 @@ fn run() -> Result<()> {
 fn push_check(root: &Path) -> Result<()> {
     let mut checks = Checks::default();
     checks.run("check", || check(root, Gates::ALL, "HEAD"));
-    if cfg!(target_os = "linux") {
+    if cfg!(target_os = "macos") {
         checks.run("proofs", || xtask::skill_proofs::verify(root));
     }
     checks.finish()
