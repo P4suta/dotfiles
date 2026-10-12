@@ -64,11 +64,11 @@ The `pre-commit` and `pre-push` hooks refuse a change that adds a gap.
 | Command | Runs |
 | --- | --- |
 | `just check` | The gates a change selects: the lint stages, prose, links, and generated files, the shared skills, the core boundary and the structural catalog, the Rust packages, and the profiles. |
-| `just push-check` | Every check on the native host, plus the complete proof suite on Mac. The hosts gate records these results, and pre-push admits only matching candidate evidence. |
+| `just push-check` | Every check on the native host, plus the proof campaign on Mac and fixed CPU measurement budgets on Linux. The hosts gate records these results, and pre-push admits only matching candidate evidence. |
 | `just check-staged` | The pre-commit check: the lint stages over the staged files, then the prose of documents and of the comments `OComment` reads. |
 | `just baselines` | The refusal of a lint baseline under `policy/lint-baselines/` that grew since a base, which CI runs from the merge base. |
 | `just profiles` | Every profile's rendering, an isolated apply and verification, the committed manifests, the ignore and remove audit, and the script input audit. |
-| `just proofs` | The Kani obligations of `policy/obligations.toml`, Miri over the pure core's tests for the host and Windows, with Linux also interpreted on Mac, and a mutation campaign over the core. It also replays the corpus of every fuzz target under `fuzz/`, checks the Quint and Alloy models under `specs/`, and builds and checks the Lean package under `specs/lean/`. |
+| `just proofs` | The Kani obligations of `policy/obligations.toml`, Miri over the pure core's tests for the host and Windows, with Linux also interpreted on Mac, and a mutation campaign over the core. It also replays every fuzz corpus and verifies the Quint, Alloy, and Lean models. Linux also runs the fixed CPU budgets, while Mac reports their separate mandatory Linux Code gate. |
 | `just prose` | The writing standard over documents and comments. |
 
 Prose gates check persisted files, comments, Markdown, commit messages, issues, pull requests, and release notes.
@@ -79,6 +79,7 @@ The workflow gate refuses a pre-push configuration that adds a different validat
 The code stage hashes every checked file, and the real stage also hashes the runtime sources its installation builds.
 An unchanged stage reuses passing evidence, while changed inputs require another run.
 The [local proof campaign](adr/local-proof-campaigns-on-mac.md) runs on Mac, while required CI proofs keep Linux target semantics.
+The [fixed CPU budgets](adr/fixed-cpu-budgets-beside-mac-proof-campaigns.md) run in the mandatory Linux code stage, so a Mac campaign result alone grants no push evidence.
 Linux and Mac code stages finish before native provisioning begins.
 It refuses a rule module without a Kani obligation, a harness outside the listed modules, and a public rule function that no harness mentions and no exemption beside it covers.
 It also refuses a proved function that no production code calls, a pilot whose issue closed without a decision record, and a metric of `policy/baselines.toml` that moved.

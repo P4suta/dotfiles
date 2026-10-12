@@ -14,6 +14,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use yaml_rust2::{Yaml, YamlLoader};
 
+mod pending;
+
 pub const NOTES: &str = "refs/notes/hosts";
 const NOTES_LOCK: &str = "hosts-notes.lock";
 const STATE: &str = ".local/state/hosts";
@@ -373,38 +375,52 @@ fn cleanup_arguments(family: Family, workspace: &Workspace) -> Result<Vec<String
     }
 }
 
-fn append_note(root: &Path, commit: &str, note: &Note) -> Result<()> {
+#[derive(Debug, PartialEq, Eq)]
+enum AppendNote {
+    Recorded,
+    Obsolete,
+}
+
+fn reuse_generation(root: &Path, note: &mut Note) -> Result<Option<u64>> {
+    let reused = note.reused.as_ref().context("reused execution identity")?;
+    let receipts = receipts(&all_notes(root)?)?;
+    let source = source(&receipts, reused).context("missing reused execution receipt")?;
+    let receipt = actual_receipt(&source.note)
+        .context("reused origin is not a sequenced actual execution")?;
+    ensure!(
+        note.generation.is_none() || note.generation == Some(receipt.generation),
+        "reused generation differs from its execution receipt"
+    );
+    note.generation = Some(receipt.generation);
+    ensure!(
+        verified_receipt(note, &receipts) == Some(receipt),
+        "reused execution receipt does not match the stage"
+    );
+    let family = Family::ALL
+        .into_iter()
+        .find(|family| family.name() == note.os)
+        .context("unknown reused OS family")?;
+    let stage = note.stage.context("reused stage")?;
+    let inputs = note.inputs.as_deref().context("reused inputs")?;
+    Ok(
+        (latest_execution(&receipts, family, stage, inputs, &note.gate) == Some(receipt)
+            && crate::hosts_rules::after_unverified(
+                Some(receipt),
+                pending::cutoff(root, family, stage, inputs, &note.gate)?,
+            ) == Some(receipt))
+        .then_some(receipt.generation),
+    )
+}
+
+fn append_note(root: &Path, commit: &str, note: &Note) -> Result<AppendNote> {
     let _lock = notes_lock(root)?;
     let mut note = note.clone();
     if note.stage.is_some() {
-        if let Some(reused) = &note.reused {
-            let receipts = receipts(&all_notes(root)?)?;
-            let source = source(&receipts, reused).context("missing reused execution receipt")?;
-            let receipt = actual_receipt(&source.note)
-                .context("reused origin is not a sequenced actual execution")?;
-            ensure!(
-                note.generation.is_none() || note.generation == Some(receipt.generation),
-                "reused generation differs from its execution receipt"
-            );
-            note.generation = Some(receipt.generation);
-            ensure!(
-                verified_receipt(&note, &receipts) == Some(receipt),
-                "reused execution receipt does not match the stage"
-            );
-            let family = Family::ALL
-                .into_iter()
-                .find(|family| family.name() == note.os)
-                .context("unknown reused OS family")?;
-            ensure!(
-                latest_execution(
-                    &receipts,
-                    family,
-                    note.stage.context("reused stage")?,
-                    note.inputs.as_deref().context("reused inputs")?,
-                    &note.gate,
-                ) == Some(receipt),
-                "reused execution is no longer the latest successful stage; run `dotfiles hosts check` again"
-            );
+        if note.reused.is_some() {
+            let Some(generation) = reuse_generation(root, &mut note)? else {
+                return Ok(AppendNote::Obsolete);
+            };
+            note.generation = Some(generation);
         } else {
             let mut anchor = None;
             if let Some(workspace) = &note.workspace {
@@ -437,7 +453,7 @@ fn append_note(root: &Path, commit: &str, note: &Note) -> Result<()> {
                             serde_json::to_value(&note)? == serde_json::to_value(&existing.note)?,
                             "workspace stage execution has conflicting results"
                         );
-                        return Ok(());
+                        return Ok(AppendNote::Recorded);
                     }
                 }
             }
@@ -471,7 +487,7 @@ fn append_note(root: &Path, commit: &str, note: &Note) -> Result<()> {
             commit,
         ],
     )?;
-    Ok(())
+    Ok(AppendNote::Recorded)
 }
 
 fn notes_lock(root: &Path) -> Result<fs::File> {
@@ -531,6 +547,7 @@ fn clean_recorded_workspace(native: &Real, root: &Path, commit: &str, note: &Not
             workspace: Some(workspace.clone()),
         },
     )
+    .map(|_| ())
 }
 
 fn disk_arguments(family: Family, home: Option<&Path>) -> Vec<String> {
@@ -626,6 +643,7 @@ fn recover_workspaces(native: &Real, root: &Path) -> Result<()> {
             .into_iter()
             .find(|family| family.name() == note.os)
             .context("unknown workspace host family")?;
+        let _execution = pending::Lease::acquire(root, family)?;
         cleanup_arguments(family, workspace)?;
         let mut status = command(native, Tool::Domyjob);
         status.args(["status", &reference]);
@@ -653,7 +671,7 @@ fn recover_workspaces(native: &Real, root: &Path) -> Result<()> {
         ensure!(
             !pending_workspaces(&all_notes(root)?)?.contains_key(&(commit, reference)),
             "workspace recovery failed: {}",
-            failures.join("\n")
+            failures.failures.join("\n")
         );
     }
     Ok(())
@@ -935,6 +953,18 @@ pub(crate) fn admission(repository: &Path, commit: &str) -> Result<Verdict> {
     let required = required(&workflows_at(repository, &commit)?)?;
     let inputs = input_hashes(repository, &commit, DEFAULT_GATE)?;
     let receipts = receipts(&all_notes(repository)?)?;
+    let mut cutoffs = [[None; 2]; 3];
+    for family in Family::ALL {
+        for stage in Stage::ALL {
+            cutoffs[family.index()][stage.index()] = pending::cutoff(
+                repository,
+                family,
+                stage,
+                &inputs[stage.index()],
+                DEFAULT_GATE,
+            )?;
+        }
+    }
     let evidence = Family::ALL.map(|family| {
         crate::hosts_rules::stages(Stage::ALL.map(|stage| {
             let current = receipts
@@ -953,13 +983,19 @@ pub(crate) fn admission(repository: &Path, commit: &str) -> Result<Verdict> {
                 .map(|record| verified_receipt(&record.note, &receipts))
                 .fold(None, crate::hosts_rules::newest_receipt);
             crate::hosts_rules::receipt_evidence(
-                current,
-                latest_execution(
-                    &receipts,
-                    family,
-                    stage,
-                    &inputs[stage.index()],
-                    DEFAULT_GATE,
+                crate::hosts_rules::after_unverified(
+                    current,
+                    cutoffs[family.index()][stage.index()],
+                ),
+                crate::hosts_rules::after_unverified(
+                    latest_execution(
+                        &receipts,
+                        family,
+                        stage,
+                        &inputs[stage.index()],
+                        DEFAULT_GATE,
+                    ),
+                    cutoffs[family.index()][stage.index()],
                 ),
             )
         }))
@@ -973,6 +1009,13 @@ pub(crate) fn admission(repository: &Path, commit: &str) -> Result<Verdict> {
 ///
 /// Returns an error when a family recorded no result or a failed one, or Git fails while reading the notes.
 pub fn require_admission(repository: &Path, commit: &str) -> Result<()> {
+    for family in Family::ALL {
+        ensure!(
+            !pending::exists(repository, family)?,
+            "{} has a pending execution; resume with `dotfiles hosts check`",
+            family.name()
+        );
+    }
     match admission(repository, commit)? {
         Verdict::Admit => Ok(()),
         Verdict::Missing(family) => bail!(
@@ -1718,7 +1761,7 @@ fn job_output(
 }
 
 fn remote_job(native: &Real, alias: &str, submission: Command) -> Result<(Option<i32>, String)> {
-    let (status, mut text) = job_output(submission, Some(REQUEST_LIMIT))?;
+    let (status, text) = job_output(submission, Some(REQUEST_LIMIT))?;
     ensure!(
         status.success(),
         "{alias}: submit remote job: {text}; inspect `domyjob ls {alias}` before rerunning"
@@ -1730,22 +1773,39 @@ fn remote_job(native: &Real, alias: &str, submission: Command) -> Result<(Option
         .map(|job| format!("{prefix}{job}"))
         .with_context(|| format!("{alias}: submission returned no job identity: {text}; inspect `domyjob ls {alias}` before rerunning"))?;
     println!("{reference}: submitted");
+    wait_job(native, alias, &reference, text)
+}
+
+fn wait_job(
+    native: &Real,
+    alias: &str,
+    reference: &str,
+    mut text: String,
+) -> Result<(Option<i32>, String)> {
     loop {
         let mut request = command(native, Tool::Domyjob);
-        request.args(["status", &reference]);
+        request.args(["status", reference]);
         let (status, current) = job_output(request, Some(REQUEST_LIMIT))
             .with_context(|| format!("inspect {reference} with `domyjob status {reference}`"))?;
         ensure!(status.success(), "{reference}: read job status: {current}");
         let state_prefix = format!("{reference} ");
-        let state = current
+        let replies: Vec<_> = current
             .lines()
-            .find_map(|line| line.strip_prefix(&state_prefix))
-            .with_context(|| format!("{reference}: status returned no matching job: {current}"))?;
+            .filter_map(|line| line.strip_prefix(&state_prefix))
+            .collect();
+        let [state] = replies.as_slice() else {
+            bail!("{reference}: status returned no unique matching job: {current}");
+        };
+        let state = *state;
         if state.starts_with("finished ") {
-            let result = outcome(alias, &current);
+            ensure!(
+                known_terminal(state),
+                "{reference}: unknown job state: {state}"
+            );
+            let result = outcome(alias, &format!("{reference} {state}"));
             text.push_str(&current);
             let mut request = command(native, Tool::Domyjob);
-            request.args(["logs", &reference]);
+            request.args(["logs", reference]);
             let (status, logs) = job_output(request, Some(REQUEST_LIMIT))
                 .with_context(|| format!("read {reference} with `domyjob logs {reference}`"))?;
             ensure!(status.success(), "{reference}: read job logs: {logs}");
@@ -1758,6 +1818,23 @@ fn remote_job(native: &Real, alias: &str, submission: Command) -> Result<(Option
         );
         std::thread::sleep(JOB_POLL_INTERVAL);
     }
+}
+
+fn known_terminal(state: &str) -> bool {
+    let Some(result) = state.strip_prefix("finished ") else {
+        return false;
+    };
+    matches!(
+        result,
+        "succeeded" | "lost" | "killed" | "memory limit exceeded"
+    ) || result
+        .strip_prefix("launch failed: ")
+        .is_some_and(|reason| !reason.is_empty())
+        || result
+            .strip_prefix("failed (")
+            .and_then(|value| value.strip_suffix(')'))
+            .and_then(|code| code.parse::<i32>().ok())
+            .is_some_and(|code| code != 0)
 }
 
 /// `Ok` when the host can run the gate, or the next action that would make it able to.
@@ -1916,6 +1993,14 @@ fn reuse_plan(
         for stage in Stage::ALL {
             reused[family.index()][stage.index()] =
                 reusable(&receipts, family, stage, &inputs[stage.index()], gate);
+            if crate::hosts_rules::after_unverified(
+                latest_execution(&receipts, family, stage, &inputs[stage.index()], gate),
+                pending::cutoff(root, family, stage, &inputs[stage.index()], gate)?,
+            )
+            .is_none()
+            {
+                reused[family.index()][stage.index()] = None;
+            }
         }
     }
     Ok(reused)
@@ -1925,15 +2010,16 @@ pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
     let root = PathBuf::from(git_text(Path::new("."), &["rev-parse", "--show-toplevel"])?);
     let clean = git(&root, &["status", "--porcelain", "--untracked-files=all"])?.is_empty();
     let commit = git_text(&root, &["rev-parse", "HEAD"])?;
-    let tree = git_text(&root, &["rev-parse", "HEAD^{tree}"])?;
+    let tree = git_text(&root, &["rev-parse", &format!("{commit}^{{tree}}")])?;
     let required = required(&workflows_at(&root, &commit)?)?;
+    let native = native(home)?;
+    if clean {
+        recover_pending(&native, &root)?;
+        recover_workspaces(&native, &root)?;
+    }
     if required == [false; 3] {
         println!("The CI matrix requires no OS family; nothing to check");
         return Ok(());
-    }
-    let native = native(home)?;
-    if clean {
-        recover_workspaces(&native, &root)?;
     }
     let inputs = input_hashes(&root, &commit, gate)?;
     let reused = reuse_plan(&root, required, &inputs, gate)?;
@@ -1948,48 +2034,36 @@ pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
             &root,
             &["bundle", "create", &bundle.to_string_lossy(), "HEAD"],
         )?;
+        ensure!(
+            git_text(
+                &root,
+                &["bundle", "list-heads", &bundle.to_string_lossy(), "HEAD"]
+            )? == format!("{commit} HEAD"),
+            "candidate changed during host preflight; run `dotfiles hosts check` from its clean checkout"
+        );
     }
     let runs: Vec<_> = std::thread::scope(|scope| {
         let handles: Vec<_> = Family::ALL
             .into_iter()
             .filter(|family| required[family.index()])
             .map(|family| {
-                let (native, root, snapshot) = (&native, &root, snapshot.path());
-                let reused = reused[family.index()].clone();
+                let (native, root, snapshot, commit, tree, inputs) =
+                    (&native, &root, snapshot.path(), &commit, &tree, &inputs);
                 let target = hosts[family.index()].clone();
                 let thread = scope.spawn(move || {
-                    if reused.iter().all(Option::is_some) {
-                        let host = reused[0]
-                            .as_ref()
-                            .context("reused code record")?
-                            .host
-                            .clone();
-                        return Ok(GateRun {
-                            family,
-                            target: Target::Local(host),
-                            status: Some(0),
-                            output: format!(
-                                "{STAGE_REPORT}{}",
-                                serde_json::to_string(&Stages {
-                                    code: 0,
-                                    real: 0,
-                                    applied: None,
-                                    workspace: None
-                                })?
-                            ),
-                            reused,
-                        });
-                    }
-                    let target = target.context("managed host is unavailable")?;
-                    let skipped = reused.each_ref().map(Option::is_some);
-                    run_gate(native, root, snapshot, family, &target, gate, skipped).map(
-                        |(status, output)| GateRun {
-                            family,
-                            target,
-                            status,
-                            output,
-                            reused,
+                    check_family(
+                        native,
+                        &Candidate {
+                            root,
+                            commit,
+                            tree,
+                            gate,
+                            inputs,
                         },
+                        snapshot,
+                        family,
+                        target,
+                        required,
                     )
                 });
                 (family, thread)
@@ -2009,13 +2083,127 @@ pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
     });
     let mut failed = Vec::new();
     for run in runs {
-        match run.and_then(|run| record_run(&native, &root, &commit, &tree, gate, &inputs, &run)) {
+        match run {
             Ok(failures) => failed.extend(failures),
             Err(error) => failed.push(format!("host gate: {error:#}")),
         }
     }
     ensure!(failed.is_empty(), "{}", failed.join("\n"));
     Ok(())
+}
+
+fn recover_pending(native: &Real, root: &Path) -> Result<()> {
+    let runs = std::thread::scope(|scope| {
+        Family::ALL
+            .into_iter()
+            .map(|family| {
+                let task = scope.spawn(move || -> Result<Vec<String>> {
+                    if !pending::exists(root, family)? {
+                        return Ok(Vec::new());
+                    }
+                    Ok(pending::Lease::acquire(root, family)?
+                        .recover(native, root)?
+                        .unwrap_or_default())
+                });
+                (family, task)
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|(family, task)| {
+                task.join().unwrap_or_else(|_| {
+                    Err(anyhow::anyhow!(
+                        "the {} recovery thread panicked",
+                        family.name()
+                    ))
+                })
+            })
+            .collect::<Vec<_>>()
+    });
+    let mut failures = Vec::new();
+    for run in runs {
+        match run {
+            Ok(current) => failures.extend(current),
+            Err(error) => failures.push(format!("recover host gate: {error:#}")),
+        }
+    }
+    ensure!(failures.is_empty(), "{}", failures.join("\n"));
+    Ok(())
+}
+
+fn check_family(
+    native: &Real,
+    candidate: &Candidate<'_>,
+    snapshot: &Path,
+    family: Family,
+    target: Option<Target>,
+    required: [bool; 3],
+) -> Result<Vec<String>> {
+    let execution = pending::Lease::acquire(candidate.root, family)?;
+    if let Some(failures) = execution.recover(native, candidate.root)?
+        && !failures.is_empty()
+    {
+        return Ok(failures);
+    }
+    let reused = reuse_plan(candidate.root, required, candidate.inputs, candidate.gate)?
+        [family.index()]
+    .clone();
+    let run = if reused.iter().all(Option::is_some) {
+        let host = reused[0]
+            .as_ref()
+            .context("reused code record")?
+            .host
+            .clone();
+        GateRun {
+            family,
+            target: Target::Local(host),
+            status: Some(0),
+            output: format!(
+                "{STAGE_REPORT}{}",
+                serde_json::to_string(&Stages {
+                    code: 0,
+                    real: 0,
+                    applied: None,
+                    workspace: None
+                })?
+            ),
+            reused,
+        }
+    } else {
+        let target = target.context("managed host is unavailable")?;
+        if let Target::Remote(alias) = &target {
+            return execution.execute(native, candidate, snapshot, alias, reused);
+        }
+        let skipped = reused.each_ref().map(Option::is_some);
+        let (status, output) = run_gate(
+            native,
+            candidate.root,
+            snapshot,
+            family,
+            &target,
+            candidate.gate,
+            skipped,
+        )?;
+        GateRun {
+            family,
+            target,
+            status,
+            output,
+            reused,
+        }
+    };
+    let result = record_run(
+        native,
+        candidate.root,
+        candidate.commit,
+        candidate.tree,
+        candidate.gate,
+        candidate.inputs,
+        &run,
+    )?;
+    if result.recorded {
+        execution.retire_unverified(candidate.root)?;
+    }
+    Ok(result.failures)
 }
 
 /// One family's gate as it ran on its host: the exit status when the job finished, and its combined output.
@@ -2027,8 +2215,21 @@ struct GateRun {
     reused: [Option<Reused>; 2],
 }
 
-/// Appends the note of one finished gate to the commit, returning the failure to report when the gate didn't pass.
-fn reported(run: &GateRun) -> Result<(Stages, Option<Workspace>)> {
+#[derive(Debug)]
+struct Candidate<'a> {
+    root: &'a Path,
+    commit: &'a str,
+    tree: &'a str,
+    gate: &'a str,
+    inputs: &'a [String; 2],
+}
+
+struct RecordedRun {
+    failures: Vec<String>,
+    recorded: bool,
+}
+
+fn stage_packet(run: &GateRun) -> Result<(Stages, Option<Workspace>)> {
     let GateRun {
         family,
         target,
@@ -2036,15 +2237,6 @@ fn reported(run: &GateRun) -> Result<(Stages, Option<Workspace>)> {
         output,
         reused,
     } = run;
-    let Some(status) = *status else {
-        eprintln!("{output}");
-        bail!(
-            "{} {}: the job did not finish; inspect it with `domyjob ls {}` before rerunning",
-            family.name(),
-            target.name(),
-            target.name()
-        );
-    };
     let reports: Vec<_> = output
         .lines()
         .filter_map(|line| line.strip_prefix(STAGE_REPORT))
@@ -2052,7 +2244,7 @@ fn reported(run: &GateRun) -> Result<(Stages, Option<Workspace>)> {
     let [report] = reports.as_slice() else {
         eprintln!("{output}");
         bail!(
-            "{} {}: the job returned {status} without exactly one complete stage report",
+            "{} {}: the job returned {status:?} without exactly one complete stage report",
             family.name(),
             target.name()
         );
@@ -2077,9 +2269,15 @@ fn reported(run: &GateRun) -> Result<(Stages, Option<Workspace>)> {
     } else {
         None
     };
+    Ok((report, workspace))
+}
+
+fn reported(run: &GateRun) -> Result<(Stages, Option<Workspace>)> {
+    let (report, workspace) = stage_packet(run)?;
     let statuses = [report.code, report.real];
     ensure!(
-        (status == 0) == statuses.iter().all(|status| *status == 0),
+        crate::hosts_rules::report_evidence(run.status, statuses.iter().all(|status| *status == 0))
+            == crate::hosts_rules::ReportEvidence::Verified,
         "the job status disagrees with its stage report"
     );
     Ok((report, workspace))
@@ -2093,7 +2291,7 @@ fn record_run(
     gate: &str,
     inputs: &[String; 2],
     run: &GateRun,
-) -> Result<Vec<String>> {
+) -> Result<RecordedRun> {
     let (report, workspace) = reported(run)?;
     let GateRun {
         family,
@@ -2104,6 +2302,7 @@ fn record_run(
     } = run;
     let statuses = [report.code, report.real];
     let mut failures = Vec::new();
+    let mut recorded = true;
     let mut receipt = None;
     if reused[1].is_none()
         && let Some(applied) = &report.applied
@@ -2132,13 +2331,21 @@ fn record_run(
             reused: reuse.clone(),
             workspace: workspace.clone(),
         };
-        if let Err(error) = append_note(root, commit, &note) {
-            failures.push(format!(
-                "{} {} {}: record note: {error:#}",
-                family.name(),
-                target.name(),
-                stage.name()
-            ));
+        match append_note(root, commit, &note) {
+            Ok(AppendNote::Recorded) => {}
+            Ok(AppendNote::Obsolete) => {
+                failures.push(format!("{} {} {}: reused origin became obsolete; run `dotfiles hosts check` for fresh stage evidence", family.name(), target.name(), stage.name()));
+                continue;
+            }
+            Err(error) => {
+                recorded = false;
+                failures.push(format!(
+                    "{} {} {}: record note: {error:#}",
+                    family.name(),
+                    target.name(),
+                    stage.name()
+                ));
+            }
         }
         receipt = Some(note);
         if let Some(reuse) = reuse {
@@ -2166,7 +2373,8 @@ fn record_run(
             ));
         }
     }
-    if workspace.is_some()
+    if recorded
+        && workspace.is_some()
         && let Some(receipt) = receipt
     {
         let cleanup = clean_recorded_workspace(native, root, commit, &receipt);
@@ -2182,7 +2390,7 @@ fn record_run(
     if !failures.is_empty() {
         eprintln!("{output}");
     }
-    Ok(failures)
+    Ok(RecordedRun { failures, recorded })
 }
 
 /// One family's gate on its host, with its exit status when the job finished and its combined output.
@@ -2291,6 +2499,31 @@ mod job_tests {
                 .filter_map(|(skip, name)| (!skip).then_some(name))
                 .collect();
             assert_eq!(received.into_iter().collect::<Vec<_>>(), expected);
+        }
+    }
+
+    #[test]
+    fn only_supported_terminal_states_allow_unverified_history() {
+        for state in [
+            "finished succeeded",
+            "finished failed (1)",
+            "finished failed (-1073741819)",
+            "finished launch failed: process unavailable",
+            "finished lost",
+            "finished killed",
+            "finished memory limit exceeded",
+        ] {
+            assert!(known_terminal(state), "{state}");
+        }
+        for state in [
+            "running",
+            "finished unknown",
+            "finished failed (0)",
+            "finished failed (invalid)",
+            "finished launch failed: ",
+            "finished succeeded trailing",
+        ] {
+            assert!(!known_terminal(state), "{state}");
         }
     }
 
@@ -2628,11 +2861,7 @@ mod job_tests {
             let mut copied = note("linux", Stage::Code, 0, &inputs[0], DEFAULT_GATE);
             copied.reused = Some(planned);
             let before = all_notes(root)?;
-            let stale = append_note(root, candidate, &copied).unwrap_err();
-            assert!(
-                stale.to_string().contains("no longer the latest"),
-                "{stale:#}"
-            );
+            assert_eq!(append_note(root, candidate, &copied)?, AppendNote::Obsolete);
             assert_eq!(all_notes(root)?, before);
             append_note(
                 root,

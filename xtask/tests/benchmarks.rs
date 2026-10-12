@@ -12,6 +12,54 @@ fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
 }
 
+#[test]
+fn native_checks_never_omit_their_required_campaign_or_fixed_budget() {
+    use rules::hosts_rules::Family;
+    for (family, extra) in [
+        (Family::Linux, Some("benchmarks")),
+        (Family::Mac, Some("proofs")),
+        (Family::Windows, None),
+    ] {
+        for (native_failed, extra_failed) in
+            [(false, false), (true, false), (false, true), (true, true)]
+        {
+            let observed = std::cell::RefCell::new(Vec::new());
+            let run = |stage| {
+                observed.borrow_mut().push(stage);
+                let failed = if stage == "check" {
+                    native_failed
+                } else {
+                    extra_failed
+                };
+                anyhow::ensure!(!failed, "{stage} fixture failure");
+                Ok(())
+            };
+            let result = xtask::skill_proofs::verify_push(
+                family,
+                || run("check"),
+                || run("proofs"),
+                || run("benchmarks"),
+            );
+            let mut required = vec!["check"];
+            required.extend(extra);
+            assert_eq!(*observed.borrow(), required);
+            assert_eq!(
+                result.is_err(),
+                native_failed || (extra_failed && extra.is_some())
+            );
+            if let Err(failure) = result {
+                let diagnostic = format!("{failure:#}");
+                if native_failed {
+                    assert!(diagnostic.contains("check fixture failure"));
+                }
+                if extra_failed && let Some(extra) = extra {
+                    assert!(diagnostic.contains(&format!("{extra} fixture failure")));
+                }
+            }
+        }
+    }
+}
+
 /// One gungraun summary line with instruction and heap profiles.
 fn summary(function: &str, instructions: u64, heap_peak: u64) -> String {
     serde_json::json!({

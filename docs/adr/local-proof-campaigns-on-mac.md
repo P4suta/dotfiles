@@ -1,6 +1,7 @@
 ---
 date: 2026-10-12
-status: accepted
+status: amended
+changed_by: [fixed-cpu-budgets-beside-mac-proof-campaigns.md]
 ---
 # Run local proof campaigns on Mac and keep Linux CI
 
@@ -27,7 +28,7 @@ Fuzz corpus replay and mutation testing run natively on Mac with their existing 
 
 The proof and Lean images contain pinned Linux x86_64 binaries, so their builds and runs explicitly select `linux/amd64`.
 The gate reuses an existing image only when Docker reports that operating system and architecture.
-Valgrind instruction, heap, and binary ceilings keep their Linux x86_64 environment even on an Arm Mac.
+These images use Linux x86_64 binaries, but glibc still selects string operations from CPU features.
 Portable Quint and Alloy images keep their existing native Docker platform and offline model checks.
 
 Mac code and native provisioning run serially so setup can't consume the timed proof budget.

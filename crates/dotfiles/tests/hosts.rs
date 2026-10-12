@@ -1719,6 +1719,704 @@ fn an_unreachable_host_stops_the_check_with_its_next_action() -> Result<()> {
     Ok(())
 }
 
+struct RemoteCheck {
+    scope: tempfile::TempDir,
+    tools: tempfile::TempDir,
+    root: PathBuf,
+    home: PathBuf,
+    executions: PathBuf,
+}
+
+impl RemoteCheck {
+    fn new() -> Result<Self> {
+        let tools = tools()?;
+        let scope = incident_fixture::scope()?;
+        let root = scope.path().join("project");
+        let home = scope.path().join("home");
+        prepare_host_check_project(&root, &home)?;
+        let executions = scope.path().join("executions");
+        Ok(Self {
+            scope,
+            tools,
+            root,
+            home,
+            executions,
+        })
+    }
+
+    fn command(
+        &self,
+        root: &Path,
+        interruption: &str,
+        stages: &str,
+    ) -> Result<std::process::Command> {
+        let path = std::env::join_paths(std::iter::once(self.tools.path().to_path_buf()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+        ))?;
+        let mut command =
+            fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), self.scope.path());
+        command
+            .args(["hosts", "check"])
+            .current_dir(root)
+            .env("PATH", &path)
+            .env("HOME", &self.home)
+            .env("USERPROFILE", &self.home)
+            .env("GIT_CONFIG_GLOBAL", self.root.join("gitconfig"))
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "Fixture")
+            .env("GIT_AUTHOR_EMAIL", "fixture@example.com")
+            .env("GIT_COMMITTER_NAME", "Fixture")
+            .env("GIT_COMMITTER_EMAIL", "fixture@example.com")
+            .env("HOSTS_FIXTURE_STATUS", r#"{"Self":{"DNSName":"phone.example.ts.net.","OS":"android","Online":true},"Peer":{"a":{"DNSName":"box.example.ts.net.","OS":"linux","TailscaleIPs":["100.64.0.2"],"Online":true}}}"#)
+            .env("HOSTS_FIXTURE_EXECUTIONS", &self.executions)
+            .env("HOSTS_FIXTURE_INTERRUPTION", interruption)
+            .env("HOSTS_FIXTURE_STAGES", stages)
+            .env("DOTFILES_EXPECTED_FAILURE", "");
+        Ok(command)
+    }
+
+    fn passing_check(&self) -> Result<std::process::Output> {
+        let output = self.command(&self.root, "", VALID_STAGES)?.output()?;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(output)
+    }
+}
+
+const VALID_STAGES: &str =
+    r#"{"code":0,"real":0,"applied":{"drifted_targets":[],"verification_error":null}}"#;
+
+#[test]
+fn pending_recovery_needs_no_new_workspace_capacity() -> Result<()> {
+    let fixture = RemoteCheck::new()?;
+    let interrupted = fixture
+        .command(&fixture.root, "status", VALID_STAGES)?
+        .output()?;
+    assert!(!interrupted.status.success());
+    let resumed = fixture
+        .command(&fixture.root, "", VALID_STAGES)?
+        .env("HOSTS_FIXTURE_SPACE", "1")
+        .env("HOSTS_FIXTURE_DOCTOR", "fail")
+        .output()?;
+    ensure!(
+        resumed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+    assert_eq!(fs::read_to_string(&fixture.executions)?.lines().count(), 1);
+    assert!(!fixture.root.join(".git/hosts-pending/linux.json").exists());
+    require_admission(&fixture.root, "HEAD")?;
+    fs::write(fixture.root.join("lib.rs"), "new code")?;
+    git(&fixture.root, &["add", "."])?;
+    git(&fixture.root, &["commit", "--quiet", "-m", "code"])?;
+    let new_work = fixture
+        .command(&fixture.root, "", VALID_STAGES)?
+        .env("HOSTS_FIXTURE_SPACE", "1")
+        .output()?;
+    assert!(!new_work.status.success());
+    assert!(String::from_utf8_lossy(&new_work.stderr).contains("one more workspace requires"));
+    assert_eq!(fs::read_to_string(&fixture.executions)?.lines().count(), 1);
+    Ok(())
+}
+
+#[test]
+fn cached_unrelated_candidates_retire_unverified_pending_without_new_workspace_capacity()
+-> Result<()> {
+    for space in ["100000000000", "1"] {
+        let fixture = RemoteCheck::new()?;
+        fixture.passing_check()?;
+        let cached = git(&fixture.root, &["rev-parse", "HEAD"])?;
+        let previous = git(
+            &fixture.root,
+            &["notes", "--ref", dotfiles::hosts::NOTES, "show", &cached],
+        )?;
+        let generations: Vec<_> = previous
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(serde_json::from_str::<serde_json::Value>)
+            .collect::<serde_json::Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|note| note["stage"].is_string())
+            .map(|note| note["generation"].clone())
+            .collect();
+        fs::create_dir(fixture.root.join("home"))?;
+        fs::write(
+            fixture.root.join("home/dot_profile"),
+            "unverified candidate profile",
+        )?;
+        git(&fixture.root, &["add", "."])?;
+        git(&fixture.root, &["commit", "--quiet", "-m", "profile"])?;
+        let unverified = git(&fixture.root, &["rev-parse", "HEAD"])?;
+        let gate = dotfiles::hosts::DEFAULT_GATE;
+        let cached_inputs = dotfiles::hosts::input_hashes(&fixture.root, &cached, gate)?;
+        let unverified_inputs = dotfiles::hosts::input_hashes(&fixture.root, &unverified, gate)?;
+        assert!(
+            cached_inputs
+                .into_iter()
+                .zip(unverified_inputs)
+                .all(|(cached, unverified)| cached != unverified)
+        );
+        let terminal = fixture
+            .command(&fixture.root, "no-report-0", VALID_STAGES)?
+            .output()?;
+        assert!(!terminal.status.success());
+        let pending = fixture.root.join(".git/hosts-pending/linux.json");
+        let history_path = fixture.root.join(".git/hosts-pending/linux.history.json");
+        assert!(pending.is_file());
+        let history = fs::read(&history_path)?;
+        assert!(require_admission(&fixture.root, &unverified).is_err());
+        git(&fixture.root, &["checkout", "--quiet", &cached])?;
+        let reused = fixture
+            .command(&fixture.root, "", VALID_STAGES)?
+            .env("HOSTS_FIXTURE_SPACE", space)
+            .env(
+                "HOSTS_FIXTURE_DOCTOR",
+                if space == "1" { "fail" } else { "ok" },
+            )
+            .output()?;
+        ensure!(
+            reused.status.success(),
+            "{space}: {}",
+            String::from_utf8_lossy(&reused.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&reused.stdout);
+        assert!(
+            stdout.contains("code: reused") && stdout.contains("real: reused"),
+            "{stdout}"
+        );
+        assert!(
+            !pending.exists(),
+            "a cached candidate must retire the validated obsolete pending record"
+        );
+        require_admission(&fixture.root, &cached)?;
+        assert!(require_admission(&fixture.root, &unverified).is_err());
+        assert_eq!(fs::read(&history_path)?, history);
+        assert_eq!(fs::read_to_string(&fixture.executions)?.lines().count(), 2);
+        let notes = git(
+            &fixture.root,
+            &["notes", "--ref", dotfiles::hosts::NOTES, "show", &cached],
+        )?;
+        let notes: Vec<serde_json::Value> = notes
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(serde_json::from_str)
+            .collect::<serde_json::Result<_>>()?;
+        let copies: Vec<_> = notes
+            .iter()
+            .filter(|note| note["reused"].is_object())
+            .collect();
+        assert_eq!(copies.len(), 2);
+        assert_eq!(
+            copies
+                .into_iter()
+                .map(|note| note["generation"].clone())
+                .collect::<Vec<_>>(),
+            generations
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn one_interrupted_family_does_not_prevent_other_pending_families_from_recording() -> Result<()> {
+    const TAILNET: &str = r#"{"Self":{"DNSName":"phone.example.ts.net.","OS":"android","Online":true},"Peer":{"a":{"DNSName":"box.example.ts.net.","OS":"linux","TailscaleIPs":["100.64.0.2"],"Online":true},"b":{"DNSName":"mac.example.ts.net.","OS":"macOS","TailscaleIPs":["100.64.0.3"],"Online":true},"c":{"DNSName":"pc.example.ts.net.","OS":"windows","TailscaleIPs":["100.64.0.4"],"Online":true}}}"#;
+    let fixture = RemoteCheck::new()?;
+    fs::write(
+        fixture.root.join(".github/workflows/ci.yml"),
+        "jobs:\n  test:\n    strategy:\n      matrix:\n        os: [ubuntu-latest, macos-latest, windows-latest]\n    runs-on: ${{ matrix.os }}\n",
+    )?;
+    fs::write(
+        fixture.home.join(".local/state/hosts/ssh_config"),
+        render(
+            &["box".into(), "mac".into(), "pc".into()],
+            "owner",
+            &fixture.home.join("known_hosts"),
+        ),
+    )?;
+    git(&fixture.root, &["add", "."])?;
+    git(&fixture.root, &["commit", "--quiet", "-m", "matrix"])?;
+    let interrupted = fixture
+        .command(&fixture.root, "status", VALID_STAGES)?
+        .env("HOSTS_FIXTURE_STATUS", TAILNET)
+        .output()?;
+    assert!(!interrupted.status.success());
+    for family in ["linux", "macos", "windows"] {
+        assert!(
+            fixture
+                .root
+                .join(format!(".git/hosts-pending/{family}.json"))
+                .is_file()
+        );
+    }
+    let resumed = fixture
+        .command(&fixture.root, "status", VALID_STAGES)?
+        .env("HOSTS_FIXTURE_STATUS", TAILNET)
+        .env("HOSTS_FIXTURE_INTERRUPTION_HOST", "box")
+        .output()?;
+    assert!(!resumed.status.success());
+    assert!(String::from_utf8_lossy(&resumed.stderr).contains("SSH status connection timed out"));
+    assert!(fixture.root.join(".git/hosts-pending/linux.json").is_file());
+    for family in ["macos", "windows"] {
+        assert!(
+            !fixture
+                .root
+                .join(format!(".git/hosts-pending/{family}.json"))
+                .exists()
+        );
+    }
+    let recorded = git(
+        &fixture.root,
+        &["notes", "--ref", dotfiles::hosts::NOTES, "show", "HEAD"],
+    )?;
+    let notes: Vec<serde_json::Value> = recorded
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(serde_json::from_str)
+        .collect::<serde_json::Result<_>>()?;
+    for family in ["macos", "windows"] {
+        assert_eq!(
+            notes
+                .iter()
+                .filter(|note| note["os"] == family
+                    && note["stage"].is_string()
+                    && note["status"] == 0)
+                .count(),
+            2
+        );
+    }
+    assert!(!notes.iter().any(|note| note["os"] == "linux"));
+    assert_eq!(fs::read_to_string(&fixture.executions)?.lines().count(), 3);
+    Ok(())
+}
+
+fn await_fixture_barrier(child: &mut std::process::Child, barrier: &Path) -> Result<()> {
+    const WAIT_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+    let start = std::time::Instant::now();
+    while !barrier.with_extension("ready").is_file() {
+        if let Some(status) = child.try_wait()? {
+            anyhow::bail!("fixture collector exited before its barrier: {status}");
+        }
+        if start.elapsed() >= WAIT_LIMIT {
+            platform::cleanup::report(child.kill(), "stop the fixture collector");
+            platform::cleanup::report(child.wait(), "reap the fixture collector");
+            anyhow::bail!("fixture collector did not reach its barrier");
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+    Ok(())
+}
+
+#[test]
+fn a_head_change_during_preflight_cannot_submit_another_candidates_source() -> Result<()> {
+    let fixture = RemoteCheck::new()?;
+    let first = git(&fixture.root, &["rev-parse", "HEAD"])?;
+    fs::write(fixture.root.join("lib.rs"), "another candidate")?;
+    git(&fixture.root, &["add", "."])?;
+    git(&fixture.root, &["commit", "--quiet", "-m", "code"])?;
+    let second = git(&fixture.root, &["rev-parse", "HEAD"])?;
+    git(&fixture.root, &["checkout", "--quiet", &first])?;
+    let barrier = fixture.scope.path().join("probe-barrier");
+    let mut check = fixture
+        .command(&fixture.root, "", VALID_STAGES)?
+        .env("HOSTS_FIXTURE_PROBE_BARRIER", &barrier)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    await_fixture_barrier(&mut check, &barrier)?;
+    git(&fixture.root, &["checkout", "--quiet", &second])?;
+    fs::write(&barrier, "release")?;
+    let output = check.wait_with_output()?;
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("candidate changed during host preflight")
+    );
+    assert!(!fixture.executions.exists());
+    assert!(!fixture.root.join(".git/hosts-pending/linux.json").exists());
+    assert_eq!(
+        git(
+            &fixture.root,
+            &[
+                "for-each-ref",
+                "--format=%(refname)",
+                dotfiles::hosts::NOTES
+            ]
+        )?,
+        ""
+    );
+    Ok(())
+}
+
+#[test]
+fn an_unacknowledged_submission_replays_its_frozen_program() -> Result<()> {
+    let fixture = RemoteCheck::new()?;
+    let interrupted = fixture
+        .command(&fixture.root, "submission", VALID_STAGES)?
+        .output()?;
+    assert!(!interrupted.status.success());
+    let path = fixture.root.join(".git/hosts-pending/linux.json");
+    let mut pending: serde_json::Value = serde_json::from_slice(&fs::read(&path)?)?;
+    let program = pending["program"]
+        .as_array_mut()
+        .context("frozen fixture program")?;
+    let bootstrap = program.last_mut().context("fixture bootstrap")?;
+    *bootstrap = format!(
+        "{}\n# Previous installed bootstrap\n",
+        bootstrap.as_str().context("fixture script")?
+    )
+    .into();
+    let program: Vec<String> = serde_json::from_value(pending["program"].clone())?;
+    let submission = pending["submission"]
+        .as_str()
+        .context("fixture submission")?;
+    fs::write(
+        fixture
+            .executions
+            .with_extension(format!("{submission}.program")),
+        format!("{program:?}"),
+    )?;
+    fs::write(&path, serde_json::to_vec(&pending)?)?;
+    let recovered = fixture.command(&fixture.root, "", VALID_STAGES)?.output()?;
+    ensure!(
+        recovered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    assert_eq!(fs::read_to_string(&fixture.executions)?.lines().count(), 1);
+    require_admission(&fixture.root, "HEAD")?;
+    Ok(())
+}
+
+#[test]
+fn unverified_terminal_history_blocks_old_credit_and_allows_distinct_fresh_attempts() -> Result<()>
+{
+    let fixture = RemoteCheck::new()?;
+    let first = git(&fixture.root, &["rev-parse", "HEAD"])?;
+    let interrupted = fixture
+        .command(&fixture.root, "status", VALID_STAGES)?
+        .output()?;
+    assert!(!interrupted.status.success());
+    let previous = candidate_record(
+        &fixture.root,
+        "linux",
+        &git(&fixture.root, &["rev-parse", "HEAD^{tree}"])?,
+        0,
+    )?;
+    git(
+        &fixture.root,
+        &[
+            "notes",
+            "--ref",
+            dotfiles::hosts::NOTES,
+            "append",
+            "-m",
+            &previous,
+            "HEAD",
+        ],
+    )?;
+    let notes = git(
+        &fixture.root,
+        &["notes", "--ref", dotfiles::hosts::NOTES, "show", "HEAD"],
+    )?;
+    for interruption in ["no-report-0", "no-report-1"] {
+        let output = fixture
+            .command(&fixture.root, interruption, VALID_STAGES)?
+            .output()?;
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("unverified history blocks old credit")
+        );
+        assert_eq!(
+            git(
+                &fixture.root,
+                &["notes", "--ref", dotfiles::hosts::NOTES, "show", "HEAD"]
+            )?,
+            notes
+        );
+        assert!(require_admission(&fixture.root, "HEAD").is_err());
+    }
+    assert_eq!(fs::read_to_string(&fixture.executions)?.lines().count(), 2);
+    let history_path = fixture.root.join(".git/hosts-pending/linux.history.json");
+    assert_corrupt_history_refuses_submission(&fixture, &history_path)?;
+    fs::write(
+        fixture.root.join(".git/hosts-pending/linux/head.bundle"),
+        "interrupted replacement of an obsolete source bundle",
+    )?;
+    fs::write(fixture.root.join("lib.rs"), "another candidate")?;
+    git(&fixture.root, &["add", "."])?;
+    git(&fixture.root, &["commit", "--quiet", "-m", "code"])?;
+    let second = git(&fixture.root, &["rev-parse", "HEAD"])?;
+    let fresh = fixture.passing_check()?;
+    let stdout = String::from_utf8_lossy(&fresh.stdout);
+    assert!(
+        stdout.contains("code: passed") && stdout.contains("real: passed"),
+        "{stdout}"
+    );
+    require_admission(&fixture.root, &second)?;
+    assert!(require_admission(&fixture.root, &first).is_err());
+    git(&fixture.root, &["checkout", "--quiet", &first])?;
+    let fresh = fixture.passing_check()?;
+    let stdout = String::from_utf8_lossy(&fresh.stdout);
+    assert!(
+        stdout.contains("code: passed") && stdout.contains("real: reused"),
+        "{stdout}"
+    );
+    require_admission(&fixture.root, &first)?;
+    let ids: Vec<String> = fs::read_to_string(&fixture.executions)?
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(ids.len(), 4);
+    assert!(
+        ids.iter()
+            .enumerate()
+            .all(|(index, id)| !ids[..index].contains(id))
+    );
+    let records: Vec<serde_json::Value> = serde_json::from_slice(&fs::read(history_path)?)?;
+    assert_eq!(records.len(), 2);
+    assert!(
+        records
+            .iter()
+            .all(|record| record["cutoff"] == 1 && record["execution"]["commit"] == first)
+    );
+    Ok(())
+}
+
+fn assert_corrupt_history_refuses_submission(fixture: &RemoteCheck, path: &Path) -> Result<()> {
+    let history = fs::read(path)?;
+    let mut invalid: serde_json::Value = serde_json::from_slice(&history)?;
+    invalid[0]["execution"]["inputs"][0] = "invalid-source".into();
+    fs::write(path, serde_json::to_vec(&invalid)?)?;
+    let rejected = fixture.command(&fixture.root, "", VALID_STAGES)?.output()?;
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("other committed inputs"));
+    let mut invalid: serde_json::Value = serde_json::from_slice(&history)?;
+    invalid[0]["cutoff"] = 0.into();
+    fs::write(path, serde_json::to_vec(&invalid)?)?;
+    let rejected = fixture.command(&fixture.root, "", VALID_STAGES)?.output()?;
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr)
+            .contains("cutoff differs from its notes revision")
+    );
+    fs::remove_file(path)?;
+    let rejected = fixture.command(&fixture.root, "", VALID_STAGES)?.output()?;
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("no matching terminal history"));
+    assert_eq!(fs::read_to_string(&fixture.executions)?.lines().count(), 2);
+    fs::write(path, history)?;
+    Ok(())
+}
+
+#[test]
+fn supervisor_terminals_and_status_contradictions_require_fresh_stage_evidence() -> Result<()> {
+    let fixture = RemoteCheck::new()?;
+    let pending = fixture.root.join(".git/hosts-pending/linux.json");
+    let history = fixture.root.join(".git/hosts-pending/linux.history.json");
+    let malformed = fixture
+        .command(&fixture.root, "supervisor-malformed", VALID_STAGES)?
+        .output()?;
+    assert!(!malformed.status.success());
+    assert!(String::from_utf8_lossy(&malformed.stderr).contains("malformed host stage report"));
+    assert!(!history.exists());
+    let prepared: serde_json::Value = serde_json::from_slice(&fs::read(&pending)?)?;
+    assert_eq!(prepared["state"], "submitted");
+    for interruption in ["supervisor", "contradictory"] {
+        let output = fixture
+            .command(&fixture.root, interruption, VALID_STAGES)?
+            .output()?;
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("unverified history blocks old credit")
+        );
+        assert_eq!(
+            git(
+                &fixture.root,
+                &[
+                    "for-each-ref",
+                    "--format=%(refname)",
+                    dotfiles::hosts::NOTES
+                ]
+            )?,
+            ""
+        );
+        assert!(require_admission(&fixture.root, "HEAD").is_err());
+        let unverified: serde_json::Value = serde_json::from_slice(&fs::read(&pending)?)?;
+        assert_eq!(unverified["state"], "unverified");
+    }
+    assert_eq!(fs::read_to_string(&fixture.executions)?.lines().count(), 2);
+    let fresh = fixture.command(&fixture.root, "", VALID_STAGES)?.output()?;
+    ensure!(
+        fresh.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fresh.stderr)
+    );
+    assert_eq!(fs::read_to_string(&fixture.executions)?.lines().count(), 3);
+    require_admission(&fixture.root, "HEAD")?;
+    assert!(!pending.exists());
+    assert!(history.is_file());
+    Ok(())
+}
+
+#[test]
+fn interrupted_remote_checks_resume_the_accepted_job_before_another_execution() -> Result<()> {
+    if incident_fixture::run(
+        "interrupted_remote_checks_resume_the_accepted_job_before_another_execution",
+    )? {
+        return Ok(());
+    }
+    let fixture = RemoteCheck::new()?;
+    let root = fixture.root.clone();
+    let executions = fixture.executions.clone();
+    let check = |interruption: &str, stages: &str| -> Result<std::process::Output> {
+        Ok(fixture.command(&root, interruption, stages)?.output()?)
+    };
+    let valid = VALID_STAGES;
+    let pending = root.join(".git/hosts-pending/linux.json");
+    for interruption in [
+        "submission",
+        "status",
+        "unknown",
+        "finished-unknown",
+        "logs",
+        "malformed",
+    ] {
+        let output = check(interruption, valid)?;
+        assert!(!output.status.success());
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            pending.is_file(),
+            "an accepted job must survive {interruption}"
+        );
+        assert_eq!(fs::read_to_string(&executions)?.lines().count(), 1);
+        assert_eq!(
+            git(
+                &root,
+                &[
+                    "for-each-ref",
+                    "--format=%(refname)",
+                    dotfiles::hosts::NOTES
+                ]
+            )?,
+            ""
+        );
+        assert!(require_admission(&root, "HEAD").is_err());
+        assert!(!root.join(".git/hosts-pending/linux.history.json").exists());
+    }
+    let bundle = root.join(".git/hosts-pending/linux/head.bundle");
+    let original_bundle = fs::read(&bundle)?;
+    fs::write(&bundle, "changed source")?;
+    let changed = check("", valid)?;
+    assert!(!changed.status.success());
+    assert!(String::from_utf8_lossy(&changed.stderr).contains("pending source bundle changed"));
+    assert!(pending.is_file());
+    fs::write(&bundle, original_bundle)?;
+    let note_lock = root.join(".git/refs/notes/hosts.lock");
+    fs::create_dir_all(note_lock.parent().context("note lock parent")?)?;
+    fs::write(&note_lock, "fixture writer owns the ref")?;
+    let blocked = check("", valid)?;
+    assert!(!blocked.status.success());
+    assert!(String::from_utf8_lossy(&blocked.stderr).contains("record note"));
+    assert!(pending.is_file());
+    fs::remove_file(note_lock)?;
+    let failure =
+        r#"{"code":7,"real":9,"applied":{"drifted_targets":[],"verification_error":null}}"#;
+    let failed = check("", failure)?;
+    eprint!("{}", String::from_utf8_lossy(&failed.stderr));
+    assert!(!failed.status.success());
+    assert!(!pending.exists());
+    assert_eq!(fs::read_to_string(&executions)?.lines().count(), 1);
+    let notes = git(
+        &root,
+        &["notes", "--ref", dotfiles::hosts::NOTES, "show", "HEAD"],
+    )?;
+    assert!(notes.contains("\"status\":7") && notes.contains("\"status\":9"));
+    assert!(require_admission(&root, "HEAD").is_err());
+    let passed = check("", valid)?;
+    ensure!(
+        passed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&passed.stderr)
+    );
+    assert_eq!(fs::read_to_string(&executions)?.lines().count(), 2);
+    assert!(!pending.exists());
+    require_admission(&root, "HEAD")?;
+    incident_fixture::preserve(fixture.scope);
+    Ok(())
+}
+
+#[test]
+fn linked_worktrees_share_one_pending_execution_and_reuse_its_results() -> Result<()> {
+    const WAIT_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+    let fixture = RemoteCheck::new()?;
+    let other = fixture.scope.path().join("other");
+    git(
+        &fixture.root,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            &other.to_string_lossy(),
+            "HEAD",
+        ],
+    )?;
+    let interrupted = fixture
+        .command(&fixture.root, "status", VALID_STAGES)?
+        .output()?;
+    assert!(!interrupted.status.success());
+    let barrier = fixture.scope.path().join("barrier");
+    let mut first = fixture
+        .command(&fixture.root, "", VALID_STAGES)?
+        .env("HOSTS_FIXTURE_BARRIER", &barrier)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    let start = std::time::Instant::now();
+    while !barrier.with_extension("ready").is_file() {
+        if start.elapsed() >= WAIT_LIMIT {
+            platform::cleanup::report(first.kill(), "stop the fixture collector");
+            let output = first.wait_with_output()?;
+            anyhow::bail!(
+                "fixture did not reach its pending job: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(fixture.root.join(".git/hosts-pending-linux.lock"))?;
+    assert!(matches!(
+        lock.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    let second = fixture
+        .command(&other, "", VALID_STAGES)?
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    fs::write(&barrier, "release")?;
+    for output in [first.wait_with_output()?, second.wait_with_output()?] {
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert_eq!(fs::read_to_string(&fixture.executions)?.lines().count(), 1);
+    assert!(!fixture.root.join(".git/hosts-pending/linux.json").exists());
+    require_admission(&fixture.root, "HEAD")?;
+    require_admission(&other, "HEAD")?;
+    Ok(())
+}
+
 const RECOVERY_WORKSPACE: &str = "/owned/jobs/job/workspace";
 
 fn record_stale_completed_workspace(root: &Path) -> Result<()> {
@@ -1759,6 +2457,10 @@ fn record_stale_completed_workspace(root: &Path) -> Result<()> {
         .as_object_mut()
         .context("failed actual fixture")?
         .remove("reused");
+    failure
+        .as_object_mut()
+        .context("failed actual fixture")?
+        .remove("workspace");
     failure["status"] = 1.into();
     failure["generation"] = git(root, &["rev-list", "--count", dotfiles::hosts::NOTES])?
         .parse::<u64>()?
@@ -1880,7 +2582,10 @@ fn assert_reuse(
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(serde_json::from_str)
-        .collect::<std::result::Result<_, _>>()?;
+        .collect::<std::result::Result<Vec<serde_json::Value>, _>>()?
+        .into_iter()
+        .filter(|record| record["stage"].is_string())
+        .collect();
     assert_eq!(records.len(), 4);
     for (first, reused) in records[..2].iter().zip(&records[2..]) {
         assert_eq!(reused["inputs"], first["inputs"]);

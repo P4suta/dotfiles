@@ -445,12 +445,19 @@ fn run() -> Result<()> {
 }
 
 fn push_check(root: &Path) -> Result<()> {
-    let mut checks = Checks::default();
-    checks.run("check", || check(root, Gates::ALL, "HEAD"));
-    if cfg!(target_os = "macos") {
-        checks.run("proofs", || xtask::skill_proofs::verify(root));
-    }
-    checks.finish()
+    use rules::hosts_rules::Family;
+    let family = match std::env::consts::OS {
+        "linux" => Family::Linux,
+        "macos" => Family::Mac,
+        "windows" => Family::Windows,
+        _ => anyhow::bail!("unsupported native operating system"),
+    };
+    xtask::skill_proofs::verify_push(
+        family,
+        || check(root, Gates::ALL, "HEAD"),
+        || xtask::skill_proofs::verify(root),
+        || xtask::benchmarks::verify_in_container(root),
+    )
 }
 
 fn user_directory() -> Result<PathBuf> {

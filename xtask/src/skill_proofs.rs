@@ -22,6 +22,28 @@ pub const KANI_BATCH_SIZE: usize = 16;
 const KANI_BATCH_TEST: &str =
     "a_kani_batch_verifies_every_harness_and_rejects_every_counterexample";
 
+/// Run native checks and the family's required campaign or measurement budgets.
+///
+/// # Errors
+///
+/// Returns all failed checks after every selected check finishes.
+pub fn verify_push(
+    family: rules::hosts_rules::Family,
+    native: impl FnOnce() -> Result<()>,
+    proofs: impl FnOnce() -> Result<()>,
+    benchmarks: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    use rules::hosts_rules::{Verification, verification};
+    let mut checks = Checks::default();
+    checks.run("check", native);
+    match verification(family) {
+        Verification::Native => {}
+        Verification::Proofs => checks.run("proof campaign", proofs),
+        Verification::Benchmarks => checks.run("fixed Linux benchmarks", benchmarks),
+    }
+    checks.finish()
+}
+
 /// Compares a Kani results document with the expected harnesses and the proof budget.
 ///
 /// # Errors
@@ -524,13 +546,19 @@ fn verify_in_container(root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Runs every Kani obligation of the manifest natively on macOS and Linux, and in a Linux container elsewhere.
+/// Runs the complete proof campaign, with fixed measurement budgets on Linux and in the Windows container.
 ///
 /// # Errors
 ///
 /// Returns an error when the pinned Kani version or Docker engine can't run, Docker can't build the verification image, or any proof or counterexample check fails.
 pub fn verify(root: &Path) -> Result<()> {
     let mut checks = Checks::default();
+    if cfg!(target_os = "macos") {
+        println!("Mac proof campaign: Kani, Miri, fuzz, mutation, and models.");
+        println!(
+            "Fixed Linux x86_64 benchmark budgets require the Linux code-stage result from `dotfiles hosts check`."
+        );
+    }
     if cfg!(any(target_os = "macos", target_os = "linux")) {
         checks.run("native proofs", || verify_native(root));
     } else {
@@ -541,8 +569,8 @@ pub fn verify(root: &Path) -> Result<()> {
         checks.run("benchmarks", || crate::benchmarks::verify(root));
         return checks.finish();
     }
-    // The models and native-host benchmarks run in their pinned images.
-    if cfg!(any(target_os = "macos", target_os = "linux")) {
+    // The instruction ceilings depend on the native x86_64 CPU's libc dispatch and the image.
+    if cfg!(target_os = "linux") {
         checks.run("benchmarks", || {
             crate::benchmarks::verify_in_container(root)
         });

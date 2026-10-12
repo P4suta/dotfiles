@@ -26,6 +26,23 @@ impl Family {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Verification {
+    Native,
+    Proofs,
+    Benchmarks,
+}
+
+/// The extra verification bound to one native code-stage receipt.
+#[must_use]
+pub const fn verification(family: Family) -> Verification {
+    match family {
+        Family::Linux => Verification::Benchmarks,
+        Family::Mac => Verification::Proofs,
+        Family::Windows => Verification::Native,
+    }
+}
+
 /// What a commit's notes say about one family.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Evidence {
@@ -107,6 +124,63 @@ pub const fn reuse(facts: [bool; 5]) -> bool {
 #[must_use]
 pub const fn workspace_pending(previous: bool, stage: bool, passed: bool) -> bool {
     stage || (previous && !passed)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PendingState {
+    Prepared,
+    Submitted,
+    Unverified,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PendingAction {
+    Submit,
+    Resume,
+    Record,
+    Forget,
+    Restart,
+}
+
+/// Keep unfinished work, and retire it only after its verified report has receipts.
+#[must_use]
+pub const fn pending_action(state: PendingState, verified: bool, recorded: bool) -> PendingAction {
+    if verified {
+        if recorded {
+            PendingAction::Forget
+        } else {
+            PendingAction::Record
+        }
+    } else {
+        match state {
+            PendingState::Prepared => PendingAction::Submit,
+            PendingState::Submitted => PendingAction::Resume,
+            PendingState::Unverified => PendingAction::Restart,
+        }
+    }
+}
+
+/// An unverified attempt invalidates earlier credit until a newer actual receipt exists.
+#[must_use]
+pub const fn after_unverified(receipt: Option<Receipt>, cutoff: Option<u64>) -> Option<Receipt> {
+    match (receipt, cutoff) {
+        (Some(receipt), Some(cutoff)) if receipt.generation <= cutoff => None,
+        (receipt, _) => receipt,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReportEvidence {
+    Verified,
+    Unverified,
+}
+
+#[must_use]
+pub const fn report_evidence(status: Option<i32>, passed: bool) -> ReportEvidence {
+    match status {
+        Some(status) if (status == 0) == passed => ReportEvidence::Verified,
+        _ => ReportEvidence::Unverified,
+    }
 }
 
 pub const WORKSPACE_BYTES: u64 = 12 * 1024 * 1024 * 1024;
@@ -388,6 +462,31 @@ mod proofs {
 
     #[cfg(kani)]
     #[kani::proof]
+    fn local_campaign_and_fixed_budgets_keep_their_required_hosts() {
+        let family = match kani::any::<u8>() {
+            0 => Family::Linux,
+            1 => Family::Mac,
+            _ => Family::Windows,
+        };
+        spec_verification(family);
+        let selected = verification(family);
+        kani::cover!(selected == Verification::Proofs);
+        kani::cover!(selected == Verification::Benchmarks);
+        kani::cover!(selected == Verification::Native);
+    }
+
+    pub fn spec_verification(family: Family) {
+        let selected = verification(family);
+        assert_eq!(selected == Verification::Proofs, family == Family::Mac);
+        assert_eq!(
+            selected == Verification::Benchmarks,
+            family == Family::Linux
+        );
+        assert_eq!(selected == Verification::Native, family == Family::Windows);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
     fn concurrent_stages_require_cores_and_space() {
         let family = match kani::any::<u8>() {
             0 => Family::Linux,
@@ -441,6 +540,79 @@ mod proofs {
         );
         kani::cover!(pending && stage && !passed);
         kani::cover!(!pending && previous && !stage && passed);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn pending_executions_resume_and_require_verified_recorded_results() {
+        let state = [
+            PendingState::Prepared,
+            PendingState::Submitted,
+            PendingState::Unverified,
+        ][usize::from(kani::any::<u8>() % 3)];
+        let verified: bool = kani::any();
+        let recorded: bool = kani::any();
+        let action = pending_action(state, verified, recorded);
+        assert_eq!(action == PendingAction::Forget, verified && recorded);
+        assert_eq!(action == PendingAction::Record, verified && !recorded);
+        assert_eq!(
+            action == PendingAction::Resume,
+            !verified && state == PendingState::Submitted
+        );
+        assert_eq!(
+            action == PendingAction::Submit,
+            !verified && state == PendingState::Prepared
+        );
+        assert_eq!(
+            action == PendingAction::Restart,
+            !verified && state == PendingState::Unverified
+        );
+        kani::cover!(action == PendingAction::Forget);
+        kani::cover!(action == PendingAction::Record);
+        kani::cover!(action == PendingAction::Resume && recorded);
+        kani::cover!(action == PendingAction::Submit);
+        kani::cover!(action == PendingAction::Restart);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn unverified_attempts_require_later_actual_receipts() {
+        let generation: u64 = kani::any();
+        let cutoff: u64 = kani::any();
+        let receipt = Receipt {
+            generation,
+            passed: kani::any(),
+        };
+        assert_eq!(
+            after_unverified(Some(receipt), Some(cutoff)),
+            if generation > cutoff {
+                Some(receipt)
+            } else {
+                None
+            }
+        );
+        assert_eq!(after_unverified(Some(receipt), None), Some(receipt));
+        assert_eq!(after_unverified(None, Some(cutoff)), None);
+        kani::cover!(generation > cutoff);
+        kani::cover!(generation == cutoff);
+        kani::cover!(generation < cutoff);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn verified_reports_require_a_matching_natural_exit() {
+        let present: bool = kani::any();
+        let code: i32 = kani::any();
+        let passed: bool = kani::any();
+        let status = if present { Some(code) } else { None };
+        assert_eq!(
+            report_evidence(status, passed) == ReportEvidence::Verified,
+            present && ((code == 0) == passed)
+        );
+        kani::cover!(!present);
+        kani::cover!(present && code == 0 && passed);
+        kani::cover!(present && code != 0 && !passed);
+        kani::cover!(present && ((code == 0) != passed));
     }
 
     #[cfg(kani)]
@@ -716,6 +888,13 @@ mod tests {
     }
 
     #[test]
+    fn every_native_family_keeps_its_required_verification() {
+        for family in Family::ALL {
+            proofs::spec_verification(family);
+        }
+    }
+
+    #[test]
     fn timed_proofs_do_not_overlap_native_setup() {
         assert!(!concurrent_stages(Family::Linux, usize::MAX, u64::MAX));
         assert!(!concurrent_stages(Family::Mac, usize::MAX, u64::MAX));
@@ -768,6 +947,62 @@ mod tests {
                     previous
                 }
             );
+        }
+    }
+
+    #[test]
+    fn unfinished_submissions_resume_and_unverified_results_never_retire() {
+        for state in [
+            PendingState::Prepared,
+            PendingState::Submitted,
+            PendingState::Unverified,
+        ] {
+            for [verified, recorded] in flags() {
+                let action = pending_action(state, verified, recorded);
+                assert_eq!(action == PendingAction::Forget, verified && recorded);
+                assert_eq!(action == PendingAction::Record, verified && !recorded);
+                assert_eq!(
+                    action == PendingAction::Resume,
+                    !verified && state == PendingState::Submitted
+                );
+                assert_eq!(
+                    action == PendingAction::Submit,
+                    !verified && state == PendingState::Prepared
+                );
+                assert_eq!(
+                    action == PendingAction::Restart,
+                    !verified && state == PendingState::Unverified
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unverified_attempts_do_not_accept_old_or_reused_generation_credit() {
+        for cutoff in [0, 1, u64::MAX - 1, u64::MAX] {
+            for generation in [0, 1, u64::MAX - 1, u64::MAX] {
+                let receipt = Receipt {
+                    generation,
+                    passed: true,
+                };
+                assert_eq!(
+                    after_unverified(Some(receipt), Some(cutoff)).is_some(),
+                    generation > cutoff
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn supervisor_outcomes_and_inconsistent_packets_have_no_verified_stage_evidence() {
+        for code in [i32::MIN, -1, 0, 1, i32::MAX] {
+            for passed in [false, true] {
+                assert_eq!(
+                    report_evidence(Some(code), passed) == ReportEvidence::Verified,
+                    (code == 0) == passed
+                );
+                assert_eq!(report_evidence(None, passed), ReportEvidence::Unverified);
+            }
         }
     }
 

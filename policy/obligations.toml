@@ -464,6 +464,14 @@ fn reject_profile_evidence_for_a_repository_without_the_runtime() {
     assert!(production::profile_gate(true, false));
 }
 #[kani::proof]
+fn reject_linux_checks_omitting_fixed_measurement_budgets() {
+    assert!(production::verification(production::Family::Linux) == production::Verification::Native);
+}
+#[kani::proof]
+fn reject_mac_checks_omitting_the_proof_campaign() {
+    assert!(production::verification(production::Family::Mac) == production::Verification::Native);
+}
+#[kani::proof]
 fn reject_parallel_stages_without_capacity() {
     assert!(production::concurrent_stages(production::Family::Windows, production::CONCURRENT_CORES - 1, production::CONCURRENT_BYTES));
 }
@@ -523,6 +531,23 @@ fn reject_silently_accepting_a_changed_key() {
 #[kani::proof]
 fn reject_checking_a_dirty_tree() {
     assert!(start(false, [true, true, true], [true, true, true]) == Start::Run);
+}
+#[kani::proof]
+fn reject_resubmitting_an_accepted_execution() {
+    assert!(pending_action(PendingState::Submitted, false, false) == PendingAction::Submit);
+}
+#[kani::proof]
+fn reject_forgetting_an_unverified_execution() {
+    assert!(pending_action(PendingState::Submitted, false, true) == PendingAction::Forget);
+}
+#[kani::proof]
+fn reject_old_receipt_credit_after_an_unverified_terminal_execution() {
+    let previous = Receipt { generation: 3, passed: true };
+    assert!(after_unverified(Some(previous), Some(3)) == Some(previous));
+}
+#[kani::proof]
+fn reject_a_supervisor_terminal_packet_as_verified_stage_evidence() {
+    assert!(production::report_evidence(None, true) == production::ReportEvidence::Verified);
 }
 '''
 
