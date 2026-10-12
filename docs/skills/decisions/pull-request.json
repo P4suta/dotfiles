@@ -1,7 +1,7 @@
 {
-  "revision": "25a52aa2e4cb2b31354e278af13682a7d312a1b554e979401d89dbd283a7ea7f",
+  "revision": "b6129a494dc2cad9bcbf017461d364953e632a52cee929fc3565975d2c20c7ad",
   "outcome": "implemented",
-  "reason": "Bind the GitHub CLI used by repository checks to the exact project pin while retaining the native profile's installed version.\nThe isolated code environment resolves the pin without host configuration, and the inventory tests reject stale tool bindings.",
+  "reason": "Align the GitHub CLI declaration with project pin 2.102.0 and keep the native latest selector.\nThe reviewed entrypoint and workflow resource preserve exact repository and issue selection, authentication, quota checks, and checked publication.\nThe final local PR document check passed on the verified installation before this metadata update.",
   "evidence": [
     "crates/platform/src/code_environment.rs",
     "crates/dotfiles/tests/hosts.rs",

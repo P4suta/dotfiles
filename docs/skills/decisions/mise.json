@@ -1,10 +1,13 @@
 {
-  "revision": "b0898fa55b73120f0a1361360b6cd133e5c0970616da20132924378976dfa483",
+  "revision": "9eb34272916199a97be6a5050e268504f2b1bf74bd8349c03f9cb054f349d7d1",
   "outcome": "implemented",
-  "reason": "Keep backend resolution, exact versions, and configuration precedence separate from dependency update policy.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "reason": "Align the skill declaration with mise 2026.10.6, the release already verified by native bootstrap checksum checks.\nThe reviewed entrypoint keeps exact project pins, locked toolchains, configuration precedence, and noninteractive execution.\nThe catalog revision includes this tool metadata, and the authoritative inventory rejects incompatible bindings.",
   "evidence": [
     "home/dot_agents/skills/mise/SKILL.md",
     "home/dot_agents/skills/mise/tools.toml",
+    "home/.chezmoidata/versions.toml",
+    "home/.chezmoitemplates/partials/install-mise-sh",
+    "home/.chezmoitemplates/partials/install-mise-ps1",
     "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null

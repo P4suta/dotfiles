@@ -1,7 +1,7 @@
 {
-  "revision": "adcd3589953208683ae52eddc38c6baf03b9696fb161359994e176b9e390fcf9",
+  "revision": "cfc4e58f7be0237989b33cbe02862cdef5220917bfd934497771fe3109037103",
   "outcome": "implemented",
-  "reason": "Bind Docker CLI 29.8.2 to verification-tools because the native profile and proof checks use the container boundary.\nThe code gate must resolve the CLI from an exact project installation rather than the host PATH.\nThe inventory tests reject stale bindings, and the isolated environment fixture rejects unrelated host applications.",
+  "reason": "Align the Docker CLI declaration with the verified project pin 29.9.0.\nThe reviewed verification entrypoint and Rust resource keep their container isolation, proof, target, and coverage requirements.\nThe native CLI installation and fixed Linux preflight already exercised the existing container command path; this change updates only its catalog binding.",
   "evidence": [
     "crates/platform/src/code_environment.rs",
     "crates/dotfiles/tests/hosts.rs",
