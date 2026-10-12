@@ -12,6 +12,12 @@ mod fixture_git;
 const COMPLETION_LIMIT: Duration = Duration::from_secs(10);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+fn accepted_job(state: &Path, alias: &str) -> Result<(String, std::path::PathBuf)> {
+    let submission = fs::read_to_string(state.join(alias).join("submission"))?;
+    let job = state.join(alias).join("jobs").join(&submission);
+    Ok((submission, job))
+}
+
 fn git(root: &Path, arguments: &[&str]) -> Result<String> {
     let output = fixture_git::command("git", &root.join("gitconfig"))
         .arg("-C")
@@ -139,9 +145,18 @@ fn completed_jobs_record_every_result_and_exit_without_a_waiting_session() -> Re
             [expected; 3]
         );
         for alias in ["box", "mac", "pc"] {
-            let job = state.join(alias).join("jobs/gate");
+            let (submission, job) = accepted_job(&state, alias)?;
             assert!(!job.join("workspace").exists());
             assert_eq!(fs::read(job.join("output.log"))?, b"retained log");
+            for line in notes.lines().filter(|line| !line.is_empty()) {
+                let note: dotfiles::hosts::Note = serde_json::from_str(line)?;
+                if note.host == alias {
+                    assert!(
+                        note.workspace
+                            .is_some_and(|workspace| workspace.job == submission)
+                    );
+                }
+            }
         }
         if failed == "no" {
             recover_interrupted_receipt(&root, &state, request)?;
@@ -180,7 +195,7 @@ fn recover_interrupted_receipt(
             "HEAD",
         ],
     )?;
-    let job = state.join("box/jobs/gate");
+    let (submission, job) = accepted_job(state, "box")?;
     fs::create_dir_all(job.join("workspace"))?;
     fs::write(job.join("workspace/build-output"), "interrupted output")?;
     let output = request().output()?;
@@ -191,8 +206,15 @@ fn recover_interrupted_receipt(
     );
     assert!(!job.join("workspace").exists());
     assert_eq!(fs::read(job.join("output.log"))?, b"retained log");
+    assert_eq!(
+        fs::read_to_string(state.join("box/submission"))?,
+        submission
+    );
     let stdout = String::from_utf8(output.stdout)?;
-    assert!(!stdout.contains(":gate: submitted"), "{stdout}");
+    assert!(
+        !stdout.contains(&format!("box:{submission}: submitted")),
+        "{stdout}"
+    );
     for stage in ["code", "real"] {
         assert!(stdout.contains(&format!("box {stage}: reused")), "{stdout}");
     }

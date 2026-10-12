@@ -17,6 +17,7 @@ ARG APALACHE_SHA256=93fef2f381d30465eff906a2d6afa3358cb2c9adf6a8aad3bec0ded4f454
 ADD --checksum=sha256:${APALACHE_SHA256} https://github.com/apalache-mc/apalache/releases/download/v${APALACHE_VERSION}/apalache-${APALACHE_VERSION}.tgz /tmp/apalache.tgz
 ADD https://github.com/apalache-mc/apalache/releases/download/v${APALACHE_VERSION}/sha256sum.txt /tmp/sha256sum.txt
 RUN grep -qx "${APALACHE_SHA256}  apalache-${APALACHE_VERSION}.tgz" /tmp/sha256sum.txt \
+    && echo "${APALACHE_SHA256}  /tmp/apalache.tgz" | sha256sum -c - \
     && mkdir -p ${QUINT_HOME}/apalache-dist-${APALACHE_VERSION}/apalache \
     && tar -xzf /tmp/apalache.tgz --strip-components=1 -C ${QUINT_HOME}/apalache-dist-${APALACHE_VERSION}/apalache \
     && rm /tmp/apalache.tgz /tmp/sha256sum.txt \

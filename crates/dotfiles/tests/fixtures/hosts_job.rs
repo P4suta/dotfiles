@@ -4,10 +4,24 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 
-fn workspace(target: &str) -> PathBuf {
+fn state(target: &str) -> PathBuf {
     PathBuf::from(std::env::var_os("HOSTS_JOB_STATE").unwrap())
         .join(target.split(':').next().unwrap())
-        .join("jobs/gate/workspace")
+}
+
+fn workspace(target: &str) -> PathBuf {
+    let root = state(target);
+    let job = target.split_once(':').map_or_else(
+        || std::fs::read_to_string(root.join("submission")).unwrap(),
+        |(_, job)| job.to_owned(),
+    );
+    root.join("jobs").join(job).join("workspace")
+}
+
+fn submission(arguments: &[String]) -> Option<&str> {
+    arguments
+        .windows(2)
+        .find_map(|pair| (pair[0] == "--submission").then_some(pair[1].as_str()))
 }
 
 fn report(target: &str) {
@@ -96,8 +110,9 @@ fn main() {
         }
         "on" => println!("{target}:probe"),
         "run" if arguments.iter().any(|argument| argument == "--wait") => {
-            report(target);
-            println!("{target}:gate finished {outcome}");
+            let reference = format!("{target}:{}", submission(&arguments).unwrap_or("gate"));
+            report(&reference);
+            println!("{reference} finished {outcome}");
             std::io::stdout().flush().unwrap();
             let release = PathBuf::from(std::env::var_os("HOSTS_JOB_RELEASE").unwrap());
             while !release.exists() {
@@ -105,15 +120,18 @@ fn main() {
             }
         }
         "run" => {
-            let workspace = workspace(target);
+            let job = submission(&arguments).expect("requested submission identity");
+            let reference = format!("{target}:{job}");
+            let workspace = workspace(&reference);
             std::fs::create_dir_all(&workspace).unwrap();
+            std::fs::write(state(target).join("submission"), job).unwrap();
             std::fs::write(workspace.join("build-output"), "built").unwrap();
             std::fs::write(
                 workspace.parent().unwrap().join("output.log"),
                 "retained log",
             )
             .unwrap();
-            println!("{target}:gate");
+            println!("{reference}");
         }
         "status" if target.ends_with(":probe") => println!("{target} finished succeeded"),
         "status" if target.ends_with(":space") => println!("{target} finished succeeded"),

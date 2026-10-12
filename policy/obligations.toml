@@ -882,6 +882,34 @@ source = "crates/rules/src/proof_budget_rules.rs"
 probes = '''
 use production::{BUDGET_MILLIS, Verdict, verdict};
 #[kani::proof]
+fn reject_a_mutation_campaign_with_zero_workers() {
+    assert!(production::mutant_jobs(0) == 0);
+}
+#[kani::proof]
+fn reject_a_mutation_pool_above_its_ceiling() {
+    assert!(production::mutant_jobs(production::MUTANT_JOB_LIMIT + 1) > production::MUTANT_JOB_LIMIT);
+}
+#[kani::proof]
+fn reject_a_mutant_without_a_completed_test_being_caught() {
+    assert!(production::mutation_outcome(production::MutationPhase::Passed, None) == Some(production::MutationOutcome::Caught));
+}
+#[kani::proof]
+fn reject_a_build_timeout_being_credited_as_non_termination() {
+    assert!(production::mutation_outcome(production::MutationPhase::TimedOut, None) == Some(production::MutationOutcome::TimedOut));
+}
+#[kani::proof]
+fn reject_partial_mutation_counts_passing() {
+    assert!(production::mutation_exit(2, [1, 0, 0, 0]) == Some(production::MUTATION_CLEAN_EXIT));
+}
+#[kani::proof]
+fn reject_overflowing_mutation_counts_passing() {
+    assert!(production::mutation_exit(u64::MAX, [u64::MAX, 1, 0, 0]) == Some(production::MUTATION_CLEAN_EXIT));
+}
+#[kani::proof]
+fn reject_mutation_timeouts_having_a_success_exit() {
+    assert!(production::mutation_exit(1, [0, 0, 1, 0]) == Some(production::MUTATION_CLEAN_EXIT));
+}
+#[kani::proof]
 fn reject_admitting_an_overrun() {
     assert!(verdict(Some(BUDGET_MILLIS + 1)) == Verdict::Within);
 }

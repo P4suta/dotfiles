@@ -16,7 +16,9 @@ ADD --checksum=sha256:${LEAN_SHA256} https://github.com/leanprover/lean4/release
 
 ENV ELAN_HOME=/opt/elan
 ENV PATH=/opt/elan/bin:$PATH
-RUN tar -xzf /tmp/elan.tar.gz -C /tmp \
+RUN echo "${ELAN_SHA256}  /tmp/elan.tar.gz" | sha256sum -c - \
+    && echo "${LEAN_SHA256}  /tmp/lean.tar.zst" | sha256sum -c - \
+    && tar -xzf /tmp/elan.tar.gz -C /tmp \
     && /tmp/elan-init -y --no-modify-path --default-toolchain none \
     && mkdir -p /opt/lean \
     && tar --zstd -xf /tmp/lean.tar.zst -C /opt/lean --strip-components=1 \

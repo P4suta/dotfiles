@@ -572,6 +572,10 @@ fn the_container_reads_the_checkout_and_runs_the_unchanged_proof_gate() {
         .expect("platform of the pinned x86_64 tools");
     assert_eq!(text[platform + 1], "linux/amd64");
     assert!(text.contains(&"dotfiles-proofs-target-fixture:/cache".into()));
+    assert!(
+        text.windows(2)
+            .any(|pair| pair[0] == "--env" && pair[1] == "DOTFILES_HOST_CACHE=/cache")
+    );
     let image = text
         .iter()
         .position(|value| value == "dotfiles-proofs:fixture")
@@ -670,6 +674,172 @@ fn the_alloy_image_pins_alloy_and_its_base_by_digest() {
     for line in definition.lines().filter(|line| line.starts_with("FROM ")) {
         assert!(line.contains("@sha256:"), "{line}");
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CorruptAsset {
+    directory: &'static str,
+    target: &'static str,
+}
+
+const CORRUPTED_ASSET: &str = "corrupt-verifier-asset";
+const MODEL_PLATFORM: &str = "linux/amd64";
+const CORRUPT_ASSETS: [CorruptAsset; 4] = [
+    CorruptAsset {
+        directory: xtask::alloy::IMAGE_DIRECTORY,
+        target: "/opt/alloy/alloy.jar",
+    },
+    CorruptAsset {
+        directory: xtask::quint::IMAGE_DIRECTORY,
+        target: "/tmp/apalache.tgz",
+    },
+    CorruptAsset {
+        directory: xtask::lean::IMAGE_DIRECTORY,
+        target: "/tmp/elan.tar.gz",
+    },
+    CorruptAsset {
+        directory: xtask::lean::IMAGE_DIRECTORY,
+        target: "/tmp/lean.tar.zst",
+    },
+];
+
+fn corrupted_image_context(root: &Path, asset: CorruptAsset) -> anyhow::Result<tempfile::TempDir> {
+    let scope = incident_fixture::scope()?;
+    for entry in std::fs::read_dir(root.join(asset.directory))? {
+        let entry = entry?;
+        anyhow::ensure!(
+            entry.file_type()?.is_file(),
+            "a model image context contains a non-file: {}",
+            entry.path().display()
+        );
+        std::fs::copy(entry.path(), scope.path().join(entry.file_name()))?;
+    }
+    anyhow::ensure!(
+        !scope.path().join(CORRUPTED_ASSET).exists(),
+        "the model image context collides with its corruption fixture"
+    );
+    std::fs::write(
+        scope.path().join(CORRUPTED_ASSET),
+        b"corrupted verifier input\n",
+    )?;
+    let path = scope.path().join("Dockerfile");
+    let definition = std::fs::read_to_string(&path)?;
+    let target = format!(" {}", asset.target);
+    let mut replaced = 0;
+    let definition = definition
+        .lines()
+        .map(|line| {
+            if line.starts_with("ADD --checksum=sha256:") && line.ends_with(&target) {
+                replaced += 1;
+                format!("COPY {CORRUPTED_ASSET} {}", asset.target)
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    anyhow::ensure!(
+        replaced == 1,
+        "the model image has {replaced} pinned inputs for {}",
+        asset.target
+    );
+    std::fs::write(path, format!("{definition}\n"))?;
+    Ok(scope)
+}
+
+#[test]
+fn corruption_probes_preserve_other_inputs_and_cover_every_model_asset() -> anyhow::Result<()> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let mut covered = BTreeSet::new();
+    for asset in CORRUPT_ASSETS {
+        assert!(covered.insert((asset.directory, asset.target)));
+        let scope = corrupted_image_context(root, asset)?;
+        let original = std::fs::read_to_string(root.join(asset.directory).join("Dockerfile"))?;
+        let altered = std::fs::read_to_string(scope.path().join("Dockerfile"))?;
+        let differences: Vec<_> = original
+            .lines()
+            .zip(altered.lines())
+            .filter(|(original, altered)| original != altered)
+            .collect();
+        assert_eq!(original.lines().count(), altered.lines().count());
+        assert_eq!(differences.len(), 1);
+        assert!(differences[0].0.starts_with("ADD --checksum=sha256:"));
+        assert_eq!(
+            differences[0].1,
+            format!("COPY {CORRUPTED_ASSET} {}", asset.target)
+        );
+        for entry in std::fs::read_dir(root.join(asset.directory))? {
+            let entry = entry?;
+            if entry.file_name() != "Dockerfile" {
+                assert_eq!(
+                    std::fs::read(entry.path())?,
+                    std::fs::read(scope.path().join(entry.file_name()))?
+                );
+            }
+        }
+        platform::cleanup::report(scope.close(), "remove the model corruption fixture");
+    }
+    let mut declared = BTreeSet::new();
+    for directory in [
+        xtask::alloy::IMAGE_DIRECTORY,
+        xtask::quint::IMAGE_DIRECTORY,
+        xtask::lean::IMAGE_DIRECTORY,
+    ] {
+        let definition = std::fs::read_to_string(root.join(directory).join("Dockerfile"))?;
+        for line in definition
+            .lines()
+            .filter(|line| line.starts_with("ADD --checksum=sha256:"))
+        {
+            let target = line.split_whitespace().last().unwrap();
+            declared.insert((directory.to_owned(), target.to_owned()));
+        }
+    }
+    assert_eq!(
+        covered
+            .into_iter()
+            .map(|(directory, target)| (directory.to_owned(), target.to_owned()))
+            .collect::<BTreeSet<_>>(),
+        declared
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "runs through the authoritative model gate with Docker"]
+fn proof_images_reject_corrupt_verifier_assets_before_use() -> anyhow::Result<()> {
+    corruption_probes_preserve_other_inputs_and_cover_every_model_asset()?;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let mut checks = xtask::checks::Checks::default();
+    for asset in CORRUPT_ASSETS {
+        checks.run(asset.target, || {
+            let scope = corrupted_image_context(root, asset)?;
+            let result = (|| {
+                let mut command = platform::tool::Tool::Docker.command();
+                command.arg("build");
+                if asset.directory == xtask::lean::IMAGE_DIRECTORY {
+                    command.args(["--platform", MODEL_PLATFORM]);
+                }
+                let output = command.arg(scope.path()).output()?;
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                print!("{stdout}");
+                eprint!("{stderr}");
+                let report = format!("{stdout}{stderr}");
+                anyhow::ensure!(
+                    !output.status.success()
+                        && report.contains(&format!("{}: FAILED", asset.target))
+                        && report.contains("computed checksum did NOT match"),
+                    "the model image did not reject the corrupted {} by its checksum: {}\n{report}",
+                    asset.target,
+                    output.status
+                );
+                Ok(())
+            })();
+            platform::cleanup::report(scope.close(), "remove the model corruption fixture");
+            result
+        });
+    }
+    checks.finish()
 }
 
 #[test]

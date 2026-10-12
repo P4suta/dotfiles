@@ -4,6 +4,77 @@ pub const BUDGET_MILLIS: u64 = 30_000;
 /// The `--harness-timeout` after which the verifier abandons a harness.
 pub const TIMEOUT_SECONDS: u64 = 60;
 
+/// The largest mutation worker pool and shared Cargo jobserver pool.
+pub const MUTANT_JOB_LIMIT: usize = 8;
+
+#[must_use]
+pub const fn mutant_jobs(available: usize) -> usize {
+    match available {
+        0 => 1,
+        1..=MUTANT_JOB_LIMIT => available,
+        _ => MUTANT_JOB_LIMIT,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum MutationPhase {
+    Passed,
+    Failed,
+    TimedOut,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(usize)]
+pub enum MutationOutcome {
+    Caught,
+    Missed,
+    TimedOut,
+    Unviable,
+}
+
+#[must_use]
+pub const fn mutation_outcome(
+    build: MutationPhase,
+    test: Option<MutationPhase>,
+) -> Option<MutationOutcome> {
+    match (build, test) {
+        (MutationPhase::Failed, None) => Some(MutationOutcome::Unviable),
+        (MutationPhase::Passed, Some(MutationPhase::Failed)) => Some(MutationOutcome::Caught),
+        (MutationPhase::Passed, Some(MutationPhase::Passed)) => Some(MutationOutcome::Missed),
+        (MutationPhase::Passed, Some(MutationPhase::TimedOut)) => Some(MutationOutcome::TimedOut),
+        _ => None,
+    }
+}
+
+pub const MUTATION_CLEAN_EXIT: i32 = 0;
+pub const MUTATION_MISSED_EXIT: i32 = 2;
+pub const MUTATION_TIMEOUT_EXIT: i32 = 3;
+
+#[must_use]
+pub const fn mutation_exit(total: u64, counts: [u64; 4]) -> Option<i32> {
+    let [caught, missed, timed_out, unviable] = counts;
+    let Some(first) = caught.checked_add(missed) else {
+        return None;
+    };
+    let Some(second) = first.checked_add(timed_out) else {
+        return None;
+    };
+    let Some(sum) = second.checked_add(unviable) else {
+        return None;
+    };
+    if total == 0 || total != sum {
+        return None;
+    }
+    Some(if timed_out != 0 {
+        MUTATION_TIMEOUT_EXIT
+    } else if missed != 0 {
+        MUTATION_MISSED_EXIT
+    } else {
+        MUTATION_CLEAN_EXIT
+    })
+}
+
 /// A property Kani proves, rules out, reaches, or leaves unverified.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Check {
@@ -44,6 +115,82 @@ pub const fn verdict(duration_millis: Option<u64>) -> Verdict {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn mutation_pools_preserve_capacity_and_never_exceed_the_ceiling() {
+        let available: usize = kani::any();
+        let jobs = mutant_jobs(available);
+        assert!(jobs > 0 && jobs <= MUTANT_JOB_LIMIT);
+        if available == 0 {
+            assert_eq!(jobs, 1);
+        } else if available <= MUTANT_JOB_LIMIT {
+            assert_eq!(jobs, available);
+        } else {
+            assert_eq!(jobs, MUTANT_JOB_LIMIT);
+        }
+        kani::cover!(available == 0 && jobs == 1);
+        kani::cover!(available > MUTANT_JOB_LIMIT && jobs == MUTANT_JOB_LIMIT);
+    }
+
+    pub fn spec_mutation_outcome(build: MutationPhase, test: Option<MutationPhase>) {
+        let outcome = mutation_outcome(build, test);
+        assert_eq!(
+            outcome == Some(MutationOutcome::Unviable),
+            build == MutationPhase::Failed && test.is_none()
+        );
+        for (phase, expected) in [
+            (MutationPhase::Failed, MutationOutcome::Caught),
+            (MutationPhase::Passed, MutationOutcome::Missed),
+            (MutationPhase::TimedOut, MutationOutcome::TimedOut),
+        ] {
+            assert_eq!(
+                outcome == Some(expected),
+                build == MutationPhase::Passed && test == Some(phase)
+            );
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn only_completed_build_and_test_phases_decide_a_mutant() {
+        let build: MutationPhase = kani::any();
+        let test: Option<MutationPhase> = kani::any();
+        spec_mutation_outcome(build, test);
+        kani::cover!(mutation_outcome(build, test) == Some(MutationOutcome::Caught));
+        kani::cover!(mutation_outcome(build, test).is_none());
+    }
+
+    pub fn spec_mutation_exit(total: u64, counts: [u64; 4]) {
+        let [caught, missed, timed_out, unviable] = counts;
+        let sum =
+            u128::from(caught) + u128::from(missed) + u128::from(timed_out) + u128::from(unviable);
+        let exit = mutation_exit(total, counts);
+        assert_eq!(exit.is_some(), total != 0 && sum == u128::from(total));
+        if let Some(exit) = exit {
+            assert_eq!(
+                exit,
+                if timed_out != 0 {
+                    MUTATION_TIMEOUT_EXIT
+                } else if missed != 0 {
+                    MUTATION_MISSED_EXIT
+                } else {
+                    MUTATION_CLEAN_EXIT
+                }
+            );
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn mutation_counts_cannot_overflow_or_disagree_and_timeouts_dominate_misses() {
+        let total: u64 = kani::any();
+        let counts: [u64; 4] = kani::any();
+        spec_mutation_exit(total, counts);
+        kani::cover!(mutation_exit(total, counts) == Some(MUTATION_TIMEOUT_EXIT));
+        kani::cover!(mutation_exit(total, counts).is_none());
+    }
 
     #[cfg(kani)]
     #[kani::proof]
@@ -97,6 +244,58 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mutation_phase_results_require_the_completed_test_or_a_failed_build() {
+        for build in [
+            MutationPhase::Passed,
+            MutationPhase::Failed,
+            MutationPhase::TimedOut,
+        ] {
+            for test in [
+                None,
+                Some(MutationPhase::Passed),
+                Some(MutationPhase::Failed),
+                Some(MutationPhase::TimedOut),
+            ] {
+                proofs::spec_mutation_outcome(build, test);
+            }
+        }
+    }
+
+    #[test]
+    fn mutation_counts_hold_each_boundary_and_exit_precedence_without_overflow() {
+        for (total, counts) in [
+            (0, [0; 4]),
+            (1, [1, 0, 0, 0]),
+            (1, [0, 1, 0, 0]),
+            (1, [0, 0, 1, 0]),
+            (1, [0, 0, 0, 1]),
+            (2, [0, 1, 1, 0]),
+            (2, [1, 0, 0, 0]),
+            (u64::MAX, [u64::MAX, 0, 0, 0]),
+            (u64::MAX, [u64::MAX, 1, 0, 0]),
+            (u64::MAX, [1, u64::MAX, 0, 0]),
+            (u64::MAX, [1, 0, u64::MAX, 0]),
+            (u64::MAX, [1, 0, 0, u64::MAX]),
+        ] {
+            proofs::spec_mutation_exit(total, counts);
+        }
+    }
+
+    #[test]
+    fn mutation_jobs_preserve_capacity_until_the_ceiling() {
+        for (available, expected) in [
+            (0, 1),
+            (1, 1),
+            (MUTANT_JOB_LIMIT - 1, MUTANT_JOB_LIMIT - 1),
+            (MUTANT_JOB_LIMIT, MUTANT_JOB_LIMIT),
+            (MUTANT_JOB_LIMIT + 1, MUTANT_JOB_LIMIT),
+            (usize::MAX, MUTANT_JOB_LIMIT),
+        ] {
+            assert_eq!(mutant_jobs(available), expected);
+        }
+    }
 
     #[test]
     fn proof_results_keep_impossibility_separate_from_missing_evidence() {

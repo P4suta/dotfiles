@@ -87,6 +87,9 @@ It also refuses a proved function that no production code calls, a pilot whose i
 Each rule module keeps its properties in `spec_*` functions of its `proofs` module.
 Its Kani harnesses prove them for every input, and its tests run them over every input they can list.
 The mutation campaign of `just proofs` runs those tests, since cargo-mutants can't run Kani, and refuses a surviving mutant or a timeout that `policy/obligations.toml` doesn't name as non-terminating.
+Mutation workers and their shared Cargo jobserver use at most eight slots, with one test thread per worker.
+Completion requires a successful baseline, every selected mutant's terminal result, and matching counters and exit status.
+Failed campaigns keep logs and mutation reports outside the scratch scope.
 
 A Quint model under `specs/` describes a workflow that races other actors, such as `pr-workflow ready` while other hosts push.
 `just proofs` checks it in a pinned image without a network.
@@ -96,6 +99,8 @@ The rule module with the same step function replays the committed traces and com
 The gate writes those traces again at the fixed seed to show they still match.
 
 Each Alloy assertion has an instance and a mutated fact that yields a counterexample at the same recorded scope.
+Every model image verifies the pinned SHA-256 of its downloaded verifier bytes before using them.
+The model gate also requires checksum refusals for a corrupted copy of each verifier asset.
 `just gen` exports the actual profile manifests as an Alloy instance, so the model checks the deployed target, retirement, directory, and hook relations.
 Lean proves the general skill plan and setup order theorems.
 Generated vectors compare its definitions with the Rust functions, and the gate checks each module in a fresh kernel and refuses any axiom outside the three standard axioms.

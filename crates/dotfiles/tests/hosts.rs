@@ -246,6 +246,7 @@ fn rust_code_fixture() -> Result<(CodeFixture, platform::code_environment::Insta
         (&bin, "unrelated-application"),
         (&sysroot.join("bin"), "cargo"),
         (&sysroot.join("bin"), "rustc"),
+        (&sysroot.join("bin"), "rustdoc"),
     ] {
         fs::copy(
             &mise,
@@ -325,7 +326,7 @@ fn a_code_gate_exposes_only_its_captured_rustup_manager() -> Result<()> {
         .cargo
         .join("bin")
         .join(format!("rustup{}", std::env::consts::EXE_SUFFIX));
-    for name in ["rustup", "cargo-miri"] {
+    for name in ["rustup", "cargo-miri", "rustdoc"] {
         let proxy = bootstrap.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
         assert!(proxy.is_file(), "the owned bootstrap must supply {name}");
         assert_eq!(
@@ -353,6 +354,19 @@ fn a_code_gate_exposes_only_its_captured_rustup_manager() -> Result<()> {
         String::from_utf8(output.stdout)?.replace("\r\n", "\n"),
         format!("rustc {NIGHTLY} fixture\n")
     );
+    let output = environment
+        .command(platform::tool::Tool::Rustup.program())
+        .args(["run", NIGHTLY, "cargo", "--rustdoc-version"])
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout)?.replace("\r\n", "\n"),
+        format!("rustdoc {NIGHTLY} fixture\n")
+    );
     assert!(
         environment
             .command("unrelated-application")
@@ -367,6 +381,53 @@ fn a_code_gate_exposes_only_its_captured_rustup_manager() -> Result<()> {
                 .join(format!("rustup{}", std::env::consts::EXE_SUFFIX))
         )?,
         fs::read(&installed.mise)?
+    );
+    miri_builds_expire_with_their_code_environment(&fixture, &installed, environment)?;
+    Ok(())
+}
+
+fn miri_builds_expire_with_their_code_environment(
+    fixture: &CodeFixture,
+    installed: &platform::code_environment::Installations,
+    environment: platform::code_environment::CodeEnvironment,
+) -> Result<()> {
+    use platform::code_environment::MIRI_TARGET_VARIABLE;
+    const LAUNCHER: &str = "saved-miri-launcher";
+    const CARGO_ARTIFACT: &str = "retained-cargo-artifact";
+    let first = environment.command("cargo-miri");
+    let location = |command: &std::process::Command, name: &str| -> Result<PathBuf> {
+        command
+            .get_envs()
+            .find_map(|(key, value)| (key == name).then_some(value).flatten())
+            .map(PathBuf::from)
+            .with_context(|| format!("code environment has no {name}"))
+    };
+    let target = location(&first, MIRI_TARGET_VARIABLE)?;
+    let cargo = location(&first, "CARGO_TARGET_DIR")?;
+    assert!(target.starts_with(location(&first, "HOME")?));
+    fs::create_dir_all(&target)?;
+    fs::write(target.join(LAUNCHER), b"captured old cwd and environment")?;
+    fs::create_dir_all(&cargo)?;
+    fs::write(cargo.join(CARGO_ARTIFACT), b"reusable compiler output")?;
+    let second = platform::code_environment::CodeEnvironment::build(&fixture.root, installed)?;
+    let command = second.command("cargo-miri");
+    let fresh = location(&command, MIRI_TARGET_VARIABLE)?;
+    assert_ne!(target, fresh);
+    assert_eq!(cargo, location(&command, "CARGO_TARGET_DIR")?);
+    assert!(fresh.starts_with(location(&command, "HOME")?));
+    fs::create_dir_all(&fresh)?;
+    drop(environment);
+    assert!(
+        !target.exists(),
+        "a destroyed environment retained its launch metadata"
+    );
+    assert!(
+        fresh.is_dir(),
+        "destroying one environment removed the next target"
+    );
+    assert_eq!(
+        fs::read(cargo.join(CARGO_ARTIFACT))?,
+        b"reusable compiler output"
     );
     Ok(())
 }

@@ -14,7 +14,7 @@ const UNIX_BASE: [&str; 4] = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
 const WINDOWS_GIT: &str = "Git";
 const MISE_CONFIG: &str = "mise.toml";
 const CARGO_BIN: &str = "bin";
-const RUSTUP_COMPONENT_PROXY: &str = "cargo-miri";
+const RUSTUP_COMPONENT_PROXIES: [&str; 2] = ["cargo-miri", "rustdoc"];
 const KANI_HOME: &str = ".kani";
 const KANI_TOOL: &str = "cargo:kani-verifier";
 const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
@@ -25,6 +25,8 @@ const NATIVE_QUERY_CONFIG: &str = "empty.toml";
 pub const NATIVE_PATH_DIFF: &str = "DOTFILES_HOST_MISE_DIFF";
 pub const NATIVE_PATH_DIFF_PRESENT: &str = "DOTFILES_HOST_MISE_DIFF_PRESENT";
 pub const HOST_CACHE: &str = ".cache/dotfiles/hosts";
+pub const MIRI_TARGET_VARIABLE: &str = "DOTFILES_HOST_MIRI_TARGET";
+const MIRI_TARGET_DIRECTORY: &str = ".cache/miri-target";
 #[cfg(unix)]
 const BOOTSTRAP_COPY: &str = "/bin/cp";
 #[cfg(windows)]
@@ -482,6 +484,7 @@ impl CodeEnvironment {
             ("DOTFILES_ONEPASSWORD_APP", home.join("absent-app")),
             ("CARGO_TARGET_DIR", installed.cache.join("code")),
             ("DOTFILES_HOST_CACHE", installed.cache.clone()),
+            (MIRI_TARGET_VARIABLE, home.join(MIRI_TARGET_DIRECTORY)),
         ] {
             self.set(name, value.as_os_str());
         }
@@ -836,8 +839,10 @@ fn link_rust_proxies(mise: &Path, installed: &Installations) -> Result<()> {
         Tool::Rustup.program(),
         Tool::Cargo.program(),
         Tool::Rustc.program(),
-        RUSTUP_COMPONENT_PROXY,
-    ] {
+    ]
+    .into_iter()
+    .chain(RUSTUP_COMPONENT_PROXIES)
+    {
         link_executable(
             &source,
             &mise.with_file_name(format!("{}{}", program, std::env::consts::EXE_SUFFIX)),

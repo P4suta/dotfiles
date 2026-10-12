@@ -510,6 +510,8 @@ pub fn container_run_arguments(root: &Path, image: &str, target_volume: &str) ->
             "--env",
             "CARGO_TARGET_DIR=/cache/target",
             "--env",
+            "DOTFILES_HOST_CACHE=/cache",
+            "--env",
             &format!("{INSIDE_CONTAINER}=1"),
             "--workdir",
             "/work",
@@ -806,15 +808,9 @@ fn verify_fuzz(root: &Path) -> Result<()> {
 /// The cargo-mutants release that `mise.toml` and the proof image pin.
 pub const MUTANTS_VERSION: &str = "27.1.0";
 
-/// The mutants built and tested at once: one per core the host offers, since each one only builds and tests the small core.
-fn mutant_jobs() -> String {
-    std::thread::available_parallelism()
-        .map_or(1, std::num::NonZeroUsize::get)
-        .to_string()
-}
-
 /// The crate whose specification lost its assertion, which the mutation gate must refuse.
 const MUTANTS_FIXTURE: &str = "xtask/proofs/mutants-fixture";
+const MUTANTS_FIXTURE_PACKAGE: &str = "mutants-fixture";
 
 /// The package whose tests must catch every mutant of its code.
 const MUTATED_PACKAGE: &str = "rules";
@@ -822,14 +818,29 @@ const MUTATED_PACKAGE: &str = "rules";
 /// Each mutation worker runs its tests serially while the campaign schedules workers.
 const MUTANT_TEST_THREADS: &str = "1";
 
+const MUTANT_OUTPUT_DIRECTORY: &str = "mutation-evidence";
+const MUTANT_OUTPUT_PREFIX: &str = "campaign-";
+const HOST_CACHE_VARIABLE: &str = "DOTFILES_HOST_CACHE";
+
 fn mutants(directory: &Path, output: &Path) -> std::process::Command {
+    mutants_with_cores(
+        directory,
+        output,
+        std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get),
+    )
+}
+
+fn mutants_with_cores(directory: &Path, output: &Path, available: usize) -> std::process::Command {
     let mut command = Tool::Cargo.command();
+    let jobs = proof_budget_rules::mutant_jobs(available).to_string();
     // Each mutant builds in its own copy of the tree, which a shared target directory would serialize.
     command
         .env_remove("CARGO_TARGET_DIR")
         .env("RUST_TEST_THREADS", MUTANT_TEST_THREADS)
-        .args(["mutants", "--no-shuffle", "--jobs"])
-        .arg(mutant_jobs())
+        .args(["mutants", "--no-shuffle", "--jobserver=true", "--jobs"])
+        .arg(&jobs)
+        .arg("--jobserver-tasks")
+        .arg(&jobs)
         .arg("--dir")
         .arg(directory)
         .arg("--output")
@@ -837,13 +848,269 @@ fn mutants(directory: &Path, output: &Path) -> std::process::Command {
     command
 }
 
-/// A campaign's list of mutants with one outcome, empty when the campaign found none.
-fn outcome(output: &Path, list: &str) -> String {
-    fs::read_to_string(output.join("mutants.out").join(list)).unwrap_or_default()
+fn mutant_output_root(root: &Path, cache: Option<&Path>) -> std::path::PathBuf {
+    cache
+        .map_or_else(|| root.join("target"), Path::to_path_buf)
+        .join(MUTANT_OUTPUT_DIRECTORY)
+}
+
+fn with_mutant_output(directory: &Path, check: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
+    fs::create_dir_all(directory)?;
+    let output = tempfile::Builder::new()
+        .prefix(MUTANT_OUTPUT_PREFIX)
+        .tempdir_in(directory)?;
+    match check(output.path()) {
+        Ok(()) => {
+            let removal = format!(
+                "remove successful mutation evidence at {}",
+                output.path().display()
+            );
+            platform::cleanup::report(output.close(), removal);
+            Ok(())
+        }
+        Err(error) => {
+            let retained = output.keep();
+            Err(error.context(format!(
+                "mutation evidence retained at {}",
+                retained.display()
+            )))
+        }
+    }
+}
+
+fn mutation_campaign(root: &Path, check: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
+    let cache = std::env::var_os(HOST_CACHE_VARIABLE)
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from);
+    let directory = mutant_output_root(root, cache.as_deref());
+    with_mutant_output(&directory, check)
 }
 
 fn lines(text: &str) -> u64 {
     text.lines().filter(|line| !line.trim().is_empty()).count() as u64
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct MutationIdentity {
+    name: String,
+    package: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+enum MutationScenario {
+    Baseline,
+    Mutant(MutationIdentity),
+}
+
+#[derive(Debug, serde::Deserialize)]
+enum MutationStage {
+    Build,
+    Test,
+}
+
+#[derive(Debug, serde::Deserialize)]
+enum MutationStatus {
+    Success,
+    Failure(i32),
+    Timeout,
+}
+
+impl MutationStatus {
+    fn phase(&self) -> Result<proof_budget_rules::MutationPhase> {
+        use proof_budget_rules::MutationPhase;
+        match self {
+            Self::Success => Ok(MutationPhase::Passed),
+            Self::Failure(code) if *code != 0 => Ok(MutationPhase::Failed),
+            Self::Timeout => Ok(MutationPhase::TimedOut),
+            Self::Failure(_) => {
+                anyhow::bail!("a mutation phase claims failure with exit code zero")
+            }
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct MutationPhaseReceipt {
+    phase: MutationStage,
+    process_status: MutationStatus,
+}
+
+#[derive(Clone, Copy, Debug, serde::Deserialize, Eq, PartialEq)]
+enum MutationSummary {
+    Success,
+    Failure,
+    CaughtMutant,
+    MissedMutant,
+    Timeout,
+    Unviable,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct MutationReceipt {
+    scenario: MutationScenario,
+    summary: MutationSummary,
+    phase_results: Vec<MutationPhaseReceipt>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct MutationReport {
+    outcomes: Vec<MutationReceipt>,
+    total_mutants: u64,
+    missed: u64,
+    caught: u64,
+    timeout: u64,
+    unviable: u64,
+    success: u64,
+    end_time: Option<String>,
+    cargo_mutants_version: String,
+}
+
+fn mutation_phases(
+    phases: &[MutationPhaseReceipt],
+) -> Result<(
+    proof_budget_rules::MutationPhase,
+    Option<proof_budget_rules::MutationPhase>,
+)> {
+    match phases {
+        [
+            MutationPhaseReceipt {
+                phase: MutationStage::Build,
+                process_status,
+            },
+        ] => Ok((process_status.phase()?, None)),
+        [
+            MutationPhaseReceipt {
+                phase: MutationStage::Build,
+                process_status: build,
+            },
+            MutationPhaseReceipt {
+                phase: MutationStage::Test,
+                process_status: test,
+            },
+        ] => Ok((build.phase()?, Some(test.phase()?))),
+        _ => anyhow::bail!("mutation phases are missing, duplicated, or out of order"),
+    }
+}
+
+fn validate_mutation_report(
+    inventory: &[MutationIdentity],
+    report: MutationReport,
+    status: Option<i32>,
+    package: &str,
+) -> Result<MutationReport> {
+    use proof_budget_rules::{MutationOutcome, MutationPhase, mutation_exit, mutation_outcome};
+    ensure!(
+        report.cargo_mutants_version == MUTANTS_VERSION
+            && report
+                .end_time
+                .as_deref()
+                .is_some_and(|end| !end.is_empty()),
+        "mutation execution is incomplete or its version differs"
+    );
+    let expected: BTreeSet<_> = inventory
+        .iter()
+        .map(|mutant| mutant.name.as_str())
+        .collect();
+    ensure!(
+        !expected.is_empty()
+            && expected.len() == inventory.len()
+            && inventory
+                .iter()
+                .all(|mutant| !mutant.name.is_empty() && mutant.package == package),
+        "mutation inventory is empty, duplicated, or names another package"
+    );
+    let mut actual = BTreeSet::new();
+    let mut counts = [0u64; 4];
+    let mut baseline = false;
+    for outcome in &report.outcomes {
+        let (build, test) = mutation_phases(&outcome.phase_results)?;
+        let MutationScenario::Mutant(mutant) = &outcome.scenario else {
+            ensure!(
+                !baseline
+                    && build == MutationPhase::Passed
+                    && test == Some(MutationPhase::Passed)
+                    && outcome.summary == MutationSummary::Success,
+                "mutation baseline is missing, duplicated, or failed"
+            );
+            baseline = true;
+            continue;
+        };
+        ensure!(
+            baseline,
+            "mutation scenarios precede their successful baseline"
+        );
+        ensure!(
+            mutant.package == package
+                && expected.contains(mutant.name.as_str())
+                && actual.insert(mutant.name.as_str()),
+            "mutation outcome has an unexpected or duplicate identity"
+        );
+        let result = mutation_outcome(build, test)
+            .context("mutation outcome has no completed test or failed build")?;
+        let summary = match result {
+            MutationOutcome::Caught => MutationSummary::CaughtMutant,
+            MutationOutcome::Missed => MutationSummary::MissedMutant,
+            MutationOutcome::TimedOut => MutationSummary::Timeout,
+            MutationOutcome::Unviable => MutationSummary::Unviable,
+        };
+        ensure!(
+            outcome.summary == summary,
+            "mutation summary contradicts its phase results"
+        );
+        let count = counts
+            .get_mut(result as usize)
+            .context("unknown mutation result")?;
+        *count = count.checked_add(1).context("mutation count overflow")?;
+    }
+    ensure!(
+        baseline && actual == expected,
+        "mutation execution omitted its baseline or selected mutants"
+    );
+    ensure!(
+        report.success == 0
+            && [
+                report.caught,
+                report.missed,
+                report.timeout,
+                report.unviable
+            ] == counts,
+        "mutation counters contradict the completed scenarios"
+    );
+    let exit = mutation_exit(report.total_mutants, counts)
+        .context("mutation total disagrees with completed scenarios")?;
+    ensure!(
+        status == Some(exit),
+        "mutation process exit contradicts its complete results"
+    );
+    Ok(report)
+}
+
+fn mutation_names(report: &MutationReport, summary: MutationSummary) -> Vec<String> {
+    report
+        .outcomes
+        .iter()
+        .filter_map(|outcome| {
+            if outcome.summary == summary
+                && let MutationScenario::Mutant(mutant) = &outcome.scenario
+            {
+                Some(mutant.name.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn completed_mutation_report(
+    output: &Path,
+    status: std::process::ExitStatus,
+    package: &str,
+) -> Result<MutationReport> {
+    let reports = output.join("mutants.out");
+    let inventory: Vec<MutationIdentity> =
+        serde_json::from_slice(&fs::read(reports.join("mutants.json"))?)?;
+    let report: MutationReport = serde_json::from_slice(&fs::read(reports.join("outcomes.json"))?)?;
+    validate_mutation_report(&inventory, report, status.code(), package)
 }
 
 /// Mutates the decision core, holds its survivors and unexplained timeouts to their baselines, and refuses a fixture whose specification lost its assertion.
@@ -864,15 +1131,17 @@ fn verify_mutants(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
         verify_mutant_results(root, manifest)
     });
     checks.run("mutation fixture", || {
-        let fixture = tempfile::tempdir()?;
-        mutants(&root.join(MUTANTS_FIXTURE), fixture.path())
-            .status()
-            .context("start cargo-mutants on its fixture")?;
-        ensure!(
-            lines(&outcome(fixture.path(), "missed.txt")) > 0,
-            "the mutation gate admitted {MUTANTS_FIXTURE}, whose specification asserts nothing, so the gate proves nothing"
-        );
-        Ok(())
+        mutation_campaign(root, |output| {
+            let status = mutants(&root.join(MUTANTS_FIXTURE), output)
+                .status()
+                .context("start cargo-mutants on its fixture")?;
+            let report = completed_mutation_report(output, status, MUTANTS_FIXTURE_PACKAGE)?;
+            ensure!(
+                report.missed != 0,
+                "the mutation gate admitted {MUTANTS_FIXTURE}, whose specification asserts nothing, so the gate proves nothing"
+            );
+            Ok(())
+        })
     });
     checks.finish()?;
     println!(
@@ -882,18 +1151,26 @@ fn verify_mutants(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
 }
 
 fn verify_mutant_results(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
-    let output = tempfile::tempdir()?;
-    let status = mutants(root, output.path())
+    mutation_campaign(root, |output| check_mutant_results(root, manifest, output))
+}
+
+fn check_mutant_results(
+    root: &Path,
+    manifest: &obligations::Manifest,
+    output: &Path,
+) -> Result<()> {
+    let status = mutants(root, output)
         .args(["--package", MUTATED_PACKAGE])
         .status()
         .context("start cargo-mutants")?;
+    let report = completed_mutation_report(output, status, MUTATED_PACKAGE)?;
     ensure!(
-        !outcome(output.path(), "caught.txt").is_empty(),
+        report.caught != 0,
         "cargo-mutants caught no mutant of {MUTATED_PACKAGE}, so the campaign didn't run: {status}"
     );
-    let missed = outcome(output.path(), "missed.txt");
-    let unexplained =
-        obligations::unexplained_timeouts(manifest, &outcome(output.path(), "timeout.txt"));
+    let missed = mutation_names(&report, MutationSummary::MissedMutant).join("\n");
+    let timeouts = mutation_names(&report, MutationSummary::Timeout).join("\n");
+    let unexplained = obligations::unexplained_timeouts(manifest, &timeouts);
     let baselines = obligations::parse_baselines(
         &fs::read_to_string(root.join(obligations::BASELINES)).context(obligations::BASELINES)?,
     )?;
@@ -953,6 +1230,7 @@ const MIRI_BATCH_TESTS: usize = 32;
 
 /// The crate with undefined behavior that Miri must refuse.
 const MIRI_FIXTURE: &str = "xtask/proofs/miri-fixture/Cargo.toml";
+const MIRI_CHECKOUT_TARGET: &str = "target/miri";
 
 /// A discovered test and its existing ignore state.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1105,7 +1383,11 @@ fn nightly_cargo(root: &Path) -> std::process::Command {
 
 fn miri(root: &Path) -> std::process::Command {
     let mut command = nightly_cargo(root);
-    command.args(["miri", "test", "--locked"]);
+    let target = std::env::var_os(platform::code_environment::MIRI_TARGET_VARIABLE)
+        .map_or_else(|| root.join(MIRI_CHECKOUT_TARGET), std::path::PathBuf::from);
+    command
+        .args(["miri", "test", "--locked", "--target-dir"])
+        .arg(target);
     command
 }
 
@@ -1129,7 +1411,10 @@ fn verify_miri(root: &Path) -> Result<()> {
         ensure!(
             !output.status.success()
                 && String::from_utf8_lossy(&output.stderr).contains("Undefined Behavior"),
-            "Miri admitted the out-of-bounds read in {MIRI_FIXTURE}, so the gate proves nothing"
+            "Miri did not report undefined behavior in {MIRI_FIXTURE}: {}\n{}\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
         );
         Ok(())
     });
@@ -1264,20 +1549,312 @@ mod tests {
     const MUTATION_TEST: &str =
         "skill_proofs::tests::mutation_workers_do_not_multiply_the_test_pool";
 
+    fn mutation_report_fixture() -> (Value, Value) {
+        let phase = |name, status| serde_json::json!({"phase":name,"process_status":status});
+        let baseline = serde_json::json!({"scenario":"Baseline","summary":"Success","phase_results":[phase("Build",serde_json::json!("Success")),phase("Test",serde_json::json!("Success"))]});
+        let cases = [
+            (
+                "caught",
+                "CaughtMutant",
+                vec![
+                    phase("Build", serde_json::json!("Success")),
+                    phase("Test", serde_json::json!({"Failure":101})),
+                ],
+            ),
+            (
+                "missed",
+                "MissedMutant",
+                vec![
+                    phase("Build", serde_json::json!("Success")),
+                    phase("Test", serde_json::json!("Success")),
+                ],
+            ),
+            (
+                "timeout",
+                "Timeout",
+                vec![
+                    phase("Build", serde_json::json!("Success")),
+                    phase("Test", serde_json::json!("Timeout")),
+                ],
+            ),
+            (
+                "unviable",
+                "Unviable",
+                vec![phase("Build", serde_json::json!({"Failure":101}))],
+            ),
+        ];
+        let inventory: Vec<_> = cases
+            .iter()
+            .map(|(name, _, _)| serde_json::json!({"name":name,"package":"rules"}))
+            .collect();
+        let mut outcomes = vec![baseline];
+        outcomes.extend(cases.into_iter().map(|(name, summary, phase_results)| serde_json::json!({"scenario":{"Mutant":{"name":name,"package":"rules"}},"summary":summary,"phase_results":phase_results})));
+        (
+            serde_json::json!(inventory),
+            serde_json::json!({"outcomes":outcomes,"total_mutants":4,"missed":1,"caught":1,"timeout":1,"unviable":1,"success":0,"end_time":"2026-10-12T10:00:00Z","cargo_mutants_version":MUTANTS_VERSION}),
+        )
+    }
+
+    fn validate_mutation_fixture(
+        inventory: Value,
+        report: Value,
+        exit: Option<i32>,
+    ) -> Result<MutationReport> {
+        let inventory: Vec<MutationIdentity> = serde_json::from_value(inventory)?;
+        validate_mutation_report(
+            &inventory,
+            serde_json::from_value(report)?,
+            exit,
+            MUTATED_PACKAGE,
+        )
+    }
+
+    #[test]
+    fn mutation_reports_bind_terminal_phases_and_counters() -> Result<()> {
+        let (inventory, report) = mutation_report_fixture();
+        let validated = validate_mutation_fixture(
+            inventory.clone(),
+            report.clone(),
+            Some(proof_budget_rules::MUTATION_TIMEOUT_EXIT),
+        )?;
+        assert_eq!(
+            mutation_names(&validated, MutationSummary::CaughtMutant),
+            ["caught"]
+        );
+        assert_eq!(
+            mutation_names(&validated, MutationSummary::Timeout),
+            ["timeout"]
+        );
+        for (pointer, value) in [
+            ("/end_time", serde_json::json!(null)),
+            ("/end_time", serde_json::json!("")),
+            ("/cargo_mutants_version", serde_json::json!("wrong")),
+            ("/total_mutants", serde_json::json!(3)),
+            ("/caught", serde_json::json!(u64::MAX)),
+            ("/success", serde_json::json!(1)),
+            ("/outcomes/0/summary", serde_json::json!("Failure")),
+            (
+                "/outcomes/0/phase_results/1/process_status",
+                serde_json::json!({"Failure":101}),
+            ),
+            (
+                "/outcomes/1/scenario/Mutant/name",
+                serde_json::json!("unexpected"),
+            ),
+            (
+                "/outcomes/1/scenario/Mutant/package",
+                serde_json::json!("other"),
+            ),
+            ("/outcomes/1/summary", serde_json::json!("MissedMutant")),
+            (
+                "/outcomes/1/phase_results/1/process_status",
+                serde_json::json!({"Failure":0}),
+            ),
+            (
+                "/outcomes/1/phase_results/1/process_status",
+                serde_json::json!("Other"),
+            ),
+            (
+                "/outcomes/1/phase_results/0/phase",
+                serde_json::json!("Test"),
+            ),
+            ("/outcomes/1/phase_results", serde_json::json!([])),
+            (
+                "/outcomes/3/phase_results",
+                serde_json::json!([{"phase":"Build","process_status":"Timeout"}]),
+            ),
+        ] {
+            let mut broken = report.clone();
+            *broken.pointer_mut(pointer).unwrap() = value;
+            assert!(
+                validate_mutation_fixture(
+                    inventory.clone(),
+                    broken,
+                    Some(proof_budget_rules::MUTATION_TIMEOUT_EXIT)
+                )
+                .is_err(),
+                "{pointer}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn mutation_reports_require_every_unique_inventory_identity_and_baseline() {
+        let (inventory, report) = mutation_report_fixture();
+        for index in [0, 1] {
+            let mut omitted = report.clone();
+            omitted["outcomes"].as_array_mut().unwrap().remove(index);
+            if index != 0 {
+                omitted["caught"] = serde_json::json!(0);
+                omitted["total_mutants"] = serde_json::json!(3);
+            }
+            assert!(
+                validate_mutation_fixture(
+                    inventory.clone(),
+                    omitted,
+                    Some(proof_budget_rules::MUTATION_TIMEOUT_EXIT)
+                )
+                .is_err()
+            );
+            let mut duplicate = report.clone();
+            let copied = duplicate["outcomes"][index].clone();
+            duplicate["outcomes"].as_array_mut().unwrap().push(copied);
+            if index != 0 {
+                duplicate["caught"] = serde_json::json!(2);
+                duplicate["total_mutants"] = serde_json::json!(5);
+            }
+            assert!(
+                validate_mutation_fixture(
+                    inventory.clone(),
+                    duplicate,
+                    Some(proof_budget_rules::MUTATION_TIMEOUT_EXIT)
+                )
+                .is_err()
+            );
+        }
+        let mut duplicate = inventory.clone();
+        duplicate.as_array_mut().unwrap().push(inventory[0].clone());
+        let mut other = inventory.clone();
+        other[0]["package"] = serde_json::json!("other");
+        for broken in [serde_json::json!([]), duplicate, other] {
+            assert!(
+                validate_mutation_fixture(
+                    broken,
+                    report.clone(),
+                    Some(proof_budget_rules::MUTATION_TIMEOUT_EXIT)
+                )
+                .is_err()
+            );
+        }
+        for exit in [
+            None,
+            Some(proof_budget_rules::MUTATION_CLEAN_EXIT),
+            Some(proof_budget_rules::MUTATION_MISSED_EXIT),
+        ] {
+            assert!(validate_mutation_fixture(inventory.clone(), report.clone(), exit).is_err());
+        }
+    }
+
+    #[test]
+    fn mutation_commands_bind_worker_build_and_test_pools() {
+        const OBSERVED_MAC_CORES: usize = 18;
+        for (cores, workers) in [
+            (0, 1),
+            (
+                proof_budget_rules::MUTANT_JOB_LIMIT,
+                proof_budget_rules::MUTANT_JOB_LIMIT,
+            ),
+            (
+                proof_budget_rules::MUTANT_JOB_LIMIT + 1,
+                proof_budget_rules::MUTANT_JOB_LIMIT,
+            ),
+            (OBSERVED_MAC_CORES, proof_budget_rules::MUTANT_JOB_LIMIT),
+            (usize::MAX, proof_budget_rules::MUTANT_JOB_LIMIT),
+        ] {
+            let command = mutants_with_cores(Path::new("source"), Path::new("output"), cores);
+            let arguments: Vec<_> = command
+                .get_args()
+                .map(|argument| argument.to_string_lossy())
+                .collect();
+            let expected = workers.to_string();
+            for option in ["--jobs", "--jobserver-tasks"] {
+                assert!(
+                    arguments
+                        .windows(2)
+                        .any(|pair| pair[0] == option && pair[1] == expected),
+                    "{cores}: {arguments:?}"
+                );
+            }
+            assert!(
+                arguments
+                    .iter()
+                    .any(|argument| argument == "--jobserver=true")
+            );
+            assert!(
+                command
+                    .get_envs()
+                    .any(|(name, value)| name == "RUST_TEST_THREADS"
+                        && value == Some(std::ffi::OsStr::new("1")))
+            );
+            assert!(
+                command
+                    .get_envs()
+                    .any(|(name, value)| name == "CARGO_TARGET_DIR" && value.is_none())
+            );
+        }
+    }
+
+    #[test]
+    fn mutation_failures_retain_exact_diagnostics_outside_the_scratch_scope() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let scratch = tempfile::tempdir_in(scope.path())?;
+        let cache = scope.path().join("cache");
+        let parent = mutant_output_root(scratch.path(), Some(&cache));
+        let mut retained = None;
+        let result = with_mutant_output(&parent, |output| {
+            retained = Some(output.to_path_buf());
+            fs::create_dir_all(output.join("mutants.out/log"))?;
+            fs::write(output.join("mutants.out/outcomes.json"), b"exact outcomes")?;
+            fs::write(
+                output.join("mutants.out/log/finite.log"),
+                b"exact test failure",
+            )?;
+            anyhow::bail!("unexplained mutation timeout")
+        });
+        let path = retained.context("the campaign started")?;
+        drop(scratch);
+        assert!(path.is_dir(), "the failed campaign deleted its diagnostics");
+        assert!(path.starts_with(&cache));
+        assert_eq!(
+            fs::read(path.join("mutants.out/outcomes.json"))?,
+            b"exact outcomes"
+        );
+        assert_eq!(
+            fs::read(path.join("mutants.out/log/finite.log"))?,
+            b"exact test failure"
+        );
+        let error = result.unwrap_err();
+        let report = format!("{error:#}");
+        assert!(report.contains("unexplained mutation timeout"));
+        assert!(report.contains(&path.display().to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn mutation_success_removes_its_owned_output() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let parent = mutant_output_root(scope.path(), None);
+        assert_eq!(
+            parent,
+            scope.path().join("target").join(MUTANT_OUTPUT_DIRECTORY)
+        );
+        let mut completed = None;
+        with_mutant_output(&parent, |output| {
+            completed = Some(output.to_path_buf());
+            fs::write(output.join("outcomes.json"), b"all caught")?;
+            Ok(())
+        })?;
+        assert!(!completed.context("the campaign started")?.exists());
+        Ok(())
+    }
+
     #[test]
     #[ignore = "requires the installed pinned cargo-mutants"]
     fn mutation_workers_do_not_multiply_the_test_pool() -> Result<()> {
         let root = crate::canonical(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").as_path())?;
         if std::env::var(NATIVE_FIXTURE).is_ok_and(|value| value == MUTATION_TEST) {
-            let output = tempfile::tempdir()?;
-            mutants(&root.join(MUTANTS_FIXTURE), output.path())
-                .status()
-                .context("start the mutation worker fixture")?;
-            ensure!(
-                lines(&outcome(output.path(), "missed.txt")) > 0,
-                "the mutation worker fixture failed its baseline or caught its assertionless rule"
-            );
-            return Ok(());
+            return mutation_campaign(&root, |output| {
+                let status = mutants(&root.join(MUTANTS_FIXTURE), output)
+                    .status()
+                    .context("start the mutation worker fixture")?;
+                let report = completed_mutation_report(output, status, MUTANTS_FIXTURE_PACKAGE)?;
+                ensure!(
+                    report.missed != 0,
+                    "the mutation worker fixture failed its baseline or caught its assertionless rule"
+                );
+                Ok(())
+            });
         }
         let home = platform::home::home().context("native tool home")?;
         let environment = dotfiles::hosts::code_environment(&root, &home)?;

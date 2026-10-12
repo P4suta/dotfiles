@@ -172,6 +172,7 @@ fn run(root: &Path, output: &Path, image: &str, model: &AlloyModel, command: &st
 /// Returns an error when Docker can't build or run the image, or a command ends otherwise than its obligation requires.
 pub fn verify(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
     let root = crate::canonical(root)?;
+    crate::container::verify_image_assets(&root)?;
     let output = tempfile::tempdir()?;
     let image = image(&root)?;
     build(&root, &image)?;

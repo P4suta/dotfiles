@@ -122,14 +122,14 @@ fn main() {
             }
             print!("{contents}");
         }
-        "rustc" => match arguments.as_slice() {
+        name @ ("rustc" | "rustdoc") => match arguments.as_slice() {
             [version] if version == "--version" => {
                 let toolchain = if executable.file_stem().unwrap() == "rustup" {
                     std::env::var("RUSTUP_TOOLCHAIN").unwrap()
                 } else {
                     "1.99.0".into()
                 };
-                println!("rustc {toolchain} fixture");
+                println!("{name} {toolchain} fixture");
             }
             [print, sysroot] if print == "--print" && sysroot == "sysroot" => {
                 println!("{}", std::fs::read_to_string("rust-sysroot").unwrap());
@@ -157,8 +157,12 @@ fn main() {
                     std::env::var("RUSTUP_TOOLCHAIN").unwrap()
                 );
             } else {
-                assert_eq!(arguments, ["--rustc-version"]);
-                let status = Command::new("rustc").arg("--version").status().unwrap();
+                let program = match arguments.as_slice() {
+                    [argument] if argument == "--rustc-version" => "rustc",
+                    [argument] if argument == "--rustdoc-version" => "rustdoc",
+                    _ => panic!("unexpected cargo command: {arguments:?}"),
+                };
+                let status = Command::new(program).arg("--version").status().unwrap();
                 std::process::exit(status.code().unwrap());
             }
         }
