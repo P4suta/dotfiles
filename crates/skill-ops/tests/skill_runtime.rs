@@ -287,6 +287,80 @@ fn checking_open_incidents_does_not_record_another_failure() -> Result<()> {
 }
 
 #[test]
+fn discharge_cli_refuses_unknown_identities_and_missing_prevention() -> Result<()> {
+    const IDENTITY_ERROR: &str = "a discharge must name one recorded incident identity";
+    const PREVENTION_ERROR: &str = "holds no complete prevention";
+    const ABBREVIATED_ID_LENGTH: usize = 12;
+
+    let scope = fixture()?;
+    let root = scope.path();
+    let state = root.join("state");
+    let inputs = [
+        "policy.json",
+        "approved.json",
+        "tree/alpha/SKILL.md",
+        "tree/beta/SKILL.md",
+    ]
+    .map(|path| {
+        let path = root.join(path);
+        fs::read(&path).map(|bytes| (path, bytes))
+    })
+    .into_iter()
+    .collect::<std::io::Result<Vec<_>>>()?;
+
+    refused_discharge(root, "invalid-identity", IDENTITY_ERROR)?;
+    let records = ops::incidents(&state)?;
+    assert_eq!(records.len(), 1);
+    let incident = &records[0];
+    assert_eq!(incident.rule, "tool.failure");
+    assert_eq!(incident.source.key(), "malformed-input");
+    assert!(
+        incident
+            .evidence
+            .iter()
+            .any(|text| text.contains(IDENTITY_ERROR))
+    );
+    let original_path = state
+        .join("incidents")
+        .join(format!("{}.json", incident.id));
+    let original = fs::read(&original_path)?;
+
+    let unknown = "0".repeat(incident.id.len());
+    assert!(!records.iter().any(|record| record.id == unknown));
+    refused_discharge(root, &unknown, IDENTITY_ERROR)?;
+    refused_discharge(root, &incident.id[..ABBREVIATED_ID_LENGTH], IDENTITY_ERROR)?;
+    refused_discharge(root, &incident.id, PREVENTION_ERROR)?;
+
+    assert_eq!(fs::read(original_path)?, original);
+    for (path, bytes) in inputs {
+        assert_eq!(fs::read(path)?, bytes);
+    }
+    assert!(!state.join("discharges").try_exists()?);
+    incident_fixture::preserve(scope);
+    Ok(())
+}
+
+fn refused_discharge(root: &Path, incident: &str, expected: &str) -> Result<()> {
+    let output = run(
+        root,
+        &[
+            "discharge",
+            "--rule",
+            "tool.failure",
+            "--incident",
+            incident,
+        ],
+        None,
+    )?;
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(stderr.contains(expected), "{stderr}");
+    eprint!("{stderr}");
+    assert_eq!(ops::discharges(&root.join("state"))?, []);
+    Ok(())
+}
+
+#[test]
 fn relative_analysis_paths_create_missing_parents_without_overwriting_reports() -> Result<()> {
     let fixture = fixture()?;
     let root = fixture.path();
