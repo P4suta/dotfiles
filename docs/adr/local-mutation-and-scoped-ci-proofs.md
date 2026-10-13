@@ -8,18 +8,18 @@ status: accepted
 
 The hosted Linux proof campaign reached its 60-minute limit during mutation testing.
 Kani, Miri, and all fuzz corpus replays completed, but the remaining measurements and models lacked hosted results.
-The owner paused hosted mutation testing pending the njutest project.
+The CI proof campaign defers mutation testing pending the njutest project.
 The Mac candidate gate already runs the complete mutation inventory before publication.
 
 ## Decision
 
 This amends the hosted campaign in [fixed processor budgets beside Mac proof campaigns](fixed-cpu-budgets-beside-mac-proof-campaigns.md).
-`just proofs` and the Mac candidate gate retain production mutation testing, its assertion-free rejecting fixture, and their existing budgets.
+`just proofs` and the Mac candidate gate keep production mutation testing, its assertion-free rejecting fixture, and their existing budgets.
 The required Linux job calls `just proofs-ci`.
 That command runs Kani, Miri, every fuzz corpus replay and rejecting fixture, fixed Linux measurements, Quint, Alloy, and Lean.
 Its declared scope excludes production mutation testing and its mutation fixture.
 It never reports a mutation result.
-The CI job keeps cargo-mutants disabled during this pause.
+The CI job excludes cargo-mutants during this pause.
 
 Kani retains its serial execution, complete inventory, rejecting probes, target semantics, and per-harness limits.
 Native candidate admission still requires the normal source-bound Code and Real results on every host.

@@ -64,6 +64,8 @@ fn ends_with_ci(bytes: &[u8], suffix: &[u8]) -> bool {
 /// The session links Claude Code adds to a message.
 const SESSION_LINK: &[u8] = b"https://claude.ai/code/";
 
+const _: () = assert!(matches!(SESSION_LINK, [_, ..]));
+
 /// The domain of the trailers an Anthropic agent adds, which email treats in any case.
 const AGENT_DOMAIN: &[u8] = b"@anthropic.com";
 
@@ -100,8 +102,15 @@ pub fn is_attribution(line: &[u8]) -> bool {
         return true;
     }
     // A bare session link on a line of its own.
-    tail.strip_prefix(SESSION_LINK)
-        .is_some_and(|rest| !rest.is_empty() && !rest.iter().any(u8::is_ascii_whitespace))
+    session_link(tail)
+}
+
+fn session_link(tail: &[u8]) -> bool {
+    tail.len() > SESSION_LINK.len()
+        && tail.first() == SESSION_LINK.first()
+        && tail
+            .strip_prefix(SESSION_LINK)
+            .is_some_and(|rest| !rest.iter().any(u8::is_ascii_whitespace))
 }
 
 /// The message without its attribution lines and the trailing blank lines they leave, and how many lines it removed.
@@ -1471,6 +1480,55 @@ mod proofs {
     }
 
     #[cfg(kani)]
+    fn bounded_session_link_fallback(shortest: u8, longest: u8) -> (bool, u8, bool) {
+        const LONGEST: usize = 32;
+        let line: [u8; LONGEST] = kani::any();
+        let length: u8 = kani::any();
+        kani::assume(shortest <= length && length <= longest);
+        let input = &line[..usize::from(length)];
+        let original = input
+            .strip_prefix(SESSION_LINK)
+            .is_some_and(|rest| !rest.is_empty() && !rest.iter().any(u8::is_ascii_whitespace));
+        let actual = session_link(input);
+        assert_eq!(actual, original);
+        (actual, length, input.first() == SESSION_LINK.first())
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn short_session_link_fallback_preserves_every_prefix_rejection() {
+        let (actual, length, same_first) = bounded_session_link_fallback(0, 23);
+        assert!(!actual);
+        kani::cover!(same_first);
+        kani::cover!(!same_first);
+        kani::cover!(length == 0);
+        kani::cover!(length == 23);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn session_link_fallback_with_one_to_four_suffix_bytes_keeps_its_predicate() {
+        let (actual, length, _) = bounded_session_link_fallback(24, 27);
+        kani::cover!(actual);
+        kani::cover!(!actual);
+        kani::cover!(length == 24);
+        kani::cover!(length == 27);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn session_link_fallback_with_five_to_nine_suffix_bytes_keeps_its_predicate() {
+        let (actual, length, _) = bounded_session_link_fallback(28, 32);
+        kani::cover!(actual);
+        kani::cover!(!actual);
+        kani::cover!(length == 28);
+        kani::cover!(length == 32);
+    }
+
+    #[cfg(kani)]
     #[kani::proof]
     #[kani::unwind(16)]
     fn an_agent_trailer_counts_in_any_case_and_a_human_one_never() {
@@ -2022,6 +2080,41 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_links_preserve_human_text_and_require_a_complete_suffix() {
+        for (line, attribution) in [
+            ("", false),
+            ("h", false),
+            ("human text beginning with the same letter", false),
+            ("https://example.invalid/session_1", false),
+            ("http://claude.ai/code/session_1", false),
+            ("https://claude.ai/code/", false),
+            ("https://claude.ai/code/ \t", false),
+            ("https://claude.ai/code/x", true),
+            ("https://claude.ai/code/x \t", true),
+            ("https://claude.ai/code/x y", false),
+            ("https://claude.ai/code/session_1", true),
+            ("https://claude.ai/code/session_1 \t", true),
+            ("https://claude.ai/code/session 1", false),
+            ("https://claude.ai/code/session\t1", false),
+        ] {
+            assert_eq!(is_attribution(line.as_bytes()), attribution, "{line:?}");
+            assert_eq!(
+                strip_attribution(line),
+                (
+                    String::from(if attribution { "" } else { line }),
+                    usize::from(attribution),
+                ),
+                "{line:?}",
+            );
+        }
+        let mut session = *b"https://claude.ai/code/session_1";
+        for first in u8::MIN..=u8::MAX {
+            session[0] = first;
+            assert_eq!(is_attribution(&session), first == b'h');
+        }
+    }
 
     #[test]
     #[cfg_attr(

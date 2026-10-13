@@ -71,7 +71,7 @@ const SIMPLIFIED_RANGES: &[(u32, u32)] = &[
 /// The frequent simplified forms outside those runs.
 ///
 /// Shinjitai that look simplified stay off this list, because Japan simplified them the same way, and `shinjitai_are_not_mistaken_for_simplified_chinese` tests them.
-const SIMPLIFIED_EXTRA: &str = "\
+const SIMPLIFIED_EXTRA_TEXT: &str = "\
 这过还进远违连迟运迈达边辽迁选逊递逻遗适\
 个们为么义习书买产亲亿从仅仓价众优伟传伤伦伪侧债储\
 关兴养兽农军凤凭击划则刚创删别劝办务动劳势华协单卫厂厅历压厌县变发叹吗员响哑\
@@ -82,6 +82,37 @@ const SIMPLIFIED_EXTRA: &str = "\
 玛环现玺珑琐电畅疗疟疮疯癞皑盏监盘睁瞒矫矿码砖础硕碱离种积稳穷窍窜窝窥竖竞笔笼筛筹签简篮类粪粮紧\
 网罗罚罢羁翘聂聋职聪肃肠肤肿胀胁脏脑脓脸腻舰舱艰艳艺节苍苏荐荚荣药莲获莹莺萝萤营萧萨蓝蔷\
 虏虑虾蚀蚁蚂蜗蝇衅补衬袄袜袭邓郑酝释阳阴阵阶际陆陇陈陕陨险隐隶难雏雾韦韧韩飞龙龚龛龟";
+
+const SIMPLIFIED_SEARCH_ALIGNMENT: usize = 8;
+
+#[repr(align(8))]
+struct AlignedSimplified([u8; SIMPLIFIED_EXTRA_TEXT.len()]);
+
+const SIMPLIFIED_EXTRA_BYTES: &AlignedSimplified = &{
+    let mut bytes = [0; SIMPLIFIED_EXTRA_TEXT.len()];
+    bytes.copy_from_slice(SIMPLIFIED_EXTRA_TEXT.as_bytes());
+    AlignedSimplified(bytes)
+};
+
+const SIMPLIFIED_EXTRA: &str = match std::str::from_utf8(&SIMPLIFIED_EXTRA_BYTES.0) {
+    Ok(text) => text,
+    Err(_) => panic!("the aligned simplified forms must remain valid UTF-8"),
+};
+
+const _: () = {
+    assert!(std::mem::align_of::<AlignedSimplified>() == SIMPLIFIED_SEARCH_ALIGNMENT);
+    assert!(std::mem::offset_of!(AlignedSimplified, 0) == 0);
+    assert!(SIMPLIFIED_EXTRA.len() == SIMPLIFIED_EXTRA_TEXT.len());
+    let original = SIMPLIFIED_EXTRA_TEXT.as_bytes();
+    let aligned = &SIMPLIFIED_EXTRA_BYTES.0;
+    assert!(aligned.len() == original.len());
+    let mut index = 0;
+    while index < original.len() {
+        assert!(aligned[index] == original[index]);
+        assert!(SIMPLIFIED_EXTRA.as_bytes()[index] == original[index]);
+        index += 1;
+    }
+};
 
 /// Characters that occupy no visual space, or reorder what surrounds them.
 const INVISIBLE: &[(u32, u32, &str)] = &[
@@ -361,7 +392,44 @@ pub fn refusal(
 
 #[cfg(test)]
 mod tests {
-    use super::{Mode, commit_message_body, evidence, refusal, scan};
+    use super::{
+        AlignedSimplified, Diagnostic, Mode, SIMPLIFIED_EXTRA, SIMPLIFIED_EXTRA_BYTES,
+        SIMPLIFIED_EXTRA_TEXT, SIMPLIFIED_SEARCH_ALIGNMENT, commit_message_body, evidence, refusal,
+        scan,
+    };
+
+    #[test]
+    fn simplified_forms_keep_aligned_identical_utf8_and_their_diagnostics() {
+        assert_eq!(
+            std::mem::align_of::<AlignedSimplified>(),
+            SIMPLIFIED_SEARCH_ALIGNMENT
+        );
+        assert_eq!(
+            SIMPLIFIED_EXTRA_BYTES.0.as_ptr().addr() % SIMPLIFIED_SEARCH_ALIGNMENT,
+            0
+        );
+        assert_eq!(
+            SIMPLIFIED_EXTRA.as_bytes(),
+            SIMPLIFIED_EXTRA_TEXT.as_bytes()
+        );
+        assert_eq!(
+            SIMPLIFIED_EXTRA.as_ptr().addr() % SIMPLIFIED_SEARCH_ALIGNMENT,
+            0
+        );
+        let expected: Vec<_> = SIMPLIFIED_EXTRA_TEXT
+            .chars()
+            .enumerate()
+            .map(|(index, ch)| Diagnostic {
+                line: 1,
+                col: index + 1,
+                ch,
+                kind: "simplified Chinese",
+            })
+            .collect();
+        for mode in [Mode::English, Mode::Japanese, Mode::Content] {
+            assert_eq!(scan(SIMPLIFIED_EXTRA, mode), expected);
+        }
+    }
 
     #[test]
     fn a_language_refusal_is_complete_and_bounded() {

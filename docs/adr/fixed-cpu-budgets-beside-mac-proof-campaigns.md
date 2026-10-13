@@ -19,7 +19,8 @@ Changing those ceilings or forcing instructions that the host doesn't support wo
 This amends the measurement allocation in [local proof campaigns on Mac](local-proof-campaigns-on-mac.md).
 Mac's `just proofs` runs Kani, Miri, fuzz corpus replay, mutation testing, and the Quint, Alloy, and Lean models.
 It reports that fixed CPU measurements require the separate mandatory Linux code-stage result.
-Linux's `just proofs` keeps its complete existing campaign and measurement checks, including the required hosted CI run.
+Linux's `just proofs` keeps its complete existing campaign and measurement checks.
+The required hosted CI run uses `just proofs-ci`, retaining measurement checks while deferring mutation testing as [scoped CI proofs](local-mutation-and-scoped-ci-proofs.md) describes.
 Windows keeps its existing Linux-container proof path.
 
 The canonical code gate selects the extra verification through the [typed family decision](../../crates/rules/src/hosts_rules.rs).

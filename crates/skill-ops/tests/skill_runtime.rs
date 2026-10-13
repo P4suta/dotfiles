@@ -1069,6 +1069,8 @@ fn a_manifest_without_reviewed_revisions_is_refused_with_the_install_command() -
         assert!(!refused.status.success());
         let message = String::from_utf8(refused.stderr)?;
         assert!(message.contains("just install-skill-ops"), "{message}");
+        assert!(message.contains("missing field `reviewed`"), "{message}");
     }
+    incident_fixture::preserve(fixture);
     Ok(())
 }

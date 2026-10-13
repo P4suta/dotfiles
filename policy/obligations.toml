@@ -2092,8 +2092,11 @@ bridge = "xtask/tests/contrast_refinement.rs::the_generated_definition_is_bound_
 verifier = "kani"
 source = "crates/rules/src/guard_rules.rs"
 probes = '''
-use production::{Ancestry, Push, civil_from_days, global_scan, image_is_pinned, overrides_policy, push, strip_attribution};
+use production::{Ancestry, Push, civil_from_days, global_scan, image_is_pinned, is_attribution, overrides_policy, push, strip_attribution};
 const MISSING: Ancestry = Ancestry { known: false, descends: true };
+#[kani::proof]
+#[kani::unwind(33)]
+fn reject_discarding_a_complete_bare_session_link() { assert!(!is_attribution(b"https://claude.ai/code/session_1")); }
 #[kani::proof]
 #[kani::unwind(90)]
 fn reject_removing_a_human_coauthor() { assert_eq!(strip_attribution("Co-authored-by: Human <human@example.invalid>\n").1, 1); }

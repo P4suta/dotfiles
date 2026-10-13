@@ -20,6 +20,37 @@ const GITHUB_REMOTE_PREFIXES: [&str; 3] = [
     "git@github.com:",
 ];
 
+const ABSOLUTE_PATH_BYTES: &[u8] = b"--path-format=absolute";
+const ABSOLUTE_PATH_ALIGNMENT: usize = 8;
+
+#[repr(align(8))]
+struct AbsolutePathArgument([u8; ABSOLUTE_PATH_BYTES.len()]);
+
+const ABSOLUTE_PATH_ARGUMENT: &AbsolutePathArgument = &{
+    let mut bytes = [0; ABSOLUTE_PATH_BYTES.len()];
+    bytes.copy_from_slice(ABSOLUTE_PATH_BYTES);
+    AbsolutePathArgument(bytes)
+};
+
+const ABSOLUTE_PATH: &str = match std::str::from_utf8(&ABSOLUTE_PATH_ARGUMENT.0) {
+    Ok(text) => text,
+    Err(_) => panic!("the absolute Git path argument must remain valid UTF-8"),
+};
+
+const _: () = {
+    assert!(std::mem::align_of::<AbsolutePathArgument>() == ABSOLUTE_PATH_ALIGNMENT);
+    assert!(std::mem::offset_of!(AbsolutePathArgument, 0) == 0);
+    assert!(ABSOLUTE_PATH.len() == ABSOLUTE_PATH_BYTES.len());
+    let mut original: &[u8] = ABSOLUTE_PATH_BYTES;
+    let mut actual = ABSOLUTE_PATH.as_bytes();
+    while let ([left, left_tail @ ..], [right, right_tail @ ..]) = (original, actual) {
+        assert!(*left == *right);
+        original = left_tail;
+        actual = right_tail;
+    }
+    assert!(original.is_empty() && actual.is_empty());
+};
+
 /// The global options that choose the repository, so the gate reads the repository the command acts on.
 fn locating(globals: &[String]) -> Vec<String> {
     let mut kept = Vec::new();
@@ -48,11 +79,8 @@ fn git(globals: &[String], arguments: &[&str]) -> Option<String> {
 /// Whether the stack tooling holds the lease of the repository `globals` select.
 pub fn leased(globals: &[String]) -> bool {
     let token = std::env::var_os(TOKEN).map(std::ffi::OsString::into_encoded_bytes);
-    let lease = git(
-        globals,
-        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    )
-    .and_then(|directory| std::fs::read(Path::new(&directory).join(LEASE)).ok());
+    let lease = git(globals, &["rev-parse", ABSOLUTE_PATH, "--git-common-dir"])
+        .and_then(|directory| std::fs::read(Path::new(&directory).join(LEASE)).ok());
     gate_rules::stack_tooling(token.as_deref(), lease.as_deref())
 }
 
@@ -145,7 +173,24 @@ impl Repository for Checkout {
 
 #[cfg(test)]
 mod tests {
-    use super::{github_slug, locating};
+    use super::{
+        ABSOLUTE_PATH, ABSOLUTE_PATH_ALIGNMENT, ABSOLUTE_PATH_ARGUMENT, ABSOLUTE_PATH_BYTES,
+        AbsolutePathArgument, github_slug, locating,
+    };
+
+    #[test]
+    fn absolute_git_paths_keep_aligned_identical_argument_bytes() {
+        assert_eq!(
+            std::mem::align_of::<AbsolutePathArgument>(),
+            ABSOLUTE_PATH_ALIGNMENT,
+        );
+        assert_eq!(
+            ABSOLUTE_PATH_ARGUMENT.0.as_ptr().addr() % ABSOLUTE_PATH_ALIGNMENT,
+            0,
+        );
+        assert_eq!(ABSOLUTE_PATH.as_bytes(), ABSOLUTE_PATH_BYTES);
+        assert_eq!(ABSOLUTE_PATH.as_ptr().addr() % ABSOLUTE_PATH_ALIGNMENT, 0);
+    }
 
     #[test]
     fn a_github_remote_names_its_repository() {

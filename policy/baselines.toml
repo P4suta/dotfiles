@@ -4,11 +4,11 @@
 
 [[metric]]
 metric = "proved-subjects"
-exact = 228
+exact = 229
 
 [[metric]]
 metric = "probes"
-exact = 271
+exact = 274
 
 # The three unsafe blocks and the console handler of the Win32 sites in policy/unsafe-sites.toml, and the read past a slice in the Miri fixture.
 [[metric]]
@@ -37,7 +37,7 @@ exact = 160
 [[metric]]
 metric = "ir"
 bench = "strip"
-exact = 7323
+exact = 7291
 
 [[metric]]
 metric = "heap-peak"
@@ -67,7 +67,7 @@ exact = 45572
 [[metric]]
 metric = "ir"
 bench = "pre_push_denied"
-exact = 962061
+exact = 962058
 
 [[metric]]
 metric = "heap-peak"
@@ -77,7 +77,7 @@ exact = 21150
 [[metric]]
 metric = "ir"
 bench = "commit_message_clean"
-exact = 1249070
+exact = 1248995
 
 [[metric]]
 metric = "heap-peak"
@@ -87,7 +87,7 @@ exact = 7504
 [[metric]]
 metric = "ir"
 bench = "commit_message_attribution"
-exact = 1648888
+exact = 1648711
 
 [[metric]]
 metric = "heap-peak"
