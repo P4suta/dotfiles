@@ -453,7 +453,7 @@ mod tests {
             let bytes = match arguments.first().and_then(|value| value.to_str()) {
                 Some("prompt") => b"quote ' \" $() `backtick` \\ newline\n'#\x1b[0m".to_vec(),
                 Some("init") if arguments.get(1).is_some_and(|value| value == "nu") => {
-                    b"export-env { load-env {\n    PROMPT_MULTILINE_INDICATOR: (\n        ^'/native path/starship' prompt --continuation\n    )\n    PROMPT_COMMAND: {|| ^starship prompt }\n}}\n".to_vec()
+                    b"export-env { load-env {\n    PROMPT_MULTILINE_INDICATOR: (\n        ^/native/mise/installs/starship/1.26.0/starship prompt --continuation\n    )\n    PROMPT_COMMAND: {|| ^starship prompt }\n}}\n".to_vec()
                 }
                 Some("init") if arguments.get(1).is_some_and(|value| value == "zsh") => {
                     b"PROMPT='$('/native path/starship' prompt)'\nPROMPT2=\"$(/native/path/starship prompt --continuation)\"\n".to_vec()

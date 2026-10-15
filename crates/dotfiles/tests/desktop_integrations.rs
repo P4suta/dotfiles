@@ -279,7 +279,7 @@ impl OpenCodeApplyFixture {
                 .parent()
                 .context("template parent is missing")?,
         )?;
-        fs::copy(Self::production_template(), &installed_template)?;
+        fs::write(&installed_template, fs::read(Self::production_template())?)?;
         Ok(Self {
             scope,
             checkout,
@@ -427,9 +427,9 @@ fn canonical_opencode_registration_converges_without_an_external_edit_refusal() 
             .iter()
             .any(|evidence| evidence.contains(".config/opencode/opencode.json"))
     );
-    fs::copy(
-        OpenCodeApplyFixture::production_template(),
+    fs::write(
         &fixture.installed_template,
+        fs::read(OpenCodeApplyFixture::production_template())?,
     )?;
     let applied = fixture.apply("canonical-backup")?;
     ensure!(

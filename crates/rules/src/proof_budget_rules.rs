@@ -5,10 +5,17 @@ pub const BUDGET_MILLIS: u64 = 30_000;
 pub const TIMEOUT_SECONDS: u64 = 60;
 
 const NANOS_PER_MILLI: u128 = 1_000_000;
+const MAX_ELAPSED_NANOS: u128 = (u64::MAX as u128) * NANOS_PER_MILLI;
 
 #[must_use]
 pub fn elapsed_millis(nanos: u128) -> Option<u64> {
-    u64::try_from(nanos.div_ceil(NANOS_PER_MILLI)).ok()
+    if nanos > MAX_ELAPSED_NANOS {
+        None
+    } else if nanos == 0 {
+        Some(0)
+    } else {
+        u64::try_from((nanos - 1) / NANOS_PER_MILLI + 1).ok()
+    }
 }
 
 /// The largest mutation worker pool and shared Cargo jobserver pool.
@@ -142,26 +149,30 @@ pub const fn verdict(duration_millis: Option<u64>) -> Verdict {
 mod proofs {
     use super::*;
 
-    pub fn spec_elapsed_millis(nanos: u128) {
-        let millis = nanos / NANOS_PER_MILLI + u128::from(!nanos.is_multiple_of(NANOS_PER_MILLI));
-        assert_eq!(
-            elapsed_millis(nanos).is_some(),
-            millis <= u128::from(u64::MAX)
-        );
-        if let Some(actual) = elapsed_millis(nanos) {
-            assert_eq!(u128::from(actual), millis);
+    pub fn spec_elapsed_millis(nanos: u128) -> Option<u64> {
+        let elapsed = elapsed_millis(nanos);
+        assert_eq!(elapsed.is_some(), nanos <= MAX_ELAPSED_NANOS);
+        if let Some(actual) = elapsed {
             assert!(u128::from(actual) * NANOS_PER_MILLI >= nanos);
             assert!(actual == 0 || u128::from(actual - 1) * NANOS_PER_MILLI < nanos);
         }
+        elapsed
     }
 
     #[cfg(kani)]
     #[kani::proof]
     fn host_elapsed_rounds_up_without_overflow_or_understatement() {
-        let nanos: u128 = kani::any();
-        spec_elapsed_millis(nanos);
-        kani::cover!(elapsed_millis(nanos) == Some(BUDGET_MILLIS));
-        kani::cover!(elapsed_millis(nanos).is_none());
+        let elapsed = if kani::any() {
+            let nanos = kani::any::<u128>() >> MAX_ELAPSED_NANOS.leading_zeros();
+            kani::assume(nanos <= MAX_ELAPSED_NANOS);
+            spec_elapsed_millis(nanos)
+        } else {
+            let nanos: u128 = kani::any();
+            kani::assume(nanos > MAX_ELAPSED_NANOS);
+            spec_elapsed_millis(nanos)
+        };
+        kani::cover!(elapsed == Some(BUDGET_MILLIS));
+        kani::cover!(elapsed.is_none());
     }
 
     #[cfg(kani)]
@@ -331,7 +342,10 @@ mod tests {
             u128::from(u64::MAX) * NANOS_PER_MILLI + 1,
             u128::MAX,
         ] {
-            proofs::spec_elapsed_millis(nanos);
+            assert_eq!(
+                proofs::spec_elapsed_millis(nanos),
+                u64::try_from(nanos.div_ceil(NANOS_PER_MILLI)).ok()
+            );
         }
     }
 

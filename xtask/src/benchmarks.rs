@@ -880,6 +880,7 @@ pub fn observe_mac(root: &Path, output: &Path, metadata_only: bool) -> Result<()
     ensure!(!output.exists(), "observation output already exists");
     let image = proof_image(&root)?;
     let image_id = crate::skill_proofs::verified_image_id(&image)?;
+    crate::container::prepare_cargo(&root, &image_id)?;
     let (host_info, host_version) = observed_host()?;
     let exchange = tempfile::Builder::new()
         .prefix("benchmark-observation-")
@@ -1341,7 +1342,7 @@ fn container_command(root: &Path, image_id: &str, request: &Path, result: &Path)
             "--volume",
             &format!("{}:/cache", container_target_volume(root)),
             "--volume",
-            "dotfiles-proofs-registry:/usr/local/cargo/registry",
+            crate::container::CARGO_REGISTRY_VOLUME,
             "--env",
             "CARGO_TARGET_DIR=/cache/target",
             "--env",
@@ -1370,6 +1371,7 @@ pub fn verify_in_container(root: &Path) -> Result<()> {
     let image = proof_image(&root)?;
     crate::skill_proofs::ensure_image(&root, &definition, &image)?;
     let image_id = crate::skill_proofs::verified_image_id(&image)?;
+    crate::container::prepare_cargo(&root, &image_id)?;
     let exchange = tempfile::Builder::new().prefix("benchmarks-").tempdir()?;
     let directory = crate::canonical(exchange.path())?;
     let result = directory.join("output");

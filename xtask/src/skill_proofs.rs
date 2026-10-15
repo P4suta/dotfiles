@@ -863,7 +863,7 @@ fn container_campaign_arguments(
             "--volume",
             &format!("{target_volume}:/cache"),
             "--volume",
-            "dotfiles-proofs-registry:/usr/local/cargo/registry",
+            crate::container::CARGO_REGISTRY_VOLUME,
             "--env",
             "CARGO_TARGET_DIR=/cache/target",
             "--env",
@@ -902,6 +902,7 @@ fn verify_container_measured(root: &Path, campaign: ProofCampaign) -> Result<()>
     let image = proof_image(root)?;
     ensure_image(root, &definition, &image)?;
     let image_id = verified_image_id(&image)?;
+    crate::container::prepare_cargo(root, &image_id)?;
     let output = crate::phase_evidence::output(
         Tool::Docker.command().args(container_campaign_arguments(
             root,

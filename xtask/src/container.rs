@@ -8,9 +8,13 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::{Read as _, Write as _};
 use std::path::Path;
-use std::process::Output;
+use std::process::{Command, Output, Stdio};
 
 pub(crate) const LINUX_AMD64: &str = "linux/amd64";
+pub(crate) const CARGO_REGISTRY_VOLUME: &str = "dotfiles-proofs-registry:/usr/local/cargo/registry";
+const CARGO_FETCH_GATE: &str =
+    "set -e; for manifest in \"$@\"; do cargo fetch --locked --manifest-path \"$manifest\"; done";
+const CARGO_SOURCE: &str = "/source";
 const PLATFORM_FORMAT: &str = "{{.Os}}/{{.Architecture}}";
 const ASSET_TEST: &str = "proof_images_reject_corrupt_verifier_assets_before_use";
 const MAX_ASSET_STREAM_BYTES: usize = 1024 * 1024;
@@ -302,6 +306,59 @@ pub(crate) fn native_platform() -> Result<String> {
     Ok(platform)
 }
 
+pub(crate) fn prepare_cargo(root: &Path, image_id: &str) -> Result<()> {
+    prepare_cargo_with(root, image_id, |command| {
+        crate::phase_evidence::output(command, "verification container Cargo materials")
+    })
+}
+
+fn prepare_cargo_with(
+    root: &Path,
+    image_id: &str,
+    execute: impl FnOnce(&mut Command) -> Result<Output>,
+) -> Result<()> {
+    let workload = dotfiles::artifacts::CargoWorkload::capture(root)?;
+    let manifests = workload.workspace_manifests()?;
+    let mut mount = OsString::from("type=bind,\"source=");
+    mount.push(root);
+    mount.push(format!("\",target={CARGO_SOURCE},readonly"));
+    let mut command = Tool::Docker.command();
+    command
+        .args([
+            "run",
+            "--rm",
+            "--pull=never",
+            "--platform",
+            LINUX_AMD64,
+            "--mount",
+        ])
+        .arg(mount)
+        .args([
+            "--volume",
+            CARGO_REGISTRY_VOLUME,
+            "--workdir",
+            CARGO_SOURCE,
+            image_id,
+            "bash",
+            "-ec",
+            CARGO_FETCH_GATE,
+            "--",
+        ])
+        .args(
+            manifests
+                .iter()
+                .map(|path| format!("{CARGO_SOURCE}/{path}")),
+        )
+        .stdin(Stdio::null());
+    let output = execute(&mut command)?;
+    ensure!(
+        output.status.success(),
+        "preparing the container's locked Cargo workspaces failed or was interrupted: {}",
+        output.status
+    );
+    workload.require_current(root)
+}
+
 pub(crate) fn run_arguments() -> Vec<OsString> {
     let mut arguments: Vec<OsString> = ["run", "--rm", "--network", "none"]
         .map(OsString::from)
@@ -320,6 +377,139 @@ fn owner_arguments() -> [OsString; 2] {
 #[cfg(not(unix))]
 fn owner_arguments() -> [OsString; 0] {
     []
+}
+
+#[cfg(test)]
+mod cargo_tests {
+    use super::*;
+    #[cfg(unix)]
+    use std::os::unix::process::ExitStatusExt as _;
+    #[cfg(windows)]
+    use std::os::windows::process::ExitStatusExt as _;
+
+    const SATELLITE: &str = "satellite $literal; (one)";
+    const IMAGE: &str = "sha256:fixture";
+
+    fn workspace(root: &Path) -> Result<()> {
+        fs::create_dir_all(root)?;
+        fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = []\n")?;
+        fs::write(root.join("Cargo.lock"), "version = 4\n")?;
+        Ok(())
+    }
+
+    fn output(code: i32) -> Output {
+        #[cfg(unix)]
+        let status = std::process::ExitStatus::from_raw(code << 8);
+        #[cfg(windows)]
+        let status = std::process::ExitStatus::from_raw(code.cast_unsigned());
+        Output {
+            status,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn preparation_fetches_every_captured_workspace_as_data_in_the_shared_registry() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        workspace(root.path())?;
+        workspace(&root.path().join(SATELLITE))?;
+        prepare_cargo_with(root.path(), IMAGE, |command| {
+            let arguments: Vec<_> = command.get_args().collect();
+            let gate = arguments
+                .iter()
+                .position(|arg| *arg == CARGO_FETCH_GATE)
+                .unwrap();
+            assert_eq!(arguments[gate - 3], IMAGE);
+            assert_eq!(arguments[gate - 2], "bash");
+            assert_eq!(arguments[gate - 1], "-ec");
+            assert_eq!(
+                arguments[gate + 1..],
+                [
+                    "--",
+                    "/source/Cargo.toml",
+                    &format!("/source/{SATELLITE}/Cargo.toml"),
+                ]
+            );
+            assert!(
+                arguments
+                    .windows(2)
+                    .any(|pair| { pair[0] == "--volume" && pair[1] == CARGO_REGISTRY_VOLUME })
+            );
+            assert!(arguments.windows(2).any(|pair| {
+                pair[0] == "--mount"
+                    && pair[1]
+                        .to_string_lossy()
+                        .ends_with(",target=/source,readonly")
+            }));
+            assert!(
+                arguments
+                    .windows(2)
+                    .any(|pair| { pair[0] == "--platform" && pair[1] == LINUX_AMD64 })
+            );
+            assert!(!arguments.iter().any(|arg| {
+                matches!(
+                    arg.to_str(),
+                    Some("--target" | "--offline" | "--network=none")
+                )
+            }));
+            Ok(output(0))
+        })
+    }
+
+    #[test]
+    fn preparation_refuses_failed_or_unavailable_fetches() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        workspace(root.path())?;
+        for code in [1, 137] {
+            assert!(prepare_cargo_with(root.path(), IMAGE, |_| Ok(output(code))).is_err());
+        }
+        assert!(
+            prepare_cargo_with(root.path(), IMAGE, |_| {
+                Err(std::io::Error::from(std::io::ErrorKind::NotFound).into())
+            })
+            .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn preparation_refuses_changed_inputs_after_a_successful_fetch() -> Result<()> {
+        for name in ["Cargo.toml", "Cargo.lock"] {
+            let root = tempfile::tempdir()?;
+            workspace(root.path())?;
+            let result = prepare_cargo_with(root.path(), IMAGE, |_| {
+                let path = root.path().join(name);
+                let mut text = fs::read_to_string(&path)?;
+                text.push_str("# changed during preparation\n");
+                fs::write(path, text)?;
+                Ok(output(0))
+            });
+            assert!(result.is_err(), "accepted changed {name}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn preparation_refuses_an_unlocked_workspace_before_starting_docker() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        workspace(root.path())?;
+        fs::create_dir(root.path().join(SATELLITE))?;
+        fs::write(
+            root.path().join(SATELLITE).join("Cargo.toml"),
+            "[workspace]\nmembers = []\n",
+        )?;
+        let mut invoked = false;
+        assert!(
+            prepare_cargo_with(root.path(), IMAGE, |_| {
+                invoked = true;
+                Ok(output(0))
+            })
+            .is_err()
+        );
+        assert!(!invoked);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

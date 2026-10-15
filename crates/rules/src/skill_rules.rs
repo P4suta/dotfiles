@@ -419,8 +419,15 @@ mod proofs {
         let first: usize = kani::any();
         let second: usize = kani::any();
         let minimum: usize = kani::any();
-        let percent: usize = kani::any();
-        let composes = spec_composition_sound(shared, first, second, minimum, percent);
+        let composes = if kani::any() {
+            let percent = usize::from(kani::any::<u8>());
+            kani::assume((1..=PERCENT).contains(&percent));
+            spec_composition_sound(shared, first, second, minimum, percent)
+        } else {
+            let percent: usize = kani::any();
+            kani::assume(!(1..=PERCENT).contains(&percent));
+            spec_composition_sound(shared, first, second, minimum, percent)
+        };
         kani::cover!(composes);
         kani::cover!(!composes);
     }

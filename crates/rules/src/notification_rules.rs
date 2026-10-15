@@ -277,7 +277,10 @@ mod proofs {
             issued_millis: kani::any(),
             now_millis: kani::any(),
         };
-        if let Decision::Queue(accepted) = decide(input) {
+        let decision = decide(input);
+        kani::cover!(matches!(decision, Decision::Queue(_)));
+        kani::cover!(!matches!(decision, Decision::Queue(_)));
+        if let Decision::Queue(accepted) = decision {
             assert_eq!(Some(accepted), input.event);
             assert_eq!(input.desktop, Desktop::Present);
             assert_ne!(input.origin, Origin::Internal);
@@ -303,6 +306,9 @@ mod proofs {
     #[kani::proof]
     fn event_codes_name_only_the_fixed_vocabulary() {
         let code: u8 = kani::any();
-        assert_eq!(event(code).is_some(), usize::from(code) < EVENTS.len());
+        let known = event(code).is_some();
+        assert_eq!(known, usize::from(code) < EVENTS.len());
+        kani::cover!(known);
+        kani::cover!(!known);
     }
 }
