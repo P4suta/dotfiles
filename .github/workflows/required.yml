@@ -19,7 +19,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5
       - name: Select the gates this change affects
         id: classify
         env:
@@ -51,7 +51,7 @@ jobs:
         if: needs.classify.outputs.gates != ''
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5
         if: needs.classify.outputs.gates != ''
       - name: Check the selected gates
         if: needs.classify.outputs.gates != ''
@@ -78,7 +78,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5
         with:
           install_args: rust
       - name: Build the guard tests
@@ -115,7 +115,7 @@ jobs:
         if: contains(needs.classify.outputs.gates, 'profiles')
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5
         if: contains(needs.classify.outputs.gates, 'profiles')
       - name: Apply, reprovision, and reapply the native profile on this disposable host
         if: contains(needs.classify.outputs.gates, 'profiles')
