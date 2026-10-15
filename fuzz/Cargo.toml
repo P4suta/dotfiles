@@ -11,14 +11,35 @@ license = "MIT OR Apache-2.0"
 cargo-fuzz = true
 
 [dependencies]
+anyhow = "1.0"
+coderabbit-guard = { path = "../crates/coderabbit-guard" }
+dotfiles = { version = "0.1.0", path = "../crates/dotfiles" }
 dotguard = { path = "../crates/dotguard" }
+flate2 = "1.1.10"
 libfuzzer-sys = "0.4.13"
 model = { path = "../crates/model" }
 platform = { path = "../crates/platform" }
 rules = { path = "../crates/rules" }
+serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0"
+tempfile = "3.27"
+tar = { version = "0.4.46", default-features = false }
 toml = "1.0"
 xtask = { path = "../xtask" }
+
+[[bin]]
+name = "artifact_plan"
+path = "fuzz_targets/artifact_plan.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "artifact_materials"
+path = "fuzz_targets/artifact_materials.rs"
+test = false
+doc = false
+bench = false
 
 [[bin]]
 name = "color_literal"
@@ -78,3 +99,24 @@ bench = false
 
 [workspace]
 members = ["."]
+
+[[bin]]
+name = "renovate_report"
+path = "fuzz_targets/renovate_report.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "review_completion"
+path = "fuzz_targets/review_completion.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "proof_image_server"
+path = "fuzz_targets/proof_image_server.rs"
+test = false
+doc = false
+bench = false

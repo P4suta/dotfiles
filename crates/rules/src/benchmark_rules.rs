@@ -27,9 +27,105 @@ pub fn complete(counts: [Counts; BENCHMARKS], binaries: u64, unknown: bool) -> b
             .all(|count| count.instructions == 1 && count.heap == 1 && count.measurements == 1)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum ProfileMode {
+    Observe,
+    Verify,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Independent observed profile facts retain every combination checked by the admission proof."
+)]
+pub struct ProfileEvidence {
+    pub processor: bool,
+    pub runtime: bool,
+    pub tools: bool,
+    pub source: bool,
+    pub inventory: bool,
+    pub controls: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProfileVerdict {
+    Observation,
+    Accepted,
+    Refused,
+}
+
+#[must_use]
+pub const fn profile(mode: ProfileMode, evidence: ProfileEvidence) -> ProfileVerdict {
+    if !(evidence.processor
+        && evidence.runtime
+        && evidence.tools
+        && evidence.source
+        && evidence.inventory
+        && evidence.controls)
+    {
+        return ProfileVerdict::Refused;
+    }
+    match mode {
+        ProfileMode::Observe => ProfileVerdict::Observation,
+        ProfileMode::Verify => ProfileVerdict::Accepted,
+    }
+}
+
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn mac_profile_requires_every_measured_context_and_never_promotes_observation() {
+        let mode: ProfileMode = kani::any();
+        let evidence: ProfileEvidence = kani::any();
+        let result = profile(mode, evidence);
+        let complete = evidence.processor
+            && evidence.runtime
+            && evidence.tools
+            && evidence.source
+            && evidence.inventory
+            && evidence.controls;
+        assert_eq!(
+            result == ProfileVerdict::Accepted,
+            complete && mode == ProfileMode::Verify
+        );
+        assert_eq!(
+            result == ProfileVerdict::Observation,
+            complete && mode == ProfileMode::Observe
+        );
+        assert_eq!(result == ProfileVerdict::Refused, !complete);
+        kani::cover!(result == ProfileVerdict::Accepted);
+        kani::cover!(result == ProfileVerdict::Observation);
+        kani::cover!(result == ProfileVerdict::Refused);
+    }
+
+    #[test]
+    fn an_observation_never_verifies_and_every_missing_profile_fact_is_refused() {
+        for bits in 0_u8..64 {
+            let evidence = ProfileEvidence {
+                processor: bits & 1 != 0,
+                runtime: bits & 2 != 0,
+                tools: bits & 4 != 0,
+                source: bits & 8 != 0,
+                inventory: bits & 16 != 0,
+                controls: bits & 32 != 0,
+            };
+            for mode in [ProfileMode::Observe, ProfileMode::Verify] {
+                let expected = if bits != 63 {
+                    ProfileVerdict::Refused
+                } else if mode == ProfileMode::Observe {
+                    ProfileVerdict::Observation
+                } else {
+                    ProfileVerdict::Accepted
+                };
+                assert_eq!(profile(mode, evidence), expected);
+            }
+        }
+    }
 
     #[cfg(kani)]
     #[kani::proof]

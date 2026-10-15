@@ -20,6 +20,12 @@ const TEMP_ENVIRONMENT: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
 const HOSTS_PUSH_GATE: &str = "mise x -- just hosts gate {1} {2}";
 const CARGO_MANIFEST: &str = "Cargo.toml";
 const CARGO_LOCK: &str = "Cargo.lock";
+pub const CI_PROOFS_ENTRY: &str = "mise x -- just proofs-ci";
+pub const CI_PHASE_ENTRY: &str = "mise x -- just proofs-ci --phase \"$PHASE\"";
+const CI_PROOFS_SELECTED: &str = "contains(env.GATES, 'proofs')";
+const CI_PHASE_VALUE: &str = "${{ matrix.phase }}";
+const CI_MAX_PARALLEL: i64 = 2;
+const CI_PROOF_TIMEOUT_MINUTES: i64 = 60;
 
 pub(crate) fn command(root: &Path, tool: Tool, arguments: &[&str]) -> Result<()> {
     run(tool.command(), root, tool.program(), arguments)
@@ -97,6 +103,59 @@ pub fn push_hook_findings(configuration: &str) -> Result<Vec<String>> {
     })
 }
 
+fn proof_phase_findings(job: &yaml_rust2::Yaml) -> Vec<String> {
+    use yaml_rust2::Yaml;
+    let mut found = Vec::new();
+    let steps = job["steps"].as_vec();
+    let full = steps.is_some_and(|steps| {
+        steps.iter().any(|step| {
+            step["run"].as_str() == Some(CI_PROOFS_ENTRY)
+                && (step["if"].is_badvalue() || step["if"].as_str() == Some(CI_PROOFS_SELECTED))
+        })
+    });
+    let matrix = &job["strategy"]["matrix"];
+    if full && matrix.is_badvalue() {
+        return found;
+    }
+    let mut counts = [0u8; 3];
+    let mut unknown = false;
+    for value in matrix["phase"].as_vec().into_iter().flatten() {
+        let position = crate::proof_ci_phase::Phase::ALL
+            .iter()
+            .position(|phase| Some(phase.name()) == value.as_str());
+        if let Some(count) = position.and_then(|position| counts.get_mut(position)) {
+            *count = count.saturating_add(1);
+        } else {
+            unknown = true;
+        }
+    }
+    if !crate::proof_budget_rules::ci_phases_complete(counts, unknown)
+        || matrix.as_hash().is_none_or(|axes| axes.len() != 1)
+    {
+        found.push("the proofs matrix must contain every known partition exactly once without include or exclude overrides".into());
+    }
+    let strategy = &job["strategy"];
+    if strategy["fail-fast"] != Yaml::Boolean(false)
+        || !strategy["max-parallel"]
+            .as_i64()
+            .is_some_and(|parallel| (1..=CI_MAX_PARALLEL).contains(&parallel))
+        || job["timeout-minutes"].as_i64() != Some(CI_PROOF_TIMEOUT_MINUTES)
+    {
+        found.push("the proofs matrix must collect every partition with at most two jobs and its unchanged 60-minute job limit".into());
+    }
+    if job["env"]["PHASE"].as_str() != Some(CI_PHASE_VALUE)
+        || !steps.is_some_and(|steps| {
+            steps.iter().any(|step| {
+                step["run"].as_str() == Some(CI_PHASE_ENTRY)
+                    && step["if"].as_str() == Some(CI_PROOFS_SELECTED)
+            })
+        })
+    {
+        found.push("every proofs matrix job must execute its selected mandatory partition through the checked CI entry".into());
+    }
+    found
+}
+
 /// Refusals for a CI workflow that the settings in `policy/github.toml` can't rely on.
 /// The workflow must run for pull requests and the merge queue, and each required status must name a job that needs every other job and always runs.
 /// No step may call `cargo run`, since the justfile owns every command.
@@ -121,6 +180,7 @@ pub fn workflow_findings(workflow: &str, policy: &str) -> Result<Vec<String>> {
     if !proofs_run_on_linux(&document) {
         found.push("the proofs job must run on Linux, the push gate's proof target".into());
     }
+    found.extend(proof_phase_findings(&document["jobs"]["proofs"]));
     let required: Vec<&str> = policy
         .get("ruleset")
         .and_then(|ruleset| ruleset.get("main"))
@@ -245,10 +305,26 @@ pub fn workspace_manifests(root: &Path) -> Result<Vec<String>> {
 ///
 /// Reports every workspace with a missing or stale lockfile.
 pub fn locked_workspaces(root: &Path) -> Result<()> {
+    resolve_locked_workspaces(root, &workspace_manifests(root)?)
+}
+
+/// Refuse stale independent locks before running a heavy verification body.
+///
+/// # Errors
+///
+/// Reports every full offline resolution failure without running the supplied body.
+pub fn with_locked_workspaces<T>(root: &Path, body: impl FnOnce() -> Result<T>) -> Result<T> {
+    let workload = dotfiles::artifacts::CargoWorkload::capture(root)?;
+    resolve_locked_workspaces(root, &workload.workspace_manifests()?)?;
+    workload.require_current(root)?;
+    body()
+}
+
+fn resolve_locked_workspaces(root: &Path, manifests: &[String]) -> Result<()> {
     let mut checks = crate::checks::Checks::default();
-    for manifest in workspace_manifests(root)? {
-        checks.run(&manifest, || {
-            let path = root.join(&manifest);
+    for manifest in manifests {
+        checks.run(manifest, || {
+            let path = root.join(manifest);
             ensure!(
                 path.with_file_name(CARGO_LOCK).is_file(),
                 "missing {CARGO_LOCK}"
@@ -259,6 +335,7 @@ pub fn locked_workspaces(root: &Path) -> Result<()> {
                 .args([
                     "metadata",
                     "--locked",
+                    "--offline",
                     "--format-version",
                     "1",
                     "--manifest-path",
@@ -426,6 +503,10 @@ pub const PLANTED_KEY: &str = "dotfiles-planted-unknown-key";
 
 /// The schema errors a refusal quotes for one target.
 const QUOTED_ERRORS: usize = 5;
+const CLAUDE_SCHEMA: &str = "schemas/vendor/claude-code-settings.schema.json.gz";
+pub const CLAUDE_ON_FAILURE_MIN_VERSION: &str = "2.1.295";
+pub const CLAUDE_ON_FAILURE_DOCUMENTATION: &str =
+    "https://code.claude.com/docs/en/hooks#block-the-action-when-a-hook-fails";
 
 /// A consumer's vendored schema and the rendered targets it governs, with the targets every profile rendered so far.
 pub struct Contract {
@@ -460,6 +541,7 @@ impl Contract {
         resources: &[crate::obligations::Vendored],
         close_root: bool,
         undeclared: &[String],
+        extensions: &[crate::obligations::SchemaExtension],
     ) -> Result<Self> {
         let schema = &vendored.schema;
         let read = |vendored: &crate::obligations::Vendored| -> Result<(bool, Value)> {
@@ -471,6 +553,13 @@ impl Contract {
             Ok((digest_matches, document))
         };
         let (mut digest_matches, mut document) = read(vendored)?;
+        if !extensions.is_empty() {
+            ensure!(
+                digest_matches,
+                "schema extensions require the pinned original bytes"
+            );
+            extend_schema(schema, &mut document, extensions)?;
+        }
         if close_root {
             let root_schema = document
                 .as_object_mut()
@@ -589,6 +678,56 @@ impl Contract {
     }
 }
 
+fn extend_schema(
+    schema: &str,
+    document: &mut Value,
+    extensions: &[crate::obligations::SchemaExtension],
+) -> Result<()> {
+    for extension in extensions {
+        match extension {
+            crate::obligations::SchemaExtension::ClaudeCommandFailurePolicy => {
+                ensure!(
+                    schema == CLAUDE_SCHEMA,
+                    "Claude's documented extension requires its original consumer schema"
+                );
+                let variants = document
+                    .pointer_mut("/$defs/hookCommand/anyOf")
+                    .and_then(Value::as_array_mut)
+                    .context("Claude command hook union changed")?;
+                let commands: Vec<_> = variants
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, variant)| {
+                        variant
+                            .pointer("/properties/type/const")
+                            .and_then(Value::as_str)
+                            == Some("command")
+                    })
+                    .map(|(index, _)| index)
+                    .collect();
+                let [index] = commands.as_slice() else {
+                    anyhow::bail!("Claude command hook union has no unique command branch");
+                };
+                let command = &mut variants[*index];
+                ensure!(
+                    command["additionalProperties"] == Value::Bool(false),
+                    "Claude command hook no longer closes unknown fields"
+                );
+                let properties = command
+                    .get_mut("properties")
+                    .and_then(Value::as_object_mut)
+                    .context("Claude command properties changed")?;
+                ensure!(
+                    !properties.contains_key("onFailure"),
+                    "the consumer schema now declares onFailure; retire its documented extension"
+                );
+                properties.insert("onFailure".to_owned(), serde_json::json!({"type": "string", "enum": ["continue", "block"], "description": format!("Command failure policy in Claude Code >= {CLAUDE_ON_FAILURE_MIN_VERSION}; {CLAUDE_ON_FAILURE_DOCUMENTATION}")}));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn known_references(
     document: &Value,
     identifiers: &std::collections::BTreeSet<&str>,
@@ -638,6 +777,7 @@ pub fn contracts(root: &Path, manifest: &crate::obligations::Manifest) -> Result
                 resources,
                 close_root,
                 undeclared,
+                extensions,
             } => Some(Contract::load(
                 root,
                 &crate::obligations::Vendored {
@@ -649,6 +789,7 @@ pub fn contracts(root: &Path, manifest: &crate::obligations::Manifest) -> Result
                 resources,
                 *close_root,
                 undeclared,
+                extensions,
             )),
             _ => None,
         })
@@ -692,13 +833,21 @@ pub fn conform(profile: &str, dump: &Value, contracts: &mut [Contract]) -> Resul
 }
 
 /// Checks every rendered target of one profile and returns the shell targets it checked.
-pub(crate) fn rendered(root: &Path, dump: &Value, directory: &Path) -> Result<Vec<String>> {
+pub(crate) fn rendered(
+    root: &Path,
+    dump: &Value,
+    directory: &Path,
+    speech: &crate::profile_snapshot::PreparedSpeech,
+) -> Result<Vec<String>> {
     let targets = dump.as_object().context("profile dump must be a mapping")?;
     fs::create_dir(directory)?;
     let mut shells = Vec::new();
     let mut powershell = Vec::new();
     for (index, (name, target)) in targets.iter().enumerate() {
         if target["type"] != "file" && target["type"] != "script" {
+            continue;
+        }
+        if speech.contains(name) {
             continue;
         }
         let contents = target["contents"]
@@ -852,11 +1001,13 @@ fn runtime_scripts(root: &Path) -> Result<Vec<(String, String)>> {
 }
 
 fn toml_file(directory: &Path, file: &Path, name: &str, contents: &str) -> Result<()> {
+    toml::from_str::<toml::Table>(contents)
+        .with_context(|| format!("invalid rendered TOML: {name}"))?;
     fs::write(file, contents)?;
     let output = Tool::Taplo
         .command()
         .current_dir(directory)
-        .args(["lint", "--no-schema", "--no-auto-config"])
+        .args(["format", "--no-auto-config"])
         .arg(file)
         .output()?;
     ensure!(
@@ -1524,6 +1675,129 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn the_pcm_allowance_keeps_ordinary_text_encoding_closed() {
+        let scope = tempfile::tempdir().unwrap();
+        let speech = crate::profile_snapshot::rendered_speech(
+            scope.path(),
+            &serde_json::json!({}),
+            |_| unreachable!(),
+        )
+        .unwrap();
+        for (index, contents) in ["missing newline", "\u{feff}text\n"].iter().enumerate() {
+            let dump = serde_json::json!({"ordinary.txt": {"type": "file", "contents": contents}});
+            assert!(
+                rendered(
+                    scope.path(),
+                    &dump,
+                    &scope.path().join(format!("bad-{index}")),
+                    &speech
+                )
+                .is_err()
+            );
+        }
+        let dump = serde_json::json!({"ordinary.txt": {"type": "file", "contents": "valid UTF-8 日本語\n"}});
+        assert_eq!(
+            rendered(scope.path(), &dump, &scope.path().join("valid"), &speech).unwrap(),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn rendered_toml_syntax_does_not_retrieve_a_document_schema() {
+        const ABSENT_SCHEMA: &str =
+            "file:///dotfiles-syntax-fixture-must-never-fetch-a-schema.json";
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("rendered.toml");
+        for contents in [
+            format!("#:schema {ABSENT_SCHEMA}\nadd_newline = false\n"),
+            format!("\"$schema\" = \"{ABSENT_SCHEMA}\"\nadd_newline = false\n"),
+        ] {
+            toml_file(directory.path(), &file, "starship.toml", &contents).unwrap();
+        }
+    }
+
+    #[test]
+    fn rendered_toml_syntax_refuses_invalid_original_annotations_and_duplicate_keys() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("rendered.toml");
+        for contents in [
+            "\"$schema\" = \"unterminated\nadd_newline = false\n",
+            "\"$schema\" = 1\n\"$schema\" = 2\n",
+            "add_newline = false\nadd_newline = true\n",
+            "format = [\n",
+            "format = [1,,2]\n",
+            "format = \"one\ntwo\"\n",
+            "format = \"\u{7}\"\n",
+            "format = \"\\e\"\n",
+            "[table]\nvalue = 1\n[table]\nother = 2\n",
+            "table.value = 1\ntable = 2\n",
+            "inline = { value = 1 }\ninline.other = 2\n",
+        ] {
+            assert!(toml_file(directory.path(), &file, "starship.toml", contents).is_err());
+        }
+    }
+
+    #[test]
+    fn rendered_toml_syntax_accepts_every_value_family_without_a_remote_schema() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("rendered.toml");
+        let contents = r##""$schema" = "file:///dotfiles-syntax-fixture-must-never-fetch-a-schema.json"
+text = "a # is text"
+unicode = "日本語 🤖"
+multiline = """#:schema file:///also-not-a-directive.json
+another line"""
+integer = 42
+float = 1.25
+nan = nan
+positive_infinity = inf
+negative_infinity = -inf
+enabled = true
+datetime = 1979-05-27T07:32:00Z
+date = 1979-05-27
+time = 07:32:00
+array = [1, "text", false]
+inline = { value = 3 }
+[nested]
+"$schema" = "file:///a-nested-key-is-data.json"
+"##;
+        toml_file(directory.path(), &file, "types.toml", contents).unwrap();
+    }
+
+    #[test]
+    fn original_toml_syntax_and_semantic_refusals_match_the_pinned_linter() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("rendered.toml");
+        for contents in [
+            "value = 1\n",
+            "# valid original formatting is unrestricted\nvalue=1\n",
+            "value = nan\n",
+            "value = inf\n",
+            "value = 1979-05-27T07:32:00Z\n",
+            "value = \"日本語 🤖 # text\"\n",
+            "value = [1, \"two\", false]\n",
+            "value = 1\nvalue = 2\n",
+            "[table]\nvalue = 1\n[table]\nother = 2\n",
+            "table.value = 1\ntable = 2\n",
+            "inline = { value = 1 }\ninline.other = 2\n",
+            "value = [1,,2]\n",
+            "value = \"one\ntwo\"\n",
+            "value = \"\u{7}\"\n",
+            "value = \"\\e\"\n",
+        ] {
+            fs::write(&file, contents).unwrap();
+            let original = Tool::Taplo
+                .command()
+                .current_dir(directory.path())
+                .args(["lint", "--no-schema", "--no-auto-config"])
+                .arg(&file)
+                .output()
+                .unwrap();
+            let repaired = toml_file(directory.path(), &file, "original.toml", contents);
+            assert_eq!(repaired.is_ok(), original.status.success(), "{contents}");
+        }
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn the_pinned_zsh_rejects_invalid_startup_syntax() {
@@ -1547,5 +1821,35 @@ mod tests {
             "2.74.1"
         );
         assert!(mise_chezmoi_pin("[tools]\njust = \"1\"\n").is_err());
+    }
+
+    #[test]
+    fn a_documented_schema_extension_refuses_consumer_drift_instead_of_opening_unknown_fields() {
+        let original = serde_json::json!({"$defs": {"hookCommand": {"anyOf": [{"type": "object", "additionalProperties": false, "properties": {"type": {"const": "command"}, "command": {"type": "string"}}}]}}});
+        let extension = [crate::obligations::SchemaExtension::ClaudeCommandFailurePolicy];
+        let mut declared = original.clone();
+        declared["$defs"]["hookCommand"]["anyOf"][0]["properties"]["onFailure"] =
+            serde_json::json!({"type": "string"});
+        let mut opened = original.clone();
+        opened["$defs"]["hookCommand"]["anyOf"][0]["additionalProperties"] = Value::Bool(true);
+        let mut duplicate = original.clone();
+        duplicate["$defs"]["hookCommand"]["anyOf"]
+            .as_array_mut()
+            .unwrap()
+            .push(original["$defs"]["hookCommand"]["anyOf"][0].clone());
+        for mut invalid in [declared, opened, duplicate, serde_json::json!({})] {
+            assert!(extend_schema(CLAUDE_SCHEMA, &mut invalid, &extension).is_err());
+        }
+        assert!(
+            extend_schema(
+                "schemas/vendor/unrelated.json.gz",
+                &mut original.clone(),
+                &extension
+            )
+            .is_err()
+        );
+        let mut once = original;
+        extend_schema(CLAUDE_SCHEMA, &mut once, &extension).unwrap();
+        assert!(extend_schema(CLAUDE_SCHEMA, &mut once, &extension).is_err());
     }
 }

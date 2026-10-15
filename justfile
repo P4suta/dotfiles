@@ -38,14 +38,29 @@ profiles-linux: trust
 proofs *args: trust
     mise x -- cargo xtask proofs {{args}}
 
-proofs-ci: trust
-    mise x -- cargo xtask proofs-ci
+proofs-ci *args: trust
+    mise x -- cargo xtask proofs-ci {{args}}
+
+verification-prepare *args: trust
+    mise x -- cargo xtask verification-env prepare {{args}}
+
+verification-doctor *args: trust
+    mise x -- cargo xtask verification-env doctor {{args}}
+
+verification-smoke *args: trust
+    mise x -- cargo xtask verification-env smoke {{args}}
+
+njutest-assess *args: trust
+    mise x rust -- cargo xtask njutest-assessment {{args}}
 
 graphs: trust
     mise x -- cargo xtask graphs
 
 classify *args: trust
     mise x -- cargo xtask classify {{args}}
+
+issue-context *args: trust
+    mise x -- cargo run --locked --package pr-workflow --bin pr-workflow -- change-check {{args}}
 
 rehearse *args: trust
     mise x -- cargo xtask rehearse {{args}}

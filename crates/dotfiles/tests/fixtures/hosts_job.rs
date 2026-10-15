@@ -101,6 +101,9 @@ fn main() {
         {
             println!("{target}:space")
         }
+        "on" if arguments.iter().any(|argument| argument.contains("df -Pi")) => {
+            println!("{target}:inodes")
+        }
         "on" if arguments
             .iter()
             .any(|argument| argument.contains("workspace")) =>
@@ -135,6 +138,7 @@ fn main() {
         }
         "status" if target.ends_with(":probe") => println!("{target} finished succeeded"),
         "status" if target.ends_with(":space") => println!("{target} finished succeeded"),
+        "status" if target.ends_with(":inodes") => println!("{target} finished succeeded"),
         "status" if target.ends_with(":cleanup") => println!("{target} finished succeeded"),
         "status" => {
             let state = PathBuf::from(std::env::var_os("HOSTS_JOB_STATE").unwrap())
@@ -157,6 +161,19 @@ fn main() {
                 println!("100000000000");
             } else {
                 println!("/dev/fixture 0 0 100000000 0% /fixture");
+            }
+        }
+        "logs" if target.ends_with(":inodes") => {
+            if target.starts_with("mac:") {
+                println!(
+                    "Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on"
+                );
+                println!("/dev/home 100000000000 0 100000000000 0% 0 100000000 0% /home");
+                println!("/dev/tmp 100000000000 0 100000000000 0% 0 90000000 0% /tmp");
+            } else {
+                println!("Filesystem Inodes IUsed IFree IUse% Mounted on");
+                println!("/dev/home 100000000 0 100000000 0% /home");
+                println!("/dev/tmp 90000000 0 90000000 0% /tmp");
             }
         }
         "logs" if target.ends_with(":cleanup") => {}

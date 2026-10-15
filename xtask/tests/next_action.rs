@@ -716,7 +716,7 @@ fn github_states_name_the_pull_request_and_its_command() -> Result<()> {
         (
             on_github(Some(("OPEN", false, Checks::Success)), false),
             Step::AwaitReview,
-            Some("gh pr view 7 --repo P4suta/dotfiles --comments"),
+            Some("pr-workflow check --repo P4suta/dotfiles --issue <issue> --pr 7 --final"),
         ),
         (
             on_github(Some(("MERGED", false, Checks::Success)), false),
@@ -825,6 +825,7 @@ fn gh_directory() -> &'static tempfile::TempDir {
     DIRECTORY.get_or_init(|| {
         let directory = tempfile::tempdir().unwrap();
         let result = platform::process::command("rustc")
+            .arg("--edition=2024")
             .arg(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../crates/pr-workflow/tests/fixtures/gh.rs"
@@ -1194,7 +1195,8 @@ fn online_inspection_reads_the_pull_request_and_compares_with_its_base() -> Resu
         .cli(&[])?
         .env("GH_FIXTURE_LIST", listed.to_string())
         .output()?;
-    assert_eq!(reported(&output)?["action"], "await-review-resume");
+    assert!(!output.status.success());
+    assert!(String::from_utf8(output.stderr)?.contains("the current PR repository is unknown"));
 
     let output = fixture
         .cli(&[])?

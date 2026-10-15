@@ -9,6 +9,9 @@
 //! * Major updates never block, because deferring them stays a valid decision.
 //!
 //! Missing tools, malformed reports, and failed lookups refuse the push with a structured next action.
+//! A `uses-with` input that holds a `${{ matrix.* }}` expression names no version, so it needs no lookup.
+//!
+//! GitHub lookups need a token: `RENOVATE_GITHUB_COM_TOKEN` when the environment sets it, or else the same secret from the Doppler project and config that this machine's chezmoi data names.
 //!
 //! Opt out with `git config renovate.localSkip true`, adding `--global` for the whole machine, or once with `RENOVATE_LOCAL_SKIP=1 git push`.
 
@@ -20,7 +23,11 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
+pub mod report;
+
 const DEFAULT_UPDATE_TYPES: &str = "minor patch pin pinDigest";
+const LOOKUP_REQUEST_TIMEOUT: &str = "5s";
+const INSPECT_ARGUMENT_COUNT: usize = 2;
 
 /// The exit status of a subcommand the gate doesn't serve.
 const USAGE_ERROR: i32 = 2;
@@ -32,11 +39,13 @@ const CONTAINERBASE: &str = "/tmp/containerbase";
 const DEFAULT_UID: u32 = 501;
 const DEFAULT_GID: u32 = 20;
 
-/// One dependency with a blocking update available, as parsed from the jq report.
-struct Update {
+/// One dependency with a blocking update in a validated report.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Update {
     package_file: String,
     dep_name: String,
     current_value: String,
+    resolved_version: String,
     current_digest: String,
     replace_string: String,
     kind: String,
@@ -46,12 +55,62 @@ struct Update {
 }
 
 pub fn dispatch(args: &[String]) -> i32 {
-    if args.first().map(String::as_str) == Some("run") {
-        run_local(&args[1..])
-    } else {
-        eprintln!("usage: dotguard renovate run");
-        USAGE_ERROR
+    match args.first().map(String::as_str) {
+        Some("run") => run_local(&args[1..]),
+        Some("inspect") if args.len() == INSPECT_ARGUMENT_COUNT => {
+            inspect_report(Path::new(&args[1]))
+        }
+        _ => {
+            eprintln!("usage: dotguard renovate run [arguments] | inspect <report.json>");
+            USAGE_ERROR
+        }
     }
+}
+
+fn update_types() -> String {
+    std::env::var("RENOVATE_LOCAL_UPDATE_TYPES")
+        .or_else(|_| std::env::var("RENOVATE_LOCAL_GATE_TYPES"))
+        .unwrap_or_else(|_| DEFAULT_UPDATE_TYPES.to_owned())
+}
+
+fn read_report(path: &Path) -> Result<report::CheckedReport, String> {
+    std::fs::read(path)
+        .map_err(|_| "the required report could not be read".to_owned())
+        .and_then(|bytes| report::parse(&bytes, &update_types()).map_err(|error| error.to_string()))
+}
+
+fn report_refusal(evidence: &str) -> i32 {
+    Refusal::new(
+        "push.evidence",
+        "the required report could not be validated",
+        "dotguard renovate run",
+    )
+    .evidence(evidence)
+    .emit();
+    1
+}
+
+fn inspect_report(path: &Path) -> i32 {
+    let report = match read_report(path) {
+        Ok(report) => report,
+        Err(evidence) => return report_refusal(&evidence),
+    };
+    println!(
+        "Validated lookup evidence: {} nonfatal notices, {} selected update candidates",
+        report.notices,
+        report.updates.len()
+    );
+    for update in report.updates {
+        println!(
+            "{}: {} {} -> {} ({})",
+            update.package_file,
+            update.dep_name,
+            display_current(&update),
+            display_new(&update),
+            update.kind
+        );
+    }
+    0
 }
 
 pub fn run(remote: &str) -> i32 {
@@ -109,10 +168,8 @@ fn gate_ref(remote: &str, input: &str) -> i32 {
         Err(cause) => return unavailable(&cause),
     };
 
-    for tool in ["docker", "jq"] {
-        if locate::which(tool).is_none() {
-            return unavailable(&format!("required tool {tool} is missing"));
-        }
+    if locate::which("docker").is_none() {
+        return unavailable("required tool docker is missing");
     }
     eprintln!(
         ">>> renovate gate: dependency manifests changed — checking the touched dependencies..."
@@ -123,25 +180,18 @@ fn gate_ref(remote: &str, input: &str) -> i32 {
         return unavailable("Renovate did not produce verified evidence for the offered commit");
     };
 
-    let types = std::env::var("RENOVATE_LOCAL_UPDATE_TYPES")
-        .or_else(|_| std::env::var("RENOVATE_LOCAL_GATE_TYPES"))
-        .unwrap_or_else(|_| DEFAULT_UPDATE_TYPES.to_owned());
-    let out = jq_updates(&types, &report);
+    let checked = read_report(&report);
     if let Some(dir) = report.parent() {
         platform::cleanup::remove_dir_all(dir);
     }
-    let Some(out) = out else {
-        return unavailable("the required report could not be validated");
+    let checked = match checked {
+        Ok(checked) => checked,
+        Err(evidence) => return report_refusal(&evidence),
     };
-    if out.lines().any(|line| {
-        let mut fields = line.split('\u{1f}');
-        fields.clone().count() != UPDATE_FIELDS
-            || fields.next().is_none_or(str::is_empty)
-            || !matches!(fields.next_back(), Some("true" | "false"))
-    }) {
-        return unavailable("the dependency report contains malformed compatibility evidence");
+    if checked.notices != 0 {
+        eprintln!("renovate gate: {} nonfatal report notices", checked.notices);
     }
-    let updates = parse_updates(&out);
+    let updates = checked.updates;
     let contexts = match replacement_contexts(&updates, &found) {
         Ok(contexts) => contexts,
         Err(cause) => return unavailable(cause),
@@ -477,10 +527,12 @@ fn touched(c: &Update, added_lines: Option<&str>, scope_unknown: bool) -> bool {
 }
 
 fn display_current(c: &Update) -> String {
-    if c.current_value.is_empty() {
-        c.current_digest.chars().take(SHORT_DIGEST).collect()
-    } else {
+    if !c.resolved_version.is_empty() {
+        c.resolved_version.clone()
+    } else if !c.current_value.is_empty() {
         c.current_value.clone()
+    } else {
+        c.current_digest.chars().take(SHORT_DIGEST).collect()
     }
 }
 
@@ -513,125 +565,6 @@ fn renovate_report(offered: Option<&str>) -> Option<PathBuf> {
         platform::cleanup::remove_dir_all(&dir);
         None
     }
-}
-
-/// The jq program that flattens the report into candidate lines joined by the unit separator `U+001F`, which keeps empty fields intact.
-const JQ_UPDATES: &str = concat!(
-    r#"def nullable_string($key): .[$key]==null or (.[$key]|type)=="string";"#,
-    r#"def nonempty_string: if type=="string" then length>0 else false end;"#,
-    r#"def optional_type($key;$kind): if has($key) then (.[$key]|type)==$kind else true end;"#,
-    r#"def report_warnings: if has("warnings") then .warnings else [] end;"#,
-    r#"def excluded: .enabled==false or (.skipReason as $reason|(["path-dependency","internal-package","file-dependency","file","local-dependency","local","local-chart","ignored","disabled","is-pinned"]|index($reason))!=null);"#,
-    r#"def valid_update: if type!="object" then false else"#,
-    r#" ((.updateType//.bucket)|nonempty_string)"#,
-    r#" and (if has("updateType") then (.updateType|nonempty_string) else true end)"#,
-    r#" and (if has("bucket") then (.bucket|nonempty_string) else true end)"#,
-    r#" and optional_type("isBreaking";"boolean") and optional_type("pendingChecks";"boolean")"#,
-    r#" and nullable_string("newValue") and nullable_string("newDigest") end;"#,
-    r#"def valid_dependency: if type!="object" then false else"#,
-    r#" (.depName|nonempty_string) and (.updates|type)=="array" and (report_warnings|type)=="array""#,
-    r#" and optional_type("enabled";"boolean")"#,
-    r#" and nullable_string("currentValue") and nullable_string("currentDigest") and nullable_string("replaceString")"#,
-    r#" and all(.updates[];valid_update) end;"#,
-    r#"def mise_backend_providers: {"#,
-    r#""nu":{"datasource":"github-releases","packageName":"nushell/nushell"},"#,
-    r#""conda:zsh":{"datasource":"conda","packageName":"conda-forge/zsh"},"#,
-    r#""pypi:ansible-core":{"datasource":"pypi","packageName":"ansible-core"},"#,
-    r#""cargo-deny":{"datasource":"crate","packageName":"cargo-deny"}};"#,
-    r#"def counterpart($records;$file;$dep):"#,
-    r#" [$records[]|select(.manager=="regex" and .packageFile==$file and .dependency.depName==$dep)]"#,
-    r#"|if length==1 then .[0].dependency else null end;"#,
-    r#"def verified_lookup: (.currentValue|nonempty_string) and (.currentVersion|nonempty_string)"#,
-    r#" and .skipReason==null and (excluded|not) and (report_warnings|length)==0;"#,
-    r#"def covered_mise_backend($records;$record):"#,
-    r#" $record.dependency as $source|mise_backend_providers[$source.depName] as $provider"#,
-    r#"|if $record.manager!="mise" or $source.skipReason!="unsupported-datasource" or $provider==null then false else"#,
-    r#" counterpart($records;$record.packageFile;$source.depName) as $verified"#,
-    r#"|if $verified==null then false else"#,
-    r#" ($source.lockedVersion|nonempty_string) and $verified.currentValue==$source.lockedVersion"#,
-    r#" and $verified.datasource==$provider.datasource and $verified.packageName==$provider.packageName"#,
-    r#" and ($verified|verified_lookup) end end;"#,
-    r#"def hosted_channel: .datasource=="github-runners" and .depType=="github-runner""#,
-    r#" and (.depName=="ubuntu" or .depName=="windows") and .currentValue=="latest""#,
-    r#" and .skipReason=="invalid-version" and (.updates|length)==0 and (report_warnings|length)==0;"#,
-    r#"def covered_mise_ci_alias($records;$record): $record.dependency as $alias"#,
-    r#"|if $record.manager!="github-actions" or $record.packageFile!=".github/workflows/ci.yml""#,
-    r#" or $alias.datasource!="github-release-attachments" or $alias.depType!="uses-with""#,
-    r#" or $alias.depName!="jdx/mise" or $alias.packageName!="jdx/mise""#,
-    r#" or $alias.currentValue!="${{ steps.mise.outputs.version }}" or $alias.skipReason!="invalid-value""#,
-    r#" or ($alias.updates|length)!=0 or ($alias|report_warnings|length)!=0 then false else"#,
-    r#" counterpart($records;"home/.chezmoidata/versions.toml";"jdx/mise") as $verified"#,
-    r#"|if $verified==null then false else"#,
-    r#" $verified.datasource=="github-releases" and $verified.packageName=="jdx/mise""#,
-    r#" and ($verified|verified_lookup) end end;"#,
-    r#"($types|split(" ")|map(select(length>0))) as $blocking"#,
-    r#"|if ((.repositories.local.problems//[])|length)!=0 then error("repository problems prevent verified lookup evidence") else . end"#,
-    r#"|if (.repositories.local.packageFiles|type)!="object" then error("missing packageFiles") else .repositories.local.packageFiles end"#,
-    r#"|[to_entries[]|.key as $manager"#,
-    r#"|if (.value|type)!="array" then error("invalid manager packageFiles") else .value[] end"#,
-    r#"|if (.packageFile|nonempty_string|not) or (.deps|type)!="array" then error("invalid packageFile dependency evidence") else . end"#,
-    r#"|.packageFile as $file|.deps[]"#,
-    r#"|if valid_dependency then {manager:$manager,packageFile:$file,dependency:.} else error("invalid dependency lookup evidence") end] as $records"#,
-    r#"|$records[] as $record|$record.dependency"#,
-    r#"|if excluded or hosted_channel or covered_mise_backend($records;$record) or covered_mise_ci_alias($records;$record) then empty"#,
-    r#" elif .skipReason!=null or (report_warnings|length)!=0 then error("incomplete dependency lookup evidence") else . end"#,
-    r#"|$record.packageFile as $file|.depName as $dep|(.currentValue//"") as $cur|(.currentDigest//"") as $dig"#,
-    r#"|(.replaceString//"") as $rep|.updates[]|(.updateType//.bucket) as $type"#,
-    r#"|select(.pendingChecks!=true)|select(($blocking|index($type))!=null)"#,
-    r#"|[$file,$dep,$cur,$dig,$rep,$type,(.newValue//""),(.newDigest//""),(.isBreaking//false)]"#,
-    r#"|map(tostring|gsub("[\u001f\n]";" "))|join("\u001f")"#,
-);
-
-fn jq_updates(types: &str, report: &Path) -> Option<String> {
-    let out = locate::child("jq")
-        .args(["-r", "--arg", "types", types, JQ_UPDATES])
-        .arg(report)
-        .env("PATH", locate::hook_path())
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    Some(String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
-/// The report carries eight dependency fields and its compatibility classification.
-const UPDATE_FIELDS: usize = 9;
-
-fn parse_updates(out: &str) -> Vec<Update> {
-    let mut v = Vec::new();
-    for line in out.lines() {
-        let fields: Vec<&str> = line.split('\u{1f}').collect();
-        let [
-            package_file,
-            dep_name,
-            current_value,
-            current_digest,
-            replace_string,
-            update_type,
-            new_value,
-            new_digest,
-            breaking,
-        ] = fields[..]
-        else {
-            continue;
-        };
-        if package_file.is_empty() {
-            continue;
-        }
-        v.push(Update {
-            package_file: package_file.to_owned(),
-            dep_name: dep_name.to_owned(),
-            current_value: current_value.to_owned(),
-            current_digest: current_digest.to_owned(),
-            replace_string: replace_string.to_owned(),
-            kind: update_type.to_owned(),
-            new_value: new_value.to_owned(),
-            new_digest: new_digest.to_owned(),
-            breaking: breaking == "true",
-        });
-    }
-    v
 }
 
 /// Reports whether Renovate manages this path.
@@ -849,9 +782,55 @@ fn prepare(offered: Option<&str>, passthrough: &[String]) -> Option<RunConfig> {
         gid,
         dedicated_token: std::env::var("RENOVATE_GITHUB_COM_TOKEN")
             .ok()
-            .filter(|s| !s.is_empty()),
+            .filter(|s| !s.is_empty())
+            .or_else(doppler_token),
         passthrough: passthrough.to_vec(),
     })
+}
+
+/// The secret this machine's Doppler project and config hold for Renovate's GitHub lookups.
+///
+/// `chezmoi` names the project and config, and `doppler` prints the value into this process alone.
+/// A missing tool, an unnamed project, a failed fetch, or an unresolved reference yields `None`, and the run then lacks GitHub lookups as before.
+fn doppler_token() -> Option<String> {
+    let scope = locate::child("chezmoi")
+        .args([
+            "execute-template",
+            "{{ .doppler.project }}/{{ .doppler.config }}",
+        ])
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    let scope = String::from_utf8(scope.stdout).ok()?;
+    let (project, config) = doppler_scope(&scope)?;
+    let fetched = locate::child("doppler")
+        .args([
+            "secrets",
+            "get",
+            "RENOVATE_GITHUB_COM_TOKEN",
+            "--plain",
+            "--project",
+            project,
+            "--config",
+            config,
+            "--timeout",
+            LOOKUP_REQUEST_TIMEOUT,
+            "--no-check-version",
+        ])
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    let token = String::from_utf8(fetched.stdout).ok()?.trim().to_owned();
+    (!token.is_empty() && !token.starts_with("${")).then_some(token)
+}
+
+/// The project and config of `project/config`, when the text names both.
+fn doppler_scope(text: &str) -> Option<(&str, &str)> {
+    let (project, config) = text.trim().split_once('/')?;
+    (!project.is_empty() && !config.is_empty() && !config.contains('/'))
+        .then_some((project, config))
 }
 
 fn checkout_snapshot(root: &str, offered: Option<&str>) -> Option<PathBuf> {
@@ -969,8 +948,16 @@ fn run_prepared(cfg: &RunConfig, quiet_stdout: bool) -> Option<i32> {
 
 #[cfg(test)]
 mod run_tests {
-    use super::{RunConfig, docker_plan, image_is_pinned};
+    use super::{RunConfig, docker_plan, doppler_scope, image_is_pinned};
     use std::path::PathBuf;
+
+    #[test]
+    fn the_doppler_scope_names_both_a_project_and_a_config() {
+        assert_eq!(doppler_scope("dotfiles/prd\n"), Some(("dotfiles", "prd")));
+        for unnamed in ["", "/", "dotfiles/", "/prd", "dotfiles", "a/b/c"] {
+            assert_eq!(doppler_scope(unnamed), None, "{unnamed:?}");
+        }
+    }
 
     fn cfg(dedicated_token: Option<&str>, report_file: Option<&str>) -> RunConfig {
         RunConfig {
@@ -1155,7 +1142,7 @@ mod credential_boundary {
 
 #[cfg(test)]
 mod tests {
-    use super::{Update, is_manifest, parse_updates, touched};
+    use super::{Update, is_manifest, touched};
     use std::collections::BTreeMap;
 
     #[test]
@@ -1235,23 +1222,12 @@ mod tests {
         assert_eq!(refusal.bypass, None);
     }
 
-    #[test]
-    fn updates_parse_from_unit_separated_lines() {
-        let out = "Cargo.toml\u{1f}serde\u{1f}1.0\u{1f}\u{1f}serde = \"1.0\"\u{1f}minor\u{1f}1.1\u{1f}\u{1f}false\n";
-        let c = &parse_updates(out)[0];
-        assert_eq!(c.package_file, "Cargo.toml");
-        assert_eq!(c.dep_name, "serde");
-        assert_eq!(c.kind, "minor");
-        assert_eq!(c.new_value, "1.1");
-        assert!(c.replace_string.contains("serde"));
-        assert!(parse_updates("garbage without separators").is_empty());
-    }
-
     fn cand(rep: &str, cur: &str, dep: &str) -> Update {
         Update {
             package_file: "Cargo.toml".into(),
             dep_name: dep.into(),
             current_value: cur.into(),
+            resolved_version: String::new(),
             current_digest: String::new(),
             replace_string: rep.into(),
             kind: "minor".into(),

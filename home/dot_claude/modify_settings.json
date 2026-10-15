@@ -7,6 +7,7 @@
 */ -}}
 {{- $current := dict -}}
 {{- if trim .chezmoi.stdin -}}{{- $current = fromJson .chezmoi.stdin -}}{{- end -}}
+{{- $_ := set $current "hooks" (includeTemplate "partials/without_skill_ops_hooks" (dig "hooks" (dict) $current) | fromJson) -}}
 {{- /*
 The shell hook refuses recursive disk-usage scans in Bash and PowerShell.
 It also refuses file writes through inline interpreters, heredocs, and redirects in Bash.
@@ -14,37 +15,27 @@ It runs the same runtime binary the git hooks use.
 */ -}}
 {{- $tool := ".local/bin/dotfiles" -}}
 {{- if eq .profile "windows" }}{{ $tool = ".local/bin/dotfiles.exe" }}{{ end -}}
-{{- $hook := dict "type" "command" "command" (printf "%s claude-bash" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
+{{- $hook := dict "type" "command" "onFailure" "block" "command" (printf "%s claude-bash" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
 {{- /*
 The timing hook sets each shell command timeout from its measured durations.
 The tool events keep every group another installer added and replace only their own.
 */ -}}
 {{- $timing := dict "type" "command" "command" (printf "%s claude-timing" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
-{{- $hooks := dict -}}
-{{- $pre := list -}}
-{{- $preLast := list -}}
-{{- range (dig "hooks" "PreToolUse" (list) $current) -}}
-{{-   $text := toJson . -}}
-{{-   if contains "skill-ops " $text -}}{{- $preLast = append $preLast . -}}
-{{-   else if not (or (contains " claude-bash" $text) (contains " claude-timing" $text)) -}}{{- $pre = append $pre . -}}{{- end -}}
-{{- end -}}
-{{- $_ := set $hooks "PreToolUse" (concat $pre (list (dict "matcher" "Bash|PowerShell" "hooks" (list $hook $timing))) $preLast) -}}
+{{- $hooks := dig "hooks" (dict) $current -}}
+{{- $pre := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PreToolUse" (list) $hooks) "suffixes" (list " claude-bash" " claude-timing" " issue-guard")) | fromJson -}}
+{{- $_ := set $hooks "PreToolUse" (concat $pre (list (dict "matcher" "Bash|PowerShell" "hooks" (list $hook $timing)))) -}}
+{{- $issue := dict "type" "command" "command" (printf "%s issue-guard" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) "onFailure" "block" -}}
+{{- $_ := set $hooks "PreToolUse" (concat (dig "PreToolUse" (list) $hooks) (list (dict "matcher" "Edit|Write|MultiEdit|apply_patch" "hooks" (list $issue)))) -}}
 {{- range $event := list "PostToolUse" "PostToolUseFailure" -}}
-{{-   $groups := list -}}
-{{-   $last := list -}}
-{{-   range (dig "hooks" $event (list) $current) -}}
-{{-     $text := toJson . -}}
-{{-     if contains "skill-ops " $text -}}{{- $last = append $last . -}}
-{{-     else if not (contains " claude-timing" $text) -}}{{- $groups = append $groups . -}}{{- end -}}
-{{-   end -}}
-{{-   $_ := set $hooks $event (concat $groups (list (dict "matcher" "Bash|PowerShell" "hooks" (list $timing))) $last) -}}
+{{-   $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list " claude-timing")) | fromJson -}}
+{{-   $_ := set $hooks $event (concat $groups (list (dict "matcher" "Bash|PowerShell" "hooks" (list $timing)))) -}}
 {{- end -}}
 {{- /*
 A session starts with the verification report, which lists the repository's code shapes that nothing verifies with their next actions.
 On Windows it first runs the process-start probe, which hands the agent a refusal while a hung Defender engine stalls every process start.
 The stop hook refuses to end a turn while a file it changed holds such a shape.
 Both events keep every group another installer added and replace only these.
-skill-ops keeps its own groups last, so these go before them and neither installer reorders the other's.
+Unrelated handlers remain in their existing groups.
 */ -}}
 {{- $session := list -}}
 {{- if eq .profile "windows" -}}
@@ -53,18 +44,25 @@ skill-ops keeps its own groups last, so these go before them and neither install
 {{- $session = append $session (dict "type" "command" "command" (printf "%s assure start" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool)))) -}}
 {{- $stop := dict "type" "command" "command" (printf "%s assure stop" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
 {{- range $event := list "SessionStart" "Stop" -}}
-{{-   $groups := list -}}
-{{-   $last := list -}}
-{{-   range (dig "hooks" $event (list) $current) -}}
-{{-     $text := toJson . -}}
-{{-     if contains "skill-ops " $text -}}{{- $last = append $last . -}}
-{{-     else if not (or (contains " health --session" $text) (contains " assure start" $text) (contains " assure stop" $text)) -}}{{- $groups = append $groups . -}}{{- end -}}
-{{-   end -}}
+{{-   $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list " health --session" " assure start" " assure stop")) | fromJson -}}
 {{-   $own := dict "hooks" (list $stop) -}}
 {{-   if eq $event "SessionStart" -}}{{- $own = dict "hooks" $session -}}{{- end -}}
-{{-   $_ := set $hooks $event (concat $groups (list $own) $last) -}}
+{{-   $_ := set $hooks $event (concat $groups (list $own)) -}}
+{{- end -}}
+{{- if eq (includeTemplate "partials/skill_ops_experimental" .) "true" -}}
+{{- $observe := dict "type" "command" "command" "skill-ops observe --client claude" "timeout" 10 -}}
+{{- $_ := set $hooks "PostToolUse" (concat (dig "PostToolUse" (list) $hooks) (list (dict "matcher" "Read|read|Skill|skill|Bash|bash|exec_command" "hooks" (list $observe)))) -}}
+{{- $hold := dict "type" "command" "command" "skill-ops stop" "timeout" 10 -}}
+{{- $_ := set $hooks "Stop" (concat (dig "Stop" (list) $hooks) (list (dict "hooks" (list $hold)))) -}}
 {{- end -}}
 {{- $managed := dict "autoMemoryEnabled" false "hooks" $hooks -}}
+{{- $notify := dict "type" "command" "command" (printf "%s notifications agent claude" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) "timeout" 1 "async" true -}}
+{{- $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "Notification" (list) $hooks) "suffixes" (list " notifications agent claude")) | fromJson -}}
+{{- $_ := set $hooks "Notification" (concat $groups (list (dict "matcher" "permission_prompt|idle_prompt|elicitation_dialog" "hooks" (list $notify)))) -}}
+{{- range $event := list "UserPromptSubmit" "PostToolUse" "PostToolUseFailure" -}}
+{{- $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list " notifications agent claude")) | fromJson -}}
+{{- $_ := set $hooks $event (concat $groups (list (dict "hooks" (list $notify)))) -}}
+{{- end -}}
 {{- if eq .profile "wsl" -}}
 {{- $managed = mergeOverwrite $managed (includeTemplate "native/claude-settings/wsl.json.tmpl" . | fromJson) -}}
 {{- end -}}

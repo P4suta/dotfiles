@@ -3,6 +3,7 @@
 use crate::next_action_rules::{Checks, Head, Host, Pr, State, Step, Upstream, decide, executable};
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
+use rules::review_routing_rules::{Completion, ReviewEvidence, completion};
 use serde::Serialize;
 use serde_json::Value;
 use skill_ops::skill_rules::{Tracked, tracked_decision};
@@ -447,6 +448,29 @@ pub(crate) fn pr_reviews_paused(home: &Path) -> Result<bool> {
     Ok(false)
 }
 
+fn required_review_paused(
+    root: &Path,
+    repository: Option<&str>,
+    pull_request: Option<&PullRequest>,
+    home: &Path,
+) -> Result<bool> {
+    let pr_paused = pr_reviews_paused(home)?;
+    let scope = coderabbit_guard::pause(home)?;
+    let cli_paused = coderabbit_guard::review_rules::cli_reviews_paused(scope);
+    let Some(pr) = pull_request.filter(|pr| pr.state == "OPEN") else {
+        return Ok(pr_paused);
+    };
+    if !pr_paused && !cli_paused {
+        return Ok(false);
+    }
+    let route = pr_workflow::current_review_route(
+        root,
+        repository.context("the current PR repository is unknown")?,
+        pr.number,
+    )?;
+    Ok(completion(route, cli_paused, pr_paused, ReviewEvidence::None, true) == Completion::Paused)
+}
+
 /// Whether the repository defines GitHub Actions workflows that report checks on a PR.
 fn workflows(root: &Path) -> Result<bool> {
     let directory = root.join(".github/workflows");
@@ -539,6 +563,12 @@ pub fn inspect(root: &Path, environment: &Environment) -> Result<Observed> {
         _ => false,
     };
     let (undecided_skills, incomplete_decisions) = decision_backlog(root)?;
+    let review_paused = required_review_paused(
+        root,
+        repository.as_deref(),
+        pull_request.as_ref(),
+        &environment.home,
+    )?;
     Ok(Observed {
         host,
         branch,
@@ -554,7 +584,7 @@ pub fn inspect(root: &Path, environment: &Environment) -> Result<Observed> {
         undecided_skills,
         incomplete_decisions,
         push_paused: environment.home.join(".config/git/push-paused").exists(),
-        review_paused: pr_reviews_paused(&environment.home)?,
+        review_paused,
         repository,
         workflows: workflows(root)?,
         github_inspected: !environment.offline,
@@ -718,7 +748,7 @@ pub fn recommend(state: Observed) -> Recommendation {
         ),
         Step::AwaitReviewResume => (
             format!(
-                "CodeRabbit is paused by the owner; leave PR #{number} unchanged and continue local work until review resumes"
+                "The required CodeRabbit route is paused by the owner on PR #{number}; continue independent work until that pool resumes"
             ),
             None,
         ),
@@ -732,10 +762,10 @@ pub fn recommend(state: Observed) -> Recommendation {
         ),
         Step::AwaitReview => (
             format!(
-                "PR #{number} is in review; inspect the review of the current head and address its findings"
+                "Checks pass on PR #{number}; validate its current importance route and remaining evidence before an authorized merge"
             ),
             Some(format!(
-                "gh pr view {number} --repo {repository} --comments"
+                "pr-workflow check --repo {repository} --issue <issue> --pr {number} --final"
             )),
         ),
     };

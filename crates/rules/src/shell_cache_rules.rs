@@ -7,6 +7,110 @@ const ATUIN_INDEX: &[u8] = b"if (version).minor >= 104 or (version).major > 0 {\
 const ATUIN_ZSH_INDEX: &[u8] =
     b"(ATUIN_SHELL=zsh atuin __internal prepare-search-index >/dev/null 2>&1 &)";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Shell {
+    Nu,
+    Zsh,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Escape {
+    Verbatim,
+    Quote,
+    Slash,
+    Control,
+}
+
+const NU_CONTINUATION_START: &[u8] = b"    PROMPT_MULTILINE_INDICATOR: (";
+const NU_CONTINUATION_END: &[u8] = b"    )";
+const NU_COMMAND_START: &[u8] = b"        ^'";
+const NU_COMMAND_END: &[u8] = b"' prompt --continuation";
+const ZSH_COMMAND_START: &[u8] = b"PROMPT2=\"$(";
+const ZSH_COMMAND_END: &[u8] = b" prompt --continuation)\"";
+
+fn line(input: &[u8], start: usize) -> Option<(&[u8], usize)> {
+    let remaining = input.get(start..)?;
+    let length = remaining.iter().position(|byte| *byte == b'\n');
+    match length {
+        Some(length) => Some((remaining.get(..length)?, start + length + 1)),
+        None => Some((remaining, input.len())),
+    }
+}
+
+fn command(shell: Shell, line: &[u8]) -> bool {
+    let (prefix, suffix) = match shell {
+        Shell::Nu => (NU_COMMAND_START, NU_COMMAND_END),
+        Shell::Zsh => (ZSH_COMMAND_START, ZSH_COMMAND_END),
+    };
+    let Some(program) = line
+        .strip_prefix(prefix)
+        .and_then(|line| line.strip_suffix(suffix))
+    else {
+        return false;
+    };
+    !program.is_empty()
+        && program.iter().all(|byte| {
+            !matches!(byte, 0 | b'\r' | b'\n')
+                && match shell {
+                    Shell::Nu => *byte != b'\'',
+                    Shell::Zsh => !matches!(byte, b'\"' | b'$' | b'`' | b'(' | b')'),
+                }
+        })
+}
+
+/// The unique eager continuation assignment in the pinned Starship generator.
+#[must_use]
+pub fn continuation(shell: Shell, input: &[u8]) -> Option<Range<usize>> {
+    let mut start = 0;
+    let mut selected = None;
+    while start < input.len() {
+        let (first, next) = line(input, start)?;
+        let end = match shell {
+            Shell::Nu if first == NU_CONTINUATION_START => {
+                let (expression, following) = line(input, next)?;
+                let (last, end) = line(input, following)?;
+                (command(shell, expression) && last == NU_CONTINUATION_END).then_some(end)
+            }
+            Shell::Zsh if command(shell, first) => Some(next),
+            _ => None,
+        };
+        if let Some(end) = end {
+            if selected.is_some() {
+                return None;
+            }
+            selected = Some(start..end);
+        }
+        start = next;
+    }
+    selected
+}
+
+/// Escaping for Nushell strings and zsh `$'...'` strings.
+#[must_use]
+pub fn literal_escape(shell: Shell, character: char) -> Escape {
+    match (shell, character) {
+        (Shell::Nu, '"') | (Shell::Zsh, '\'') => Escape::Quote,
+        (_, '\\') => Escape::Slash,
+        (_, character) if character.is_control() => Escape::Control,
+        _ => Escape::Verbatim,
+    }
+}
+
+/// The captured prompt prefix after the shell's command-output newline handling.
+#[must_use]
+pub fn prompt_end(shell: Shell, input: &[u8]) -> usize {
+    match shell {
+        Shell::Nu => input
+            .strip_suffix(b"\r\n")
+            .or_else(|| input.strip_suffix(b"\n"))
+            .map_or(input.len(), <[u8]>::len),
+        Shell::Zsh => input
+            .iter()
+            .rposition(|byte| *byte != b'\n')
+            .map_or(0, |last| last + 1),
+    }
+}
+
 /// Whether Atuin's zsh initialization line leaves index construction to the first search.
 #[must_use]
 pub fn keep_atuin_line(line: &[u8]) -> bool {
@@ -40,6 +144,152 @@ pub fn keep_mise_line(line: &[u8]) -> bool {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    #[cfg(kani)]
+    const NU: &[u8] =
+        b"    PROMPT_MULTILINE_INDICATOR: (\n        ^'/p' prompt --continuation\n    )\n";
+    #[cfg(kani)]
+    const ZSH: &[u8] = b"PROMPT2=\"$(/p prompt --continuation)\"\n";
+    #[cfg(kani)]
+    const CONTINUATION_BOUND: usize = 100;
+
+    #[cfg(kani)]
+    fn changed_continuation(shell: Shell, range: Range<u8>) {
+        let original = match shell {
+            Shell::Nu => NU,
+            Shell::Zsh => ZSH,
+        };
+        let path = match shell {
+            Shell::Nu => NU_CONTINUATION_START.len() + 1 + NU_COMMAND_START.len(),
+            Shell::Zsh => ZSH_COMMAND_START.len(),
+        };
+        let mut input = [0u8; CONTINUATION_BOUND];
+        input[..original.len()].copy_from_slice(original);
+        let offset: u8 = kani::any();
+        kani::assume(range.contains(&offset));
+        let offset = usize::from(offset);
+        let byte: u8 = kani::any();
+        input[offset] = byte;
+        let retained_path = matches!(offset.checked_sub(path), Some(0 | 1));
+        let path_byte = !matches!(byte, 0 | b'\r' | b'\n')
+            && match shell {
+                Shell::Nu => byte != b'\'',
+                Shell::Zsh => !matches!(byte, b'"' | b'$' | b'`' | b'(' | b')'),
+            };
+        let expected = if retained_path {
+            path_byte
+        } else {
+            original.get(offset) == Some(&byte)
+        };
+        assert_eq!(
+            continuation(shell, &input[..original.len()]).is_some(),
+            expected
+        );
+        kani::cover!(expected);
+        kani::cover!(!expected);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(101)]
+    fn nu_continuation_shape_bytes_zero_through_thirty_one() {
+        changed_continuation(Shell::Nu, 0..32);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(101)]
+    fn nu_continuation_shape_bytes_thirty_two_through_sixty_three() {
+        changed_continuation(Shell::Nu, 32..64);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(101)]
+    fn nu_continuation_shape_bytes_sixty_four_through_the_end() {
+        changed_continuation(Shell::Nu, 64..u8::try_from(NU.len()).unwrap());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(101)]
+    fn zsh_continuation_shape_bytes_zero_through_thirty_one() {
+        changed_continuation(Shell::Zsh, 0..32);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(101)]
+    fn zsh_continuation_shape_bytes_thirty_two_through_the_end() {
+        changed_continuation(Shell::Zsh, 32..u8::try_from(ZSH.len()).unwrap());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(201)]
+    fn continuation_requires_a_line_boundary_and_a_unique_assignment() {
+        let mut input = [0u8; NU.len() + 1];
+        input[0] = kani::any();
+        input[1..].copy_from_slice(NU);
+        assert_eq!(continuation(Shell::Nu, &input).is_some(), input[0] == b'\n');
+        let mut duplicate = [0u8; NU.len() * 2];
+        duplicate[..NU.len()].copy_from_slice(NU);
+        duplicate[NU.len()..].copy_from_slice(NU);
+        assert!(continuation(Shell::Nu, &duplicate).is_none());
+        kani::cover!(input[0] == b'\n');
+        kani::cover!(input[0] != b'\n');
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn literal_escaping_covers_every_unicode_scalar_and_shell_quote() {
+        let character: char = kani::any();
+        let nu: bool = kani::any();
+        let shell = if nu { Shell::Nu } else { Shell::Zsh };
+        let expected = if (nu && character == '"') || (!nu && character == '\'') {
+            Escape::Quote
+        } else if character == '\\' {
+            Escape::Slash
+        } else if matches!(character, '\0'..='\u{1f}' | '\u{7f}'..='\u{9f}') {
+            Escape::Control
+        } else {
+            Escape::Verbatim
+        };
+        assert_eq!(literal_escape(shell, character), expected);
+        kani::cover!(expected == Escape::Quote);
+        kani::cover!(expected == Escape::Slash);
+        kani::cover!(expected == Escape::Control);
+        kani::cover!(expected == Escape::Verbatim);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn captured_prompt_newlines_match_each_shell() {
+        let input: [u8; 8] = kani::any();
+        let length: usize = kani::any();
+        kani::assume(length <= input.len());
+        let input = &input[..length];
+        let nu = prompt_end(Shell::Nu, input);
+        let zsh = prompt_end(Shell::Zsh, input);
+        assert!(nu <= length && zsh <= length);
+        let ending = if input.last() == Some(&b'\n') {
+            if length >= 2 && input.get(length - 2) == Some(&b'\r') {
+                2
+            } else {
+                1
+            }
+        } else {
+            0
+        };
+        assert_eq!(nu, length - ending);
+        assert!(input[zsh..].iter().all(|byte| *byte == b'\n'));
+        assert!(zsh == 0 || input.get(zsh - 1) != Some(&b'\n'));
+        kani::cover!(nu < length);
+        kani::cover!(nu == length);
+        kani::cover!(zsh < length);
+        kani::cover!(zsh == length);
+    }
 
     #[cfg(kani)]
     #[kani::proof]
@@ -148,6 +398,65 @@ mod proofs {
 mod tests {
     use super::*;
     use alloc::vec::Vec;
+
+    #[test]
+    fn continuation_selects_one_known_eager_assignment_and_preserves_unknown_shapes() {
+        let nu = b"    PROMPT_MULTILINE_INDICATOR: (\n        ^'/path with spaces/starship' prompt --continuation\n    )\n";
+        let zsh = b"PROMPT2=\"$(/native/starship prompt --continuation)\"\n";
+        for (shell, script) in [(Shell::Nu, &nu[..]), (Shell::Zsh, &zsh[..])] {
+            assert_eq!(continuation(shell, script), Some(0..script.len()));
+            let duplicated: Vec<_> = script.iter().chain(script).copied().collect();
+            assert_eq!(continuation(shell, &duplicated), None);
+            let nested: Vec<_> = b" ".iter().chain(script).copied().collect();
+            assert_eq!(continuation(shell, &nested), None);
+            for prefix in [&b"\n"[..], b"# known generator\n"] {
+                let surrounded: Vec<_> = prefix
+                    .iter()
+                    .chain(script)
+                    .chain(b"# deferred\n")
+                    .copied()
+                    .collect();
+                assert_eq!(
+                    continuation(shell, &surrounded),
+                    Some(prefix.len()..prefix.len() + script.len())
+                );
+            }
+        }
+        for invalid in [
+            &b""[..],
+            b"PROMPT2='deferred prompt'\n",
+            b"PROMPT2=\"$(starship prompt --unknown)\"\n",
+        ] {
+            assert_eq!(continuation(Shell::Zsh, invalid), None);
+        }
+        for character in ['\0', '\n', '\u{1b}', '\u{7f}', '\u{85}', '\u{9f}'] {
+            assert_eq!(literal_escape(Shell::Nu, character), Escape::Control);
+            assert_eq!(literal_escape(Shell::Zsh, character), Escape::Control);
+        }
+        assert_eq!(literal_escape(Shell::Nu, '"'), Escape::Quote);
+        assert_eq!(literal_escape(Shell::Zsh, '\''), Escape::Quote);
+        assert_eq!(literal_escape(Shell::Nu, '\\'), Escape::Slash);
+        assert_eq!(literal_escape(Shell::Zsh, '\\'), Escape::Slash);
+        for character in ['$', '`', '#', '日', '😀'] {
+            assert_eq!(literal_escape(Shell::Nu, character), Escape::Verbatim);
+            assert_eq!(literal_escape(Shell::Zsh, character), Escape::Verbatim);
+        }
+    }
+
+    #[test]
+    fn prompt_capture_preserves_the_original_shell_newline_semantics() {
+        for (input, nu, zsh) in [
+            (&b""[..], &b""[..], &b""[..]),
+            (b"line", b"line", b"line"),
+            (b"line\r", b"line\r", b"line\r"),
+            (b"line\n", b"line", b"line"),
+            (b"line\n\n", b"line\n", b"line"),
+            (b"line\r\n\r\n", b"line\r\n", b"line\r\n\r"),
+        ] {
+            assert_eq!(&input[..prompt_end(Shell::Nu, input)], nu);
+            assert_eq!(&input[..prompt_end(Shell::Zsh, input)], zsh);
+        }
+    }
 
     #[test]
     fn atuin_keeps_search_and_history_functions_but_starts_no_index_job() {

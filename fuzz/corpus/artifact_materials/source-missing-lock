@@ -1,0 +1,1 @@
+{"files":{"Cargo.lock":"version=4\n[[package]]\nname='example'\nversion='1.2.3'\nsource='registry+https://github.com/rust-lang/crates.io-index'\nchecksum='1878533c325f953e90871117518288b603e84710825170bbf251dc872f8e9f88'\n","Cargo.toml":"[workspace]\n","fuzz/Cargo.toml":"[workspace]\n"},"archive":null}

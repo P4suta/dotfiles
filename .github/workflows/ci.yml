@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Only the proofs job enables Kani.
+  # Only the Kani partition enables Kani.
   # The owner paused hosted mutation execution pending njutest.
   MISE_DISABLE_TOOLS: "cargo:kani-verifier,cargo:cargo-mutants"
   # Every managed host runs mise in paranoid mode, which loads a project configuration only once it trusts that exact file.
@@ -48,6 +48,11 @@ jobs:
         env:
           BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
         run: mise x -- just classify --base "$BASE" >> "$GITHUB_OUTPUT"
+      - name: Validate the signed issue contexts of the change
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
+        run: mise x -- just issue-context --base "$BASE"
       # The check jobs hold every finding to its baseline, and only this job fetches the base the baselines may not grow from.
       - name: Refuse a lint baseline that grew since the base
         env:
@@ -129,14 +134,21 @@ jobs:
         run: mise x -- just ansible-syntax-check
 
   proofs:
-    name: proofs
+    name: proofs (${{ matrix.phase }})
     needs: classify
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        phase: [kani, runtime, metrics-models]
     env:
-      MISE_DISABLE_TOOLS: "cargo:cargo-mutants"
+      MISE_DISABLE_TOOLS: ${{ matrix.phase == 'kani' && 'cargo:cargo-mutants' || 'cargo:kani-verifier,cargo:cargo-mutants' }}
       GATES: ${{ needs.classify.outputs.gates }}
+      PHASE: ${{ matrix.phase }}
+      CARGO_BUILD_JOBS: "2"
     steps:
       - name: Refuse to pass without a classification
         if: needs.classify.result != 'success'
@@ -168,17 +180,17 @@ jobs:
             ~/.cargo/git
             ~/.kani
             target
-          key: proofs-${{ hashFiles('Cargo.lock', 'mise.toml') }}
-          restore-keys: proofs-
+          key: proofs-${{ matrix.phase }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          restore-keys: proofs-${{ matrix.phase }}-
       - name: Set up the pinned verifier
-        if: contains(env.GATES, 'proofs')
+        if: contains(env.GATES, 'proofs') && matrix.phase == 'kani'
         run: mise x -- kani setup
       - name: Set up Miri on the nightly the verifier pins
-        if: contains(env.GATES, 'proofs')
+        if: contains(env.GATES, 'proofs') && matrix.phase == 'runtime'
         run: rustup toolchain install nightly-2026-08-21 --profile minimal --component miri,rust-src
-      - name: Prove contracts and models without the paused mutation campaign
+      - name: Run the mandatory partition without the paused mutation campaign
         if: contains(env.GATES, 'proofs')
-        run: mise x -- just proofs-ci
+        run: mise x -- just proofs-ci --phase "$PHASE"
 
   minimum-git:
     # Git 2.43 comes from Ubuntu 24.04 and ranks as the oldest Git on a managed host.

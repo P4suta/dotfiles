@@ -49,11 +49,11 @@ pub const fn origin(explicit: bool, working_copy: bool, build_checkout: bool) ->
     }
 }
 
-/// The rebuild touches a recorded installation only when it exists and no longer matches the sources.
+/// The rebuild touches only a recorded installation from this checkout whose content no longer matches.
 /// A tool that the owner never installed stays absent.
 #[must_use]
-pub const fn reinstalls(recorded: bool, recorded_matches: bool) -> bool {
-    recorded && !recorded_matches
+pub const fn reinstalls(recorded: bool, source_matches: bool, recorded_matches: bool) -> bool {
+    recorded && source_matches && !recorded_matches
 }
 
 /// The properties Kani proves for every input and the tests check over every input they list.
@@ -80,9 +80,10 @@ mod proofs {
         );
     }
 
-    pub fn spec_reinstalls(recorded: bool, matching: bool) {
-        let rebuild = reinstalls(recorded, matching);
-        assert_eq!(rebuild, recorded && !matching);
+    pub fn spec_reinstalls(recorded: bool, source_matches: bool, matching: bool) {
+        let rebuild = reinstalls(recorded, source_matches, matching);
+        assert_eq!(rebuild, recorded && source_matches && !matching);
+        assert!(!rebuild || source_matches);
     }
 
     #[cfg(kani)]
@@ -114,11 +115,13 @@ mod proofs {
     #[kani::proof]
     fn only_a_recorded_lagging_installation_is_rebuilt() {
         let recorded: bool = kani::any();
+        let source_matches: bool = kani::any();
         let matching: bool = kani::any();
-        spec_reinstalls(recorded, matching);
-        let reinstall = reinstalls(recorded, matching);
+        spec_reinstalls(recorded, source_matches, matching);
+        let reinstall = reinstalls(recorded, source_matches, matching);
         kani::cover!(reinstall);
-        kani::cover!(!reinstall & recorded);
+        kani::cover!(!reinstall && recorded && !source_matches);
+        kani::cover!(!reinstall && recorded && source_matches);
     }
 }
 
@@ -130,10 +133,10 @@ mod tests {
     fn every_input_meets_the_specification() {
         for [first, second] in flags() {
             super::proofs::spec_freshness(first, second);
-            super::proofs::spec_reinstalls(first, second);
         }
         for [explicit, working, built] in flags() {
             super::proofs::spec_origin(explicit, working, built);
+            super::proofs::spec_reinstalls(explicit, working, built);
         }
     }
 }

@@ -1,0 +1,1 @@
+{"repositories":{"local":{"packageFiles":{"cargo":[{"packageFile":"Cargo.toml","deps":[{"depName":"serde","currentValue":"1.0","skipReason":"github-token-required","warnings":[{"message":"lookup failed"}],"updates":[]}]}]}}}}

@@ -7,14 +7,14 @@
 # A version update takes every checksum from the release's SHASUMS256.txt.
 [mise]
 # renovate: datasource=github-releases depName=jdx/mise extractVersion=^v(?<version>.+)$
-version = "2026.10.6"
+version = "2026.10.7"
 
 [mise.sha256]
-linux-arm64 = "5f3187febbe9ff98e4c78b3596c7bbfde0e3ef8e4b1820494d03efd499de7b6e"
-linux-x64 = "3f44343eebc7e0d6623bcea46e304864f02dff648edd75c82871b53cc697b366"
-macos-arm64 = "bbcea7b0f844d026424a4c8335357a15a2f5c9e9132c9408de990d9be6f26101"
-macos-x64 = "70e1407e2fdc7a19f94db35745a8e5885b0e4bbdbfb34bfb7e3619d6230a8f70"
-windows-x64 = "c586696608dae5538e49b91cc728d3d525ba02a48c9200327694003dbde3b0a4"
+linux-arm64 = "c7108d85a32ba17e4747d31d4a42f39f0c134f16211e204e8ef0a49d4f518fe1"
+linux-x64 = "6eb1b890e90818417ca34c90dbbd47881917d5cd199f31b63b062ea9c6b18d85"
+macos-arm64 = "f5171e341518a57e8c4e9280e28443e35d66212c51164c83be76794e0a78b014"
+macos-x64 = "c3355f0c56d1b9fe73a2ba30e034b4e483541b25b1ad812a87440abfaeec8baa"
+windows-x64 = "152086b35c0e0adc182718f6f280f6b7f58b97535d5070fb6135f4e524a0d0e1"
 
 [platforms.linux.tool_versions]
 java = "temurin-25"

@@ -1,0 +1,35 @@
+{
+  "count": 6,
+  "entries": [
+    {
+      "name": "mise/",
+      "length": 0,
+      "attributes": 2180841472
+    },
+    {
+      "name": "mise/bin/",
+      "length": 0,
+      "attributes": 2180841472
+    },
+    {
+      "name": "mise/bin/mise-shim.exe",
+      "length": 276992,
+      "attributes": 2176057344
+    },
+    {
+      "name": "mise/bin/mise.exe",
+      "length": 206449664,
+      "attributes": 2176057344
+    },
+    {
+      "name": "mise/LICENSE",
+      "length": 1068,
+      "attributes": 2176057344
+    },
+    {
+      "name": "mise/README.md",
+      "length": 10989,
+      "attributes": 2176057344
+    }
+  ]
+}

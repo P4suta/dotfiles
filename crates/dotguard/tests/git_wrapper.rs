@@ -127,6 +127,9 @@ fn text(bytes: &[u8]) -> String {
 #[test]
 fn a_failed_real_push_records_its_rule_status_and_invocation() {
     let wrapper = Wrapper::new("failed-push-observation");
+    let opt_in = wrapper.home().join(platform::incidents::EXPERIMENTAL);
+    std::fs::create_dir_all(opt_in.parent().unwrap()).unwrap();
+    std::fs::write(opt_in, rules::incident_rules::EXPERIMENTAL_OPT_IN).unwrap();
     let state = wrapper.scope.join("state");
     let output = wrapper.run_env(
         &["push", "origin", "main"],

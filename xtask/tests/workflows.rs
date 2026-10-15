@@ -17,7 +17,6 @@ const POLICY: &str = "[ruleset.main]\nrequired_status_checks = [\"required\"]\n"
 const MISE_PINS: &str = "home/.chezmoidata/versions.toml";
 const CONTROL_VERSION: &str = "0.0.1";
 const PRODUCER_SYSTEM_PATH: &str = "/usr/bin:/bin";
-const CI_PROOFS_ENTRY: &str = "mise x -- just proofs-ci";
 
 const WORKFLOW: &str = "on:
   pull_request:
@@ -92,13 +91,70 @@ fn ci_uses_the_explicit_proof_entry_for_the_paused_mutation_campaign() -> Result
             .as_vec()
             .context("the proofs job has no steps")?;
         assert!(
-            steps
-                .iter()
-                .any(|step| step["run"].as_str() == Some(CI_PROOFS_ENTRY)),
+            steps.iter().any(|step| matches!(
+                step["run"].as_str(),
+                Some(xtask::quality::CI_PROOFS_ENTRY | xtask::quality::CI_PHASE_ENTRY)
+            )),
             "the proofs job must call its explicit CI entry"
         );
     }
     Ok(())
+}
+
+#[test]
+fn a_hosted_partition_cannot_omit_duplicate_or_skip_required_work() {
+    let current = repository(".github/workflows/ci.yml");
+    let (prefix, proofs) = current.split_once("\n  proofs:\n").unwrap();
+    let (proofs, suffix) = proofs.split_once("\n  minimum-git:\n").unwrap();
+    for (from, to, expected) in [
+        (
+            "phase: [kani, runtime, metrics-models]",
+            "phase: [kani, runtime]",
+            "every known partition exactly once",
+        ),
+        (
+            "phase: [kani, runtime, metrics-models]",
+            "phase: [kani, runtime, runtime]",
+            "every known partition exactly once",
+        ),
+        (
+            "phase: [kani, runtime, metrics-models]",
+            "phase: [kani, runtime, metrics-models, unknown]",
+            "every known partition exactly once",
+        ),
+        (
+            "fail-fast: false",
+            "fail-fast: true",
+            "collect every partition",
+        ),
+        ("max-parallel: 2", "max-parallel: 3", "at most two jobs"),
+        (
+            "PHASE: ${{ matrix.phase }}",
+            "PHASE: kani",
+            "execute its selected mandatory partition",
+        ),
+        (
+            xtask::quality::CI_PHASE_ENTRY,
+            "mise x -- just proofs-ci --phase kani",
+            "execute its selected mandatory partition",
+        ),
+        (
+            "phase: [kani, runtime, metrics-models]",
+            "phase: [kani, runtime, metrics-models]\n        exclude: [{phase: runtime}]",
+            "without include or exclude overrides",
+        ),
+    ] {
+        assert_eq!(proofs.matches(from).count(), 1, "fixture subject: {from}");
+        let changed = format!(
+            "{prefix}\n  proofs:\n{}\n  minimum-git:\n{suffix}",
+            proofs.replacen(from, to, 1)
+        );
+        let findings = workflow_findings(&changed, POLICY).unwrap();
+        assert!(
+            findings.iter().any(|finding| finding.contains(expected)),
+            "missing {expected}: {findings:?}"
+        );
+    }
 }
 
 #[test]

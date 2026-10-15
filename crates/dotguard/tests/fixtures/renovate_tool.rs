@@ -7,15 +7,56 @@ fn main() {
     let executable = std::env::current_exe().unwrap();
     match executable.file_stem().unwrap().to_str().unwrap() {
         "id" => println!("{FIXTURE_ID}"),
-        "jq" => {
-            let status =
-                std::process::Command::new(std::env::var_os("RENOVATE_FIXTURE_JQ").unwrap())
-                    .args(&args)
-                    .status()
-                    .unwrap();
-            std::process::exit(status.code().unwrap_or(1));
-        }
         "docker" => docker(&args),
+        "chezmoi" => {
+            assert_eq!(
+                std::env::var("MISE_NOT_FOUND_AUTO_INSTALL").unwrap(),
+                "false"
+            );
+            assert_eq!(std::env::var("MISE_AUTO_PRUNE").unwrap(), "false");
+            assert_eq!(
+                args,
+                [
+                    "execute-template",
+                    "{{ .doppler.project }}/{{ .doppler.config }}"
+                ]
+            );
+            println!(
+                "{}",
+                std::env::var("RENOVATE_FIXTURE_DOPPLER_SCOPE").unwrap()
+            );
+        }
+        "doppler" => {
+            assert_eq!(
+                args,
+                [
+                    "secrets",
+                    "get",
+                    "RENOVATE_GITHUB_COM_TOKEN",
+                    "--plain",
+                    "--project",
+                    "managed-project",
+                    "--config",
+                    "prd",
+                    "--timeout",
+                    "5s",
+                    "--no-check-version"
+                ]
+            );
+            std::fs::write(
+                std::env::var_os("RENOVATE_FIXTURE_DOPPLER_CALL").unwrap(),
+                args.join("\n"),
+            )
+            .unwrap();
+            if std::env::var("RENOVATE_FIXTURE_DOPPLER_FAIL").unwrap() == "1" {
+                eprintln!("synthetic-credential-error");
+                std::process::exit(1);
+            }
+            println!(
+                "{}",
+                std::env::var("RENOVATE_FIXTURE_DOPPLER_TOKEN").unwrap()
+            );
+        }
         "dotguard-renovate" => {
             assert!(!args.is_empty());
             let status =
@@ -31,6 +72,17 @@ fn main() {
 }
 
 fn docker(args: &[String]) {
+    if let Ok(expected) = std::env::var("RENOVATE_FIXTURE_EXPECT_GITHUB_TOKEN") {
+        let actual = std::env::var("GITHUB_COM_TOKEN").ok();
+        if expected.is_empty() {
+            assert_eq!(actual, None);
+            assert!(!args.iter().any(|arg| arg == "GITHUB_COM_TOKEN"));
+        } else {
+            assert_eq!(actual.as_deref(), Some(expected.as_str()));
+            assert!(args.iter().any(|arg| arg == "GITHUB_COM_TOKEN"));
+            assert!(!args.iter().any(|arg| arg.contains(&expected)));
+        }
+    }
     let image = args
         .iter()
         .position(|arg| arg.starts_with("renovate/renovate:"))

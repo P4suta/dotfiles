@@ -1,0 +1,1 @@
+{"repositories":{"local":{"packageFiles":{"cargo":[{"packageFile":"Cargo.toml","deps":[{"depName":"serde","currentValue":"1.0","updates":[{"updateType":"patch","newValue":"1.1"}]}]}]}}}}

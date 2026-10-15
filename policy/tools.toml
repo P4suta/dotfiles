@@ -123,6 +123,11 @@ tools = [
 
 [[none]]
 reason = "desktop"
+why = "The notification runtime uses this backend only to play validated fixed PCM presets, and its CLI owns preparation, status, and intentional tests."
+tools = ["pulseaudio"]
+
+[[none]]
+reason = "desktop"
 why = "These are interactive terminals, editors, shells, prompts, and full-screen viewers for the owner, which an agent neither drives nor needs to explain."
 tools = [
   "atuin",

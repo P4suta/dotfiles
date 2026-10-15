@@ -2,7 +2,7 @@
 //!
 //! Hook processes start from a non-interactive `sh` that may never have run `mise activate`, so this module restores the managed tool directories to `PATH`.
 //!
-//! `MISE_AUTO_INSTALL=false` stops each shim run from downloading missing tools.
+//! Child processes prevent mise from installing missing tools or pruning installations.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -18,10 +18,13 @@ pub fn hook_path() -> String {
         .map_or_else(|_| String::new(), |s| s.to_string_lossy().into_owned())
 }
 
-/// A `Command` with the hook `PATH` and `MISE_AUTO_INSTALL=false`.
+/// A `Command` with the hook `PATH` and automatic mise installation and pruning off.
 pub fn child(program: &str) -> Command {
     let mut c = platform::process::command(program);
-    c.env("PATH", hook_path()).env("MISE_AUTO_INSTALL", "false");
+    c.env("PATH", hook_path())
+        .env("MISE_AUTO_INSTALL", "false")
+        .env("MISE_NOT_FOUND_AUTO_INSTALL", "false")
+        .env("MISE_AUTO_PRUNE", "false");
     c
 }
 

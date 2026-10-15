@@ -18,6 +18,46 @@ by = "crates/skill-ops/tests/skill_gate_replay.rs"
 
 [[owner]]
 shape = "parser"
+path = "crates/dotfiles/src/artifacts/plan.rs"
+by = "fuzz/fuzz_targets/artifact_plan.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/artifacts/workload.rs"
+by = "fuzz/fuzz_targets/artifact_materials.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/artifacts/consume.rs"
+by = "fuzz/fuzz_targets/artifact_materials.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/artifacts/native.rs"
+by = "fuzz/fuzz_targets/artifact_materials.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/artifacts/mise_consume.rs"
+by = "fuzz/fuzz_targets/artifact_materials.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/artifacts/rustup_consume.rs"
+by = "fuzz/fuzz_targets/artifact_materials.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/artifacts/transport.rs"
+by = "fuzz/fuzz_targets/artifact_plan.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/rules/src/artifact_rules.rs"
+by = "fuzz/fuzz_targets/artifact_plan.rs"
+
+[[owner]]
+shape = "parser"
 path = "crates/model/src/data.rs"
 by = "fuzz/fuzz_targets/chezmoi_data.rs"
 
@@ -57,9 +97,24 @@ shape = "parser"
 path = "crates/model/src/repository.rs"
 by = "fuzz/fuzz_targets/repository_metadata.rs"
 
+[[owner]]
+shape = "parser"
+path = "crates/platform/src/source_identity.rs"
+by = "fuzz/fuzz_targets/repository_metadata.rs"
+
 [[budget]]
 name = "mutants-missed"
 ceiling = 0
+
+[[owner]]
+shape = "parser"
+path = "crates/dotguard/src/renovate/report.rs"
+by = "fuzz/fuzz_targets/renovate_report.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/coderabbit-guard/src/receipt.rs"
+by = "fuzz/fuzz_targets/review_completion.rs"
 
 [[budget]]
 name = "mutants-timed-out"
@@ -69,3 +124,8 @@ ceiling = 0
 [[budget]]
 name = "unsafe-sites"
 ceiling = 5
+
+[[owner]]
+shape = "parser"
+path = "xtask/src/proof_image_prepare.rs"
+by = "fuzz/fuzz_targets/proof_image_server.rs"

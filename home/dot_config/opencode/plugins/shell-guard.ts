@@ -29,15 +29,16 @@ export const ShellGuard: Plugin = async (
       call: Parameters<BeforeTool>[0],
       output: Parameters<BeforeTool>[1],
     ): Promise<void> => {
-      if (call.tool !== "bash") {
+      const mutation = ["edit", "write", "apply_patch"].includes(call.tool);
+      if (call.tool !== "bash" && !mutation) {
         return;
       }
       const args: unknown = output.args;
-      const child = Bun.spawn([executable, "claude-bash"], {
+      const child = Bun.spawn([executable, mutation ? "issue-guard" : "claude-bash"], {
         cwd: input.directory,
         stdin: new Blob([
           JSON.stringify({
-            tool_name: "bash",
+            tool_name: call.tool,
             cwd: input.directory,
             tool_input: args,
           }),

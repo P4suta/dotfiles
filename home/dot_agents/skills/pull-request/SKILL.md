@@ -14,9 +14,9 @@ Those rules, including title format and required sections, override personal def
 Identify the exact repository, base, head, and authorized operation.
 An authoring request grants no authority for unrelated publication or account changes.
 
-Before implementation, run `pr-workflow start --repo OWNER/REPO`.
+Before GitHub-bound implementation, run `pr-workflow start --repo OWNER/REPO`.
 The [global workflow policy](assets/workflow-policy.json) identifies personal owners by GitHub login and numeric identity, and the command checks live repository identity and fork status.
-For a personal non-fork repository, select an existing open issue or create one with `pr-workflow issue create` or `pr-workflow issue edit`, then run `start` with `--issue NUMBER`.
+For a personal non-fork repository, select an existing open issue or create one with `pr-workflow issue create` or `pr-workflow issue edit`, then run `start` with `--issue NUMBER --path PATH`.
 Record the problem, intended behavior, bounded scope, and observable acceptance criteria in the issue before coding.
 Reuse a suitable issue instead of creating a duplicate.
 External projects and forks follow their own contribution rules and need no upstream issue.
@@ -24,10 +24,21 @@ Treat an unknown or inconsistent repository response as a failed prerequisite.
 Online operations need live authenticated `gh` access, keep requests bounded and serialized, and stop without retry on authentication failure, low quota, or rate limit.
 Never transfer tokens between machines or publish from stale prerequisite caches.
 
-`coderabbit --guard-status --json` reports the pause scope of CodeRabbit PR and CLI reviews.
-When the owner pauses PR reviews, `pr-workflow` refuses an operation that would request one and reports that nothing awaits review, so follow its stated next action.
-Otherwise prefer CodeRabbit title and summary generation when the destination enables it, and load `coderabbit-review` for one guarded CLI review before an initial substantive PR.
-For an existing PR, use its current review and skip a duplicate CLI review of the same diff.
+Before a remote repository exists, use the explicit local provider.
+Run `pr-workflow local init`, create an issue with `local create`, and register its implementation scope with `local select --issue NUMBER --path PATH` before editing.
+These commands need no GitHub executable, token, or authentication.
+Run `local check` for the issue prerequisite and the project's normal commands for its required verification.
+Local issue numbers and owner-local records grant no publication authority.
+When publication becomes authorized, link the actual local history with checked remote `start --promote-local` and keep the normal live issue, signing, checks, and owner authorization.
+The new remote start supplies no retroactive authority for earlier local edits.
+
+Assess every PR using the [importance criteria](references/importance.md) before publication.
+The checked workflow requires an authenticated current-diff assessment and routes `low` and `medium` to no CodeRabbit review, `high` to the guarded CLI, and `critical` to PR review.
+Keep severe levels exceptional and explain concrete consequences rather than escalating by filename or diff size.
+`coderabbit --guard-status --json` reports the separate PR and CLI pause scopes.
+A paused required route remains pending and never changes its classification.
+Use `coderabbit-review` for the selected route and existing supported findings.
+Keep the standalone PR description exclusion for all noncritical levels, and permit CodeRabbit generation only for the PR route.
 Read [commands and generation](references/workflow.md) for the placeholders, the PR review budget, and the optional configuration example.
 Write the document locally when the service fails or the destination requires a document it fails to produce.
 Local creation always starts as a draft, and moving it to review needs separate authorization.
@@ -53,6 +64,6 @@ Confirm validation claims from real command results, and distinguish passing, fa
 The checker proves neither the claims nor that the issue preceded implementation, so verify those from the work.
 
 Read back the published document and draft state with `gh`, and run the final live-document check.
-Its CodeRabbit line says whether the current head still needs a PR review, and `coderabbit-review` then covers that review and its findings.
+Its CodeRabbit line reports the selected route and outstanding evidence for the current diff.
 Load `ci-budget` before an authorized push or PR update.
 When `gh` fails, keep its diagnostic and inspect the remote state before retrying an uncertain mutation.

@@ -38,6 +38,19 @@ enum Action {
         #[arg(long)]
         container: bool,
     },
+    #[command(hide = true)]
+    BenchmarksReport,
+    /// Observes a Mac guest profile without granting benchmark verification credit.
+    BenchmarksObserve {
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        metadata_only: bool,
+    },
+    #[command(hide = true)]
+    BenchmarksObserveReport,
+    #[command(hide = true)]
+    BenchmarksCpuFeatures,
     /// Writes the generated files: the architecture decision index.
     Gen {
         /// Refuses a stale generated file instead of writing it.
@@ -131,7 +144,16 @@ enum Action {
         scope: xtask::change::Scope,
     },
     /// Run the CI proof campaign, deferring mutation and its fixture to the full native campaign.
-    ProofsCi,
+    ProofsCi {
+        /// One required hosted matrix partition.
+        /// Without this flag, run the complete campaign.
+        #[arg(long)]
+        phase: Option<xtask::proof_ci_phase::Phase>,
+    },
+    /// Prepare required verifier environments, inspect readiness without installation, or run semantic smoke controls.
+    VerificationEnv(xtask::verification_env::Request),
+    /// Assess the pinned mutation runner without replacing native mutation evidence.
+    NjutestAssessment(xtask::njutest_assessment::Request),
     /// Write the reachable state graph of every Quint model that records one, as `TLC` dumps it in the pinned image.
     Graphs,
 }
@@ -218,6 +240,7 @@ fn check_package(root: &Path, manifest: &Path, checks: &mut Checks) {
 /// The pre-commit check validates lint, document prose, and comments from the index snapshot.
 /// The pre-push check runs the gates the whole change selects.
 fn check_staged(root: &Path) -> Result<()> {
+    pr_workflow::check_issue_context(root, None, true)?;
     let staged = xtask::change::paths(root, &xtask::change::Source::Staged)?;
     let growth = xtask::lint::baseline_growth(root, "HEAD")?;
     let snapshot = xtask::staged_snapshot::export(root)?;
@@ -238,6 +261,9 @@ fn check_staged(root: &Path) -> Result<()> {
 /// A change that selects fewer gates skips only the checks it can't affect.
 fn check(root: &Path, gates: Gates, reference: &str) -> Result<()> {
     let mut checks = Checks::default();
+    checks.run("issue.context", || {
+        pr_workflow::check_issue_context(root, (reference != "HEAD").then_some(reference), false)
+    });
     if gates.contains(Gate::Prose) {
         check_prose(root, reference, &mut checks);
     }
@@ -284,7 +310,7 @@ fn check(root: &Path, gates: Gates, reference: &str) -> Result<()> {
 
 fn check_prose(root: &Path, reference: &str, checks: &mut Checks) {
     checks.run("prose.lint", || {
-        xtask::lint::check(root, &xtask::lint::tracked(root)?, true, reference)
+        xtask::lint::check(root, &xtask::lint::source_files(root)?, true, reference)
     });
     checks.run("prose.adr", || xtask::adr::generate(root, true));
     checks.run("prose.editorconfig", || xtask::quality::editorconfig(root));
@@ -344,7 +370,47 @@ fn generate(root: &Path, check: bool) -> Result<()> {
     xtask::lean::vectors(root, check)?;
     xtask::manifest_model::instance(root, check)?;
     xtask::launchers::generate(root, check)?;
+    xtask::njutest_assessment::generate(root, check)?;
     xtask::profiles::targets_page(root, check)
+}
+
+fn observe_benchmarks(root: &Path, output: &Path, metadata_only: bool) -> Result<()> {
+    if metadata_only {
+        return observe_benchmarks_prepared(root, output, true);
+    }
+    xtask::quality::with_locked_workspaces(root, || {
+        observe_benchmarks_prepared(root, output, false)
+    })
+}
+
+fn observe_benchmarks_prepared(root: &Path, output: &Path, metadata_only: bool) -> Result<()> {
+    xtask::phase_evidence::run(
+        root,
+        "non-verifying Mac benchmark observation",
+        if metadata_only {
+            0
+        } else {
+            xtask::benchmarks::FUNCTIONS.len()
+        },
+        || xtask::benchmarks::observe_mac(root, output, metadata_only),
+    )
+}
+
+fn report_benchmark_observation(root: &Path) -> Result<()> {
+    xtask::quality::with_locked_workspaces(root, || {
+        xtask::benchmarks::write_observation_report(root)
+    })
+}
+
+fn proofs(root: &Path, scope: &xtask::change::Scope) -> Result<()> {
+    if scope.resolve(root)?.contains(Gate::Proofs) {
+        xtask::skill_proofs::verify(root)
+    } else {
+        println!(
+            "Skipped the proofs: the change touches no rule module, proof inventory, or tooling"
+        );
+        Ok(())
+    }
 }
 
 fn run() -> Result<()> {
@@ -364,6 +430,15 @@ fn run() -> Result<()> {
         Action::Profiles { output } => profiles(&cli.root, output.as_deref())?,
         Action::ProfilesLinux => xtask::linux_profiles::check(&cli.root)?,
         Action::Benchmarks { container } => benchmarks(&cli.root, container)?,
+        Action::BenchmarksReport => xtask::quality::with_locked_workspaces(&cli.root, || {
+            xtask::benchmarks::write_container_report(&cli.root)
+        })?,
+        Action::BenchmarksObserve {
+            output,
+            metadata_only,
+        } => observe_benchmarks(&cli.root, &output, metadata_only)?,
+        Action::BenchmarksObserveReport => report_benchmark_observation(&cli.root)?,
+        Action::BenchmarksCpuFeatures => xtask::benchmark_profile::print_processor_features()?,
         Action::Gen { check } => generate(&cli.root, check)?,
         Action::ThemeGrids { write } => xtask::profiles::write_theme_grids(&cli.root, write)?,
         Action::FzfGrid => fzf_grid(&cli.root)?,
@@ -378,21 +453,14 @@ fn run() -> Result<()> {
             xtask::profile_snapshot::check(&cli.root)?;
             xtask::input_audit::check(&cli.root)?;
         }
-        Action::PublicAudit { denylist } => {
-            xtask::profiles::audit_private(&cli.root, &denylist)?;
-        }
+        Action::PublicAudit { denylist } => xtask::profiles::audit_private(&cli.root, &denylist)?,
         Action::InstallPrWorkflow => install_pr_workflow(&cli.root)?,
         Action::InstallProse => install_prose(&cli.root)?,
-        Action::Proofs { scope } => {
-            if scope.resolve(&cli.root)?.contains(Gate::Proofs) {
-                xtask::skill_proofs::verify(&cli.root)?;
-            } else {
-                println!(
-                    "Skipped the proofs: the change touches no rule module, proof inventory, or tooling"
-                );
-            }
-        }
-        Action::ProofsCi => xtask::skill_proofs::verify_ci(&cli.root)?,
+        Action::Proofs { scope } => proofs(&cli.root, &scope)?,
+        Action::ProofsCi { phase: Some(phase) } => xtask::proof_ci_phase::verify(&cli.root, phase)?,
+        Action::ProofsCi { phase: None } => xtask::skill_proofs::verify_ci(&cli.root)?,
+        Action::VerificationEnv(request) => xtask::verification_env::run(&cli.root, &request)?,
+        Action::NjutestAssessment(request) => xtask::njutest_assessment::run(&cli.root, request)?,
         Action::Graphs => xtask::state_graph::write(&cli.root)?,
         Action::Classify { scope } => xtask::change::run(&cli.root, &scope)?,
         Action::Skills => {
@@ -523,6 +591,7 @@ where
 
 fn install_pr_workflow(root: &Path) -> Result<()> {
     let binary = release_binary(root, "pr-workflow", "pr-workflow")?;
+    platform::freshness::verify_artifact(root, &binary, Built::PrWorkflow)?;
     let user_directory = user_directory()?;
     pr_workflow::deploy(root, &binary, &user_directory, |paths| {
         apply_sources(root, "dirs,files,symlinks", paths)
@@ -550,6 +619,7 @@ fn install_prose(root: &Path) -> Result<()> {
 
 fn install_review_guard(root: &Path) -> Result<()> {
     let binary = release_binary(root, "coderabbit-guard", "coderabbit")?;
+    platform::freshness::verify_artifact(root, &binary, Built::Coderabbit)?;
     apply_sources(
         root,
         "dirs,files",
@@ -564,9 +634,13 @@ fn install_review_guard(root: &Path) -> Result<()> {
 }
 
 fn install_skill_ops(root: &Path) -> Result<()> {
+    let user_directory = user_directory()?;
+    if !platform::incidents::enabled_at(&user_directory) {
+        return skill_ops::skill_install::remove_native_hooks(&user_directory);
+    }
     skill_ops::check_catalog(root)?;
     let binary = release_binary(root, "skill-ops", "skill-ops")?;
-    let user_directory = user_directory()?;
+    platform::freshness::verify_artifact(root, &binary, Built::SkillOps)?;
     skill_ops::skill_install::deploy(
         root,
         &binary,
@@ -661,11 +735,22 @@ fn main() {
 }
 
 fn benchmarks(root: &Path, container: bool) -> Result<()> {
-    if container || !cfg!(target_os = "linux") {
-        xtask::benchmarks::verify_in_container(root)
-    } else {
-        xtask::benchmarks::verify(root)
-    }
+    xtask::quality::with_locked_workspaces(root, || benchmarks_prepared(root, container))
+}
+
+fn benchmarks_prepared(root: &Path, container: bool) -> Result<()> {
+    xtask::phase_evidence::run(
+        root,
+        "fixed Linux benchmark budget",
+        xtask::benchmarks::FUNCTIONS.len(),
+        || {
+            if container || !cfg!(target_os = "linux") {
+                xtask::benchmarks::verify_in_container(root)
+            } else {
+                xtask::benchmarks::verify(root)
+            }
+        },
+    )
 }
 
 #[cfg(test)]
@@ -673,11 +758,114 @@ mod tests {
     use super::*;
 
     #[test]
+    fn benchmark_observation_is_closed_and_never_accepts_a_verification_flag() {
+        assert!(matches!(
+            Cli::try_parse_from([
+                "xtask",
+                "benchmarks-observe",
+                "--metadata-only",
+                "--output",
+                "fresh.json"
+            ])
+            .unwrap()
+            .command,
+            Action::BenchmarksObserve {
+                metadata_only: true,
+                ..
+            }
+        ));
+        assert!(Cli::try_parse_from(["xtask", "benchmarks-observe"]).is_err());
+        for flag in ["--verify", "--accept", "--skip", "--reuse"] {
+            assert!(
+                Cli::try_parse_from([
+                    "xtask",
+                    "benchmarks-observe",
+                    "--output",
+                    "fresh.json",
+                    flag
+                ])
+                .is_err()
+            );
+            assert!(Cli::try_parse_from(["xtask", "benchmarks-observe-report", flag]).is_err());
+        }
+    }
+
+    #[test]
+    fn benchmark_transport_is_a_distinct_fixed_container_entry() {
+        assert!(matches!(
+            Cli::try_parse_from(["xtask", "benchmarks-report"])
+                .unwrap()
+                .command,
+            Action::BenchmarksReport
+        ));
+        for args in [
+            vec!["xtask", "benchmarks-report", "--container"],
+            vec!["xtask", "benchmarks-report", "--report", "old.json"],
+            vec!["xtask", "benchmarks-report", "--skip"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
+    }
+
+    #[test]
+    fn assessment_entry_keeps_inspection_preparation_and_execution_explicit() {
+        for args in [
+            vec!["xtask", "njutest-assessment", "prepare"],
+            vec!["xtask", "njutest-assessment", "plan"],
+            vec![
+                "xtask",
+                "njutest-assessment",
+                "inspect",
+                "catalog",
+                "catalog.json",
+            ],
+            vec![
+                "xtask",
+                "njutest-assessment",
+                "run",
+                "--temperature",
+                "warm",
+            ],
+        ] {
+            assert!(matches!(
+                Cli::try_parse_from(args).unwrap().command,
+                Action::NjutestAssessment(_)
+            ));
+        }
+        for args in [
+            vec!["xtask", "njutest-assessment", "adopt"],
+            vec!["xtask", "njutest-assessment", "run"],
+            vec![
+                "xtask",
+                "njutest-assessment",
+                "run",
+                "--temperature",
+                "skipped",
+            ],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
+    }
+
+    #[test]
     fn the_ci_proof_entry_runs_the_complete_ci_campaign_without_a_scope() {
         let cli = Cli::try_parse_from(["xtask", "proofs-ci"]).unwrap();
-        assert!(matches!(cli.command, Action::ProofsCi));
+        assert!(matches!(cli.command, Action::ProofsCi { phase: None }));
         for option in ["--staged", "--base", "--no-verify"] {
             assert!(Cli::try_parse_from(["xtask", "proofs-ci", option]).is_err());
+        }
+    }
+
+    #[test]
+    fn the_ci_phase_entry_accepts_only_the_complete_closed_phase_inventory() {
+        for phase in xtask::proof_ci_phase::Phase::ALL {
+            let cli = Cli::try_parse_from(["xtask", "proofs-ci", "--phase", phase.name()]).unwrap();
+            assert!(
+                matches!(cli.command, Action::ProofsCi { phase: Some(actual) } if actual == phase)
+            );
+        }
+        for phase in ["mutation", "none", "all", "skipped", "kani,runtime"] {
+            assert!(Cli::try_parse_from(["xtask", "proofs-ci", "--phase", phase]).is_err());
         }
     }
 }

@@ -9,6 +9,7 @@ pub mod paths;
 pub mod process;
 pub use rules::process_rules;
 pub mod refusal;
+pub mod speech;
 pub use rules::{cycle_rules, order_rules};
 
 /// The source hash shared by binaries compiled in the same build.
@@ -21,15 +22,25 @@ pub use rules::aside_rules;
 #[cfg(feature = "tools")]
 pub mod build_inputs;
 #[cfg(feature = "tools")]
+pub mod cargo_target;
+#[cfg(feature = "tools")]
 pub mod checks;
 #[cfg(feature = "tools")]
 pub mod code_environment;
 #[cfg(feature = "tools")]
 pub mod freshness;
 #[cfg(feature = "tools")]
+pub mod issue_context;
+#[cfg(feature = "tools")]
+pub mod local_issues;
+#[cfg(feature = "tools")]
 pub mod runtime;
 #[cfg(feature = "tools")]
 pub mod script_analyzer;
+#[cfg(feature = "tools")]
+pub mod signed_git;
+#[cfg(feature = "tools")]
+pub mod source_identity;
 #[cfg(feature = "tools")]
 pub use rules::stale_rules;
 #[cfg(feature = "tools")]

@@ -17,6 +17,8 @@ Reporting pending incident maintenance as a new tool failure also enlarged the w
 
 The hosts gate runs `just push-check` through its isolated code environment.
 That command runs every existing check on each required native family and collects the complete proof suite on Linux, the target of the CI proof job and the former Windows pre-push proof container.
+The clean, credential-free candidate bundle supplies implementation evidence rather than committed issue-authority evidence.
+The edit guard, staged pre-commit check, and required hosted trusted-base check enforce issue authority at their respective boundaries.
 Both stages must complete, even when one fails.
 Independent proof batches, modules, and verifier stages collect their failures before refusing the candidate.
 Invalid shared prerequisites refuse their dependent work, while unrelated verifiers still run.

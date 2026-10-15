@@ -55,6 +55,13 @@ enum Commands {
     ClaudeBash,
     /// Claude Code `PreToolUse` and `PostToolUse` hook for Bash and PowerShell: sets each command's timeout from its measured durations.
     ClaudeTiming,
+    /// Refuse supported implementation edits without a checked issue context.
+    IssueGuard,
+    /// Fixed Japanese desktop notifications, independent of experimental skill maintenance.
+    Notifications {
+        #[command(subcommand)]
+        action: dotfiles::notifications::Action,
+    },
     /// The agent hooks of the verification gate: the session start report of a repository's gaps, and the stop decision over the files a turn changed.
     Assure { point: dotfiles::assure::AgentPoint },
     /// Refuses work on a host whose process creation stalls, as it does when the Defender scan engine stops responding.
@@ -134,6 +141,11 @@ enum Commands {
         #[command(subcommand)]
         action: dotfiles::hosts::Action,
     },
+    /// Plan, fetch, and verify pinned materials.
+    Artifacts {
+        #[command(subcommand)]
+        action: dotfiles::artifacts::Action,
+    },
     /// The Windows setup command line, which the elevated sshd setup reruns.
     #[command(hide = true)]
     Windows {
@@ -202,6 +214,8 @@ fn run() -> Result<()> {
         )?),
         Commands::ClaudeBash => dotfiles::claude_hook::run()?,
         Commands::ClaudeTiming => dotfiles::claude_timing::run()?,
+        Commands::IssueGuard => std::process::exit(dotfiles::issue_guard::hook()?),
+        Commands::Notifications { action } => dotfiles::notifications::run(action)?,
         Commands::Assure { point } => dotfiles::assure::hook(point)?,
         Commands::Health { session } => health(session)?,
         Commands::Hook { hook, arguments } => dotfiles::hooks::run(hook, &arguments)?,
@@ -249,6 +263,7 @@ fn run() -> Result<()> {
             backup.as_deref(),
         )?,
         Commands::Hosts { action } => dotfiles::hosts::run(action)?,
+        Commands::Artifacts { action } => dotfiles::artifacts::run(&cli.root, action)?,
         Commands::Windows { arguments } => windows(arguments)?,
     }
     Ok(())

@@ -1,4 +1,6 @@
 use anyhow::{Result, ensure};
+use std::path::Path;
+use std::process::Command;
 
 const GATE_FIXTURE: &str = "DOTFILES_GATE_FIXTURE";
 
@@ -15,12 +17,31 @@ pub fn preserve(scope: tempfile::TempDir) {
     }
 }
 
+pub fn enable(command: &mut Command, scope: &Path) -> Result<()> {
+    let home = scope.join("home");
+    let marker = home.join(platform::incidents::EXPERIMENTAL);
+    std::fs::create_dir_all(marker.parent().unwrap())?;
+    std::fs::write(marker, skill_ops::incident_rules::EXPERIMENTAL_OPT_IN)?;
+    if let Some(original) = platform::home::home() {
+        for (name, directory) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
+            command.env(
+                name,
+                std::env::var_os(name).unwrap_or_else(|| original.join(directory).into()),
+            );
+        }
+    }
+    command.env("HOME", &home).env("USERPROFILE", &home);
+    Ok(())
+}
+
 pub fn run(test: &str) -> Result<bool> {
     if std::env::var(GATE_FIXTURE).is_ok_and(|value| value == test) {
         return Ok(false);
     }
     let scope = scope()?;
-    let output = platform::process::command(std::env::current_exe()?)
+    let mut command = platform::process::command(std::env::current_exe()?);
+    enable(&mut command, scope.path())?;
+    let output = command
         .args(["--exact", test, "--nocapture"])
         .env(GATE_FIXTURE, test)
         .env("SKILL_OPS_STATE", scope.path().join("state"))

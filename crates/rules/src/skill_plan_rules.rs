@@ -994,7 +994,9 @@ mod proofs {
     fn raw_input<const N: usize, R>(
         run: impl FnOnce(&[&[usize]], &[usize], &[u8; SKILLS]) -> R,
     ) -> R {
-        raw_input_length::<N, R>(usize::from(kani::any::<u8>() % 6), run)
+        let length = usize::from(kani::any::<u8>());
+        kani::assume(length <= SKILLS);
+        raw_input_length::<N, R>(length, run)
     }
 
     #[cfg(kani)]
@@ -1027,7 +1029,11 @@ mod proofs {
                 .unwrap_or_default()
         });
         let requests: [u8; SKILLS] = kani::any();
-        let requested = requests.map(|skill| usize::from(skill % 6));
+        let requested = requests.map(|skill| {
+            let skill = usize::from(skill);
+            kani::assume(skill <= SKILLS);
+            skill
+        });
         run(&deps, &requested[..length], &masks)
     }
 }

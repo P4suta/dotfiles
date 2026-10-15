@@ -1,7 +1,10 @@
 ---
-status: accepted
+status: amended
+changed_by: [route-coderabbit-by-current-pr-importance.md]
 ---
 # Apply layered review-capacity budgets
+
+The current review selection and service opt-in behavior are amended by [the importance decision](route-coderabbit-by-current-pr-importance.md).
 
 ## Context
 

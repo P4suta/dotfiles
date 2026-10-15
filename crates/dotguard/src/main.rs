@@ -124,6 +124,12 @@ fn usage() {
 
 /// `~/.local/bin/git` delegates here, and on success this function never returns because it replaces the process with the real git.
 fn git_wrapper(argv: &[String]) -> ExitCode {
+    let globals = gitargv::global_options(argv);
+    let subcommand = argv
+        .get(globals.len())
+        .map(String::as_str)
+        .unwrap_or_default();
+    let spoken = SpokenGit::new(subcommand);
     if let Some(denial) = gitargv::inspect_in(argv, &stack::Checkout) {
         let full: Vec<String> = std::iter::once("git".to_owned())
             .chain(argv.iter().cloned())
@@ -144,6 +150,7 @@ fn git_wrapper(argv: &[String]) -> ExitCode {
             Admission::Refused => {
                 bypass::record("REJECT", denial.rule, &denial.reason, &full);
                 gitargv::refusal(&denial, argv).emit();
+                spoken.finish(false);
                 return ExitCode::FAILURE;
             }
         }
@@ -158,6 +165,7 @@ fn git_wrapper(argv: &[String]) -> ExitCode {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
+        spoken.finish(false);
         return ExitCode::from(COMMAND_NOT_FOUND);
     };
     let invoked: Vec<&str> = std::iter::once("git")
@@ -165,11 +173,9 @@ fn git_wrapper(argv: &[String]) -> ExitCode {
         .collect();
     let mut git = real_git::at(&real);
     git.args(argv).env(INVOKED, refusal::command(&invoked));
-    let globals = gitargv::global_options(argv);
-    let subcommand = argv
-        .get(globals.len())
-        .map(String::as_str)
-        .unwrap_or_default();
+    if spoken.operation.is_some() {
+        git.env(platform::speech::INTERNAL, "1");
+    }
     let push = subcommand == "push";
     let rewrite = subcommand == "revert"
         || subcommand == "commit" && argv.iter().any(|arg| arg == "--amend")
@@ -191,7 +197,47 @@ fn git_wrapper(argv: &[String]) -> ExitCode {
     } else {
         false
     };
-    delegate(&real, git, push, rewrite, published)
+    delegate(&real, git, push, rewrite, published, &spoken)
+}
+
+#[derive(Debug)]
+struct SpokenGit {
+    operation: Option<(bool, String)>,
+}
+
+impl SpokenGit {
+    fn new(subcommand: &str) -> Self {
+        use rules::notification_rules::Event;
+        let operation = match subcommand {
+            "commit" | "push" if std::env::var_os(platform::speech::INTERNAL).is_none() => {
+                let push = subcommand == "push";
+                let id = platform::speech::operation_id();
+                platform::speech::announce(
+                    if push {
+                        Event::PushStarted
+                    } else {
+                        Event::CommitStarted
+                    },
+                    &id,
+                );
+                Some((push, id))
+            }
+            _ => None,
+        };
+        Self { operation }
+    }
+    fn finish(&self, success: bool) {
+        use rules::notification_rules::Event;
+        if let Some((push, id)) = &self.operation {
+            let event = match (*push, success) {
+                (false, false) => Event::CommitFailed,
+                (false, true) => Event::CommitCompleted,
+                (true, false) => Event::PushFailed,
+                (true, true) => Event::PushCompleted,
+            };
+            platform::speech::announce(event, id);
+        }
+    }
 }
 
 /// Carries the command the wrapper ran to the hooks of that command, so a hook's bypass can repeat it.
@@ -216,10 +262,11 @@ fn delegate(
     push: bool,
     rewrite: bool,
     published: bool,
+    spoken: &SpokenGit,
 ) -> ExitCode {
     use std::os::unix::process::CommandExt;
-    if push || rewrite && published {
-        return observed_delegate(real, git, push, rewrite, published);
+    if push || rewrite && published || spoken.operation.is_some() {
+        return observed_delegate(real, git, push, rewrite, published, spoken);
     }
     // `exec` returns only on failure.
     let err = git.exec();
@@ -234,9 +281,10 @@ fn delegate(
     push: bool,
     rewrite: bool,
     published: bool,
+    spoken: &SpokenGit,
 ) -> ExitCode {
     ignore_console_interrupts();
-    observed_delegate(real, git, push, rewrite, published)
+    observed_delegate(real, git, push, rewrite, published, spoken)
 }
 
 fn observed_delegate(
@@ -245,6 +293,7 @@ fn observed_delegate(
     push: bool,
     rewrite: bool,
     published: bool,
+    spoken: &SpokenGit,
 ) -> ExitCode {
     let invoked = git
         .get_envs()
@@ -253,6 +302,7 @@ fn observed_delegate(
         .map_or_else(String::new, |value| value.to_string_lossy().into_owned());
     match git.status() {
         Ok(status) => {
+            spoken.finish(status.success());
             if let Some(source) = rules::incident_rules::signal(
                 rules::incident_rules::Operation {
                     push,
@@ -275,13 +325,29 @@ fn observed_delegate(
                 .evidence(status.to_string());
                 platform::incidents::record(&observation, source);
             }
-            std::process::exit(status.code().unwrap_or(1))
+            std::process::exit(shell_status(status))
         }
         Err(err) => {
+            spoken.finish(false);
             eprintln!("::error:: could not run {}: {err}", real.display());
             ExitCode::from(COMMAND_NOT_EXECUTABLE)
         }
     }
+}
+
+fn shell_status(status: std::process::ExitStatus) -> i32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        const SIGNAL_STATUS_OFFSET: i32 = 128;
+        status.code().unwrap_or_else(|| {
+            status
+                .signal()
+                .map_or(1, |signal| SIGNAL_STATUS_OFFSET + signal)
+        })
+    }
+    #[cfg(not(unix))]
+    status.code().unwrap_or(1)
 }
 
 /// The console sends Ctrl+C to every attached process, git handles it, and the wrapper waits so the shell returns only after git exits.

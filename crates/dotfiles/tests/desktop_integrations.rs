@@ -374,6 +374,9 @@ impl OpenCodeApplyFixture {
 #[test]
 fn canonical_opencode_registration_converges_without_an_external_edit_refusal() -> Result<()> {
     let fixture = OpenCodeApplyFixture::new()?;
+    let consent = fixture.home.join(platform::incidents::EXPERIMENTAL);
+    fs::create_dir_all(consent.parent().context("experimental marker parent")?)?;
+    fs::write(consent, skill_ops::incident_rules::EXPERIMENTAL_OPT_IN)?;
     let target = fixture.home.join(".config/opencode/opencode.json");
     let historical = successful(fixture.renderer().arg("cat").arg(&target))?.stdout;
     fs::write(&fixture.installed_template, &historical)?;

@@ -3,11 +3,39 @@
 use std::path::Path;
 use std::process::Command;
 
+const MISSING_MATERIAL_EXIT: i32 = 77;
+const MATERIAL_SOURCE: &str =
+    "https://static.crates.io/crates/host-fixture-material/host-fixture-material-1.2.3.crate";
+
 fn main() {
+    let control = Path::new(env!("DOTFILES_TEST_CODE_ROOT"));
     let executable = std::fs::canonicalize(std::env::current_exe().unwrap()).unwrap();
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     let invoked = std::path::PathBuf::from(std::env::args_os().next().unwrap());
     match invoked.file_stem().unwrap().to_str().unwrap() {
+        "curl" => {
+            if arguments == ["--disable", "--version"] {
+                println!("curl 8.4.0 fixture");
+                return;
+            }
+            assert_eq!(arguments.first().map(String::as_str), Some("--disable"));
+            assert!(
+                arguments
+                    .iter()
+                    .any(|argument| argument == "--max-filesize")
+            );
+            let source = arguments
+                .windows(2)
+                .find_map(|pair| (pair[0] == "--url").then_some(pair[1].as_str()))
+                .unwrap();
+            assert_eq!(source, MATERIAL_SOURCE);
+            std::fs::write(
+                std::env::var_os("HOSTS_FIXTURE_MATERIAL_FETCH").unwrap(),
+                "refused\n",
+            )
+            .unwrap();
+            std::process::exit(MISSING_MATERIAL_EXIT);
+        }
         "mise" => {
             if arguments == ["--version"] {
                 let version = std::fs::read_to_string(executable.with_extension("version"))
@@ -29,7 +57,7 @@ fn main() {
                 }
                 print!(
                     "{}",
-                    std::fs::read_to_string(executable.with_extension("native-path.json")).unwrap()
+                    std::fs::read_to_string(control.join("native-path.json")).unwrap()
                 );
                 return;
             }
@@ -72,7 +100,11 @@ fn main() {
                     installation.join(format!("python{}", std::env::consts::EXE_SUFFIX)),
                 )
                 .unwrap();
-                std::fs::write("installed-at", data.to_string_lossy().as_bytes()).unwrap();
+                std::fs::write(
+                    control.join("installed-at"),
+                    data.to_string_lossy().as_bytes(),
+                )
+                .unwrap();
                 return;
             }
             let file = match arguments[0].as_str() {
@@ -80,21 +112,33 @@ fn main() {
                 "bin-paths" => "paths",
                 _ => panic!("unexpected mise command: {arguments:?}"),
             };
-            let mut contents = std::fs::read_to_string(file).unwrap();
+            let configuration =
+                std::path::PathBuf::from(std::env::var_os("MISE_CONFIG_FILE").unwrap());
+            assert_eq!(
+                std::fs::canonicalize(std::env::current_dir().unwrap()).unwrap(),
+                std::fs::canonicalize(configuration.parent().unwrap()).unwrap()
+            );
+            let mut contents = std::fs::read_to_string(control.join(file)).unwrap();
+            if file == "tools.json" {
+                contents = contents.replace(
+                    &format!("{:?}", control.join("mise.toml").to_str().unwrap()),
+                    &format!("{:?}", configuration.to_str().unwrap()),
+                );
+            }
             if file == "tools.json"
-                && Path::new("relocate").exists()
+                && control.join("relocate").exists()
                 && data.starts_with(std::env::var_os("HOME").unwrap())
-                && !Path::new("installed-at").exists()
+                && !control.join("installed-at").exists()
             {
                 contents = contents
                     .replace("\"installed\":true", "\"installed\":false")
                     .replace("\"active\":true", "\"active\":false");
             }
-            if (Path::new("missing").exists() || Path::new("relocate").exists())
-                && Path::new("installed-at").exists()
+            if (control.join("missing").exists() || control.join("relocate").exists())
+                && control.join("installed-at").exists()
                 && installation.is_dir()
             {
-                let paths = std::fs::read_to_string("paths").unwrap();
+                let paths = std::fs::read_to_string(control.join("paths")).unwrap();
                 let original = paths.lines().next().unwrap();
                 contents = if file == "tools.json" {
                     contents
@@ -109,7 +153,7 @@ fn main() {
                 };
             }
             if installation.is_dir() {
-                let paths = std::fs::read_to_string("paths").unwrap();
+                let paths = std::fs::read_to_string(control.join("paths")).unwrap();
                 let original = paths.lines().next().unwrap();
                 contents = if file == "tools.json" {
                     contents.replace(
@@ -132,7 +176,10 @@ fn main() {
                 println!("{name} {toolchain} fixture");
             }
             [print, sysroot] if print == "--print" && sysroot == "sysroot" => {
-                println!("{}", std::fs::read_to_string("rust-sysroot").unwrap());
+                println!(
+                    "{}",
+                    std::fs::read_to_string(control.join("rust-sysroot")).unwrap()
+                );
             }
             _ => panic!("unexpected rustc command: {arguments:?}"),
         },

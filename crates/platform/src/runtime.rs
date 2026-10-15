@@ -10,6 +10,8 @@ use std::process::{Command, Stdio};
 use crate::target_rules::{Target, target};
 use crate::tool::Tool;
 
+const RENDER_TERM: &str = "xterm-256color";
+
 #[derive(Debug)]
 pub struct Reply {
     pub success: bool,
@@ -32,6 +34,19 @@ pub trait Runner {
     /// Returns an error when the generator can't start.
     fn initialization(&mut self, tool: Tool, arguments: &[OsString]) -> Result<Reply> {
         self.run(tool, arguments)
+    }
+    /// Generates shell-specific output in that shell's rendering context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the generator can't start.
+    fn initialization_for(
+        &mut self,
+        tool: Tool,
+        arguments: &[OsString],
+        _shell: &str,
+    ) -> Result<Reply> {
+        self.initialization(tool, arguments)
     }
     /// Run a binary this repository installed at a known path, such as a bundle executable it just verified.
     ///
@@ -119,10 +134,11 @@ impl Real {
 
 impl Runner for Real {
     fn available(&self, tool: Tool) -> bool {
-        let name = tool.program();
-        if Path::new(name).is_absolute() {
-            return executable(Path::new(name));
+        let program = tool.executable();
+        if program.is_absolute() {
+            return executable(&program);
         }
+        let name = tool.program();
         std::env::split_paths(&self.path).any(|directory| {
             executable(&directory.join(name))
                 || (cfg!(windows)
@@ -177,17 +193,37 @@ impl Runner for Real {
         for name in MISE_SESSION {
             command.env_remove(name);
         }
-        let output = command
-            .args(arguments)
-            .stdin(Stdio::null())
-            .stderr(Stdio::inherit())
-            .output()
-            .with_context(|| format!("generate {} initialization", tool.program()))?;
-        Ok(Reply {
-            success: output.status.success(),
-            bytes: output.stdout,
-        })
+        initialization_reply(command, tool, arguments)
     }
+
+    fn initialization_for(
+        &mut self,
+        tool: Tool,
+        arguments: &[OsString],
+        shell: &str,
+    ) -> Result<Reply> {
+        let mut command = self.command(tool);
+        for name in MISE_SESSION {
+            command.env_remove(name);
+        }
+        command
+            .env("STARSHIP_SHELL", shell)
+            .env("TERM", RENDER_TERM);
+        initialization_reply(command, tool, arguments)
+    }
+}
+
+fn initialization_reply(mut command: Command, tool: Tool, arguments: &[OsString]) -> Result<Reply> {
+    let output = command
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stderr(Stdio::inherit())
+        .output()
+        .with_context(|| format!("generate {} initialization", tool.program()))?;
+    Ok(Reply {
+        success: output.status.success(),
+        bytes: output.stdout,
+    })
 }
 
 /// A cached initialization belongs to its future shell rather than the generating session.
@@ -280,6 +316,22 @@ pub fn initialization(
     Ok(reply.bytes)
 }
 
+/// Captures registered initialization in the specified shell's rendering context.
+///
+/// # Errors
+///
+/// Returns an error when the generator can't start or fails.
+pub fn initialization_for(
+    runner: &mut impl Runner,
+    tool: Tool,
+    arguments: &[OsString],
+    shell: &str,
+) -> Result<Vec<u8>> {
+    let reply = runner.initialization_for(tool, arguments, shell)?;
+    ensure!(reply.success, "{} initialization failed", tool.program());
+    Ok(reply.bytes)
+}
+
 pub fn optional(runner: &mut impl Runner, tool: Tool, arguments: &[&str]) {
     if runner.available(tool)
         && let Err(error) = checked(runner, tool, &args(arguments))
@@ -317,4 +369,89 @@ pub fn replace(path: &Path, bytes: &[u8], executable: bool) -> Result<()> {
     candidate.as_file().sync_all()?;
     candidate.persist(path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_initialization_sets_only_child_context_and_clears_mise_session() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        let mut runner = Real::new(home.path())?;
+        runner
+            .environment
+            .push(("STARSHIP_SHELL".into(), "parent-shell".into()));
+        runner.environment.push(("TERM".into(), "dumb".into()));
+        for name in MISE_SESSION {
+            runner
+                .environment
+                .push(((*name).into(), "parent-session".into()));
+        }
+        let environment = runner.environment.clone();
+        let script = "[$env.STARSHIP_SHELL $env.TERM (('__MISE_DIFF' in $env) or ('__MISE_SESSION' in $env) or ('__MISE_ORIG_PATH' in $env) or ('MISE_SHELL' in $env))] | to json --raw";
+        let output = initialization_for(
+            &mut runner,
+            Tool::Nu,
+            &args(&["--no-config-file", "-c", script]),
+            "zsh",
+        )?;
+        let actual: serde_json::Value = serde_json::from_slice(&output)?;
+        assert_eq!(actual, serde_json::json!(["zsh", RENDER_TERM, false]));
+        assert_eq!(runner.environment, environment);
+        Ok(())
+    }
+
+    #[test]
+    fn a_dumb_parent_cannot_supply_the_cached_starship_continuation() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        let config = home.path().join("starship.toml");
+        fs::write(
+            &config,
+            "continuation_prompt = '[owned-continuation](bold red)'\n",
+        )?;
+        let mut runner = Real::new(home.path())?;
+        runner.environment.extend([
+            ("TERM".into(), "dumb".into()),
+            ("STARSHIP_CONFIG".into(), config.into_os_string()),
+            (
+                "STARSHIP_CACHE".into(),
+                home.path().join("cache").into_os_string(),
+            ),
+        ]);
+        let parent = runner.environment.clone();
+        for shell in ["nu", "zsh"] {
+            let mut direct = runner.command(Tool::Starship);
+            let disabled = direct
+                .args(["prompt", "--continuation"])
+                .env("STARSHIP_SHELL", shell)
+                .output()?;
+            ensure!(disabled.status.success(), "dumb Starship control failed");
+            assert!(
+                String::from_utf8_lossy(&disabled.stdout)
+                    .contains("Starship disabled due to TERM=dumb")
+            );
+            let expected = runner
+                .command(Tool::Starship)
+                .args(["prompt", "--continuation"])
+                .env("STARSHIP_SHELL", shell)
+                .env("TERM", RENDER_TERM)
+                .output()?;
+            ensure!(
+                expected.status.success(),
+                "interactive Starship control failed"
+            );
+            let actual = initialization_for(
+                &mut runner,
+                Tool::Starship,
+                &args(&["prompt", "--continuation"]),
+                shell,
+            )?;
+            assert_eq!(actual, expected.stdout);
+            assert!(String::from_utf8_lossy(&actual).contains("owned-continuation"));
+            assert!(!String::from_utf8_lossy(&actual).contains("TERM=dumb"));
+        }
+        assert_eq!(runner.environment, parent);
+        Ok(())
+    }
 }

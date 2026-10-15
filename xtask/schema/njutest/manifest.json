@@ -1,0 +1,55 @@
+{
+  "repository": "https://github.com/P4suta/njutest",
+  "revision": "46d5b5f4446503162ea18189756249231abb6fc7",
+  "license": "MIT OR Apache-2.0",
+  "documents": [
+    {
+      "path": "xtask/schema/njutest/njutest-assurance-report-v1.json",
+      "upstream_path": "schema/njutest-assurance-report-v1.json",
+      "git_blob": "3057bd82128e844327971ed6af6883d66c91bd58",
+      "sha256": "32dffb64af03f035efa7ff6b64732d888ee1ed0983f9b35988312b0ea6a514a7",
+      "bytes": 102247,
+      "schema_version": 3
+    },
+    {
+      "path": "xtask/schema/njutest/rust-mutants-catalog-v1.json",
+      "upstream_path": "schema/rust-mutants-catalog-v1.json",
+      "git_blob": "bdfefc8b82e24d9215816a372adf05b8807ba392",
+      "sha256": "dc93b3834401a52e4dfa377d5bb7e548350b0bab18ec5183ca3562f3c147d70b",
+      "bytes": 6390,
+      "schema_version": 1
+    },
+    {
+      "path": "xtask/schema/njutest/rust-mutants-run-report-v1.json",
+      "upstream_path": "schema/rust-mutants-run-report-v1.json",
+      "git_blob": "1d4099f1eee89c5fa867cb04fe6a35e5b7616bdb",
+      "sha256": "8f253a6c4b80e71ac89d730ef4ebabd96565fad3399f72f4e689b303ed51ea4a",
+      "bytes": 35164,
+      "schema_version": 5
+    },
+    {
+      "path": "xtask/tests/fixtures/njutest/assurance.json",
+      "upstream_path": "xtask/tests/testdata/reader-runs/documents-baseline/artifacts/reports/runs/20261002t125737471z-006769/njutest-assurance-report-v1.json",
+      "git_blob": "fac6ce8c3fd0c40dcdb4e2bf82d89e4987e1b3d5",
+      "sha256": "0bca9aead5c608bed1bb78866f5c6071e84267c52e9e673cc5b496f7f18cddbd",
+      "bytes": 40890,
+      "schema_version": 3
+    },
+    {
+      "path": "xtask/tests/fixtures/njutest/catalog.json",
+      "upstream_path": "xtask/tests/testdata/engine-run-simple/catalog-v1.json",
+      "git_blob": "0206ed884960384073088c2721f71663c69a335d",
+      "sha256": "d9aa09853890fa235a8086be3da0e54e2bf8eabcdd4aca13fded12dc4d8ba6fd",
+      "bytes": 6582,
+      "schema_version": 1
+    },
+    {
+      "path": "xtask/tests/fixtures/njutest/engine.json",
+      "upstream_path": "xtask/tests/testdata/engine-run-simple/run-report-v1.json",
+      "git_blob": "d5875b4c45e2cfa41e8110070edcf25ed1161a51",
+      "sha256": "7db3b2f953442633d6f8e9daee63b5ad8f6806d41f9520e4f30025b372859ddb",
+      "bytes": 24213,
+      "schema_version": 5
+    }
+  ]
+}

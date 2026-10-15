@@ -16,6 +16,9 @@ pub const DIRECTORY: &str = "xtask/tests/snapshots";
 
 const HOME: &str = "/fixture/home";
 const SOURCE: &str = "/fixture/source";
+const SPEECH_SOURCE: &str = "home/dot_config/dotfiles/notifications";
+const SPEECH_AUDIO: &str = ".config/dotfiles/notifications/audio/";
+const SPEECH_MANIFEST: &str = ".config/dotfiles/notifications/materials.tsv";
 const PUBLIC_KEY: &str =
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureFixtureFixtureFixtureFixtureFixture fixture";
 
@@ -221,6 +224,111 @@ fn mode(entry: &Value) -> Value {
         .map_or(Value::Null, |perm| json!(format!("{perm:04o}")))
 }
 
+pub(crate) fn source_speech(root: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
+    Ok(
+        dotfiles::notifications::prepared_materials(&root.join(SPEECH_SOURCE))?
+            .into_iter()
+            .map(|material| {
+                (
+                    format!("{SPEECH_AUDIO}{}.wav", material.name),
+                    material.bytes,
+                )
+            })
+            .collect(),
+    )
+}
+
+pub(crate) fn validate_source_speech(root: &Path, paths: &[String]) -> Result<()> {
+    let prefix = format!("{SPEECH_SOURCE}/audio/");
+    if paths
+        .iter()
+        .any(|path| path.starts_with(&prefix) || path == &format!("{SPEECH_SOURCE}/materials.tsv"))
+    {
+        let materials = source_speech(root)?;
+        for path in paths.iter().filter(|path| path.starts_with(&prefix)) {
+            let name = path.strip_prefix(&prefix).context("speech source prefix")?;
+            ensure!(
+                materials.contains_key(&format!("{SPEECH_AUDIO}{name}")),
+                "undeclared prepared speech: {path}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+pub(crate) struct PreparedSpeech {
+    files: BTreeMap<String, Vec<u8>>,
+}
+
+impl PreparedSpeech {
+    pub(crate) fn contains(&self, path: &str) -> bool {
+        self.files.contains_key(path)
+    }
+
+    pub(crate) fn digest(&self, path: &str) -> Option<String> {
+        self.files.get(path).map(|bytes| sha256(bytes))
+    }
+}
+
+pub(crate) fn rendered_speech(
+    root: &Path,
+    dump: &Value,
+    cat: impl FnOnce(&[String]) -> Result<Vec<u8>>,
+) -> Result<PreparedSpeech> {
+    let targets = dump.as_object().context("profile dump must be a mapping")?;
+    if !targets.contains_key(SPEECH_MANIFEST)
+        && !targets.keys().any(|path| path.starts_with(SPEECH_AUDIO))
+    {
+        return Ok(PreparedSpeech {
+            files: BTreeMap::new(),
+        });
+    }
+    let expected = source_speech(root)?;
+    let manifest = fs::read_to_string(root.join(SPEECH_SOURCE).join(platform::speech::MATERIALS))?;
+    ensure!(
+        targets
+            .get(SPEECH_MANIFEST)
+            .is_some_and(|entry| entry["type"] == "file"
+                && entry["contents"].as_str() == Some(manifest.as_str())),
+        "rendered speech manifest differs from the validated source"
+    );
+    for path in targets.keys().filter(|path| path.starts_with(SPEECH_AUDIO)) {
+        ensure!(
+            expected.contains_key(path),
+            "undeclared rendered speech: {path}"
+        );
+    }
+    for path in expected.keys() {
+        ensure!(
+            targets
+                .get(path)
+                .is_some_and(|entry| entry["type"] == "file"),
+            "missing rendered PCM file: {path}"
+        );
+    }
+    let paths = expected.keys().cloned().collect::<Vec<_>>();
+    let raw = cat(&paths)?;
+    let mut offset: usize = 0;
+    let mut actual = BTreeMap::new();
+    for (path, bytes) in expected {
+        let end = offset
+            .checked_add(bytes.len())
+            .context("prepared speech length overflow")?;
+        let rendered = raw
+            .get(offset..end)
+            .context("truncated raw prepared speech rendering")?;
+        ensure!(
+            rendered == bytes,
+            "rendered PCM differs from its validated manifest: {path}"
+        );
+        actual.insert(path, rendered.to_vec());
+        offset = end;
+    }
+    ensure!(offset == raw.len(), "unexpected extra raw speech bytes");
+    Ok(PreparedSpeech { files: actual })
+}
+
 /// The manifest of one combination: every target with its type, mode, and content digest, and every script with its phase, position, and body digest.
 pub(crate) fn manifest(source: &Path, combination: Combination) -> Result<Value> {
     let scope = Scope::new(&combination.data(source)?)?;
@@ -238,6 +346,17 @@ pub(crate) fn manifest(source: &Path, combination: Combination) -> Result<Value>
             "json",
         ],
     )?)?;
+    let speech = rendered_speech(source, &serde_json::to_value(&dump)?, |paths| {
+        let names = paths
+            .iter()
+            .map(|path| scope.destination.join(path))
+            .collect::<Vec<_>>();
+        let mut arguments = vec!["cat", "--"];
+        for path in &names {
+            arguments.push(path.to_str().context("PCM target is not UTF-8")?);
+        }
+        scope.run(source, &overrides, &arguments)
+    })?;
     let listing = scope.run(
         source,
         &overrides,
@@ -265,9 +384,11 @@ pub(crate) fn manifest(source: &Path, combination: Combination) -> Result<Value>
             .as_str()
             .context("dump entry without a type")?;
         let digest = match kind {
-            "file" => entry["contents"]
-                .as_str()
-                .map(|text| sha256(text.as_bytes())),
+            "file" => speech.digest(path).or_else(|| {
+                entry["contents"]
+                    .as_str()
+                    .map(|text| sha256(text.as_bytes()))
+            }),
             "symlink" => entry["linkname"]
                 .as_str()
                 .map(|text| sha256(text.as_bytes())),
@@ -452,6 +573,167 @@ pub(crate) fn command_line_dependent(root: &Path) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pcm(sample: u8) -> Vec<u8> {
+        let length: u32 = 44_100;
+        let mut bytes = Vec::new();
+        bytes.extend(b"RIFF");
+        bytes.extend((length + 36).to_le_bytes());
+        bytes.extend(b"WAVEfmt ");
+        bytes.extend(16u32.to_le_bytes());
+        bytes.extend(1u16.to_le_bytes());
+        bytes.extend(1u16.to_le_bytes());
+        bytes.extend(22_050u32.to_le_bytes());
+        bytes.extend(length.to_le_bytes());
+        bytes.extend(2u16.to_le_bytes());
+        bytes.extend(16u16.to_le_bytes());
+        bytes.extend(b"data");
+        bytes.extend(length.to_le_bytes());
+        bytes.resize(bytes.len() + usize::try_from(length).unwrap(), 0);
+        bytes[44] = sample;
+        bytes
+    }
+
+    fn speech_fixture(sample: u8) -> tempfile::TempDir {
+        let fixture = tempfile::tempdir().unwrap();
+        fs::write(fixture.path().join(".chezmoiroot"), "home\n").unwrap();
+        let directory = fixture.path().join(SPEECH_SOURCE);
+        fs::create_dir_all(directory.join("audio")).unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let names = dotfiles::notifications::prepared_materials(&root.join(SPEECH_SOURCE)).unwrap();
+        let mut manifest = String::from("dotfiles-notifications-v1\n");
+        let bytes = pcm(sample);
+        for material in names {
+            fs::write(
+                directory
+                    .join("audio")
+                    .join(format!("{}.wav", material.name)),
+                &bytes,
+            )
+            .unwrap();
+            writeln!(
+                manifest,
+                "{}\t{}\t{}\t1000",
+                material.name,
+                sha256(&bytes),
+                bytes.len()
+            )
+            .unwrap();
+        }
+        fs::write(directory.join(platform::speech::MATERIALS), manifest).unwrap();
+        fixture
+    }
+
+    fn native_speech(root: &Path) -> (Value, PreparedSpeech) {
+        let scope = Scope::new(&json!({})).unwrap();
+        let data = json!({});
+        let dump = serde_json::from_slice(
+            &scope
+                .run(
+                    root,
+                    &data,
+                    &["dump", "--include", "files", "--format", "json"],
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let speech = rendered_speech(root, &dump, |paths| {
+            let names = paths
+                .iter()
+                .map(|path| scope.destination.join(path))
+                .collect::<Vec<_>>();
+            let mut arguments = vec!["cat", "--"];
+            for path in &names {
+                arguments.push(path.to_str().unwrap());
+            }
+            scope.run(root, &data, &arguments)
+        })
+        .unwrap();
+        (dump, speech)
+    }
+
+    #[test]
+    fn binary_pcm_snapshots_hash_native_cat_bytes_without_utf8_conversion() {
+        let fixture = speech_fixture(0xff);
+        let (dump, rendered) = native_speech(fixture.path());
+        let expected = source_speech(fixture.path()).unwrap();
+        assert_eq!(rendered.files, expected);
+        for (path, bytes) in expected {
+            assert_eq!(rendered.digest(&path), Some(sha256(&bytes)));
+            assert_ne!(
+                rendered.digest(&path),
+                Some(sha256(dump[&path]["contents"].as_str().unwrap().as_bytes()))
+            );
+        }
+    }
+
+    #[test]
+    fn distinct_invalid_utf8_pcm_payloads_do_not_collide_in_snapshot_hashes() {
+        let first = speech_fixture(0xff);
+        let second = speech_fixture(0xfe);
+        let (first_dump, first_rendered) = native_speech(first.path());
+        let (second_dump, second_rendered) = native_speech(second.path());
+        for path in first_rendered.files.keys() {
+            assert_eq!(first_dump[path]["contents"], second_dump[path]["contents"]);
+            assert_ne!(first_rendered.digest(path), second_rendered.digest(path));
+        }
+    }
+
+    #[test]
+    fn pcm_allowance_refuses_unknown_partial_changed_and_malformed_materials() {
+        let fixture = speech_fixture(0xff);
+        let (dump, rendered) = native_speech(fixture.path());
+        let raw = rendered
+            .files
+            .values()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
+        let unknown = format!("{SPEECH_AUDIO}foreign.wav");
+        let mut extra = dump.clone();
+        extra[&unknown] = json!({"type": "file", "contents": "foreign"});
+        assert!(rendered_speech(fixture.path(), &extra, |_| Ok(raw.clone())).is_err());
+        let mut partial = dump.clone();
+        partial
+            .as_object_mut()
+            .unwrap()
+            .remove(rendered.files.keys().next().unwrap());
+        assert!(rendered_speech(fixture.path(), &partial, |_| Ok(raw.clone())).is_err());
+        let mut changed = raw.clone();
+        changed[44] = 0xfe;
+        assert!(rendered_speech(fixture.path(), &dump, |_| Ok(changed)).is_err());
+        assert!(
+            rendered_speech(fixture.path(), &dump, |_| Ok(raw[..raw.len() - 1].to_vec())).is_err()
+        );
+        let mut extra_bytes = raw;
+        extra_bytes.push(0);
+        assert!(rendered_speech(fixture.path(), &dump, |_| Ok(extra_bytes)).is_err());
+        let mut changed_manifest = dump.clone();
+        changed_manifest[SPEECH_MANIFEST]["contents"] = json!("foreign manifest\n");
+        assert!(rendered_speech(fixture.path(), &changed_manifest, |_| Ok(Vec::new())).is_err());
+        assert!(
+            validate_source_speech(
+                fixture.path(),
+                &[format!("{SPEECH_SOURCE}/audio/foreign.wav")]
+            )
+            .is_err()
+        );
+        let first = rendered
+            .files
+            .keys()
+            .next()
+            .unwrap()
+            .strip_prefix(SPEECH_AUDIO)
+            .unwrap();
+        let path = fixture.path().join(SPEECH_SOURCE).join("audio").join(first);
+        let mut malformed = fs::read(&path).unwrap();
+        malformed[20] = 3;
+        fs::write(&path, malformed).unwrap();
+        assert!(
+            validate_source_speech(fixture.path(), &[format!("{SPEECH_SOURCE}/audio/{first}")])
+                .is_err()
+        );
+    }
 
     #[test]
     fn sixteen_combinations_have_distinct_names() {

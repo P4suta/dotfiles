@@ -814,6 +814,29 @@ impl<'a> Fixture<'a> {
             self.chezmoi().args(arguments),
             &format!("{} {phase}", self.profile.name()),
         )
+        .map_err(|error| {
+            if !arguments.contains(&"verify") {
+                return error;
+            }
+            match self.run(
+                &[
+                    "status",
+                    "--include",
+                    "dirs,files,symlinks,remove",
+                    "--exclude",
+                    "externals",
+                ],
+                "verification target status",
+            ) {
+                Ok(status) => error.context(format!(
+                    "verification target status:\n{}",
+                    String::from_utf8_lossy(&status.stdout)
+                )),
+                Err(diagnostic) => error.context(format!(
+                    "verification target status unavailable: {diagnostic:#}"
+                )),
+            }
+        })
     }
 
     fn managed(&self, include: &str) -> Result<Vec<String>> {
@@ -866,7 +889,21 @@ impl<'a> Fixture<'a> {
             "{} profile renders no source for these targets of targets.toml: {missing:?}",
             profile.name()
         );
-        let shells = crate::quality::rendered(self.root, &dump, &self.scope.join("syntax"))?;
+        let speech = crate::profile_snapshot::rendered_speech(self.root, &dump, |paths| {
+            let mut command = self.chezmoi();
+            command
+                .env_remove("SSH_AUTH_SOCK")
+                .env_remove("DOTFILES_SSH_AUTH_SOCK")
+                .env_remove("SSH_CONNECTION")
+                .env_remove("SSH_CLIENT")
+                .env_remove("SSH_TTY")
+                .env("DOTFILES_ONEPASSWORD_APP", self.scope.join("absent-app"))
+                .args(["cat", "--"])
+                .args(paths.iter().map(|path| self.destination.join(path)));
+            Ok(output(&mut command, "raw prepared speech rendering")?.stdout)
+        })?;
+        let shells =
+            crate::quality::rendered(self.root, &dump, &self.scope.join("syntax"), &speech)?;
         println!(
             "Checked the {} shell targets of {}: {}",
             shells.len(),

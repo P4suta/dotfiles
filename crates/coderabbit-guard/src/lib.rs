@@ -1,5 +1,15 @@
 //! The `CodeRabbit` guard: the local review budget, the owner's pauses, and the pinned runtime every invocation goes through.
 
+mod committed;
+mod receipt;
+mod scope;
+
+pub use receipt::{
+    CLI_RECEIPT_LIMIT, CliFinding, CliReview, ReviewSeverity, SignedReviewReceipt,
+    read_cli_receipt, require_cli_evidence, require_historical_cli_findings, validate_agent_stream,
+};
+pub use scope::ReviewBinding;
+
 pub use platform::{aside, freshness, refusal, report, tool};
 pub use rules::review_rules;
 
@@ -567,6 +577,11 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
         report_status(&ledger, &organization, scope, json)?;
         return Ok(0);
     }
+    let committed = committed::Request::parse(&args)?;
+    let args = match &committed {
+        Some(request) => request.arguments(),
+        None => args,
+    };
     let kind = classify(&args);
     if kind == Invocation::Forbidden {
         bail!(
@@ -610,7 +625,13 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
         runtime.status.success() && std::str::from_utf8(&runtime.stdout)?.trim() == version,
         "CodeRabbit runtime has drifted from its pinned version; review refused"
     );
-    let directory = review_directory(&args)?;
+    let committed = committed
+        .map(|request| request.prepare(user_directory, &version))
+        .transpose()?;
+    let directory = match &committed {
+        Some(prepared) => Some(prepared.root.clone()),
+        None => review_directory(&args)?,
+    };
     execute_admitted(
         || pause(user_directory),
         &ledger,
@@ -620,7 +641,7 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
         || {
             let mut command = crate::tool::external(&vendor);
             command.args(["usage", "--agent"]).env("CI", "true");
-            if let Some(directory) = directory {
+            if let Some(directory) = &directory {
                 command.current_dir(directory);
             }
             let usage = command.output()?;
@@ -631,6 +652,9 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
             Ok(String::from_utf8(usage.stdout)?)
         },
         || {
+            if let Some(prepared) = committed {
+                return prepared.execute(&vendor);
+            }
             let status = crate::tool::external(&vendor)
                 .args(args)
                 .env("CI", "true")

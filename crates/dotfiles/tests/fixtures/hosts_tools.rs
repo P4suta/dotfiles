@@ -46,6 +46,9 @@ fn main() {
         {
             println!("{alias}:space")
         }
+        "on" if args.iter().any(|argument| argument.contains("df -Pi")) => {
+            println!("{alias}:inodes")
+        }
         "on" => println!("{alias}:probe"),
         "run" => {
             let job = args
@@ -91,6 +94,7 @@ fn main() {
         }
         "status" if alias.ends_with(":probe") => println!("{alias} finished succeeded"),
         "status" if alias.ends_with(":space") => println!("{alias} finished succeeded"),
+        "status" if alias.ends_with(":inodes") => println!("{alias} finished succeeded"),
         "status" => {
             match interruption {
                 "status" => {
@@ -144,6 +148,19 @@ fn main() {
                 println!("{free}");
             } else {
                 println!("/dev/fixture 0 0 {free} 0% /fixture");
+            }
+        }
+        "logs" if alias.ends_with(":inodes") => {
+            if alias.starts_with("mac:") {
+                println!(
+                    "Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on"
+                );
+                println!("/dev/home 100000000000 0 100000000000 0% 0 100000000 0% /home");
+                println!("/dev/tmp 100000000000 0 100000000000 0% 0 90000000 0% /tmp");
+            } else {
+                println!("Filesystem Inodes IUsed IFree IUse% Mounted on");
+                println!("/dev/home 100000000 0 100000000 0% /home");
+                println!("/dev/tmp 90000000 0 90000000 0% /tmp");
             }
         }
         "logs" => {

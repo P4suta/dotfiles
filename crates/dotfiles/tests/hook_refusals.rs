@@ -169,6 +169,9 @@ fn native_output_replays_preserve_the_real_hook_failure_without_new_incidents() 
         return Ok(());
     }
     let host = Host::new()?;
+    let consent = host.home().join(platform::incidents::EXPERIMENTAL);
+    fs::create_dir_all(consent.parent().unwrap())?;
+    fs::write(consent, skill_ops::incident_rules::EXPERIMENTAL_OPT_IN)?;
     let failed = host.hook(&["post-commit"])?;
     assert_eq!(refusal(&failed).rule, "hook.gate");
     let state = host.scope.path().join("state");
@@ -202,9 +205,12 @@ fn native_output_replays_preserve_the_real_hook_failure_without_new_incidents() 
 #[test]
 fn post_commit_refreshes_changed_tools_once_and_keeps_failed_installations_stale() -> Result<()> {
     use platform::build_inputs::{CRATES, content_hash};
-    use platform::freshness::{Built, Embedded, lagging, record_installation, verify};
+    use platform::freshness::{Built, Embedded, lagging, verify};
 
     let host = Host::new()?;
+    let consent = host.home().join(platform::incidents::EXPERIMENTAL);
+    fs::create_dir_all(consent.parent().unwrap())?;
+    fs::write(consent, skill_ops::incident_rules::EXPERIMENTAL_OPT_IN)?;
     for krate in CRATES {
         fs::create_dir_all(host.repository().join(krate).join("src"))?;
     }
@@ -215,7 +221,10 @@ fn post_commit_refreshes_changed_tools_once_and_keeps_failed_installations_stale
     )?;
     fs::write(&library, "pub fn current() {}\n")?;
     for built in Built::ALL {
-        record_installation(&host.home(), &host.repository(), built)?;
+        let directory = host.home().join(".local/state/dotfiles/installed");
+        fs::create_dir_all(&directory)?;
+        let record = serde_json::json!({"schema":1,"build":{"revision":"fixture","root":platform::paths::canonical(&host.repository())?,"hash":content_hash(&host.repository())?}});
+        fs::write(directory.join(built.binary()), serde_json::to_vec(&record)?)?;
     }
     let stamp = Embedded {
         revision: "fixture".into(),
@@ -244,7 +253,7 @@ fn post_commit_refreshes_changed_tools_once_and_keeps_failed_installations_stale
             .args(["hook", "post-commit"])
             .env("PATH", std::env::join_paths(path)?)
             .env("FIXTURE_HOOK_LOG", &events)
-            .env("FIXTURE_BUILD_HASH", content_hash(&host.repository())?);
+            .env("FIXTURE_INSTALLATION_RECORD", serde_json::to_string(&serde_json::json!({"schema":1,"build":{"revision":"fixture","root":platform::paths::canonical(&host.repository())?,"hash":content_hash(&host.repository())?}}))?);
         if let Some(failure) = failure {
             command.env("FIXTURE_INSTALL_FAILURE", failure);
         } else {

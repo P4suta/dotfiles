@@ -48,6 +48,37 @@ pub enum IssueGate {
     Missing,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SourceRelation {
+    Same,
+    ForkNetwork,
+    Refused,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RepositoryIdentities {
+    pub source: u64,
+    pub target: u64,
+    pub source_network: u64,
+    pub target_network: u64,
+}
+
+#[must_use]
+pub const fn source_relation(identities: RepositoryIdentities) -> SourceRelation {
+    if identities.source == 0
+        || identities.target == 0
+        || identities.source_network == 0
+        || identities.target_network == 0
+        || identities.source_network != identities.target_network
+    {
+        SourceRelation::Refused
+    } else if identities.source == identities.target {
+        SourceRelation::Same
+    } else {
+        SourceRelation::ForkNetwork
+    }
+}
+
 /// Apply personal issue rules only to owned non-fork repositories.
 #[must_use]
 pub fn issue_gate(personal_owner: bool, fork: bool, checked_issue: bool) -> IssueGate {
@@ -60,9 +91,84 @@ pub fn issue_gate(personal_owner: bool, fork: bool, checked_issue: bool) -> Issu
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContextGate {
+    NotRequired,
+    Missing,
+    Unauthenticated,
+    Destination,
+    Branch,
+    Source,
+    Closed,
+    Scope,
+    Accepted,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Independent observed predicates retain every input combination for the issue decision and its proof."
+)]
+pub struct ContextFacts {
+    pub required: bool,
+    pub present: bool,
+    pub authentic: bool,
+    pub destination: bool,
+    pub branch: bool,
+    pub source: bool,
+    pub open: bool,
+    pub scoped: bool,
+}
+
+#[must_use]
+pub const fn context_gate(facts: ContextFacts) -> ContextGate {
+    if !facts.required {
+        ContextGate::NotRequired
+    } else if !facts.present {
+        ContextGate::Missing
+    } else if !facts.authentic {
+        ContextGate::Unauthenticated
+    } else if !facts.destination {
+        ContextGate::Destination
+    } else if !facts.branch {
+        ContextGate::Branch
+    } else if !facts.source {
+        ContextGate::Source
+    } else if !facts.open {
+        ContextGate::Closed
+    } else if !facts.scoped {
+        ContextGate::Scope
+    } else {
+        ContextGate::Accepted
+    }
+}
+
 #[must_use]
 pub fn api_quota_available(remaining: u64, reserve: u64) -> bool {
     reserve > 0 && remaining >= reserve
+}
+
+#[must_use]
+pub fn registered_path(scope: &[u8], path: &[u8]) -> bool {
+    !scope.is_empty()
+        && (scope == path
+            || path
+                .strip_prefix(scope)
+                .is_some_and(|rest| rest.first() == Some(&b'/')))
+}
+
+#[must_use]
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "Independent prerequisite predicates preserve the complete admission domain checked by the proof."
+)]
+pub const fn initial_change_allowed(
+    required: bool,
+    dirty: bool,
+    covered: bool,
+    owner_adoption: bool,
+) -> bool {
+    !required || !dirty || covered || owner_adoption
 }
 
 #[must_use]
@@ -328,6 +434,131 @@ pub fn plan(
 mod proofs {
     use super::*;
 
+    pub fn spec_source_relation(identities: RepositoryIdentities) {
+        let relation = source_relation(identities);
+        let checked = identities.source != 0
+            && identities.target != 0
+            && identities.source_network != 0
+            && identities.target_network != 0
+            && identities.source_network == identities.target_network;
+        assert_eq!(relation != SourceRelation::Refused, checked);
+        assert_eq!(
+            relation == SourceRelation::Same,
+            checked && identities.source == identities.target
+        );
+        assert_eq!(
+            relation == SourceRelation::ForkNetwork,
+            checked && identities.source != identities.target
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn source_and_destination_require_a_known_common_repository_network() {
+        let identities = RepositoryIdentities {
+            source: kani::any(),
+            target: kani::any(),
+            source_network: kani::any(),
+            target_network: kani::any(),
+        };
+        spec_source_relation(identities);
+        kani::cover!(source_relation(identities) == SourceRelation::ForkNetwork);
+        kani::cover!(source_relation(identities) == SourceRelation::Refused);
+    }
+
+    pub fn spec_initial_change([required, dirty, covered, owner_adoption]: [bool; 4]) {
+        let allowed = initial_change_allowed(required, dirty, covered, owner_adoption);
+        assert_eq!(!allowed, required && dirty && !covered && !owner_adoption);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_late_start_cannot_adopt_unregistered_changes_without_owner_approval() {
+        let flags = kani::any();
+        spec_initial_change(flags);
+        let [required, dirty, covered, owner_adoption] = flags;
+        let allowed = initial_change_allowed(required, dirty, covered, owner_adoption);
+        kani::cover!(allowed);
+        kani::cover!(!allowed);
+    }
+
+    pub fn spec_context(flags: [bool; 8]) {
+        let [
+            required,
+            present,
+            authentic,
+            destination,
+            branch,
+            source,
+            open,
+            scoped,
+        ] = flags;
+        let result = context_gate(ContextFacts {
+            required,
+            present,
+            authentic,
+            destination,
+            branch,
+            source,
+            open,
+            scoped,
+        });
+        assert_eq!(
+            result == ContextGate::Accepted,
+            required && present && authentic && destination && branch && source && open && scoped
+        );
+        assert_eq!(result == ContextGate::NotRequired, !required);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn implementation_requires_every_checked_context_fact() {
+        let flags = kani::any();
+        spec_context(flags);
+        let [
+            required,
+            present,
+            authentic,
+            destination,
+            branch,
+            source,
+            open,
+            scoped,
+        ] = flags;
+        let result = context_gate(ContextFacts {
+            required,
+            present,
+            authentic,
+            destination,
+            branch,
+            source,
+            open,
+            scoped,
+        });
+        kani::cover!(result == ContextGate::Accepted);
+        kani::cover!(required && result != ContextGate::Accepted);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn registered_paths_require_a_complete_scope_component() {
+        let scope: [u8; 8] = kani::any();
+        let path: [u8; 8] = kani::any();
+        let sl: usize = kani::any();
+        let pl: usize = kani::any();
+        kani::assume(sl <= scope.len() && pl <= path.len());
+        let scope = &scope[..sl];
+        let path = &path[..pl];
+        let prefix = sl <= pl && scope.iter().zip(path).all(|(a, b)| a == b);
+        assert_eq!(
+            registered_path(scope, path),
+            sl > 0 && prefix && (sl == pl || path.get(sl) == Some(&b'/'))
+        );
+        kani::cover!(registered_path(scope, path));
+        kani::cover!(!registered_path(scope, path));
+    }
+
     pub const OPERATIONS: [Operation; 3] = [Operation::Create, Operation::Edit, Operation::Ready];
     pub const ISSUES: [IssueGate; 3] = [
         IssueGate::NotRequired,
@@ -578,6 +809,43 @@ mod proofs {
 mod tests {
     use super::*;
     use crate::domain::flags;
+
+    #[test]
+    fn repository_identity_requires_a_known_common_network() {
+        for source in [0, 1, 2, u64::MAX] {
+            for target in [0, 1, 2, u64::MAX] {
+                for source_network in [0, 1, 2, u64::MAX] {
+                    for target_network in [0, 1, 2, u64::MAX] {
+                        proofs::spec_source_relation(RepositoryIdentities {
+                            source,
+                            target,
+                            source_network,
+                            target_network,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_issue_context_fact_is_required_before_admission() {
+        for facts in flags() {
+            proofs::spec_context(facts);
+        }
+        for facts in flags() {
+            proofs::spec_initial_change(facts);
+        }
+        for (scope, path, expected) in [
+            ("crates/a", "crates/a", true),
+            ("crates/a", "crates/a/b.rs", true),
+            ("crates/a", "crates/another.rs", false),
+            ("", "crates/a", false),
+            ("日本語", "日本語/入力.rs", true),
+        ] {
+            assert_eq!(registered_path(scope.as_bytes(), path.as_bytes()), expected);
+        }
+    }
 
     #[test]
     #[cfg_attr(miri, ignore = "Miri takes seconds over every input")]

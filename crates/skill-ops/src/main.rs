@@ -745,7 +745,23 @@ impl Session {
 }
 
 fn main() {
+    match skill_ops::freshness::print_build_identity() {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(error) => {
+            skill_ops::report(&error);
+            std::process::exit(1);
+        }
+    }
     let mut cli = Cli::parse();
+    if !platform::incidents::enabled() {
+        if matches!(cli.command, Commands::Stop) {
+            println!("{{}}");
+        } else {
+            println!("Experimental skill operations are disabled; no assessment was performed.");
+        }
+        return;
+    }
     let result = if matches!(cli.command, Commands::Stop) {
         use skill_ops::skill_gate_rules::Answer;
         let input = stdin_json();

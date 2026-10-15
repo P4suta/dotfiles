@@ -195,7 +195,7 @@ pub fn decide(state: State) -> Step {
         return Step::StartWork;
     }
     if state.upstream != Upstream::Current {
-        // A push to a PR in review starts a CodeRabbit review, so the owner's review pause also holds it.
+        // The adapter binds a pause to the authenticated required route before holding publication.
         return match (state.push_paused, state.review_paused, state.pr) {
             (true, _, _) => Step::AwaitPushResume,
             (false, true, Pr::Unknown) => Step::InspectGithub,

@@ -35,6 +35,7 @@ pub const CORE_SOURCES: &str = "crates/rules/src";
 const SOURCE_ROOTS: [&str; 2] = ["crates", "xtask"];
 
 const GITHUB_REPOSITORY: &str = "P4suta/dotfiles";
+const MIN_CFG_ATTR_ARGUMENTS: usize = 2;
 
 /// The mutation configuration, whose exclusions count as exemptions.
 pub const MUTANTS_CONFIG: &str = ".cargo/mutants.toml";
@@ -59,12 +60,13 @@ pub struct NonTerminating {
     pub reason: String,
 }
 
-/// The flags a Kani contract run may pass, pinned with the Kani version in `skill_proofs::KANI_VERSION`.
+/// The flags a Kani obligation may pass, pinned with the Kani version in `skill_proofs::KANI_VERSION`.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum KaniFlag {
     FunctionContracts,
     LoopContracts,
+    Quantifiers,
     Stubbing,
 }
 
@@ -74,6 +76,7 @@ impl KaniFlag {
         match self {
             Self::FunctionContracts => "function-contracts",
             Self::LoopContracts => "loop-contracts",
+            Self::Quantifiers => "quantifiers",
             Self::Stubbing => "stubbing",
         }
     }
@@ -108,6 +111,8 @@ pub enum Obligation {
         /// Harness definitions placed after `mod production;`, which names the module under proof.
         #[serde(default)]
         probes: String,
+        #[serde(default)]
+        flags: Vec<KaniFlag>,
     },
     /// A function contract in `source`, proved by its `proof_for_contract` harness under `flags`.
     KaniContract {
@@ -128,6 +133,8 @@ pub enum Obligation {
         close_root: bool,
         #[serde(default)]
         undeclared: Vec<String>,
+        #[serde(default)]
+        extensions: Vec<SchemaExtension>,
     },
     /// A linter run with its committed settings.
     Lint {
@@ -144,7 +151,13 @@ pub enum Obligation {
     Lean(LeanPackage),
 }
 
-/// A Lean 4 package of theorems that no bounded checker can state, each bound to the Rust code it describes.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum SchemaExtension {
+    ClaudeCommandFailurePolicy,
+}
+
+/// A Lean package with an explicit implementation evidence scope for each theorem.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LeanPackage {
@@ -163,6 +176,22 @@ pub struct LeanTheorem {
     pub module: String,
     /// The Kani harness or Rust test that binds it, as `<path>::<function>`.
     pub bridge: String,
+    pub refinement: LeanRefinement,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum LeanRefinement {
+    BoundedKani {
+        source: String,
+        constant: String,
+        value: u64,
+    },
+    GeneratedVectors,
+    SourceTranslation,
+    SelectedCases {
+        entrypoint: String,
+    },
 }
 
 /// Every public theorem under `directory`, as its module and short name, excluding build outputs under `.lake`.
@@ -203,9 +232,15 @@ fn lean_theorems(package: &Path, directory: &Path) -> Vec<(String, String)> {
 
 /// The refusals of a Lean obligation that the source alone decides: the package and its pinned toolchain, each theorem in its module and its axiom report, and each bridge.
 #[must_use]
-pub fn close_lean(root: &Path, lean: &LeanPackage) -> Vec<String> {
+pub fn close_lean(root: &Path, manifest: &Manifest, lean: &LeanPackage) -> Vec<String> {
     let package = root.join(&lean.package);
     let mut refusals = Vec::new();
+    let names: BTreeSet<_> = lean.theorems.iter().map(|theorem| &theorem.name).collect();
+    if names.is_empty() || names.len() != lean.theorems.len() {
+        refusals.push(format!(
+            "{MANIFEST}: the Lean theorem inventory is empty or duplicated"
+        ));
+    }
     let toolchain = fs::read_to_string(package.join("lean-toolchain")).unwrap_or_default();
     if toolchain.trim() != format!("leanprover/lean4:v{}", crate::lean::LEAN_VERSION) {
         refusals.push(format!(
@@ -243,20 +278,90 @@ pub fn close_lean(root: &Path, lean: &LeanPackage) -> Vec<String> {
                 theorem.module
             ));
         }
-        let bridged = theorem
-            .bridge
-            .rsplit_once("::")
-            .is_some_and(|(path, function)| {
-                evidence_exists(root, &(path.to_owned(), function.to_owned()))
-            });
-        if !bridged {
+        if !lean_bridge_registered(root, manifest, theorem) {
             refusals.push(format!(
-                "{MANIFEST}: the bridge {} of {} names no function, so nothing binds the theorem to the Rust code",
+                "{MANIFEST}: the bridge {} of {} has no enabled registered verification root at its declared refinement scope",
                 theorem.bridge, theorem.name
             ));
         }
     }
     refusals
+}
+
+fn lean_bridge_registered(root: &Path, manifest: &Manifest, theorem: &LeanTheorem) -> bool {
+    theorem
+        .bridge
+        .split_once("::")
+        .is_some_and(|(path, function)| {
+            let modes = evidence_modes(root, &(path.to_owned(), function.to_owned()), manifest);
+            match &theorem.refinement {
+                LeanRefinement::BoundedKani {
+                    source,
+                    constant,
+                    value,
+                } => {
+                    path == source
+                        && modes.contains(&EvidenceMode::Kani)
+                        && constant_value(root, source, constant) == Some(*value)
+                        && evidence_uses(
+                            root,
+                            path,
+                            function,
+                            manifest,
+                            EvidenceMode::Kani,
+                            constant,
+                            EvidenceUse::Reference,
+                        )
+                }
+                LeanRefinement::GeneratedVectors => {
+                    modes.contains(&EvidenceMode::Test)
+                        && evidence_uses(
+                            root,
+                            path,
+                            function,
+                            manifest,
+                            EvidenceMode::Test,
+                            "xtask::lean::vectors",
+                            EvidenceUse::Call,
+                        )
+                }
+                LeanRefinement::SourceTranslation => {
+                    modes.contains(&EvidenceMode::Test)
+                        && evidence_uses(
+                            root,
+                            path,
+                            function,
+                            manifest,
+                            EvidenceMode::Test,
+                            "xtask::contrast_refinement::translate",
+                            EvidenceUse::Call,
+                        )
+                        && ["SOURCE", "GENERATED"].iter().all(|name| {
+                            evidence_uses(
+                                root,
+                                path,
+                                function,
+                                manifest,
+                                EvidenceMode::Test,
+                                &format!("xtask::contrast_refinement::{name}"),
+                                EvidenceUse::Reference,
+                            )
+                        })
+                }
+                LeanRefinement::SelectedCases { entrypoint } => {
+                    modes.contains(&EvidenceMode::Test)
+                        && evidence_uses(
+                            root,
+                            path,
+                            function,
+                            manifest,
+                            EvidenceMode::Test,
+                            entrypoint,
+                            EvidenceUse::Call,
+                        )
+                }
+            }
+        })
 }
 
 /// The Boolean satisfiability solvers an Alloy obligation may pin, each running in Java without a native library.
@@ -733,10 +838,9 @@ pub fn exemption(text: &str) -> Result<Option<Exemption>> {
             .is_some_and(|(_, condition)| !condition.trim().is_empty()),
         "an exemption names its reconsideration condition as `Reconsider when <condition>`"
     );
-    let function = qualified.rsplit("::").next().unwrap_or(qualified);
     Ok(Some(Exemption {
         reason,
-        evidence: (path.to_owned(), function.to_owned()),
+        evidence: (path.to_owned(), qualified.to_owned()),
     }))
 }
 
@@ -856,7 +960,7 @@ fn compiles_for_kani(attributes: &[syn::Attribute]) -> bool {
     })
 }
 
-/// The Kani harnesses an item declares, named by their path below the module as `kani list` names them.
+/// The Kani harnesses an item declares, named by the paths in compiler metadata.
 fn harnesses(item: &syn::Item, prefix: &str, found: &mut BTreeSet<String>) {
     match item {
         syn::Item::Fn(function) if is_harness(&function.attrs) => {
@@ -1118,10 +1222,676 @@ pub fn unexempted_exclusions(config: &str) -> Result<Vec<String>> {
     Ok(found)
 }
 
-/// Whether the substitute evidence of an exemption exists: the file holds a function of that name.
-fn evidence_exists(root: &Path, evidence: &(String, String)) -> bool {
-    fs::read_to_string(root.join(&evidence.0))
-        .is_ok_and(|text| text.contains(&format!("fn {}(", evidence.1)))
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum EvidenceMode {
+    Test,
+    Kani,
+}
+
+struct EvidenceFunction {
+    name: String,
+    available: BTreeSet<EvidenceMode>,
+    roots: BTreeSet<EvidenceMode>,
+    calls: BTreeSet<String>,
+    references: BTreeSet<String>,
+}
+
+#[derive(Default)]
+struct EvidenceCalls {
+    calls: BTreeSet<String>,
+    references: BTreeSet<String>,
+    shadowed: BTreeSet<String>,
+}
+
+impl<'ast> Visit<'ast> for EvidenceCalls {
+    fn visit_item(&mut self, _: &'ast syn::Item) {}
+    fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
+
+    fn visit_expr_path(&mut self, expression: &'ast syn::ExprPath) {
+        if expression.qself.is_none() && expression.path.leading_colon.is_none() {
+            let name = expression
+                .path
+                .segments
+                .iter()
+                .map(|segment| segment.ident.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+            if !self
+                .shadowed
+                .contains(name.split("::").next().unwrap_or(&name))
+            {
+                self.references.insert(name);
+            }
+        }
+        syn::visit::visit_expr_path(self, expression);
+    }
+
+    fn visit_expr_call(&mut self, expression: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(path) = expression.func.as_ref()
+            && path.qself.is_none()
+            && path.path.leading_colon.is_none()
+        {
+            let name = path
+                .path
+                .segments
+                .iter()
+                .map(|segment| segment.ident.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+            if !self
+                .shadowed
+                .contains(name.split("::").next().unwrap_or(&name))
+            {
+                self.calls.insert(name);
+            }
+        }
+        syn::visit::visit_expr_call(self, expression);
+    }
+
+    fn visit_expr_if(&mut self, expression: &'ast syn::ExprIf) {
+        self.visit_expr(&expression.cond);
+        match expression.cond.as_ref() {
+            syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Bool(value),
+                ..
+            }) if value.value => self.visit_block(&expression.then_branch),
+            syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Bool(value),
+                ..
+            }) if !value.value => {
+                if let Some((_, branch)) = &expression.else_branch {
+                    self.visit_expr(branch);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn visit_expr_for_loop(&mut self, expression: &'ast syn::ExprForLoop) {
+        self.visit_expr(&expression.expr);
+    }
+
+    fn visit_expr_while(&mut self, expression: &'ast syn::ExprWhile) {
+        self.visit_expr(&expression.cond);
+    }
+
+    fn visit_expr_loop(&mut self, _: &'ast syn::ExprLoop) {}
+    fn visit_expr_match(&mut self, expression: &'ast syn::ExprMatch) {
+        self.visit_expr(&expression.expr);
+    }
+
+    fn visit_macro(&mut self, expression: &'ast syn::Macro) {
+        if expression
+            .path
+            .get_ident()
+            .is_some_and(|name| self.shadowed.contains(&name.to_string()))
+        {
+            return;
+        }
+        if !["assert", "assert_eq", "assert_ne"]
+            .iter()
+            .any(|name| expression.path.is_ident(name))
+        {
+            return;
+        }
+        if let Ok(arguments) = syn::parse::Parser::parse2(
+            syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated,
+            expression.tokens.clone(),
+        ) {
+            for argument in &arguments {
+                self.visit_expr(argument);
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct EvidenceBindings(BTreeSet<String>, usize);
+
+impl<'ast> Visit<'ast> for EvidenceBindings {
+    fn visit_pat_ident(&mut self, pattern: &'ast syn::PatIdent) {
+        self.0.insert(pattern.ident.to_string());
+        syn::visit::visit_pat_ident(self, pattern);
+    }
+
+    fn visit_item_fn(&mut self, function: &'ast syn::ItemFn) {
+        self.0.insert(function.sig.ident.to_string());
+    }
+
+    fn visit_item_use(&mut self, _: &'ast syn::ItemUse) {
+        self.1 += 1;
+    }
+
+    fn visit_item_macro(&mut self, item: &'ast syn::ItemMacro) {
+        if let Some(name) = &item.ident {
+            self.0.insert(name.to_string());
+        }
+    }
+}
+
+fn use_names(tree: &syn::UseTree, prefix: &str, imported: &mut BTreeMap<String, String>) {
+    match tree {
+        syn::UseTree::Path(path) => {
+            use_names(&path.tree, &format!("{prefix}{}::", path.ident), imported);
+        }
+        syn::UseTree::Name(name) => {
+            imported.insert(name.ident.to_string(), format!("{prefix}{}", name.ident));
+        }
+        syn::UseTree::Rename(name) => {
+            imported.insert(name.rename.to_string(), format!("{prefix}{}", name.ident));
+        }
+        syn::UseTree::Group(group) => {
+            for entry in &group.items {
+                use_names(entry, prefix, imported);
+            }
+        }
+        syn::UseTree::Glob(_) => {}
+    }
+}
+
+fn evidence_calls(function: &syn::ItemFn, imports: &BTreeMap<String, String>) -> EvidenceCalls {
+    let mut bindings = EvidenceBindings::default();
+    for input in &function.sig.inputs {
+        bindings.visit_fn_arg(input);
+    }
+    bindings.visit_block(&function.block);
+    let mut imports = imports.clone();
+    let mut local_imports = 0;
+    for statement in &function.block.stmts {
+        if let syn::Stmt::Item(syn::Item::Use(imported)) = statement {
+            use_names(&imported.tree, "", &mut imports);
+            local_imports += 1;
+        }
+    }
+    let mut found = EvidenceCalls {
+        shadowed: bindings.0,
+        ..EvidenceCalls::default()
+    };
+    if bindings.1 != local_imports {
+        return found;
+    }
+    found.visit_block(&function.block);
+    for names in [&mut found.calls, &mut found.references] {
+        *names = names
+            .iter()
+            .map(|name| {
+                let (head, tail) = name
+                    .split_once("::")
+                    .map_or((name.as_str(), ""), |(head, tail)| (head, tail));
+                imports.get(head).map_or_else(
+                    || name.clone(),
+                    |imported| {
+                        if tail.is_empty() {
+                            imported.clone()
+                        } else {
+                            format!("{imported}::{tail}")
+                        }
+                    },
+                )
+            })
+            .collect();
+    }
+    found
+}
+
+fn cfg_value(meta: &syn::Meta, mode: EvidenceMode) -> Option<bool> {
+    match meta {
+        syn::Meta::Path(path) if path.is_ident("test") => Some(mode == EvidenceMode::Test),
+        syn::Meta::Path(path) if path.is_ident("kani") => Some(mode == EvidenceMode::Kani),
+        syn::Meta::Path(path) if path.is_ident("miri") => Some(false),
+        syn::Meta::List(list) => {
+            let entries = list
+                .parse_args_with(
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+                )
+                .ok()?;
+            let values: Vec<_> = entries.iter().map(|entry| cfg_value(entry, mode)).collect();
+            if list.path.is_ident("not") && values.len() == 1 {
+                return values[0].map(|value| !value);
+            }
+            if list.path.is_ident("any") {
+                if values.contains(&Some(true)) {
+                    return Some(true);
+                }
+                return (!values.contains(&None)).then_some(false);
+            }
+            if list.path.is_ident("all") {
+                if values.contains(&Some(false)) {
+                    return Some(false);
+                }
+                return (!values.contains(&None)).then_some(true);
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn expand_attribute(
+    attribute: &syn::Meta,
+    mode: EvidenceMode,
+    expanded: &mut Vec<syn::Meta>,
+) -> Option<()> {
+    if !attribute.path().is_ident("cfg_attr") {
+        expanded.push(attribute.clone());
+        return Some(());
+    }
+    let syn::Meta::List(list) = attribute else {
+        return None;
+    };
+    let arguments = list
+        .parse_args_with(syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated)
+        .ok()?;
+    if arguments.len() < MIN_CFG_ATTR_ARGUMENTS {
+        return None;
+    }
+    if cfg_value(arguments.first()?, mode)? {
+        for nested in arguments.iter().skip(1) {
+            expand_attribute(nested, mode, expanded)?;
+        }
+    }
+    Some(())
+}
+
+fn expanded_attributes(
+    attributes: &[syn::Attribute],
+    mode: EvidenceMode,
+) -> Option<Vec<syn::Meta>> {
+    let mut expanded = Vec::new();
+    for attribute in attributes {
+        expand_attribute(&attribute.meta, mode, &mut expanded)?;
+    }
+    Some(expanded)
+}
+
+fn has_effective_attribute(
+    attributes: &[syn::Attribute],
+    path: &[&str],
+    mode: EvidenceMode,
+) -> bool {
+    expanded_attributes(attributes, mode).is_some_and(|attributes| {
+        attributes.iter().any(|attribute| {
+            attribute.path().segments.len() == path.len()
+                && attribute
+                    .path()
+                    .segments
+                    .iter()
+                    .zip(path)
+                    .all(|(segment, expected)| segment.ident == *expected)
+        })
+    })
+}
+
+fn available_modes(
+    attributes: &[syn::Attribute],
+    inherited: &BTreeSet<EvidenceMode>,
+) -> BTreeSet<EvidenceMode> {
+    inherited
+        .iter()
+        .copied()
+        .filter(|mode| {
+            expanded_attributes(attributes, *mode).is_some_and(|attributes| {
+                attributes.iter().all(|attribute| {
+                    if attribute.path().is_ident("ignore") {
+                        return false;
+                    }
+                    if !attribute.path().is_ident("cfg") {
+                        return true;
+                    }
+                    let syn::Meta::List(list) = attribute else {
+                        return false;
+                    };
+                    list.parse_args::<syn::Meta>()
+                        .is_ok_and(|meta| cfg_value(&meta, *mode) == Some(true))
+                })
+            })
+        })
+        .collect()
+}
+
+fn evidence_functions(
+    items: &[syn::Item],
+    prefix: &str,
+    inherited: &BTreeSet<EvidenceMode>,
+    registered: &BTreeSet<EvidenceMode>,
+    inherited_imports: &BTreeMap<String, String>,
+    functions: &mut Vec<EvidenceFunction>,
+) {
+    let mut imports = inherited_imports.clone();
+    for item in items {
+        if let syn::Item::Use(imported) = item {
+            use_names(&imported.tree, "", &mut imports);
+        }
+    }
+    for item in items {
+        let available = available_modes(item_attributes(item), inherited);
+        match item {
+            syn::Item::Fn(function) if !has_attribute(&function.attrs, &["ignore"]) => {
+                let mut roots = BTreeSet::new();
+                if has_effective_attribute(&function.attrs, &["test"], EvidenceMode::Test)
+                    && registered.contains(&EvidenceMode::Test)
+                    && available.contains(&EvidenceMode::Test)
+                {
+                    roots.insert(EvidenceMode::Test);
+                }
+                if (has_effective_attribute(
+                    &function.attrs,
+                    &["kani", "proof"],
+                    EvidenceMode::Kani,
+                ) || has_effective_attribute(
+                    &function.attrs,
+                    &["kani", "proof_for_contract"],
+                    EvidenceMode::Kani,
+                )) && registered.contains(&EvidenceMode::Kani)
+                    && available.contains(&EvidenceMode::Kani)
+                {
+                    roots.insert(EvidenceMode::Kani);
+                }
+                let called = evidence_calls(function, &imports);
+                functions.push(EvidenceFunction {
+                    name: format!("{prefix}{}", function.sig.ident),
+                    available,
+                    roots,
+                    calls: called.calls,
+                    references: called.references,
+                });
+            }
+            syn::Item::Mod(module) => {
+                if let Some((_, items)) = &module.content {
+                    evidence_functions(
+                        items,
+                        &format!("{prefix}{}::", module.ident),
+                        &available,
+                        registered,
+                        &imports,
+                        functions,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn verification_source(path: &str) -> bool {
+    let relative = Path::new(path);
+    !relative.is_absolute()
+        && relative
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
+        && relative
+            .extension()
+            .is_some_and(|extension| extension == "rs")
+        && (path.starts_with("crates/") || path.starts_with("xtask/"))
+}
+
+fn module_source(root: &Path, path: &str, mode: EvidenceMode) -> bool {
+    let relative = Path::new(path);
+    let Some(parent) = relative.parent() else {
+        return false;
+    };
+    if parent.file_name().is_none_or(|name| name != "src") {
+        return false;
+    }
+    let Some(package) = parent.parent() else {
+        return false;
+    };
+    let Some(cargo) = fs::read_to_string(root.join(package).join("Cargo.toml"))
+        .ok()
+        .and_then(|text| toml::from_str::<toml::Table>(&text).ok())
+    else {
+        return false;
+    };
+    let Some(stem) = relative.file_stem().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    ["lib.rs", "main.rs"].into_iter().any(|entry| {
+        let target = if entry == "lib.rs" { "autolib" } else { "autobins" };
+        if cargo.get("package").is_none_or(|package| package.get(target).and_then(toml::Value::as_bool) == Some(false))
+            || cargo.get("lib").is_some() || cargo.get("bin").is_some()
+        { return false; }
+        let file = root.join(parent).join(entry);
+        fs::read_to_string(file).ok().and_then(|text| syn::parse_file(&text).ok()).is_some_and(|parsed| {
+            let inherited = available_modes(&parsed.attrs, &BTreeSet::from([mode]));
+            parsed.items.iter().any(|item| matches!(item, syn::Item::Mod(module) if module.ident == stem && module.content.is_none() && !has_effective_attribute(&module.attrs, &["path"], mode) && available_modes(&module.attrs, &inherited).contains(&mode)))
+        })
+    })
+}
+
+fn test_source(root: &Path, path: &str) -> bool {
+    if !verification_source(path) {
+        return false;
+    }
+    let relative = Path::new(path);
+    let Some(parent) = relative.parent() else {
+        return false;
+    };
+    if parent.file_name().is_some_and(|name| name == "tests") {
+        let Some(package) = parent.parent() else {
+            return false;
+        };
+        return fs::read_to_string(root.join(package).join("Cargo.toml"))
+            .ok()
+            .and_then(|text| toml::from_str::<toml::Table>(&text).ok())
+            .is_some_and(|table| {
+                table.get("package").is_some()
+                    && table
+                        .get("package")
+                        .and_then(|package| package.get("autotests"))
+                        .and_then(toml::Value::as_bool)
+                        != Some(false)
+                    && table.get("test").is_none()
+            });
+    }
+    module_source(root, path, EvidenceMode::Test)
+}
+
+fn evidence_graph(root: &Path, path: &str, manifest: &Manifest) -> Vec<EvidenceFunction> {
+    if !verification_source(path) {
+        return Vec::new();
+    }
+    let Ok(text) = fs::read_to_string(root.join(path)) else {
+        return Vec::new();
+    };
+    let Ok(file) = syn::parse_file(&text) else {
+        return Vec::new();
+    };
+    let mut registered = BTreeSet::new();
+    if test_source(root, path) {
+        registered.insert(EvidenceMode::Test);
+    }
+    if module_source(root, path, EvidenceMode::Kani)
+        && manifest.obligations.iter().any(
+            |obligation| matches!(obligation, Obligation::Kani { source, .. } if source == path),
+        )
+    {
+        registered.insert(EvidenceMode::Kani);
+    }
+    let mut functions = Vec::new();
+    let available = available_modes(
+        &file.attrs,
+        &BTreeSet::from([EvidenceMode::Test, EvidenceMode::Kani]),
+    );
+    evidence_functions(
+        &file.items,
+        "",
+        &available,
+        &registered,
+        &BTreeMap::new(),
+        &mut functions,
+    );
+    functions
+}
+
+fn resolved_name(scope: &str, called: &str) -> String {
+    if let Some(relative) = called.strip_prefix("crate::") {
+        return relative.to_owned();
+    }
+    if let Some(relative) = called.strip_prefix("self::") {
+        return if scope.is_empty() {
+            relative.to_owned()
+        } else {
+            format!("{scope}::{relative}")
+        };
+    }
+    if let Some(relative) = called.strip_prefix("super::") {
+        return resolved_name(
+            scope.rsplit_once("::").map_or("", |(parent, _)| parent),
+            &format!("self::{relative}"),
+        );
+    }
+    if scope.is_empty() {
+        called.to_owned()
+    } else {
+        format!("{scope}::{called}")
+    }
+}
+
+fn reachable(
+    functions: &[EvidenceFunction],
+    start: BTreeSet<String>,
+    mode: EvidenceMode,
+) -> BTreeSet<String> {
+    let mut reached = start;
+    loop {
+        let before = reached.len();
+        for function in functions {
+            if !reached.contains(&function.name) {
+                continue;
+            }
+            let scope = function
+                .name
+                .rsplit_once("::")
+                .map_or("", |(scope, _)| scope);
+            for called in &function.calls {
+                let name = resolved_name(scope, called);
+                if functions
+                    .iter()
+                    .any(|candidate| candidate.name == name && candidate.available.contains(&mode))
+                {
+                    reached.insert(name);
+                }
+            }
+        }
+        if reached.len() == before {
+            return reached;
+        }
+    }
+}
+
+fn evidence_modes(
+    root: &Path,
+    evidence: &(String, String),
+    manifest: &Manifest,
+) -> BTreeSet<EvidenceMode> {
+    let (path, requested) = evidence;
+    let functions = evidence_graph(root, path, manifest);
+    let candidates: Vec<_> = functions
+        .iter()
+        .filter(|function| {
+            function.name == *requested
+                || (!requested.contains("::")
+                    && function.name.rsplit("::").next() == Some(requested))
+        })
+        .collect();
+    if candidates.len() != 1 {
+        return BTreeSet::new();
+    }
+    let target = &candidates[0].name;
+    let mut proved = BTreeSet::new();
+    for mode in [EvidenceMode::Test, EvidenceMode::Kani] {
+        let roots = functions
+            .iter()
+            .filter(|function| function.roots.contains(&mode))
+            .map(|function| function.name.clone())
+            .collect();
+        let reached = reachable(&functions, roots, mode);
+        if reached.contains(target) {
+            proved.insert(mode);
+        }
+    }
+    proved
+}
+
+#[derive(Clone, Copy)]
+enum EvidenceUse {
+    Call,
+    Reference,
+}
+
+fn evidence_uses(
+    root: &Path,
+    path: &str,
+    requested: &str,
+    manifest: &Manifest,
+    mode: EvidenceMode,
+    reference: &str,
+    usage: EvidenceUse,
+) -> bool {
+    let functions = evidence_graph(root, path, manifest);
+    let names: BTreeSet<_> = functions
+        .iter()
+        .filter(|function| {
+            function.name == requested
+                || (!requested.contains("::")
+                    && function.name.rsplit("::").next() == Some(requested))
+        })
+        .map(|function| function.name.clone())
+        .collect();
+    if names.len() != 1 {
+        return false;
+    }
+    let reached = reachable(&functions, names, mode);
+    functions.iter().any(|function| {
+        reached.contains(&function.name)
+            && match usage {
+                EvidenceUse::Call => &function.calls,
+                EvidenceUse::Reference => &function.references,
+            }
+            .iter()
+            .any(|name| {
+                name == reference
+                    || resolved_name(
+                        function
+                            .name
+                            .rsplit_once("::")
+                            .map_or("", |(scope, _)| scope),
+                        name,
+                    ) == reference
+            })
+    })
+}
+
+fn constant_value(root: &Path, source: &str, requested: &str) -> Option<u64> {
+    fn find(items: &[syn::Item], prefix: &str, requested: &str) -> Option<u64> {
+        for item in items {
+            match item {
+                syn::Item::Const(constant)
+                    if format!("{prefix}{}", constant.ident) == requested =>
+                {
+                    if let syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Int(value),
+                        ..
+                    }) = constant.expr.as_ref()
+                    {
+                        return value.base10_parse().ok();
+                    }
+                }
+                syn::Item::Mod(module) => {
+                    if let Some((_, items)) = &module.content
+                        && let Some(value) =
+                            find(items, &format!("{prefix}{}::", module.ident), requested)
+                    {
+                        return Some(value);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+    let file = syn::parse_file(&fs::read_to_string(root.join(source)).ok()?).ok()?;
+    find(&file.items, "", requested)
 }
 
 /// Every `*_rules.rs` module of the decision core, as a checkout-relative path.
@@ -1171,7 +1941,7 @@ pub fn closure(root: &Path, manifest: &Manifest) -> Result<Closure> {
     let mentions = production_mentions(root)?;
     for obligation in &manifest.obligations {
         match obligation {
-            Obligation::Kani { source, probes } => {
+            Obligation::Kani { source, probes, .. } => {
                 if !listed.insert(source.clone()) {
                     result
                         .refusals
@@ -1185,7 +1955,7 @@ pub fn closure(root: &Path, manifest: &Manifest) -> Result<Closure> {
                 }
                 let found = module(&fs::read_to_string(root.join(source))?)
                     .with_context(|| source.clone())?;
-                close_module(root, source, &found, &mentions, &mut result);
+                close_module(root, manifest, source, &found, &mentions, &mut result);
                 let rejected = probe_harnesses(probes).with_context(|| source.clone())?;
                 if rejected.is_empty() {
                     result.refusals.push(format!(
@@ -1241,7 +2011,7 @@ pub fn closure(root: &Path, manifest: &Manifest) -> Result<Closure> {
                 .extend(close_lint(root, *tool, settings, probe, finding)),
             Obligation::Quint(quint) => result.refusals.extend(close_quint(root, quint)),
             Obligation::Alloy(alloy) => result.refusals.extend(close_alloy(root, alloy)),
-            Obligation::Lean(lean) => result.refusals.extend(close_lean(root, lean)),
+            Obligation::Lean(lean) => result.refusals.extend(close_lean(root, manifest, lean)),
         }
     }
     for missing in modules.difference(&listed) {
@@ -1259,6 +2029,7 @@ pub fn closure(root: &Path, manifest: &Manifest) -> Result<Closure> {
 
 fn close_module(
     root: &Path,
+    manifest: &Manifest,
     source: &str,
     found: &Module,
     mentions: &BTreeMap<String, BTreeSet<String>>,
@@ -1285,10 +2056,9 @@ fn close_module(
             exemption: subject.exemption.as_ref().map(|exemption| exemption.reason),
             decides: subject.decides,
             pure: true,
-            evidence: subject
-                .exemption
-                .as_ref()
-                .is_some_and(|exemption| evidence_exists(root, &exemption.evidence)),
+            evidence: subject.exemption.as_ref().is_some_and(|exemption| {
+                !evidence_modes(root, &exemption.evidence, manifest).is_empty()
+            }),
             called,
         };
         result.subjects += 1;

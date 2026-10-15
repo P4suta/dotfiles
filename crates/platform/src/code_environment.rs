@@ -13,6 +13,20 @@ use crate::paths::canonical;
 const UNIX_BASE: [&str; 4] = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
 const WINDOWS_GIT: &str = "Git";
 const MISE_CONFIG: &str = "mise.toml";
+const MISE_LOCK: &str = "mise.lock";
+const PROJECT_INPUTS: [&str; 2] = [MISE_CONFIG, MISE_LOCK];
+const LOCK_SIDECARS: &str = ".mise/locks";
+const PROJECT_INPUT_LIMIT: u64 = 4 * 1024 * 1024;
+const PROJECT_INPUT_COUNT: usize = 128;
+const PROJECT_INPUT_DEPTH: usize = 8;
+const PRIVATE_PROJECT: &str = "project";
+const LINK_READBACK: &str = "linked-tools.json";
+const NATIVE_READBACK: &str = "inherited-native-tools.json";
+const STAGED_READBACK: &str = "inherited-staged-tools.json";
+const PRIVATE_DATA: &str = ".local/share/mise";
+const ABSENT_SYSTEM_INSTALLS: &str = "absent-system-installs";
+const TOOL_INVENTORY_LIMIT: usize = 128;
+const TOOL_DIAGNOSTIC_LIMIT: usize = 4096;
 const CARGO_BIN: &str = "bin";
 const RUSTUP_COMPONENT_PROXIES: [&str; 2] = ["cargo-miri", "rustdoc"];
 const KANI_HOME: &str = ".kani";
@@ -298,14 +312,14 @@ impl Installations {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Source {
     r#type: String,
     path: PathBuf,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Installation {
     version: String,
@@ -375,9 +389,121 @@ impl Compiler {
 /// Owns the scratch home for as long as a gate or one of its child processes runs.
 #[derive(Debug)]
 pub struct CodeEnvironment {
-    scope: tempfile::TempDir,
+    scope: Option<tempfile::TempDir>,
     root: PathBuf,
+    configuration: PathBuf,
+    inputs: BTreeMap<PathBuf, Vec<u8>>,
     variables: BTreeMap<OsString, OsString>,
+}
+
+#[derive(Default)]
+struct ProjectInputBudget {
+    bytes: u64,
+    nodes: usize,
+}
+
+fn regular_project_input(path: &Path, budget: &mut ProjectInputBudget) -> Result<Vec<u8>> {
+    use std::io::Read as _;
+
+    let metadata = fs::symlink_metadata(path)?;
+    ensure!(
+        metadata.is_file() && !metadata.file_type().is_symlink(),
+        "project input is not a regular file: {}",
+        path.display()
+    );
+    ensure!(
+        metadata.len() <= PROJECT_INPUT_LIMIT,
+        "project input exceeds its byte limit"
+    );
+    let mut bytes = Vec::new();
+    fs::File::open(path)?
+        .take(PROJECT_INPUT_LIMIT + 1)
+        .read_to_end(&mut bytes)?;
+    budget.bytes = budget
+        .bytes
+        .checked_add(u64::try_from(bytes.len())?)
+        .context("project input byte count overflow")?;
+    budget.nodes += 1;
+    ensure!(
+        budget.bytes <= PROJECT_INPUT_LIMIT && budget.nodes <= PROJECT_INPUT_COUNT,
+        "project inputs exceed their bounded capture"
+    );
+    ensure!(
+        !fs::symlink_metadata(path)?.file_type().is_symlink(),
+        "project input became a filesystem link"
+    );
+    Ok(bytes)
+}
+
+fn collect_sidecars(
+    root: &Path,
+    relative: &Path,
+    depth: usize,
+    budget: &mut ProjectInputBudget,
+    inputs: &mut BTreeMap<PathBuf, Vec<u8>>,
+) -> Result<()> {
+    ensure!(
+        depth <= PROJECT_INPUT_DEPTH,
+        "project lock sidecars exceed their depth limit"
+    );
+    let path = root.join(relative);
+    let metadata = fs::symlink_metadata(&path)?;
+    ensure!(
+        !metadata.file_type().is_symlink(),
+        "project lock sidecar is a filesystem link"
+    );
+    if metadata.is_file() {
+        inputs.insert(relative.to_owned(), regular_project_input(&path, budget)?);
+        return Ok(());
+    }
+    ensure!(metadata.is_dir(), "project lock sidecar has a special type");
+    budget.nodes += 1;
+    ensure!(
+        budget.nodes <= PROJECT_INPUT_COUNT,
+        "project lock sidecars exceed their entry limit"
+    );
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let text = name
+            .to_str()
+            .context("project lock sidecar name is not Unicode")?;
+        ensure!(
+            rules::artifact_rules::portable_component(text.as_bytes()),
+            "project lock sidecar name is not portable"
+        );
+        collect_sidecars(root, &relative.join(name), depth + 1, budget, inputs)?;
+    }
+    Ok(())
+}
+
+fn project_inputs(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>> {
+    let mut budget = ProjectInputBudget::default();
+    let mut inputs = BTreeMap::new();
+    for name in PROJECT_INPUTS {
+        inputs.insert(
+            PathBuf::from(name),
+            regular_project_input(&root.join(name), &mut budget)?,
+        );
+    }
+    let sidecars = Path::new(LOCK_SIDECARS);
+    let parent = sidecars
+        .parent()
+        .context("project lock namespace has no parent")?;
+    match fs::symlink_metadata(root.join(parent)) {
+        Ok(metadata) => ensure!(
+            metadata.is_dir() && !metadata.file_type().is_symlink(),
+            "project lock namespace parent is not a regular directory"
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(inputs),
+        Err(error) => return Err(error.into()),
+    }
+    match fs::symlink_metadata(root.join(sidecars)) {
+        Ok(_) => collect_sidecars(root, sidecars, 0, &mut budget, &mut inputs)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(inputs)
 }
 
 impl CodeEnvironment {
@@ -387,8 +513,32 @@ impl CodeEnvironment {
     ///
     /// Returns an error for a missing or inactive installation, a mismatched version or source,
     /// a nonabsolute tool directory, or an unsuccessful resolution command.
-    pub fn build(root: &Path, installed: &Installations) -> Result<Self> {
-        let scope = tempfile::tempdir()?;
+    pub fn prepare(root: &Path, installed: &Installations) -> Result<CodePreparation> {
+        Self::prepare_scope(root, installed, tempfile::tempdir()?)
+    }
+
+    /// Stage the private data view beside the caller's fresh native materials.
+    ///
+    /// # Errors
+    /// Refuses storage inside Source and invalid project or native pins.
+    pub fn prepare_in(
+        root: &Path,
+        installed: &Installations,
+        parent: &Path,
+    ) -> Result<CodePreparation> {
+        let parent = canonical(parent)?;
+        ensure!(
+            !parent.starts_with(canonical(root)?),
+            "private native data view must stay outside Source"
+        );
+        Self::prepare_scope(root, installed, tempfile::tempdir_in(parent)?)
+    }
+
+    fn prepare_scope(
+        root: &Path,
+        installed: &Installations,
+        scope: tempfile::TempDir,
+    ) -> Result<CodePreparation> {
         let directory = canonical(scope.path())?;
         let root = canonical(root)?;
         let home = directory.join("home");
@@ -401,16 +551,41 @@ impl CodeEnvironment {
         fs::write(&empty, "")?;
         let mise = bootstrap.join(format!("mise{}", std::env::consts::EXE_SUFFIX));
         copy_bootstrap(&installed.mise, &mise).context("copy the mise bootstrap")?;
+        let project = directory.join(PRIVATE_PROJECT);
+        fs::create_dir(&project)?;
+        let inputs = project_inputs(&root)?;
+        for (name, bytes) in &inputs {
+            let path = project.join(name);
+            fs::create_dir_all(path.parent().context("private input has no parent")?)?;
+            fs::write(path, bytes)?;
+        }
         let github = home.join(".config/gh");
         fs::create_dir_all(&github)?;
         fs::write(github.join("hosts.yml"), GITHUB_HOSTS)?;
         let mut base = base_directories();
         let mut environment = Self {
-            scope,
+            scope: Some(scope),
             root,
+            configuration: project.join(MISE_CONFIG),
+            inputs,
             variables: BTreeMap::new(),
         };
         environment.seed(installed, &home, &temporary, &empty)?;
+        for name in [
+            "MISE_CONFIG_DIR",
+            "MISE_CACHE_DIR",
+            "MISE_STATE_DIR",
+            "XDG_CACHE_HOME",
+            "XDG_DATA_HOME",
+            "XDG_STATE_HOME",
+        ] {
+            fs::create_dir_all(Path::new(
+                environment
+                    .variables
+                    .get(OsStr::new(name))
+                    .context("native mutable directory is missing")?,
+            ))?;
+        }
         base.insert(0, bootstrap.clone());
         environment.set("PATH", std::env::join_paths(&base)?);
         #[cfg(windows)]
@@ -432,15 +607,32 @@ impl CodeEnvironment {
             std::str::from_utf8(&version)?.split_whitespace().next() == Some(pin.as_str()),
             "the mise bootstrap does not match release pin {pin}"
         );
-        let mut directories = environment.resolve(&mise, installed)?;
-        directories.extend(base);
-        directories.retain(|directory| directory != &bootstrap);
-        directories.insert(0, bootstrap);
-        environment.set("PATH", std::env::join_paths(directories)?);
-        environment.set("MISE_CARGO_HOME", home.join(".cargo"));
-        Ok(environment)
+        Ok(CodePreparation {
+            environment,
+            mise,
+            base,
+            links: None,
+            inherited: None,
+        })
     }
 
+    /// Refuse a missing native compiler before any material installer runs.
+    ///
+    /// # Errors
+    /// Refuses invalid source or bootstrap pins and an unavailable Windows Microsoft Visual C++ toolchain.
+    pub fn compiler_preflight(root: &Path, installed: &Installations) -> Result<()> {
+        let mut preparation = Self::prepare(root, installed)?;
+        preparation.admit_inherited(installed)
+    }
+
+    /// Resolve the existing native installations without granting material health.
+    ///
+    /// # Errors
+    /// Refuses invalid project pins, bootstrap identity, and unresolved installations.
+    pub fn build(root: &Path, installed: &Installations) -> Result<Self> {
+        let mut preparation = Self::prepare(root, installed)?;
+        preparation.finish(installed, false)?.into_environment()
+    }
     fn seed(
         &mut self,
         installed: &Installations,
@@ -462,7 +654,13 @@ impl CodeEnvironment {
             ("MISE_STATE_DIR", home.join(".local/state/mise")),
             ("MISE_GLOBAL_CONFIG_FILE", empty.to_path_buf()),
             ("MISE_SYSTEM_CONFIG_FILE", empty.to_path_buf()),
-            ("MISE_TRUSTED_CONFIG_PATHS", self.root.clone()),
+            (
+                "MISE_TRUSTED_CONFIG_PATHS",
+                self.configuration
+                    .parent()
+                    .context("private project has no parent")?
+                    .to_path_buf(),
+            ),
             (
                 "MISE_CEILING_PATHS",
                 self.root
@@ -482,16 +680,22 @@ impl CodeEnvironment {
             ("SKILL_OPS_STATE", home.join(".local/state/skill-ops")),
             ("GH_CONFIG_DIR", home.join(".config/gh")),
             ("DOTFILES_ONEPASSWORD_APP", home.join("absent-app")),
-            ("CARGO_TARGET_DIR", installed.cache.join("code")),
+            (
+                "CARGO_TARGET_DIR",
+                crate::cargo_target::code(&self.root, &installed.cache)?,
+            ),
             ("DOTFILES_HOST_CACHE", installed.cache.clone()),
             (MIRI_TARGET_VARIABLE, home.join(MIRI_TARGET_DIRECTORY)),
         ] {
             self.set(name, value.as_os_str());
         }
+        self.set("MISE_CONFIG_FILE", self.configuration.clone());
+        self.set("KANI_HOME", installed.kani.clone());
         for (name, value) in [
             ("GIT_CONFIG_NOSYSTEM", "1"),
             ("GIT_TERMINAL_PROMPT", "0"),
             ("MISE_AUTO_INSTALL", "false"),
+            ("MISE_AUTO_PRUNE", "false"),
             ("MISE_GITHUB_GH_CLI_TOKENS", "false"),
             ("LC_ALL", "C"),
             ("LANG", "C"),
@@ -515,7 +719,12 @@ impl CodeEnvironment {
         Ok(())
     }
 
-    fn resolve(&mut self, mise: &Path, installed: &Installations) -> Result<Vec<PathBuf>> {
+    fn resolve(
+        &mut self,
+        mise: &Path,
+        installed: &Installations,
+        prepared: bool,
+    ) -> Result<Vec<PathBuf>> {
         let listing = self.output(mise, &["ls", "--local", "--json"])?;
         let mut tools: BTreeMap<String, Vec<Installation>> = serde_json::from_slice(&listing)?;
         ensure!(!tools.is_empty(), "the checkout has no pinned tools");
@@ -528,13 +737,15 @@ impl CodeEnvironment {
                 ensure!(
                     (tool.active || !tool.installed)
                         && tool.source.r#type == MISE_CONFIG
-                        && canonical(&tool.source.path)? == self.root.join(MISE_CONFIG)
+                        && canonical(&tool.source.path)? == self.configuration
                         && tool.version == tool.requested_version,
                     "{name} does not resolve to its exact active project pin"
                 );
             }
         }
-        self.prepare_tools(mise, installed, &tools)?;
+        if !prepared {
+            self.prepare_tools(mise, installed, &tools)?;
+        }
         {
             let resolved: BTreeMap<String, Vec<Installation>> =
                 serde_json::from_slice(&self.output(mise, &["ls", "--local", "--json"])?)?;
@@ -561,7 +772,7 @@ impl CodeEnvironment {
                         tool.installed,
                         tool.active,
                         tool.source.r#type == MISE_CONFIG
-                            && canonical(&tool.source.path)? == self.root.join(MISE_CONFIG),
+                            && canonical(&tool.source.path)? == self.configuration,
                         tool.version == tool.requested_version,
                     ]),
                     "{name} does not resolve to its installed project pin: {tool:?}"
@@ -691,7 +902,7 @@ impl CodeEnvironment {
                 .context("code HOME is missing")?,
         );
         let data = home.join(".local/share/mise");
-        link_installations(&data, installed, tools)?;
+        link_installations(&data, installed, tools, false)?;
         if let Some(kani) = tools.get(KANI_TOOL).and_then(|versions| versions.first()) {
             let bundle = format!("kani-{}", kani.version);
             let source = installed.kani.join(&bundle);
@@ -790,6 +1001,34 @@ impl CodeEnvironment {
             .insert(name.into(), value.as_ref().to_owned());
     }
 
+    /// Recheck the exact original project inputs and their private copies.
+    ///
+    /// # Errors
+    /// Refuses a moved configuration or changed source and copied bytes.
+    pub fn require_current(&self) -> Result<()> {
+        ensure!(
+            self.scope.is_some(),
+            "code environment ownership was transferred"
+        );
+        ensure!(
+            canonical(&self.configuration)? == self.configuration,
+            "private project configuration changed"
+        );
+        let project = self
+            .configuration
+            .parent()
+            .context("private project has no parent")?;
+        ensure!(
+            project_inputs(&self.root)? == self.inputs,
+            "Source project tool inputs changed"
+        );
+        ensure!(
+            project_inputs(project)? == self.inputs,
+            "private project tool inputs changed"
+        );
+        Ok(())
+    }
+
     /// A gate command and all its descendants inherit this environment.
     #[must_use]
     pub fn command(&self, program: impl AsRef<OsStr>) -> Command {
@@ -800,6 +1039,11 @@ impl CodeEnvironment {
 
     fn output(&self, program: &Path, arguments: &[&str]) -> Result<Vec<u8>> {
         let mut command = self.command(program);
+        command.current_dir(
+            self.configuration
+                .parent()
+                .context("private project has no parent")?,
+        );
         command.args(arguments);
         let output = if arguments.first() == Some(&"install") {
             crate::process::mise_install(command)?.output()
@@ -815,6 +1059,546 @@ impl CodeEnvironment {
         );
         Ok(output.stdout)
     }
+}
+
+/// An owned private project view before its native health gate.
+#[derive(Debug)]
+pub struct CodePreparation {
+    environment: CodeEnvironment,
+    mise: PathBuf,
+    base: Vec<PathBuf>,
+    links: Option<RustKaniLinks>,
+    inherited: Option<InheritedTools>,
+}
+
+#[derive(Debug)]
+struct InheritedTools {
+    tools: BTreeMap<String, Vec<Installation>>,
+    installs: PathBuf,
+    storage: PathBuf,
+}
+
+/// A borrowing resolver result which leaves ownership with its preparation on failure.
+#[derive(Debug)]
+pub struct ResolvedCode<'a> {
+    environment: &'a mut CodeEnvironment,
+}
+
+impl ResolvedCode<'_> {
+    /// Transfer the validated environment after the caller's complete health operation succeeds.
+    ///
+    /// # Errors
+    /// Refuses an already transferred environment without consuming its preparation owner.
+    pub fn into_environment(self) -> Result<CodeEnvironment> {
+        let scope = self
+            .environment
+            .scope
+            .take()
+            .context("code environment ownership was transferred")?;
+        Ok(CodeEnvironment {
+            scope: Some(scope),
+            root: std::mem::take(&mut self.environment.root),
+            configuration: std::mem::take(&mut self.environment.configuration),
+            inputs: std::mem::take(&mut self.environment.inputs),
+            variables: std::mem::take(&mut self.environment.variables),
+        })
+    }
+}
+
+/// The original resolver's checked logical paths and their actual fresh stores.
+#[derive(Debug)]
+pub struct RustKaniLinks {
+    data: PathBuf,
+    rust: PathBuf,
+    launcher: Option<PathBuf>,
+}
+
+impl RustKaniLinks {
+    #[must_use]
+    pub fn data(&self) -> &Path {
+        &self.data
+    }
+    #[must_use]
+    pub fn rust(&self) -> &Path {
+        &self.rust
+    }
+    #[must_use]
+    pub fn launcher(&self) -> Option<&Path> {
+        self.launcher.as_deref()
+    }
+}
+
+impl CodePreparation {
+    /// Capture and check every inherited pin before native material preparation.
+    ///
+    /// # Errors
+    /// Refuses incomplete native tools, changed variants, unrelated storage, and changed inputs.
+    pub fn admit_inherited(&mut self, installed: &Installations) -> Result<()> {
+        self.environment.require_current()?;
+        self.environment.set("MISE_OFFLINE", "true");
+        self.environment.set("MISE_LOCKED", "true");
+        let scope = self
+            .environment
+            .scope
+            .as_ref()
+            .context("code environment ownership was transferred")?
+            .path()
+            .to_owned();
+        self.environment.set(
+            "MISE_SYSTEM_INSTALLS_DIR",
+            scope.join(ABSENT_SYSTEM_INSTALLS),
+        );
+        if let Some(inherited) = &self.inherited {
+            let listing = self
+                .environment
+                .output(&self.mise, &["ls", "--local", "--json"])?;
+            return inherited.require_matching(
+                &serde_json::from_slice(&listing)?,
+                &self.environment.configuration,
+            );
+        }
+        let original = self
+            .environment
+            .output(&self.mise, &["ls", "--local", "--json"])?;
+        fs::write(scope.join(NATIVE_READBACK), &original)?;
+        let tools: BTreeMap<String, Vec<Installation>> = serde_json::from_slice(&original)?;
+        require_inherited_pins(&tools, &self.environment.configuration)?;
+        let inherited = InheritedTools {
+            tools,
+            installs: canonical(&installed.data.join("installs"))?,
+            storage: canonical(&installed.data)?,
+        };
+        inherited.require_native_storage()?;
+        let staged = self.stage_inherited(&inherited)?;
+        fs::write(scope.join(STAGED_READBACK), &staged)?;
+        inherited.require_matching(
+            &serde_json::from_slice(&staged)?,
+            &self.environment.configuration,
+        )?;
+        self.environment.require_current()?;
+        self.inherited = Some(inherited);
+        Ok(())
+    }
+
+    fn stage_inherited(&mut self, inherited: &InheritedTools) -> Result<Vec<u8>> {
+        let home = PathBuf::from(
+            self.environment
+                .variables
+                .get(OsStr::new("HOME"))
+                .context("code HOME is missing")?,
+        );
+        let data = home.join(PRIVATE_DATA);
+        fs::create_dir_all(&data)?;
+        self.environment.set("MISE_DATA_DIR", &data);
+        self.environment.set(
+            "MISE_SHARED_INSTALL_DIRS",
+            std::env::join_paths([&inherited.installs])?,
+        );
+        self.environment
+            .output(&self.mise, &["ls", "--local", "--json"])
+    }
+
+    /// Register fresh stores with the public resolver, retaining its original readback.
+    ///
+    /// # Errors
+    /// Refuses changed project inputs, missing stores, wrong logical paths, and unrelated targets.
+    pub fn link_rust_kani(
+        &mut self,
+        installed: &Installations,
+        rust: &Path,
+        launcher: Option<&Path>,
+    ) -> Result<&RustKaniLinks> {
+        self.admit_inherited(installed)?;
+        self.environment.require_current()?;
+        let tools: BTreeMap<String, Vec<Installation>> = serde_json::from_slice(
+            &self
+                .environment
+                .output(&self.mise, &["ls", "--local", "--json"])?,
+        )?;
+        let home = PathBuf::from(
+            self.environment
+                .variables
+                .get(OsStr::new("HOME"))
+                .context("code HOME is missing")?,
+        );
+        let data = home.join(PRIVATE_DATA);
+        fs::create_dir_all(&data)?;
+        self.environment.set("MISE_DATA_DIR", &data);
+        self.environment.set("MISE_OFFLINE", "true");
+        self.environment.set("MISE_LOCKED", "true");
+        self.link_fresh_stores(&tools, installed, rust, launcher)?;
+        link_rust_proxies(&self.mise, installed)?;
+        if let Some(launcher) = launcher {
+            self.base.insert(0, canonical(&launcher.join(CARGO_BIN))?);
+        }
+        self.environment
+            .set("PATH", std::env::join_paths(&self.base)?);
+        let original = self
+            .environment
+            .output(&self.mise, &["ls", "--local", "--json"])?;
+        fs::write(
+            self.environment
+                .scope
+                .as_ref()
+                .context("code environment ownership was transferred")?
+                .path()
+                .join(LINK_READBACK),
+            &original,
+        )?;
+        let resolved: BTreeMap<String, Vec<Installation>> = serde_json::from_slice(&original)?;
+        self.inherited
+            .as_ref()
+            .context("inherited inventory was not captured")?
+            .require_matching(&resolved, &self.environment.configuration)?;
+        let rust = checked_store(
+            &resolved,
+            "rust",
+            &self.environment.configuration,
+            &data,
+            rust,
+        )?;
+        let launcher = launcher
+            .map(|path| {
+                checked_store(
+                    &resolved,
+                    KANI_TOOL,
+                    &self.environment.configuration,
+                    &data,
+                    path,
+                )
+            })
+            .transpose()?;
+        self.environment.require_current()?;
+        self.links = Some(RustKaniLinks {
+            data,
+            rust,
+            launcher,
+        });
+        self.links
+            .as_ref()
+            .context("native material links were not recorded")
+    }
+
+    fn link_fresh_stores(
+        &mut self,
+        tools: &BTreeMap<String, Vec<Installation>>,
+        installed: &Installations,
+        rust: &Path,
+        launcher: Option<&Path>,
+    ) -> Result<()> {
+        for (name, path) in [
+            ("RUSTUP_HOME", &installed.rustup),
+            ("MISE_RUSTUP_HOME", &installed.rustup),
+            ("MISE_CARGO_HOME", &installed.cargo),
+            ("DOTFILES_HOST_CARGO_HOME", &installed.cargo),
+            ("KANI_HOME", &installed.kani),
+        ] {
+            self.environment.set(name, path);
+        }
+        let rust_pin = exact_project_pin(tools, "rust", &self.environment.configuration)?;
+        self.environment.output(
+            &self.mise,
+            &[
+                "link",
+                &format!("rust@{rust_pin}"),
+                rust.to_str().context("fresh Rust path is not Unicode")?,
+            ],
+        )?;
+        match (tools.get(KANI_TOOL), launcher) {
+            (Some(_), Some(path)) => {
+                let pin = exact_project_pin(tools, KANI_TOOL, &self.environment.configuration)?;
+                self.environment.output(
+                    &self.mise,
+                    &[
+                        "link",
+                        &format!("{KANI_TOOL}@{pin}"),
+                        path.to_str()
+                            .context("fresh Kani launcher path is not Unicode")?,
+                    ],
+                )?;
+            }
+            (None, None) => {}
+            _ => anyhow::bail!("native verifier project and material inventories differ"),
+        }
+        Ok(())
+    }
+
+    /// Add only the private resolver and compiler paths to an already isolated health command.
+    ///
+    /// # Errors
+    /// Refuses an unlinked data view or changed original and copied project inputs.
+    pub fn configure_health(&self, command: &mut Command) -> Result<()> {
+        self.links
+            .as_ref()
+            .context("native health has no original resolver links")?;
+        self.environment.require_current()?;
+        for (name, value) in &self.environment.variables {
+            let key = name.to_string_lossy();
+            if key.starts_with("MISE_")
+                || key == "PATH"
+                || key == "CARGO_TARGET_DIR"
+                || key == "LIB"
+                || key == "INCLUDE"
+                || key == "LIBPATH"
+                || key == "DOTFILES_HOST_COMPILER"
+            {
+                command.env(name, value);
+            }
+        }
+        command.current_dir(&self.environment.root);
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn immutable_paths(&self) -> Vec<PathBuf> {
+        let project = self.environment.configuration.with_file_name("");
+        let mut paths = self
+            .environment
+            .inputs
+            .keys()
+            .map(|name| project.join(name))
+            .collect::<Vec<_>>();
+        if let Some(bootstrap) = self.mise.parent() {
+            paths.push(bootstrap.to_owned());
+        }
+        if let Some(links) = &self.links {
+            paths.push(links.data.join("installs"));
+            if let Some(path) = &links.launcher {
+                paths.push(path.clone());
+            }
+        }
+        paths
+    }
+
+    /// Build only after the trusted caller has completed original native health.
+    ///
+    /// # Errors
+    /// Refuses a missing original resolver binding and any unresolved project tool.
+    pub fn build(&mut self, installed: &Installations) -> Result<ResolvedCode<'_>> {
+        self.links
+            .as_ref()
+            .context("prepared code environment has no resolver binding")?;
+        self.finish(installed, true)
+    }
+
+    fn finish(&mut self, installed: &Installations, prepared: bool) -> Result<ResolvedCode<'_>> {
+        self.environment.require_current()?;
+        if let Some(inherited) = &self.inherited {
+            let original = self
+                .environment
+                .output(&self.mise, &["ls", "--local", "--json"])?;
+            inherited.require_matching(
+                &serde_json::from_slice(&original)?,
+                &self.environment.configuration,
+            )?;
+        }
+        let mut directories = self.environment.resolve(&self.mise, installed, prepared)?;
+        directories.extend(self.base.iter().cloned());
+        let bootstrap = self
+            .mise
+            .parent()
+            .context("mise bootstrap has no directory")?;
+        directories.retain(|directory| directory != bootstrap);
+        directories.insert(0, bootstrap.into());
+        self.environment
+            .set("PATH", std::env::join_paths(directories)?);
+        self.environment.require_current()?;
+        Ok(ResolvedCode {
+            environment: &mut self.environment,
+        })
+    }
+}
+
+fn exact_project_pin<'a>(
+    tools: &'a BTreeMap<String, Vec<Installation>>,
+    name: &str,
+    configuration: &Path,
+) -> Result<&'a str> {
+    let versions = tools
+        .get(name)
+        .with_context(|| format!("project has no {name} pin"))?;
+    let [tool] = versions.as_slice() else {
+        anyhow::bail!("{name} project pin is missing or ambiguous");
+    };
+    ensure!(
+        tool.source.r#type == MISE_CONFIG
+            && canonical(&tool.source.path)? == configuration
+            && tool.version == tool.requested_version,
+        "{name} does not resolve to the exact private project pin"
+    );
+    Ok(&tool.requested_version)
+}
+
+fn fresh_native_tool(name: &str) -> bool {
+    name == "rust" || name == KANI_TOOL
+}
+
+fn require_inherited_pins(
+    tools: &BTreeMap<String, Vec<Installation>>,
+    configuration: &Path,
+) -> Result<()> {
+    ensure!(!tools.is_empty(), "the checkout has no pinned tools");
+    ensure!(
+        tools.len() <= TOOL_INVENTORY_LIMIT,
+        "project tool inventory exceeds its member limit"
+    );
+    let mut failures = Vec::new();
+    for (name, versions) in tools {
+        let checked = (|| {
+            exact_project_pin(tools, name, configuration)?;
+            if fresh_native_tool(name) {
+                return Ok(());
+            }
+            let [tool] = versions.as_slice() else {
+                anyhow::bail!("{name} must resolve to exactly one pinned version");
+            };
+            ensure!(
+                rules::hosts_rules::pinned_tool([
+                    tool.installed,
+                    tool.active,
+                    tool.source.r#type == MISE_CONFIG
+                        && canonical(&tool.source.path)? == configuration,
+                    tool.version == tool.requested_version,
+                ]),
+                "{name} does not resolve to its installed project pin: {tool:?}"
+            );
+            ensure!(
+                tool.install_path.is_absolute(),
+                "{name} has a relative installation"
+            );
+            Ok(())
+        })();
+        if let Err(error) = checked {
+            failures.push(tool_failure(name, &error));
+        }
+    }
+    require_tools(&failures)
+}
+
+fn tool_failure(name: &str, error: &anyhow::Error) -> String {
+    format!("{name}: {error:#}")
+        .chars()
+        .take(TOOL_DIAGNOSTIC_LIMIT)
+        .collect()
+}
+
+fn require_tools(failures: &[String]) -> Result<()> {
+    ensure!(
+        failures.is_empty(),
+        "inherited tool admission refused {} member(s):\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    Ok(())
+}
+
+impl InheritedTools {
+    fn require_native_storage(&self) -> Result<()> {
+        let mut failures = Vec::new();
+        for (name, versions) in &self.tools {
+            if fresh_native_tool(name) {
+                continue;
+            }
+            let checked = (|| {
+                let [tool] = versions.as_slice() else {
+                    anyhow::bail!("{name} native installation is ambiguous");
+                };
+                ensure!(
+                    canonical(&tool.install_path)?.starts_with(&self.storage),
+                    "{name} native installation escapes its captured storage"
+                );
+                ensure!(
+                    tool.install_path.starts_with(&self.installs),
+                    "{name} native installation is outside its captured installs lookup"
+                );
+                Ok(())
+            })();
+            if let Err(error) = checked {
+                failures.push(tool_failure(name, &error));
+            }
+        }
+        require_tools(&failures)
+    }
+
+    fn require_matching(
+        &self,
+        staged: &BTreeMap<String, Vec<Installation>>,
+        configuration: &Path,
+    ) -> Result<()> {
+        require_inherited_pins(staged, configuration)?;
+        ensure!(
+            self.tools.keys().eq(staged.keys()),
+            "staging changed the complete project pin inventory: native={:?}, staged={:?}",
+            self.tools.keys().collect::<Vec<_>>(),
+            staged.keys().collect::<Vec<_>>()
+        );
+        self.require_native_storage()?;
+        let mut failures = Vec::new();
+        for (name, originals) in &self.tools {
+            let checked = (|| {
+                let [original] = originals.as_slice() else {
+                    anyhow::bail!("{name} native installation is ambiguous");
+                };
+                let [current] = staged
+                    .get(name)
+                    .context("staged tool is missing")?
+                    .as_slice()
+                else {
+                    anyhow::bail!("{name} staged installation is ambiguous");
+                };
+                ensure!(
+                    original.requested_version == current.requested_version
+                        && original.version == current.version,
+                    "{name} staging changed its exact project pin"
+                );
+                if fresh_native_tool(name) {
+                    return Ok(());
+                }
+                ensure!(
+                    original.install_path.file_name() == current.install_path.file_name()
+                        && canonical(&original.install_path)? == canonical(&current.install_path)?,
+                    "{name} staging changed its native installation variant or endpoint"
+                );
+                Ok(())
+            })();
+            if let Err(error) = checked {
+                failures.push(tool_failure(name, &error));
+            }
+        }
+        require_tools(&failures)
+    }
+}
+
+fn checked_store(
+    tools: &BTreeMap<String, Vec<Installation>>,
+    name: &str,
+    configuration: &Path,
+    data: &Path,
+    expected: &Path,
+) -> Result<PathBuf> {
+    exact_project_pin(tools, name, configuration)?;
+    let tool = &tools[name][0];
+    ensure!(
+        tool.installed && tool.active && tool.install_path.is_absolute(),
+        "{name} resolver path is not an active absolute installation"
+    );
+    if name == KANI_TOOL {
+        ensure!(
+            tool.install_path.starts_with(data.join("installs")),
+            "native verifier resolver path is outside its owned logical installation namespace"
+        );
+    }
+    if let Some(link) = &tool.symlinked_to {
+        ensure!(
+            link.is_absolute() && canonical(link)? == canonical(expected)?,
+            "{name} resolver names an unrelated linked store"
+        );
+    }
+    ensure!(
+        canonical(&tool.install_path)? == canonical(expected)?,
+        "{name} resolver did not select the fresh physical store"
+    );
+    Ok(tool.install_path.clone())
 }
 
 #[cfg(windows)]
@@ -877,8 +1661,12 @@ fn link_installations(
     data: &Path,
     installed: &Installations,
     tools: &BTreeMap<String, Vec<Installation>>,
+    prepared_rust: bool,
 ) -> Result<()> {
     for (name, versions) in tools {
+        if prepared_rust && matches!(name.as_str(), "rust" | KANI_TOOL) {
+            continue;
+        }
         for tool in versions.iter().filter(|tool| tool.installed) {
             let relative = tool
                 .install_path
@@ -929,10 +1717,12 @@ fn link_entry(source: &Path, destination: &Path) -> Result<()> {
 
 impl Drop for CodeEnvironment {
     fn drop(&mut self) {
-        crate::cleanup::report(
-            fs::remove_dir_all(self.scope.path()),
-            "remove the code gate environment",
-        );
+        if let Some(scope) = &self.scope {
+            crate::cleanup::report(
+                fs::remove_dir_all(scope.path()),
+                "remove the code gate environment",
+            );
+        }
     }
 }
 
@@ -967,6 +1757,550 @@ fn base_directories() -> Vec<PathBuf> {
 #[cfg(test)]
 mod native_path_tests {
     use super::*;
+
+    const PINNED_MISE_FIXTURE: &str = "DOTFILES_VERIFIED_MISE_BOOTSTRAP";
+    const PINNED_MISE_VERSION: &str = "2026.10.7";
+    const NATIVE_INVENTORY_SOURCE: &str = "DOTFILES_NATIVE_INVENTORY_SOURCE";
+    const NATIVE_INVENTORY_PARENT: &str = "DOTFILES_NATIVE_INVENTORY_PARENT";
+    const NATIVE_INVENTORY_RESULTS: &str = "DOTFILES_NATIVE_INVENTORY_RESULTS";
+    const NATIVE_INVENTORY_METADATA: &str = "native-inventory.json";
+    const NATIVE_INVENTORY_FAILURE: &str = "native-inventory.failure.txt";
+    const NATIVE_INVENTORY_BYTES: usize = 1024 * 1024;
+    const RESOLVER_TOOL: &str = "http:choose";
+    const RESOLVER_PROJECT: &str = "[tools]\n\"http:choose\"={version=\"1.3.7\",url=\"https://github.com/theryangeary/choose/releases/download/v1.3.7/choose-x86_64-pc-windows-gnu.exe\",checksum=\"sha256:9233beade020c3e74854911a15aa973f7dc9f4253abe8856b8c273579a555903\"}\n[settings]\nparanoid=true\n";
+    const LOCKED_SIDECARS: [(&str, &[u8]); 4] = [
+        (
+            ".mise/locks/yamllint/1.38.0/pyproject.toml",
+            include_bytes!("../../../.mise/locks/yamllint/1.38.0/pyproject.toml"),
+        ),
+        (
+            ".mise/locks/yamllint/1.38.0/uv.lock",
+            include_bytes!("../../../.mise/locks/yamllint/1.38.0/uv.lock"),
+        ),
+        (
+            ".mise/locks/pypi-ansible-core/2.21.4/pyproject.toml",
+            include_bytes!("../../../.mise/locks/pypi-ansible-core/2.21.4/pyproject.toml"),
+        ),
+        (
+            ".mise/locks/pypi-ansible-core/2.21.4/uv.lock",
+            include_bytes!("../../../.mise/locks/pypi-ansible-core/2.21.4/uv.lock"),
+        ),
+    ];
+
+    fn write_resolver_fixture(root: &Path) -> Result<()> {
+        for (name, bytes) in [
+            (MISE_CONFIG, include_bytes!("../../../mise.toml").as_slice()),
+            (MISE_LOCK, include_bytes!("../../../mise.lock").as_slice()),
+            (
+                RELEASE_PINS,
+                include_bytes!("../../../home/.chezmoidata/versions.toml").as_slice(),
+            ),
+        ]
+        .into_iter()
+        .chain(LOCKED_SIDECARS)
+        {
+            let path = root.join(name);
+            fs::create_dir_all(path.parent().context("resolver fixture input parent")?)?;
+            fs::write(path, bytes)?;
+        }
+        Ok(())
+    }
+
+    fn native_inventory_directory(variable: &str) -> Result<PathBuf> {
+        let path = PathBuf::from(
+            std::env::var_os(variable)
+                .with_context(|| format!("provide the owned native inventory {variable}"))?,
+        );
+        ensure!(
+            path.is_absolute(),
+            "native inventory directory must be absolute"
+        );
+        let physical = canonical(&path)?;
+        ensure!(
+            path == physical
+                && fs::symlink_metadata(&path)?.is_dir()
+                && !fs::symlink_metadata(&path)?.file_type().is_symlink(),
+            "native inventory directory must be physical and regular"
+        );
+        Ok(physical)
+    }
+
+    fn write_native_inventory(
+        results: &Path,
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<serde_json::Value> {
+        use sha2::{Digest as _, Sha256};
+        use std::io::Write as _;
+
+        ensure!(
+            bytes.len() <= NATIVE_INVENTORY_BYTES,
+            "native inventory output exceeds its retention bound"
+        );
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(results.join(name))?
+            .write_all(bytes)?;
+        Ok(
+            serde_json::json!({"file":name,"bytes":bytes.len(),"sha256":crate::build_inputs::hex(&Sha256::digest(bytes))}),
+        )
+    }
+
+    fn retain_native_inventory(
+        preparation: &CodePreparation,
+        results: &Path,
+    ) -> Result<serde_json::Value> {
+        let scope = preparation
+            .environment
+            .scope
+            .as_ref()
+            .context("native inventory owner is missing")?;
+        let mut files = Vec::new();
+        for name in [NATIVE_READBACK, STAGED_READBACK] {
+            match fs::read(scope.path().join(name)) {
+                Ok(bytes) => {
+                    files.push(write_native_inventory(results, name, &bytes)?);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    files.push(serde_json::json!({"file":name,"status":"NOT_RUN"}));
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(serde_json::Value::Array(files))
+    }
+
+    #[test]
+    #[ignore = "requires the source-authenticated pinned mise bootstrap and complete native stores"]
+    fn inherited_native_inventory_preserves_all_original_variants() -> Result<()> {
+        let source = native_inventory_directory(NATIVE_INVENTORY_SOURCE)?;
+        let parent = native_inventory_directory(NATIVE_INVENTORY_PARENT)?;
+        let results = native_inventory_directory(NATIVE_INVENTORY_RESULTS)?;
+        ensure!(
+            !parent.starts_with(&source) && results.starts_with(&parent) && results != parent,
+            "native inventory outputs must remain inside their owned namespace outside Source"
+        );
+        let producer = crate::freshness::embedded();
+        ensure!(
+            canonical(&producer.root)? == source
+                && crate::build_inputs::content_hash(&source)? == producer.hash,
+            "native inventory test binary does not bind the exact current Source"
+        );
+        for name in [
+            NATIVE_READBACK,
+            STAGED_READBACK,
+            NATIVE_INVENTORY_METADATA,
+            NATIVE_INVENTORY_FAILURE,
+        ] {
+            ensure!(
+                fs::symlink_metadata(results.join(name))
+                    .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound),
+                "native inventory output already exists or cannot be inspected"
+            );
+        }
+        let home = crate::home::home().context("native home is unavailable")?;
+        let mut installed = Installations::discover(&home)?;
+        installed.mise = canonical(Path::new(
+            &std::env::var_os(PINNED_MISE_FIXTURE)
+                .context("provide the verified pinned mise bootstrap")?,
+        ))?;
+        let mut preparation = CodeEnvironment::prepare_in(&source, &installed, &parent)?;
+        let outcome = preparation.admit_inherited(&installed);
+        let files = retain_native_inventory(&preparation, &results)?;
+        let failure = outcome
+            .as_ref()
+            .err()
+            .map(|error| {
+                write_native_inventory(
+                    &results,
+                    NATIVE_INVENTORY_FAILURE,
+                    format!("{error:#}").as_bytes(),
+                )
+            })
+            .transpose()?;
+        write_native_inventory(
+            &results,
+            NATIVE_INVENTORY_METADATA,
+            &serde_json::to_vec_pretty(&serde_json::json!({
+                "source":source,"producer_root":producer.root,"producer_hash":producer.hash,
+                "mise":installed.mise,"native_data":installed.data,"files":files,
+                "admitted":outcome.is_ok(),"failure":failure,
+                "native_installation":"NOT_RUN","native_health":"NOT_RUN"
+            }))?,
+        )?;
+        outcome?;
+        preparation.environment.require_current()?;
+        ensure!(
+            crate::build_inputs::content_hash(&source)? == producer.hash,
+            "native inventory operation changed Source"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires the source-authenticated pinned mise bootstrap"]
+    fn private_project_preserves_locked_sidecars_and_refuses_both_input_drifts() -> Result<()> {
+        let source = tempfile::tempdir()?;
+        let materials = tempfile::tempdir()?;
+        write_resolver_fixture(source.path())?;
+        let installed = Installations {
+            mise: canonical(Path::new(
+                &std::env::var_os(PINNED_MISE_FIXTURE)
+                    .context("provide the verified pinned mise bootstrap")?,
+            ))?,
+            data: materials.path().join("native-data"),
+            cargo: materials.path().join("native-cargo"),
+            rustup: materials.path().join("native-rustup"),
+            kani: materials.path().join("native-kani"),
+            cache: materials.path().join("cache"),
+        };
+        let mut preparation =
+            CodeEnvironment::prepare_in(source.path(), &installed, materials.path())?;
+        preparation.environment.set("MISE_OFFLINE", "true");
+        preparation.environment.set("MISE_LOCKED", "true");
+        preparation.environment.set("MISE_PARANOID", "true");
+        let project = preparation
+            .environment
+            .configuration
+            .parent()
+            .context("captured project parent")?
+            .to_owned();
+        let mut copied = Vec::new();
+        for (name, bytes) in LOCKED_SIDECARS {
+            let path = project.join(name);
+            copied.push((name, fs::read(&path).is_ok_and(|actual| actual == bytes)));
+            fs::create_dir_all(path.parent().context("private sidecar parent")?)?;
+            fs::write(path, bytes)?;
+        }
+        let before = preparation
+            .environment
+            .output(&preparation.mise, &["ls", "--local", "--json"])?;
+        eprintln!(
+            "inherited inventory before={}",
+            String::from_utf8_lossy(&before)
+        );
+        let inventory: BTreeMap<String, Vec<Installation>> = serde_json::from_slice(&before)?;
+        assert!(!inventory.is_empty());
+        assert!(inventory.contains_key("yamllint"));
+        for versions in inventory.values() {
+            for tool in versions {
+                assert_eq!(
+                    canonical(&tool.source.path)?,
+                    preparation.environment.configuration
+                );
+                assert_eq!(tool.version, tool.requested_version);
+            }
+        }
+        let mut refused = Vec::new();
+        for (name, bytes) in LOCKED_SIDECARS {
+            for base in [source.path(), project.as_path()] {
+                let path = base.join(name);
+                let mut changed = bytes.to_vec();
+                changed.push(b'\n');
+                fs::write(&path, changed)?;
+                refused.push((
+                    path.clone(),
+                    preparation.environment.require_current().is_err(),
+                ));
+                fs::write(path, bytes)?;
+                preparation.environment.require_current()?;
+            }
+        }
+        let after = preparation
+            .environment
+            .output(&preparation.mise, &["ls", "--local", "--json"])?;
+        eprintln!(
+            "inherited inventory after={}",
+            String::from_utf8_lossy(&after)
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&before)?,
+            serde_json::from_slice::<serde_json::Value>(&after)?
+        );
+        assert!(
+            copied.iter().all(|(_, retained)| *retained),
+            "all tracked sidecars must be captured: {copied:?}"
+        );
+        assert!(
+            refused.iter().all(|(_, rejected)| *rejected),
+            "both captured and Source drift must refuse: {refused:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires the source-authenticated pinned mise bootstrap"]
+    fn internal_mise_resolution_uses_the_exact_private_project() -> Result<()> {
+        let mise = canonical(Path::new(
+            &std::env::var_os(PINNED_MISE_FIXTURE)
+                .context("provide the verified pinned mise bootstrap")?,
+        ))?;
+        let root = tempfile::tempdir()?;
+        let scope = tempfile::tempdir()?;
+        let project = scope.path().join(PRIVATE_PROJECT);
+        let home = scope.path().join("home");
+        let temporary = scope.path().join("tmp");
+        let empty = scope.path().join("empty-config.toml");
+        for directory in [&project, &home, &temporary] {
+            fs::create_dir(directory)?;
+        }
+        fs::write(&empty, "")?;
+        let mut inputs = BTreeMap::new();
+        for (name, bytes) in [
+            (MISE_CONFIG, RESOLVER_PROJECT.as_bytes()),
+            (MISE_LOCK, b"lockfile_version=3\n".as_slice()),
+        ] {
+            fs::write(root.path().join(name), bytes)?;
+            fs::write(project.join(name), bytes)?;
+            inputs.insert(PathBuf::from(name), bytes.to_vec());
+        }
+        let installed = Installations {
+            mise: mise.clone(),
+            data: home.join("data"),
+            cargo: home.join("cargo"),
+            rustup: home.join("rustup"),
+            kani: home.join("kani"),
+            cache: home.join("cache"),
+        };
+        let mut environment = CodeEnvironment {
+            root: canonical(root.path())?,
+            configuration: canonical(&project.join(MISE_CONFIG))?,
+            inputs,
+            variables: BTreeMap::new(),
+            scope: Some(scope),
+        };
+        environment.seed(&installed, &home, &temporary, &empty)?;
+        environment.set("PATH", std::env::join_paths(base_directories())?);
+        environment.set("MISE_OFFLINE", "true");
+        environment.set("MISE_PARANOID", "true");
+        environment.require_current()?;
+        let version = environment.output(&mise, &["--version"])?;
+        assert_eq!(
+            std::str::from_utf8(&version)?.split_whitespace().next(),
+            Some(PINNED_MISE_VERSION)
+        );
+        let listing = environment.output(&mise, &["ls", "--local", "--json"])?;
+        let tools: BTreeMap<String, Vec<Installation>> = serde_json::from_slice(&listing)?;
+        let [tool] = tools
+            .get(RESOLVER_TOOL)
+            .context("the exact private project tool must be listed")?
+            .as_slice()
+        else {
+            anyhow::bail!("the private project tool must resolve once");
+        };
+        assert_eq!(canonical(&tool.source.path)?, environment.configuration);
+        assert_eq!(tool.source.r#type, MISE_CONFIG);
+        assert_eq!(tool.requested_version, "1.3.7");
+        assert_eq!(
+            environment.command(&mise).get_current_dir(),
+            Some(environment.root.as_path())
+        );
+        environment.require_current()
+    }
+
+    #[test]
+    fn exact_project_copies_refuse_source_and_private_input_drift() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let scope = tempfile::tempdir()?;
+        let project = scope.path().join(PRIVATE_PROJECT);
+        fs::create_dir(&project)?;
+        let mut inputs = BTreeMap::new();
+        for name in PROJECT_INPUTS {
+            let bytes = name.as_bytes().to_vec();
+            fs::write(root.path().join(name), &bytes)?;
+            fs::write(project.join(name), &bytes)?;
+            inputs.insert(PathBuf::from(name), bytes);
+        }
+        let sidecar = Path::new(LOCK_SIDECARS).join("tool/uv.lock");
+        for base in [root.path(), project.as_path()] {
+            let path = base.join(&sidecar);
+            fs::create_dir_all(path.parent().context("test sidecar parent")?)?;
+            fs::write(path, b"captured graph")?;
+        }
+        inputs.insert(sidecar.clone(), b"captured graph".to_vec());
+        let environment = CodeEnvironment {
+            root: canonical(root.path())?,
+            configuration: canonical(&project.join(MISE_CONFIG))?,
+            inputs,
+            variables: BTreeMap::new(),
+            scope: Some(scope),
+        };
+        environment.require_current()?;
+        fs::write(root.path().join(MISE_LOCK), "changed source")?;
+        assert!(environment.require_current().is_err());
+        fs::write(root.path().join(MISE_LOCK), MISE_LOCK)?;
+        environment.require_current()?;
+        fs::write(project.join(MISE_CONFIG), "changed private copy")?;
+        assert!(environment.require_current().is_err());
+        fs::write(project.join(MISE_CONFIG), MISE_CONFIG)?;
+        environment.require_current()?;
+        for base in [root.path(), project.as_path()] {
+            fs::remove_file(base.join(&sidecar))?;
+            assert!(environment.require_current().is_err());
+            fs::write(base.join(&sidecar), b"captured graph")?;
+            environment.require_current()?;
+            let added = base.join(LOCK_SIDECARS).join("unexpected.lock");
+            fs::write(&added, b"uncaptured graph")?;
+            assert!(environment.require_current().is_err());
+            fs::remove_file(added)?;
+            environment.require_current()?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn project_sidecar_capture_refuses_links_and_excessive_inputs() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let foreign = tempfile::tempdir()?;
+        for name in PROJECT_INPUTS {
+            fs::write(root.path().join(name), name)?;
+        }
+        let sidecars = root.path().join(LOCK_SIDECARS);
+        fs::create_dir_all(&sidecars)?;
+        let input = sidecars.join("graph.lock");
+        fs::write(&input, b"captured graph")?;
+        project_inputs(root.path())?;
+        fs::File::create(&input)?.set_len(PROJECT_INPUT_LIMIT + 1)?;
+        assert!(project_inputs(root.path()).is_err());
+        fs::write(&input, b"captured graph")?;
+        let link = sidecars.join("linked");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(foreign.path(), &link)?;
+        #[cfg(windows)]
+        {
+            let output = crate::tool::Tool::Pwsh.command()
+                .args(["-NoLogo", "-NoProfile", "-Command", "& { param([string]$Link,[string]$Target) New-Item -ItemType Junction -Path $Link -Value $Target -ErrorAction Stop | Out-Null }"])
+                .arg(&link).arg(foreign.path()).output()?;
+            ensure!(
+                output.status.success(),
+                "create the linked sidecar control: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let failure = project_inputs(root.path()).expect_err("linked graph inputs must refuse");
+        assert_eq!(
+            failure.to_string(),
+            "project lock sidecar is a filesystem link"
+        );
+        #[cfg(unix)]
+        fs::remove_file(link)?;
+        #[cfg(windows)]
+        fs::remove_dir(link)?;
+        for index in 0..PROJECT_INPUT_COUNT {
+            fs::write(sidecars.join(format!("member{index}.lock")), b"graph")?;
+        }
+        assert!(project_inputs(root.path()).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn native_health_and_code_share_the_existing_cargo_target() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let scope = tempfile::tempdir()?;
+        let project = scope.path().join(PRIVATE_PROJECT);
+        let target = scope.path().join("target");
+        fs::create_dir(&project)?;
+        fs::create_dir(&target)?;
+        let mut inputs = BTreeMap::new();
+        for name in PROJECT_INPUTS {
+            let bytes = name.as_bytes().to_vec();
+            fs::write(root.path().join(name), &bytes)?;
+            fs::write(project.join(name), &bytes)?;
+            inputs.insert(PathBuf::from(name), bytes);
+        }
+        let preparation = CodePreparation {
+            mise: scope.path().join("mise"),
+            base: Vec::new(),
+            links: Some(RustKaniLinks {
+                data: scope.path().join("data"),
+                rust: scope.path().join("fresh-rust"),
+                launcher: None,
+            }),
+            inherited: None,
+            environment: CodeEnvironment {
+                root: canonical(root.path())?,
+                configuration: canonical(&project.join(MISE_CONFIG))?,
+                inputs,
+                variables: BTreeMap::from([(
+                    "CARGO_TARGET_DIR".into(),
+                    target.clone().into_os_string(),
+                )]),
+                scope: Some(scope),
+            },
+        };
+        let code = preparation.environment.command("fixture-cargo");
+        assert_eq!(
+            code.get_envs()
+                .find(|(key, _)| *key == "CARGO_TARGET_DIR")
+                .and_then(|(_, value)| value),
+            Some(target.as_os_str())
+        );
+        let mut health = crate::process::command("fixture-cargo");
+        health.env_remove("CARGO_TARGET_DIR");
+        preparation.configure_health(&mut health)?;
+        assert_eq!(
+            health
+                .get_envs()
+                .find(|(key, _)| *key == "CARGO_TARGET_DIR")
+                .and_then(|(_, value)| value),
+            Some(target.as_os_str())
+        );
+        assert_eq!(
+            health.get_current_dir(),
+            Some(preparation.environment.root.as_path())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn original_resolver_refuses_missing_uninstalled_and_unrelated_fresh_stores() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let configuration = scope.path().join(MISE_CONFIG);
+        fs::write(&configuration, "project")?;
+        let configuration = canonical(&configuration)?;
+        let data = scope.path().join("data");
+        let selected = data.join("installs/kani/verifier");
+        let other = scope.path().join("other");
+        fs::create_dir_all(&selected)?;
+        fs::create_dir(&other)?;
+        let tool = Installation {
+            version: "0.68.0".into(),
+            requested_version: "0.68.0".into(),
+            install_path: selected.clone(),
+            source: Source {
+                r#type: MISE_CONFIG.into(),
+                path: configuration.clone(),
+            },
+            installed: true,
+            active: true,
+            symlinked_to: None,
+        };
+        let mut tools = BTreeMap::from([(KANI_TOOL.to_owned(), vec![tool])]);
+        assert_eq!(
+            checked_store(&tools, KANI_TOOL, &configuration, &data, &selected)?,
+            selected
+        );
+        assert!(checked_store(&tools, KANI_TOOL, &configuration, &data, &other).is_err());
+        assert!(
+            checked_store(
+                &tools,
+                KANI_TOOL,
+                &configuration,
+                &data,
+                &scope.path().join("missing")
+            )
+            .is_err()
+        );
+        let tool = tools
+            .get_mut(KANI_TOOL)
+            .context("test resolver tool")?
+            .first_mut()
+            .context("test resolver version")?;
+        tool.installed = false;
+        assert!(checked_store(&tools, KANI_TOOL, &configuration, &data, &selected).is_err());
+        Ok(())
+    }
 
     fn response(stdout: &str, stderr: &str, status: i32) -> std::process::Output {
         #[cfg(windows)]

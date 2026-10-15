@@ -1,7 +1,7 @@
 {
-  "revision": "9eb34272916199a97be6a5050e268504f2b1bf74bd8349c03f9cb054f349d7d1",
+  "revision": "ecf7ad642aa8aa2c8f03abc034019572058838cb249eb3abf97b9c705df2a88c",
   "outcome": "implemented",
-  "reason": "Align the skill declaration with mise 2026.10.6, the release already verified by native bootstrap checksum checks.\nThe reviewed entrypoint keeps exact project pins, locked toolchains, configuration precedence, and noninteractive execution.\nThe catalog revision includes this tool metadata, and the authoritative inventory rejects incompatible bindings.",
+  "reason": "Bind the tool declaration to the pinned mise 2026.10.7 bootstrap.\nThe verified release bytes retain the existing exact project pins, configuration precedence, and noninteractive command contract.\nThe inventory checks the declared version against the managed installation.",
   "evidence": [
     "home/dot_agents/skills/mise/SKILL.md",
     "home/dot_agents/skills/mise/tools.toml",

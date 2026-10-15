@@ -246,11 +246,29 @@ pub fn inventory(root: &Path, policy: &Policy) -> Result<Inventory> {
 }
 
 fn development(root: &Path, inventory: &mut Inventory) -> Result<()> {
-    let development: toml::Table = toml::from_str(&fs::read_to_string(root.join("mise.toml"))?)?;
+    development_file(root, "mise.toml", inventory)?;
+    let environments: BTreeSet<_> = crate::tool::Tool::ALL
+        .into_iter()
+        .filter_map(|tool| match tool.provision() {
+            platform::tool::Provision::PinnedEnvironment { environment, .. } => Some(environment),
+            _ => None,
+        })
+        .collect();
+    for environment in environments {
+        let file = format!("mise.{environment}.toml");
+        if root.join(&file).is_file() {
+            development_file(root, &file, inventory)?;
+        }
+    }
+    Ok(())
+}
+
+fn development_file(root: &Path, file: &str, inventory: &mut Inventory) -> Result<()> {
+    let development: toml::Table = toml::from_str(&fs::read_to_string(root.join(file))?)?;
     let tools = development
         .get("tools")
         .and_then(toml::Value::as_table)
-        .context("mise.toml has no tools")?;
+        .with_context(|| format!("{file} has no tools"))?;
     for (spec, value) in tools {
         let version = value
             .as_str()
@@ -518,4 +536,31 @@ pub fn check(root: &Path) -> Result<usize> {
         refusals.join("\n")
     );
     Ok(inventory.len())
+}
+
+#[cfg(test)]
+mod environment_tests {
+    use super::*;
+
+    #[test]
+    fn optional_environment_is_inventoried_without_entering_the_default_tool_set() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        fs::write(root.path().join("mise.toml"), "[tools]\nrust = '1.99.0'\n")?;
+        fs::write(
+            root.path().join("mise.njutest.toml"),
+            include_str!("../../mise.njutest.toml"),
+        )?;
+        let mut inventory = Inventory::new();
+        development(root.path(), &mut inventory)?;
+        assert!(inventory.contains_key("njutest"));
+        assert!(!inventory["njutest"].profiles.contains("windows"));
+        assert!(inventory["njutest"].versions.contains(&format!(
+            "rev:{}",
+            crate::njutest_assessment::UPSTREAM_REVISION
+        )));
+        let default: toml::Value =
+            toml::from_str(&fs::read_to_string(root.path().join("mise.toml"))?)?;
+        assert_eq!(default["tools"].as_table().unwrap().len(), 1);
+        Ok(())
+    }
 }

@@ -189,24 +189,38 @@ fn run(root: &Path, output: &Path, image: &str, command: &[&str]) -> Result<Stri
     Ok(stdout)
 }
 
-/// Compiles the model to `TLA+` and dumps its reachable graph with `TLC` on one worker, offline in the pinned image.
-///
-/// # Errors
-///
-/// Returns an error when the compilation or `TLC` fails, or the dump doesn't hold the graph `TLC` counted.
-pub fn dump(root: &Path, output: &Path, image: &str, model: &QuintModel) -> Result<Graph> {
+pub(crate) trait Runner {
+    fn run(&self, command: &[&str]) -> Result<String>;
+    fn write(&self, name: &str, bytes: &[u8]) -> Result<()>;
+    fn read(&self, name: &str) -> Result<String>;
+}
+
+struct Container<'a> {
+    root: &'a Path,
+    output: &'a Path,
+    image: &'a str,
+}
+
+impl Runner for Container<'_> {
+    fn run(&self, command: &[&str]) -> Result<String> {
+        run(self.root, self.output, self.image, command)
+    }
+    fn write(&self, name: &str, bytes: &[u8]) -> Result<()> {
+        Ok(fs::write(self.output.join(name), bytes)?)
+    }
+    fn read(&self, name: &str) -> Result<String> {
+        Ok(fs::read_to_string(self.output.join(name))?)
+    }
+}
+
+fn dump_with(runner: &impl Runner, model: &QuintModel) -> Result<Graph> {
     let main = &model.main;
     let spec = format!("{}/{}", quint::SOURCE, model.spec);
-    let compiled = run(
-        root,
-        output,
-        image,
-        &[
-            "quint", "compile", "--target", "tlaplus", "--main", main, &spec,
-        ],
-    )?;
-    fs::write(output.join(format!("{main}.tla")), compiled)?;
-    fs::write(output.join(format!("{main}.cfg")), CONFIGURATION)?;
+    let compiled = runner.run(&[
+        "quint", "compile", "--target", "tlaplus", "--main", main, &spec,
+    ])?;
+    runner.write(&format!("{main}.tla"), compiled.as_bytes())?;
+    runner.write(&format!("{main}.cfg"), CONFIGURATION.as_bytes())?;
     let jar = format!(
         "{}/apalache-dist-{}/apalache/lib/apalache.jar",
         quint::QUINT_HOME,
@@ -214,30 +228,42 @@ pub fn dump(root: &Path, output: &Path, image: &str, model: &QuintModel) -> Resu
     );
     let base = format!("{}/{main}", quint::OUTPUT);
     let module = format!("{base}.tla");
-    let report = run(
-        root,
-        output,
-        image,
-        &[
-            "java",
-            STACK,
-            "-cp",
-            &jar,
-            "tlc2.TLC",
-            "-deadlock",
-            "-workers",
-            "1",
-            "-metadir",
-            STATES,
-            "-dump",
-            "dot,actionlabels",
-            &base,
-            &module,
-        ],
-    )?;
-    let dot = fs::read_to_string(output.join(format!("{main}.dot")))
+    let report = runner.run(&[
+        "java",
+        STACK,
+        "-cp",
+        &jar,
+        "tlc2.TLC",
+        "-deadlock",
+        "-workers",
+        "1",
+        "-metadir",
+        STATES,
+        "-dump",
+        "dot,actionlabels",
+        &base,
+        &module,
+    ])?;
+    let dot = runner
+        .read(&format!("{main}.dot"))
         .with_context(|| format!("TLC wrote no graph of {main}"))?;
     canonical(&dot, &report)
+}
+
+/// Compiles the model to `TLA+` and dumps its reachable graph with `TLC` on one worker, offline in the pinned image.
+///
+/// # Errors
+///
+/// Returns an error when the compilation or `TLC` fails, or the dump doesn't hold the graph `TLC` counted.
+pub fn dump(root: &Path, output: &Path, image: &str, model: &QuintModel) -> Result<Graph> {
+    dump_with(
+        &Container {
+            root,
+            output,
+            image,
+        },
+        model,
+    )
 }
 
 fn graphs(manifest: &Manifest) -> impl Iterator<Item = (&QuintModel, &str)> {
@@ -256,9 +282,21 @@ fn graphs(manifest: &Manifest) -> impl Iterator<Item = (&QuintModel, &str)> {
 ///
 /// Returns an error when a dump fails or differs from its committed graph.
 pub fn check(root: &Path, output: &Path, image: &str, manifest: &Manifest) -> Result<usize> {
+    check_with(
+        root,
+        manifest,
+        &Container {
+            root,
+            output,
+            image,
+        },
+    )
+}
+
+pub(crate) fn check_with(root: &Path, manifest: &Manifest, runner: &impl Runner) -> Result<usize> {
     let mut checked = 0;
     for (model, graph) in graphs(manifest) {
-        let fresh = render(&dump(root, output, image, model)?);
+        let fresh = render(&dump_with(runner, model)?);
         let committed = fs::read_to_string(root.join(graph)).context(graph.to_owned())?;
         if committed != fresh {
             bail!(

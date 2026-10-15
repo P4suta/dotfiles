@@ -1,7 +1,8 @@
 use anyhow::Result;
 use platform::build_inputs::{CRATES, content_hash, inputs};
 use platform::freshness::{
-    Built, Embedded, SOURCE_VARIABLE, embedded, lagging, locate, record_installation, verify,
+    BUILD_IDENTITY_ARGUMENT, Built, Embedded, SOURCE_VARIABLE, embedded, lagging, locate,
+    record_installation, verify, verify_artifact,
 };
 use platform::refusal::Refusal;
 use platform::stale_rules::{Freshness, Origin, freshness, origin, reinstalls, runs};
@@ -55,6 +56,28 @@ fn built_from(root: &Path) -> Result<Embedded> {
         root: root.to_path_buf(),
         hash: content_hash(root)?,
     })
+}
+
+fn record_fixture(home: &Path, root: &Path, built: Built) -> Result<()> {
+    let directory = home.join(".local/state/dotfiles/installed");
+    fs::create_dir_all(&directory)?;
+    let record = serde_json::json!({
+        "schema": 1,
+        "build": {
+            "revision": "fixture",
+            "root": platform::paths::canonical(root)?,
+            "hash": content_hash(root)?,
+        },
+    });
+    fs::write(directory.join(built.binary()), serde_json::to_vec(&record)?)?;
+    Ok(())
+}
+
+fn enable_skill_ops(home: &Path) -> Result<()> {
+    let consent = home.join(platform::incidents::EXPERIMENTAL);
+    fs::create_dir_all(consent.parent().unwrap())?;
+    fs::write(consent, rules::incident_rules::EXPERIMENTAL_OPT_IN)?;
+    Ok(())
 }
 
 fn rust_files(directory: PathBuf) -> Result<Vec<PathBuf>> {
@@ -117,9 +140,10 @@ fn the_nearest_named_checkout_wins() {
 
 #[test]
 fn only_a_recorded_lagging_installation_is_rebuilt() {
-    assert!(reinstalls(true, false));
-    assert!(!reinstalls(true, true));
-    assert!(!reinstalls(false, false));
+    assert!(reinstalls(true, true, false));
+    assert!(!reinstalls(true, true, true));
+    assert!(!reinstalls(true, false, false));
+    assert!(!reinstalls(false, true, false));
 }
 
 #[test]
@@ -268,7 +292,13 @@ fn every_embedded_file_is_a_build_input() -> Result<()> {
     let root = repository();
     let listed = inputs(&root)?;
     let mut checked = 0;
-    for source in tool_sources(&root)? {
+    let mut missing = Vec::new();
+    let mut pending = tool_sources(&root)?;
+    let mut visited = BTreeSet::new();
+    while let Some(source) = pending.pop() {
+        if !visited.insert(source.clone()) {
+            continue;
+        }
         let text = fs::read_to_string(&source)?;
         for line in text.lines().map(str::trim_start) {
             if line.starts_with("//") {
@@ -285,20 +315,29 @@ fn every_embedded_file_is_a_build_input() -> Result<()> {
                         .expect("a file has a directory")
                         .join(literal),
                 );
+                if resolved
+                    .extension()
+                    .is_some_and(|extension| extension == "rs")
+                {
+                    pending.push(resolved.clone());
+                }
                 let resolved = resolved
                     .strip_prefix(&root)?
                     .to_string_lossy()
                     .replace('\\', "/");
-                assert!(
-                    listed.contains(&resolved),
-                    "{} compiles in {resolved}, which the installed tools are not rebuilt from; add it to build_inputs::SHARED",
-                    source.display()
-                );
+                if !listed.contains(&resolved) {
+                    missing.push(format!("{} compiles in {resolved}", source.display()));
+                }
                 checked += 1;
             }
         }
     }
     assert!(checked > 0, "no embedded files were found to check");
+    assert!(
+        missing.is_empty(),
+        "embedded files outside build_inputs::SHARED:\n{}",
+        missing.join("\n")
+    );
     Ok(())
 }
 
@@ -334,17 +373,125 @@ fn no_installer_reads_the_default_chezmoi_source() -> Result<()> {
 #[test]
 fn a_recorded_installation_is_rebuilt_only_after_its_sources_change() -> Result<()> {
     let home = tempfile::tempdir()?;
+    enable_skill_ops(home.path())?;
     let checkout = fixture("pub fn rule() {}")?;
     assert_eq!(lagging(home.path(), checkout.path())?, Vec::<Built>::new());
-    record_installation(home.path(), checkout.path(), Built::SkillOps)?;
+    record_fixture(home.path(), checkout.path(), Built::SkillOps)?;
     assert_eq!(lagging(home.path(), checkout.path())?, Vec::<Built>::new());
     fs::write(checkout.path().join(LIBRARY), "pub fn rule() { 2; }")?;
     assert_eq!(
         lagging(home.path(), checkout.path())?,
         vec![Built::SkillOps]
     );
-    record_installation(home.path(), checkout.path(), Built::SkillOps)?;
+    record_fixture(home.path(), checkout.path(), Built::SkillOps)?;
     assert_eq!(lagging(home.path(), checkout.path())?, Vec::<Built>::new());
+    Ok(())
+}
+
+#[test]
+fn an_unrelated_checkout_never_takes_over_the_primary_installation() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    enable_skill_ops(home.path())?;
+    let primary = fixture("pub fn current() {}")?;
+    let secondary = fixture("pub fn current() {}")?;
+    record_fixture(home.path(), primary.path(), Built::SkillOps)?;
+    let record = home
+        .path()
+        .join(".local/state/dotfiles/installed/skill-ops");
+    let original = fs::read(&record)?;
+    fs::write(secondary.path().join(LIBRARY), "pub fn secondary() {}")?;
+    assert_eq!(lagging(home.path(), secondary.path())?, Vec::<Built>::new());
+    platform::freshness::reinstall_lagging(home.path(), secondary.path())?;
+    assert_eq!(fs::read(&record)?, original);
+    fs::write(primary.path().join(LIBRARY), "pub fn primary_changed() {}")?;
+    assert_eq!(lagging(home.path(), secondary.path())?, Vec::<Built>::new());
+    assert_eq!(lagging(home.path(), primary.path())?, [Built::SkillOps]);
+    record_fixture(home.path(), secondary.path(), Built::SkillOps)?;
+    assert_eq!(lagging(home.path(), primary.path())?, Vec::<Built>::new());
+    fs::write(
+        secondary.path().join(LIBRARY),
+        "pub fn secondary_changed() {}",
+    )?;
+    assert_eq!(lagging(home.path(), secondary.path())?, [Built::SkillOps]);
+    Ok(())
+}
+
+#[test]
+fn unbound_or_moved_records_require_explicit_installation_without_guessing_origin() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    enable_skill_ops(home.path())?;
+    let checkout = fixture("pub fn current() {}")?;
+    let directory = home.path().join(".local/state/dotfiles/installed");
+    fs::create_dir_all(&directory)?;
+    let path = directory.join(Built::SkillOps.binary());
+    for invalid in [content_hash(checkout.path())?, "malformed".into()] {
+        fs::write(&path, invalid)?;
+        let error = lagging(home.path(), checkout.path()).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<Refusal>().unwrap().rule,
+            "tool.installation-origin"
+        );
+    }
+    record_fixture(home.path(), checkout.path(), Built::SkillOps)?;
+    let moved = tempfile::tempdir()?;
+    let relocated = moved.path().join("relocated");
+    fs::rename(checkout.path(), &relocated)?;
+    let error = lagging(home.path(), &relocated).unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<Refusal>().unwrap().rule,
+        "tool.installation-origin"
+    );
+    fs::remove_file(path)?;
+    assert_eq!(lagging(home.path(), &relocated)?, Vec::<Built>::new());
+    Ok(())
+}
+
+#[test]
+fn artifact_readback_binds_installation_to_the_actual_build_instead_of_caller_checkout()
+-> Result<()> {
+    let home = tempfile::tempdir()?;
+    let source = repository();
+    let artifact = Path::new(env!("CARGO_BIN_EXE_pr-workflow"));
+    let stamp = verify_artifact(&source, artifact, Built::PrWorkflow)?;
+    assert_eq!(stamp.root, platform::paths::canonical(&source)?);
+    let installed = Built::PrWorkflow.installed_binary(home.path());
+    fs::create_dir_all(installed.parent().unwrap())?;
+    fs::copy(artifact, installed)?;
+    record_installation(home.path(), &source, Built::PrWorkflow)?;
+    let record = home
+        .path()
+        .join(".local/state/dotfiles/installed/pr-workflow");
+    let original = fs::read(&record)?;
+    let foreign = fixture("pub fn unrelated() {}")?;
+    assert!(verify_artifact(foreign.path(), artifact, Built::PrWorkflow).is_err());
+    assert!(record_installation(home.path(), foreign.path(), Built::PrWorkflow).is_err());
+    assert_eq!(fs::read(&record)?, original);
+    assert_eq!(lagging(home.path(), foreign.path())?, Vec::<Built>::new());
+    Ok(())
+}
+
+#[test]
+fn reserved_metadata_is_read_only_and_does_not_grant_freshness() -> Result<()> {
+    let scope = tempfile::tempdir()?;
+    let foreign = fixture("pub fn unrelated() {}")?;
+    let program = env!("CARGO_BIN_EXE_pr-workflow");
+    let metadata = fixture_process::command(program, scope.path())
+        .arg(BUILD_IDENTITY_ARGUMENT)
+        .env(SOURCE_VARIABLE, foreign.path())
+        .output()?;
+    assert!(metadata.status.success());
+    let stamp: Embedded = serde_json::from_slice(&metadata.stdout)?;
+    assert_eq!(stamp, embedded());
+    let normal = fixture_process::command(program, scope.path())
+        .arg("--help")
+        .env(SOURCE_VARIABLE, foreign.path())
+        .output()?;
+    assert!(!normal.status.success());
+    let extra = fixture_process::command(program, scope.path())
+        .args([BUILD_IDENTITY_ARGUMENT, "unexpected"])
+        .env(SOURCE_VARIABLE, foreign.path())
+        .output()?;
+    assert!(!extra.status.success());
     Ok(())
 }
 

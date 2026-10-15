@@ -6,19 +6,19 @@
 | --- | --- | --- |
 | [0001 Shared skills and typed repository governance](0001-shared-skills-and-governance.md) | accepted |  |
 | [0002 Enforce a local CodeRabbit review budget](0002-coderabbit-local-review-budget.md) | amended | [0007](0007-reserved-review-capacity.md) |
-| [0003 Local shared-skill operations](0003-local-skill-operations.md) | amended | [0012](0012-windows-proofs-in-a-linux-container.md), [0014](0014-per-skill-decision-records.md), [2026-10-07](checked-obligation-manifest.md) |
+| [0003 Local shared-skill operations](0003-local-skill-operations.md) | amended | [0012](0012-windows-proofs-in-a-linux-container.md), [0014](0014-per-skill-decision-records.md), [2026-10-07](checked-obligation-manifest.md), [2026-10-13](experimental-skill-maintenance-by-explicit-opt-in.md) |
 | [0004 Checked pull request authoring](0004-checked-pull-request-authoring.md) | accepted |  |
 | [0005 Native desktop integration assurance](0005-native-desktop-integration-assurance.md) | accepted |  |
 | [0006 Global personal issue prerequisite](0006-global-personal-issue-prerequisite.md) | accepted |  |
 | [0007 Preserve included review capacity](0007-reserved-review-capacity.md) | amended | [0008](0008-layered-review-capacity.md) |
-| [0008 Apply layered review-capacity budgets](0008-layered-review-capacity.md) | accepted |  |
+| [0008 Apply layered review-capacity budgets](0008-layered-review-capacity.md) | amended | [2026-10-13](route-coderabbit-by-current-pr-importance.md) |
 | [0009 Public source with native profiles and Rust orchestration](0009-public-native-profiles.md) | accepted |  |
 | [0010 Rehearse the native apply and declare every external tool](0010-rehearse-native-application.md) | accepted |  |
 | [0011 Run one Git policy on every host](0011-one-git-policy-on-every-host.md) | accepted |  |
 | [0012 Run the Kani proofs on Windows in a pinned Linux container](0012-windows-proofs-in-a-linux-container.md) | accepted |  |
 | [0013 Mark a PR ready only after every check passes](0013-ready-only-after-passing-checks.md) | accepted |  |
 | [0014 Bind tracked skill decisions to each skill revision](0014-per-skill-decision-records.md) | accepted |  |
-| [0015 Scope the CodeRabbit owner pause](0015-scoped-coderabbit-pause.md) | accepted |  |
+| [0015 Scope the CodeRabbit owner pause](0015-scoped-coderabbit-pause.md) | amended | [2026-10-13](route-coderabbit-by-current-pr-importance.md) |
 | [0016 Enforce one writing standard on persisted prose and replies](0016-one-writing-standard.md) | amended | [2026-10-10](persisted-prose-gates.md) |
 | [0017 Normalize line endings to LF on every host and agent write](0017-lf-line-endings-everywhere.md) | accepted |  |
 | [0018 Turn off persistent agent memory in the native client profiles](0018-agent-memory-off.md) | accepted |  |
@@ -60,5 +60,21 @@
 | [2026-10-12 Classify native failures from delivery signals before output replays](native-failure-signals-before-output-replays.md) | proposed |  |
 | [2026-10-12 Recover native PATH before constructing candidate environments](native-path-before-candidate-environments.md) | proposed |  |
 | [2026-10-12 Persist remote execution ownership before submission](persist-remote-execution-ownership.md) | proposed |  |
+| [2026-10-12 Bind acquisition plans to pinned inputs and reusable material identities](pinned-acquisition-plans-and-content-addressed-materials.md) | proposed |  |
+| [2026-10-13 Admit native work from a complete resource plan](admit-native-work-from-a-complete-resource-plan.md) | proposed |  |
+| [2026-10-13 Assess a pinned mutation engine before adoption](assess-pinned-mutation-engine-before-adoption.md) | proposed |  |
+| [2026-10-13 Authenticate issue context at edit and integration boundaries](authenticate-issue-context-at-edit-and-integration-boundaries.md) | proposed |  |
+| [2026-10-13 Bind private verifier phase evidence](bind-private-verifier-phase-evidence.md) | proposed |  |
+| [2026-10-13 Enable experimental skill maintenance only through explicit local opt-in](experimental-skill-maintenance-by-explicit-opt-in.md) | accepted |  |
+| [2026-10-13 Keep local issue authority separate from remote publication](keep-local-issue-authority-separate-from-remote-publication.md) | proposed |  |
 | [2026-10-13 Keep mutation testing local while CI verifies its declared proof campaign](local-mutation-and-scoped-ci-proofs.md) | accepted |  |
+| [2026-10-13 Protect local host candidate execution](protect-local-host-candidate-execution.md) | proposed |  |
 | [2026-10-13 Run Renovate through a process from the same source build](renovate-behind-a-source-matched-process.md) | proposed |  |
+| [2026-10-13 Require every fixed proof partition in hosted CI](require-every-fixed-proof-partition-in-hosted-ci.md) | proposed |  |
+| [2026-10-13 Retain Miri sysroots with fresh interpretation](retain-miri-sysroots-with-fresh-interpretation.md) | proposed |  |
+| [2026-10-13 Route CodeRabbit by current PR importance](route-coderabbit-by-current-pr-importance.md) | accepted |  |
+| [2026-10-13 Speak fixed development events through an optional desktop queue](speak-fixed-development-events-through-an-optional-desktop-queue.md) | amended | [2026-10-14](report-optional-notification-failures-with-fixed-warnings.md) |
+| [2026-10-13 Validate Renovate reports before classifying freshness](validated-renovate-reports.md) | proposed |  |
+| [2026-10-14 Partition Cargo artifacts by physical source root](partition-cargo-artifacts-by-physical-source-root.md) | proposed |  |
+| [2026-10-14 Report optional notification failures with fixed warnings](report-optional-notification-failures-with-fixed-warnings.md) | proposed |  |
+| [2026-10-15 Prove portable component scans with erased witnesses](prove-portable-component-scans-with-erased-witnesses.md) | proposed |  |

@@ -2,6 +2,95 @@ extern crate alloc;
 
 pub const MAINTENANCE_PENDING_RULE: &str = "skill-ops.maintenance-pending";
 
+pub const EXPERIMENTAL_OPT_IN: &[u8] = b"enabled\n";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OwnerStop {
+    Absent,
+    Present,
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExperimentalOptIn {
+    Missing,
+    Valid,
+    Invalid,
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SkillMode {
+    Off,
+    Experimental,
+}
+
+#[must_use]
+pub const fn skill_mode(stop: OwnerStop, opt_in: ExperimentalOptIn) -> SkillMode {
+    match (stop, opt_in) {
+        (OwnerStop::Absent, ExperimentalOptIn::Valid) => SkillMode::Experimental,
+        _ => SkillMode::Off,
+    }
+}
+
+#[cfg(any(test, kani))]
+mod experimental_mode_proofs {
+    use super::*;
+
+    fn spec(stop: OwnerStop, opt_in: ExperimentalOptIn) -> SkillMode {
+        let mode = skill_mode(stop, opt_in);
+        assert_eq!(
+            mode == SkillMode::Experimental,
+            stop == OwnerStop::Absent && opt_in == ExperimentalOptIn::Valid
+        );
+        mode
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_a_valid_explicit_opt_in_without_an_owner_stop_enables_the_experiment() {
+        let stop = if kani::any() {
+            OwnerStop::Absent
+        } else if kani::any() {
+            OwnerStop::Present
+        } else {
+            OwnerStop::Unavailable
+        };
+        let opt_in = if kani::any() {
+            ExperimentalOptIn::Missing
+        } else if kani::any() {
+            ExperimentalOptIn::Valid
+        } else if kani::any() {
+            ExperimentalOptIn::Invalid
+        } else {
+            ExperimentalOptIn::Unavailable
+        };
+        let mode = spec(stop, opt_in);
+        kani::cover!(mode == SkillMode::Experimental);
+        kani::cover!(stop == OwnerStop::Present && opt_in == ExperimentalOptIn::Valid);
+        kani::cover!(stop == OwnerStop::Unavailable && opt_in == ExperimentalOptIn::Valid);
+        kani::cover!(stop == OwnerStop::Absent && opt_in == ExperimentalOptIn::Unavailable);
+    }
+
+    #[test]
+    fn every_experimental_mode_tuple_fails_closed_without_explicit_consent() {
+        for stop in [
+            OwnerStop::Absent,
+            OwnerStop::Present,
+            OwnerStop::Unavailable,
+        ] {
+            for opt_in in [
+                ExperimentalOptIn::Missing,
+                ExperimentalOptIn::Valid,
+                ExperimentalOptIn::Invalid,
+                ExperimentalOptIn::Unavailable,
+            ] {
+                spec(stop, opt_in);
+            }
+        }
+    }
+}
+
 /// A failed native operation or the checked status of existing maintenance.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeReport {

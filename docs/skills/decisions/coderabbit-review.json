@@ -1,9 +1,13 @@
 {
-  "revision": "fa847c72ccf0a7b0f54814fd5c3ee0c16e487a24aaa04f7285c75dd44f210234",
+  "revision": "c388c862873f7cc967bb90caa25c9ff7144d7e1183702915f308e6a09a576fe4",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Apply the authenticated assessment's exclusive route: none for routine changes, guarded CLI for high, and PR review for critical.\nKeep exact-diff evidence, supported findings, capacity, owner pauses, authorization, and private diagnostics protections.\nThis revision clarifies the existing obligations without changing review selection.\nThe two review cores passed five normal Kani harnesses and nine rejecting probes, and the completion parser replayed three seeds with an assertion-defect control.\nCurrent native gates, service analysis, and rollout remain pending.",
   "evidence": [
     "home/dot_agents/skills/coderabbit-review/SKILL.md",
+    "home/dot_agents/skills/pull-request/references/importance.md",
+    "docs/adr/route-coderabbit-by-current-pr-importance.md",
+    "crates/rules/src/review_completion_rules.rs",
+    "crates/rules/src/review_routing_rules.rs",
     "crates/coderabbit-guard/tests/review_guard.rs",
     "crates/rules/src/review_rules.rs",
     "docs/adr/0008-layered-review-capacity.md",

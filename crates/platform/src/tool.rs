@@ -2,6 +2,7 @@
 
 use crate::step::Step;
 use model::profile_rules::Profile;
+use std::path::PathBuf;
 use std::process::Command;
 
 /// The Nix installer's default profile, which a login shell may not have on its `PATH` yet.
@@ -10,6 +11,13 @@ const NIX: &str = "/nix/var/nix/profiles/default/bin/nix";
 /// Bash at its fixed system path, so a user's `PATH` can't substitute another.
 const BASH: &str = "/bin/bash";
 const OCOMMENT_PIN: &str = "cargo:https://github.com/P4suta/OComment";
+const NJUTEST_PIN: &str = "cargo:https://github.com/P4suta/njutest";
+const NJUTEST_PROVISION: Provision = Provision::PinnedEnvironment {
+    environment: "njutest",
+    key: NJUTEST_PIN,
+};
+#[cfg(windows)]
+const WINDOWS_ARCHIVE: &str = "System32/tar.exe";
 #[cfg(target_os = "linux")]
 const ZSH: &str = "zsh";
 #[cfg(not(target_os = "linux"))]
@@ -23,6 +31,11 @@ pub const NIX_PACKAGES: &str = "/nix/packages";
 pub enum Provision {
     /// Pinned in this repository's `mise.toml` under this key, so checks and CI resolve the same version.
     Pinned(&'static str),
+    /// An exact tool pin loaded only for its selected mise environment.
+    PinnedEnvironment {
+        environment: &'static str,
+        key: &'static str,
+    },
     /// Part of the operating system or its base developer tools wherever the calling code runs.
     Host,
     /// Installed by this setup step before any later step relies on it.
@@ -77,6 +90,7 @@ pub enum Tool {
     Herdr,
     HerdrAgent,
     Hlint,
+    Icacls,
     Id,
     ImConfig,
     Java,
@@ -87,6 +101,7 @@ pub enum Tool {
     Lefthook,
     Mise,
     Nix,
+    Njutest,
     Nohup,
     Nu,
     Ocaml,
@@ -119,6 +134,7 @@ pub enum Tool {
     Vale,
     Vivid,
     Winget,
+    Whoami,
     Wslpath,
     XdgMime,
     Yamllint,
@@ -128,7 +144,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 92] = [
+    pub const ALL: [Self; 95] = [
         Self::Actionlint,
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
@@ -173,6 +189,7 @@ impl Tool {
         Self::Herdr,
         Self::HerdrAgent,
         Self::Hlint,
+        Self::Icacls,
         Self::Id,
         Self::ImConfig,
         Self::Java,
@@ -183,6 +200,7 @@ impl Tool {
         Self::Lefthook,
         Self::Mise,
         Self::Nix,
+        Self::Njutest,
         Self::Nohup,
         Self::Nu,
         Self::Ocaml,
@@ -215,6 +233,7 @@ impl Tool {
         Self::Vale,
         Self::Vivid,
         Self::Winget,
+        Self::Whoami,
         Self::Wslpath,
         Self::XdgMime,
         Self::Yamllint,
@@ -259,11 +278,13 @@ impl Tool {
             Self::Gsettings => "gsettings",
             Self::Herdr => "herdr",
             Self::Hlint => "hlint",
+            Self::Icacls => "icacls.exe",
             Self::Id => "id",
             Self::ImConfig => "im-config",
             Self::Kani => "kani",
             Self::Mise => "mise",
             Self::Nix => NIX,
+            Self::Njutest => "njutest",
             Self::Nu => "nu",
             Self::OnePassword => "1password",
             Self::Opam => "opam",
@@ -321,6 +342,7 @@ impl Tool {
             Self::Unzip => "unzip",
             Self::UpdateDesktopDatabase => "update-desktop-database",
             Self::Winget => "winget",
+            Self::Whoami => "whoami.exe",
         }
     }
 
@@ -339,6 +361,7 @@ impl Tool {
             Self::Chezmoi => Provision::Pinned("chezmoi"),
             Self::GhStack => Provision::Pinned("github:github/gh-stack"),
             Self::Ocomment => Provision::Pinned(OCOMMENT_PIN),
+            Self::Njutest => NJUTEST_PROVISION,
             Self::Gitleaks => Provision::Pinned("gitleaks"),
             Self::Gh => Provision::Pinned("gh"),
             Self::Docker => Provision::Pinned("docker-cli"),
@@ -348,19 +371,15 @@ impl Tool {
             Self::Shellcheck => Provision::Pinned("shellcheck"),
             Self::Taplo => Provision::Pinned("taplo"),
             Self::Vale => Provision::Pinned("vale"),
-            Self::Zsh => {
-                if cfg!(target_os = "linux") {
-                    Provision::Pinned("conda:zsh")
-                } else {
-                    Provision::Host
-                }
-            }
-            Self::Bash
+            Self::Zsh if cfg!(target_os = "linux") => Provision::Pinned("conda:zsh"),
+            Self::Zsh
+            | Self::Bash
             | Self::Curl
             | Self::CurlExe
             | Self::Defaults
             | Self::Env
             | Self::Git
+            | Self::Icacls
             | Self::Id
             | Self::Launchctl
             | Self::Nohup
@@ -372,6 +391,7 @@ impl Tool {
             | Self::TarExe
             | Self::Unzip
             | Self::Winget
+            | Self::Whoami
             | Self::Wslpath => Provision::Host,
             Self::Atuin
             | Self::Cabal
@@ -451,7 +471,28 @@ impl Tool {
     /// A Git hook exports its repository through these variables, and a check's fixture repositories would otherwise write to the hook's real index.
     #[must_use]
     pub fn command(self) -> Command {
-        crate::process::command(self.program())
+        let mut command = crate::process::command(self.executable());
+        if let Provision::PinnedEnvironment { environment, .. } = self.provision() {
+            command.env("MISE_ENV", environment);
+        }
+        command
+    }
+
+    #[must_use]
+    pub fn executable(self) -> PathBuf {
+        #[cfg(windows)]
+        if matches!(self, Self::TarExe | Self::Icacls | Self::Whoami) {
+            return std::env::var_os("SystemRoot")
+                .map(PathBuf::from)
+                .filter(|root| root.is_absolute())
+                .unwrap_or_else(|| crate::home::DEFAULT_SYSTEM_ROOT.into())
+                .join(if self == Self::TarExe {
+                    WINDOWS_ARCHIVE.into()
+                } else {
+                    PathBuf::from("System32").join(self.program())
+                });
+        }
+        self.program().into()
     }
 
     /// A chezmoi run that reads the invoking checkout.
@@ -466,7 +507,7 @@ impl Tool {
     /// A process for this program that keeps a Git hook's repository variables.
     #[must_use]
     pub fn hook_command(self) -> Command {
-        crate::process::repository_command(self.program())
+        crate::process::repository_command(self.executable())
     }
 }
 
@@ -477,4 +518,31 @@ pub use crate::process::GIT_LOCAL_ENVIRONMENT;
 #[must_use]
 pub fn external(program: impl AsRef<std::ffi::OsStr>) -> Command {
     crate::process::command(program)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_tool_selects_its_named_environment_from_any_directory() {
+        let Provision::PinnedEnvironment { environment, key } = Tool::Njutest.provision() else {
+            panic!("assessment tool requires its optional provider")
+        };
+        assert_eq!(key, NJUTEST_PIN);
+        assert_eq!(environment, "njutest");
+        assert!(
+            Tool::Njutest
+                .command()
+                .get_envs()
+                .any(|(name, value)| name == "MISE_ENV"
+                    && value == Some(std::ffi::OsStr::new(environment)))
+        );
+        assert!(
+            !Tool::Cargo
+                .command()
+                .get_envs()
+                .any(|(name, _)| name == "MISE_ENV")
+        );
+    }
 }

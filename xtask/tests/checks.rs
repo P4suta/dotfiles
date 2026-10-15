@@ -118,6 +118,62 @@ fn formatter_fixture(root: &Path) -> Result<()> {
 }
 
 #[test]
+fn full_lint_checks_new_files_without_reading_ignored_or_binary_content() -> Result<()> {
+    let scope = tempfile::tempdir()?;
+    let root = scope.path();
+    let global = root.join("global.gitconfig");
+    fs::write(&global, "")?;
+    fs::write(root.join(".gitignore"), "ignored.rs\nglobal.gitconfig\n")?;
+    fs::write(root.join(".gitattributes"), "*.bin binary\n")?;
+    let unformatted = b"pub fn fixture(){println!(\"hello\");}\n";
+    for name in ["tracked.rs", "new.rs", "ignored.rs"] {
+        fs::write(root.join(name), unformatted)?;
+    }
+    fs::write(root.join("new.txt"), b"text without a final newline")?;
+    fs::write(root.join("raw.bin"), [u8::MAX])?;
+    for arguments in [vec!["init", "--quiet"], vec!["add", "tracked.rs"]] {
+        let output = fixture_git::command("git", &global)
+            .current_dir(root)
+            .args(arguments)
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("new.rs", root.join("linked.rs"))?;
+    assert_eq!(xtask::lint::tracked(root)?, ["tracked.rs"]);
+    let paths = xtask::lint::source_files(root)?;
+    assert!(paths.contains(&"new.rs".to_owned()));
+    assert!(!paths.contains(&"ignored.rs".to_owned()));
+    let formatting = xtask::lint::findings(root, xtask::lint::Stage::Rustfmt, &paths)?;
+    assert_eq!(
+        formatting.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["new.rs", "tracked.rs"]
+    );
+    let encoding = xtask::lint::findings(root, xtask::lint::Stage::Encoding, &paths)?;
+    assert_eq!(
+        encoding.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["new.txt"]
+    );
+    assert_eq!(encoding["new.txt"]["no-final-newline"], 1);
+    let output = xtask::tool::Tool::Rustfmt
+        .command()
+        .current_dir(root)
+        .args(["--edition", "2024", "--", "tracked.rs", "new.rs"])
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(xtask::lint::findings(root, xtask::lint::Stage::Rustfmt, &paths)?.is_empty());
+    Ok(())
+}
+
+#[test]
 fn the_formatter_gate_rejects_unformatted_rust_and_accepts_real_formatting() -> Result<()> {
     if std::env::var(FORMATTER_FIXTURE).is_ok_and(|value| value == FORMATTER_TEST) {
         let state = std::env::var_os(fixture_process::INCIDENT_STATE)
@@ -131,7 +187,9 @@ fn the_formatter_gate_rejects_unformatted_rust_and_accepts_real_formatting() -> 
     let scope = incident_fixture::scope()?;
     let global = scope.path().join("global.gitconfig");
     fs::write(&global, "")?;
-    let output = fixture_git::command(std::env::current_exe()?, &global)
+    let mut command = fixture_git::command(std::env::current_exe()?, &global);
+    incident_fixture::enable(&mut command, scope.path())?;
+    let output = command
         .args(["--exact", FORMATTER_TEST, "--nocapture"])
         .env(FORMATTER_FIXTURE, FORMATTER_TEST)
         .env("DOTFILES_EXPECTED_FAILURE", "")
@@ -196,14 +254,15 @@ fn copy_prose_bundle(source: &Path, target: &Path) -> Result<()> {
 }
 
 fn prose_gate(root: &Path) -> Result<std::process::Output> {
-    Ok(
-        fixture_git::command(env!("CARGO_BIN_EXE_xtask"), &root.join("global.gitconfig"))
-            .arg("--root")
-            .arg(root)
-            .args(["check", "--gates", "prose"])
-            .env("DOTFILES_EXPECTED_FAILURE", "")
-            .output()?,
-    )
+    let mut command =
+        fixture_git::command(env!("CARGO_BIN_EXE_xtask"), &root.join("global.gitconfig"));
+    incident_fixture::enable(&mut command, root)?;
+    Ok(command
+        .arg("--root")
+        .arg(root)
+        .args(["check", "--gates", "prose"])
+        .env("DOTFILES_EXPECTED_FAILURE", "")
+        .output()?)
 }
 
 fn assert_gate_comment_findings(stderr: &str) {
@@ -450,6 +509,7 @@ fn the_check_command_reports_multiple_selected_gate_failures_in_one_run() -> Res
     assert_eq!(
         stages,
         [
+            "Checking issue.context",
             "Checking prose.lint",
             "Checking prose.adr",
             "Checking prose.editorconfig",

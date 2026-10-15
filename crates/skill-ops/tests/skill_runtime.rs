@@ -22,6 +22,7 @@ fn fixture() -> Result<tempfile::TempDir> {
         Some(root) => tempfile::tempdir_in(fixture_process::directory(Path::new(&root)))?,
         None => tempfile::tempdir()?,
     };
+    experimental(directory.path())?;
     let tree = directory.path().join("tree");
     for name in ["alpha", "beta"] {
         fs::create_dir_all(tree.join(name))?;
@@ -59,6 +60,13 @@ fn fixture() -> Result<tempfile::TempDir> {
     Ok(directory)
 }
 
+fn experimental(home: &Path) -> Result<()> {
+    let opt_in = home.join(platform::incidents::EXPERIMENTAL);
+    fs::create_dir_all(opt_in.parent().unwrap())?;
+    fs::write(opt_in, ops::incident_rules::EXPERIMENTAL_OPT_IN)?;
+    Ok(())
+}
+
 fn run(root: &Path, arguments: &[&str], input: Option<&Value>) -> Result<Output> {
     run_with_label(root, arguments, input, None)
 }
@@ -76,6 +84,8 @@ fn run_with_label(
     let mut command = fixture_process::command(env!("CARGO_BIN_EXE_skill-ops"), root);
     command
         .current_dir(root)
+        .env("HOME", root)
+        .env("USERPROFILE", root)
         .args(["--tree"])
         .arg(root.join("tree"))
         .args(["--policy"])
@@ -113,6 +123,101 @@ fn success(output: Output) -> Result<Output> {
         String::from_utf8_lossy(&output.stderr)
     );
     Ok(output)
+}
+
+#[test]
+fn disabled_commands_skip_freshness_collection_and_assessment() -> Result<()> {
+    let fixture = tempfile::tempdir()?;
+    let root = fixture.path();
+    let marker = root.join(platform::incidents::DISABLED);
+    fs::create_dir_all(marker.parent().unwrap())?;
+    fs::write(marker, "owner stop")?;
+    let history = root.join("state/history.json");
+    fs::create_dir_all(history.parent().unwrap())?;
+    fs::write(&history, "preserved")?;
+    experimental(root)?;
+    let before_modified = fs::metadata(&history)?.modified()?;
+    for arguments in [
+        &["stop"][..],
+        &["check"][..],
+        &["doctor"][..],
+        &["observe", "--client", "claude"][..],
+    ] {
+        let output = fixture_process::command(env!("CARGO_BIN_EXE_skill-ops"), root)
+            .env("HOME", root)
+            .env("USERPROFILE", root)
+            .current_dir(root)
+            .args(arguments)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout)?;
+        if arguments == ["stop"] {
+            assert_eq!(stdout.trim(), "{}");
+            assert_eq!(output.stderr, [] as [u8; 0]);
+        } else {
+            assert!(
+                stdout.contains("disabled; no assessment was performed"),
+                "{stdout}"
+            );
+        }
+        assert_eq!(fs::read_to_string(&history)?, "preserved");
+        assert_eq!(fs::metadata(&history)?.modified()?, before_modified);
+        assert_eq!(fs::read_dir(root.join("state"))?.count(), 1);
+        assert!(!root.join(".local/state/skill-ops").exists());
+        assert!(!root.join(".config/skill-ops/approved.json").exists());
+    }
+    Ok(())
+}
+
+#[test]
+fn missing_invalid_and_unavailable_opt_in_leave_commands_unassessed() -> Result<()> {
+    for content in [None, Some("enabled"), Some("enabled\r\n"), Some("false\n")] {
+        let fixture = tempfile::tempdir()?;
+        if let Some(content) = content {
+            let path = fixture.path().join(platform::incidents::EXPERIMENTAL);
+            fs::create_dir_all(path.parent().unwrap())?;
+            fs::write(path, content)?;
+        }
+        for arguments in [
+            &["stop"][..],
+            &["check"][..],
+            &["observe", "--client", "claude"][..],
+        ] {
+            let output = fixture_process::command(env!("CARGO_BIN_EXE_skill-ops"), fixture.path())
+                .env("HOME", fixture.path())
+                .env("USERPROFILE", fixture.path())
+                .current_dir(fixture.path())
+                .args(arguments)
+                .output()?;
+            assert!(output.status.success());
+            let stdout = String::from_utf8(output.stdout)?;
+            if arguments == ["stop"] {
+                assert_eq!(stdout.trim(), "{}");
+                assert_eq!(output.stderr, [] as [u8; 0]);
+            } else {
+                assert!(
+                    stdout.contains("disabled; no assessment was performed"),
+                    "{stdout}"
+                );
+            }
+            assert!(!fixture.path().join("state").exists());
+        }
+    }
+    let fixture = tempfile::tempdir()?;
+    fs::write(fixture.path().join(".config"), "not a directory")?;
+    let output = fixture_process::command(env!("CARGO_BIN_EXE_skill-ops"), fixture.path())
+        .env("HOME", fixture.path())
+        .env("USERPROFILE", fixture.path())
+        .args(["stop"])
+        .output()?;
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8(output.stdout)?.trim(), "{}");
+    assert!(!fixture.path().join("state").exists());
+    Ok(())
 }
 
 #[test]
@@ -715,6 +820,8 @@ fn opencode_adapter_records_a_native_sdk_read_without_retaining_private_payloads
         .arg(root)
         .arg(executable)
         .env("PATH", "")
+        .env("HOME", root)
+        .env("USERPROFILE", root)
         .env("SKILL_OPS_TREE", root.join("tree"))
         .env("SKILL_OPS_POLICY", root.join("policy.json"))
         .env("SKILL_OPS_STATE", root.join("state"))
@@ -732,10 +839,40 @@ fn opencode_adapter_records_a_native_sdk_read_without_retaining_private_payloads
     Ok(())
 }
 
+#[test]
+fn opencode_default_off_and_cached_callbacks_never_spawn_without_current_consent() -> Result<()> {
+    let fixture = fixture()?;
+    let root = fixture.path();
+    let runtime = success(
+        platform::process::command("bun")
+            .args(["-e", "console.log(process.execPath)"])
+            .output()?,
+    )?;
+    let runtime = String::from_utf8(runtime.stdout)?;
+    let runtime = Path::new(runtime.trim());
+    assert!(runtime.is_absolute() && runtime.is_file());
+    success(
+        fixture_process::command(runtime, root)
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/opencode-mode.ts"))
+            .arg(root)
+            .env("HOME", root)
+            .env("USERPROFILE", root)
+            .env("PATH", "")
+            .output()?,
+    )?;
+    assert_eq!(
+        ops::recorded(&root.join("state"))?,
+        [] as [ops::Observation; 0]
+    );
+    assert!(!root.join("state").exists());
+    Ok(())
+}
+
 /// A source checkout and a native user tree that both hold the fixture skills, with the policy and a decision record for each skill.
 fn native_source(fixture: &Path) -> Result<(PathBuf, PathBuf, ops::Catalog)> {
     let source = fixture.join("source");
     let user = fixture.join("native-user");
+    experimental(&user)?;
     fs::create_dir_all(source.join("home/.chezmoidata"))?;
     let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/.chezmoidata");
     for file in ["targets.toml", "profiles.toml"] {

@@ -190,13 +190,11 @@ fn renovate_fixture(name: &str) -> (Repository, String, String) {
         "{}",
         String::from_utf8_lossy(&compiler.stderr)
     );
-    for name in ["jq", "id"] {
-        std::fs::copy(
-            &docker,
-            tools.join(format!("{name}{}", std::env::consts::EXE_SUFFIX)),
-        )
-        .unwrap();
-    }
+    std::fs::copy(
+        &docker,
+        tools.join(format!("id{}", std::env::consts::EXE_SUFFIX)),
+    )
+    .unwrap();
     let base = repository.commit("base", &[]);
     std::fs::write(repository.path().join("Cargo.toml"), RENOVATE_MANIFEST).unwrap();
     std::fs::write(repository.path().join("mise.toml"), RENOVATE_MISE_MANIFEST).unwrap();
@@ -211,20 +209,6 @@ fn renovate_fixture(name: &str) -> (Repository, String, String) {
 }
 
 fn renovate_variables(repository: &Repository) -> Vec<(&'static str, String)> {
-    let output = fixture_git::command("mise", &repository.scope.join("gitconfig"))
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .args(["which", "jq"])
-        .output()
-        .expect("mise resolves the project's jq");
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let resolved = String::from_utf8(output.stdout).expect("mise's jq path is UTF-8");
-    let jq = Path::new(resolved.trim());
-    assert!(jq.is_absolute() && jq.is_file(), "{}", jq.display());
-    let jq = platform::paths::canonical(jq).expect("the project's concrete jq");
     vec![
         (
             "RENOVATE_FIXTURE_ARGS",
@@ -243,7 +227,6 @@ fn renovate_variables(repository: &Repository) -> Vec<(&'static str, String)> {
                 .to_string_lossy()
                 .into_owned(),
         ),
-        ("RENOVATE_FIXTURE_JQ", jq.to_string_lossy().into_owned()),
         ("RENOVATE_LOCAL_SKIP", String::new()),
         ("RENOVATE_GITHUB_COM_TOKEN", String::new()),
     ]
@@ -448,6 +431,258 @@ fn current_renovate_report() -> serde_json::Value {
     }]}}}})
 }
 
+#[test]
+fn renovate_fetches_managed_credentials_without_exposing_them_or_overriding_the_environment() {
+    let (repository, base, offered) = renovate_fixture("renovate-managed-credentials");
+    let tools = repository.path().join(".local/bin");
+    for name in ["chezmoi", "doppler"] {
+        std::fs::copy(
+            tools.join(format!("docker{}", std::env::consts::EXE_SUFFIX)),
+            tools.join(format!("{name}{}", std::env::consts::EXE_SUFFIX)),
+        )
+        .unwrap();
+    }
+    let report = repository.scope.join("credential-report.json");
+    std::fs::write(
+        &report,
+        serde_json::to_vec(&current_renovate_report()).unwrap(),
+    )
+    .unwrap();
+    let called = repository.scope.join("doppler-called");
+    for (scope, explicit, secret, fail, expected, fetched) in [
+        (
+            "managed-project/prd",
+            "",
+            "synthetic-doppler-token",
+            "0",
+            "synthetic-doppler-token",
+            true,
+        ),
+        (
+            "managed-project/prd",
+            "synthetic-environment-token",
+            "unused-token",
+            "1",
+            "synthetic-environment-token",
+            false,
+        ),
+        ("managed-project/prd", "", "unused-token", "1", "", true),
+        (
+            "managed-project/prd",
+            "",
+            "${unresolved.reference}",
+            "0",
+            "",
+            true,
+        ),
+        ("managed-project/prd", "", "", "0", "", true),
+        (
+            "managed-project/prd/other",
+            "",
+            "unused-token",
+            "0",
+            "",
+            false,
+        ),
+    ] {
+        if called.exists() {
+            std::fs::remove_file(&called).unwrap();
+        }
+        let mut variables = renovate_variables(&repository);
+        variables.retain(|(name, _)| *name != "RENOVATE_GITHUB_COM_TOKEN");
+        variables.extend([
+            ("MISE_NOT_FOUND_AUTO_INSTALL", "true".to_owned()),
+            ("MISE_AUTO_PRUNE", "true".to_owned()),
+            ("RENOVATE_GITHUB_COM_TOKEN", explicit.to_owned()),
+            ("RENOVATE_FIXTURE_DOPPLER_SCOPE", scope.to_owned()),
+            ("RENOVATE_FIXTURE_DOPPLER_TOKEN", secret.to_owned()),
+            ("RENOVATE_FIXTURE_DOPPLER_FAIL", fail.to_owned()),
+            ("RENOVATE_FIXTURE_EXPECT_GITHUB_TOKEN", expected.to_owned()),
+            (
+                "RENOVATE_FIXTURE_DOPPLER_CALL",
+                called.to_string_lossy().into_owned(),
+            ),
+            (
+                "RENOVATE_FIXTURE_REPORT",
+                report.to_string_lossy().into_owned(),
+            ),
+        ]);
+        let values: Vec<_> = variables
+            .iter()
+            .map(|(name, value)| (*name, value.as_str()))
+            .collect();
+        let output = repository.dotguard_with(
+            &["renovate-gate", "origin", RENOVATE_REMOTE],
+            &format!("refs/heads/main {offered} refs/heads/main {base}\n"),
+            &[],
+            &values,
+        );
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(called.exists(), fetched, "{scope}");
+        for leaked in [
+            "synthetic-doppler-token",
+            "synthetic-environment-token",
+            "synthetic-credential-error",
+            "${unresolved.reference}",
+        ] {
+            assert!(!String::from_utf8_lossy(&output.stdout).contains(leaked));
+            assert!(!String::from_utf8_lossy(&output.stderr).contains(leaked));
+        }
+    }
+}
+
+#[test]
+fn renovate_accepts_warning_problems_without_hiding_updates_or_errors() {
+    let (repository, base, offered) = renovate_fixture("renovate-problem-severity");
+    for global in [false, true] {
+        let mut report = current_renovate_report();
+        let problems = if global {
+            &mut report["problems"]
+        } else {
+            &mut report["repositories"]["local"]["problems"]
+        };
+        *problems = serde_json::json!([{"level":40,"msg":"A feature is deprecated"}]);
+        let output = report_gate(&repository, &base, &offered, &report);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let mut outdated = report.clone();
+        outdated["repositories"]["local"]["packageFiles"]["cargo"][0]["deps"][0]["updates"] =
+            serde_json::json!([{"updateType":"patch","newValue":"1.0.2"}]);
+        assert_eq!(
+            refusal(&report_gate(&repository, &base, &offered, &outdated)).rule,
+            "push.dependencies"
+        );
+
+        for level in [
+            serde_json::json!(50),
+            serde_json::json!(60),
+            serde_json::json!(41),
+            serde_json::json!("40"),
+            serde_json::Value::Null,
+        ] {
+            let mut failed = report.clone();
+            let problems = if global {
+                &mut failed["problems"]
+            } else {
+                &mut failed["repositories"]["local"]["problems"]
+            };
+            problems[0]["level"] = level;
+            assert_eq!(
+                refusal(&report_gate(&repository, &base, &offered, &failed)).rule,
+                "push.evidence"
+            );
+        }
+    }
+}
+
+#[test]
+fn renovate_accepts_unversioned_skips_independently_of_the_manager() {
+    let (repository, base, offered) = renovate_fixture("renovate-unversioned");
+    for manager in ["bundler", "npm", "cargo", "nuget", "future-manager"] {
+        for reason in ["invalid-value", "unspecified-version"] {
+            let dependency = serde_json::json!({"depName":"fixture","skipReason":reason,"updates":[],"warnings":[]});
+            let report = serde_json::json!({"repositories":{"local":{"packageFiles":{manager:[{"packageFile":"Cargo.toml","deps":[dependency]}]}}}});
+            let output = report_gate(&repository, &base, &offered, &report);
+            assert!(
+                output.status.success(),
+                "{manager}/{reason}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+}
+
+#[test]
+fn renovate_never_treats_a_declared_version_or_lookup_failure_as_unversioned() {
+    let (repository, base, offered) = renovate_fixture("renovate-unversioned-refusals");
+    for (field, value) in [
+        ("currentValue", serde_json::json!("invalid")),
+        ("currentValue", serde_json::json!("")),
+        ("currentDigest", serde_json::json!("sha256:123")),
+        ("lockedVersion", serde_json::json!("1.0.1")),
+        ("lockedVersion", serde_json::json!(false)),
+        ("warnings", serde_json::json!([{"message":"lookup failed"}])),
+        (
+            "updates",
+            serde_json::json!([{"updateType":"patch","newValue":"1.0.2"}]),
+        ),
+        ("skipReason", serde_json::json!("github-token-required")),
+        ("skipReason", serde_json::json!("unsupported-datasource")),
+    ] {
+        let mut dependency = serde_json::json!({"depName":"fixture","skipReason":"invalid-value","updates":[],"warnings":[]});
+        dependency[field] = value;
+        let report = serde_json::json!({"repositories":{"local":{"packageFiles":{"cargo":[{"packageFile":"Cargo.toml","deps":[dependency]}]}}}});
+        assert_eq!(
+            refusal(&report_gate(&repository, &base, &offered, &report)).rule,
+            "push.evidence",
+            "{field}"
+        );
+    }
+}
+
+#[test]
+fn renovate_report_refusals_identify_the_failed_dependency_without_its_payload() {
+    let (repository, base, offered) = renovate_fixture("renovate-report-diagnostics");
+    let mut report = current_renovate_report();
+    let dependency = &mut report["repositories"]["local"]["packageFiles"]["cargo"][0]["deps"][0];
+    dependency["skipReason"] = serde_json::json!("github-token-required");
+    dependency["warnings"] = serde_json::json!([{"message":"Bearer private-token"}]);
+    let rejected = refusal(&report_gate(&repository, &base, &offered, &report));
+    assert_eq!(rejected.rule, "push.evidence");
+    assert!(rejected.evidence.iter().any(|line| line.contains("cargo")
+        && line.contains("Cargo.toml")
+        && line.contains("fixture")
+        && line.contains("github-token-required")));
+    assert!(
+        rejected
+            .evidence
+            .iter()
+            .all(|line| !line.contains("private-token"))
+    );
+}
+
+#[test]
+fn renovate_inspects_saved_reports_without_starting_a_container() {
+    let (repository, _, _) = renovate_fixture("renovate-inspect");
+    let file = repository.scope.join("saved-report.json");
+    std::fs::write(&file, include_bytes!("fixtures/renovate-local-44.52.json")).unwrap();
+    let inspected = repository.dotguard_with(
+        &["renovate", "inspect", file.to_str().unwrap()],
+        "",
+        &[],
+        &[],
+    );
+    assert!(
+        inspected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&inspected.stderr)
+    );
+    let output = String::from_utf8(inspected.stdout).unwrap();
+    assert!(output.contains("1 nonfatal notices"));
+    assert!(output.contains("bootsnap 1.17.0 -> 1.26.0"));
+    assert!(!repository.scope.join("arguments").exists());
+    std::fs::write(
+        &file,
+        br#"{"problems":[{"level":50}],"repositories":{"local":{"packageFiles":{}}}}"#,
+    )
+    .unwrap();
+    let failed = repository.dotguard_with(
+        &["renovate", "inspect", file.to_str().unwrap()],
+        "",
+        &[],
+        &[],
+    );
+    assert_eq!(refusal(&failed).rule, "push.evidence");
+    assert!(!repository.scope.join("arguments").exists());
+}
 fn report_gate(
     repository: &Repository,
     base: &str,
@@ -784,6 +1019,63 @@ fn renovate_admits_only_exact_hosted_channels() {
         let output = report_gate(&repository, &base, &offered, &report);
         assert_eq!(refusal(&output).rule, "push.evidence", "{field}");
     }
+}
+
+fn matrix_input_report(value: &str) -> serde_json::Value {
+    serde_json::json!({"repositories":{"local":{"packageFiles":{"github-actions":[{
+        "packageFile":".github/workflows/ci.yml","deps":[{
+            "depName":"rust","depType":"uses-with",
+            "currentValue":value,"skipReason":"invalid-value","updates":[]
+        }]
+    }]}}}})
+}
+
+#[test]
+fn renovate_admits_only_matrix_expression_inputs() {
+    let (repository, base, offered) = renovate_fixture("renovate-matrix-inputs");
+    let mut rejected = Vec::new();
+    for value in ["${{ matrix.rust }}", "${{matrix.tool-chain}}"] {
+        let output = report_gate(&repository, &base, &offered, &matrix_input_report(value));
+        if !output.status.success() {
+            rejected.push(value);
+        }
+    }
+    assert_eq!(
+        rejected,
+        Vec::<&str>::new(),
+        "matrix expression inputs rejected"
+    );
+    for (field, value) in [
+        (
+            "currentValue",
+            serde_json::json!("${{ steps.mise.outputs.version }}"),
+        ),
+        (
+            "currentValue",
+            serde_json::json!("${{ matrix.rust }} extra"),
+        ),
+        ("currentValue", serde_json::json!("stable")),
+        ("depType", serde_json::json!("action")),
+        ("skipReason", serde_json::json!("invalid-version")),
+        ("warnings", serde_json::json!([{"message":"lookup failed"}])),
+        ("updates", serde_json::json!([{"updateType":"major"}])),
+    ] {
+        let mut report = matrix_input_report("${{ matrix.rust }}");
+        report["repositories"]["local"]["packageFiles"]["github-actions"][0]["deps"][0][field] =
+            value;
+        let output = report_gate(&repository, &base, &offered, &report);
+        assert_eq!(refusal(&output).rule, "push.evidence", "{field}");
+    }
+    let mut wrong_manager = matrix_input_report("${{ matrix.rust }}");
+    let managers = wrong_manager["repositories"]["local"]["packageFiles"]
+        .as_object_mut()
+        .unwrap();
+    let inputs = managers.remove("github-actions").unwrap();
+    managers.insert("cargo".to_owned(), inputs);
+    assert_eq!(
+        refusal(&report_gate(&repository, &base, &offered, &wrong_manager)).rule,
+        "push.evidence"
+    );
 }
 
 #[test]

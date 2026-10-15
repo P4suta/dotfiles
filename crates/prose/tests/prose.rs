@@ -689,6 +689,91 @@ fn the_document_gate_refuses_new_prose_in_a_repository() -> Result<()> {
 }
 
 #[test]
+fn repository_documents_include_untracked_files_without_ignored_or_deleted_neighbors() -> Result<()>
+{
+    let directory = repository(&[
+        (".gitignore", "ignored.md\n.prose-runtime/\n"),
+        ("deleted.md", ATTRIBUTED),
+    ])?;
+    let root = directory.path();
+    fs::remove_file(root.join("deleted.md"))?;
+    fs::write(root.join("ignored.md"), ATTRIBUTED)?;
+    fs::write(root.join("new.md"), format!("{ATTRIBUTED}\n"))?;
+    let bundle = Bundle::source(root)?;
+    let before = prose::findings(root, Scope::Documents, &bundle)?;
+    assert_eq!(before.len(), 1, "{before:?}");
+    assert_eq!(before[0].path, "new.md");
+    assert!(attribution_reported(&before, ATTRIBUTED));
+    git(root, &["add", "new.md"])?;
+    assert_eq!(prose::findings(root, Scope::Documents, &bundle)?, before);
+    Ok(())
+}
+
+#[test]
+fn repository_comments_include_untracked_files_without_ignored_or_deleted_neighbors() -> Result<()>
+{
+    let directory = repository(&[
+        (".gitignore", "ignored.rs\n.prose-runtime/\n"),
+        ("deleted.rs", &format!("// {ATTRIBUTED}\n")),
+    ])?;
+    let root = directory.path();
+    fs::remove_file(root.join("deleted.rs"))?;
+    fs::write(root.join("ignored.rs"), format!("// {ATTRIBUTED}\n"))?;
+    fs::write(root.join("new.rs"), format!("// {ATTRIBUTED}\n"))?;
+    let arguments = ["--source", ".", "repository", "--scope", "comments"].map(str::to_owned);
+    let (code, before) = run_in(root, &arguments)?;
+    assert_eq!(code, 2, "{before}");
+    assert_eq!(
+        before.matches("new.rs:1:1: Dotfiles.Attribution").count(),
+        1
+    );
+    assert!(
+        !before.contains("ignored.rs") && !before.contains("deleted.rs"),
+        "{before}"
+    );
+    git(root, &["add", "new.rs"])?;
+    assert_eq!(run_in(root, &arguments)?, (code, before));
+    Ok(())
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn repository_scan_does_not_follow_untracked_external_symlinks() -> Result<()> {
+    let directory = repository(&[(".gitignore", ".prose-runtime/\n")])?;
+    let external = tempfile::tempdir()?;
+    fs::write(external.path().join("guide.md"), [0xff])?;
+    fs::write(external.path().join("source.rs"), [0xff])?;
+    for name in ["guide.md", "source.rs"] {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(external.path().join(name), directory.path().join(name))?;
+        #[cfg(windows)]
+        {
+            let result = std::os::windows::fs::symlink_file(
+                external.path().join(name),
+                directory.path().join(name),
+            );
+            if result
+                .as_ref()
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied)
+            {
+                eprintln!("External symlink check requires Windows symlink permission.");
+                return Ok(());
+            }
+            result?;
+        }
+    }
+    prose::repository(
+        directory.path(),
+        Scope::Documents,
+        &Bundle::source(directory.path())?,
+    )?;
+    let arguments = ["--source", ".", "repository", "--scope", "comments"].map(str::to_owned);
+    let (code, output) = run_in(directory.path(), &arguments)?;
+    assert_eq!(code, 0, "{output}");
+    Ok(())
+}
+
+#[test]
 fn the_pre_commit_comment_gate_reads_source_comments_through_ocomment() -> Result<()> {
     let arguments = hook_arguments("pre-commit", "staged")?;
     assert_eq!(

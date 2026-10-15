@@ -49,6 +49,7 @@ mod domain {
 }
 
 pub mod adr_rules;
+pub mod artifact_rules;
 pub mod aside_rules;
 pub mod benchmark_rules;
 pub mod body_rules;
@@ -73,20 +74,26 @@ pub mod instruction_rules;
 pub mod legacy_rules;
 pub mod lint_rules;
 pub mod next_action_rules;
+pub mod notification_rules;
 pub mod obligation_rules;
 pub mod ocomment_rules;
 pub mod order_rules;
 pub mod path_conversion_rules;
+pub mod phase_receipt_rules;
 pub mod postcommit_rules;
 pub mod pr_ready_rules;
 pub mod pr_rules;
 pub mod process_rules;
 pub mod profile_rules;
 pub mod proof_budget_rules;
+pub mod proof_image_prepare_rules;
 pub mod prose_rules;
 pub mod ready_push_rules;
 pub mod reaper_rules;
 pub mod repository_rules;
+pub mod resource_rules;
+pub mod review_completion_rules;
+pub mod review_routing_rules;
 pub mod review_rules;
 pub mod schema_rules;
 pub mod shape_rules;

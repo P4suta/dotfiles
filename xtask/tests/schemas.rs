@@ -61,6 +61,57 @@ fn vendor_text_keeps_its_spelling_while_authored_and_neighboring_files_are_check
     assert!(found.contains_key(&paths[2]), "{found:?}");
 }
 
+#[test]
+fn opaque_transport_and_imported_documents_do_not_hide_authored_neighbors() {
+    let checkout = checkout();
+    assert!(
+        fixture_git::command("git", &checkout.path().join("global.gitconfig"))
+            .current_dir(checkout.path())
+            .args(["init", "--quiet"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    fs::copy(
+        root().join(".typos.toml"),
+        checkout.path().join(".typos.toml"),
+    )
+    .unwrap();
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(root().join("xtask/schema/njutest/manifest.json")).unwrap(),
+    )
+    .unwrap();
+    let mut excluded = vec![".pr-workflow/contexts.json".to_owned()];
+    excluded.extend(
+        manifest["documents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|document| document["path"].as_str().unwrap().to_owned()),
+    );
+    let authored = [
+        ".pr-workflow/authored.json",
+        "xtask/schema/njutest/manifest.json",
+        "xtask/tests/fixtures/njutest/authored.json",
+    ];
+    let mut paths = excluded.clone();
+    paths.extend(authored.map(str::to_owned));
+    let word = ["f", "pr"].concat();
+    for path in &paths {
+        let destination = checkout.path().join(path);
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        fs::write(destination, format!("{{\"text\":\"{word}\"}}\n")).unwrap();
+    }
+    let found = xtask::lint::findings(checkout.path(), xtask::lint::Stage::Typos, &paths).unwrap();
+    assert_eq!(found.len(), authored.len(), "{found:?}");
+    for path in authored {
+        assert!(found.contains_key(path), "{found:?}");
+    }
+    for path in excluded {
+        assert!(!found.contains_key(&path), "{found:?}");
+    }
+}
+
 fn starship() -> Contract {
     let manifest = manifest(root()).unwrap();
     let Some(Obligation::JsonSchema { schema, sha256, encoded_sha256, .. }) =
@@ -80,6 +131,7 @@ fn starship() -> Contract {
         &[".config/starship.toml".to_owned()],
         &[],
         false,
+        &[],
         &[],
     )
     .unwrap()
@@ -103,6 +155,28 @@ fn a_planted_unknown_key_in_a_mapped_target_fails_and_names_the_target_and_profi
 }
 
 #[test]
+fn document_schema_hints_never_replace_the_original_vendored_contract() {
+    let mut contracts = vec![starship()];
+    for contents in [
+        "\"$schema\" = \"file:///dotfiles-missing-consumer-schema.json\"\nadd_newline = false\n"
+            .to_owned(),
+        "#:schema file:///dotfiles-missing-consumer-schema.json\nadd_newline = false\n".to_owned(),
+    ] {
+        let clean = json!({".config/starship.toml": {"contents": contents}});
+        conform("windows", &clean, &mut contracts).unwrap();
+        let bad_type = json!({".config/starship.toml": {"contents": format!("{contents}command_timeout = 'wrong type'\n")}});
+        let error = conform("windows", &bad_type, &mut contracts).unwrap_err();
+        let refusal = format!("{error:#}");
+        assert!(
+            refusal.contains("windows") && refusal.contains(".config/starship.toml"),
+            "{refusal}"
+        );
+        let unknown = json!({".config/starship.toml": {"contents": format!("{contents}{PLANTED_KEY} = 1\n")}});
+        assert!(conform("windows", &unknown, &mut contracts).is_err());
+    }
+}
+
+#[test]
 fn every_governed_schema_of_the_repository_compiles_offline_and_refuses_a_planted_key() {
     for contract in contracts(root(), &manifest(root()).unwrap()).unwrap() {
         let planted = json!({ PLANTED_KEY: true });
@@ -112,6 +186,89 @@ fn every_governed_schema_of_the_repository_compiles_offline_and_refuses_a_plante
             contract.schema
         );
     }
+}
+
+fn claude() -> Contract {
+    contracts(root(), &manifest(root()).unwrap())
+        .unwrap()
+        .into_iter()
+        .find(|contract| {
+            contract
+                .schema
+                .ends_with("claude-code-settings.schema.json.gz")
+        })
+        .unwrap()
+}
+
+#[test]
+fn the_documented_command_failure_policy_is_typed_and_keeps_unknown_hook_fields_closed() {
+    let contract = claude();
+    let target = ".claude/settings.json";
+    for policy in ["continue", "block"] {
+        let valid = json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "dotfiles claude-hook", "onFailure": policy}]}]}});
+        assert!(contract.refusal("mac", target, &valid).is_none(), "{valid}");
+    }
+    for hook in [
+        json!({"type": "command", "command": "dotfiles claude-hook", "onFailure": "allow"}),
+        json!({"type": "command", "command": "dotfiles claude-hook", "onFailure": true}),
+        json!({"type": "command", "command": "dotfiles claude-hook", "onFailure": "block", "onFailurre": "block"}),
+        json!({"type": "prompt", "prompt": "check", "onFailure": "block"}),
+    ] {
+        let invalid = json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [hook]}]}});
+        assert!(
+            contract.refusal("mac", target, &invalid).is_some(),
+            "{invalid}"
+        );
+    }
+    let manifest = manifest(root()).unwrap();
+    let vendored = manifest
+        .obligations
+        .iter()
+        .find_map(|obligation| match obligation {
+            Obligation::JsonSchema {
+                schema,
+                sha256,
+                encoded_sha256,
+                ..
+            } if schema.ends_with("claude-code-settings.schema.json.gz") => Some(Vendored {
+                schema: schema.clone(),
+                sha256: sha256.clone(),
+                encoded_sha256: encoded_sha256.clone(),
+            }),
+            _ => None,
+        })
+        .unwrap();
+    assert!(
+        xtask::obligations::vendored_bytes(root(), &vendored)
+            .unwrap()
+            .0
+    );
+    let mut drifted = vendored;
+    drifted.sha256 = "0".to_owned();
+    assert!(
+        Contract::load(
+            root(),
+            &drifted,
+            &[target.to_owned()],
+            &[],
+            true,
+            &[],
+            &[xtask::obligations::SchemaExtension::ClaudeCommandFailurePolicy]
+        )
+        .is_err()
+    );
+    assert!(
+        parse_manifest(
+            r#"[[obligation]]
+verifier = "json-schema"
+schema = "schemas/vendor/claude-code-settings.schema.json.gz"
+sha256 = "0"
+targets = [".claude/settings.json"]
+extensions = ["allow-all-unknown-fields"]
+"#
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -133,6 +290,7 @@ fn a_reference_to_an_unvendored_schema_fails_instead_of_fetching_it() {
         &[],
         &[],
         false,
+        &[],
         &[],
     )
     .unwrap_err();
@@ -157,6 +315,7 @@ fn a_vendored_schema_whose_hash_differs_from_the_manifest_fails() {
         &["a.json".to_owned()],
         &[],
         false,
+        &[],
         &[],
     )
     .unwrap();
@@ -257,6 +416,7 @@ fn a_schema_no_profile_renders_a_target_for_checks_nothing_and_fails() {
             encoded_sha256: None,
         }],
         false,
+        &[],
         &[],
     );
     assert!(

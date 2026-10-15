@@ -3,9 +3,12 @@
 //! `just gen` writes the vector files from the Rust functions, and Lean proves by evaluation that its definitions give the same results.
 
 use crate::obligations::{self, LeanPackage, Obligation};
+use crate::phase_evidence::RawResult;
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::fs;
@@ -33,24 +36,85 @@ const DIGEST_BYTES: usize = 8;
 #[must_use]
 pub fn axiom_refusals(output: &str) -> Vec<String> {
     let mut refusals = Vec::new();
+    if output.trim().is_empty() {
+        refusals.push("the axiom report is empty".to_owned());
+    }
     for line in output
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
     {
-        if line.ends_with("does not depend on any axioms") {
-            continue;
-        }
-        let Some((theorem, axioms)) = line.split_once(" depends on axioms: ") else {
+        let Some((theorem, axioms)) = axiom_report(line) else {
             refusals.push(format!("unexpected axiom report: {line}"));
             continue;
         };
-        let axioms = axioms.trim_start_matches('[').trim_end_matches(']');
-        for axiom in axioms.split(',').map(str::trim) {
+        for axiom in axioms {
             if !STANDARD_AXIOMS.contains(&axiom) {
-                refusals.push(format!("{theorem} rests on the axiom {axiom}"));
+                refusals.push(format!("'{theorem}' rests on the axiom {axiom}"));
             }
         }
+    }
+    refusals
+}
+
+fn axiom_report(line: &str) -> Option<(&str, Vec<&str>)> {
+    let (theorem, report) = line.strip_prefix('\'')?.split_once("' ")?;
+    if theorem.is_empty()
+        || theorem
+            .chars()
+            .any(|character| character.is_whitespace() || character == '\'')
+    {
+        return None;
+    }
+    if report == "does not depend on any axioms" {
+        return Some((theorem, Vec::new()));
+    }
+    let axioms = report
+        .strip_prefix("depends on axioms: [")?
+        .strip_suffix(']')?;
+    if axioms.is_empty() || axioms.contains(['[', ']']) {
+        return None;
+    }
+    let parsed: Vec<_> = axioms.split(',').map(str::trim).collect();
+    if parsed
+        .iter()
+        .any(|axiom| axiom.is_empty() || axiom.chars().any(char::is_whitespace))
+    {
+        return None;
+    }
+    Some((theorem, parsed))
+}
+
+/// Refuses incomplete, duplicate, unexpected, or unsupported theorem reports.
+#[must_use]
+pub fn theorem_refusals(output: &str, package: &LeanPackage) -> Vec<String> {
+    let mut refusals = axiom_refusals(output);
+    let expected: BTreeSet<_> = package
+        .theorems
+        .iter()
+        .map(|theorem| theorem.name.as_str())
+        .collect();
+    if expected.is_empty() || expected.len() != package.theorems.len() {
+        refusals.push("the theorem inventory is empty or duplicated".to_owned());
+    }
+    let mut reported = BTreeSet::new();
+    for line in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        let Some((name, _)) = axiom_report(line) else {
+            continue;
+        };
+        if !expected.contains(name) {
+            refusals.push(format!("the axiom report names unlisted theorem {name}"));
+        }
+        if !reported.insert(name) {
+            refusals.push(format!("the axiom report repeats theorem {name}"));
+        }
+    }
+    for missing in expected.difference(&reported) {
+        refusals.push(format!("the axiom report omits theorem {missing}"));
     }
     refusals
 }
@@ -84,12 +148,12 @@ pub fn image(root: &Path) -> Result<String> {
     ))
 }
 
-fn build(root: &Path, image: &str) -> Result<()> {
+pub(crate) fn build(root: &Path, image: &str) -> Result<()> {
     if crate::container::amd64_image_present(image)? {
         return Ok(());
     }
-    let status = Tool::Docker
-        .command()
+    let mut command = Tool::Docker.command();
+    command
         .args([
             "build",
             "--platform",
@@ -97,12 +161,14 @@ fn build(root: &Path, image: &str) -> Result<()> {
             "--tag",
             image,
         ])
-        .arg(root.join(IMAGE_DIRECTORY))
-        .status()
-        .context("build the pinned Lean image")?;
+        .arg(root.join(IMAGE_DIRECTORY));
+    let output = crate::phase_evidence::output(&mut command, "build the pinned Lean image")?;
     ensure!(
-        status.success(),
-        "cannot build the pinned Lean image: {status}"
+        output.status.success(),
+        "cannot build the pinned Lean image: {}\n{}{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
     Ok(())
 }
@@ -158,56 +224,137 @@ fn modules(package: &LeanPackage) -> Vec<String> {
     found
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Reports {
+    inputs_sha256: String,
+    manifest_sha256: String,
+    image_tag: String,
+    image_id: String,
+    packages: Vec<PackageReport>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PackageReport {
+    package: String,
+    script: String,
+    result: RawResult,
+}
+
+pub(crate) fn collect(root: &Path, manifest: &obligations::Manifest) -> Result<Reports> {
+    let root = crate::canonical(root)?;
+    vectors(&root, true)?;
+    let image_tag = image(&root)?;
+    build(&root, &image_tag)?;
+    let identity = crate::verification_env::inspect(&image_tag, crate::container::LINUX_AMD64)?;
+    let mut reports = Reports {
+        inputs_sha256: crate::phase_evidence::model_inputs(&root)?,
+        manifest_sha256: crate::build_inputs::hex(&Sha256::digest(format!("{manifest:?}"))),
+        image_tag,
+        image_id: identity.id,
+        packages: Vec::new(),
+    };
+    for obligation in &manifest.obligations {
+        if let Obligation::Lean(package) = obligation {
+            let script = script(package, &modules(package))?;
+            let mut command = Tool::Docker.command();
+            command.args(run_arguments(&root, &reports.image_id, &script));
+            let output = crate::phase_evidence::output(&mut command, "Lean theorem replay")?;
+            reports.packages.push(PackageReport {
+                package: package.package.clone(),
+                script,
+                result: output.into(),
+            });
+        }
+    }
+    Ok(reports)
+}
+
+pub(crate) fn validate(
+    root: &Path,
+    manifest: &obligations::Manifest,
+    reports: &Reports,
+) -> Result<()> {
+    ensure!(
+        reports.manifest_sha256
+            == crate::build_inputs::hex(&Sha256::digest(format!("{manifest:?}"))),
+        "Lean report manifest differs"
+    );
+    ensure!(
+        reports.inputs_sha256 == crate::phase_evidence::model_inputs(root)?,
+        "Lean report source inputs differ"
+    );
+    vectors(root, true)?;
+    ensure!(
+        reports.image_tag == image(root)?,
+        "Lean report image definition differs"
+    );
+    crate::verification_env::parse_image(
+        &serde_json::to_string(&serde_json::json!({
+            "Id":reports.image_id, "Os":"linux", "Architecture":"amd64"
+        }))?,
+        crate::container::LINUX_AMD64,
+    )?;
+    let packages = manifest
+        .obligations
+        .iter()
+        .filter_map(|obligation| {
+            if let Obligation::Lean(package) = obligation {
+                Some(package)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        packages.len() == reports.packages.len(),
+        "Lean package report inventory is incomplete or unexpected"
+    );
+    let mut proved = 0;
+    for (package, report) in packages.iter().zip(&reports.packages) {
+        ensure!(
+            report.package == package.package
+                && report.script == script(package, &modules(package))?,
+            "Lean report operation differs from the current manifest"
+        );
+        let stdout = String::from_utf8_lossy(&report.result.stdout);
+        ensure!(
+            report.result.success(),
+            "the Lean package {} failed: {:?}\n{stdout}{}",
+            package.package,
+            report.result.status,
+            String::from_utf8_lossy(&report.result.stderr)
+        );
+        let report = stdout.split_once("AXIOMS").map_or("", |(_, report)| report);
+        let refusals = theorem_refusals(
+            &report
+                .lines()
+                .filter(|line| line.contains("axioms"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            package,
+        );
+        ensure!(
+            refusals.is_empty(),
+            "a theorem rests on an axiom outside {STANDARD_AXIOMS:?}:\n{}",
+            refusals.join("\n")
+        );
+        proved += package.theorems.len();
+    }
+    println!(
+        "Proved all {proved} Lean theorems offline with Lean {LEAN_VERSION}: each builds without a warning, rests on the standard axioms alone, and replays in a fresh kernel"
+    );
+    Ok(())
+}
+
 /// Discharges every Lean obligation of the manifest in the pinned image, offline.
 ///
 /// # Errors
 ///
 /// Returns an error when Docker or Lean fails, the build warns, a theorem uses another axiom, or fresh replay fails.
 pub fn verify(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
-    let root = crate::canonical(root)?;
-    vectors(&root, true)?;
-    let image = image(&root)?;
-    build(&root, &image)?;
-    let mut proved = 0;
-    for obligation in &manifest.obligations {
-        if let Obligation::Lean(package) = obligation {
-            let output = Tool::Docker
-                .command()
-                .args(run_arguments(
-                    &root,
-                    &image,
-                    &script(package, &modules(package))?,
-                ))
-                .output()
-                .context("start the Lean container")?;
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            ensure!(
-                output.status.success(),
-                "the Lean package {} failed: {}\n{stdout}{}",
-                package.package,
-                output.status,
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let report = stdout.split_once("AXIOMS").map_or("", |(_, report)| report);
-            let refusals = axiom_refusals(
-                &report
-                    .lines()
-                    .filter(|line| line.contains("axioms"))
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            );
-            ensure!(
-                refusals.is_empty(),
-                "a theorem rests on an axiom outside {STANDARD_AXIOMS:?}:\n{}",
-                refusals.join("\n")
-            );
-            proved += package.theorems.len();
-        }
-    }
-    println!(
-        "Proved all {proved} Lean theorems offline with Lean {LEAN_VERSION}: each builds without a warning, rests on the standard axioms alone, and replays in a fresh kernel"
-    );
-    Ok(())
+    validate(root, manifest, &collect(root, manifest)?)
 }
 
 /// One skill plan the vectors pin: a catalog, the skills it requests, and what `skill_plan_rules::plan` answers.
@@ -427,4 +574,69 @@ pub fn vectors(root: &Path, check: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod report_tests {
+    use super::*;
+    const IMAGE_HEX_DIGITS: usize = 64;
+
+    #[test]
+    fn lean_reports_bind_every_package_script_theorem_and_terminal_outcome() -> Result<()> {
+        let root = crate::canonical(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .context("workspace root")?,
+        )?;
+        let manifest = obligations::manifest(&root)?;
+        let mut packages = Vec::new();
+        for obligation in &manifest.obligations {
+            if let Obligation::Lean(package) = obligation {
+                let mut stdout = String::new();
+                for theorem in &package.theorems {
+                    writeln!(stdout, "'{}' does not depend on any axioms", theorem.name)?;
+                }
+                packages.push(PackageReport {
+                    package: package.package.clone(),
+                    script: script(package, &modules(package))?,
+                    result: RawResult {
+                        status: Some(0),
+                        stdout: format!("AXIOMS\n{stdout}").into_bytes(),
+                        stderr: Vec::new(),
+                    },
+                });
+            }
+        }
+        ensure!(!packages.is_empty(), "Lean fixture inventory missing");
+        let reports = Reports {
+            inputs_sha256: crate::phase_evidence::model_inputs(&root)?,
+            manifest_sha256: crate::build_inputs::hex(&Sha256::digest(format!("{manifest:?}"))),
+            image_tag: image(&root)?,
+            image_id: format!("sha256:{}", "a".repeat(IMAGE_HEX_DIGITS)),
+            packages,
+        };
+        let decoded: Reports = serde_json::from_slice(&serde_json::to_vec(&reports)?)?;
+        validate(&root, &manifest, &decoded)?;
+        for mutation in 0..9 {
+            let mut changed = reports.clone();
+            match mutation {
+                0 => {
+                    changed.packages.pop();
+                }
+                1 => changed.packages.push(changed.packages[0].clone()),
+                2 => changed.packages[0].script.clear(),
+                3 => changed.packages[0].result.status = None,
+                4 => changed.packages[0].result.stdout = b"AXIOMS\n".to_vec(),
+                5 => changed.packages[0].result.status = Some(1),
+                6 => changed.inputs_sha256.clear(),
+                7 => changed.image_id.clear(),
+                _ => changed.manifest_sha256.clear(),
+            }
+            assert!(
+                validate(&root, &manifest, &changed).is_err(),
+                "accepted mutation {mutation}"
+            );
+        }
+        Ok(())
+    }
 }

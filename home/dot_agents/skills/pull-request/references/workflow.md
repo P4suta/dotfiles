@@ -59,6 +59,7 @@ pr-workflow check --repo OWNER/REPO --pr 17 --final
 ```
 
 The default `local` mode always creates a draft.
+Every generation mode starts as a draft before any review request.
 `ready` requires an open draft with an accepted document and only passing head checks.
 `edit` replaces title and body together and leaves draft state unchanged.
 Local-file `check` never contacts GitHub and leaves the live issue prerequisite unmet, and `check --pr` only reads.
@@ -81,19 +82,71 @@ pr-workflow merge --repo OWNER/REPO --pr 17 --pr 19
 `stack sync` and `stack rebase` hold the repository's stack lease, the only way dotguard admits a rebase or leased force push of a published branch besides an `ALLOW_FORCE` waiver.
 `merge` takes independent PRs in order.
 It updates a behind head by merge and waits for every head check.
-It adds the pause lines, marks a draft ready, and merges the verified head with `--match-head-commit`.
+It enforces the assessed review route, marks a draft ready, and merges the verified head with `--match-head-commit`.
 `stack merge` restacks instead of updating and merges the stack up to the PR together.
-Both stop with a structured refusal on a failed check, conflict, timeout, or an owed CodeRabbit review, which only `coderabbit-review` can settle.
+Both stop with a structured refusal on a failed check, conflict, timeout, or missing evidence for the assessed CodeRabbit route.
+
+## Importance assessment
+
+Use the [importance criteria](importance.md) for every PR.
+Prepare a bounded JSON assessment of the actual committed diff and sign it with the existing trusted Git identity:
+
+```console
+pr-workflow assess --repo OWNER/REPO --base main --assessment-file importance.json --output importance.packet
+```
+
+The command creates a new packet file and refuses to overwrite one.
+Copy its single signed classification line into the PR body.
+The signed statement binds the exact repository, merge base, head, diff, and assessment.
+Fork contributions also bind the verified source and destination repository identities.
+Use the source owner's qualified head when publishing to an upstream repository.
+Preparation can assess local commits before their authorized push, while publication verifies the actual published source branch.
+It contains no private CLI output.
+Changing any part of that binding requires a new assessment.
+
+An ordinary bounded behavior change can use this input shape:
+
+```json
+{
+  "level": "medium",
+  "model": "The actual assessing model",
+  "rationale": "The changed operation is bounded and recoverable under its existing checks.",
+  "evidence": [{"path": "src/operation.rs", "change": "Describe the concrete changed behavior and effective recovery."}],
+  "severe": null
+}
+```
+
+Evidence paths must occur in the current diff.
+For `high` and `critical`, replace `severe` with the required concrete ground, consequence, likelihood, blast radius, rollback reasons, and their closed categories.
+The executable rejects unknown fields, unsupported levels, and an assessment that fails the severe threshold.
+The assessment's factual accuracy remains the accountable agent's responsibility.
+
+For a required `high` review, pass the guard's signed private receipt with `--cli-receipt PATH` to the publication command.
+Produce it on the managed review executor with:
+
+```console
+coderabbit review-committed --base-commit FULL_MERGE_BASE_SHA --receipt NEW_PRIVATE_FILE
+```
+
+Keep the receipt outside the reviewed checkout and write it to a new destination file.
+Don't embed that receipt, raw diagnostics, or authentication data in the PR body.
+Missing or stale required review evidence holds readiness and merge.
+`critical` uses actual current-head PR review evidence and doesn't accept a CLI receipt as a substitute.
+Reassess a published high route with `assess --pr NUMBER --prior-cli-receipt PATH` before changing its route.
+Keep that private prior receipt available to later checks.
+Its authenticated findings remain obligations while its old completion supplies no credit for the new diff.
+Put every returned finding's ID, resolved or unsupported disposition, concrete reason, and current-source evidence in the signed assessment.
 
 ## CodeRabbit generation
 
-Complete local checks before one budget-qualified CLI review of an initial substantive change.
+Complete local checks and the authenticated importance assessment before the selected review.
 `coderabbit --guard-status --json` reports the owner's pause scope: `reviews.pr` and `reviews.cli` each read `paused` or `allowed`.
-When the owner pauses PR reviews, create, edit, and ready refuse CodeRabbit generation, and an edit must keep the `@coderabbitai ignore` line and the `<!-- coderabbit-pause -->` line of a ready PR.
-`ready` then requires the standalone lines `@coderabbitai ignore` and `<!-- coderabbit-pause -->`, so the transition starts no automatic review and the PR needs its review again after resumption.
-An ignore line without the pause marker stands as a permanent exclusion.
-The live check and `ready` print whether the current head needs a CodeRabbit PR review, needs one again after the pause, has an exclusion, or needs none during the pause.
-The guard enforces the CLI budget and pause itself, and an unavailable CLI allowance counts as a skipped local review with its actual reason, never as a clean review.
+Keep the standalone `@coderabbitai ignore` description line for `low`, `medium`, and `high`, with no `review:critical` opt-in label.
+Only the current `critical` route permits CodeRabbit generation and PR opt-in.
+An owner pause blocks the selected required route rather than lifting its obligation.
+The live check and `ready` report the current route and any missing evidence.
+The guard preserves its CLI budget and pause.
+An unavailable allowance leaves a required CLI review pending.
 
 CLI reviews, IDE reviews, PR reviews, chat, and paid add-ons have separate usage pools.
 Check PR quota with the [official guidance](https://docs.coderabbit.ai/management/rate-limits), including an authorized `@coderabbitai rate limit` comment, which starts no review.
@@ -107,7 +160,8 @@ Confirm the applicable window and current counts, because the official policy ca
 Hold ready publication, generation, and pushes that would start an automatic PR review while the required capacity stays unknown, and report the reason and reconsideration time.
 After a one-hour hold, recheck once instead of pushing on a timer.
 Keep paid usage inactive and honor an owner-imposed pause until the owner resumes.
-The CLI guard enforces its managed entry points, but these publication decisions stay an agent obligation, and ordinary Git and GitHub clients bypass this PR command.
+The CLI guard and checked PR workflow enforce their managed entry points.
+Ordinary Git and GitHub clients can bypass them.
 Other clients can spend capacity after a snapshot, so account-wide limits need service enforcement or a common reservation gateway.
 
 Use the standard placeholders from the [official configuration reference](https://docs.coderabbit.ai/reference/configuration).
@@ -120,9 +174,10 @@ pr-workflow ready --repo OWNER/REPO --generation coderabbit --pr 17
 pr-workflow check --repo OWNER/REPO --pr 17 --final
 ```
 
-CodeRabbit creation opens the PR for review.
-Pass `--draft` when the task requires a draft.
-Explicit CodeRabbit `ready` on a draft starts generation and skips final validation.
+CodeRabbit creation also starts as a draft with a current critical assessment.
+A permitted ready transition must meet the selected route and the destination's checks.
+For `critical`, readiness can precede the PR review, but final validation and merge require its observed completion.
+Add the critical opt-in label or request a full review only after verifying the corresponding capacity and authorization.
 The final check rejects remaining placeholders.
 Check the generated document for destination rules, intent, and truthful validation results, then correct it with `edit` when authorized.
 Use [the configuration example](../assets/coderabbit.yaml) only for authorized configuration work, merged with the destination's existing rules.

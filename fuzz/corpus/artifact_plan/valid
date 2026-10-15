@@ -1,0 +1,6 @@
+{
+  "project": "[tools]\nexample = \"1.2.3\"\n",
+  "mise_lock": "lockfile_version = 3\n[[tools.example]]\nversion = \"1.2.3\"\nbackend = \"aqua:owner/example\"\nspecifiers = [\"1.2.3\"]\n[tools.example.\"platforms.windows-x64\"]\nurl = \"https://example.com/example-1.2.3.zip\"\nchecksum = \"sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\n",
+  "cargo_lock": "version = 4\n",
+  "versions": ""
+}

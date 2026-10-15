@@ -19,6 +19,13 @@ pub const fn mutation_required(campaign: ProofCampaign) -> bool {
     matches!(campaign, ProofCampaign::Full)
 }
 
+/// The hosted phase matrix must contain Kani, runtime checks, and metrics with models exactly once.
+#[must_use]
+pub const fn ci_phases_complete(counts: [u8; 3], unknown: bool) -> bool {
+    let [kani, runtime, metrics_models] = counts;
+    kani == 1 && runtime == 1 && metrics_models == 1 && !unknown
+}
+
 #[must_use]
 pub const fn mutant_jobs(available: usize) -> usize {
     match available {
@@ -127,6 +134,18 @@ pub const fn verdict(duration_millis: Option<u64>) -> Verdict {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn every_ci_phase_inventory_requires_each_known_partition_exactly_once() {
+        let counts: [u8; 3] = kani::any();
+        let unknown: bool = kani::any();
+        let complete = ci_phases_complete(counts, unknown);
+        assert_eq!(complete, counts.iter().all(|count| *count == 1) && !unknown);
+        kani::cover!(complete);
+        kani::cover!(!complete);
+    }
 
     pub fn spec_mutation_required(campaign: ProofCampaign) {
         assert_eq!(mutation_required(campaign), campaign == ProofCampaign::Full);

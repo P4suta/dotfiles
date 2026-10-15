@@ -19,5 +19,9 @@ fn main() {
     let record = std::path::Path::new(&home)
         .join(".local/state/dotfiles/installed")
         .join(binary);
-    std::fs::write(record, std::env::var("FIXTURE_BUILD_HASH").unwrap()).unwrap();
+    std::fs::write(
+        record,
+        std::env::var("FIXTURE_INSTALLATION_RECORD").unwrap(),
+    )
+    .unwrap();
 }

@@ -15,8 +15,9 @@ const SKILL_TARGET_PREFIX: &str = ".agents/skills/";
 /// # Errors
 ///
 /// Returns an error when `client` names neither `codex` nor `claude`, or when the settings, `hooks`, a hook event, or a hook group lack the expected JSON shape.
-pub fn merge_hooks(mut value: Value, client: &str) -> Result<Value> {
+pub fn merge_hooks(value: Value, client: &str) -> Result<Value> {
     ensure!(matches!(client, "codex" | "claude"), "unknown hook client");
+    let mut value = remove_hooks(value)?;
     let object = value
         .as_object_mut()
         .context("client settings must be a JSON object")?;
@@ -39,6 +40,31 @@ pub fn merge_hooks(mut value: Value, client: &str) -> Result<Value> {
         } else {
             json!({"hooks":[{"type":"command", "command":format!("skill-ops {action}"),"timeout":HOOK_TIMEOUT_SECONDS}]})
         };
+        entries.push(expected);
+    }
+    Ok(value)
+}
+
+/// Removes only the owned skill-ops commands, preserving mixed hook groups.
+///
+/// # Errors
+///
+/// Returns an error when settings or hook groups have an invalid JSON shape.
+pub fn remove_hooks(mut value: Value) -> Result<Value> {
+    let object = value
+        .as_object_mut()
+        .context("client settings must be a JSON object")?;
+    let Some(hooks) = object.get_mut("hooks") else {
+        return Ok(value);
+    };
+    for entries in hooks
+        .as_object_mut()
+        .context("native hooks must be an object")?
+        .values_mut()
+    {
+        let entries = entries
+            .as_array_mut()
+            .context("native hook event must be an array")?;
         let mut retained = Vec::new();
         for mut entry in std::mem::take(entries) {
             let handlers = entry["hooks"]
@@ -59,10 +85,28 @@ pub fn merge_hooks(mut value: Value, client: &str) -> Result<Value> {
                 retained.push(entry);
             }
         }
-        retained.push(expected);
         *entries = retained;
     }
     Ok(value)
+}
+
+/// Removes native skill-ops hook registrations without changing skill state.
+///
+/// # Errors
+///
+/// Returns an error if reading or updating an existing settings file fails.
+pub fn remove_native_hooks(user_directory: &Path) -> Result<()> {
+    for relative in [".codex/hooks.json", ".claude/settings.json"] {
+        let path = user_directory.join(relative);
+        if path.try_exists()? {
+            let value: Value = crate::read_json(&path)?;
+            let next = remove_hooks(value.clone())?;
+            if next != value {
+                crate::write_json(&path, &next, true)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Installs `binary` as skill-ops, records the approved catalog for `profile` and policy, and registers the client hooks.
@@ -78,6 +122,9 @@ pub fn install(
     profile: Profile,
 ) -> Result<()> {
     use crate as ops;
+    if !platform::incidents::enabled_at(user_directory) {
+        return remove_native_hooks(user_directory);
+    }
     ops::check_catalog(source)?;
     let expected = profile_catalog(source, profile)?;
     let installed = ops::catalog_owned(&user_directory.join(".agents/skills"), &expected)?;
@@ -156,6 +203,9 @@ pub fn deploy(
     mut apply: impl FnMut(&Path) -> Result<()>,
 ) -> Result<()> {
     use crate::skill_rules::{InstallationStage, installation_stage};
+    if !platform::incidents::enabled_at(user_directory) {
+        return remove_native_hooks(user_directory);
+    }
     let mut policy_applied = false;
     let mut runtime_installed = false;
     loop {
@@ -211,6 +261,63 @@ fn profile_catalog(source: &Path, profile: Profile) -> Result<crate::Catalog> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disabled_installation_removes_only_owned_handlers_without_assessing_skills() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        let marker = home.path().join(platform::incidents::DISABLED);
+        fs::create_dir_all(marker.parent().unwrap())?;
+        fs::write(&marker, "owner stop")?;
+        let value = json!({
+            "other": {"keep": true},
+            "hooks": {
+                "PreToolUse": [{"matcher":"Bash", "other":7, "hooks":[
+                    {"type":"command", "command":"dotfiles claude-bash"},
+                    {"type":"command", "command":"skill-ops observe --client claude"},
+                    {"type":"command", "command":"skill-ops-custom stop"}
+                ]}],
+                "Stop": [{"hooks":[{"type":"command", "command":"skill-ops stop"}]}],
+                "PostToolUse": [{"hooks":[{"type":"command", "command":"line-endings"}]}]
+            }
+        });
+        let expected = json!({
+            "other": {"keep": true},
+            "hooks": {
+                "PreToolUse": [{"matcher":"Bash", "other":7, "hooks":[
+                    {"type":"command", "command":"dotfiles claude-bash"},
+                    {"type":"command", "command":"skill-ops-custom stop"}
+                ]}],
+                "Stop": [],
+                "PostToolUse": [{"hooks":[{"type":"command", "command":"line-endings"}]}]
+            }
+        });
+        for relative in [".codex/hooks.json", ".claude/settings.json"] {
+            crate::write_json(&home.path().join(relative), &value, true)?;
+        }
+        let history = home.path().join(".local/state/skill-ops/history.json");
+        fs::create_dir_all(history.parent().unwrap())?;
+        fs::write(&history, "unchanged history")?;
+        let missing = home.path().join("missing source and binary");
+        install(&missing, &missing, home.path(), Profile::Mac)?;
+        deploy(&missing, &missing, home.path(), Profile::Mac, |_| {
+            panic!("a disabled deployment cannot apply policy or adapters")
+        })?;
+        for relative in [".codex/hooks.json", ".claude/settings.json"] {
+            let actual: Value = crate::read_json(&home.path().join(relative))?;
+            assert_eq!(actual, expected);
+            assert_eq!(remove_hooks(actual.clone())?, actual);
+        }
+        fs::remove_file(&marker)?;
+        install(&missing, &missing, home.path(), Profile::Mac)?;
+        deploy(&missing, &missing, home.path(), Profile::Mac, |_| {
+            panic!("a default-off deployment cannot apply policy or adapters")
+        })?;
+        assert_eq!(fs::read_to_string(history)?, "unchanged history");
+        assert!(!home.path().join(".config/skill-ops/approved.json").exists());
+        assert!(!home.path().join(".local/bin").exists());
+        assert!(remove_hooks(json!({"hooks":{"Stop":[{"hooks":false}]}})).is_err());
+        Ok(())
+    }
 
     #[test]
     fn profile_scope_excludes_only_declared_skills_and_preserves_missing_skill_errors() -> Result<()>

@@ -1,5 +1,5 @@
-//! The lint stages: each linter the repository pins, run over tracked files and held to a shrink-only baseline under `policy/lint-baselines/`.
-//! `check --staged` runs every stage over the staged files, and the prose gate runs every stage over every tracked file.
+//! The lint stages: each linter the repository pins, run over repository source files and held to a shrink-only baseline under `policy/lint-baselines/`.
+//! `check --staged` runs every stage over the staged files, and the prose gate runs every stage over tracked and nonignored new files.
 
 use crate::lint_rules::{self, Standing};
 use crate::tool::Tool;
@@ -123,7 +123,15 @@ fn text_files(root: &Path, paths: &[String]) -> Result<Vec<String>> {
         let output = Tool::Git
             .command()
             .current_dir(root)
-            .args(["ls-files", "--eol", "-z", "--"])
+            .args([
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--eol",
+                "-z",
+                "--",
+            ])
             .args(chunk)
             .output()
             .context("start git")?;
@@ -424,12 +432,18 @@ fn head(root: &Path, path: &str) -> Vec<u8> {
 ///
 /// Returns an error when a linter can't start, or when Git can't list the text files.
 pub fn findings(root: &Path, stage: Stage, paths: &[String]) -> Result<Counts> {
+    if stage == Stage::Encoding {
+        crate::profile_snapshot::validate_source_speech(root, paths)?;
+    }
     let links = symlinks(root, paths)?;
     let files: Vec<String> = paths
         .iter()
         .filter(|path| {
             // A baseline quotes the findings it admits, so no stage reads one.
-            root.join(path).is_file() && !links.contains(path) && !path.starts_with(BASELINES)
+            root.join(path).is_file()
+                && !root.join(path).is_symlink()
+                && !links.contains(path)
+                && !path.starts_with(BASELINES)
         })
         .filter(|path| stage.covers(path, &head(root, path)))
         .cloned()
@@ -688,19 +702,37 @@ pub fn baseline_growth(root: &Path, reference: &str) -> Result<Vec<String>> {
 ///
 /// Returns an error when Git can't list the tracked files.
 pub fn tracked(root: &Path) -> Result<Vec<String>> {
-    let output = Tool::Git
-        .command()
+    list_paths(root, false)
+}
+
+/// Tracked paths and nonignored new paths, sorted without duplicates.
+///
+/// # Errors
+///
+/// Returns an error if Git can't list source paths.
+pub fn source_files(root: &Path) -> Result<Vec<String>> {
+    list_paths(root, true)
+}
+
+fn list_paths(root: &Path, include_new: bool) -> Result<Vec<String>> {
+    let mut command = Tool::Git.command();
+    command
         .current_dir(root)
-        .args(["ls-files", "-z"])
-        .output()
-        .context("start git")?;
-    ensure!(output.status.success(), "git cannot list the tracked files");
-    Ok(output
+        .args(["ls-files", "--cached", "-z"]);
+    if include_new {
+        command.args(["--others", "--exclude-standard"]);
+    }
+    let output = command.output().context("start git")?;
+    ensure!(output.status.success(), "git cannot list source files");
+    let mut paths: Vec<String> = output
         .stdout
         .split(|byte| *byte == 0)
         .filter(|name| !name.is_empty())
         .map(|name| String::from_utf8_lossy(name).into_owned())
-        .collect())
+        .collect();
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
 }
 
 /// Runs every stage over `scope` and refuses a finding beyond its baseline, an entry that admits more than its path holds, and a baseline that grew since `reference`.

@@ -1,5 +1,6 @@
 //! The installed runtime behind every Git hook, setup launcher, and agent hook, and the Windows machine setup.
 
+pub mod artifacts;
 pub mod assure;
 pub mod claude_hook;
 pub mod claude_timing;
@@ -9,8 +10,10 @@ pub mod hooks;
 pub mod host_checks;
 pub mod hosts;
 pub mod integrations;
+pub mod issue_guard;
 pub mod legacy;
 pub mod line_endings;
+pub mod notifications;
 pub mod profiles;
 pub mod ready_push;
 pub mod repository;

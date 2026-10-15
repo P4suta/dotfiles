@@ -62,12 +62,87 @@
       ]
     },
     "KaniFlag": {
-      "description": "The flags a Kani contract run may pass, pinned with the Kani version in `skill_proofs::KANI_VERSION`.",
+      "description": "The flags a Kani obligation may pass, pinned with the Kani version in `skill_proofs::KANI_VERSION`.",
       "type": "string",
       "enum": [
         "function-contracts",
         "loop-contracts",
+        "quantifiers",
         "stubbing"
+      ]
+    },
+    "LeanRefinement": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "constant": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "bounded-kani"
+            },
+            "source": {
+              "type": "string"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "source",
+            "constant",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "generated-vectors"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "source-translation"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "entrypoint": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "selected-cases"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "entrypoint"
+          ]
+        }
       ]
     },
     "LeanTheorem": {
@@ -85,13 +160,17 @@
         "name": {
           "description": "The full name, such as `Dotfiles.SkillPlan.plan_correct`.",
           "type": "string"
+        },
+        "refinement": {
+          "$ref": "#/$defs/LeanRefinement"
         }
       },
       "additionalProperties": false,
       "required": [
         "name",
         "module",
-        "bridge"
+        "bridge",
+        "refinement"
       ]
     },
     "LintTool": {
@@ -126,6 +205,12 @@
           "description": "Every harness in `source` must pass, and every harness in `probes` must fail on an assertion.",
           "type": "object",
           "properties": {
+            "flags": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/KaniFlag"
+              }
+            },
             "probes": {
               "description": "Harness definitions placed after `mod production;`, which names the module under proof.",
               "type": "string",
@@ -188,6 +273,12 @@
                 "null"
               ],
               "default": null
+            },
+            "extensions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/SchemaExtension"
+              }
             },
             "resources": {
               "type": "array",
@@ -444,6 +535,12 @@
         "subjects",
         "exit",
         "issue"
+      ]
+    },
+    "SchemaExtension": {
+      "type": "string",
+      "enum": [
+        "claude-command-failure-policy"
       ]
     },
     "SymbolicQuint": {

@@ -1,6 +1,8 @@
 //! The shell integrations each tool generates and the agent integrations a host installs.
 
-use crate::runtime::{Runner, args, checked, initialization, optional, replace};
+use crate::runtime::{
+    Runner, args, checked, initialization, initialization_for, optional, replace,
+};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
@@ -107,6 +109,14 @@ pub fn shell_caches(home: &Path, runner: &mut impl Runner) -> Result<()> {
             if name == "atuin" {
                 bytes = without_startup_index(&String::from_utf8(bytes)?)?.into_bytes();
             }
+            if tool == Tool::Starship {
+                bytes = cached_continuation(
+                    runner,
+                    rules::shell_cache_rules::Shell::Nu,
+                    &String::from_utf8(bytes)?,
+                )?
+                .into_bytes();
+            }
             replace(&target, &bytes, false)?;
         } else if !target.exists() {
             replace(&target, b"", false)?;
@@ -151,6 +161,7 @@ fn zsh_caches(home: &Path, runner: &mut impl Runner) -> Result<()> {
         let script = match name {
             "mise" => deferred_mise(&text),
             "atuin" => without_atuin_zsh_index(&text),
+            "starship" => cached_continuation(runner, rules::shell_cache_rules::Shell::Zsh, &text)?,
             "ls-colors" => {
                 ensure!(
                     !text.contains('\''),
@@ -163,6 +174,66 @@ fn zsh_caches(home: &Path, runner: &mut impl Runner) -> Result<()> {
         replace(&cache.join(format!("{name}.zsh")), script.as_bytes(), false)?;
     }
     Ok(())
+}
+
+fn continuation_literal(shell: rules::shell_cache_rules::Shell, text: &str) -> Result<String> {
+    use rules::shell_cache_rules::{Escape, Shell, literal_escape};
+    use std::fmt::Write as _;
+    let mut literal = String::from(match shell {
+        Shell::Nu => "\"",
+        Shell::Zsh => "$'",
+    });
+    for character in text.chars() {
+        match literal_escape(shell, character) {
+            Escape::Verbatim => literal.push(character),
+            Escape::Quote | Escape::Slash => {
+                literal.push('\\');
+                literal.push(character);
+            }
+            Escape::Control => match shell {
+                Shell::Nu => write!(literal, "\\u{{{:x}}}", u32::from(character))?,
+                Shell::Zsh => write!(literal, "\\u{:04x}", u32::from(character))?,
+            },
+        }
+    }
+    literal.push(match shell {
+        Shell::Nu => '"',
+        Shell::Zsh => '\'',
+    });
+    Ok(literal)
+}
+
+fn cached_continuation(
+    runner: &mut impl Runner,
+    shell: rules::shell_cache_rules::Shell,
+    script: &str,
+) -> Result<String> {
+    use rules::shell_cache_rules::Shell;
+    let span = rules::shell_cache_rules::continuation(shell, script.as_bytes())
+        .context("unknown or repeated Starship continuation assignment")?;
+    let prompt = String::from_utf8(initialization_for(
+        runner,
+        Tool::Starship,
+        &args(&["prompt", "--continuation"]),
+        match shell {
+            Shell::Nu => "nu",
+            Shell::Zsh => "zsh",
+        },
+    )?)?;
+    let end = rules::shell_cache_rules::prompt_end(shell, prompt.as_bytes());
+    let prompt = prompt.get(..end).context("continuation prompt boundary")?;
+    let literal = continuation_literal(shell, prompt)?;
+    let assignment = match shell {
+        Shell::Nu => format!("    PROMPT_MULTILINE_INDICATOR: {literal}\n"),
+        Shell::Zsh => format!("PROMPT2={literal}\n"),
+    };
+    let before = script
+        .get(..span.start)
+        .context("continuation start boundary")?;
+    let after = script
+        .get(span.end..)
+        .context("continuation end boundary")?;
+    Ok(format!("{before}{assignment}{after}"))
 }
 
 fn pwsh_caches(home: &Path, runner: &mut impl Runner) -> Result<()> {
@@ -358,5 +429,167 @@ mod tests {
         };
         assert!(integrations(scope.path(), &mut fake, false).is_err());
         assert_eq!(fs::read(&target).unwrap(), b"previous");
+    }
+
+    #[derive(Default)]
+    struct Starship {
+        failed_prompt: bool,
+        calls: Vec<Vec<OsString>>,
+        shells: Vec<String>,
+    }
+
+    impl Runner for Starship {
+        fn available(&self, tool: Tool) -> bool {
+            tool == Tool::Starship
+        }
+
+        fn run(&mut self, tool: Tool, arguments: &[OsString]) -> Result<Reply> {
+            assert_eq!(tool, Tool::Starship);
+            self.calls.push(arguments.to_vec());
+            let bytes = match arguments.first().and_then(|value| value.to_str()) {
+                Some("prompt") => b"quote ' \" $() `backtick` \\ newline\n'#\x1b[0m".to_vec(),
+                Some("init") if arguments.get(1).is_some_and(|value| value == "nu") => {
+                    b"export-env { load-env {\n    PROMPT_MULTILINE_INDICATOR: (\n        ^'/native path/starship' prompt --continuation\n    )\n    PROMPT_COMMAND: {|| ^starship prompt }\n}}\n".to_vec()
+                }
+                Some("init") if arguments.get(1).is_some_and(|value| value == "zsh") => {
+                    b"PROMPT='$('/native path/starship' prompt)'\nPROMPT2=\"$(/native/path/starship prompt --continuation)\"\n".to_vec()
+                }
+                Some("init") => b"unchanged powershell initialization\n".to_vec(),
+                other => anyhow::bail!("unexpected Starship command {other:?}"),
+            };
+            Ok(Reply {
+                success: !(self.failed_prompt
+                    && arguments.first().is_some_and(|value| value == "prompt")),
+                bytes,
+            })
+        }
+
+        fn run_installed(&mut self, program: &Path, _: &[OsString]) -> Result<Reply> {
+            anyhow::bail!("unexpected installed program {}", program.display())
+        }
+
+        fn initialization_for(
+            &mut self,
+            tool: Tool,
+            arguments: &[OsString],
+            shell: &str,
+        ) -> Result<Reply> {
+            self.shells.push(shell.to_owned());
+            self.initialization(tool, arguments)
+        }
+    }
+
+    #[test]
+    fn starship_continuation_is_computed_when_caches_are_generated() {
+        let home = tempfile::tempdir().unwrap();
+        let mut starship = Starship {
+            failed_prompt: false,
+            calls: Vec::new(),
+            ..Starship::default()
+        };
+        shell_caches(home.path(), &mut starship).unwrap();
+        let nu =
+            fs::read_to_string(home.path().join(".config/nushell/generated/starship.nu")).unwrap();
+        let zsh = fs::read_to_string(home.path().join(ZSH_CACHE).join("starship.zsh")).unwrap();
+        assert!(!nu.contains(" prompt --continuation"));
+        assert!(!zsh.contains(" prompt --continuation"));
+        assert!(nu.contains("PROMPT_COMMAND: {|| ^starship prompt }"));
+        assert!(zsh.contains("PROMPT='$('/native path/starship' prompt)'"));
+        assert_eq!(
+            starship
+                .calls
+                .iter()
+                .filter(|call| call.first().is_some_and(|value| value == "prompt"))
+                .count(),
+            2
+        );
+        assert_eq!(starship.shells, ["nu", "zsh"]);
+        assert_eq!(
+            fs::read_to_string(home.path().join(".cache/pwsh/starship.ps1")).unwrap(),
+            "unchanged powershell initialization\n"
+        );
+    }
+
+    #[test]
+    fn a_failed_continuation_query_preserves_the_previous_cache() {
+        let home = tempfile::tempdir().unwrap();
+        let cache = home.path().join(".config/nushell/generated/starship.nu");
+        replace(&cache, b"previous successful cache", false).unwrap();
+        let mut starship = Starship {
+            failed_prompt: true,
+            calls: Vec::new(),
+            ..Starship::default()
+        };
+        assert!(shell_caches(home.path(), &mut starship).is_err());
+        assert_eq!(fs::read(cache).unwrap(), b"previous successful cache");
+    }
+
+    #[test]
+    fn unknown_and_repeated_continuation_shapes_never_query_or_replace() {
+        use rules::shell_cache_rules::Shell;
+        let mut starship = Starship::default();
+        for (shell, script) in [
+            (
+                Shell::Nu,
+                "PROMPT_MULTILINE_INDICATOR: {|| ^starship prompt }\n",
+            ),
+            (
+                Shell::Zsh,
+                "PROMPT2=\"$(/native/starship prompt --unknown)\"\n",
+            ),
+            (
+                Shell::Zsh,
+                "PROMPT2=\"$(/native/starship prompt --continuation)\"\nPROMPT2=\"$(/native/starship prompt --continuation)\"\n",
+            ),
+        ] {
+            assert!(cached_continuation(&mut starship, shell, script).is_err());
+            assert_eq!(starship.calls, Vec::<Vec<OsString>>::new());
+        }
+    }
+
+    fn prompt_literal_data() -> String {
+        let mut text: String = ('\0'..='\u{1f}').chain('\u{7f}'..='\u{9f}').collect();
+        text.push_str("quote ' \" $() `backtick` \\ '# delimiter 日 😀 \u{2028} newline\n\n");
+        text
+    }
+
+    #[test]
+    fn nushell_reads_cached_prompt_data_without_expanding_commands() -> Result<()> {
+        use rules::shell_cache_rules::Shell;
+        let text = prompt_literal_data();
+        let literal = continuation_literal(Shell::Nu, &text)?;
+        let output = Tool::Nu
+            .command()
+            .args(["--no-config-file", "-c"])
+            .arg(format!("{literal} | to json --raw"))
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let actual: String = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(actual, text);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zsh_reads_cached_prompt_data_without_expanding_commands() -> Result<()> {
+        use rules::shell_cache_rules::Shell;
+        let text = prompt_literal_data();
+        let literal = continuation_literal(Shell::Zsh, &text)?;
+        let output = Tool::Zsh
+            .command()
+            .args(["-f", "-c"])
+            .arg(format!("PROMPT2={literal}; print -rn -- \"$PROMPT2\""))
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, text.as_bytes());
+        Ok(())
     }
 }

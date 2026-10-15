@@ -3,14 +3,16 @@
 //! It also witnesses every outcome and writes its traces again, while its probe module breaks the invariant.
 
 use crate::obligations::{self, Obligation, QuintModel};
+use crate::phase_evidence::RawResult;
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::cell::{Cell, RefCell};
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
-use std::process::{Output, Stdio};
 
 /// The Quint release that the image's lockfile pins.
 pub const QUINT_VERSION: &str = "0.33.0";
@@ -72,24 +74,21 @@ pub fn image(root: &Path) -> Result<String> {
 ///
 /// Returns an error when Docker can't build it.
 pub fn build(root: &Path, image: &str) -> Result<()> {
-    let present = Tool::Docker
-        .command()
-        .args(["image", "inspect", image])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if present.success() {
+    let platform = crate::container::native_platform()?;
+    if crate::container::image_present(image, &platform)? {
         return Ok(());
     }
-    let status = Tool::Docker
-        .command()
-        .args(["build", "--tag", image])
-        .arg(root.join(IMAGE_DIRECTORY))
-        .status()
-        .context("build the pinned Quint image")?;
+    let mut command = Tool::Docker.command();
+    command
+        .args(["build", "--platform", &platform, "--tag", image])
+        .arg(root.join(IMAGE_DIRECTORY));
+    let output = crate::phase_evidence::output(&mut command, "build the pinned Quint image")?;
     ensure!(
-        status.success(),
-        "cannot build the pinned Quint image: {status}"
+        output.status.success(),
+        "cannot build the pinned Quint image: {}\n{}{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
     Ok(())
 }
@@ -166,25 +165,184 @@ fn of_model(trace: &str, main: &str) -> bool {
         .is_some_and(|name| name.starts_with(&format!("{main}.")))
 }
 
-/// The pinned image, a writable output directory, and the checkout of one verification run.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Reports {
+    inputs_sha256: String,
+    manifest_sha256: String,
+    image_tag: String,
+    image_id: String,
+    platform: String,
+    operations: Vec<Operation>,
+    artifacts: Vec<Artifact>,
+}
+
+impl crate::state_graph::Runner for Runner<'_> {
+    fn run(&self, command: &[&str]) -> Result<String> {
+        let result = self.execute(command)?;
+        ensure!(
+            result.success(),
+            "Quint state graph command failed: {:?}\n{}",
+            result.status,
+            result.stderr()?
+        );
+        Ok(result.stdout()?.to_owned())
+    }
+
+    fn write(&self, name: &str, bytes: &[u8]) -> Result<()> {
+        self.file(name, Some(bytes))?;
+        Ok(())
+    }
+    fn read(&self, name: &str) -> Result<String> {
+        Ok(String::from_utf8(self.file(name, None)?)?)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Operation {
+    arguments: Vec<String>,
+    result: RawResult,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Artifact {
+    path: String,
+    written: bool,
+    bytes: Vec<u8>,
+}
+
+enum Execution<'a> {
+    Cold {
+        output: &'a Path,
+        image: &'a str,
+        reports: &'a RefCell<Reports>,
+    },
+    Captured {
+        reports: &'a Reports,
+        operation: Cell<usize>,
+        artifact: Cell<usize>,
+    },
+}
+
 struct Runner<'a> {
     root: &'a Path,
-    output: &'a Path,
-    image: String,
+    execution: Execution<'a>,
 }
 
 impl Runner<'_> {
-    fn quint(&self, arguments: &[&str]) -> Result<Output> {
-        Tool::Docker
-            .command()
-            .args(run_arguments(
-                self.root,
-                self.output,
-                &self.image,
-                arguments,
-            ))
-            .output()
-            .context("start the Quint container")
+    fn execute(&self, arguments: &[&str]) -> Result<RawResult> {
+        let result = match &self.execution {
+            Execution::Cold {
+                output,
+                image,
+                reports,
+            } => {
+                let mut command = Tool::Docker.command();
+                command.args(container_arguments(self.root, output, image, arguments));
+                let result: RawResult =
+                    crate::phase_evidence::output(&mut command, "Quint model command")?.into();
+                reports.borrow_mut().operations.push(Operation {
+                    arguments: arguments
+                        .iter()
+                        .map(|argument| (*argument).to_owned())
+                        .collect(),
+                    result: result.clone(),
+                });
+                result
+            }
+            Execution::Captured {
+                reports, operation, ..
+            } => {
+                let index = operation.get();
+                let recorded = reports
+                    .operations
+                    .get(index)
+                    .context("Quint operation report is missing")?;
+                ensure!(
+                    recorded.arguments == arguments,
+                    "Quint operation differs from the current manifest"
+                );
+                operation.set(index + 1);
+                recorded.result.clone()
+            }
+        };
+        ensure!(
+            result.status.is_some(),
+            "Quint operation has no natural terminal status"
+        );
+        Ok(result)
+    }
+
+    fn quint(&self, arguments: &[&str]) -> Result<RawResult> {
+        self.execute(&[&["quint"][..], arguments].concat())
+    }
+
+    fn directory(&self, name: &str) -> Result<()> {
+        if let Execution::Cold { output, .. } = &self.execution {
+            fs::create_dir_all(output.join(name))?;
+        }
+        Ok(())
+    }
+
+    fn file(&self, path: &str, written: Option<&[u8]>) -> Result<Vec<u8>> {
+        match &self.execution {
+            Execution::Cold {
+                output, reports, ..
+            } => {
+                let location = output.join(path);
+                let bytes = if let Some(bytes) = written {
+                    fs::write(location, bytes)?;
+                    bytes.to_vec()
+                } else {
+                    fs::read(location).with_context(|| format!("Quint wrote no artifact {path}"))?
+                };
+                reports.borrow_mut().artifacts.push(Artifact {
+                    path: path.to_owned(),
+                    written: written.is_some(),
+                    bytes: bytes.clone(),
+                });
+                Ok(bytes)
+            }
+            Execution::Captured {
+                reports, artifact, ..
+            } => {
+                let index = artifact.get();
+                let recorded = reports
+                    .artifacts
+                    .get(index)
+                    .context("Quint artifact report is missing")?;
+                ensure!(
+                    recorded.path == path && recorded.written == written.is_some(),
+                    "Quint artifact operation differs"
+                );
+                if let Some(bytes) = written {
+                    ensure!(
+                        recorded.bytes == bytes,
+                        "Quint generated configuration differs"
+                    );
+                }
+                artifact.set(index + 1);
+                Ok(recorded.bytes.clone())
+            }
+        }
+    }
+
+    fn finish(&self) -> Result<()> {
+        if let Execution::Captured {
+            reports,
+            operation,
+            artifact,
+        } = &self.execution
+        {
+            ensure!(
+                operation.get() == reports.operations.len()
+                    && artifact.get() == reports.artifacts.len(),
+                "Quint report has unexpected or duplicate operations or artifacts"
+            );
+        }
+        Ok(())
     }
 
     /// Runs `quint` and requires success, returning its standard output.
@@ -192,8 +350,8 @@ impl Runner<'_> {
         let output = self.quint(arguments)?;
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         ensure!(
-            output.status.success(),
-            "{what} failed: {}\n{stdout}{}",
+            output.success(),
+            "{what} failed: {:?}\n{stdout}{}",
             output.status,
             String::from_utf8_lossy(&output.stderr)
         );
@@ -201,7 +359,7 @@ impl Runner<'_> {
     }
 
     /// The model checker with one worker on `module`, which returns Quint's output.
-    fn tlc(&self, model: &str, module: &str, invariant: &str) -> Result<Output> {
+    fn tlc(&self, model: &str, module: &str, invariant: &str) -> Result<RawResult> {
         let config = format!("{OUTPUT}/tlc.json");
         self.quint(&[
             "verify",
@@ -232,8 +390,8 @@ impl Runner<'_> {
         let report = String::from_utf8_lossy(&checked.stdout);
         let found = distinct_states(&report);
         ensure!(
-            checked.status.success() && found == Some(quint.distinct_states),
-            "TLC found {found:?} distinct states of {} and {}, and {} records {}; review the model change, then record the new count:\n{report}",
+            checked.success() && found == Some(quint.distinct_states),
+            "TLC found {found:?} distinct states of {} and {:?}, and {} records {}; review the model change, then record the new count:\n{report}",
             quint.main,
             checked.status,
             obligations::MANIFEST,
@@ -246,11 +404,11 @@ impl Runner<'_> {
                 .map_or(&quint.main, |symbolic| &symbolic.main);
             let mut options = Vec::new();
             if let Some(symbolic) = &quint.symbolic {
-                fs::write(
-                    self.output.join("apalache.json"),
-                    serde_json::to_vec(
+                self.file(
+                    "apalache.json",
+                    Some(&serde_json::to_vec(
                         &serde_json::json!({"checker": {"cinit": symbolic.constants}}),
-                    )?,
+                    )?),
                 )?;
                 options.extend(["--apalache-config", "/out/apalache.json"]);
             }
@@ -286,7 +444,7 @@ impl Runner<'_> {
         }
         let probed = self.tlc(model, &quint.probe, &quint.invariant)?;
         ensure!(
-            !probed.status.success()
+            !probed.success()
                 && String::from_utf8_lossy(&probed.stderr).contains("found a counterexample"),
             "the model checker found no violation of {} in {}, so nothing shows the check can fail",
             quint.invariant,
@@ -332,8 +490,7 @@ impl Runner<'_> {
 
     /// Writes the traces of the model and the violation of its probe again at the seed, and requires the committed states.
     fn traces(&self, model: &str, quint: &QuintModel) -> Result<()> {
-        let generated = self.output.join("traces");
-        fs::create_dir_all(&generated)?;
+        self.directory("traces")?;
         let steps = quint.steps.to_string();
         let count = quint
             .traces
@@ -389,8 +546,8 @@ impl Runner<'_> {
         for trace in &quint.traces {
             let committed = self.root.join(trace);
             let name = committed.file_name().context("a trace path names a file")?;
-            let fresh = fs::read_to_string(generated.join(name))
-                .with_context(|| format!("Quint wrote no trace for {trace}"))?;
+            let name = name.to_str().context("non-UTF-8 trace name")?;
+            let fresh = String::from_utf8(self.file(&format!("traces/{name}"), None)?)?;
             ensure!(
                 states(&fs::read_to_string(&committed).context(trace.clone())?)? == states(&fresh)?,
                 "{trace} differs from the trace Quint writes at seed {}; regenerate it and review the change",
@@ -401,22 +558,40 @@ impl Runner<'_> {
     }
 }
 
-/// Discharges every Quint obligation of the manifest in the pinned image, offline.
-///
-/// # Errors
-///
-/// Returns an error when Docker can't build or run the image, or any check of an obligation fails.
-pub fn verify(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
+pub(crate) fn collect(root: &Path, manifest: &obligations::Manifest) -> Result<Reports> {
     let root = crate::canonical(root)?;
     let output = tempfile::tempdir()?;
-    let image = image(&root)?;
-    build(&root, &image)?;
-    fs::write(output.path().join("tlc.json"), TLC_CONFIG)?;
+    let image_tag = image(&root)?;
+    build(&root, &image_tag)?;
+    let platform = crate::container::native_platform()?;
+    let identity = crate::verification_env::inspect(&image_tag, &platform)?;
+    let reports = RefCell::new(Reports {
+        inputs_sha256: crate::phase_evidence::model_inputs(&root)?,
+        manifest_sha256: crate::build_inputs::hex(&Sha256::digest(format!("{manifest:?}"))),
+        image_tag,
+        image_id: identity.id.clone(),
+        platform,
+        operations: Vec::new(),
+        artifacts: Vec::new(),
+    });
     let runner = Runner {
         root: &root,
-        output: output.path(),
-        image,
+        execution: Execution::Cold {
+            output: output.path(),
+            image: &identity.id,
+            reports: &reports,
+        },
     };
+    run_models(&root, manifest, &runner)?;
+    Ok(reports.into_inner())
+}
+
+fn run_models(
+    root: &Path,
+    manifest: &obligations::Manifest,
+    runner: &Runner<'_>,
+) -> Result<(usize, usize)> {
+    runner.file("tlc.json", Some(TLC_CONFIG.as_bytes()))?;
     let mut verified = 0;
     for obligation in &manifest.obligations {
         if let Obligation::Quint(quint) = obligation {
@@ -427,9 +602,167 @@ pub fn verify(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
             verified += 1;
         }
     }
-    let graphs = crate::state_graph::check(&root, output.path(), &runner.image, manifest)?;
+    let graphs = crate::state_graph::check_with(root, manifest, runner)?;
+    runner.finish()?;
+    Ok((verified, graphs))
+}
+
+pub(crate) fn validate(
+    root: &Path,
+    manifest: &obligations::Manifest,
+    reports: &Reports,
+) -> Result<()> {
+    ensure!(
+        reports.manifest_sha256
+            == crate::build_inputs::hex(&Sha256::digest(format!("{manifest:?}"))),
+        "Quint report manifest differs"
+    );
+    ensure!(
+        reports.inputs_sha256 == crate::phase_evidence::model_inputs(root)?,
+        "Quint report source inputs differ"
+    );
+    ensure!(
+        reports.image_tag == image(root)?,
+        "Quint report image definition differs"
+    );
+    ensure!(
+        matches!(reports.platform.as_str(), "linux/amd64" | "linux/arm64"),
+        "Quint report platform is unsupported"
+    );
+    let (_, architecture) = reports
+        .platform
+        .split_once('/')
+        .context("Quint report target missing")?;
+    crate::verification_env::parse_image(
+        &serde_json::to_string(&serde_json::json!({
+            "Id":reports.image_id, "Os":"linux", "Architecture":architecture
+        }))?,
+        &reports.platform,
+    )?;
+    let runner = Runner {
+        root,
+        execution: Execution::Captured {
+            reports,
+            operation: Cell::new(0),
+            artifact: Cell::new(0),
+        },
+    };
+    let (verified, graphs) = run_models(root, manifest, &runner)?;
     println!(
         "Verified all {verified} Quint models offline: each typechecks, passes its tests, holds its invariant under TLC with its recorded state count, witnesses every outcome, and reproduces its traces, each probe breaks the invariant, and TLC dumps the committed state graph of {graphs}"
     );
     Ok(())
+}
+
+/// Discharges every Quint obligation of the manifest in the pinned image, offline.
+///
+/// # Errors
+///
+/// Returns an error when Docker can't build or run the image, or any check of an obligation fails.
+pub fn verify(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
+    validate(root, manifest, &collect(root, manifest)?)
+}
+
+#[cfg(test)]
+mod report_tests {
+    use super::*;
+
+    fn reports() -> Reports {
+        Reports {
+            inputs_sha256: String::new(),
+            manifest_sha256: String::new(),
+            image_tag: String::new(),
+            image_id: String::new(),
+            platform: String::new(),
+            operations: vec![Operation {
+                arguments: vec![
+                    "quint".to_owned(),
+                    "typecheck".to_owned(),
+                    "/source/model.qnt".to_owned(),
+                ],
+                result: RawResult {
+                    status: Some(0),
+                    stdout: b"original stdout".to_vec(),
+                    stderr: b"original stderr".to_vec(),
+                },
+            }],
+            artifacts: vec![
+                Artifact {
+                    path: "tlc.json".to_owned(),
+                    written: true,
+                    bytes: TLC_CONFIG.as_bytes().to_vec(),
+                },
+                Artifact {
+                    path: "traces/main.0.itf.json".to_owned(),
+                    written: false,
+                    bytes: b"original trace".to_vec(),
+                },
+            ],
+        }
+    }
+
+    fn decoder(reports: &Reports) -> Runner<'_> {
+        Runner {
+            root: Path::new("."),
+            execution: Execution::Captured {
+                reports,
+                operation: Cell::new(0),
+                artifact: Cell::new(0),
+            },
+        }
+    }
+
+    #[test]
+    fn quint_reports_keep_raw_operations_and_refuse_missing_changed_or_unfinished_results()
+    -> Result<()> {
+        let reports = reports();
+        let decoded: Reports = serde_json::from_slice(&serde_json::to_vec(&reports)?)?;
+        let runner = decoder(&decoded);
+        let original = runner.quint(&["typecheck", "/source/model.qnt"])?;
+        assert_eq!(original.stdout, b"original stdout");
+        assert_eq!(original.stderr, b"original stderr");
+        assert!(runner.quint(&["typecheck", "/source/model.qnt"]).is_err());
+        for mutation in 0..3 {
+            let mut changed = reports.clone();
+            match mutation {
+                0 => changed.operations.clear(),
+                1 => changed.operations[0].arguments[1] = "verify".to_owned(),
+                _ => changed.operations[0].result.status = None,
+            }
+            assert!(
+                decoder(&changed)
+                    .quint(&["typecheck", "/source/model.qnt"])
+                    .is_err()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn quint_reports_bind_configuration_and_original_artifacts_without_effects() -> Result<()> {
+        let reports = reports();
+        let runner = decoder(&reports);
+        assert!(runner.finish().is_err());
+        runner.quint(&["typecheck", "/source/model.qnt"])?;
+        runner.file("tlc.json", Some(TLC_CONFIG.as_bytes()))?;
+        assert_eq!(
+            runner.file("traces/main.0.itf.json", None)?,
+            b"original trace"
+        );
+        runner.finish()?;
+        assert!(
+            decoder(&reports)
+                .file("tlc.json", Some(b"different worker count"))
+                .is_err()
+        );
+        assert!(decoder(&reports).file("missing.trace", None).is_err());
+        let mut duplicated = reports.clone();
+        duplicated.operations.push(duplicated.operations[0].clone());
+        let runner = decoder(&duplicated);
+        runner.quint(&["typecheck", "/source/model.qnt"])?;
+        runner.file("tlc.json", Some(TLC_CONFIG.as_bytes()))?;
+        runner.file("traces/main.0.itf.json", None)?;
+        assert!(runner.finish().is_err());
+        Ok(())
+    }
 }

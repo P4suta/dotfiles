@@ -36,6 +36,8 @@ struct Execution {
     submission: String,
     bundle_hash: String,
     program: Vec<String>,
+    #[serde(default)]
+    local: bool,
     #[serde(with = "State")]
     state: PendingState,
 }
@@ -163,6 +165,7 @@ pub(super) fn cutoff(
         .filter(|entry| {
             entry.execution.inputs[stage.index()] == inputs
                 && (stage == Stage::Real || entry.execution.gate == gate)
+                && (!entry.execution.local || entry.execution.reused[stage.index()].is_none())
         })
         .map(|entry| entry.cutoff)
         .max())
@@ -346,9 +349,9 @@ impl Lease {
             submission,
             bundle_hash: digest(&fs::read(&bundle)?),
             program,
+            local: false,
             state: PendingState::Prepared,
         };
-        self.write(&execution)?;
         Ok(execution)
     }
 
@@ -393,6 +396,7 @@ impl Lease {
             status,
             output,
             reused: execution.reused.clone(),
+            capture: None,
         };
         Ok((execution, run))
     }
@@ -437,6 +441,21 @@ impl Lease {
     }
 
     fn unverified(&self, root: &Path, execution: &Execution, run: &GateRun) -> Result<Vec<String>> {
+        self.mark_unverified(root, execution, run.status, &run.output)?;
+        anyhow::bail!(
+            "{}:{} terminated without verified stage evidence; unverified history blocks old credit; run `dotfiles hosts check` for a fresh attempt",
+            execution.host,
+            execution.submission
+        );
+    }
+
+    fn mark_unverified(
+        &self,
+        root: &Path,
+        execution: &Execution,
+        status: Option<i32>,
+        output: &str,
+    ) -> Result<()> {
         let _notes = super::notes_lock(root)?;
         let mut records = history(root, self.family)?;
         let mut execution = execution.clone();
@@ -450,8 +469,8 @@ impl Lease {
                 execution: execution.clone(),
                 cutoff,
                 notes_revision,
-                status: run.status,
-                output_hash: digest(run.output.as_bytes()),
+                status,
+                output_hash: digest(output.as_bytes()),
             });
             crate::runtime::replace(
                 &history_path(root, self.family)?,
@@ -460,11 +479,24 @@ impl Lease {
             )?;
         }
         self.write(&execution)?;
-        anyhow::bail!(
-            "{}:{} terminated without verified stage evidence; unverified history blocks old credit; run `dotfiles hosts check` for a fresh attempt",
-            execution.host,
-            execution.submission
-        );
+        Ok(())
+    }
+
+    pub(super) fn begin_local(
+        &self,
+        candidate: &Candidate<'_>,
+        snapshot: &Path,
+        host: &str,
+        reused: [Option<Reused>; 2],
+    ) -> Result<()> {
+        let mut execution = self.prepare(candidate, snapshot, host, reused)?;
+        execution.local = true;
+        self.mark_unverified(
+            candidate.root,
+            &execution,
+            None,
+            "local protected candidate capture started",
+        )
     }
 
     fn retire(&self) -> Result<()> {
@@ -510,6 +542,7 @@ impl Lease {
         reused: [Option<Reused>; 2],
     ) -> Result<Vec<String>> {
         let execution = self.prepare(candidate, snapshot, host, reused)?;
+        self.write(&execution)?;
         let (execution, run) = self.run(native, execution)?;
         self.finish(native, candidate.root, &execution, &run)
     }

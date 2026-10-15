@@ -105,7 +105,7 @@ fn an_exemption_needs_a_closed_reason_its_evidence_and_a_reconsideration() {
     .unwrap()
     .unwrap();
     assert_eq!(found.reason, Reason::NoDecision);
-    assert_eq!(found.evidence.1, "keys");
+    assert_eq!(found.evidence.1, "tests::keys");
     assert!(exemption("Plain documentation.").unwrap().is_none());
     assert!(exemption("Exempt as too-hard: no. Evidence: `a.rs::t`. Reconsider when x.").is_err());
     assert!(exemption("Exempt as no-decision: no evidence. Reconsider when x.").is_err());
@@ -119,6 +119,11 @@ fn fixture(module: &str, caller: &str) -> tempfile::TempDir {
     fs::create_dir_all(&rules).unwrap();
     fs::write(rules.join("a_rules.rs"), module).unwrap();
     fs::write(rules.join("lib.rs"), "pub mod a_rules;\n").unwrap();
+    fs::write(
+        directory.path().join("crates/rules/Cargo.toml"),
+        "[package]\nname = \"fixture-rules\"\nversion = \"0.0.0\"\n",
+    )
+    .unwrap();
     let tool = directory.path().join("crates/tool/src");
     fs::create_dir_all(&tool).unwrap();
     fs::write(tool.join("main.rs"), caller).unwrap();
@@ -213,6 +218,265 @@ fn a_stale_exemption_fails_and_a_current_one_passes() {
         "{:#?}",
         measured.refusals
     );
+}
+
+fn lean_fixture(
+    path: &str,
+    source: &str,
+    function: &str,
+    refinement: &str,
+    registration: &str,
+) -> (tempfile::TempDir, xtask::obligations::Manifest) {
+    let directory = fixture(PROVED, CALLER);
+    let package = directory.path().join("specs/lean");
+    fs::create_dir_all(&package).unwrap();
+    fs::write(
+        package.join("lean-toolchain"),
+        format!("leanprover/lean4:v{}\n", xtask::lean::LEAN_VERSION),
+    )
+    .unwrap();
+    fs::write(
+        package.join("A.lean"),
+        "namespace A\ntheorem holds : True := by trivial\nend A\n",
+    )
+    .unwrap();
+    fs::write(package.join("Axioms.lean"), "#print axioms A.holds\n").unwrap();
+    fs::create_dir_all(directory.path().join("xtask/tests")).unwrap();
+    fs::write(
+        directory.path().join("xtask/Cargo.toml"),
+        "[package]\nname = \"fixture\"\nversion = \"0.0.0\"\n",
+    )
+    .unwrap();
+    fs::write(directory.path().join(path), source).unwrap();
+    let manifest = parse_manifest(&format!(r#"
+{registration}
+[[obligation]]
+verifier = "lean"
+package = "specs/lean"
+theorems = [{{ name = "A.holds", module = "A", bridge = "{path}::{function}", refinement = {refinement} }}]
+"#)).unwrap();
+    (directory, manifest)
+}
+
+fn lean_refusals(root: &Path, manifest: &xtask::obligations::Manifest) -> Vec<String> {
+    let package = manifest
+        .obligations
+        .iter()
+        .find_map(|obligation| match obligation {
+            Obligation::Lean(package) => Some(package),
+            _ => None,
+        })
+        .unwrap();
+    xtask::obligations::close_lean(root, manifest, package)
+}
+
+#[test]
+fn the_repository_lean_bridges_close_at_their_declared_implementation_scope() {
+    let manifest = xtask::obligations::manifest(root()).unwrap();
+    assert_eq!(lean_refusals(root(), &manifest), NONE);
+}
+
+const SELECTED_CASES: &str = r#"{ kind = "selected-cases", entrypoint = "checks" }"#;
+
+#[test]
+fn a_bridge_needs_an_enabled_registered_root_that_calls_the_declared_entrypoint() {
+    for source in [
+        "// fn bridge() {}\nfn checks() {}",
+        "const TEXT: &str = \"fn bridge() {}\";\nfn checks() {}",
+        "fn bridge() { checks(); } fn checks() {}",
+        "#[test] #[ignore] fn bridge() { checks(); } fn checks() {}",
+        "#[cfg(any())] #[test] fn bridge() { checks(); } fn checks() {}",
+        "#[cfg_attr(test, ignore)] #[test] fn bridge() { checks(); } fn checks() {}",
+        "#[cfg_attr(not(miri), ignore)] #[test] fn bridge() { checks(); } fn checks() {}",
+        "#[cfg_attr(miri, test)] fn bridge() { checks(); } fn checks() {}",
+        "#[cfg_attr(unknown, test)] fn bridge() { checks(); } fn checks() {}",
+        "#[cfg_attr(test, cfg(any()))] #[test] fn bridge() { checks(); } fn checks() {}",
+        "#[cfg_attr(test)] #[test] fn bridge() { checks(); } fn checks() {}",
+        "#[cfg(any())] mod tests { #[test] fn bridge() { checks(); } fn checks() {} }",
+        "#[test] fn bridge() {} fn checks() {}",
+        "#[test] fn root() { fn dead() { bridge(); } } fn bridge() { checks(); } fn checks() {}",
+        "#[test] fn root() { let dead = || bridge(); } fn bridge() { checks(); } fn checks() {}",
+        "#[test] fn root() { if false { bridge(); } } fn bridge() { checks(); } fn checks() {}",
+        "#[test] fn root() { other::bridge(); } fn bridge() { checks(); } fn checks() {}",
+        "#[test] fn root() { let bridge = || {}; bridge(); } fn bridge() { checks(); } fn checks() {}",
+        "#[test] fn root() { object.bridge(); } fn bridge() { checks(); } fn checks() {}",
+    ] {
+        let (directory, manifest) = lean_fixture(
+            "xtask/tests/bridge.rs",
+            source,
+            "bridge",
+            SELECTED_CASES,
+            "",
+        );
+        assert_ne!(
+            lean_refusals(directory.path(), &manifest),
+            NONE.to_vec(),
+            "{source}"
+        );
+    }
+    for source in [
+        "#[test] fn bridge() { checks(); } fn checks() {}",
+        "#[cfg_attr(miri, ignore = \"Miri-only omission\")] #[test] fn bridge() { checks(); } fn checks() {}",
+        "#[cfg_attr(not(miri), test)] fn bridge() { checks(); } fn checks() {}",
+        "#[cfg_attr(test, cfg_attr(not(miri), test))] fn bridge() { checks(); } fn checks() {}",
+        "#[test] fn root() { bridge(); } fn bridge() { checks(); } fn checks() {}",
+        "#[test] fn root() { assert!(bridge()); } fn bridge() -> bool { checks(); true } fn checks() {}",
+        "#[test] fn root() { self::bridge(); } fn bridge() { checks(); } fn checks() {}",
+    ] {
+        let (directory, manifest) = lean_fixture(
+            "xtask/tests/bridge.rs",
+            source,
+            "bridge",
+            SELECTED_CASES,
+            "",
+        );
+        assert_eq!(lean_refusals(directory.path(), &manifest), NONE, "{source}");
+    }
+}
+
+#[test]
+fn cargo_registration_and_parent_configuration_cannot_be_invented() {
+    let source = "#[test] fn bridge() { checks(); } fn checks() {}";
+    for path in ["xtask/tests/bridge.txt", "crates/rules/src/a_rules.rs"] {
+        let (directory, manifest) = lean_fixture(path, source, "bridge", SELECTED_CASES, "");
+        if path.ends_with("a_rules.rs") {
+            fs::write(
+                directory.path().join("crates/rules/src/lib.rs"),
+                "#[path = \"other.rs\"] pub mod a_rules;\n",
+            )
+            .unwrap();
+        }
+        assert_ne!(
+            lean_refusals(directory.path(), &manifest),
+            NONE.to_vec(),
+            "{path}"
+        );
+    }
+    let (directory, manifest) = lean_fixture(
+        "crates/rules/src/a_rules.rs",
+        source,
+        "bridge",
+        SELECTED_CASES,
+        "",
+    );
+    fs::write(
+        directory.path().join("crates/rules/src/lib.rs"),
+        "#![cfg(any())]\npub mod a_rules;\n",
+    )
+    .unwrap();
+    assert_ne!(lean_refusals(directory.path(), &manifest), NONE.to_vec());
+    let (directory, manifest) = lean_fixture(
+        "crates/rules/src/a_rules.rs",
+        source,
+        "bridge",
+        SELECTED_CASES,
+        "",
+    );
+    fs::write(
+        directory.path().join("crates/rules/Cargo.toml"),
+        "[package]\nname = \"fixture\"\nautolib = false\n",
+    )
+    .unwrap();
+    assert_ne!(lean_refusals(directory.path(), &manifest), NONE.to_vec());
+    let (directory, manifest) = lean_fixture(
+        "xtask/tests/bridge.rs",
+        source,
+        "bridge",
+        SELECTED_CASES,
+        "",
+    );
+    fs::write(
+        directory.path().join("xtask/Cargo.toml"),
+        "[package]\nname = \"fixture\"\nautotests = false\n",
+    )
+    .unwrap();
+    assert_ne!(lean_refusals(directory.path(), &manifest), NONE.to_vec());
+}
+
+#[test]
+fn kani_scope_needs_an_execution_obligation_and_a_used_matching_bound() {
+    let source =
+        "const BOUND: usize = 5;\n#[cfg(kani)] #[kani::proof] fn bridge() { let _ = BOUND; }";
+    let refinement = r#"{ kind = "bounded-kani", source = "crates/rules/src/a_rules.rs", constant = "BOUND", value = 5 }"#;
+    let listed = "[[obligation]]\nverifier = \"kani\"\nsource = \"crates/rules/src/a_rules.rs\"\n";
+    let (directory, manifest) = lean_fixture(
+        "crates/rules/src/a_rules.rs",
+        source,
+        "bridge",
+        refinement,
+        listed,
+    );
+    assert_eq!(lean_refusals(directory.path(), &manifest), NONE);
+    for (code, scope, registration) in [
+        (
+            source.replace("let _ = BOUND;", ""),
+            refinement.to_owned(),
+            listed,
+        ),
+        (
+            source.to_owned(),
+            refinement.replace("value = 5", "value = 6"),
+            listed,
+        ),
+        (source.to_owned(), refinement.to_owned(), ""),
+        (
+            source.to_owned(),
+            refinement.to_owned(),
+            "[[obligation]]\nverifier = \"kani-contract\"\nsource = \"crates/rules/src/a_rules.rs\"\nfunction = \"bridge\"\nflags = [\"function-contracts\"]\n",
+        ),
+    ] {
+        let (directory, manifest) = lean_fixture(
+            "crates/rules/src/a_rules.rs",
+            &code,
+            "bridge",
+            &scope,
+            registration,
+        );
+        assert_ne!(lean_refusals(directory.path(), &manifest), NONE.to_vec());
+    }
+}
+
+#[test]
+fn refinement_roles_cannot_be_attached_to_an_unrelated_empty_test() {
+    for refinement in [
+        r#"{ kind = "generated-vectors" }"#,
+        r#"{ kind = "source-translation" }"#,
+    ] {
+        let (directory, manifest) = lean_fixture(
+            "xtask/tests/bridge.rs",
+            "#[test] fn bridge() {}",
+            "bridge",
+            refinement,
+            "",
+        );
+        assert_ne!(lean_refusals(directory.path(), &manifest), NONE.to_vec());
+    }
+    for source in [
+        "use xtask::lean::vectors; #[test] fn bridge() { vectors(root(), true).unwrap(); }",
+        "use xtask::lean::vectors as generate; #[test] fn bridge() { generate(root(), true).unwrap(); }",
+    ] {
+        let (directory, manifest) = lean_fixture(
+            "xtask/tests/bridge.rs",
+            source,
+            "bridge",
+            r#"{ kind = "generated-vectors" }"#,
+            "",
+        );
+        assert_eq!(lean_refusals(directory.path(), &manifest), NONE);
+    }
+    let (directory, manifest) = lean_fixture(
+        "xtask/tests/bridge.rs",
+        "use xtask::lean::vectors; #[test] fn bridge() { let vectors = || {}; vectors(); }",
+        "bridge",
+        r#"{ kind = "generated-vectors" }"#,
+        "",
+    );
+    assert_ne!(lean_refusals(directory.path(), &manifest), NONE.to_vec());
+    assert!(parse_manifest(r#"[[obligation]]
+verifier = "lean"
+package = "specs/lean"
+theorems = [{ name = "A.holds", module = "A", bridge = "xtask/tests/a.rs::bridge", refinement = { kind = "universal-rust" } }]
+"#).is_err());
 }
 
 #[test]

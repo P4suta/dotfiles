@@ -7,6 +7,60 @@ use std::path::Path;
 
 #[cfg(windows)]
 #[test]
+fn native_windows_tar_ignores_path_shadowing_for_drive_letter_archives() -> Result<()> {
+    use platform::runtime::{Real, Runner, checked};
+
+    const PAYLOAD: &str = "archive payload";
+    let scope = tempfile::tempdir()?;
+    let root = platform::paths::canonical(scope.path())?;
+    let shadow = root.join("shadow");
+    let extract = root.join("extract");
+    fs::create_dir(&shadow)?;
+    fs::create_dir(&extract)?;
+    fs::copy(std::env::current_exe()?, shadow.join("tar.exe"))?;
+    fs::write(root.join("payload.txt"), PAYLOAD)?;
+    let native =
+        std::path::PathBuf::from(std::env::var_os("SystemRoot").context("native Windows root")?)
+            .join("System32/tar.exe");
+    let archive = root.join("fixture.zip");
+    let created = platform::process::command(&native)
+        .args(["-c", "-a", "-f"])
+        .arg(&archive)
+        .arg("-C")
+        .arg(&root)
+        .arg("payload.txt")
+        .output()?;
+    ensure!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let mut runner = Real::new(&root)?;
+    runner.path = shadow.into_os_string();
+    assert_eq!(runner.command(Tool::TarExe).get_program(), native);
+    assert!(runner.available(Tool::TarExe));
+    let listing = checked(
+        &mut runner,
+        Tool::TarExe,
+        &["-tf".into(), archive.clone().into()],
+    )?;
+    assert_eq!(String::from_utf8(listing)?.trim(), "payload.txt");
+    checked(
+        &mut runner,
+        Tool::TarExe,
+        &[
+            "-xf".into(),
+            archive.into(),
+            "-C".into(),
+            extract.clone().into(),
+        ],
+    )?;
+    assert_eq!(fs::read_to_string(extract.join("payload.txt"))?, PAYLOAD);
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
 fn powershell_cache_preserves_the_native_windows_environment() -> Result<()> {
     let cache = platform::process::PowerShellCache::new()?;
     let mut command = Tool::Pwsh.command();
@@ -397,12 +451,18 @@ fn fixture_git_processes_start_from_the_shared_helper() -> Result<()> {
         Some(directory) => tempfile::tempdir_in(directory)?,
         None => tempfile::tempdir()?,
     };
+    let home = scope.path().join("home");
+    let opt_in = home.join(platform::incidents::EXPERIMENTAL);
+    fs::create_dir_all(opt_in.parent().context("fixture consent has a parent")?)?;
+    fs::write(opt_in, rules::incident_rules::EXPERIMENTAL_OPT_IN)?;
     let output = fixture_git::fixture_process::command(std::env::current_exe()?, scope.path())
         .args([
             "--exact",
             "fixture_git_processes_start_from_the_shared_helper",
             "--nocapture",
         ])
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
         .env(FIXTURE_GUARD_CHILD, "1")
         .env("DOTFILES_EXPECTED_FAILURE", "")
         .output()?;

@@ -1,14 +1,64 @@
 //! The pull request workflow: issue-scoped preparation, creation, document edits, ready transitions, and stacked branches.
 
+mod context;
+mod local;
+mod review_policy;
+pub use local::Action as LocalAction;
+
+/// Validate the issue contexts selected by the actual local or CI change.
+///
+/// # Errors
+///
+/// Returns a refusal when the source, issue, destination, signature, or path scope differs.
+pub fn check_issue_context(root: &Path, base: Option<&str>, staged: bool) -> Result<()> {
+    context::check(root, base, staged).map_err(|error| {
+        Refusal::new(
+            "pr.issue-context",
+            "the implementation change lacks a matching checked issue context",
+            "pr-workflow start --repo OWNER/REPO --issue NUMBER --path PATH",
+        )
+        .evidence(format!("{error:#}"))
+        .into()
+    })
+}
+
+/// Read the authenticated review route of the actual PR head without requesting a review.
+///
+/// # Errors
+/// Returns a refusal for an unavailable, unsigned, malformed, stale, or mismatched assessment.
+pub fn current_review_route(
+    root: &Path,
+    repository: &str,
+    pr: u64,
+) -> Result<rules::review_routing_rules::ReviewRoute> {
+    let target = Target {
+        repo: repository.into(),
+        generation: Generation::Local,
+        title_policy: None,
+        issue: None,
+        cli_receipt: None,
+        prior_cli_receipt: None,
+    };
+    target.conventional_required()?;
+    let github = Github::connect()?;
+    let live = live_document(&github, &target, pr)?;
+    match live.state.as_str() {
+        "CLOSED" | "MERGED" => return Ok(rules::review_routing_rules::ReviewRoute::None),
+        "OPEN" => {}
+        _ => bail!("unknown PR lifecycle while reading its review route"),
+    }
+    Ok(review_policy::live_binding_at(root, &github, &target, &live.body, &live)?.route)
+}
+
 pub use platform::{aside, build_inputs, freshness, refusal, report, tool};
 pub use rules::{pr_ready_rules, pr_rules, wip_rules};
 
 use crate::pr_ready_rules::{Action as Move, Report, Settlement, State, Workflow};
 use crate::pr_rules::{
     Blocker, Checks, Dependency, Effect, Exclusion, Generation, IssueGate, Lifecycle, MergeState,
-    Operation, ReviewRequirement, Step, Stop, api_quota_available, coderabbit_body_marker_allowed,
-    dependency, exclusion, head_checks, issue_gate, keeps_pause_exclusion, merge_step, plan,
-    requests_review, review_request_allowed, review_requirement,
+    Operation, Step, Stop, api_quota_available, coderabbit_body_marker_allowed, dependency,
+    exclusion, head_checks, issue_gate, keeps_pause_exclusion, merge_step, plan, requests_review,
+    review_request_allowed,
 };
 use crate::refusal::{Refusal, command};
 use crate::tool::Tool;
@@ -20,7 +70,8 @@ use prose::prose_rules::standard_applies;
 use pulldown_cmark::{Event, Tag, TagEnd};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
@@ -39,6 +90,7 @@ const PLACEHOLDER_OPEN: &str = "{{";
 const PLACEHOLDER_CLOSE: &str = "}}";
 /// A repository's parts: `OWNER/REPO`.
 const REPOSITORY_PARTS: usize = 2;
+const MAX_IDENTITY_REPOSITORIES: usize = 2;
 const GITHUB: &str = "https://github.com";
 /// The URL prefixes of a GitHub remote, over HTTPS, SSH, and the short `git@host:path` SSH form.
 const GITHUB_REMOTE_PREFIXES: [&str; 3] = [
@@ -71,10 +123,49 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    /// Report the verified route of the actual current PR assessment without requesting review.
+    ReviewRoute {
+        #[command(flatten)]
+        target: Target,
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        pr: u64,
+    },
+    /// Sign an AI importance assessment for the exact current committed PR diff.
+    Assess {
+        #[command(flatten)]
+        target: Target,
+        #[arg(long)]
+        base: String,
+        #[arg(long)]
+        assessment_file: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        /// Carry the prior actual PR assessment when changing its review route.
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        pr: Option<u64>,
+    },
     /// Inspect repository scope and the issue before starting GitHub-bound work.
     Start {
         #[command(flatten)]
         target: Target,
+        /// Repository-relative files or directories this issue permits implementation to change.
+        #[arg(long = "path")]
+        paths: Vec<PathBuf>,
+        /// Adopt the exact pre-existing baseline approved once in owner-local state.
+        #[arg(long)]
+        adopt_existing: bool,
+        /// Link actual local issue history through this new checked remote authorization.
+        #[arg(long, conflicts_with = "adopt_existing")]
+        promote_local: bool,
+    },
+    /// Match signed issue contexts to the actual local or CI change.
+    ChangeCheck {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long, conflicts_with = "staged")]
+        base: Option<String>,
+        #[arg(long)]
+        staged: bool,
     },
     /// Validate local files or the current GitHub document without mutation.
     Check {
@@ -150,6 +241,11 @@ pub enum Commands {
     Issue {
         #[command(subcommand)]
         action: IssueAction,
+    },
+    /// Prepare and check owner-local issues without a remote repository or GitHub access.
+    Local {
+        #[command(subcommand)]
+        action: LocalAction,
     },
 }
 
@@ -235,7 +331,10 @@ pub struct IssueDocument {
 impl Commands {
     fn name(&self) -> &'static str {
         match self {
+            Self::ReviewRoute { .. } => "review-route",
+            Self::Assess { .. } => "assess",
             Self::Start { .. } => "start",
+            Self::ChangeCheck { .. } => "change-check",
             Self::Check { .. } => "check",
             Self::Create { .. } => "create",
             Self::Edit { .. } => "edit",
@@ -243,6 +342,7 @@ impl Commands {
             Self::Merge { .. } => "merge",
             Self::Stack { .. } => "stack",
             Self::Issue { .. } => "issue",
+            Self::Local { .. } => "local",
         }
     }
 }
@@ -261,6 +361,12 @@ pub struct Target {
     /// An existing open issue in the destination repository, required for personal non-forks.
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     pub issue: Option<u64>,
+    /// Private signed evidence from the guarded committed CLI review of this exact diff.
+    #[arg(long)]
+    pub cli_receipt: Option<PathBuf>,
+    /// Private original receipt required when a prior high assessment changes review route.
+    #[arg(long)]
+    pub prior_cli_receipt: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -292,6 +398,36 @@ struct LiveDocument {
     status_check_rollup: Vec<ReportedCheck>,
     head_ref_oid: Option<String>,
     base_ref_name: Option<String>,
+    base_ref_oid: Option<String>,
+    #[serde(default)]
+    labels: Vec<ReviewLabel>,
+    author: ReviewAuthor,
+    #[serde(flatten)]
+    source: LiveSource,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveSource {
+    head_ref_name: Option<String>,
+    head_repository: Option<HeadRepository>,
+    head_repository_owner: Option<ReviewAuthor>,
+    is_cross_repository: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct HeadRepository {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct ReviewAuthor {
+    login: String,
+}
+
+#[derive(Deserialize)]
+struct ReviewLabel {
+    name: String,
 }
 
 /// One entry of the head commit's check rollup: a check run, named by `name`, or a commit status, named by `context`.
@@ -411,6 +547,7 @@ impl WorkInProgress {
 struct Github {
     policy: WorkflowPolicy,
     login: String,
+    repositories: RefCell<BTreeMap<String, Repository>>,
 }
 
 /// One open PR as the REST list reports it.
@@ -443,6 +580,8 @@ struct Owner {
 struct Destination {
     personal: bool,
     fork: bool,
+    repository_id: u64,
+    owner_id: u64,
 }
 
 fn workflow_policy() -> Result<WorkflowPolicy> {
@@ -477,14 +616,7 @@ fn workflow_policy() -> Result<WorkflowPolicy> {
     Ok(policy)
 }
 
-#[derive(Deserialize)]
-struct Repository {
-    full_name: String,
-    owner: Owner,
-    fork: bool,
-    #[serde(default)]
-    default_branch: Option<String>,
-}
+type Repository = platform::source_identity::Repository;
 
 /// An open PR as `gh pr list` reports it.
 #[derive(Deserialize)]
@@ -507,6 +639,12 @@ struct MergeView {
     is_draft: bool,
     head_ref_oid: String,
     base_ref_name: String,
+    base_ref_oid: Option<String>,
+    #[serde(default)]
+    labels: Vec<ReviewLabel>,
+    author: ReviewAuthor,
+    #[serde(flatten)]
+    source: LiveSource,
     mergeable: String,
     merge_state_status: String,
     #[serde(default)]
@@ -904,6 +1042,8 @@ fn offline_destination(repo: &str) -> Result<Destination> {
             .iter()
             .any(|personal| personal.login.eq_ignore_ascii_case(owner)),
         fork: false,
+        repository_id: 0,
+        owner_id: 0,
     })
 }
 
@@ -914,13 +1054,17 @@ fn validate_issue(document: &IssueDocument) -> Result<ValidatedDocument> {
         generation: Generation::Local,
         title_policy: None,
         issue: None,
+        cli_receipt: None,
+        prior_cli_receipt: None,
     };
     target.conventional_required()?;
     let body = fs::read_to_string(&document.body_file).context("read UTF-8 issue body file")?;
+    validate_issue_contents(&document.title, body)
+}
+
+fn validate_issue_contents(title: &str, body: String) -> Result<ValidatedDocument> {
     ensure!(
-        single_line(&document.title)
-            && document.title.trim() == document.title
-            && !unfinished(&document.title),
+        single_line(title) && title.trim() == title && !unfinished(title),
         "the issue title must be a finished single line without surrounding whitespace"
     );
     let visible = without_comments(&body);
@@ -929,11 +1073,11 @@ fn validate_issue(document: &IssueDocument) -> Result<ValidatedDocument> {
         "the issue body is empty, holds only comments, or contains an unfinished placeholder"
     );
     ensure!(
-        !body.contains(TITLE_REQUEST) && !document.title.contains(TITLE_REQUEST),
+        !body.contains(TITLE_REQUEST) && !title.contains(TITLE_REQUEST),
         "an issue cannot request CodeRabbit generation"
     );
     Ok(ValidatedDocument {
-        title: document.title.clone(),
+        title: title.to_owned(),
         body,
     })
 }
@@ -960,6 +1104,7 @@ impl Github {
         let mut github = Self {
             policy: workflow_policy()?,
             login: String::new(),
+            repositories: RefCell::default(),
         };
         let user: Owner = github.read("user").map_err(|error| {
             if error.downcast_ref::<Refusal>().is_some() {
@@ -986,6 +1131,20 @@ impl Github {
         })?;
         github.login = user.login;
         Ok(github)
+    }
+
+    fn repository(&self, repository: &str) -> Result<Repository> {
+        let key = repository.to_ascii_lowercase();
+        if let Some(metadata) = self.repositories.borrow().get(&key) {
+            return Ok(metadata.clone());
+        }
+        ensure!(
+            self.repositories.borrow().len() < MAX_IDENTITY_REPOSITORIES,
+            "one PR operation may inspect only its source and destination repository identities"
+        );
+        let metadata: Repository = self.read(&format!("repos/{repository}"))?;
+        self.repositories.borrow_mut().insert(key, metadata.clone());
+        Ok(metadata)
     }
 
     /// The status checks that the rulesets of `base` require, by the name each check reports.
@@ -1042,7 +1201,38 @@ impl Github {
     /// Inspect live REST quota headers on each serialized prerequisite request.
     fn read<T: serde::de::DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
         let args = ["api", endpoint, "--hostname", "github.com", "--include"].map(OsString::from);
-        let response = gh(&args)?.replace("\r\n", "\n");
+        self.response(&gh(&args)?, "core")
+    }
+
+    fn graphql<T: serde::de::DeserializeOwned>(
+        &self,
+        query: &str,
+        variables: &serde_json::Value,
+    ) -> Result<T> {
+        let mut input = tempfile::NamedTempFile::new()?;
+        serde_json::to_writer(
+            input.as_file_mut(),
+            &serde_json::json!({"query":query,"variables":variables}),
+        )?;
+        input.as_file().sync_all()?;
+        let args = [
+            "api".into(),
+            "graphql".into(),
+            "--hostname".into(),
+            "github.com".into(),
+            "--include".into(),
+            "--input".into(),
+            input.path().as_os_str().to_owned(),
+        ];
+        self.response(&gh(&args)?, "graphql")
+    }
+
+    fn response<T: serde::de::DeserializeOwned>(
+        &self,
+        response: &str,
+        resource: &str,
+    ) -> Result<T> {
+        let response = response.replace("\r\n", "\n");
         let (headers, body) = response
             .split_once("\n\n")
             .context("missing GitHub response headers")?;
@@ -1074,7 +1264,7 @@ impl Github {
             .parse()
             .context("invalid GitHub quota reset")?;
         ensure!(
-            header("x-ratelimit-resource")? == "core" && reset > 0,
+            header("x-ratelimit-resource")? == resource && reset > 0,
             "invalid GitHub REST quota resource"
         );
         require(
@@ -1147,7 +1337,7 @@ enum BodySource<'a> {
 
 /// Establish the global personal scope of a repository.
 fn destination(github: &Github, repo: &str) -> Result<Destination> {
-    let repository: Repository = github.read(&format!("repos/{repo}"))?;
+    let repository = github.repository(repo)?;
     require(
         repository.full_name.eq_ignore_ascii_case(repo)
             && repository.owner.id != 0
@@ -1197,7 +1387,36 @@ fn destination(github: &Github, repo: &str) -> Result<Destination> {
     Ok(Destination {
         personal,
         fork: repository.fork,
+        repository_id: repository.id,
+        owner_id: repository.owner.id,
     })
+}
+
+fn source_identity(
+    github: &Github,
+    root: &Path,
+    target: &str,
+) -> Result<platform::source_identity::Checked> {
+    platform::source_identity::capture(root, target, |repository| github.repository(repository))
+        .map_err(source_identity_error)
+}
+
+fn source_identity_error(error: anyhow::Error) -> anyhow::Error {
+    let Some(changed) = error.downcast_ref::<platform::source_identity::OriginChanged>() else {
+        return error;
+    };
+    Refusal::new(
+        "pr.stack",
+        "checkout source changed while its destination was being verified; retain the original source before repeating the operation",
+        command(&["git", "remote", "get-url", "origin"]),
+    )
+    .evidence(format!("verified source: {}", changed.expected()))
+    .evidence(format!("actual source: {}", changed.actual()))
+    .into()
+}
+
+fn require_current_source(source: &platform::source_identity::Checked) -> Result<()> {
+    source.require_current().map_err(source_identity_error)
 }
 
 /// Validate an explicitly selected issue in a destination with a known personal scope.
@@ -1411,8 +1630,12 @@ fn admit_review_request(
     operation: Operation,
     generation: Generation,
     body: &str,
+    route: rules::review_routing_rules::ReviewRoute,
     live: impl FnOnce() -> Result<(bool, Exclusion)>,
 ) -> Result<()> {
+    if route != rules::review_routing_rules::ReviewRoute::Pr {
+        return Ok(());
+    }
     if !pr_reviews_paused()? {
         return Ok(());
     }
@@ -1455,25 +1678,6 @@ fn admit_review_request(
             format!(
                 "keep the standalone `{PAUSE_EXCLUSION}` line of this ready PR until the owner resumes PR reviews"
             )
-        }
-    );
-    Ok(())
-}
-
-fn report_review_requirement(body: &str) -> Result<()> {
-    println!(
-        "{}",
-        match review_requirement(pr_reviews_paused()?, review_exclusion(body)) {
-            ReviewRequirement::Paused =>
-                "CodeRabbit PR review: not required while the owner pauses PR reviews; do not wait for or request one".to_owned(),
-            ReviewRequirement::Excluded => format!(
-                "CodeRabbit PR review: excluded by the body's `{REVIEW_EXCLUSION}` line; none is owed"
-            ),
-            ReviewRequirement::Resumed => format!(
-                "CodeRabbit PR review: required again now that PR reviews have resumed; remove the `{REVIEW_EXCLUSION}` and `{PAUSE_EXCLUSION}` lines with pr-workflow edit, then request it with an authorized `@coderabbitai review` comment"
-            ),
-            ReviewRequirement::Required =>
-                "CodeRabbit PR review: required for the current head where the destination enables CodeRabbit; complete it with coderabbit-review".to_owned(),
         }
     );
     Ok(())
@@ -1522,22 +1726,65 @@ fn live_document(_github: &Github, target: &Target, pr: u64) -> Result<LiveDocum
     args.extend([
         pr.to_string().into(),
         "--json".into(),
-        "title,body,state,isDraft,statusCheckRollup,headRefOid,baseRefName".into(),
+        "title,body,state,isDraft,statusCheckRollup,headRefOid,baseRefName,baseRefOid,labels,author,headRefName,headRepository,headRepositoryOwner,isCrossRepository".into(),
     ]);
     serde_json::from_str(&gh(&args)?).context("invalid gh PR document")
 }
 
+fn start_implementation(
+    target: &Target,
+    paths: &[PathBuf],
+    adopt_existing: bool,
+    promote_local: bool,
+    rerun: &str,
+) -> Result<()> {
+    target.conventional_required()?;
+    let github = Github::connect()?;
+    let destination = destination(&github, &target.repo)?;
+    let gate = inspect_issue(&github, target, destination, None, rerun)?;
+    require_issue(gate, target)?;
+    context::start(
+        &github,
+        target,
+        destination,
+        paths,
+        adopt_existing,
+        promote_local,
+    )?;
+    println!("Checked implementation context saved ({gate:?})");
+    Ok(())
+}
+
 fn run(action: Commands, rerun: &str) -> Result<()> {
     match action {
-        Commands::Start { target } => {
+        Commands::ReviewRoute { target, pr } => {
+            let route = current_review_route(&std::env::current_dir()?, &target.repo, pr)?;
+            let route = match route {
+                rules::review_routing_rules::ReviewRoute::None => "none",
+                rules::review_routing_rules::ReviewRoute::Cli => "cli",
+                rules::review_routing_rules::ReviewRoute::Pr => "pr",
+            };
+            println!("{}", serde_json::json!({"route":route}));
+        }
+        Commands::Assess {
+            target,
+            base,
+            assessment_file,
+            output,
+            pr,
+        } => {
             target.conventional_required()?;
             let github = Github::connect()?;
-            let destination = destination(&github, &target.repo)?;
-            let gate = inspect_issue(&github, &target, destination, None, rerun)?;
-            require_issue(gate, &target)?;
-            println!(
-                "Repository prerequisites accepted ({gate:?}); inspect the destination rules and issue scope before implementation"
-            );
+            review_policy::assess(&github, &target, &base, &assessment_file, &output, pr)?;
+        }
+        Commands::Start {
+            target,
+            paths,
+            adopt_existing,
+            promote_local,
+        } => start_implementation(&target, &paths, adopt_existing, promote_local, rerun)?,
+        Commands::ChangeCheck { root, base, staged } => {
+            check_issue_context(&root, base.as_deref(), staged)?;
         }
         Commands::Check {
             target,
@@ -1546,20 +1793,7 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
             pr,
             r#final,
         } => {
-            if let Some(pr) = pr {
-                check_live(&target, pr, r#final, rerun)?;
-            } else {
-                let destination = offline_destination(&target.repo)?;
-                let (_, document) = read_document(
-                    DocumentArgs {
-                        target,
-                        title: title.context("title required")?,
-                        body_file: body_file.context("body file required")?,
-                    },
-                    r#final,
-                )?;
-                written_to_standard(destination, PULL_REQUEST, &document)?;
-            }
+            check_command(target, title, body_file, pr, r#final, rerun)?;
             println!(
                 "PR document accepted; local-file checks do not inspect issues and validation claims still require execution evidence"
             );
@@ -1570,47 +1804,9 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
             base,
             draft,
             independent,
-        } => create(document, head, base, draft, independent, rerun)?,
+        } => create(document, &head, base, draft, independent, rerun)?,
         Commands::Edit { document, pr } => edit(document, pr, rerun)?,
-        Commands::Ready { target, pr } => {
-            target.conventional_required()?;
-            let github = Github::connect()?;
-            let live = live_document(&github, &target, pr)?;
-            let inspect = || {
-                command(&[
-                    "gh",
-                    "pr",
-                    "view",
-                    &pr.to_string(),
-                    "--repo",
-                    &target.repo,
-                    "--json",
-                    "state,isDraft",
-                ])
-            };
-            require(live.state == "OPEN", || {
-                Refusal::new("pr.state", "only an open PR can become ready", inspect())
-                    .evidence(format!("#{pr}: state {}", live.state))
-            })?;
-            let (Some(base), Some(head)) =
-                (live.base_ref_name.as_deref(), live.head_ref_oid.as_deref())
-            else {
-                bail!("GitHub reported no base branch or no head commit");
-            };
-            let required = github.required_checks(&target, base)?;
-            let body = make_ready(
-                &github,
-                &target,
-                pr,
-                live.title,
-                live.body,
-                live.is_draft,
-                checks(&live.status_check_rollup, &required),
-                (base, head),
-                rerun,
-            )?;
-            report_review_requirement(&body)?;
-        }
+        Commands::Ready { target, pr } => ready_command(&target, pr, rerun)?,
         Commands::Merge {
             target,
             prs,
@@ -1624,8 +1820,77 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
         }
         Commands::Stack { action } => stack(action, rerun)?,
         Commands::Issue { action } => issue(action)?,
+        Commands::Local { action } => local::run(action)?,
     }
     Ok(())
+}
+
+fn check_command(
+    target: Target,
+    title: Option<String>,
+    body_file: Option<PathBuf>,
+    pr: Option<u64>,
+    r#final: bool,
+    rerun: &str,
+) -> Result<()> {
+    if let Some(pr) = pr {
+        return check_live(&target, pr, r#final, rerun);
+    }
+    let destination = offline_destination(&target.repo)?;
+    let (_, document) = read_document(
+        DocumentArgs {
+            target,
+            title: title.context("title required")?,
+            body_file: body_file.context("body file required")?,
+        },
+        r#final,
+    )?;
+    written_to_standard(destination, PULL_REQUEST, &document)?;
+    println!(
+        "Offline document format accepted; no issue, source, classification, or review credit"
+    );
+    Ok(())
+}
+
+fn ready_command(target: &Target, pr: u64, rerun: &str) -> Result<()> {
+    target.conventional_required()?;
+    let github = Github::connect()?;
+    let live = live_document(&github, target, pr)?;
+    let inspect = || {
+        command(&[
+            "gh",
+            "pr",
+            "view",
+            &pr.to_string(),
+            "--repo",
+            &target.repo,
+            "--json",
+            "state,isDraft",
+        ])
+    };
+    require(live.state == "OPEN", || {
+        Refusal::new("pr.state", "only an open PR can become ready", inspect())
+            .evidence(format!("#{pr}: state {}", live.state))
+    })?;
+    let (Some(base), Some(head)) = (live.base_ref_name.as_deref(), live.head_ref_oid.as_deref())
+    else {
+        bail!("GitHub reported no base branch or no head commit");
+    };
+    let required = github.required_checks(target, base)?;
+    let body = make_ready(
+        &github,
+        target,
+        pr,
+        live.title,
+        live.body,
+        live.is_draft,
+        checks(&live.status_check_rollup, &required),
+        (base, head),
+        rerun,
+    )?;
+    let live = live_document(&github, target, pr)?;
+    let checked = review_policy::live_binding(&github, target, &body, &live)?;
+    review_policy::describe(&checked)
 }
 
 /// Checks the current GitHub document of `pr` and the issue it links.
@@ -1633,6 +1898,7 @@ fn check_live(target: &Target, pr: u64, r#final: bool, rerun: &str) -> Result<()
     target.conventional_required()?;
     let github = Github::connect()?;
     let live = live_document(&github, target, pr)?;
+    let checked = review_policy::live_binding(&github, target, &live.body, &live)?;
     let document = validate(target, live.title, live.body, r#final)?;
     let destination = destination(&github, &target.repo)?;
     written_to_standard(destination, PULL_REQUEST, &document)?;
@@ -1646,12 +1912,15 @@ fn check_live(target: &Target, pr: u64, r#final: bool, rerun: &str) -> Result<()
         )?,
         target,
     )?;
-    report_review_requirement(&document.body)
+    if r#final {
+        review_policy::completion(&checked, target, &github, pr)?;
+    }
+    review_policy::describe(&checked)
 }
 
 fn create(
     document: DocumentArgs,
-    head: String,
+    head: &str,
     base: Option<String>,
     draft: bool,
     independent: bool,
@@ -1660,14 +1929,21 @@ fn create(
     let body_file = document.body_file.clone();
     let title = document.title.clone();
     let (target, document) = read_document(document, false)?;
-    branch(&head)?;
+    branch(head)?;
     if let Some(base) = &base {
         branch(base)?;
     }
-    admit_review_request(Operation::Create, target.generation, &document.body, || {
-        Ok((true, Exclusion::None))
-    })?;
     let github = Github::connect()?;
+    let checked =
+        review_policy::create_binding(&github, &target, &document.body, head, base.as_deref())?;
+    let head = review_policy::qualified_head(&checked, head)?;
+    admit_review_request(
+        Operation::Create,
+        target.generation,
+        &document.body,
+        checked.route,
+        || Ok((true, Exclusion::None)),
+    )?;
     let destination = destination(&github, &target.repo)?;
     written_to_standard(destination, PULL_REQUEST, &document)?;
     let issue = inspect_issue(
@@ -1700,7 +1976,9 @@ fn create(
     if let Some(base) = base {
         args.extend([OsString::from("--base"), base.into()]);
     }
-    if effect == Effect::CreateDraft {
+    if effect == Effect::CreateDraft
+        || checked.route == rules::review_routing_rules::ReviewRoute::Pr
+    {
         args.push("--draft".into());
     }
     let _body = write_document(&mut args, &document)?;
@@ -1711,15 +1989,17 @@ fn create(
 fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
     let body_file = document.body_file.clone();
     let (target, document) = read_document(document, false)?;
-    let mut connected = None;
-    admit_review_request(Operation::Edit, target.generation, &document.body, || {
-        let live = live_document(connected.insert(Github::connect()?), &target, pr)?;
-        Ok((live.is_draft, review_exclusion(&live.body)))
-    })?;
-    let github = match connected {
-        Some(github) => github,
-        None => Github::connect()?,
-    };
+    let github = Github::connect()?;
+    let live = live_document(&github, &target, pr)?;
+    let checked = review_policy::live_binding(&github, &target, &document.body, &live)?;
+    review_policy::preserve_edit(&github, &target, pr, &live, &checked)?;
+    admit_review_request(
+        Operation::Edit,
+        target.generation,
+        &document.body,
+        checked.route,
+        || Ok((live.is_draft, review_exclusion(&live.body))),
+    )?;
     let destination = destination(&github, &target.repo)?;
     written_to_standard(destination, PULL_REQUEST, &document)?;
     let issue = inspect_issue(
@@ -1765,6 +2045,13 @@ fn make_ready(
     (base, head): (&str, &str),
     rerun: &str,
 ) -> Result<String> {
+    let live = live_document(github, target, pr)?;
+    ensure!(
+        live.head_ref_oid.as_deref() == Some(head),
+        "PR head changed before its ready admission"
+    );
+    let reviewed = review_policy::live_binding(github, target, &body, &live)?;
+    review_policy::admit_ready(&reviewed, target, github, pr, &body)?;
     let document = validate(target, title, body, false)?;
     let destination = destination(github, &target.repo)?;
     let issue = inspect_issue(
@@ -1782,9 +2069,13 @@ fn make_ready(
     planned(Operation::Ready, target, Some(pr), draft, issue, checks)?;
     dotfiles::hosts::require_admission(Path::new("."), head)?;
     dotfiles::assure::ready(Path::new("."), &dotfiles::assure::installed()?, base, head)?;
-    admit_review_request(Operation::Ready, target.generation, &document.body, || {
-        Ok((draft, review_exclusion(&document.body)))
-    })?;
+    admit_review_request(
+        Operation::Ready,
+        target.generation,
+        &document.body,
+        reviewed.route,
+        || Ok((draft, review_exclusion(&document.body))),
+    )?;
     // The command walks the model of `specs/pr_ready.qnt`: head 0 carries the report this read returned.
     let reported = ready_step(pr_ready_rules::initial(), Move::Report(report))
         .unwrap_or_else(|_| pr_ready_rules::initial());
@@ -1894,7 +2185,7 @@ fn merge_view(target: &Target, pr: u64) -> Result<MergeView> {
     args.extend([
         pr.to_string().into(),
         "--json".into(),
-        "title,body,state,isDraft,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,closingIssuesReferences".into(),
+        "title,body,state,isDraft,headRefOid,baseRefName,baseRefOid,labels,author,mergeable,mergeStateStatus,statusCheckRollup,closingIssuesReferences,headRefName,headRepository,headRepositoryOwner,isCrossRepository".into(),
     ]);
     serde_json::from_str(&gh(&args)?).context("invalid gh PR merge state")
 }
@@ -1904,6 +2195,7 @@ fn merge_view(target: &Target, pr: u64) -> Result<MergeView> {
 fn merge_state(
     github: &Github,
     target: &Target,
+    pr: u64,
     view: &MergeView,
     stacked: bool,
 ) -> Result<MergeState> {
@@ -1924,13 +2216,36 @@ fn merge_state(
     };
     // GitHub itself holds a merge to the required checks, so the merge state reads the rollup alone.
     let (total, unfinished, failed, _) = tally(&view.status_check_rollup, &[]);
+    let mut exclusion = review_exclusion(&view.body);
+    if matches!(lifecycle, Lifecycle::Draft | Lifecycle::Ready) {
+        let reviewed = review_policy::check(
+            github,
+            target,
+            &view.body,
+            view.base_ref_oid
+                .as_deref()
+                .context("actual merge base commit missing")?,
+            &view.head_ref_oid,
+            &view.author.login,
+        )?;
+        review_policy::validate_live_source(&reviewed, &view.source)?;
+        review_policy::labels(&reviewed, &view.labels)?;
+        if lifecycle == Lifecycle::Ready
+            && !behind
+            && view.mergeable != "CONFLICTING"
+            && head_checks(total, unfinished, failed) == rules::pr_rules::HeadChecks::Success
+        {
+            review_policy::completion(&reviewed, target, github, pr)?;
+        }
+        exclusion = Exclusion::Owner;
+    }
     Ok(MergeState {
         lifecycle,
         conflict: view.mergeable == "CONFLICTING",
         behind,
         checks: head_checks(total, unfinished, failed),
         clean: stacked || matches!(view.merge_state_status.as_str(), "CLEAN" | "HAS_HOOKS"),
-        exclusion: review_exclusion(&view.body),
+        exclusion,
     })
 }
 
@@ -2038,11 +2353,10 @@ fn merge_independent(
     polling: Polling,
     rerun: &str,
 ) -> Result<()> {
-    let paused = pr_reviews_paused()?;
     let started = Instant::now();
     loop {
         let view = merge_view(target, pr)?;
-        match merge_step(merge_state(github, target, &view, false)?, false, paused) {
+        match merge_step(merge_state(github, target, pr, &view, false)?, false, false) {
             Step::Done => {
                 println!("#{pr} merged at {}", view.head_ref_oid);
                 return Ok(());
@@ -2173,6 +2487,10 @@ fn github_slug(url: &str) -> Option<String> {
 /// Requires a current directory that holds a checkout whose `origin` matches the target repository.
 fn require_checkout(target: &Target) -> Result<()> {
     let url = git_output(&["remote", "get-url", "origin"]).unwrap_or_default();
+    require_checkout_origin(target, &url)
+}
+
+fn require_checkout_origin(target: &Target, url: &str) -> Result<()> {
     let slug = github_slug(url.trim());
     require(
         slug.as_deref()
@@ -2243,7 +2561,6 @@ fn merge_stack(
     polling: Polling,
     rerun: &str,
 ) -> Result<()> {
-    let paused = pr_reviews_paused()?;
     let started = Instant::now();
     'restart: loop {
         let open = open_prs(target)?;
@@ -2263,7 +2580,7 @@ fn merge_stack(
         let mut verified = Vec::new();
         for &pr in &numbers {
             let view = merge_view(target, pr)?;
-            match merge_step(merge_state(github, target, &view, true)?, true, paused) {
+            match merge_step(merge_state(github, target, pr, &view, true)?, true, false) {
                 Step::Merge => verified.push((pr, view.head_ref_oid)),
                 Step::Done => {}
                 Step::Restack => {
@@ -2426,10 +2743,16 @@ fn create_stacked(document: DocumentArgs, head: &str, base: &str, rerun: &str) -
     let (target, document) = read_document(document, false)?;
     branch(head)?;
     branch(base)?;
-    admit_review_request(Operation::Create, target.generation, &document.body, || {
-        Ok((true, Exclusion::None))
-    })?;
     let github = Github::connect()?;
+    let checked =
+        review_policy::create_binding(&github, &target, &document.body, head, Some(base))?;
+    admit_review_request(
+        Operation::Create,
+        target.generation,
+        &document.body,
+        checked.route,
+        || Ok((true, Exclusion::None)),
+    )?;
     let destination = destination(&github, &target.repo)?;
     written_to_standard(destination, PULL_REQUEST, &document)?;
     let issue = inspect_issue(
@@ -2589,6 +2912,9 @@ pub fn deploy(
     );
     let mut retained = approved.catalog.clone();
     retained.skills.remove("pull-request");
+    for skill in retained.skills.values_mut() {
+        skill.references.remove("pull-request");
+    }
     ensure!(
         ops::catalog_owned(&user_directory.join(".agents/skills"), &retained)? == retained,
         "unrelated installed managed skills have changed; preserve and review them before installation"
@@ -2608,6 +2934,14 @@ pub fn deploy(
             .context("source PR skill is missing")?
             .clone(),
     );
+    let available: BTreeSet<_> = approved.catalog.skills.keys().cloned().collect();
+    approved
+        .catalog
+        .skills
+        .get_mut("pull-request")
+        .context("planned PR skill is missing")?
+        .references
+        .retain(|name| available.contains(name));
     let reviewed = ops::adoptable_revisions(
         &expected,
         &ops::tracked_decisions(&source.join(ops::DECISIONS))?,
@@ -2629,11 +2963,21 @@ pub fn deploy(
         "scoped PR skill installation is empty"
     );
     apply(&paths)?;
+    let installed = ops::catalog_owned(&user_directory.join(".agents/skills"), &approved.catalog)?;
     ensure!(
-        ops::catalog_owned(&user_directory.join(".agents/skills"), &approved.catalog)?
-            == approved.catalog,
+        installed.skills.get("pull-request") == approved.catalog.skills.get("pull-request"),
         "installed PR skill differs from the reviewed source"
     );
+    let mut unchanged = installed.clone();
+    unchanged.skills.remove("pull-request");
+    for skill in unchanged.skills.values_mut() {
+        skill.references.remove("pull-request");
+    }
+    ensure!(
+        unchanged == retained,
+        "unrelated installed managed skills changed during scoped installation"
+    );
+    approved.catalog = installed;
     install(binary, user_directory)?;
     approved.catalog_hash = ops::hash(&approved.catalog)?;
     ops::write_json(&manifest, &approved, true)?;

@@ -1,6 +1,12 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 language: en-US
 reviews:
+  auto_review:
+    enabled: false
+    labels: ["review:critical"]
+    description_keyword: ""
+    auto_incremental_review: false
+    drafts: false
   auto_title_placeholder: "@coderabbitai"
   auto_title_instructions: >-
     Follow the destination repository's contribution rules.

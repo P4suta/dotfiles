@@ -342,7 +342,7 @@ impl Scratch {
             .join(platform::code_environment::HOST_CACHE)
             .join(RUNTIME_BUILD);
         let status = environment
-            .command(platform::tool::Tool::Cargo.program())
+            .command(platform::tool::Tool::Cargo.program())?
             .args([
                 "build",
                 "--locked",

@@ -8,6 +8,21 @@ pub const BASELINES: &str = "../policy/baselines.toml";
 
 /// The `exact` ceiling of one benchmark's `metric`, refusing a benchmark the baselines don't record.
 pub fn ceiling(metric: &str, bench: &str) -> u64 {
+    if let Some(path) = std::env::var_os(xtask::benchmark_profile::PROFILE_ENV) {
+        let profile = xtask::benchmark_profile::read_recorded(std::path::Path::new(&path))
+            .unwrap_or_else(|error| panic!("read benchmark profile: {error:#}"));
+        return profile
+            .measurements
+            .iter()
+            .find_map(|entry| {
+                (entry.function == bench).then_some(match metric {
+                    "ir" => entry.instructions,
+                    "heap-peak" => entry.heap_peak,
+                    _ => panic!("unknown benchmark metric {metric}"),
+                })
+            })
+            .unwrap_or_else(|| panic!("profile records no {metric} ceiling for {bench}"));
+    }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(BASELINES);
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));

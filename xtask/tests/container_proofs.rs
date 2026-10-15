@@ -1,8 +1,10 @@
+use anyhow::Context as _;
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use xtask::alloy::{AssetControlResult, CORRUPT_ASSETS, CorruptAsset};
 use xtask::skill_proofs::{
     FUZZ_VERSION, KANI_VERSION, MUTANTS_VERSION, container_image, container_run_arguments,
     container_target_volume, validate_results,
@@ -16,19 +18,50 @@ const IMAGE_PLATFORM_FIXTURE: &str = "DOTFILES_IMAGE_PLATFORM_FIXTURE";
 
 fn run_kani_driver_fixture(test: &str) -> anyhow::Result<bool> {
     if std::env::var(KANI_DRIVER_FIXTURE).is_ok_and(|value| value == test) {
+        anyhow::ensure!(
+            platform::incidents::enabled(),
+            "the owned Kani driver fixture requires explicit experimental consent"
+        );
         return Ok(false);
     }
     let scope = incident_fixture::scope()?;
-    let output = platform::process::command(std::env::current_exe()?)
+    let home = scope.path().join("home");
+    let consent = home.join(platform::incidents::EXPERIMENTAL);
+    std::fs::create_dir_all(consent.parent().unwrap())?;
+    std::fs::write(consent, rules::incident_rules::EXPERIMENTAL_OPT_IN)?;
+    anyhow::ensure!(
+        platform::incidents::enabled_at(&home),
+        "the owned Kani driver fixture consent is invalid"
+    );
+    let native_home = platform::home::home().context("native tool home")?;
+    let driver = xtask::skill_proofs::kani_environment_driver()?;
+    let kani_home = driver
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .context("existing Kani distribution root")?;
+    let mut command = platform::process::command(std::env::current_exe()?);
+    command
         .args(["--ignored", "--exact", test, "--nocapture"])
         .env(KANI_DRIVER_FIXTURE, test)
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("KANI_HOME", kani_home)
         .env("SKILL_OPS_STATE", scope.path().join("state"))
-        .env("DOTFILES_EXPECTED_FAILURE", "")
-        .output()?;
+        .env("DOTFILES_EXPECTED_FAILURE", "");
+    for (name, directory) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
+        command.env(
+            name,
+            std::env::var_os(name)
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| native_home.join(directory).into_os_string()),
+        );
+    }
+    let output = command.output()?;
     print!("{}", String::from_utf8_lossy(&output.stdout));
     eprint!("{}", String::from_utf8_lossy(&output.stderr));
-    anyhow::ensure!(output.status.success(), "owned Kani driver fixture failed");
     incident_fixture::preserve(scope);
+    anyhow::ensure!(output.status.success(), "owned Kani driver fixture failed");
     Ok(true)
 }
 
@@ -726,32 +759,8 @@ fn the_alloy_image_pins_alloy_and_its_base_by_digest() {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-struct CorruptAsset {
-    directory: &'static str,
-    target: &'static str,
-}
-
 const CORRUPTED_ASSET: &str = "corrupt-verifier-asset";
 const MODEL_PLATFORM: &str = "linux/amd64";
-const CORRUPT_ASSETS: [CorruptAsset; 4] = [
-    CorruptAsset {
-        directory: xtask::alloy::IMAGE_DIRECTORY,
-        target: "/opt/alloy/alloy.jar",
-    },
-    CorruptAsset {
-        directory: xtask::quint::IMAGE_DIRECTORY,
-        target: "/tmp/apalache.tgz",
-    },
-    CorruptAsset {
-        directory: xtask::lean::IMAGE_DIRECTORY,
-        target: "/tmp/elan.tar.gz",
-    },
-    CorruptAsset {
-        directory: xtask::lean::IMAGE_DIRECTORY,
-        target: "/tmp/lean.tar.zst",
-    },
-];
 
 fn corrupted_image_context(root: &Path, asset: CorruptAsset) -> anyhow::Result<tempfile::TempDir> {
     let scope = incident_fixture::scope()?;
@@ -860,6 +869,7 @@ fn proof_images_reject_corrupt_verifier_assets_before_use() -> anyhow::Result<()
     corruption_probes_preserve_other_inputs_and_cover_every_model_asset()?;
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let mut checks = xtask::checks::Checks::default();
+    let mut reports = Vec::new();
     for asset in CORRUPT_ASSETS {
         checks.run(asset.target, || {
             let scope = corrupted_image_context(root, asset)?;
@@ -874,21 +884,18 @@ fn proof_images_reject_corrupt_verifier_assets_before_use() -> anyhow::Result<()
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 print!("{stdout}");
                 eprint!("{stderr}");
-                let report = format!("{stdout}{stderr}");
-                anyhow::ensure!(
-                    !output.status.success()
-                        && report.contains(&format!("{}: FAILED", asset.target))
-                        && report.contains("computed checksum did NOT match"),
-                    "the model image did not reject the corrupted {} by its checksum: {}\n{report}",
-                    asset.target,
-                    output.status
-                );
-                Ok(())
+                let captured = AssetControlResult::capture(asset, output)?;
+                let result = captured.require_rejection();
+                reports.push(captured);
+                result
             })();
             platform::cleanup::report(scope.close(), "remove the model corruption fixture");
             result
         });
     }
+    checks.run("retain original asset control results", || {
+        xtask::alloy::write_asset_results(&reports)
+    });
     checks.finish()
 }
 

@@ -1,7 +1,8 @@
 //! The Lean obligations: the vectors equal what the Rust code gives, and the axiom report refuses `sorry`, `native_decide`, and a user axiom.
 
 use std::path::Path;
-use xtask::lean::{axiom_refusals, vectors};
+use xtask::lean::{axiom_refusals, theorem_refusals, vectors};
+use xtask::obligations::{LeanPackage, Obligation, parse_manifest};
 
 fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
@@ -34,6 +35,63 @@ fn a_theorem_on_sorry_native_decide_or_a_user_axiom_is_refused() {
         );
     }
     assert_eq!(axiom_refusals("garbage").len(), 1);
+}
+
+fn package() -> LeanPackage {
+    let manifest = parse_manifest(r#"
+[[obligation]]
+verifier = "lean"
+package = "specs/lean"
+theorems = [
+    { name = "A.first", module = "A", bridge = "xtask/tests/a.rs::first", refinement = { kind = "selected-cases", entrypoint = "checks" } },
+    { name = "A.second", module = "A", bridge = "xtask/tests/a.rs::second", refinement = { kind = "selected-cases", entrypoint = "checks" } },
+]
+"#).unwrap();
+    let Obligation::Lean(package) = manifest.obligations.into_iter().next().unwrap() else {
+        panic!("a Lean package");
+    };
+    package
+}
+
+#[test]
+fn every_expected_theorem_has_exactly_one_valid_axiom_report() {
+    let package = package();
+    let clean = "'A.first' depends on axioms: [propext, Quot.sound]\n'A.second' does not depend on any axioms\n";
+    assert_eq!(theorem_refusals(clean, &package), Vec::<String>::new());
+    for invalid in [
+        String::new(),
+        "'A.first' does not depend on any axioms".to_owned(),
+        clean.replace("A.second", "A.first"),
+        format!("{clean}'A.third' does not depend on any axioms\n"),
+        clean.replace(
+            "depends on axioms: [propext, Quot.sound]",
+            "arbitrary does not depend on any axioms",
+        ),
+        clean.replace("[propext, Quot.sound]", "propext, Quot.sound"),
+        clean.replace("[propext, Quot.sound]", "[[propext, Quot.sound]]"),
+        clean.replace("[propext, Quot.sound]", "[]"),
+        clean.replace("[propext, Quot.sound]", "[propext, ]"),
+        clean.replace("[propext, Quot.sound]", "[propext, sorryAx]"),
+    ] {
+        assert_ne!(
+            theorem_refusals(&invalid, &package),
+            Vec::<String>::new(),
+            "{invalid}"
+        );
+    }
+}
+
+#[test]
+fn an_empty_or_duplicated_expected_theorem_set_is_refused() {
+    let mut empty = package();
+    empty.theorems.clear();
+    assert_ne!(theorem_refusals("", &empty), Vec::<String>::new());
+    let mut duplicate = package();
+    duplicate.theorems[1].name = duplicate.theorems[0].name.clone();
+    assert_ne!(
+        theorem_refusals("'A.first' does not depend on any axioms", &duplicate),
+        Vec::<String>::new()
+    );
 }
 
 #[test]

@@ -8,4 +8,18 @@
 {{- range list "features.memories" "features.external_agent_memory_import" "features.chronicle" "memories.generate_memories" "memories.use_memories" -}}
 {{- $current = setValueAtPath . false $current -}}
 {{- end -}}
+{{- $tool := joinPath .chezmoi.homeDir ".local/bin/dotfiles" -}}
+{{- if eq .profile "windows" -}}{{- $tool = printf "%s.exe" $tool -}}{{- end -}}
+{{- $previous := dig "notify" (list) $current -}}
+{{- if kindIs "slice" $previous -}}
+{{- $forward := "" -}}
+{{- if and (ge (len $previous) 4) (eq (index $previous 0) $tool) (eq (index $previous 1) "notifications") (eq (index $previous 2) "agent") (eq (index $previous 3) "codex") -}}
+{{-   if and (eq (len $previous) 6) (eq (index $previous 4) "--forward-notify") -}}{{- $forward = index $previous 5 -}}{{- end -}}
+{{- else if gt (len $previous) 0 -}}
+{{-   $forward = toJson $previous -}}
+{{- end -}}
+{{- $notify := list $tool "notifications" "agent" "codex" -}}
+{{- if $forward -}}{{- $notify = concat $notify (list "--forward-notify" $forward) -}}{{- end -}}
+{{- $current = setValueAtPath "notify" $notify $current -}}
+{{- end -}}
 {{ toToml $current | trim }}

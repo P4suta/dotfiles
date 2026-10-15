@@ -1421,7 +1421,12 @@ mod fixture_process;
 fn verifies_an_actual_isolated_incident() {
     let parent = std::env::var_os("SKILL_OPS_INCIDENT_EVIDENCE_ROOT").unwrap();
     let fixture = tempfile::tempdir_in(fixture_process::directory(std::path::Path::new(&parent))).unwrap();
+    let home = fixture.path().join("home");
+    let marker = home.join(platform::incidents::EXPERIMENTAL);
+    std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
+    std::fs::write(marker, rules::incident_rules::EXPERIMENTAL_OPT_IN).unwrap();
     let output = fixture_process::command(env!("CARGO_BIN_EXE_incident-fixture"), fixture.path())
+        .env("HOME", &home).env("USERPROFILE", &home)
         .env_remove("DOTFILES_EXPECTED_FAILURE").current_dir(fixture.path()).output().unwrap();
     assert!(!output.status.success());
     assert_eq!(std::fs::read_dir(fixture.path().join("state/incidents")).unwrap().count(), 1);

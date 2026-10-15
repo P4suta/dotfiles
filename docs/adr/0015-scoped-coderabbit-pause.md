@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: amended
+changed_by: [route-coderabbit-by-current-pr-importance.md]
 ---
 # Scope the CodeRabbit owner pause
 Extends the owner pause of [ADR 0007](0007-reserved-review-capacity.md).
+The current importance routing and pause obligations are amended by [the importance decision](route-coderabbit-by-current-pr-importance.md).
 
 ## Context
 

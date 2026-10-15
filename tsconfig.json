@@ -13,5 +13,5 @@
     "types": ["bun"],
     "noEmit": true
   },
-  "include": ["home/dot_config/opencode/plugins/skill-ops.ts", "home/dot_config/opencode/plugins/prose.ts", "home/dot_config/opencode/plugins/line-endings.ts", "home/dot_config/opencode/plugins/shell-guard.ts", "crates/*/tests/fixtures/*.ts"]
+  "include": ["home/dot_config/opencode/plugins/skill-ops.ts", "home/dot_config/opencode/plugins/prose.ts", "home/dot_config/opencode/plugins/line-endings.ts", "home/dot_config/opencode/plugins/shell-guard.ts", "home/dot_config/opencode/plugins/notifications.ts", "crates/*/tests/fixtures/*.ts"]
 }

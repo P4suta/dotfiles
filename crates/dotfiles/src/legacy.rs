@@ -142,14 +142,43 @@ fn refusal_text(tool: &ModernTool, legacy: &str, arguments: &[&str]) -> String {
     )
 }
 
-/// The refusal of the first legacy command in `command` or in a script it runs, or `None` when the hook admits it.
+/// Keep refusals and unavailable inspections independent across every script a command runs.
+#[derive(Debug, Default)]
+pub struct Findings {
+    pub refusals: Vec<String>,
+    pub unavailable: Vec<String>,
+}
+
+impl Findings {
+    fn append(&mut self, other: Self) {
+        self.refusals.extend(other.refusals);
+        self.unavailable.extend(other.unavailable);
+    }
+}
+
+/// Every mapped invocation and unavailable inspection in the command's bounded scripts.
 /// A bypass that names the entry with a reason admits the command and appends a line to the Git bypass log.
 ///
 /// # Errors
 ///
-/// Returns an error when the embedded table doesn't parse or reading a script the command runs fails.
+/// Returns an error when the embedded table doesn't parse.
+pub fn findings(command: &str, directory: Option<&Path>) -> Result<Findings> {
+    Ok(inspect(command, directory, table()?, 0))
+}
+
+/// The joined diagnostics, or `None` when every supported inspection admits the command.
+///
+/// # Errors
+///
+/// Returns an error when the embedded table doesn't parse.
 pub fn refusal(command: &str, directory: Option<&Path>) -> Result<Option<String>> {
-    inspect(command, directory, table()?, 0)
+    let findings = findings(command, directory)?;
+    let messages: Vec<_> = findings
+        .refusals
+        .into_iter()
+        .chain(findings.unavailable)
+        .collect();
+    Ok((!messages.is_empty()).then(|| messages.join("\n\n")))
 }
 
 fn script_refusal(
@@ -157,13 +186,13 @@ fn script_refusal(
     directory: Option<&Path>,
     table: &Modern,
     depth: usize,
-) -> Result<Option<String>> {
+) -> Result<Findings> {
     let resolved = match directory {
         Some(directory) if Path::new(path).is_relative() => directory.join(path),
         _ => Path::new(path).to_path_buf(),
     };
-    if excepted(table, &resolved, directory) || !resolved.try_exists()? {
-        return Ok(None);
+    if excepted(table, &resolved, directory) {
+        return Ok(Findings::default());
     }
     let metadata = resolved.metadata()?;
     ensure!(
@@ -173,17 +202,22 @@ fn script_refusal(
     ensure!(depth < DEPTH, "script nesting exceeds the inspection limit");
     let text = std::fs::read_to_string(&resolved)
         .with_context(|| format!("read the script {}", resolved.display()))?;
-    Ok(inspect(&text, directory, table, depth + 1)?
-        .map(|message| format!("{message}\nThe script {path} runs this command.")))
+    let mut findings = inspect(&text, directory, table, depth + 1);
+    for message in findings
+        .refusals
+        .iter_mut()
+        .chain(&mut findings.unavailable)
+    {
+        message.push_str("\nThe script ");
+        message.push_str(path);
+        message.push_str(" runs this command.");
+    }
+    Ok(findings)
 }
 
-fn inspect(
-    command: &str,
-    directory: Option<&Path>,
-    table: &Modern,
-    depth: usize,
-) -> Result<Option<String>> {
+fn inspect(command: &str, directory: Option<&Path>, table: &Modern, depth: usize) -> Findings {
     let nested = depth < DEPTH;
+    let mut findings = Findings::default();
     for words in segments(command) {
         let (command_words, bypass) = command_words(&words);
         let Some((first, rest)) = command_words.split_first() else {
@@ -191,10 +225,13 @@ fn inspect(
         };
         let name = program(first);
         let name = name.as_str();
-        if let Some(path) = script_path(name, first, rest)
-            && let Some(message) = script_refusal(path, directory, table, depth)?
-        {
-            return Ok(Some(message));
+        if let Some(path) = script_path(name, first, rest) {
+            match script_refusal(path, directory, table, depth)
+                .with_context(|| format!("inspect the script {path}"))
+            {
+                Ok(report) => findings.append(report),
+                Err(error) => findings.unavailable.push(format!("{error:#}")),
+            }
         }
         let arguments: Vec<&str> = rest.iter().map(String::as_str).collect();
         let tool = table.tools.iter().find(|tool| {
@@ -207,7 +244,7 @@ fn inspect(
         let bypassed = bypass.is_some_and(|value| legacy_rules::bypass_names(value, name));
         match (legacy_rules::verdict(tool.is_some(), false, bypassed), tool) {
             (Verdict::Refuse, Some(tool)) => {
-                return Ok(Some(refusal_text(tool, name, &arguments)));
+                findings.refusals.push(refusal_text(tool, name, &arguments));
             }
             (Verdict::Bypassed, _) => {
                 let reason = bypass
@@ -224,12 +261,15 @@ fn inspect(
         }
     }
     for script in nested_scripts(command) {
-        ensure!(nested, "script nesting exceeds the inspection limit");
-        if let Some(message) = inspect(script.as_str(), directory, table, depth + 1)? {
-            return Ok(Some(message));
+        if nested {
+            findings.append(inspect(script.as_str(), directory, table, depth + 1));
+        } else {
+            findings
+                .unavailable
+                .push("script nesting exceeds the inspection limit".to_owned());
         }
     }
-    Ok(None)
+    findings
 }
 
 #[cfg(test)]
@@ -323,6 +363,96 @@ mod tests {
             .unwrap(),
             None
         );
-        assert_eq!(refusal("bash missing.sh", Some(root)).unwrap(), None);
+        assert_eq!(
+            findings("bash missing.sh", Some(root))
+                .unwrap()
+                .unavailable
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn compound_commands_report_every_mapped_invocation_before_resubmission() {
+        let command = "rg -n -i proof src | head -80; ls -la; fd -H -t f assure; wc -l src/*.rs";
+        let message = refused(command);
+        for tool in ["ls", "wc"] {
+            assert!(
+                message.contains(&format!("`{tool}` is a legacy command")),
+                "{message}"
+            );
+        }
+        assert!(message.contains("eza -la"), "{message}");
+        assert!(message.contains("tokei"), "{message}");
+        assert_eq!(
+            refusal(
+                "rg -n -i proof src | head -80; eza -la; fd -H -t f assure; tokei src",
+                None
+            )
+            .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn compound_diagnostics_keep_bypasses_scoped_and_include_nested_scripts() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("scan.sh"),
+            "grep -n proof src/main.rs\nwc -l src/main.rs\n",
+        )
+        .unwrap();
+        let message = refusal("DOTFILES_LEGACY_BYPASS='ls: structured output compatibility' ls -la; bash scan.sh; bash -c 'cat src/main.rs'; ls -l", Some(directory.path())).unwrap().unwrap();
+        for tool in ["grep", "wc", "cat", "ls"] {
+            assert!(
+                message.contains(&format!("`{tool}` is a legacy command")),
+                "{message}"
+            );
+        }
+        assert_eq!(
+            message.matches("`ls` is a legacy command").count(),
+            1,
+            "{message}"
+        );
+        assert!(message.contains("scan.sh"), "{message}");
+    }
+
+    #[test]
+    fn unavailable_nested_inspections_preserve_known_findings_from_other_segments() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("broken.sh"), [0xff]).unwrap();
+        std::fs::write(directory.path().join("valid.sh"), "grep proof Cargo.toml\n").unwrap();
+        let report = findings(
+            "sh broken.sh; ls -la; sh missing.sh; sh valid.sh; wc -l Cargo.toml",
+            Some(directory.path()),
+        )
+        .unwrap();
+        assert_eq!(report.unavailable.len(), 2, "{report:?}");
+        assert_eq!(report.refusals.len(), 3, "{report:?}");
+        for name in ["ls", "grep", "wc"] {
+            assert!(
+                report
+                    .refusals
+                    .iter()
+                    .any(|message| message.contains(&format!("`{name}` is a legacy command"))),
+                "{report:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_exceeded_script_depth_preserves_sibling_findings() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("loop.sh"), "sh loop.sh; ls -la\n").unwrap();
+        let report = findings("sh loop.sh; wc -l Cargo.toml", Some(directory.path())).unwrap();
+        assert_eq!(report.unavailable.len(), 1, "{report:?}");
+        assert!(
+            report
+                .unavailable
+                .first()
+                .unwrap()
+                .contains("nesting exceeds")
+        );
+        assert_eq!(report.refusals.len(), DEPTH + 1, "{report:?}");
     }
 }

@@ -259,16 +259,16 @@ fn powershell(event: &Value) -> bool {
 
 const POWERSHELL_PARSE: &str = "$tokens = $null; $errors = $null; $ast = [System.Management.Automation.Language.Parser]::ParseInput([Console]::In.ReadToEnd(), [ref]$tokens, [ref]$errors); $writes = @($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FileRedirectionAst] -and -not ($node.Location -is [System.Management.Automation.Language.VariableExpressionAst] -and $node.Location.VariablePath.UserPath -ieq 'null')}, $true)).Count -gt 0; @{errors = @($errors); file_write = $writes} | ConvertTo-Json -Depth 4 -Compress";
 
-/// The refusal for one `PreToolUse` event, or `None` when the hook admits the tool call.
+/// The independent policy refusals for one event.
 /// Client and subagent events share the same command policy.
-pub(crate) fn refusal(event: &str) -> Result<Option<Blocked>> {
+fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
     let event: Value = serde_json::from_str(event).context("PreToolUse event is not JSON")?;
     let tool = event["tool_name"].as_str().unwrap_or_default();
     if !matches!(
         tool,
         "Bash" | "PowerShell" | "bash" | "exec_command" | "shell"
     ) {
-        return Ok(None);
+        return Ok(Vec::new());
     }
     let command = shell_command(&event)?;
     let command = command.as_str();
@@ -280,27 +280,28 @@ pub(crate) fn refusal(event: &str) -> Result<Option<Blocked>> {
     let blocked = |rule: &'static str, source, message: String| Blocked {
         rule,
         source,
-        session,
+        session: session.clone(),
         message,
     };
+    let mut findings = Vec::new();
     if let Some(message) = disk_scan_refusal(command) {
-        return Ok(Some(blocked(
+        findings.push(blocked(
             "hook.disk-scan",
             skill_ops::incident_rules::Source::GateRefusal,
             message,
-        )));
+        ));
     }
     if let Some(message) = path_conversion_refusal(command, cfg!(windows)) {
-        return Ok(Some(blocked(
+        findings.push(blocked(
             "hook.path-conversion",
             skill_ops::incident_rules::Source::GateRefusal,
             message,
-        )));
+        ));
     }
     if !powershell(&event)
         && let shell_syntax_rules::Verdict::Refuse(reason) = shell_syntax_rules::inspect(command)
     {
-        return Ok(Some(blocked(
+        findings.push(blocked(
             "hook.shell-syntax",
             skill_ops::incident_rules::Source::MalformedInput,
             format!(
@@ -308,36 +309,63 @@ pub(crate) fn refusal(event: &str) -> Result<Option<Blocked>> {
                 shell_syntax_rules::cause(reason),
                 shell_syntax_rules::next_action(reason)
             ),
-        )));
+        ));
     }
     if let Verdict::Refuse(reason) = inspect(command)
         && (!powershell(&event) || reason != crate::shell_write_rules::Reason::FileRedirect)
     {
-        return Ok(Some(blocked(
+        findings.push(blocked(
             "hook.shell-write",
             skill_ops::incident_rules::Source::GateRefusal,
             format!(
                 "Refused: this command writes a file through an inline interpreter, in-place editor, heredoc, or redirect.\nNext action: {}",
                 next_action(reason)
             ),
-        )));
+        ));
     }
     if let Some(message) = attribution_refusal(command, event["cwd"].as_str().map(Path::new)) {
-        return Ok(Some(blocked(
+        findings.push(blocked(
             "hook.attribution",
             skill_ops::incident_rules::Source::GateRefusal,
             message,
-        )));
+        ));
     }
-    Ok(
-        crate::legacy::refusal(command, event["cwd"].as_str().map(Path::new))?.map(|message| {
-            blocked(
-                "hook.legacy",
-                skill_ops::incident_rules::Source::GateRefusal,
-                message,
-            )
-        }),
-    )
+    let legacy = crate::legacy::findings(command, event["cwd"].as_str().map(Path::new))
+        .unwrap_or_else(|error| crate::legacy::Findings {
+            refusals: Vec::new(),
+            unavailable: vec![format!("{error:#}")],
+        });
+    for message in legacy.refusals {
+        findings.push(blocked(
+            "hook.legacy",
+            skill_ops::incident_rules::Source::GateRefusal,
+            message,
+        ));
+    }
+    for message in legacy.unavailable {
+        findings.push(blocked(
+            "hook.inspection",
+            skill_ops::incident_rules::Source::MalformedInput,
+            format!("Refused: command policy inspection could not finish: {message}.\nNext action: correct the script's path, permissions, encoding, or inspection limit before resubmitting."),
+        ));
+    }
+    Ok(findings)
+}
+
+#[cfg(test)]
+fn combined(findings: Vec<Blocked>) -> Option<Blocked> {
+    let mut findings = findings.into_iter();
+    let mut first = findings.next()?;
+    for finding in findings {
+        first.message.push_str("\n\n");
+        first.message.push_str(&finding.message);
+    }
+    Some(first)
+}
+
+#[cfg(test)]
+pub(crate) fn refusal(event: &str) -> Result<Option<Blocked>> {
+    Ok(combined(policy_refusals(event)?))
 }
 
 fn validate_command(
@@ -366,16 +394,14 @@ fn validate_command(
     Ok(child.wait_with_output()?)
 }
 
-fn checked_event(event: &str) -> Result<Option<Blocked>> {
-    if let Some(blocked) = refusal(event)? {
-        return Ok(Some(blocked));
-    }
+fn checked_events(event: &str) -> Result<Vec<Blocked>> {
+    let mut findings = policy_refusals(event)?;
     let value: Value = serde_json::from_str(event)?;
     if !matches!(
         value["tool_name"].as_str(),
         Some("Bash" | "PowerShell" | "bash" | "shell" | "exec_command")
     ) {
-        return Ok(None);
+        return Ok(findings);
     }
     let command = shell_command(&value)?;
     let validation = (|| -> Result<(bool, bool)> {
@@ -429,10 +455,10 @@ fn checked_event(event: &str) -> Result<Option<Blocked>> {
     let (errors, file_write) = validation.unwrap_or((false, false));
     let verdict =
         shell_syntax_rules::checked(shell_syntax_rules::Verdict::Admit, available, errors);
-    if verdict == shell_syntax_rules::Verdict::Admit
+    if available
         && let Verdict::Refuse(reason) = crate::shell_write_rules::verdict(false, false, file_write)
     {
-        return Ok(Some(Blocked {
+        findings.push(Blocked {
             rule: "hook.shell-write",
             source: skill_ops::incident_rules::Source::GateRefusal,
             session: value["session_id"]
@@ -443,11 +469,10 @@ fn checked_event(event: &str) -> Result<Option<Blocked>> {
                 "Refused: this PowerShell command writes a file.\nNext action: {}",
                 next_action(reason)
             ),
-        }));
+        });
     }
-    Ok(match verdict {
-        shell_syntax_rules::Verdict::Admit => None,
-        shell_syntax_rules::Verdict::Refuse(reason) => Some(Blocked {
+    if let shell_syntax_rules::Verdict::Refuse(reason) = verdict {
+        findings.push(Blocked {
             rule: "hook.shell-syntax",
             source: skill_ops::incident_rules::Source::MalformedInput,
             session: value["session_id"]
@@ -464,8 +489,14 @@ fn checked_event(event: &str) -> Result<Option<Blocked>> {
                     shell_syntax_rules::next_action(reason)
                 )
             },
-        }),
-    })
+        });
+    }
+    Ok(findings)
+}
+
+#[cfg(all(test, windows))]
+fn checked_event(event: &str) -> Result<Option<Blocked>> {
+    Ok(combined(checked_events(event)?))
 }
 
 /// The skill-ops state directory the incident store lives under, which the test environment can move.
@@ -479,6 +510,9 @@ fn incident_state() -> Option<PathBuf> {
 /// Records the refusal as an incident, so no session ends without a prevention decision for its rule.
 /// A recording failure reports itself and never admits the command the hook refused.
 fn record(blocked: &Blocked) {
+    if !platform::incidents::enabled() {
+        return;
+    }
     let Some(state) = incident_state() else {
         return;
     };
@@ -513,10 +547,23 @@ fn record(blocked: &Blocked) {
 /// Returns an error when it can't read standard input, the event doesn't parse as JSON, or a shell event has no command.
 pub fn run() -> Result<()> {
     let mut event = String::new();
-    std::io::stdin().read_to_string(&mut event)?;
-    if let Some(blocked) = checked_event(&event)? {
-        record(&blocked);
-        eprintln!("{}", blocked.message);
+    let findings = std::io::stdin()
+        .read_to_string(&mut event)
+        .context("read the tool event")
+        .and_then(|_| checked_events(&event))
+        .unwrap_or_else(|error| {
+        vec![Blocked {
+            rule: "hook.inspection",
+            source: skill_ops::incident_rules::Source::MalformedInput,
+            session: NO_SESSION.to_owned(),
+            message: format!("Refused: command inspection could not finish: {error:#}.\nNext action: provide a valid tool event before resubmitting."),
+        }]
+        });
+    if !findings.is_empty() {
+        for blocked in &findings {
+            record(blocked);
+            eprintln!("{}\n", blocked.message);
+        }
         std::process::exit(BLOCK);
     }
     Ok(())
@@ -668,6 +715,80 @@ mod tests {
             refusal(&write).unwrap().map(|blocked| blocked.message),
             None
         );
+    }
+
+    #[test]
+    fn compound_preflight_reports_independent_refusal_families_together() {
+        let command = "du -sh .; ls -la; python -c 'open(\"out\", \"w\").write(\"x\")'";
+        let message = refusal(&bash(command)).unwrap().unwrap().message;
+        assert!(message.contains("walks a directory tree"), "{message}");
+        assert!(message.contains("inline interpreter"), "{message}");
+        assert!(message.contains("`ls` is a legacy command"), "{message}");
+        assert!(message.contains("storage-scout"), "{message}");
+        assert!(message.contains("Edit or Write tool"), "{message}");
+    }
+
+    #[test]
+    fn a_policy_refusal_does_not_hide_external_syntax_findings() {
+        let findings = checked_events(&bash("ls -la; if then")).unwrap();
+        assert!(findings.iter().any(|finding| finding.rule == "hook.legacy"));
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.rule == "hook.shell-syntax")
+        );
+    }
+
+    #[test]
+    fn a_powershell_syntax_error_does_not_hide_an_observed_file_write() {
+        let directory = tempfile::tempdir().unwrap();
+        let event = json!({
+            "tool_name": "PowerShell",
+            "cwd": directory.path(),
+            "tool_input": {"command": "Write-Output value > output.txt; if ("}
+        })
+        .to_string();
+        let findings = checked_events(&event).unwrap();
+        for rule in ["hook.shell-syntax", "hook.shell-write"] {
+            assert!(
+                findings.iter().any(|finding| finding.rule == rule),
+                "missing {rule}"
+            );
+        }
+        assert!(!directory.path().join("output.txt").exists());
+    }
+
+    #[test]
+    fn unavailable_script_inspection_is_an_explicit_blocking_finding() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("broken.sh"), [0xff]).unwrap();
+        let event = json!({"tool_name": "Bash", "cwd": directory.path(), "tool_input": {"command": "du -sh .; sh broken.sh; ls -la; wc -l Cargo.toml"}}).to_string();
+        let findings = policy_refusals(&event).unwrap();
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.rule == "hook.disk-scan")
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.rule == "hook.inspection"
+                    && finding.message.contains("could not finish"))
+        );
+        for name in ["ls", "wc"] {
+            assert!(
+                findings.iter().any(|finding| finding.rule == "hook.legacy"
+                    && finding
+                        .message
+                        .contains(&format!("`{name}` is a legacy command"))),
+                "{}",
+                findings
+                    .iter()
+                    .map(|finding| finding.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+        }
     }
 
     #[test]

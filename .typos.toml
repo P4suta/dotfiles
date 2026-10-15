@@ -1,8 +1,18 @@
-
 [files]
 # Vendored upstream schemas keep their upstream text.
-# Their sha256 pins in policy/obligations.toml keep them byte-exact.
-extend-exclude = [".git/", "schemas/vendor/"]
+# Schema pins and the upstream document manifest keep imported text byte-exact.
+# The signed issue-context transport also contains opaque authenticated bytes.
+extend-exclude = [
+  ".git/",
+  "schemas/vendor/",
+  ".pr-workflow/contexts.json",
+  "xtask/schema/njutest/njutest-assurance-report-v1.json",
+  "xtask/schema/njutest/rust-mutants-catalog-v1.json",
+  "xtask/schema/njutest/rust-mutants-run-report-v1.json",
+  "xtask/tests/fixtures/njutest/assurance.json",
+  "xtask/tests/fixtures/njutest/catalog.json",
+  "xtask/tests/fixtures/njutest/engine.json",
+]
 # Check hidden files.
 ignore-hidden = false
 
@@ -13,3 +23,7 @@ check-filename = false
 [default.extend-words]
 tre = "tre"     # Tool name.
 serie = "serie" # Tool name.
+
+[type.rust]
+# Windows command arguments and Alloy model extensions remain literal protocol text.
+extend-ignore-re = ['"/fo"', '\.als\b']

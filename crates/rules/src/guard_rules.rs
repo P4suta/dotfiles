@@ -988,8 +988,12 @@ mod proofs {
     #[kani::proof]
     #[kani::unwind(5)]
     fn every_bounded_global_argument_scan_keeps_exact_override_spans() {
-        let codes = kani::any::<[u8; 4]>().map(|code| code % 14);
-        let length = usize::from(kani::any::<u8>() % 5);
+        let codes = kani::any::<[u8; 4]>();
+        for code in codes {
+            kani::assume(usize::from(code) < ARGUMENTS.len());
+        }
+        let length = usize::from(kani::any::<u8>());
+        kani::assume(length <= codes.len());
         let scan = spec_scan_words(&codes[..length]);
         kani::cover!(scan.index < length && scan.length != 0);
         kani::cover!(scan.index > length);

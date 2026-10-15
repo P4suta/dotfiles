@@ -16,11 +16,135 @@ mod incident_fixture;
 
 use fixture_git::fixture_process;
 
+#[path = "support/host_materials.rs"]
+mod host_materials;
+
+const CODE_SUBPROCESS: &str = "code_environment_subprocess";
+const CODE_OUTPUT: &str = "DOTFILES_TEST_CODE_OUTPUT";
+const CODE_ACTION: &str = "DOTFILES_TEST_CODE_ACTION";
+
+fn code_child(mut command: std::process::Command, scope: &Path) -> std::process::Command {
+    command
+        .args(["--exact", CODE_SUBPROCESS, "--ignored", "--nocapture"])
+        .env(CODE_OUTPUT, scope.join("code.stdout"))
+        .env_remove(CODE_ACTION);
+    command
+}
+
+fn code_output(mut command: std::process::Command) -> Result<std::process::Output> {
+    let destination = command
+        .get_envs()
+        .find_map(|(name, value)| (name == CODE_OUTPUT).then_some(value).flatten())
+        .map(PathBuf::from)
+        .context("the code subprocess output belongs to its fixture")?;
+    let mut output = command.output()?;
+    if output.status.success() {
+        output.stdout = fs::read(destination)?;
+    }
+    Ok(output)
+}
+
+#[test]
+#[ignore = "runs only as an explicitly configured code environment subprocess"]
+fn code_environment_subprocess() -> Result<()> {
+    let destination = std::env::var_os(CODE_OUTPUT).context("code fixture output")?;
+    let root = std::env::current_dir()?;
+    let home = platform::home::home().context("code fixture home")?;
+    let mut installed = platform::code_environment::Installations::discover(&home)?;
+    let action = std::env::var(CODE_ACTION).ok();
+    let bootstrap = match action.as_deref() {
+        None => None,
+        Some("materials") => {
+            let parent = tempfile::tempdir()?;
+            let _prepared = dotfiles::artifacts::prepare_source_cargo(&root, &home, parent.path())?;
+            None
+        }
+        Some("bootstrap") => {
+            let config = root.parent().context("fixture scope")?.join("chezmoi.toml");
+            fs::write(
+                &config,
+                format!(
+                    "[data]\nprofile = {:?}\n",
+                    dotfiles::profiles::native_profile()?.name()
+                ),
+            )?;
+            let scratch = dotfiles::host_checks::Scratch::new(&config)?;
+            let renderer = scratch.renderer(&root, &installed)?;
+            installed.mise = scratch.provision_mise(&root, &renderer)?;
+            Some(scratch)
+        }
+        Some(other) => anyhow::bail!("unknown code fixture action {other}"),
+    };
+    let environment = platform::code_environment::CodeEnvironment::build(&root, &installed)?;
+    let mut original = Vec::new();
+    if bootstrap.is_some() {
+        let output = environment.command("mise").arg("--version").output()?;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        original.extend(output.stdout);
+    }
+    let output = environment.command("python").output()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    original.extend(output.stdout);
+    fs::write(destination, original)?;
+    Ok(())
+}
+
 struct CodeFixture {
     scope: tempfile::TempDir,
     root: PathBuf,
     host: PathBuf,
     old: PathBuf,
+}
+
+fn add_fixture_pin(root: &Path, name: &str, version: &str, backend: &str) -> Result<()> {
+    let configuration = root.join("mise.toml");
+    let mut project: toml::Table = toml::from_str(&fs::read_to_string(&configuration)?)?;
+    project["tools"]
+        .as_table_mut()
+        .context("fixture project tools")?
+        .insert(name.into(), version.into());
+    fs::write(configuration, toml::to_string(&project)?)?;
+    let lock = root.join("mise.lock");
+    let mut table: toml::Table = toml::from_str(&fs::read_to_string(&lock)?)?;
+    table["tools"]
+        .as_table_mut()
+        .context("fixture locked tools")?
+        .insert(
+            name.into(),
+            toml::Value::Array(vec![toml::Value::Table(toml::Table::from_iter([
+                ("version".into(), version.into()),
+                ("backend".into(), backend.into()),
+                (
+                    "specifiers".into(),
+                    toml::Value::Array(vec![version.into()]),
+                ),
+            ]))]),
+        );
+    fs::write(lock, toml::to_string(&table)?)?;
+    Ok(())
+}
+
+fn compile_code_fixture(root: &Path, mise: &Path) -> Result<()> {
+    let compiled = platform::process::command("rustc")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/code_environment.rs"
+        ))
+        .args(["--edition", "2024"])
+        .env("DOTFILES_TEST_CODE_ROOT", platform::paths::canonical(root)?)
+        .arg("-o")
+        .arg(mise)
+        .status()?;
+    ensure!(compiled.success(), "compile the code environment fixture");
+    Ok(())
 }
 
 fn code_fixture() -> Result<CodeFixture> {
@@ -33,21 +157,12 @@ fn code_fixture() -> Result<CodeFixture> {
         fs::create_dir_all(directory)?;
     }
     let mise = host.join(format!("mise{}", std::env::consts::EXE_SUFFIX));
-    let compiled = platform::process::command("rustc")
-        .arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/code_environment.rs"
-        ))
-        .args(["--edition", "2024"])
-        .arg("-o")
-        .arg(&mise)
-        .status()?;
-    ensure!(compiled.success(), "compile the code environment fixture");
+    compile_code_fixture(&root, &mise)?;
     let native_path = std::env::join_paths(std::iter::once(host.clone()).chain(
         std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
     ))?;
     fs::write(
-        mise.with_extension("native-path.json"),
+        root.join("native-path.json"),
         serde_json::to_vec(&serde_json::json!({
             "PATH": native_path.to_str().context("fixture native PATH")?
         }))?,
@@ -66,6 +181,11 @@ fn code_fixture() -> Result<CodeFixture> {
         )),
     )?;
     fs::write(root.join("mise.toml"), "[tools]\npython = '3.14.8'\n")?;
+    fs::write(
+        root.join("mise.lock"),
+        "lockfile_version = 3\n[[tools.python]]\nversion = '3.14.8'\nbackend = 'core:python'\nspecifiers = ['3.14.8']\n",
+    )?;
+    host_materials::seed(&root, &host)?;
     fs::create_dir_all(root.join("home/.chezmoidata"))?;
     fs::write(
         installed.parent().unwrap().join(".mise.backend.toml"),
@@ -137,10 +257,7 @@ fn seed_renderer(fixture: &CodeFixture) -> Result<()> {
     let pin = table["tools"]["chezmoi"]
         .as_str()
         .context("the fixture needs a chezmoi pin")?;
-    fs::write(
-        fixture.root.join("mise.toml"),
-        format!("[tools]\npython = '3.14.8'\nchezmoi = {pin:?}\n"),
-    )?;
+    add_fixture_pin(&fixture.root, "chezmoi", pin, "aqua:twpayne/chezmoi")?;
     let directory = fixture.host.join("data/installs/chezmoi").join(pin);
     fs::create_dir_all(&directory)?;
     fs::copy(
@@ -174,9 +291,11 @@ fn the_code_gate_and_its_children_ignore_the_fixture_host_environment() -> Resul
         path.extend(std::env::split_paths(
             &std::env::var_os("PATH").unwrap_or_default(),
         ));
-        let mut command = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), scope.path());
+        let mut command = code_child(
+            fixture_process::command(std::env::current_exe()?, scope.path()),
+            scope.path(),
+        );
         command
-            .args(["hosts", "code", "--gate", "python"])
             .current_dir(&root)
             .env("HOME", &host)
             .env("USERPROFILE", &host)
@@ -204,7 +323,7 @@ fn the_code_gate_and_its_children_ignore_the_fixture_host_environment() -> Resul
                 root.join("gitconfig")
             },
         );
-        Ok(command.output()?)
+        code_output(command)
     };
     let clean = run(false)?;
     let polluted = run(true)?;
@@ -272,10 +391,7 @@ fn rust_code_fixture() -> Result<(CodeFixture, platform::code_environment::Insta
     rust["install_path"] = serde_json::json!(proxy);
     tools["rust"] = serde_json::json!([rust]);
     fs::write(inventory, serde_json::to_vec(&tools)?)?;
-    fs::write(
-        fixture.root.join("mise.toml"),
-        format!("[tools]\npython = '3.14.8'\nrust = {RUST_PIN:?}\n"),
-    )?;
+    add_fixture_pin(&fixture.root, "rust", RUST_PIN, "core:rust")?;
     let installed = platform::code_environment::Installations {
         mise,
         data: fixture.host.join("data"),
@@ -580,6 +696,12 @@ fn the_code_environment_owns_mise_after_its_installation_is_removed() -> Result<
 #[test]
 fn code_proofs_reuse_only_the_pinned_kani_bundle_without_host_configuration() -> Result<()> {
     let fixture = code_fixture()?;
+    add_fixture_pin(
+        &fixture.root,
+        "cargo:kani-verifier",
+        "0.68.0",
+        "cargo:kani-verifier",
+    )?;
     let kani = fixture.host.join(".kani");
     let selected = kani.join("kani-0.68.0");
     let other = kani.join("kani-0.67.0");
@@ -652,10 +774,11 @@ fn a_code_gate_can_construct_another_isolated_code_gate() -> Result<()> {
     };
     let environment =
         platform::code_environment::CodeEnvironment::build(&fixture.root, &installed)?;
-    let output = environment
-        .command(env!("CARGO_BIN_EXE_dotfiles"))
-        .args(["hosts", "code", "--gate", "python"])
-        .output()?;
+    let command = code_child(
+        environment.command(std::env::current_exe()?),
+        fixture.scope.path(),
+    );
+    let output = code_output(command)?;
     ensure!(
         output.status.success(),
         "{}",
@@ -690,6 +813,108 @@ fn a_mise_bootstrap_with_a_different_release_pin_stops_before_the_gate() -> Resu
     assert!(!output.status.success());
     assert!(String::from_utf8(output.stderr)?.contains("release pin 2026.9.0"));
     assert_eq!(output.stdout, [] as [u8; 0]);
+    Ok(())
+}
+
+#[test]
+fn public_code_refuses_unresolved_cargo_and_missing_inherited_tools_before_the_body() -> Result<()>
+{
+    let fixture = code_fixture()?;
+    let lock = fixture.root.join("Cargo.lock");
+    let original_lock = fs::read_to_string(&lock)?;
+    let listing = fixture.root.join("tools.json");
+    let original_listing = fs::read(&listing)?;
+    let mut missing: serde_json::Value = serde_json::from_slice(&original_listing)?;
+    missing["python"][0]["installed"] = false.into();
+    missing["python"][0]["active"] = false.into();
+    let paths = std::env::join_paths(std::iter::once(fixture.host.clone()).chain(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+    ))?;
+    for cargo in [true, false] {
+        if cargo {
+            fs::write(
+                &lock,
+                original_lock
+                    .lines()
+                    .filter(|line| !line.starts_with("checksum="))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )?;
+        } else {
+            fs::write(&lock, &original_lock)?;
+            fs::write(&listing, serde_json::to_vec(&missing)?)?;
+        }
+        let output = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), fixture.scope.path())
+            .args(["hosts", "code", "--gate", "python"])
+            .current_dir(&fixture.root)
+            .env("HOME", &fixture.host)
+            .env("USERPROFILE", &fixture.host)
+            .env("MISE_DATA_DIR", fixture.host.join("data"))
+            .env("PATH", &paths)
+            .output()?;
+        assert!(!output.status.success());
+        let diagnostic = String::from_utf8(output.stderr)?;
+        let expected = if cargo {
+            "acquisition plan is empty or unresolved"
+        } else {
+            "inherited tool admission refused"
+        };
+        assert!(diagnostic.contains(expected), "{diagnostic}");
+        assert_eq!(output.stdout, b"");
+        assert!(!fixture.root.join("installed-at").exists());
+        assert!(!fixture.host.join("data/gate-state").exists());
+    }
+    Ok(())
+}
+
+#[test]
+fn missing_cargo_materials_refuse_the_consumer_before_building_a_code_environment() -> Result<()> {
+    let fixture = code_fixture()?;
+    let blob = host_materials::seed_cache(&fixture.root, &fixture.host)?;
+    fs::remove_file(&blob)?;
+    let binary = fixture
+        .host
+        .join(format!("code-probe{}", std::env::consts::EXE_SUFFIX));
+    fs::copy(std::env::current_exe()?, &binary)?;
+    let curl = fixture
+        .host
+        .join(format!("curl{}", std::env::consts::EXE_SUFFIX));
+    fs::copy(
+        fixture
+            .host
+            .join(format!("mise{}", std::env::consts::EXE_SUFFIX)),
+        &curl,
+    )?;
+    let trace = fixture.scope.path().join("material-fetch");
+    let paths = std::env::join_paths(std::iter::once(fixture.host.clone()).chain(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+    ))?;
+    let output = code_child(
+        fixture_process::command(&binary, fixture.scope.path()),
+        fixture.scope.path(),
+    )
+    .current_dir(&fixture.root)
+    .env("HOME", &fixture.host)
+    .env("USERPROFILE", &fixture.host)
+    .env("PATH", paths)
+    .env(CODE_ACTION, "materials")
+    .env("HOSTS_FIXTURE_MATERIAL_FETCH", &trace)
+    .output()?;
+    assert!(!output.status.success());
+    let diagnostic = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        diagnostic.contains("curl acquisition exited with code 77"),
+        "{diagnostic}"
+    );
+    assert_eq!(fs::read_to_string(trace)?, "refused\n");
+    assert!(!blob.exists());
+    assert!(!fixture.scope.path().join("code.stdout").exists());
+    assert!(!fixture.root.join("installed-at").exists());
+    assert!(!fixture.host.join("data/gate-state").exists());
     Ok(())
 }
 
@@ -729,16 +954,20 @@ fn a_different_native_mise_uses_the_source_launcher_only_in_scratch() -> Result<
     paths.extend(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     ));
-    let output = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), fixture.scope.path())
-        .args(["hosts", "code", "--gate", "mise --version && python"])
+    let mut command = code_child(
+        fixture_process::command(std::env::current_exe()?, fixture.scope.path()),
+        fixture.scope.path(),
+    );
+    command
         .current_dir(&fixture.root)
         .env("HOME", &fixture.host)
         .env("USERPROFILE", &fixture.host)
         .env("MISE_DATA_DIR", fixture.host.join("data"))
+        .env(CODE_ACTION, "bootstrap")
         .env("__MISE_DIFF", "inherited-host-activation")
         .env("__MISE_ORIG_PATH", &fixture.old)
-        .env("PATH", std::env::join_paths(paths)?)
-        .output()?;
+        .env("PATH", std::env::join_paths(paths)?);
+    let output = code_output(command)?;
     ensure!(
         output.status.success(),
         "{}",
@@ -898,6 +1127,7 @@ fn the_code_environment_links_with_the_registered_windows_toolchain() -> Result<
 #[test]
 fn a_missing_exact_pin_installs_only_in_the_code_scratch_home() -> Result<()> {
     let fixture = code_fixture()?;
+    add_fixture_pin(&fixture.root, "uv", "0.12.22", "aqua:astral-sh/uv")?;
     fs::write(fixture.root.join("missing"), "")?;
     let listing = fixture.root.join("tools.json");
     let mut tools: serde_json::Value = serde_json::from_slice(&fs::read(&listing)?)?;
@@ -920,16 +1150,17 @@ fn a_missing_exact_pin_installs_only_in_the_code_scratch_home() -> Result<()> {
         &std::env::var_os("PATH").unwrap_or_default(),
     ));
     let run = || -> Result<std::process::Output> {
-        Ok(
-            fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), fixture.scope.path())
-                .args(["hosts", "code", "--gate", "python"])
-                .current_dir(&fixture.root)
-                .env("HOME", &fixture.host)
-                .env("USERPROFILE", &fixture.host)
-                .env("MISE_DATA_DIR", fixture.host.join("data"))
-                .env("PATH", std::env::join_paths(&path)?)
-                .output()?,
-        )
+        let mut command = code_child(
+            fixture_process::command(std::env::current_exe()?, fixture.scope.path()),
+            fixture.scope.path(),
+        );
+        command
+            .current_dir(&fixture.root)
+            .env("HOME", &fixture.host)
+            .env("USERPROFILE", &fixture.host)
+            .env("MISE_DATA_DIR", fixture.host.join("data"))
+            .env("PATH", std::env::join_paths(&path)?);
+        code_output(command)
     };
     let output = run()?;
     ensure!(
@@ -969,14 +1200,17 @@ fn an_unusable_installation_link_is_replaced_only_in_scratch() -> Result<()> {
     path.extend(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     ));
-    let output = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), fixture.scope.path())
-        .args(["hosts", "code", "--gate", "python"])
+    let mut command = code_child(
+        fixture_process::command(std::env::current_exe()?, fixture.scope.path()),
+        fixture.scope.path(),
+    );
+    command
         .current_dir(&fixture.root)
         .env("HOME", &fixture.host)
         .env("USERPROFILE", &fixture.host)
         .env("MISE_DATA_DIR", fixture.host.join("data"))
-        .env("PATH", std::env::join_paths(path)?)
-        .output()?;
+        .env("PATH", std::env::join_paths(path)?);
+    let output = code_output(command)?;
     ensure!(
         output.status.success(),
         "{}",
@@ -1108,6 +1342,43 @@ struct BootstrapFixture {
     pin: String,
 }
 
+fn bootstrap_rustup(cargo: &Path) -> Result<PathBuf> {
+    let program = cargo
+        .join("bin")
+        .join(format!("rustup{}", std::env::consts::EXE_SUFFIX));
+    platform::paths::canonical(&program)?;
+    Ok(program)
+}
+
+#[test]
+fn a_named_rustup_proxy_preserves_the_manager_dispatch() -> Result<()> {
+    let scope = tempfile::tempdir()?;
+    let root = platform::paths::canonical(scope.path())?;
+    let cargo = root.join("cargo");
+    let bin = cargo.join("bin");
+    fs::create_dir_all(&bin)?;
+    let home = platform::home::home().context("native tool home")?;
+    let native_cargo =
+        std::env::var_os("CARGO_HOME").map_or_else(|| home.join(".cargo"), PathBuf::from);
+    let manager = format!("rustup{}", std::env::consts::EXE_SUFFIX);
+    let installer = bin.join(format!("rustup-init{}", std::env::consts::EXE_SUFFIX));
+    fs::copy(native_cargo.join("bin").join(&manager), &installer)?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&installer, bin.join(&manager))?;
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(&installer, bin.join(&manager))?;
+    let output = fixture_process::command(bootstrap_rustup(&cargo)?, &root)
+        .args(["show", "active-toolchain"])
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "named rustup manager dispatch failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_ne!(output.stdout, Vec::<u8>::new());
+    Ok(())
+}
+
 fn bootstrap_fixture() -> Result<BootstrapFixture> {
     let scope = tempfile::tempdir()?;
     let directory = platform::paths::canonical(scope.path())?;
@@ -1120,11 +1391,7 @@ fn bootstrap_fixture() -> Result<BootstrapFixture> {
     let home = platform::home::home().context("native tool home")?;
     let installed = platform::code_environment::Installations::discover(&home)?;
     let cargo = installed.cargo.clone();
-    let rustup = platform::paths::canonical(
-        &cargo
-            .join("bin")
-            .join(format!("rustup{}", std::env::consts::EXE_SUFFIX)),
-    )?;
+    let rustup = bootstrap_rustup(&cargo)?;
     link_directory(&installed.rustup, &host.join(".rustup"))?;
     let data = if cfg!(windows) {
         host.join("AppData/Local/mise")
@@ -1274,7 +1541,13 @@ fn the_remote_bootstrap_uses_native_rust_tools_with_owned_writable_state() -> Re
         .env("RUSTUP_TOOLCHAIN", values["RUSTUP_TOOLCHAIN"])
         .args(["show", "active-toolchain"])
         .output()?;
-    ensure!(active.status.success(), "resolve the bootstrap toolchain");
+    ensure!(
+        active.status.success(),
+        "resolve the bootstrap toolchain with {}: {}; {}",
+        rustup.display(),
+        active.status,
+        String::from_utf8_lossy(&active.stderr)
+    );
     let active = String::from_utf8(active.stdout)?;
     assert_eq!(
         active.split_whitespace().next(),
@@ -1285,7 +1558,7 @@ fn the_remote_bootstrap_uses_native_rust_tools_with_owned_writable_state() -> Re
             &job.join("bootstrap/.cargo/bin")
                 .join(format!("rustup{}", std::env::consts::EXE_SUFFIX))
         )?,
-        rustup
+        platform::paths::canonical(&rustup)?
     );
     assert_eq!(
         fs::read_to_string(&global)?,
@@ -2730,6 +3003,9 @@ fn one_head_reports_every_failing_host_and_stage() -> Result<()> {
     let home = scope.path().join("home");
     fs::create_dir_all(root.join(".github/workflows"))?;
     fs::create_dir_all(home.join(".local/state/hosts"))?;
+    let opt_in = home.join(platform::incidents::EXPERIMENTAL);
+    fs::create_dir_all(opt_in.parent().context("fixture consent directory")?)?;
+    fs::write(opt_in, skill_ops::incident_rules::EXPERIMENTAL_OPT_IN)?;
     fs::write(
         home.join(".local/state/hosts/ssh_config"),
         render(

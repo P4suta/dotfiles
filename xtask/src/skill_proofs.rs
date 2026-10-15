@@ -9,10 +9,12 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 pub const KANI_VERSION: &str = "0.68.0";
+pub(crate) const KANI_CBMC_VERSION: &str = "6.11.0";
+const KANI_OBJECT_BITS: u32 = 12;
 
 /// Every proof covers a reachable acceptance and a reachable refusal.
 const WITNESSES: usize = 2;
@@ -22,6 +24,7 @@ const CHECKED_ADD_OVERFLOW: &str = "attempt to add with overflow";
 pub const KANI_BATCH_SIZE: usize = 16;
 const KANI_BATCH_TEST: &str =
     "a_kani_batch_verifies_every_harness_and_rejects_every_counterexample";
+const MUTATION_CAMPAIGN_CASES: usize = 2;
 
 /// Run native checks and the family's required campaign or measurement budgets.
 ///
@@ -204,12 +207,16 @@ fn validate_proof(result: &Value) -> Result<()> {
     Ok(())
 }
 
-/// The unstable features a Kani run enables: stubbing always, and the ones a contract obligation adds.
+/// The unstable features a Kani run enables: stubbing always, and the ones an obligation adds.
 fn features(flags: &BTreeSet<&'static str>) -> Vec<&'static str> {
     flags.iter().flat_map(|flag| ["-Z", flag]).collect()
 }
 
-fn standalone_kani() -> std::process::Command {
+fn standalone_kani() -> Result<std::process::Command> {
+    installed_kani_command()
+}
+
+fn checked_kani(mut command: std::process::Command) -> std::process::Command {
     // Inlining and jump threading duplicate cover intrinsics along unsatisfiable paths.
     const CHECKED_MIR: &str = "--edition=2024 -C overflow-checks=yes -C debug-assertions=yes -Z mir-opt-level=3 -Z mir-enable-passes=-Inline,-JumpThreading";
     let mut flags = std::env::var_os("RUSTFLAGS").unwrap_or_default();
@@ -217,7 +224,6 @@ fn standalone_kani() -> std::process::Command {
         flags.push(" ");
     }
     flags.push(CHECKED_MIR);
-    let mut command = Tool::Kani.command();
     command.env("RUSTFLAGS", flags);
     command
 }
@@ -234,6 +240,16 @@ pub fn verify_file(
     counterexample: bool,
     flags: &BTreeSet<&'static str>,
 ) -> Result<()> {
+    verify_file_recorded(source, directory, expected, counterexample, flags).map(|_| ())
+}
+
+fn verify_file_recorded(
+    source: &Path,
+    directory: &Path,
+    expected: &[&str],
+    counterexample: bool,
+    flags: &BTreeSet<&'static str>,
+) -> Result<Vec<crate::phase_evidence::KaniBatch>> {
     ensure!(
         !expected.is_empty(),
         "proof execution is incomplete or empty"
@@ -243,13 +259,23 @@ pub fn verify_file(
         "duplicate proof harness"
     );
     let mut checks = Checks::default();
+    let mut reports = Vec::new();
     for batch in expected.chunks(KANI_BATCH_SIZE) {
         checks.run(
             &format!("{} [{}]", source.display(), batch.join(", ")),
-            || verify_batch(source, directory, batch, counterexample, flags),
+            || {
+                let document = verify_batch(source, directory, batch, counterexample, flags)?;
+                reports.push(crate::phase_evidence::KaniBatch {
+                    names: batch.iter().map(|name| (*name).to_owned()).collect(),
+                    counterexample,
+                    document,
+                });
+                Ok(())
+            },
         );
     }
-    checks.finish()
+    checks.finish()?;
+    Ok(reports)
 }
 
 fn verify_batch(
@@ -258,13 +284,32 @@ fn verify_batch(
     expected: &[&str],
     counterexample: bool,
     flags: &BTreeSet<&'static str>,
-) -> Result<()> {
+) -> Result<Value> {
+    verify_batch_command(
+        standalone_kani()?,
+        source,
+        directory,
+        expected,
+        counterexample,
+        flags,
+    )
+}
+
+fn verify_batch_command(
+    mut command: std::process::Command,
+    source: &Path,
+    directory: &Path,
+    expected: &[&str],
+    counterexample: bool,
+    flags: &BTreeSet<&'static str>,
+) -> Result<Value> {
     let output = directory.join("results.json");
     fs::write(&output, "")?;
-    let mut command = standalone_kani();
     command
         .current_dir(directory)
         .arg(source)
+        .arg("--target-dir")
+        .arg(directory)
         .args(["--output-format", "terse", "-Z", "unstable-options"])
         .args(features(flags))
         .arg("--exact")
@@ -275,7 +320,16 @@ fn verify_batch(
     for name in expected {
         command.args(["--harness", name]);
     }
-    let status = command.status().context("start pinned Kani verifier")?;
+    command
+        .args(["--cbmc-args", "--object-bits"])
+        .arg(KANI_OBJECT_BITS.to_string());
+    let output = crate::phase_evidence::output(&mut command, "Kani batch")?;
+    let status = output.status;
+    crate::phase_evidence::retain(
+        "Kani batch",
+        "receipt",
+        &fs::read(directory.join("results.json"))?,
+    )?;
     let mut checks = Checks::default();
     checks.run("Kani exit", || {
         ensure!(
@@ -285,49 +339,328 @@ fn verify_batch(
         Ok(())
     });
     checks.run("Kani report", || {
-        let result: Value = skill_ops::read_json(&output)?;
+        let result: Value = skill_ops::read_json(&directory.join("results.json"))?;
         validate_results(&result, expected, counterexample)
     });
-    checks.finish()
+    checks.finish()?;
+    skill_ops::read_json(&directory.join("results.json"))
 }
 
-/// The harnesses that `kani list` finds in `source`, which every run must then pass.
+const KANI_TOOL: &str = "cargo:kani-verifier";
+const KANI_HOME: &str = "KANI_HOME";
+const KANI_DIRECTORY: &str = ".kani";
+const KANI_DRIVER: &str = "bin/kani-driver";
+const KANI_TOOLCHAIN: &str = "rust-toolchain-version";
+const KANI_VALID_SMOKE: &str = "#[kani::proof] fn valid() { let value: bool = kani::any(); assert_eq!(value, !(!value)); kani::cover!(value); kani::cover!(!value); }\n";
+const KANI_REJECT_SMOKE: &str =
+    "#[kani::proof] fn rejected() { let value: bool = kani::any(); assert!(value); }\n";
+
+/// Returns the existing installed verifier driver without preparing or installing it.
+///
+/// # Errors
+///
+/// Refuses an absent or incomplete pinned Kani distribution.
+pub fn kani_environment_driver() -> Result<std::path::PathBuf> {
+    Ok(installed_kani_directory()?.join(KANI_DRIVER))
+}
+
+/// Prepares the pinned Kani installation on its supported native route or Windows image route.
+///
+/// # Errors
+///
+/// Refuses unsupported pins, failed explicit installation or setup, and an unavailable prepared verifier.
+pub fn prepare_kani_environment(root: &Path) -> Result<()> {
+    if cfg!(windows) {
+        ensure_linux_engine()?;
+        return ensure_image(root, &root.join(PROOF_IMAGE), &proof_image(root)?);
+    }
+    if kani_environment_version(root).is_ok() {
+        return Ok(());
+    }
+    let config: toml::Value = toml::from_str(&fs::read_to_string(root.join(MISE_CONFIG))?)?;
+    ensure!(
+        config["tools"][KANI_TOOL]["version"].as_str() == Some(KANI_VERSION),
+        "Kani installation pin differs from the verified driver"
+    );
+    let mut installation = Tool::Mise.command();
+    installation.current_dir(root).args(["install", KANI_TOOL]);
+    let status = platform::process::mise_install(installation)?.status()?;
+    ensure!(
+        status.success(),
+        "install the pinned Kani launcher: {status}"
+    );
+    let status = Tool::Mise
+        .command()
+        .current_dir(root)
+        .args([
+            "x",
+            &format!("{KANI_TOOL}@{KANI_VERSION}"),
+            "--",
+            "kani",
+            "setup",
+        ])
+        .status()?;
+    ensure!(
+        status.success(),
+        "prepare the pinned Kani distribution: {status}"
+    );
+    kani_environment_version(root)?;
+    Ok(())
+}
+
+fn installed_kani_directory() -> Result<std::path::PathBuf> {
+    let home = std::env::var_os(KANI_HOME)
+        .map(std::path::PathBuf::from)
+        .map_or_else(
+            || {
+                std::env::var_os("HOME")
+                    .map(|home| std::path::PathBuf::from(home).join(KANI_DIRECTORY))
+                    .context("Kani native home")
+            },
+            Ok,
+        )?;
+    ensure!(home.is_absolute(), "Kani home must be absolute");
+    let directory = home.join(format!("kani-{KANI_VERSION}"));
+    ensure!(
+        directory.join(KANI_DRIVER).is_file() && directory.join(KANI_TOOLCHAIN).is_file(),
+        "the existing Kani distribution is incomplete; run its explicit preparation command"
+    );
+    Ok(directory)
+}
+
+/// Reads the existing driver's version without invoking Kani's proxy that installs tools.
+///
+/// # Errors
+///
+/// Refuses a missing distribution, an unsuccessful version query, or another installed release.
+pub fn kani_environment_version(root: &Path) -> Result<String> {
+    ensure!(
+        !cfg!(windows),
+        "Windows Kani metadata uses the existing Linux image route"
+    );
+    let output = crate::phase_evidence::output(
+        installed_kani_command()?.current_dir(root).arg("--version"),
+        "existing Kani driver version",
+    )?;
+    let version = String::from_utf8(output.stdout)?.trim().to_owned();
+    ensure!(
+        output.status.success() && kani_environment_version_matches(&version),
+        "the existing Kani driver has another version or cannot run"
+    );
+    Ok(version)
+}
+
+/// Validates the pinned standalone driver's complete version response.
+#[must_use]
+pub fn kani_environment_version_matches(version: &str) -> bool {
+    version.trim()
+        == format!("Kani Rust Verifier {KANI_VERSION} (standalone)\nCBMC {KANI_CBMC_VERSION}")
+}
+
+fn installed_kani_command() -> Result<std::process::Command> {
+    let directory = installed_kani_directory()?;
+    let mut command = checked_kani(platform::process::command(directory.join(KANI_DRIVER)));
+    let mut path = vec![directory.join("bin"), directory.join("pyroot/bin")];
+    path.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let mut python = vec![directory.join("pyroot")];
+    python.extend(std::env::split_paths(
+        &std::env::var_os("PYTHONPATH").unwrap_or_default(),
+    ));
+    command
+        .env("PATH", std::env::join_paths(path)?)
+        .env("PYTHONPATH", std::env::join_paths(python)?)
+        .env(
+            "RUSTUP_TOOLCHAIN",
+            fs::read_to_string(directory.join(KANI_TOOLCHAIN))?.trim(),
+        );
+    for variable in ["LD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH"] {
+        if let Some(paths) = std::env::var_os(variable) {
+            let paths = std::env::split_paths(&paths).filter(|path| {
+                !path
+                    .components()
+                    .any(|component| component.as_os_str() == "toolchains")
+            });
+            command.env(variable, std::env::join_paths(paths)?);
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.arg0("kani");
+    }
+    Ok(command)
+}
+
+/// Runs one reachable valid proof and one assertion-defect control with the prepared verifier.
+///
+/// # Errors
+///
+/// Refuses missing prepared assets, incomplete receipts, an unverified proof, or a missing assertion rejection.
+pub fn smoke_kani_environment(root: &Path) -> Result<()> {
+    let scope = tempfile::tempdir()?;
+    let flags = BTreeSet::from(["stubbing"]);
+    if cfg!(windows) {
+        return smoke_kani_container(root, scope.path(), &flags);
+    }
+    kani_environment_version(root)?;
+    for (name, body, counterexample) in [
+        ("valid", KANI_VALID_SMOKE, false),
+        ("rejected", KANI_REJECT_SMOKE, true),
+    ] {
+        let source = scope.path().join(format!("{name}.rs"));
+        fs::write(&source, body)?;
+        verify_batch_command(
+            installed_kani_command()?,
+            &source,
+            scope.path(),
+            &[name],
+            counterexample,
+            &flags,
+        )?;
+    }
+    Ok(())
+}
+
+fn smoke_kani_container(
+    root: &Path,
+    directory: &Path,
+    flags: &BTreeSet<&'static str>,
+) -> Result<()> {
+    ensure_linux_engine()?;
+    let image = proof_image(root)?;
+    ensure!(
+        crate::container::amd64_image_present(&image)?,
+        "the existing Kani smoke image is unavailable; run its explicit preparation command"
+    );
+    for (name, body, counterexample) in [
+        ("valid", KANI_VALID_SMOKE, false),
+        ("rejected", KANI_REJECT_SMOKE, true),
+    ] {
+        let source = directory.join(format!("{name}.rs"));
+        fs::write(&source, body)?;
+        fs::write(directory.join("results.json"), [])?;
+        let mount = format!(
+            "type=bind,\"source={}\",target=/work",
+            crate::canonical(directory)?.display()
+        );
+        let status = Tool::Docker
+            .command()
+            .args([
+                "run",
+                "--rm",
+                "--pull",
+                "never",
+                "--network",
+                "none",
+                "--platform",
+                crate::container::LINUX_AMD64,
+                "--mount",
+                &mount,
+                "--workdir",
+                "/work",
+                &image,
+                "kani",
+            ])
+            .arg(format!("{name}.rs"))
+            .args(["--output-format", "terse", "-Z", "unstable-options"])
+            .args(features(flags))
+            .args([
+                "--exact",
+                "--harness",
+                name,
+                "--harness-timeout",
+                &format!("{}s", proof_budget_rules::TIMEOUT_SECONDS),
+                "--export-json",
+                "results.json",
+            ])
+            .status()?;
+        ensure!(
+            status.success() != counterexample,
+            "Kani smoke returned another outcome: {status}"
+        );
+        validate_results(
+            &skill_ops::read_json(&directory.join("results.json"))?,
+            &[name],
+            counterexample,
+        )?;
+    }
+    Ok(())
+}
+
+/// Collects the same compiler harness metadata as Kani list while directing generated artifacts outside protected Source.
 fn verify_inventory(
     source: &Path,
     directory: &Path,
     flags: &BTreeSet<&'static str>,
 ) -> Result<BTreeSet<String>> {
-    let status = standalone_kani()
-        .current_dir(directory)
-        .args(["list", "--format", "json"])
-        .args(features(flags))
-        .arg(source)
-        .status()?;
-    ensure!(status.success(), "cannot list required proof harnesses");
-    let listed: Value = skill_ops::read_json(&directory.join("kani-list.json"))?;
+    let metadata = directory
+        .join(source.file_stem().context("Kani inventory crate name")?)
+        .with_extension("kani-metadata.json");
+    fs::write(&metadata, "")?;
+    let output = crate::phase_evidence::output(
+        standalone_kani()?
+            .current_dir(directory)
+            .arg(source)
+            .arg("--target-dir")
+            .arg(directory)
+            .arg("--only-codegen")
+            .arg("--keep-temps")
+            .args(features(flags)),
+        "Kani compiler harness inventory",
+    )?;
     ensure!(
-        listed["kani-version"] == KANI_VERSION,
-        "unexpected proof inventory version"
+        output.status.success(),
+        "cannot compile required proof harness inventory"
     );
-    let declarations = listed["standard-harnesses"]
-        .as_object()
-        .context("missing standard harness inventory")?;
-    let contracts = listed["contract-harnesses"].as_object();
-    let names: BTreeSet<String> = declarations
-        .values()
-        .chain(contracts.into_iter().flat_map(serde_json::Map::values))
-        .flat_map(|value| value.as_array().into_iter().flatten())
-        .map(|value| {
-            value
-                .as_str()
-                .map(str::to_owned)
-                .context("invalid proof inventory")
-        })
-        .collect::<Result<_>>()?;
+    let bytes = fs::read(&metadata)?;
+    crate::phase_evidence::retain("Kani compiler harness inventory", "inventory", &bytes)?;
+    compiled_harnesses(&bytes)
+}
+
+#[derive(serde::Deserialize)]
+struct CompiledInventory {
+    proof_harnesses: Vec<CompiledHarness>,
+}
+
+#[derive(serde::Deserialize)]
+struct CompiledHarness {
+    pretty_name: String,
+    attributes: CompiledAttributes,
+}
+
+#[derive(serde::Deserialize)]
+struct CompiledAttributes {
+    kind: CompiledKind,
+}
+
+#[derive(serde::Deserialize)]
+enum CompiledKind {
+    Proof,
+    ProofForContract { target_fn: String },
+    Test,
+}
+
+fn compiled_harnesses(bytes: &[u8]) -> Result<BTreeSet<String>> {
+    let inventory: CompiledInventory = serde_json::from_slice(bytes)?;
+    let mut names = BTreeSet::new();
+    for harness in inventory.proof_harnesses {
+        match harness.attributes.kind {
+            CompiledKind::Test => continue,
+            CompiledKind::Proof => {}
+            CompiledKind::ProofForContract { target_fn } => {
+                ensure!(!target_fn.is_empty(), "empty Kani contract target");
+            }
+        }
+        ensure!(
+            !harness.pretty_name.is_empty() && names.insert(harness.pretty_name),
+            "empty or duplicate Kani compiler harness identity"
+        );
+    }
     ensure!(
         !names.is_empty(),
-        "{} declares no proof harness",
-        source.display()
+        "Kani compiler metadata holds no proof harness"
     );
     Ok(names)
 }
@@ -429,6 +762,14 @@ impl ImagePins {
     }
 }
 
+/// The same checked release arguments used by the current image identity.
+///
+/// # Errors
+/// Refuses missing, malformed, mismatched, or unlocked image pins.
+pub(crate) fn proof_image_arguments(root: &Path) -> Result<[String; 6]> {
+    Ok(ImagePins::load(root)?.arguments())
+}
+
 /// The image identity covers its definition and every release pin its build uses.
 ///
 /// # Errors
@@ -466,10 +807,14 @@ pub fn ensure_image(root: &Path, definition: &Path, image: &str) -> Result<()> {
     for pin in ImagePins::load(root)?.arguments() {
         command.arg("--build-arg").arg(pin);
     }
-    let status = command.arg(root.join("xtask/proofs")).status()?;
+    let output = crate::phase_evidence::output(
+        command.arg(root.join("xtask/proofs")),
+        "verification image build",
+    )?;
     ensure!(
-        status.success(),
-        "building the verification image failed: {status}"
+        output.status.success(),
+        "building the verification image failed: {}",
+        output.status
     );
     Ok(())
 }
@@ -504,6 +849,7 @@ fn container_campaign_arguments(
     let mut arguments: Vec<OsString> = [
         "run",
         "--rm",
+        "--pull=never",
         "--platform",
         crate::container::LINUX_AMD64,
         "--security-opt=seccomp=unconfined",
@@ -545,25 +891,54 @@ fn container_campaign_arguments(
 /// Kani has no native build here, so the unchanged proof gate runs on a pinned Linux verification host that mounts this checkout read-only.
 fn verify_in_container(root: &Path, campaign: ProofCampaign) -> Result<()> {
     let root = crate::canonical(root)?;
+    crate::phase_evidence::run(&root, "Windows Linux proof container", 1, || {
+        verify_container_measured(&root, campaign)
+    })
+}
+
+fn verify_container_measured(root: &Path, campaign: ProofCampaign) -> Result<()> {
     ensure_linux_engine().context("Kani proofs on this host run in a Linux container")?;
     let definition = root.join(PROOF_IMAGE);
-    let image = proof_image(&root)?;
-    ensure_image(&root, &definition, &image)?;
-    let status = Tool::Docker
-        .command()
-        .args(container_campaign_arguments(
-            &root,
-            &image,
-            &container_target_volume(&root),
+    let image = proof_image(root)?;
+    ensure_image(root, &definition, &image)?;
+    let image_id = verified_image_id(&image)?;
+    let output = crate::phase_evidence::output(
+        Tool::Docker.command().args(container_campaign_arguments(
+            root,
+            &image_id,
+            &container_target_volume(root),
             campaign,
-        ))
-        .status()
-        .context("start the Kani verification container")?;
+        )),
+        "Linux proof container campaign",
+    )?;
     ensure!(
-        status.success(),
-        "the containerized proof gate failed: {status}"
+        output.status.success(),
+        "the containerized proof gate failed: {}",
+        output.status
     );
     Ok(())
+}
+
+pub(crate) fn verified_image_id(image: &str) -> Result<String> {
+    let metadata = crate::phase_evidence::output(
+        Tool::Docker
+            .command()
+            .args(["image", "inspect", "--format", "{{json .}}", image]),
+        "proof container image identity",
+    )?;
+    ensure!(
+        metadata.status.success(),
+        "inspect the proof container image identity"
+    );
+    let metadata: Value = serde_json::from_slice(&metadata.stdout)?;
+    ensure!(
+        metadata["Os"] == "linux" && metadata["Architecture"] == "amd64",
+        "proof container image must preserve Linux amd64 target semantics"
+    );
+    Ok(metadata["Id"]
+        .as_str()
+        .context("proof container image ID")?
+        .to_owned())
 }
 
 /// Runs the complete proof campaign, with fixed measurement budgets on Linux and in the Windows container.
@@ -585,6 +960,10 @@ pub fn verify_ci(root: &Path) -> Result<()> {
 }
 
 fn verify_campaign(root: &Path, campaign: ProofCampaign) -> Result<()> {
+    crate::quality::with_locked_workspaces(root, || verify_campaign_prepared(root, campaign))
+}
+
+fn verify_campaign_prepared(root: &Path, campaign: ProofCampaign) -> Result<()> {
     let mut checks = Checks::default();
     if campaign == ProofCampaign::Ci {
         println!(
@@ -605,24 +984,68 @@ fn verify_campaign(root: &Path, campaign: ProofCampaign) -> Result<()> {
     }
     if std::env::var_os(INSIDE_CONTAINER).is_some() {
         // The image pins Valgrind and the gungraun runner, so the budgets run here with them natively.
-        checks.run("benchmarks", || crate::benchmarks::verify(root));
+        checks.run("benchmarks", || {
+            crate::phase_evidence::run(
+                root,
+                "fixed Linux benchmarks",
+                crate::benchmarks::FUNCTIONS.len(),
+                || crate::benchmarks::verify(root),
+            )
+        });
         return checks.finish();
     }
     // The instruction ceilings depend on the native x86_64 CPU's libc dispatch and the image.
     if cfg!(target_os = "linux") {
         checks.run("benchmarks", || {
-            crate::benchmarks::verify_in_container(root)
+            crate::phase_evidence::run(
+                root,
+                "fixed Linux benchmarks",
+                crate::benchmarks::FUNCTIONS.len(),
+                || crate::benchmarks::verify_in_container(root),
+            )
         });
     }
-    checks.run("models", || {
-        let manifest = obligations::manifest(root)?;
-        let mut models = Checks::default();
-        models.run("Quint", || crate::quint::verify(root, &manifest));
-        models.run("Alloy", || crate::alloy::verify(root, &manifest));
-        models.run("Lean", || crate::lean::verify(root, &manifest));
-        models.finish()
-    });
+    checks.run("models", || verify_models(root));
     checks.finish()
+}
+
+fn verify_models(root: &Path) -> Result<()> {
+    let manifest = obligations::manifest(root)?;
+    let mut models = Checks::default();
+    for (name, workload, verifier) in [
+        (
+            "Quint models",
+            manifest
+                .obligations
+                .iter()
+                .filter(|obligation| matches!(obligation, Obligation::Quint(_)))
+                .count(),
+            crate::quint::verify as fn(&Path, &obligations::Manifest) -> Result<()>,
+        ),
+        (
+            "Alloy models",
+            manifest
+                .obligations
+                .iter()
+                .filter(|obligation| matches!(obligation, Obligation::Alloy(_)))
+                .count(),
+            crate::alloy::verify,
+        ),
+        (
+            "Lean packages",
+            manifest
+                .obligations
+                .iter()
+                .filter(|obligation| matches!(obligation, Obligation::Lean(_)))
+                .count(),
+            crate::lean::verify,
+        ),
+    ] {
+        models.run(name, || {
+            crate::phase_evidence::run(root, name, workload, || verifier(root, &manifest))
+        });
+    }
+    models.finish()
 }
 
 /// Set inside the Kani container, whose gate leaves the Quint models to the host that started it.
@@ -665,6 +1088,13 @@ fn run_native_checks(
 }
 
 fn verify_native(root: &Path, campaign: ProofCampaign) -> Result<()> {
+    with_fuzz_compilation(
+        || compile_fuzz_targets(root),
+        || verify_native_prepared(root, campaign),
+    )
+}
+
+fn verify_native_prepared(root: &Path, campaign: ProofCampaign) -> Result<()> {
     let manifest = obligations::manifest(root);
     run_native_checks(
         campaign,
@@ -685,41 +1115,80 @@ fn verify_native(root: &Path, campaign: ProofCampaign) -> Result<()> {
     )
 }
 
-fn verify_kani(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
-    let version = Tool::Kani.command().arg("--version").output()?;
-    ensure!(
-        version.status.success()
-            && String::from_utf8(version.stdout)?
-                .contains(&format!("Kani Rust Verifier {KANI_VERSION}")),
-        "the pinned Kani version is unavailable"
-    );
+pub(crate) fn verify_kani(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
+    let workload = manifest
+        .obligations
+        .iter()
+        .filter(|obligation| matches!(obligation, Obligation::Kani { .. }))
+        .count();
+    crate::phase_evidence::run(root, "Kani subjects", workload, || {
+        verify_kani_measured(root, manifest)
+    })
+}
+
+fn verify_kani_measured(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
+    kani_environment_version(root)?;
     verify_kani_driver(root)?;
-    let mut verified = 0;
-    let mut rejected = 0;
-    let mut checks = Checks::default();
-    for obligation in &manifest.obligations {
-        if let Obligation::Kani { source, probes } = obligation {
-            checks.run(source, || {
-                let flags = flags(manifest, source);
-                let (proved, refused) = verify_rules(root, source, probes, &flags)?;
-                verified += proved;
-                rejected += refused;
-                Ok(())
-            });
-        }
-    }
-    checks.finish()?;
+    let verifier_hash = crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
+    let engine_hash = crate::phase_evidence::engine_digest(root)?;
+    let (verified, rejected) = run_rule_subjects(
+        manifest,
+        |source, probes| {
+            prepare_rules(
+                root,
+                source,
+                probes,
+                &flags(manifest, source),
+                &verifier_hash,
+                &engine_hash,
+            )
+        },
+        execute_rules,
+    )?;
     println!(
         "Verified all {verified} production policy harnesses with their reachable outcomes, and rejected all {rejected} counterexamples"
     );
     Ok(())
 }
 
+fn run_rule_subjects<T>(
+    manifest: &obligations::Manifest,
+    mut prepare: impl FnMut(&str, &str) -> Result<T>,
+    mut execute: impl FnMut(T) -> Result<(usize, usize)>,
+) -> Result<(usize, usize)> {
+    let mut prepared = Vec::new();
+    let mut checks = Checks::default();
+    for obligation in &manifest.obligations {
+        if let Obligation::Kani { source, probes, .. } = obligation {
+            checks.run(source, || {
+                prepared.push((source, prepare(source, probes)?));
+                Ok(())
+            });
+        }
+    }
+    checks.finish()?;
+    ensure!(
+        !prepared.is_empty(),
+        "Kani campaign has no required rule subjects"
+    );
+    let mut verified = 0;
+    let mut rejected = 0;
+    let mut checks = Checks::default();
+    for (source, subject) in prepared {
+        checks.run(source, || {
+            let (proved, refused) = execute(subject)?;
+            verified += proved;
+            rejected += refused;
+            Ok(())
+        });
+    }
+    checks.finish()?;
+    Ok((verified, rejected))
+}
+
 fn verify_kani_driver(root: &Path) -> Result<()> {
-    let output = Tool::Cargo
-        .command()
-        .current_dir(root)
-        .args([
+    let output = crate::phase_evidence::output(
+        Tool::Cargo.command().current_dir(root).args([
             "test",
             "--locked",
             "--package",
@@ -730,11 +1199,10 @@ fn verify_kani_driver(root: &Path) -> Result<()> {
             "--ignored",
             "--exact",
             KANI_BATCH_TEST,
-        ])
-        .output()?;
+        ]),
+        "Kani driver regression",
+    )?;
     let stdout = String::from_utf8_lossy(&output.stdout);
-    print!("{stdout}");
-    eprint!("{}", String::from_utf8_lossy(&output.stderr));
     ensure!(
         output.status.success()
             && stdout
@@ -750,6 +1218,86 @@ pub const FUZZ_VERSION: &str = "0.13.2";
 
 /// The cargo-fuzz directory of this repository's parser targets, which `assure.toml` names as their owners.
 pub const FUZZ_DIRECTORY: &str = "fuzz";
+const FUZZ_COMPILE_OPERATION: &str = "fuzz target compilation prerequisite";
+const FUZZ_COMPILE_MANIFEST: &str = "fuzz/Cargo.toml";
+const FUZZ_SHARED_SOURCE: &str = "crates/dotfiles/examples/support";
+
+#[derive(Debug)]
+struct FuzzCompileInputs {
+    workload: dotfiles::artifacts::CargoWorkload,
+    targets: Vec<String>,
+    closure: [String; 2],
+}
+
+impl FuzzCompileInputs {
+    fn capture(root: &Path) -> Result<Self> {
+        let targets = fuzz_targets(&root.join(FUZZ_DIRECTORY))?;
+        ensure!(!targets.is_empty(), "{FUZZ_DIRECTORY} holds no fuzz target");
+        Ok(Self {
+            workload: dotfiles::artifacts::CargoWorkload::capture(root)?,
+            targets,
+            closure: Self::closure(root)?,
+        })
+    }
+
+    fn closure(root: &Path) -> Result<[String; 2]> {
+        Ok([
+            crate::phase_evidence::model_inputs(root)?,
+            crate::phase_evidence::verifier_digest(&root.join(FUZZ_SHARED_SOURCE))?,
+        ])
+    }
+
+    fn require_current(&self, root: &Path) -> Result<()> {
+        self.workload.require_current(root)?;
+        ensure!(
+            self.targets == fuzz_targets(&root.join(FUZZ_DIRECTORY))?
+                && self.closure == Self::closure(root)?,
+            "Source changed during the fuzz compilation prerequisite"
+        );
+        Ok(())
+    }
+}
+
+pub(crate) fn with_fuzz_compilation<T>(
+    compile: impl FnOnce() -> Result<()>,
+    body: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    compile()?;
+    body()
+}
+
+pub(crate) fn compile_fuzz_targets(root: &Path) -> Result<()> {
+    let inputs = FuzzCompileInputs::capture(root)?;
+    crate::phase_evidence::run(root, FUZZ_COMPILE_OPERATION, inputs.targets.len(), || {
+        let output = crate::phase_evidence::output(
+            nightly_cargo(root)
+                .args([
+                    "check",
+                    "--locked",
+                    "--offline",
+                    "--bins",
+                    "--jobs",
+                    "2",
+                    "--manifest-path",
+                ])
+                .arg(root.join(FUZZ_COMPILE_MANIFEST)),
+            FUZZ_COMPILE_OPERATION,
+        )?;
+        require_fuzz_compilation(&output)?;
+        inputs.require_current(root)
+    })
+}
+
+fn require_fuzz_compilation(output: &std::process::Output) -> Result<()> {
+    ensure!(
+        output.status.success(),
+        "{FUZZ_COMPILE_OPERATION} failed: {}; stdout={}; stderr={}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
 
 /// A cargo-fuzz directory whose one target panics on its corpus, which the replay must refuse.
 const FUZZ_FIXTURE: &str = "xtask/proofs/fuzz-fixture";
@@ -774,12 +1322,15 @@ pub fn fuzz_targets(directory: &Path) -> Result<Vec<String>> {
 }
 
 fn nightly_host(root: &Path) -> Result<String> {
-    let output = Tool::Rustup
-        .command()
-        .current_dir(root)
-        .args(["run", MIRI_TOOLCHAIN, Tool::Rustc.program(), "-vV"])
-        .output()
-        .context("query the pinned nightly host")?;
+    let output = crate::phase_evidence::output(
+        Tool::Rustup.command().current_dir(root).args([
+            "run",
+            MIRI_TOOLCHAIN,
+            Tool::Rustc.program(),
+            "-vV",
+        ]),
+        "pinned nightly host",
+    )?;
     ensure!(
         output.status.success(),
         "cannot resolve the pinned nightly host:\n{}",
@@ -799,34 +1350,142 @@ fn nightly_host(root: &Path) -> Result<String> {
 
 /// Replays the committed corpus of `target` once for the pinned compiler's host, with no new input.
 fn replay(root: &Path, directory: &str, target: &str, host: &str) -> Result<std::process::Output> {
-    nightly_cargo(root)
-        .args([
-            "fuzz",
-            "run",
-            "--target",
-            host,
-            "--fuzz-dir",
-            directory,
-            target,
-        ])
-        .arg(format!("{directory}/corpus/{target}"))
-        .args(["--", "-runs=0"])
-        .output()
-        .context("start cargo-fuzz")
+    crate::phase_evidence::output(
+        nightly_cargo(root)
+            .args([
+                "fuzz",
+                "run",
+                "--target",
+                host,
+                "--fuzz-dir",
+                directory,
+                target,
+            ])
+            .arg(format!("{directory}/corpus/{target}"))
+            .args(["--", "-runs=0"]),
+        &format!("fuzz {directory}/{target} for {host}"),
+    )
 }
 
 /// Replays every parser target over its committed corpus and refuses a fixture whose corpus makes its target panic.
-fn verify_fuzz(root: &Path) -> Result<()> {
-    let version = Tool::Cargo.command().args(["fuzz", "--version"]).output()?;
+pub(crate) fn verify_fuzz(root: &Path) -> Result<()> {
+    let workload = fuzz_targets(&root.join(FUZZ_DIRECTORY))?.len() + 1;
+    crate::phase_evidence::run(root, "fuzz targets and rejecting fixture", workload, || {
+        verify_fuzz_measured(root)
+    })
+}
+
+fn verify_fuzz_measured(root: &Path) -> Result<()> {
+    let reports = collect_fuzz(root)?;
+    validate_fuzz_reports(&fuzz_inventory(root, &reports.host)?, &reports)?;
+    println!(
+        "Replayed the corpus of every fuzz target, {}, and refused its fixture",
+        reports
+            .runs
+            .iter()
+            .map(|run| run.target.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    Ok(())
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FuzzRun {
+    target: String,
+    corpus_hash: String,
+    result: crate::phase_evidence::RawResult,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FuzzReports {
+    version: crate::phase_evidence::RawResult,
+    host: String,
+    runs: Vec<FuzzRun>,
+    fixture_corpus_hash: String,
+    fixture: crate::phase_evidence::RawResult,
+}
+
+#[derive(Debug)]
+pub(crate) struct FuzzInventory {
+    host: String,
+    targets: Vec<(String, String)>,
+    fixture_corpus_hash: String,
+}
+
+pub(crate) fn fuzz_inventory(root: &Path, host: &str) -> Result<FuzzInventory> {
+    let names = fuzz_targets(&root.join(FUZZ_DIRECTORY))?;
+    let mut targets = Vec::new();
+    for name in names {
+        let corpus = root.join(FUZZ_DIRECTORY).join("corpus").join(&name);
+        ensure!(
+            fs::read_dir(&corpus).is_ok_and(|mut entries| entries.next().is_some()),
+            "fuzz corpus is empty"
+        );
+        targets.push((name, crate::phase_evidence::verifier_digest(&corpus)?));
+    }
+    Ok(FuzzInventory {
+        host: host.into(),
+        targets,
+        fixture_corpus_hash: crate::phase_evidence::verifier_digest(
+            &root.join(FUZZ_FIXTURE).join("corpus/crash"),
+        )?,
+    })
+}
+
+pub(crate) fn validate_fuzz_reports(expected: &FuzzInventory, reports: &FuzzReports) -> Result<()> {
+    ensure!(
+        reports.version.success()
+            && reports
+                .version
+                .stdout()?
+                .contains(&format!("cargo-fuzz {FUZZ_VERSION}")),
+        "fuzz tool version is absent or differs"
+    );
+    ensure!(
+        reports.host == expected.host && !expected.host.is_empty(),
+        "fuzz target semantics differ from the pinned nightly host"
+    );
+    ensure!(
+        !expected.targets.is_empty() && reports.runs.len() == expected.targets.len(),
+        "fuzz target inventory is empty, missing, repeated, or unexpected"
+    );
+    for (run, (target, corpus_hash)) in reports.runs.iter().zip(&expected.targets) {
+        ensure!(
+            run.target == *target && run.result.success(),
+            "fuzz target identity or outcome differs"
+        );
+        ensure!(run.corpus_hash == *corpus_hash, "fuzz corpus changed");
+    }
+    ensure!(
+        reports.fixture_corpus_hash == expected.fixture_corpus_hash,
+        "fuzz rejecting corpus changed"
+    );
+    ensure!(
+        reports.fixture.failure() && reports.fixture.stderr()?.contains("panicked"),
+        "fuzz did not reject its crashing corpus"
+    );
+    Ok(())
+}
+
+pub(crate) fn collect_fuzz(root: &Path) -> Result<FuzzReports> {
+    let version = crate::phase_evidence::output(
+        Tool::Cargo.command().args(["fuzz", "--version"]),
+        "cargo-fuzz version",
+    )?;
     ensure!(
         version.status.success()
-            && String::from_utf8(version.stdout)?.contains(&format!("cargo-fuzz {FUZZ_VERSION}")),
+            && std::str::from_utf8(&version.stdout)?
+                .contains(&format!("cargo-fuzz {FUZZ_VERSION}")),
         "the pinned cargo-fuzz {FUZZ_VERSION} is unavailable"
     );
     let targets = fuzz_targets(&root.join(FUZZ_DIRECTORY))?;
     ensure!(!targets.is_empty(), "{FUZZ_DIRECTORY} holds no fuzz target");
     let host = nightly_host(root)?;
     let mut checks = Checks::default();
+    let mut runs = Vec::new();
     for target in &targets {
         checks.run(&format!("fuzz target {target}"), || {
             let corpus = root.join(FUZZ_DIRECTORY).join("corpus").join(target);
@@ -835,29 +1494,41 @@ fn verify_fuzz(root: &Path) -> Result<()> {
                 "the fuzz target {target} has no corpus under {}",
                 corpus.display()
             );
+            let corpus_hash = crate::phase_evidence::verifier_digest(&corpus)?;
             let output = replay(root, FUZZ_DIRECTORY, target, &host)?;
             ensure!(
                 output.status.success(),
                 "replaying the corpus of {target} failed:\n{}",
                 String::from_utf8_lossy(&output.stderr)
             );
+            runs.push(FuzzRun {
+                target: target.clone(),
+                corpus_hash,
+                result: output.into(),
+            });
             Ok(())
         });
     }
+    let mut fixture = None;
+    let fixture_corpus_hash =
+        crate::phase_evidence::verifier_digest(&root.join(FUZZ_FIXTURE).join("corpus/crash"))?;
     checks.run("fuzz fixture", || {
         let output = replay(root, FUZZ_FIXTURE, "crash", &host)?;
         ensure!(
             !output.status.success() && String::from_utf8_lossy(&output.stderr).contains("panicked"),
             "the corpus replay admitted {FUZZ_FIXTURE}, whose corpus makes its target panic, so the gate proves nothing"
         );
+        fixture = Some(output.into());
         Ok(())
     });
     checks.finish()?;
-    println!(
-        "Replayed the corpus of every fuzz target, {}, and refused its fixture",
-        targets.join(", ")
-    );
-    Ok(())
+    Ok(FuzzReports {
+        version: version.into(),
+        host,
+        runs,
+        fixture_corpus_hash,
+        fixture: fixture.context("fuzz rejecting fixture did not complete")?,
+    })
 }
 
 /// The cargo-mutants release that `mise.toml` and the proof image pin.
@@ -1156,75 +1827,169 @@ fn mutation_names(report: &MutationReport, summary: MutationSummary) -> Vec<Stri
         .collect()
 }
 
+#[cfg(test)]
 fn completed_mutation_report(
     output: &Path,
     status: std::process::ExitStatus,
     package: &str,
 ) -> Result<MutationReport> {
+    decode_mutation_origin(&mutation_origin(output, status.code(), package)?, package)
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MutationOrigin {
+    package: String,
+    status: Option<i32>,
+    inventory: Vec<u8>,
+    outcomes: Vec<u8>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MutationReports {
+    version: crate::phase_evidence::RawResult,
+    production: MutationOrigin,
+    fixture: MutationOrigin,
+}
+
+fn mutation_origin(output: &Path, status: Option<i32>, package: &str) -> Result<MutationOrigin> {
     let reports = output.join("mutants.out");
-    let inventory: Vec<MutationIdentity> =
-        serde_json::from_slice(&fs::read(reports.join("mutants.json"))?)?;
-    let report: MutationReport = serde_json::from_slice(&fs::read(reports.join("outcomes.json"))?)?;
-    validate_mutation_report(&inventory, report, status.code(), package)
+    let inventory = fs::read(reports.join("mutants.json"))?;
+    let report = fs::read(reports.join("outcomes.json"))?;
+    crate::phase_evidence::retain(package, "mutation-inventory", &inventory)?;
+    crate::phase_evidence::retain(package, "mutation-outcomes", &report)?;
+    Ok(MutationOrigin {
+        package: package.into(),
+        status,
+        inventory,
+        outcomes: report,
+    })
+}
+
+fn decode_mutation_origin(origin: &MutationOrigin, package: &str) -> Result<MutationReport> {
+    ensure!(
+        origin.package == package,
+        "mutation origin names another package"
+    );
+    let inventory: Vec<MutationIdentity> = serde_json::from_slice(&origin.inventory)?;
+    let report: MutationReport = serde_json::from_slice(&origin.outcomes)?;
+    validate_mutation_report(&inventory, report, origin.status, package)
 }
 
 /// Mutates the decision core, holds its survivors and unexplained timeouts to their baselines, and refuses a fixture whose specification lost its assertion.
 /// Test times stay advisory: only the outcome of each mutant counts.
 fn verify_mutants(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
-    let version = Tool::Cargo
-        .command()
-        .args(["mutants", "--version"])
-        .output()?;
-    ensure!(
-        version.status.success()
-            && String::from_utf8(version.stdout)?
-                .contains(&format!("cargo-mutants {MUTANTS_VERSION}")),
-        "the pinned cargo-mutants {MUTANTS_VERSION} is unavailable"
-    );
-    let mut checks = Checks::default();
-    checks.run("production mutants", || {
-        verify_mutant_results(root, manifest)
-    });
-    checks.run("mutation fixture", || {
-        mutation_campaign(root, |output| {
-            let status = mutants(&root.join(MUTANTS_FIXTURE), output)
-                .status()
-                .context("start cargo-mutants on its fixture")?;
-            let report = completed_mutation_report(output, status, MUTANTS_FIXTURE_PACKAGE)?;
-            ensure!(
-                report.missed != 0,
-                "the mutation gate admitted {MUTANTS_FIXTURE}, whose specification asserts nothing, so the gate proves nothing"
-            );
-            Ok(())
-        })
-    });
-    checks.finish()?;
+    crate::phase_evidence::run(
+        root,
+        "mutation production and rejecting fixture",
+        MUTATION_CAMPAIGN_CASES,
+        || verify_mutants_measured(root, manifest),
+    )
+}
+
+fn verify_mutants_measured(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
+    validate_mutant_reports(root, manifest, &collect_mutants(root, manifest)?)?;
     println!(
         "Every mutant of {MUTATED_PACKAGE} died or holds its baseline, and the fixture without an assertion let its mutants survive"
     );
     Ok(())
 }
 
-fn verify_mutant_results(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
-    mutation_campaign(root, |output| check_mutant_results(root, manifest, output))
-}
-
-fn check_mutant_results(
+pub(crate) fn validate_mutant_reports(
     root: &Path,
     manifest: &obligations::Manifest,
-    output: &Path,
+    reports: &MutationReports,
 ) -> Result<()> {
-    let status = mutants(root, output)
-        .args(["--package", MUTATED_PACKAGE])
-        .status()
-        .context("start cargo-mutants")?;
-    let report = completed_mutation_report(output, status, MUTATED_PACKAGE)?;
+    ensure!(
+        reports.version.success()
+            && reports
+                .version
+                .stdout()?
+                .contains(&format!("cargo-mutants {MUTANTS_VERSION}")),
+        "mutation tool version is absent or differs"
+    );
+    validate_mutation_production(
+        root,
+        manifest,
+        &decode_mutation_origin(&reports.production, MUTATED_PACKAGE)?,
+    )?;
+    let fixture = decode_mutation_origin(&reports.fixture, MUTANTS_FIXTURE_PACKAGE)?;
+    ensure!(
+        fixture.missed != 0,
+        "mutation did not reject its assertionless fixture"
+    );
+    Ok(())
+}
+
+pub(crate) fn collect_mutants(
+    root: &Path,
+    manifest: &obligations::Manifest,
+) -> Result<MutationReports> {
+    let version = crate::phase_evidence::output(
+        Tool::Cargo.command().args(["mutants", "--version"]),
+        "cargo-mutants version",
+    )?;
+    ensure!(
+        version.status.success()
+            && std::str::from_utf8(&version.stdout)?
+                .contains(&format!("cargo-mutants {MUTANTS_VERSION}")),
+        "the pinned cargo-mutants {MUTANTS_VERSION} is unavailable"
+    );
+    let mut checks = Checks::default();
+    let mut production = None;
+    checks.run("production mutants", || {
+        mutation_campaign(root, |output| {
+            let status = crate::phase_evidence::output(
+                mutants(root, output).args(["--package", MUTATED_PACKAGE]),
+                "production mutation campaign",
+            )?
+            .status;
+            let raw = mutation_origin(output, status.code(), MUTATED_PACKAGE)?;
+            validate_mutation_production(
+                root,
+                manifest,
+                &decode_mutation_origin(&raw, MUTATED_PACKAGE)?,
+            )?;
+            production = Some(raw);
+            Ok(())
+        })
+    });
+    let mut fixture = None;
+    checks.run("mutation fixture", || {
+        mutation_campaign(root, |output| {
+            let result = crate::phase_evidence::output(
+                &mut mutants(&root.join(MUTANTS_FIXTURE), output), "mutation assertion-defect fixture",
+            )?;
+            let raw = mutation_origin(output, result.status.code(), MUTANTS_FIXTURE_PACKAGE)?;
+            let report = decode_mutation_origin(&raw, MUTANTS_FIXTURE_PACKAGE)?;
+            ensure!(
+                report.missed != 0,
+                "the mutation gate admitted {MUTANTS_FIXTURE}, whose specification asserts nothing, so the gate proves nothing"
+            );
+            fixture = Some(raw);
+            Ok(())
+        })
+    });
+    checks.finish()?;
+    Ok(MutationReports {
+        version: version.into(),
+        production: production.context("production mutation did not complete")?,
+        fixture: fixture.context("mutation fixture did not complete")?,
+    })
+}
+
+fn validate_mutation_production(
+    root: &Path,
+    manifest: &obligations::Manifest,
+    report: &MutationReport,
+) -> Result<()> {
     ensure!(
         report.caught != 0,
-        "cargo-mutants caught no mutant of {MUTATED_PACKAGE}, so the campaign didn't run: {status}"
+        "cargo-mutants caught no mutant of {MUTATED_PACKAGE}, so the campaign didn't run"
     );
-    let missed = mutation_names(&report, MutationSummary::MissedMutant).join("\n");
-    let timeouts = mutation_names(&report, MutationSummary::Timeout).join("\n");
+    let missed = mutation_names(report, MutationSummary::MissedMutant).join("\n");
+    let timeouts = mutation_names(report, MutationSummary::Timeout).join("\n");
     let unexplained = obligations::unexplained_timeouts(manifest, &timeouts);
     let baselines = obligations::parse_baselines(
         &fs::read_to_string(root.join(obligations::BASELINES)).context(obligations::BASELINES)?,
@@ -1246,19 +2011,24 @@ fn check_mutant_results(
     Ok(())
 }
 
-/// The unstable options the obligations of `source` need: stubbing always, and what each contract obligation names.
+/// The unstable options the obligations of `source` need: stubbing always, and what each obligation names.
 fn flags(manifest: &obligations::Manifest, source: &str) -> BTreeSet<&'static str> {
     let mut flags = BTreeSet::from([KaniFlag::Stubbing.argument()]);
     for obligation in &manifest.obligations {
-        if let Obligation::KaniContract {
-            source: contract,
-            flags: named,
-            ..
-        } = obligation
-            && contract == source
-        {
-            flags.extend(named.iter().map(|flag| flag.argument()));
-        }
+        let named = match obligation {
+            Obligation::Kani {
+                source: declared,
+                flags,
+                ..
+            }
+            | Obligation::KaniContract {
+                source: declared,
+                flags,
+                ..
+            } if declared == source => flags,
+            _ => continue,
+        };
+        flags.extend(named.iter().map(|flag| flag.argument()));
     }
     flags
 }
@@ -1286,9 +2056,31 @@ const MIRI_BATCH_TESTS: usize = 32;
 /// The crate with undefined behavior that Miri must refuse.
 const MIRI_FIXTURE: &str = "xtask/proofs/miri-fixture/Cargo.toml";
 const MIRI_CHECKOUT_TARGET: &str = "target/miri";
+const MIRI_SYSROOT_CACHE: &str = "miri-sysroots";
+const MIRI_SYSROOT_LOCK: &str = "setup.lock";
+const MIRI_SYSROOT_DIRECTORY: &str = "sysroot";
+const MIRI_CUSTOM_ENVIRONMENT: &[&str] = &[
+    "MIRI",
+    "MIRI_SYSROOT",
+    "MIRI_LIB_SRC",
+    "MIRI_NO_STD",
+    "MIRIFLAGS",
+    "RUSTC",
+    "RUSTC_WRAPPER",
+    "RUSTC_WORKSPACE_WRAPPER",
+    "RUSTC_STAGE",
+    "RUSTC_BOOTSTRAP",
+    "RUSTFLAGS",
+    "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_BUILD_TARGET",
+    "CARGO_BUILD_RUSTC",
+    "CARGO_BUILD_RUSTC_WRAPPER",
+    "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+];
 
 /// A discovered test and its existing ignore state.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MiriTest {
     pub name: String,
     pub ignored: bool,
@@ -1450,44 +2242,136 @@ fn nightly_cargo(root: &Path) -> std::process::Command {
     command
 }
 
-fn miri(root: &Path) -> std::process::Command {
+fn miri(root: &Path, sysroot: Option<&Path>) -> std::process::Command {
     let mut command = nightly_cargo(root);
     let target = std::env::var_os(platform::code_environment::MIRI_TARGET_VARIABLE)
         .map_or_else(|| root.join(MIRI_CHECKOUT_TARGET), std::path::PathBuf::from);
     command
         .args(["miri", "test", "--locked", "--target-dir"])
         .arg(target);
+    if let Some(sysroot) = sysroot {
+        command.env("MIRI_SYSROOT", sysroot);
+    }
     command
 }
 
-/// Interprets the pure crates' tests under Miri for every target, each test binary within the proof budget, and refuses a fixture with undefined behavior.
-fn verify_miri(root: &Path) -> Result<()> {
-    let mut checks = Checks::default();
-    for &target in MIRI_TARGETS {
-        for krate in MIRI_CRATES {
-            checks.run(
-                &format!("Miri {krate} for {}", target.unwrap_or("the host")),
-                || verify_miri_crate(root, krate, target),
-            );
-        }
-    }
-    checks.run("Miri fixture", || {
-        let output = miri(root)
-            .arg("--manifest-path")
-            .arg(root.join(MIRI_FIXTURE))
-            .output()
-            .context("start Miri on its fixture")?;
+fn miri_sysroot_namespace(
+    root: &Path,
+    cache: &Path,
+    target: Option<&str>,
+) -> Result<std::path::PathBuf> {
+    let mut versions = Vec::new();
+    for (program, arguments) in [
+        (Tool::Rustc.program(), &["-vV"][..]),
+        ("miri", &["--version"][..]),
+        (Tool::Cargo.program(), &["miri", "--version"][..]),
+    ] {
+        let output = crate::phase_evidence::output(
+            Tool::Rustup
+                .command()
+                .current_dir(root)
+                .args(["run", MIRI_TOOLCHAIN, program])
+                .args(arguments),
+            "Miri sysroot compiler identity",
+        )?;
         ensure!(
-            !output.status.success()
-                && String::from_utf8_lossy(&output.stderr).contains("Undefined Behavior"),
-            "Miri did not report undefined behavior in {MIRI_FIXTURE}: {}\n{}\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
+            output.status.success() && !output.stdout.is_empty(),
+            "cannot identify the pinned Miri compiler: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        Ok(())
-    });
-    checks.finish()?;
+        versions.push(String::from_utf8(output.stdout)?);
+    }
+    let host = versions[0]
+        .lines()
+        .filter_map(|line| line.strip_prefix("host: "))
+        .collect::<Vec<_>>();
+    ensure!(
+        host.len() == 1 && !host[0].is_empty(),
+        "the pinned compiler must name one host"
+    );
+    let identity = serde_json::to_vec(&(
+        MIRI_TOOLCHAIN,
+        target.unwrap_or(host[0]),
+        &versions,
+        fs::read(root.join(".cargo/config.toml"))?,
+    ))?;
+    Ok(cache
+        .join(MIRI_SYSROOT_CACHE)
+        .join(MIRI_TOOLCHAIN)
+        .join(crate::build_inputs::hex(&Sha256::digest(identity))))
+}
+
+fn use_miri_sysroot<T>(
+    storage: &Path,
+    setup: impl FnOnce(&Path) -> Result<()>,
+    run: impl FnOnce(&Path) -> Result<T>,
+) -> Result<T> {
+    fs::create_dir_all(storage)?;
+    let lease = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(storage.join(MIRI_SYSROOT_LOCK))?;
+    lease.lock()?;
+    let sysroot = storage.join(MIRI_SYSROOT_DIRECTORY);
+    setup(&sysroot)?;
+    run(&sysroot)
+}
+
+fn with_miri_sysroot<T>(
+    root: &Path,
+    target: Option<&str>,
+    run: impl FnOnce(Option<&Path>) -> Result<T>,
+) -> Result<T> {
+    let cache = std::env::var_os("DOTFILES_HOST_CACHE");
+    if MIRI_CUSTOM_ENVIRONMENT
+        .iter()
+        .any(|name| std::env::var_os(name).is_some())
+    {
+        return run(None);
+    }
+    let Some(cache) = cache else {
+        return run(None);
+    };
+    let cache = std::path::PathBuf::from(cache);
+    ensure!(
+        cache.is_absolute(),
+        "the Miri build cache must be host-local and absolute"
+    );
+    let storage = miri_sysroot_namespace(root, &cache, target)?;
+    use_miri_sysroot(
+        &storage,
+        |sysroot| {
+            let mut command = nightly_cargo(root);
+            command.args(["miri", "setup"]).env("MIRI_SYSROOT", sysroot);
+            if let Some(target) = target {
+                command.args(["--target", target]);
+            }
+            let output = crate::phase_evidence::output(&mut command, "Miri sysroot setup")?;
+            ensure!(
+                output.status.success(),
+                "Miri sysroot setup failed:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            Ok(())
+        },
+        |sysroot| run(Some(sysroot)),
+    )
+}
+
+/// Interprets the pure crates' tests under Miri for every target, each test binary within the proof budget, and refuses a fixture with undefined behavior.
+pub(crate) fn verify_miri(root: &Path) -> Result<()> {
+    crate::phase_evidence::run(
+        root,
+        "Miri targets and UB fixture",
+        MIRI_TARGETS.len() * MIRI_CRATES.len() + 1,
+        || verify_miri_measured(root),
+    )
+}
+
+fn verify_miri_measured(root: &Path) -> Result<()> {
+    validate_miri_reports(&collect_miri(root)?)?;
     println!(
         "Miri interpreted the tests of {} for {MIRI_TARGETS:?} without undefined behavior, and refused its fixture",
         MIRI_CRATES.join(", ")
@@ -1495,33 +2379,142 @@ fn verify_miri(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn verify_miri_crate(root: &Path, krate: &str, target: Option<&str>) -> Result<()> {
-    let mut command = miri(root);
-    command.args(["--package", krate]);
-    if let Some(target) = target {
-        command.args(["--target", target]);
-    }
-    let output = command
-        .args(["--", "--list", "--format", "json", "-Z", "unstable-options"])
-        .output()
-        .context("list Miri tests")?;
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MiriRun {
+    selected: Vec<MiriTest>,
+    result: crate::phase_evidence::RawResult,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MiriCase {
+    krate: String,
+    target: Option<String>,
+    discovery: crate::phase_evidence::RawResult,
+    runs: Vec<MiriRun>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MiriReports {
+    cases: Vec<MiriCase>,
+    fixture: crate::phase_evidence::RawResult,
+}
+
+pub(crate) fn validate_miri_reports(reports: &MiriReports) -> Result<()> {
+    let expected = MIRI_TARGETS
+        .iter()
+        .flat_map(|target| MIRI_CRATES.iter().map(move |krate| (*krate, *target)))
+        .collect::<Vec<_>>();
     ensure!(
-        output.status.success(),
-        "cannot list Miri tests of {krate} for {}:\n{}",
-        target.unwrap_or("the host"),
-        String::from_utf8_lossy(&output.stderr)
+        reports.cases.len() == expected.len(),
+        "Miri crate and target inventory is incomplete or repeated"
     );
-    let batches = miri_batches(&String::from_utf8(output.stdout)?)?;
+    for (case, (krate, target)) in reports.cases.iter().zip(expected) {
+        ensure!(
+            case.krate == krate && case.target.as_deref() == target,
+            "Miri case identity differs from the current inventory"
+        );
+        validate_miri_case(case)?;
+    }
+    validate_miri_fixture(&reports.fixture)
+}
+
+fn validate_miri_fixture(result: &crate::phase_evidence::RawResult) -> Result<()> {
+    ensure!(
+        result.failure() && result.stderr()?.contains("Undefined Behavior"),
+        "Miri did not reject the undefined-behavior fixture"
+    );
+    Ok(())
+}
+
+fn validate_miri_case(case: &MiriCase) -> Result<()> {
+    ensure!(case.discovery.success(), "Miri inventory discovery failed");
+    let expected = miri_batches(case.discovery.stdout()?)?;
+    ensure!(
+        case.runs.len() == expected.len(),
+        "Miri result batch inventory is missing, repeated, or unexpected"
+    );
+    for (run, selected) in case.runs.iter().zip(expected) {
+        ensure!(
+            run.selected == selected && run.result.success(),
+            "Miri selection or execution differs from its complete inventory"
+        );
+        validate_miri_batch(run.result.stdout()?, &selected)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn collect_miri(root: &Path) -> Result<MiriReports> {
     let mut checks = Checks::default();
-    for batch in batches {
-        let names: Vec<_> = batch.iter().map(|test| test.name.as_str()).collect();
-        checks.run(&format!("tests [{}]", names.join(", ")), || {
-            let mut command = miri(root);
+    let mut cases = Vec::new();
+    for &target in MIRI_TARGETS {
+        for krate in MIRI_CRATES {
+            checks.run(
+                &format!("Miri {krate} for {}", target.unwrap_or("the host")),
+                || {
+                    let case = collect_miri_case(root, krate, target)?;
+                    validate_miri_case(&case)?;
+                    cases.push(case);
+                    Ok(())
+                },
+            );
+        }
+    }
+    let mut fixture = None;
+    checks.run("Miri fixture", || {
+        with_miri_sysroot(root, None, |sysroot| {
+            let output = crate::phase_evidence::output(
+                miri(root, sysroot)
+                    .arg("--manifest-path")
+                    .arg(root.join(MIRI_FIXTURE)),
+                "Miri undefined-behavior fixture",
+            )?;
+            let raw = crate::phase_evidence::RawResult::from(output);
+            validate_miri_fixture(&raw)?;
+            fixture = Some(raw);
+            Ok(())
+        })
+    });
+    checks.finish()?;
+    Ok(MiriReports {
+        cases,
+        fixture: fixture.context("Miri fixture did not complete")?,
+    })
+}
+
+fn collect_miri_case(root: &Path, krate: &str, target: Option<&str>) -> Result<MiriCase> {
+    with_miri_sysroot(root, target, |sysroot| {
+        let mut command = miri(root, sysroot);
+        command.args(["--package", krate]);
+        if let Some(target) = target {
+            command.args(["--target", target]);
+        }
+        let label = format!("Miri {krate} for {}", target.unwrap_or("host"));
+        let output = crate::phase_evidence::output(
+            command.args(["--", "--list", "--format", "json", "-Z", "unstable-options"]),
+            &format!("{label} inventory"),
+        )?;
+        ensure!(
+            output.status.success(),
+            "cannot list Miri tests of {krate} for {}:\n{}",
+            target.unwrap_or("the host"),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let discovery = crate::phase_evidence::RawResult::from(output);
+        let batches = miri_batches(discovery.stdout()?)?;
+        let mut checks = Checks::default();
+        let mut runs = Vec::new();
+        for batch in batches {
+            let names: Vec<_> = batch.iter().map(|test| test.name.as_str()).collect();
+            checks.run(&format!("tests [{}]", names.join(", ")), || {
+            let mut command = miri(root, sysroot);
             command.args(["--package", krate]);
             if let Some(target) = target {
                 command.args(["--target", target]);
             }
-            let output = command
+            let output = crate::phase_evidence::output(command
                 .args([
                     "--",
                     "--format",
@@ -1530,9 +2523,7 @@ fn verify_miri_crate(root: &Path, krate: &str, target: Option<&str>) -> Result<(
                     "unstable-options",
                     "--exact",
                 ])
-                .args(&names)
-                .output()
-                .context("start Miri")?;
+                .args(&names), &format!("{label} [{}]", names.join(", ")))?;
             let report = String::from_utf8_lossy(&output.stdout);
             ensure!(
                 output.status.success(),
@@ -1547,52 +2538,179 @@ fn verify_miri_crate(root: &Path, krate: &str, target: Option<&str>) -> Result<(
                 batch.len() - ignored,
                 target.unwrap_or("the host")
             );
+            runs.push(MiriRun { selected: batch.clone(), result: output.into() });
             Ok(())
         });
-    }
-    checks.finish()
+        }
+        checks.finish()?;
+        Ok(MiriCase {
+            krate: krate.into(),
+            target: target.map(str::to_owned),
+            discovery,
+            runs,
+        })
+    })
 }
 
 /// Verifies one rule module and its probes, and returns how many harnesses it proved and how many probes it rejected.
-/// The gate refuses a `kani list` inventory that differs from the harnesses the source declares, so the closure check and the verifier agree.
+/// The gate refuses compiler metadata that differs from the harnesses the source declares, so the closure check and the verifier agree.
+#[cfg(all(test, not(windows)))]
 fn verify_rules(
     root: &Path,
     source: &str,
     probes: &str,
     flags: &BTreeSet<&'static str>,
+    verifier_hash: &str,
+    engine_hash: &str,
 ) -> Result<(usize, usize)> {
+    execute_rules(prepare_rules(
+        root,
+        source,
+        probes,
+        flags,
+        verifier_hash,
+        engine_hash,
+    )?)
+}
+
+#[derive(Debug)]
+enum PreparedRules {
+    Reused { proved: usize, rejected: usize },
+    Compiled(Box<CompiledRules>),
+}
+
+#[derive(Debug)]
+struct CompiledRules {
+    root: PathBuf,
+    source: String,
+    path: PathBuf,
+    original: Vec<u8>,
+    directory: tempfile::TempDir,
+    probe: tempfile::TempDir,
+    probe_file: PathBuf,
+    declared: Vec<String>,
+    rejected: Vec<String>,
+    flags: BTreeSet<&'static str>,
+    input: crate::phase_evidence::KaniInput,
+}
+
+fn prepare_rules(
+    root: &Path,
+    source: &str,
+    probes: &str,
+    flags: &BTreeSet<&'static str>,
+    verifier_hash: &str,
+    engine_hash: &str,
+) -> Result<PreparedRules> {
     let path = crate::canonical(&root.join(source))?;
     let original = fs::read(&path)?;
     let declared = obligations::module(&String::from_utf8(original.clone())?)?.harnesses;
+    let rejected_names: Vec<String> = obligations::probe_harnesses(probes)?.into_iter().collect();
+    let declared_names: Vec<String> = declared.iter().cloned().collect();
+    let input =
+        crate::phase_evidence::kani_input(root, source, probes, flags, verifier_hash, engine_hash)?;
+    if let Some(origin) =
+        crate::phase_evidence::cached_kani(root, &input, &declared_names, &rejected_names)?
+    {
+        println!(
+            "Reused verified Kani subject {source}: {} production harnesses and {} rejected probes",
+            declared.len(),
+            rejected_names.len()
+        );
+        println!(
+            "Kani origin sha256:{}, original harness duration={} ms; current readback reran all result decoders",
+            origin.identity(),
+            origin.harness_duration_ms()
+        );
+        return Ok(PreparedRules::Reused {
+            proved: declared.len(),
+            rejected: rejected_names.len(),
+        });
+    }
+    crate::phase_evidence::begin_kani(root, &input)?;
     let directory = tempfile::tempdir()?;
     let harnesses = verify_inventory(&path, directory.path(), flags)?;
     ensure!(
         harnesses == declared,
         "Kani lists other harnesses in {source} than the source declares: {harnesses:?} against {declared:?}"
     );
-    let names: Vec<&str> = harnesses.iter().map(String::as_str).collect();
+    let probe = tempfile::tempdir()?;
+    let probe_file = probe.path().join("counterexample.rs");
+    fs::write(
+        &probe_file,
+        format!(
+            "#[path = {:?}]\nmod production;\n{probes}",
+            path.to_string_lossy()
+        ),
+    )?;
+    let compiled_probes = verify_inventory(&probe_file, probe.path(), flags)?;
+    let expected_probes: BTreeSet<_> = declared
+        .iter()
+        .map(|name| format!("production::{name}"))
+        .chain(rejected_names.iter().cloned())
+        .collect();
+    ensure!(
+        compiled_probes == expected_probes,
+        "Kani lists other counterexample harnesses for {source} than its complete production and rejecting inventory"
+    );
+    Ok(PreparedRules::Compiled(Box::new(CompiledRules {
+        root: root.to_owned(),
+        source: source.to_owned(),
+        path,
+        original,
+        directory,
+        probe,
+        probe_file,
+        declared: declared_names,
+        rejected: rejected_names,
+        flags: flags.clone(),
+        input,
+    })))
+}
+
+fn execute_rules(prepared: PreparedRules) -> Result<(usize, usize)> {
+    let compiled = match prepared {
+        PreparedRules::Compiled(compiled) => compiled,
+        PreparedRules::Reused { proved, rejected } => return Ok((proved, rejected)),
+    };
+    let CompiledRules {
+        root,
+        source,
+        path,
+        original,
+        directory,
+        probe,
+        probe_file,
+        declared,
+        rejected,
+        flags,
+        input,
+    } = *compiled;
+    let names: Vec<&str> = declared.iter().map(String::as_str).collect();
     let mut checks = Checks::default();
+    let mut reports = Vec::new();
     checks.run("production harnesses", || {
-        verify_file(&path, directory.path(), &names, false, flags)
+        reports.extend(verify_file_recorded(
+            &path,
+            directory.path(),
+            &names,
+            false,
+            &flags,
+        )?);
+        Ok(())
     });
-    let mut rejected = 0;
     checks.run("counterexamples", || {
-        let harnesses = obligations::probe_harnesses(probes)?;
-        let probe = tempfile::tempdir()?;
-        let file = probe.path().join("counterexample.rs");
-        fs::write(
-            &file,
-            format!(
-                "#[path = {:?}]\nmod production;\n{probes}",
-                path.to_string_lossy()
-            ),
-        )?;
         // Each bounded receipt must reject its exact probe on an assertion.
-        let probe_names: Vec<&str> = harnesses.iter().map(String::as_str).collect();
+        let probe_names: Vec<&str> = rejected.iter().map(String::as_str).collect();
         if !probe_names.is_empty() {
-            verify_file(&file, probe.path(), &probe_names, true, flags)?;
+            reports.extend(verify_file_recorded(
+                &probe_file,
+                probe.path(),
+                &probe_names,
+                true,
+                &flags,
+            )?);
         }
-        rejected = harnesses.len();
         Ok(())
     });
     checks.run("source binding", || {
@@ -1603,12 +2721,504 @@ fn verify_rules(
         Ok(())
     });
     checks.finish()?;
-    Ok((names.len(), rejected))
+    crate::phase_evidence::publish_kani(&root, input, reports, &declared, &rejected)?;
+    Ok((names.len(), rejected.len()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_fuzz_compile_barrier_uses_real_compiler_status_before_heavy_work() -> Result<()> {
+        use std::cell::Cell;
+
+        const SOURCE_FILE: &str = "fuzz_compile_fixture.rs";
+        const OUTPUT_FILE: &str = "fuzz_compile_fixture.rmeta";
+        const MISSING_IMPORT: &str = "use anyhow::Result;\nfn main() {}\n";
+        const VALID_SOURCE: &str = "fn main() {}\n";
+        let scope = tempfile::tempdir()?;
+        let result = (|| {
+            for (valid, source) in [(false, MISSING_IMPORT), (true, VALID_SOURCE)] {
+                let input = scope.path().join(SOURCE_FILE);
+                fs::write(&input, source)?;
+                let output = Tool::Rustc
+                    .command()
+                    .current_dir(scope.path())
+                    .args(["--edition", "2024", "--emit", "metadata"])
+                    .arg(&input)
+                    .arg("-o")
+                    .arg(scope.path().join(OUTPUT_FILE))
+                    .output()
+                    .context("compile the actual owned import fixture")?;
+                assert_eq!(output.status.success(), valid);
+                let calls = Cell::new(0_usize);
+                let guarded = with_fuzz_compilation(
+                    || require_fuzz_compilation(&output),
+                    || {
+                        calls.set(calls.get() + 1);
+                        Ok(())
+                    },
+                );
+                assert_eq!(calls.get(), usize::from(valid));
+                if valid {
+                    guarded?;
+                } else {
+                    let error = guarded.expect_err("a real compiler failure must block heavy work");
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    assert!(stderr.contains("E0432"), "{stderr}");
+                    assert!(format!("{error:#}").contains(stderr.as_ref()));
+                }
+            }
+            Ok(())
+        })();
+        platform::cleanup::report(scope.close(), "remove the owned fuzz compilation fixture");
+        result
+    }
+
+    fn rule_subjects_fixture() -> obligations::Manifest {
+        obligations::Manifest {
+            obligations: ["first", "broken", "last"]
+                .map(|source| Obligation::Kani {
+                    source: source.to_owned(),
+                    probes: String::new(),
+                    flags: Vec::new(),
+                })
+                .into(),
+            pilots: Vec::new(),
+            non_terminating: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_rule_compile_failure_collects_all_inputs_before_any_proof_body() {
+        let mut compiled = Vec::new();
+        let mut executed = Vec::new();
+        let failure = run_rule_subjects(
+            &rule_subjects_fixture(),
+            |source, _| {
+                compiled.push(source.to_owned());
+                ensure!(source != "broken", "compiler rejected the required harness");
+                Ok(source.to_owned())
+            },
+            |source| {
+                executed.push(source);
+                Ok((1, 2))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(compiled, ["first", "broken", "last"]);
+        assert_eq!(executed, Vec::<String>::new());
+        assert!(format!("{failure:#}").contains("compiler rejected the required harness"));
+    }
+
+    #[test]
+    fn every_rule_is_prepared_before_execution_and_body_failures_are_collected() {
+        let operations = std::cell::RefCell::new(Vec::new());
+        let failure = run_rule_subjects(
+            &rule_subjects_fixture(),
+            |source, _| {
+                operations.borrow_mut().push(format!("prepare:{source}"));
+                Ok(source.to_owned())
+            },
+            |source| {
+                operations.borrow_mut().push(format!("execute:{source}"));
+                ensure!(source == "first", "proof body refused {source}");
+                Ok((1, 2))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            *operations.borrow(),
+            [
+                "prepare:first",
+                "prepare:broken",
+                "prepare:last",
+                "execute:first",
+                "execute:broken",
+                "execute:last"
+            ]
+        );
+        let diagnostic = format!("{failure:#}");
+        assert!(diagnostic.contains("proof body refused broken"));
+        assert!(diagnostic.contains("proof body refused last"));
+    }
+
+    #[test]
+    fn an_empty_rule_campaign_cannot_supply_success() {
+        let mut manifest = rule_subjects_fixture();
+        manifest.obligations.clear();
+        let mut executed = 0;
+        let failure = run_rule_subjects(
+            &manifest,
+            |_, _| Ok(()),
+            |()| {
+                executed += 1;
+                Ok((0, 0))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(executed, 0);
+        assert!(format!("{failure:#}").contains("no required rule subjects"));
+    }
+
+    fn raw_result(
+        status: Option<i32>,
+        stdout: &str,
+        stderr: &str,
+    ) -> crate::phase_evidence::RawResult {
+        crate::phase_evidence::RawResult {
+            status,
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    fn miri_reports_fixture() -> MiriReports {
+        let discovery = "{\"type\":\"suite\",\"event\":\"discovery\"}\n{\"type\":\"test\",\"event\":\"discovered\",\"name\":\"tested\",\"ignore\":false}\n{\"type\":\"suite\",\"event\":\"completed\",\"tests\":1,\"benchmarks\":0}\n";
+        let result = "{\"type\":\"suite\",\"event\":\"started\"}\n{\"type\":\"test\",\"event\":\"ok\",\"name\":\"tested\"}\n{\"type\":\"suite\",\"event\":\"ok\",\"failed\":0,\"exec_time\":0.001}\n";
+        let cases = MIRI_TARGETS
+            .iter()
+            .flat_map(|target| {
+                MIRI_CRATES.iter().map(move |krate| MiriCase {
+                    krate: (*krate).into(),
+                    target: target.map(str::to_owned),
+                    discovery: raw_result(Some(0), discovery, ""),
+                    runs: vec![MiriRun {
+                        selected: vec![MiriTest {
+                            name: "tested".into(),
+                            ignored: false,
+                        }],
+                        result: raw_result(Some(0), result, ""),
+                    }],
+                })
+            })
+            .collect();
+        MiriReports {
+            cases,
+            fixture: raw_result(Some(1), "", "Undefined Behavior"),
+        }
+    }
+
+    #[test]
+    fn miri_reports_revalidate_every_target_inventory_selection_and_fixture() -> Result<()> {
+        let valid = miri_reports_fixture();
+        validate_miri_reports(&valid)?;
+        let mut invalid = valid.clone();
+        invalid.cases.pop();
+        assert!(validate_miri_reports(&invalid).is_err());
+        let mut invalid = valid.clone();
+        invalid.cases[0].target = Some("unsupported-target".into());
+        assert!(validate_miri_reports(&invalid).is_err());
+        let mut invalid = valid.clone();
+        let repeated = invalid.cases[0].runs[0].clone();
+        invalid.cases[0].runs.push(repeated);
+        assert!(validate_miri_reports(&invalid).is_err());
+        let mut invalid = valid.clone();
+        invalid.cases[0].runs[0].selected[0].ignored = true;
+        assert!(validate_miri_reports(&invalid).is_err());
+        let mut invalid = valid.clone();
+        invalid.cases[0].runs[0].result.status = None;
+        assert!(validate_miri_reports(&invalid).is_err());
+        let mut invalid = valid.clone();
+        invalid.fixture.status = None;
+        assert!(validate_miri_reports(&invalid).is_err());
+        let mut invalid = valid;
+        invalid.fixture.stderr = b"compiler failed".to_vec();
+        assert!(validate_miri_reports(&invalid).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn mutation_origins_redecode_raw_identity_inventory_and_terminal_outcomes() -> Result<()> {
+        let (inventory, outcomes) = mutation_report_fixture();
+        let valid = MutationOrigin {
+            package: "rules".into(),
+            status: Some(proof_budget_rules::MUTATION_TIMEOUT_EXIT),
+            inventory: serde_json::to_vec(&inventory)?,
+            outcomes: serde_json::to_vec(&outcomes)?,
+        };
+        decode_mutation_origin(&valid, "rules")?;
+        for invalid in [
+            MutationOrigin {
+                package: "foreign".into(),
+                ..valid.clone()
+            },
+            MutationOrigin {
+                status: None,
+                ..valid.clone()
+            },
+            MutationOrigin {
+                inventory: b"[]".to_vec(),
+                ..valid.clone()
+            },
+            MutationOrigin {
+                outcomes: b"{}".to_vec(),
+                ..valid
+            },
+        ] {
+            assert!(decode_mutation_origin(&invalid, "rules").is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn fuzz_reports_bind_the_complete_current_corpus_target_and_rejecting_inventory() -> Result<()>
+    {
+        let expected = FuzzInventory {
+            host: "fixture-host".into(),
+            targets: vec![("parser".into(), "corpus-hash".into())],
+            fixture_corpus_hash: "rejecting-corpus".into(),
+        };
+        let valid = FuzzReports {
+            version: raw_result(Some(0), &format!("cargo-fuzz {FUZZ_VERSION}"), ""),
+            host: "fixture-host".into(),
+            runs: vec![FuzzRun {
+                target: "parser".into(),
+                corpus_hash: "corpus-hash".into(),
+                result: raw_result(Some(0), "", ""),
+            }],
+            fixture_corpus_hash: "rejecting-corpus".into(),
+            fixture: raw_result(Some(1), "", "panicked"),
+        };
+        validate_fuzz_reports(&expected, &valid)?;
+        let mut invalid = valid.clone();
+        invalid.runs.clear();
+        assert!(validate_fuzz_reports(&expected, &invalid).is_err());
+        let mut invalid = valid.clone();
+        invalid.runs.push(invalid.runs[0].clone());
+        assert!(validate_fuzz_reports(&expected, &invalid).is_err());
+        let mut invalid = valid.clone();
+        invalid.runs[0].corpus_hash = "stale".into();
+        assert!(validate_fuzz_reports(&expected, &invalid).is_err());
+        let mut invalid = valid.clone();
+        invalid.host = "foreign-target".into();
+        assert!(validate_fuzz_reports(&expected, &invalid).is_err());
+        let mut invalid = valid;
+        invalid.fixture.status = None;
+        assert!(validate_fuzz_reports(&expected, &invalid).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn compiler_inventory_keeps_standard_and_contract_harnesses_and_refuses_false_rows()
+    -> Result<()> {
+        let proof =
+            serde_json::json!({"pretty_name":"proofs::valid","attributes":{"kind":"Proof"}});
+        let contract = serde_json::json!({"pretty_name":"proofs::contract","attributes":{"kind":{"ProofForContract":{"target_fn":"production"}}}});
+        let test = serde_json::json!({"pretty_name":"tests::unit","attributes":{"kind":"Test"}});
+        let decode = |rows: Value| {
+            compiled_harnesses(&serde_json::to_vec(
+                &serde_json::json!({"proof_harnesses":rows}),
+            )?)
+        };
+        assert_eq!(
+            decode(serde_json::json!([proof, contract, test]))?,
+            BTreeSet::from(["proofs::contract".into(), "proofs::valid".into()])
+        );
+        for invalid in [
+            serde_json::json!([]),
+            serde_json::json!([test]),
+            serde_json::json!([proof, proof]),
+            serde_json::json!([{"pretty_name":"","attributes":{"kind":"Proof"}}]),
+            serde_json::json!([{"pretty_name":"unexpected","attributes":{"kind":"Unknown"}}]),
+            serde_json::json!([{"pretty_name":"contract","attributes":{"kind":{"ProofForContract":{"target_fn":""}}}}]),
+        ] {
+            assert!(decode(invalid).is_err());
+        }
+        assert!(compiled_harnesses(b"{}").is_err());
+        assert!(compiled_harnesses(b"not-json").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn kani_version_accepts_only_the_complete_pinned_standalone_response() {
+        assert!(kani_environment_version_matches(
+            "Kani Rust Verifier 0.68.0 (standalone)\nCBMC 6.11.0\n"
+        ));
+        for invalid in [
+            "Kani Rust Verifier 0.68.0",
+            "Kani Rust Verifier 0.68.0 (standalone)",
+            "Kani Rust Verifier 0.68.1 (standalone)\nCBMC 6.11.0",
+            "Kani Rust Verifier 0.68.0 (cargo plugin)\nCBMC 6.11.0",
+            "Kani Rust Verifier 0.68.0 (standalone)\nCBMC 6.10.0",
+            "Kani Rust Verifier 0.68.0 (standalone)\nCBMC 6.11.0\nunexpected",
+        ] {
+            assert!(!kani_environment_version_matches(invalid), "{invalid}");
+        }
+    }
+
+    #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn freshness_report_decisions_and_their_counterexamples_verify_against_production() -> Result<()>
+    {
+        const EXPECTED: (usize, usize) = (3, 6);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        crate::phase_evidence::run(
+            root,
+            "freshness subject regression",
+            EXPECTED.0 + EXPECTED.1,
+            || {
+                let manifest = obligations::manifest(root)?;
+                let source = "crates/rules/src/freshness_rules.rs";
+                let probes = manifest
+                    .obligations
+                    .iter()
+                    .find_map(|obligation| match obligation {
+                        Obligation::Kani {
+                            source: candidate,
+                            probes,
+                            ..
+                        } if candidate == source => Some(probes),
+                        _ => None,
+                    })
+                    .context("freshness decisions have a registered proof obligation")?;
+                kani_environment_version(root)?;
+                verify_kani_driver(root)?;
+                let verifier_hash =
+                    crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
+                let engine_hash = crate::phase_evidence::engine_digest(root)?;
+                let result = verify_rules(
+                    root,
+                    source,
+                    probes,
+                    &flags(&manifest, source),
+                    &verifier_hash,
+                    &engine_hash,
+                )?;
+                ensure!(
+                    result == EXPECTED,
+                    "freshness proof inventory differs: {result:?}"
+                );
+                Ok(())
+            },
+        )
+    }
+    #[test]
+    #[ignore = "requires the installed pinned Kani"]
+    #[cfg(not(target_os = "windows"))]
+    fn review_decisions_and_their_counterexamples_verify_against_production() -> Result<()> {
+        const SUBJECTS: [(&str, (usize, usize)); 3] = [
+            ("crates/rules/src/review_routing_rules.rs", (3, 8)),
+            ("crates/rules/src/review_completion_rules.rs", (2, 1)),
+            ("crates/rules/src/pr_rules.rs", (8, 20)),
+        ];
+        const EXPECTED: (usize, usize) = (13, 29);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .context("the proof test has a workspace root")?;
+        crate::phase_evidence::run(
+            root,
+            "review subject regression",
+            EXPECTED.0 + EXPECTED.1,
+            || {
+                let source_hash = platform::build_inputs::content_hash(root)?;
+                ensure!(
+                    source_hash == platform::BUILD_HASH,
+                    "review proof producer is stale for the current source"
+                );
+                let manifest = obligations::manifest(root)?;
+                let closure = obligations::closure(root, &manifest)?;
+                ensure!(
+                    closure.refusals.is_empty(),
+                    "review proof inventory is not closed:\n{}",
+                    closure.refusals.join("\n")
+                );
+                kani_environment_version(root)?;
+                verify_kani_driver(root)?;
+                let verifier_hash =
+                    crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
+                let engine_hash = crate::phase_evidence::engine_digest(root)?;
+                let mut actual = (0, 0);
+                let mut checks = Checks::default();
+                for (source, expected) in SUBJECTS {
+                    checks.run(source, || {
+                        let probes = manifest
+                            .obligations
+                            .iter()
+                            .find_map(|obligation| match obligation {
+                                Obligation::Kani {
+                                    source: candidate,
+                                    probes,
+                                    ..
+                                } if candidate == source => Some(probes),
+                                _ => None,
+                            })
+                            .context(
+                                "the selected review source has a registered Kani obligation",
+                            )?;
+                        let result = verify_rules(
+                            root,
+                            source,
+                            probes,
+                            &flags(&manifest, source),
+                            &verifier_hash,
+                            &engine_hash,
+                        )?;
+                        ensure!(
+                            result == expected,
+                            "review proof inventory differs for {source}: {result:?}"
+                        );
+                        actual.0 += result.0;
+                        actual.1 += result.1;
+                        Ok(())
+                    });
+                }
+                checks.run("source freshness", || {
+                    ensure!(
+                        platform::build_inputs::content_hash(root)? == source_hash
+                            && crate::phase_evidence::engine_digest(root)? == engine_hash,
+                        "review proof source or engine inputs changed during verification"
+                    );
+                    Ok(())
+                });
+                checks.finish()?;
+                ensure!(
+                    actual == EXPECTED,
+                    "review subject proof execution is incomplete: {actual:?}"
+                );
+                Ok(())
+            },
+        )
+    }
+
+    #[test]
+    #[ignore = "requires the installed pinned Kani"]
+    #[cfg(not(target_os = "windows"))]
+    fn acquired_material_and_mac_profile_rules_verify_against_production() -> Result<()> {
+        const SOURCES: [&str; 2] = [
+            "crates/rules/src/artifact_rules.rs",
+            "crates/rules/src/benchmark_rules.rs",
+        ];
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .context("the proof test has a workspace root")?;
+        let source_hash = platform::build_inputs::content_hash(root)?;
+        ensure!(
+            source_hash == platform::BUILD_HASH,
+            "material and profile proof producer is stale for the current source"
+        );
+        let mut manifest = obligations::manifest(root)?;
+        let closure = obligations::closure(root, &manifest)?;
+        ensure!(
+            closure.refusals.is_empty(),
+            "material and profile proof inventory is not closed:\n{}",
+            closure.refusals.join("\n")
+        );
+        manifest.obligations.retain(|obligation| {
+            matches!(obligation, Obligation::Kani { source, .. } if SOURCES.contains(&source.as_str()))
+        });
+        ensure!(
+            manifest.obligations.len() == SOURCES.len(),
+            "every selected material and profile source needs one proof obligation"
+        );
+        verify_kani(root, &manifest)?;
+        ensure!(
+            platform::build_inputs::content_hash(root)? == source_hash,
+            "material or profile proof source changed during verification"
+        );
+        Ok(())
+    }
 
     const NATIVE_FIXTURE: &str = "DOTFILES_NATIVE_PROOF_FIXTURE";
     const NATIVE_TEST: &str =
@@ -1617,6 +3227,77 @@ mod tests {
         "skill_proofs::tests::the_code_environment_dispatches_the_pinned_nightly_verifiers";
     const MUTATION_TEST: &str =
         "skill_proofs::tests::mutation_workers_do_not_multiply_the_test_pool";
+
+    #[test]
+    fn a_retained_miri_sysroot_requires_fresh_setup_and_execution() -> Result<()> {
+        let cache = tempfile::tempdir()?;
+        let setups = std::cell::Cell::new(0);
+        let executions = std::cell::Cell::new(0);
+        for _ in 0..2 {
+            use_miri_sysroot(
+                cache.path(),
+                |sysroot| {
+                    setups.set(setups.get() + 1);
+                    fs::create_dir_all(sysroot)?;
+                    fs::write(sysroot.join("compiled-stdlib"), b"compiler artifacts")?;
+                    Ok(())
+                },
+                |sysroot| {
+                    let contender = fs::OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open(cache.path().join(MIRI_SYSROOT_LOCK))?;
+                    assert!(
+                        contender.try_lock().is_err(),
+                        "setup lease ended before interpretation"
+                    );
+                    assert_eq!(
+                        fs::read(sysroot.join("compiled-stdlib"))?,
+                        b"compiler artifacts"
+                    );
+                    executions.set(executions.get() + 1);
+                    Ok(())
+                },
+            )?;
+        }
+        assert_eq!(setups.get(), 2);
+        assert_eq!(executions.get(), 2);
+        let failure = use_miri_sysroot(
+            cache.path(),
+            |_| anyhow::bail!("current setup failed"),
+            |_| {
+                executions.set(executions.get() + 1);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert!(failure.to_string().contains("current setup failed"));
+        assert_eq!(
+            executions.get(),
+            2,
+            "old artifacts credited a failed preparation"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_miri_test_uses_the_prepared_sysroot_without_retaining_launch_metadata() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let sysroot = scope.path().join(MIRI_SYSROOT_DIRECTORY);
+        let command = miri(scope.path(), Some(&sysroot));
+        let selected = command
+            .get_envs()
+            .find_map(|(name, value)| (name == "MIRI_SYSROOT").then_some(value).flatten());
+        assert_eq!(selected, Some(sysroot.as_os_str()));
+        let arguments = command.get_args().collect::<Vec<_>>();
+        assert!(
+            arguments
+                .windows(3)
+                .any(|args| args == ["miri", "test", "--locked"])
+        );
+        assert!(!arguments.contains(&sysroot.as_os_str()));
+        Ok(())
+    }
 
     fn mutation_report_fixture() -> (Value, Value) {
         let phase = |name, status| serde_json::json!({"phase":name,"process_status":status});
@@ -1995,7 +3676,7 @@ mod tests {
         let home = platform::home::home().context("native tool home")?;
         let environment = dotfiles::hosts::code_environment(&root, &home)?;
         let output = environment
-            .command(std::env::current_exe()?)
+            .command(std::env::current_exe()?)?
             .args(["--ignored", "--exact", MUTATION_TEST, "--nocapture"])
             .env(NATIVE_FIXTURE, MUTATION_TEST)
             .env("RUST_TEST_THREADS", "2")
@@ -2019,7 +3700,7 @@ mod tests {
                 let mut targets = Checks::default();
                 for &target in MIRI_TARGETS {
                     targets.run(target.unwrap_or("the host"), || {
-                        let mut command = miri(&root);
+                        let mut command = miri(&root, None);
                         command.arg("--manifest-path").arg(root.join(MIRI_FIXTURE));
                         if let Some(target) = target {
                             command.args(["--target", target]);
@@ -2052,7 +3733,7 @@ mod tests {
         let home = platform::home::home().context("native tool home")?;
         let environment = dotfiles::hosts::code_environment(&root, &home)?;
         let output = environment
-            .command(std::env::current_exe()?)
+            .command(std::env::current_exe()?)?
             .args(["--ignored", "--exact", NIGHTLY_TEST, "--nocapture"])
             .env(NATIVE_FIXTURE, NIGHTLY_TEST)
             .env("RUSTUP_AUTO_INSTALL", "0")
@@ -2070,7 +3751,7 @@ mod tests {
     fn missing_manifest_cannot_skip_independent_native_checks() -> Result<()> {
         if std::env::var(NATIVE_FIXTURE).is_ok_and(|value| value == NATIVE_TEST) {
             let root = tempfile::tempdir()?;
-            let failure = verify_native(root.path(), ProofCampaign::Full).unwrap_err();
+            let failure = verify_native_prepared(root.path(), ProofCampaign::Full).unwrap_err();
             let diagnostic = format!("{failure:#}");
             for stage in ["Kani:", "Miri:", "fuzz:", "mutation:"] {
                 assert!(diagnostic.contains(stage), "{diagnostic}");

@@ -52,6 +52,11 @@ The plan runs, in order:
 
 ## Verification on every repository
 
+Skill observations and maintenance holds default to off.
+An [explicit machine-local experimental opt-in](reference/experimental-skill-maintenance.md) keeps the engine available.
+The opt-in leaves required repository verification and historical maintenance records unchanged.
+Ordinary agents read the applicable skill instructions directly.
+
 `home/dot_config/assure/shapes.toml` names the code shapes every repository on these machines must verify: pure decisions, protocols, and parsers, each with the signals that find it and the owner it needs.
 The same gate applies the anti-pattern catalog beside it, and counts each finding as a gap.
 A repository names its owners and budgets in `assure.toml` at its root, and an exemption sits in the comment block that precedes the site it exempts, as [its decision record](adr/verification-proportional-to-code-shape.md) describes.
@@ -64,13 +69,17 @@ The `pre-commit` and `pre-push` hooks refuse a change that adds a gap.
 | Command | Runs |
 | --- | --- |
 | `just check` | The gates a change selects: the lint stages, prose, links, and generated files, the shared skills, the core boundary and the structural catalog, the Rust packages, and the profiles. |
-| `just push-check` | Every check on the native host, plus the proof campaign on Mac and fixed CPU measurement budgets on Linux. The hosts gate records these results, and pre-push admits only matching candidate evidence. |
+| `just push-check` | Native implementation checks, plus the proof campaign on Mac and fixed CPU measurement budgets on Linux. The hosts gate records these results, and pre-push admits only matching candidate evidence. |
 | `just check-staged` | The pre-commit check: the lint stages over the staged files, then the prose of documents and of the comments `OComment` reads. |
 | `just baselines` | The refusal of a lint baseline under `policy/lint-baselines/` that grew since a base, which CI runs from the merge base. |
 | `just profiles` | Every profile's rendering, an isolated apply and verification, the committed manifests, the ignore and remove audit, and the script input audit. |
 | `just proofs` | The Kani obligations of `policy/obligations.toml`, Miri over the pure core's tests for the host and Windows, with Linux also interpreted on Mac, and a mutation campaign over the core. It also replays every fuzz corpus and verifies the Quint, Alloy, and Lean models. Linux also runs the fixed CPU budgets, while Mac reports their separate mandatory Linux Code gate. |
 | `just proofs-ci` | The required hosted Linux campaign: Kani, Miri, fuzz corpus replay, fixed CPU budgets, Quint, Alloy, and Lean. The local Mac candidate gate retains mutation testing while the owner pauses its hosted execution pending njutest. |
 | `just prose` | The writing standard over documents and comments. |
+
+The credential-free Code stage checks a clean candidate bundle and supplies implementation evidence.
+It doesn't authenticate the committed change's issue authority.
+The edit guard and staged pre-commit check enforce that authority before publication, and required hosted CI validates it using the trusted base.
 
 Prose gates check persisted files, comments, Markdown, commit messages, issues, pull requests, and release notes.
 The adapters setup step and `just install-prose` remove retired Claude Code and Codex reply hooks and the OpenCode reply plugin.

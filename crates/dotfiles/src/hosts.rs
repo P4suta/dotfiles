@@ -14,6 +14,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use yaml_rust2::{Yaml, YamlLoader};
 
+mod local;
 mod pending;
 
 pub const NOTES: &str = "refs/notes/hosts";
@@ -22,20 +23,25 @@ const STATE: &str = ".local/state/hosts";
 pub const DEFAULT_GATE: &str = "just push-check";
 const STAGE_REPORT: &str = "DOTFILES_HOST_STAGES ";
 const CODE_SHELL: &str = "/bin/sh";
+const KANI_NATIVE_HEALTH: &str =
+    "a_kani_batch_verifies_every_harness_and_rejects_every_counterexample";
+const KANI_HEALTH_RESULT: &str = "test result: ok. 1 passed; 0 failed;";
 const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
 const PROFILE_ROOT: &str = ".chezmoiroot";
 const PROFILE_RUNTIME: &str = "crates/dotfiles/Cargo.toml";
 const JOB_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const REQUEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const REQUEST_LIMIT: Duration = Duration::from_secs(300);
-const INPUT_SCHEMA: &[u8] = b"hosts-stage-inputs-v2\0";
+const INPUT_SCHEMA: &[u8] = b"hosts-stage-inputs-v3\0";
 const REMOVE_WORKSPACE: &str = "/bin/rm";
 const DISK_SPACE: &str = "/bin/df";
 const BYTES_PER_KIB: u64 = 1024;
 const DF_AVAILABLE_COLUMN: usize = 3;
-const SHARED_INPUTS: [&str; 6] = [
+mod resources;
+const SHARED_INPUTS: [&str; 7] = [
     "mise.toml",
     "mise.lock",
+    "mise.njutest.toml",
     RELEASE_PINS,
     "crates/dotfiles/src/hosts.rs",
     "crates/dotfiles/src/host_checks.rs",
@@ -75,6 +81,8 @@ struct Stages {
     applied: Option<crate::host_checks::Applied>,
     #[serde(default)]
     workspace: Option<String>,
+    #[serde(default)]
+    capture: Option<local::Execution>,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -121,6 +129,8 @@ pub enum Action {
         skip_real: bool,
         #[arg(long)]
         workspace: Option<PathBuf>,
+        #[arg(long)]
+        capture: Option<PathBuf>,
     },
     /// Refuse pushed GitHub branches that lack a passing note for an operating system family in their CI matrix.
     /// Reads pre-push input.
@@ -145,11 +155,13 @@ pub fn run(action: Action) -> Result<()> {
             skip_code,
             skip_real,
             workspace,
+            capture,
         } => worker(
             &native_home.map_or_else(home, Ok)?,
             &gate,
             [skip_code, skip_real],
             workspace.as_deref(),
+            capture.as_deref(),
         ),
         Action::Gate { url, .. } => {
             let mut input = Vec::new();
@@ -287,6 +299,8 @@ pub struct Note {
     pub reused: Option<Reused>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<Workspace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<local::Receipt>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -545,13 +559,14 @@ fn clean_recorded_workspace(native: &Real, root: &Path, commit: &str, note: &Not
             generation: None,
             reused: None,
             workspace: Some(workspace.clone()),
+            capture: None,
         },
     )
     .map(|_| ())
 }
 
-fn disk_arguments(family: Family, home: Option<&Path>) -> Vec<String> {
-    let paths = home.map_or_else(
+fn disk_paths(family: Family, home: Option<&Path>) -> [String; 2] {
+    home.map_or_else(
         || match family {
             Family::Windows => ["$env:USERPROFILE".into(), "$env:TEMP".into()],
             Family::Linux | Family::Mac => ["\"$HOME\"".into(), "\"${TMPDIR:-/tmp}\"".into()],
@@ -565,8 +580,11 @@ fn disk_arguments(family: Family, home: Option<&Path>) -> Vec<String> {
                 }
             })
         },
-    );
-    let [home, temporary] = paths;
+    )
+}
+
+fn disk_arguments(family: Family, home: Option<&Path>) -> Vec<String> {
+    let [home, temporary] = disk_paths(family, home);
     let script = match family {
         Family::Linux | Family::Mac => format!("LC_ALL=C {DISK_SPACE} -Pk {home} {temporary}"),
         Family::Windows => format!(
@@ -630,7 +648,41 @@ fn require_capacity(native: &Real, family: Family, target: &Target) -> Result<()
         target.name(),
         crate::hosts_rules::WORKSPACE_BYTES
     );
-    Ok(())
+    let inodes = if family == Family::Windows {
+        rules::resource_rules::Inodes::NotApplicable
+    } else {
+        let arguments = inode_arguments(
+            family,
+            match target {
+                Target::Local(_) => Some(&native.home),
+                Target::Remote(_) => None,
+            },
+        );
+        let (status, output) = match target {
+            Target::Remote(alias) => domyjob(native, alias, &["on"], &arguments)?,
+            Target::Local(_) => {
+                let mut command = platform::process::command(&arguments[0]);
+                command.args(&arguments[1..]);
+                let (status, output) = job_output(command, Some(REQUEST_LIMIT))?;
+                (status.code(), output)
+            }
+        };
+        ensure!(
+            status == Some(0),
+            "{}: inode measurement failed: {output}",
+            target.name()
+        );
+        resources::available_inodes(family, &output)?
+    };
+    resources::require(family, available, inodes, target.name())
+}
+
+fn inode_arguments(family: Family, local_home: Option<&Path>) -> Vec<String> {
+    let [home, temporary] = disk_paths(family, local_home);
+    wrap(
+        family,
+        &format!("LC_ALL=C {DISK_SPACE} -Pi {home} {temporary}"),
+    )
 }
 
 fn recover_workspaces(native: &Real, root: &Path) -> Result<()> {
@@ -666,6 +718,7 @@ fn recover_workspaces(native: &Real, root: &Path) -> Result<()> {
                 status: outcome(&note.host, &status),
                 output: format!("{reference}\n{status}\n{logs}"),
                 reused: workspace.reused.clone(),
+                capture: None,
             },
         )?;
         ensure!(
@@ -877,6 +930,7 @@ fn scoped_evidence(
 fn git(repository: &Path, arguments: &[&str]) -> Result<Vec<u8>> {
     let output = Tool::Git
         .command()
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .arg("-C")
         .arg(repository)
         .args(arguments)
@@ -1327,10 +1381,10 @@ fn remote_gate_stages(family: Family, gate: &str, skipped: [bool; 2]) -> String 
     let cache = platform::code_environment::HOST_CACHE;
     let worker = match family {
         Family::Windows => format!(
-            "$env:DOTFILES_HOST_CACHE = Join-Path $nativeHome '{cache}'; $env:CARGO_TARGET_DIR = Join-Path $env:DOTFILES_HOST_CACHE worker; $env:CARGO_HOME = Join-Path $env:DOTFILES_HOST_CACHE cargo; $env:MISE_CARGO_HOME = $env:CARGO_HOME; New-Item -ItemType Directory -Force $env:CARGO_HOME | Out-Null; {worker}"
+            "$env:DOTFILES_HOST_CACHE = Join-Path $nativeHome '{cache}'; $env:CARGO_HOME = Join-Path $env:DOTFILES_HOST_CACHE cargo; $env:MISE_CARGO_HOME = $env:CARGO_HOME; New-Item -ItemType Directory -Force $env:CARGO_HOME | Out-Null; {worker}"
         ),
         Family::Linux | Family::Mac => format!(
-            "export DOTFILES_HOST_CACHE=\"$nativeHome/{cache}\" CARGO_TARGET_DIR=\"$nativeHome/{cache}/worker\" CARGO_HOME=\"$nativeHome/{cache}/cargo\" MISE_CARGO_HOME=\"$nativeHome/{cache}/cargo\"; mkdir -p \"$CARGO_HOME\" && {worker}"
+            "export DOTFILES_HOST_CACHE=\"$nativeHome/{cache}\" CARGO_HOME=\"$nativeHome/{cache}/cargo\" MISE_CARGO_HOME=\"$nativeHome/{cache}/cargo\"; mkdir -p \"$CARGO_HOME\" && {worker}"
         ),
     };
     let bootstrap = match family {
@@ -1393,7 +1447,16 @@ fn concurrent_capacity(home: &Path) -> Result<bool> {
     ))
 }
 
-fn worker(home: &Path, gate: &str, skipped: [bool; 2], workspace: Option<&Path>) -> Result<()> {
+fn worker(
+    home: &Path,
+    gate: &str,
+    skipped: [bool; 2],
+    workspace: Option<&Path>,
+    capture: Option<&Path>,
+) -> Result<()> {
+    let captured = capture
+        .map(|manifest| local::worker(manifest, gate))
+        .transpose()?;
     let workspace = workspace
         .map(|path| -> Result<_> {
             let path = platform::paths::canonical(path)?;
@@ -1404,12 +1467,16 @@ fn worker(home: &Path, gate: &str, skipped: [bool; 2], workspace: Option<&Path>)
             Ok(path.to_string_lossy().replace('\\', "/"))
         })
         .transpose()?;
+    let root = std::env::current_dir()?;
+    let _source_protection = workspace
+        .as_ref()
+        .map(|_| local::protect_remote(&root))
+        .transpose()?;
     let concurrent = skipped == [false; 2]
         && concurrent_capacity(home).unwrap_or_else(|error| {
             eprintln!("stages run sequentially: measure capacity: {error:#}");
             false
         });
-    let root = std::env::current_dir()?;
     let (code, real) = run_stages(
         skipped,
         concurrent,
@@ -1440,7 +1507,8 @@ fn worker(home: &Path, gate: &str, skipped: [bool; 2], workspace: Option<&Path>)
             code,
             real,
             applied,
-            workspace
+            workspace,
+            capture: captured
         })?
     );
     ensure!(
@@ -1454,7 +1522,8 @@ fn code(home: &Path, gate: &str) -> Result<()> {
     let environment = code_environment(&std::env::current_dir()?, home)?;
     let argv = code_shell(gate);
     let status = environment
-        .command(&argv[0])
+        .command(&argv[0])?
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .args(&argv[1..])
         .stdin(Stdio::null())
         .status()?;
@@ -1462,15 +1531,196 @@ fn code(home: &Path, gate: &str) -> Result<()> {
     Ok(())
 }
 
-/// Build the code gate's environment from this checkout's exact tool pins.
+#[derive(Debug)]
+struct CodeProtections {
+    _materials: Vec<local::Protection>,
+    _cargo: Vec<local::Protection>,
+}
+
+impl CodeProtections {
+    fn new(materials: Vec<local::Protection>, cargo: Vec<local::Protection>) -> Self {
+        Self {
+            _materials: materials,
+            _cargo: cargo,
+        }
+    }
+}
+
+/// The native environment retaining its verified Cargo source materials.
+#[derive(Debug)]
+pub struct CodeEnvironment {
+    _protections: CodeProtections,
+    cargo: crate::artifacts::PreparedCargo,
+    workload: crate::artifacts::CargoWorkload,
+    native: platform::code_environment::CodeEnvironment,
+    rust: crate::artifacts::InstalledRustKani,
+    _native_health: Vec<crate::artifacts::NativeMaterialOperation>,
+    _materials: tempfile::TempDir,
+}
+
+impl CodeEnvironment {
+    /// Configure a child with the retained, verified Cargo materials.
+    ///
+    /// # Errors
+    ///
+    /// Refuses changed inputs and ambiguous external Cargo configuration.
+    pub fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Result<Command> {
+        self.rust.require_current()?;
+        self.native.require_current()?;
+        let mut command = self.native.command(program);
+        self.cargo
+            .configure_environment(&self.workload, &mut command)?;
+        Ok(command)
+    }
+}
+
+/// Prepare verified Cargo sources before building the native tool environment.
 ///
 /// # Errors
 ///
-/// Returns an error for missing native tools, failed pinned mise setup, or unresolved isolated tools.
-pub fn code_environment(
+/// Refuses incomplete materials, unsafe archives, ambiguous configurations, and unresolved tools.
+pub fn code_environment(root: &Path, home: &Path) -> Result<CodeEnvironment> {
+    let materials = tempfile::tempdir()?;
+    let project = crate::artifacts::CargoWorkload::capture(root)?;
+    project.plan()?.complete()?;
+    project.require_environment_scope()?;
+    let mut project = Some(project);
+    let mut cargo_owners = None;
+    let mut protections = Vec::new();
+    let native_parts = with_code_installations(root, home, |mut installed| {
+        let mut preparation = platform::code_environment::CodeEnvironment::prepare_in(
+            root,
+            &installed,
+            materials.path(),
+        )?;
+        preparation.admit_inherited(&installed)?;
+        let prepared = crate::artifacts::prepare_source_rust_kani(root, home, materials.path())?;
+        let workload = project
+            .take()
+            .context("project Cargo workload was already consumed")?
+            .with_stdlib(&prepared)?;
+        cargo_owners = Some(crate::artifacts::prepare_cargo_workload(
+            workload,
+            home,
+            materials.path(),
+        )?);
+        let (workload, cargo) = cargo_owners
+            .as_ref()
+            .context("complete Cargo owners were not retained")?;
+        cargo.configure_environment(workload, &mut Tool::Cargo.command())?;
+        protections = cargo
+            .immutable_paths()
+            .iter()
+            .map(|path| local::Protection::seal(path))
+            .collect::<Result<Vec<_>>>()?;
+        let mut rust = prepared.install()?;
+        installed.cargo = rust.cargo_home();
+        installed.rustup = rust.rustup_home();
+        installed.kani = rust.kani_home();
+        let launcher = rust.launcher_root();
+        let links = preparation.link_rust_kani(
+            &installed,
+            &rust.stable_toolchain(),
+            launcher.as_deref(),
+        )?;
+        rust.bind_data_view(links.data(), links.rust(), links.launcher())?;
+        installed.data = links.data().to_owned();
+        let mut immutable = rust.immutable_paths();
+        immutable.extend(cargo.immutable_paths());
+        immutable.extend(preparation.immutable_paths());
+        let material_protections = local::Protection::seal_materials(materials.path(), &immutable)?;
+        let health_command = if rust.target() == crate::artifacts::Target::WindowsX64 {
+            None
+        } else {
+            Some(kani_health_command(&rust, &preparation, cargo, workload)?)
+        };
+        let mut health = Vec::new();
+        let native = rust.with_health(
+            |store| {
+                if let Some(command) = health_command {
+                    health.push(original_kani_health(store, command)?);
+                }
+                Ok(())
+            },
+            |stores| {
+                ensure!(
+                    stores.data() == installed.data
+                        && stores.installed().rustup_home() == installed.rustup,
+                    "native health belongs to another prepared Code environment"
+                );
+                preparation.build(&installed)
+            },
+        )?;
+        let native = native.into_environment()?;
+        Ok((material_protections, native, rust, health))
+    })?;
+    let (workload, cargo) = cargo_owners
+        .take()
+        .context("complete Cargo owners were not retained")?;
+    let (material_protections, native, rust, health) = native_parts;
+    Ok(CodeEnvironment {
+        _protections: CodeProtections::new(material_protections, protections),
+        cargo,
+        workload,
+        native,
+        rust,
+        _native_health: health,
+        _materials: materials,
+    })
+}
+
+fn kani_health_command(
+    store: &crate::artifacts::InstalledRustKani,
+    preparation: &platform::code_environment::CodePreparation,
+    cargo: &crate::artifacts::PreparedCargo,
+    workload: &crate::artifacts::CargoWorkload,
+) -> Result<Command> {
+    let mut command = platform::tool::external(store.cargo_program());
+    command.args([
+        "test",
+        "--locked",
+        "--offline",
+        "--jobs",
+        "2",
+        "-p",
+        "xtask",
+        "--test",
+        "container_proofs",
+        KANI_NATIVE_HEALTH,
+        "--",
+        "--ignored",
+        "--exact",
+        "--nocapture",
+        "--test-threads=1",
+    ]);
+    store.configure_health(&mut command)?;
+    preparation.configure_health(&mut command)?;
+    cargo.configure_environment(workload, &mut command)?;
+    Ok(command)
+}
+
+fn original_kani_health(
+    store: &crate::artifacts::InstalledRustKani,
+    command: Command,
+) -> Result<crate::artifacts::NativeMaterialOperation> {
+    let output = store.observe_health(command, "original fresh Kani driver regression")?;
+    ensure!(
+        output.status == Some(0)
+            && output.stdout_complete
+            && output.stderr_complete
+            && std::str::from_utf8(&output.stdout)?
+                .lines()
+                .any(|line| line.starts_with(KANI_HEALTH_RESULT)),
+        "the original fresh Kani driver regression did not complete"
+    );
+    Ok(output)
+}
+
+fn with_code_installations<T>(
     root: &Path,
     home: &Path,
-) -> Result<platform::code_environment::CodeEnvironment> {
+    build: impl FnOnce(platform::code_environment::Installations) -> Result<T>,
+) -> Result<T> {
     let mut installed = platform::code_environment::Installations::discover(home)?;
     let releases = model::data::parse(RELEASE_PINS, &fs::read_to_string(root.join(RELEASE_PINS))?)
         .map_err(anyhow::Error::msg)?;
@@ -1487,7 +1737,7 @@ pub fn code_environment(
         .next()
         == Some(pin.as_str())
     {
-        return platform::code_environment::CodeEnvironment::build(root, &installed);
+        return build(installed);
     }
     let scope = tempfile::tempdir()?;
     let config = scope.path().join("chezmoi.toml");
@@ -1503,7 +1753,7 @@ pub fn code_environment(
         .renderer(root, &installed)
         .and_then(|renderer| bootstrap.provision_mise(root, &renderer))
         .with_context(|| format!("resolve mise release pin {pin}"))?;
-    platform::code_environment::CodeEnvironment::build(root, &installed)
+    build(installed)
 }
 
 fn code_shell(gate: &str) -> Vec<String> {
@@ -2147,6 +2397,7 @@ fn check_family(
     let reused = reuse_plan(candidate.root, required, candidate.inputs, candidate.gate)?
         [family.index()]
     .clone();
+    let mut owned = None;
     let run = if reused.iter().all(Option::is_some) {
         let host = reused[0]
             .as_ref()
@@ -2163,10 +2414,12 @@ fn check_family(
                     code: 0,
                     real: 0,
                     applied: None,
-                    workspace: None
+                    workspace: None,
+                    capture: None
                 })?
             ),
             reused,
+            capture: None,
         }
     } else {
         let target = target.context("managed host is unavailable")?;
@@ -2174,23 +2427,28 @@ fn check_family(
             return execution.execute(native, candidate, snapshot, alias, reused);
         }
         let skipped = reused.each_ref().map(Option::is_some);
-        let (status, output) = run_gate(
-            native,
-            candidate.root,
-            snapshot,
-            family,
-            &target,
-            candidate.gate,
-            skipped,
-        )?;
+        execution.begin_local(candidate, snapshot, target.name(), reused.clone())?;
+        let captured =
+            local::Owned::capture(candidate, &snapshot.join("head.bundle"), &native.home)?;
+        let (status, output) = job_output(captured.command(&native.home, skipped)?, None)
+            .context("run the captured local gate")?;
+        let capture = Some(captured.execution.clone());
+        owned = Some(captured);
         GateRun {
             family,
             target,
-            status,
+            status: status.code(),
             output,
             reused,
+            capture,
         }
     };
+    if let Some(capture) = &run.capture {
+        ensure!(
+            capture.matches(candidate),
+            "local execution provenance belongs to another candidate"
+        );
+    }
     let result = record_run(
         native,
         candidate.root,
@@ -2200,6 +2458,9 @@ fn check_family(
         candidate.inputs,
         &run,
     )?;
+    if let Some(mut owned) = owned {
+        owned.close()?;
+    }
     if result.recorded {
         execution.retire_unverified(candidate.root)?;
     }
@@ -2213,6 +2474,7 @@ struct GateRun {
     status: Option<i32>,
     output: String,
     reused: [Option<Reused>; 2],
+    capture: Option<local::Execution>,
 }
 
 #[derive(Debug)]
@@ -2236,6 +2498,7 @@ fn stage_packet(run: &GateRun) -> Result<(Stages, Option<Workspace>)> {
         status,
         output,
         reused,
+        ..
     } = run;
     let reports: Vec<_> = output
         .lines()
@@ -2274,6 +2537,17 @@ fn stage_packet(run: &GateRun) -> Result<(Stages, Option<Workspace>)> {
 
 fn reported(run: &GateRun) -> Result<(Stages, Option<Workspace>)> {
     let (report, workspace) = stage_packet(run)?;
+    if matches!(run.target, Target::Local(_)) && run.reused.iter().any(Option::is_none) {
+        ensure!(
+            run.capture.is_some() && run.capture == report.capture,
+            "local stage report has no matching protected execution provenance"
+        );
+    } else {
+        ensure!(
+            run.capture.is_none() && report.capture.is_none(),
+            "the execution returned unexpected local provenance"
+        );
+    }
     let statuses = [report.code, report.real];
     ensure!(
         crate::hosts_rules::report_evidence(run.status, statuses.iter().all(|status| *status == 0))
@@ -2330,6 +2604,7 @@ fn record_run(
             generation: None,
             reused: reuse.clone(),
             workspace: workspace.clone(),
+            capture: report.capture.as_ref().map(local::Execution::receipt),
         };
         match append_note(root, commit, &note) {
             Ok(AppendNote::Recorded) => {}
@@ -2393,46 +2668,361 @@ fn record_run(
     Ok(RecordedRun { failures, recorded })
 }
 
-/// One family's gate on its host, with its exit status when the job finished and its combined output.
-fn run_gate(
-    native: &Real,
-    root: &Path,
-    snapshot: &Path,
-    family: Family,
-    target: &Target,
-    gate: &str,
-    skipped: [bool; 2],
-) -> Result<(Option<i32>, String)> {
-    match target {
-        Target::Remote(alias) => {
-            let mut submission = command(native, Tool::Domyjob);
-            submission
-                .current_dir(snapshot)
-                .args(["run", alias, "--"])
-                .args(wrap(family, &remote_gate_stages(family, gate, skipped)));
-            remote_job(native, alias, submission)
-        }
-        Target::Local(_) => {
-            let mut request = crate::host_checks::unattended(std::env::current_exe()?);
-            request
-                .args(["hosts", "worker", "--gate", gate])
-                .current_dir(root);
-            for (skip, flag) in skipped.into_iter().zip(["--skip-code", "--skip-real"]) {
-                if skip {
-                    request.arg(flag);
-                }
-            }
-            let (status, text) = job_output(request, None).context("run the local gate")?;
-            Ok((status.code(), text))
-        }
-    }
-}
-
 #[cfg(test)]
 mod job_tests {
     use super::*;
 
     const STAGE_START_LIMIT: Duration = Duration::from_secs(5);
+    const PREPARATION_FAILURE_SCOPE: &str = "DOTFILES_TEST_PREPARATION_FAILURE_SCOPE";
+    const PREPARATION_FAILURE_TEST: &str =
+        "hosts::job_tests::failed_code_preparation_restores_protections_before_owned_cleanup";
+    const PREPARATION_PACKAGE: &str = "cleanup-dependency";
+    const PREPARATION_PACKAGE_VERSION: &str = "1.2.3";
+    const PREPARATION_REGISTRY: &str = "registry+https://github.com/rust-lang/crates.io-index";
+    const PREPARATION_ARCHIVE_URL: &str =
+        "https://static.crates.io/crates/cleanup-dependency/cleanup-dependency-1.2.3.crate";
+    const PREPARATION_CACHE: &str = ".cache/dotfiles/artifacts";
+    const INHERITED_FAILURE_SCOPE: &str = "DOTFILES_TEST_INHERITED_FAILURE_SCOPE";
+    const INHERITED_FAILURE_TEST: &str =
+        "hosts::job_tests::missing_inherited_tool_refuses_before_native_material_preparation";
+    const PINNED_MISE_FIXTURE: &str = "DOTFILES_VERIFIED_MISE_BOOTSTRAP";
+    const INHERITED_INPUTS: [(&str, &[u8]); 7] = [
+        (
+            "mise.toml",
+            b"[tools]\nyamllint='1.38.0'\nuv='0.12.22'\n[settings]\nparanoid=true\nlockfile=true\n",
+        ),
+        ("mise.lock", include_bytes!("../../../mise.lock")),
+        (
+            RELEASE_PINS,
+            include_bytes!("../../../home/.chezmoidata/versions.toml"),
+        ),
+        (
+            ".mise/locks/yamllint/1.38.0/pyproject.toml",
+            include_bytes!("../../../.mise/locks/yamllint/1.38.0/pyproject.toml"),
+        ),
+        (
+            ".mise/locks/yamllint/1.38.0/uv.lock",
+            include_bytes!("../../../.mise/locks/yamllint/1.38.0/uv.lock"),
+        ),
+        (
+            ".mise/locks/pypi-ansible-core/2.21.4/pyproject.toml",
+            include_bytes!("../../../.mise/locks/pypi-ansible-core/2.21.4/pyproject.toml"),
+        ),
+        (
+            ".mise/locks/pypi-ansible-core/2.21.4/uv.lock",
+            include_bytes!("../../../.mise/locks/pypi-ansible-core/2.21.4/uv.lock"),
+        ),
+    ];
+
+    #[test]
+    #[ignore = "requires the source-authenticated pinned mise bootstrap"]
+    fn missing_inherited_tool_refuses_before_native_material_preparation() -> Result<()> {
+        if let Some(scope) = std::env::var_os(INHERITED_FAILURE_SCOPE) {
+            let namespace = platform::paths::canonical(Path::new(&scope))?;
+            let source = namespace.join("source");
+            let home = namespace.join("home");
+            let failure = code_environment(&source, &home)
+                .expect_err("the original resolver must refuse missing inherited yamllint");
+            assert!(
+                failure
+                    .to_string()
+                    .contains("yamllint does not resolve to its installed project pin"),
+                "the inherited-tool refusal must precede malformed native policy: {failure:#}"
+            );
+            assert!(
+                failure
+                    .to_string()
+                    .contains("uv does not resolve to its installed project pin"),
+                "both missing inherited tools must be reported: {failure:#}"
+            );
+            assert!(
+                failure.to_string().contains("refused 2 member(s)"),
+                "the complete failing inventory must be counted: {failure:#}"
+            );
+            assert!(!home.join(".rustup/toolchains").exists());
+            assert!(!home.join(".kani").exists());
+            for (name, expected) in INHERITED_INPUTS {
+                assert_eq!(
+                    fs::read(source.join(name))?,
+                    expected,
+                    "Source input changed: {name}"
+                );
+            }
+            return Ok(());
+        }
+        let owned = tempfile::tempdir()?;
+        let namespace = platform::paths::canonical(owned.path())?;
+        let source = namespace.join("source");
+        let home = namespace.join("home");
+        let programs = home.join(".local/bin");
+        let temporary = namespace.join("tmp");
+        fs::create_dir_all(&programs)?;
+        fs::create_dir(&temporary)?;
+        preparation_fixture(&source, &home)?;
+        for (name, bytes) in INHERITED_INPUTS {
+            let path = source.join(name);
+            fs::create_dir_all(path.parent().context("inherited fixture input parent")?)?;
+            fs::write(path, bytes)?;
+        }
+        let catalog = source.join("policy/native-materials.toml");
+        fs::create_dir_all(catalog.parent().context("native fixture policy parent")?)?;
+        fs::write(&catalog, b"[deliberately unclosed native material policy")?;
+        let mise = std::env::var_os(PINNED_MISE_FIXTURE)
+            .context("provide the verified pinned mise bootstrap")?;
+        fs::copy(
+            Path::new(&mise),
+            programs.join(format!("mise{}", std::env::consts::EXE_SUFFIX)),
+        )?;
+        let mut command = platform::process::command(std::env::current_exe()?);
+        command
+            .args([
+                "--exact",
+                INHERITED_FAILURE_TEST,
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(INHERITED_FAILURE_SCOPE, &namespace)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("TMP", &temporary)
+            .env("TEMP", &temporary)
+            .env("TMPDIR", &temporary)
+            .env("DOTFILES_HOST_PATH", &programs)
+            .env("MISE_DATA_DIR", home.join("native-data"))
+            .env("DOTFILES_HOST_CARGO_HOME", home.join(".cargo"))
+            .env("RUSTUP_HOME", home.join(".rustup"))
+            .env("DOTFILES_HOST_CACHE", home.join("host-cache"))
+            .env(platform::code_environment::NATIVE_PATH_DIFF_PRESENT, "0")
+            .env_remove(platform::code_environment::NATIVE_PATH_DIFF)
+            .env_remove("__MISE_DIFF");
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "early inherited-tool refusal failed: {:?}\nstdout={}\nstderr={}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stderr, Vec::<u8>::new());
+        assert_eq!(
+            fs::read(&catalog)?,
+            b"[deliberately unclosed native material policy"
+        );
+        platform::cleanup::report(
+            owned.close(),
+            "remove the early inherited-tool refusal fixture",
+        );
+        Ok(())
+    }
+
+    struct PreparationArchive(Vec<u8>);
+
+    impl crate::artifacts::Fetch for PreparationArchive {
+        fn fetch(
+            &self,
+            source: &str,
+            destination: &Path,
+        ) -> std::result::Result<(), crate::artifacts::FetchFailure> {
+            if source != PREPARATION_ARCHIVE_URL {
+                return Err(crate::artifacts::FetchFailure::Refused(
+                    "unexpected preparation fixture material".into(),
+                ));
+            }
+            fs::write(destination, &self.0)
+                .map_err(|error| crate::artifacts::FetchFailure::Refused(error.to_string()))
+        }
+    }
+
+    fn preparation_fixture(source: &Path, home: &Path) -> Result<()> {
+        let gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut archive = tar::Builder::new(gzip);
+        let manifest = format!(
+            "[package]\nname={PREPARATION_PACKAGE:?}\nversion={PREPARATION_PACKAGE_VERSION:?}\nedition='2024'\n"
+        );
+        for (path, contents) in [
+            ("Cargo.toml", manifest.as_bytes()),
+            ("src/lib.rs", b"pub fn value() -> u32 { 37 }\n".as_slice()),
+        ] {
+            let mut header = tar::Header::new_ustar();
+            header.set_size(u64::try_from(contents.len())?);
+            header.set_mode(0o644);
+            header.set_entry_type(tar::EntryType::Regular);
+            header.set_cksum();
+            archive.append_data(
+                &mut header,
+                format!("{PREPARATION_PACKAGE}-{PREPARATION_PACKAGE_VERSION}/{path}"),
+                contents,
+            )?;
+        }
+        let archive = PreparationArchive(archive.into_inner()?.finish()?);
+        let checksum = crate::artifacts::Digest::of(&archive.0);
+        fs::create_dir_all(source.join("src"))?;
+        fs::write(
+            source.join("Cargo.toml"),
+            format!(
+                "[package]\nname='cleanup-fixture'\nversion='0.1.0'\nedition='2024'\n[workspace]\n[dependencies]\n{PREPARATION_PACKAGE}='={PREPARATION_PACKAGE_VERSION}'\n"
+            ),
+        )?;
+        fs::write(
+            source.join("Cargo.lock"),
+            format!(
+                "version=4\n[[package]]\nname='cleanup-fixture'\nversion='0.1.0'\ndependencies=['{PREPARATION_PACKAGE}']\n[[package]]\nname='{PREPARATION_PACKAGE}'\nversion='{PREPARATION_PACKAGE_VERSION}'\nsource='{PREPARATION_REGISTRY}'\nchecksum='{}'\n",
+                checksum.hex()
+            ),
+        )?;
+        fs::write(
+            source.join("src/lib.rs"),
+            "pub fn value() -> u32 { cleanup_dependency::value() }\n",
+        )?;
+        let workload = crate::artifacts::CargoWorkload::capture(source)?;
+        let plan = workload.plan()?;
+        let [material] = plan.artifacts() else {
+            anyhow::bail!("preparation fixture requires exactly one material");
+        };
+        assert_eq!(
+            material.subject(),
+            format!("crate:{PREPARATION_PACKAGE}@{PREPARATION_PACKAGE_VERSION}")
+        );
+        assert_eq!(material.expected(), checksum);
+        let cache = crate::artifacts::Cache::new(home.join(PREPARATION_CACHE));
+        cache.acquire(&plan, &archive)?;
+        cache.verify(&plan)?;
+        Ok(())
+    }
+
+    #[test]
+    fn failed_code_preparation_restores_protections_before_owned_cleanup() -> Result<()> {
+        if let Some(scope) = std::env::var_os(PREPARATION_FAILURE_SCOPE) {
+            let namespace = platform::paths::canonical(Path::new(&scope))?;
+            let failure = code_environment(&namespace.join("source"), &namespace.join("home"))
+                .expect_err("the captured Source deliberately has no release pins");
+            assert!(
+                failure
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound),
+                "the original missing-input refusal must survive cleanup: {failure:#}"
+            );
+            return Ok(());
+        }
+        let owned = tempfile::tempdir()?;
+        let namespace = platform::paths::canonical(owned.path())?;
+        let source = namespace.join("source");
+        let home = namespace.join("home");
+        let programs = home.join(".local/bin");
+        let temporary = namespace.join("tmp");
+        fs::create_dir_all(&programs)?;
+        fs::create_dir(&temporary)?;
+        preparation_fixture(&source, &home)?;
+        fs::write(
+            programs.join(format!("mise{}", std::env::consts::EXE_SUFFIX)),
+            b"an owned path fixture that must never be executed",
+        )?;
+        let mut command = platform::process::command(std::env::current_exe()?);
+        command
+            .args(["--exact", PREPARATION_FAILURE_TEST, "--nocapture"])
+            .env(PREPARATION_FAILURE_SCOPE, &namespace)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("TMP", &temporary)
+            .env("TEMP", &temporary)
+            .env("TMPDIR", &temporary)
+            .env("DOTFILES_HOST_PATH", &programs)
+            .env(platform::code_environment::NATIVE_PATH_DIFF_PRESENT, "0")
+            .env_remove(platform::code_environment::NATIVE_PATH_DIFF)
+            .env_remove("__MISE_DIFF");
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "the deliberate preparation refusal failed: {:?}\nstdout={}\nstderr={}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stderr,
+            Vec::<u8>::new(),
+            "the original refusal must not produce a protection restoration failure"
+        );
+        let retained = fs::read_dir(&temporary)?
+            .map(|entry| Ok(entry?.file_name()))
+            .collect::<Result<Vec<_>>>()?;
+        assert_eq!(
+            retained,
+            Vec::<std::ffi::OsString>::new(),
+            "owned preparation outputs must be removed after protections restore"
+        );
+        platform::cleanup::report(owned.close(), "remove the failed preparation fixture");
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn retained_material_layers_restore_cargo_permissions_before_cleanup() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let namespace = tempfile::tempdir()?;
+        let cargo = namespace.path().join("cargo");
+        let vendor = cargo.join("vendor");
+        let cargo_home = cargo.join("cargo-home");
+        let config = cargo_home.join("config.toml");
+        let source = vendor.join("source");
+        fs::create_dir_all(&vendor)?;
+        fs::create_dir(&cargo_home)?;
+        fs::write(&config, "configuration")?;
+        fs::write(&source, "source")?;
+        let paths = [
+            namespace.path().to_owned(),
+            cargo,
+            vendor.clone(),
+            cargo_home,
+            config.clone(),
+            source.clone(),
+        ];
+        let expected = paths
+            .iter()
+            .map(|path| Ok((path.clone(), fs::metadata(path)?.permissions().mode())))
+            .collect::<Result<Vec<_>>>()?;
+        let protections = [vendor.clone(), config.clone()]
+            .iter()
+            .map(|path| local::Protection::seal(path))
+            .collect::<Result<Vec<_>>>()?;
+        let material = local::Protection::seal_materials(namespace.path(), &[vendor, config])?;
+        let protections = CodeProtections::new(material, protections);
+        let refused = fs::OpenOptions::new()
+            .write(true)
+            .open(&source)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied);
+        drop(protections);
+        let restored = paths
+            .iter()
+            .map(|path| Ok((path.clone(), fs::metadata(path)?.permissions().mode())))
+            .collect::<Result<Vec<_>>>()?;
+        for (path, mode) in &expected {
+            fs::set_permissions(path, fs::Permissions::from_mode(*mode))?;
+        }
+        let directory = namespace.path().to_owned();
+        namespace.close()?;
+        assert!(refused, "live retained materials must reject writes");
+        assert_eq!(restored, expected);
+        assert!(!directory.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn a_local_success_without_captured_execution_provenance_is_not_verified() {
+        let run = GateRun {
+            family: Family::Mac,
+            target: Target::Local("owned-fixture".into()),
+            status: Some(0),
+            output: format!(
+                "{STAGE_REPORT}{}",
+                serde_json::json!({"code":0,"real":0,"applied":null,"workspace":null})
+            ),
+            reused: [None, None],
+            capture: None,
+        };
+        assert!(reported(&run).is_err());
+    }
 
     fn failed_real() -> crate::host_checks::Report {
         crate::host_checks::Report {
@@ -2647,6 +3237,7 @@ mod job_tests {
                 generation: None,
                 reused: None,
                 workspace: None,
+                capture: None,
             },
         )?;
         Ok(())
@@ -2830,6 +3421,7 @@ mod job_tests {
                 generation: None,
                 reused: None,
                 workspace: None,
+                capture: None,
             };
             for commit in &commits[..2] {
                 append_note(
@@ -2990,6 +3582,7 @@ mod job_tests {
                 job: job.into(),
                 reused: [None, None],
             }),
+            capture: None,
         };
         let code = note(Stage::Code, 0, "old");
         append_note(root, &commit, &code)?;

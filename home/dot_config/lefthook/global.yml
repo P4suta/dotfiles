@@ -4,8 +4,10 @@ output:
   - failure
 
 pre-commit:
-  parallel: true
+  parallel: false
   commands:
+    issue-context:
+      run: pr-workflow change-check --staged
     prose-sembr:
 # Fix staged additions in place and keep partial staging.
       glob: "*"

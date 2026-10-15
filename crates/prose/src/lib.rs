@@ -1114,19 +1114,28 @@ pub fn read_policy(root: &Path) -> Result<Policy> {
     .with_context(|| format!("{POLICY} is invalid"))
 }
 
-fn tracked(root: &Path) -> Result<Vec<String>> {
+fn source_files(root: &Path) -> Result<Vec<String>> {
     let output = Tool::Git
         .command()
         .current_dir(root)
-        .args(["ls-files", "-z"])
+        .args([
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ])
         .output()
-        .context("list tracked files")?;
+        .context("list source files")?;
     ensure!(output.status.success(), "git ls-files failed");
-    Ok(String::from_utf8(output.stdout)?
+    let mut files: Vec<String> = String::from_utf8(output.stdout)?
         .split('\0')
         .filter(|path| !path.is_empty())
         .map(str::to_owned)
-        .collect())
+        .collect();
+    files.sort();
+    files.dedup();
+    Ok(files)
 }
 
 /// Markdown documents: `*.md`, `*.md.tmpl`, and the files `.ocomment.toml` declares Markdown.
@@ -1174,7 +1183,7 @@ fn scan(
     used: &mut [bool],
 ) -> Result<Vec<Finding>> {
     bundle.verify()?;
-    let files = tracked(root)?;
+    let files = source_files(root)?;
     let documents = documents(root, &files)?;
     let mut selected = Vec::new();
     for path in files {
@@ -1182,7 +1191,9 @@ fn scan(
             Scope::Documents => documents.contains(&path),
             Scope::Comments => !documents.contains(&path),
         };
-        if !in_scope || !root.join(&path).is_file() {
+        if !in_scope
+            || !fs::symlink_metadata(root.join(&path)).is_ok_and(|metadata| metadata.is_file())
+        {
             continue;
         }
         let mut skipped = false;
@@ -1282,7 +1293,7 @@ Rewrite these sentences and rerun `just prose`.",
 ///
 /// # Errors
 ///
-/// Returns an error when reading the policy fails, the bundle fails verification, listing or reading the tracked files fails, or a linter fails.
+/// Returns an error when reading the policy fails, the bundle fails verification, listing or reading source files fails, or a linter fails.
 /// Returns an error when any finding remains unexempted or an exemption lacks a reason or matches no finding.
 pub fn repository(root: &Path, scope: Scope, bundle: &Bundle) -> Result<()> {
     let policy = read_policy(root)?;
@@ -1302,7 +1313,7 @@ pub fn repository(root: &Path, scope: Scope, bundle: &Bundle) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Returns an error when reading the policy fails, the bundle fails verification, listing or reading the tracked files fails, or a linter fails.
+/// Returns an error when reading the policy fails, the bundle fails verification, listing or reading source files fails, or a linter fails.
 pub fn findings(root: &Path, scope: Scope, bundle: &Bundle) -> Result<Vec<Finding>> {
     let policy = read_policy(root)?;
     let mut used = vec![false; policy.exempt.len()];

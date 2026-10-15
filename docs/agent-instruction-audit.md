@@ -96,14 +96,13 @@ Once run, `pr-workflow start` refuses a personal non-fork repository without a q
 Follow-up F4: nothing stops a direct `gh pr create`.
 Whether a diff fits an issue's scope stays judgment.
 
-> - For every implementation change, run `skill-ops load formal-assurance verification-tools` and meet the obligations of the skills it loads before declaring the change complete.
+> - For implementation changes, read the relevant formal-assurance and verification-tools skill instructions directly and meet their verification obligations.
 
-Follow-up F5: `home/dot_config/skill-ops/policy.json` makes `verification-tools` load `type-contracts` and `executable-policy`.
-The observer hook records skill loads, but completion doesn't require them yet.
+Judgment: selecting relevant skill instructions and checking their verification obligations requires a review of the implementation and its evidence.
 
-> - Before declaring work complete, run `skill-ops check` and resolve what it reports.
+> - Keep experimental skill maintenance off by default, and don't run or require its loading, observation, analysis, triage, or checks without this machine's explicit opt-in.
 
-Follow-up F6: the `skill-ops stop` hook already blocks completion in Claude Code and Codex, and OpenCode has no blocking completion hook.
+Judgment: the owner controls each machine's opt-in, and verification duties still apply without skill maintenance.
 
 > - Keep the CodeRabbit CLI and PR review pools separate, apply adaptive thresholds where they apply, and hold a push or PR update while review capacity stays unverified.
 
@@ -426,7 +425,8 @@ Each removed line names what holds it now:
 - `Merged`: the retained line containing the quoted fragment rewords or restates it.
 - `Contradicted`: the named retained line or skill states the rule that applies instead.
 
-No gate refuses work done without loading a skill, and F5 adds a completion gate for `formal-assurance` and `verification-tools` only.
+Formal-assurance and verification-tools obligations still require reading their relevant instructions and checking implementation evidence.
+Experimental skill maintenance stays off until the machine's explicit opt-in.
 
 | Former line | Held by | Mechanism |
 | --- | --- | --- |
@@ -494,15 +494,6 @@ A repository opts out with `git config guard.commits off` when its own instructi
 ### F4:
 
 The managed agent permission profiles deny `gh pr create`, `gh pr edit`, and `gh pr ready`, and the denial names the matching `pr-workflow` command.
-
-### F5:
-
-`skill-ops stop` refuses completion of a session whose observed edits change implementation files without observed loads of `formal-assurance` and `verification-tools`.
-It names `skill-ops load formal-assurance verification-tools`.
-
-### F6:
-
-The OpenCode `skill-ops` plugin in `home/dot_config/opencode/plugins/skill-ops.ts` runs `skill-ops check` when a session goes idle and reports its refusal to the agent.
 
 ### F7:
 

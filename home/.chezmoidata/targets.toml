@@ -19,6 +19,8 @@
 ".config/dev-reaper" = "desktop"
 ".config/dev-reaper/config" = "desktop"
 ".config/dotfiles-nix" = "linux"
+".config/dotfiles/notifications" = "native"
+".config/dotfiles/notifications/**" = "native"
 ".config/fcitx5" = "linux"
 ".config/fcitx5/config" = "linux"
 ".config/fcitx5/profile" = "linux"

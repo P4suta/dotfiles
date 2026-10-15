@@ -1,6 +1,84 @@
 use anyhow::Result;
+use serde_json::{Value, json};
 use skill_ops::{Metadata, export_checks, metadata, validate_links, validate_tree};
 use std::fs;
+
+#[path = "../../crates/platform/tests/support/fixture_process.rs"]
+mod fixture_process;
+
+#[test]
+fn disabled_installer_removes_owned_hooks_without_loading_or_building_source() -> Result<()> {
+    for owner_disabled in [false, true] {
+        let scope = tempfile::tempdir()?;
+        let source = scope.path().join("source");
+        let home = scope.path().join("home");
+        fs::create_dir(&source)?;
+        let history = home.join(".local/state/skill-ops/history.json");
+        fs::create_dir_all(history.parent().expect("history parent"))?;
+        fs::write(&history, "preserved history\n")?;
+        let stop = home.join(platform::incidents::DISABLED);
+        let opt_in = home.join(platform::incidents::EXPERIMENTAL);
+        if owner_disabled {
+            fs::create_dir_all(stop.parent().expect("consent parent"))?;
+            fs::write(&stop, "owner stop\n")?;
+            fs::write(&opt_in, rules::incident_rules::EXPERIMENTAL_OPT_IN)?;
+        }
+        let expected = json!({"theme":"auto", "hooks":{
+            "Stop":[{"matcher":"*", "hooks":[
+                {"type":"command", "command":"unrelated-guard"},
+                {"type":"command", "command":"skill-ops-custom stop"}
+            ]}],
+            "PostToolUse":[{"hooks":[{"type":"command", "command":"line-endings"}]}]
+        }});
+        for (client, relative) in [
+            ("codex", ".codex/hooks.json"),
+            ("claude", ".claude/settings.json"),
+        ] {
+            let mut settings = expected.clone();
+            settings["hooks"]["Stop"][0]["hooks"]
+                .as_array_mut()
+                .expect("stop handlers")
+                .push(json!({"type":"command", "command":"skill-ops stop"}));
+            settings["hooks"]["PostToolUse"][0]["hooks"].as_array_mut().expect("observe handlers")
+                .push(json!({"type":"command", "command":format!("skill-ops observe --client {client}")}));
+            let path = home.join(relative);
+            fs::create_dir_all(path.parent().expect("settings parent"))?;
+            fs::write(path, serde_json::to_vec(&settings)?)?;
+        }
+        let output = fixture_process::command(env!("CARGO_BIN_EXE_xtask"), scope.path())
+            .current_dir(&source)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .arg("--root")
+            .arg(&source)
+            .arg("install-skill-ops")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for relative in [".codex/hooks.json", ".claude/settings.json"] {
+            let actual: Value = serde_json::from_slice(&fs::read(home.join(relative))?)?;
+            assert_eq!(actual, expected);
+        }
+        assert_eq!(fs::read_to_string(history)?, "preserved history\n");
+        assert_eq!(fs::read_dir(&source)?.count(), 0);
+        assert!(!home.join(".local/bin").try_exists()?);
+        assert!(!home.join(".local/state/dotfiles").try_exists()?);
+        assert!(!home.join(".config/skill-ops/approved.json").try_exists()?);
+        if owner_disabled {
+            assert_eq!(fs::read(stop)?, b"owner stop\n");
+            assert_eq!(
+                fs::read(opt_in)?,
+                rules::incident_rules::EXPERIMENTAL_OPT_IN
+            );
+        } else {
+            assert!(!stop.try_exists()? && !opt_in.try_exists()?);
+        }
+    }
+    Ok(())
+}
 
 #[test]
 fn folded_and_quoted_yaml_descriptions_are_discovered() -> Result<()> {

@@ -12,13 +12,14 @@ license.workspace = true
 [dependencies]
 platform = { path = "../platform", default-features = false }
 rules = { path = "../rules" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [dev-dependencies]
 anyhow = "1.0"
 platform = { path = "../platform", default-features = false, features = [
   "tools",
 ] }
-serde_json = "1.0"
 tempfile = "3.27"
 
 # The workspace forbids unsafe code, which no #[expect] can lift.

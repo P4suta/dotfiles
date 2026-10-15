@@ -20,6 +20,8 @@ A target missing from the first table reaches every profile.
 | `.config/dev-reaper` | desktop | mac, linux |
 | `.config/dev-reaper/config` | desktop | mac, linux |
 | `.config/dotfiles-nix` | linux | linux |
+| `.config/dotfiles/notifications` | native | mac, linux, windows |
+| `.config/dotfiles/notifications/**` | native | mac, linux, windows |
 | `.config/fcitx5` | linux | linux |
 | `.config/fcitx5/config` | linux | linux |
 | `.config/fcitx5/profile` | linux | linux |
