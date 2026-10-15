@@ -4,6 +4,13 @@ pub const BUDGET_MILLIS: u64 = 30_000;
 /// The `--harness-timeout` after which the verifier abandons a harness.
 pub const TIMEOUT_SECONDS: u64 = 60;
 
+const NANOS_PER_MILLI: u128 = 1_000_000;
+
+#[must_use]
+pub fn elapsed_millis(nanos: u128) -> Option<u64> {
+    u64::try_from(nanos.div_ceil(NANOS_PER_MILLI)).ok()
+}
+
 /// The largest mutation worker pool and shared Cargo jobserver pool.
 pub const MUTANT_JOB_LIMIT: usize = 8;
 
@@ -134,6 +141,28 @@ pub const fn verdict(duration_millis: Option<u64>) -> Verdict {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_elapsed_millis(nanos: u128) {
+        let millis = nanos / NANOS_PER_MILLI + u128::from(!nanos.is_multiple_of(NANOS_PER_MILLI));
+        assert_eq!(
+            elapsed_millis(nanos).is_some(),
+            millis <= u128::from(u64::MAX)
+        );
+        if let Some(actual) = elapsed_millis(nanos) {
+            assert_eq!(u128::from(actual), millis);
+            assert!(u128::from(actual) * NANOS_PER_MILLI >= nanos);
+            assert!(actual == 0 || u128::from(actual - 1) * NANOS_PER_MILLI < nanos);
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn host_elapsed_rounds_up_without_overflow_or_understatement() {
+        let nanos: u128 = kani::any();
+        spec_elapsed_millis(nanos);
+        kani::cover!(elapsed_millis(nanos) == Some(BUDGET_MILLIS));
+        kani::cover!(elapsed_millis(nanos).is_none());
+    }
 
     #[cfg(kani)]
     #[kani::proof]
@@ -288,6 +317,23 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn elapsed_milliseconds_preserve_fractional_boundaries_and_overflow() {
+        for nanos in [
+            0,
+            1,
+            NANOS_PER_MILLI - 1,
+            NANOS_PER_MILLI,
+            u128::from(BUDGET_MILLIS) * NANOS_PER_MILLI,
+            u128::from(BUDGET_MILLIS) * NANOS_PER_MILLI + 1,
+            u128::from(u64::MAX) * NANOS_PER_MILLI,
+            u128::from(u64::MAX) * NANOS_PER_MILLI + 1,
+            u128::MAX,
+        ] {
+            proofs::spec_elapsed_millis(nanos);
+        }
+    }
 
     #[test]
     fn ci_defers_mutation_while_the_full_campaign_preserves_it() {

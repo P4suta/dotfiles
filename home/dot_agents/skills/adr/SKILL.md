@@ -8,8 +8,14 @@ description: >-
 # Architecture decision records
 
 Read the project's existing decisions before proposing a design.
-Keep its location, numbering, status vocabulary, and indexes.
-For a new collection, use `docs/adr/NNNN-short-decision.md`.
+Preserve existing filenames, references, collection locations, and status vocabulary.
+In personal repositories, name new records `<decision>.md` and add `date: YYYY-MM-DD` to their front matter.
+Use `docs/adr/` for a new collection.
+Follow the contribution rules of another owner's repository.
+
+Where an index generator exists, derive a deterministic order from record metadata.
+After merging concurrent additions, keep every source record and regenerate a conflicted index.
+Resolve competing edits to the same record explicitly.
 
 Write an ADR when a choice affects a public contract, dependency direction, state model, trust boundary, persistence, compatibility, or a major operational constraint.
 Routine refactors and implementation details need none.

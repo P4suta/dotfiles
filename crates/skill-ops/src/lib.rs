@@ -1187,9 +1187,13 @@ pub fn write_file(path: &Path, bytes: &[u8], replace: bool) -> Result<()> {
     temporary.write_all(bytes)?;
     temporary.as_file().sync_all()?;
     if replace {
-        temporary.persist(path)?;
+        temporary
+            .persist(path)
+            .with_context(|| format!("replace persisted file {}", path.display()))?;
     } else {
-        temporary.persist_noclobber(path)?;
+        temporary
+            .persist_noclobber(path)
+            .with_context(|| format!("create persisted file {}", path.display()))?;
     }
     sync_directory(directory)?;
     Ok(())

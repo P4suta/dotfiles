@@ -192,7 +192,11 @@ fn continuation_literal(shell: rules::shell_cache_rules::Shell, text: &str) -> R
             }
             Escape::Control => match shell {
                 Shell::Nu => write!(literal, "\\u{{{:x}}}", u32::from(character))?,
-                Shell::Zsh => write!(literal, "\\u{:04x}", u32::from(character))?,
+                Shell::Zsh => {
+                    for byte in character.to_string().bytes() {
+                        write!(literal, "\\x{byte:02x}")?;
+                    }
+                }
             },
         }
     }
@@ -581,6 +585,8 @@ mod tests {
         let literal = continuation_literal(Shell::Zsh, &text)?;
         let output = Tool::Zsh
             .command()
+            .env("LC_ALL", "C")
+            .env("LANG", "C")
             .args(["-f", "-c"])
             .arg(format!("PROMPT2={literal}; print -rn -- \"$PROMPT2\""))
             .output()?;

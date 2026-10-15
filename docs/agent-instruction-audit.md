@@ -96,6 +96,16 @@ Once run, `pr-workflow start` refuses a personal non-fork repository without a q
 Follow-up F4: nothing stops a direct `gh pr create`.
 Whether a diff fits an issue's scope stays judgment.
 
+> - In personal repositories, use stable descriptive document paths and name new ADRs after the decision with a front-matter date, as the shared `adr` skill describes.
+
+Follow-up F8: the shared `adr` skill states the convention, and `xtask/src/adr.rs` checks the dotfiles collection.
+Other personal repositories have no shared ADR gate.
+Choosing a descriptive name still requires reading the decision.
+
+>   Preserve existing filenames and references, and regenerate shared indexes from source records when the repository has a generator.
+
+Follow-up F8: the dotfiles index has a generator, but no shared gate checks index drift and historical reference preservation across personal repositories.
+
 > - For implementation changes, read the relevant formal-assurance and verification-tools skill instructions directly and meet their verification obligations.
 
 Judgment: selecting relevant skill instructions and checking their verification obligations requires a review of the implementation and its evidence.
@@ -471,6 +481,7 @@ Experimental skill maintenance stays off until the machine's explicit opt-in.
 ## Follow-ups
 
 F1 lands with issue #44.
+F8 continues the shared ADR work of issue #110.
 The others have no scoped issue yet, and each gets its own issue under #42 before implementation.
 
 ### F1:
@@ -500,3 +511,9 @@ The managed agent permission profiles deny `gh pr create`, `gh pr edit`, and `gh
 The pre-push dispatcher asks the CodeRabbit guard for the PR review pool's capacity before pushing a branch with an open PR.
 It keeps that capacity apart from the CLI pool, with the applicable adaptive threshold.
 It refuses the push when the capacity stays unverified or runs out, and it names the pool and the capacity it found.
+
+### F8:
+
+Reuse the existing ADR checker and index generator through an installed command for personal repositories.
+Preserve historical document names and references, and check the exact staged or pushed tree.
+Adopt the same checker in repository checks and required CI.

@@ -24,6 +24,9 @@ const LINK_READBACK: &str = "linked-tools.json";
 const NATIVE_READBACK: &str = "inherited-native-tools.json";
 const STAGED_READBACK: &str = "inherited-staged-tools.json";
 const PRIVATE_DATA: &str = ".local/share/mise";
+const DOCKER_USER_DIRECTORY: &str = ".docker";
+#[cfg(unix)]
+const POWERSHELL_USER_DIRECTORIES: [&str; 2] = [".local/share/powershell", ".config/powershell"];
 const ABSENT_SYSTEM_INSTALLS: &str = "absent-system-installs";
 const TOOL_INVENTORY_LIMIT: usize = 128;
 const TOOL_DIAGNOSTIC_LIMIT: usize = 4096;
@@ -310,6 +313,63 @@ impl Installations {
                 .map_or_else(|| home.join(HOST_CACHE), PathBuf::from),
         })
     }
+
+    fn shared_lookups(
+        &self,
+        origin: Option<&OsStr>,
+        shared: Option<&OsStr>,
+    ) -> Result<Vec<InstallationLookup>> {
+        let Some(shared) = shared else {
+            return Ok(Vec::new());
+        };
+        let Some(origin) = origin
+            .map(Path::new)
+            .filter(|origin| *origin == self.data.as_path())
+        else {
+            return Ok(Vec::new());
+        };
+        ensure!(
+            origin.is_absolute()
+                && self.data.is_absolute()
+                && canonical(origin)? == canonical(&self.data)?,
+            "shared installs belong to another native data origin"
+        );
+        let mut lookups = Vec::new();
+        for path in std::env::split_paths(shared) {
+            ensure!(
+                lookups.len() < TOOL_INVENTORY_LIMIT,
+                "shared install lookup inventory exceeds its member limit"
+            );
+            let lookup = InstallationLookup::capture(&path)?;
+            if !lookups.contains(&lookup) {
+                lookups.push(lookup);
+            }
+        }
+        Ok(lookups)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct InstallationLookup {
+    installs: PathBuf,
+    storage: PathBuf,
+}
+
+impl InstallationLookup {
+    fn capture(path: &Path) -> Result<Self> {
+        const INSTALLS: &str = "installs";
+        ensure!(
+            path.is_absolute() && path.file_name() == Some(OsStr::new(INSTALLS)),
+            "native install lookup must name an absolute installs directory"
+        );
+        let storage = canonical(path.parent().context("native install lookup has no root")?)?;
+        let installs = canonical(path)?;
+        ensure!(
+            installs == storage.join(INSTALLS) && installs.is_dir(),
+            "native install lookup redirects outside its captured storage root"
+        );
+        Ok(Self { installs, storage })
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -578,6 +638,12 @@ impl CodeEnvironment {
             "XDG_CACHE_HOME",
             "XDG_DATA_HOME",
             "XDG_STATE_HOME",
+            #[cfg(windows)]
+            "APPDATA",
+            #[cfg(windows)]
+            "LOCALAPPDATA",
+            #[cfg(windows)]
+            "ProgramData",
         ] {
             fs::create_dir_all(Path::new(
                 environment
@@ -586,6 +652,11 @@ impl CodeEnvironment {
                     .context("native mutable directory is missing")?,
             ))?;
         }
+        #[cfg(unix)]
+        for relative in POWERSHELL_USER_DIRECTORIES {
+            fs::create_dir_all(home.join(relative))?;
+        }
+        fs::create_dir_all(home.join(DOCKER_USER_DIRECTORY))?;
         base.insert(0, bootstrap.clone());
         environment.set("PATH", std::env::join_paths(&base)?);
         #[cfg(windows)]
@@ -715,6 +786,16 @@ impl CodeEnvironment {
             self.set("ProgramData", home.join("ProgramData"));
             self.set("ALLUSERSPROFILE", home.join("ProgramData"));
             self.set("ProgramFiles", program_files());
+        }
+        let shared = installed.shared_lookups(
+            std::env::var_os("MISE_DATA_DIR").as_deref(),
+            std::env::var_os("MISE_SHARED_INSTALL_DIRS").as_deref(),
+        )?;
+        if !shared.is_empty() {
+            self.set(
+                "MISE_SHARED_INSTALL_DIRS",
+                std::env::join_paths(shared.iter().map(|lookup| &lookup.installs))?,
+            );
         }
         Ok(())
     }
@@ -1074,8 +1155,7 @@ pub struct CodePreparation {
 #[derive(Debug)]
 struct InheritedTools {
     tools: BTreeMap<String, Vec<Installation>>,
-    installs: PathBuf,
-    storage: PathBuf,
+    lookups: Vec<InstallationLookup>,
 }
 
 /// A borrowing resolver result which leaves ownership with its preparation on failure.
@@ -1163,11 +1243,24 @@ impl CodePreparation {
         fs::write(scope.join(NATIVE_READBACK), &original)?;
         let tools: BTreeMap<String, Vec<Installation>> = serde_json::from_slice(&original)?;
         require_inherited_pins(&tools, &self.environment.configuration)?;
-        let inherited = InheritedTools {
-            tools,
-            installs: canonical(&installed.data.join("installs"))?,
-            storage: canonical(&installed.data)?,
-        };
+        let mut lookups = vec![InstallationLookup::capture(
+            &installed.data.join("installs"),
+        )?];
+        for lookup in installed.shared_lookups(
+            self.environment
+                .variables
+                .get(OsStr::new("MISE_DATA_DIR"))
+                .map(OsString::as_os_str),
+            self.environment
+                .variables
+                .get(OsStr::new("MISE_SHARED_INSTALL_DIRS"))
+                .map(OsString::as_os_str),
+        )? {
+            if !lookups.contains(&lookup) {
+                lookups.push(lookup);
+            }
+        }
+        let inherited = InheritedTools { tools, lookups };
         inherited.require_native_storage()?;
         let staged = self.stage_inherited(&inherited)?;
         fs::write(scope.join(STAGED_READBACK), &staged)?;
@@ -1192,7 +1285,7 @@ impl CodePreparation {
         self.environment.set("MISE_DATA_DIR", &data);
         self.environment.set(
             "MISE_SHARED_INSTALL_DIRS",
-            std::env::join_paths([&inherited.installs])?,
+            std::env::join_paths(inherited.lookups.iter().map(|lookup| &lookup.installs))?,
         );
         self.environment
             .output(&self.mise, &["ls", "--local", "--json"])
@@ -1503,13 +1596,13 @@ impl InheritedTools {
                 let [tool] = versions.as_slice() else {
                     anyhow::bail!("{name} native installation is ambiguous");
                 };
+                let endpoint = canonical(&tool.install_path)?;
                 ensure!(
-                    canonical(&tool.install_path)?.starts_with(&self.storage),
-                    "{name} native installation escapes its captured storage"
-                );
-                ensure!(
-                    tool.install_path.starts_with(&self.installs),
-                    "{name} native installation is outside its captured installs lookup"
+                    self.lookups
+                        .iter()
+                        .any(|lookup| tool.install_path.starts_with(&lookup.installs)
+                            && endpoint.starts_with(&lookup.storage)),
+                    "{name} native installation is outside its captured installs lookup or storage"
                 );
                 Ok(())
             })();
@@ -2249,6 +2342,166 @@ mod native_path_tests {
         assert_eq!(
             health.get_current_dir(),
             Some(preparation.environment.root.as_path())
+        );
+        Ok(())
+    }
+
+    fn nested_installations_fixture(scope: &Path) -> Result<Installations> {
+        let data = scope.join("local-data");
+        fs::create_dir_all(data.join("installs"))?;
+        Ok(Installations {
+            mise: scope.join("mise"),
+            data,
+            cargo: scope.join("cargo"),
+            rustup: scope.join("rustup"),
+            kani: scope.join("kani"),
+            cache: scope.join("cache"),
+        })
+    }
+
+    #[test]
+    fn nested_installation_lookups_bind_the_current_data_origin_and_canonical_roots() -> Result<()>
+    {
+        let scope = tempfile::tempdir()?;
+        let installed = nested_installations_fixture(scope.path())?;
+        let shared = scope.path().join("shared-data/installs");
+        fs::create_dir_all(&shared)?;
+        let paths = std::env::join_paths([&shared, &shared])?;
+        let lookups = installed.shared_lookups(Some(installed.data.as_os_str()), Some(&paths))?;
+        assert_eq!(lookups.len(), 1);
+        assert_eq!(lookups[0].installs, canonical(&shared)?);
+        assert_eq!(lookups[0].storage, canonical(shared.parent().unwrap())?);
+        assert_eq!(
+            installed.shared_lookups(None, Some(&paths))?,
+            Vec::<InstallationLookup>::new()
+        );
+        assert_eq!(
+            installed.shared_lookups(Some(scope.path().as_os_str()), Some(&paths))?,
+            Vec::<InstallationLookup>::new()
+        );
+        assert_eq!(
+            installed.shared_lookups(Some(installed.data.as_os_str()), None)?,
+            Vec::<InstallationLookup>::new()
+        );
+        let file_lookup = scope.path().join("file-data/installs");
+        fs::create_dir_all(file_lookup.parent().unwrap())?;
+        fs::write(&file_lookup, b"not a directory")?;
+        for path in [
+            PathBuf::from("relative/installs"),
+            scope.path().to_path_buf(),
+            scope.path().join("missing/installs"),
+            file_lookup,
+        ] {
+            let paths = std::env::join_paths([path])?;
+            assert!(
+                installed
+                    .shared_lookups(Some(installed.data.as_os_str()), Some(&paths))
+                    .is_err()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn nested_installation_inventory_preserves_shared_endpoints_and_all_pin_checks() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let installed = nested_installations_fixture(scope.path())?;
+        let shared = scope.path().join("shared-data/installs");
+        let endpoint = shared.join("python/3.14.8");
+        let changed = shared.join("python/3.14.8-other-variant");
+        let unrelated = scope.path().join("unrelated/python/3.14.8");
+        for path in [&endpoint, &changed, &unrelated] {
+            fs::create_dir_all(path)?;
+        }
+        let configuration = scope.path().join(MISE_CONFIG);
+        fs::write(&configuration, "project")?;
+        let configuration = canonical(&configuration)?;
+        let tools = BTreeMap::from([(
+            "python".into(),
+            vec![Installation {
+                version: "3.14.8".into(),
+                requested_version: "3.14.8".into(),
+                install_path: canonical(&endpoint)?,
+                source: Source {
+                    r#type: MISE_CONFIG.into(),
+                    path: configuration.clone(),
+                },
+                installed: true,
+                active: true,
+                symlinked_to: None,
+            }],
+        )]);
+        let paths = std::env::join_paths([&shared])?;
+        let mut lookups = vec![InstallationLookup::capture(
+            &installed.data.join("installs"),
+        )?];
+        lookups.extend(installed.shared_lookups(Some(installed.data.as_os_str()), Some(&paths))?);
+        let mut inherited = InheritedTools {
+            tools: tools.clone(),
+            lookups,
+        };
+        inherited.require_matching(&tools, &configuration)?;
+        let shared_lookup = inherited.lookups.pop().unwrap();
+        assert!(inherited.require_native_storage().is_err());
+        inherited.lookups.push(shared_lookup);
+        inherited.require_native_storage()?;
+        for tool in [
+            Installation {
+                installed: false,
+                ..tools["python"][0].clone()
+            },
+            Installation {
+                active: false,
+                ..tools["python"][0].clone()
+            },
+            Installation {
+                version: "changed".into(),
+                ..tools["python"][0].clone()
+            },
+            Installation {
+                install_path: canonical(&changed)?,
+                ..tools["python"][0].clone()
+            },
+            Installation {
+                install_path: canonical(&unrelated)?,
+                ..tools["python"][0].clone()
+            },
+            Installation {
+                source: Source {
+                    r#type: "global".into(),
+                    path: configuration.clone(),
+                },
+                ..tools["python"][0].clone()
+            },
+        ] {
+            let changed = BTreeMap::from([("python".into(), vec![tool])]);
+            assert!(
+                inherited
+                    .require_matching(&changed, &configuration)
+                    .is_err()
+            );
+        }
+        inherited.lookups[1].storage = canonical(&installed.data)?;
+        assert!(inherited.require_native_storage().is_err());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nested_installation_lookups_refuse_redirected_storage_roots() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let installed = nested_installations_fixture(scope.path())?;
+        let storage = scope.path().join("shared-data");
+        let unrelated = scope.path().join("unrelated");
+        fs::create_dir(&storage)?;
+        fs::create_dir(&unrelated)?;
+        let shared = storage.join("installs");
+        std::os::unix::fs::symlink(&unrelated, &shared)?;
+        let paths = std::env::join_paths([&shared])?;
+        assert!(
+            installed
+                .shared_lookups(Some(installed.data.as_os_str()), Some(&paths))
+                .is_err()
         );
         Ok(())
     }

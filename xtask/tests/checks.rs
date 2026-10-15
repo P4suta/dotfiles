@@ -346,11 +346,18 @@ fn the_prose_gate_checks_original_comments_and_accepts_their_corrections() -> Re
             String::from_utf8_lossy(&output.stderr)
         );
     }
+    fs::write(
+        root.join(".git/info/exclude"),
+        format!("/{}/\n", prose::SOURCE_CONFIG),
+    )?;
     let refused = prose_gate(root)?;
     assert!(!refused.status.success());
     let stdout = String::from_utf8(refused.stdout)?;
     let stderr = String::from_utf8(refused.stderr)?;
-    assert!(stdout.contains("Checking prose.comment-style"), "{stdout}");
+    assert!(
+        stdout.contains("Checking prose.comment-style"),
+        "{stdout}\n{stderr}"
+    );
     assert_gate_comment_findings(&stderr);
     assert_gate_comment_incident(root)?;
     write_gate_comment_fixture(root, true)?;
@@ -363,7 +370,7 @@ fn the_prose_gate_checks_original_comments_and_accepts_their_corrections() -> Re
     let stderr = String::from_utf8(corrected.stderr)?;
     assert!(
         stdout.contains("Validated repository Comments prose against policy/prose.toml"),
-        "{stdout}"
+        "{stdout}\n{stderr}"
     );
     let (_, summary) = stderr
         .rsplit_once("selected stages failed:")

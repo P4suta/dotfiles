@@ -1,11 +1,12 @@
 {
-  "revision": "2e849650d59cdbc34ff582cebab2313a6d2bcf414535758001165fec83dc84d6",
+  "revision": "e3c6c1926bcb1a3438f8a3048b57a487caa94c2df7d99e0a6eb6db1dfb8471a9",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Use descriptive, dated records for concurrent work across personal repositories, preserve historical references, and expose the rule through shared policy while recording the remaining enforcement gap.",
   "evidence": [
     "home/dot_agents/skills/adr/SKILL.md",
-    "docs/adr/0016-one-writing-standard.md",
-    "crates/prose/tests/prose.rs"
+    "home/.chezmoitemplates/partials/agent_policy",
+    "docs/agent-instruction-audit.md",
+    "xtask/src/adr.rs"
   ],
   "revisit": null
 }

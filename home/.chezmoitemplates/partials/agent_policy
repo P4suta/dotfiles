@@ -20,6 +20,8 @@ A project's own instructions take precedence when they conflict.
 - Verify changes with a project's own lint, typecheck, and test commands when they exist.
 - Before GitHub-bound implementation, run `pr-workflow start` for the exact destination.
 - Use `pr-workflow` for PR creation, document edits, and ready transitions, and keep the diff within the issue's scope.
+- In personal repositories, use stable descriptive document paths and name new ADRs after the decision with a front-matter date, as the shared `adr` skill describes.
+  Preserve existing filenames and references, and regenerate shared indexes from source records when the repository has a generator.
 - For implementation changes, read the relevant formal-assurance and verification-tools skill instructions directly and meet their verification obligations.
 - Keep experimental skill maintenance off by default, and don't run or require its loading, observation, analysis, triage, or checks without this machine's explicit opt-in.
 - Keep the CodeRabbit CLI and PR review pools separate, apply adaptive thresholds where they apply, and hold a push or PR update while review capacity stays unverified.

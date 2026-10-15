@@ -2256,11 +2256,13 @@ mod tests {
     fn preflight_fixture(root: &Path) -> Result<PreflightMaterials> {
         fs::create_dir_all(root.join("policy"))?;
         for name in ["mise.toml", "mise.lock"] {
-            fs::copy(
-                Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../..")
-                    .join(name),
+            fs::write(
                 root.join(name),
+                fs::read(
+                    Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("../..")
+                        .join(name),
+                )?,
             )?;
         }
         let mut policy: toml::Value = toml::from_str(include_str!(concat!(

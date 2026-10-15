@@ -1162,6 +1162,18 @@ verifier = "kani"
 source = "crates/rules/src/proof_budget_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_rounding_a_positive_host_elapsed_down_to_zero() {
+    assert!(production::elapsed_millis(1) == Some(0));
+}
+#[kani::proof]
+fn reject_rounding_a_host_budget_overrun_down() {
+    assert!(production::elapsed_millis(u128::from(production::BUDGET_MILLIS) * 1_000_000 + 1) == Some(production::BUDGET_MILLIS));
+}
+#[kani::proof]
+fn reject_wrapping_an_unrepresentable_host_elapsed() {
+    assert!(production::elapsed_millis(u128::MAX).is_some());
+}
+#[kani::proof]
 fn reject_a_missing_ci_partition() {
     assert!(production::ci_phases_complete([1, 0, 1], false));
 }

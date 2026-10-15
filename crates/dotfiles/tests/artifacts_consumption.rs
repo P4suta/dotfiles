@@ -10,7 +10,6 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-#[cfg(unix)]
 #[path = "../../platform/tests/support/fixture_process.rs"]
 mod fixture_process;
 
@@ -535,7 +534,7 @@ fn verified_archives_install_in_fresh_cargo_storage_without_a_registry_index() -
         String::from_utf8_lossy(&output.stderr)
     );
     let binary = install.join(format!("bin/consumer{}", std::env::consts::EXE_SUFFIX));
-    let actual = platform::process::command(binary).output()?;
+    let actual = fixture_process::command(binary, fixture.scope.path()).output()?;
     assert!(actual.status.success());
     assert_eq!(actual.stdout, b"37\n");
     assert!(

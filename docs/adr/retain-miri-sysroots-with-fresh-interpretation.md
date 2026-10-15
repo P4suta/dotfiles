@@ -21,6 +21,13 @@ This setup command validates the upstream standard-library source and configurat
 
 Keep launch targets within the disposable Code home.
 Every campaign still discovers the current test inventory, executes every required batch, validates complete results and budgets, and runs the undefined-behavior fixture.
+Measure each batch with the collector's host monotonic clock and retain its elapsed milliseconds, rounded upward, with the selected tests and raw result.
+Require that measurement during both collection and retained-report validation against the existing 30-second budget.
+The measured Cargo invocation includes compilation and startup, so it is a conservative upper bound on interpreted execution time.
+The interpreted libtest JSON clock remains a protocol diagnostic because Miri replaces clocks under default isolation.
+Missing native timing is refused, and the full batch inventory, ignore states, isolation, and undefined-behavior fixture remain required.
+Partition exhaustive byte and casing tests into disjoint named shards without removing any original input or assertion.
+Run each such shard separately and keep ordinary tests grouped, so their combined execution does not conceal an over-budget workload.
 No log, digest, or earlier success replaces execution or authorizes a complete Code note.
 
 The owner-managed cache and pinned compiler installation remain external trust boundaries.

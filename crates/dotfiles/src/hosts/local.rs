@@ -740,6 +740,39 @@ mod tests {
     const PINNED_MISE_FIXTURE: &str = "DOTFILES_VERIFIED_MISE_BOOTSTRAP";
     const MISE_FIXTURE_RELEASES: &str = "home/.chezmoidata/versions.toml";
 
+    #[cfg(unix)]
+    fn import_powershell_get(home: &Path) -> Result<()> {
+        let cache = platform::process::PowerShellCache::new()?;
+        let mut command = Tool::Pwsh.command();
+        command
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$ErrorActionPreference = 'Stop'; Import-Module PowerShellGet -ErrorAction Stop; [Console]::Write($HOME)",
+            ])
+            .env("HOME", home)
+            .env("USERPROFILE", home)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .env("XDG_DATA_HOME", home.join(".local/share"))
+            .env_remove("PSModulePath");
+        let output = cache.apply(&mut command).output()?;
+        assert!(
+            output.status.success(),
+            "PowerShellGet import failed under material protection: {:?}\nstdout={}\nstderr={}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(std::str::from_utf8(&output.stdout)?, home.to_string_lossy());
+        assert!(
+            home.join(".local/share/powershell/Scripts/InstalledScriptInfos")
+                .is_dir()
+        );
+        Ok(())
+    }
+
     #[test]
     #[ignore = "requires the source-authenticated pinned mise bootstrap"]
     fn failed_protected_code_resolution_releases_guards_before_owned_cleanup() -> Result<()> {
@@ -770,14 +803,43 @@ mod tests {
             &installed,
             &namespace,
         )?;
-        let immutable = preparation.immutable_paths();
+        let mut immutable = preparation.immutable_paths();
         let project = immutable
             .first()
             .context("private configuration")?
             .parent()
             .context("private project")?;
         let scope = project.parent().context("owned code scope")?.to_owned();
+        let home = scope.join("home");
+        let projection = home.join(".local/share/mise/installs");
+        fs::create_dir_all(&projection)?;
+        let original = projection.join("original-tool");
+        fs::write(&original, b"authenticated native fixture")?;
+        immutable.push(projection.clone());
         let guards = Protection::seal_materials(&namespace, &immutable)?;
+        assert!(fs::write(&original, b"changed native fixture").is_err());
+        assert!(fs::rename(&projection, projection.with_file_name("replaced-installs")).is_err());
+        assert!(fs::create_dir(home.join(".local/share/unprepared-tool")).is_err());
+        let docker = home.join(".docker");
+        assert!(docker.is_dir(), "Docker output must precede sealing");
+        fs::write(docker.join("owned-write"), b"private mutable output")?;
+        #[cfg(windows)]
+        for relative in ["AppData/Roaming", "AppData/Local", "ProgramData"] {
+            let directory = home.join(relative);
+            assert!(directory.is_dir(), "native output must precede sealing");
+            fs::write(directory.join("owned-write"), b"private mutable output")?;
+        }
+        #[cfg(unix)]
+        {
+            for directory in [".local/share/powershell", ".config/powershell"] {
+                let directory = home.join(directory);
+                assert!(directory.is_dir(), "PowerShell output must precede sealing");
+                fs::write(directory.join("owned-write"), b"private mutable output")?;
+            }
+            import_powershell_get(&home)?;
+        }
+        assert_eq!(fs::read(&original)?, b"authenticated native fixture");
+        assert!(fs::write(&original, b"tool output relaxed the seal").is_err());
         let failure = preparation
             .build(&installed)
             .expect_err("original resolution requires its native store binding");

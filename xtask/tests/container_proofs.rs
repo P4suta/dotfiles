@@ -153,6 +153,44 @@ fn miri_batches_keep_every_discovered_test_and_its_ignore_state() {
 }
 
 #[test]
+fn miri_exhaustive_shards_run_separately_without_losing_other_tests_or_ignores() {
+    let mut expected: BTreeSet<_> = (0..75)
+        .map(|index| (format!("unit::case_{index:03}"), index % 2 == 0))
+        .collect();
+    let families = [
+        "artifact_rules::tests::sha256_rejects_every_noncanonical_byte_at_every_position_",
+        "artifact_rules::tests::device_prefix_membership_matches_the_reference_for_every_byte_at_every_position_",
+        "artifact_rules::tests::portable_components_match_the_split_reference_for_all_device_spellings_",
+    ];
+    let mut isolated = BTreeSet::new();
+    for family in families {
+        for shard in 0..8 {
+            let name = format!("{family}shard_{shard}");
+            isolated.insert(name.clone());
+            expected.insert((name, shard == 0));
+        }
+    }
+    let mut events: Vec<_> = expected.iter().map(|(name, ignored)| json!({"type":"test", "event":"discovered", "name":name, "ignore":ignored})).collect();
+    events
+        .push(json!({"type":"suite", "event":"completed", "tests":expected.len(), "benchmarks":0}));
+    let batches = xtask::skill_proofs::miri_batches(&miri_events(&events)).unwrap();
+    for batch in &batches {
+        assert!(!batch.is_empty() && batch.len() <= 32);
+        if batch.iter().any(|test| isolated.contains(&test.name)) {
+            assert_eq!(batch.len(), 1);
+        }
+    }
+    let count: usize = batches.iter().map(Vec::len).sum();
+    let actual: BTreeSet<_> = batches
+        .into_iter()
+        .flatten()
+        .map(|test| (test.name, test.ignored))
+        .collect();
+    assert_eq!(count, expected.len());
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn miri_discovery_refuses_empty_incomplete_and_duplicate_inventories() {
     let test = json!({"type":"test", "event":"discovered", "name":"unit::case", "ignore":false});
     let completed = json!({"type":"suite", "event":"completed", "tests":1, "benchmarks":0});
@@ -188,7 +226,12 @@ fn miri_batch_results_refuse_missing_changed_duplicate_and_slow_tests() {
     }];
     let test = json!({"type":"test", "event":"ok", "name":"unit::case"});
     let suite = json!({"type":"suite", "event":"ok", "failed":0, "exec_time":30.0});
-    validate_miri_batch(&miri_events(&[test.clone(), suite.clone()]), &expected).unwrap();
+    validate_miri_batch(
+        &miri_events(&[test.clone(), suite.clone()]),
+        &expected,
+        30_000,
+    )
+    .unwrap();
     for events in [
         vec![suite.clone()],
         vec![test.clone()],
@@ -207,23 +250,24 @@ fn miri_batch_results_refuse_missing_changed_duplicate_and_slow_tests() {
         ],
         vec![
             test.clone(),
-            json!({"type":"suite", "event":"ok", "failed":0, "exec_time":30.001}),
+            json!({"type":"suite", "event":"ok", "failed":0}),
         ],
     ] {
-        assert!(validate_miri_batch(&miri_events(&events), &expected).is_err());
+        assert!(validate_miri_batch(&miri_events(&events), &expected, 1).is_err());
     }
-    assert!(validate_miri_batch(&miri_events(&[test.clone(), suite.clone()]), &[]).is_err());
+    assert!(validate_miri_batch(&miri_events(&[test.clone(), suite.clone()]), &[], 1).is_err());
     assert!(
         validate_miri_batch(
             &miri_events(&[test, suite]),
-            &[expected[0].clone(), expected[0].clone()]
+            &[expected[0].clone(), expected[0].clone()],
+            1,
         )
         .is_err()
     );
 }
 
 #[test]
-fn miri_batch_durations_accept_json_numbers_and_refuse_invalid_or_over_budget_values() {
+fn miri_batch_durations_separate_interpreted_time_from_the_host_budget() {
     use xtask::skill_proofs::{MiriTest, validate_miri_batch};
     let expected = [MiriTest {
         name: "unit::case".to_owned(),
@@ -245,31 +289,26 @@ fn miri_batch_durations_accept_json_numbers_and_refuse_invalid_or_over_budget_va
         "30.0",
         "3e1",
         "30000e-3",
-    ] {
-        validate_miri_batch(&report(seconds), &expected)
-            .unwrap_or_else(|error| panic!("duration {seconds}: {error}"));
-    }
-    for seconds in [
-        "-1",
-        "-9.75e-6",
-        "-0.0",
-        "null",
-        "\"9.75e-6\"",
-        "1e309",
+        "399",
         "1e17",
         "18446744073709551615",
         "30.000000000000004",
-        "30.0000000001",
-        "30.0001",
-        "3.00000000001e1",
     ] {
+        validate_miri_batch(&report(seconds), &expected, 30_000)
+            .unwrap_or_else(|error| panic!("duration {seconds}: {error}"));
+    }
+    for seconds in ["-1", "-9.75e-6", "-0.0", "null", "\"9.75e-6\"", "1e309"] {
         assert!(
-            validate_miri_batch(&report(seconds), &expected).is_err(),
+            validate_miri_batch(&report(seconds), &expected, 1).is_err(),
             "duration {seconds} must be refused"
         );
     }
     let missing = format!("{test}\n{{\"type\":\"suite\",\"event\":\"ok\",\"failed\":0}}");
-    assert!(validate_miri_batch(&missing, &expected).is_err());
+    assert!(validate_miri_batch(&missing, &expected, 1).is_err());
+    validate_miri_batch(&report("399"), &expected, 29_999).unwrap();
+    for elapsed_ms in [30_001, u64::MAX] {
+        assert!(validate_miri_batch(&report("1e-9"), &expected, elapsed_ms).is_err());
+    }
 }
 
 #[test]
@@ -771,7 +810,10 @@ fn corrupted_image_context(root: &Path, asset: CorruptAsset) -> anyhow::Result<t
             "a model image context contains a non-file: {}",
             entry.path().display()
         );
-        std::fs::copy(entry.path(), scope.path().join(entry.file_name()))?;
+        std::fs::write(
+            scope.path().join(entry.file_name()),
+            std::fs::read(entry.path())?,
+        )?;
     }
     anyhow::ensure!(
         !scope.path().join(CORRUPTED_ASSET).exists(),

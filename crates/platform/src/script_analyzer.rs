@@ -76,7 +76,7 @@ pub fn save(base: &Path) -> Result<()> {
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            "$ErrorActionPreference = 'Stop'; Save-Module -Name $env:DOTFILES_MODULE -RequiredVersion $env:DOTFILES_MODULE_VERSION -Path $env:DOTFILES_MODULE_BASE -Repository PSGallery -Force",
+            "$ErrorActionPreference = 'Stop'; Import-Module PowerShellGet -ErrorAction Stop; Save-Module -Name $env:DOTFILES_MODULE -RequiredVersion $env:DOTFILES_MODULE_VERSION -Path $env:DOTFILES_MODULE_BASE -Repository PSGallery -Force -Verbose",
         ])
         .env("DOTFILES_MODULE", MODULE)
         .env("DOTFILES_MODULE_VERSION", VERSION)
@@ -88,7 +88,8 @@ pub fn save(base: &Path) -> Result<()> {
         .context("start pwsh to save PSScriptAnalyzer")?;
     ensure!(
         output.status.success(),
-        "Save-Module PSScriptAnalyzer {VERSION} failed: {}",
+        "Save-Module PSScriptAnalyzer {VERSION} failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout).trim(),
         String::from_utf8_lossy(&output.stderr).trim()
     );
     Ok(())

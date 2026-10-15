@@ -135,11 +135,12 @@ fn read(root: &Path, home: &Path) -> Result<Project> {
             );
         }
     }
-    let bytes = serde_json::to_vec(&project)?;
+    let mut bytes = serde_json::to_vec(&project)?;
     let record = path.with_extension("history").join(format!(
         "{}.json",
         crate::build_inputs::hex(&Sha256::digest(&bytes))
     ));
+    bytes.push(b'\n');
     ensure!(
         !fs::symlink_metadata(&record)?.file_type().is_symlink() && fs::read(record)? == bytes,
         "local issue state has no matching actual history record"
@@ -201,11 +202,12 @@ fn save(root: &Path, home: &Path, project: &mut Project, kind: Persistence) -> R
         )?),
         "local issue history escaped its owner directory"
     );
-    let bytes = serde_json::to_vec(project)?;
+    let mut bytes = serde_json::to_vec(project)?;
     let record = history.join(format!(
         "{}.json",
         crate::build_inputs::hex(&Sha256::digest(&bytes))
     ));
+    bytes.push(b'\n');
     if record.exists() {
         ensure!(
             fs::read(&record)? == bytes,

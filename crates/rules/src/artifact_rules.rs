@@ -840,15 +840,22 @@ mod tests {
         }
     }
 
-    #[test]
-    fn portable_components_match_the_split_reference_for_all_device_spellings() {
+    fn assert_device_spellings(cases: &core::ops::Range<u16>) {
         let aliases: [&[u8]; 24] = [
             b"CON", b"PRN", b"AUX", b"NUL", b"CONIN$", b"CONOUT$", b"COM1", b"COM2", b"COM3",
             b"COM4", b"COM5", b"COM6", b"COM7", b"COM8", b"COM9", b"LPT1", b"LPT2", b"LPT3",
             b"LPT4", b"LPT5", b"LPT6", b"LPT7", b"LPT8", b"LPT9",
         ];
+        let mut ordinal = 0;
+        let mut checked = 0;
         for alias in aliases {
             for casing in 0..(1_u16 << alias.len()) {
+                let included = cases.contains(&ordinal);
+                ordinal += 1;
+                if !included {
+                    continue;
+                }
+                checked += 1;
                 let mut spelling = alias.to_vec();
                 for (index, byte) in spelling.iter_mut().enumerate() {
                     if casing & (1 << index) != 0 {
@@ -887,10 +894,51 @@ mod tests {
                 ));
             }
         }
+        assert_eq!(ordinal, 512);
+        assert_eq!(checked, cases.end - cases.start);
     }
 
     #[test]
-    fn device_prefix_membership_matches_the_reference_for_every_byte_at_every_position() {
+    fn portable_components_match_the_split_reference_for_all_device_spellings_cases_000_063() {
+        assert_device_spellings(&(0..64));
+    }
+
+    #[test]
+    fn portable_components_match_the_split_reference_for_all_device_spellings_cases_064_127() {
+        assert_device_spellings(&(64..128));
+    }
+
+    #[test]
+    fn portable_components_match_the_split_reference_for_all_device_spellings_cases_128_191() {
+        assert_device_spellings(&(128..192));
+    }
+
+    #[test]
+    fn portable_components_match_the_split_reference_for_all_device_spellings_cases_192_255() {
+        assert_device_spellings(&(192..256));
+    }
+
+    #[test]
+    fn portable_components_match_the_split_reference_for_all_device_spellings_cases_256_319() {
+        assert_device_spellings(&(256..320));
+    }
+
+    #[test]
+    fn portable_components_match_the_split_reference_for_all_device_spellings_cases_320_383() {
+        assert_device_spellings(&(320..384));
+    }
+
+    #[test]
+    fn portable_components_match_the_split_reference_for_all_device_spellings_cases_384_447() {
+        assert_device_spellings(&(384..448));
+    }
+
+    #[test]
+    fn portable_components_match_the_split_reference_for_all_device_spellings_cases_448_511() {
+        assert_device_spellings(&(448..512));
+    }
+
+    fn assert_device_prefix_membership(bytes: &core::ops::RangeInclusive<u8>) {
         for alias in [
             b"CON".as_slice(),
             b"PRN",
@@ -902,7 +950,7 @@ mod tests {
             b"CONOUT$",
         ] {
             for position in 0..alias.len() {
-                for byte in u8::MIN..=u8::MAX {
+                for byte in (*bytes).clone() {
                     let mut prefix = alias.to_vec();
                     prefix[position] = byte;
                     for suffix in [b"".as_slice(), b".txt"] {
@@ -921,6 +969,54 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn device_prefix_membership_matches_the_reference_for_every_byte_at_every_position_bytes_00_1f()
+    {
+        assert_device_prefix_membership(&(0x00..=0x1f));
+    }
+
+    #[test]
+    fn device_prefix_membership_matches_the_reference_for_every_byte_at_every_position_bytes_20_3f()
+    {
+        assert_device_prefix_membership(&(0x20..=0x3f));
+    }
+
+    #[test]
+    fn device_prefix_membership_matches_the_reference_for_every_byte_at_every_position_bytes_40_5f()
+    {
+        assert_device_prefix_membership(&(0x40..=0x5f));
+    }
+
+    #[test]
+    fn device_prefix_membership_matches_the_reference_for_every_byte_at_every_position_bytes_60_7f()
+    {
+        assert_device_prefix_membership(&(0x60..=0x7f));
+    }
+
+    #[test]
+    fn device_prefix_membership_matches_the_reference_for_every_byte_at_every_position_bytes_80_9f()
+    {
+        assert_device_prefix_membership(&(0x80..=0x9f));
+    }
+
+    #[test]
+    fn device_prefix_membership_matches_the_reference_for_every_byte_at_every_position_bytes_a0_bf()
+    {
+        assert_device_prefix_membership(&(0xa0..=0xbf));
+    }
+
+    #[test]
+    fn device_prefix_membership_matches_the_reference_for_every_byte_at_every_position_bytes_c0_df()
+    {
+        assert_device_prefix_membership(&(0xc0..=0xdf));
+    }
+
+    #[test]
+    fn device_prefix_membership_matches_the_reference_for_every_byte_at_every_position_bytes_e0_ff()
+    {
+        assert_device_prefix_membership(&(0xe0..=0xff));
     }
 
     #[test]
@@ -1133,9 +1229,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn sha256_rejects_every_noncanonical_byte_at_every_position() {
-        for invalid in 0..=u8::MAX {
+    fn assert_sha256_invalid_bytes(bytes: core::ops::RangeInclusive<u8>) {
+        for invalid in bytes {
             if HEX_DIGITS.contains(&invalid) {
                 continue;
             }
@@ -1147,6 +1242,46 @@ mod tests {
                 assert_eq!(sha256(&encoded), None);
             }
         }
+    }
+
+    #[test]
+    fn sha256_rejects_every_noncanonical_byte_at_every_position_bytes_00_1f() {
+        assert_sha256_invalid_bytes(0x00..=0x1f);
+    }
+
+    #[test]
+    fn sha256_rejects_every_noncanonical_byte_at_every_position_bytes_20_3f() {
+        assert_sha256_invalid_bytes(0x20..=0x3f);
+    }
+
+    #[test]
+    fn sha256_rejects_every_noncanonical_byte_at_every_position_bytes_40_5f() {
+        assert_sha256_invalid_bytes(0x40..=0x5f);
+    }
+
+    #[test]
+    fn sha256_rejects_every_noncanonical_byte_at_every_position_bytes_60_7f() {
+        assert_sha256_invalid_bytes(0x60..=0x7f);
+    }
+
+    #[test]
+    fn sha256_rejects_every_noncanonical_byte_at_every_position_bytes_80_9f() {
+        assert_sha256_invalid_bytes(0x80..=0x9f);
+    }
+
+    #[test]
+    fn sha256_rejects_every_noncanonical_byte_at_every_position_bytes_a0_bf() {
+        assert_sha256_invalid_bytes(0xa0..=0xbf);
+    }
+
+    #[test]
+    fn sha256_rejects_every_noncanonical_byte_at_every_position_bytes_c0_df() {
+        assert_sha256_invalid_bytes(0xc0..=0xdf);
+    }
+
+    #[test]
+    fn sha256_rejects_every_noncanonical_byte_at_every_position_bytes_e0_ff() {
+        assert_sha256_invalid_bytes(0xe0..=0xff);
     }
 
     #[test]

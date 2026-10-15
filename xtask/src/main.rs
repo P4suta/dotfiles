@@ -527,7 +527,7 @@ fn push_check(root: &Path) -> Result<()> {
         family,
         || check(root, Gates::ALL, "HEAD"),
         || xtask::skill_proofs::verify(root),
-        || xtask::benchmarks::verify_in_container(root),
+        || benchmarks(root, true),
     )
 }
 

@@ -218,7 +218,7 @@ fn standalone_kani() -> Result<std::process::Command> {
 
 fn checked_kani(mut command: std::process::Command) -> std::process::Command {
     // Inlining and jump threading duplicate cover intrinsics along unsatisfiable paths.
-    const CHECKED_MIR: &str = "--edition=2024 -C overflow-checks=yes -C debug-assertions=yes -Z mir-opt-level=3 -Z mir-enable-passes=-Inline,-JumpThreading";
+    const CHECKED_MIR: &str = "--edition=2024 -C overflow-checks=yes -C debug-assertions=yes -Z mir-opt-level=3 -Z mir-enable-passes=-Inline,-JumpThreading -Zcrate-attr=feature(stmt_expr_attributes,proc_macro_hygiene)";
     let mut flags = std::env::var_os("RUSTFLAGS").unwrap_or_default();
     if !flags.is_empty() {
         flags.push(" ");
@@ -1546,7 +1546,50 @@ const MUTANT_TEST_THREADS: &str = "1";
 
 const MUTANT_OUTPUT_DIRECTORY: &str = "mutation-evidence";
 const MUTANT_OUTPUT_PREFIX: &str = "campaign-";
+const MUTANT_SOURCE_PREFIX: &str = "mutation-source-";
+#[cfg(unix)]
+const MUTANT_SOURCE_FILE_MODE: u32 = 0o600;
+#[cfg(unix)]
+const MUTANT_SOURCE_EXECUTE_BITS: u32 = 0o111;
 const HOST_CACHE_VARIABLE: &str = "DOTFILES_HOST_CACHE";
+
+fn with_mutant_source<T>(root: &Path, check: impl FnOnce(&Path) -> Result<T>) -> Result<T> {
+    ensure!(
+        fs::symlink_metadata(root)?.file_type().is_dir(),
+        "mutation source must be a physical directory"
+    );
+    let mut files = Vec::new();
+    crate::profiles::source_files(root, &mut files)?;
+    ensure!(!files.is_empty(), "mutation source has no inputs");
+    let scope = tempfile::Builder::new()
+        .prefix(MUTANT_SOURCE_PREFIX)
+        .tempdir()?;
+    let result = (|| {
+        for file in files {
+            let metadata = fs::symlink_metadata(&file)?;
+            ensure!(metadata.is_file(), "mutation source contains a non-file");
+            let target = scope.path().join(file.strip_prefix(root)?);
+            fs::create_dir_all(target.parent().context("mutation source parent")?)?;
+            let bytes = fs::read(&file)?;
+            fs::write(&target, &bytes)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                fs::set_permissions(
+                    &target,
+                    fs::Permissions::from_mode(
+                        MUTANT_SOURCE_FILE_MODE
+                            | (metadata.permissions().mode() & MUTANT_SOURCE_EXECUTE_BITS),
+                    ),
+                )?;
+            }
+            ensure!(fs::read(&target)? == bytes, "mutation source copy differs");
+        }
+        check(scope.path())
+    })();
+    platform::cleanup::report(scope.close(), "remove writable mutation source");
+    result
+}
 
 fn mutants(directory: &Path, output: &Path) -> std::process::Command {
     mutants_with_cores(
@@ -1936,12 +1979,23 @@ pub(crate) fn collect_mutants(
                 .contains(&format!("cargo-mutants {MUTANTS_VERSION}")),
         "the pinned cargo-mutants {MUTANTS_VERSION} is unavailable"
     );
+    with_mutant_source(root, |source| {
+        collect_staged_mutants(root, source, manifest, version)
+    })
+}
+
+fn collect_staged_mutants(
+    root: &Path,
+    source: &Path,
+    manifest: &obligations::Manifest,
+    version: std::process::Output,
+) -> Result<MutationReports> {
     let mut checks = Checks::default();
     let mut production = None;
     checks.run("production mutants", || {
         mutation_campaign(root, |output| {
             let status = crate::phase_evidence::output(
-                mutants(root, output).args(["--package", MUTATED_PACKAGE]),
+                mutants(source, output).args(["--package", MUTATED_PACKAGE]),
                 "production mutation campaign",
             )?
             .status;
@@ -1959,7 +2013,7 @@ pub(crate) fn collect_mutants(
     checks.run("mutation fixture", || {
         mutation_campaign(root, |output| {
             let result = crate::phase_evidence::output(
-                &mut mutants(&root.join(MUTANTS_FIXTURE), output), "mutation assertion-defect fixture",
+                &mut mutants(&source.join(MUTANTS_FIXTURE), output), "mutation assertion-defect fixture",
             )?;
             let raw = mutation_origin(output, result.status.code(), MUTANTS_FIXTURE_PACKAGE)?;
             let report = decode_mutation_origin(&raw, MUTANTS_FIXTURE_PACKAGE)?;
@@ -2052,6 +2106,11 @@ pub const MIRI_TARGETS: &[Option<&str>] = if cfg!(target_os = "macos") {
 
 /// The tests in one Miri invocation, whose whole binary must meet the proof budget.
 const MIRI_BATCH_TESTS: usize = 32;
+const MIRI_EXHAUSTIVE_FAMILIES: [&str; 3] = [
+    "artifact_rules::tests::sha256_rejects_every_noncanonical_byte_at_every_position_",
+    "artifact_rules::tests::device_prefix_membership_matches_the_reference_for_every_byte_at_every_position_",
+    "artifact_rules::tests::portable_components_match_the_split_reference_for_all_device_spellings_",
+];
 
 /// The crate with undefined behavior that Miri must refuse.
 const MIRI_FIXTURE: &str = "xtask/proofs/miri-fixture/Cargo.toml";
@@ -2130,13 +2189,18 @@ pub fn miri_batches(output: &str) -> Result<Vec<Vec<MiriTest>>> {
         !tests.is_empty() && tests.len() as u64 == total,
         "Miri test discovery is empty or incomplete"
     );
-    let tests: Vec<_> = tests
+    let (isolated, tests): (Vec<_>, Vec<_>) = tests
         .into_iter()
         .map(|(name, ignored)| MiriTest { name, ignored })
-        .collect();
+        .partition(|test| {
+            MIRI_EXHAUSTIVE_FAMILIES
+                .iter()
+                .any(|family| test.name.starts_with(family))
+        });
     Ok(tests
         .chunks(MIRI_BATCH_TESTS)
         .map(<[MiriTest]>::to_vec)
+        .chain(isolated.into_iter().map(|test| vec![test]))
         .collect())
 }
 
@@ -2145,9 +2209,12 @@ pub fn miri_batches(output: &str) -> Result<Vec<Vec<MiriTest>>> {
 /// # Errors
 ///
 /// Returns an error for a missing, duplicate, changed, failed, or slow result.
-pub fn validate_miri_batch(output: &str, expected: &[MiriTest]) -> Result<()> {
-    const NANOS_PER_MILLI: u32 = 1_000_000;
-    const ROUNDING_TICK: std::time::Duration = std::time::Duration::from_nanos(1);
+pub fn validate_miri_batch(output: &str, expected: &[MiriTest], elapsed_ms: u64) -> Result<()> {
+    ensure!(
+        proof_budget_rules::verdict(Some(elapsed_ms)) == proof_budget_rules::Verdict::Within,
+        "Miri host invocation exceeds {} ms: {elapsed_ms}ms",
+        proof_budget_rules::BUDGET_MILLIS
+    );
     let mut completed = BTreeMap::new();
     let mut suites = 0;
     for event in miri_events(output)? {
@@ -2167,24 +2234,11 @@ pub fn validate_miri_batch(output: &str, expected: &[MiriTest]) -> Result<()> {
                 let seconds = event["exec_time"]
                     .as_number()
                     .context("missing Miri duration")?;
-                let millis = seconds
-                    .as_f64()
-                    .filter(|seconds| !seconds.is_sign_negative())
-                    .and_then(|seconds| {
-                        let duration = std::time::Duration::try_from_secs_f64(seconds).ok()?;
-                        let duration = if duration.as_secs_f64() < seconds {
-                            duration.checked_add(ROUNDING_TICK)?
-                        } else {
-                            duration
-                        };
-                        u64::try_from(duration.as_millis())
-                            .ok()?
-                            .checked_add(u64::from(duration.subsec_nanos() % NANOS_PER_MILLI != 0))
-                    });
                 ensure!(
-                    proof_budget_rules::verdict(millis) == proof_budget_rules::Verdict::Within,
-                    "Miri test binary exceeds {} ms: {seconds}s",
-                    proof_budget_rules::BUDGET_MILLIS
+                    seconds
+                        .as_f64()
+                        .is_some_and(|seconds| seconds.is_finite() && !seconds.is_sign_negative()),
+                    "invalid Miri interpreted duration: {seconds}"
                 );
                 suites += 1;
             }
@@ -2203,6 +2257,11 @@ pub fn validate_miri_batch(output: &str, expected: &[MiriTest]) -> Result<()> {
         "Miri test results are missing, unexpected, or changed their ignore state"
     );
     Ok(())
+}
+
+fn miri_elapsed_millis(elapsed: std::time::Duration) -> Result<u64> {
+    proof_budget_rules::elapsed_millis(elapsed.as_nanos())
+        .context("Miri host elapsed milliseconds overflow")
 }
 
 /// The wall time of each test binary that `cargo test` reports, in milliseconds.
@@ -2383,6 +2442,7 @@ fn verify_miri_measured(root: &Path) -> Result<()> {
 #[serde(deny_unknown_fields)]
 pub(crate) struct MiriRun {
     selected: Vec<MiriTest>,
+    elapsed_ms: u64,
     result: crate::phase_evidence::RawResult,
 }
 
@@ -2441,7 +2501,7 @@ fn validate_miri_case(case: &MiriCase) -> Result<()> {
             run.selected == selected && run.result.success(),
             "Miri selection or execution differs from its complete inventory"
         );
-        validate_miri_batch(run.result.stdout()?, &selected)?;
+        validate_miri_batch(run.result.stdout()?, &selected, run.elapsed_ms)?;
     }
     Ok(())
 }
@@ -2514,6 +2574,7 @@ fn collect_miri_case(root: &Path, krate: &str, target: Option<&str>) -> Result<M
             if let Some(target) = target {
                 command.args(["--target", target]);
             }
+            let started = std::time::Instant::now();
             let output = crate::phase_evidence::output(command
                 .args([
                     "--",
@@ -2524,6 +2585,7 @@ fn collect_miri_case(root: &Path, krate: &str, target: Option<&str>) -> Result<M
                     "--exact",
                 ])
                 .args(&names), &format!("{label} [{}]", names.join(", ")))?;
+            let elapsed_ms = miri_elapsed_millis(started.elapsed())?;
             let report = String::from_utf8_lossy(&output.stdout);
             ensure!(
                 output.status.success(),
@@ -2531,14 +2593,14 @@ fn collect_miri_case(root: &Path, krate: &str, target: Option<&str>) -> Result<M
                 target.unwrap_or("the host"),
                 String::from_utf8_lossy(&output.stderr)
             );
-            validate_miri_batch(&report, &batch)?;
+            validate_miri_batch(&report, &batch, elapsed_ms)?;
             let ignored = batch.iter().filter(|test| test.ignored).count();
             println!(
                 "Miri verified {} tests of {krate} for {} within the proof budget and retained {ignored} existing ignores",
                 batch.len() - ignored,
                 target.unwrap_or("the host")
             );
-            runs.push(MiriRun { selected: batch.clone(), result: output.into() });
+            runs.push(MiriRun { selected: batch.clone(), elapsed_ms, result: output.into() });
             Ok(())
         });
         }
@@ -2889,6 +2951,7 @@ mod tests {
                             name: "tested".into(),
                             ignored: false,
                         }],
+                        elapsed_ms: 1,
                         result: raw_result(Some(0), result, ""),
                     }],
                 })
@@ -2921,11 +2984,52 @@ mod tests {
         invalid.cases[0].runs[0].result.status = None;
         assert!(validate_miri_reports(&invalid).is_err());
         let mut invalid = valid.clone();
+        invalid.cases[0].runs[0].elapsed_ms = proof_budget_rules::BUDGET_MILLIS + 1;
+        assert!(validate_miri_reports(&invalid).is_err());
+        let mut missing = serde_json::to_value(&valid)?;
+        missing["cases"][0]["runs"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("elapsed_ms");
+        assert!(serde_json::from_value::<MiriReports>(missing).is_err());
+        for elapsed in [
+            serde_json::Value::Null,
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::from_str("18446744073709551616")?,
+        ] {
+            let mut invalid = serde_json::to_value(&valid)?;
+            invalid["cases"][0]["runs"][0]["elapsed_ms"] = elapsed;
+            assert!(serde_json::from_value::<MiriReports>(invalid).is_err());
+        }
+        let mut invalid = serde_json::to_value(&valid)?;
+        invalid["cases"][0]["runs"][0]["unexpected"] = serde_json::json!(1);
+        assert!(serde_json::from_value::<MiriReports>(invalid).is_err());
+        let mut invalid = valid.clone();
         invalid.fixture.status = None;
         assert!(validate_miri_reports(&invalid).is_err());
         let mut invalid = valid;
         invalid.fixture.stderr = b"compiler failed".to_vec();
         assert!(validate_miri_reports(&invalid).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn miri_host_elapsed_rounds_up_and_refuses_overflow() -> Result<()> {
+        use std::time::Duration;
+        for (elapsed, expected) in [
+            (Duration::ZERO, 0),
+            (Duration::from_nanos(1), 1),
+            (Duration::from_secs(30), 30_000),
+            (Duration::from_secs(30) + Duration::from_nanos(1), 30_001),
+            (Duration::from_millis(u64::MAX), u64::MAX),
+        ] {
+            assert_eq!(miri_elapsed_millis(elapsed)?, expected);
+        }
+        assert!(
+            miri_elapsed_millis(Duration::from_millis(u64::MAX) + Duration::from_nanos(1)).is_err()
+        );
+        assert!(miri_elapsed_millis(Duration::MAX).is_err());
         Ok(())
     }
 
@@ -3554,6 +3658,133 @@ mod tests {
     }
 
     #[test]
+    fn mutation_source_keeps_readonly_input_bytes_and_inventory_paths() -> Result<()> {
+        let original = tempfile::tempdir()?;
+        let inputs = [
+            ("Cargo.toml", b"[workspace]\n".as_slice()),
+            (
+                "crates/rules/src/lib.rs",
+                b"pub fn rule() -> bool { true }\n",
+            ),
+            (
+                "xtask/proofs/mutants-fixture/src/lib.rs",
+                b"pub fn fixture() {}\n",
+            ),
+            ("scripts/helper", b"#!/bin/sh\nexit 0\n"),
+        ];
+        let mut permissions = Vec::new();
+        for (relative, bytes) in inputs {
+            let path = original.path().join(relative);
+            fs::create_dir_all(path.parent().context("fixture parent")?)?;
+            fs::write(&path, bytes)?;
+            #[cfg(unix)]
+            if relative == "scripts/helper" {
+                use std::os::unix::fs::PermissionsExt as _;
+                fs::set_permissions(
+                    &path,
+                    fs::Permissions::from_mode(
+                        MUTANT_SOURCE_FILE_MODE | MUTANT_SOURCE_EXECUTE_BITS,
+                    ),
+                )?;
+            }
+            let writable = fs::metadata(&path)?.permissions();
+            let mut sealed = writable.clone();
+            sealed.set_readonly(true);
+            fs::set_permissions(&path, sealed)?;
+            permissions.push((path, writable));
+        }
+        fs::create_dir(original.path().join("target"))?;
+        fs::write(original.path().join("target/ignored"), b"build output")?;
+        let mut staged = None;
+        let result = with_mutant_source(original.path(), |source| {
+            staged = Some(source.to_path_buf());
+            let mut files = Vec::new();
+            crate::profiles::source_files(source, &mut files)?;
+            assert_eq!(files.len(), inputs.len());
+            for (relative, bytes) in inputs {
+                assert_eq!(fs::read(source.join(relative))?, bytes);
+                assert!(
+                    fs::metadata(original.path().join(relative))?
+                        .permissions()
+                        .readonly()
+                );
+                fs::write(source.join(relative), b"a mutant changed its owned input")?;
+                assert_eq!(fs::read(original.path().join(relative))?, bytes);
+            }
+            assert!(!source.join("target").exists());
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                assert_eq!(
+                    fs::metadata(source.join("scripts/helper"))?
+                        .permissions()
+                        .mode()
+                        & MUTANT_SOURCE_EXECUTE_BITS,
+                    MUTANT_SOURCE_EXECUTE_BITS
+                );
+            }
+            for directory in [source.to_path_buf(), source.join(MUTANTS_FIXTURE)] {
+                let command = mutants_with_cores(&directory, Path::new("output"), 1);
+                assert!(
+                    command
+                        .get_args()
+                        .collect::<Vec<_>>()
+                        .windows(2)
+                        .any(|pair| { pair[0] == "--dir" && pair[1] == directory.as_os_str() })
+                );
+            }
+            Ok(())
+        });
+        for (path, writable) in permissions {
+            fs::set_permissions(path, writable)?;
+        }
+        result?;
+        assert!(!staged.context("mutation source was staged")?.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn mutation_source_removes_its_copy_when_the_consumer_fails() -> Result<()> {
+        let original = tempfile::tempdir()?;
+        fs::write(original.path().join("Cargo.toml"), b"[workspace]\n")?;
+        let mut staged = None;
+        let result: Result<()> = with_mutant_source(original.path(), |source| {
+            staged = Some(source.to_path_buf());
+            anyhow::bail!("original mutation failure")
+        });
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("original mutation failure")
+        );
+        assert!(!staged.context("mutation source was staged")?.exists());
+        assert_eq!(
+            fs::read(original.path().join("Cargo.toml"))?,
+            b"[workspace]\n"
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mutation_source_refuses_links_before_the_consumer_runs() -> Result<()> {
+        let original = tempfile::tempdir()?;
+        let external = tempfile::tempdir()?;
+        fs::write(external.path().join("input"), b"external input")?;
+        std::os::unix::fs::symlink(external.path().join("input"), original.path().join("link"))?;
+        let mut ran = false;
+        let result = with_mutant_source(original.path(), |_| {
+            ran = true;
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert!(!ran);
+        assert_eq!(fs::read(external.path().join("input"))?, b"external input");
+        Ok(())
+    }
+
+    #[test]
     fn mutation_commands_bind_worker_build_and_test_pools() {
         const OBSERVED_MAC_CORES: usize = 18;
         for (cores, workers) in [
@@ -3661,16 +3892,19 @@ mod tests {
     fn mutation_workers_do_not_multiply_the_test_pool() -> Result<()> {
         let root = crate::canonical(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").as_path())?;
         if std::env::var(NATIVE_FIXTURE).is_ok_and(|value| value == MUTATION_TEST) {
-            return mutation_campaign(&root, |output| {
-                let status = mutants(&root.join(MUTANTS_FIXTURE), output)
-                    .status()
-                    .context("start the mutation worker fixture")?;
-                let report = completed_mutation_report(output, status, MUTANTS_FIXTURE_PACKAGE)?;
-                ensure!(
-                    report.missed != 0,
-                    "the mutation worker fixture failed its baseline or caught its assertionless rule"
-                );
-                Ok(())
+            return with_mutant_source(&root, |source| {
+                mutation_campaign(&root, |output| {
+                    let status = mutants(&source.join(MUTANTS_FIXTURE), output)
+                        .status()
+                        .context("start the mutation worker fixture")?;
+                    let report =
+                        completed_mutation_report(output, status, MUTANTS_FIXTURE_PACKAGE)?;
+                    ensure!(
+                        report.missed != 0,
+                        "the mutation worker fixture failed its baseline or caught its assertionless rule"
+                    );
+                    Ok(())
+                })
             });
         }
         let home = platform::home::home().context("native tool home")?;
