@@ -1581,7 +1581,7 @@ impl CodeEnvironment {
 ///
 /// Refuses incomplete materials, unsafe archives, ambiguous configurations, and unresolved tools.
 pub fn code_environment(root: &Path, home: &Path) -> Result<CodeEnvironment> {
-    let materials = tempfile::tempdir()?;
+    let materials = material_directory(&std::env::temp_dir())?;
     let project = crate::artifacts::CargoWorkload::capture(root)?;
     project.plan()?.complete()?;
     project.require_environment_scope()?;
@@ -1668,6 +1668,10 @@ pub fn code_environment(root: &Path, home: &Path) -> Result<CodeEnvironment> {
         _native_health: health,
         _materials: materials,
     })
+}
+
+fn material_directory(parent: &Path) -> Result<tempfile::TempDir> {
+    Ok(tempfile::tempdir_in(platform::paths::canonical(parent)?)?)
 }
 
 fn kani_health_command(
@@ -2672,6 +2676,30 @@ fn record_run(
 #[cfg(test)]
 mod job_tests {
     use super::*;
+
+    #[test]
+    fn owned_materials_use_the_physical_temporary_parent() -> Result<()> {
+        let namespace = tempfile::tempdir()?;
+        let namespace_root = platform::paths::canonical(namespace.path())?;
+        let physical = namespace_root.join("physical");
+        let alias = namespace_root.join("alias");
+        fs::create_dir(&physical)?;
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&physical, &alias)?;
+        #[cfg(windows)]
+        junction::create(&physical, &alias)?;
+        let materials = material_directory(&alias)?;
+        assert_eq!(materials.path().parent(), Some(physical.as_path()));
+        fs::write(materials.path().join("material"), b"owned")?;
+        assert_eq!(
+            fs::read(platform::paths::canonical(materials.path())?.join("material"))?,
+            b"owned"
+        );
+        let material_path = materials.path().to_owned();
+        materials.close()?;
+        assert!(!material_path.exists());
+        Ok(())
+    }
 
     const STAGE_START_LIMIT: Duration = Duration::from_secs(5);
     const PREPARATION_FAILURE_SCOPE: &str = "DOTFILES_TEST_PREPARATION_FAILURE_SCOPE";

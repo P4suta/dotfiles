@@ -75,6 +75,12 @@ Linux's timed code stage finishes before real provisioning begins, so setup comp
 Other families retain concurrent stages only with the existing core and storage capacity.
 Credential fixtures construct their tool lookup path instead of copying the caller's unrelated tools.
 A regression verifies the fixture under a parent PATH beyond the [Windows command interpreter's limit](https://learn.microsoft.com/en-us/troubleshoot/windows-client/shell-experience/command-line-string-limitation).
+Owned native material directories resolve the operating system's temporary-parent alias before creation, while their untrusted contents retain strict link refusal.
+Fresh compiler commands remove inherited loader settings before checking the prepared compiler and its sysroot.
+Real profile checks retain their isolated home and use the owner's native home only in the GitHub credential lookup child.
+Code checks retain their separate credential environment.
+Adapter checks install locked dependencies and typecheck a writable source snapshot instead of writing inside protected Source.
+Development builds optimize external dependencies while workspace crates retain their existing assertions, overflow checks, and compilation settings.
 The shared mise installation constructor removes duplicate PATH entries while preserving their first occurrence and lookup order.
 On Windows it counts the resulting UTF-16 code units and refuses a PATH that cmd would silently discard, before starting the installer or taking its lock.
 The pure length decision has an exhaustive Kani harness and rejecting boundary probes, and native tests check supplementary characters and duplicate reduction.

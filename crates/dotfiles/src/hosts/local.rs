@@ -1018,22 +1018,12 @@ mod tests {
 
     fn fixture(root: &Path) -> Result<(String, String, [String; 2])> {
         git(root, &["init", "--quiet"])?;
+        git(root, &["config", "user.name", "fixture"])?;
+        git(root, &["config", "user.email", "fixture@example.invalid"])?;
         fs::write(root.join("Cargo.toml"), "captured A")?;
         git(root, &["add", "Cargo.toml"])?;
         let tree = git_text(root, &["write-tree"])?;
-        let commit = git_text(
-            root,
-            &[
-                "-c",
-                "user.name=fixture",
-                "-c",
-                "user.email=fixture@example.invalid",
-                "commit-tree",
-                &tree,
-                "-m",
-                "fixture",
-            ],
-        )?;
+        let commit = git_text(root, &["commit-tree", &tree, "-m", "fixture"])?;
         git(root, &["update-ref", "HEAD", &commit])?;
         Ok((
             commit.clone(),

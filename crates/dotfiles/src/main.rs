@@ -179,11 +179,7 @@ fn run() -> Result<()> {
                     .status()?,
             );
         }
-        Commands::GithubToken => {
-            let host = std::env::var_os("MISE_CREDENTIAL_HOST")
-                .context("mise credential host unavailable")?;
-            exit(platform::github::command(&host)?.status()?);
-        }
+        Commands::GithubToken => github_token()?,
         Commands::Repository { request } => match request {
             RepositoryRequest::Generate { remote } => {
                 dotfiles::repository::write(&cli.root)?;
@@ -267,6 +263,13 @@ fn run() -> Result<()> {
         Commands::Windows { arguments } => windows(arguments)?,
     }
     Ok(())
+}
+
+fn github_token() -> Result<()> {
+    let host =
+        std::env::var_os("MISE_CREDENTIAL_HOST").context("mise credential host unavailable")?;
+    let home = std::env::var_os(platform::github::CREDENTIAL_HOME).map(PathBuf::from);
+    dotfiles::secrets::exit(platform::github::command_in_home(&host, home.as_deref())?.status()?)
 }
 
 /// Runs the Windows setup command line and exits with its status.

@@ -1229,12 +1229,24 @@ fn powershell_file(
 ///
 /// Returns an error when Bun can't start or either Bun command fails.
 pub fn adapters(root: &Path) -> Result<()> {
+    let snapshot = tempfile::tempdir()?;
+    let mut files = Vec::new();
+    crate::profiles::source_files(root, &mut files)?;
+    for file in files {
+        let target = snapshot.path().join(file.strip_prefix(root)?);
+        fs::create_dir_all(
+            target
+                .parent()
+                .context("adapter snapshot parent is missing")?,
+        )?;
+        fs::copy(file, target)?;
+    }
     command(
-        root,
+        snapshot.path(),
         Tool::Bun,
         &["install", "--frozen-lockfile", "--ignore-scripts"],
     )?;
-    command(root, Tool::Bun, &["run", "check"])
+    command(snapshot.path(), Tool::Bun, &["run", "check"])
 }
 
 /// Installs the pinned Ansible collections into a temporary directory and syntax-checks `ops/site.yml`.

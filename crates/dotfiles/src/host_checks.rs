@@ -92,6 +92,7 @@ pub struct Scratch {
     home: PathBuf,
     config: PathBuf,
     download_cache: Option<PathBuf>,
+    credential_home: Option<PathBuf>,
     native_path: platform::code_environment::NativePath,
 }
 
@@ -145,6 +146,7 @@ impl Scratch {
             home,
             config,
             download_cache: None,
+            credential_home: None,
             native_path,
         })
     }
@@ -160,7 +162,7 @@ impl Scratch {
         self
     }
 
-    fn github(&self, source: &Path) -> Result<()> {
+    fn github(&mut self, source: &Path, home: &Path) -> Result<()> {
         let destination = self.home.join(GH_CONFIG);
         fs::create_dir_all(&destination)?;
         for name in GH_LOGIN_FILES {
@@ -170,6 +172,7 @@ impl Scratch {
                 Err(error) => return Err(error).context("snapshot GitHub CLI login"),
             }
         }
+        self.credential_home = Some(home.to_path_buf());
         Ok(())
     }
 
@@ -194,6 +197,7 @@ impl Scratch {
             }
         }
         for name in [
+            platform::github::CREDENTIAL_HOME,
             "GH_TOKEN",
             "GITHUB_TOKEN",
             "GITHUB_API_TOKEN",
@@ -203,6 +207,9 @@ impl Scratch {
             "SSH_ASKPASS",
         ] {
             command.env_remove(name);
+        }
+        if let Some(home) = &self.credential_home {
+            command.env(platform::github::CREDENTIAL_HOME, home);
         }
         for (name, value) in [
             ("HOME", self.home.clone()),
@@ -628,8 +635,8 @@ pub fn check(root: &Path, home: &Path) -> Report {
     let config = home.join(CONFIG);
     let mut applied = None;
     let candidate = (|| {
-        let scratch = Scratch::new(&config)?.cache_downloads(home);
-        scratch.github(&github_config(home))?;
+        let mut scratch = Scratch::new(&config)?.cache_downloads(home);
+        scratch.github(&github_config(home), home)?;
         let mut candidate = Checks::default();
         let mut renderer = None;
         candidate.run("host.renderer", || {
@@ -849,6 +856,11 @@ mod tests {
             .get_envs()
             .find_map(|(name, value)| (name == "GH_CONFIG_DIR").then_some(value).flatten());
         assert_eq!(directory, Some(scratch.home.join(".config/gh").as_os_str()));
+        assert!(
+            command.get_envs().any(|(name, value)| {
+                name == platform::github::CREDENTIAL_HOME && value.is_none()
+            })
+        );
         Ok(())
     }
 
@@ -874,8 +886,20 @@ mod tests {
                 crate::profiles::native_profile()?.name()
             ),
         )?;
-        let scratch = Scratch::new(&config)?;
-        scratch.github(&github)?;
+        let mut scratch = Scratch::new(&config)?;
+        scratch.github(&github, &host)?;
+        let command = scratch.command("mise");
+        let environment = command
+            .get_envs()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(
+            environment.get(OsStr::new(platform::github::CREDENTIAL_HOME)),
+            Some(&Some(host.as_os_str()))
+        );
+        assert_eq!(
+            environment.get(OsStr::new("HOME")),
+            Some(&Some(scratch.home.as_os_str()))
+        );
         let output = scratch
             .command("gh")
             .env("GH_NO_UPDATE_NOTIFIER", "1")
@@ -922,12 +946,12 @@ mod tests {
                 crate::profiles::native_profile()?.name()
             ),
         )?;
-        let scratch = Scratch::new(&config)?;
-        scratch.github(&scope.path().join("absent"))?;
+        let mut scratch = Scratch::new(&config)?;
+        scratch.github(&scope.path().join("absent"), scope.path())?;
         assert!(fs::read_dir(scratch.home.join(GH_CONFIG))?.next().is_none());
         let invalid = scope.path().join("invalid");
         fs::create_dir_all(invalid.join(GH_LOGIN_FILES[0]))?;
-        assert!(scratch.github(&invalid).is_err());
+        assert!(scratch.github(&invalid, scope.path()).is_err());
         Ok(())
     }
 

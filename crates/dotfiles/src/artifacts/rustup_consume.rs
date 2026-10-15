@@ -1550,9 +1550,11 @@ fn native_command(root: &Path, program: &Path, channel: &str) -> Result<Command>
     let mut command = platform::tool::external(program);
     for (name, _) in std::env::vars_os() {
         let name_text = name.to_string_lossy().to_ascii_uppercase();
-        if ["RUSTUP_", "CARGO_", "MISE_", "__MISE_", "UV_", "DOPPLER_"]
-            .iter()
-            .any(|prefix| name_text.starts_with(prefix))
+        if [
+            "RUSTUP_", "CARGO_", "MISE_", "__MISE_", "UV_", "DOPPLER_", "LD_", "DYLD_",
+        ]
+        .iter()
+        .any(|prefix| name_text.starts_with(prefix))
             || matches!(
                 name_text.as_str(),
                 "GITHUB_TOKEN"
@@ -2169,7 +2171,7 @@ mod tests {
     const MODE: &str = "DOTFILES_NATIVE_RUST_ENV_TEST_MODE";
     const SCOPE: &str = "DOTFILES_NATIVE_RUST_ENV_TEST_SCOPE";
     const ENVIRONMENT_TEST: &str = "artifacts::rustup_consume::tests::owned_native_commands_remove_ambient_store_and_compiler_overrides";
-    const OVERRIDES: [&str; 7] = [
+    const OVERRIDES: [&str; 10] = [
         "mise_config_file",
         "rustup_home",
         "uv_cache_dir",
@@ -2177,6 +2179,9 @@ mod tests {
         "RUSTC_WRAPPER",
         "RUSTC_WORKSPACE_WRAPPER",
         "CARGO_ENCODED_RUSTFLAGS",
+        "LD_LIBRARY_PATH",
+        "DYLD_LIBRARY_PATH",
+        "DYLD_FALLBACK_LIBRARY_PATH",
     ];
     const KANI_VERSION: &str = "0.68.0";
     const RUST_VERSION: &str = "1.99.0";
@@ -3225,6 +3230,14 @@ mod tests {
                     );
                 }
                 assert_eq!(std::env::var_os("HOME"), Some(root.join("home").into()));
+                assert_eq!(
+                    std::env::var_os("RUSTUP_HOME").map(PathBuf::from),
+                    Some(root.join("home/.rustup"))
+                );
+                assert_eq!(
+                    std::env::var("RUSTUP_TOOLCHAIN").as_deref(),
+                    Ok(RUST_VERSION)
+                );
                 for (name, value) in [
                     ("RUSTUP_AUTO_INSTALL", "0"),
                     ("CARGO_NET_OFFLINE", "true"),

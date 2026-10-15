@@ -11,6 +11,9 @@ const INSTALLATIONS: &str = "installs/gh";
 const LATEST: &str = "latest";
 const BIN: &str = "bin";
 
+/// The owner's home used only by the native credential lookup child.
+pub const CREDENTIAL_HOME: &str = "DOTFILES_GITHUB_CREDENTIAL_HOME";
+
 fn direct(candidate: &Path, name: &OsStr) -> io::Result<Option<PathBuf>> {
     if !candidate.is_file() {
         return Ok(None);
@@ -109,19 +112,76 @@ pub fn executable(path: &OsStr) -> io::Result<PathBuf> {
 ///
 /// Returns an error if PATH lacks an installed CLI or reading its installation fails.
 pub fn command(host: &OsStr) -> io::Result<Command> {
+    command_in_home(host, None)
+}
+
+/// Resolve credentials with an optional native home for the lookup child.
+///
+/// # Errors
+///
+/// Returns an error if native CLI discovery fails.
+pub fn command_in_home(host: &OsStr, home: Option<&Path>) -> io::Result<Command> {
     let path = std::env::var_os("PATH").unwrap_or_default();
     let directories =
         std::env::split_paths(&path).chain(crate::process::mise_shims(std::env::var_os));
     let discovery = std::env::join_paths(directories)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    let mut command = crate::process::command(executable(&discovery)?);
+    Ok(credential_command(&executable(&discovery)?, host, home))
+}
+
+fn credential_command(program: &Path, host: &OsStr, home: Option<&Path>) -> Command {
+    let mut command = crate::process::command(program);
     command.args(["auth", "token", "--hostname"]).arg(host);
-    Ok(command)
+    command.env_remove(CREDENTIAL_HOME);
+    if let Some(home) = home {
+        command.env("HOME", home);
+    }
+    command
 }
 
 #[cfg(all(test, feature = "tools"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credential_home_changes_only_the_lookup_child() -> io::Result<()> {
+        let scope = tempfile::tempdir()?;
+        let native = scope.path().join("native");
+        let scratch = scope.path().join("scratch");
+        let login = scratch.join("gh");
+        let script = scope
+            .path()
+            .join(if cfg!(windows) { "gh.cmd" } else { "gh" });
+        let body = if cfg!(windows) {
+            "@echo off\r\nif not \"%HOME%\"==\"%EXPECTED_HOME%\" exit /b 21\r\nif not \"%GH_CONFIG_DIR%\"==\"%EXPECTED_LOGIN%\" exit /b 22\r\necho credential-environment-ok\r\n"
+        } else {
+            "#!/bin/sh\n[ \"$HOME\" = \"$EXPECTED_HOME\" ] || exit 21\n[ \"$GH_CONFIG_DIR\" = \"$EXPECTED_LOGIN\" ] || exit 22\nprintf 'credential-environment-ok\\n'\n"
+        };
+        fs::write(&script, body)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(&script, fs::Permissions::from_mode(0o700))?;
+        }
+        for selected in [None, Some(native.as_path())] {
+            let mut command = credential_command(&script, OsStr::new("github.com"), selected);
+            if selected.is_none() {
+                command.env("HOME", &scratch);
+            }
+            let expected = selected.unwrap_or(&scratch);
+            let output = command
+                .env("EXPECTED_HOME", expected)
+                .env("GH_CONFIG_DIR", &login)
+                .env("EXPECTED_LOGIN", &login)
+                .output()?;
+            assert!(output.status.success(), "credential fixture: {output:?}");
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout).trim(),
+                "credential-environment-ok"
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn installed_cli_discovery_respects_aliases_inside_release_archives() -> io::Result<()> {
