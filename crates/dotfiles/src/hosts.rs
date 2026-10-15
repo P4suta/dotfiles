@@ -32,7 +32,7 @@ const PROFILE_RUNTIME: &str = "crates/dotfiles/Cargo.toml";
 const JOB_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const REQUEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const REQUEST_LIMIT: Duration = Duration::from_secs(300);
-const INPUT_SCHEMA: &[u8] = b"hosts-stage-inputs-v3\0";
+const INPUT_SCHEMA: u32 = 3;
 const REMOVE_WORKSPACE: &str = "/bin/rm";
 const DISK_SPACE: &str = "/bin/df";
 const BYTES_PER_KIB: u64 = 1024;
@@ -738,8 +738,9 @@ fn recover_workspaces(native: &Real, root: &Path) -> Result<()> {
 pub fn input_hashes(root: &Path, commit: &str, gate: &str) -> Result<[String; 2]> {
     let listing = git(root, &["ls-tree", "-r", "-z", commit])?;
     let mut hashes = [Sha256::new(), Sha256::new()];
+    let schema = format!("hosts-stage-inputs-v{INPUT_SCHEMA}\0");
     for hash in &mut hashes {
-        hash.update(INPUT_SCHEMA);
+        hash.update(schema.as_bytes());
     }
     hashes[0].update(gate.as_bytes());
     hashes[0].update([0]);

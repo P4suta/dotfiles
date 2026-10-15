@@ -39,6 +39,12 @@ A reused receipt retains the original execution's order and provenance, so copyi
 Recovering a partially recorded job retains its first execution order and never allocates a newer one for a replay.
 Writing reused evidence rechecks that execution's freshness, and admission checks it across all commits.
 Legacy receipts without an execution order cannot authorize reuse or admission.
+Pending executions name the input schema that produced their hashes, and the current schema still requires exact committed-input equality.
+An older terminal unverified history entry without that schema retains its identity, tree, digest shapes, and notes-order checks, but its input keys cannot select reusable evidence.
+Its cutoff blocks earlier credit for the entire OS family until a newer actual execution provides current evidence.
+This preserves the existing unverified-order decision without treating an obsolete hash algorithm as proof of success.
+Unknown explicit schemas and legacy active submissions are refused rather than resubmitted.
+Appending another terminal failure preserves the existing history bytes and order.
 After a new execution passes, subsequent matching candidates can reuse that verified result again.
 The workflow matrix must retain Linux so the proof suite participates in admission.
 The ordinary Rust checks discover every independent Cargo workspace from tracked manifests and validate every lockfile with Cargo before the expensive proof and benchmark stages.

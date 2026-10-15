@@ -2425,6 +2425,99 @@ fn an_unacknowledged_submission_replays_its_frozen_program() -> Result<()> {
 }
 
 #[test]
+fn legacy_terminal_history_requires_fresh_evidence_without_rewriting_old_records() -> Result<()> {
+    let fixture = RemoteCheck::new()?;
+    fixture.passing_check()?;
+    let first = git(&fixture.root, &["rev-parse", "HEAD"])?;
+    fs::write(fixture.root.join("lib.rs"), "legacy failed candidate")?;
+    git(&fixture.root, &["add", "."])?;
+    git(&fixture.root, &["commit", "--quiet", "-m", "legacy"])?;
+    let failed = fixture
+        .command(&fixture.root, "no-report-1", VALID_STAGES)?
+        .output()?;
+    assert!(!failed.status.success());
+    let history_path = fixture.root.join(".git/hosts-pending/linux.history.json");
+    let pending = fixture.root.join(".git/hosts-pending/linux.json");
+    let mut records: serde_json::Value = serde_json::from_slice(&fs::read(&history_path)?)?;
+    records[0]["execution"]
+        .as_object_mut()
+        .unwrap()
+        .remove("input_schema");
+    records[0]["execution"]["inputs"] = serde_json::json!([
+        "800c76cff907e32bd66fcb00f16b61a41f14ec97219c884b3b10938310c7b704",
+        "f46cbbe2bf28ede9cc82cbed532685e6c9641aeee29297de42a615bb09205758"
+    ]);
+    let legacy = serde_json::to_vec_pretty(&records)?;
+    fs::write(&history_path, &legacy)?;
+    fs::remove_file(&pending)?;
+    git(&fixture.root, &["checkout", "--quiet", &first])?;
+    assert_legacy_history_refuses_invalid_records(&fixture, &history_path, &records)?;
+    assert!(require_admission(&fixture.root, "HEAD").is_err());
+    let fresh = fixture.passing_check()?;
+    let stdout = String::from_utf8_lossy(&fresh.stdout);
+    assert!(
+        stdout.contains("code: passed") && stdout.contains("real: passed"),
+        "{stdout}"
+    );
+    require_admission(&fixture.root, "HEAD")?;
+    assert_eq!(fs::read(&history_path)?, legacy);
+    assert_eq!(fs::read_to_string(&fixture.executions)?.lines().count(), 3);
+    fs::write(fixture.root.join("lib.rs"), "new failed candidate")?;
+    git(&fixture.root, &["add", "."])?;
+    git(&fixture.root, &["commit", "--quiet", "-m", "new failure"])?;
+    let failed = fixture
+        .command(&fixture.root, "no-report-1", VALID_STAGES)?
+        .output()?;
+    assert!(!failed.status.success());
+    let appended = fs::read(&history_path)?;
+    assert!(appended.starts_with(&legacy[..legacy.len() - 1]));
+    let appended: Vec<serde_json::Value> = serde_json::from_slice(&appended)?;
+    assert_eq!(appended.len(), 2);
+    assert_eq!(appended[0], records[0]);
+    assert_eq!(appended[1]["execution"]["input_schema"], 3);
+    Ok(())
+}
+
+fn assert_legacy_history_refuses_invalid_records(
+    fixture: &RemoteCheck,
+    path: &Path,
+    records: &serde_json::Value,
+) -> Result<()> {
+    let original = fs::read(path)?;
+    for (field, value, expected) in [
+        (
+            "input_schema",
+            serde_json::json!(999),
+            "unsupported input schema",
+        ),
+        (
+            "inputs",
+            serde_json::json!(["invalid", "invalid"]),
+            "valid input digests",
+        ),
+        ("state", serde_json::json!("submitted"), "must be terminal"),
+    ] {
+        let mut invalid = records.clone();
+        invalid[0]["execution"][field] = value;
+        fs::write(path, serde_json::to_vec(&invalid)?)?;
+        let rejected = fixture.command(&fixture.root, "", VALID_STAGES)?.output()?;
+        assert!(!rejected.status.success());
+        assert!(String::from_utf8_lossy(&rejected.stderr).contains(expected));
+    }
+    fs::write(path, original)?;
+    let pending = fixture.root.join(".git/hosts-pending/linux.json");
+    let mut active = records[0]["execution"].clone();
+    active["state"] = "submitted".into();
+    fs::write(&pending, serde_json::to_vec(&active)?)?;
+    let rejected = fixture.command(&fixture.root, "", VALID_STAGES)?.output()?;
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("must be terminal"));
+    fs::remove_file(pending)?;
+    assert_eq!(fs::read_to_string(&fixture.executions)?.lines().count(), 2);
+    Ok(())
+}
+
+#[test]
 fn unverified_terminal_history_blocks_old_credit_and_allows_distinct_fresh_attempts() -> Result<()>
 {
     let fixture = RemoteCheck::new()?;

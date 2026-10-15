@@ -31,6 +31,8 @@ struct Execution {
     host: String,
     os: String,
     gate: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    input_schema: Option<u32>,
     inputs: [String; 2],
     reused: [Option<Reused>; 2],
     submission: String,
@@ -82,10 +84,18 @@ impl Execution {
             git_text(root, &["rev-parse", &format!("{}^{{tree}}", self.commit)])? == self.tree,
             "execution has another committed tree"
         );
-        ensure!(
-            input_hashes(root, &self.commit, &self.gate)? == self.inputs,
-            "execution has other committed inputs"
-        );
+        match self.input_schema {
+            Some(super::INPUT_SCHEMA) => ensure!(
+                input_hashes(root, &self.commit, &self.gate)? == self.inputs,
+                "execution has other committed inputs"
+            ),
+            None => ensure!(
+                self.state == PendingState::Unverified
+                    && self.inputs.iter().all(|input| valid_digest(input)),
+                "legacy execution must be terminal with valid input digests"
+            ),
+            Some(_) => anyhow::bail!("execution has an unsupported input schema"),
+        }
         ensure!(
             valid_digest(&self.bundle_hash),
             "invalid source bundle digest"
@@ -108,6 +118,29 @@ fn history_path(root: &Path, family: Family) -> Result<PathBuf> {
     Ok(common(root)?
         .join(DIRECTORY)
         .join(format!("{}.history.json", family.name())))
+}
+
+fn append_history(path: &Path, record: &UnverifiedTerminal, empty: bool) -> Result<()> {
+    let mut bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => b"[]".to_vec(),
+        Err(error) => return Err(error.into()),
+    };
+    let end = bytes
+        .iter()
+        .rposition(|byte| !byte.is_ascii_whitespace())
+        .context("empty unverified execution history")?;
+    ensure!(
+        bytes[end] == b']',
+        "unverified execution history is not an array"
+    );
+    let mut addition = Vec::new();
+    if !empty {
+        addition.push(b',');
+    }
+    addition.extend(serde_json::to_vec(record)?);
+    bytes.splice(end..end, addition);
+    crate::runtime::replace(path, &bytes, false)
 }
 
 fn history(root: &Path, family: Family) -> Result<Vec<UnverifiedTerminal>> {
@@ -163,9 +196,10 @@ pub(super) fn cutoff(
     Ok(history
         .iter()
         .filter(|entry| {
-            entry.execution.inputs[stage.index()] == inputs
-                && (stage == Stage::Real || entry.execution.gate == gate)
-                && (!entry.execution.local || entry.execution.reused[stage.index()].is_none())
+            entry.execution.input_schema.is_none()
+                || (entry.execution.inputs[stage.index()] == inputs
+                    && (stage == Stage::Real || entry.execution.gate == gate)
+                    && (!entry.execution.local || entry.execution.reused[stage.index()].is_none()))
         })
         .map(|entry| entry.cutoff)
         .max())
@@ -344,6 +378,7 @@ impl Lease {
             host: host.to_owned(),
             os: self.family.name().to_owned(),
             gate: candidate.gate.to_owned(),
+            input_schema: Some(super::INPUT_SCHEMA),
             inputs: candidate.inputs.clone(),
             reused,
             submission,
@@ -457,7 +492,7 @@ impl Lease {
         output: &str,
     ) -> Result<()> {
         let _notes = super::notes_lock(root)?;
-        let mut records = history(root, self.family)?;
+        let records = history(root, self.family)?;
         let mut execution = execution.clone();
         execution.state = PendingState::Unverified;
         if !records
@@ -465,17 +500,17 @@ impl Lease {
             .any(|entry| entry.execution.submission == execution.submission)
         {
             let (notes_revision, cutoff) = notes_barrier(root)?;
-            records.push(UnverifiedTerminal {
+            let record = UnverifiedTerminal {
                 execution: execution.clone(),
                 cutoff,
                 notes_revision,
                 status,
                 output_hash: digest(output.as_bytes()),
-            });
-            crate::runtime::replace(
+            };
+            append_history(
                 &history_path(root, self.family)?,
-                &serde_json::to_vec(&records)?,
-                false,
+                &record,
+                records.is_empty(),
             )?;
         }
         self.write(&execution)?;
