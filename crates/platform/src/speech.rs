@@ -432,12 +432,15 @@ pub fn worker_lock(home: &Path) -> io::Result<File> {
 ///
 /// # Errors
 ///
-/// Returns an error when locking, parsing bounded state, or writing the remaining queue fails.
+/// Returns an error when locking, parsing bounded state, writing the remaining queue, or releasing the worker lock fails.
 pub fn next(home: &Path, worker: &mut Option<File>) -> io::Result<Option<Packet>> {
     let state = home.join(STATE);
     let _lock = lock(&state, QUEUE_LOCK)?;
     let mut found = packets(&state)?;
     if found.is_empty() {
+        if let Some(lock) = worker.as_ref() {
+            lock.unlock()?;
+        }
         worker.take();
         return Ok(None);
     }
@@ -762,13 +765,18 @@ mod tests {
             usize::from(rules::notification_rules::MAX_PENDING)
         );
         let mut worker = Some(worker_lock(home).unwrap());
+        let duplicate = worker.as_ref().unwrap().try_clone().unwrap();
         assert!(worker_lock(home).is_err());
         for _ in 0..rules::notification_rules::MAX_PENDING {
             assert!(next(home, &mut worker).unwrap().is_some());
         }
         assert!(next(home, &mut worker).unwrap().is_none());
         assert!(worker.is_none());
-        assert!(worker_lock(home).is_ok());
+        let successor = worker_lock(home).unwrap();
+        drop(duplicate);
+        assert!(worker_lock(home).is_err());
+        successor.unlock().unwrap();
+        worker_lock(home).unwrap();
     }
     #[cfg(feature = "tools")]
     #[test]

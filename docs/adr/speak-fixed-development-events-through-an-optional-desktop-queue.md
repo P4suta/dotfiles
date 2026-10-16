@@ -19,6 +19,11 @@ The pure notification policy decides whether to queue a request from frequency, 
 The platform adapter owns the bounded machine-local queue and serial worker.
 The dotfiles adapter validates recording bytes and invokes the native desktop player with a deadline.
 
+When the queue becomes empty, the platform adapter explicitly unlocks the worker while still holding the queue lock.
+It releases ownership only after unlocking succeeds, including when a duplicated or inherited handle remains open.
+Native [file-lock semantics](https://doc.rust-lang.org/std/fs/struct.File.html#method.unlock) are an external boundary alongside the proved notification-policy core.
+A real duplicated-handle regression checks immediate handoff and that closing an old handle preserves its successor's lock.
+
 The managed default is `all`, matching the owner's requested start, failure, and completion frequency.
 A separate unmanaged owner override survives profile application.
 CI, SSH, internal nested operations, and unsupported desktops stay quiet.
