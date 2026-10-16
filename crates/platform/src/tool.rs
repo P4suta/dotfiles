@@ -67,6 +67,7 @@ pub enum Tool {
     Defaults,
     DesktopFileValidate,
     Docker,
+    DockerBuildx,
     Domyjob,
     Doppler,
     Dotguard,
@@ -144,7 +145,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 95] = [
+    pub const ALL: [Self; 96] = [
         Self::Actionlint,
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
@@ -166,6 +167,7 @@ impl Tool {
         Self::Defaults,
         Self::DesktopFileValidate,
         Self::Docker,
+        Self::DockerBuildx,
         Self::Domyjob,
         Self::Doppler,
         Self::Dotguard,
@@ -318,6 +320,7 @@ impl Tool {
             Self::Carapace => "carapace",
             Self::Code => "code",
             Self::Docker => "docker",
+            Self::DockerBuildx => "docker-cli-plugin-docker-buildx",
             Self::Domyjob => "domyjob",
             Self::Fleet => "fleet",
             Self::Nohup => "nohup",
@@ -365,6 +368,7 @@ impl Tool {
             Self::Gitleaks => Provision::Pinned("gitleaks"),
             Self::Gh => Provision::Pinned("gh"),
             Self::Docker => Provision::Pinned("docker-cli"),
+            Self::DockerBuildx => Provision::Pinned("aqua:docker/buildx"),
             Self::Kani => Provision::Pinned("cargo:kani-verifier"),
             Self::Nu => Provision::Pinned("nu"),
             Self::Pwsh => Provision::Pinned("powershell"),

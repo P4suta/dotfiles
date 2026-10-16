@@ -17,3 +17,5 @@ import Dotfiles
 #print axioms Dotfiles.Contrast.division_bounds
 #print axioms Dotfiles.Contrast.division_threshold
 #print axioms Dotfiles.Contrast.reported_ratio
+#print axioms Dotfiles.Elapsed.ceiling_upper
+#print axioms Dotfiles.Elapsed.ceiling_minimal

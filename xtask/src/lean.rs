@@ -562,6 +562,12 @@ pub fn vectors(root: &Path, check: bool) -> Result<()> {
                 root.join(crate::contrast_refinement::SOURCE),
             )?)?,
         ),
+        (
+            crate::elapsed_refinement::GENERATED,
+            crate::elapsed_refinement::translate(&fs::read_to_string(
+                root.join(crate::elapsed_refinement::SOURCE),
+            )?)?,
+        ),
     ] {
         let file = root.join(path);
         if check {

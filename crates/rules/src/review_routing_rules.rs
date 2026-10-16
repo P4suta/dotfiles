@@ -1,4 +1,5 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum ReviewLevel {
     Low,
     Medium,
@@ -7,6 +8,7 @@ pub enum ReviewLevel {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum ReviewRoute {
     None,
     Cli,
@@ -14,12 +16,14 @@ pub enum ReviewRoute {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum Consequence {
     Severe,
     Catastrophic,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum Likelihood {
     Hypothetical,
     Credible,
@@ -27,6 +31,7 @@ pub enum Likelihood {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum BlastRadius {
     Limited,
     Broad,
@@ -34,6 +39,7 @@ pub enum BlastRadius {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum Rollback {
     Recoverable,
     Difficult,
@@ -41,6 +47,7 @@ pub enum Rollback {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub struct SevereRisk {
     pub consequence: Consequence,
     pub likelihood: Likelihood,
@@ -80,6 +87,7 @@ pub fn assessment_allowed(level: ReviewLevel, risk: Option<SevereRisk>) -> bool 
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum ReviewEvidence {
     None,
     Cli,
@@ -165,12 +173,25 @@ mod proofs {
                 | (ReviewRoute::Cli, ReviewEvidence::Cli)
                 | (ReviewRoute::Pr, ReviewEvidence::Pr)
         );
+        let missing = matches!(
+            (route, evidence),
+            (ReviewRoute::Cli | ReviewRoute::Pr, ReviewEvidence::None)
+        );
+        let wrong_route = !matching && !missing;
         assert_eq!(
             actual == Completion::Accepted,
             resolved && !paused && matching
         );
         assert_eq!(actual == Completion::Paused, resolved && paused);
         assert_eq!(actual == Completion::Unresolved, !resolved);
+        assert_eq!(
+            actual == Completion::Missing,
+            resolved && !paused && missing
+        );
+        assert_eq!(
+            actual == Completion::WrongRoute,
+            resolved && !paused && wrong_route
+        );
     }
 
     #[cfg(kani)]
@@ -215,68 +236,6 @@ mod proofs {
             "incomplete selected review is refused"
         );
         spec_completion(route, cli, pr, evidence, resolved);
-    }
-}
-
-#[cfg(kani)]
-impl kani::Arbitrary for ReviewLevel {
-    fn any() -> Self {
-        match kani::any::<u8>() % 4 {
-            0 => Self::Low,
-            1 => Self::Medium,
-            2 => Self::High,
-            _ => Self::Critical,
-        }
-    }
-}
-
-#[cfg(kani)]
-impl kani::Arbitrary for ReviewRoute {
-    fn any() -> Self {
-        match kani::any::<u8>() % 3 {
-            0 => Self::None,
-            1 => Self::Cli,
-            _ => Self::Pr,
-        }
-    }
-}
-
-#[cfg(kani)]
-impl kani::Arbitrary for ReviewEvidence {
-    fn any() -> Self {
-        match kani::any::<u8>() % 3 {
-            0 => Self::None,
-            1 => Self::Cli,
-            _ => Self::Pr,
-        }
-    }
-}
-
-#[cfg(kani)]
-impl kani::Arbitrary for SevereRisk {
-    fn any() -> Self {
-        Self {
-            consequence: if kani::any() {
-                Consequence::Severe
-            } else {
-                Consequence::Catastrophic
-            },
-            likelihood: match kani::any::<u8>() % 3 {
-                0 => Likelihood::Hypothetical,
-                1 => Likelihood::Credible,
-                _ => Likelihood::Exposed,
-            },
-            blast_radius: match kani::any::<u8>() % 3 {
-                0 => BlastRadius::Limited,
-                1 => BlastRadius::Broad,
-                _ => BlastRadius::Systemic,
-            },
-            rollback: match kani::any::<u8>() % 3 {
-                0 => Rollback::Recoverable,
-                1 => Rollback::Difficult,
-                _ => Rollback::Irreversible,
-            },
-        }
     }
 }
 

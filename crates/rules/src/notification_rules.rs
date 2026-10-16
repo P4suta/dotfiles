@@ -238,6 +238,27 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn maximum_age_is_inclusive_and_the_next_millisecond_is_stale() {
+        let request = fresh(Some(Event::CommitFailed));
+        assert_eq!(
+            decide(Request {
+                issued_millis: 0,
+                now_millis: MAX_AGE_MILLIS,
+                ..request
+            }),
+            Decision::Queue(Event::CommitFailed)
+        );
+        assert_eq!(
+            decide(Request {
+                issued_millis: 0,
+                now_millis: MAX_AGE_MILLIS + 1,
+                ..request
+            }),
+            Decision::Quiet(Reason::Stale)
+        );
+    }
 }
 
 #[cfg(kani)]

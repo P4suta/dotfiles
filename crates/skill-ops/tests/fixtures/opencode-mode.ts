@@ -17,9 +17,9 @@ const input: Parameters<Plugin>[0] = {
   serverUrl: new URL("http://127.0.0.1:9"),
   $: Bun.$,
 };
-const config = join(root, ".config");
-const optIn = join(config, "skill-ops", "experimental");
-const stop = join(config, "skill-ops", "disabled");
+const config = join(root, ".config", "skill-ops");
+const optIn = join(config, "experimental");
+const stop = join(config, "disabled");
 const spawn = spyOn(Bun, "spawn").mockImplementation(() => { throw new Error("fixture spawn boundary"); });
 const spawnCount = (): number => spawn.mock.calls.length;
 const assertNoHooks = async (): Promise<void> => {

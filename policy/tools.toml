@@ -71,6 +71,7 @@ tools = [
 reason = "toolchain"
 why = "Each project's manifest and pins choose these toolchains and package managers, and their own documentation governs them, so the mise skill and the project instructions decide their use."
 tools = [
+  "buildx",
   "bun",
   "cabal",
   "cargo-binstall",

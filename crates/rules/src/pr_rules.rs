@@ -68,7 +68,6 @@ pub const fn source_relation(identities: RepositoryIdentities) -> SourceRelation
     if identities.source == 0
         || identities.target == 0
         || identities.source_network == 0
-        || identities.target_network == 0
         || identities.source_network != identities.target_network
     {
         SourceRelation::Refused

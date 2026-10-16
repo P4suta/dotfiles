@@ -35,7 +35,9 @@ pub fn verify(root: &Path, phase: Phase) -> Result<()> {
         cfg!(target_os = "linux"),
         "hosted proof partitions require the native Linux target"
     );
-    crate::quality::with_locked_workspaces(root, || verify_prepared(root, phase))
+    crate::elapsed_refinement::with_source(root, || {
+        crate::quality::with_locked_workspaces(root, || verify_prepared(root, phase))
+    })
 }
 
 fn verify_prepared(root: &Path, phase: Phase) -> Result<()> {

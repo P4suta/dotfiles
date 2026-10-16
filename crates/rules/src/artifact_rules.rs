@@ -100,8 +100,6 @@ pub fn portable_component(bytes: &[u8], #[cfg(kani)] witness: usize) -> bool {
     let mut index = 0;
     #[cfg(kani)]
     let witness_byte = component_byte(bytes, witness);
-    #[cfg(kani)]
-    let mut bytes_remaining: usize = bytes.len();
     #[cfg_attr(
         kani,
         kani::loop_invariant(
@@ -123,34 +121,23 @@ pub fn portable_component(bytes: &[u8], #[cfg(kani)] witness: usize) -> bool {
                         && witness_byte != b'|'
                         && witness_byte != b'?'
                         && witness_byte != b'*'))
-                && bytes_remaining <= bytes.len()
-                && bytes_remaining + index == bytes.len()
         )
     )]
-    #[cfg_attr(kani, kani::loop_decreases(bytes_remaining))]
+    #[cfg_attr(kani, kani::loop_decreases(bytes.len().wrapping_sub(index)))]
     while index < bytes.len() {
         let byte = component_byte(bytes, index);
-        let forbidden = u8::from(byte == b'/')
-            | u8::from(byte == b'\\')
-            | u8::from(byte == b':')
-            | u8::from(byte == b'<')
-            | u8::from(byte == b'>')
-            | u8::from(byte == b'"')
-            | u8::from(byte == b'|')
-            | u8::from(byte == b'?')
-            | u8::from(byte == b'*');
+        let forbidden = matches!(
+            byte,
+            b'/' | b'\\' | b':' | b'<' | b'>' | b'"' | b'|' | b'?' | b'*'
+        );
         let dot = u8::from(byte == b'.');
         admitted &= u8::from(byte >= b' ')
             & u8::from(byte <= b'~')
-            & (TRUE_BIT ^ forbidden)
+            & u8::from(!forbidden)
             & (TRUE_BIT ^ (dot & (TRUE_BIT ^ first_dot_seen) & previous_space));
         first_dot_seen |= dot;
         previous_space = u8::from(byte == b' ');
         index += 1;
-        #[cfg(kani)]
-        {
-            bytes_remaining -= 1;
-        }
     }
     admitted == TRUE_BIT
 }
@@ -167,29 +154,27 @@ fn windows_device(bytes: &[u8]) -> bool {
     let sixth = component_byte(bytes, CONIN_DEVICE_STEM_BYTES - DEVICE_TRAILER_BYTES);
     let seventh = component_byte(bytes, CONOUT_DEVICE_STEM_BYTES - DEVICE_TRAILER_BYTES);
     let eighth = component_byte(bytes, CONOUT_DEVICE_STEM_BYTES);
-    let con = u8::from(first == b'c') & u8::from(second == b'o') & u8::from(third == b'n');
+    let con = first == b'c' && second == b'o' && third == b'n';
     let short = con
-        | (u8::from(first == b'p') & u8::from(second == b'r') & u8::from(third == b'n'))
-        | (u8::from(first == b'a') & u8::from(second == b'u') & u8::from(third == b'x'))
-        | (u8::from(first == b'n') & u8::from(second == b'u') & u8::from(third == b'l'));
-    let numbered = ((u8::from(first == b'c') & u8::from(second == b'o') & u8::from(third == b'm'))
-        | (u8::from(first == b'l') & u8::from(second == b'p') & u8::from(third == b't')))
-        & u8::from(fourth.wrapping_sub(b'1') <= DEVICE_NUMBER_SPAN);
+        || (first == b'p' && second == b'r' && third == b'n')
+        || (first == b'a' && second == b'u' && third == b'x')
+        || (first == b'n' && second == b'u' && third == b'l');
+    let numbered = ((first == b'c' && second == b'o' && third == b'm')
+        || (first == b'l' && second == b'p' && third == b't'))
+        && fourth.wrapping_sub(b'1') <= DEVICE_NUMBER_SPAN;
     let conin = con
-        & u8::from((fourth | ASCII_CASE_BIT) == b'i')
-        & u8::from((fifth | ASCII_CASE_BIT) == b'n')
-        & u8::from(sixth == b'$');
+        && (fourth | ASCII_CASE_BIT) == b'i'
+        && (fifth | ASCII_CASE_BIT) == b'n'
+        && sixth == b'$';
     let conout = con
-        & u8::from((fourth | ASCII_CASE_BIT) == b'o')
-        & u8::from((fifth | ASCII_CASE_BIT) == b'u')
-        & u8::from((sixth | ASCII_CASE_BIT) == b't')
-        & u8::from(seventh == b'$');
-    (short & (u8::from(bytes.len() == SHORT_DEVICE_STEM_BYTES) | u8::from(fourth == b'.')))
-        | (numbered
-            & (u8::from(bytes.len() == NUMBERED_DEVICE_STEM_BYTES) | u8::from(fifth == b'.')))
-        | (conin & (u8::from(bytes.len() == CONIN_DEVICE_STEM_BYTES) | u8::from(seventh == b'.')))
-        | (conout & (u8::from(bytes.len() == CONOUT_DEVICE_STEM_BYTES) | u8::from(eighth == b'.')))
-        != FALSE_BIT
+        && (fourth | ASCII_CASE_BIT) == b'o'
+        && (fifth | ASCII_CASE_BIT) == b'u'
+        && (sixth | ASCII_CASE_BIT) == b't'
+        && seventh == b'$';
+    (short && (bytes.len() == SHORT_DEVICE_STEM_BYTES || fourth == b'.'))
+        || (numbered && (bytes.len() == NUMBERED_DEVICE_STEM_BYTES || fifth == b'.'))
+        || (conin && (bytes.len() == CONIN_DEVICE_STEM_BYTES || seventh == b'.'))
+        || (conout && (bytes.len() == CONOUT_DEVICE_STEM_BYTES || eighth == b'.'))
 }
 
 fn component_byte(bytes: &[u8], index: usize) -> u8 {
@@ -275,7 +260,7 @@ pub fn sha256(bytes: &[u8]) -> Option<[u8; SHA256_BYTES]> {
         let [high, low, tail @ ..] = rest else {
             return None;
         };
-        *byte = (hexadecimal(*high)? << HEX_DIGIT_BITS) | hexadecimal(*low)?;
+        *byte = (hexadecimal(*high)? << HEX_DIGIT_BITS) + hexadecimal(*low)?;
         rest = tail;
     }
     Some(digest)
@@ -1097,6 +1082,19 @@ mod tests {
     }
 
     #[test]
+    fn version_length_rejects_zero_and_accepts_both_inclusive_bounds() {
+        for (length, expected) in [
+            (0, false),
+            (1, true),
+            (MAX_VERSION_BYTES, true),
+            (MAX_VERSION_BYTES + 1, false),
+            (usize::MAX, false),
+        ] {
+            assert_eq!(version_length(length), expected, "{length}");
+        }
+    }
+
+    #[test]
     fn numeric_reference_preserves_nonempty_component_grammar() {
         for (version, expected) in [
             ("1.2", true),
@@ -1111,6 +1109,7 @@ mod tests {
             ("1.2.3.4.5.6", false),
             ("1.2.3.4.5.6.7.8", false),
             ("1.a", false),
+            ("1.a.2", false),
             ("1.*", false),
         ] {
             assert_eq!(
@@ -1331,6 +1330,11 @@ mod tests {
         ] {
             assert!(!pinned(version.as_bytes()), "{version}");
         }
+        let mut two_invalid_revision_bytes = [b'0'; REVISION_PREFIX.len() + GIT_REVISION_BYTES];
+        two_invalid_revision_bytes[..REVISION_PREFIX.len()].copy_from_slice(REVISION_PREFIX);
+        two_invalid_revision_bytes[REVISION_PREFIX.len()] = b'g';
+        two_invalid_revision_bytes[REVISION_PREFIX.len() + 1] = b'g';
+        assert!(!pinned(&two_invalid_revision_bytes));
         let mut longest = [b'0'; MAX_VERSION_BYTES];
         if let Some(separator) = longest.get_mut(1) {
             *separator = b'.';

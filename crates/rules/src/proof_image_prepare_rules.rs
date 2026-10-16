@@ -158,6 +158,7 @@ mod tests {
 
     #[test]
     fn preparation_reserves_release_time_and_missing_facts_never_continue() {
+        assert_eq!(WORK_SECONDS + RELEASE_SECONDS, WALL_SECONDS);
         for ownership in [
             Ownership::Uncaptured,
             Ownership::Changed,
@@ -182,17 +183,32 @@ mod tests {
 
     #[test]
     fn unknown_foreign_and_unacknowledged_servers_remain_unsettled() {
-        for ownership in [
-            Ownership::Uncaptured,
-            Ownership::Changed,
-            Ownership::Captured,
+        for (ownership, expectations) in [
+            (Ownership::Uncaptured, [[Release::Unsettled; 4]; 3]),
+            (Ownership::Changed, [[Release::Unsettled; 4]; 3]),
+            (
+                Ownership::Captured,
+                [
+                    [Release::Unsettled; 4],
+                    [
+                        Release::Stop,
+                        Release::Stop,
+                        Release::Unsettled,
+                        Release::Unsettled,
+                    ],
+                    [Release::Acknowledged; 4],
+                ],
+            ),
         ] {
-            for running in [Running::Unknown, Running::Yes, Running::No] {
-                for elapsed in [0, WALL_SECONDS - 1, WALL_SECONDS, u64::MAX] {
-                    assert_eq!(
-                        release(elapsed, ownership, running) == Release::Acknowledged,
-                        ownership == Ownership::Captured && running == Running::No
-                    );
+            for (running, expectations) in [Running::Unknown, Running::Yes, Running::No]
+                .into_iter()
+                .zip(expectations)
+            {
+                for (elapsed, expected) in [0, WALL_SECONDS - 1, WALL_SECONDS, u64::MAX]
+                    .into_iter()
+                    .zip(expectations)
+                {
+                    assert_eq!(release(elapsed, ownership, running), expected);
                 }
             }
         }
@@ -200,6 +216,10 @@ mod tests {
 
     #[test]
     fn observed_losses_refuse_missing_floor_and_overflow_without_extra_credit() {
+        assert_eq!(
+            observed_storage(Some(10), Some(10), 10, 0),
+            ObservedStorage::Admitted
+        );
         assert_eq!(
             observed_storage(None, Some(10), 1, 2),
             ObservedStorage::Unknown

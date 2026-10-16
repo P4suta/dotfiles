@@ -4,18 +4,18 @@ pub const BUDGET_MILLIS: u64 = 30_000;
 /// The `--harness-timeout` after which the verifier abandons a harness.
 pub const TIMEOUT_SECONDS: u64 = 60;
 
-const NANOS_PER_MILLI: u128 = 1_000_000;
-const MAX_ELAPSED_NANOS: u128 = (u64::MAX as u128) * NANOS_PER_MILLI;
+pub const NANOS_PER_MILLI: u32 = 1_000_000;
+#[cfg(any(test, kani))]
+const MAX_ELAPSED_NANOS: u128 = (u64::MAX as u128) * (NANOS_PER_MILLI as u128);
 
 #[must_use]
-pub fn elapsed_millis(nanos: u128) -> Option<u64> {
-    if nanos > MAX_ELAPSED_NANOS {
-        None
-    } else if nanos == 0 {
-        Some(0)
-    } else {
-        u64::try_from((nanos - 1) / NANOS_PER_MILLI + 1).ok()
+pub fn elapsed_millis(whole_millis: u128, remainder_nanos: u32) -> Option<u64> {
+    if remainder_nanos >= NANOS_PER_MILLI {
+        return None;
     }
+    u64::try_from(whole_millis)
+        .ok()?
+        .checked_add(u64::from(remainder_nanos != 0))
 }
 
 /// The largest mutation worker pool and shared Cargo jobserver pool.
@@ -149,12 +149,23 @@ pub const fn verdict(duration_millis: Option<u64>) -> Verdict {
 mod proofs {
     use super::*;
 
-    pub fn spec_elapsed_millis(nanos: u128) -> Option<u64> {
-        let elapsed = elapsed_millis(nanos);
-        assert_eq!(elapsed.is_some(), nanos <= MAX_ELAPSED_NANOS);
+    pub fn spec_elapsed_millis(whole_millis: u128, remainder_nanos: u32) -> Option<u64> {
+        let elapsed = elapsed_millis(whole_millis, remainder_nanos);
+        assert_eq!(
+            elapsed.is_some(),
+            remainder_nanos < NANOS_PER_MILLI
+                && whole_millis <= u128::from(u64::MAX)
+                && (remainder_nanos == 0 || whole_millis < u128::from(u64::MAX))
+        );
         if let Some(actual) = elapsed {
-            assert!(u128::from(actual) * NANOS_PER_MILLI >= nanos);
-            assert!(actual == 0 || u128::from(actual - 1) * NANOS_PER_MILLI < nanos);
+            assert_eq!(
+                u128::from(actual),
+                whole_millis + u128::from(remainder_nanos != 0)
+            );
+            let nanos = whole_millis * u128::from(NANOS_PER_MILLI) + u128::from(remainder_nanos);
+            assert!(nanos <= MAX_ELAPSED_NANOS);
+            assert!(u128::from(actual) * u128::from(NANOS_PER_MILLI) >= nanos);
+            assert!(actual == 0 || u128::from(actual - 1) * u128::from(NANOS_PER_MILLI) < nanos);
         }
         elapsed
     }
@@ -162,17 +173,36 @@ mod proofs {
     #[cfg(kani)]
     #[kani::proof]
     fn host_elapsed_rounds_up_without_overflow_or_understatement() {
-        let elapsed = if kani::any() {
-            let nanos = kani::any::<u128>() >> MAX_ELAPSED_NANOS.leading_zeros();
-            kani::assume(nanos <= MAX_ELAPSED_NANOS);
-            spec_elapsed_millis(nanos)
-        } else {
-            let nanos: u128 = kani::any();
-            kani::assume(nanos > MAX_ELAPSED_NANOS);
-            spec_elapsed_millis(nanos)
-        };
-        kani::cover!(elapsed == Some(BUDGET_MILLIS));
-        kani::cover!(elapsed.is_none());
+        let whole_millis: u128 = kani::any();
+        let remainder_nanos: u32 = kani::any();
+        let elapsed = elapsed_millis(whole_millis, remainder_nanos);
+        assert_eq!(
+            elapsed.is_some(),
+            remainder_nanos < NANOS_PER_MILLI
+                && whole_millis <= u128::from(u64::MAX)
+                && (remainder_nanos == 0 || whole_millis < u128::from(u64::MAX))
+        );
+        if let Some(actual) = elapsed {
+            assert_eq!(
+                u128::from(actual),
+                whole_millis + u128::from(remainder_nanos != 0)
+            );
+        }
+        cover_elapsed_boundaries(whole_millis, remainder_nanos, elapsed);
+    }
+
+    #[cfg(kani)]
+    fn cover_elapsed_boundaries(whole_millis: u128, remainder_nanos: u32, elapsed: Option<u64>) {
+        kani::cover!(
+            whole_millis == u128::from(BUDGET_MILLIS)
+                && remainder_nanos == 0
+                && elapsed == Some(BUDGET_MILLIS)
+        );
+        kani::cover!(
+            whole_millis == u128::from(u64::MAX)
+                && remainder_nanos == NANOS_PER_MILLI - 1
+                && elapsed.is_none()
+        );
     }
 
     #[cfg(kani)]
@@ -331,20 +361,36 @@ mod tests {
 
     #[test]
     fn elapsed_milliseconds_preserve_fractional_boundaries_and_overflow() {
-        for nanos in [
-            0,
-            1,
-            NANOS_PER_MILLI - 1,
-            NANOS_PER_MILLI,
-            u128::from(BUDGET_MILLIS) * NANOS_PER_MILLI,
-            u128::from(BUDGET_MILLIS) * NANOS_PER_MILLI + 1,
-            u128::from(u64::MAX) * NANOS_PER_MILLI,
-            u128::from(u64::MAX) * NANOS_PER_MILLI + 1,
-            u128::MAX,
+        for (whole_millis, remainder_nanos) in [
+            (0, 0),
+            (0, 1),
+            (0, 999_999),
+            (1, 0),
+            (999, 999_999),
+            (1_000, 0),
+            (30_000, 0),
+            (30_000, 1),
+            (u128::from(u64::MAX), 0),
+            (u128::from(u64::MAX), 1),
+            (u128::from(u64::MAX) + 1, 0),
+            (u128::MAX, 999_999),
+            (0, 1_000_000),
+            (0, u32::MAX),
+            (u128::MAX, u32::MAX),
         ] {
+            let expected = (remainder_nanos < NANOS_PER_MILLI)
+                .then(|| {
+                    whole_millis
+                        .checked_mul(u128::from(NANOS_PER_MILLI))?
+                        .checked_add(u128::from(remainder_nanos))?
+                        .div_ceil(u128::from(NANOS_PER_MILLI))
+                        .try_into()
+                        .ok()
+                })
+                .flatten();
             assert_eq!(
-                proofs::spec_elapsed_millis(nanos),
-                u64::try_from(nanos.div_ceil(NANOS_PER_MILLI)).ok()
+                proofs::spec_elapsed_millis(whole_millis, remainder_nanos),
+                expected
             );
         }
     }
@@ -405,6 +451,27 @@ mod tests {
             (usize::MAX, MUTANT_JOB_LIMIT),
         ] {
             assert_eq!(mutant_jobs(available), expected);
+        }
+    }
+
+    #[test]
+    fn ci_phases_require_exactly_one_result_each_and_no_unknown_phase() {
+        for counts in [
+            [0, 1, 1],
+            [1, 0, 1],
+            [1, 1, 0],
+            [1, 1, 1],
+            [2, 1, 1],
+            [1, 2, 1],
+            [1, 1, 2],
+            [u8::MAX, 1, 1],
+        ] {
+            for unknown in [false, true] {
+                assert_eq!(
+                    ci_phases_complete(counts, unknown),
+                    counts == [1, 1, 1] && !unknown
+                );
+            }
         }
     }
 

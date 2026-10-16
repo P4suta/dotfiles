@@ -170,5 +170,27 @@ mod tests {
             ),
             Err(Refusal::EmptyPlan)
         );
+        assert_eq!(
+            admission(
+                [Allocation {
+                    bytes: 0,
+                    inodes: 2
+                }; COMPONENTS],
+                Some(u64::MAX),
+                Inodes::Available(u64::MAX)
+            ),
+            Err(Refusal::EmptyPlan)
+        );
+        assert_eq!(
+            admission(
+                [Allocation {
+                    bytes: 10,
+                    inodes: 0
+                }; COMPONENTS],
+                Some(u64::MAX),
+                Inodes::NotApplicable
+            ),
+            Err(Refusal::EmptyPlan)
+        );
     }
 }

@@ -5,6 +5,17 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
+#[test]
+fn docker_buildx_is_an_exact_project_tool() {
+    assert!(Tool::ALL.iter().any(|tool| {
+        tool.program() == "docker-cli-plugin-docker-buildx"
+            && matches!(
+                tool.provision(),
+                platform::tool::Provision::Pinned("aqua:docker/buildx")
+            )
+    }));
+}
+
 #[cfg(windows)]
 #[test]
 fn native_windows_tar_ignores_path_shadowing_for_drive_letter_archives() -> Result<()> {

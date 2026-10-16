@@ -251,6 +251,27 @@ mod proofs {
 
 #[cfg(test)]
 mod tests {
+    use super::ProblemSeverity;
+
+    #[test]
+    fn problem_severity_accepts_only_the_fixed_level_codes() {
+        for (level, expected) in [
+            (0, ProblemSeverity::Invalid),
+            (9, ProblemSeverity::Invalid),
+            (10, ProblemSeverity::Notice),
+            (20, ProblemSeverity::Notice),
+            (30, ProblemSeverity::Notice),
+            (40, ProblemSeverity::Notice),
+            (49, ProblemSeverity::Invalid),
+            (50, ProblemSeverity::Error),
+            (60, ProblemSeverity::Error),
+            (61, ProblemSeverity::Invalid),
+            (u64::MAX, ProblemSeverity::Invalid),
+        ] {
+            assert_eq!(super::problem_severity(level), expected);
+        }
+    }
+
     #[test]
     fn every_lookup_state_preserves_the_contract() {
         use super::{LookupFacts, LookupSkip, VersionSelection};

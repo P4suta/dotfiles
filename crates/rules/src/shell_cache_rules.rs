@@ -486,14 +486,15 @@ mod tests {
                 );
             }
         }
-        for invalid in [
-            &b""[..],
-            b"    PROMPT_MULTILINE_INDICATOR: (\n        ^/path/starship;touch prompt --continuation\n    )\n",
-            b"    PROMPT_MULTILINE_INDICATOR: (\n        ^/path/$(touch) prompt --continuation\n    )\n",
-            b"PROMPT2='deferred prompt'\n",
-            b"PROMPT2=\"$(starship prompt --unknown)\"\n",
+        for (shell, invalid) in [
+            (Shell::Nu, &b""[..]),
+            (Shell::Zsh, &b""[..]),
+            (Shell::Nu, &b"    PROMPT_MULTILINE_INDICATOR: (\n        ^/path/starship;touch prompt --continuation\n    )\n"[..]),
+            (Shell::Nu, &b"    PROMPT_MULTILINE_INDICATOR: (\n        ^/path/$(touch) prompt --continuation\n    )\n"[..]),
+            (Shell::Zsh, &b"PROMPT2='deferred prompt'\n"[..]),
+            (Shell::Zsh, &b"PROMPT2=\"$(starship prompt --unknown)\"\n"[..]),
         ] {
-            assert_eq!(continuation(Shell::Zsh, invalid), None);
+            assert_eq!(continuation(shell, invalid), None);
         }
         for character in ['\0', '\n', '\u{1b}', '\u{7f}', '\u{85}', '\u{9f}'] {
             assert_eq!(literal_escape(Shell::Nu, character), Escape::Control);
@@ -506,6 +507,21 @@ mod tests {
         for character in ['$', '`', '#', '日', '😀'] {
             assert_eq!(literal_escape(Shell::Nu, character), Escape::Verbatim);
             assert_eq!(literal_escape(Shell::Zsh, character), Escape::Verbatim);
+        }
+    }
+
+    #[test]
+    fn continuation_refuses_empty_or_controlled_programs_and_an_unclosed_block() {
+        for (shell, input) in [
+            (Shell::Nu, &b"    PROMPT_MULTILINE_INDICATOR: (\n        ^'' prompt --continuation\n    )\n"[..]),
+            (Shell::Nu, &b"    PROMPT_MULTILINE_INDICATOR: (\n        ^ prompt --continuation\n    )\n"[..]),
+            (Shell::Nu, &b"    PROMPT_MULTILINE_INDICATOR: (\n        ^'/p\0' prompt --continuation\n    )\n"[..]),
+            (Shell::Nu, &b"    PROMPT_MULTILINE_INDICATOR: (\n        ^'/p' prompt --continuation\n    ) extra\n"[..]),
+            (Shell::Zsh, &b"PROMPT2=\"$( prompt --continuation)\"\n"[..]),
+            (Shell::Zsh, &b"PROMPT2=\"$(/p\0 prompt --continuation)\"\n"[..]),
+            (Shell::Zsh, &b"PROMPT2=\"$(/p$ prompt --continuation)\"\n"[..]),
+        ] {
+            assert_eq!(continuation(shell, input), None, "{shell:?}: {input:?}");
         }
     }
 

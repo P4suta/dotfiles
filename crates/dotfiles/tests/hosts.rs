@@ -1358,8 +1358,9 @@ fn a_named_rustup_proxy_preserves_the_manager_dispatch() -> Result<()> {
     let bin = cargo.join("bin");
     fs::create_dir_all(&bin)?;
     let home = platform::home::home().context("native tool home")?;
-    let native_cargo =
-        std::env::var_os("CARGO_HOME").map_or_else(|| home.join(".cargo"), PathBuf::from);
+    let native_cargo = std::env::var_os("DOTFILES_HOST_CARGO_HOME")
+        .or_else(|| std::env::var_os("CARGO_HOME"))
+        .map_or_else(|| home.join(".cargo"), PathBuf::from);
     let manager = format!("rustup{}", std::env::consts::EXE_SUFFIX);
     let installer = bin.join(format!("rustup-init{}", std::env::consts::EXE_SUFFIX));
     fs::copy(native_cargo.join("bin").join(&manager), &installer)?;

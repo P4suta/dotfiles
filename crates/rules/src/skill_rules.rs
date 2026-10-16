@@ -153,12 +153,15 @@ pub fn composition_candidate(
     minimum: usize,
     percent: usize,
 ) -> bool {
+    let Ok(ratio) = u8::try_from(percent) else {
+        return false;
+    };
     shared <= first
         && shared <= second
         && minimum >= MINIMUM_PAIR_FLOOR
         && (1..=PERCENT).contains(&percent)
         && shared >= minimum
-        && (shared as u128) * (PERCENT as u128) >= (first.min(second) as u128) * (percent as u128)
+        && (shared as u128) * (PERCENT as u128) >= (first.min(second) as u128) * u128::from(ratio)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -358,7 +361,13 @@ mod proofs {
         if composes {
             assert!(shared <= first && shared <= second && shared >= minimum && minimum >= 2);
             assert!((1..=100).contains(&percent));
-            assert!(shared as u128 * 100 >= first.min(second) as u128 * percent as u128);
+            match u8::try_from(percent) {
+                Ok(ratio) => {
+                    assert_eq!(usize::from(ratio), percent);
+                    assert!(shared as u128 * 100 >= first.min(second) as u128 * u128::from(ratio));
+                }
+                Err(_) => assert!(!composes),
+            }
         }
         composes
     }
@@ -413,23 +422,44 @@ mod proofs {
     }
 
     #[cfg(kani)]
-    #[kani::proof]
-    fn composition_respects_sample_and_ratio_without_overflow() {
+    fn composition_partition(ordering: core::cmp::Ordering) {
+        use core::cmp::Ordering::{Equal, Greater, Less};
+
         let shared: usize = kani::any();
         let first: usize = kani::any();
         let second: usize = kani::any();
         let minimum: usize = kani::any();
-        let composes = if kani::any() {
-            let percent = usize::from(kani::any::<u8>());
-            kani::assume((1..=PERCENT).contains(&percent));
-            spec_composition_sound(shared, first, second, minimum, percent)
-        } else {
-            let percent: usize = kani::any();
-            kani::assume(!(1..=PERCENT).contains(&percent));
-            spec_composition_sound(shared, first, second, minimum, percent)
-        };
-        kani::cover!(composes);
-        kani::cover!(!composes);
+        let percent: usize = kani::any();
+        kani::assume(match ordering {
+            Less => first < second,
+            Equal => first == second,
+            Greater => first > second,
+        });
+        let composes = spec_composition_sound(shared, first, second, minimum, percent);
+        let minimum_pair = shared == MINIMUM_PAIR_FLOOR
+            && first == MINIMUM_PAIR_FLOOR + usize::from(ordering == Greater)
+            && second == MINIMUM_PAIR_FLOOR + usize::from(ordering == Less)
+            && minimum == MINIMUM_PAIR_FLOOR;
+        kani::cover!(composes && minimum_pair && percent == PERCENT);
+        kani::cover!(!composes && percent == 0);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn composition_respects_sample_and_ratio_without_overflow() {
+        composition_partition(core::cmp::Ordering::Less);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn composition_respects_sample_and_ratio_when_the_samples_are_equal() {
+        composition_partition(core::cmp::Ordering::Equal);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn composition_respects_sample_and_ratio_when_the_second_is_smaller() {
+        composition_partition(core::cmp::Ordering::Greater);
     }
 
     #[cfg(kani)]
@@ -542,7 +572,7 @@ mod tests {
             for first in COUNTS {
                 for second in COUNTS {
                     for minimum in [0, 1, 2, 3] {
-                        for percent in [0, 1, 50, 99, 100, 101] {
+                        for percent in [0, 1, 50, 99, 100, 101, 255, 256, usize::MAX] {
                             proofs::spec_composition(shared, first, second, minimum, percent);
                         }
                     }

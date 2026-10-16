@@ -10,6 +10,7 @@ pub mod change;
 pub mod checks;
 mod container;
 pub mod contrast_refinement;
+pub mod elapsed_refinement;
 pub mod environment;
 pub mod ignore_audit;
 pub mod input_audit;

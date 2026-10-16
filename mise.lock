@@ -351,6 +351,72 @@ checksum = "sha256:4928c399ae78ee82f99139a5629077b8d90a58599d834584dd4e613cb60c8
 url = "https://github.com/dalance/procs/releases/download/v0.14.12/procs-v0.14.12-x86_64-windows.zip"
 url_api = "https://api.github.com/repos/dalance/procs/releases/assets/457526458"
 
+[[tools."aqua:docker/buildx"]]
+version = "0.38.0"
+backend = "aqua:docker/buildx"
+specifiers = ["0.38.0"]
+
+[tools."aqua:docker/buildx"."platforms.linux-arm64"]
+checksum = "sha256:38e890e1a162bfdbf32fbe91404991dc4fc28e55b0de901b34374a061bab4d2c"
+url = "https://github.com/docker/buildx/releases/download/v0.38.0/buildx-v0.38.0.linux-arm64"
+url_api = "https://api.github.com/repos/docker/buildx/releases/assets/619849315"
+provenance = "cosign"
+
+[tools."aqua:docker/buildx"."platforms.linux-arm64-musl"]
+checksum = "sha256:38e890e1a162bfdbf32fbe91404991dc4fc28e55b0de901b34374a061bab4d2c"
+url = "https://github.com/docker/buildx/releases/download/v0.38.0/buildx-v0.38.0.linux-arm64"
+url_api = "https://api.github.com/repos/docker/buildx/releases/assets/619849315"
+provenance = "cosign"
+
+[tools."aqua:docker/buildx"."platforms.linux-x64"]
+checksum = "sha256:4fe4cc38adf48169132749b6ca22a990928db0118e3407584ee553723115d287"
+url = "https://github.com/docker/buildx/releases/download/v0.38.0/buildx-v0.38.0.linux-amd64"
+url_api = "https://api.github.com/repos/docker/buildx/releases/assets/619849327"
+provenance = "cosign"
+
+[tools."aqua:docker/buildx"."platforms.linux-x64-baseline"]
+checksum = "sha256:4fe4cc38adf48169132749b6ca22a990928db0118e3407584ee553723115d287"
+url = "https://github.com/docker/buildx/releases/download/v0.38.0/buildx-v0.38.0.linux-amd64"
+url_api = "https://api.github.com/repos/docker/buildx/releases/assets/619849327"
+provenance = "cosign"
+
+[tools."aqua:docker/buildx"."platforms.linux-x64-musl"]
+checksum = "sha256:4fe4cc38adf48169132749b6ca22a990928db0118e3407584ee553723115d287"
+url = "https://github.com/docker/buildx/releases/download/v0.38.0/buildx-v0.38.0.linux-amd64"
+url_api = "https://api.github.com/repos/docker/buildx/releases/assets/619849327"
+provenance = "cosign"
+
+[tools."aqua:docker/buildx"."platforms.linux-x64-musl-baseline"]
+checksum = "sha256:4fe4cc38adf48169132749b6ca22a990928db0118e3407584ee553723115d287"
+url = "https://github.com/docker/buildx/releases/download/v0.38.0/buildx-v0.38.0.linux-amd64"
+url_api = "https://api.github.com/repos/docker/buildx/releases/assets/619849327"
+provenance = "cosign"
+
+[tools."aqua:docker/buildx"."platforms.macos-arm64"]
+checksum = "sha256:85989b895add5f119c1ccf8eada2f6892fc33ccf16bd8917638eae404ef26344"
+url = "https://github.com/docker/buildx/releases/download/v0.38.0/buildx-v0.38.0.darwin-arm64"
+url_api = "https://api.github.com/repos/docker/buildx/releases/assets/620148395"
+
+[tools."aqua:docker/buildx"."platforms.macos-x64"]
+checksum = "sha256:b123dc6fb51f88e47d37223938e2acd66edec73105459f65f19f15cc912ee559"
+url = "https://github.com/docker/buildx/releases/download/v0.38.0/buildx-v0.38.0.darwin-amd64"
+url_api = "https://api.github.com/repos/docker/buildx/releases/assets/620148407"
+
+[tools."aqua:docker/buildx"."platforms.macos-x64-baseline"]
+checksum = "sha256:b123dc6fb51f88e47d37223938e2acd66edec73105459f65f19f15cc912ee559"
+url = "https://github.com/docker/buildx/releases/download/v0.38.0/buildx-v0.38.0.darwin-amd64"
+url_api = "https://api.github.com/repos/docker/buildx/releases/assets/620148407"
+
+[tools."aqua:docker/buildx"."platforms.windows-x64"]
+checksum = "sha256:b39784aed5b3f9b24d1971bbcbad8c8206033fa63ed4fea82c9141728fe0ea26"
+url = "https://github.com/docker/buildx/releases/download/v0.38.0/buildx-v0.38.0.windows-amd64.exe"
+url_api = "https://api.github.com/repos/docker/buildx/releases/assets/620148408"
+
+[tools."aqua:docker/buildx"."platforms.windows-x64-baseline"]
+checksum = "sha256:b39784aed5b3f9b24d1971bbcbad8c8206033fa63ed4fea82c9141728fe0ea26"
+url = "https://github.com/docker/buildx/releases/download/v0.38.0/buildx-v0.38.0.windows-amd64.exe"
+url_api = "https://api.github.com/repos/docker/buildx/releases/assets/620148408"
+
 [[tools.ast-grep]]
 version = "0.45.3"
 backend = "aqua:ast-grep/ast-grep"

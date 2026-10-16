@@ -961,7 +961,9 @@ pub fn verify_ci(root: &Path) -> Result<()> {
 }
 
 fn verify_campaign(root: &Path, campaign: ProofCampaign) -> Result<()> {
-    crate::quality::with_locked_workspaces(root, || verify_campaign_prepared(root, campaign))
+    crate::elapsed_refinement::with_source(root, || {
+        crate::quality::with_locked_workspaces(root, || verify_campaign_prepared(root, campaign))
+    })
 }
 
 fn verify_campaign_prepared(root: &Path, campaign: ProofCampaign) -> Result<()> {
@@ -2261,8 +2263,11 @@ pub fn validate_miri_batch(output: &str, expected: &[MiriTest], elapsed_ms: u64)
 }
 
 fn miri_elapsed_millis(elapsed: std::time::Duration) -> Result<u64> {
-    proof_budget_rules::elapsed_millis(elapsed.as_nanos())
-        .context("Miri host elapsed milliseconds overflow")
+    proof_budget_rules::elapsed_millis(
+        elapsed.as_millis(),
+        elapsed.subsec_nanos() % proof_budget_rules::NANOS_PER_MILLI,
+    )
+    .context("Miri host elapsed milliseconds overflow")
 }
 
 /// The wall time of each test binary that `cargo test` reports, in milliseconds.
@@ -3021,6 +3026,10 @@ mod tests {
         for (elapsed, expected) in [
             (Duration::ZERO, 0),
             (Duration::from_nanos(1), 1),
+            (Duration::from_nanos(999_999), 1),
+            (Duration::from_millis(1), 1),
+            (Duration::from_nanos(999_999_999), 1_000),
+            (Duration::from_secs(1), 1_000),
             (Duration::from_secs(30), 30_000),
             (Duration::from_secs(30) + Duration::from_nanos(1), 30_001),
             (Duration::from_millis(u64::MAX), u64::MAX),
@@ -3031,6 +3040,7 @@ mod tests {
             miri_elapsed_millis(Duration::from_millis(u64::MAX) + Duration::from_nanos(1)).is_err()
         );
         assert!(miri_elapsed_millis(Duration::MAX).is_err());
+        assert!(miri_elapsed_millis(Duration::from_secs(u64::MAX / 1_000 + 1)).is_err());
         Ok(())
     }
 

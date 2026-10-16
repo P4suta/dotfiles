@@ -1398,6 +1398,10 @@ fn write_evidence_fixture(root: &std::path::Path) -> Result<()> {
     fs::create_dir_all(root.join("tests"))?;
     let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../platform");
     let rules = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rules");
+    fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock"),
+        root.join("Cargo.lock"),
+    )?;
     fs::write(
         root.join("Cargo.toml"),
         format!(
@@ -1470,6 +1474,7 @@ fn committed_evidence_fixture(root: &std::path::Path) -> Result<String> {
         vec![
             "add",
             "Cargo.toml",
+            "Cargo.lock",
             "tests/gate.rs",
             "tests/support/fixture_process.rs",
             "src/main.rs",

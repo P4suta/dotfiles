@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
+use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -25,6 +26,10 @@ const NATIVE_READBACK: &str = "inherited-native-tools.json";
 const STAGED_READBACK: &str = "inherited-staged-tools.json";
 const PRIVATE_DATA: &str = ".local/share/mise";
 const DOCKER_USER_DIRECTORY: &str = ".docker";
+const DOCKER_PLUGIN_DIRECTORY: &str = "cli-plugins";
+const BUILDX_TOOL: &str = "aqua:docker/buildx";
+const BUILDX_PROGRAM: &str = "docker-cli-plugin-docker-buildx";
+const BUILDX_PLUGIN: &str = "docker-buildx";
 #[cfg(unix)]
 const POWERSHELL_USER_DIRECTORIES: [&str; 2] = [".local/share/powershell", ".config/powershell"];
 const ABSENT_SYSTEM_INSTALLS: &str = "absent-system-installs";
@@ -454,6 +459,7 @@ pub struct CodeEnvironment {
     configuration: PathBuf,
     inputs: BTreeMap<PathBuf, Vec<u8>>,
     variables: BTreeMap<OsString, OsString>,
+    docker_plugin: Option<(PathBuf, [u8; 32])>,
 }
 
 #[derive(Default)]
@@ -629,6 +635,7 @@ impl CodeEnvironment {
             configuration: project.join(MISE_CONFIG),
             inputs,
             variables: BTreeMap::new(),
+            docker_plugin: None,
         };
         environment.seed(installed, &home, &temporary, &empty)?;
         for name in [
@@ -702,6 +709,14 @@ impl CodeEnvironment {
     /// Refuses invalid project pins, bootstrap identity, and unresolved installations.
     pub fn build(root: &Path, installed: &Installations) -> Result<Self> {
         let mut preparation = Self::prepare(root, installed)?;
+        let tools: BTreeMap<String, Vec<Installation>> = serde_json::from_slice(
+            &preparation
+                .environment
+                .output(&preparation.mise, &["ls", "--local", "--json"])?,
+        )?;
+        if tools.contains_key(BUILDX_TOOL) {
+            preparation.admit_inherited(installed)?;
+        }
         preparation.finish(installed, false)?.into_environment()
     }
     fn seed(
@@ -1107,6 +1122,14 @@ impl CodeEnvironment {
             project_inputs(project)? == self.inputs,
             "private project tool inputs changed"
         );
+        if let Some((path, digest)) = &self.docker_plugin {
+            ensure!(
+                fs::symlink_metadata(path)?.file_type().is_file()
+                    && canonical(path)? == *path
+                    && Sha256::digest(fs::read(path)?)[..] == digest[..],
+                "owned Docker Buildx plugin changed"
+            );
+        }
         Ok(())
     }
 
@@ -1181,6 +1204,7 @@ impl ResolvedCode<'_> {
             configuration: std::mem::take(&mut self.environment.configuration),
             inputs: std::mem::take(&mut self.environment.inputs),
             variables: std::mem::take(&mut self.environment.variables),
+            docker_plugin: self.environment.docker_plugin.take(),
         })
     }
 }
@@ -1268,8 +1292,82 @@ impl CodePreparation {
             &serde_json::from_slice(&staged)?,
             &self.environment.configuration,
         )?;
+        if let Some(versions) = inherited.tools.get(BUILDX_TOOL) {
+            let request = format!("{BUILDX_TOOL}@{}", versions[0].version);
+            let paths = self
+                .environment
+                .output(&self.mise, &["bin-paths", &request])?;
+            let directories = std::str::from_utf8(&paths)?
+                .lines()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>();
+            self.stage_docker_plugin(&inherited, &directories)?;
+        }
         self.environment.require_current()?;
         self.inherited = Some(inherited);
+        Ok(())
+    }
+
+    fn stage_docker_plugin(
+        &mut self,
+        inherited: &InheritedTools,
+        directories: &[PathBuf],
+    ) -> Result<()> {
+        require_inherited_pins(&inherited.tools, &self.environment.configuration)?;
+        inherited.require_native_storage()?;
+        let [tool] = inherited
+            .tools
+            .get(BUILDX_TOOL)
+            .context("missing Buildx admission")?
+            .as_slice()
+        else {
+            anyhow::bail!("ambiguous Buildx admission");
+        };
+        let installation = canonical(&tool.install_path)?;
+        let program = format!("{BUILDX_PROGRAM}{}", std::env::consts::EXE_SUFFIX);
+        let mut sources = Vec::new();
+        for directory in directories {
+            ensure!(directory.is_absolute(), "Buildx bin directory is relative");
+            let directory = canonical(directory)?;
+            ensure!(
+                directory.starts_with(&installation),
+                "Buildx bin directory escaped its admitted installation"
+            );
+            let source = directory.join(&program);
+            if source.try_exists()? {
+                ensure!(
+                    fs::symlink_metadata(&source)?.file_type().is_file(),
+                    "Buildx plugin is not a regular file"
+                );
+                sources.push(source);
+            }
+        }
+        sources.sort();
+        sources.dedup();
+        let [source] = sources.as_slice() else {
+            anyhow::bail!("Buildx must resolve to one admitted executable");
+        };
+        let before = Sha256::digest(fs::read(source)?);
+        let home = self
+            .environment
+            .scope
+            .as_ref()
+            .context("code environment ownership was transferred")?
+            .path()
+            .join("home");
+        let directory = home
+            .join(DOCKER_USER_DIRECTORY)
+            .join(DOCKER_PLUGIN_DIRECTORY);
+        fs::create_dir(&directory)?;
+        let destination =
+            directory.join(format!("{BUILDX_PLUGIN}{}", std::env::consts::EXE_SUFFIX));
+        copy_bootstrap(source, &destination)?;
+        ensure!(
+            Sha256::digest(fs::read(&destination)?) == before
+                && Sha256::digest(fs::read(source)?) == before,
+            "Buildx bytes changed during staging"
+        );
+        self.environment.docker_plugin = Some((canonical(&destination)?, before.into()));
         Ok(())
     }
 
@@ -1453,6 +1551,9 @@ impl CodePreparation {
             .collect::<Vec<_>>();
         if let Some(bootstrap) = self.mise.parent() {
             paths.push(bootstrap.to_owned());
+        }
+        if let Some((path, _)) = &self.environment.docker_plugin {
+            paths.push(path.clone());
         }
         if let Some(links) = &self.links {
             paths.push(links.data.join("installs"));
@@ -2161,6 +2262,7 @@ mod native_path_tests {
             configuration: canonical(&project.join(MISE_CONFIG))?,
             inputs,
             variables: BTreeMap::new(),
+            docker_plugin: None,
             scope: Some(scope),
         };
         environment.seed(&installed, &home, &temporary, &empty)?;
@@ -2217,6 +2319,7 @@ mod native_path_tests {
             configuration: canonical(&project.join(MISE_CONFIG))?,
             inputs,
             variables: BTreeMap::new(),
+            docker_plugin: None,
             scope: Some(scope),
         };
         environment.require_current()?;
@@ -2287,6 +2390,120 @@ mod native_path_tests {
         Ok(())
     }
 
+    fn copied_project_inputs(root: &Path, project: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>> {
+        let mut inputs = BTreeMap::new();
+        for name in PROJECT_INPUTS {
+            let bytes = name.as_bytes().to_vec();
+            fs::write(root.join(name), &bytes)?;
+            fs::write(project.join(name), &bytes)?;
+            inputs.insert(PathBuf::from(name), bytes);
+        }
+        Ok(inputs)
+    }
+
+    #[test]
+    fn docker_plugin_staging_preserves_isolation_and_refuses_changed_material() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let scope = tempfile::tempdir()?;
+        let project = scope.path().join(PRIVATE_PROJECT);
+        let home = scope.path().join("home");
+        fs::create_dir_all(home.join(DOCKER_USER_DIRECTORY))?;
+        fs::create_dir(&project)?;
+        let inputs = copied_project_inputs(root.path(), &project)?;
+        let installed = nested_installations_fixture(root.path())?;
+        let installation = installed.data.join("installs/buildx/0.38.0");
+        fs::create_dir_all(&installation)?;
+        let source = installation.join(format!("{BUILDX_PROGRAM}{}", std::env::consts::EXE_SUFFIX));
+        fs::write(&source, b"exact admitted plugin")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(&source, fs::Permissions::from_mode(0o755))?;
+        }
+        fs::write(
+            installation.join("config.json"),
+            b"native credential sentinel",
+        )?;
+        let configuration = canonical(&project.join(MISE_CONFIG))?;
+        let mut inherited = InheritedTools {
+            tools: BTreeMap::from([(
+                BUILDX_TOOL.into(),
+                vec![Installation {
+                    version: "0.38.0".into(),
+                    requested_version: "0.38.0".into(),
+                    install_path: canonical(&installation)?,
+                    source: Source {
+                        r#type: MISE_CONFIG.into(),
+                        path: configuration.clone(),
+                    },
+                    installed: true,
+                    active: true,
+                    symlinked_to: None,
+                }],
+            )]),
+            lookups: vec![InstallationLookup::capture(
+                &installed.data.join("installs"),
+            )?],
+        };
+        let mut preparation = CodePreparation {
+            mise: scope.path().join("bootstrap/mise"),
+            base: Vec::new(),
+            links: None,
+            inherited: None,
+            environment: CodeEnvironment {
+                scope: Some(scope),
+                root: canonical(root.path())?,
+                configuration,
+                inputs,
+                variables: BTreeMap::new(),
+                docker_plugin: None,
+            },
+        };
+        inherited.tools.get_mut(BUILDX_TOOL).unwrap()[0].requested_version = "wrong".into();
+        assert!(
+            preparation
+                .stage_docker_plugin(&inherited, std::slice::from_ref(&installation))
+                .is_err()
+        );
+        inherited.tools.get_mut(BUILDX_TOOL).unwrap()[0].requested_version = "0.38.0".into();
+        assert!(
+            preparation
+                .stage_docker_plugin(&inherited, &[root.path().to_owned()])
+                .is_err()
+        );
+        preparation.stage_docker_plugin(&inherited, &[installation])?;
+        let docker = home.join(DOCKER_USER_DIRECTORY);
+        let plugin = canonical(
+            &docker
+                .join(DOCKER_PLUGIN_DIRECTORY)
+                .join(format!("{BUILDX_PLUGIN}{}", std::env::consts::EXE_SUFFIX)),
+        )?;
+        assert_eq!(fs::read(&plugin)?, b"exact admitted plugin");
+        assert!(preparation.immutable_paths().contains(&plugin));
+        assert!(!preparation.immutable_paths().contains(&docker));
+        assert!(!docker.join("config.json").exists());
+        fs::create_dir(docker.join("buildx"))?;
+        fs::write(docker.join("buildx/state"), b"writable plugin state")?;
+        preparation.environment.require_current()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(fs::metadata(&plugin)?.permissions().mode() & 0o777, 0o755);
+        }
+        fs::write(&plugin, b"modified owned plugin")?;
+        assert!(preparation.environment.require_current().is_err());
+        assert_eq!(fs::read(&source)?, b"exact admitted plugin");
+        fs::write(&plugin, b"exact admitted plugin")?;
+        let environment = ResolvedCode {
+            environment: &mut preparation.environment,
+        }
+        .into_environment()?;
+        environment.require_current()?;
+        fs::write(&plugin, b"changed after ownership transfer")?;
+        assert!(environment.require_current().is_err());
+        Ok(())
+    }
+
     #[test]
     fn native_health_and_code_share_the_existing_cargo_target() -> Result<()> {
         let root = tempfile::tempdir()?;
@@ -2312,6 +2529,7 @@ mod native_path_tests {
             }),
             inherited: None,
             environment: CodeEnvironment {
+                docker_plugin: None,
                 root: canonical(root.path())?,
                 configuration: canonical(&project.join(MISE_CONFIG))?,
                 inputs,
