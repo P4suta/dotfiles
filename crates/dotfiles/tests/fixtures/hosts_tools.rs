@@ -1,5 +1,9 @@
 //! Stands in for `tailscale` and `domyjob`, chosen by the executable's name.
 
+const MISSING_JOB: &str = "domyjob: remote node refused the request: MissingJob";
+const MISSING_CONTEXT: &str =
+    "domyjob node: the job identifier is absent or its record is incomplete";
+
 fn barrier(variable: &str, alias: &str) {
     if let Ok(path) = std::env::var(variable) {
         let path = std::path::Path::new(&path);
@@ -97,6 +101,20 @@ fn main() {
         "status" if alias.ends_with(":inodes") => println!("{alias} finished succeeded"),
         "status" => {
             match interruption {
+                "missing" | "missing-success" | "missing-prefix" | "missing-suffix"
+                | "missing-followed" | "missing-blank" => {
+                    eprintln!("{MISSING_CONTEXT}");
+                    match interruption {
+                        "missing-prefix" => eprintln!("prefix {MISSING_JOB}"),
+                        "missing-suffix" => eprintln!("{MISSING_JOB} suffix"),
+                        "missing-followed" => {
+                            eprintln!("{MISSING_JOB}\nSSH status connection timed out")
+                        }
+                        "missing-blank" => eprintln!("{MISSING_JOB}\n"),
+                        _ => eprintln!("{MISSING_JOB}"),
+                    }
+                    std::process::exit(i32::from(interruption != "missing-success"));
+                }
                 "status" => {
                     eprintln!("SSH status connection timed out");
                     std::process::exit(1);

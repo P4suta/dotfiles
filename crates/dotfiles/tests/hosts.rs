@@ -2692,6 +2692,106 @@ fn supervisor_terminals_and_status_contradictions_require_fresh_stage_evidence()
 }
 
 #[test]
+fn missing_remote_jobs_require_distinct_fresh_evidence() -> Result<()> {
+    use sha2::{Digest as _, Sha256};
+
+    for recovery in [false, true] {
+        let fixture = RemoteCheck::new()?;
+        let pending = fixture.root.join(".git/hosts-pending/linux.json");
+        let history_path = fixture.root.join(".git/hosts-pending/linux.history.json");
+        if recovery {
+            let interrupted = fixture
+                .command(&fixture.root, "status", VALID_STAGES)?
+                .output()?;
+            assert!(!interrupted.status.success());
+            let previous = candidate_record(
+                &fixture.root,
+                "linux",
+                &git(&fixture.root, &["rev-parse", "HEAD^{tree}"])?,
+                0,
+            )?;
+            git(
+                &fixture.root,
+                &[
+                    "notes",
+                    "--ref",
+                    dotfiles::hosts::NOTES,
+                    "append",
+                    "-m",
+                    &previous,
+                    "HEAD",
+                ],
+            )?;
+        }
+        let notes_before = git(
+            &fixture.root,
+            &[
+                "for-each-ref",
+                "--format=%(objectname)",
+                dotfiles::hosts::NOTES,
+            ],
+        )?;
+        let missing = fixture
+            .command(&fixture.root, "missing", VALID_STAGES)?
+            .output()?;
+        assert!(!missing.status.success());
+        assert!(
+            String::from_utf8_lossy(&missing.stderr)
+                .contains("unverified history blocks old credit")
+        );
+        let execution: serde_json::Value = serde_json::from_slice(&fs::read(&pending)?)?;
+        assert_eq!(execution["state"], "unverified");
+        assert_eq!(
+            git(
+                &fixture.root,
+                &[
+                    "for-each-ref",
+                    "--format=%(objectname)",
+                    dotfiles::hosts::NOTES
+                ]
+            )?,
+            notes_before
+        );
+        assert!(require_admission(&fixture.root, "HEAD").is_err());
+        let attempted = fs::read_to_string(&fixture.executions)?;
+        let ids: Vec<_> = attempted.lines().collect();
+        assert_eq!(ids.len(), 1, "recovery must not submit another job");
+        let history = fs::read(&history_path)?;
+        let records: Vec<serde_json::Value> = serde_json::from_slice(&history)?;
+        assert_eq!(records.len(), 1);
+        assert!(records[0]["status"].is_null());
+        assert_eq!(
+            records[0]["execution"]["submission"],
+            execution["submission"]
+        );
+        assert_eq!(records[0]["cutoff"], u64::from(recovery));
+        let retained = format!(
+            "{}\ndomyjob node: the job identifier is absent or its record is incomplete\ndomyjob: remote node refused the request: MissingJob\n",
+            ids[0]
+        );
+        assert_eq!(
+            records[0]["output_hash"],
+            Sha256::digest(retained.as_bytes())
+                .iter()
+                .fold(String::new(), |mut text, byte| {
+                    write!(&mut text, "{byte:02x}").unwrap();
+                    text
+                })
+        );
+        fixture.passing_check()?;
+        require_admission(&fixture.root, "HEAD")?;
+        assert!(!pending.exists());
+        assert_eq!(fs::read(&history_path)?, history);
+        let fresh = fs::read_to_string(&fixture.executions)?;
+        let fresh_ids: Vec<_> = fresh.lines().collect();
+        assert_eq!(fresh_ids.len(), 2);
+        assert_eq!(fresh_ids[0], ids[0]);
+        assert_ne!(fresh_ids[0], fresh_ids[1]);
+    }
+    Ok(())
+}
+
+#[test]
 fn interrupted_remote_checks_resume_the_accepted_job_before_another_execution() -> Result<()> {
     if incident_fixture::run(
         "interrupted_remote_checks_resume_the_accepted_job_before_another_execution",
@@ -2709,6 +2809,11 @@ fn interrupted_remote_checks_resume_the_accepted_job_before_another_execution() 
     for interruption in [
         "submission",
         "status",
+        "missing-success",
+        "missing-prefix",
+        "missing-suffix",
+        "missing-followed",
+        "missing-blank",
         "unknown",
         "finished-unknown",
         "logs",

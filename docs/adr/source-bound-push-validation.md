@@ -45,6 +45,12 @@ Its cutoff blocks earlier credit for the entire OS family until a newer actual e
 This preserves the existing unverified-order decision without treating an obsolete hash algorithm as proof of success.
 Unknown explicit schemas and legacy active submissions are refused rather than resubmitted.
 Appending another terminal failure preserves the existing history bytes and order.
+An unsuccessful status request whose final line is exactly domyjob's `MissingJob` refusal enters that same unverified history with no exit-status evidence and the complete observed output digest.
+This boundary trusts the installed domyjob client to authenticate its node and emit that refusal for an absent or incomplete job record.
+Other transport failures, successful requests, and similar text retain the pending execution.
+The unchanged `report_evidence` and `after_unverified` rules reject missing status evidence and block old credit; their Kani proofs cover those decisions, while CLI fault-injection tests cover the external response and persisted recovery.
+Those tests do not establish remote job absence independently of domyjob, and a change to its response protocol requires revisiting this boundary.
+Recovery grants no success, preserves existing notes and history, and requires a distinct actual execution before admission.
 After a new execution passes, subsequent matching candidates can reuse that verified result again.
 The workflow matrix must retain Linux so the proof suite participates in admission.
 The ordinary Rust checks discover every independent Cargo workspace from tracked manifests and validate every lockfile with Cargo before the expensive proof and benchmark stages.

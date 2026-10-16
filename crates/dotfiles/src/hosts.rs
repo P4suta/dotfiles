@@ -30,6 +30,7 @@ const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
 const PROFILE_ROOT: &str = ".chezmoiroot";
 const PROFILE_RUNTIME: &str = "crates/dotfiles/Cargo.toml";
 const JOB_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const MISSING_JOB: &str = "domyjob: remote node refused the request: MissingJob";
 const REQUEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const REQUEST_LIMIT: Duration = Duration::from_secs(300);
 const INPUT_SCHEMA: u32 = 3;
@@ -2042,6 +2043,10 @@ fn wait_job(
         request.args(["status", reference]);
         let (status, current) = job_output(request, Some(REQUEST_LIMIT))
             .with_context(|| format!("inspect {reference} with `domyjob status {reference}`"))?;
+        if !status.success() && current.lines().next_back() == Some(MISSING_JOB) {
+            text.push_str(&current);
+            return Ok((None, text));
+        }
         ensure!(status.success(), "{reference}: read job status: {current}");
         let state_prefix = format!("{reference} ");
         let replies: Vec<_> = current
