@@ -30,50 +30,116 @@ const NU_BARE_COMMAND_END: &[u8] = b" prompt --continuation";
 const ZSH_COMMAND_START: &[u8] = b"PROMPT2=\"$(";
 const ZSH_COMMAND_END: &[u8] = b" prompt --continuation)\"";
 
-fn line(input: &[u8], start: usize) -> Option<(&[u8], usize)> {
-    let remaining = input.get(start..)?;
-    let length = remaining.iter().position(|byte| *byte == b'\n');
-    match length {
-        Some(length) => Some((remaining.get(..length)?, start + length + 1)),
-        None => Some((remaining, input.len())),
-    }
+const fn byte_at(input: &[u8], index: usize) -> Option<u8> {
+    let Some((_, tail)) = input.split_at_checked(index) else {
+        return None;
+    };
+    tail.first().copied()
 }
 
-fn command(shell: Shell, line: &[u8]) -> bool {
+const fn line(input: &[u8], start: usize) -> (usize, usize) {
+    let mut end = start;
+    while end < input.len() {
+        if matches!(byte_at(input, end), Some(b'\n')) {
+            return (end, end + 1);
+        }
+        end += 1;
+    }
+    (end, end)
+}
+
+const fn span_is(input: &[u8], start: usize, end: usize, expected: &[u8]) -> bool {
+    if !matches!(end.checked_sub(start), Some(length) if length == expected.len()) {
+        return false;
+    }
+    let mut index = 0;
+    while index < expected.len() {
+        if !matches!(
+            (byte_at(input, start + index), byte_at(expected, index)),
+            (Some(actual), Some(expected)) if actual == expected
+        ) {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+const fn program_range(
+    input: &[u8],
+    start: usize,
+    end: usize,
+    prefix: &[u8],
+    suffix: &[u8],
+) -> Option<Range<usize>> {
+    let Some(program_start) = start.checked_add(prefix.len()) else {
+        return None;
+    };
+    let Some(program_end) = end.checked_sub(suffix.len()) else {
+        return None;
+    };
+    if !span_is(input, start, program_start, prefix) || !span_is(input, program_end, end, suffix) {
+        return None;
+    }
+    Some(program_start..program_end)
+}
+
+const fn command(shell: Shell, input: &[u8], start: usize, end: usize) -> bool {
     match shell {
-        Shell::Nu => nu_command(line),
+        Shell::Nu => nu_command(input, start, end),
         Shell::Zsh => {
-            let Some(program) = line
-                .strip_prefix(ZSH_COMMAND_START)
-                .and_then(|line| line.strip_suffix(ZSH_COMMAND_END))
+            let Some(program) =
+                program_range(input, start, end, ZSH_COMMAND_START, ZSH_COMMAND_END)
             else {
                 return false;
             };
-            !program.is_empty()
-                && program.iter().all(|byte| {
-                    !matches!(byte, 0 | b'\r' | b'\n' | b'\"' | b'$' | b'`' | b'(' | b')')
-                })
+            let mut index = program.start;
+            let mut nonempty = false;
+            while index < program.end {
+                if matches!(
+                    byte_at(input, index),
+                    Some(0 | b'\r' | b'\n' | b'\"' | b'$' | b'`' | b'(' | b')')
+                ) {
+                    return false;
+                }
+                nonempty = true;
+                index += 1;
+            }
+            nonempty
         }
     }
 }
 
-fn nu_command(line: &[u8]) -> bool {
-    if let Some(program) = line
-        .strip_prefix(NU_COMMAND_START)
-        .and_then(|line| line.strip_suffix(NU_COMMAND_END))
-    {
-        return !program.is_empty()
-            && program
-                .iter()
-                .all(|byte| !matches!(byte, 0 | b'\r' | b'\n' | b'\''));
+const fn nu_command(input: &[u8], start: usize, end: usize) -> bool {
+    let (program, quoted) =
+        if let Some(program) = program_range(input, start, end, NU_COMMAND_START, NU_COMMAND_END) {
+            (program, true)
+        } else if let Some(program) = program_range(
+            input,
+            start,
+            end,
+            NU_BARE_COMMAND_START,
+            NU_BARE_COMMAND_END,
+        ) {
+            (program, false)
+        } else {
+            return false;
+        };
+    let mut index = program.start;
+    let mut nonempty = false;
+    while index < program.end {
+        let byte = byte_at(input, index);
+        if if quoted {
+            matches!(byte, Some(0 | b'\r' | b'\n' | b'\''))
+        } else {
+            !matches!(byte, Some(byte) if nu_bare_path_byte(byte))
+        } {
+            return false;
+        }
+        nonempty = true;
+        index += 1;
     }
-    let Some(program) = line
-        .strip_prefix(NU_BARE_COMMAND_START)
-        .and_then(|line| line.strip_suffix(NU_BARE_COMMAND_END))
-    else {
-        return false;
-    };
-    !program.is_empty() && program.iter().copied().all(nu_bare_path_byte)
+    nonempty
 }
 
 const fn nu_bare_path_byte(byte: u8) -> bool {
@@ -82,25 +148,48 @@ const fn nu_bare_path_byte(byte: u8) -> bool {
 
 /// The unique eager continuation assignment in the pinned Starship generator.
 #[must_use]
-pub fn continuation(shell: Shell, input: &[u8]) -> Option<Range<usize>> {
+pub const fn continuation(shell: Shell, input: &[u8]) -> Option<Range<usize>> {
     let mut start = 0;
     let mut selected = None;
+    let mut previous_header: Option<usize> = None;
+    let mut command_header: Option<usize> = None;
     while start < input.len() {
-        let (first, next) = line(input, start)?;
-        let end = match shell {
-            Shell::Nu if first == NU_CONTINUATION_START => {
-                let (expression, following) = line(input, next)?;
-                let (last, end) = line(input, following)?;
-                (command(shell, expression) && last == NU_CONTINUATION_END).then_some(end)
+        let (end, next) = line(input, start);
+        let candidate = match shell {
+            Shell::Nu => {
+                let candidate = if span_is(input, start, end, NU_CONTINUATION_END) {
+                    match command_header {
+                        Some(header) => Some(header..next),
+                        None => None,
+                    }
+                } else {
+                    None
+                };
+                command_header = if command(shell, input, start, end) {
+                    previous_header
+                } else {
+                    None
+                };
+                previous_header = if span_is(input, start, end, NU_CONTINUATION_START) {
+                    Some(start)
+                } else {
+                    None
+                };
+                candidate
             }
-            Shell::Zsh if command(shell, first) => Some(next),
-            _ => None,
+            Shell::Zsh => {
+                if command(shell, input, start, end) {
+                    Some(start..next)
+                } else {
+                    None
+                }
+            }
         };
-        if let Some(end) = end {
+        if let Some(candidate) = candidate {
             if selected.is_some() {
                 return None;
             }
-            selected = Some(start..end);
+            selected = Some(candidate);
         }
         start = next;
     }
@@ -176,23 +265,132 @@ mod proofs {
     #[cfg(kani)]
     const ZSH: &[u8; 38] = b"PROMPT2=\"$(/p prompt --continuation)\"\n";
     #[cfg(kani)]
+    const CELL_BITS: usize = 2;
+    #[cfg(kani)]
+    const CELLS_PER_BYTE: usize = u8::BITS as usize / CELL_BITS;
+    #[cfg(kani)]
+    const BYTE_VALUES: usize = u8::MAX as usize + 1;
+    #[cfg(kani)]
+    const PACKED_BYTES: usize = BYTE_VALUES / CELLS_PER_BYTE;
+    #[cfg(kani)]
+    const CELL_UNEVALUATED: u8 = 0;
+    #[cfg(kani)]
+    const CELL_REJECT: u8 = 1;
+    #[cfg(kani)]
+    const CELL_ACCEPT: u8 = 2;
+    #[cfg(kani)]
+    const CELL_INVALID: u8 = 3;
+    #[cfg(kani)]
+    const CELL_MASK: u8 = (1 << CELL_BITS) - 1;
+
+    #[cfg(kani)]
+    const fn raw_cell(cells: &[u8; PACKED_BYTES], key: u8) -> u8 {
+        let slot = key as usize / CELLS_PER_BYTE;
+        let shift = (key as usize % CELLS_PER_BYTE) * CELL_BITS;
+        (cells[slot] >> shift) & CELL_MASK
+    }
+
+    #[cfg(kani)]
+    const fn insert_cell(cells: &mut [u8; PACKED_BYTES], key: u8, actual: bool) {
+        let slot = key as usize / CELLS_PER_BYTE;
+        let shift = (key as usize % CELLS_PER_BYTE) * CELL_BITS;
+        let encoded = if actual { CELL_ACCEPT } else { CELL_REJECT };
+        let mask = CELL_MASK << shift;
+        cells[slot] = (cells[slot] & !mask) | (encoded << shift);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn continuation_cell_storage_preserves_key_identity_and_other_cells() {
+        let original: [u8; PACKED_BYTES] = kani::any();
+        let key: u8 = kani::any();
+        let other: u8 = kani::any();
+        let actual: bool = kani::any();
+        let mut updated = original;
+        insert_cell(&mut updated, key, actual);
+        assert_eq!(
+            raw_cell(&updated, key),
+            if actual { CELL_ACCEPT } else { CELL_REJECT }
+        );
+        if other != key {
+            assert_eq!(raw_cell(&updated, other), raw_cell(&original, other));
+        }
+        kani::cover!(other == key);
+        kani::cover!(other != key);
+    }
+
+    #[cfg(kani)]
+    struct ContinuationRow {
+        offset: usize,
+        cells: [u8; PACKED_BYTES],
+    }
+
+    #[cfg(kani)]
+    const fn continuation_row<const N: usize>(
+        shell: Shell,
+        original: &[u8; N],
+        offset: usize,
+    ) -> ContinuationRow {
+        assert!(offset < N);
+        let mut cells = [CELL_UNEVALUATED; PACKED_BYTES];
+        let mut byte = 0;
+        while byte < BYTE_VALUES {
+            let evaluated_byte = byte as u8;
+            let mut input = *original;
+            input[offset] = evaluated_byte;
+            insert_cell(
+                &mut cells,
+                evaluated_byte,
+                continuation(shell, &input).is_some(),
+            );
+            byte += 1;
+        }
+        ContinuationRow { offset, cells }
+    }
+
+    #[cfg(kani)]
+    macro_rules! continuation_rows {
+        ($shell:expr, $original:ident; $($offset:literal),+ $(,)?) => {
+            [$(const { continuation_row($shell, $original, $offset) }),+]
+        };
+    }
+
+    #[cfg(kani)]
+    const NU_BARE_ROWS: [ContinuationRow; NU_BARE.len()] = continuation_rows!(Shell::Nu, NU_BARE; 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73);
+    #[cfg(kani)]
+    const NU_QUOTED_ROWS: [ContinuationRow; NU_QUOTED.len()] = continuation_rows!(Shell::Nu, NU_QUOTED; 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75);
+    #[cfg(kani)]
+    const ZSH_ROWS: [ContinuationRow; ZSH.len()] = continuation_rows!(Shell::Zsh, ZSH; 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37);
+
+    #[cfg(kani)]
+    fn evaluated_continuation(row: &ContinuationRow, offset: usize, byte: u8) -> bool {
+        assert_eq!(row.offset, offset);
+        match raw_cell(&row.cells, byte) {
+            CELL_REJECT => false,
+            CELL_ACCEPT => true,
+            CELL_UNEVALUATED => panic!("CTFE row must evaluate every admitted input"),
+            CELL_INVALID => panic!("CTFE row must contain a valid result code"),
+            _ => unreachable!(),
+        }
+    }
+
+    #[cfg(kani)]
     fn changed_continuation<const N: usize>(
         shell: Shell,
         range: Range<u8>,
         bare_nu: bool,
         original: &[u8; N],
+        rows: &[ContinuationRow; N],
     ) {
         let path = match shell {
             Shell::Nu if bare_nu => NU_CONTINUATION_START.len() + 1 + NU_BARE_COMMAND_START.len(),
             Shell::Nu => NU_CONTINUATION_START.len() + 1 + NU_COMMAND_START.len(),
             Shell::Zsh => ZSH_COMMAND_START.len(),
         };
-        let mut input = *original;
         let offset: u8 = kani::any();
         kani::assume(range.contains(&offset));
         let offset = usize::from(offset);
         let byte: u8 = kani::any();
-        input[offset] = byte;
         let retained_path = matches!(offset.checked_sub(path), Some(0 | 1));
         let path_byte = !matches!(byte, 0 | b'\r' | b'\n')
             && match shell {
@@ -205,7 +403,10 @@ mod proofs {
         } else {
             original.get(offset) == Some(&byte)
         };
-        assert_eq!(continuation(shell, &input).is_some(), expected);
+        assert_eq!(
+            evaluated_continuation(&rows[offset], offset, byte),
+            expected
+        );
         kani::cover!(expected);
         kani::cover!(!expected);
     }
@@ -216,9 +417,9 @@ mod proofs {
     fn nu_continuation_shape_bytes_zero_through_thirty_one() {
         let bare_nu: bool = kani::any();
         if bare_nu {
-            changed_continuation(Shell::Nu, 0..32, true, NU_BARE);
+            changed_continuation(Shell::Nu, 0..32, true, NU_BARE, &NU_BARE_ROWS);
         } else {
-            changed_continuation(Shell::Nu, 0..32, false, NU_QUOTED);
+            changed_continuation(Shell::Nu, 0..32, false, NU_QUOTED, &NU_QUOTED_ROWS);
         }
     }
 
@@ -228,9 +429,9 @@ mod proofs {
     fn nu_continuation_shape_bytes_thirty_two_through_sixty_three() {
         let bare_nu: bool = kani::any();
         if bare_nu {
-            changed_continuation(Shell::Nu, 32..64, true, NU_BARE);
+            changed_continuation(Shell::Nu, 32..64, true, NU_BARE, &NU_BARE_ROWS);
         } else {
-            changed_continuation(Shell::Nu, 32..64, false, NU_QUOTED);
+            changed_continuation(Shell::Nu, 32..64, false, NU_QUOTED, &NU_QUOTED_ROWS);
         }
     }
 
@@ -245,6 +446,7 @@ mod proofs {
                 64..u8::try_from(NU_BARE.len()).unwrap(),
                 true,
                 NU_BARE,
+                &NU_BARE_ROWS,
             );
         } else {
             changed_continuation(
@@ -252,6 +454,7 @@ mod proofs {
                 64..u8::try_from(NU_QUOTED.len()).unwrap(),
                 false,
                 NU_QUOTED,
+                &NU_QUOTED_ROWS,
             );
         }
     }
@@ -260,43 +463,82 @@ mod proofs {
     #[kani::proof]
     #[kani::unwind(101)]
     fn zsh_continuation_shape_bytes_zero_through_thirty_one() {
-        changed_continuation(Shell::Zsh, 0..32, false, ZSH);
+        changed_continuation(Shell::Zsh, 0..32, false, ZSH, &ZSH_ROWS);
     }
 
     #[cfg(kani)]
     #[kani::proof]
     #[kani::unwind(101)]
     fn zsh_continuation_shape_bytes_thirty_two_through_the_end() {
-        changed_continuation(Shell::Zsh, 32..u8::try_from(ZSH.len()).unwrap(), false, ZSH);
+        changed_continuation(
+            Shell::Zsh,
+            32..u8::try_from(ZSH.len()).unwrap(),
+            false,
+            ZSH,
+            &ZSH_ROWS,
+        );
     }
 
     #[cfg(kani)]
     #[kani::proof]
     #[kani::unwind(201)]
     fn continuation_requires_a_line_boundary_and_a_unique_assignment() {
-        let mut input = [0u8; NU_BARE.len() + 1];
-        input[0] = kani::any();
-        input[1..].copy_from_slice(NU_BARE);
-        assert!(continuation(Shell::Nu, &input[1..]).is_some());
-        assert_eq!(continuation(Shell::Nu, &input).is_some(), input[0] == b'\n');
-        let mut quoted_input = [0u8; NU_QUOTED.len() + 1];
-        quoted_input[0] = kani::any();
-        quoted_input[1..].copy_from_slice(NU_QUOTED);
-        assert!(continuation(Shell::Nu, &quoted_input[1..]).is_some());
+        const BARE_BOUNDARY: ContinuationRow = const {
+            let mut input = [0u8; NU_BARE.len() + 1];
+            let mut index = 0;
+            while index < NU_BARE.len() {
+                input[index + 1] = NU_BARE[index];
+                index += 1;
+            }
+            continuation_row(Shell::Nu, &input, 0)
+        };
+        const QUOTED_BOUNDARY: ContinuationRow = const {
+            let mut input = [0u8; NU_QUOTED.len() + 1];
+            let mut index = 0;
+            while index < NU_QUOTED.len() {
+                input[index + 1] = NU_QUOTED[index];
+                index += 1;
+            }
+            continuation_row(Shell::Nu, &input, 0)
+        };
+        let byte: u8 = kani::any();
+        assert!(const { continuation(Shell::Nu, NU_BARE).is_some() });
         assert_eq!(
-            continuation(Shell::Nu, &quoted_input).is_some(),
-            quoted_input[0] == b'\n'
+            evaluated_continuation(&BARE_BOUNDARY, 0, byte),
+            byte == b'\n'
         );
-        let mut duplicate = [0u8; NU_BARE.len() * 2];
-        duplicate[..NU_BARE.len()].copy_from_slice(NU_BARE);
-        duplicate[NU_BARE.len()..].copy_from_slice(NU_BARE);
-        assert!(continuation(Shell::Nu, &duplicate).is_none());
-        let mut duplicate_quoted = [0u8; NU_QUOTED.len() * 2];
-        duplicate_quoted[..NU_QUOTED.len()].copy_from_slice(NU_QUOTED);
-        duplicate_quoted[NU_QUOTED.len()..].copy_from_slice(NU_QUOTED);
-        assert!(continuation(Shell::Nu, &duplicate_quoted).is_none());
-        kani::cover!(input[0] == b'\n');
-        kani::cover!(input[0] != b'\n');
+        let quoted_byte: u8 = kani::any();
+        assert!(const { continuation(Shell::Nu, NU_QUOTED).is_some() });
+        assert_eq!(
+            evaluated_continuation(&QUOTED_BOUNDARY, 0, quoted_byte),
+            quoted_byte == b'\n'
+        );
+        assert!(
+            const {
+                let mut duplicate = [0u8; NU_BARE.len() * 2];
+                let mut index = 0;
+                while index < NU_BARE.len() {
+                    duplicate[index] = NU_BARE[index];
+                    duplicate[index + NU_BARE.len()] = NU_BARE[index];
+                    index += 1;
+                }
+                continuation(Shell::Nu, &duplicate).is_none()
+            }
+        );
+        assert!(
+            const {
+                let mut duplicate = [0u8; NU_QUOTED.len() * 2];
+                let mut index = 0;
+                while index < NU_QUOTED.len() {
+                    duplicate[index] = NU_QUOTED[index];
+                    duplicate[index + NU_QUOTED.len()] = NU_QUOTED[index];
+                    index += 1;
+                }
+                continuation(Shell::Nu, &duplicate).is_none()
+            }
+        );
+        kani::cover!(byte == b'\n');
+        kani::cover!(byte != b'\n');
     }
 
     #[cfg(kani)]
@@ -492,6 +734,7 @@ mod tests {
             (Shell::Nu, &b"    PROMPT_MULTILINE_INDICATOR: (\n        ^/path/starship;touch prompt --continuation\n    )\n"[..]),
             (Shell::Nu, &b"    PROMPT_MULTILINE_INDICATOR: (\n        ^/path/$(touch) prompt --continuation\n    )\n"[..]),
             (Shell::Zsh, &b"PROMPT2='deferred prompt'\n"[..]),
+            (Shell::Zsh, &b"PROMPT3=\"$(/native/starship prompt --continuation)\"\n"[..]),
             (Shell::Zsh, &b"PROMPT2=\"$(starship prompt --unknown)\"\n"[..]),
         ] {
             assert_eq!(continuation(shell, invalid), None);
@@ -523,6 +766,41 @@ mod tests {
         ] {
             assert_eq!(continuation(shell, input), None, "{shell:?}: {input:?}");
         }
+    }
+
+    #[test]
+    fn continuation_preserves_eof_and_the_complete_program_suffix() {
+        for (shell, script) in [
+            (Shell::Nu, &b"    PROMPT_MULTILINE_INDICATOR: (\n        ^/p prompt --continuation\n    )"[..]),
+            (Shell::Nu, &b"    PROMPT_MULTILINE_INDICATOR: (\n        ^'/p $x (q) \"r\"' prompt --continuation\n    )"[..]),
+            (Shell::Zsh, &b"PROMPT2=\"$(/path with spaces prompt --continuation)\""[..]),
+            (Shell::Zsh, &b"PROMPT2=\"$(/p prompt --continuation q prompt --continuation)\""[..]),
+        ] {
+            assert_eq!(continuation(shell, script), Some(0..script.len()));
+            let mut duplicate = script.to_vec();
+            duplicate.push(b'\n');
+            duplicate.extend_from_slice(script);
+            assert_eq!(continuation(shell, &duplicate), None);
+            for suffix in *b"x\r" {
+                let mut unknown = script.to_vec();
+                unknown.push(suffix);
+                assert_eq!(continuation(shell, &unknown), None);
+            }
+        }
+    }
+
+    #[test]
+    fn continuation_restarts_at_an_adjacent_header_without_a_final_newline() {
+        let header = b"    PROMPT_MULTILINE_INDICATOR: (\n";
+        let script =
+            b"    PROMPT_MULTILINE_INDICATOR: (\n        ^'/p' prompt --continuation\n    )";
+        let mut input = header.to_vec();
+        input.extend_from_slice(script);
+        assert_eq!(
+            continuation(Shell::Nu, &input),
+            Some(header.len()..input.len())
+        );
+        assert_eq!(continuation(Shell::Nu, header), None);
     }
 
     #[test]
