@@ -121,8 +121,13 @@ fn git_notifications_keep_owner_event_ids_and_nonfatal_worker_failures() -> Resu
 fn git_notification_queue_failures_keep_status_and_hide_private_input() -> Result<()> {
     let home = prepared_git_home()?;
     let state = home.path().join(platform::speech::STATE);
-    std::fs::create_dir_all(state.parent().context("fixture state has no parent")?)?;
-    std::fs::write(&state, "owned obstruction")?;
+    std::fs::create_dir_all(&state)?;
+    let queue = state.join("queue");
+    std::fs::write(&queue, "owned obstruction")?;
+    assert_eq!(
+        platform::speech::frequency(home.path())?,
+        rules::notification_rules::Frequency::All
+    );
     let private_input = "private operation and path";
     let output = desktop_runtime(home.path())
         .args([
@@ -142,7 +147,7 @@ fn git_notification_queue_failures_keep_status_and_hide_private_input() -> Resul
         String::from_utf8(output.stderr)?,
         "warning: could not queue the spoken notification: notification operation failed\n"
     );
-    assert_eq!(std::fs::read_to_string(state)?, "owned obstruction");
+    assert_eq!(std::fs::read_to_string(queue)?, "owned obstruction");
     Ok(())
 }
 

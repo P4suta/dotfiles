@@ -109,6 +109,59 @@ pub fn remove_native_hooks(user_directory: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Records the installed owned catalog and policy without enabling maintenance.
+///
+/// # Errors
+///
+/// Returns an error when source validation fails, native files differ, or writing the approval fails.
+pub fn install_catalog(source: &Path, user_directory: &Path, profile: Profile) -> Result<()> {
+    record_catalog(
+        user_directory,
+        &validated_catalog(source, user_directory, profile)?,
+    )
+}
+
+fn validated_catalog(
+    source: &Path,
+    user_directory: &Path,
+    profile: Profile,
+) -> Result<crate::Approved> {
+    use crate as ops;
+    ops::check_catalog(source)?;
+    let expected = profile_catalog(source, profile)?;
+    let installed = ops::catalog_owned(&user_directory.join(".agents/skills"), &expected)?;
+    ensure!(
+        expected == installed,
+        "installed skill catalog differs; review and apply only the intended native paths"
+    );
+    let policy: ops::Policy =
+        ops::read_json(&source.join("home/dot_config/skill-ops/policy.json"))?;
+    let native_policy: ops::Policy =
+        ops::read_json(&user_directory.join(".config/skill-ops/policy.json"))?;
+    ensure!(
+        policy == native_policy,
+        "installed skill operations policy differs"
+    );
+    Ok(ops::Approved {
+        catalog_hash: ops::hash(&expected)?,
+        policy_hash: ops::hash(&policy)?,
+        engine_hash: ops::engine_hash()?,
+        reviewed: ops::adoptable_revisions(
+            &expected,
+            &ops::tracked_decisions(&source.join(ops::DECISIONS))?,
+        ),
+        catalog: expected,
+    })
+}
+
+fn record_catalog(user_directory: &Path, approved: &crate::Approved) -> Result<()> {
+    crate::write_json(
+        &user_directory.join(".config/skill-ops/approved.json"),
+        approved,
+        true,
+    )
+}
+
 /// Installs `binary` as skill-ops, records the approved catalog for `profile` and policy, and registers the client hooks.
 ///
 /// # Errors
@@ -125,21 +178,7 @@ pub fn install(
     if !platform::incidents::enabled_at(user_directory) {
         return remove_native_hooks(user_directory);
     }
-    ops::check_catalog(source)?;
-    let expected = profile_catalog(source, profile)?;
-    let installed = ops::catalog_owned(&user_directory.join(".agents/skills"), &expected)?;
-    ensure!(
-        expected == installed,
-        "installed skill catalog differs; review and apply only the intended native paths"
-    );
-    let policy: ops::Policy =
-        ops::read_json(&source.join("home/dot_config/skill-ops/policy.json"))?;
-    let native_policy: ops::Policy =
-        ops::read_json(&user_directory.join(".config/skill-ops/policy.json"))?;
-    ensure!(
-        policy == native_policy,
-        "installed skill operations policy differs"
-    );
+    let approved = validated_catalog(source, user_directory, profile)?;
     ensure!(binary.is_file(), "built skill-ops executable is missing");
     let directory = user_directory.join(".local/bin");
     fs::create_dir_all(&directory)?;
@@ -153,20 +192,7 @@ pub fn install(
     )?;
     #[cfg(unix)]
     fs::File::open(&directory)?.sync_all()?;
-    ops::write_json(
-        &user_directory.join(".config/skill-ops/approved.json"),
-        &ops::Approved {
-            catalog_hash: ops::hash(&expected)?,
-            policy_hash: ops::hash(&policy)?,
-            engine_hash: ops::engine_hash()?,
-            reviewed: ops::adoptable_revisions(
-                &expected,
-                &ops::tracked_decisions(&source.join(ops::DECISIONS))?,
-            ),
-            catalog: expected,
-        },
-        true,
-    )?;
+    record_catalog(user_directory, &approved)?;
     for (client, path) in [
         ("codex", user_directory.join(".codex/hooks.json")),
         ("claude", user_directory.join(".claude/settings.json")),

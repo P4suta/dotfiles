@@ -503,12 +503,7 @@ fn run() -> Result<()> {
                 output.write_all(&[0])?;
             }
         }
-        Action::Install => {
-            let paths = skill_source_paths(&cli.root)?;
-            ensure!(!paths.is_empty(), "no skill files to install");
-            apply_sources(&cli.root, "dirs,files,symlinks", paths)
-                .context("scoped skill installation failed")?;
-        }
+        Action::Install => install_shared_skills(&cli.root)?,
         Action::InstallReviewGuard => install_review_guard(&cli.root)?,
         Action::InstallSkillOps => install_skill_ops(&cli.root)?,
     }
@@ -587,6 +582,20 @@ where
         .status()?;
     ensure!(status.success(), "chezmoi apply failed with {status}");
     Ok(())
+}
+
+fn install_shared_skills(root: &Path) -> Result<()> {
+    skill_ops::check_catalog(root)?;
+    let mut paths = skill_source_paths(root)?;
+    ensure!(!paths.is_empty(), "no skill files to install");
+    paths.push(root.join("home/dot_config/skill-ops/policy.json"));
+    apply_sources(root, "dirs,files,symlinks", paths)
+        .context("scoped skill installation failed")?;
+    skill_ops::skill_install::install_catalog(
+        root,
+        &user_directory()?,
+        xtask::profiles::native_profile()?,
+    )
 }
 
 fn install_pr_workflow(root: &Path) -> Result<()> {

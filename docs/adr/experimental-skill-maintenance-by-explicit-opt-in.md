@@ -30,6 +30,15 @@ Disabling the feature changes no historical record into a successful assessment 
 Required compiler, typing, lint, test, proof, and source verification contracts remain effective.
 Agents read the relevant skill files directly during ordinary development.
 
+Normal shared-skill installation applies the owned skills and static policy.
+It validates their exact native contents with the source profile and records the approved catalog through the existing checked hashes and tracked decisions.
+This static installation works while experimental maintenance stays off and preserves observations, history, consent markers, and client hooks.
+The scoped PR installer still refuses unrelated owned skill or policy drift from that approval.
+Native filesystem integration tests exercise fresh installation, changed owned revisions, and mismatch refusals through the production installers.
+These tests trust the native filesystem, chezmoi, and existing hash and decision cores.
+They supply no proof of external filesystem behavior or a maintenance assessment.
+Changes to those external contracts require fresh native checks.
+
 This decision partially supersedes [ADR 0003](0003-local-skill-operations.md): its automatic collectors and completion holds apply only in the experimental mode.
 Its immutable-history and evidence-integrity contracts still apply whenever the engine runs.
 
