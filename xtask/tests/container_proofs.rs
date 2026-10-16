@@ -551,7 +551,11 @@ fn the_image_identity_covers_pins_and_rejects_missing_or_drifting_pins() {
         "xtask/proofs/Dockerfile",
         "home/.chezmoidata/versions.toml",
     ] {
-        std::fs::copy(root.join(path), scope.path().join(path)).unwrap();
+        std::fs::write(
+            scope.path().join(path),
+            std::fs::read(root.join(path)).unwrap(),
+        )
+        .unwrap();
     }
     let first = xtask::skill_proofs::proof_image(scope.path()).unwrap();
     let lock = std::fs::read_to_string(scope.path().join("mise.lock")).unwrap();

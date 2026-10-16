@@ -14,6 +14,15 @@ pub fn place(directory: &Path) -> PathBuf {
     std::fs::create_dir_all(directory).unwrap();
     let git = directory.join(format!("git{}", std::env::consts::EXE_SUFFIX));
     std::fs::copy(env!("CARGO_BIN_EXE_dotguard"), &git).unwrap();
+    std::fs::copy(
+        env!("CARGO_BIN_EXE_dotguard-renovate"),
+        directory.join(format!(
+            "{}{}",
+            dotguard::RENOVATE_BINARY,
+            std::env::consts::EXE_SUFFIX
+        )),
+    )
+    .unwrap();
     git
 }
 

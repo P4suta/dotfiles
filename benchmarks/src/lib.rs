@@ -81,6 +81,7 @@ pub fn library(bench: &str) -> gungraun::LibraryBenchmarkConfig {
 #[must_use]
 pub fn wrapper(bench: &str) -> gungraun::BinaryBenchmarkConfig {
     let mut config = gungraun::BinaryBenchmarkConfig::default();
+    config.envs([("LD_LIBRARY_PATH", ""), ("LD_PRELOAD", "")]);
     config.tool(callgrind(bench));
     config.tool(dhat(bench));
     config.clone()

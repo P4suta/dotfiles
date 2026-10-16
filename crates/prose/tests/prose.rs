@@ -524,7 +524,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result<()> {
                 stack.push(path);
             } else {
                 fs::create_dir_all(target.parent().expect("parent"))?;
-                fs::copy(&path, &target)?;
+                fs::write(target, fs::read(path)?)?;
             }
         }
     }

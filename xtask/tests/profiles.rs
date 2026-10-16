@@ -930,7 +930,7 @@ fn source_snapshot() -> tempfile::TempDir {
             if kind.is_dir() {
                 copy(&entry.path(), &to.join(&name));
             } else if kind.is_file() {
-                fs::copy(entry.path(), to.join(&name)).unwrap();
+                fs::write(to.join(&name), fs::read(entry.path()).unwrap()).unwrap();
             }
         }
     }

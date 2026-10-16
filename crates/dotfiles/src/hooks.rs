@@ -268,6 +268,36 @@ fn delegate(
     )
 }
 
+/// Runs the source-matched signing worker without depending on the policy companion.
+#[must_use]
+pub fn post_commit_worker(producer: &str) -> i32 {
+    if producer != platform::BUILD_HASH {
+        Refusal::new(
+            "tool.stale",
+            "the post-commit worker does not match the invoking runtime",
+            "chezmoi apply",
+        )
+        .evidence("the worker producer differs from its compiled source hash")
+        .emit();
+        return 1;
+    }
+    dotguard::postcommit::run()
+}
+
+fn dotguard_command(native: &Real, hook: Hook, arguments: &[OsString]) -> Result<Command> {
+    let mut command = if matches!(hook, Hook::PostCommit) {
+        let mut worker = native.hook_command_installed(&std::env::current_exe()?);
+        worker.args(["post-commit-worker", platform::BUILD_HASH]);
+        worker
+    } else {
+        let mut gate = native.hook_command(Tool::Dotguard);
+        gate.arg(hook.name()).args(arguments);
+        gate
+    };
+    command.stdin(Stdio::piped());
+    Ok(command)
+}
+
 /// Runs one global Git hook: the health gate, the push pause, and the repository's own hooks.
 ///
 /// # Errors
@@ -368,8 +398,7 @@ impl Run<'_> {
             }
             Gate::StagedTree => self.staged = staged_tree(&self.native),
             Gate::Dotguard => {
-                let mut command = self.native.hook_command(Tool::Dotguard);
-                command.arg(hook.name()).args(arguments);
+                let mut command = dotguard_command(&self.native, hook, arguments)?;
                 self::gate(
                     &mut command,
                     &input,

@@ -75,6 +75,8 @@ enum Commands {
         #[arg(last = true)]
         arguments: Vec<OsString>,
     },
+    #[command(hide = true)]
+    PostCommitWorker { producer: String },
     LineEndings {
         #[command(subcommand)]
         request: dotfiles::line_endings::Request,
@@ -215,6 +217,9 @@ fn run() -> Result<()> {
         Commands::Assure { point } => dotfiles::assure::hook(point)?,
         Commands::Health { session } => health(session)?,
         Commands::Hook { hook, arguments } => dotfiles::hooks::run(hook, &arguments)?,
+        Commands::PostCommitWorker { producer } => {
+            std::process::exit(dotfiles::hooks::post_commit_worker(&producer));
+        }
         Commands::LineEndings { request } => dotfiles::line_endings::run(request)?,
         Commands::Git { arguments } => exit(dotfiles::hooks::git(&arguments)?),
         Commands::GitAudit {

@@ -69,7 +69,11 @@ fn verification_failure_stale_claims_and_changed_source_cannot_complete() {
     let fixture = tempfile::tempdir().unwrap();
     for path in [SOURCE, GENERATED, MANIFEST] {
         fs::create_dir_all(fixture.path().join(path).parent().unwrap()).unwrap();
-        fs::copy(root().join(path), fixture.path().join(path)).unwrap();
+        fs::write(
+            fixture.path().join(path),
+            fs::read(root().join(path)).unwrap(),
+        )
+        .unwrap();
     }
     assert!(with_source(fixture.path(), || Ok(())).is_ok());
     assert!(with_source::<()>(fixture.path(), || anyhow::bail!("native proof failed")).is_err());
@@ -80,7 +84,11 @@ fn verification_failure_stale_claims_and_changed_source_cannot_complete() {
         })
         .is_err()
     );
-    fs::copy(root().join(SOURCE), fixture.path().join(SOURCE)).unwrap();
+    fs::write(
+        fixture.path().join(SOURCE),
+        fs::read(root().join(SOURCE)).unwrap(),
+    )
+    .unwrap();
     let manifest = fs::read_to_string(fixture.path().join(MANIFEST)).unwrap();
     assert!(
         with_source(fixture.path(), || {
@@ -99,7 +107,11 @@ fn missing_duplicated_or_substituted_obligations_cannot_skip_verification() {
     let fixture = tempfile::tempdir().unwrap();
     for path in [SOURCE, GENERATED, MANIFEST] {
         fs::create_dir_all(fixture.path().join(path).parent().unwrap()).unwrap();
-        fs::copy(root().join(path), fixture.path().join(path)).unwrap();
+        fs::write(
+            fixture.path().join(path),
+            fs::read(root().join(path)).unwrap(),
+        )
+        .unwrap();
     }
     let manifest = fs::read_to_string(root().join(MANIFEST)).unwrap();
     let kani = manifest

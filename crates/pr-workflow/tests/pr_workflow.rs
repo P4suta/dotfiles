@@ -268,6 +268,8 @@ impl Fixture {
     ) -> Result<(String, String)> {
         let key = self.signing_key()?;
         for (name, value) in [
+            ("user.name", "Fixture"),
+            ("user.email", "fixture@example.com"),
             ("gpg.format", "ssh"),
             ("gpg.ssh.program", "ssh-keygen"),
             (

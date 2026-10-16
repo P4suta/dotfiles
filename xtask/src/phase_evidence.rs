@@ -1012,7 +1012,7 @@ mod tests {
                 fs::create_dir_all(target)?;
             } else {
                 fs::create_dir_all(target.parent().context("fixture input parent")?)?;
-                fs::copy(source, target)?;
+                fs::write(target, fs::read(source)?)?;
             }
         }
         for relative in [
@@ -1023,7 +1023,7 @@ mod tests {
         ] {
             let target = scope.path().join(relative);
             fs::create_dir_all(target.parent().context("fixture adapter parent")?)?;
-            fs::copy(root.join(relative), target)?;
+            fs::write(target, fs::read(root.join(relative))?)?;
         }
         Ok(scope)
     }

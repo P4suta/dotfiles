@@ -1398,9 +1398,9 @@ fn write_evidence_fixture(root: &std::path::Path) -> Result<()> {
     fs::create_dir_all(root.join("tests"))?;
     let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../platform");
     let rules = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rules");
-    fs::copy(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock"),
+    fs::write(
         root.join("Cargo.lock"),
+        fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock"))?,
     )?;
     fs::write(
         root.join("Cargo.toml"),

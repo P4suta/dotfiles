@@ -7,6 +7,9 @@ use std::process::{Command, Stdio};
 #[path = "../../platform/tests/support/fixture_process.rs"]
 mod fixture_process;
 
+const GIT_DISPATCH_FIXTURE: &str = "DOTFILES_GIT_NOTIFICATION_DISPATCH_FIXTURE";
+const GIT_OPERATION: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
 fn runtime(home: &Path) -> Command {
     let mut command = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), home);
     command
@@ -32,6 +35,164 @@ fn desktop_runtime(home: &Path) -> Command {
         .env("DISPLAY", "notification-fixture")
         .env("SESSIONNAME", "Console");
     command
+}
+
+fn prepared_git_home() -> Result<tempfile::TempDir> {
+    let home = tempfile::tempdir()?;
+    let config = home.path().join(platform::speech::CONFIG);
+    std::fs::create_dir_all(&config)?;
+    std::fs::write(config.join("frequency"), "all\n")?;
+    std::fs::write(
+        config.join(platform::speech::MATERIALS),
+        "fixture marker; no worker exists",
+    )?;
+    Ok(home)
+}
+
+#[test]
+fn git_notifications_refuse_stale_producers_and_non_git_events() -> Result<()> {
+    let home = prepared_git_home()?;
+    for (producer, event) in [
+        ("different-source", "0"),
+        (platform::BUILD_HASH, "6"),
+        (platform::BUILD_HASH, "7"),
+        (platform::BUILD_HASH, "255"),
+    ] {
+        let output = desktop_runtime(home.path())
+            .args([
+                "notifications",
+                "git",
+                "--producer",
+                producer,
+                "--event",
+                event,
+                "--operation",
+                "fixture",
+            ])
+            .output()?;
+        assert!(output.status.success(), "{output:?}");
+        assert!(output.stdout.is_empty() && output.stderr.is_empty());
+        assert!(!home.path().join(platform::speech::STATE).exists());
+    }
+    Ok(())
+}
+
+#[test]
+fn git_notifications_keep_owner_event_ids_and_nonfatal_worker_failures() -> Result<()> {
+    let home = prepared_git_home()?;
+    let operation = "0123456789abcdef".repeat(4);
+    let mut expected = String::new();
+    for event in 0..=5 {
+        let output = desktop_runtime(home.path())
+            .args([
+                "notifications",
+                "git",
+                "--producer",
+                platform::BUILD_HASH,
+                "--event",
+                &event.to_string(),
+                "--operation",
+                &operation,
+            ])
+            .output()?;
+        assert!(output.status.success());
+        assert_eq!(output.stdout, Vec::<u8>::new());
+        assert_eq!(
+            String::from_utf8(output.stderr)?,
+            "warning: could not start the spoken notification worker: notification operation failed\n"
+        );
+        expected.push_str(&platform::speech::identity(
+            &format!("git-{event}"),
+            &operation,
+        ));
+        expected.push('\n');
+    }
+    let state = home.path().join(platform::speech::STATE);
+    assert_eq!(std::fs::read_to_string(state.join("ledger"))?, expected);
+    let queued = std::fs::read_to_string(state.join("queue"))?;
+    assert_eq!(queued.lines().count(), 6);
+    for (event, line) in queued.lines().enumerate() {
+        assert!(line.starts_with(&format!("{event}\t")));
+    }
+    Ok(())
+}
+
+#[test]
+fn git_notification_queue_failures_keep_status_and_hide_private_input() -> Result<()> {
+    let home = prepared_git_home()?;
+    let state = home.path().join(platform::speech::STATE);
+    std::fs::create_dir_all(state.parent().context("fixture state has no parent")?)?;
+    std::fs::write(&state, "owned obstruction")?;
+    let private_input = "private operation and path";
+    let output = desktop_runtime(home.path())
+        .args([
+            "notifications",
+            "git",
+            "--producer",
+            platform::BUILD_HASH,
+            "--event",
+            "0",
+            "--operation",
+            private_input,
+        ])
+        .output()?;
+    assert!(output.status.success());
+    assert_eq!(output.stdout, Vec::<u8>::new());
+    assert_eq!(
+        String::from_utf8(output.stderr)?,
+        "warning: could not queue the spoken notification: notification operation failed\n"
+    );
+    assert_eq!(std::fs::read_to_string(state)?, "owned obstruction");
+    Ok(())
+}
+
+#[test]
+fn git_notifications_dispatch_the_matching_runtime_from_the_parent() -> Result<()> {
+    if std::env::var_os(GIT_DISPATCH_FIXTURE).is_some() {
+        platform::speech::announce(
+            rules::notification_rules::Event::CommitStarted,
+            GIT_OPERATION,
+        );
+        return Ok(());
+    }
+    let home = prepared_git_home()?;
+    let bin = home.path().join(".local/bin");
+    std::fs::create_dir_all(&bin)?;
+    std::fs::copy(
+        env!("CARGO_BIN_EXE_dotfiles"),
+        bin.join(format!("dotfiles{}", std::env::consts::EXE_SUFFIX)),
+    )?;
+    let mut command = fixture_process::command(std::env::current_exe()?, home.path());
+    command
+        .env("HOME", home.path())
+        .env("USERPROFILE", home.path())
+        .env("DISPLAY", "notification-fixture")
+        .env("SESSIONNAME", "Console")
+        .env(GIT_DISPATCH_FIXTURE, "1");
+    for name in [
+        "CI",
+        "SSH_CONNECTION",
+        "SSH_TTY",
+        "DOTFILES_HOST_CACHE",
+        "WSL_DISTRO_NAME",
+        platform::speech::INTERNAL,
+    ] {
+        command.env_remove(name);
+    }
+    let output = command
+        .args([
+            "--exact",
+            "git_notifications_dispatch_the_matching_runtime_from_the_parent",
+            "--nocapture",
+        ])
+        .output()?;
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stderr, Vec::<u8>::new());
+    assert_eq!(
+        std::fs::read_to_string(home.path().join(platform::speech::STATE).join("ledger"))?,
+        format!("{}\n", platform::speech::identity("git-0", GIT_OPERATION))
+    );
+    Ok(())
 }
 
 #[test]

@@ -25,10 +25,12 @@ pub const INTERNAL: &str = "DOTFILES_NOTIFICATION_INTERNAL";
 const MAX_LEDGER: usize = 64;
 const MAX_STATE_BYTES: u64 = 16_384;
 const HEX_RADIX: u8 = 16;
+const HEX: &[u8] = b"0123456789abcdef";
 const IDENTITY_HEX_BYTES: usize = 64;
 const FAILED_OPERATION: &str = "notification operation failed";
 const QUEUE_LOCK_WAIT: Duration = Duration::from_millis(50);
 const QUEUE_LOCK_POLL: Duration = Duration::from_millis(2);
+const PRODUCER_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -93,21 +95,31 @@ pub fn now() -> io::Result<u64> {
 
 #[must_use]
 pub fn identity(namespace: &str, opaque: &str) -> String {
-    Sha256::digest(format!("{namespace}\0{opaque}").as_bytes())
-        .iter()
-        .flat_map(|byte| [byte / HEX_RADIX, byte % HEX_RADIX])
-        .filter_map(|digit| char::from_digit(u32::from(digit), u32::from(HEX_RADIX)))
-        .collect()
+    let mut hash = Sha256::new();
+    hash.update(namespace.as_bytes());
+    hash.update(b"\0");
+    hash.update(opaque.as_bytes());
+    let mut result = String::with_capacity(IDENTITY_HEX_BYTES);
+    for byte in hash.finalize() {
+        result.push(char::from(HEX[usize::from(byte / HEX_RADIX)]));
+        result.push(char::from(HEX[usize::from(byte % HEX_RADIX)]));
+    }
+    result
 }
 
 #[must_use]
 pub fn operation_id() -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            u64::try_from(elapsed.as_millis()).unwrap_or_default()
+        });
     identity(
         "operation",
         &format!(
             "{}:{}:{}",
             std::process::id(),
-            now().unwrap_or_default(),
+            millis,
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ),
     )
@@ -461,12 +473,10 @@ pub fn pending_decision(home: &Path, packet: &Packet) -> io::Result<Decision> {
     }))
 }
 
-/// Starts the installed worker with the producer's embedded source identity and quiet streams.
-///
-/// # Errors
-///
-/// Returns an error if installation lacks a runtime or its process can't start.
-pub fn launch_worker(home: &Path) -> io::Result<()> {
+fn runtime_command(
+    home: &Path,
+    environment: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> io::Result<std::process::Command> {
     let executable = home.join(if cfg!(windows) {
         ".local/bin/dotfiles.exe"
     } else {
@@ -475,17 +485,39 @@ pub fn launch_worker(home: &Path) -> io::Result<()> {
     if !executable.is_file() {
         return Err(error("notification runtime is unavailable"));
     }
-    let mut command = crate::process::command(executable);
+    let environment = environment.into_iter().filter(|(name, _)| {
+        !crate::process::GIT_LOCAL_ENVIRONMENT.iter().any(|local| {
+            if cfg!(windows) {
+                name.as_encoded_bytes()
+                    .eq_ignore_ascii_case(local.as_bytes())
+            } else {
+                name == local
+            }
+        })
+    });
+    let command = crate::process::isolated_command(executable, environment);
+    #[cfg(windows)]
+    let command = {
+        use std::os::windows::process::CommandExt;
+        let mut command = command;
+        command.creation_flags(CREATE_NO_WINDOW);
+        command
+    };
+    Ok(command)
+}
+
+/// Starts the installed worker with the producer's embedded source identity and quiet streams.
+///
+/// # Errors
+///
+/// Returns an error if installation lacks a runtime or its process can't start.
+pub fn launch_worker(home: &Path) -> io::Result<()> {
+    let mut command = runtime_command(home, std::env::vars_os())?;
     command
         .args(["notifications", "worker", "--producer", crate::BUILD_HASH])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
     let mut child = command.spawn()?;
     std::thread::spawn(move || {
         report(child.wait(), Operation::Reap);
@@ -493,9 +525,60 @@ pub fn launch_worker(home: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn dispatch_git(home: &Path, event: Event, operation: &str) -> io::Result<()> {
+    let mut child = runtime_command(home, std::env::vars_os())?
+        .args([
+            "notifications",
+            "git",
+            "--producer",
+            crate::BUILD_HASH,
+            "--event",
+        ])
+        .arg((event as u8).to_string())
+        .args(["--operation", operation])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()?;
+    let began = Instant::now();
+    let failed = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return if status.success() {
+                    Ok(())
+                } else {
+                    Err(error(FAILED_OPERATION))
+                };
+            }
+            Ok(None) if began.elapsed() < PRODUCER_TIMEOUT => {
+                std::thread::sleep(QUEUE_LOCK_POLL);
+            }
+            Ok(None) => break error("notification producer exceeded its deadline"),
+            Err(cause) => break cause,
+        }
+    };
+    report(child.kill(), Operation::Stop);
+    report(child.wait(), Operation::Reap);
+    Err(failed)
+}
+
 /// An optional notification preserves the calling operation's result and standard output.
-/// Clock, active queue, and worker startup failures produce fixed nonfatal warnings on standard error.
+/// Producer failures produce fixed nonfatal warnings on standard error.
 pub fn announce(event: Event, operation: &str) {
+    let Some(home) = crate::home::home() else {
+        return;
+    };
+    if desktop() != Desktop::Present
+        || !home.join(CONFIG).join(MATERIALS).is_file()
+        || frequency(&home).unwrap_or(Frequency::Off) == Frequency::Off
+    {
+        return;
+    }
+    report(dispatch_git(&home, event, operation), Operation::Queue);
+}
+
+/// Queues the matching Git producer's event with its existing owner identity.
+pub fn receive_git(event: Event, operation: &str) {
     let Some(home) = crate::home::home() else {
         return;
     };
@@ -517,6 +600,81 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     use std::fmt;
+
+    #[test]
+    fn identity_keeps_the_original_preimage_and_every_digest_byte() {
+        const BYTE_VALUES: usize = 256;
+        const LONG_INPUT_REPETITIONS: usize = 32_768;
+
+        let mut seen = [false; BYTE_VALUES];
+        let mut check = |namespace: &str, opaque: &str| {
+            let digest = Sha256::digest(format!("{namespace}\0{opaque}").as_bytes());
+            let mut expected = String::new();
+            for byte in &digest {
+                write!(expected, "{byte:02x}").unwrap();
+            }
+            assert_eq!(identity(namespace, opaque), expected);
+            for byte in digest {
+                seen[usize::from(byte)] = true;
+            }
+        };
+        let long = "\u{2603}\0".repeat(LONG_INPUT_REPETITIONS);
+        for (namespace, opaque) in [
+            ("", ""),
+            ("namespace", ""),
+            ("", "opaque"),
+            ("n\u{2603}", "v\u{1f680}"),
+            ("namespace\0suffix", "opaque\0suffix"),
+            ("operation", long.as_str()),
+        ] {
+            check(namespace, opaque);
+        }
+        for value in u8::MIN..=u8::MAX {
+            check("operation", &value.to_string());
+        }
+        assert!(seen.into_iter().all(std::convert::identity));
+    }
+
+    #[cfg(feature = "tools")]
+    #[test]
+    fn runtime_environment_preserves_parent_values_except_git_repository_context() {
+        use std::ffi::OsString;
+
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(
+            bin.join(format!("dotfiles{}", std::env::consts::EXE_SUFFIX)),
+            "owned runtime fixture",
+        )
+        .unwrap();
+        let kept: Vec<(OsString, OsString)> = [
+            ("HOME", "owned-home"),
+            ("PATH", "owned-path"),
+            ("DOPPLER_TOKEN", "owned-token-fixture"),
+            (INTERNAL, "1"),
+            ("UNICODE_VALUE", "\u{2603}"),
+            ("GIT_CONFIG_GLOBAL", "owned-git-config"),
+        ]
+        .map(|(name, value)| (name.into(), value.into()))
+        .into();
+        let mut environment = kept.clone();
+        for local in crate::process::GIT_LOCAL_ENVIRONMENT {
+            environment.push((local.into(), "owned-repository".into()));
+            if cfg!(windows) {
+                environment.push((local.to_ascii_lowercase().into(), "owned-repository".into()));
+            }
+        }
+        let command = runtime_command(home.path(), environment).unwrap();
+        let actual: std::collections::BTreeMap<_, _> = command
+            .get_envs()
+            .map(|(name, value)| (name.to_owned(), value.map(std::ffi::OsStr::to_owned)))
+            .collect();
+        assert_eq!(actual.len(), kept.len());
+        for (name, value) in kept {
+            assert_eq!(actual.get(&name), Some(&Some(value)));
+        }
+    }
 
     struct SensitiveError<'a>(&'a Cell<bool>);
 

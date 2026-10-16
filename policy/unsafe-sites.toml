@@ -16,6 +16,6 @@ function = "filter_keys"
 outside_miri = "SystemParametersInfoW is a Win32 call that Miri doesn't model, so its effect on the session's keyboard settings has only a real-host check"
 
 [[site]]
-path = "crates/dotguard/src/main.rs"
+path = "crates/dotguard/src/git_wrapper.rs"
 function = "ignore_console_interrupts"
 outside_miri = "SetConsoleCtrlHandler registers a handler with the Windows console, which Miri doesn't model and which needs a live console process"

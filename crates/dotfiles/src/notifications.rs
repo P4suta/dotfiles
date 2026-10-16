@@ -142,6 +142,15 @@ pub enum Action {
         #[arg(long)]
         producer: String,
     },
+    #[command(hide = true)]
+    Git {
+        #[arg(long)]
+        producer: String,
+        #[arg(long)]
+        event: u8,
+        #[arg(long)]
+        operation: String,
+    },
 }
 
 fn preset_names() -> Vec<&'static str> {
@@ -222,6 +231,25 @@ pub fn run(action: Action) -> Result<()> {
         Action::Worker { producer } => {
             if producer == platform::BUILD_HASH {
                 speech::report(worker(&home()?), speech::Operation::Worker);
+            }
+            Ok(())
+        }
+        Action::Git {
+            producer,
+            event,
+            operation,
+        } => {
+            if producer == platform::BUILD_HASH
+                && let Some(
+                    event @ (Event::CommitStarted
+                    | Event::CommitFailed
+                    | Event::CommitCompleted
+                    | Event::PushStarted
+                    | Event::PushFailed
+                    | Event::PushCompleted),
+                ) = rules::notification_rules::event(event)
+            {
+                speech::receive_git(event, &operation);
             }
             Ok(())
         }

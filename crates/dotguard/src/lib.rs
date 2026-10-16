@@ -13,6 +13,7 @@
 pub mod attribution;
 pub mod bypass;
 pub mod clock;
+pub mod git_wrapper;
 pub mod gitargv;
 pub mod lang;
 pub mod locate;

@@ -57,7 +57,7 @@ exact = 0
 [[metric]]
 metric = "ir"
 bench = "git_status"
-exact = 471236
+exact = 447016
 
 [[metric]]
 metric = "heap-peak"
@@ -67,7 +67,7 @@ exact = 45572
 [[metric]]
 metric = "ir"
 bench = "pre_push_denied"
-exact = 962058
+exact = 890288
 
 [[metric]]
 metric = "heap-peak"
@@ -77,7 +77,7 @@ exact = 21150
 [[metric]]
 metric = "ir"
 bench = "commit_message_clean"
-exact = 1248995
+exact = 1177427
 
 [[metric]]
 metric = "heap-peak"
@@ -87,7 +87,7 @@ exact = 7504
 [[metric]]
 metric = "ir"
 bench = "commit_message_attribution"
-exact = 1648711
+exact = 1577131
 
 [[metric]]
 metric = "heap-peak"
@@ -97,7 +97,7 @@ exact = 8530
 # The size, in bytes, of the stripped release-guard binary of the local policy gate.
 [[metric]]
 metric = "binary-size"
-exact = 553272
+exact = 546584
 
 # The mutation campaign of `just proofs` over the decision core.
 [[metric]]

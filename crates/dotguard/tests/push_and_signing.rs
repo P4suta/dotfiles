@@ -312,6 +312,41 @@ fn renovate_backend_refuses_a_different_or_missing_source_hash_before_dispatch()
 }
 
 #[test]
+fn git_commands_require_the_matching_policy_before_running_git() {
+    let (repository, _, _) = renovate_fixture("git-matching-policy");
+    let guard = copied_guard(&repository);
+    let head = repository.git(&["rev-parse", "HEAD"]);
+    let arguments = ["git", "commit", "--allow-empty", "-m", "must not run"];
+    let missing = repository.binary_with(&guard, &arguments, "", &[], &[]);
+    assert_eq!(refusal(&missing).rule, "tool.failure");
+    let ordinary = repository.binary_with(&guard, &["git", "status", "--short"], "", &[], &[]);
+    assert!(ordinary.status.success());
+    std::fs::copy(
+        repository
+            .path()
+            .join(format!(".local/bin/docker{}", std::env::consts::EXE_SUFFIX)),
+        guard.with_file_name(format!(
+            "{}{}",
+            dotguard::RENOVATE_BINARY,
+            std::env::consts::EXE_SUFFIX
+        )),
+    )
+    .unwrap();
+    let mismatched = repository.binary_with(
+        &guard,
+        &arguments,
+        "",
+        &[],
+        &[(
+            "RENOVATE_FIXTURE_BACKEND",
+            env!("CARGO_BIN_EXE_dotguard-renovate"),
+        )],
+    );
+    assert_eq!(refusal(&mismatched).rule, "tool.stale");
+    assert_eq!(repository.git(&["rev-parse", "HEAD"]), head);
+}
+
+#[test]
 fn renovate_preserves_manual_arguments_and_keeps_hook_arguments_out_of_the_container() {
     let (repository, base, offered) = renovate_fixture("renovate-arguments");
     let variables = renovate_variables(&repository);

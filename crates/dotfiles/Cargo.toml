@@ -12,6 +12,10 @@ default-run = "dotfiles"
 name = "dotfiles"
 path = "src/main.rs"
 
+[[test]]
+name = "hook_exec_count"
+harness = false
+
 [dependencies]
 anyhow = "1.0"
 blake3 = "=1.8.7"

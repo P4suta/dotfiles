@@ -87,6 +87,38 @@ impl Host {
             .args(arguments)
             .output()?)
     }
+
+    fn bare_gate_failure(&self) -> Result<Output> {
+        let status = platform::process::command("rustc")
+            .args(["--edition", "2024"])
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/just.rs"))
+            .arg("-o")
+            .arg(
+                self.home()
+                    .join(".local/bin")
+                    .join(format!("dotguard{}", std::env::consts::EXE_SUFFIX)),
+            )
+            .status()?;
+        ensure!(status.success(), "fixture failing gate compilation failed");
+        self.hook(&["pre-commit"])
+    }
+
+    fn empty_commit(&self) -> Result<()> {
+        let tree = String::from_utf8(self.run("git", &["write-tree"])?.stdout)?;
+        let base = String::from_utf8(
+            self.run("git", &["commit-tree", tree.trim(), "-m", "base"])?
+                .stdout,
+        )?;
+        let empty = String::from_utf8(
+            self.run(
+                "git",
+                &["commit-tree", tree.trim(), "-p", base.trim(), "-m", "empty"],
+            )?
+            .stdout,
+        )?;
+        self.run("git", &["update-ref", "HEAD", empty.trim()])?;
+        Ok(())
+    }
 }
 
 /// The record a refused command printed as its last line.
@@ -152,12 +184,12 @@ fn a_child_refusal_stays_last_and_a_bare_failure_gets_its_own_record() -> Result
         !String::from_utf8_lossy(&relayed.stderr).contains("Error:"),
         "nothing follows a relayed refusal"
     );
-    let failed = refusal(&host.hook(&["post-commit"])?);
+    let failed = refusal(&host.bare_gate_failure()?);
     eprintln!("{}", failed.line());
     assert_eq!(failed.rule, "hook.gate");
     assert_eq!(
         failed.next.as_deref().unwrap_or_default(),
-        "dotguard post-commit"
+        "dotguard pre-commit"
     );
     Ok(())
 }
@@ -172,7 +204,7 @@ fn native_output_replays_preserve_the_real_hook_failure_without_new_incidents() 
     let consent = host.home().join(platform::incidents::EXPERIMENTAL);
     fs::create_dir_all(consent.parent().unwrap())?;
     fs::write(consent, skill_ops::incident_rules::EXPERIMENTAL_OPT_IN)?;
-    let failed = host.hook(&["post-commit"])?;
+    let failed = host.bare_gate_failure()?;
     assert_eq!(refusal(&failed).rule, "hook.gate");
     let state = host.scope.path().join("state");
     let primary = skill_ops::incidents(&state)?;
@@ -184,7 +216,7 @@ fn native_output_replays_preserve_the_real_hook_failure_without_new_incidents() 
         "session_id": "owned-native-delivery",
         "tool_use_id": "failed-hook",
         "tool_name": "Bash",
-        "tool_input": {"command": "dotfiles hook post-commit"},
+        "tool_input": {"command": "dotfiles hook pre-commit"},
         "tool_response": body,
     });
     assert!(!skill_ops::record_native_failure(&state, "codex", &event)?);
@@ -276,13 +308,10 @@ fn post_commit_refreshes_changed_tools_once_and_keeps_failed_installations_stale
         lagging(&host.home(), &host.repository())?,
         Vec::<Built>::new()
     );
-    let installed = "dotguard\ninstall-review-guard\ninstall-pr-workflow\ninstall-skill-ops\n";
+    let installed = "install-review-guard\ninstall-pr-workflow\ninstall-skill-ops\n";
     assert_eq!(fs::read_to_string(&events)?, installed);
     assert!(run(None)?.status.success());
-    assert_eq!(
-        fs::read_to_string(&events)?,
-        format!("{installed}dotguard\n")
-    );
+    assert_eq!(fs::read_to_string(&events)?, installed);
     fs::write(&library, "pub fn changed_again() {}\n")?;
     let failed = run(Some("install-skill-ops"))?;
     assert!(failed.status.success());
@@ -299,6 +328,11 @@ fn post_commit_refreshes_changed_tools_once_and_keeps_failed_installations_stale
         lagging(&host.home(), &host.repository())?,
         Vec::<Built>::new()
     );
+    host.empty_commit()?;
+    fs::write(&library, "pub fn refused_change() {}\n")?;
+    let previous = fs::read_to_string(&events)?;
+    assert_eq!(refusal(&run(None)?).rule, "commit.empty");
+    assert_eq!(fs::read_to_string(&events)?, previous);
     Ok(())
 }
 

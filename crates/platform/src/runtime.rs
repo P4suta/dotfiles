@@ -96,8 +96,19 @@ impl Real {
     }
 
     /// A Git hook gate, which keeps the hook's repository variables to inspect the commit in progress.
+    #[must_use]
     pub fn hook_command(&self, tool: Tool) -> Command {
-        let mut command = self.prepare(tool.hook_command(), tool == Tool::Codex);
+        self.prepare_hook(tool.hook_command(), tool == Tool::Codex)
+    }
+
+    /// A hook worker at a known path, with the hook's repository and managed tool environment.
+    #[must_use]
+    pub fn hook_command_installed(&self, program: &Path) -> Command {
+        self.prepare_hook(crate::process::repository_command(program), false)
+    }
+
+    fn prepare_hook(&self, command: Command, codex: bool) -> Command {
+        let mut command = self.prepare(command, codex);
         command.env(
             "CARGO_TARGET_DIR",
             hook_target(
@@ -374,6 +385,31 @@ pub fn replace(path: &Path, bytes: &[u8], executable: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn installed_hook_workers_keep_the_registered_hook_environment() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        let mut runner = Real::new(home.path())?;
+        runner.directory = Some(home.path().join("repository"));
+        runner
+            .environment
+            .push(("GIT_INDEX_FILE".into(), "owned-index".into()));
+        let registered = runner.hook_command(Tool::Dotguard);
+        let executable = home.path().join("dotfiles");
+        let worker = runner.hook_command_installed(&executable);
+        assert_eq!(worker.get_program(), executable);
+        assert_eq!(worker.get_current_dir(), registered.get_current_dir());
+        assert_eq!(
+            worker.get_envs().collect::<Vec<_>>(),
+            registered.get_envs().collect::<Vec<_>>()
+        );
+        assert!(crate::process::GIT_LOCAL_ENVIRONMENT.iter().all(|name| {
+            worker
+                .get_envs()
+                .all(|(key, value)| key != *name || value.is_some())
+        }));
+        Ok(())
+    }
 
     #[test]
     fn shell_initialization_sets_only_child_context_and_clears_mise_session() -> Result<()> {

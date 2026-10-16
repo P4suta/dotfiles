@@ -241,7 +241,7 @@ where
     K: AsRef<OsStr>,
     V: AsRef<OsStr>,
 {
-    let mut command = command(program);
+    let mut command = construct::<false>(program);
     command.env_clear().envs(environment);
     command
 }

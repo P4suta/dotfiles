@@ -79,3 +79,4 @@
 | [2026-10-14 Report optional notification failures with fixed warnings](report-optional-notification-failures-with-fixed-warnings.md) | proposed |  |
 | [2026-10-15 Prove portable component scans with erased witnesses](prove-portable-component-scans-with-erased-witnesses.md) | proposed |  |
 | [2026-10-16 Evaluate fixed parser domains before symbolic selection](finite-shell-parser-ctfe.md) | proposed |  |
+| [2026-10-17 Run spoken Git commands in the matching policy companion](isolate-spoken-git-in-the-matching-companion.md) | proposed |  |

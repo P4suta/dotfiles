@@ -1,4 +1,4 @@
-use dotguard::{refusal::Refusal, renovate};
+use dotguard::{git_wrapper, postcommit, refusal::Refusal, renovate};
 use std::process::ExitCode;
 
 const USAGE_ERROR: u8 = 2;
@@ -8,7 +8,7 @@ fn main() -> ExitCode {
     if arguments.next().as_deref() != Some(platform::BUILD_HASH) {
         Refusal::new(
             "tool.stale",
-            "the Renovate backend does not match the invoking Git guard",
+            "the policy companion does not match the invoking Git guard",
             "chezmoi apply",
         )
         .evidence(
@@ -18,6 +18,8 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     let result = match arguments.next().as_deref() {
+        Some("git") => return git_wrapper::run::<true>(&arguments.collect::<Vec<_>>()),
+        Some("post-commit") => postcommit::run(),
         Some("renovate-gate") => renovate::run(arguments.next().as_deref().unwrap_or("origin")),
         Some("renovate") => renovate::dispatch(&arguments.collect::<Vec<_>>()),
         _ => return ExitCode::from(USAGE_ERROR),

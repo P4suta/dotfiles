@@ -2488,8 +2488,7 @@ mod native_path_tests {
         assert!(!preparation.immutable_paths().contains(&docker));
         assert!(!docker.join("config.json").exists());
         let state = docker.join(BUILDX_STATE_DIRECTORY);
-        assert!(state.is_dir());
-        assert!(!preparation.immutable_paths().contains(&state));
+        assert!(state.is_dir() && !preparation.immutable_paths().contains(&state));
         fs::write(state.join("state"), b"writable plugin state")?;
         preparation.environment.require_current()?;
         #[cfg(unix)]

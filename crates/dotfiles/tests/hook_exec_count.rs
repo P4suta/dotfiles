@@ -1,8 +1,10 @@
-//! The processes each hook spawns, counted through stand-ins for dotguard, lefthook, Git, and storage-scout.
+//! The processes each hook spawns, counted through gate stand-ins and the actual signing worker's self-reentry.
 //! Each hook spawns exactly the invocations below in this order, and `policy/baselines.toml` records how many as its `exec-count`.
 
 use anyhow::{Context, Result, ensure};
+use clap::ValueEnum;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
@@ -115,8 +117,12 @@ impl Host {
     fn spawned(&self, arguments: &[&str]) -> Result<Vec<String>> {
         let _ = fs::remove_file(self.log());
         let output = self
-            .command(env!("CARGO_BIN_EXE_dotfiles"))
-            .arg("hook")
+            .command(
+                std::env::current_exe()?
+                    .to_str()
+                    .context("a UTF-8 test executable")?,
+            )
+            .arg("fixture-hook")
             .args(arguments)
             .output()?;
         ensure!(
@@ -150,7 +156,6 @@ fn baseline(hook: &str) -> Result<usize> {
     Ok(usize::try_from(exact)?)
 }
 
-#[test]
 fn each_hook_spawns_exactly_its_gates_in_order() -> Result<()> {
     let host = Host::new()?;
     host.configure()?;
@@ -190,7 +195,7 @@ fn each_hook_spawns_exactly_its_gates_in_order() -> Result<()> {
         (
             "post-commit",
             vec!["post-commit"],
-            vec!["dotguard post-commit"],
+            vec!["dotfiles post-commit-worker"],
         ),
         (
             "post-checkout",
@@ -215,7 +220,6 @@ fn each_hook_spawns_exactly_its_gates_in_order() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn an_unconfigured_hook_spawns_no_gate() -> Result<()> {
     let host = Host::new()?;
     for arguments in [
@@ -230,4 +234,43 @@ fn an_unconfigured_hook_spawns_no_gate() -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn main() -> Result<()> {
+    let mut arguments = std::env::args().skip(1);
+    match arguments.next().as_deref() {
+        Some("fixture-hook") => {
+            let hook = dotfiles::hooks::Hook::from_str(
+                &arguments.next().context("a fixture hook name")?,
+                false,
+            )
+            .map_err(anyhow::Error::msg)?;
+            let mut arguments = arguments.map(std::ffi::OsString::from).collect::<Vec<_>>();
+            if arguments.first().is_some_and(|argument| argument == "--") {
+                arguments.remove(0);
+            }
+            dotfiles::hooks::run(hook, &arguments)
+        }
+        Some("post-commit-worker") => {
+            let producer = arguments.next().context("the worker's producer")?;
+            ensure!(arguments.next().is_none(), "unexpected worker argument");
+            let mut log = fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(std::env::var_os("COUNTER_LOG").context("the worker's invocation log")?)?;
+            writeln!(log, "dotfiles post-commit-worker")?;
+            std::process::exit(dotfiles::hooks::post_commit_worker(&producer));
+        }
+        None | Some("--nocapture") => {
+            ensure!(
+                arguments.next().is_none(),
+                "unsupported count test argument"
+            );
+            each_hook_spawns_exactly_its_gates_in_order()?;
+            an_unconfigured_hook_spawns_no_gate()?;
+            println!("test result: ok. 2 passed; 0 failed");
+            Ok(())
+        }
+        Some(argument) => anyhow::bail!("unsupported count test argument: {argument}"),
+    }
 }

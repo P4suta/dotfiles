@@ -350,6 +350,87 @@ fn a_copy_named_git_passes_arguments_streams_and_status_through() {
 }
 
 #[test]
+fn paired_git_commands_preserve_results_when_notifications_fail() {
+    let environment = std::env::vars_os().filter(|(name, _)| {
+        ![
+            "CI",
+            "SSH_CONNECTION",
+            "SSH_TTY",
+            "DOTFILES_HOST_CACHE",
+            "WSL_DISTRO_NAME",
+            platform::speech::INTERNAL,
+        ]
+        .iter()
+        .any(|excluded| name == excluded)
+    });
+    let wrapper = Wrapper::inheriting("paired-notifications", environment);
+    let config = wrapper.home().join(platform::speech::CONFIG);
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(config.join("frequency"), "all\n").unwrap();
+    std::fs::write(config.join(platform::speech::MATERIALS), "owned fixture").unwrap();
+    let variables = [
+        ("GIT_AUTHOR_NAME", "Fixture"),
+        ("GIT_AUTHOR_EMAIL", "fixture@example.invalid"),
+        ("GIT_COMMITTER_NAME", "Fixture"),
+        ("GIT_COMMITTER_EMAIL", "fixture@example.invalid"),
+        ("DISPLAY", "notification-fixture"),
+        ("SESSIONNAME", "Console"),
+    ];
+    let committed = wrapper.run_env(
+        &["commit", "--allow-empty", "-F", "-"],
+        Some(b"paired commit\n"),
+        &variables,
+    );
+    assert!(committed.status.success(), "{committed:?}");
+    assert!(text(&committed.stdout).contains("paired commit"));
+    let warning = "warning: could not queue the spoken notification: notification operation failed";
+    assert_eq!(
+        text(&committed.stderr)
+            .lines()
+            .filter(|line| *line == warning)
+            .count(),
+        2
+    );
+    assert_eq!(
+        text(&wrapper.run(&["rev-list", "--count", "HEAD"], None).stdout).trim(),
+        "1"
+    );
+    let remote = wrapper.scope.join("remote.git");
+    let remote = remote.to_str().unwrap();
+    assert!(
+        wrapper
+            .run(&["init", "--bare", "--quiet", remote], None)
+            .status
+            .success()
+    );
+    let pushed = wrapper.run_env(&["push", remote, "HEAD:refs/heads/main"], None, &variables);
+    assert!(pushed.status.success(), "{pushed:?}");
+    assert_eq!(pushed.stdout, Vec::<u8>::new());
+    let error = text(&pushed.stderr);
+    assert!(error.contains("[new branch]"));
+    assert!(!error.contains("Everything up-to-date"));
+    assert_eq!(error.lines().filter(|line| *line == warning).count(), 2);
+    assert_eq!(
+        text(
+            &wrapper
+                .run(
+                    &[
+                        "--git-dir",
+                        remote,
+                        "rev-list",
+                        "--count",
+                        "refs/heads/main"
+                    ],
+                    None
+                )
+                .stdout
+        )
+        .trim(),
+        "1"
+    );
+}
+
+#[test]
 fn a_callers_git_repository_variables_cannot_redirect_the_wrapper() {
     let outer = Wrapper::new("outer-repository");
     let outer_git = outer.scope.join("repository/.git");
