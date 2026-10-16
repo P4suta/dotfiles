@@ -27,6 +27,7 @@ const STAGED_READBACK: &str = "inherited-staged-tools.json";
 const PRIVATE_DATA: &str = ".local/share/mise";
 const DOCKER_USER_DIRECTORY: &str = ".docker";
 const DOCKER_PLUGIN_DIRECTORY: &str = "cli-plugins";
+const BUILDX_STATE_DIRECTORY: &str = "buildx";
 const BUILDX_TOOL: &str = "aqua:docker/buildx";
 const BUILDX_PROGRAM: &str = "docker-cli-plugin-docker-buildx";
 const BUILDX_PLUGIN: &str = "docker-buildx";
@@ -1359,6 +1360,10 @@ impl CodePreparation {
             .join(DOCKER_USER_DIRECTORY)
             .join(DOCKER_PLUGIN_DIRECTORY);
         fs::create_dir(&directory)?;
+        fs::create_dir(
+            home.join(DOCKER_USER_DIRECTORY)
+                .join(BUILDX_STATE_DIRECTORY),
+        )?;
         let destination =
             directory.join(format!("{BUILDX_PLUGIN}{}", std::env::consts::EXE_SUFFIX));
         copy_bootstrap(source, &destination)?;
@@ -2482,8 +2487,10 @@ mod native_path_tests {
         assert!(preparation.immutable_paths().contains(&plugin));
         assert!(!preparation.immutable_paths().contains(&docker));
         assert!(!docker.join("config.json").exists());
-        fs::create_dir(docker.join("buildx"))?;
-        fs::write(docker.join("buildx/state"), b"writable plugin state")?;
+        let state = docker.join(BUILDX_STATE_DIRECTORY);
+        assert!(state.is_dir());
+        assert!(!preparation.immutable_paths().contains(&state));
+        fs::write(state.join("state"), b"writable plugin state")?;
         preparation.environment.require_current()?;
         #[cfg(unix)]
         {

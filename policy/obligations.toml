@@ -2007,6 +2007,14 @@ mutant = "crates/rules/src/shell_cache_rules.rs:41:5: replace line -> (usize, us
 reason = "the returned next position stays one, so continuation reads a two-byte input forever"
 
 [[non-terminating]]
+mutant = "crates/rules/src/shell_cache_rules.rs:42:15: replace < with == in line"
+reason = "the mutated line guard skips a nonempty input at start zero and returns next position zero, so continuation reads that input forever"
+
+[[non-terminating]]
+mutant = "crates/rules/src/shell_cache_rules.rs:42:15: replace < with > in line"
+reason = "the mutated line guard skips a nonempty input at start zero and returns next position zero, so continuation reads that input forever"
+
+[[non-terminating]]
 mutant = "crates/rules/src/shell_cache_rules.rs:44:30: replace + with - in line"
 reason = "a one-byte line followed by a newline returns next position zero, so continuation reads that line forever"
 

@@ -3364,7 +3364,7 @@ fn apply_pr_skill(
         {
             let destination = skills.join("pull-request").join(relative);
             fs::create_dir_all(destination.parent().context("fixture skill parent")?)?;
-            fs::copy(path, destination)?;
+            fs::write(destination, fs::read(path)?)?;
         } else {
             assert_eq!(
                 *path,

@@ -267,11 +267,11 @@ mod proofs {
     #[cfg(kani)]
     const CELL_BITS: usize = 2;
     #[cfg(kani)]
-    const CELLS_PER_BYTE: usize = u8::BITS as usize / CELL_BITS;
+    const CELLS_PER_BYTE: usize = 4;
     #[cfg(kani)]
-    const BYTE_VALUES: usize = u8::MAX as usize + 1;
+    const BYTE_VALUES: usize = 256;
     #[cfg(kani)]
-    const PACKED_BYTES: usize = BYTE_VALUES / CELLS_PER_BYTE;
+    const PACKED_BYTES: usize = 64;
     #[cfg(kani)]
     const CELL_UNEVALUATED: u8 = 0;
     #[cfg(kani)]
@@ -281,7 +281,7 @@ mod proofs {
     #[cfg(kani)]
     const CELL_INVALID: u8 = 3;
     #[cfg(kani)]
-    const CELL_MASK: u8 = (1 << CELL_BITS) - 1;
+    const CELL_MASK: u8 = 3;
 
     #[cfg(kani)]
     const fn raw_cell(cells: &[u8; PACKED_BYTES], key: u8) -> u8 {
