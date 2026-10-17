@@ -311,6 +311,7 @@ mod tests {
         std::fs::write(&global, "[settings]\nparanoid = true\n")?;
         let preview = scratch
             .command("mise")
+            .env("MISE_COLOR", "0")
             .args(["prune", "--dry-run"])
             .output()?;
         ensure!(

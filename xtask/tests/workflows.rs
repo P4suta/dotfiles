@@ -17,6 +17,8 @@ const POLICY: &str = "[ruleset.main]\nrequired_status_checks = [\"required\"]\n"
 const MISE_PINS: &str = "home/.chezmoidata/versions.toml";
 const CONTROL_VERSION: &str = "0.0.1";
 const PRODUCER_SYSTEM_PATH: &str = "/usr/bin:/bin";
+const REHEARSAL_TOKEN: &str = "${{ github.token }}";
+const CARGO_CACHE_INPUTS: &str = "${{ hashFiles('**/Cargo.lock', 'mise.toml', '!**/target/**', '!**/.git/**', '!**/node_modules/**', '!**/.venv/**') }}";
 
 const WORKFLOW: &str = "on:
   pull_request:
@@ -80,8 +82,108 @@ fn the_ci_workflow_provides_what_the_ruleset_requires() {
     );
 }
 
+fn rehearsal_tokens(text: &str) -> Result<()> {
+    let workflow = YamlLoader::load_from_str(text)?;
+    let [workflow] = workflow.as_slice() else {
+        bail!("CI must contain one workflow document")
+    };
+    for name in ["rehearsal", "rehearsal-wsl"] {
+        let job = &workflow["jobs"][name];
+        let steps: Vec<_> = job["steps"]
+            .as_vec()
+            .context("rehearsal steps are missing")?
+            .iter()
+            .filter(|step| {
+                step["run"]
+                    .as_str()
+                    .is_some_and(|script| script.contains("just rehearse --disposable-host"))
+            })
+            .collect();
+        let [step] = steps.as_slice() else {
+            bail!("{name} requires exactly one rehearsal entry")
+        };
+        ensure!(
+            step["env"]["GITHUB_TOKEN"].as_str() == Some(REHEARSAL_TOKEN),
+            "{name} must provide its job token to the actual rehearsal process"
+        );
+    }
+    ensure!(
+        workflow["jobs"]["rehearsal-wsl"]["env"]["WSLENV"]
+            .as_str()
+            .is_some_and(|names| names.split(':').any(|name| name == "GITHUB_TOKEN")),
+        "WSL must transport GITHUB_TOKEN into the rehearsal distribution"
+    );
+    Ok(())
+}
+
+#[test]
+fn rehearsal_authentication_reaches_native_and_wsl_installers() -> Result<()> {
+    // GitHub supplies the job token, and WSL implements WSLENV transport.
+    // Hosted rehearsal must exercise the authenticated installer boundary.
+    let current = repository(".github/workflows/ci.yml");
+    rehearsal_tokens(&current)?;
+    let binding = format!("          GITHUB_TOKEN: {REHEARSAL_TOKEN}\n");
+    assert_eq!(current.matches(&binding).count(), 2);
+    for offset in [current.find(&binding), current.rfind(&binding)] {
+        let mut changed = current.clone();
+        let offset = offset.context("rehearsal token binding")?;
+        changed.replace_range(offset..offset + binding.len(), "");
+        assert!(rehearsal_tokens(&changed).is_err());
+    }
+    let changed = current.replace("WSLENV: CI:GITHUB_TOKEN:", "WSLENV: CI:");
+    assert_ne!(changed, current);
+    assert!(rehearsal_tokens(&changed).is_err());
+    Ok(())
+}
+
+#[test]
+fn cargo_caches_bind_every_consumer_lock_without_generated_trees() -> Result<()> {
+    // GitHub evaluates hashFiles.
+    // The patterns follow CargoWorkload's source boundary.
+    let workflow = YamlLoader::load_from_str(&repository(".github/workflows/ci.yml"))?;
+    let [workflow] = workflow.as_slice() else {
+        bail!("CI must contain one workflow document")
+    };
+    for (name, prefix) in [
+        ("check", "cargo-${{ runner.os }}-"),
+        ("proofs", "proofs-${{ matrix.phase }}-"),
+    ] {
+        let caches: Vec<_> = workflow["jobs"][name]["steps"]
+            .as_vec()
+            .context("CI job steps are missing")?
+            .iter()
+            .filter(|step| {
+                step["uses"]
+                    .as_str()
+                    .is_some_and(|action| action.starts_with("actions/cache@"))
+            })
+            .collect();
+        let [cache] = caches.as_slice() else {
+            bail!("{name} requires exactly one Cargo cache")
+        };
+        assert_eq!(
+            cache["with"]["key"].as_str(),
+            Some(format!("{prefix}{CARGO_CACHE_INPUTS}").as_str()),
+            "{name} must invalidate cached materials when any consumer lock changes"
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn ci_uses_the_explicit_proof_entry_for_the_paused_mutation_campaign() -> Result<()> {
+    let current = YamlLoader::load_from_str(&repository(".github/workflows/ci.yml"))?;
+    let [current] = current.as_slice() else {
+        bail!("CI must contain one workflow document")
+    };
+    assert_eq!(
+        current["jobs"]["check"]["env"]["MISE_DISABLE_TOOLS"].as_str(),
+        Some("cargo:kani-verifier"),
+        "Code environment tests require the pinned mutation tool to be installed"
+    );
+    assert!(!rules::proof_budget_rules::mutation_required(
+        rules::proof_budget_rules::ProofCampaign::Ci
+    ));
     for text in [repository(".github/workflows/ci.yml"), WORKFLOW.to_owned()] {
         let workflow = YamlLoader::load_from_str(&text)?;
         let [workflow] = workflow.as_slice() else {

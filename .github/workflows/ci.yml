@@ -72,6 +72,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:
+      MISE_DISABLE_TOOLS: "cargo:kani-verifier"
       GATES: ${{ needs.classify.outputs.gates }}
     steps:
       - name: Refuse to pass without a classification
@@ -103,7 +104,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'mise.toml', '!**/target/**', '!**/.git/**', '!**/node_modules/**', '!**/.venv/**') }}
           restore-keys: cargo-${{ runner.os }}-
       - uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
         if: runner.os == 'Windows' && (contains(env.GATES, 'rust') || contains(env.GATES, 'profiles'))
@@ -180,7 +181,7 @@ jobs:
             ~/.cargo/git
             ~/.kani
             target
-          key: proofs-${{ matrix.phase }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          key: proofs-${{ matrix.phase }}-${{ hashFiles('**/Cargo.lock', 'mise.toml', '!**/target/**', '!**/.git/**', '!**/node_modules/**', '!**/.venv/**') }}
           restore-keys: proofs-${{ matrix.phase }}-
       - name: Set up the pinned verifier
         if: contains(env.GATES, 'proofs') && matrix.phase == 'kani'
@@ -278,6 +279,7 @@ jobs:
         shell: bash
         env:
           GIT_CONFIG_GLOBAL: ${{ runner.temp }}/dotfiles-rehearsal.gitconfig
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           git config --file "$GIT_CONFIG_GLOBAL" include.path "$HOME/.config/git/config"
           git config --file "$GIT_CONFIG_GLOBAL" url.https://github.com/P4suta/OComment.insteadOf git@github.com:P4suta/OComment
@@ -293,7 +295,7 @@ jobs:
     timeout-minutes: 120
     env:
       # WSL receives only the variables that WSLENV names.
-      WSLENV: CI:MISE_DISABLE_TOOLS:MISE_PARANOID
+      WSLENV: CI:GITHUB_TOKEN:MISE_DISABLE_TOOLS:MISE_PARANOID
     steps:
       - name: Refuse to pass without a classification
         if: needs.classify.result != 'success'
@@ -325,6 +327,8 @@ jobs:
       - name: Apply, reprovision, and reapply the native profile in this disposable distribution
         if: contains(needs.classify.outputs.gates, 'profiles')
         shell: wsl-bash {0}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -eu
           export PATH="$HOME/.local/bin:$PATH"

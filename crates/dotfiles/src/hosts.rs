@@ -2994,7 +2994,7 @@ mod job_tests {
     fn retained_material_layers_restore_cargo_permissions_before_cleanup() -> Result<()> {
         use std::os::unix::fs::PermissionsExt as _;
 
-        let namespace = tempfile::tempdir()?;
+        let namespace = material_directory(&std::env::temp_dir())?;
         let cargo = namespace.path().join("cargo");
         let vendor = cargo.join("vendor");
         let cargo_home = cargo.join("cargo-home");

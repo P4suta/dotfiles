@@ -2540,7 +2540,7 @@ mod tests {
 
     #[test]
     fn authenticated_stdlib_union_closes_a_fresh_offline_cargo_consumer() -> Result<()> {
-        let namespace = tempfile::tempdir()?;
+        let namespace = tempfile::tempdir_in(platform::paths::canonical(&std::env::temp_dir())?)?;
         let dependency = stdlib_fixture_crate(STDLIB_ONLY_PACKAGE)?;
         let lock = stdlib_fixture_lock(STDLIB_ONLY_PACKAGE, Digest::of(&dependency));
         let archive = stdlib_material_archive(
@@ -2616,7 +2616,7 @@ mod tests {
 
     #[test]
     fn authenticated_stdlib_union_refuses_missing_or_poisoned_packages() -> Result<()> {
-        let namespace = tempfile::tempdir()?;
+        let namespace = tempfile::tempdir_in(platform::paths::canonical(&std::env::temp_dir())?)?;
         let dependency = stdlib_fixture_crate(STDLIB_ONLY_PACKAGE)?;
         let lock = stdlib_fixture_lock(STDLIB_ONLY_PACKAGE, Digest::of(&dependency));
         let archive = stdlib_material_archive(
@@ -2660,7 +2660,7 @@ mod tests {
 
     #[test]
     fn authenticated_stdlib_union_refuses_conflicts_and_foreign_source() -> Result<()> {
-        let namespace = tempfile::tempdir()?;
+        let namespace = tempfile::tempdir_in(platform::paths::canonical(&std::env::temp_dir())?)?;
         let archive =
             stdlib_material_archive(STDLIB_ARCHIVE_ROOT, &[(STDLIB_ARCHIVE_MEMBER, STDLIB_LOCK)])?;
         let (root, _, rust) = prepared_stdlib_archive_fixture(namespace.path(), &archive)?;
@@ -2703,7 +2703,7 @@ mod tests {
 
     #[test]
     fn authenticated_stdlib_union_rechecks_original_source_and_owned_bytes() -> Result<()> {
-        let namespace = tempfile::tempdir()?;
+        let namespace = tempfile::tempdir_in(platform::paths::canonical(&std::env::temp_dir())?)?;
         let archive =
             stdlib_material_archive(STDLIB_ARCHIVE_ROOT, &[(STDLIB_ARCHIVE_MEMBER, STDLIB_LOCK)])?;
         let (root, _, rust) = prepared_stdlib_archive_fixture(namespace.path(), &archive)?;
@@ -2823,7 +2823,8 @@ mod tests {
             ),
         ];
         for (archive, expected) in cases {
-            let namespace = tempfile::tempdir()?;
+            let namespace =
+                tempfile::tempdir_in(platform::paths::canonical(&std::env::temp_dir())?)?;
             let root = namespace.path().join("source");
             let output = namespace.path().join("output");
             fs::create_dir(&output)?;
@@ -2845,7 +2846,7 @@ mod tests {
 
     #[test]
     fn installed_stdlib_lock_requires_the_authenticated_regular_original() -> Result<()> {
-        let namespace = tempfile::tempdir()?;
+        let namespace = tempfile::tempdir_in(platform::paths::canonical(&std::env::temp_dir())?)?;
         let archive =
             stdlib_material_archive(STDLIB_ARCHIVE_ROOT, &[(STDLIB_ARCHIVE_MEMBER, STDLIB_LOCK)])?;
         let (_, _, rust) = prepared_stdlib_archive_fixture(namespace.path(), &archive)?;
@@ -2882,7 +2883,7 @@ mod tests {
     #[test]
     fn verified_rust_src_captures_its_original_cargo_lock_before_installation() -> Result<()> {
         assert_eq!(Digest::of(STDLIB_LOCK).hex(), STDLIB_LOCK_SHA256);
-        let namespace = tempfile::tempdir()?;
+        let namespace = tempfile::tempdir_in(platform::paths::canonical(&std::env::temp_dir())?)?;
         let root = namespace.path().join("source");
         let output = namespace.path().join("output");
         fs::create_dir(&output)?;
@@ -2948,7 +2949,7 @@ mod tests {
 
     #[test]
     fn native_preflight_refuses_an_incompatible_bundle_before_launcher_preparation() -> Result<()> {
-        let namespace = tempfile::tempdir()?;
+        let namespace = tempfile::tempdir_in(platform::paths::canonical(&std::env::temp_dir())?)?;
         let root = namespace.path().join("source");
         let output = namespace.path().join("output");
         fs::create_dir(&output)?;

@@ -3,7 +3,7 @@ use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 
 /// Git for Windows' exec path sits three levels inside its installation: `mingw64/libexec/git-core`.
 const GIT_EXEC_PATH_DEPTH: usize = 3;
@@ -299,28 +299,77 @@ pub fn workspace_manifests(root: &Path) -> Result<Vec<String>> {
     Ok(workspaces)
 }
 
-/// Validate each workspace's lockfile before building or running its tools.
+/// Prepare and validate each workspace's locked dependencies before running its tools.
 ///
 /// # Errors
 ///
-/// Reports every workspace with a missing or stale lockfile.
+/// Reports missing locks and failed dependency preparation or offline resolution.
 pub fn locked_workspaces(root: &Path) -> Result<()> {
-    resolve_locked_workspaces(root, &workspace_manifests(root)?)
+    let mut checks = crate::checks::Checks::default();
+    for manifest in workspace_manifests(root)? {
+        checks.run(&manifest, || {
+            ensure!(
+                root.join(&manifest).with_file_name(CARGO_LOCK).is_file(),
+                "missing {CARGO_LOCK}"
+            );
+            Ok(())
+        });
+    }
+    checks.finish()?;
+    with_locked_workspaces(root, || Ok(()))
 }
 
-/// Refuse stale independent locks before running a heavy verification body.
+/// Prepare independent locked dependencies and validate them offline before verification.
 ///
 /// # Errors
 ///
-/// Reports every full offline resolution failure without running the supplied body.
+/// Refuses failed fetches, changed inputs, or offline resolution failures before calling the body.
 pub fn with_locked_workspaces<T>(root: &Path, body: impl FnOnce() -> Result<T>) -> Result<T> {
+    with_locked_workspaces_using(root, |command| Ok(command.output()?), body)
+}
+
+/// Prepare and validate every locked workspace through the supplied Cargo process port.
+///
+/// # Errors
+///
+/// Reports failed fetches or offline resolutions and refuses changed source inputs before calling the body.
+pub fn with_locked_workspaces_using<T>(
+    root: &Path,
+    mut execute: impl FnMut(&mut Command) -> Result<Output>,
+    body: impl FnOnce() -> Result<T>,
+) -> Result<T> {
     let workload = dotfiles::artifacts::CargoWorkload::capture(root)?;
-    resolve_locked_workspaces(root, &workload.workspace_manifests()?)?;
+    let manifests = workload.workspace_manifests()?;
+    resolve_locked_workspaces(
+        root,
+        &manifests,
+        &["fetch", "--locked", "--manifest-path"],
+        &mut execute,
+    )?;
+    workload.require_current(root)?;
+    resolve_locked_workspaces(
+        root,
+        &manifests,
+        &[
+            "metadata",
+            "--locked",
+            "--offline",
+            "--format-version",
+            "1",
+            "--manifest-path",
+        ],
+        &mut execute,
+    )?;
     workload.require_current(root)?;
     body()
 }
 
-fn resolve_locked_workspaces(root: &Path, manifests: &[String]) -> Result<()> {
+fn resolve_locked_workspaces(
+    root: &Path,
+    manifests: &[String],
+    arguments: &[&str],
+    execute: &mut impl FnMut(&mut Command) -> Result<Output>,
+) -> Result<()> {
     let mut checks = crate::checks::Checks::default();
     for manifest in manifests {
         checks.run(manifest, || {
@@ -329,20 +378,14 @@ fn resolve_locked_workspaces(root: &Path, manifests: &[String]) -> Result<()> {
                 path.with_file_name(CARGO_LOCK).is_file(),
                 "missing {CARGO_LOCK}"
             );
-            let output = Tool::Cargo
-                .command()
+            let mut command = Tool::Cargo.command();
+            command
                 .current_dir(root)
-                .args([
-                    "metadata",
-                    "--locked",
-                    "--offline",
-                    "--format-version",
-                    "1",
-                    "--manifest-path",
-                ])
+                .args(arguments)
                 .arg(&path)
-                .stdout(Stdio::null())
-                .output()?;
+                .stdin(Stdio::null())
+                .stdout(Stdio::null());
+            let output = execute(&mut command)?;
             ensure!(
                 output.status.success(),
                 "{}",

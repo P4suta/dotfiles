@@ -16,6 +16,14 @@ const MATERIAL_PATH_LIMIT: usize = 262_144;
 const MATERIAL_DEPTH_LIMIT: usize = 128;
 #[cfg(unix)]
 const UNIX_WRITE_BITS: u32 = 0o222;
+#[cfg(windows)]
+const FILE_SHARE_READ: u32 = 1;
+#[cfg(windows)]
+const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+#[cfg(windows)]
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+#[cfg(windows)]
+const ERROR_SHARING_VIOLATION: i32 = 32;
 const WRITABLE_OUTPUTS: [&str; 3] = [
     "target",
     "fuzz/artifacts",
@@ -319,7 +327,7 @@ fn verify_protection(root: &Path, file: &Path, directory: &Path) -> Result<()> {
         fs::OpenOptions::new()
             .write(true)
             .open(file)
-            .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied),
+            .is_err_and(|error| protection_denied(&error)),
         "captured file protection does not reject writes"
     );
     let probe = directory.join(PROBE);
@@ -330,11 +338,23 @@ fn verify_protection(root: &Path, file: &Path, directory: &Path) -> Result<()> {
             anyhow::bail!("captured directory protection does not reject entry replacement");
         }
         Err(error) => ensure!(
-            error.kind() == std::io::ErrorKind::PermissionDenied,
+            protection_denied(&error),
             "captured directory rejection has another cause: {error}"
         ),
     }
     Ok(())
+}
+
+fn protection_denied(error: &std::io::Error) -> bool {
+    if error.kind() == std::io::ErrorKind::PermissionDenied {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
+    }
+    #[cfg(not(windows))]
+    false
 }
 
 #[derive(Debug)]
@@ -347,6 +367,8 @@ pub(super) struct Protection {
     owner: Option<String>,
     #[cfg(windows)]
     material: Option<Vec<MaterialAcl>>,
+    #[cfg(windows)]
+    leases: Vec<fs::File>,
 }
 
 #[cfg(windows)]
@@ -369,6 +391,8 @@ impl Protection {
             owner: None,
             #[cfg(windows)]
             material: Some(inventory.acls()),
+            #[cfg(windows)]
+            leases: retain_entries(inventory.paths.iter().chain(&inventory.links))?,
         };
         #[cfg(unix)]
         {
@@ -407,6 +431,8 @@ impl Protection {
             owner: None,
             #[cfg(windows)]
             material: None,
+            #[cfg(windows)]
+            leases: retain_entries(&paths)?,
         };
         #[cfg(unix)]
         {
@@ -462,6 +488,8 @@ impl Protection {
     }
 
     fn release(&mut self) -> Result<()> {
+        #[cfg(windows)]
+        self.leases.clear();
         #[cfg(unix)]
         {
             for (path, permissions) in &self.permissions {
@@ -491,6 +519,23 @@ impl Protection {
         }
         Ok(())
     }
+}
+
+#[cfg(windows)]
+fn retain_entries<'a>(paths: impl IntoIterator<Item = &'a PathBuf>) -> Result<Vec<fs::File>> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+
+    paths
+        .into_iter()
+        .map(|path| {
+            fs::File::options()
+                .read(true)
+                .share_mode(FILE_SHARE_READ)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+                .open(path)
+                .with_context(|| format!("retain protected native entry {}", path.display()))
+        })
+        .collect()
 }
 
 impl Drop for Protection {
@@ -990,6 +1035,63 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn retained_entries_reject_mutation_without_acls_and_release_every_handle() -> Result<()> {
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        let owned = tempfile::tempdir()?;
+        let namespace = platform::paths::canonical(owned.path())?;
+        let directory = namespace.join("sealed");
+        let file = directory.join("source");
+        let linked = namespace.join("linked");
+        let mutable = namespace.join("mutable");
+        fs::create_dir(&directory)?;
+        fs::create_dir(&mutable)?;
+        fs::write(&file, b"original")?;
+        material_link(&directory, &linked)?;
+        let paths = [directory.clone(), file.clone(), linked.clone()];
+        let missing = namespace.join("missing");
+        assert!(retain_entries(paths.iter().chain([&missing])).is_err());
+        fs::write(&file, b"original")?;
+        let leases = retain_entries(&paths)?;
+        let nested = retain_entries(&paths)?;
+        assert_eq!(fs::read(&file)?, b"original");
+        assert_eq!(fs::read(linked.join("source"))?, b"original");
+        let refused = fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(&file)
+            .expect_err("backup intent cannot bypass the retained read handle");
+        assert_eq!(refused.raw_os_error(), Some(ERROR_SHARING_VIOLATION));
+        assert!(protection_denied(&refused));
+        for path in &paths {
+            let refused = fs::rename(path, namespace.join("replaced"))
+                .expect_err("retained entries cannot be renamed");
+            assert_eq!(refused.raw_os_error(), Some(ERROR_SHARING_VIOLATION));
+        }
+        assert!(fs::remove_dir(&linked).is_err());
+        fs::write(mutable.join("output"), b"mutable")?;
+        fs::rename(mutable.join("output"), mutable.join("renamed"))?;
+        drop(nested);
+        assert!(fs::write(&file, b"still protected").is_err());
+        drop(leases);
+        fs::write(&file, b"released")?;
+        let replaced = directory.join("replaced");
+        fs::rename(&file, &replaced)?;
+        fs::remove_file(replaced)?;
+        fs::remove_dir(&linked)?;
+        fs::rename(&directory, namespace.join("released"))?;
+        assert!(!protection_denied(&std::io::Error::from(
+            std::io::ErrorKind::NotFound
+        )));
+        assert!(!protection_denied(&std::io::Error::other(
+            "unrelated failure"
+        )));
+        platform::cleanup::report(owned.close(), "remove the retained entry fixture");
         Ok(())
     }
 
