@@ -1,4 +1,0 @@
-{{- $signingKey := includeTemplate "signing_pubkey" . | trim -}}
-{{- if ne $signingKey "" -}}
-{{ .git.email }} {{ $signingKey }}
-{{ end -}}

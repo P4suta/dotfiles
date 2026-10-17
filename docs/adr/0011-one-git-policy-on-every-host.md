@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Run one Git policy on every host
-
-Status: accepted.
 
 ## Context
 

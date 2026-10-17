@@ -1,0 +1,10 @@
+id: retired-term
+valid:
+  - "fn budget(limit: u64) -> u64 { limit }"
+  - "fn reset_entry_and_script_state() {}"
+  - "struct TemplateData { root: String }"
+invalid:
+  - "fn capacity_budget(capacity: u64) -> u64 { capacity }"
+  - "fn forget_script_runs() {}"
+  - "struct ContextData { root: String }"
+  - "const RENOVATE_LOCAL_GATE_TYPES: &str = \"minor patch\";"

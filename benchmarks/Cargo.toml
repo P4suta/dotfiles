@@ -1,0 +1,32 @@
+# Local policy benchmarks with committed ceilings.
+# gungraun runs only under Valgrind on Linux, so the package keeps its own workspace outside the stable one, as the cargo-fuzz targets do.
+[package]
+name = "dotfiles-benchmarks"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+dotguard = { path = "../crates/dotguard" }
+# The benches read their ceilings from the recorded baselines, so the runner fails with its exit status 3 the moment a budget breaks.
+gungraun = "0.20.0"
+xtask = { path = "../xtask" }
+
+# Valgrind reads the symbols of the measured code.
+[profile.bench]
+debug = true
+
+[lib]
+name = "bench_limits"
+
+[[bench]]
+name = "library"
+harness = false
+
+[[bench]]
+name = "wrapper"
+harness = false
+
+[workspace]
+members = ["."]

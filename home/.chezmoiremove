@@ -1,0 +1,5 @@
+{{- range $target, $set := .retired }}
+{{- if has $.profile (index $.profiles $set) }}
+{{ $target }}
+{{- end }}
+{{- end }}

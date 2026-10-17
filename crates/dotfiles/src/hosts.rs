@@ -1,0 +1,3837 @@
+//! Cross-platform push evidence: managed SSH access to one host per OS family, gate runs through domyjob, and Git notes that pre-push and `pr-workflow ready` require.
+
+use crate::hosts_rules::{Evidence, Family, Key, Start, Verdict, admit, gated, pin, record, start};
+use crate::runtime::Real;
+use crate::tool::Tool;
+use anyhow::{Context, Result, bail, ensure};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+use yaml_rust2::{Yaml, YamlLoader};
+
+mod local;
+mod pending;
+
+pub const NOTES: &str = "refs/notes/hosts";
+const NOTES_LOCK: &str = "hosts-notes.lock";
+const STATE: &str = ".local/state/hosts";
+pub const DEFAULT_GATE: &str = "just push-check";
+const STAGE_REPORT: &str = "DOTFILES_HOST_STAGES ";
+const CODE_SHELL: &str = "/bin/sh";
+const KANI_NATIVE_HEALTH: &str =
+    "a_kani_batch_verifies_every_harness_and_rejects_every_counterexample";
+const KANI_HEALTH_RESULT: &str = "test result: ok. 1 passed; 0 failed;";
+const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
+const PROFILE_ROOT: &str = ".chezmoiroot";
+const PROFILE_RUNTIME: &str = "crates/dotfiles/Cargo.toml";
+const JOB_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const MISSING_JOB: &str = "domyjob: remote node refused the request: MissingJob";
+const REQUEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const REQUEST_LIMIT: Duration = Duration::from_secs(300);
+const INPUT_SCHEMA: u32 = 3;
+const REMOVE_WORKSPACE: &str = "/bin/rm";
+const DISK_SPACE: &str = "/bin/df";
+const BYTES_PER_KIB: u64 = 1024;
+const DF_AVAILABLE_COLUMN: usize = 3;
+mod resources;
+const SHARED_INPUTS: [&str; 7] = [
+    "mise.toml",
+    "mise.lock",
+    "mise.njutest.toml",
+    RELEASE_PINS,
+    "crates/dotfiles/src/hosts.rs",
+    "crates/dotfiles/src/host_checks.rs",
+    "crates/platform/src/code_environment.rs",
+];
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Stage {
+    Code,
+    Real,
+}
+
+impl Stage {
+    const ALL: [Self; 2] = [Self::Code, Self::Real];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Code => 0,
+            Self::Real => 1,
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Code => "code",
+            Self::Real => "real",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Stages {
+    code: i32,
+    real: i32,
+    applied: Option<crate::host_checks::Applied>,
+    #[serde(default)]
+    workspace: Option<String>,
+    #[serde(default)]
+    capture: Option<local::Execution>,
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum Action {
+    /// Check tailnet presence, SSH through the agent, domyjob, and the gate's toolchain on every managed host.
+    Doctor {
+        #[arg(long, default_value = DEFAULT_GATE)]
+        gate: String,
+    },
+    /// Regenerate the managed SSH aliases and pinned host keys from the tailnet.
+    Sync {
+        /// Choose this tailnet host for its OS family.
+        #[arg(long)]
+        host: Vec<String>,
+        /// Remote user.
+        /// Defaults to the managed one, then to the user of a hub remote.
+        #[arg(long)]
+        user: Option<String>,
+        /// Replace this host's pinned key with the one it presents now.
+        #[arg(long)]
+        accept: Vec<String>,
+    },
+    /// Run the gate for the clean head commit on every operating system family in the continuous integration matrix and record each result as a Git note.
+    Check {
+        #[arg(long, default_value = DEFAULT_GATE)]
+        gate: String,
+    },
+    /// Run the code stage in the environment built from this checkout's installed pins.
+    Code {
+        #[arg(long, default_value = DEFAULT_GATE)]
+        gate: String,
+    },
+    /// Verify native provisioning and network access without an SSH agent.
+    Real,
+    #[command(hide = true)]
+    Worker {
+        #[arg(long, default_value = DEFAULT_GATE)]
+        gate: String,
+        #[arg(long)]
+        home: Option<PathBuf>,
+        #[arg(long)]
+        skip_code: bool,
+        #[arg(long)]
+        skip_real: bool,
+        #[arg(long)]
+        workspace: Option<PathBuf>,
+        #[arg(long)]
+        capture: Option<PathBuf>,
+    },
+    /// Refuse pushed GitHub branches that lack a passing note for an operating system family in their CI matrix.
+    /// Reads pre-push input.
+    Gate { remote: String, url: String },
+}
+
+/// Run one `hosts` subcommand in this user's home directory.
+///
+/// # Errors
+///
+/// Returns an error when the home directory stays unavailable, reading standard input fails, or the chosen subcommand fails.
+pub fn run(action: Action) -> Result<()> {
+    match action {
+        Action::Doctor { gate } => doctor(&home()?, &gate),
+        Action::Sync { host, user, accept } => sync(&home()?, &host, user, &accept),
+        Action::Check { gate } => check(&home()?, &gate),
+        Action::Code { gate } => code(&home()?, &gate),
+        Action::Real => crate::host_checks::check(&std::env::current_dir()?, &home()?).candidate,
+        Action::Worker {
+            gate,
+            home: native_home,
+            skip_code,
+            skip_real,
+            workspace,
+            capture,
+        } => worker(
+            &native_home.map_or_else(home, Ok)?,
+            &gate,
+            [skip_code, skip_real],
+            workspace.as_deref(),
+            capture.as_deref(),
+        ),
+        Action::Gate { url, .. } => {
+            let mut input = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::stdin(), &mut input)?;
+            push_gate(Path::new("."), &url, &input)
+        }
+    }
+}
+
+fn home() -> Result<PathBuf> {
+    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .map(PathBuf::from)
+        .context("home directory is unavailable")
+}
+
+/// The family a runner label names, such as `ubuntu-latest` or `macos-14`.
+#[must_use]
+pub fn label_family(label: &str) -> Option<Family> {
+    let label = label.trim().to_ascii_lowercase();
+    if label.starts_with("ubuntu") || label == "linux" {
+        Some(Family::Linux)
+    } else if label.starts_with("macos") {
+        Some(Family::Mac)
+    } else if label.starts_with("windows") {
+        Some(Family::Windows)
+    } else {
+        None
+    }
+}
+
+/// The family Tailscale reports for a node.
+#[must_use]
+pub fn os_family(os: &str) -> Option<Family> {
+    match os {
+        "linux" => Some(Family::Linux),
+        "macOS" => Some(Family::Mac),
+        "windows" => Some(Family::Windows),
+        _ => None,
+    }
+}
+
+fn strings(value: &Yaml) -> Vec<String> {
+    match value {
+        Yaml::String(text) => vec![text.clone()],
+        Yaml::Array(items) => items.iter().flat_map(strings).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn runner_labels(job: &Yaml, name: &str) -> Result<Vec<String>> {
+    let runs_on = &job["runs-on"];
+    let labels = match runs_on {
+        Yaml::Hash(_) => strings(&runs_on["labels"]),
+        other => strings(other),
+    };
+    let mut resolved = Vec::new();
+    for label in labels {
+        let Some(expression) = label
+            .trim()
+            .strip_prefix("${{")
+            .and_then(|rest| rest.strip_suffix("}}"))
+        else {
+            resolved.push(label);
+            continue;
+        };
+        let key = expression.trim().strip_prefix("matrix.").with_context(|| {
+            format!("job {name} has a runner expression the gate cannot resolve: {label}")
+        })?;
+        let matrix = &job["strategy"]["matrix"];
+        let mut values = strings(&matrix[key]);
+        if let Yaml::Array(includes) = &matrix["include"] {
+            values.extend(includes.iter().flat_map(|include| strings(&include[key])));
+        }
+        ensure!(
+            !values.is_empty(),
+            "job {name} has no matrix values for {key}"
+        );
+        resolved.extend(values);
+    }
+    Ok(resolved)
+}
+
+/// The families the workflows' jobs run on, by family index.
+/// Reusable-workflow calls have no runner of their own.
+///
+/// # Errors
+///
+/// Returns an error when a workflow holds invalid YAML, a runner expression resolves to nothing, or a job's runner names no known family.
+pub fn required(workflows: &[(String, String)]) -> Result<[bool; 3]> {
+    let mut required = [false; 3];
+    for (file, text) in workflows {
+        let documents = YamlLoader::load_from_str(text).with_context(|| format!("parse {file}"))?;
+        let Some(Yaml::Hash(jobs)) = documents.first().map(|document| &document["jobs"]) else {
+            continue;
+        };
+        for (name, job) in jobs {
+            let name = format!("{file}:{}", name.as_str().unwrap_or("?"));
+            if job["runs-on"].is_badvalue() {
+                continue;
+            }
+            let families: Vec<_> = runner_labels(job, &name)?
+                .iter()
+                .filter_map(|label| label_family(label))
+                .collect();
+            ensure!(
+                !families.is_empty(),
+                "cannot tell the OS family of job {name}"
+            );
+            for family in families {
+                required[family.index()] = true;
+            }
+        }
+    }
+    Ok(required)
+}
+
+/// One gate run, appended to the note of the commit it ran for.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Note {
+    pub host: String,
+    pub os: String,
+    pub tree: String,
+    pub status: i32,
+    pub gate: String,
+    #[serde(default)]
+    pub stage: Option<Stage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied: Option<crate::host_checks::Applied>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inputs: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reused: Option<Reused>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<Workspace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<local::Receipt>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Reused {
+    pub commit: String,
+    pub line: usize,
+    pub host: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Workspace {
+    pub path: String,
+    pub job: String,
+    pub reused: [Option<Reused>; 2],
+}
+
+fn pending_workspaces(notes: &[(String, String)]) -> Result<BTreeMap<(String, String), Note>> {
+    let mut pending = BTreeMap::new();
+    for (commit, text) in notes {
+        for line in text.lines().filter(|line| !line.trim().is_empty()) {
+            let note: Note = serde_json::from_str(line).context("malformed hosts note")?;
+            if let Some(workspace) = &note.workspace {
+                let key = (commit.clone(), format!("{}:{}", note.host, workspace.job));
+                if crate::hosts_rules::workspace_pending(
+                    pending.contains_key(&key),
+                    note.stage.is_some(),
+                    note.status == 0,
+                ) {
+                    pending.insert(key, note);
+                } else {
+                    pending.remove(&key);
+                }
+            }
+        }
+    }
+    Ok(pending)
+}
+
+fn cleanup_arguments(family: Family, workspace: &Workspace) -> Result<Vec<String>> {
+    ensure!(
+        workspace
+            .job
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+            && !workspace.job.is_empty(),
+        "invalid workspace job identity"
+    );
+    let path = &workspace.path;
+    ensure!(
+        path.ends_with(&format!("/jobs/{}/workspace", workspace.job))
+            && !path
+                .split('/')
+                .any(|component| matches!(component, "." | "..")),
+        "cleanup requires the recorded job's workspace directory"
+    );
+    match family {
+        Family::Linux | Family::Mac => {
+            ensure!(path.starts_with('/'), "workspace path must be absolute");
+            Ok(vec![
+                REMOVE_WORKSPACE.into(),
+                "-rf".into(),
+                "--".into(),
+                path.clone(),
+            ])
+        }
+        Family::Windows => {
+            ensure!(
+                path.starts_with("//")
+                    || path
+                        .split_once(':')
+                        .is_some_and(|(drive, rest)| drive.len() == 1
+                            && drive.chars().all(|letter| letter.is_ascii_alphabetic())
+                            && rest.starts_with('/')),
+                "workspace path must be absolute"
+            );
+            Ok(wrap(
+                family,
+                &format!(
+                    "$ErrorActionPreference = 'Stop'; $workspace = '{}'; if (Test-Path -LiteralPath $workspace) {{ Remove-Item -LiteralPath $workspace -Recurse -Force }}",
+                    path.replace('\'', "''")
+                ),
+            ))
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum AppendNote {
+    Recorded,
+    Obsolete,
+}
+
+fn reuse_generation(root: &Path, note: &mut Note) -> Result<Option<u64>> {
+    let reused = note.reused.as_ref().context("reused execution identity")?;
+    let receipts = receipts(&all_notes(root)?)?;
+    let source = source(&receipts, reused).context("missing reused execution receipt")?;
+    let receipt = actual_receipt(&source.note)
+        .context("reused origin is not a sequenced actual execution")?;
+    ensure!(
+        note.generation.is_none() || note.generation == Some(receipt.generation),
+        "reused generation differs from its execution receipt"
+    );
+    note.generation = Some(receipt.generation);
+    ensure!(
+        verified_receipt(note, &receipts) == Some(receipt),
+        "reused execution receipt does not match the stage"
+    );
+    let family = Family::ALL
+        .into_iter()
+        .find(|family| family.name() == note.os)
+        .context("unknown reused OS family")?;
+    let stage = note.stage.context("reused stage")?;
+    let inputs = note.inputs.as_deref().context("reused inputs")?;
+    Ok(
+        (latest_execution(&receipts, family, stage, inputs, &note.gate) == Some(receipt)
+            && crate::hosts_rules::after_unverified(
+                Some(receipt),
+                pending::cutoff(root, family, stage, inputs, &note.gate)?,
+            ) == Some(receipt))
+        .then_some(receipt.generation),
+    )
+}
+
+fn append_note(root: &Path, commit: &str, note: &Note) -> Result<AppendNote> {
+    let _lock = notes_lock(root)?;
+    let mut note = note.clone();
+    if note.stage.is_some() {
+        if note.reused.is_some() {
+            let Some(generation) = reuse_generation(root, &mut note)? else {
+                return Ok(AppendNote::Obsolete);
+            };
+            note.generation = Some(generation);
+        } else {
+            let mut anchor = None;
+            if let Some(workspace) = &note.workspace {
+                let receipts = receipts(&all_notes(root)?)?;
+                for existing in receipts.iter().filter(|existing| {
+                    existing.origin.commit == commit
+                        && existing.note.host == note.host
+                        && existing.note.stage.is_some()
+                        && existing.note.reused.is_none()
+                        && existing.note.workspace.as_ref().is_some_and(|previous| {
+                            previous.job == workspace.job && previous.path == workspace.path
+                        })
+                }) {
+                    let receipt = actual_receipt(&existing.note)
+                        .context("workspace execution anchor has no generation")?;
+                    ensure!(
+                        anchor.is_none() || anchor == Some(receipt.generation),
+                        "workspace execution has conflicting generations"
+                    );
+                    ensure!(
+                        note.os == existing.note.os
+                            && note.tree == existing.note.tree
+                            && note.gate == existing.note.gate,
+                        "workspace execution has conflicting source facts"
+                    );
+                    anchor = Some(receipt.generation);
+                    if note.stage == existing.note.stage {
+                        note.generation = anchor;
+                        ensure!(
+                            serde_json::to_value(&note)? == serde_json::to_value(&existing.note)?,
+                            "workspace stage execution has conflicting results"
+                        );
+                        return Ok(AppendNote::Recorded);
+                    }
+                }
+            }
+            if let Some(generation) = anchor {
+                note.generation = Some(generation);
+            } else {
+                let references = git_text(root, &["for-each-ref", "--format=%(refname)", NOTES])?;
+                let count = if references.lines().any(|reference| reference == NOTES) {
+                    git_text(root, &["rev-list", "--count", NOTES])?.parse()?
+                } else {
+                    0
+                };
+                note.generation = Some(
+                    crate::hosts_rules::next_generation(count)
+                        .context("hosts receipt generation overflow")?,
+                );
+            }
+        }
+    } else {
+        note.generation = None;
+    }
+    git(
+        root,
+        &[
+            "notes",
+            "--ref",
+            NOTES,
+            "append",
+            "-m",
+            &serde_json::to_string(&note)?,
+            commit,
+        ],
+    )?;
+    Ok(AppendNote::Recorded)
+}
+
+fn notes_lock(root: &Path) -> Result<fs::File> {
+    let lock = notes_file(root)?;
+    lock.lock().context("lock shared hosts receipts")?;
+    Ok(lock)
+}
+
+fn notes_file(root: &Path) -> Result<fs::File> {
+    let common = git_text(
+        root,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    Ok(fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(Path::new(&common).join(NOTES_LOCK))?)
+}
+
+fn clean_recorded_workspace(native: &Real, root: &Path, commit: &str, note: &Note) -> Result<()> {
+    let workspace = note
+        .workspace
+        .as_ref()
+        .context("workspace receipt is missing")?;
+    let family = Family::ALL
+        .into_iter()
+        .find(|family| family.name() == note.os)
+        .context("unknown workspace host family")?;
+    let (status, output) = domyjob(
+        native,
+        &note.host,
+        &["on"],
+        &cleanup_arguments(family, workspace)?,
+    )?;
+    ensure!(
+        status == Some(0),
+        "{} {}: cleanup workspace: {output}",
+        note.os,
+        note.host
+    );
+    append_note(
+        root,
+        commit,
+        &Note {
+            host: note.host.clone(),
+            os: note.os.clone(),
+            tree: note.tree.clone(),
+            status: 0,
+            gate: note.gate.clone(),
+            stage: None,
+            applied: None,
+            inputs: None,
+            generation: None,
+            reused: None,
+            workspace: Some(workspace.clone()),
+            capture: None,
+        },
+    )
+    .map(|_| ())
+}
+
+fn disk_paths(family: Family, home: Option<&Path>) -> [String; 2] {
+    home.map_or_else(
+        || match family {
+            Family::Windows => ["$env:USERPROFILE".into(), "$env:TEMP".into()],
+            Family::Linux | Family::Mac => ["\"$HOME\"".into(), "\"${TMPDIR:-/tmp}\"".into()],
+        },
+        |home| {
+            [home.to_path_buf(), std::env::temp_dir()].map(|path| {
+                let path = path.to_string_lossy();
+                match family {
+                    Family::Windows => format!("'{}'", path.replace('\'', "''")),
+                    Family::Linux | Family::Mac => format!("'{}'", path.replace('\'', "'\"'\"'")),
+                }
+            })
+        },
+    )
+}
+
+fn disk_arguments(family: Family, home: Option<&Path>) -> Vec<String> {
+    let [home, temporary] = disk_paths(family, home);
+    let script = match family {
+        Family::Linux | Family::Mac => format!("LC_ALL=C {DISK_SPACE} -Pk {home} {temporary}"),
+        Family::Windows => format!(
+            "$ErrorActionPreference = 'Stop'; @({home}, {temporary}) | ForEach-Object {{ [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($_)).AvailableFreeSpace }}"
+        ),
+    };
+    wrap(family, &script)
+}
+
+fn space_available(family: Family, output: &str) -> Result<u64> {
+    let mut available = None;
+    for line in output.lines() {
+        let value = match family {
+            Family::Windows => line.trim().parse::<u64>().ok(),
+            Family::Linux | Family::Mac => {
+                if let Some(kib) = line
+                    .split_whitespace()
+                    .nth(DF_AVAILABLE_COLUMN)
+                    .and_then(|value| value.parse::<u64>().ok())
+                {
+                    Some(
+                        kib.checked_mul(BYTES_PER_KIB)
+                            .context("free-space byte count overflow")?,
+                    )
+                } else {
+                    None
+                }
+            }
+        };
+        if let Some(value) = value {
+            available = Some(available.map_or(value, |previous: u64| previous.min(value)));
+        }
+    }
+    available.context("host returned no free-space measurement")
+}
+
+fn capacity(native: &Real, family: Family, target: &Target) -> Result<u64> {
+    let (status, output) = match target {
+        Target::Remote(alias) => domyjob(native, alias, &["on"], &disk_arguments(family, None))?,
+        Target::Local(_) => {
+            let arguments = disk_arguments(family, Some(&native.home));
+            let mut command = platform::process::command(&arguments[0]);
+            command.args(&arguments[1..]);
+            let (status, output) = job_output(command, Some(REQUEST_LIMIT))?;
+            (status.code(), output)
+        }
+    };
+    ensure!(
+        status == Some(0),
+        "{}: free-space measurement failed: {output}",
+        target.name()
+    );
+    space_available(family, &output).with_context(|| format!("{}: read free space", target.name()))
+}
+
+fn require_capacity(native: &Real, family: Family, target: &Target) -> Result<()> {
+    let available = capacity(native, family, target)?;
+    ensure!(
+        crate::hosts_rules::workspace_fits(available),
+        "{} has {available} bytes free; one more workspace requires {} bytes",
+        target.name(),
+        crate::hosts_rules::WORKSPACE_BYTES
+    );
+    let inodes = if family == Family::Windows {
+        rules::resource_rules::Inodes::NotApplicable
+    } else {
+        let arguments = inode_arguments(
+            family,
+            match target {
+                Target::Local(_) => Some(&native.home),
+                Target::Remote(_) => None,
+            },
+        );
+        let (status, output) = match target {
+            Target::Remote(alias) => domyjob(native, alias, &["on"], &arguments)?,
+            Target::Local(_) => {
+                let mut command = platform::process::command(&arguments[0]);
+                command.args(&arguments[1..]);
+                let (status, output) = job_output(command, Some(REQUEST_LIMIT))?;
+                (status.code(), output)
+            }
+        };
+        ensure!(
+            status == Some(0),
+            "{}: inode measurement failed: {output}",
+            target.name()
+        );
+        resources::available_inodes(family, &output)?
+    };
+    resources::require(family, available, inodes, target.name())
+}
+
+fn inode_arguments(family: Family, local_home: Option<&Path>) -> Vec<String> {
+    let [home, temporary] = disk_paths(family, local_home);
+    wrap(
+        family,
+        &format!("LC_ALL=C {DISK_SPACE} -Pi {home} {temporary}"),
+    )
+}
+
+fn recover_workspaces(native: &Real, root: &Path) -> Result<()> {
+    for ((commit, reference), note) in pending_workspaces(&all_notes(root)?)? {
+        let workspace = note
+            .workspace
+            .as_ref()
+            .context("workspace receipt is missing")?;
+        let family = Family::ALL
+            .into_iter()
+            .find(|family| family.name() == note.os)
+            .context("unknown workspace host family")?;
+        let _execution = pending::Lease::acquire(root, family)?;
+        cleanup_arguments(family, workspace)?;
+        let mut status = command(native, Tool::Domyjob);
+        status.args(["status", &reference]);
+        let (exit, status) = job_output(status, Some(REQUEST_LIMIT))?;
+        ensure!(exit.success(), "{reference}: recover job status: {status}");
+        let mut logs = command(native, Tool::Domyjob);
+        logs.args(["logs", &reference]);
+        let (exit, logs) = job_output(logs, Some(REQUEST_LIMIT))?;
+        ensure!(exit.success(), "{reference}: recover job log: {logs}");
+        let failures = record_run(
+            native,
+            root,
+            &commit,
+            &note.tree,
+            &note.gate,
+            &input_hashes(root, &commit, &note.gate)?,
+            &GateRun {
+                family,
+                target: Target::Remote(note.host.clone()),
+                status: outcome(&note.host, &status),
+                output: format!("{reference}\n{status}\n{logs}"),
+                reused: workspace.reused.clone(),
+                capture: None,
+            },
+        )?;
+        ensure!(
+            !pending_workspaces(&all_notes(root)?)?.contains_key(&(commit, reference)),
+            "workspace recovery failed: {}",
+            failures.failures.join("\n")
+        );
+    }
+    Ok(())
+}
+
+/// Hashes the committed inputs of the code and real stages for `gate`.
+///
+/// # Errors
+///
+/// Returns an error when reading or parsing the committed tree fails.
+pub fn input_hashes(root: &Path, commit: &str, gate: &str) -> Result<[String; 2]> {
+    let listing = git(root, &["ls-tree", "-r", "-z", commit])?;
+    let mut hashes = [Sha256::new(), Sha256::new()];
+    let schema = format!("hosts-stage-inputs-v{INPUT_SCHEMA}\0");
+    for hash in &mut hashes {
+        hash.update(schema.as_bytes());
+    }
+    hashes[0].update(gate.as_bytes());
+    hashes[0].update([0]);
+    for entry in listing
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+    {
+        let (_, path) = entry.split_at(
+            entry
+                .iter()
+                .position(|byte| *byte == b'\t')
+                .context("git tree entry has no path")?
+                + 1,
+        );
+        let path = std::str::from_utf8(path)?;
+        let selected = crate::hosts_rules::stage_inputs(
+            path.starts_with("home/"),
+            SHARED_INPUTS.contains(&path)
+                || path.starts_with("crates/")
+                || matches!(path, "Cargo.toml" | "Cargo.lock" | ".cargo/config.toml"),
+        );
+        for (hash, selected) in hashes.iter_mut().zip(selected) {
+            if selected {
+                hash.update(entry);
+                hash.update([0]);
+            }
+        }
+    }
+    Ok(hashes.map(|hash| crate::build_inputs::hex(&hash.finalize())))
+}
+
+struct Recorded {
+    origin: Reused,
+    note: Note,
+}
+
+fn receipts(notes: &[(String, String)]) -> Result<Vec<Recorded>> {
+    let mut receipts = Vec::new();
+    for (commit, text) in notes {
+        for (line, text) in text.lines().enumerate() {
+            if text.trim().is_empty() {
+                continue;
+            }
+            let note: Note = serde_json::from_str(text).context("malformed hosts note")?;
+            receipts.push(Recorded {
+                origin: Reused {
+                    commit: commit.clone(),
+                    line: line + 1,
+                    host: note.host.clone(),
+                },
+                note,
+            });
+        }
+    }
+    Ok(receipts)
+}
+
+fn matching(note: &Note, family: Family, stage: Stage, inputs: &str, gate: &str) -> bool {
+    crate::hosts_rules::reuse([
+        true,
+        note.os == family.name(),
+        note.stage == Some(stage),
+        note.inputs.as_deref() == Some(inputs),
+        stage == Stage::Real || note.gate == gate,
+    ])
+}
+
+fn actual_receipt(note: &Note) -> Option<crate::hosts_rules::Receipt> {
+    if note.reused.is_some() {
+        return None;
+    }
+    note.generation
+        .filter(|generation| *generation > 0)
+        .map(|generation| crate::hosts_rules::Receipt {
+            generation,
+            passed: note.status == 0,
+        })
+}
+
+fn source<'a>(receipts: &'a [Recorded], reused: &Reused) -> Option<&'a Recorded> {
+    receipts.iter().find(|record| {
+        record.origin.commit == reused.commit
+            && record.origin.line == reused.line
+            && record.origin.host == reused.host
+    })
+}
+
+fn verified_receipt(note: &Note, receipts: &[Recorded]) -> Option<crate::hosts_rules::Receipt> {
+    let Some(reused) = &note.reused else {
+        return actual_receipt(note);
+    };
+    let original = &source(receipts, reused)?.note;
+    let receipt = actual_receipt(original)?;
+    let stage = note.stage?;
+    crate::hosts_rules::reuse([
+        note.status == 0 && receipt.passed && note.generation == Some(receipt.generation),
+        note.os == original.os,
+        note.stage == original.stage,
+        note.inputs.is_some() && note.inputs == original.inputs,
+        stage == Stage::Real || note.gate == original.gate,
+    ])
+    .then_some(receipt)
+}
+
+fn latest_execution(
+    receipts: &[Recorded],
+    family: Family,
+    stage: Stage,
+    inputs: &str,
+    gate: &str,
+) -> Option<crate::hosts_rules::Receipt> {
+    receipts
+        .iter()
+        .filter(|record| matching(&record.note, family, stage, inputs, gate))
+        .map(|record| actual_receipt(&record.note))
+        .fold(None, crate::hosts_rules::newest_receipt)
+}
+
+fn reusable(
+    receipts: &[Recorded],
+    family: Family,
+    stage: Stage,
+    inputs: &str,
+    gate: &str,
+) -> Option<Reused> {
+    let latest = latest_execution(receipts, family, stage, inputs, gate)?;
+    if !latest.passed {
+        return None;
+    }
+    receipts
+        .iter()
+        .find(|record| {
+            matching(&record.note, family, stage, inputs, gate)
+                && actual_receipt(&record.note) == Some(latest)
+        })
+        .map(|record| record.origin.clone())
+}
+
+fn all_notes(root: &Path) -> Result<Vec<(String, String)>> {
+    git_text(root, &["notes", "--ref", NOTES, "list"])?
+        .lines()
+        .map(|line| {
+            let (blob, commit) = line
+                .split_once(' ')
+                .context("malformed git notes listing")?;
+            Ok((
+                commit.to_owned(),
+                String::from_utf8(git(root, &["cat-file", "blob", blob])?)?,
+            ))
+        })
+        .collect()
+}
+
+/// Judge one commit's note, one JSON record per line in append order.
+///
+/// # Errors
+///
+/// Returns an error when a line holds no valid note or names an unknown OS family.
+pub fn evidence(notes: &str, tree: &str) -> Result<[Evidence; 3]> {
+    scoped_evidence(notes, tree, |_| true)
+}
+
+fn scoped_evidence(
+    notes: &str,
+    tree: &str,
+    accepts: impl Fn(&Note) -> bool,
+) -> Result<[Evidence; 3]> {
+    let mut evidence = [[Evidence::Missing; 2]; 3];
+    for line in notes.lines().filter(|line| !line.trim().is_empty()) {
+        let note: Note = serde_json::from_str(line).context("malformed hosts note")?;
+        let family = Family::ALL
+            .into_iter()
+            .find(|family| family.name() == note.os)
+            .with_context(|| format!("hosts note names an unknown OS family: {}", note.os))?;
+        let index = family.index();
+        if let Some(stage) = note.stage {
+            let previous = &mut evidence[index][stage.index()];
+            *previous = record(
+                *previous,
+                note.tree == tree && accepts(&note),
+                note.status == 0,
+            );
+        }
+    }
+    Ok(evidence.map(crate::hosts_rules::stages))
+}
+
+fn git(repository: &Path, arguments: &[&str]) -> Result<Vec<u8>> {
+    let output = Tool::Git
+        .command()
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .arg("-C")
+        .arg(repository)
+        .args(arguments)
+        .stderr(Stdio::piped())
+        .output()
+        .context("start git")?;
+    ensure!(
+        output.status.success(),
+        "git {}: {}",
+        arguments.join(" "),
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(output.stdout)
+}
+
+fn git_text(repository: &Path, arguments: &[&str]) -> Result<String> {
+    Ok(String::from_utf8(git(repository, arguments)?)?
+        .trim()
+        .to_owned())
+}
+
+fn workflows_at(repository: &Path, commit: &str) -> Result<Vec<(String, String)>> {
+    let listing = git(
+        repository,
+        &[
+            "ls-tree",
+            "-z",
+            "--name-only",
+            commit,
+            "--",
+            ".github/workflows/",
+        ],
+    )?;
+    let mut workflows = Vec::new();
+    for path in listing
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+    {
+        let path = std::str::from_utf8(path)?;
+        if crate::has_extension(path, "yml") || crate::has_extension(path, "yaml") {
+            let text = String::from_utf8(git(repository, &["show", &format!("{commit}:{path}")])?)?;
+            workflows.push((path.to_owned(), text));
+        }
+    }
+    Ok(workflows)
+}
+
+/// The verdict on a profile commit's notes for every family its own workflows require.
+pub(crate) fn admission(repository: &Path, commit: &str) -> Result<Verdict> {
+    let commit = git_text(
+        repository,
+        &["rev-parse", "--verify", &format!("{commit}^{{commit}}")],
+    )
+    .with_context(|| format!("commit {commit} is not in this checkout; fetch it first"))?;
+    let paths = git_text(
+        repository,
+        &[
+            "ls-tree",
+            "--name-only",
+            "-r",
+            &commit,
+            "--",
+            PROFILE_ROOT,
+            PROFILE_RUNTIME,
+        ],
+    )?;
+    if !crate::hosts_rules::profile_gate(
+        paths.lines().any(|path| path == PROFILE_ROOT),
+        paths.lines().any(|path| path == PROFILE_RUNTIME),
+    ) {
+        return Ok(admit([false; 3], [Evidence::Missing; 3]));
+    }
+    let tree = git_text(repository, &["rev-parse", &format!("{commit}^{{tree}}")])?;
+    let required = required(&workflows_at(repository, &commit)?)?;
+    let inputs = input_hashes(repository, &commit, DEFAULT_GATE)?;
+    let receipts = receipts(&all_notes(repository)?)?;
+    let mut cutoffs = [[None; 2]; 3];
+    for family in Family::ALL {
+        for stage in Stage::ALL {
+            cutoffs[family.index()][stage.index()] = pending::cutoff(
+                repository,
+                family,
+                stage,
+                &inputs[stage.index()],
+                DEFAULT_GATE,
+            )?;
+        }
+    }
+    let evidence = Family::ALL.map(|family| {
+        crate::hosts_rules::stages(Stage::ALL.map(|stage| {
+            let current = receipts
+                .iter()
+                .filter(|record| {
+                    record.origin.commit == commit
+                        && record.note.tree == tree
+                        && matching(
+                            &record.note,
+                            family,
+                            stage,
+                            &inputs[stage.index()],
+                            DEFAULT_GATE,
+                        )
+                })
+                .map(|record| verified_receipt(&record.note, &receipts))
+                .fold(None, crate::hosts_rules::newest_receipt);
+            crate::hosts_rules::receipt_evidence(
+                crate::hosts_rules::after_unverified(
+                    current,
+                    cutoffs[family.index()][stage.index()],
+                ),
+                crate::hosts_rules::after_unverified(
+                    latest_execution(
+                        &receipts,
+                        family,
+                        stage,
+                        &inputs[stage.index()],
+                        DEFAULT_GATE,
+                    ),
+                    cutoffs[family.index()][stage.index()],
+                ),
+            )
+        }))
+    });
+    Ok(admit(required, evidence))
+}
+
+/// Refuses a profile `commit` unless every required host family recorded a passing gate for it.
+///
+/// # Errors
+///
+/// Returns an error when a family recorded no result or a failed one, or Git fails while reading the notes.
+pub fn require_admission(repository: &Path, commit: &str) -> Result<()> {
+    for family in Family::ALL {
+        ensure!(
+            !pending::exists(repository, family)?,
+            "{} has a pending execution; resume with `dotfiles hosts check`",
+            family.name()
+        );
+    }
+    match admission(repository, commit)? {
+        Verdict::Admit => Ok(()),
+        Verdict::Missing(family) => bail!(
+            "no {} gate result for {commit}; run `dotfiles hosts check` from a clean checkout of it",
+            family.name()
+        ),
+        Verdict::Failed(family) => bail!(
+            "the {} gate failed for {commit}; fix it, commit, and run `dotfiles hosts check` again",
+            family.name()
+        ),
+    }
+}
+
+fn github(url: &str) -> bool {
+    url.contains("github.com:") || url.contains("github.com/")
+}
+
+/// Judge pre-push input: `<local ref> <local sha> <remote ref> <remote sha>` per line.
+///
+/// # Errors
+///
+/// Returns an error when the input holds invalid UTF-8 or has a malformed line.
+/// Also returns an error when a gated commit lacks a passing note for a required family, or Git fails while judging it.
+pub fn push_gate(repository: &Path, url: &str, input: &[u8]) -> Result<()> {
+    for line in std::str::from_utf8(input)?.lines() {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        let [_, local, remote_ref, _] = fields[..] else {
+            bail!("malformed pre-push input: {line}");
+        };
+        let deletion = local.bytes().all(|byte| byte == b'0');
+        if gated(github(url), remote_ref.starts_with("refs/heads/"), deletion) {
+            require_admission(repository, local)?;
+        }
+    }
+    Ok(())
+}
+
+fn native(home: &Path) -> Result<Real> {
+    let mut native = Real::new(home)?;
+    if cfg!(windows) {
+        // Only the system OpenSSH reaches the 1Password agent pipe.
+        let root = std::env::var_os("SystemRoot")
+            .unwrap_or_else(|| platform::home::DEFAULT_SYSTEM_ROOT.into());
+        let mut paths = vec![Path::new(&root).join("System32/OpenSSH")];
+        paths.extend(std::env::split_paths(&native.path));
+        native.path = std::env::join_paths(paths)?;
+    }
+    Ok(native)
+}
+
+fn command(native: &Real, tool: Tool) -> Command {
+    let mut command = native.command(tool);
+    if cfg!(windows) {
+        command.env_remove("SSH_AUTH_SOCK");
+    }
+    command
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Peer {
+    pub alias: String,
+    pub dns: String,
+    pub address: String,
+    pub family: Family,
+    pub online: bool,
+}
+
+#[derive(Debug)]
+pub struct Tailnet {
+    pub this: Option<(String, Family)>,
+    pub peers: Vec<Peer>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct Node {
+    #[serde(rename = "DNSName")]
+    dns_name: String,
+    #[serde(rename = "OS")]
+    os: String,
+    #[serde(default, rename = "TailscaleIPs")]
+    tailscale_ips: Vec<String>,
+    #[serde(default)]
+    online: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct Status {
+    #[serde(rename = "Self")]
+    this: Node,
+    #[serde(default)]
+    peer: BTreeMap<String, Node>,
+}
+
+/// Peers of a known OS family from `tailscale status --json`, named by their `MagicDNS` label.
+///
+/// # Errors
+///
+/// Returns an error when the status fails to parse as `tailscale status --json` output.
+pub fn tailnet(status: &[u8]) -> Result<Tailnet> {
+    let status: Status = serde_json::from_slice(status).context("invalid tailscale status")?;
+    let alias = |node: &Node| {
+        node.dns_name
+            .split('.')
+            .next()
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let mut peers: Vec<_> = status
+        .peer
+        .values()
+        .filter_map(|node| {
+            Some(Peer {
+                alias: alias(node),
+                dns: node.dns_name.trim_end_matches('.').to_owned(),
+                address: node
+                    .tailscale_ips
+                    .iter()
+                    .find(|ip| ip.contains('.'))?
+                    .clone(),
+                family: os_family(&node.os)?,
+                online: node.online,
+            })
+        })
+        .collect();
+    peers.sort_by(|a, b| a.alias.cmp(&b.alias));
+    Ok(Tailnet {
+        this: os_family(&status.this.os).map(|family| (alias(&status.this), family)),
+        peers,
+    })
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Managed {
+    pub aliases: Vec<String>,
+    pub user: Option<String>,
+}
+
+pub fn managed(config: &str) -> Managed {
+    let mut managed = Managed::default();
+    for line in config.lines() {
+        let mut words = line.split_whitespace();
+        match words.next() {
+            Some("Host") => managed.aliases.extend(words.map(str::to_owned)),
+            Some("User") => managed.user = words.next().map(str::to_owned),
+            _ => {}
+        }
+    }
+    managed
+}
+
+#[must_use]
+pub fn render(aliases: &[String], user: &str, known_hosts: &Path) -> String {
+    format!(
+        "# Generated by `dotfiles hosts sync` from the tailnet; host keys are pinned over the tailnet.\nHost {}\n  User {user}\n  UserKnownHostsFile {}\n  StrictHostKeyChecking yes\n  ForwardAgent no\n",
+        aliases.join(" "),
+        known_hosts.display().to_string().replace('\\', "/")
+    )
+}
+
+/// One host per OS family other than this machine's: a requested one, then the managed one, then the only online one.
+///
+/// # Errors
+///
+/// Returns an error when a requested name matches no host of a known family in the tailnet.
+pub fn select(tailnet: &Tailnet, previous: &[String], requested: &[String]) -> Result<Vec<Peer>> {
+    for name in requested {
+        ensure!(
+            tailnet.peers.iter().any(|peer| &peer.alias == name),
+            "{name} is not a Linux, Mac, or Windows host in the tailnet"
+        );
+    }
+    let mut selected = Vec::new();
+    for family in Family::ALL {
+        if tailnet.this.as_ref().is_some_and(|(_, own)| *own == family) {
+            continue;
+        }
+        let candidates: Vec<_> = tailnet
+            .peers
+            .iter()
+            .filter(|peer| peer.family == family)
+            .collect();
+        let pick = |names: &[String]| -> Vec<&Peer> {
+            candidates
+                .iter()
+                .copied()
+                .filter(|peer| names.contains(&peer.alias))
+                .collect()
+        };
+        let mut chosen = pick(requested);
+        if chosen.is_empty() {
+            chosen = pick(previous);
+        }
+        if chosen.is_empty() {
+            chosen = candidates
+                .iter()
+                .copied()
+                .filter(|peer| peer.online)
+                .collect();
+        }
+        match chosen[..] {
+            [] => {}
+            [peer] => selected.push(peer.clone()),
+            _ => bail!(
+                "several {} hosts: {}; choose one with --host",
+                family.name(),
+                chosen
+                    .iter()
+                    .map(|peer| peer.alias.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
+    }
+    Ok(selected)
+}
+
+/// Pinned keys by the first name of each `known_hosts` line.
+#[must_use]
+pub fn pinned(known_hosts: &str) -> BTreeMap<String, String> {
+    known_hosts
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let names = fields.next()?;
+            let kind = fields.next()?;
+            let key = fields.next()?;
+            kind.starts_with("ssh-").then(|| {
+                (
+                    names.split(',').next().unwrap_or_default().to_owned(),
+                    format!("{kind} {key}"),
+                )
+            })
+        })
+        .collect()
+}
+
+/// The first key line of a `known_hosts` file written for one address, as `type key`.
+#[must_use]
+pub fn scanned(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let _address = fields.next()?;
+        let kind = fields.next()?;
+        let key = fields.next()?;
+        kind.starts_with("ssh-").then(|| format!("{kind} {key}"))
+    })
+}
+
+/// The user of a hub remote on one of the hosts, as in `ssh://user@host/...` or `user@host:path`.
+#[must_use]
+pub fn hub_user(remotes: &str, aliases: &[String]) -> Option<String> {
+    remotes.split_whitespace().find_map(|url| {
+        let rest = url.strip_prefix("ssh://").unwrap_or(url);
+        let (user, host) = rest.split_once('@')?;
+        let host = host.split([':', '/']).next()?;
+        (!user.contains('/') && aliases.iter().any(|alias| alias == host)).then(|| user.to_owned())
+    })
+}
+
+/// The gate as the family's login shell runs it, so a job's minimal environment still finds the profile's tools.
+#[must_use]
+pub fn wrap(family: Family, gate: &str) -> Vec<String> {
+    let shell: &[&str] = match family {
+        Family::Linux => &["sh", "-lc"],
+        Family::Mac => &["zsh", "-lc"],
+        Family::Windows => &["powershell.exe", "-NoProfile", "-Command"],
+    };
+    shell
+        .iter()
+        .map(|word| (*word).to_owned())
+        .chain([gate.to_owned()])
+        .collect()
+}
+
+/// The gate for a domyjob snapshot holding only `head.bundle`: a checkout of exactly the commit, whose project tools mise may load.
+/// Trust covers only that checkout and starts before the clone, because checkout hooks already run mise there.
+#[must_use]
+pub fn remote_gate(family: Family, gate: &str) -> String {
+    remote_gate_stages(family, gate, [false; 2])
+}
+
+fn remote_gate_stages(family: Family, gate: &str, skipped: [bool; 2]) -> String {
+    const UNIX_GIT: &str = "/usr/bin/git";
+    const WINDOWS_GIT: &str = "C:/Program Files/Git/cmd/git.exe";
+    let diff = platform::code_environment::NATIVE_PATH_DIFF;
+    let presence = platform::code_environment::NATIVE_PATH_DIFF_PRESENT;
+    let origin = match family {
+        Family::Windows => format!(
+            "$env:DOTFILES_HOST_PATH = $env:PATH; $env:{presence} = if (Test-Path Env:__MISE_DIFF) {{ '1' }} else {{ '0' }}; $env:{diff} = if ($env:{presence} -eq '1') {{ $env:__MISE_DIFF }} else {{ '' }}; "
+        ),
+        Family::Linux | Family::Mac => format!(
+            "export DOTFILES_HOST_PATH=\"$PATH\" {diff}=\"${{__MISE_DIFF-}}\" {presence}=0; if [ \"${{__MISE_DIFF+x}}\" = x ]; then export {presence}=1; fi; "
+        ),
+    };
+    let quoted = match family {
+        Family::Windows => format!("'{}'", gate.replace('\'', "''")),
+        Family::Linux | Family::Mac => format!("'{}'", gate.replace('\'', "'\"'\"'")),
+    };
+    let mut worker = format!(
+        "mise x -- cargo run --locked --package dotfiles --bin dotfiles -- hosts worker --gate {quoted} --workspace .."
+    );
+    for (skip, flag) in skipped.into_iter().zip([" --skip-code", " --skip-real"]) {
+        if skip {
+            worker.push_str(flag);
+        }
+    }
+    let cache = platform::code_environment::HOST_CACHE;
+    let worker = match family {
+        Family::Windows => format!(
+            "$env:DOTFILES_HOST_CACHE = Join-Path $nativeHome '{cache}'; $env:CARGO_HOME = Join-Path $env:DOTFILES_HOST_CACHE cargo; $env:MISE_CARGO_HOME = $env:CARGO_HOME; New-Item -ItemType Directory -Force $env:CARGO_HOME | Out-Null; {worker}"
+        ),
+        Family::Linux | Family::Mac => format!(
+            "export DOTFILES_HOST_CACHE=\"$nativeHome/{cache}\" CARGO_HOME=\"$nativeHome/{cache}/cargo\" MISE_CARGO_HOME=\"$nativeHome/{cache}/cargo\"; mkdir -p \"$CARGO_HOME\" && {worker}"
+        ),
+    };
+    let bootstrap = match family {
+        Family::Windows => format!(
+            "$nativeHome = $env:USERPROFILE; $env:DOTFILES_HOST_PATH = $env:PATH; $env:DOTFILES_HOST_CARGO_HOME = if ($env:CARGO_HOME) {{ $env:CARGO_HOME }} else {{ Join-Path $nativeHome .cargo }}; $jobRoot = $PWD.Path; $env:MISE_DATA_DIR = Join-Path $env:LOCALAPPDATA mise; $env:RUSTUP_HOME = Join-Path $nativeHome .rustup; $env:HOME = Join-Path $jobRoot bootstrap; $env:USERPROFILE = $env:HOME; New-Item -ItemType Directory -Force $env:HOME | Out-Null; $env:APPDATA = Join-Path $env:HOME AppData/Roaming; $env:LOCALAPPDATA = Join-Path $env:HOME AppData/Local; $env:CARGO_HOME = Join-Path $env:HOME .cargo; $env:MISE_CARGO_HOME = $env:CARGO_HOME; New-Item -ItemType Directory -Force $env:CARGO_HOME | Out-Null; New-Item -ItemType Junction -Path (Join-Path $env:CARGO_HOME bin) -Target (Join-Path $env:DOTFILES_HOST_CARGO_HOME bin) -ErrorAction Stop | Out-Null; $env:PATH = (Join-Path $env:CARGO_HOME bin) + ';' + $env:PATH; $env:CARGO_TARGET_DIR = Join-Path $jobRoot build; $env:MISE_CONFIG_DIR = Join-Path $env:HOME .config/mise; $env:MISE_CACHE_DIR = Join-Path $env:HOME .cache/mise; $env:MISE_STATE_DIR = Join-Path $env:HOME .local/state/mise; $env:MISE_TRUSTED_CONFIG_PATHS = Join-Path $jobRoot checkout; $env:MISE_AUTO_INSTALL = 'false'; $env:GIT_CONFIG_GLOBAL = Join-Path $env:HOME empty.toml; Set-Content -LiteralPath $env:GIT_CONFIG_GLOBAL -Value '' -NoNewline; $env:MISE_GLOBAL_CONFIG_FILE = $env:GIT_CONFIG_GLOBAL; $env:MISE_SYSTEM_CONFIG_FILE = $env:GIT_CONFIG_GLOBAL; $env:GIT_CONFIG_NOSYSTEM = '1'; & '{WINDOWS_GIT}' -c advice.detachedHead=false clone --quiet head.bundle checkout; if (-not $?) {{ exit 1 }}; Set-Location checkout; {worker} --home $nativeHome; exit $LASTEXITCODE"
+        ),
+        Family::Linux | Family::Mac => {
+            format!(
+                "nativeHome=\"$HOME\"; export DOTFILES_HOST_PATH=\"$PATH\" DOTFILES_HOST_CARGO_HOME=\"${{CARGO_HOME:-$HOME/.cargo}}\" MISE_DATA_DIR=\"$HOME/.local/share/mise\" RUSTUP_HOME=\"$HOME/.rustup\"; export HOME=\"$PWD/bootstrap\" CARGO_TARGET_DIR=\"$PWD/build\" MISE_TRUSTED_CONFIG_PATHS=\"$PWD/checkout\" MISE_AUTO_INSTALL=false; mkdir -p \"$HOME/.cargo\" && ln -s \"$DOTFILES_HOST_CARGO_HOME/bin\" \"$HOME/.cargo/bin\" && export PATH=\"$HOME/.cargo/bin:$PATH\" CARGO_HOME=\"$HOME/.cargo\" MISE_CARGO_HOME=\"$HOME/.cargo\" XDG_CONFIG_HOME=\"$HOME/.config\" XDG_CACHE_HOME=\"$HOME/.cache\" XDG_DATA_HOME=\"$HOME/.local/share\" XDG_STATE_HOME=\"$HOME/.local/state\" MISE_CONFIG_DIR=\"$HOME/.config/mise\" MISE_CACHE_DIR=\"$HOME/.cache/mise\" MISE_STATE_DIR=\"$HOME/.local/state/mise\" GIT_CONFIG_GLOBAL=\"$HOME/empty.toml\" GIT_CONFIG_NOSYSTEM=1 && : > \"$GIT_CONFIG_GLOBAL\" && export MISE_GLOBAL_CONFIG_FILE=\"$GIT_CONFIG_GLOBAL\" MISE_SYSTEM_CONFIG_FILE=\"$GIT_CONFIG_GLOBAL\" && {UNIX_GIT} -c advice.detachedHead=false clone --quiet head.bundle checkout && cd checkout && {worker} --home \"$nativeHome\""
+            )
+        }
+    };
+    let github = match family {
+        Family::Windows => {
+            "$env:GH_CONFIG_DIR = if ($env:GH_CONFIG_DIR) { $env:GH_CONFIG_DIR } elseif ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME gh } elseif ($env:APPDATA) { Join-Path $env:APPDATA 'GitHub CLI' } else { Join-Path $env:USERPROFILE .config/gh }; "
+        }
+        Family::Linux | Family::Mac => {
+            "export GH_CONFIG_DIR=\"${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}\"; "
+        }
+    };
+    format!("{origin}{github}{bootstrap}")
+}
+
+fn run_stages<C, R>(
+    skipped: [bool; 2],
+    concurrent: bool,
+    code: C,
+    real: R,
+) -> (Result<()>, Option<crate::host_checks::Report>)
+where
+    C: FnOnce() -> Result<()> + Send,
+    R: FnOnce() -> crate::host_checks::Report,
+{
+    let code = || if skipped[0] { Ok(()) } else { code() };
+    let real = || (!skipped[1]).then(real);
+    if concurrent && skipped == [false; 2] {
+        std::thread::scope(|scope| {
+            let code = scope.spawn(code);
+            let real = real();
+            (
+                code.join()
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("code stage panicked"))),
+                real,
+            )
+        })
+    } else {
+        (code(), real())
+    }
+}
+
+fn concurrent_capacity(home: &Path) -> Result<bool> {
+    let cores = std::thread::available_parallelism()?.get();
+    let family = Family::ALL
+        .into_iter()
+        .find(|family| family.name() == std::env::consts::OS)
+        .context("native host family")?;
+    let available = capacity(&native(home)?, family, &Target::Local("worker".into()))?;
+    Ok(crate::hosts_rules::concurrent_stages(
+        family, cores, available,
+    ))
+}
+
+fn worker(
+    home: &Path,
+    gate: &str,
+    skipped: [bool; 2],
+    workspace: Option<&Path>,
+    capture: Option<&Path>,
+) -> Result<()> {
+    let captured = capture
+        .map(|manifest| local::worker(manifest, gate))
+        .transpose()?;
+    let workspace = workspace
+        .map(|path| -> Result<_> {
+            let path = platform::paths::canonical(path)?;
+            ensure!(
+                path.join("checkout") == platform::paths::canonical(&std::env::current_dir()?)?,
+                "workspace must own this checkout"
+            );
+            Ok(path.to_string_lossy().replace('\\', "/"))
+        })
+        .transpose()?;
+    let root = std::env::current_dir()?;
+    let _source_protection = workspace
+        .as_ref()
+        .map(|_| local::protect_remote(&root))
+        .transpose()?;
+    let concurrent = skipped == [false; 2]
+        && concurrent_capacity(home).unwrap_or_else(|error| {
+            eprintln!("stages run sequentially: measure capacity: {error:#}");
+            false
+        });
+    let (code, real) = run_stages(
+        skipped,
+        concurrent,
+        || code(home, gate),
+        || crate::host_checks::check(&root, home),
+    );
+    let code = match code {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("code: {error:#}");
+            1
+        }
+    };
+    let (candidate, applied) = match real {
+        Some(crate::host_checks::Report { candidate, applied }) => (candidate, Some(applied)),
+        None => (Ok(()), None),
+    };
+    let real = match candidate {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("real: {error:#}");
+            1
+        }
+    };
+    println!(
+        "{STAGE_REPORT}{}",
+        serde_json::to_string(&Stages {
+            code,
+            real,
+            applied,
+            workspace,
+            capture: captured
+        })?
+    );
+    ensure!(
+        code == 0 && real == 0,
+        "host stages failed: code={code}, real={real}"
+    );
+    Ok(())
+}
+
+fn code(home: &Path, gate: &str) -> Result<()> {
+    let environment = code_environment(&std::env::current_dir()?, home)?;
+    let argv = code_shell(gate);
+    let status = environment
+        .command(&argv[0])?
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .args(&argv[1..])
+        .stdin(Stdio::null())
+        .status()?;
+    ensure!(status.success(), "code stage failed with {status}");
+    Ok(())
+}
+
+#[derive(Debug)]
+struct CodeProtections {
+    _materials: Vec<local::Protection>,
+    _cargo: Vec<local::Protection>,
+}
+
+impl CodeProtections {
+    fn new(materials: Vec<local::Protection>, cargo: Vec<local::Protection>) -> Self {
+        Self {
+            _materials: materials,
+            _cargo: cargo,
+        }
+    }
+}
+
+/// The native environment retaining its verified Cargo source materials.
+#[derive(Debug)]
+pub struct CodeEnvironment {
+    _protections: CodeProtections,
+    cargo: crate::artifacts::PreparedCargo,
+    workload: crate::artifacts::CargoWorkload,
+    native: platform::code_environment::CodeEnvironment,
+    rust: crate::artifacts::InstalledRustKani,
+    _native_health: Vec<crate::artifacts::NativeMaterialOperation>,
+    _materials: tempfile::TempDir,
+}
+
+impl CodeEnvironment {
+    /// Configure a child with the retained, verified Cargo materials.
+    ///
+    /// # Errors
+    ///
+    /// Refuses changed inputs and ambiguous external Cargo configuration.
+    pub fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Result<Command> {
+        self.rust.require_current()?;
+        self.native.require_current()?;
+        let mut command = self.native.command(program);
+        self.cargo
+            .configure_environment(&self.workload, &mut command)?;
+        Ok(command)
+    }
+}
+
+/// Prepare verified Cargo sources before building the native tool environment.
+///
+/// # Errors
+///
+/// Refuses incomplete materials, unsafe archives, ambiguous configurations, and unresolved tools.
+pub fn code_environment(root: &Path, home: &Path) -> Result<CodeEnvironment> {
+    let materials = material_directory(&std::env::temp_dir())?;
+    let project = crate::artifacts::CargoWorkload::capture(root)?;
+    project.plan()?.complete()?;
+    project.require_environment_scope()?;
+    let mut project = Some(project);
+    let mut cargo_owners = None;
+    let mut protections = Vec::new();
+    let native_parts = with_code_installations(root, home, |mut installed| {
+        let mut preparation = platform::code_environment::CodeEnvironment::prepare_in(
+            root,
+            &installed,
+            materials.path(),
+        )?;
+        preparation.admit_inherited(&installed)?;
+        let prepared = crate::artifacts::prepare_source_rust_kani(root, home, materials.path())?;
+        let workload = project
+            .take()
+            .context("project Cargo workload was already consumed")?
+            .with_stdlib(&prepared)?;
+        cargo_owners = Some(crate::artifacts::prepare_cargo_workload(
+            workload,
+            home,
+            materials.path(),
+        )?);
+        let (workload, cargo) = cargo_owners
+            .as_ref()
+            .context("complete Cargo owners were not retained")?;
+        cargo.configure_environment(workload, &mut Tool::Cargo.command())?;
+        protections = cargo
+            .immutable_paths()
+            .iter()
+            .map(|path| local::Protection::seal(path))
+            .collect::<Result<Vec<_>>>()?;
+        let mut rust = prepared.install()?;
+        installed.cargo = rust.cargo_home();
+        installed.rustup = rust.rustup_home();
+        installed.kani = rust.kani_home();
+        let launcher = rust.launcher_root();
+        let links = preparation.link_rust_kani(
+            &installed,
+            &rust.stable_toolchain(),
+            launcher.as_deref(),
+        )?;
+        rust.bind_data_view(links.data(), links.rust(), links.launcher())?;
+        installed.data = links.data().to_owned();
+        let mut immutable = rust.immutable_paths();
+        immutable.extend(cargo.immutable_paths());
+        immutable.extend(preparation.immutable_paths());
+        let material_protections = local::Protection::seal_materials(materials.path(), &immutable)?;
+        let health_command = if rust.target() == crate::artifacts::Target::WindowsX64 {
+            None
+        } else {
+            Some(kani_health_command(&rust, &preparation, cargo, workload)?)
+        };
+        let mut health = Vec::new();
+        let native = rust.with_health(
+            |store| {
+                if let Some(command) = health_command {
+                    health.push(original_kani_health(store, command)?);
+                }
+                Ok(())
+            },
+            |stores| {
+                ensure!(
+                    stores.data() == installed.data
+                        && stores.installed().rustup_home() == installed.rustup,
+                    "native health belongs to another prepared Code environment"
+                );
+                preparation.build(&installed)
+            },
+        )?;
+        let native = native.into_environment()?;
+        Ok((material_protections, native, rust, health))
+    })?;
+    let (workload, cargo) = cargo_owners
+        .take()
+        .context("complete Cargo owners were not retained")?;
+    let (material_protections, native, rust, health) = native_parts;
+    Ok(CodeEnvironment {
+        _protections: CodeProtections::new(material_protections, protections),
+        cargo,
+        workload,
+        native,
+        rust,
+        _native_health: health,
+        _materials: materials,
+    })
+}
+
+fn material_directory(parent: &Path) -> Result<tempfile::TempDir> {
+    Ok(tempfile::tempdir_in(platform::paths::canonical(parent)?)?)
+}
+
+fn kani_health_command(
+    store: &crate::artifacts::InstalledRustKani,
+    preparation: &platform::code_environment::CodePreparation,
+    cargo: &crate::artifacts::PreparedCargo,
+    workload: &crate::artifacts::CargoWorkload,
+) -> Result<Command> {
+    let mut command = platform::tool::external(store.cargo_program());
+    command.args([
+        "test",
+        "--locked",
+        "--offline",
+        "--jobs",
+        "2",
+        "-p",
+        "xtask",
+        "--test",
+        "container_proofs",
+        KANI_NATIVE_HEALTH,
+        "--",
+        "--ignored",
+        "--exact",
+        "--nocapture",
+        "--test-threads=1",
+    ]);
+    store.configure_health(&mut command)?;
+    preparation.configure_health(&mut command)?;
+    cargo.configure_environment(workload, &mut command)?;
+    Ok(command)
+}
+
+fn original_kani_health(
+    store: &crate::artifacts::InstalledRustKani,
+    command: Command,
+) -> Result<crate::artifacts::NativeMaterialOperation> {
+    let output = store.observe_health(command, "original fresh Kani driver regression")?;
+    ensure!(
+        output.status == Some(0)
+            && output.stdout_complete
+            && output.stderr_complete
+            && std::str::from_utf8(&output.stdout)?
+                .lines()
+                .any(|line| line.starts_with(KANI_HEALTH_RESULT)),
+        "the original fresh Kani driver regression did not complete"
+    );
+    Ok(output)
+}
+
+fn with_code_installations<T>(
+    root: &Path,
+    home: &Path,
+    build: impl FnOnce(platform::code_environment::Installations) -> Result<T>,
+) -> Result<T> {
+    let mut installed = platform::code_environment::Installations::discover(home)?;
+    let releases = model::data::parse(RELEASE_PINS, &fs::read_to_string(root.join(RELEASE_PINS))?)
+        .map_err(anyhow::Error::msg)?;
+    let pin = releases
+        .mise
+        .and_then(|release| release.version)
+        .context("mise has no release pin")?;
+    let version = platform::process::command(&installed.mise)
+        .arg("--version")
+        .output()?;
+    ensure!(version.status.success(), "query the installed mise release");
+    if std::str::from_utf8(&version.stdout)?
+        .split_whitespace()
+        .next()
+        == Some(pin.as_str())
+    {
+        return build(installed);
+    }
+    let scope = tempfile::tempdir()?;
+    let config = scope.path().join("chezmoi.toml");
+    fs::write(
+        &config,
+        format!(
+            "[data]\nprofile = {:?}\n",
+            crate::profiles::native_profile()?.name()
+        ),
+    )?;
+    let bootstrap = crate::host_checks::Scratch::new(&config)?;
+    installed.mise = bootstrap
+        .renderer(root, &installed)
+        .and_then(|renderer| bootstrap.provision_mise(root, &renderer))
+        .with_context(|| format!("resolve mise release pin {pin}"))?;
+    build(installed)
+}
+
+fn code_shell(gate: &str) -> Vec<String> {
+    let shell: &[&str] = if cfg!(windows) {
+        &["pwsh", "-NoLogo", "-NoProfile", "-Command"]
+    } else {
+        &[CODE_SHELL, "-c"]
+    };
+    shell
+        .iter()
+        .map(|word| (*word).to_owned())
+        .chain([gate.to_owned()])
+        .collect()
+}
+
+/// The exit status domyjob reports for a finished job.
+/// Returns `None` when the job didn't finish or failed to launch.
+#[must_use]
+pub fn outcome(alias: &str, output: &str) -> Option<i32> {
+    let prefix = format!("{alias}:");
+    let line = output
+        .lines()
+        .find(|line| line.starts_with(&prefix) && line.contains(" finished "))?;
+    let result = line.split_once(" finished ")?.1.trim();
+    if result == "succeeded" {
+        return Some(0);
+    }
+    result
+        .strip_prefix("failed (")?
+        .strip_suffix(')')?
+        .parse()
+        .ok()
+}
+
+fn tailnet_status(native: &Real) -> Result<Tailnet> {
+    let output = command(native, Tool::Tailscale)
+        .args(["status", "--json"])
+        .stderr(Stdio::inherit())
+        .output()
+        .context("start tailscale; install it and sign in to the tailnet")?;
+    ensure!(
+        output.status.success(),
+        "tailscale is not connected; run `tailscale up`"
+    );
+    tailnet(&output.stdout)
+}
+
+fn paths(home: &Path) -> (PathBuf, PathBuf) {
+    let state = home.join(STATE);
+    (state.join("ssh_config"), state.join("known_hosts"))
+}
+
+fn read_or_empty(path: &Path) -> Result<String> {
+    match fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(error).with_context(|| format!("read {}", path.display())),
+    }
+}
+
+fn fingerprint(native: &Real, key: &str) -> Result<String> {
+    let file = tempfile::NamedTempFile::new()?;
+    fs::write(file.path(), format!("{key}\n"))?;
+    let output = command(native, Tool::SshKeygen)
+        .arg("-lf")
+        .arg(file.path())
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "ssh-keygen cannot fingerprint the scanned key"
+    );
+    Ok(String::from_utf8(output.stdout)?
+        .split_whitespace()
+        .nth(1)
+        .context("ssh-keygen printed no fingerprint")?
+        .to_owned())
+}
+
+/// The ed25519 key the host presents to the SSH client that later connects, which `ssh-keyscan` can't always negotiate.
+/// The scan offers no identity, so at most a host that admits anyone runs `true`.
+fn scan(native: &Real, user: &str, address: &str) -> Result<Option<String>> {
+    let directory = tempfile::tempdir()?;
+    let file = directory.path().join("known_hosts");
+    let known = file.display().to_string().replace('\\', "/");
+    command(native, Tool::Ssh)
+        .args([
+            "-F",
+            "none",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+        ])
+        .args([
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "HostKeyAlgorithms=ssh-ed25519",
+        ])
+        .args([
+            "-o",
+            "PreferredAuthentications=publickey",
+            "-o",
+            "IdentitiesOnly=yes",
+        ])
+        .args(["-o", "IdentityAgent=none", "-o", "IdentityFile=none"])
+        .arg("-o")
+        .arg(format!("UserKnownHostsFile={known}"))
+        .arg("-o")
+        .arg(format!("GlobalKnownHostsFile={known}"))
+        .args(["-l", user, address, "true"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .context("start ssh")?;
+    Ok(scanned(&read_or_empty(&file)?))
+}
+
+pub(crate) fn sync(
+    home: &Path,
+    requested: &[String],
+    user: Option<String>,
+    accept: &[String],
+) -> Result<()> {
+    let native = native(home)?;
+    let (config, known) = paths(home);
+    let previous = managed(&read_or_empty(&config)?);
+    let tailnet = tailnet_status(&native)?;
+    let selected = select(&tailnet, &previous.aliases, requested)?;
+    ensure!(
+        !selected.is_empty(),
+        "the tailnet has no other Linux, Mac, or Windows host"
+    );
+    let aliases: Vec<_> = selected.iter().map(|peer| peer.alias.clone()).collect();
+    let remotes = git(Path::new("."), &["remote", "-v"]).unwrap_or_default();
+    let user = user
+        .or(previous.user)
+        .or_else(|| hub_user(&String::from_utf8_lossy(&remotes), &aliases))
+        .context("no hub remote names the remote user; pass --user")?;
+    let pinned = pinned(&read_or_empty(&known)?);
+    let mut lines = String::new();
+    for peer in &selected {
+        let key = scan(&native, &user, &peer.address)?.with_context(|| {
+            format!(
+                "{} presented no ed25519 host key over the tailnet; check its SSH server",
+                peer.alias
+            )
+        })?;
+        let state = match pinned.get(&peer.alias) {
+            None => Key::New,
+            Some(current) if *current == key => Key::Same,
+            Some(_) => Key::Changed,
+        };
+        ensure!(
+            pin(state, accept.contains(&peer.alias)),
+            "{} presents a different host key {}; if expected, run `dotfiles hosts sync --accept {}`",
+            peer.alias,
+            fingerprint(&native, &key)?,
+            peer.alias
+        );
+        writeln!(lines, "{},{},{} {key}", peer.alias, peer.dns, peer.address)?;
+    }
+    crate::runtime::replace(&known, lines.as_bytes(), false)?;
+    crate::runtime::replace(&config, render(&aliases, &user, &known).as_bytes(), false)?;
+    for peer in &selected {
+        println!("{} {}: pinned", peer.family.name(), peer.alias);
+    }
+    Ok(())
+}
+
+/// Where each family's gate runs.
+#[derive(Clone, Debug)]
+enum Target {
+    Local(String),
+    Remote(String),
+}
+
+impl Target {
+    fn name(&self) -> &str {
+        match self {
+            Self::Local(name) | Self::Remote(name) => name,
+        }
+    }
+}
+
+fn targets(home: &Path, tailnet: &Tailnet) -> Result<[Option<Target>; 3]> {
+    let managed = managed(&read_or_empty(&paths(home).0)?);
+    Ok(Family::ALL.map(|family| match &tailnet.this {
+        Some((name, own)) if *own == family => Some(Target::Local(name.clone())),
+        _ => managed
+            .aliases
+            .iter()
+            .find(|alias| {
+                tailnet
+                    .peers
+                    .iter()
+                    .any(|peer| &peer.alias == *alias && peer.family == family)
+            })
+            .map(|alias| Target::Remote(alias.clone())),
+    }))
+}
+
+fn domyjob(
+    native: &Real,
+    alias: &str,
+    arguments: &[&str],
+    program: &[String],
+) -> Result<(Option<i32>, String)> {
+    let mut submission = command(native, Tool::Domyjob);
+    submission
+        .args(arguments)
+        .arg(alias)
+        .arg("--")
+        .args(program);
+    remote_job(native, alias, submission)
+}
+
+/// Collects output from a file when the child exits.
+fn job_output(
+    mut request: Command,
+    limit: Option<Duration>,
+) -> Result<(std::process::ExitStatus, String)> {
+    let log = tempfile::NamedTempFile::new()?;
+    let mut child = request
+        .stdin(Stdio::null())
+        .stdout(log.as_file().try_clone()?)
+        .stderr(log.as_file().try_clone()?)
+        .spawn()
+        .context("start host check process")?;
+    let Some(limit) = limit else {
+        let status = child.wait()?;
+        return Ok((
+            status,
+            String::from_utf8_lossy(&fs::read(log.path())?).into_owned(),
+        ));
+    };
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok((
+                status,
+                String::from_utf8_lossy(&fs::read(log.path())?).into_owned(),
+            ));
+        }
+        if started.elapsed() >= limit {
+            platform::cleanup::report(child.kill(), "stop a stalled domyjob request");
+            platform::cleanup::report(child.wait(), "reap a stalled domyjob request");
+            bail!(
+                "domyjob request did not exit within {limit:?}; inspect the remote job before rerunning"
+            );
+        }
+        std::thread::sleep(REQUEST_POLL_INTERVAL);
+    }
+}
+
+fn remote_job(native: &Real, alias: &str, submission: Command) -> Result<(Option<i32>, String)> {
+    let (status, text) = job_output(submission, Some(REQUEST_LIMIT))?;
+    ensure!(
+        status.success(),
+        "{alias}: submit remote job: {text}; inspect `domyjob ls {alias}` before rerunning"
+    );
+    let prefix = format!("{alias}:");
+    let reference = text.lines()
+        .find_map(|line| line.strip_prefix(&prefix).and_then(|rest| rest.split_whitespace().next()))
+        .filter(|job| !job.is_empty())
+        .map(|job| format!("{prefix}{job}"))
+        .with_context(|| format!("{alias}: submission returned no job identity: {text}; inspect `domyjob ls {alias}` before rerunning"))?;
+    println!("{reference}: submitted");
+    wait_job(native, alias, &reference, text)
+}
+
+fn wait_job(
+    native: &Real,
+    alias: &str,
+    reference: &str,
+    mut text: String,
+) -> Result<(Option<i32>, String)> {
+    loop {
+        let mut request = command(native, Tool::Domyjob);
+        request.args(["status", reference]);
+        let (status, current) = job_output(request, Some(REQUEST_LIMIT))
+            .with_context(|| format!("inspect {reference} with `domyjob status {reference}`"))?;
+        if !status.success() && current.lines().next_back() == Some(MISSING_JOB) {
+            text.push_str(&current);
+            return Ok((None, text));
+        }
+        ensure!(status.success(), "{reference}: read job status: {current}");
+        let state_prefix = format!("{reference} ");
+        let replies: Vec<_> = current
+            .lines()
+            .filter_map(|line| line.strip_prefix(&state_prefix))
+            .collect();
+        let [state] = replies.as_slice() else {
+            bail!("{reference}: status returned no unique matching job: {current}");
+        };
+        let state = *state;
+        if state.starts_with("finished ") {
+            ensure!(
+                known_terminal(state),
+                "{reference}: unknown job state: {state}"
+            );
+            let result = outcome(alias, &format!("{reference} {state}"));
+            text.push_str(&current);
+            let mut request = command(native, Tool::Domyjob);
+            request.args(["logs", reference]);
+            let (status, logs) = job_output(request, Some(REQUEST_LIMIT))
+                .with_context(|| format!("read {reference} with `domyjob logs {reference}`"))?;
+            ensure!(status.success(), "{reference}: read job logs: {logs}");
+            text.push_str(&logs);
+            return Ok((result, text));
+        }
+        ensure!(
+            matches!(state, "accepted" | "queued" | "starting" | "running"),
+            "{reference}: unknown job state: {state}"
+        );
+        std::thread::sleep(JOB_POLL_INTERVAL);
+    }
+}
+
+fn known_terminal(state: &str) -> bool {
+    let Some(result) = state.strip_prefix("finished ") else {
+        return false;
+    };
+    matches!(
+        result,
+        "succeeded" | "lost" | "killed" | "memory limit exceeded"
+    ) || result
+        .strip_prefix("launch failed: ")
+        .is_some_and(|reason| !reason.is_empty())
+        || result
+            .strip_prefix("failed (")
+            .and_then(|value| value.strip_suffix(')'))
+            .and_then(|code| code.parse::<i32>().ok())
+            .is_some_and(|code| code != 0)
+}
+
+/// `Ok` when the host can run the gate, or the next action that would make it able to.
+fn probe(
+    native: &Real,
+    tailnet: &Tailnet,
+    family: Family,
+    target: &Target,
+    program: &str,
+) -> Result<Result<(), String>> {
+    let Target::Remote(alias) = target else {
+        return Ok(if on_path(native, program) {
+            require_capacity(native, family, target).map_err(|error| format!("{error:#}"))
+        } else {
+            Err(format!(
+                "`{program}` is not on this machine's PATH; apply its dotfiles profile"
+            ))
+        });
+    };
+    let Some(peer) = tailnet.peers.iter().find(|peer| &peer.alias == alias) else {
+        return Ok(Err(format!(
+            "{alias} left the tailnet; run `dotfiles hosts sync`"
+        )));
+    };
+    if !peer.online {
+        return Ok(Err(format!(
+            "{alias} is offline on the tailnet; wake it or start Tailscale on it"
+        )));
+    }
+    let doctor = command(native, Tool::Domyjob)
+        .args(["doctor", alias])
+        .stdin(Stdio::null())
+        .output()
+        .context("start domyjob")?;
+    if !doctor.status.success() {
+        return Ok(Err(format!(
+            "{alias} refused SSH or domyjob; run `ssh -o BatchMode=yes {alias} true`, approve it in 1Password, then `domyjob doctor {alias}`"
+        )));
+    }
+    let (status, _) = domyjob(
+        native,
+        alias,
+        &["on"],
+        &wrap(family, &format!("{program} --version")),
+    )?;
+    Ok(if status == Some(0) {
+        require_capacity(native, family, target).map_err(|error| format!("{error:#}"))
+    } else {
+        Err(format!(
+            "{alias} has no `{program}` on its login PATH; apply its dotfiles profile"
+        ))
+    })
+}
+
+fn on_path(native: &Real, program: &str) -> bool {
+    std::env::split_paths(&native.path).any(|directory| {
+        directory.join(program).is_file()
+            || (cfg!(windows)
+                && ["exe", "cmd", "bat"]
+                    .iter()
+                    .any(|extension| directory.join(format!("{program}.{extension}")).is_file()))
+    })
+}
+
+fn program(gate: &str) -> Result<&str> {
+    gate.split_whitespace()
+        .next()
+        .context("the gate command is empty")
+}
+
+pub(crate) fn doctor(home: &Path, gate: &str) -> Result<()> {
+    let native = native(home)?;
+    let tailnet = tailnet_status(&native)?;
+    let program = program(gate)?;
+    let mut failures = 0;
+    for (family, target) in Family::ALL.into_iter().zip(targets(home, &tailnet)?) {
+        let Some(target) = target else {
+            println!(
+                "{}: no managed host; run `dotfiles hosts sync`",
+                family.name()
+            );
+            failures += 1;
+            continue;
+        };
+        match probe(&native, &tailnet, family, &target, program)? {
+            Ok(()) => println!("{} {}: ready", family.name(), target.name()),
+            Err(action) => {
+                println!("{} {}: {action}", family.name(), target.name());
+                failures += 1;
+            }
+        }
+    }
+    ensure!(failures == 0, "{failures} OS family host(s) are not ready");
+    Ok(())
+}
+
+fn ready_hosts(
+    native: &Real,
+    home: &Path,
+    gate: &str,
+    clean: bool,
+    pending: [bool; 3],
+) -> Result<[Option<Target>; 3]> {
+    let mut ready = [true; 3];
+    let mut actions: [Option<String>; 3] = Default::default();
+    let mut hosts: [Option<Target>; 3] = Default::default();
+    if clean && pending.iter().any(|pending| *pending) {
+        let tailnet = tailnet_status(native)?;
+        hosts = targets(home, &tailnet)?;
+        let program = program(gate)?;
+        for family in Family::ALL
+            .into_iter()
+            .filter(|family| pending[family.index()])
+        {
+            let index = family.index();
+            let verdict = match &hosts[index] {
+                None => Err("no managed host; run `dotfiles hosts sync`".to_owned()),
+                Some(target) => probe(native, &tailnet, family, target, program)?,
+            };
+            if let Err(action) = verdict {
+                ready[index] = false;
+                actions[index] = Some(action);
+            }
+        }
+    }
+    match start(clean, pending, ready) {
+        Start::Dirty => bail!(
+            "the tree has uncommitted or untracked files; notes bind to a commit, so commit first"
+        ),
+        Start::Unready(_) => bail!(
+            "{}",
+            Family::ALL
+                .into_iter()
+                .filter_map(|family| actions[family.index()]
+                    .as_ref()
+                    .map(|action| format!("{}: {action}", family.name())))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
+        Start::Run => Ok(hosts),
+    }
+}
+
+fn reuse_plan(
+    root: &Path,
+    required: [bool; 3],
+    inputs: &[String; 2],
+    gate: &str,
+) -> Result<[[Option<Reused>; 2]; 3]> {
+    let receipts = receipts(&all_notes(root)?)?;
+    let mut reused: [[Option<Reused>; 2]; 3] = Default::default();
+    for family in Family::ALL
+        .into_iter()
+        .filter(|family| required[family.index()])
+    {
+        for stage in Stage::ALL {
+            reused[family.index()][stage.index()] =
+                reusable(&receipts, family, stage, &inputs[stage.index()], gate);
+            if crate::hosts_rules::after_unverified(
+                latest_execution(&receipts, family, stage, &inputs[stage.index()], gate),
+                pending::cutoff(root, family, stage, &inputs[stage.index()], gate)?,
+            )
+            .is_none()
+            {
+                reused[family.index()][stage.index()] = None;
+            }
+        }
+    }
+    Ok(reused)
+}
+
+pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
+    let root = PathBuf::from(git_text(Path::new("."), &["rev-parse", "--show-toplevel"])?);
+    let clean = git(&root, &["status", "--porcelain", "--untracked-files=all"])?.is_empty();
+    let commit = git_text(&root, &["rev-parse", "HEAD"])?;
+    let tree = git_text(&root, &["rev-parse", &format!("{commit}^{{tree}}")])?;
+    let required = required(&workflows_at(&root, &commit)?)?;
+    let native = native(home)?;
+    if clean {
+        recover_pending(&native, &root)?;
+        recover_workspaces(&native, &root)?;
+    }
+    if required == [false; 3] {
+        println!("The CI matrix requires no OS family; nothing to check");
+        return Ok(());
+    }
+    let inputs = input_hashes(&root, &commit, gate)?;
+    let reused = reuse_plan(&root, required, &inputs, gate)?;
+    let pending = Family::ALL.map(|family| {
+        required[family.index()] && reused[family.index()].iter().any(Option::is_none)
+    });
+    let hosts = ready_hosts(&native, home, gate, clean, pending)?;
+    let snapshot = tempfile::tempdir()?;
+    if pending.iter().any(|pending| *pending) {
+        let bundle = snapshot.path().join("head.bundle");
+        git(
+            &root,
+            &["bundle", "create", &bundle.to_string_lossy(), "HEAD"],
+        )?;
+        ensure!(
+            git_text(
+                &root,
+                &["bundle", "list-heads", &bundle.to_string_lossy(), "HEAD"]
+            )? == format!("{commit} HEAD"),
+            "candidate changed during host preflight; run `dotfiles hosts check` from its clean checkout"
+        );
+    }
+    let runs: Vec<_> = std::thread::scope(|scope| {
+        let handles: Vec<_> = Family::ALL
+            .into_iter()
+            .filter(|family| required[family.index()])
+            .map(|family| {
+                let (native, root, snapshot, commit, tree, inputs) =
+                    (&native, &root, snapshot.path(), &commit, &tree, &inputs);
+                let target = hosts[family.index()].clone();
+                let thread = scope.spawn(move || {
+                    check_family(
+                        native,
+                        &Candidate {
+                            root,
+                            commit,
+                            tree,
+                            gate,
+                            inputs,
+                        },
+                        snapshot,
+                        family,
+                        target,
+                        required,
+                    )
+                });
+                (family, thread)
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|(family, handle)| {
+                handle.join().unwrap_or_else(|_| {
+                    Err(anyhow::anyhow!(
+                        "the {} gate thread panicked",
+                        family.name()
+                    ))
+                })
+            })
+            .collect()
+    });
+    let mut failed = Vec::new();
+    for run in runs {
+        match run {
+            Ok(failures) => failed.extend(failures),
+            Err(error) => failed.push(format!("host gate: {error:#}")),
+        }
+    }
+    ensure!(failed.is_empty(), "{}", failed.join("\n"));
+    Ok(())
+}
+
+fn recover_pending(native: &Real, root: &Path) -> Result<()> {
+    let runs = std::thread::scope(|scope| {
+        Family::ALL
+            .into_iter()
+            .map(|family| {
+                let task = scope.spawn(move || -> Result<Vec<String>> {
+                    if !pending::exists(root, family)? {
+                        return Ok(Vec::new());
+                    }
+                    Ok(pending::Lease::acquire(root, family)?
+                        .recover(native, root)?
+                        .unwrap_or_default())
+                });
+                (family, task)
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|(family, task)| {
+                task.join().unwrap_or_else(|_| {
+                    Err(anyhow::anyhow!(
+                        "the {} recovery thread panicked",
+                        family.name()
+                    ))
+                })
+            })
+            .collect::<Vec<_>>()
+    });
+    let mut failures = Vec::new();
+    for run in runs {
+        match run {
+            Ok(current) => failures.extend(current),
+            Err(error) => failures.push(format!("recover host gate: {error:#}")),
+        }
+    }
+    ensure!(failures.is_empty(), "{}", failures.join("\n"));
+    Ok(())
+}
+
+fn check_family(
+    native: &Real,
+    candidate: &Candidate<'_>,
+    snapshot: &Path,
+    family: Family,
+    target: Option<Target>,
+    required: [bool; 3],
+) -> Result<Vec<String>> {
+    let execution = pending::Lease::acquire(candidate.root, family)?;
+    if let Some(failures) = execution.recover(native, candidate.root)?
+        && !failures.is_empty()
+    {
+        return Ok(failures);
+    }
+    let reused = reuse_plan(candidate.root, required, candidate.inputs, candidate.gate)?
+        [family.index()]
+    .clone();
+    let mut owned = None;
+    let run = if reused.iter().all(Option::is_some) {
+        let host = reused[0]
+            .as_ref()
+            .context("reused code record")?
+            .host
+            .clone();
+        GateRun {
+            family,
+            target: Target::Local(host),
+            status: Some(0),
+            output: format!(
+                "{STAGE_REPORT}{}",
+                serde_json::to_string(&Stages {
+                    code: 0,
+                    real: 0,
+                    applied: None,
+                    workspace: None,
+                    capture: None
+                })?
+            ),
+            reused,
+            capture: None,
+        }
+    } else {
+        let target = target.context("managed host is unavailable")?;
+        if let Target::Remote(alias) = &target {
+            return execution.execute(native, candidate, snapshot, alias, reused);
+        }
+        let skipped = reused.each_ref().map(Option::is_some);
+        execution.begin_local(candidate, snapshot, target.name(), reused.clone())?;
+        let captured =
+            local::Owned::capture(candidate, &snapshot.join("head.bundle"), &native.home)?;
+        let (status, output) = job_output(captured.command(&native.home, skipped)?, None)
+            .context("run the captured local gate")?;
+        let capture = Some(captured.execution.clone());
+        owned = Some(captured);
+        GateRun {
+            family,
+            target,
+            status: status.code(),
+            output,
+            reused,
+            capture,
+        }
+    };
+    if let Some(capture) = &run.capture {
+        ensure!(
+            capture.matches(candidate),
+            "local execution provenance belongs to another candidate"
+        );
+    }
+    let result = record_run(
+        native,
+        candidate.root,
+        candidate.commit,
+        candidate.tree,
+        candidate.gate,
+        candidate.inputs,
+        &run,
+    )?;
+    if let Some(mut owned) = owned {
+        owned.close()?;
+    }
+    if result.recorded {
+        execution.retire_unverified(candidate.root)?;
+    }
+    Ok(result.failures)
+}
+
+/// One family's gate as it ran on its host: the exit status when the job finished, and its combined output.
+struct GateRun {
+    family: Family,
+    target: Target,
+    status: Option<i32>,
+    output: String,
+    reused: [Option<Reused>; 2],
+    capture: Option<local::Execution>,
+}
+
+#[derive(Debug)]
+struct Candidate<'a> {
+    root: &'a Path,
+    commit: &'a str,
+    tree: &'a str,
+    gate: &'a str,
+    inputs: &'a [String; 2],
+}
+
+struct RecordedRun {
+    failures: Vec<String>,
+    recorded: bool,
+}
+
+fn stage_packet(run: &GateRun) -> Result<(Stages, Option<Workspace>)> {
+    let GateRun {
+        family,
+        target,
+        status,
+        output,
+        reused,
+        ..
+    } = run;
+    let reports: Vec<_> = output
+        .lines()
+        .filter_map(|line| line.strip_prefix(STAGE_REPORT))
+        .collect();
+    let [report] = reports.as_slice() else {
+        eprintln!("{output}");
+        bail!(
+            "{} {}: the job returned {status:?} without exactly one complete stage report",
+            family.name(),
+            target.name()
+        );
+    };
+    let report: Stages = serde_json::from_str(report).context("malformed host stage report")?;
+    let workspace = if let (Target::Remote(alias), Some(path)) = (target, &report.workspace) {
+        let prefix = format!("{alias}:");
+        let job = output
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix(&prefix)
+                    .and_then(|text| text.split_whitespace().next())
+            })
+            .context("workspace job identity is missing")?;
+        let workspace = Workspace {
+            path: path.clone(),
+            job: job.to_owned(),
+            reused: reused.clone(),
+        };
+        cleanup_arguments(*family, &workspace)?;
+        Some(workspace)
+    } else {
+        None
+    };
+    Ok((report, workspace))
+}
+
+fn reported(run: &GateRun) -> Result<(Stages, Option<Workspace>)> {
+    let (report, workspace) = stage_packet(run)?;
+    if matches!(run.target, Target::Local(_)) && run.reused.iter().any(Option::is_none) {
+        ensure!(
+            run.capture.is_some() && run.capture == report.capture,
+            "local stage report has no matching protected execution provenance"
+        );
+    } else {
+        ensure!(
+            run.capture.is_none() && report.capture.is_none(),
+            "the execution returned unexpected local provenance"
+        );
+    }
+    let statuses = [report.code, report.real];
+    ensure!(
+        crate::hosts_rules::report_evidence(run.status, statuses.iter().all(|status| *status == 0))
+            == crate::hosts_rules::ReportEvidence::Verified,
+        "the job status disagrees with its stage report"
+    );
+    Ok((report, workspace))
+}
+
+fn record_run(
+    native: &Real,
+    root: &Path,
+    commit: &str,
+    tree: &str,
+    gate: &str,
+    inputs: &[String; 2],
+    run: &GateRun,
+) -> Result<RecordedRun> {
+    let (report, workspace) = reported(run)?;
+    let GateRun {
+        family,
+        target,
+        output,
+        reused,
+        ..
+    } = run;
+    let statuses = [report.code, report.real];
+    let mut failures = Vec::new();
+    let mut recorded = true;
+    let mut receipt = None;
+    if reused[1].is_none()
+        && let Some(applied) = &report.applied
+    {
+        applied.report(&format!("{} {} applied", family.name(), target.name()));
+    }
+    for (stage, status) in Stage::ALL.into_iter().zip(statuses) {
+        let reuse = &reused[stage.index()];
+        ensure!(
+            reuse.is_none() || status == 0,
+            "a reused stage reported failure"
+        );
+        let note = Note {
+            host: target.name().to_owned(),
+            os: family.name().to_owned(),
+            tree: tree.to_owned(),
+            status,
+            gate: gate.to_owned(),
+            stage: Some(stage),
+            applied: match stage {
+                Stage::Code => None,
+                Stage::Real => report.applied.clone(),
+            },
+            inputs: Some(inputs[stage.index()].clone()),
+            generation: None,
+            reused: reuse.clone(),
+            workspace: workspace.clone(),
+            capture: report.capture.as_ref().map(local::Execution::receipt),
+        };
+        match append_note(root, commit, &note) {
+            Ok(AppendNote::Recorded) => {}
+            Ok(AppendNote::Obsolete) => {
+                failures.push(format!("{} {} {}: reused origin became obsolete; run `dotfiles hosts check` for fresh stage evidence", family.name(), target.name(), stage.name()));
+                continue;
+            }
+            Err(error) => {
+                recorded = false;
+                failures.push(format!(
+                    "{} {} {}: record note: {error:#}",
+                    family.name(),
+                    target.name(),
+                    stage.name()
+                ));
+            }
+        }
+        receipt = Some(note);
+        if let Some(reuse) = reuse {
+            println!(
+                "{} {} {}: reused {}:{}",
+                family.name(),
+                target.name(),
+                stage.name(),
+                reuse.commit,
+                reuse.line
+            );
+        } else if status == 0 {
+            println!(
+                "{} {} {}: passed",
+                family.name(),
+                target.name(),
+                stage.name()
+            );
+        } else {
+            failures.push(format!(
+                "{} {} {}: failed with {status}",
+                family.name(),
+                target.name(),
+                stage.name()
+            ));
+        }
+    }
+    if recorded
+        && workspace.is_some()
+        && let Some(receipt) = receipt
+    {
+        let cleanup = clean_recorded_workspace(native, root, commit, &receipt);
+        if cleanup.is_err() {
+            failures.push(format!(
+                "{} {}: workspace cleanup is pending",
+                family.name(),
+                target.name()
+            ));
+        }
+        platform::cleanup::report(cleanup, "remove the recorded host workspace");
+    }
+    if !failures.is_empty() {
+        eprintln!("{output}");
+    }
+    Ok(RecordedRun { failures, recorded })
+}
+
+#[cfg(test)]
+mod job_tests {
+    use super::*;
+
+    #[test]
+    fn owned_materials_use_the_physical_temporary_parent() -> Result<()> {
+        let namespace = tempfile::tempdir()?;
+        let namespace_root = platform::paths::canonical(namespace.path())?;
+        let physical = namespace_root.join("physical");
+        let alias = namespace_root.join("alias");
+        fs::create_dir(&physical)?;
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&physical, &alias)?;
+        #[cfg(windows)]
+        junction::create(&physical, &alias)?;
+        let materials = material_directory(&alias)?;
+        assert_eq!(materials.path().parent(), Some(physical.as_path()));
+        fs::write(materials.path().join("material"), b"owned")?;
+        assert_eq!(
+            fs::read(platform::paths::canonical(materials.path())?.join("material"))?,
+            b"owned"
+        );
+        let material_path = materials.path().to_owned();
+        materials.close()?;
+        assert!(!material_path.exists());
+        Ok(())
+    }
+
+    const STAGE_START_LIMIT: Duration = Duration::from_secs(5);
+    const PREPARATION_FAILURE_SCOPE: &str = "DOTFILES_TEST_PREPARATION_FAILURE_SCOPE";
+    const PREPARATION_FAILURE_TEST: &str =
+        "hosts::job_tests::failed_code_preparation_restores_protections_before_owned_cleanup";
+    const PREPARATION_PACKAGE: &str = "cleanup-dependency";
+    const PREPARATION_PACKAGE_VERSION: &str = "1.2.3";
+    const PREPARATION_REGISTRY: &str = "registry+https://github.com/rust-lang/crates.io-index";
+    const PREPARATION_ARCHIVE_URL: &str =
+        "https://static.crates.io/crates/cleanup-dependency/cleanup-dependency-1.2.3.crate";
+    const PREPARATION_CACHE: &str = ".cache/dotfiles/artifacts";
+    const INHERITED_FAILURE_SCOPE: &str = "DOTFILES_TEST_INHERITED_FAILURE_SCOPE";
+    const INHERITED_FAILURE_TEST: &str =
+        "hosts::job_tests::missing_inherited_tool_refuses_before_native_material_preparation";
+    const PINNED_MISE_FIXTURE: &str = "DOTFILES_VERIFIED_MISE_BOOTSTRAP";
+    const INHERITED_INPUTS: [(&str, &[u8]); 7] = [
+        (
+            "mise.toml",
+            b"[tools]\nyamllint='1.38.0'\nuv='0.12.22'\n[settings]\nparanoid=true\nlockfile=true\n",
+        ),
+        ("mise.lock", include_bytes!("../../../mise.lock")),
+        (
+            RELEASE_PINS,
+            include_bytes!("../../../home/.chezmoidata/versions.toml"),
+        ),
+        (
+            ".mise/locks/yamllint/1.38.0/pyproject.toml",
+            include_bytes!("../../../.mise/locks/yamllint/1.38.0/pyproject.toml"),
+        ),
+        (
+            ".mise/locks/yamllint/1.38.0/uv.lock",
+            include_bytes!("../../../.mise/locks/yamllint/1.38.0/uv.lock"),
+        ),
+        (
+            ".mise/locks/pypi-ansible-core/2.21.4/pyproject.toml",
+            include_bytes!("../../../.mise/locks/pypi-ansible-core/2.21.4/pyproject.toml"),
+        ),
+        (
+            ".mise/locks/pypi-ansible-core/2.21.4/uv.lock",
+            include_bytes!("../../../.mise/locks/pypi-ansible-core/2.21.4/uv.lock"),
+        ),
+    ];
+
+    #[test]
+    #[ignore = "requires the source-authenticated pinned mise bootstrap"]
+    fn missing_inherited_tool_refuses_before_native_material_preparation() -> Result<()> {
+        if let Some(scope) = std::env::var_os(INHERITED_FAILURE_SCOPE) {
+            let namespace = platform::paths::canonical(Path::new(&scope))?;
+            let source = namespace.join("source");
+            let home = namespace.join("home");
+            let failure = code_environment(&source, &home)
+                .expect_err("the original resolver must refuse missing inherited yamllint");
+            assert!(
+                failure
+                    .to_string()
+                    .contains("yamllint does not resolve to its installed project pin"),
+                "the inherited-tool refusal must precede malformed native policy: {failure:#}"
+            );
+            assert!(
+                failure
+                    .to_string()
+                    .contains("uv does not resolve to its installed project pin"),
+                "both missing inherited tools must be reported: {failure:#}"
+            );
+            assert!(
+                failure.to_string().contains("refused 2 member(s)"),
+                "the complete failing inventory must be counted: {failure:#}"
+            );
+            assert!(!home.join(".rustup/toolchains").exists());
+            assert!(!home.join(".kani").exists());
+            for (name, expected) in INHERITED_INPUTS {
+                assert_eq!(
+                    fs::read(source.join(name))?,
+                    expected,
+                    "Source input changed: {name}"
+                );
+            }
+            return Ok(());
+        }
+        let owned = tempfile::tempdir()?;
+        let namespace = platform::paths::canonical(owned.path())?;
+        let source = namespace.join("source");
+        let home = namespace.join("home");
+        let programs = home.join(".local/bin");
+        let temporary = namespace.join("tmp");
+        fs::create_dir_all(&programs)?;
+        fs::create_dir(&temporary)?;
+        preparation_fixture(&source, &home)?;
+        for (name, bytes) in INHERITED_INPUTS {
+            let path = source.join(name);
+            fs::create_dir_all(path.parent().context("inherited fixture input parent")?)?;
+            fs::write(path, bytes)?;
+        }
+        let catalog = source.join("policy/native-materials.toml");
+        fs::create_dir_all(catalog.parent().context("native fixture policy parent")?)?;
+        fs::write(&catalog, b"[deliberately unclosed native material policy")?;
+        let mise = std::env::var_os(PINNED_MISE_FIXTURE)
+            .context("provide the verified pinned mise bootstrap")?;
+        fs::copy(
+            Path::new(&mise),
+            programs.join(format!("mise{}", std::env::consts::EXE_SUFFIX)),
+        )?;
+        let mut command = platform::process::command(std::env::current_exe()?);
+        command
+            .args([
+                "--exact",
+                INHERITED_FAILURE_TEST,
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(INHERITED_FAILURE_SCOPE, &namespace)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("TMP", &temporary)
+            .env("TEMP", &temporary)
+            .env("TMPDIR", &temporary)
+            .env("DOTFILES_HOST_PATH", &programs)
+            .env("MISE_DATA_DIR", home.join("native-data"))
+            .env("DOTFILES_HOST_CARGO_HOME", home.join(".cargo"))
+            .env("RUSTUP_HOME", home.join(".rustup"))
+            .env("DOTFILES_HOST_CACHE", home.join("host-cache"))
+            .env(platform::code_environment::NATIVE_PATH_DIFF_PRESENT, "0")
+            .env_remove(platform::code_environment::NATIVE_PATH_DIFF)
+            .env_remove("__MISE_DIFF");
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "early inherited-tool refusal failed: {:?}\nstdout={}\nstderr={}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stderr, Vec::<u8>::new());
+        assert_eq!(
+            fs::read(&catalog)?,
+            b"[deliberately unclosed native material policy"
+        );
+        platform::cleanup::report(
+            owned.close(),
+            "remove the early inherited-tool refusal fixture",
+        );
+        Ok(())
+    }
+
+    struct PreparationArchive(Vec<u8>);
+
+    impl crate::artifacts::Fetch for PreparationArchive {
+        fn fetch(
+            &self,
+            source: &str,
+            destination: &Path,
+        ) -> std::result::Result<(), crate::artifacts::FetchFailure> {
+            if source != PREPARATION_ARCHIVE_URL {
+                return Err(crate::artifacts::FetchFailure::Refused(
+                    "unexpected preparation fixture material".into(),
+                ));
+            }
+            fs::write(destination, &self.0)
+                .map_err(|error| crate::artifacts::FetchFailure::Refused(error.to_string()))
+        }
+    }
+
+    fn preparation_fixture(source: &Path, home: &Path) -> Result<()> {
+        let gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut archive = tar::Builder::new(gzip);
+        let manifest = format!(
+            "[package]\nname={PREPARATION_PACKAGE:?}\nversion={PREPARATION_PACKAGE_VERSION:?}\nedition='2024'\n"
+        );
+        for (path, contents) in [
+            ("Cargo.toml", manifest.as_bytes()),
+            ("src/lib.rs", b"pub fn value() -> u32 { 37 }\n".as_slice()),
+        ] {
+            let mut header = tar::Header::new_ustar();
+            header.set_size(u64::try_from(contents.len())?);
+            header.set_mode(0o644);
+            header.set_entry_type(tar::EntryType::Regular);
+            header.set_cksum();
+            archive.append_data(
+                &mut header,
+                format!("{PREPARATION_PACKAGE}-{PREPARATION_PACKAGE_VERSION}/{path}"),
+                contents,
+            )?;
+        }
+        let archive = PreparationArchive(archive.into_inner()?.finish()?);
+        let checksum = crate::artifacts::Digest::of(&archive.0);
+        fs::create_dir_all(source.join("src"))?;
+        fs::write(
+            source.join("Cargo.toml"),
+            format!(
+                "[package]\nname='cleanup-fixture'\nversion='0.1.0'\nedition='2024'\n[workspace]\n[dependencies]\n{PREPARATION_PACKAGE}='={PREPARATION_PACKAGE_VERSION}'\n"
+            ),
+        )?;
+        fs::write(
+            source.join("Cargo.lock"),
+            format!(
+                "version=4\n[[package]]\nname='cleanup-fixture'\nversion='0.1.0'\ndependencies=['{PREPARATION_PACKAGE}']\n[[package]]\nname='{PREPARATION_PACKAGE}'\nversion='{PREPARATION_PACKAGE_VERSION}'\nsource='{PREPARATION_REGISTRY}'\nchecksum='{}'\n",
+                checksum.hex()
+            ),
+        )?;
+        fs::write(
+            source.join("src/lib.rs"),
+            "pub fn value() -> u32 { cleanup_dependency::value() }\n",
+        )?;
+        let workload = crate::artifacts::CargoWorkload::capture(source)?;
+        let plan = workload.plan()?;
+        let [material] = plan.artifacts() else {
+            anyhow::bail!("preparation fixture requires exactly one material");
+        };
+        assert_eq!(
+            material.subject(),
+            format!("crate:{PREPARATION_PACKAGE}@{PREPARATION_PACKAGE_VERSION}")
+        );
+        assert_eq!(material.expected(), checksum);
+        let cache = crate::artifacts::Cache::new(home.join(PREPARATION_CACHE));
+        cache.acquire(&plan, &archive)?;
+        cache.verify(&plan)?;
+        Ok(())
+    }
+
+    #[test]
+    fn failed_code_preparation_restores_protections_before_owned_cleanup() -> Result<()> {
+        if let Some(scope) = std::env::var_os(PREPARATION_FAILURE_SCOPE) {
+            let namespace = platform::paths::canonical(Path::new(&scope))?;
+            let failure = code_environment(&namespace.join("source"), &namespace.join("home"))
+                .expect_err("the captured Source deliberately has no release pins");
+            assert!(
+                failure
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound),
+                "the original missing-input refusal must survive cleanup: {failure:#}"
+            );
+            return Ok(());
+        }
+        let owned = tempfile::tempdir()?;
+        let namespace = platform::paths::canonical(owned.path())?;
+        let source = namespace.join("source");
+        let home = namespace.join("home");
+        let programs = home.join(".local/bin");
+        let temporary = namespace.join("tmp");
+        fs::create_dir_all(&programs)?;
+        fs::create_dir(&temporary)?;
+        preparation_fixture(&source, &home)?;
+        fs::write(
+            programs.join(format!("mise{}", std::env::consts::EXE_SUFFIX)),
+            b"an owned path fixture that must never be executed",
+        )?;
+        let mut command = platform::process::command(std::env::current_exe()?);
+        command
+            .args(["--exact", PREPARATION_FAILURE_TEST, "--nocapture"])
+            .env(PREPARATION_FAILURE_SCOPE, &namespace)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("TMP", &temporary)
+            .env("TEMP", &temporary)
+            .env("TMPDIR", &temporary)
+            .env("DOTFILES_HOST_PATH", &programs)
+            .env(platform::code_environment::NATIVE_PATH_DIFF_PRESENT, "0")
+            .env_remove(platform::code_environment::NATIVE_PATH_DIFF)
+            .env_remove("__MISE_DIFF");
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "the deliberate preparation refusal failed: {:?}\nstdout={}\nstderr={}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stderr,
+            Vec::<u8>::new(),
+            "the original refusal must not produce a protection restoration failure"
+        );
+        let retained = fs::read_dir(&temporary)?
+            .map(|entry| Ok(entry?.file_name()))
+            .collect::<Result<Vec<_>>>()?;
+        assert_eq!(
+            retained,
+            Vec::<std::ffi::OsString>::new(),
+            "owned preparation outputs must be removed after protections restore"
+        );
+        platform::cleanup::report(owned.close(), "remove the failed preparation fixture");
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn retained_material_layers_restore_cargo_permissions_before_cleanup() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let namespace = tempfile::tempdir()?;
+        let cargo = namespace.path().join("cargo");
+        let vendor = cargo.join("vendor");
+        let cargo_home = cargo.join("cargo-home");
+        let config = cargo_home.join("config.toml");
+        let source = vendor.join("source");
+        fs::create_dir_all(&vendor)?;
+        fs::create_dir(&cargo_home)?;
+        fs::write(&config, "configuration")?;
+        fs::write(&source, "source")?;
+        let paths = [
+            namespace.path().to_owned(),
+            cargo,
+            vendor.clone(),
+            cargo_home,
+            config.clone(),
+            source.clone(),
+        ];
+        let expected = paths
+            .iter()
+            .map(|path| Ok((path.clone(), fs::metadata(path)?.permissions().mode())))
+            .collect::<Result<Vec<_>>>()?;
+        let protections = [vendor.clone(), config.clone()]
+            .iter()
+            .map(|path| local::Protection::seal(path))
+            .collect::<Result<Vec<_>>>()?;
+        let material = local::Protection::seal_materials(namespace.path(), &[vendor, config])?;
+        let protections = CodeProtections::new(material, protections);
+        let refused = fs::OpenOptions::new()
+            .write(true)
+            .open(&source)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied);
+        drop(protections);
+        let restored = paths
+            .iter()
+            .map(|path| Ok((path.clone(), fs::metadata(path)?.permissions().mode())))
+            .collect::<Result<Vec<_>>>()?;
+        for (path, mode) in &expected {
+            fs::set_permissions(path, fs::Permissions::from_mode(*mode))?;
+        }
+        let directory = namespace.path().to_owned();
+        namespace.close()?;
+        assert!(refused, "live retained materials must reject writes");
+        assert_eq!(restored, expected);
+        assert!(!directory.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn a_local_success_without_captured_execution_provenance_is_not_verified() {
+        let run = GateRun {
+            family: Family::Mac,
+            target: Target::Local("owned-fixture".into()),
+            status: Some(0),
+            output: format!(
+                "{STAGE_REPORT}{}",
+                serde_json::json!({"code":0,"real":0,"applied":null,"workspace":null})
+            ),
+            reused: [None, None],
+            capture: None,
+        };
+        assert!(reported(&run).is_err());
+    }
+
+    fn failed_real() -> crate::host_checks::Report {
+        crate::host_checks::Report {
+            candidate: Err(anyhow::anyhow!("real failure")),
+            applied: crate::host_checks::Applied {
+                drifted_targets: Vec::new(),
+                verification_error: Some("observed drift".into()),
+            },
+        }
+    }
+
+    #[test]
+    fn concurrent_stages_start_together_and_preserve_both_failures() -> Result<()> {
+        let (code_started, await_code) = std::sync::mpsc::channel();
+        let (real_started, await_real) = std::sync::mpsc::channel();
+        let (code, real) = run_stages(
+            [false; 2],
+            true,
+            move || {
+                code_started.send(())?;
+                await_real.recv_timeout(STAGE_START_LIMIT)?;
+                bail!("code failure")
+            },
+            move || {
+                real_started.send(()).expect("code stage is present");
+                await_code
+                    .recv_timeout(STAGE_START_LIMIT)
+                    .expect("code stage starts before real finishes");
+                failed_real()
+            },
+        );
+        assert_eq!(code.unwrap_err().to_string(), "code failure");
+        let real = real.context("real stage result")?;
+        assert_eq!(real.candidate.unwrap_err().to_string(), "real failure");
+        assert_eq!(
+            real.applied.verification_error.as_deref(),
+            Some("observed drift")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sequential_stages_finish_code_before_real_and_skip_reused_stages() {
+        for skipped in [[false; 2], [true, false], [false, true], [true; 2]] {
+            let (events, received) = std::sync::mpsc::channel();
+            let code_events = events.clone();
+            let (code, real) = run_stages(
+                skipped,
+                false,
+                move || {
+                    code_events.send("code").expect("event receiver");
+                    bail!("code failure")
+                },
+                move || {
+                    events.send("real").expect("event receiver");
+                    failed_real()
+                },
+            );
+            assert_eq!(code.is_ok(), skipped[0]);
+            assert_eq!(real.is_none(), skipped[1]);
+            let expected: Vec<_> = skipped
+                .into_iter()
+                .zip(["code", "real"])
+                .filter_map(|(skip, name)| (!skip).then_some(name))
+                .collect();
+            assert_eq!(received.into_iter().collect::<Vec<_>>(), expected);
+        }
+    }
+
+    #[test]
+    fn only_supported_terminal_states_allow_unverified_history() {
+        for state in [
+            "finished succeeded",
+            "finished failed (1)",
+            "finished failed (-1073741819)",
+            "finished launch failed: process unavailable",
+            "finished lost",
+            "finished killed",
+            "finished memory limit exceeded",
+        ] {
+            assert!(known_terminal(state), "{state}");
+        }
+        for state in [
+            "running",
+            "finished unknown",
+            "finished failed (0)",
+            "finished failed (invalid)",
+            "finished launch failed: ",
+            "finished succeeded trailing",
+        ] {
+            assert!(!known_terminal(state), "{state}");
+        }
+    }
+
+    #[test]
+    fn workspace_receipts_keep_passed_failed_and_interrupted_jobs_pending() -> Result<()> {
+        let record = |stage: Option<&str>, status| {
+            serde_json::json!({
+            "host":"box","os":"linux","tree":"tree","gate":"just check","status":status,
+            "stage":stage,"workspace":{"path":"/state/jobs/gate/workspace","job":"gate","reused":[null,null]}
+        }).to_string()
+        };
+        let stages = format!("{}\n{}", record(Some("code"), 0), record(Some("real"), 9));
+        let notes = [("commit".into(), stages.clone())];
+        assert_eq!(pending_workspaces(&notes)?.len(), 1);
+        let interrupted = [("commit".into(), record(Some("code"), 0))];
+        assert_eq!(pending_workspaces(&interrupted)?.len(), 1);
+        let cleaned = [("commit".into(), format!("{stages}\n{}", record(None, 0)))];
+        assert!(pending_workspaces(&cleaned)?.is_empty());
+        let failed_cleanup = [("commit".into(), format!("{stages}\n{}", record(None, 1)))];
+        assert_eq!(pending_workspaces(&failed_cleanup)?.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn cleanup_addresses_one_workspace_and_preserves_its_job() -> Result<()> {
+        let workspace = Workspace {
+            path: "/state/jobs/gate/workspace".into(),
+            job: "gate".into(),
+            reused: [None, None],
+        };
+        let arguments = cleanup_arguments(Family::Linux, &workspace)?;
+        assert_eq!(
+            arguments,
+            ["/bin/rm", "-rf", "--", "/state/jobs/gate/workspace"]
+        );
+        assert!(
+            cleanup_arguments(
+                Family::Linux,
+                &Workspace {
+                    path: "/state/jobs/gate".into(),
+                    ..workspace
+                }
+            )
+            .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn capacity_uses_the_least_free_volume_and_rejects_missing_or_overflowing_data() -> Result<()> {
+        assert_eq!(
+            space_available(
+                Family::Linux,
+                "Filesystem 1024-blocks Used Available Capacity Mounted\n/dev/home 100 20 80 20% /home\n/dev/tmp 100 90 10 90% /tmp"
+            )?,
+            10 * BYTES_PER_KIB
+        );
+        assert_eq!(
+            space_available(Family::Windows, "host:job finished succeeded\n80000\n10000")?,
+            10000
+        );
+        assert!(space_available(Family::Mac, "no disk data").is_err());
+        assert!(
+            space_available(Family::Linux, &format!("/dev/home 0 0 {} 0% /", u64::MAX)).is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn native_free_space_is_measured_for_home_and_scratch_storage() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let family = Family::ALL
+            .into_iter()
+            .find(|family| family.name() == std::env::consts::OS)
+            .context("native family")?;
+        capacity(
+            &native(scope.path())?,
+            family,
+            &Target::Local("fixture".into()),
+        )?;
+        Ok(())
+    }
+
+    fn tree(root: &Path) -> Result<String> {
+        git(root, &["add", "."])?;
+        git_text(root, &["write-tree"])
+    }
+
+    const RECEIPT_WRITER_ROLE: &str = "HOSTS_RECEIPT_WRITER_FIXTURE";
+    const RECEIPT_WRITER_TEST: &str = "hosts::job_tests::linked_worktree_process_writers_share_the_lock_and_allocate_unique_generations";
+    const RECEIPT_WRITER_LIMIT: Duration = Duration::from_secs(30);
+    const RECEIPT_WRITER_READY: &str = "writer-ready";
+
+    fn receipt_writer(root: &Path) -> Result<()> {
+        let root = platform::paths::canonical(root)?;
+        let temporary = platform::paths::canonical(&std::env::temp_dir())?;
+        ensure!(
+            root.starts_with(&temporary) && root != temporary,
+            "the writer owns a temporary repository"
+        );
+        let probe = notes_file(&root)?;
+        assert!(matches!(
+            probe.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        drop(probe);
+        fs::write(root.join(RECEIPT_WRITER_READY), "ready")?;
+        let commit = git_text(&root, &["rev-parse", "HEAD"])?;
+        append_note(
+            &root,
+            &commit,
+            &Note {
+                host: "fixture".into(),
+                os: "linux".into(),
+                tree: git_text(&root, &["rev-parse", "HEAD^{tree}"])?,
+                status: 0,
+                gate: DEFAULT_GATE.into(),
+                stage: Some(Stage::Code),
+                applied: None,
+                inputs: Some(input_hashes(&root, &commit, DEFAULT_GATE)?[0].clone()),
+                generation: None,
+                reused: None,
+                workspace: None,
+                capture: None,
+            },
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn linked_worktree_process_writers_share_the_lock_and_allocate_unique_generations() -> Result<()>
+    {
+        if let Some(root) = std::env::var_os(RECEIPT_WRITER_ROLE) {
+            return receipt_writer(Path::new(&root));
+        }
+        let owned = tempfile::tempdir()?;
+        let root = owned.path().join("project");
+        let linked = owned.path().join("linked");
+        fs::create_dir(&root)?;
+        git(&root, &["init", "--quiet"])?;
+        git(&root, &["config", "--local", "user.name", "Owned Fixture"])?;
+        git(
+            &root,
+            &["config", "--local", "user.email", "fixture@example.invalid"],
+        )?;
+        git(
+            &root,
+            &[
+                "config",
+                "--local",
+                "core.hooksPath",
+                owned
+                    .path()
+                    .join("no-hooks")
+                    .to_str()
+                    .context("owned hooks path")?,
+            ],
+        )?;
+        let tree = tree(&root)?;
+        let commit = git_text(
+            &root,
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "commit-tree",
+                &tree,
+                "-m",
+                "fixture",
+            ],
+        )?;
+        git(&root, &["update-ref", "HEAD", &commit])?;
+        git(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "-b",
+                "linked",
+                linked.to_str().context("linked path")?,
+                &commit,
+            ],
+        )?;
+        let lock = notes_lock(&root)?;
+        std::thread::scope(|scope| -> Result<()> {
+            let writers: Vec<_> = [&root, &linked]
+                .into_iter()
+                .map(|repository| {
+                    let mut command = platform::process::command(
+                        std::env::current_exe().expect("test executable"),
+                    );
+                    command
+                        .args(["--exact", RECEIPT_WRITER_TEST, "--nocapture"])
+                        .current_dir(repository)
+                        .env(RECEIPT_WRITER_ROLE, repository)
+                        .env("GIT_CONFIG_GLOBAL", owned.path().join("gitconfig"))
+                        .env("GIT_CONFIG_NOSYSTEM", "1")
+                        .env("XDG_CONFIG_HOME", owned.path().join("config"));
+                    scope.spawn(move || job_output(command, Some(RECEIPT_WRITER_LIMIT)))
+                })
+                .collect();
+            let started = Instant::now();
+            while [&root, &linked]
+                .into_iter()
+                .any(|repository| !repository.join(RECEIPT_WRITER_READY).is_file())
+                && started.elapsed() < RECEIPT_WRITER_LIMIT
+            {
+                std::thread::sleep(REQUEST_POLL_INTERVAL);
+            }
+            let ready = [&root, &linked]
+                .into_iter()
+                .all(|repository| repository.join(RECEIPT_WRITER_READY).is_file());
+            drop(lock);
+            for writer in writers {
+                let (status, output) = writer.join().expect("writer joins")?;
+                ensure!(status.success(), "owned writer: {output}");
+            }
+            ensure!(
+                ready,
+                "both linked-worktree writers observed the shared lock within their bound"
+            );
+            Ok(())
+        })?;
+        let snapshot = receipts(&all_notes(&root)?)?;
+        let mut generations: Vec<_> = snapshot
+            .iter()
+            .filter_map(|record| record.note.generation)
+            .collect();
+        generations.sort_unstable();
+        assert_eq!(generations, [1, 2]);
+        assert_eq!(git_text(&root, &["rev-list", "--count", NOTES])?, "2");
+        Ok(())
+    }
+
+    #[test]
+    fn stage_hashes_follow_their_inputs_and_the_code_gate() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let root = scope.path();
+        git(root, &["init", "--quiet"])?;
+        fs::create_dir_all(root.join("home"))?;
+        fs::create_dir_all(root.join("crates/example/src"))?;
+        fs::write(root.join("home/dot_profile"), "first")?;
+        fs::write(root.join("crates/example/src/lib.rs"), "first")?;
+        fs::write(root.join("mise.toml"), "first")?;
+        let first = input_hashes(root, &tree(root)?, DEFAULT_GATE)?;
+        assert_eq!(first, input_hashes(root, &tree(root)?, DEFAULT_GATE)?);
+        fs::write(root.join("home/dot_profile"), "second")?;
+        let profile = input_hashes(root, &tree(root)?, DEFAULT_GATE)?;
+        assert_ne!(first[0], profile[0]);
+        assert_ne!(first[1], profile[1]);
+        fs::write(root.join("crates/example/src/lib.rs"), "second")?;
+        let code = input_hashes(root, &tree(root)?, DEFAULT_GATE)?;
+        assert_ne!(profile[0], code[0]);
+        assert_ne!(profile[1], code[1]);
+        let gate = input_hashes(root, &tree(root)?, "just proofs")?;
+        assert_ne!(code[0], gate[0]);
+        assert_eq!(code[1], gate[1]);
+        fs::write(root.join("mise.toml"), "second")?;
+        let pins = input_hashes(root, &tree(root)?, DEFAULT_GATE)?;
+        assert_ne!(code[0], pins[0]);
+        assert_ne!(code[1], pins[1]);
+        fs::remove_file(root.join("home/dot_profile"))?;
+        assert_ne!(pins[1], input_hashes(root, &tree(root)?, DEFAULT_GATE)?[1]);
+        Ok(())
+    }
+
+    #[test]
+    fn the_latest_execution_failure_requires_a_new_run_across_commit_transitions() -> Result<()> {
+        for head_first in [false, true] {
+            let scope = tempfile::tempdir()?;
+            let root = scope.path();
+            git(root, &["init", "--quiet"])?;
+            git(root, &["config", "--local", "user.name", "Owned Fixture"])?;
+            git(
+                root,
+                &["config", "--local", "user.email", "fixture@example.invalid"],
+            )?;
+            let tree = tree(root)?;
+            let inputs = input_hashes(root, &tree, DEFAULT_GATE)?;
+            let commits = ["first", "second", "candidate"]
+                .into_iter()
+                .map(|message| {
+                    git_text(
+                        root,
+                        &[
+                            "-c",
+                            "commit.gpgsign=false",
+                            "commit-tree",
+                            &tree,
+                            "-m",
+                            message,
+                        ],
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let note = |os: &str, stage, status, inputs: &str, gate: &str| Note {
+                host: "fixture".into(),
+                os: os.into(),
+                tree: tree.clone(),
+                status,
+                gate: gate.into(),
+                stage: Some(stage),
+                applied: None,
+                inputs: Some(inputs.into()),
+                generation: None,
+                reused: None,
+                workspace: None,
+                capture: None,
+            };
+            for commit in &commits[..2] {
+                append_note(
+                    root,
+                    commit,
+                    &note("linux", Stage::Code, 0, &inputs[0], DEFAULT_GATE),
+                )?;
+            }
+            let ordered = all_notes(root)?;
+            let planned = reuse_plan(root, [true, false, false], &inputs, DEFAULT_GATE)?[0][0]
+                .clone()
+                .context("the latest initial execution passed")?;
+            let index = usize::from(!head_first);
+            let head = &ordered[index].0;
+            let other = &ordered[usize::from(head_first)].0;
+            git(root, &["update-ref", "HEAD", head])?;
+            let failed = note("linux", Stage::Code, 1, &inputs[0], DEFAULT_GATE);
+            append_note(root, head, &failed)?;
+            assert!(
+                reuse_plan(root, [true, false, false], &inputs, DEFAULT_GATE)?[0][0].is_none(),
+                "HEAD {head} failed after passing; another passing commit {other} cannot replace its result"
+            );
+            let candidate = &commits[2];
+            git(root, &["update-ref", "HEAD", candidate])?;
+            assert!(
+                reuse_plan(root, [true, false, false], &inputs, DEFAULT_GATE)?[0][0].is_none(),
+                "a new commit without notes cannot reuse success before a matching failure"
+            );
+            let mut copied = note("linux", Stage::Code, 0, &inputs[0], DEFAULT_GATE);
+            copied.reused = Some(planned);
+            let before = all_notes(root)?;
+            assert_eq!(append_note(root, candidate, &copied)?, AppendNote::Obsolete);
+            assert_eq!(all_notes(root)?, before);
+            append_note(
+                root,
+                candidate,
+                &note("linux", Stage::Code, 0, &inputs[0], DEFAULT_GATE),
+            )?;
+            assert_eq!(
+                reuse_plan(root, [true, false, false], &inputs, DEFAULT_GATE)?[0][0]
+                    .as_ref()
+                    .context("a new actual run recovers the cache")?
+                    .commit,
+                *candidate
+            );
+            assert_recovery_sources(root, [candidate, other, head], &inputs, copied, &failed)?;
+        }
+        Ok(())
+    }
+
+    fn assert_recovery_sources(
+        root: &Path,
+        commits: [&str; 3],
+        inputs: &[String; 2],
+        mut copied: Note,
+        failed: &Note,
+    ) -> Result<()> {
+        let [candidate, other, head] = commits;
+        let base = copied.clone();
+        let note = |os: &str, stage, status, inputs: &str, gate: &str| Note {
+            os: os.into(),
+            stage: Some(stage),
+            status,
+            inputs: Some(inputs.into()),
+            gate: gate.into(),
+            reused: None,
+            ..base.clone()
+        };
+        let recovered = reuse_plan(root, [true, false, false], inputs, DEFAULT_GATE)?[0][0]
+            .clone()
+            .context("the actual recovery is reusable")?;
+        copied.reused = Some(recovered.clone());
+        append_note(root, other, &copied)?;
+        let snapshot = receipts(&all_notes(root)?)?;
+        let original = source(&snapshot, &recovered).context("original recovery receipt")?;
+        let inherited = snapshot
+            .iter()
+            .rev()
+            .find(|record| record.origin.commit == other && record.note.reused.is_some())
+            .context("inherited recovery receipt")?;
+        assert_eq!(inherited.note.generation, original.note.generation);
+        assert!(inherited.note.generation.is_some());
+        copied.reused = Some(inherited.origin.clone());
+        assert!(append_note(root, candidate, &copied).is_err());
+        assert_eq!(
+            reuse_plan(root, [true, false, false], inputs, DEFAULT_GATE)?[0][0]
+                .as_ref()
+                .context("synthetic receipts cannot replace the actual origin")?
+                .commit,
+            candidate
+        );
+        append_note(
+            root,
+            head,
+            &note("linux", Stage::Code, 0, &inputs[0], DEFAULT_GATE),
+        )?;
+        for unrelated in [
+            note("macos", Stage::Code, 1, &inputs[0], DEFAULT_GATE),
+            note("linux", Stage::Real, 1, &inputs[1], DEFAULT_GATE),
+            note("linux", Stage::Code, 1, "other-inputs", DEFAULT_GATE),
+            note("linux", Stage::Code, 1, &inputs[0], "just proofs"),
+        ] {
+            append_note(root, head, &unrelated)?;
+            let plan = reuse_plan(root, [true, false, false], inputs, DEFAULT_GATE)?;
+            assert_eq!(
+                plan[0][0]
+                    .as_ref()
+                    .context("the current matching pass remains reusable")?
+                    .commit,
+                head
+            );
+        }
+        append_note(root, head, failed)?;
+        assert!(
+            reuse_plan(root, [true, false, false], inputs, DEFAULT_GATE)?[0][0].is_none(),
+            "a later matching failure requires another code run"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn recovery_keeps_the_original_job_generation_and_never_restamps_completed_stages() -> Result<()>
+    {
+        let scope = tempfile::tempdir()?;
+        let root = scope.path();
+        git(root, &["init", "--quiet"])?;
+        git(root, &["config", "--local", "user.name", "Owned Fixture"])?;
+        git(
+            root,
+            &["config", "--local", "user.email", "fixture@example.invalid"],
+        )?;
+        let tree = tree(root)?;
+        let commit = git_text(
+            root,
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "commit-tree",
+                &tree,
+                "-m",
+                "fixture",
+            ],
+        )?;
+        let inputs = input_hashes(root, &commit, DEFAULT_GATE)?;
+        let note = |stage: Stage, status, job: &str| Note {
+            host: "fixture".into(),
+            os: "linux".into(),
+            tree: tree.clone(),
+            status,
+            gate: DEFAULT_GATE.into(),
+            stage: Some(stage),
+            applied: None,
+            inputs: Some(inputs[stage.index()].clone()),
+            generation: None,
+            reused: None,
+            workspace: Some(Workspace {
+                path: format!("/owned/jobs/{job}/workspace"),
+                job: job.into(),
+                reused: [None, None],
+            }),
+            capture: None,
+        };
+        let code = note(Stage::Code, 0, "old");
+        append_note(root, &commit, &code)?;
+        append_note(root, &commit, &note(Stage::Real, 1, "newer"))?;
+        let before = all_notes(root)?;
+        append_note(root, &commit, &code)?;
+        assert_eq!(all_notes(root)?, before);
+        let real = note(Stage::Real, 0, "old");
+        append_note(root, &commit, &real)?;
+        let recovered = all_notes(root)?;
+        let snapshot = receipts(&recovered)?;
+        let old: Vec<_> = snapshot
+            .iter()
+            .filter(|record| {
+                record
+                    .note
+                    .workspace
+                    .as_ref()
+                    .is_some_and(|workspace| workspace.job == "old")
+            })
+            .collect();
+        assert_eq!(old.len(), 2);
+        assert_eq!(old[0].note.generation, old[1].note.generation);
+        assert!(
+            reusable(
+                &snapshot,
+                Family::Linux,
+                Stage::Real,
+                &inputs[1],
+                DEFAULT_GATE
+            )
+            .is_none()
+        );
+        append_note(root, &commit, &real)?;
+        assert_eq!(all_notes(root)?, recovered);
+        assert!(append_note(root, &commit, &note(Stage::Code, 1, "old")).is_err());
+        assert_eq!(all_notes(root)?, recovered);
+        append_note(root, &commit, &note(Stage::Real, 0, "recovery"))?;
+        assert!(
+            reusable(
+                &receipts(&all_notes(root)?)?,
+                Family::Linux,
+                Stage::Real,
+                &inputs[1],
+                DEFAULT_GATE
+            )
+            .is_some()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn reuse_requires_a_passing_matching_family_stage_hash_and_gate() -> Result<()> {
+        let note = |os: &str, stage: &str, status: i32, hash: Option<&str>, gate: &str| {
+            serde_json::json!({"host":"box","os":os,"stage":stage,"status":status,
+                "tree":"old-tree","gate":gate,"inputs":hash,"generation":1})
+            .to_string()
+        };
+        for record in [
+            note("macos", "code", 0, Some("hash"), DEFAULT_GATE),
+            note("linux", "real", 0, Some("hash"), DEFAULT_GATE),
+            note("linux", "code", 1, Some("hash"), DEFAULT_GATE),
+            note("linux", "code", 0, Some("other"), DEFAULT_GATE),
+            note("linux", "code", 0, None, DEFAULT_GATE),
+            note("linux", "code", 0, Some("hash"), "just proofs"),
+        ] {
+            assert!(
+                reusable(
+                    &receipts(&[("old".into(), record)])?,
+                    Family::Linux,
+                    Stage::Code,
+                    "hash",
+                    DEFAULT_GATE
+                )
+                .is_none()
+            );
+        }
+        let notes = [(
+            "old".into(),
+            note("linux", "code", 0, Some("hash"), DEFAULT_GATE),
+        )];
+        let reused = reusable(
+            &receipts(&notes)?,
+            Family::Linux,
+            Stage::Code,
+            "hash",
+            DEFAULT_GATE,
+        )
+        .unwrap();
+        assert_eq!(reused.commit, "old");
+        assert_eq!(reused.line, 1);
+        let mut legacy: serde_json::Value = serde_json::from_str(&notes[0].1)?;
+        legacy
+            .as_object_mut()
+            .context("legacy record")?
+            .remove("generation");
+        let legacy = [("old".into(), serde_json::to_string(&legacy)?)];
+        assert!(
+            reusable(
+                &receipts(&legacy)?,
+                Family::Linux,
+                Stage::Code,
+                "hash",
+                DEFAULT_GATE
+            )
+            .is_none()
+        );
+        let failed = [(
+            "old".into(),
+            format!(
+                "{}\n{}",
+                notes[0].1,
+                note("linux", "code", 1, Some("hash"), DEFAULT_GATE)
+            ),
+        )];
+        assert!(
+            reusable(
+                &receipts(&failed)?,
+                Family::Linux,
+                Stage::Code,
+                "hash",
+                DEFAULT_GATE
+            )
+            .is_none()
+        );
+        for reversed in [false, true] {
+            let mut tied = vec![
+                ("passed".into(), notes[0].1.clone()),
+                (
+                    "failed".into(),
+                    note("linux", "code", 1, Some("hash"), DEFAULT_GATE),
+                ),
+            ];
+            if reversed {
+                tied.reverse();
+            }
+            assert!(
+                reusable(
+                    &receipts(&tied)?,
+                    Family::Linux,
+                    Stage::Code,
+                    "hash",
+                    DEFAULT_GATE
+                )
+                .is_none()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn partial_reuse_skips_only_its_worker_stage() {
+        for family in Family::ALL {
+            let code = remote_gate_stages(family, DEFAULT_GATE, [true, false]);
+            assert!(code.contains(" --skip-code"));
+            assert!(!code.contains(" --skip-real"));
+            let real = remote_gate_stages(family, DEFAULT_GATE, [false, true]);
+            assert!(real.contains(" --skip-real"));
+            assert!(!real.contains(" --skip-code"));
+        }
+    }
+
+    #[test]
+    fn remote_bootstrap_pairs_native_path_before_activation_and_home_changes() {
+        for family in Family::ALL {
+            let script = remote_gate(family, DEFAULT_GATE);
+            let (captured_path, diff, presence, changed_home) = match family {
+                Family::Windows => {
+                    assert!(script.contains("Test-Path Env:__MISE_DIFF"));
+                    (
+                        "$env:DOTFILES_HOST_PATH = $env:PATH",
+                        "$env:DOTFILES_HOST_MISE_DIFF = if",
+                        "$env:DOTFILES_HOST_MISE_DIFF_PRESENT = if",
+                        "$env:HOME = Join-Path",
+                    )
+                }
+                Family::Linux | Family::Mac => {
+                    assert!(script.contains("[ \"${__MISE_DIFF+x}\" = x ]"));
+                    (
+                        "DOTFILES_HOST_PATH=\"$PATH\"",
+                        "DOTFILES_HOST_MISE_DIFF=\"${__MISE_DIFF-}\"",
+                        "DOTFILES_HOST_MISE_DIFF_PRESENT=0",
+                        "export HOME=",
+                    )
+                }
+            };
+            let activation = script.find("mise x --").unwrap();
+            let changed_home = script.find(changed_home).unwrap();
+            for field in [captured_path, diff, presence] {
+                let captured = script.find(field).unwrap();
+                assert!(captured < changed_home);
+                assert!(captured < activation);
+            }
+        }
+    }
+
+    #[test]
+    fn a_stalled_request_is_stopped_and_reports_its_deadline() {
+        let mut request =
+            platform::process::command(if cfg!(windows) { "pwsh" } else { CODE_SHELL });
+        if cfg!(windows) {
+            request.args([
+                "-NoLogo",
+                "-NoProfile",
+                "-Command",
+                "Start-Sleep -Seconds 30",
+            ]);
+        } else {
+            request.args(["-c", "sleep 30"]);
+        }
+        let error = job_output(request, Some(Duration::ZERO))
+            .expect_err("the request must reach its deadline");
+        assert!(
+            error.to_string().contains("did not exit within"),
+            "{error:#}"
+        );
+    }
+}

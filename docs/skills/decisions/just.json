@@ -1,9 +1,11 @@
 {
-  "revision": "40074419dd3485bf31df30b14880c643060fcbc4959746ad75da95b702b09a8a",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "6f246c58f5cbd6459b954c8da0171b82e408c88080850f3b7e4af6008fdd72ce",
+  "outcome": "implemented",
+  "reason": "Keep command discovery and argument preservation separate from typed orchestration.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
-    "dot_agents/skills/just/SKILL.md"
+    "home/dot_agents/skills/just/SKILL.md",
+    "home/dot_agents/skills/just/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

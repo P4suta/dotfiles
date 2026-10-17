@@ -1,0 +1,55 @@
+schema = 1
+
+[rustup]
+# renovate: datasource=github-releases depName=rust-lang/rustup extractVersion=^(?<version>.+)$
+version = "1.29.1"
+
+[rustup.targets.linux-x64]
+url = "https://static.rust-lang.org/rustup/archive/1.29.1/x86_64-unknown-linux-gnu/rustup-init"
+sha256 = "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71"
+
+[rustup.targets.linux-arm64]
+url = "https://static.rust-lang.org/rustup/archive/1.29.1/aarch64-unknown-linux-gnu/rustup-init"
+sha256 = "15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433"
+
+[rustup.targets.macos-x64]
+url = "https://static.rust-lang.org/rustup/archive/1.29.1/x86_64-apple-darwin/rustup-init"
+sha256 = "259e2b84274434085163fe8d556510571772cda2aa6d87ca6aa664f57bc644e3"
+
+[rustup.targets.macos-arm64]
+url = "https://static.rust-lang.org/rustup/archive/1.29.1/aarch64-apple-darwin/rustup-init"
+sha256 = "ec1b9233e7f72990ecd8e62063fa7f6c3dfc2bec8e97f88bff165f9100ac696a"
+
+[rustup.targets.windows-x64]
+url = "https://static.rust-lang.org/rustup/archive/1.29.1/x86_64-pc-windows-msvc/rustup-init.exe"
+sha256 = "6f4bef66261261fcb43131be8720bab817d403a09edec7455c371974b90bdb7e"
+
+[stable]
+channel = "1.99.0"
+url = "https://static.rust-lang.org/dist/channel-rust-1.99.0.toml"
+sha256 = "ce6dddc886364f8d786514771212cebe9b731ba82d6b859951c6b0ccc516b6a2"
+
+[nightly]
+channel = "nightly-2026-08-21"
+url = "https://static.rust-lang.org/dist/2026-08-21/channel-rust-nightly.toml"
+sha256 = "3c30cc655a7549d0b30015cd032f949e8723da5ad039f672d04520bbaea4e76d"
+
+[kani]
+version = "0.68.0"
+launcher_sha256 = "842fabd2ba8b13babab862e21fef2946b581d493f23062d5ce86266630f1d1ae"
+
+[kani.targets.macos-arm64]
+url = "https://github.com/model-checking/kani/releases/download/kani-0.68.0/kani-0.68.0-aarch64-apple-darwin.tar.gz"
+sha256 = "a5d39a5d5e748253a553aa62f295c6c397287927a28e5e32691d7ff2eda0c398"
+
+[kani.targets.macos-x64]
+url = "https://github.com/model-checking/kani/releases/download/kani-0.68.0/kani-0.68.0-x86_64-apple-darwin.tar.gz"
+sha256 = "b1367f694c1350abcae133701f78b3be3fd6e9beb66681a22ea0bcac0cc34808"
+
+[kani.targets.linux-arm64]
+url = "https://github.com/model-checking/kani/releases/download/kani-0.68.0/kani-0.68.0-aarch64-unknown-linux-gnu.tar.gz"
+sha256 = "0042d2688bf1550270def4a79c96aaeea138631818cb4ab5480120f2d51a942c"
+
+[kani.targets.linux-x64]
+url = "https://github.com/model-checking/kani/releases/download/kani-0.68.0/kani-0.68.0-x86_64-unknown-linux-gnu.tar.gz"
+sha256 = "32e2b484d73ede0bbf64a2cf0879c4259422497d8aec4ee67d448de9ae7843d3"

@@ -1,0 +1,3 @@
+[tools]
+"cargo-mutants" = "27.1.0|latest"
+"njutest" = "rev:46d5b5f4446503162ea18189756249231abb6fc7"

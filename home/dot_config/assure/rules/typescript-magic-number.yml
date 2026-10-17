@@ -1,0 +1,30 @@
+id: typescript-magic-number
+language: typescript
+severity: error
+message: An unnamed number carries a meaning that its code doesn't name.
+note: Name the value in a module-level const, and use the name.
+metadata:
+  cwe: CWE-1106
+  ruleset: ESLint no-magic-numbers
+ignores:
+  - "**/*.test.ts"
+  - "**/tests/**"
+rule:
+  kind: number
+  not:
+    any:
+      - regex: '^[01]$'
+      - inside:
+          stopBy: end
+          kind: lexical_declaration
+          regex: '^const '
+          inside:
+            any:
+              - kind: program
+              - kind: export_statement
+          not:
+            has:
+              stopBy: end
+              any:
+                - kind: arrow_function
+                - kind: function_expression

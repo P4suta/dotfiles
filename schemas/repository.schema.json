@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Repository",
+  "description": "What a repository says about itself.",
+  "type": "object",
+  "properties": {
+    "consent": {
+      "description": "Each contributor besides the copyright holder and bots, with the record of their consent to the dual license.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Consent"
+      }
+    },
+    "copyright": {
+      "description": "The copyright holder that `LICENSE-MIT` names.",
+      "type": "string"
+    },
+    "install": {
+      "description": "The commands that install the project, one per line.",
+      "type": "string"
+    },
+    "license": {
+      "description": "The license expression, which must read `MIT OR Apache-2.0`.",
+      "type": "string"
+    },
+    "name": {
+      "description": "The project name, which titles the README.",
+      "type": "string"
+    },
+    "summary": {
+      "description": "One line without a final period, which serves as the GitHub description and the README's first sentence.",
+      "type": "string"
+    },
+    "usage": {
+      "description": "The smallest useful example of use.",
+      "type": "string"
+    },
+    "usage_language": {
+      "description": "The language of the usage block, such as `sh` or `rust`.",
+      "type": "string",
+      "default": "sh"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "summary",
+    "install",
+    "usage",
+    "copyright",
+    "license"
+  ],
+  "$defs": {
+    "Consent": {
+      "description": "One contributor's consent to license their contributions under both licenses.",
+      "type": "object",
+      "properties": {
+        "contributor": {
+          "description": "The name the Git history records for the contributor.",
+          "type": "string"
+        },
+        "evidence": {
+          "description": "Where the contributor agreed, such as an issue comment URL.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "contributor",
+        "evidence"
+      ]
+    }
+  }
+}

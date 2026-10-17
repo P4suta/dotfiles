@@ -1,0 +1,9 @@
+# The GitHub settings that the owner applies by hand, since no workflow may change them.
+# The Rust gate checks that `.github/workflows/ci.yml` provides what they name.
+
+[ruleset.main]
+# The one status the ruleset requires: the required job of ci.yml, which a skipped job never blocks.
+required_status_checks = ["required"]
+# A merge queue tests each change on the current main, so the ruleset no longer demands an up-to-date branch.
+strict_required_status_checks_policy = false
+merge_queue = true

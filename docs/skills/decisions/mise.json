@@ -1,9 +1,17 @@
 {
-  "revision": "0a0a15f20a90115b8ec4924cd7fe303b35c783e41aca510b0816ea8e5dc039f1",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "4e022bfe7fe8d34d4048717b76a4377110c2430ca82eb02cf8319204e385e296",
+  "outcome": "implemented",
+  "reason": "Bind the tool declaration to the pinned mise 2026.10.9 bootstrap.\nThe five launcher checksums match the official release checksum file and asset digests.\nThe archive consumer and its fixtures use the same engine version, and the Windows member index comes from the verified release archive.\nThe inventory checks the declared version against the managed installation.",
   "evidence": [
-    "dot_agents/skills/mise/SKILL.md"
+    "home/dot_agents/skills/mise/SKILL.md",
+    "home/dot_agents/skills/mise/tools.toml",
+    "home/.chezmoidata/versions.toml",
+    "home/.chezmoitemplates/partials/install-mise-sh",
+    "home/.chezmoitemplates/partials/install-mise-ps1",
+    "xtask/tests/tool_inventory.rs",
+    "crates/dotfiles/src/artifacts/mise_consume.rs",
+    "crates/dotfiles/tests/mise_archive_consumption.rs",
+    "crates/dotfiles/tests/fixtures/mise-v2026.10.9-bootstrap-index.json"
   ],
   "revisit": null
 }

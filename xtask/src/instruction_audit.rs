@@ -11,13 +11,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The partials that every managed `CLAUDE.md` and `AGENTS.md` renders.
+/// The shared templates that every managed `CLAUDE.md` and `AGENTS.md` renders.
 pub const PARTIALS: [&str; 3] = ["agent_policy", "prose_policy", "remote_machines"];
 
 /// The tracked audit that classifies every partial line.
 pub const AUDIT: &str = "docs/agent-instruction-audit.md";
 
-/// The managed instruction files, each a root dispatcher over the same path inside every native profile.
+/// The managed instruction files, each a root dispatcher over the native instruction bodies.
 pub const PROFILE_FILES: [&str; 3] = [
     "dot_claude/CLAUDE.md.tmpl",
     "dot_codex/AGENTS.md.tmpl",
@@ -70,7 +70,9 @@ const ATTRIBUTES: [&str; 17] = [
 /// Extensions of files that can hold a gate.
 const GATE_SOURCES: [&str; 7] = [".rs", ".ts", ".js", ".json", ".toml", ".yml", ".yaml"];
 
-const PROFILES: &str = ".chezmoitemplates/profiles";
+/// The native instruction bodies that the dispatchers in `PROFILE_FILES` select, relative to `.chezmoitemplates/`.
+const NATIVE: &str = "native/agent-instructions";
+const PROFILES: &str = "home/.chezmoitemplates/native/agent-instructions";
 const RETAINED: &str = "## Retained lines";
 const REMOVED: &str = "## Removed lines";
 const FOLLOW_UPS: &str = "## Follow-ups";
@@ -247,8 +249,18 @@ fn parse(audit: &str) -> Audit<'_> {
     parsed
 }
 
+/// Pieces between backticks alternate between prose and code, so every second one holds a code span.
+const CODE_SPAN_STRIDE: usize = 2;
+
+/// The delimiters of a template action.
+const ACTION_OPEN: &str = "{{";
+const ACTION_CLOSE: &str = "}}";
+
+/// A prompt file's path ends in its parent directory, its prompt directory, and its name.
+const PROMPT_PATH_SEGMENTS: usize = 3;
+
 fn code_spans(text: &str) -> impl Iterator<Item = &str> {
-    text.split('`').skip(1).step_by(2)
+    text.split('`').skip(1).step_by(CODE_SPAN_STRIDE)
 }
 
 fn is_path(span: &str) -> bool {
@@ -287,12 +299,6 @@ pub fn findings(
         .iter()
         .map(|(path, text)| (*path, instruction_lines(text)))
         .collect();
-    let mut references: BTreeMap<&str, usize> = BTreeMap::new();
-    for entry in &parsed.entries {
-        if let Some(id) = entry.class.and_then(follow_up_id) {
-            *references.entry(id).or_default() += 1;
-        }
-    }
     let mut quoted: BTreeMap<(&str, &str), usize> = BTreeMap::new();
     let mut result = Vec::new();
     for entry in &parsed.entries {
@@ -349,62 +355,10 @@ pub fn findings(
             entry.line, entry.quote
         ));
     }
-    for (id, lines) in &parsed.definitions {
-        let referenced = references.get(id).copied().unwrap_or_default();
-        match follow_up(lines.len(), referenced) {
-            Definition::Duplicate => result.push(format!(
-                "{AUDIT}:{}: `### F{id}:` is defined more than once; keep one definition, then run `just check`.",
-                lines[1]
-            )),
-            Definition::Unreferenced => result.push(format!(
-                "{AUDIT}:{}: `### F{id}:` is referenced by no retained line; remove it or classify the line it mechanizes as `Follow-up F{id}:`, then run `just check`.",
-                lines[0]
-            )),
-            Definition::Current | Definition::Undefined => {}
-        }
-    }
+    result.extend(definition_findings(&parsed));
     for row in &parsed.rows {
-        let [_, held_by, mechanism] = row.cells[..] else {
-            result.push(format!(
-                "{AUDIT}:{}: a removed-line row needs three cells (former line, held by, mechanism); fix the row, then run `just check`.",
-                row.line
-            ));
-            continue;
-        };
-        let names_source = code_spans(mechanism).any(|span| gate_source(span, exists));
-        let names_skill = code_spans(mechanism).any(|span| skills.contains(&span));
-        let names_retained = code_spans(mechanism).any(|span| {
-            span.contains(' ')
-                && lines
-                    .iter()
-                    .flat_map(|(_, lines)| lines.iter())
-                    .filter(|(_, line, shape)| *shape == Line::Text && line.contains(span))
-                    .count()
-                    == 1
-        });
-        if !removed_row_held(holder(held_by), names_source, names_skill, names_retained) {
-            let need = match holder(held_by) {
-                None => {
-                    "a Held by cell of `Gate`, `Skill`, `Gate and skill`, `Merged`, or `Contradicted`"
-                }
-                Some(Holder::Gate) => {
-                    "a mechanism cell naming the gate's source file (`.rs`, `.ts`, `.js`, `.json`, `.toml`, `.yml`, or `.yaml`)"
-                }
-                Some(Holder::Skill) => "a mechanism cell naming an existing skill",
-                Some(Holder::GateAndSkill) => {
-                    "a mechanism cell naming the gate's source file and an existing skill"
-                }
-                Some(Holder::Merged) => {
-                    "a mechanism cell quoting, in a code span with a space, a fragment of exactly one retained line"
-                }
-                Some(Holder::Contradicted) => {
-                    "a mechanism cell naming what it contradicted: an existing skill, or, in a code span with a space, a fragment of exactly one retained line"
-                }
-            };
-            result.push(format!(
-                "{AUDIT}:{}: the removed line `{}` needs {need}; correct the row, then run `just check`.",
-                row.line, row.cells[0]
-            ));
+        if let Some(finding) = row_finding(row, &lines, exists, skills) {
+            result.push(finding);
         }
     }
     // A quote reproduces a source line, so its code spans make no claim about this repository.
@@ -432,43 +386,119 @@ pub fn findings(
     result
 }
 
-/// Refusals for a profile instruction template that renders anything besides the audited partials.
-pub fn profile_findings(path: &str, text: &str, partials: &[&str]) -> Vec<String> {
+/// Refusals for a follow-up defined more than once or referenced by no retained line.
+fn definition_findings(parsed: &Audit<'_>) -> Vec<String> {
+    let mut uses: BTreeMap<&str, usize> = BTreeMap::new();
+    for entry in &parsed.entries {
+        if let Some(id) = entry.class.and_then(follow_up_id) {
+            *uses.entry(id).or_default() += 1;
+        }
+    }
+    let mut result = Vec::new();
+    for (id, defined_at) in &parsed.definitions {
+        match follow_up(defined_at.len(), uses.get(id).copied().unwrap_or_default()) {
+            Definition::Duplicate => result.push(format!(
+                "{AUDIT}:{}: `### F{id}:` is defined more than once; keep one definition, then run `just check`.",
+                defined_at[1]
+            )),
+            Definition::Unreferenced => result.push(format!(
+                "{AUDIT}:{}: `### F{id}:` is referenced by no retained line; remove it or classify the line it mechanizes as `Follow-up F{id}:`, then run `just check`.",
+                defined_at[0]
+            )),
+            Definition::Current | Definition::Undefined => {}
+        }
+    }
+    result
+}
+
+/// The refusal for a removed-line row whose mechanism cell doesn't name what its Held by cell claims.
+fn row_finding(
+    row: &Row<'_>,
+    lines: &[(&str, Vec<Numbered<'_>>)],
+    exists: &dyn Fn(&str) -> bool,
+    skills: &[&str],
+) -> Option<String> {
+    let [_, held_by, mechanism] = row.cells[..] else {
+        return Some(format!(
+            "{AUDIT}:{}: a removed-line row needs three cells (former line, held by, mechanism); fix the row, then run `just check`.",
+            row.line
+        ));
+    };
+    let names_source = code_spans(mechanism).any(|span| gate_source(span, exists));
+    let names_skill = code_spans(mechanism).any(|span| skills.contains(&span));
+    let names_retained = code_spans(mechanism).any(|span| {
+        span.contains(' ')
+            && lines
+                .iter()
+                .flat_map(|(_, lines)| lines.iter())
+                .filter(|(_, line, shape)| *shape == Line::Text && line.contains(span))
+                .count()
+                == 1
+    });
+    if removed_row_held(holder(held_by), names_source, names_skill, names_retained) {
+        return None;
+    }
+    let need = match holder(held_by) {
+        None => "a Held by cell of `Gate`, `Skill`, `Gate and skill`, `Merged`, or `Contradicted`",
+        Some(Holder::Gate) => {
+            "a mechanism cell naming the gate's source file (`.rs`, `.ts`, `.js`, `.json`, `.toml`, `.yml`, or `.yaml`)"
+        }
+        Some(Holder::Skill) => "a mechanism cell naming an existing skill",
+        Some(Holder::GateAndSkill) => {
+            "a mechanism cell naming the gate's source file and an existing skill"
+        }
+        Some(Holder::Merged) => {
+            "a mechanism cell quoting, in a code span with a space, a fragment of exactly one retained line"
+        }
+        Some(Holder::Contradicted) => {
+            "a mechanism cell naming what it contradicted: an existing skill, or, in a code span with a space, a fragment of exactly one retained line"
+        }
+    };
+    Some(format!(
+        "{AUDIT}:{}: the removed line `{}` needs {need}; correct the row, then run `just check`.",
+        row.line, row.cells[0]
+    ))
+}
+
+/// Refusals for a profile instruction template that renders anything besides the audited shared templates.
+#[must_use]
+pub fn profile_findings(path: &str, text: &str, templates: &[&str]) -> Vec<String> {
     text.lines()
         .enumerate()
         .filter(|(_, line)| !line.trim().is_empty())
         .filter(|(_, line)| {
             !line
                 .trim()
-                .strip_prefix("{{ includeTemplate \"")
+                .strip_prefix("{{ includeTemplate \"partials/")
                 .and_then(|rest| rest.strip_suffix("\" . }}"))
-                .is_some_and(|name| partials.contains(&name))
+                .is_some_and(|name| templates.contains(&name))
         })
         .map(|(index, line)| {
             format!(
                 "{path}:{}: `{}` is not an include of an audited partial ({}); move the text into one and classify it in {AUDIT}, then run `just check`.",
                 index + 1,
                 line.trim(),
-                partials.join(", ")
+                templates.join(", ")
             )
         })
         .collect()
 }
 
-/// A dispatcher action that renders nothing itself or renders exactly its own file in one profile.
-fn dispatcher_action(action: &str, file: &str) -> bool {
+/// A dispatcher action that renders nothing itself or renders one native instruction body.
+fn dispatcher_action(action: &str) -> bool {
     let action = action.trim_matches('-').trim();
     let selects_profile = action
-        .strip_prefix("includeTemplate \"profiles/")
+        .strip_prefix("includeTemplate \"")
+        .and_then(|rest| rest.strip_prefix(NATIVE))
+        .and_then(|rest| rest.strip_prefix('/'))
         .and_then(|rest| rest.split_once('"'))
-        .and_then(|(target, argument)| Some((target.split_once('/')?, argument.trim())))
-        .is_some_and(|((profile, target), argument)| {
+        .is_some_and(|(body, argument)| {
+            let argument = argument.trim();
             let variable = argument
                 .strip_prefix('$')
                 .is_some_and(|name| !name.is_empty() && name.chars().all(char::is_alphanumeric));
-            !profile.is_empty()
-                && !profile.contains('/')
-                && target == file
+            body.strip_suffix(".md.tmpl")
+                .is_some_and(|profile| !profile.is_empty() && !profile.contains('/'))
                 && (argument == "." || variable)
         });
     selects_profile
@@ -479,35 +509,36 @@ fn dispatcher_action(action: &str, file: &str) -> bool {
             .is_some_and(|message| !message.contains('"'))
 }
 
-/// Refusals for a root dispatcher that renders text or includes anything besides its own file in a native profile.
+/// Refusals for a root dispatcher that renders text or includes anything besides a native instruction body.
+#[must_use]
 pub fn dispatcher_findings(path: &str, text: &str) -> Vec<String> {
     let mut result = Vec::new();
     'lines: for (index, line) in text.lines().enumerate() {
         let mut refuse = |what: &str| {
             result.push(format!(
-                "{path}:{}: {what}; a dispatcher only selects `profiles/<profile>/{path}`, so move the text into an audited partial, then run `just check`.",
+                "{path}:{}: {what}; a dispatcher only selects `{NATIVE}/<profile>.md.tmpl`, so move the text into an audited partial, then run `just check`.",
                 index + 1
             ));
         };
         let mut rest = line;
-        while let Some(start) = rest.find("{{") {
+        while let Some(start) = rest.find(ACTION_OPEN) {
             if !rest[..start].trim().is_empty() {
                 refuse(&format!("`{}` renders text", rest[..start].trim()));
                 continue 'lines;
             }
-            let after = &rest[start + 2..];
-            let Some(end) = after.find("}}") else {
+            let after = &rest[start + ACTION_OPEN.len()..];
+            let Some(end) = after.find(ACTION_CLOSE) else {
                 refuse("an action is not closed");
                 continue 'lines;
             };
-            if !dispatcher_action(&after[..end], path) {
+            if !dispatcher_action(&after[..end]) {
                 refuse(&format!(
                     "`{}` is not a profile selection",
                     after[..end].trim()
                 ));
                 continue 'lines;
             }
-            rest = &after[end + 2..];
+            rest = &after[end + ACTION_CLOSE.len()..];
         }
         if !rest.trim().is_empty() {
             refuse(&format!("`{}` renders text", rest.trim()));
@@ -572,8 +603,8 @@ fn loaded(path: &str) -> Option<Loaded> {
     if INSTRUCTION_NAMES.contains(&name.as_str()) {
         return Some(Loaded::Instructions);
     }
-    let prompt = name.ends_with(".md")
-        && segments.windows(3).any(|window| {
+    let prompt = crate::has_extension(name, "md")
+        && segments.windows(PROMPT_PATH_SEGMENTS).any(|window| {
             PROMPT_DIRECTORIES
                 .iter()
                 .any(|[parent, directory]| window[0] == *parent && window[1] == *directory)
@@ -581,10 +612,11 @@ fn loaded(path: &str) -> Option<Loaded> {
     prompt.then_some(Loaded::Prompt)
 }
 
-/// Files anywhere in the source tree that agent clients load as instructions or prompts.
+/// Files anywhere in the source state that agent clients load as instructions or prompts once they reach a host.
+/// The repository's own `AGENTS.md` and `CLAUDE.md` guide work on this checkout and never deploy, so they stay outside the audit.
 fn loaded_files(root: &Path) -> Result<Vec<(String, Loaded)>> {
     let mut found = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
+    let mut stack = vec![crate::source_state(root)];
     while let Some(directory) = stack.pop() {
         for path in listing(root, &directory)? {
             let name = path
@@ -607,15 +639,8 @@ fn loaded_files(root: &Path) -> Result<Vec<(String, Loaded)>> {
     Ok(found)
 }
 
-fn profile_file(path: &str) -> bool {
-    path.strip_prefix(PROFILES)
-        .and_then(|rest| rest.strip_prefix('/'))
-        .and_then(|rest| rest.split_once('/'))
-        .is_some_and(|(profile, file)| !profile.is_empty() && PROFILE_FILES.contains(&file))
-}
-
 fn shared_skills(root: &Path) -> Result<Vec<String>> {
-    let names: BTreeSet<String> = listing(root, &root.join("dot_agents/skills"))?
+    let names: BTreeSet<String> = listing(root, &root.join("home/dot_agents/skills"))?
         .into_iter()
         .filter(|path| path.is_dir())
         .filter_map(|path| path.file_name()?.to_str().map(str::to_owned))
@@ -624,6 +649,11 @@ fn shared_skills(root: &Path) -> Result<Vec<String>> {
 }
 
 /// Refuses unless the audit classifies every managed instruction and prompt line.
+///
+/// # Errors
+///
+/// Returns an error when the audit has any finding, including an instruction file outside the audit or no profile template.
+/// Also returns an error when reading a source, the audit file, or the skills directory fails.
 pub fn check(root: &Path) -> Result<()> {
     let files = loaded_files(root)?;
     let mut sources = PARTIALS
@@ -631,7 +661,7 @@ pub fn check(root: &Path) -> Result<()> {
         .map(|name| {
             Ok((
                 (*name).to_owned(),
-                read(root, &format!(".chezmoitemplates/{name}"))?,
+                read(root, &format!("home/.chezmoitemplates/partials/{name}"))?,
             ))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -653,15 +683,23 @@ pub fn check(root: &Path) -> Result<()> {
         if *kind == Loaded::Prompt {
             continue;
         }
-        if PROFILE_FILES.contains(&path.as_str()) {
-            result.extend(dispatcher_findings(path, &read(root, path)?));
-        } else if profile_file(path) {
-            profiles += 1;
-            result.extend(profile_findings(path, &read(root, path)?, &PARTIALS));
+        if let Some(file) = path
+            .strip_prefix("home/")
+            .filter(|file| PROFILE_FILES.contains(file))
+        {
+            result.extend(dispatcher_findings(file, &read(root, path)?));
         } else {
             result.push(format!(
-                "{path}: an agent instruction file outside the audit; render it through a dispatcher from `{PROFILES}/<profile>/` and add it to PROFILE_FILES in xtask/src/instruction_audit.rs, or remove it, then run `just check`."
+                "{path}: an agent instruction file outside the audit; render it through a dispatcher of a body in `{PROFILES}/` and add it to PROFILE_FILES in xtask/src/instruction_audit.rs, or remove it, then run `just check`."
             ));
+        }
+    }
+    let bodies = root.join(PROFILES);
+    if bodies.is_dir() {
+        for body in listing(root, &bodies)? {
+            let path = relative(root, &body);
+            profiles += 1;
+            result.extend(profile_findings(&path, &read(root, &path)?, &PARTIALS));
         }
     }
     if profiles == 0 {
@@ -685,11 +723,11 @@ mod tests {
         let root = tempfile::tempdir().expect("temporary repository");
         let message = format!(
             "{:#}",
-            listing(root.path(), &root.path().join("dot_agents/skills"))
+            listing(root.path(), &root.path().join("home/dot_agents/skills"))
                 .expect_err("a missing directory cannot be listed")
         );
         assert!(
-            message.starts_with("dot_agents/skills: cannot be listed"),
+            message.starts_with("home/dot_agents/skills: cannot be listed"),
             "{message}"
         );
         assert!(message.contains("just check"), "{message}");

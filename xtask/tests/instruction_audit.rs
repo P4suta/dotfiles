@@ -1,9 +1,9 @@
-use dotfiles_xtask::instruction_audit::{check, dispatcher_findings, findings, profile_findings};
-use dotfiles_xtask::instruction_rules::{
-    Class, Definition, Holder, Line, admitted, follow_up, removed_row_held,
-};
 use std::fs;
 use std::path::Path;
+use xtask::instruction_audit::{check, dispatcher_findings, findings, profile_findings};
+use xtask::instruction_rules::{
+    Class, Definition, Holder, Line, admitted, follow_up, removed_row_held,
+};
 
 const PARTIAL: &str = "# Rules\n\n## Language\n\n- Reply in Japanese.\n- Write commits in English.\n{{- if stat $notes }}\n";
 
@@ -141,7 +141,7 @@ const PROMPT_AUDIT: &str = "# Audit
 
 ## Retained lines
 
-### `dot_config/opencode/agents/reviewer.md`
+### `home/dot_config/opencode/agents/reviewer.md`
 
 > ---
 
@@ -165,8 +165,8 @@ Judgment: what a review finds is judgment.
 
 #[test]
 fn front_matter_lines_are_settings_and_body_lines_are_not() {
-    let prompts = [("dot_config/opencode/agents/reviewer.md", PROMPT)];
-    let exists = |path: &str| path == "dot_config/opencode/agents/reviewer.md";
+    let prompts = [("home/dot_config/opencode/agents/reviewer.md", PROMPT)];
+    let exists = |path: &str| path == "home/dot_config/opencode/agents/reviewer.md";
     assert_eq!(
         findings(&prompts, PROMPT_AUDIT, &exists, &SKILLS),
         Vec::<String>::new()
@@ -188,7 +188,7 @@ fn front_matter_lines_are_settings_and_body_lines_are_not() {
 "
     );
     let reported = findings(
-        &[("dot_config/opencode/agents/reviewer.md", &body)],
+        &[("home/dot_config/opencode/agents/reviewer.md", &body)],
         PROMPT_AUDIT,
         &exists,
         &SKILLS,
@@ -389,17 +389,18 @@ Judgment: the reader decides.
 #[test]
 fn profile_templates_may_only_include_audited_partials() {
     let partials = ["agent_policy", "prose_policy"];
-    assert!(
+    assert_eq!(
         profile_findings(
             "p/CLAUDE.md.tmpl",
-            "{{ includeTemplate \"agent_policy\" . }}\n\n{{ includeTemplate \"prose_policy\" . }}\n",
+            "{{ includeTemplate \"partials/agent_policy\" . }}\n\n{{ includeTemplate \"partials/prose_policy\" . }}\n",
             &partials,
-        )
-        .is_empty()
+        ),
+        Vec::<String>::new()
     );
     for text in [
-        "{{ includeTemplate \"agent_policy\" . }}\nAlways push.\n",
-        "{{ includeTemplate \"secret_policy\" . }}\n",
+        "{{ includeTemplate \"partials/agent_policy\" . }}\nAlways push.\n",
+        "{{ includeTemplate \"partials/secret_policy\" . }}\n",
+        "{{ includeTemplate \"agent_policy\" . }}\n",
     ] {
         let reported = profile_findings("p/CLAUDE.md.tmpl", text, &partials);
         assert_eq!(reported.len(), 1, "{text}\n{reported:?}");
@@ -407,16 +408,15 @@ fn profile_templates_may_only_include_audited_partials() {
     }
 }
 
-const DISPATCHER: &str = "{{- $context := merge (dict) . (index .platforms .profile) -}}
-{{- if eq .profile \"mac\" -}}
-{{ includeTemplate \"profiles/mac/dot_claude/CLAUDE.md.tmpl\" $context }}
-{{- else if has .profile (list \"linux\" \"wsl\") -}}
-{{ includeTemplate \"profiles/linux/dot_claude/CLAUDE.md.tmpl\" $context }}
-{{- else -}}{{ fail \"Target is unavailable for this profile\" }}{{- end -}}
+const DISPATCHER: &str = "{{- if eq .profile \"mac\" -}}
+{{ includeTemplate \"native/agent-instructions/mac.md.tmpl\" . }}
+{{- else -}}
+{{ includeTemplate \"native/agent-instructions/linux.md.tmpl\" . }}
+{{- end -}}
 ";
 
 #[test]
-fn a_dispatcher_only_selects_its_own_profile_file() {
+fn a_dispatcher_only_selects_a_native_instruction_body() {
     assert_eq!(
         dispatcher_findings("dot_claude/CLAUDE.md.tmpl", DISPATCHER),
         Vec::<String>::new()
@@ -424,12 +424,18 @@ fn a_dispatcher_only_selects_its_own_profile_file() {
     for (from, to) in [
         ("{{- else -}}", "Always push.\n{{- else -}}"),
         (
-            "profiles/linux/dot_claude/CLAUDE.md.tmpl",
-            "profiles/linux/dot_codex/AGENTS.md.tmpl",
+            "native/agent-instructions/linux.md.tmpl",
+            "native/bashrc/linux.tmpl",
         ),
-        ("profiles/linux/dot_claude/CLAUDE.md.tmpl", "agent_policy"),
-        ("{{ fail ", "{{ \"Always push.\" }}{{ fail "),
-        ("$context }}", "$context | printf \"%s Always push.\" }}"),
+        (
+            "native/agent-instructions/linux.md.tmpl",
+            "partials/agent_policy",
+        ),
+        ("{{- end -}}", "{{ \"Always push.\" }}{{- end -}}"),
+        (
+            "linux.md.tmpl\" . }}",
+            "linux.md.tmpl\" . | printf \"%s Always push.\" }}",
+        ),
         ("{{- end -}}", "{{- end -}}{{"),
     ] {
         let text = DISPATCHER.replacen(from, to, 1);
@@ -500,7 +506,7 @@ fn write(root: &Path, relative: &str, text: &str) {
     fs::write(path, text).expect("write fixture");
 }
 
-const PROFILE: &str = "{{ includeTemplate \"agent_policy\" . }}\n\n{{ includeTemplate \"prose_policy\" . }}\n\n{{ includeTemplate \"remote_machines\" . }}\n";
+const PROFILE: &str = "{{ includeTemplate \"partials/agent_policy\" . }}\n\n{{ includeTemplate \"partials/prose_policy\" . }}\n\n{{ includeTemplate \"partials/remote_machines\" . }}\n";
 
 /// A minimal repository whose instruction files the audit fully classifies.
 fn repository() -> tempfile::TempDir {
@@ -508,17 +514,17 @@ fn repository() -> tempfile::TempDir {
     let path = root.path();
     write(
         path,
-        ".chezmoitemplates/agent_policy",
+        "home/.chezmoitemplates/partials/agent_policy",
         "- Reply in Japanese.\n",
     );
     write(
         path,
-        ".chezmoitemplates/prose_policy",
+        "home/.chezmoitemplates/partials/prose_policy",
         "- Write one sentence per line.\n",
     );
     write(
         path,
-        ".chezmoitemplates/remote_machines",
+        "home/.chezmoitemplates/partials/remote_machines",
         "- Read the SSH aliases.\n",
     );
     write(
@@ -526,16 +532,16 @@ fn repository() -> tempfile::TempDir {
         "docs/agent-instruction-audit.md",
         "# Audit\n\n## Retained lines\n\n### `agent_policy`\n\n> - Reply in Japanese.\n\nJudgment: a.\n\n### `prose_policy`\n\n> - Write one sentence per line.\n\nJudgment: b.\n\n### `remote_machines`\n\n> - Read the SSH aliases.\n\nJudgment: c.\n\n## Removed lines\n\n| Former line | Held by | Mechanism |\n| --- | --- | --- |\n| Use demo. | Skill | `demo` states it. |\n\n## Follow-ups\n",
     );
-    write(path, "dot_agents/skills/demo/SKILL.md", "demo\n");
+    write(path, "home/dot_agents/skills/demo/SKILL.md", "demo\n");
     write(
         path,
-        ".chezmoitemplates/profiles/mac/dot_claude/CLAUDE.md.tmpl",
+        "home/.chezmoitemplates/native/agent-instructions/mac.md.tmpl",
         PROFILE,
     );
     write(
         path,
-        "dot_claude/CLAUDE.md.tmpl",
-        "{{- if eq .profile \"mac\" -}}\n{{ includeTemplate \"profiles/mac/dot_claude/CLAUDE.md.tmpl\" . }}\n{{- else -}}{{ fail \"Target is unavailable for this profile\" }}{{- end -}}\n",
+        "home/dot_claude/CLAUDE.md.tmpl",
+        "{{- includeTemplate \"native/agent-instructions/mac.md.tmpl\" . -}}\n",
     );
     root
 }
@@ -554,17 +560,17 @@ fn the_check_walks_every_profile_and_dispatcher() {
     let root = repository();
     write(
         root.path(),
-        ".chezmoitemplates/profiles/mac/dot_claude/CLAUDE.md.tmpl",
+        "home/.chezmoitemplates/native/agent-instructions/mac.md.tmpl",
         &format!("{PROFILE}Always push.\n"),
     );
     write(
         root.path(),
-        "dot_claude/CLAUDE.md.tmpl",
-        "Always push.\n{{ includeTemplate \"profiles/mac/dot_claude/CLAUDE.md.tmpl\" . }}\n",
+        "home/dot_claude/CLAUDE.md.tmpl",
+        "Always push.\n{{ includeTemplate \"native/agent-instructions/mac.md.tmpl\" . }}\n",
     );
     let message = refusal(root.path());
     assert!(
-        message.contains(".chezmoitemplates/profiles/mac/dot_claude/CLAUDE.md.tmpl:6"),
+        message.contains("home/.chezmoitemplates/native/agent-instructions/mac.md.tmpl:6"),
         "{message}"
     );
     assert!(message.contains("dot_claude/CLAUDE.md.tmpl:1"), "{message}");
@@ -573,10 +579,10 @@ fn the_check_walks_every_profile_and_dispatcher() {
 #[test]
 fn an_instruction_file_outside_the_audit_is_refused() {
     let root = repository();
-    write(root.path(), "dot_gemini/GEMINI.md", "Always push.\n");
+    write(root.path(), "home/dot_gemini/GEMINI.md", "Always push.\n");
     write(root.path(), "node_modules/pkg/AGENTS.md", "Vendored.\n");
     let message = refusal(root.path());
-    assert!(message.contains("dot_gemini/GEMINI.md"), "{message}");
+    assert!(message.contains("home/dot_gemini/GEMINI.md"), "{message}");
     assert!(!message.contains("node_modules"), "{message}");
     assert!(message.contains("just check"), "{message}");
 }
@@ -584,17 +590,17 @@ fn an_instruction_file_outside_the_audit_is_refused() {
 #[test]
 fn every_file_a_client_loads_as_instructions_is_found() {
     for path in [
-        "dot_codex/AGENTS.override.md",
-        "dot_claude/CLAUDE.local.md",
-        "dot_claude/rules/push.md",
-        "private_dot_claude/exact_rules/push.md.tmpl",
-        "dot_claude/agents/pusher.md",
-        "dot_claude/commands/push.md",
-        "dot_codex/prompts/push.md",
-        "dot_config/opencode/agents/pusher.md",
-        "dot_config/opencode/agent/pusher.md",
-        "dot_config/opencode/commands/push.md",
-        "dot_config/opencode/command/push.md",
+        "home/dot_codex/AGENTS.override.md",
+        "home/dot_claude/CLAUDE.local.md",
+        "home/dot_claude/rules/push.md",
+        "home/private_dot_claude/exact_rules/push.md.tmpl",
+        "home/dot_claude/agents/pusher.md",
+        "home/dot_claude/commands/push.md",
+        "home/dot_codex/prompts/push.md",
+        "home/dot_config/opencode/agents/pusher.md",
+        "home/dot_config/opencode/agent/pusher.md",
+        "home/dot_config/opencode/commands/push.md",
+        "home/dot_config/opencode/command/push.md",
     ] {
         let root = repository();
         write(
@@ -605,7 +611,7 @@ fn every_file_a_client_loads_as_instructions_is_found() {
         );
         write(
             root.path(),
-            "dot_agents/skills/demo/agents/openai.yaml",
+            "home/dot_agents/skills/demo/agents/openai.yaml",
             "x: y
 ",
         );
@@ -623,7 +629,7 @@ fn every_file_a_client_loads_as_instructions_is_found() {
 #[test]
 fn a_prompt_file_is_audited_line_by_line() -> anyhow::Result<()> {
     let root = repository();
-    let path = "dot_config/opencode/agents/reviewer.md";
+    let path = "home/dot_config/opencode/agents/reviewer.md";
     write(root.path(), path, PROMPT);
     let message = refusal(root.path());
     assert!(message.contains(&format!("{path}:5")), "{message}");
@@ -648,29 +654,37 @@ fn a_prompt_file_is_audited_line_by_line() -> anyhow::Result<()> {
 #[test]
 fn a_missing_skill_tree_names_the_directory_and_the_next_action() {
     let root = repository();
-    fs::remove_dir_all(root.path().join("dot_agents")).expect("remove skills");
+    fs::remove_dir_all(root.path().join("home/dot_agents")).expect("remove skills");
     let message = refusal(root.path());
-    assert!(message.contains("dot_agents/skills"), "{message}");
+    assert!(message.contains("home/dot_agents/skills"), "{message}");
     assert!(message.contains("just check"), "{message}");
 }
 
 #[test]
 fn a_repository_without_profile_templates_is_refused_with_its_location() {
     let root = repository();
-    fs::remove_dir_all(root.path().join(".chezmoitemplates/profiles")).expect("remove profiles");
-    fs::remove_file(root.path().join("dot_claude/CLAUDE.md.tmpl")).expect("remove dispatcher");
+    fs::remove_dir_all(root.path().join("home/.chezmoitemplates/native"))
+        .expect("remove native bodies");
+    fs::remove_file(root.path().join("home/dot_claude/CLAUDE.md.tmpl")).expect("remove dispatcher");
     let message = refusal(root.path());
-    assert!(message.contains(".chezmoitemplates/profiles"), "{message}");
+    assert!(
+        message.contains("home/.chezmoitemplates/native/agent-instructions"),
+        "{message}"
+    );
     assert!(message.contains("just check"), "{message}");
 }
 
 #[test]
 fn an_unreadable_partial_names_the_file_and_the_next_action() {
     let root = repository();
-    fs::remove_file(root.path().join(".chezmoitemplates/prose_policy")).expect("remove partial");
+    fs::remove_file(
+        root.path()
+            .join("home/.chezmoitemplates/partials/prose_policy"),
+    )
+    .expect("remove partial");
     let message = refusal(root.path());
     assert!(
-        message.contains(".chezmoitemplates/prose_policy"),
+        message.contains("home/.chezmoitemplates/partials/prose_policy"),
         "{message}"
     );
     assert!(message.contains("just check"), "{message}");

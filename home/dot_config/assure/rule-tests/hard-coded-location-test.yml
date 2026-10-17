@@ -1,0 +1,11 @@
+id: hard-coded-location
+valid:
+  - "const RELEASES: &str = \"https://github.com/owner/tool/releases\";\nfn releases() -> &'static str { RELEASES }"
+  - "fn name() -> &'static str { \"releases\" }"
+  - "fn remote(link: &str) -> bool { link.starts_with(\"https://\") }"
+  - "#[cfg(test)]\nmod tests { fn url() -> &'static str { \"https://example.com\" } }"
+invalid:
+  - "fn releases() -> String { format!(\"https://github.com/{}/releases\", \"owner\") }"
+  - "fn shell() -> &'static str { \"/bin/zsh\" }"
+  - "fn drive() -> &'static str { \"C:\\\\Windows\" }"
+  - "fn resolver() -> &'static str { \"1.1.1.1\" }"

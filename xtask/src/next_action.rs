@@ -1,12 +1,13 @@
 //! Inspects the repository, GitHub, and host state and recommends the single next step of the workflow.
 
 use crate::next_action_rules::{Checks, Head, Host, Pr, State, Step, Upstream, decide, executable};
-use crate::skill_ops::{DECISIONS, catalog, complete, tracked_decisions};
-use crate::skill_rules::{Tracked, tracked_decision};
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
+use rules::review_routing_rules::{Completion, ReviewEvidence, completion};
 use serde::Serialize;
 use serde_json::Value;
+use skill_ops::skill_rules::{Tracked, tracked_decision};
+use skill_ops::{DECISIONS, catalog, complete, tracked_decisions};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -17,6 +18,7 @@ pub const BASE: &str = "origin/main";
 pub const DEFAULT_BRANCH: &str = "main";
 
 /// Where this host keeps the state that the inspection reads.
+#[derive(Debug)]
 pub struct Environment {
     pub home: PathBuf,
     /// `TEMP` on Windows, `None` when unset, and the system temporary directory on other hosts.
@@ -26,7 +28,7 @@ pub struct Environment {
 }
 
 impl Environment {
-    pub fn current(offline: bool) -> Result<Self> {
+    pub(crate) fn current(offline: bool) -> Result<Self> {
         let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
             .context("the home directory is unavailable; set HOME or USERPROFILE")?;
         Ok(Self {
@@ -59,11 +61,32 @@ pub struct PullRequest {
     pub draft: bool,
     /// The branch the PR merges into.
     pub base: String,
+    #[serde(serialize_with = "checks_key")]
     pub checks: Checks,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes every field to a serializer by reference"
+)]
+fn checks_key<S: serde::Serializer>(checks: &Checks, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(checks.key())
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes every field to a serializer by reference"
+)]
+fn step_key<S: serde::Serializer>(step: &Step, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(step.key())
 }
 
 /// The facts behind a recommendation, reported with it so an agent can check the reasoning.
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an independent observed fact that the report shows as it was read"
+)]
 pub struct Observed {
     pub host: HostStatus,
     pub branch: Option<String>,
@@ -91,6 +114,7 @@ pub struct Observed {
 }
 
 impl Observed {
+    #[must_use]
     pub fn state(&self) -> State {
         State {
             host: match self.host {
@@ -140,6 +164,7 @@ impl Observed {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Recommendation {
+    #[serde(serialize_with = "step_key")]
     pub action: Step,
     pub executable: bool,
     pub summary: String,
@@ -149,6 +174,7 @@ pub struct Recommendation {
 
 /// An unset `TEMP` comes first, then a required directory on an unmounted volume such as the Dev Drive, then a missing temporary directory.
 /// The volume names the path's root, so only a Windows drive letter can go missing.
+#[must_use]
 pub fn host_status(temp: Option<&Path>, cargo_target: Option<&Path>) -> HostStatus {
     let Some(temp) = temp else {
         return HostStatus::TempUnset;
@@ -175,24 +201,25 @@ pub fn host_status(temp: Option<&Path>, cargo_target: Option<&Path>) -> HostStat
     }
 }
 
-/// Failing checks outrank pending ones, and an empty rollup means no check has reported yet.
+/// Failed checks outrank pending ones, and an empty rollup means no check has reported yet.
+#[must_use]
 pub fn classify_checks(rollup: &[Value]) -> Checks {
     let mut pending = false;
     for item in rollup {
         let outcome = match item["state"].as_str() {
             Some(state) => match state {
-                "SUCCESS" => Checks::Passing,
+                "SUCCESS" => Checks::Success,
                 "PENDING" | "EXPECTED" => Checks::Pending,
-                _ => Checks::Failing,
+                _ => Checks::Failure,
             },
             None if item["status"].as_str() != Some("COMPLETED") => Checks::Pending,
             None => match item["conclusion"].as_str() {
-                Some("SUCCESS" | "NEUTRAL" | "SKIPPED") => Checks::Passing,
-                _ => Checks::Failing,
+                Some("SUCCESS" | "NEUTRAL" | "SKIPPED") => Checks::Success,
+                _ => Checks::Failure,
             },
         };
         match outcome {
-            Checks::Failing => return Checks::Failing,
+            Checks::Failure => return Checks::Failure,
             Checks::Pending => pending = true,
             _ => {}
         }
@@ -200,11 +227,12 @@ pub fn classify_checks(rollup: &[Value]) -> Checks {
     match (rollup.is_empty(), pending) {
         (true, _) => Checks::None,
         (false, true) => Checks::Pending,
-        (false, false) => Checks::Passing,
+        (false, false) => Checks::Success,
     }
 }
 
 /// The `OWNER/REPO` of a GitHub remote URL in HTTPS, SSH, or scp form.
+#[must_use]
 pub fn github_repository(url: &str) -> Option<String> {
     let (_, rest) = url.trim().split_once("github.com")?;
     let path = rest
@@ -217,8 +245,12 @@ pub fn github_repository(url: &str) -> Option<String> {
 }
 
 /// Skills whose tracked decision has no entry or binds another revision, and those whose current decision lacks its reason or evidence.
+///
+/// # Errors
+///
+/// Returns an error when reading the skill catalog or the tracked decisions fails.
 pub fn decision_backlog(root: &Path) -> Result<(Vec<String>, Vec<String>)> {
-    let tree = root.join("dot_agents/skills");
+    let tree = root.join("home/dot_agents/skills");
     if !tree.is_dir() {
         return Ok(Default::default());
     }
@@ -376,7 +408,7 @@ fn held_by_branch(root: &Path, branch: &str, commit: &str) -> Result<bool> {
     )?;
     let mut revisions = format!("{commit}\n");
     for entry in reflog.lines() {
-        revisions.push_str(&format!("^{entry}\n"));
+        revisions.extend(["^", entry, "\n"]);
     }
     let mut child = Tool::Git
         .command()
@@ -401,8 +433,8 @@ fn held_by_branch(root: &Path, branch: &str, commit: &str) -> Result<bool> {
     Ok(count(&String::from_utf8_lossy(&output.stdout))? == 0)
 }
 
-/// Whether the owner paused CodeRabbit PR reviews: the all-scope `paused` marker or the PR-scope `paused-pr` marker.
-pub fn pr_reviews_paused(home: &Path) -> Result<bool> {
+/// Whether the owner paused `CodeRabbit` PR reviews: the all-scope `paused` marker or the PR-scope `paused-pr` marker.
+pub(crate) fn pr_reviews_paused(home: &Path) -> Result<bool> {
     let state = home.join(".local/state/coderabbit-guard");
     for marker in ["paused", "paused-pr"] {
         if state
@@ -414,6 +446,29 @@ pub fn pr_reviews_paused(home: &Path) -> Result<bool> {
         }
     }
     Ok(false)
+}
+
+fn required_review_paused(
+    root: &Path,
+    repository: Option<&str>,
+    pull_request: Option<&PullRequest>,
+    home: &Path,
+) -> Result<bool> {
+    let pr_paused = pr_reviews_paused(home)?;
+    let scope = coderabbit_guard::pause(home)?;
+    let cli_paused = coderabbit_guard::review_rules::cli_reviews_paused(scope);
+    let Some(pr) = pull_request.filter(|pr| pr.state == "OPEN") else {
+        return Ok(pr_paused);
+    };
+    if !pr_paused && !cli_paused {
+        return Ok(false);
+    }
+    let route = pr_workflow::current_review_route(
+        root,
+        repository.context("the current PR repository is unknown")?,
+        pr.number,
+    )?;
+    Ok(completion(route, cli_paused, pr_paused, ReviewEvidence::None, true) == Completion::Paused)
 }
 
 /// Whether the repository defines GitHub Actions workflows that report checks on a PR.
@@ -434,6 +489,12 @@ fn workflows(root: &Path) -> Result<bool> {
     Ok(false)
 }
 
+/// Observes the host, the worktree, its branches, the skill decisions, and, unless offline, GitHub.
+///
+/// # Errors
+///
+/// Returns an error when a Git command fails, including the fetch when online, or the PR lookup fails.
+/// Also returns an error when reading the skill decisions, the `CodeRabbit` pause markers, or the workflow directory fails.
 pub fn inspect(root: &Path, environment: &Environment) -> Result<Observed> {
     let host = host_status(
         environment.temp.as_deref(),
@@ -502,6 +563,12 @@ pub fn inspect(root: &Path, environment: &Environment) -> Result<Observed> {
         _ => false,
     };
     let (undecided_skills, incomplete_decisions) = decision_backlog(root)?;
+    let review_paused = required_review_paused(
+        root,
+        repository.as_deref(),
+        pull_request.as_ref(),
+        &environment.home,
+    )?;
     Ok(Observed {
         host,
         branch,
@@ -517,7 +584,7 @@ pub fn inspect(root: &Path, environment: &Environment) -> Result<Observed> {
         undecided_skills,
         incomplete_decisions,
         push_paused: environment.home.join(".config/git/push-paused").exists(),
-        review_paused: pr_reviews_paused(&environment.home)?,
+        review_paused,
         repository,
         workflows: workflows(root)?,
         github_inspected: !environment.offline,
@@ -525,6 +592,11 @@ pub fn inspect(root: &Path, environment: &Environment) -> Result<Observed> {
     })
 }
 
+#[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per step, which the exhaustive match keeps complete"
+)]
 pub fn recommend(state: Observed) -> Recommendation {
     let step = decide(state.state());
     let branch = state.branch.as_deref().unwrap_or("HEAD");
@@ -676,7 +748,7 @@ pub fn recommend(state: Observed) -> Recommendation {
         ),
         Step::AwaitReviewResume => (
             format!(
-                "CodeRabbit is paused by the owner; leave PR #{number} unchanged and continue local work until review resumes"
+                "The required CodeRabbit route is paused by the owner on PR #{number}; continue independent work until that pool resumes"
             ),
             None,
         ),
@@ -690,10 +762,10 @@ pub fn recommend(state: Observed) -> Recommendation {
         ),
         Step::AwaitReview => (
             format!(
-                "PR #{number} is in review; inspect the review of the current head and address its findings"
+                "Checks pass on PR #{number}; validate its current importance route and remaining evidence before an authorized merge"
             ),
             Some(format!(
-                "gh pr view {number} --repo {repository} --comments"
+                "pr-workflow check --repo {repository} --issue <issue> --pr {number} --final"
             )),
         ),
     };
@@ -708,6 +780,10 @@ pub fn recommend(state: Observed) -> Recommendation {
 
 /// Runs an executable step and returns what it printed.
 /// Any other step gets a refusal with its summary and command.
+///
+/// # Errors
+///
+/// Returns an error when the step lacks an executable form, or when creating the directory, the Git merge, or drafting the decision fails.
 pub fn perform(root: &Path, recommendation: &Recommendation) -> Result<Option<String>> {
     let state = &recommendation.state;
     match (recommendation.action, &state.host) {
@@ -726,12 +802,10 @@ pub fn perform(root: &Path, recommendation: &Recommendation) -> Result<Option<St
             "inspect `git status` and rerun `just next`",
         )
         .map(|_| None),
-        (Step::DraftDecisions, _) => {
-            crate::skill_ops::decide(root, &state.undecided_skills[0]).map(Some)
-        }
+        (Step::DraftDecisions, _) => skill_ops::decide(root, &state.undecided_skills[0]).map(Some),
         (action, _) => bail!(
             "`{}` is not a local, reversible step, so --execute does not run it; next action: {}{}",
-            serde_json::to_value(action)?.as_str().unwrap_or_default(),
+            action.key(),
             recommendation.summary,
             recommendation
                 .command
@@ -750,6 +824,10 @@ fn report(recommendation: &Recommendation) -> Result<()> {
 
 /// Prints the recommendation as one JSON line on stdout and a summary on stderr.
 /// `--execute` first runs an executable step and then reports the step after it.
+///
+/// # Errors
+///
+/// Returns an error when the home directory stays unavailable, the inspection fails, or `--execute` can't run or complete the step.
 pub fn run(root: &Path, offline: bool, execute: bool) -> Result<()> {
     let environment = Environment::current(offline)?;
     let recommendation = recommend(inspect(root, &environment)?);

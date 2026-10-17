@@ -1,4 +1,4 @@
-# Repeats `dot_config/ocomment/config.toml`, which a CI runner lacks.
+# Repeats `home/dot_config/ocomment/config.toml`, which a CI runner lacks.
 version = 1
 
 # Remove nothing.
@@ -11,7 +11,7 @@ wrap = "sentence"
 
 # Vendored Vale packages keep their upstream text.
 [files]
-exclude = ["dot_config/prose/styles/**"]
+exclude = ["home/dot_config/prose/styles/**"]
 
 # Source names hide the format behind `dot_` and `.tmpl`, so these overrides name it.
 # Only the prose partials hold Markdown.
@@ -19,15 +19,15 @@ exclude = ["dot_config/prose/styles/**"]
 [[overrides]]
 paths = [
   "**/*.md.tmpl",
-  ".chezmoitemplates/agent_policy",
-  ".chezmoitemplates/prose_policy",
-  ".chezmoitemplates/remote_machines",
-  ".chezmoitemplates/signing_pubkey",
+  "home/.chezmoitemplates/partials/agent_policy",
+  "home/.chezmoitemplates/partials/prose_policy",
+  "home/.chezmoitemplates/partials/remote_machines",
+  "home/.chezmoitemplates/partials/signing_pubkey",
 ]
 language = "markdown"
 
 [[overrides]]
-paths = ["**/*.toml.tmpl", "dot_gitconfig.tmpl"]
+paths = ["**/*.toml.tmpl", "home/dot_config/git/config.tmpl"]
 language = "toml"
 
 [[overrides]]
@@ -44,26 +44,25 @@ language = "lua"
 
 [[overrides]]
 paths = [
-  "dot_config/dev-reaper/config.tmpl",
-  "dot_config/session-reaper/config.tmpl",
-  ".chezmoitemplates/profiles/mac/dot_config/dev-reaper/config",
-  ".chezmoitemplates/profiles/mac/dot_config/session-reaper/config",
-  ".chezmoitemplates/profiles/linux/dot_config/dev-reaper/config",
-  ".chezmoitemplates/profiles/linux/dot_config/session-reaper/config",
+  "home/dot_config/dev-reaper/config.tmpl",
+  "home/dot_config/session-reaper/config.tmpl",
+  "home/.chezmoitemplates/native/dev-reaper/mac",
+  "home/.chezmoitemplates/native/dev-reaper/linux",
+  "home/.chezmoitemplates/native/session-reaper/mac",
+  "home/.chezmoitemplates/native/session-reaper/linux",
 ]
 language = "toml"
 
 # These files share only shell comment and string syntax.
 [[overrides]]
 paths = [
-  "dot_bashrc.tmpl",
-  "dot_profile.tmpl",
-  ".chezmoitemplates/profiles/linux/dot_bashrc.tmpl",
-  ".chezmoitemplates/profiles/linux/dot_profile.tmpl",
-  ".chezmoitemplates/profiles/mac/dot_bashrc",
-  ".chezmoitemplates/profiles/mac/dot_zprofile.tmpl",
-  ".chezmoitemplates/profiles/mac/dot_zshrc.tmpl",
-  ".chezmoitemplates/profiles/wsl/dot_bashrc.tmpl",
+  "home/dot_bashrc.tmpl",
+  "home/dot_profile.tmpl",
+  "home/dot_zprofile.tmpl",
+  "home/dot_zshrc.tmpl",
+  "home/.chezmoitemplates/native/bashrc/mac",
+  "home/.chezmoitemplates/native/bashrc/linux.tmpl",
+  "home/.chezmoitemplates/native/bashrc/wsl.tmpl",
   "**/*.sh.tmpl",
   "**/*.nu",
   "**/*.nu.tmpl",

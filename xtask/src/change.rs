@@ -24,12 +24,32 @@ pub struct Scope {
     #[arg(long, conflicts_with = "gates")]
     staged: bool,
     /// Run exactly these comma-separated gates, as `classify` printed them.
-    #[arg(long, value_parser = Gates::parse)]
+    #[arg(long, value_parser = parse_gates)]
     gates: Option<Gates>,
 }
 
+fn parse_gates(text: &str) -> Result<Gates, String> {
+    Gates::parse(text).map_err(|unknown| unknown.to_string())
+}
+
 impl Scope {
+    /// Whether the scope names the staged paths.
+    #[must_use]
+    pub const fn staged(&self) -> bool {
+        self.staged
+    }
+
+    /// The reference whose committed state a shrink-only baseline compares with: the base, or `HEAD` without one.
+    #[must_use]
+    pub fn reference(&self) -> &str {
+        self.base.as_deref().unwrap_or("HEAD")
+    }
+
     /// The gates to run: every gate unless the scope names a change set or gates.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when git can't list the scope's change set.
     pub fn resolve(&self, root: &Path) -> Result<Gates> {
         if let Some(gates) = self.gates {
             return Ok(gates);
@@ -45,6 +65,10 @@ impl Scope {
 
 /// Paths changed in the source.
 /// A renamed path lists both names, so each gets a class.
+///
+/// # Errors
+///
+/// Returns an error when git can't start or can't list the change set.
 pub fn paths(root: &Path, source: &Source) -> Result<Vec<String>> {
     let mut command = Tool::Git.command();
     command
@@ -72,12 +96,21 @@ pub fn paths(root: &Path, source: &Source) -> Result<Vec<String>> {
         .collect())
 }
 
+/// The gates the paths changed in the source select.
+///
+/// # Errors
+///
+/// Returns an error when git can't start or can't list the change set.
 pub fn gates(root: &Path, source: &Source) -> Result<Gates> {
     Ok(select(paths(root, source)?.iter().map(String::as_str)))
 }
 
 /// Prints `gates=<names>`, the form a CI step appends to its output file.
+///
+/// # Errors
+///
+/// Returns an error when git can't list the scope's change set.
 pub fn run(root: &Path, scope: &Scope) -> Result<()> {
-    println!("gates={}", scope.resolve(root)?.names());
+    println!("gates={}", scope.resolve(root)?);
     Ok(())
 }

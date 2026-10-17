@@ -1,0 +1,68 @@
+# Host state that applications write into the home directory.
+# No source entry declares these paths; the patterns keep `chezmoi add` from ever capturing them.
+
+# Sign-in state that holds tokens.
+.config/gh/hosts.yml
+.codex/auth.json
+.config/chezmoi/**
+.config/dotfiles/private/**
+.doppler
+.doppler/**
+.coderabbit
+.coderabbit/**
+.migration-imported
+
+# 1Password application state and its live SSH agent socket.
+.config/op/**
+.config/1Password/**
+.1password/**
+.var/app/com.onepassword.OnePassword/**
+Library/Group Containers/2BUA8C4S2C.com.1password/**
+
+# Runtime state, caches, and shell history.
+.config/git/push-paused
+.local/share/atuin/**
+.local/share/mise/**
+.local/state/**
+.cache
+.cache/**
+.bash_history
+.zsh_history
+.zcompdump*
+AppData/Local/mise/**
+AppData/Roaming/atuin/**
+.DS_Store
+**/.DS_Store
+
+# Editor settings, extensions, and remote server state, which may hold credentials.
+.config/Code
+.config/Code/**
+.vscode-server
+.vscode-server/**
+Library/Application Support/Code/**
+.config/zed
+.config/zed/**
+.local/share/zed
+.local/share/zed/**
+Library/Application Support/Zed/**
+Library/Application Support/com.mitchellh.ghostty/**
+
+# Agent client state; the dotfiles ship only skills and the merged settings keys.
+.claude/projects/**
+.claude/plans/**
+.claude/shell-snapshots/**
+.claude/todos/**
+.claude/statsig/**
+.claude/file-history/**
+.claude/__store.db
+.claude/history.jsonl
+.claude/settings.local.json
+.claude.json
+.codex/sessions/**
+.config/skill-ops/approved.json
+
+# Build outputs inside the checkout.
+node_modules
+target
+**/skills/**/scripts/**/target
+**/skills/**/scripts/**/target/**

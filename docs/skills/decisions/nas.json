@@ -1,11 +1,13 @@
 {
-  "revision": "652eb9fee92107899988a52f53d0e156ddfea6998df5d28301f037a2bac5461f",
+  "revision": "ae111b51c885a5e1bc51827c5d092ec1f7c72319293f942007620df212f40f8c",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Keep independent archive verification and restoration separate from local cache cleanup.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
-    "dot_agents/skills/nas/SKILL.md",
-    "dot_agents/skills/nas/references/synology-drive.md",
-    "docs/skills/nas-evaluation.md"
+    "home/dot_agents/skills/nas/SKILL.md",
+    "home/dot_agents/skills/nas/references/synology-drive.md",
+    "docs/skills/nas-evaluation.md",
+    "home/dot_agents/skills/nas/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

@@ -1,0 +1,358 @@
+name: ci
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+  # The obligation closure reads whether each pilot's issue closed.
+  issues: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Only the Kani partition enables Kani.
+  # The owner paused hosted mutation execution pending njutest.
+  MISE_DISABLE_TOOLS: "cargo:kani-verifier,cargo:cargo-mutants"
+  # Every managed host runs mise in paranoid mode, which loads a project configuration only once it trusts that exact file.
+  MISE_PARANOID: "1"
+  MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}/mise.toml
+
+jobs:
+  classify:
+    name: classify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      gates: ${{ steps.classify.outputs.gates }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Read the pinned mise version
+        id: mise
+        shell: bash
+        run: |
+          version="$(sed -n '/^\[mise\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5
+        with:
+          version: ${{ steps.mise.outputs.version }}
+      - name: Select the gates this change affects
+        id: classify
+        env:
+          BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
+        run: mise x -- just classify --base "$BASE" >> "$GITHUB_OUTPUT"
+      - name: Validate the signed issue contexts of the change
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
+        run: mise x -- just issue-context --base "$BASE"
+      # The check jobs hold every finding to its baseline, and only this job fetches the base the baselines may not grow from.
+      - name: Refuse a lint baseline that grew since the base
+        env:
+          BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
+        run: mise x -- just baselines --base "$BASE"
+
+  # The ruleset still requires these matrix contexts.
+  # Until it requires only the required job, this job keeps their names and always reports, with each step gated instead.
+  check:
+    name: required (${{ matrix.os }})
+    needs: classify
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      GATES: ${{ needs.classify.outputs.gates }}
+    steps:
+      - name: Refuse to pass without a classification
+        if: needs.classify.result != 'success'
+        shell: bash
+        run: |
+          echo "the classify job did not succeed, so no gate was selected" >&2
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.GATES != ''
+        with:
+          persist-credentials: false
+      - name: Read the pinned mise version
+        id: mise
+        if: env.GATES != ''
+        shell: bash
+        run: |
+          version="$(sed -n '/^\[mise\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5
+        if: env.GATES != ''
+        with:
+          version: ${{ steps.mise.outputs.version }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: env.GATES != ''
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
+        if: runner.os == 'Windows' && (contains(env.GATES, 'rust') || contains(env.GATES, 'profiles'))
+        with:
+          distribution: Ubuntu-24.04
+          additional-packages: build-essential ca-certificates curl git
+      - name: Install the pinned mise release for the Windows FZF renderer
+        if: runner.os == 'Windows' && (contains(env.GATES, 'rust') || contains(env.GATES, 'profiles'))
+        shell: wsl-bash {0}
+        run: |
+          set -eu
+          version=$(sed -n '/^\[mise\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)
+          digest=$(sed -n 's/^linux-x64 = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)
+          mkdir -p "$HOME/.local/bin"
+          curl --fail --location --silent --show-error --output "$HOME/.local/bin/mise" \
+            "https://github.com/jdx/mise/releases/download/v$version/mise-v$version-linux-x64"
+          echo "$digest  $HOME/.local/bin/mise" | sha256sum --check --strict
+          chmod +x "$HOME/.local/bin/mise"
+      - name: Check the selected gates
+        if: env.GATES != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DOTFILES_FZF_WSL_DISTRIBUTION: ${{ runner.os == 'Windows' && 'Ubuntu-24.04' || '' }}
+        run: mise x -- just check --gates "$GATES"
+      - name: Check Linux system provisioning syntax
+        if: runner.os == 'Linux' && contains(needs.classify.outputs.gates, 'profiles')
+        run: mise x -- just ansible-syntax-check
+
+  proofs:
+    name: proofs (${{ matrix.phase }})
+    needs: classify
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        phase: [kani, runtime, metrics-models]
+    env:
+      MISE_DISABLE_TOOLS: ${{ matrix.phase == 'kani' && 'cargo:cargo-mutants' || 'cargo:kani-verifier,cargo:cargo-mutants' }}
+      GATES: ${{ needs.classify.outputs.gates }}
+      PHASE: ${{ matrix.phase }}
+      CARGO_BUILD_JOBS: "2"
+    steps:
+      - name: Refuse to pass without a classification
+        if: needs.classify.result != 'success'
+        shell: bash
+        run: |
+          echo "the classify job did not succeed, so no gate was selected" >&2
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: contains(env.GATES, 'proofs')
+        with:
+          persist-credentials: false
+      - name: Read the pinned mise version
+        id: mise
+        if: contains(env.GATES, 'proofs')
+        shell: bash
+        run: |
+          version="$(sed -n '/^\[mise\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5
+        if: contains(env.GATES, 'proofs')
+        with:
+          version: ${{ steps.mise.outputs.version }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: contains(env.GATES, 'proofs')
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.kani
+            target
+          key: proofs-${{ matrix.phase }}-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          restore-keys: proofs-${{ matrix.phase }}-
+      - name: Set up the pinned verifier
+        if: contains(env.GATES, 'proofs') && matrix.phase == 'kani'
+        run: mise x -- kani setup
+      - name: Set up Miri on the nightly the verifier pins
+        if: contains(env.GATES, 'proofs') && matrix.phase == 'runtime'
+        run: rustup toolchain install nightly-2026-08-21 --profile minimal --component miri,rust-src
+      - name: Run the mandatory partition without the paused mutation campaign
+        if: contains(env.GATES, 'proofs')
+        run: mise x -- just proofs-ci --phase "$PHASE"
+
+  minimum-git:
+    # Git 2.43 comes from Ubuntu 24.04 and ranks as the oldest Git on a managed host.
+    # The guard reads the Git state through it.
+    # The runner builds the tests, and an Ubuntu 24.04 container with the same C library runs them with its own Git.
+    name: guard (Git 2.43)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read the pinned mise version
+        id: mise
+        shell: bash
+        run: |
+          version="$(sed -n '/^\[mise\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5
+        with:
+          version: ${{ steps.mise.outputs.version }}
+          install_args: rust jq
+      - name: Build the guard tests
+        shell: bash
+        run: |
+          mise x rust jq -- cargo test --locked --package dotguard --no-run --message-format=json \
+            | mise x jq -- jq -r 'select(.profile.test == true and .executable != null) | .executable' > guard-tests.txt
+          test -s guard-tests.txt
+      - name: Run the guard tests on Git 2.43
+        shell: bash
+        run: |
+          rust_sysroot="$(readlink -f "$(mise x rust -- rustc --print sysroot)")"
+          mise_executable="$(readlink -f "$(command -v mise)")"
+          mise_data="${MISE_DATA_DIR:-$HOME/.local/share/mise}"
+          docker run --rm --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+            --volume "$rust_sysroot:$rust_sysroot:ro" --volume "$mise_data:$mise_data:ro" \
+            --volume "$mise_executable:/usr/local/bin/mise:ro" \
+            --env "PATH=$rust_sysroot/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+            --env "MISE_DATA_DIR=$mise_data" --env MISE_PARANOID --env MISE_TRUSTED_CONFIG_PATHS \
+            --workdir "$GITHUB_WORKSPACE/crates/dotguard" \
+            ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55 \
+            bash -euo pipefail -c 'apt-get update -qq && apt-get install --yes --no-install-recommends -qq git openssh-client gcc libc6-dev > /dev/null
+              git --version | grep -Fx "git version 2.43.0"
+              rustc --version
+              test -x "$(mise which jq)"
+              while read -r test; do "$test"; done < ../../guard-tests.txt'
+
+  # The ruleset still requires these matrix contexts, so this job keeps their names and always reports, like the check job.
+  rehearsal:
+    name: rehearsal (${{ matrix.os }})
+    needs: classify
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - name: Refuse to pass without a classification
+        if: needs.classify.result != 'success'
+        shell: bash
+        run: |
+          echo "the classify job did not succeed, so no gate was selected" >&2
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: contains(needs.classify.outputs.gates, 'profiles')
+        with:
+          persist-credentials: false
+      - name: Read the pinned mise version
+        id: mise
+        if: contains(needs.classify.outputs.gates, 'profiles')
+        shell: bash
+        run: |
+          version="$(sed -n '/^\[mise\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5
+        if: contains(needs.classify.outputs.gates, 'profiles')
+        with:
+          version: ${{ steps.mise.outputs.version }}
+      - name: Apply, reprovision, and reapply the native profile on this disposable host
+        if: contains(needs.classify.outputs.gates, 'profiles')
+        shell: bash
+        env:
+          GIT_CONFIG_GLOBAL: ${{ runner.temp }}/dotfiles-rehearsal.gitconfig
+        run: |
+          git config --file "$GIT_CONFIG_GLOBAL" include.path "$HOME/.config/git/config"
+          git config --file "$GIT_CONFIG_GLOBAL" url.https://github.com/P4suta/OComment.insteadOf git@github.com:P4suta/OComment
+          git config --file "$GIT_CONFIG_GLOBAL" url.https://github.com/P4suta/domyjob.insteadOf git@github.com:P4suta/domyjob
+          mise x -- just rehearse --disposable-host
+
+  # The wsl profile rehearses inside a fresh WSL distribution on a disposable Windows host.
+  rehearsal-wsl:
+    name: rehearsal (wsl)
+    needs: classify
+    if: ${{ !cancelled() }}
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      # WSL receives only the variables that WSLENV names.
+      WSLENV: CI:MISE_DISABLE_TOOLS:MISE_PARANOID
+    steps:
+      - name: Refuse to pass without a classification
+        if: needs.classify.result != 'success'
+        shell: bash
+        run: |
+          echo "the classify job did not succeed, so no gate was selected" >&2
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: contains(needs.classify.outputs.gates, 'profiles')
+        with:
+          persist-credentials: false
+      - uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
+        if: contains(needs.classify.outputs.gates, 'profiles')
+        with:
+          distribution: Ubuntu-24.04
+          additional-packages: build-essential ca-certificates curl git
+      - name: Install the pinned mise release in WSL
+        if: contains(needs.classify.outputs.gates, 'profiles')
+        shell: wsl-bash {0}
+        run: |
+          set -eu
+          version=$(sed -n '/^\[mise\]$/,/^\[/s/^version = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)
+          digest=$(sed -n 's/^linux-x64 = "\(.*\)"$/\1/p' home/.chezmoidata/versions.toml)
+          mkdir -p "$HOME/.local/bin"
+          curl --fail --location --silent --show-error --output "$HOME/.local/bin/mise" \
+            "https://github.com/jdx/mise/releases/download/v$version/mise-v$version-linux-x64"
+          echo "$digest  $HOME/.local/bin/mise" | sha256sum --check --strict
+          chmod +x "$HOME/.local/bin/mise"
+      - name: Apply, reprovision, and reapply the native profile in this disposable distribution
+        if: contains(needs.classify.outputs.gates, 'profiles')
+        shell: wsl-bash {0}
+        run: |
+          set -eu
+          export PATH="$HOME/.local/bin:$PATH"
+          export GIT_CONFIG_GLOBAL="$(mktemp /tmp/dotfiles-rehearsal-git.XXXXXX)"
+          trap 'rm -f -- "$GIT_CONFIG_GLOBAL"' EXIT
+          git config --file "$GIT_CONFIG_GLOBAL" include.path "$HOME/.config/git/config"
+          git config --file "$GIT_CONFIG_GLOBAL" url.https://github.com/P4suta/OComment.insteadOf git@github.com:P4suta/OComment
+          git config --file "$GIT_CONFIG_GLOBAL" url.https://github.com/P4suta/domyjob.insteadOf git@github.com:P4suta/domyjob
+          mise trust "$PWD/mise.toml"
+          mise x rust just -- just mise-install
+          mise x -- just rehearse --disposable-host
+
+  # The one status the ruleset requires.
+  # Each job decides its selected steps, and every required job must finish successfully.
+  required:
+    name: required
+    needs: [classify, check, proofs, minimum-git, rehearsal, rehearsal-wsl]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refuse a missing, skipped, failed, or cancelled job
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            case "$result" in
+              success) ;;
+              *) echo "a required job ended as $result" >&2; exit 1 ;;
+            esac
+          done

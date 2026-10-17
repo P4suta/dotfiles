@@ -1,0 +1,15 @@
+{{- if not (has .profile (list "mac" "linux" "windows" "wsl")) -}}{{ fail "Unknown dotfiles profile" }}{{- end }}
+{{- range (concat (dig "setup" "ignore" (list) .) (dig "setup" "skip" (list) .)) }}
+.chezmoiscripts/*/[0-9][0-9]-{{ .script }}
+{{- end }}
+{{- range $target, $set := .targets }}
+{{- if not (has $.profile (index $.profiles $set)) }}
+{{ $target }}
+{{- end }}
+{{- end }}
+{{- range $target, $set := .scripts }}
+{{- if not (has $.profile (index $.profiles $set)) }}
+{{ $target }}
+{{- end }}
+{{- end }}
+{{ includeTemplate "partials/host-state-ignore" . }}

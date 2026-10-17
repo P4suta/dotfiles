@@ -1,0 +1,44 @@
+{{- $tools := concat .platforms.linux.tools.common (index .platforms.linux.tools .role) -}}
+{{- $nix := stat (joinPath .chezmoi.homeDir ".nix-profile/bin/nu") -}}
+{{- if not $nix -}}
+{{-   range $_, $spec := .platforms.linux.nix.packages -}}
+{{-     if $spec }}{{ $tools = append $tools $spec }}{{ end -}}
+{{-   end -}}
+{{- end -}}
+{{- $tools = uniq $tools -}}
+{{- $pins := includeTemplate "partials/modern-pins" . | fromJson -}}
+[tools]
+{{- range $tools }}
+{{- if not (hasKey $pins .) }}
+{{- if eq . "erlang" }}
+{{- end }}
+{{ . | quote }} = {{ if hasKey $.platforms.linux.tool_versions . }}{{ index $.platforms.linux.tool_versions . | quote }}{{ else }}"latest"{{ end }}
+{{- end }}
+{{- end }}
+{{- range $tool, $version := $pins }}
+{{ $tool | quote }} = {{ $version | quote }}
+{{- end }}
+
+[tools."http:coderabbit"]
+version = {{ .coderabbit.version | quote }}
+rename_exe = "coderabbit-vendor"
+
+[tools."http:coderabbit".platforms]
+{{- range $platform, $artifact := .coderabbit.platforms }}
+{{ $platform }} = { url = "https://cli.coderabbit.ai/releases/{{ $.coderabbit.version }}/{{ $artifact.artifact }}", checksum = "sha256:{{ $artifact.sha256 }}"{{ if hasPrefix "windows-" $platform }}, rename_exe = "coderabbit-vendor.exe"{{ end }} }
+{{- end }}
+
+[settings]
+experimental = true
+# A project's configuration loads only after `mise trust` records its exact contents.
+paranoid = true
+jobs = {{ .platforms.linux.mise.jobs }}
+# domyjob runs the owner's own projects in this work area, and each new workspace path would otherwise have its mise.toml refused.
+trusted_config_paths = [{{ joinPath .chezmoi.homeDir ".local/state/domyjob/v3/work" | quote }}]
+
+[settings.hook_env]
+chpwd_only = true
+
+[settings.github]
+gh_cli_tokens = true
+credential_command = {{ includeTemplate "partials/mise-github-credential" . }}

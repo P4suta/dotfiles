@@ -1,0 +1,21 @@
+{{- $hooks := dict -}}
+{{- range $event, $groups := . -}}
+{{-   $retained := list -}}
+{{-   range $groups -}}
+{{-     $handlers := list -}}
+{{-     $before := len .hooks -}}
+{{-     range .hooks -}}
+{{-       $command := default "" .command -}}
+{{-       if not (or (eq $command "skill-ops observe --client codex") (eq $command "skill-ops observe --client claude") (eq $command "skill-ops stop")) -}}
+{{-         $handlers = append $handlers . -}}
+{{-       end -}}
+{{-     end -}}
+{{-     if or (gt (len $handlers) 0) (eq $before 0) -}}
+{{-       $group := deepCopy . -}}
+{{-       $_ := set $group "hooks" $handlers -}}
+{{-       $retained = append $retained $group -}}
+{{-     end -}}
+{{-   end -}}
+{{-   $_ := set $hooks $event $retained -}}
+{{- end -}}
+{{- toJson $hooks -}}

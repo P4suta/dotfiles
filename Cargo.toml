@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["xtask", "crates/*"]
+# The repository settings tool ships inside a shared skill, so it keeps its own manifest and lockfile.
+exclude = ["home"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unfulfilled_lint_expectations = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+undocumented_unsafe_blocks = "deny"
+
+[profile.dev.package."*"]
+opt-level = 1
+
+# The Git wrapper starts on every Git command, so it trades build time for a small, stripped binary.
+# `cargo install --profile release-guard` selects it, because link-time optimization has no per-package setting.
+[profile.release-guard]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

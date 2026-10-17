@@ -1,0 +1,19 @@
+{{- $retained := list -}}
+{{- range .groups -}}
+{{-   $handlers := list -}}
+{{-   $before := len .hooks -}}
+{{-   range .hooks -}}
+{{-     $command := default "" .command -}}
+{{-     $owned := false -}}
+{{-     range $.suffixes -}}
+{{-       if and (hasSuffix . $command) (regexMatch `^('([^']|'"'"')*[/\\]dotfiles(-xtask)?(\.exe)?'|([^[:space:]'"]*[/\\])?dotfiles(-xtask)?(\.exe)?)$` (trimSuffix . $command)) -}}{{- $owned = true -}}{{- end -}}
+{{-     end -}}
+{{-     if not $owned -}}{{- $handlers = append $handlers . -}}{{- end -}}
+{{-   end -}}
+{{-   if or (gt (len $handlers) 0) (eq $before 0) -}}
+{{-     $group := deepCopy . -}}
+{{-     $_ := set $group "hooks" $handlers -}}
+{{-     $retained = append $retained $group -}}
+{{-   end -}}
+{{- end -}}
+{{- toJson $retained -}}

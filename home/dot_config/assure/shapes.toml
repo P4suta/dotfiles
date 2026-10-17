@@ -1,0 +1,48 @@
+# The code shapes these machines require every repository to verify, the signals that find each one, and what owns it.
+# A signal names a path suffix and the text a line starts with after its leading blanks, and an empty prefix finds the file as a whole.
+# The signals start precise, so a site they find almost always has the shape.
+# A file under an `exclude` segment verifies code rather than ships it, so no signal reads it.
+# An owning file carries the `marker`, `in_file` lets the site's own file own it, and `corpus` requires a non-empty `fuzz/corpus/<target>/` beside the cargo-fuzz target `fuzz/fuzz_targets/<target>.rs`.
+# A repository names the owner of each other site in its own `assure.toml`.
+# An exemption sits in the comment block before the site as `Exempt as <reason>: <justification>`.
+
+exclude = ["tests", "fuzz", "benches", "examples", "fixtures", "testdata"]
+
+[[shape]]
+id = "decision"
+requirement = "a bounded proof and a rejected counterexample that shows the proof isn't vacuous"
+next = "add a Kani harness and a rejecting probe beside the decision"
+marker = "kani::proof"
+in_file = true
+signals = [{ suffix = "_rules.rs" }]
+
+[[shape]]
+id = "protocol"
+requirement = "a checked model of its invariants, bound to the implementation by a replay of the model's traces"
+next = "write a Quint model, replay its traces through the step function in a test, and name that test as the owner in assure.toml"
+marker = ".qnt"
+signals = [
+  { suffix = ".rs", prefix = "pub fn step(" },
+  { suffix = ".rs", prefix = "pub const fn step(" },
+]
+
+[[shape]]
+id = "parser"
+requirement = "a cargo-fuzz target with a replayed corpus and round-trip properties"
+next = "add fuzz/fuzz_targets/<target>.rs with its corpus under fuzz/corpus/<target>/, replay the corpus in the repository's gate, and name the target as the owner in assure.toml"
+marker = "fuzz_target!"
+corpus = true
+signals = [
+  { suffix = ".rs", prefix = "pub fn parse(" },
+  { suffix = ".rs", prefix = "pub fn decode(" },
+  { suffix = ".rs", prefix = "impl FromStr for " },
+  { suffix = ".rs", prefix = "impl std::str::FromStr for " },
+  { suffix = ".rs", prefix = "impl core::str::FromStr for " },
+  { suffix = ".rs", prefix = "impl<'de> Deserialize<'de> for " },
+  { suffix = ".rs", prefix = "impl<'de> serde::Deserialize<'de> for " },
+]
+
+# The same points refuse the code that the generic anti-pattern catalog beside this file refuses, in the files whose extension its rules read.
+[anti_patterns]
+config = "sgconfig.yml"
+extensions = ["rs", "sh", "bash", "ts", "tsx", "mts", "cts"]

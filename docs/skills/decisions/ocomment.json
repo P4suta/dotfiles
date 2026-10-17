@@ -1,9 +1,13 @@
 {
-  "revision": "a16e9937dde6435c7270f403f07bc43d8cffdf98d1470cbeb92d6fdd0e9a27d5",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "a6041d4fd0965340f81c57e551952d47b97bb7814ccf9eb3538c532b565ecd6a",
+  "outcome": "implemented",
+  "reason": "Bind the project checker to the public source revision that supports the existing policy mode and flat scan positions.\nThe native installation still uses its setup provider, so the reviewed binding covers that selector and the immutable project pin.\nThe skill's check, explain, staging, and preservation procedures apply to both providers, and the inventory gate rejects an unreviewed version.",
   "evidence": [
-    "dot_agents/skills/ocomment/SKILL.md"
+    "home/dot_agents/skills/ocomment/SKILL.md",
+    "home/dot_agents/skills/ocomment/tools.toml",
+    "xtask/tests/tool_inventory.rs",
+    "mise.toml",
+    "crates/prose/src/lib.rs"
   ],
   "revisit": null
 }

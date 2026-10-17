@@ -140,6 +140,19 @@
   changed_when: false
   check_mode: false
 
+- name: Read the hung-kernel reboot settings
+  ansible.builtin.command:
+    argv: [sysctl, -n, kernel.panic, kernel.panic_on_oops, kernel.softlockup_panic, kernel.hung_task_timeout_secs, kernel.hung_task_panic]
+  register: oom_hang_reboot
+  changed_when: false
+  check_mode: false
+
+- name: Verify a hung kernel reboots on its own
+  ansible.builtin.assert:
+    that:
+      - oom_hang_reboot.stdout_lines == ['10', '1', '1', '600', '1']
+  when: not ansible_check_mode
+
 - name: Read global IPv4 addresses and default routes
   ansible.builtin.command:
     argv: "{{ item }}"

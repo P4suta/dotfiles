@@ -1,12 +1,13 @@
 {
-  "revision": "5db48fde131f9523e03ebe1cb32f7eb5763b4c9ef6b94f3e73f5c49166777136",
+  "revision": "91f8a2ceaec85c180c1da6dacdcc83045c0d671c7fc3cd43d679c802b162a119",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "State that a skill never repeats a version or budget a gate pins, which the skill check now refuses, and end with the same pointer as the other assurance skills to the machine gate that reports and refuses verification gaps.",
   "evidence": [
-    "dot_agents/skills/executable-policy/SKILL.md",
+    "home/dot_agents/skills/executable-policy/SKILL.md",
+    "docs/adr/verification-proportional-to-code-shape.md",
     "docs/adr/0003-local-skill-operations.md",
-    "xtask/tests/skill_ops.rs",
-    "xtask/tests/skill_runtime.rs"
+    "crates/skill-ops/tests/skill_ops.rs",
+    "crates/skill-ops/tests/skill_runtime.rs"
   ],
   "revisit": null
 }

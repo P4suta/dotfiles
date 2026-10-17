@@ -1,0 +1,21 @@
+[package]
+name = "model"
+description = "The typed chezmoi data and profiles of these dotfiles"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+rules = { path = "../rules" }
+schemars = "1.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0"
+toml = "1.0"
+
+[dev-dependencies]
+tempfile = "3.27"
+
+[lints]
+workspace = true

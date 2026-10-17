@@ -1,0 +1,65 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  // The shared preset holds the schedule, grouping, digest pins, and automerge policy.
+  extends: ['github>P4suta/renovate-config'],
+  // A release waits three days before Renovate proposes it, so a pulled release never reaches a host.
+  minimumReleaseAge: '3 days',
+  // Version changes arrive only through these managers, as pull requests that pass the required checks.
+  enabledManagers: ['github-actions', 'mise', 'cargo', 'dockerfile', 'custom.regex'],
+  customManagers: [
+    {
+      // Each pin in versions.toml that a `renovate:` comment precedes, with the lookup that comment names.
+      customType: 'regex',
+      managerFilePatterns: ['/^home/\\.chezmoidata/(versions|modern)\\.toml$/'],
+      matchStrings: [
+        '# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\n[\\w-]+ = "(?<currentValue>[^"]+)"',
+      ],
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^mise\\.toml$/'],
+      matchStrings: ['(?:^|\\r?\\n)(?<depName>nu)\\s*=\\s*"(?<currentValue>[^"]+)"'],
+      datasourceTemplate: 'github-releases',
+      packageNameTemplate: 'nushell/nushell',
+      versioningTemplate: 'semver',
+      extractVersionTemplate: '^v?(?<version>\\d+\\.\\d+\\.\\d+)$',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^mise\\.toml$/'],
+      matchStrings: ['(?:^|\\r?\\n)"(?<depName>conda:zsh)"\\s*=\\s*\\{\\s*version\\s*=\\s*"(?<currentValue>[^"]+)"'],
+      datasourceTemplate: 'conda',
+      packageNameTemplate: 'conda-forge/zsh',
+      versioningTemplate: 'loose',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^mise\\.toml$/'],
+      matchStrings: ['(?:^|\\r?\\n)"(?<depName>pypi:ansible-core)"\\s*=\\s*\\{\\s*version\\s*=\\s*"(?<currentValue>[^"]+)"'],
+      datasourceTemplate: 'pypi',
+      packageNameTemplate: 'ansible-core',
+      versioningTemplate: 'pep440',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^mise\\.toml$/'],
+      matchStrings: ['(?:^|\\r?\\n)(?<depName>cargo-deny)\\s*=\\s*"(?<currentValue>[^"]+)"'],
+      datasourceTemplate: 'crate',
+      packageNameTemplate: 'cargo-deny',
+      versioningTemplate: 'cargo',
+    },
+  ],
+  packageRules: [
+    {
+      // Lift this constraint after the native lint distributions pass the checks in issue #163.
+      matchManagers: ['mise'],
+      matchDepNames: ['python'],
+      allowedVersions: '<3.15',
+    },
+    {
+      matchUpdateTypes: ['major'],
+      automerge: false,
+      labels: ['breaking-change'],
+    },
+  ],
+}

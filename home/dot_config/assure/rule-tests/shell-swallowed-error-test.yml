@@ -1,0 +1,7 @@
+id: shell-swallowed-error
+valid:
+  - "if ! mise activate bash; then echo 'mise failed' >&2; fi"
+  - "command -v mise >/dev/null && mise activate bash"
+invalid:
+  - "mise activate bash || true"
+  - "rm -f stale.lock || :"

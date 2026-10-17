@@ -1,0 +1,31 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /*
+  Codex reads its hooks from this file, so each profile sets the verification hooks and keeps unrelated handlers.
+  A session starts with the verification report, which lists the repository's code shapes that nothing verifies with their next actions.
+  The stop hook refuses to end a turn while a file it changed holds such a shape.
+  The pre-tool hook blocks a malformed or file-writing shell command before Codex runs it, through the decision core every managed client shares.
+*/ -}}
+{{- $current := dict -}}
+{{- if trim .chezmoi.stdin -}}{{- $current = fromJson .chezmoi.stdin -}}{{- end -}}
+{{- $_ := set $current "hooks" (includeTemplate "partials/without_skill_ops_hooks" (dig "hooks" (dict) $current) | fromJson) -}}
+{{- $tool := ".local/bin/dotfiles" -}}
+{{- if eq .profile "windows" }}{{ $tool = ".local/bin/dotfiles.exe" }}{{ end -}}
+{{- $command := includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool) -}}
+{{- $hooks := dig "hooks" (dict) $current -}}
+{{- $pre := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PreToolUse" (list) $hooks) "suffixes" (list " claude-bash" " issue-guard")) | fromJson -}}
+{{- $own_pre := dict "matcher" "Bash|shell|exec_command" "hooks" (list (dict "type" "command" "command" (printf "%s claude-bash" $command))) -}}
+{{- $_ := set $hooks "PreToolUse" (concat $pre (list $own_pre)) -}}
+{{- $issue := dict "matcher" "apply_patch|Edit|Write|MultiEdit|edit|write" "hooks" (list (dict "type" "command" "command" (printf "%s issue-guard" $command))) -}}
+{{- $_ := set $hooks "PreToolUse" (concat (dig "PreToolUse" (list) $hooks) (list $issue)) -}}
+{{- range $event, $point := dict "SessionStart" "start" "Stop" "stop" -}}
+{{-   $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list (printf " assure %s" $point))) | fromJson -}}
+{{-   $own := dict "hooks" (list (dict "type" "command" "command" (printf "%s assure %s" $command $point))) -}}
+{{-   $_ := set $hooks $event (concat $groups (list $own)) -}}
+{{- end -}}
+{{- if eq (includeTemplate "partials/skill_ops_experimental" .) "true" -}}
+{{- $observe := dict "type" "command" "command" "skill-ops observe --client codex" "timeout" 10 -}}
+{{- $_ := set $hooks "PostToolUse" (concat (dig "PostToolUse" (list) $hooks) (list (dict "matcher" "Read|read|Skill|skill|Bash|bash|exec_command" "hooks" (list $observe)))) -}}
+{{- $hold := dict "type" "command" "command" "skill-ops stop" "timeout" 10 -}}
+{{- $_ := set $hooks "Stop" (concat (dig "Stop" (list) $hooks) (list (dict "hooks" (list $hold)))) -}}
+{{- end -}}
+{{ mergeOverwrite $current (dict "hooks" $hooks) | toPrettyJson "  " | trim }}

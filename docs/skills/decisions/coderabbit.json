@@ -1,13 +1,19 @@
 {
-  "revision": "f963a404b048266d53b602212325e901e2b54a0298a8ae737938f904ad2a68a8",
+  "revision": "21a99546207fee53d0d7690cf71e3932cb1c8c0c7274ed8c1edf574e1940ab32",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Use the accountable importance assessment to select one CodeRabbit pool and keep severe classifications exceptional.\nKeep service setup separate from findings, preserve billing and capacity controls, and verify effective opt-in settings before claiming adoption.\nThis revision clarifies prose without changing review selection.\nThe four prepared configuration files passed the official schema, and source-bound Kani checks passed for the two exclusive review cores.\nEffective organization settings, service review, complete native gates, and rollout remain pending.",
   "evidence": [
-    "dot_agents/skills/coderabbit/SKILL.md",
-    "xtask/src/review_guard.rs",
+    "home/dot_agents/skills/coderabbit/SKILL.md",
+    "home/dot_agents/skills/pull-request/references/importance.md",
+    "docs/adr/route-coderabbit-by-current-pr-importance.md",
+    "docs/coderabbit/organization.yaml",
+    "docs/coderabbit/global-overrides.yaml",
+    "crates/coderabbit-guard/src/lib.rs",
     "docs/adr/0008-layered-review-capacity.md",
     "docs/adr/0015-scoped-coderabbit-pause.md",
-    "xtask/src/review_rules.rs"
+    "crates/rules/src/review_rules.rs",
+    "home/dot_agents/skills/coderabbit/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

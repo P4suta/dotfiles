@@ -1,6 +1,276 @@
 use anyhow::Result;
-use dotfiles_xtask::{Metadata, export_checks, metadata, validate_links, validate_tree};
+use serde_json::{Value, json};
+use skill_ops::{Metadata, export_checks, metadata, validate_links, validate_tree};
 use std::fs;
+use std::path::Path;
+
+#[path = "../../crates/platform/tests/support/fixture_process.rs"]
+mod fixture_process;
+
+fn catalog_source() -> Result<tempfile::TempDir> {
+    let source = tree()?;
+    let root = source.path();
+    fs::write(root.join(".chezmoiroot"), "home\n")?;
+    for relative in ["home/dot_agents/skills/pull-request", "home/.chezmoidata"] {
+        fs::create_dir_all(root.join(relative))?;
+    }
+    fs::write(
+        root.join("home/dot_agents/skills/pull-request/SKILL.md"),
+        "---\nname: pull-request\ndescription: Publish a checked change.\n---\n# Contract\nCheck the current change.\n",
+    )?;
+    fs::write(
+        root.join("home/dot_claude/skills/symlink_pull-request"),
+        "../../.agents/skills/pull-request\n",
+    )?;
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../home/.chezmoidata");
+    for name in ["targets.toml", "profiles.toml"] {
+        fs::write(
+            root.join("home/.chezmoidata").join(name),
+            fs::read(data.join(name))?,
+        )?;
+    }
+    skill_ops::write_json(
+        &root.join("home/dot_config/skill-ops/policy.json"),
+        &json!({"schema":1,"review_every":3,"minimum_pair_sessions":2,
+            "pair_percent":80,"max_entry_words":100,"requirements":[],"bundles":{}}),
+        false,
+    )?;
+    track_catalog(root)?;
+    Ok(source)
+}
+
+fn track_catalog(root: &Path) -> Result<()> {
+    for (name, skill) in skill_ops::catalog(&root.join("home/dot_agents/skills"))?.skills {
+        skill_ops::write_json(
+            &root.join(skill_ops::DECISIONS).join(format!("{name}.json")),
+            &skill_ops::SkillDecision {
+                revision: skill.revision,
+                outcome: skill_ops::Outcome::Keep,
+                reason: "The fixture checks the native installation boundary.".into(),
+                evidence: vec![format!("home/dot_agents/skills/{name}/SKILL.md")],
+                revisit: None,
+                size: None,
+            },
+            true,
+        )?;
+    }
+    Ok(())
+}
+
+fn install_catalog_command(source: &Path, home: &Path) -> Result<()> {
+    let configuration = home.join(".config/chezmoi/chezmoi.toml");
+    fs::create_dir_all(configuration.parent().expect("configuration parent"))?;
+    fs::write(
+        configuration,
+        toml::to_string(&json!({"sourceDir":source}))?,
+    )?;
+    let output = fixture_process::command(env!("CARGO_BIN_EXE_xtask"), source)
+        .current_dir(source)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("XDG_CACHE_HOME", home.join(".cache"))
+        .env("XDG_STATE_HOME", home.join(".local/state"))
+        .arg("--root")
+        .arg(source)
+        .arg("install")
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+fn refuse_catalog_drift(source: &Path, user: &Path, binary: &Path) -> Result<()> {
+    let manifest = user.join(".config/skill-ops/approved.json");
+    let approved_bytes = fs::read(&manifest)?;
+    let policy = user.join(".config/skill-ops/policy.json");
+    let policy_bytes = fs::read(&policy)?;
+    let mut mismatched_policy: skill_ops::Policy = skill_ops::read_json(&policy)?;
+    mismatched_policy.review_every += 1;
+    skill_ops::write_json(&policy, &mismatched_policy, true)?;
+    let profile = xtask::profiles::native_profile()?;
+    assert!(
+        skill_ops::skill_install::install_catalog(source, user, profile)
+            .unwrap_err()
+            .to_string()
+            .contains("policy differs")
+    );
+    assert_eq!(fs::read(&manifest)?, approved_bytes);
+    fs::write(&policy, policy_bytes)?;
+    fs::write(
+        user.join(".agents/skills/example/SKILL.md"),
+        "---\nname: example\ndescription: Inspect a changed native input.\n---\n# Drift\nRefuse this unreviewed native change.\n",
+    )?;
+    assert!(
+        skill_ops::skill_install::install_catalog(source, user, profile)
+            .unwrap_err()
+            .to_string()
+            .contains("installed skill catalog differs")
+    );
+    let mut applied = false;
+    assert!(
+        pr_workflow::deploy(source, binary, user, |_| {
+            applied = true;
+            Ok(())
+        })
+        .is_err()
+    );
+    assert!(!applied);
+    assert_eq!(fs::read(&manifest)?, approved_bytes);
+    Ok(())
+}
+
+#[test]
+fn static_catalog_installation_allows_scoped_pr_updates_without_enabling_maintenance() -> Result<()>
+{
+    for owner_disabled in [false, true] {
+        let source = catalog_source()?;
+        let home = tempfile::tempdir()?;
+        let user = home.path();
+        let history = user.join(".local/state/skill-ops/history.json");
+        fs::create_dir_all(history.parent().expect("history parent"))?;
+        fs::write(&history, "preserved history\n")?;
+        let hooks = user.join(".codex/hooks.json");
+        skill_ops::write_json(
+            &hooks,
+            &json!({"hooks":{"Stop":[{"hooks":[
+            {"type":"command","command":"unrelated-guard"}]}]}}),
+            false,
+        )?;
+        let previous_hooks = fs::read(&hooks)?;
+        let stop = user.join(platform::incidents::DISABLED);
+        let opt_in = user.join(platform::incidents::EXPERIMENTAL);
+        if owner_disabled {
+            fs::create_dir_all(stop.parent().expect("consent parent"))?;
+            fs::write(&stop, "owner stop\n")?;
+            fs::write(&opt_in, rules::incident_rules::EXPERIMENTAL_OPT_IN)?;
+        }
+        let manifest = user.join(".config/skill-ops/approved.json");
+        let binary = user.join("built-pr-workflow");
+        fs::write(&binary, "owned executable fixture")?;
+        for revision in ["initial", "updated"] {
+            fs::write(
+                source
+                    .path()
+                    .join("home/dot_agents/skills/example/SKILL.md"),
+                format!(
+                    "---\nname: example\ndescription: Inspect a checked input.\n---\n# Contract\nCheck the {revision} input.\n"
+                ),
+            )?;
+            track_catalog(source.path())?;
+            install_catalog_command(source.path(), user)?;
+            assert!(
+                manifest.is_file(),
+                "shared-skill installation must record the approved catalog"
+            );
+            let approved: skill_ops::Approved = skill_ops::read_json(&manifest)?;
+            assert_eq!(
+                approved.catalog,
+                skill_ops::catalog(&source.path().join("home/dot_agents/skills"))?
+            );
+            assert_eq!(approved.reviewed.len(), 2);
+            pr_workflow::deploy(source.path(), &binary, user, |_| Ok(()))?;
+        }
+        refuse_catalog_drift(source.path(), user, &binary)?;
+        assert!(!platform::incidents::enabled_at(user));
+        assert_eq!(fs::read(&history)?, b"preserved history\n");
+        assert_eq!(fs::read(hooks)?, previous_hooks);
+        assert!(
+            !user
+                .join(".local/bin")
+                .join(format!("skill-ops{}", std::env::consts::EXE_SUFFIX))
+                .try_exists()?
+        );
+        if owner_disabled {
+            assert_eq!(fs::read(stop)?, b"owner stop\n");
+            assert_eq!(
+                fs::read(opt_in)?,
+                rules::incident_rules::EXPERIMENTAL_OPT_IN
+            );
+        } else {
+            assert!(!stop.try_exists()? && !opt_in.try_exists()?);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn disabled_installer_removes_owned_hooks_without_loading_or_building_source() -> Result<()> {
+    for owner_disabled in [false, true] {
+        let scope = tempfile::tempdir()?;
+        let source = scope.path().join("source");
+        let home = scope.path().join("home");
+        fs::create_dir(&source)?;
+        let history = home.join(".local/state/skill-ops/history.json");
+        fs::create_dir_all(history.parent().expect("history parent"))?;
+        fs::write(&history, "preserved history\n")?;
+        let stop = home.join(platform::incidents::DISABLED);
+        let opt_in = home.join(platform::incidents::EXPERIMENTAL);
+        if owner_disabled {
+            fs::create_dir_all(stop.parent().expect("consent parent"))?;
+            fs::write(&stop, "owner stop\n")?;
+            fs::write(&opt_in, rules::incident_rules::EXPERIMENTAL_OPT_IN)?;
+        }
+        let expected = json!({"theme":"auto", "hooks":{
+            "Stop":[{"matcher":"*", "hooks":[
+                {"type":"command", "command":"unrelated-guard"},
+                {"type":"command", "command":"skill-ops-custom stop"}
+            ]}],
+            "PostToolUse":[{"hooks":[{"type":"command", "command":"line-endings"}]}]
+        }});
+        for (client, relative) in [
+            ("codex", ".codex/hooks.json"),
+            ("claude", ".claude/settings.json"),
+        ] {
+            let mut settings = expected.clone();
+            settings["hooks"]["Stop"][0]["hooks"]
+                .as_array_mut()
+                .expect("stop handlers")
+                .push(json!({"type":"command", "command":"skill-ops stop"}));
+            settings["hooks"]["PostToolUse"][0]["hooks"].as_array_mut().expect("observe handlers")
+                .push(json!({"type":"command", "command":format!("skill-ops observe --client {client}")}));
+            let path = home.join(relative);
+            fs::create_dir_all(path.parent().expect("settings parent"))?;
+            fs::write(path, serde_json::to_vec(&settings)?)?;
+        }
+        let output = fixture_process::command(env!("CARGO_BIN_EXE_xtask"), scope.path())
+            .current_dir(&source)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .arg("--root")
+            .arg(&source)
+            .arg("install-skill-ops")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for relative in [".codex/hooks.json", ".claude/settings.json"] {
+            let actual: Value = serde_json::from_slice(&fs::read(home.join(relative))?)?;
+            assert_eq!(actual, expected);
+        }
+        assert_eq!(fs::read_to_string(history)?, "preserved history\n");
+        assert_eq!(fs::read_dir(&source)?.count(), 0);
+        assert!(!home.join(".local/bin").try_exists()?);
+        assert!(!home.join(".local/state/dotfiles").try_exists()?);
+        assert!(!home.join(".config/skill-ops/approved.json").try_exists()?);
+        if owner_disabled {
+            assert_eq!(fs::read(stop)?, b"owner stop\n");
+            assert_eq!(
+                fs::read(opt_in)?,
+                rules::incident_rules::EXPERIMENTAL_OPT_IN
+            );
+        } else {
+            assert!(!stop.try_exists()? && !opt_in.try_exists()?);
+        }
+    }
+    Ok(())
+}
 
 #[test]
 fn folded_and_quoted_yaml_descriptions_are_discovered() -> Result<()> {
@@ -79,14 +349,14 @@ fn broken_or_escaping_local_resources_are_rejected() -> Result<()> {
 
 fn tree() -> Result<tempfile::TempDir> {
     let root = tempfile::tempdir()?;
-    fs::create_dir_all(root.path().join("dot_agents/skills/example"))?;
-    fs::create_dir_all(root.path().join("dot_claude/skills"))?;
+    fs::create_dir_all(root.path().join("home/dot_agents/skills/example"))?;
+    fs::create_dir_all(root.path().join("home/dot_claude/skills"))?;
     fs::write(
-        root.path().join("dot_agents/skills/example/SKILL.md"),
+        root.path().join("home/dot_agents/skills/example/SKILL.md"),
         "---\nname: example\ndescription: Task\n---\n# Body\n",
     )?;
     fs::write(
-        root.path().join("dot_claude/skills/symlink_example"),
+        root.path().join("home/dot_claude/skills/symlink_example"),
         "../../.agents/skills/example\n",
     )?;
     Ok(root)
@@ -96,13 +366,13 @@ fn tree() -> Result<tempfile::TempDir> {
 fn discovery_aliases_are_complete_and_cannot_drift() -> Result<()> {
     let root = tree()?;
     assert_eq!(validate_tree(root.path())?, 1);
-    let alias = root.path().join("dot_claude/skills/symlink_example");
+    let alias = root.path().join("home/dot_claude/skills/symlink_example");
     fs::write(&alias, "/tmp/unrelated-source\n")?;
     assert!(validate_tree(root.path()).is_err());
     fs::remove_file(&alias)?;
     assert!(validate_tree(root.path()).is_err());
     fs::write(&alias, "../../.agents/skills/example\n")?;
-    fs::create_dir(root.path().join("dot_claude/skills/independent-copy"))?;
+    fs::create_dir(root.path().join("home/dot_claude/skills/independent-copy"))?;
     assert!(validate_tree(root.path()).is_err());
     Ok(())
 }
@@ -118,20 +388,27 @@ fn check_snapshots_preserve_sources_and_exclude_builds_and_unrelated_state() -> 
     )?;
     fs::write(root.path().join("xtask/target/build"), "build bytes")?;
     fs::write(root.path().join("mise.toml"), "[tools]\n")?;
-    fs::create_dir_all(root.path().join("guard/src"))?;
-    fs::create_dir_all(root.path().join("guard/target"))?;
-    fs::write(root.path().join("guard/src/lib.rs"), "pub fn guard() {}\n")?;
+    fs::create_dir_all(root.path().join("crates/dotguard/src"))?;
+    fs::create_dir_all(root.path().join("crates/dotguard/target"))?;
     fs::write(
-        root.path().join("guard/target/build"),
+        root.path().join("crates/dotguard/src/lib.rs"),
+        "pub fn guard() {}\n",
+    )?;
+    fs::write(
+        root.path().join("crates/dotguard/target/build"),
         "private build bytes",
     )?;
     for relative in [
-        ".chezmoiignore",
+        "Cargo.toml",
+        "Cargo.lock",
+        "clippy.toml",
+        ".chezmoiroot",
+        "home/.chezmoiignore",
         "lefthook.yml",
-        ".github/workflows/required.yml",
-        "dot_config/skill-ops/policy.json",
-        "dot_config/opencode/plugins/skill-ops.ts",
-        "dot_config/opencode/plugins/line-endings.ts",
+        ".github/workflows/ci.yml",
+        "home/dot_config/skill-ops/policy.json",
+        "home/dot_config/opencode/plugins/skill-ops.ts",
+        "home/dot_config/opencode/plugins/line-endings.ts",
         "docs/skills/decisions/alpha.json",
         "package.json",
         "bun.lock",
@@ -150,9 +427,9 @@ fn check_snapshots_preserve_sources_and_exclude_builds_and_unrelated_state() -> 
         fs::read(root.path().join("xtask/src/lib.rs"))?
     );
     assert!(!output.join("xtask/target").try_exists()?);
-    assert!(!output.join("guard/target").try_exists()?);
+    assert!(!output.join("crates/dotguard/target").try_exists()?);
     assert_eq!(
-        fs::read(output.join("guard/src/lib.rs"))?,
+        fs::read(output.join("crates/dotguard/src/lib.rs"))?,
         b"pub fn guard() {}\n"
     );
     assert!(!output.join("unrelated-state").try_exists()?);
@@ -170,15 +447,15 @@ fn child_checks_cannot_overwrite_the_running_task_executable() -> Result<()> {
     let root = tempfile::tempdir()?;
     let cache = tempfile::tempdir()?;
     assert_eq!(
-        dotfiles_xtask::check_build_dir(root.path(), Some(cache.path())),
+        xtask::check_build_dir(root.path(), Some(cache.path())),
         cache.path().join("checks")
     );
     assert_eq!(
-        dotfiles_xtask::check_build_dir(root.path(), Some(std::path::Path::new("relative-target"))),
+        xtask::check_build_dir(root.path(), Some(std::path::Path::new("relative-target"))),
         root.path().join("relative-target/checks")
     );
     assert_eq!(
-        dotfiles_xtask::check_build_dir(root.path(), None),
+        xtask::check_build_dir(root.path(), None),
         root.path().join("target/checks")
     );
     Ok(())

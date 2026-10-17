@@ -1,0 +1,4 @@
+{{- $signingKey := includeTemplate "partials/signing_pubkey" . | trim -}}
+{{- if or (ne .profile "mac") (ne $signingKey "") -}}
+{{ .git.email }} namespaces="git" {{ $signingKey }}
+{{ end -}}

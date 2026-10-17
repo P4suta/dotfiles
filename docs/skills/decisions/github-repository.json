@@ -1,9 +1,13 @@
 {
-  "revision": "d0da0c8f0be8bbaef319d5f8f13535cef1e83660471bdae9712e4cd430902570",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions, and the helper's lint policy denies unreasoned lint allowances as every crate in the repository does.",
+  "revision": "0a38aac369d75e4a4a12e5ce8b8a0fa036b909358cce22cdc377eaa526f3734f",
+  "outcome": "implemented",
+  "reason": "Audit metadata, generated artifacts, licenses, and the live GitHub description through the same installed checker, while reporting drift without mutating settings.\nThe governance tests reject absent and stale metadata evidence.",
   "evidence": [
-    "dot_agents/skills/github-repository/SKILL.md"
+    "home/dot_agents/skills/github-repository/SKILL.md",
+    "home/dot_agents/skills/github-repository/assets/baseline.json",
+    "home/dot_agents/skills/github-repository/scripts/repo-settings/tests/governance.rs",
+    "crates/dotfiles/src/repository.rs",
+    "docs/adr/repository-metadata-and-generated-artifacts.md"
   ],
   "revisit": null
 }

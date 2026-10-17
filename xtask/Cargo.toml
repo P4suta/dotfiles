@@ -1,35 +1,46 @@
 [package]
-name = "dotfiles-xtask"
-default-run = "dotfiles-xtask"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.90"
-publish = false
-license = "MIT"
+name = "xtask"
+description = "The repository's development tasks, which `cargo xtask` and the just recipes run"
+default-run = "xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
 
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.6", features = ["derive", "env"] }
-dotguard = { path = "../guard" }
+coderabbit-guard = { path = "../crates/coderabbit-guard" }
+dotfiles = { path = "../crates/dotfiles" }
+dotguard = { path = "../crates/dotguard" }
+flate2 = "1.1.10"
+jsonschema = { version = "=0.20.0", default-features = false, features = [
+  "draft201909",
+  "draft202012",
+] }
+model = { path = "../crates/model" }
+platform = { path = "../crates/platform", features = ["pty"] }
+portable-pty = "0.9.0"
+pr-workflow = { path = "../crates/pr-workflow" }
+proc-macro2 = "1.0.107"
+prose = { path = "../crates/prose" }
 pulldown-cmark = "0.13"
-yaml-rust2 = "0.13"
-serde_json = "1.0"
+quote = "1.0.47"
+rules = { path = "../crates/rules" }
+schemars = "1.2"
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0"
 sha2 = "0.11.0"
+skill-ops = { path = "../crates/skill-ops" }
+syn = { version = "2.0.119", features = ["full", "visit"] }
 tempfile = "3.27"
 toml = "1.0"
+vt100 = "0.16.2"
+yaml-rust2 = "0.13"
 
-[build-dependencies]
-sha2 = "0.11.0"
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["process"] }
 
-[lints.rust]
-unsafe_code = "forbid"
-unfulfilled_lint_expectations = "deny"
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
-
-[lints.clippy]
-all = { level = "warn", priority = -1 }
-allow_attributes = "deny"
-allow_attributes_without_reason = "deny"
-
-[workspace]
+[lints]
+workspace = true

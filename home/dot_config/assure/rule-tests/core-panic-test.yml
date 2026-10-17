@@ -1,0 +1,10 @@
+id: core-panic
+valid:
+  - "pub fn first(bytes: &[u8]) -> Option<u8> { bytes.first().copied() }"
+  - "#[cfg(test)]\nmod tests { #[test] fn first() { assert_eq!(super::first(b\"a\").unwrap(), b'a'); } }"
+  - "#[cfg(kani)]\n#[kani::proof]\nfn harness() { let value: Option<u8> = kani::any(); kani::assume(value.is_some()); value.unwrap(); }"
+invalid:
+  - "pub fn first(bytes: &[u8]) -> u8 { bytes.first().copied().unwrap() }"
+  - "pub fn first(bytes: &[u8]) -> u8 { *bytes.first().expect(\"a byte\") }"
+  - "pub fn later() -> u8 { todo!() }"
+  - "pub fn never(code: u8) -> u8 { if code > 1 { panic!(\"bad code\") } code }"

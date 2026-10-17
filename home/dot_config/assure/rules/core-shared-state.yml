@@ -1,0 +1,22 @@
+id: core-shared-state
+language: rust
+severity: error
+message: The core mutates shared state through interior mutability or a mutable static.
+note: Return the new state as a value and let the caller keep it.
+metadata:
+  basis: Functional core, imperative shell (Bernhardt 2012); CWE-1109
+files:
+  - "**/rules/src/**/*.rs"
+  - "**/core/src/**/*.rs"
+  - "**/*-core/src/**/*.rs"
+  - "**/*_core/src/**/*.rs"
+  - "**/domain/**/*.rs"
+rule:
+  any:
+    - kind: type_identifier
+      regex: ^(Cell|RefCell|OnceCell|UnsafeCell|Mutex|RwLock|Atomic[A-Za-z0-9]+)$
+    - kind: static_item
+      has:
+        kind: mutable_specifier
+  not:
+    matches: verification-only

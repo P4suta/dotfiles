@@ -1,0 +1,4 @@
+# The count of psscriptanalyzer findings per path and rule that existed when the stage started.
+# The gate refuses a finding beyond these counts and an entry that admits more than its path holds, so this file only shrinks.
+
+[findings]

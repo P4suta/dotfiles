@@ -1,0 +1,21 @@
+id: core-panic
+language: rust
+severity: error
+message: The core panics instead of returning its failure as a value.
+note: Return Option or Result and let the adapter decide what a failure means; read slices with get.
+metadata:
+  basis: Make illegal states unrepresentable (Minsky 2011); CWE-248
+files:
+  - "**/rules/src/**/*.rs"
+  - "**/core/src/**/*.rs"
+  - "**/*-core/src/**/*.rs"
+  - "**/*_core/src/**/*.rs"
+  - "**/domain/**/*.rs"
+rule:
+  any:
+    - pattern: $VALUE.unwrap()
+    - pattern: $VALUE.expect($$$)
+    - kind: macro_invocation
+      regex: ^(panic|todo|unimplemented|unreachable)!
+  not:
+    matches: verification-only

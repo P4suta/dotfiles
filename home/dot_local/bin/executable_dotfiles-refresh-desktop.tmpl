@@ -1,0 +1,2 @@
+#!/bin/sh
+exec {{ includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles") }} --root {{ includeTemplate "partials/sh_quote" .chezmoi.workingTree }} setup desktop --config {{ includeTemplate "partials/sh_quote" .chezmoi.configFile }} --live

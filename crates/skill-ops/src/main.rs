@@ -1,0 +1,808 @@
+use anyhow::{Context, Result, ensure};
+use clap::{Parser, Subcommand};
+use serde::{Deserialize, Serialize};
+use skill_ops::freshness::Built;
+use skill_ops::refusal::Refusal;
+use skill_ops::{self as ops, Catalog, Note, Policy, Report, Review, Runtime};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
+/// The largest native hook input the engine reads, 8 MiB.
+const HOOK_INPUT_LIMIT: usize = 8 * 1024 * 1024;
+
+#[derive(Debug)]
+struct MaintenancePending(Refusal);
+
+impl MaintenancePending {
+    fn new(cause: impl Into<String>) -> Self {
+        Self(
+            Refusal::new(
+                ops::incident_rules::MAINTENANCE_PENDING_RULE,
+                cause,
+                "inspect the pending skill maintenance and complete its prevention evidence",
+            )
+            .evidence("the maintenance check observed existing incomplete obligations"),
+        )
+    }
+}
+
+impl std::fmt::Display for MaintenancePending {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0.cause)
+    }
+}
+
+impl std::error::Error for MaintenancePending {}
+
+#[derive(Parser)]
+#[command(about = "Load, observe, analyze, and verify the owner's shared skills locally")]
+struct Cli {
+    #[arg(long, env = "SKILL_OPS_TREE")]
+    tree: Option<PathBuf>,
+    #[arg(long, env = "SKILL_OPS_POLICY")]
+    policy: Option<PathBuf>,
+    #[arg(long, env = "SKILL_OPS_STATE")]
+    state: Option<PathBuf>,
+    #[arg(long, env = "SKILL_OPS_APPROVED")]
+    approved: Option<PathBuf>,
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Load {
+        names: Vec<String>,
+        #[arg(long)]
+        bundle: Option<String>,
+    },
+    Observe {
+        #[arg(long)]
+        client: String,
+    },
+    Analyze {
+        #[arg(long)]
+        out: PathBuf,
+    },
+    Triage {
+        #[arg(long)]
+        decisions: PathBuf,
+        #[arg(long)]
+        evidence_root: Option<PathBuf>,
+    },
+    Note {
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        summary: String,
+        #[arg(long)]
+        skill: Vec<String>,
+        #[arg(long, required = true)]
+        evidence: Vec<String>,
+    },
+    /// Records one incident of a rule, unless the recorder marks the failure expected.
+    Incident {
+        #[arg(long)]
+        rule: String,
+        #[arg(long)]
+        session: String,
+        #[arg(long, default_value = "gate-refusal")]
+        source: String,
+        #[arg(long)]
+        evidence: Vec<String>,
+        #[arg(long)]
+        red_test: bool,
+        #[arg(long)]
+        counterexample: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Records prevention for the named incident identities.
+    Discharge {
+        #[arg(long)]
+        rule: String,
+        #[arg(long, required = true)]
+        incident: Vec<String>,
+        #[arg(long)]
+        commit: Option<String>,
+        #[arg(long)]
+        evidence: Vec<String>,
+        #[arg(long)]
+        exempt_reason: Option<String>,
+        #[arg(long)]
+        reconsideration: Option<String>,
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+    },
+    Check,
+    Stop,
+    Doctor,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimeReview {
+    evidence_root: PathBuf,
+    evidence_hashes: BTreeMap<String, String>,
+    review: Review,
+}
+
+fn optional<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>> {
+    if path.try_exists()? {
+        Ok(Some(ops::read_json(path)?))
+    } else {
+        Ok(None)
+    }
+}
+
+fn reviewed(approved: &Path) -> Result<BTreeMap<String, ops::Reviewed>> {
+    Ok(if approved.try_exists()? {
+        ops::read_approved(approved)?.reviewed
+    } else {
+        BTreeMap::new()
+    })
+}
+
+fn stdin_json() -> Result<serde_json::Value> {
+    let mut text = String::new();
+    std::io::stdin()
+        .take(HOOK_INPUT_LIMIT as u64 + 1)
+        .read_to_string(&mut text)?;
+    ensure!(
+        text.len() <= HOOK_INPUT_LIMIT,
+        "hook input exceeds its size bound"
+    );
+    serde_json::from_str(&text).context("invalid native hook input")
+}
+
+fn archived_report(state: &Path, identity: &str) -> Result<Report> {
+    ensure!(
+        skill_ops::skill_rules::immutable_identity_valid(
+            identity.len(),
+            identity.bytes().all(|byte| byte.is_ascii_hexdigit())
+        ),
+        "invalid immutable report identity"
+    );
+    let report = ops::read_json(&state.join("reports").join(format!("{identity}.json")))?;
+    ensure!(
+        ops::hash(&report)? == identity,
+        "immutable report identity mismatch"
+    );
+    Ok(report)
+}
+
+/// The store that holds the content of a review's evidence, named by the digest of its evidence hashes, so the review outlives the checkout it cited.
+fn evidence_store(state: &Path, hashes: &BTreeMap<String, String>) -> Result<PathBuf> {
+    Ok(state.join("review-evidence").join(ops::hash(hashes)?))
+}
+
+/// Copies each cited evidence file from `root` into `store`, accepting an existing copy only when it holds the same bytes.
+fn record_evidence(store: &Path, root: &Path, hashes: &BTreeMap<String, String>) -> Result<()> {
+    for name in hashes.keys() {
+        let bytes = fs::read(root.join(name))
+            .with_context(|| format!("read review evidence {name} under {}", root.display()))?;
+        let copy = store.join(name);
+        if copy.try_exists()? {
+            ensure!(
+                fs::read(&copy)? == bytes,
+                "the recorded copy of review evidence {name} differs from the evidence it records"
+            );
+        } else {
+            ops::write_file(&copy, &bytes, false)?;
+        }
+    }
+    Ok(())
+}
+
+/// The command that records a fresh review, which every refusal of recorded evidence names.
+const RETRIAGE: &str = "skill-ops analyze --out <report.json> && skill-ops triage --decisions <decisions.json> --evidence-root <checkout>";
+
+/// The evidence store of a recorded review, once its content matches the review's hashes.
+/// A review recorded before the store existed names only its checkout, so this copies its evidence from that checkout while the checkout still holds it.
+fn recorded_evidence(state: &Path, reviewed: &RuntimeReview) -> Result<PathBuf> {
+    let store = evidence_store(state, &reviewed.evidence_hashes)?;
+    let root = &reviewed.evidence_root;
+    if !store.try_exists()? {
+        let current = root
+            .is_dir()
+            .then(|| ops::evidence_hashes(&reviewed.review, root).ok())
+            .flatten();
+        if current.as_ref() != Some(&reviewed.evidence_hashes) {
+            let cause = if root.is_dir() {
+                "the review recorded its evidence only by path, and that checkout no longer holds the evidence it reviewed"
+            } else {
+                "the review recorded its evidence only by path, and that checkout no longer exists"
+            };
+            return Err(Refusal::new("skill-ops.review-evidence", cause, RETRIAGE)
+                .evidence(format!("evidence checkout: {}", root.display()))
+                .evidence(format!(
+                    "review record: {}",
+                    state.join("review.json").display()
+                ))
+                .into());
+        }
+        record_evidence(&store, root, &reviewed.evidence_hashes)?;
+    }
+    let verified = ops::evidence_hashes(&reviewed.review, &store).ok();
+    if verified.as_ref() != Some(&reviewed.evidence_hashes) {
+        return Err(Refusal::new(
+            "skill-ops.review-evidence",
+            "the recorded copy of the review's evidence no longer matches the hashes the review holds",
+            RETRIAGE,
+        )
+        .evidence(format!("evidence store: {}", store.display()))
+        .into());
+    }
+    Ok(store)
+}
+
+fn pending(
+    catalog: &Catalog,
+    policy: &Policy,
+    state: &Path,
+    approved: &Path,
+    root: &Path,
+) -> Result<bool> {
+    let draft: Option<Report> = optional(&state.join("report.json"))?;
+    let baseline = ops::read_approved(approved)?;
+    // Each decision binds to its finding, so a review stands in for the draft only when it decides every draft finding that no reviewed revision adopted.
+    let reviewed: Option<RuntimeReview> = optional::<RuntimeReview>(&state.join("review.json"))?
+        .filter(|reviewed| {
+            let findings = draft.as_ref().map(|draft| {
+                let adopted = ops::adopted_findings(draft, &baseline.reviewed);
+                draft
+                    .findings
+                    .iter()
+                    .enumerate()
+                    .map(|(index, finding)| (index, adopted.contains(&finding.id)))
+                    .collect::<Vec<_>>()
+            });
+            let decided: Vec<usize> = draft.as_ref().map_or_else(Vec::new, |draft| {
+                reviewed
+                    .review
+                    .decisions
+                    .iter()
+                    .filter_map(|decision| {
+                        draft
+                            .findings
+                            .iter()
+                            .position(|finding| finding.id == decision.id)
+                    })
+                    .collect()
+            });
+            skill_ops::skill_gate_rules::review_applies(findings.as_deref(), &decided)
+        });
+    let report = reviewed
+        .as_ref()
+        .map(|reviewed| archived_report(state, &reviewed.review.report_hash))
+        .transpose()?;
+    let events = ops::recorded(state)?;
+    let notes = ops::notes(state)?;
+    let recorded = reviewed
+        .as_ref()
+        .map(|reviewed| recorded_evidence(state, reviewed))
+        .transpose()?;
+    let baseline = ops::read_approved(approved)?;
+    if let Some(reviewed) = &reviewed {
+        ensure!(
+            ops::evidence_hashes(
+                &reviewed.review,
+                recorded
+                    .as_deref()
+                    .context("a recorded review holds its evidence")?,
+            )? == reviewed.evidence_hashes,
+            "review evidence changed; reassess the current evidence"
+        );
+    }
+    let runtime = Runtime {
+        catalog,
+        policy,
+        events: &events,
+        notes: &notes,
+        report: report.as_ref().or(draft.as_ref()),
+        review: reviewed.as_ref().map(|item| &item.review),
+        approved: &baseline,
+        evidence_root: recorded.as_deref().unwrap_or(root),
+    };
+    if draft.is_some()
+        && !ops::runtime_pending(Runtime {
+            report: draft.as_ref(),
+            review: None,
+            ..runtime
+        })?
+    {
+        return Ok(false);
+    }
+    ops::runtime_pending(runtime)
+}
+
+/// Whether `specs/skill_gate.qnt` lets triage record a review of the current analysis and store draft.
+fn triage_admitted(current: bool, drafted: bool) -> bool {
+    use skill_ops::skill_gate_rules::{Gate, Move, Store, gate, step};
+    let state = Gate {
+        events: 1,
+        draft: Some(u8::from(current && drafted)),
+        ..gate()
+    };
+    step(Store::Fixed, state, Move::Triage).is_some()
+}
+
+/// The Stop hook's answer from `specs/skill_gate.qnt`: stop with no pending work, request maintenance once per session, then report an incomplete end.
+fn stop_answer(current: bool, continued: bool) -> skill_ops::skill_gate_rules::Answer {
+    use skill_ops::skill_gate_rules::{Answer, Gate, Move, Store, THRESHOLD, gate, safe, step};
+    let state = Gate {
+        events: if current { 0 } else { THRESHOLD },
+        continued,
+        requests: u8::from(continued),
+        ..gate()
+    };
+    step(Store::Fixed, state, Move::Stop)
+        .filter(safe)
+        .map_or(Answer::End, |next| next.answer)
+}
+
+fn open_session(cli: &Cli) -> Result<Session> {
+    let user_directory = PathBuf::from(
+        std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+            .context("user directory is unavailable")?,
+    );
+    let tree = cli
+        .tree
+        .clone()
+        .unwrap_or_else(|| user_directory.join(".agents/skills"));
+    let policy_path = cli
+        .policy
+        .clone()
+        .unwrap_or_else(|| user_directory.join(".config/skill-ops/policy.json"));
+    let state = cli
+        .state
+        .clone()
+        .unwrap_or_else(|| user_directory.join(".local/state/skill-ops"));
+    let approved = cli
+        .approved
+        .clone()
+        .unwrap_or_else(|| user_directory.join(".config/skill-ops/approved.json"));
+    let catalog = if cli.tree.is_none() {
+        let baseline = ops::read_approved(&approved)?;
+        ensure!(
+            ops::hash(&baseline.catalog)? == baseline.catalog_hash,
+            "managed catalog manifest is inconsistent"
+        );
+        ops::catalog_owned(&tree, &baseline.catalog)?
+    } else {
+        ops::catalog(&tree)?
+    };
+    let policy: Policy = ops::read_json(&policy_path)?;
+    ops::validate_policy(&policy, &catalog)?;
+    Ok(Session {
+        user_directory,
+        tree,
+        state,
+        approved,
+        catalog,
+        policy,
+    })
+}
+
+fn execute(cli: Cli) -> Result<()> {
+    let session = open_session(&cli)?;
+    match cli.command {
+        Commands::Load { names, bundle } => session.load(names, bundle)?,
+        Commands::Observe { client } => {
+            let input = stdin_json()?;
+            ops::record_native_failure(&session.state, &client, &input)?;
+            for observation in ops::observations(&client, &input, &session.catalog, &session.tree)?
+            {
+                ops::record(&session.state, &observation)?;
+            }
+        }
+        Commands::Analyze { out } => session.analyze(&out)?,
+        Commands::Triage {
+            decisions,
+            evidence_root,
+        } => session.triage(&decisions, evidence_root)?,
+        Commands::Note {
+            kind,
+            summary,
+            skill,
+            evidence,
+        } => session.note(&Note {
+            kind,
+            skills: skill,
+            summary,
+            evidence,
+        })?,
+        Commands::Incident {
+            rule,
+            session: incident_session,
+            source,
+            evidence,
+            red_test,
+            counterexample,
+            dry_run,
+        } => session.incident(
+            &rule,
+            &incident_session,
+            &source,
+            evidence,
+            red_test,
+            counterexample,
+            dry_run,
+        )?,
+        Commands::Discharge {
+            rule,
+            incident,
+            commit,
+            evidence,
+            exempt_reason,
+            reconsideration,
+            root,
+        } => {
+            let outcome = if evidence.is_empty() {
+                "exempt"
+            } else {
+                "mechanized"
+            };
+            let discharges: Vec<ops::Discharge> = incident
+                .into_iter()
+                .map(|id| ops::Discharge {
+                    schema: 1,
+                    rule: rule.clone(),
+                    incident: Some(id),
+                    commit: commit.clone(),
+                    outcome: outcome.into(),
+                    evidence: evidence.clone(),
+                    reason: exempt_reason.clone(),
+                    reconsideration: reconsideration.clone(),
+                })
+                .collect();
+            session.discharge(&discharges, &root)?;
+        }
+        Commands::Check => {
+            if let Some(open) = session.open_incidents()? {
+                return Err(MaintenancePending::new(open).into());
+            }
+            if session.pending()? {
+                return Err(MaintenancePending::new(
+                    "skill maintenance is pending; run skill-ops analyze --out FILE and triage the findings it lists with skill-ops triage --decisions FILE"
+                ).into());
+            }
+        }
+        Commands::Stop => unreachable!("Stop is translated into a checked completion request"),
+        Commands::Doctor => session.doctor()?,
+    }
+    Ok(())
+}
+
+/// The catalog, policy, and local state one skill-ops command works on.
+struct Session {
+    user_directory: PathBuf,
+    tree: PathBuf,
+    state: PathBuf,
+    approved: PathBuf,
+    catalog: ops::Catalog,
+    policy: Policy,
+}
+
+impl Session {
+    fn pending(&self) -> Result<bool> {
+        pending(
+            &self.catalog,
+            &self.policy,
+            &self.state,
+            &self.approved,
+            &self.tree,
+        )
+    }
+
+    /// Records one incident of a rule, unless the recorder marks the failure expected.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the command line holds one flag per expected-failure fact"
+    )]
+    fn incident(
+        &self,
+        rule: &str,
+        incident_session: &str,
+        source: &str,
+        evidence: Vec<String>,
+        red_test: bool,
+        counterexample: bool,
+        dry_run: bool,
+    ) -> Result<()> {
+        let source = skill_ops::incident_rules::Source::from_key(source)
+            .with_context(|| format!("unknown incident source `{source}`"))?;
+        let incident = ops::Incident::new(rule, incident_session, source, evidence)?;
+        let expected = skill_ops::incident_rules::Expected {
+            red_test,
+            counterexample,
+            dry_run,
+        };
+        if ops::record_incident(&self.state, &incident, expected)? {
+            println!("Recorded an incident of `{rule}`; a discharge is now required");
+        } else {
+            println!("Recorded no new incident");
+        }
+        Ok(())
+    }
+
+    /// Records prevention for each named incident.
+    fn discharge(&self, discharges: &[ops::Discharge], root: &Path) -> Result<()> {
+        ops::record_discharges(&self.state, root, discharges)?;
+        for discharge in discharges {
+            println!(
+                "Recorded {} prevention for incident {} of `{}`",
+                discharge.outcome,
+                discharge.incident.as_deref().unwrap_or_default(),
+                discharge.rule
+            );
+        }
+        Ok(())
+    }
+
+    /// The refusal that names every rule whose incidents lack a prevention decision, ranked by repetition first.
+    fn open_incidents(&self) -> Result<Option<String>> {
+        let open = ops::open_incident_rules(&self.state)?;
+        if open.is_empty() {
+            return Ok(None);
+        }
+        let names: Vec<String> = open
+            .iter()
+            .map(|(rule, repetitions, rank)| {
+                let weight = if *rank == skill_ops::incident_rules::Rank::Repeated {
+                    "repeated "
+                } else {
+                    ""
+                };
+                format!("{rule} ({weight}{repetitions} incidents)")
+            })
+            .collect();
+        Ok(Some(format!(
+            "incidents of {} lack a prevention decision.\nNext action: {}",
+            names.join(", "),
+            skill_ops::incident_rules::next_action()
+        )))
+    }
+
+    /// Prints the dependency plan of the selected skills and each skill's instructions in that order.
+    fn load(&self, mut names: Vec<String>, bundle: Option<String>) -> Result<()> {
+        if let Some(bundle) = bundle {
+            names.extend(
+                self.policy
+                    .bundles
+                    .get(&bundle)
+                    .context("unknown skill bundle")?
+                    .iter()
+                    .cloned(),
+            );
+        }
+        ensure!(!names.is_empty(), "select a skill or bundle");
+        let available: BTreeSet<_> = self.catalog.skills.keys().cloned().collect();
+        let plan = ops::dependency_plan(&available, &names, &self.policy.requirements)?;
+        println!("SKILL_OPS_LOAD {}", serde_json::to_string(&plan)?);
+        for name in plan {
+            println!(
+                "\n{}",
+                fs::read_to_string(self.tree.join(name).join("SKILL.md"))?
+            );
+        }
+        Ok(())
+    }
+
+    fn analyze(&self, out: &Path) -> Result<()> {
+        let (catalog, policy, state, approved) =
+            (&self.catalog, &self.policy, &self.state, &self.approved);
+        let _store = ops::lock_store(state)?;
+        let events = ops::recorded(state)?;
+        let notes = ops::notes(state)?;
+        let report = ops::analyze(catalog, policy, &events, &notes)?;
+        let adopted = ops::adopted_findings(&report, &reviewed(approved)?);
+        ops::write_json(out, &report, false)?;
+        ops::preserve_json(
+            &state
+                .join("reports")
+                .join(format!("{}.json", ops::hash(&report)?)),
+            &report,
+        )?;
+        if out != state.join("report.json") {
+            ops::write_json(&state.join("report.json"), &report, true)?;
+        }
+        println!(
+            "Analyzed {} skills, {} observations, {} sessions, and {} improvement notes; report {}",
+            catalog.skills.len(),
+            events.len(),
+            report.sessions,
+            notes.len(),
+            ops::hash(&report)?
+        );
+        let open: Vec<_> = report
+            .findings
+            .iter()
+            .filter(|finding| !adopted.contains(&finding.id))
+            .collect();
+        println!(
+            "Adopted {} findings from the reviewed skill revisions",
+            adopted.len()
+        );
+        if open.is_empty() {
+            println!("No finding needs triage");
+        } else {
+            for finding in &open {
+                println!("Needs triage: {} ({})", finding.id, finding.kind);
+            }
+            println!(
+                "Record these dispositions in a Review JSON with report_hash and decisions, then run skill-ops triage --decisions FILE."
+            );
+        }
+        Ok(())
+    }
+
+    fn triage(&self, decisions: &Path, evidence_root: Option<PathBuf>) -> Result<()> {
+        let (catalog, policy, state, approved) =
+            (&self.catalog, &self.policy, &self.state, &self.approved);
+        let review: Review = ops::read_json(decisions)?;
+        // The store lock holds every analysis off until triage records the review, binding it to the draft it checked.
+        let _store = ops::lock_store(state)?;
+        let report = archived_report(state, &review.report_hash)?;
+        let current = ops::analyze(catalog, policy, &ops::recorded(state)?, &ops::notes(state)?)?;
+        let draft: Option<Report> = optional(&state.join("report.json"))?;
+        ensure!(
+            triage_admitted(report == current, draft.as_ref() == Some(&report)),
+            "analysis changed before triage; analyze the current evidence"
+        );
+        let evidence_root =
+            skill_ops::canonical(&evidence_root.unwrap_or_else(|| self.tree.clone()))?;
+        ops::check_review(
+            &ops::hash(&report)?,
+            &report.findings,
+            &ops::adopted_findings(&report, &reviewed(approved)?),
+            &review,
+            &evidence_root,
+        )?;
+        let evidence_hashes = ops::evidence_hashes(&review, &evidence_root)?;
+        record_evidence(
+            &evidence_store(state, &evidence_hashes)?,
+            &evidence_root,
+            &evidence_hashes,
+        )?;
+        let reviewed = RuntimeReview {
+            evidence_root,
+            evidence_hashes,
+            review,
+        };
+        ops::preserve_json(
+            &state
+                .join("reviews")
+                .join(format!("{}.json", ops::hash(&reviewed)?)),
+            &reviewed,
+        )?;
+        ops::write_json(&state.join("review.json"), &reviewed, true)?;
+        println!("Verified every disposition against the current analysis and local evidence");
+        Ok(())
+    }
+
+    fn note(&self, note: &Note) -> Result<()> {
+        ops::analyze(&self.catalog, &self.policy, &[], std::slice::from_ref(note))?;
+        let destination = self
+            .state
+            .join("notes")
+            .join(format!("{}.json", ops::hash(note)?));
+        if destination.try_exists()? {
+            ensure!(
+                ops::read_json::<Note>(&destination)? == *note,
+                "conflicting improvement observation"
+            );
+        } else {
+            ops::write_json(&destination, note, false)?;
+        }
+        println!(
+            "Recorded a local improvement observation; analysis and disposition are now required"
+        );
+        Ok(())
+    }
+
+    fn doctor(&self) -> Result<()> {
+        let user_directory = &self.user_directory;
+        let events = ops::recorded(&self.state)?;
+        println!(
+            "Shared catalog: {} validated skills; {} local observations",
+            self.catalog.skills.len(),
+            events.len()
+        );
+        println!(
+            "Required maintenance: {}",
+            if self.pending()? {
+                "pending"
+            } else {
+                "current"
+            }
+        );
+        for (client, path) in [
+            ("codex", user_directory.join(".codex/hooks.json")),
+            ("claude", user_directory.join(".claude/settings.json")),
+        ] {
+            let data: serde_json::Value = ops::read_json(&path)?;
+            ensure!(
+                skill_ops::skill_install::merge_hooks(data.clone(), client)? == data,
+                "{client} observer or completion hook registration has drifted"
+            );
+            println!(
+                "{client}: observer and completion definitions registered; runtime trust and activation require native client verification"
+            );
+        }
+        ensure!(
+            fs::read_to_string(user_directory.join(".config/opencode/plugins/skill-ops.ts"))?
+                == include_str!("../../../home/dot_config/opencode/plugins/skill-ops.ts"),
+            "OpenCode observer definition has drifted"
+        );
+        println!(
+            "OpenCode: typed observer definition registered; runtime activation requires native client verification"
+        );
+        Ok(())
+    }
+}
+
+fn main() {
+    match skill_ops::freshness::print_build_identity() {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(error) => {
+            skill_ops::report(&error);
+            std::process::exit(1);
+        }
+    }
+    let mut cli = Cli::parse();
+    if !platform::incidents::enabled() {
+        if matches!(cli.command, Commands::Stop) {
+            println!("{{}}");
+        } else {
+            println!("Experimental skill operations are disabled; no assessment was performed.");
+        }
+        return;
+    }
+    let result = if matches!(cli.command, Commands::Stop) {
+        use skill_ops::skill_gate_rules::Answer;
+        let input = stdin_json();
+        let continued = input
+            .as_ref()
+            .is_ok_and(|input| input["stop_hook_active"] == true);
+        cli.command = Commands::Check;
+        let checked = match skill_ops::freshness::require_current(Built::SkillOps) {
+            Err(error) => Err(error.context(
+                "run `just install-skill-ops` in the dotfiles checkout to rebuild the stale hook",
+            )),
+            Ok(()) => input.and_then(|_| execute(cli)),
+        };
+        let reason = checked.as_ref().err().map(|error| match error.downcast_ref::<Refusal>() {
+            Some(refusal) => format!(
+                "Skill maintenance remains incomplete: {}. Next: {}",
+                refusal.cause,
+                refusal.next.as_deref().unwrap_or("none")
+            ),
+            None => format!("Skill maintenance remains incomplete: {error:#}. Run skill-ops analyze, assess the findings it lists with skill-operations, implement accepted changes, and run skill-ops triage for them before claiming completion."),
+        });
+        let response = match stop_answer(checked.is_ok(), continued) {
+            Answer::Allow => serde_json::json!({}),
+            Answer::Request => {
+                serde_json::json!({"decision":"block","reason":reason})
+            }
+            Answer::End | Answer::None => {
+                serde_json::json!({"continue":false,"stopReason":reason,"systemMessage":"Skill maintenance remains incomplete; automatic continuation is bounded."})
+            }
+        };
+        println!("{response}");
+        Ok(())
+    } else {
+        skill_ops::freshness::require_current(Built::SkillOps).and_then(|()| execute(cli))
+    };
+    if let Err(error) = result {
+        if let Some(pending) = error.downcast_ref::<MaintenancePending>() {
+            eprint!("{}", pending.0.render());
+        } else {
+            skill_ops::report(&error);
+        }
+        std::process::exit(1);
+    }
+}

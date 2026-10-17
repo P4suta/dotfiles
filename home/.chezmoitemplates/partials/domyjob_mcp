@@ -1,0 +1,28 @@
+{{- define "domyjob_json_string" -}}
+{{- $lineSeparator := printf "%c" 8232 -}}
+{{- $paragraphSeparator := printf "%c" 8233 -}}
+{{- $lines := list -}}
+{{- range splitList $lineSeparator . -}}
+{{- $paragraphs := list -}}
+{{- range splitList $paragraphSeparator . -}}
+{{- $paragraphs = append $paragraphs (toRawJson . | trimPrefix "\"" | trimSuffix "\"") -}}
+{{- end -}}
+{{- $lines = append $lines (join $paragraphSeparator $paragraphs) -}}
+{{- end -}}
+{{- printf "\"%s\"" (join $lineSeparator $lines) -}}
+{{- end -}}
+{{- $versions := joinPath .chezmoi.homeDir ".cargo" "domyjob" "versions" -}}
+{{- $pin := joinPath $versions "pinned" -}}
+{{- with lstat $pin -}}
+{{- if ne .type "file" -}}{{ fail "The domyjob build pin must be a regular file" }}{{- end -}}
+{{- $build := include $pin | trim -}}
+{{- if not (regexMatch "^[0-9a-f]{16}$" $build) -}}{{ fail "The domyjob build pin must hold 16 lowercase hexadecimal digits" }}{{- end -}}
+{{- $executable := "domyjob" -}}
+{{- if eq $.profile "windows" -}}{{- $executable = "domyjob.exe" -}}{{- end -}}
+{{- $program := joinPath $versions $build "bin" $executable -}}
+{{- $file := lstat $program -}}
+{{- if not (and $file (eq $file.type "file")) -}}{{ fail "The pinned domyjob executable must be a regular file; run domyjob chat setup" }}{{- end -}}
+{{- print "{\"type\":\"local\",\"command\":[" -}}
+{{- template "domyjob_json_string" $program -}}
+{{- print ",\"mcp\"],\"enabled\":true}" -}}
+{{- end -}}

@@ -1,0 +1,36 @@
+id: swallowed-error
+language: rust
+severity: error
+message: The code discards a failure without acting on it.
+note: Return the error, report it with what failed, or match the one outcome that is expected and handle every other.
+metadata:
+  cwe: CWE-390
+  ruleset: SEI CERT ERR00-J
+ignores:
+  - "**/tests/**"
+  - "**/benches/**"
+rule:
+  any:
+    - kind: let_declaration
+      pattern: let _ = $VALUE;
+      has:
+        field: value
+        any:
+          - kind: call_expression
+          - kind: macro_invocation
+          - kind: await_expression
+          - kind: try_expression
+    - kind: expression_statement
+      pattern: $VALUE.ok();
+    - kind: match_arm
+      all:
+        - has:
+            field: pattern
+            regex: '^Err\(_\)$'
+        - has:
+            field: value
+            regex: '^\{\s*\}$'
+    - kind: if_expression
+      pattern: if let Err(_) = $VALUE {}
+  not:
+    matches: verification-only

@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Global personal issue prerequisite
-
-Status: accepted.
 
 ## Context
 

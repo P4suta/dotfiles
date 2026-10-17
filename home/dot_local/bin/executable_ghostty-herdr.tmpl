@@ -1,0 +1,2 @@
+#!/bin/sh
+exec {{ includeTemplate "partials/sh_quote" (printf "%s/.local/bin/dotfiles" .chezmoi.homeDir) }} terminal ghostty herdr -- "$@"

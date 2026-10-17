@@ -1,0 +1,29 @@
+[package]
+name = "skill-ops"
+description = "The skill operations engine and the installation of the shared skills"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "skill-ops"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.6", features = ["derive", "env"] }
+model = { path = "../model" }
+platform = { path = "../platform" }
+pulldown-cmark = "0.13"
+rules = { path = "../rules" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.11.0"
+tempfile = "3.27"
+toml = "1.0"
+yaml-rust2 = "0.13"
+
+[lints]
+workspace = true

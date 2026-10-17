@@ -1,0 +1,16 @@
+[platforms.linux.desktop]
+kitty_channel = "stable"
+nerd_fonts_version = "v3.5.1"
+opacity = "0.85"
+zed_channel = "stable"
+
+[platforms.linux.desktop.keyboard]
+delay = 300
+repeat_interval = 33
+
+[platforms.windows.terminal]
+font_family = "JetBrainsMono NF"
+font_size = 11
+max_fps = 120
+multiplexer = "herdr"
+opacity = 0.8

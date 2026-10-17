@@ -1,0 +1,59 @@
+{{- /*
+  The one definition of the machine-local configuration.
+  `chezmoi init` writes it on a host, and the profile gates render it for their fixtures.
+  It writes only keys that a template or the Rust runtime reads.
+*/ -}}
+{{- $detected := "linux" -}}
+{{- if eq .chezmoi.os "darwin" -}}
+{{-   $detected = "mac" -}}
+{{- else if eq .chezmoi.os "windows" -}}
+{{-   $detected = "windows" -}}
+{{- else if eq .chezmoi.os "linux" -}}
+{{-   if .chezmoi.kernel.osrelease | lower | contains "microsoft" -}}{{- $detected = "wsl" -}}{{- end -}}
+{{- end -}}
+{{- $profile := promptChoiceOnce . "profile" "Dotfiles profile" (list "mac" "linux" "windows" "wsl") $detected -}}
+{{- $role := promptChoiceOnce . "role" "Machine role" (list "personal" "work") "personal" -}}
+{{- $name := promptStringOnce . "git.name" "Git author name" -}}
+{{- $email := promptStringOnce . "git.email" "Git author email" -}}
+{{- $key := promptStringOnce . "signing.public_key" "SSH signing public key (empty disables signing)" -}}
+sourceDir = {{ .chezmoi.workingTree | quote }}
+umask = 0o022
+
+[data]
+profile = {{ $profile | quote }}
+role = {{ $role | quote }}
+
+[data.git]
+name = {{ $name | quote }}
+email = {{ $email | quote }}
+
+[data.signing]
+enabled = {{ ne $key "" }}
+public_key = {{ $key | quote }}
+
+[data.herdr_agent]
+public_keys = {{ dig "herdr_agent" "public_keys" (list) . | toJson }}
+
+[data.doppler]
+project = {{ promptStringOnce . "doppler.project" "Doppler project (optional)" "" | quote }}
+config = {{ promptStringOnce . "doppler.config" "Doppler config (optional)" "" | quote }}
+
+[data.doppler.secrets]
+{{- range (list "claude" "codex" "opencode") }}
+{{ . }} = {{ dig "doppler" "secrets" . (list) $ | toJson }}
+{{- end }}
+
+[data.paths]
+projects = {{ promptStringOnce . "paths.projects" "Project checkout directory" (joinPath .chezmoi.homeDir "projects") | quote }}
+{{- range (dig "setup" "ignore" (dig "setup" "skip" (list) .) .) }}
+
+[[data.setup.ignore]]
+script = {{ .script | quote }}
+reason = {{ .reason | quote }}
+{{- end }}
+{{- if eq $profile "windows" }}
+
+[interpreters.ps1]
+command = "pwsh"
+args = ["-NoLogo", "-NoProfile"]
+{{- end }}

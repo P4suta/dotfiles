@@ -1,0 +1,15 @@
+{{ if eq .profile "wsl" -}}
+# Local history only.
+# Sync stays off because no server account exists.
+{{ else -}}
+# Local-only: no server registration, so sync stays off.
+{{ end -}}
+auto_sync = false
+update_check = false
+
+# UI
+style = "compact"
+inline_height = 20
+show_preview = true
+search_mode = "fuzzy"
+filter_mode = "global"

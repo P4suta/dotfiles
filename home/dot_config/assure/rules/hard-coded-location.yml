@@ -1,0 +1,25 @@
+id: hard-coded-location
+language: rust
+severity: error
+message: A URL, host, or absolute path sits inline in code instead of in configuration.
+note: Name it in a const in the crate's constants module or read it from configuration, and use the name.
+metadata:
+  cwe: CWE-547
+  ruleset: SEI CERT MSC03-J
+ignores:
+  - "**/tests/**"
+  - "**/benches/**"
+rule:
+  any:
+    - kind: string_literal
+    - kind: raw_string_literal
+  regex: '([a-z][a-z0-9+.-]*://[A-Za-z0-9])|(^r?#*"/(usr|etc|opt|var|tmp|home|bin|sbin|nix|dev|proc|Applications|Library|System)(/|"))|(^r?#*"[A-Za-z]:(\\\\|/))|(\b[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\b)'
+  not:
+    any:
+      - matches: verification-only
+      - inside:
+          stopBy: end
+          any:
+            - kind: const_item
+            - kind: static_item
+            - kind: attribute_item

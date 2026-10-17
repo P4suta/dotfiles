@@ -1,0 +1,7 @@
+id: typescript-hard-coded-location
+valid:
+  - "const RELEASES = 'https://example.com/releases';\nexport function releases(): string { return RELEASES; }"
+  - "export function remote(link: string): boolean { return link.startsWith('https://'); }"
+invalid:
+  - "export function releases(): string { return 'https://example.com/releases'; }"
+  - "export function shell(): string { return '/bin/zsh'; }"

@@ -1,0 +1,5 @@
+{{- if eq .profile "mac" -}}
+{{ includeTemplate "native/nushell-config/mac.nu.tmpl" . }}
+{{- else -}}
+{{ includeTemplate "native/nushell-config/linux.nu.tmpl" . }}
+{{- end -}}

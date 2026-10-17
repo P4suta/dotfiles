@@ -1,0 +1,11 @@
+id: shell-swallowed-error
+language: bash
+severity: error
+message: The script discards a command's failure with `|| true`.
+note: Test the command in an if, and act on the failure, or let the script stop on it.
+metadata:
+  cwe: CWE-390
+  ruleset: SEI CERT ERR00-J
+rule:
+  kind: list
+  regex: '\|\|\s*(true|:)\s*$'

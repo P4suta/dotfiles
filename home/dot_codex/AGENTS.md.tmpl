@@ -1,0 +1,5 @@
+{{- if eq .profile "mac" -}}
+{{ includeTemplate "native/agent-instructions/mac.md.tmpl" . }}
+{{- else -}}
+{{ includeTemplate "native/agent-instructions/linux.md.tmpl" . }}
+{{- end -}}

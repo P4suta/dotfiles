@@ -1,0 +1,15 @@
+{
+  "revision": "1a7da6223ce3419b879fe59c51bed1eb74e610091eb9bdfd86a6c8bf4766b8aa",
+  "outcome": "implemented",
+  "reason": "Add the judgment the structural gates can't make, where the core boundary goes and which domain types to name, and point at the compiler boundary of the Rust core and the shared ast-grep catalog that refuse the rest; formal-assurance loads it.",
+  "evidence": [
+    "home/dot_agents/skills/functional-architecture/SKILL.md",
+    "home/dot_config/skill-ops/policy.json",
+    "home/dot_config/assure/sgconfig.yml",
+    "crates/rules/src/lib.rs",
+    "crates/rules/src/boundary_rules.rs",
+    "xtask/src/structure.rs",
+    "xtask/tests/structure.rs"
+  ],
+  "revisit": null
+}

@@ -1,10 +1,10 @@
 {
-  "revision": "fae5963ca938364b020650461b6e9e90f986cd28fab950b355b56b0738e671e1",
+  "revision": "60f6ed70f99edab6a75e8cc0c86d904cea9b4423f51c25c177f5f69bb0b383bf",
   "outcome": "implemented",
-  "reason": "Point cross-platform verification at `dotfiles-xtask hosts check`, which the push gates enforce, in the minimal prose of the writing standard; keep CI-job mapping, hosted-only prerequisites, and push-hold judgment.",
+  "reason": "The revision renames the machine-local push hold to the established push pause of the git configuration vocabulary, with every sentence of the skill keeping its meaning.",
   "evidence": [
-    "dot_agents/skills/ci-budget/SKILL.md",
-    "xtask/src/hosts.rs",
+    "home/dot_agents/skills/ci-budget/SKILL.md",
+    "crates/dotfiles/src/hosts.rs",
     "docs/adr/0020-os-family-push-evidence.md"
   ],
   "revisit": null

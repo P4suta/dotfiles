@@ -1,0 +1,6 @@
+{
+  "project": "[tools]\nexample = \"1.2.3\"\n",
+  "mise_lock": "lockfile_version = 3\n[[tools.example]]\nversion = \"1.2.3\"\nbackend = \"cargo:example\"\nspecifiers = [\"1.2.3\"]\n",
+  "cargo_lock": "version = 4\n",
+  "versions": ""
+}

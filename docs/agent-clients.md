@@ -20,7 +20,7 @@ Use POSIX commands and standalone executables such as `git` and `chezmoi` in the
 
 The Bash and PowerShell tools on Windows start without the mise shims on `PATH`, because no shell profile activates mise for them.
 Git hooks still find their tools.
-The global hooks run `dotfiles-xtask`, which starts each hook tool with the mise shims prepended, and this repository's `lefthook.yml` runs `mise x --`.
+The global hooks run `dotfiles`, which starts each hook tool with the mise shims prepended, and this repository's `lefthook.yml` runs `mise x --`.
 A command that an agent runs directly needs the shims prepended to `PATH` or `mise x --` in front of it.
 
 ## Claude Code host terminal on Windows

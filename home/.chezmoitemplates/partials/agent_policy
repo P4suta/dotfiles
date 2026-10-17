@@ -1,0 +1,29 @@
+# Global rules
+
+These personal preferences apply to every project on this machine.
+A project's own instructions take precedence when they conflict.
+
+## Language
+
+- Reply in Japanese.
+- Write outward-facing artifacts such as commit messages, PRs, issues, code comments, documentation, and release notes in English.
+
+## Environment
+
+- Use `mise x -- <command>` when a project pins a specific tool version.
+- Use `gh` for GitHub operations.
+- Follow Conventional Commits.
+
+## Workflow
+
+- Make the smallest change that accomplishes the task, and keep its diff reviewable.
+- Verify changes with a project's own lint, typecheck, and test commands when they exist.
+- Before GitHub-bound implementation, run `pr-workflow start` for the exact destination.
+- Use `pr-workflow` for PR creation, document edits, and ready transitions, and keep the diff within the issue's scope.
+- In personal repositories, use stable descriptive document paths and name new ADRs after the decision with a front-matter date, as the shared `adr` skill describes.
+  Preserve existing filenames and references, and regenerate shared indexes from source records when the repository has a generator.
+- For implementation changes, read the relevant formal-assurance and verification-tools skill instructions directly and meet their verification obligations.
+- Keep experimental skill maintenance off by default, and don't run or require its loading, observation, analysis, triage, or checks without this machine's explicit opt-in.
+- Keep the CodeRabbit CLI and PR review pools separate, apply adaptive thresholds where they apply, and hold a push or PR update while review capacity stays unverified.
+- Never declare a PR complete while supported review findings, required checks, or a review of its current head remain outstanding.
+- Commit, push, reply to or resolve PR threads, request reviews, and merge only when the owner asks.

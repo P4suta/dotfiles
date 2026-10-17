@@ -1,14 +1,16 @@
 {
-  "revision": "b5e0c24b7a7837ff687cb0da7fef9843abb1b7f2677d3f73b788536624050ce3",
+  "revision": "a7dbe2988a0e9719aa64f78e096d863c6330c843ea82943bc69d301db3cad190",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Keep catalog discovery, dependency loading, observations, and evidence-backed maintenance separate from native installation.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
-    "dot_agents/skills/skill-operations/SKILL.md",
-    "dot_agents/skills/skill-operations/references/operations.md",
+    "home/dot_agents/skills/skill-operations/SKILL.md",
+    "home/dot_agents/skills/skill-operations/references/operations.md",
     "docs/adr/0003-local-skill-operations.md",
     "docs/adr/0014-per-skill-decision-records.md",
-    "xtask/tests/skill_ops.rs",
-    "xtask/tests/skill_runtime.rs"
+    "crates/skill-ops/tests/skill_ops.rs",
+    "crates/skill-ops/tests/skill_runtime.rs",
+    "home/dot_agents/skills/skill-operations/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

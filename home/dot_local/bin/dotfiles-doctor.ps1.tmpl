@@ -1,0 +1,2 @@
+& {{ includeTemplate "partials/ps_quote" (joinPath .chezmoi.homeDir ".local/bin/dotfiles.exe") }} --root {{ includeTemplate "partials/ps_quote" .chezmoi.workingTree }} doctor --strict
+exit $LASTEXITCODE

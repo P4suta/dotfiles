@@ -1,0 +1,10 @@
+{{- $enabled := false -}}
+{{- $config := lstat (joinPath .chezmoi.homeDir ".config") -}}
+{{- $directory := lstat (joinPath .chezmoi.homeDir ".config" "skill-ops") -}}
+{{- $stop := lstat (joinPath .chezmoi.homeDir ".config" "skill-ops" "disabled") -}}
+{{- $consent := joinPath .chezmoi.homeDir ".config" "skill-ops" "experimental" -}}
+{{- $file := lstat $consent -}}
+{{- if and $config (eq $config.type "dir") $directory (eq $directory.type "dir") (not $stop) $file (eq $file.type "file") (eq (int $file.size) (len "enabled\n")) -}}
+{{- $enabled = eq (include $consent) "enabled\n" -}}
+{{- end -}}
+{{- $enabled -}}

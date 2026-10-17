@@ -1,0 +1,18 @@
+{{- $pins := includeTemplate "partials/modern-pins" . | fromJson -}}
+[tools]
+{{- range (concat .platforms.wsl.tools.common (index .platforms.wsl.tools .role) | uniq) }}
+{{- if not (hasKey $pins .) }}
+{{ . | quote }} = "latest"
+{{- end }}
+{{- end }}
+{{- range $tool, $version := $pins }}
+{{ $tool | quote }} = {{ $version | quote }}
+{{- end }}
+
+[settings]
+experimental = true
+# A project's configuration loads only after `mise trust` records its exact contents.
+paranoid = true
+
+[settings.github]
+credential_command = {{ includeTemplate "partials/mise-github-credential" . }}
