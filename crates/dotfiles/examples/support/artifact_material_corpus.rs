@@ -36,7 +36,7 @@ const NATIVE_CONFIGURATION: &str = "[tools]\nglobal='1.2.3'\n";
 const NATIVE_LOCK: &str = "lockfile_version=3\n[[tools.global]]\nversion='1.2.3'\nbackend='aqua:owner/global'\nspecifiers=['1.2.3']\n[tools.global.\"platforms.windows-x64\"]\nurl='https://example.com/global.zip'\nchecksum='sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'\n";
 const MISE_CONFIGURATION: &str = "[tools]\n'http:example'={version='1.2.3',url='https://example.com/example.zip',checksum='sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'}\n";
 const MISE_LOCK: &str = "lockfile_version=3\n[[tools.'http:example']]\nversion='1.2.3'\nbackend='http:example'\nspecifiers=['1.2.3']\n[tools.'http:example'.options]\n[tools.'http:example'.\"platforms.windows-x64\"]\nurl='https://example.com/example.zip'\nchecksum='sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'\n";
-const MISE_VERSIONS: &str = "[mise]\nversion='2026.10.7'\n[mise.sha256]\nwindows-x64='152086b35c0e0adc182718f6f280f6b7f58b97535d5070fb6135f4e524a0d0e1'\n";
+const MISE_VERSIONS: &str = "[mise]\nversion='2026.10.9'\n[mise.sha256]\nwindows-x64='bc813006b1bf6cf02f470f44fac775a43da8403266a6c4d68e28dad510dcda39'\n";
 const MISE_PIN: &str = "{\"blake3\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\"effective_filename\":\"example.zip\"}";
 const MISE_ZIP_INDEX: &str =
     "{\"count\":1,\"entries\":[{\"name\":\"mise/bin/mise.exe\",\"length\":37,\"attributes\":0}]}";
@@ -584,7 +584,7 @@ fn mise_configuration_cases() -> Result<Vec<Case>> {
             "mise-archive-old-engine",
             MISE_CONFIGURATION.into(),
             MISE_LOCK.into(),
-            MISE_VERSIONS.replace("2026.10.7", "2026.10.6"),
+            MISE_VERSIONS.replace("2026.10.9", "2026.10.6"),
             Expected::Refused,
         ),
         (

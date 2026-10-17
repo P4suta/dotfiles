@@ -1,14 +1,17 @@
 {
-  "revision": "ecf7ad642aa8aa2c8f03abc034019572058838cb249eb3abf97b9c705df2a88c",
+  "revision": "4e022bfe7fe8d34d4048717b76a4377110c2430ca82eb02cf8319204e385e296",
   "outcome": "implemented",
-  "reason": "Bind the tool declaration to the pinned mise 2026.10.7 bootstrap.\nThe verified release bytes retain the existing exact project pins, configuration precedence, and noninteractive command contract.\nThe inventory checks the declared version against the managed installation.",
+  "reason": "Bind the tool declaration to the pinned mise 2026.10.9 bootstrap.\nThe five launcher checksums match the official release checksum file and asset digests.\nThe archive consumer and its fixtures use the same engine version, and the Windows member index comes from the verified release archive.\nThe inventory checks the declared version against the managed installation.",
   "evidence": [
     "home/dot_agents/skills/mise/SKILL.md",
     "home/dot_agents/skills/mise/tools.toml",
     "home/.chezmoidata/versions.toml",
     "home/.chezmoitemplates/partials/install-mise-sh",
     "home/.chezmoitemplates/partials/install-mise-ps1",
-    "xtask/tests/tool_inventory.rs"
+    "xtask/tests/tool_inventory.rs",
+    "crates/dotfiles/src/artifacts/mise_consume.rs",
+    "crates/dotfiles/tests/mise_archive_consumption.rs",
+    "crates/dotfiles/tests/fixtures/mise-v2026.10.9-bootstrap-index.json"
   ],
   "revisit": null
 }

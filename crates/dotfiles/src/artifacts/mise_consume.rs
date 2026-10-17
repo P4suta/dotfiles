@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-const ENGINE_VERSION: &str = "2026.10.7";
+const ENGINE_VERSION: &str = "2026.10.9";
 const CONFIGURATION: &str = "mise.toml";
 const LOCK: &str = "mise.lock";
 const CARGO_LOCK: &str = "Cargo.lock";

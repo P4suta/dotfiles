@@ -17,11 +17,11 @@ const FIXTURE_BYTES: &str = "DOTFILES_VERIFIED_CHOOSE_RELEASE";
 #[cfg(windows)]
 const FIXTURE_MISE: &str = "DOTFILES_VERIFIED_MISE_RELEASE_ARCHIVE";
 const BOOTSTRAP_URL: &str =
-    "https://github.com/jdx/mise/releases/download/v2026.10.7/mise-v2026.10.7-windows-x64.zip";
-const BOOTSTRAP_SHA256: &str = "152086b35c0e0adc182718f6f280f6b7f58b97535d5070fb6135f4e524a0d0e1";
-const VERSIONS: &str = "[mise]\nversion='2026.10.7'\n[mise.sha256]\nwindows-x64='152086b35c0e0adc182718f6f280f6b7f58b97535d5070fb6135f4e524a0d0e1'\n";
+    "https://github.com/jdx/mise/releases/download/v2026.10.9/mise-v2026.10.9-windows-x64.zip";
+const BOOTSTRAP_SHA256: &str = "bc813006b1bf6cf02f470f44fac775a43da8403266a6c4d68e28dad510dcda39";
+const VERSIONS: &str = "[mise]\nversion='2026.10.9'\n[mise.sha256]\nwindows-x64='bc813006b1bf6cf02f470f44fac775a43da8403266a6c4d68e28dad510dcda39'\n";
 const PUBLIC_BOOTSTRAP_INDEX: &[u8] =
-    include_bytes!("fixtures/mise-v2026.10.7-bootstrap-index.json");
+    include_bytes!("fixtures/mise-v2026.10.9-bootstrap-index.json");
 const PUBLIC_BOOTSTRAP_MEMBERS: usize = 6;
 const PUBLIC_BOOTSTRAP_DIRECTORY: &str = "mise/";
 #[cfg(windows)]
@@ -340,7 +340,7 @@ impl Fetch for FakeVersionProgram {
                 "unexpected bootstrap fixture request".into(),
             ));
         }
-        fs::write(destination, b"@echo 2026.10.7\r\n")
+        fs::write(destination, b"@echo 2026.10.9\r\n")
             .map_err(|error| FetchFailure::Refused(error.to_string()))
     }
 }
@@ -436,7 +436,7 @@ fn bootstrap_directories_never_allow_data_or_linked_entries() -> Result<()> {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires pinned mise 2026.10.7 and the reviewed public choose release"]
+#[ignore = "requires pinned mise 2026.10.9 and the reviewed public choose release"]
 fn verified_public_release_installs_fresh_offline_and_runs_independent_live_health() -> Result<()> {
     let fixture = Fixture::new("http:choose", None)?;
     let (workload, prepared) = fixture.prepare()?;
@@ -467,7 +467,7 @@ fn captured_public_material_mutation_and_index_corruption_refuse_consumption() -
         .expect_err("invalid private pin entry must refuse before running the verified engine");
     assert!(format!("{corruption:#}").contains("private download pin index has invalid fields"));
     fs::write(&index, original_index)?;
-    fs::write(immutable[3].join("mise.exe"), b"@echo 2026.10.7\r\n")?;
+    fs::write(immutable[3].join("mise.exe"), b"@echo 2026.10.9\r\n")?;
     let replaced = prepared
         .install(&workload)
         .expect_err("a replaced engine must refuse before any installer operation");

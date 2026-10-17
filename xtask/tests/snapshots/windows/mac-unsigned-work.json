@@ -91,7 +91,7 @@
     {"mode":"0644","path":".agents/skills/macos-pkg/SKILL.md","sha256":"81f12f8bedd2a157dab5a8f03606ef63e6353fb4082089a6cd8e5af5959308b6","type":"file"},
     {"mode":"0755","path":".agents/skills/mise","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/mise/SKILL.md","sha256":"a7481f62ef5877e264c8103a2b322c835a55a37c8d04fc2423e29ded585b9770","type":"file"},
-    {"mode":"0644","path":".agents/skills/mise/tools.toml","sha256":"c6467d8965603ec3fb688ce0e749dbcbd2b816081ecac58c16e346b0f63a1526","type":"file"},
+    {"mode":"0644","path":".agents/skills/mise/tools.toml","sha256":"1ce97a0dc789c3ef90e1644be2c4040b741894dcdf44537099eead916f8f553d","type":"file"},
     {"mode":"0755","path":".agents/skills/multi-machine","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/multi-machine/SKILL.md","sha256":"695a5ddb77a7fd36f1cebf5077f4275456e6c9f54bc6a686eb27535e0849b911","type":"file"},
     {"mode":"0755","path":".agents/skills/mutation-testing","sha256":null,"type":"dir"},
@@ -542,7 +542,7 @@
     {"mode":"0644","path":"Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist","sha256":"23d2659fda306176b6841a3e58f234d4f5c63451a00778e3b69d1b660cca87b8","type":"file"}
   ],
   "scripts": [
-    {"condition":"always","phase":"before","position":0,"sha256":"5aa0f5b0fbaca3b80b70ee7e9271197a3e5cfe357cc46e022753e22ff7cd4265","target":".chezmoiscripts/unix/00-mise.sh"},
+    {"condition":"always","phase":"before","position":0,"sha256":"9f084700130d58f0351cfd4168e255bf3d79fa9b915f150a7e6ac36c4cc9a2e5","target":".chezmoiscripts/unix/00-mise.sh"},
     {"condition":"always","phase":"before","position":1,"sha256":"18c93726e5cc04bf6abcc0170fca31fb549c3cc49bb64b0642b4dcd7aea297f6","target":".chezmoiscripts/unix/01-runtime.sh"},
     {"condition":"onchange","phase":"before","position":2,"sha256":"6d7ed7f72a136550609bd1e627c210694053116696033e4bb990511bac94d455","target":".chezmoiscripts/unix/02-github.sh"},
     {"condition":"onchange","phase":"after","position":3,"sha256":"5e7f94f9794e745624ac29cf2b2fc6d2dca0213348ba4a5057f2981cd5d09ae0","target":".chezmoiscripts/unix/04-desktop.sh"},
