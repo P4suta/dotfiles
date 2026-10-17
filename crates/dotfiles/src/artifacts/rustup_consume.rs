@@ -2322,9 +2322,9 @@ mod tests {
     const STDLIB_LOCK: &[u8] =
         include_bytes!("../../tests/fixtures/rust-src-nightly-library-cargo-lock.txt");
     const STDLIB_REGISTRY_PACKAGES: usize = 30;
-    const PROJECT_REGISTRY_PACKAGES: usize = 236;
+    const PROJECT_REGISTRY_PACKAGES: usize = 237;
     const STDLIB_ADDITIONAL_PACKAGES: usize = 21;
-    const STDLIB_UNION_PACKAGES: usize = 257;
+    const STDLIB_UNION_PACKAGES: usize = 258;
     const MATERIAL_FIXTURE_NAME: &str = "example";
     const MATERIAL_FIXTURE_VERSION: &str = "1.2.3";
     const MATERIAL_FIXTURE_REGISTRY: &str = "registry+https://github.com/rust-lang/crates.io-index";
