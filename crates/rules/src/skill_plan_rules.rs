@@ -1038,8 +1038,9 @@ mod proofs {
     }
 }
 
+#[doc(hidden)]
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     fn plan(deps: &[&[usize]], requested: &[usize]) -> Result<Vec<usize>, Failure> {
@@ -1048,9 +1049,7 @@ mod tests {
             .map(|plan| plan.skills().to_vec())
     }
 
-    #[test]
-    #[cfg_attr(miri, ignore = "Miri takes minutes over every catalog of four skills")]
-    fn every_catalog_of_up_to_four_skills_meets_plan_correct() {
+    pub fn every_catalog_of_up_to_four_skills_meets_plan_correct() {
         for count in 0..=4u32 {
             let sets = 1u32 << count;
             for code in 0..sets.pow(count) {

@@ -157,8 +157,9 @@ mod proofs {
     }
 }
 
+#[doc(hidden)]
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[cfg(miri)]
@@ -170,9 +171,7 @@ mod tests {
         entries_without_a_verbatim_copy_have_no_target();
     }
 
-    #[test]
-    #[cfg_attr(miri, ignore = "Miri takes minutes over every name")]
-    fn every_short_name_over_the_attribute_letters_meets_the_specification() {
+    pub fn every_short_name_over_the_attribute_letters_meets_the_specification() {
         for source in crate::domain::words(b"dot_.l", 6) {
             for entry in [Entry::File, Entry::Directory] {
                 proofs::spec_target(entry, &source);
