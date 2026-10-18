@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use platform::build_inputs::{CRATES, content_hash, inputs};
 use platform::freshness::{
     BUILD_IDENTITY_ARGUMENT, Built, Embedded, SOURCE_VARIABLE, embedded, lagging, locate,
@@ -418,30 +418,40 @@ fn an_unrelated_checkout_never_takes_over_the_primary_installation() -> Result<(
 
 #[test]
 fn unbound_or_moved_records_require_explicit_installation_without_guessing_origin() -> Result<()> {
-    let home = tempfile::tempdir()?;
-    enable_skill_ops(home.path())?;
-    let checkout = fixture("pub fn current() {}")?;
+    let home = tempfile::tempdir().context("create installation home")?;
+    enable_skill_ops(home.path()).context("enable skill-ops in the installation home")?;
+    let checkout = fixture("pub fn current() {}").context("create source checkout")?;
     let directory = home.path().join(".local/state/dotfiles/installed");
-    fs::create_dir_all(&directory)?;
+    fs::create_dir_all(&directory)
+        .with_context(|| format!("create installation records in {}", directory.display()))?;
     let path = directory.join(Built::SkillOps.binary());
     for invalid in [content_hash(checkout.path())?, "malformed".into()] {
-        fs::write(&path, invalid)?;
+        fs::write(&path, invalid)
+            .with_context(|| format!("write invalid installation record {}", path.display()))?;
         let error = lagging(home.path(), checkout.path()).unwrap_err();
         assert_eq!(
             error.downcast_ref::<Refusal>().unwrap().rule,
             "tool.installation-origin"
         );
     }
-    record_fixture(home.path(), checkout.path(), Built::SkillOps)?;
-    let moved = tempfile::tempdir()?;
+    record_fixture(home.path(), checkout.path(), Built::SkillOps)
+        .context("record the source checkout before moving it")?;
+    let moved = tempfile::tempdir().context("create checkout relocation parent")?;
     let relocated = moved.path().join("relocated");
-    fs::rename(checkout.path(), &relocated)?;
+    fs::rename(checkout.path(), &relocated).with_context(|| {
+        format!(
+            "move source checkout {} to {}",
+            checkout.path().display(),
+            relocated.display()
+        )
+    })?;
     let error = lagging(home.path(), &relocated).unwrap_err();
     assert_eq!(
         error.downcast_ref::<Refusal>().unwrap().rule,
         "tool.installation-origin"
     );
-    fs::remove_file(path)?;
+    fs::remove_file(&path)
+        .with_context(|| format!("remove installation record {}", path.display()))?;
     assert_eq!(lagging(home.path(), &relocated)?, Vec::<Built>::new());
     Ok(())
 }
