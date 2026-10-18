@@ -676,20 +676,525 @@ mod proofs {
         kani::cover!(length == SHA256_HEX_BYTES + 1);
     }
 
-    #[kani::proof]
-    #[kani::unwind(67)]
-    fn pins_without_the_revision_prefix_match_the_complete_numeric_grammar() {
-        let bytes: [u8; MAX_VERSION_BYTES + 1] = kani::any();
-        let length: u8 = kani::any();
-        let length = usize::from(length);
-        kani::assume(length <= bytes.len());
-        let version = &bytes[..length];
+    fn numeric_pin_length<const LENGTH: usize>() -> (bool, bool) {
+        let bytes: [u8; LENGTH] = kani::any();
+        let version = &bytes[..];
         kani::assume(!version.starts_with(REVISION_PREFIX));
-        let bounded = !version.is_empty() && length <= MAX_VERSION_BYTES;
+        let bounded = !version.is_empty() && LENGTH <= MAX_VERSION_BYTES;
         let numeric = reference::numeric(version);
         let result = pinned(version);
         assert!(version.strip_prefix(REVISION_PREFIX).is_none());
         assert_eq!(result, bounded && numeric);
+        (result, numeric)
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_boundary_lengths_are_refused() {
+        let (empty, _) = numeric_pin_length::<0>();
+        assert!(!empty);
+        let (single, _) = numeric_pin_length::<1>();
+        assert!(!single);
+        let (pair, _) = numeric_pin_length::<2>();
+        assert!(!pair);
+        let (oversized, _) = numeric_pin_length::<65>();
+        assert!(!oversized);
+        kani::cover!(!empty);
+        kani::cover!(!oversized);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_3_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<3>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_4_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<4>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_5_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<5>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_6_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<6>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_7_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<7>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_8_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<8>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_9_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<9>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_10_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<10>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_11_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<11>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_12_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<12>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_13_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<13>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_14_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<14>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_15_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<15>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_16_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<16>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_17_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<17>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_18_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<18>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_19_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<19>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_20_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<20>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_21_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<21>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_22_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<22>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_23_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<23>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_24_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<24>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_25_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<25>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_26_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<26>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_27_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<27>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_28_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<28>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_29_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<29>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_30_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<30>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_31_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<31>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_32_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<32>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_33_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<33>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_34_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<34>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_35_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<35>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_36_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<36>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_37_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<37>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_38_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<38>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_39_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<39>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_40_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<40>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_41_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<41>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_42_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<42>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_43_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<43>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_44_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<44>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_45_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<45>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_46_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<46>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_47_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<47>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_48_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<48>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_49_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<49>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_50_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<50>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_51_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<51>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_52_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<52>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_53_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<53>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_54_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<54>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_55_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<55>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_56_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<56>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_57_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<57>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_58_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<58>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_59_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<59>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_60_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<60>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_61_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<61>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_62_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<62>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_63_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<63>();
+        kani::cover!(result && numeric);
+        kani::cover!(!result);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn numeric_pin_length_64_matches_the_complete_grammar() {
+        let (result, numeric) = numeric_pin_length::<64>();
         kani::cover!(result && numeric);
         kani::cover!(!result);
     }
