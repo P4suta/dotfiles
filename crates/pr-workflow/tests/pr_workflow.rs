@@ -1850,6 +1850,112 @@ fn integration_checks_authenticate_contexts_and_keep_multiple_issue_scopes() -> 
 }
 
 #[test]
+fn native_fixture_checks_ignore_the_parent_github_event() -> Result<()> {
+    let outer = Fixture::new("Outer CI repository.\n")?;
+    let event = outer.context_home.path().join("event.json");
+    fs::write(
+        &event,
+        serde_json::to_vec(&serde_json::json!({
+            "repository":{"full_name":"P4suta/project"},
+            "pull_request":{
+                "base":{"repo":{"full_name":"P4suta/project"}},
+                "head":{"ref":"feature","sha":outer.head}
+            }
+        }))?,
+    )?;
+    let output = fixture_process::command(std::env::current_exe()?, outer.directory.path())
+        .env("GITHUB_ACTIONS", "true")
+        .env("GITHUB_EVENT_PATH", &event)
+        .env("GITHUB_REPOSITORY", "P4suta/project")
+        .args([
+            "--exact",
+            "a_new_local_project_prepares_unborn_scoped_work_without_github",
+            "change_gate_refuses_missing_forged_closed_and_unscoped_contexts",
+            "fresh_fork_clones_authenticate_issue_transport_without_owner_local_state",
+            "issue_checks_use_the_actual_transaction_index_and_isolate_signature_objects",
+            "working_change_checks_use_owner_context_and_cover_all_local_changes",
+            "--test-threads=2",
+            "--nocapture",
+        ])
+        .output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{}{}",
+        stdout,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("5 passed; 0 failed"), "{stdout}");
+    Ok(())
+}
+
+#[test]
+fn explicit_ci_context_accepts_its_head_and_refuses_foreign_identity_or_head() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let root = fixture.directory.path();
+    let mut start = fixture.personal_command("start")?;
+    start.args(["--issue", "23"]);
+    let variables: Vec<_> = start
+        .get_envs()
+        .filter_map(|(key, value)| value.map(|value| (key.to_owned(), value.to_owned())))
+        .collect();
+    let started = start.output()?;
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    fs::write(root.join("body.md"), "Changed input.\n")?;
+    git(
+        root,
+        &["add", "body.md", platform::issue_context::TRANSPORT],
+    )?;
+    let foreign = Fixture::new("Foreign CI repository.\n")?;
+    let event = fixture.context_home.path().join("event.json");
+    for (repository, head, expected) in [
+        ("P4suta/project", fixture.head.as_str(), None),
+        (
+            "P4suta/foreign",
+            fixture.head.as_str(),
+            Some("CI repository identities differ"),
+        ),
+        (
+            "P4suta/project",
+            foreign.head.as_str(),
+            Some("Not a valid commit name"),
+        ),
+    ] {
+        fs::write(
+            &event,
+            serde_json::to_vec(&serde_json::json!({
+                "repository":{"full_name":"P4suta/project"},
+                "pull_request":{
+                    "base":{"repo":{"full_name":"P4suta/project"}},
+                    "head":{"ref":"feature","sha":head}
+                }
+            }))?,
+        )?;
+        let output = fixture_process::command(env!("CARGO_BIN_EXE_pr-workflow"), root)
+            .current_dir(root)
+            .envs(variables.iter().cloned())
+            .env("GITHUB_ACTIONS", "true")
+            .env("GITHUB_EVENT_PATH", &event)
+            .env("GITHUB_REPOSITORY", repository)
+            .args(["change-check", "--staged"])
+            .output()?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if let Some(reason) = expected {
+            assert!(!output.status.success(), "{stderr}");
+            assert!(stderr.contains(reason), "{stderr}");
+        } else {
+            assert!(output.status.success(), "{stderr}");
+            assert!(String::from_utf8_lossy(&output.stdout).contains("bound to live issues"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn working_change_checks_use_owner_context_and_cover_all_local_changes() -> Result<()> {
     let fixture = Fixture::new(BODY)?;
     let root = platform::issue_context::checkout(fixture.directory.path())?;

@@ -31,6 +31,9 @@ pub fn directory(scope: &Path) -> PathBuf {
 pub fn command(program: impl AsRef<OsStr>, scope: &Path) -> Command {
     let scope = directory(scope);
     let mut command = platform::process::command(program);
+    for name in ["GITHUB_ACTIONS", "GITHUB_EVENT_PATH", "GITHUB_REPOSITORY"] {
+        command.env_remove(name);
+    }
     command.env(INCIDENT_STATE, scope.join("state"));
     command
 }

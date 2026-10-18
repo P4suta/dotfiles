@@ -231,6 +231,21 @@ fn a_hosted_partition_cannot_omit_duplicate_or_skip_required_work() {
         ),
         ("max-parallel: 2", "max-parallel: 3", "at most two jobs"),
         (
+            "timeout-minutes: ${{ matrix.phase == 'kani' && 120 || 60 }}",
+            "timeout-minutes: 60",
+            "job limit",
+        ),
+        (
+            "timeout-minutes: ${{ matrix.phase == 'kani' && 120 || 60 }}",
+            "timeout-minutes: ${{ matrix.phase == 'runtime' && 120 || 60 }}",
+            "job limit",
+        ),
+        (
+            "timeout-minutes: ${{ matrix.phase == 'kani' && 120 || 60 }}",
+            "timeout-minutes: ${{ matrix.phase == 'kani' && 120 || 120 }}",
+            "job limit",
+        ),
+        (
             "PHASE: ${{ matrix.phase }}",
             "PHASE: kani",
             "execute its selected mandatory partition",

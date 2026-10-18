@@ -25,7 +25,7 @@ pub const CI_PHASE_ENTRY: &str = "mise x -- just proofs-ci --phase \"$PHASE\"";
 const CI_PROOFS_SELECTED: &str = "contains(env.GATES, 'proofs')";
 const CI_PHASE_VALUE: &str = "${{ matrix.phase }}";
 const CI_MAX_PARALLEL: i64 = 2;
-const CI_PROOF_TIMEOUT_MINUTES: i64 = 60;
+const CI_PROOF_TIMEOUT: &str = "${{ matrix.phase == 'kani' && 120 || 60 }}";
 
 pub(crate) fn command(root: &Path, tool: Tool, arguments: &[&str]) -> Result<()> {
     run(tool.command(), root, tool.program(), arguments)
@@ -139,9 +139,9 @@ fn proof_phase_findings(job: &yaml_rust2::Yaml) -> Vec<String> {
         || !strategy["max-parallel"]
             .as_i64()
             .is_some_and(|parallel| (1..=CI_MAX_PARALLEL).contains(&parallel))
-        || job["timeout-minutes"].as_i64() != Some(CI_PROOF_TIMEOUT_MINUTES)
+        || job["timeout-minutes"].as_str() != Some(CI_PROOF_TIMEOUT)
     {
-        found.push("the proofs matrix must collect every partition with at most two jobs and its unchanged 60-minute job limit".into());
+        found.push("the proofs matrix must collect every partition with at most two jobs and its phase-specific job limits".into());
     }
     if job["env"]["PHASE"].as_str() != Some(CI_PHASE_VALUE)
         || !steps.is_some_and(|steps| {
