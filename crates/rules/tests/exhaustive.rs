@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-#[path = "support/domain.rs"]
+#[path = "../src/domain.rs"]
 #[doc(hidden)]
 pub mod domain;
 #[path = "../src/skill_plan_rules.rs"]

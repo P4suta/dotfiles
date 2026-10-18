@@ -21,7 +21,6 @@ extern crate alloc;
 
 /// The finite input domains the tests walk, so a test checks a specification over every input Kani checks.
 #[cfg(test)]
-#[path = "../tests/support/domain.rs"]
 mod domain;
 
 pub mod adr_rules;

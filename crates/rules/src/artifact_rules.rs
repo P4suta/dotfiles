@@ -697,13 +697,11 @@ mod proofs {
     #[kani::proof]
     #[kani::unwind(67)]
     fn pins_with_the_revision_prefix_match_the_complete_revision_grammar() {
-        let bytes: [u8; MAX_VERSION_BYTES + 1] = kani::any();
-        let length: u8 = kani::any();
-        let length = usize::from(length);
-        kani::assume(length <= bytes.len());
-        let version = &bytes[..length];
-        kani::assume(version.starts_with(REVISION_PREFIX));
-        let bounded = !version.is_empty() && length <= MAX_VERSION_BYTES;
+        let mut bytes: [u8; REVISION_PREFIX.len() + GIT_REVISION_BYTES] = kani::any();
+        bytes[..REVISION_PREFIX.len()].copy_from_slice(REVISION_PREFIX);
+        let version = &bytes[..];
+        assert!(version.starts_with(REVISION_PREFIX));
+        let bounded = !version.is_empty() && version.len() <= MAX_VERSION_BYTES;
         let revision = version.strip_prefix(REVISION_PREFIX).is_some_and(|tail| {
             tail.len() == GIT_REVISION_BYTES
                 && tail
@@ -715,6 +713,158 @@ mod proofs {
         assert_eq!(result, bounded && revision);
         kani::cover!(result && revision);
         kani::cover!(!result);
+    }
+
+    fn noncanonical_revision_length<const LENGTH: usize>() -> bool {
+        let mut bytes: [u8; LENGTH] = kani::any();
+        bytes[..REVISION_PREFIX.len()].copy_from_slice(REVISION_PREFIX);
+        let version = &bytes[..];
+        assert!(version.starts_with(REVISION_PREFIX));
+        let bounded = !version.is_empty() && version.len() <= MAX_VERSION_BYTES;
+        let revision = version.strip_prefix(REVISION_PREFIX).is_some_and(|tail| {
+            tail.len() == GIT_REVISION_BYTES
+                && tail
+                    .iter()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        });
+        let result = pinned(version);
+        assert!(!reference::numeric(version));
+        assert_eq!(result, bounded && revision);
+        assert!(!result);
+        result
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn revision_prefix_lengths_4_through_11_are_refused() {
+        let first = noncanonical_revision_length::<4>();
+        assert!(!first);
+        assert!(!noncanonical_revision_length::<5>());
+        assert!(!noncanonical_revision_length::<6>());
+        assert!(!noncanonical_revision_length::<7>());
+        assert!(!noncanonical_revision_length::<8>());
+        assert!(!noncanonical_revision_length::<9>());
+        assert!(!noncanonical_revision_length::<10>());
+        let last = noncanonical_revision_length::<11>();
+        assert!(!last);
+        kani::cover!(!first);
+        kani::cover!(!last);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn revision_prefix_lengths_12_through_19_are_refused() {
+        let first = noncanonical_revision_length::<12>();
+        assert!(!first);
+        assert!(!noncanonical_revision_length::<13>());
+        assert!(!noncanonical_revision_length::<14>());
+        assert!(!noncanonical_revision_length::<15>());
+        assert!(!noncanonical_revision_length::<16>());
+        assert!(!noncanonical_revision_length::<17>());
+        assert!(!noncanonical_revision_length::<18>());
+        let last = noncanonical_revision_length::<19>();
+        assert!(!last);
+        kani::cover!(!first);
+        kani::cover!(!last);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn revision_prefix_lengths_20_through_27_are_refused() {
+        let first = noncanonical_revision_length::<20>();
+        assert!(!first);
+        assert!(!noncanonical_revision_length::<21>());
+        assert!(!noncanonical_revision_length::<22>());
+        assert!(!noncanonical_revision_length::<23>());
+        assert!(!noncanonical_revision_length::<24>());
+        assert!(!noncanonical_revision_length::<25>());
+        assert!(!noncanonical_revision_length::<26>());
+        let last = noncanonical_revision_length::<27>();
+        assert!(!last);
+        kani::cover!(!first);
+        kani::cover!(!last);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn revision_prefix_lengths_28_through_35_are_refused() {
+        let first = noncanonical_revision_length::<28>();
+        assert!(!first);
+        assert!(!noncanonical_revision_length::<29>());
+        assert!(!noncanonical_revision_length::<30>());
+        assert!(!noncanonical_revision_length::<31>());
+        assert!(!noncanonical_revision_length::<32>());
+        assert!(!noncanonical_revision_length::<33>());
+        assert!(!noncanonical_revision_length::<34>());
+        let last = noncanonical_revision_length::<35>();
+        assert!(!last);
+        kani::cover!(!first);
+        kani::cover!(!last);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn revision_prefix_lengths_36_through_43_are_refused() {
+        let first = noncanonical_revision_length::<36>();
+        assert!(!first);
+        assert!(!noncanonical_revision_length::<37>());
+        assert!(!noncanonical_revision_length::<38>());
+        assert!(!noncanonical_revision_length::<39>());
+        assert!(!noncanonical_revision_length::<40>());
+        assert!(!noncanonical_revision_length::<41>());
+        assert!(!noncanonical_revision_length::<42>());
+        let last = noncanonical_revision_length::<43>();
+        assert!(!last);
+        kani::cover!(!first);
+        kani::cover!(!last);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn revision_prefix_lengths_45_through_51_are_refused() {
+        let first = noncanonical_revision_length::<45>();
+        assert!(!first);
+        assert!(!noncanonical_revision_length::<46>());
+        assert!(!noncanonical_revision_length::<47>());
+        assert!(!noncanonical_revision_length::<48>());
+        assert!(!noncanonical_revision_length::<49>());
+        assert!(!noncanonical_revision_length::<50>());
+        let last = noncanonical_revision_length::<51>();
+        assert!(!last);
+        kani::cover!(!first);
+        kani::cover!(!last);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn revision_prefix_lengths_52_through_58_are_refused() {
+        let first = noncanonical_revision_length::<52>();
+        assert!(!first);
+        assert!(!noncanonical_revision_length::<53>());
+        assert!(!noncanonical_revision_length::<54>());
+        assert!(!noncanonical_revision_length::<55>());
+        assert!(!noncanonical_revision_length::<56>());
+        assert!(!noncanonical_revision_length::<57>());
+        let last = noncanonical_revision_length::<58>();
+        assert!(!last);
+        kani::cover!(!first);
+        kani::cover!(!last);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(67)]
+    fn revision_prefix_lengths_59_through_65_are_refused() {
+        let first = noncanonical_revision_length::<59>();
+        assert!(!first);
+        assert!(!noncanonical_revision_length::<60>());
+        assert!(!noncanonical_revision_length::<61>());
+        assert!(!noncanonical_revision_length::<62>());
+        assert!(!noncanonical_revision_length::<63>());
+        assert!(!noncanonical_revision_length::<64>());
+        let last = noncanonical_revision_length::<65>();
+        assert!(!last);
+        kani::cover!(!first);
+        kani::cover!(!last);
     }
 }
 
