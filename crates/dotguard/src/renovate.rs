@@ -674,7 +674,7 @@ pub struct RunConfig {
     pub passthrough: Vec<String>,
 }
 
-const DEFAULT_IMAGE: &str = "renovate/renovate:44.52.0@sha256:778ff1b404d79ef7763f0c904ebb279a4138ffc1017181ad076b1648e37f6dbd";
+const DEFAULT_IMAGE: &str = "renovate/renovate:44.169.0@sha256:99c305024372fe8fc928a187dccfa276ebfd3e6911b967cb7b8667376ed6c046";
 
 /// The image reference must name an exact `renovate/renovate` version with a sha256 digest, so no caller can fall back to `:latest`.
 fn image_is_pinned(image: &str) -> bool {

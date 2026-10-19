@@ -6,6 +6,15 @@
   ],
   "work_in_progress": {
     "default": 1,
-    "repositories": {}
+    "repositories": {
+      "P4suta/degree-audit": {
+        "limit": 2,
+        "reason": "Temporary CI cleanup beside the existing PR; remove after issue 59 merges"
+      },
+      "P4suta/simple-blog": {
+        "limit": 2,
+        "reason": "Temporary CI cleanup beside the existing PR; remove after issue 22 merges"
+      }
+    }
   }
 }
