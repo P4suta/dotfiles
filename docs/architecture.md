@@ -52,6 +52,17 @@ The plan runs, in order:
 
 ## Verification on every repository
 
+Codex runs command hooks through the configured session shell.
+The Windows profile uses PowerShell invocation syntax and `dotfiles codex-hooks run` to preserve each hook's input, output, and exit status.
+The wrapper records its start, child completion, and failure diagnostics under `~/.local/state/dotfiles/codex-hooks.jsonl`.
+`dotfiles codex-hooks logs --limit 20` prints recent execution evidence, and missing or unfinished runs supply no success evidence.
+The log keeps execution metadata and standard error, while the hook input and standard output pass through to the child and Codex.
+An exclusive file lock protects concurrent appends and log compaction.
+Native process, stream, file-lock, and PowerShell behavior form external boundaries covered by integration checks.
+Codex serializes shell calls as `Bash` and omits their dialect, so the Windows wrapper supplies the native PowerShell context to the shared guard while keeping explicit input metadata.
+When a session starts outside a checkout, the edit guard discovers the target checkout and checks its signed issue authority.
+A session inside a checkout keeps that checkout's path boundary.
+
 Skill observations and maintenance holds default to off.
 An [explicit machine-local experimental opt-in](reference/experimental-skill-maintenance.md) keeps the engine available.
 The opt-in leaves required repository verification and historical maintenance records unchanged.

@@ -344,6 +344,14 @@ fn codex_runtime_hooks_have_native_windows_commands() {
                 profile == "windows",
                 "{profile}: {handler}"
             );
+            if profile == "windows" {
+                assert!(
+                    handler["commandWindows"]
+                        .as_str()
+                        .unwrap()
+                        .contains("codex-hooks run")
+                );
+            }
         }
     }
 }
@@ -395,14 +403,17 @@ fn windows_codex_hook(tool: &std::path::Path) -> Value {
 }
 
 #[cfg(windows)]
-fn run_codex_hook(command: &str, receipt: &std::path::Path, input: &str) -> std::process::Output {
+fn run_codex_hook(
+    shell: &std::path::Path,
+    command: &str,
+    receipt: &std::path::Path,
+    input: &str,
+) -> std::process::Output {
     use std::io::Write;
-    use std::os::windows::process::CommandExt;
     use std::process::Stdio;
 
-    let mut child = platform::process::command(std::env::var_os("ComSpec").unwrap())
-        .args(["/D", "/S", "/C"])
-        .raw_arg(format!("\"{command}\""))
+    let mut child = platform::process::command(shell)
+        .args(["-NoProfile", "-NonInteractive", "-Command", command])
         .env(CODEX_HOOK_PROBE, receipt)
         .env("PATH", "")
         .stdin(Stdio::piped())
@@ -431,38 +442,58 @@ fn codex_windows_hooks_preserve_paths_input_and_child_failures() {
     std::fs::copy(std::env::current_exe().unwrap(), &tool).unwrap();
     let receipt = scope.path().join("receipt");
     let hook = windows_codex_hook(&tool);
-
-    let legacy = run_codex_hook(
-        hook["command"].as_str().unwrap(),
-        &receipt,
-        CODEX_HOOK_INPUT,
-    );
-    assert!(!legacy.status.success());
-    assert!(!receipt.exists(), "the legacy command reached the child");
-
-    let command = hook["commandWindows"].as_str().unwrap();
-    let valid = run_codex_hook(command, &receipt, CODEX_HOOK_INPUT);
+    let selected = platform::process::command("mise")
+        .args(["which", "pwsh"])
+        .output()
+        .unwrap();
     assert!(
-        valid.status.success(),
+        selected.status.success(),
         "{}",
-        String::from_utf8_lossy(&valid.stderr)
+        String::from_utf8_lossy(&selected.stderr)
     );
-    assert_eq!(std::fs::read_to_string(&receipt).unwrap(), CODEX_HOOK_INPUT);
+    let shells = [
+        std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe"),
+        std::path::PathBuf::from(String::from_utf8(selected.stdout).unwrap().trim()),
+    ];
+    for shell in shells {
+        if receipt.exists() {
+            std::fs::remove_file(&receipt).unwrap();
+        }
+        let legacy = run_codex_hook(
+            &shell,
+            hook["command"].as_str().unwrap(),
+            &receipt,
+            CODEX_HOOK_INPUT,
+        );
+        assert!(!legacy.status.success());
+        assert!(!receipt.exists(), "the legacy command reached the child");
 
-    let rejected = run_codex_hook(command, &receipt, "wrong input");
-    assert_eq!(rejected.status.code(), Some(101));
-    assert_eq!(std::fs::read_to_string(&receipt).unwrap(), "wrong input");
+        let command = hook["commandWindows"].as_str().unwrap();
+        let valid = run_codex_hook(&shell, command, &receipt, CODEX_HOOK_INPUT);
+        assert!(
+            valid.status.success(),
+            "{}",
+            String::from_utf8_lossy(&valid.stderr)
+        );
+        assert_eq!(std::fs::read_to_string(&receipt).unwrap(), CODEX_HOOK_INPUT);
 
-    std::fs::remove_file(&receipt).unwrap();
-    let missing = windows_codex_hook(&directory.join("missing-runtime.exe"));
-    let failed = run_codex_hook(
-        missing["commandWindows"].as_str().unwrap(),
-        &receipt,
-        CODEX_HOOK_INPUT,
-    );
-    assert_eq!(failed.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&failed.stderr).contains("missing-runtime.exe"));
-    assert!(!receipt.exists());
+        let rejected = run_codex_hook(&shell, command, &receipt, "wrong input");
+        assert_eq!(rejected.status.code(), Some(101));
+        assert_eq!(std::fs::read_to_string(&receipt).unwrap(), "wrong input");
+
+        std::fs::remove_file(&receipt).unwrap();
+        let missing = windows_codex_hook(&directory.join("missing-runtime.exe"));
+        let failed = run_codex_hook(
+            &shell,
+            missing["commandWindows"].as_str().unwrap(),
+            &receipt,
+            CODEX_HOOK_INPUT,
+        );
+        assert_eq!(failed.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&failed.stderr).contains("missing-runtime.exe"));
+        assert!(!receipt.exists());
+    }
 }
 
 #[test]

@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use dotfiles::codex_hooks;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -57,6 +58,11 @@ enum Commands {
     ClaudeTiming,
     /// Refuse supported implementation edits without a checked issue context.
     IssueGuard,
+    /// Execute Codex hooks with local evidence or inspect their recent results.
+    CodexHooks {
+        #[command(subcommand)]
+        request: codex_hooks::Request,
+    },
     /// Fixed Japanese desktop notifications, independent of experimental skill maintenance.
     Notifications {
         #[command(subcommand)]
@@ -213,6 +219,7 @@ fn run() -> Result<()> {
         Commands::ClaudeBash => dotfiles::claude_hook::run()?,
         Commands::ClaudeTiming => dotfiles::claude_timing::run()?,
         Commands::IssueGuard => std::process::exit(dotfiles::issue_guard::hook()?),
+        Commands::CodexHooks { request } => std::process::exit(codex_hooks::run(request)?),
         Commands::Notifications { action } => dotfiles::notifications::run(action)?,
         Commands::Assure { point } => dotfiles::assure::hook(point)?,
         Commands::Health { session } => health(session)?,

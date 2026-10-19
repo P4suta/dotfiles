@@ -1,8 +1,11 @@
 {{- $command := printf "%s %s" (includeTemplate "partials/sh_quote" .tool) .arguments -}}
 {{- $handler := dict "type" "command" "command" $command -}}
 {{- if eq .profile "windows" -}}
-{{- $invocation := printf "& %s %s; exit $LASTEXITCODE" (includeTemplate "partials/ps_quote" .tool) .arguments -}}
-{{- $windows := printf "\"%%SystemRoot%%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -NonInteractive -Command \"$ErrorActionPreference = 'Stop'; & ([scriptblock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'))))\"" (b64enc $invocation) -}}
+{{- $arguments := .arguments -}}
+{{- if dig "trace" false . -}}
+{{- $arguments = printf "codex-hooks run --name %s -- %s %s" (includeTemplate "partials/ps_quote" .arguments) (includeTemplate "partials/ps_quote" .tool) .arguments -}}
+{{- end -}}
+{{- $windows := printf "$ErrorActionPreference = 'Stop'; & %s %s; exit $LASTEXITCODE" (includeTemplate "partials/ps_quote" .tool) $arguments -}}
 {{- $_ := set $handler "commandWindows" $windows -}}
 {{- end -}}
 {{- $handler | toJson -}}

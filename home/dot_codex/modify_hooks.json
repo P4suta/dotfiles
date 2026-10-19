@@ -13,15 +13,15 @@
 {{- $runtime := joinPath .chezmoi.homeDir $tool -}}
 {{- $hooks := dig "hooks" (dict) $current -}}
 {{- $pre := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PreToolUse" (list) $hooks) "suffixes" (list " claude-bash" " issue-guard")) | fromJson -}}
-{{- $shell := includeTemplate "partials/codex_runtime_hook" (dict "profile" .profile "tool" $runtime "arguments" "claude-bash") | fromJson -}}
+{{- $shell := includeTemplate "partials/codex_runtime_hook" (dict "profile" .profile "tool" $runtime "arguments" "claude-bash" "trace" true) | fromJson -}}
 {{- $own_pre := dict "matcher" "Bash|shell|exec_command" "hooks" (list $shell) -}}
 {{- $_ := set $hooks "PreToolUse" (concat $pre (list $own_pre)) -}}
-{{- $edit := includeTemplate "partials/codex_runtime_hook" (dict "profile" .profile "tool" $runtime "arguments" "issue-guard") | fromJson -}}
+{{- $edit := includeTemplate "partials/codex_runtime_hook" (dict "profile" .profile "tool" $runtime "arguments" "issue-guard" "trace" true) | fromJson -}}
 {{- $issue := dict "matcher" "apply_patch|Edit|Write|MultiEdit|edit|write" "hooks" (list $edit) -}}
 {{- $_ := set $hooks "PreToolUse" (concat (dig "PreToolUse" (list) $hooks) (list $issue)) -}}
 {{- range $event, $point := dict "SessionStart" "start" "Stop" "stop" -}}
 {{-   $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list (printf " assure %s" $point))) | fromJson -}}
-{{-   $hook := includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" (printf "assure %s" $point)) | fromJson -}}
+{{-   $hook := includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" (printf "assure %s" $point) "trace" true) | fromJson -}}
 {{-   $own := dict "hooks" (list $hook) -}}
 {{-   $_ := set $hooks $event (concat $groups (list $own)) -}}
 {{- end -}}
