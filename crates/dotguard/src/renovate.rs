@@ -457,7 +457,7 @@ fn default_branch_tip(remote: &str) -> Result<Option<String>, String> {
 }
 
 fn diff_names(base: &str, tip: &str) -> Result<Vec<String>, String> {
-    real_git::capture(&["diff", "--name-only", base, tip])
+    real_git::capture(&["diff", "--name-only", "--diff-filter=d", base, tip])
         .map(|s| {
             s.lines()
                 .filter(|l| is_manifest(l))

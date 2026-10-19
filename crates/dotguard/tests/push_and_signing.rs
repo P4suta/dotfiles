@@ -459,6 +459,46 @@ fn renovate_snapshot_isolates_hook_git_environment_and_preserves_the_source_repo
     );
 }
 
+#[test]
+fn renovate_deleting_a_manifest_does_not_start_a_lookup() {
+    let (repository, _, initial) = renovate_fixture("renovate-deleted-manifest");
+    let workflow = ".github/workflows/mutants.yml";
+    let base = changed_file(&repository, workflow, "name: Mutants\n", &initial);
+    repository.git(&["rm", workflow]);
+    let tree = repository.git(&["write-tree"]);
+    let offered = repository.git(&["commit-tree", &tree, "-p", &base, "-m", "remove workflow"]);
+    repository.git(&["update-ref", "HEAD", &offered]);
+    let output = report_gate(&repository, &base, &offered, &serde_json::json!({}));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!repository.scope.join("arguments").exists());
+}
+
+#[test]
+fn renovate_deletions_leave_changed_manifests_required() {
+    let (repository, _, initial) = renovate_fixture("renovate-deletion-and-change");
+    let workflow = ".github/workflows/mutants.yml";
+    let base = changed_file(&repository, workflow, "name: Mutants\n", &initial);
+    repository.git(&["rm", workflow]);
+    let offered = changed_file(
+        &repository,
+        "Cargo.toml",
+        "[dependencies]\nfixture = \"1.0.0\"\n",
+        &base,
+    );
+    let mut report = current_renovate_report();
+    let dependency = &mut report["repositories"]["local"]["packageFiles"]["cargo"][0]["deps"][0];
+    dependency["currentValue"] = "1.0.0".into();
+    dependency["updates"] =
+        serde_json::json!([{"updateType":"patch","newValue":"1.0.1","isBreaking":false}]);
+    let output = report_gate(&repository, &base, &offered, &report);
+    assert_eq!(refusal(&output).rule, "push.dependencies");
+    assert!(repository.scope.join("arguments").exists());
+}
+
 fn current_renovate_report() -> serde_json::Value {
     serde_json::json!({"repositories":{"local":{"packageFiles":{"cargo":[{
         "packageFile":"Cargo.toml",
