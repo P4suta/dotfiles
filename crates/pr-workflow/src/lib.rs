@@ -482,14 +482,27 @@ impl ReportedCheck {
             (None, None) => false,
         }
     }
+
+    fn optional_skip(&self, required: &[String]) -> bool {
+        self.finished()
+            && self.conclusion.as_deref() == Some("SKIPPED")
+            && self.label().is_some_and(|label| {
+                !label.is_empty() && !required.iter().any(|name| name == label)
+            })
+    }
 }
 
-/// The total, unfinished, and failed checks of a rollup, and how many `required` checks it lacks or hasn't passed.
+/// Counts the checks, unfinished or failed results, and missing required evidence.
+/// Completed optional skips supply no evidence.
 fn tally(rollup: &[ReportedCheck], required: &[String]) -> (usize, usize, usize, usize) {
+    let total = rollup
+        .iter()
+        .filter(|check| !check.optional_skip(required))
+        .count();
     let unfinished = rollup.iter().filter(|check| !check.finished()).count();
     let failed = rollup
         .iter()
-        .filter(|check| check.finished() && !check.passed())
+        .filter(|check| check.finished() && !check.passed() && !check.optional_skip(required))
         .count();
     let missing = required
         .iter()
@@ -499,13 +512,100 @@ fn tally(rollup: &[ReportedCheck], required: &[String]) -> (usize, usize, usize,
             })
         })
         .count();
-    (rollup.len(), unfinished, failed, missing)
+    (total, unfinished, failed, missing)
 }
 
 /// The report of a head's rollup, given the checks its base requires.
 fn checks(rollup: &[ReportedCheck], required: &[String]) -> Report {
     let (total, unfinished, failed, missing) = tally(rollup, required);
     pr_ready_rules::report(total, unfinished, failed, missing)
+}
+
+#[cfg(test)]
+mod check_reports {
+    use super::{Report, ReportedCheck, checks};
+
+    fn run(name: Option<&str>, conclusion: &str) -> ReportedCheck {
+        ReportedCheck {
+            status: Some("COMPLETED".into()),
+            conclusion: Some(conclusion.into()),
+            state: None,
+            name: name.map(str::to_owned),
+            context: None,
+        }
+    }
+
+    #[test]
+    fn a_named_optional_skip_preserves_a_complete_required_report() {
+        let rollup = [
+            run(Some("required"), "SUCCESS"),
+            run(Some("build-test"), "SKIPPED"),
+        ];
+        assert_eq!(checks(&rollup, &["required".into()]), Report::Complete);
+    }
+
+    #[test]
+    fn optional_skips_alone_supply_no_completion_credit() {
+        assert_eq!(
+            checks(&[run(Some("build-test"), "SKIPPED")], &[]),
+            Report::Pending
+        );
+    }
+
+    #[test]
+    fn required_and_unnamed_skips_still_block() {
+        for name in [Some("required"), Some(""), None] {
+            let rollup = [run(Some("required"), "SUCCESS"), run(name, "SKIPPED")];
+            assert_eq!(checks(&rollup, &["required".into()]), Report::Failed);
+        }
+    }
+
+    #[test]
+    fn failed_cancelled_and_unknown_conclusions_still_block() {
+        for conclusion in [
+            "FAILURE",
+            "CANCELLED",
+            "TIMED_OUT",
+            "ACTION_REQUIRED",
+            "STALE",
+            "STARTUP_FAILURE",
+            "UNKNOWN",
+            "skipped",
+        ] {
+            let rollup = [
+                run(Some("required"), "SUCCESS"),
+                run(Some("build-test"), conclusion),
+            ];
+            assert_eq!(
+                checks(&rollup, &["required".into()]),
+                Report::Failed,
+                "{conclusion}"
+            );
+        }
+    }
+
+    #[test]
+    fn optional_skips_never_hide_unfinished_or_missing_required_checks() {
+        let mut pending = run(Some("build-test"), "SKIPPED");
+        pending.status = Some("IN_PROGRESS".into());
+        assert_eq!(
+            checks(
+                &[run(Some("required"), "SUCCESS"), pending],
+                &["required".into()]
+            ),
+            Report::Pending
+        );
+        assert_eq!(
+            checks(
+                &[
+                    run(Some("other"), "SUCCESS"),
+                    run(Some("build-test"), "SKIPPED")
+                ],
+                &["required".into()]
+            ),
+            Report::Partial
+        );
+    }
 }
 
 #[derive(Deserialize)]
