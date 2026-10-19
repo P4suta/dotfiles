@@ -3275,6 +3275,102 @@ fn a_push_between_the_read_and_ready_returns_the_pr_to_draft() -> Result<()> {
 }
 
 #[test]
+fn the_repository_owner_can_assess_a_bot_pull_request() -> Result<()> {
+    let body = format!("{BODY}\nCloses #23.\n");
+    let fixture = Fixture::new(&body)?;
+    let branch = git(fixture.directory.path(), &["branch", "--show-current"])?;
+    let mut command = fixture.personal_command("edit")?;
+    let output = command
+        .args(["--title", "fix: preserve edits", "--body-file"])
+        .arg(&fixture.body)
+        .args(["--pr", "17", "--issue", "23"])
+        .env(
+            "GH_FIXTURE_VIEW",
+            serde_json::json!({
+                "title":"fix: preserve edits", "body":body,
+                "state":"OPEN", "isDraft":true,
+                "author":{"login":"app/renovate","is_bot":true},
+                "headRefName":branch, "headRepository":{"name":"project"},
+                "headRepositoryOwner":{"login":"P4suta"},
+                "isCrossRepository":false
+            })
+            .to_string(),
+        )
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = fixture.log()?;
+    assert!(log.contains("users/P4suta/ssh_signing_keys"));
+    assert!(!log.contains("users/app/renovate/ssh_signing_keys"));
+    assert!(log.contains("\nedit\n17\n"));
+    Ok(())
+}
+
+#[test]
+fn bot_assessments_refuse_other_accounts_and_cross_repository_sources() -> Result<()> {
+    for (repo, source) in [
+        ("owner/project", Some(false)),
+        ("P4suta/project", Some(true)),
+        ("P4suta/project", None),
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        let mut command = fixture.command_for_repo("edit", repo)?;
+        let output = command
+            .args(["--title", "fix: preserve edits", "--body-file"])
+            .arg(&fixture.body)
+            .args(["--pr", "17"])
+            .env(
+                "GH_FIXTURE_VIEW",
+                serde_json::json!({
+                    "title":"fix: preserve edits", "body":BODY,
+                    "state":"OPEN", "isDraft":true,
+                    "author":{"login":"app/renovate","is_bot":true},
+                    "isCrossRepository":source
+                })
+                .to_string(),
+            )
+            .output()?;
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains("bot assessments require the authenticated repository owner"),
+            "{error}"
+        );
+        assert!(!fixture.log()?.contains("\nedit\n17\n"));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_human_pull_request_keeps_the_original_signer() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let mut command = fixture.command_for_repo("edit", "P4suta/project")?;
+    let output = command
+        .args(["--title", "fix: preserve edits", "--body-file"])
+        .arg(&fixture.body)
+        .args(["--pr", "17"])
+        .env(
+            "GH_FIXTURE_VIEW",
+            serde_json::json!({
+                "title":"fix: preserve edits", "body":BODY,
+                "state":"OPEN", "isDraft":true,
+                "author":{"login":"other-user","is_bot":false},
+                "isCrossRepository":false
+            })
+            .to_string(),
+        )
+        .output()?;
+    assert!(!output.status.success());
+    let log = fixture.log()?;
+    assert!(log.contains("users/other-user/ssh_signing_keys"));
+    assert!(!log.contains("\nedit\n17\n"));
+    Ok(())
+}
+
+#[test]
 fn edit_and_gh_failure_preserve_one_attempt_and_report_the_failure() -> Result<()> {
     for operation in ["create", "edit"] {
         let fixture = Fixture::new(BODY)?;
@@ -3784,6 +3880,53 @@ fn ready_refuses_a_pr_that_adds_an_unowned_parser_until_its_fuzz_target_exists()
 
 const PASSING: &str = r#"[{"status":"COMPLETED","conclusion":"SUCCESS"}]"#;
 const FAILING: &str = r#"[{"status":"COMPLETED","conclusion":"FAILURE"}]"#;
+
+#[test]
+fn the_owner_can_ready_and_merge_a_bot_pull_request() -> Result<()> {
+    let body = format!("{BODY}\nCloses #23.\n");
+    let fixture = Fixture::new(&body)?;
+    let views = [
+        (true, "DRAFT"),
+        (true, "DRAFT"),
+        (false, "CLEAN"),
+        (false, "CLEAN"),
+        (false, "MERGED"),
+    ]
+    .into_iter()
+    .map(|(draft, state)| -> Result<String> {
+        let original = read(17, &fixture.head, draft, &body, PASSING, state);
+        let (_, encoded) = original.split_once('=').context("fixture view")?;
+        let mut view: serde_json::Value = serde_json::from_str(encoded)?;
+        view.as_object_mut().context("fixture object")?.extend(
+            serde_json::json!({
+                "author":{"login":"app/renovate","is_bot":true},
+                "headRefName":"feature","headRepository":{"name":"project"},
+                "headRepositoryOwner":{"login":"P4suta"},"isCrossRepository":false
+            })
+            .as_object()
+            .context("bot fixture")?
+            .clone(),
+        );
+        Ok(format!("17={view}"))
+    })
+    .collect::<Result<Vec<_>>>()?
+    .join("\n");
+    let output = fixture
+        .personal_command("merge")?
+        .args(["--pr", "17", "--interval", "0"])
+        .env("GH_FIXTURE_VIEWS", views)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = fixture.log()?;
+    assert_eq!(mutations(&log), ["ready", "merge"]);
+    assert!(!log.contains("users/app/renovate/ssh_signing_keys"));
+    assert!(log.contains(&format!("\n--match-head-commit\n{}\n", fixture.head)));
+    Ok(())
+}
 
 /// One read of a PR for `GH_FIXTURE_VIEWS`.
 /// `merge` holds the merge state of GitHub, or `MERGED` for a merged PR.

@@ -64,6 +64,28 @@ pub const fn route(level: ReviewLevel) -> ReviewRoute {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AssessmentSigner {
+    Creator,
+    RepositoryOwner,
+    Unavailable,
+}
+
+#[must_use]
+pub const fn assessment_signer(
+    creator_is_bot: bool,
+    owns_repository: bool,
+    same_repository: bool,
+) -> AssessmentSigner {
+    if !creator_is_bot {
+        AssessmentSigner::Creator
+    } else if owns_repository && same_repository {
+        AssessmentSigner::RepositoryOwner
+    } else {
+        AssessmentSigner::Unavailable
+    }
+}
+
 #[must_use]
 pub fn assessment_allowed(level: ReviewLevel, risk: Option<SevereRisk>) -> bool {
     let minimum = risk.and_then(|risk| {
@@ -129,6 +151,30 @@ pub fn completion(
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_signer(bot: bool, owner: bool, same_repository: bool) {
+        let actual = assessment_signer(bot, owner, same_repository);
+        assert_eq!(actual == AssessmentSigner::Creator, !bot);
+        assert_eq!(
+            actual == AssessmentSigner::RepositoryOwner,
+            bot && owner && same_repository
+        );
+        assert_eq!(
+            actual == AssessmentSigner::Unavailable,
+            bot && (!owner || !same_repository)
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn bot_assessments_require_the_owner_and_the_same_source_repository() {
+        let [bot, owner, same_repository]: [bool; 3] = kani::any();
+        let actual = assessment_signer(bot, owner, same_repository);
+        kani::cover!(actual == AssessmentSigner::Creator);
+        kani::cover!(actual == AssessmentSigner::RepositoryOwner);
+        kani::cover!(actual == AssessmentSigner::Unavailable);
+        spec_signer(bot, owner, same_repository);
+    }
 
     pub fn spec_route(level: ReviewLevel) {
         let actual = route(level);
@@ -242,6 +288,13 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_creator_and_ownership_case_selects_the_accountable_signer() {
+        for [bot, owner, same_repository] in crate::domain::flags() {
+            proofs::spec_signer(bot, owner, same_repository);
+        }
+    }
 
     #[test]
     fn every_declared_level_has_one_exclusive_route() {

@@ -1242,6 +1242,7 @@ pub(super) fn live_binding_at(
     body: &str,
     live: &super::LiveDocument,
 ) -> Result<Checked> {
+    let signer = assessment_signer(github, target, &live.author, &live.source)?;
     let checked = check_at(
         root,
         github,
@@ -1253,11 +1254,31 @@ pub(super) fn live_binding_at(
         live.head_ref_oid
             .as_deref()
             .context("actual PR head commit is missing")?,
-        &live.author.login,
+        signer,
     )?;
     validate_live_source(&checked, &live.source)?;
     labels(&checked, &live.labels)?;
     Ok(checked)
+}
+
+pub(super) fn assessment_signer<'a>(
+    github: &'a Github,
+    target: &Target,
+    creator: &'a super::ReviewAuthor,
+    source: &super::LiveSource,
+) -> Result<&'a str> {
+    let repository = github.repository(&target.repo)?;
+    match policy::assessment_signer(
+        creator.is_bot,
+        github.login.eq_ignore_ascii_case(&repository.owner.login),
+        source.is_cross_repository == Some(false),
+    ) {
+        policy::AssessmentSigner::Creator => Ok(&creator.login),
+        policy::AssessmentSigner::RepositoryOwner => Ok(&github.login),
+        policy::AssessmentSigner::Unavailable => anyhow::bail!(
+            "bot assessments require the authenticated repository owner and the same source repository"
+        ),
+    }
 }
 
 pub(super) fn qualified_head(checked: &Checked, head: &str) -> Result<String> {
@@ -1421,14 +1442,8 @@ fn prepare_history(
         return Ok(None);
     };
     let live = super::live_document(github, target, pr)?;
-    let Some(prior) = previous(
-        github,
-        target,
-        &live.body,
-        &live.author.login,
-        &current.root,
-    )?
-    else {
+    let signer = assessment_signer(github, target, &live.author, &live.source)?;
+    let Some(prior) = previous(github, target, &live.body, signer, &current.root)? else {
         return Ok(None);
     };
     if policy::route(prior.assessment.level.into()) == ReviewRoute::Cli
@@ -1438,7 +1453,7 @@ fn prepare_history(
             github,
             target,
             &prior.binding,
-            &live.author.login,
+            signer,
             &current.root,
             prior.source.as_ref(),
         )?;
@@ -1518,13 +1533,7 @@ pub(super) fn preserve_edit(
     checked: &Checked,
 ) -> Result<()> {
     require_resolved_threads(github, target, pr, &checked.binding.head)?;
-    if let Some(prior) = previous(
-        github,
-        target,
-        &live.body,
-        &live.author.login,
-        &checked.root,
-    )? {
+    if let Some(prior) = previous(github, target, &live.body, &checked.signer, &checked.root)? {
         if policy::route(prior.assessment.level.into()) == ReviewRoute::Cli
             && checked.route != ReviewRoute::Cli
         {

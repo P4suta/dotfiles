@@ -423,6 +423,8 @@ struct HeadRepository {
 #[derive(Deserialize)]
 struct ReviewAuthor {
     login: String,
+    #[serde(default)]
+    is_bot: bool,
 }
 
 #[derive(Deserialize)]
@@ -2218,6 +2220,7 @@ fn merge_state(
     let (total, unfinished, failed, _) = tally(&view.status_check_rollup, &[]);
     let mut exclusion = review_exclusion(&view.body);
     if matches!(lifecycle, Lifecycle::Draft | Lifecycle::Ready) {
+        let signer = review_policy::assessment_signer(github, target, &view.author, &view.source)?;
         let reviewed = review_policy::check(
             github,
             target,
@@ -2226,7 +2229,7 @@ fn merge_state(
                 .as_deref()
                 .context("actual merge base commit missing")?,
             &view.head_ref_oid,
-            &view.author.login,
+            signer,
         )?;
         review_policy::validate_live_source(&reviewed, &view.source)?;
         review_policy::labels(&reviewed, &view.labels)?;

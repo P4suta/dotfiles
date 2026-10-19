@@ -3214,11 +3214,11 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     fn review_decisions_and_their_counterexamples_verify_against_production() -> Result<()> {
         const SUBJECTS: [(&str, (usize, usize)); 3] = [
-            ("crates/rules/src/review_routing_rules.rs", (3, 8)),
+            ("crates/rules/src/review_routing_rules.rs", (4, 10)),
             ("crates/rules/src/review_completion_rules.rs", (2, 1)),
             ("crates/rules/src/pr_rules.rs", (8, 20)),
         ];
-        const EXPECTED: (usize, usize) = (13, 29);
+        const EXPECTED: (usize, usize) = (14, 31);
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .context("the proof test has a workspace root")?;
