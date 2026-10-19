@@ -80,5 +80,6 @@
 | [2026-10-15 Prove portable component scans with erased witnesses](prove-portable-component-scans-with-erased-witnesses.md) | proposed |  |
 | [2026-10-16 Evaluate fixed parser domains before symbolic selection](finite-shell-parser-ctfe.md) | proposed |  |
 | [2026-10-17 Run spoken Git commands in the matching policy companion](isolate-spoken-git-in-the-matching-companion.md) | proposed |  |
+| [2026-10-19 Bind inherited Renovate Cargo records to committed workspace metadata](cargo-workspace-renovate-bindings.md) | proposed |  |
 | [2026-10-19 Make native verification authoritative and keep hosted CI lightweight](native-verification-with-lightweight-ci.md) | amended | [2026-10-19](optional-native-verification-before-publication.md) |
 | [2026-10-19 Make native verification optional before publication](optional-native-verification-before-publication.md) | accepted |  |

@@ -141,7 +141,6 @@ A target missing from the first table reaches every profile.
 | `.chezmoiscripts/unix/13-racket.sh` | mac | mac |
 | `.chezmoiscripts/unix/14-guard.sh` | mac | mac |
 | `.chezmoiscripts/unix/15-ocomment.sh` | linux | linux |
-| `.chezmoiscripts/unix/16-domyjob.sh` | mac | mac |
 | `.chezmoiscripts/unix/17-fleet.sh` | mac | mac |
 | `.chezmoiscripts/unix/18-retire-tmux.sh` | linux | linux |
 

@@ -24,6 +24,16 @@
         "$ref": "#/$defs/ContrastPair"
       }
     },
+    "domyjob": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Domyjob"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "herdr_agent": {
       "anyOf": [
         {
@@ -175,6 +185,21 @@
       },
       "additionalProperties": false
     },
+    "Chat": {
+      "type": "object",
+      "properties": {
+        "peers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "peers"
+      ]
+    },
     "Coderabbit": {
       "description": "The pinned `CodeRabbit` command line and its artifact for each host platform.",
       "type": "object",
@@ -217,6 +242,18 @@
         "foreground",
         "background",
         "used"
+      ]
+    },
+    "Domyjob": {
+      "type": "object",
+      "properties": {
+        "chat": {
+          "$ref": "#/$defs/Chat"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "chat"
       ]
     },
     "Herdr": {

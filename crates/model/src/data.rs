@@ -13,6 +13,7 @@ use std::path::Path;
 #[serde(deny_unknown_fields)]
 pub struct Data {
     pub coderabbit: Option<Coderabbit>,
+    pub domyjob: Option<Domyjob>,
     pub herdr_agent: Option<HerdrAgent>,
     /// The mise release that every host installs before any other step.
     pub mise: Option<MiseRelease>,
@@ -32,6 +33,18 @@ pub struct Data {
     pub scripts: Option<BTreeMap<String, String>>,
     /// The modern command-line tools that replace legacy ones for agents, pinned on every profile.
     pub modern: Option<Modern>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Domyjob {
+    pub chat: Chat,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Chat {
+    pub peers: Vec<String>,
 }
 
 /// The modern tool table: each preferred tool, the bootstrap scripts that keep legacy tools, and the candidates it leaves out.

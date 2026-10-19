@@ -33,7 +33,7 @@
     {"mode":"0755","path":".agents/skills/concise-source","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/concise-source/SKILL.md","sha256":"621a2e9f4e1ae8c84f38c3a4b70fa2e2ca122e72ed3832eff7c7ed6623e7eeef","type":"file"},
     {"mode":"0755","path":".agents/skills/delegation","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/delegation/SKILL.md","sha256":"129f7f59ef4dce0649dd9f54d79959b889a580718b9631385cdcccc8e50e4f49","type":"file"},
+    {"mode":"0644","path":".agents/skills/delegation/SKILL.md","sha256":"7d972270efb5d490c10bbb7a1a6f5f98db430978b907a31df38f8748d96e05e6","type":"file"},
     {"mode":"0755","path":".agents/skills/development-assurance","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/development-assurance/SKILL.md","sha256":"f740cd5fbab788c13c8b22baa7846ee7be7e9d196adf5a1531a9f30189d16d37","type":"file"},
     {"mode":"0755","path":".agents/skills/domyjob","sha256":null,"type":"dir"},
@@ -480,6 +480,8 @@
     {"condition":"onchange","phase":"before","position":2,"sha256":"6d7ed7f72a136550609bd1e627c210694053116696033e4bb990511bac94d455","target":".chezmoiscripts/unix/02-github.sh"},
     {"condition":"onchange","phase":"after","position":3,"sha256":"8a228e5bdf831f48b8ca505d36b2815ec81c9a62181f09b9bb2cceee17cd914a","target":".chezmoiscripts/unix/05-tools.sh"},
     {"condition":"always","phase":"after","position":4,"sha256":"d778e07ae8319a305c213bf8df6c8bffface302947a9d870a6d4d28ab8d48b2e","target":".chezmoiscripts/unix/06-integrations.sh"},
-    {"condition":"always","phase":"after","position":5,"sha256":"632d15985bc32da6916abaa22dc65ddc9b48ed965e483142375e608a6b1c4018","target":".chezmoiscripts/unix/19-adapters.sh"}
+    {"condition":"onchange","phase":"after","position":5,"sha256":"611dc99445a4d5bdff8c7982b096f0d17361f641b0f7268bedf1b4639f5384dd","target":".chezmoiscripts/unix/16-domyjob.sh"},
+    {"condition":"always","phase":"after","position":6,"sha256":"eb80c48ce88363f921df8cf00bce9274f7b3bd7a5caee83a37237a01f8042299","target":".chezmoiscripts/unix/19-chat.sh"},
+    {"condition":"always","phase":"after","position":7,"sha256":"632d15985bc32da6916abaa22dc65ddc9b48ed965e483142375e608a6b1c4018","target":".chezmoiscripts/unix/20-adapters.sh"}
   ]
 }

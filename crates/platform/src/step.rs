@@ -35,6 +35,7 @@ pub enum Step {
     Fleet,
     RetireTmux,
     Upgrade,
+    Chat,
     Adapters,
 }
 
@@ -111,7 +112,7 @@ const EVERY: &[Profile] = &[Profile::Mac, Profile::Linux, Profile::Wsl, Profile:
 
 impl Step {
     /// Every step in declaration order, which breaks ties in the run order.
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 30] = [
         Self::Mise,
         Self::Runtime,
         Self::Github,
@@ -140,6 +141,7 @@ impl Step {
         Self::Fleet,
         Self::RetireTmux,
         Self::Upgrade,
+        Self::Chat,
         Self::Adapters,
     ];
 
@@ -175,6 +177,7 @@ impl Step {
             Self::Fleet => "fleet",
             Self::RetireTmux => "retire-tmux",
             Self::Upgrade => "upgrade",
+            Self::Chat => "chat",
             Self::Adapters => "adapters",
         }
     }
@@ -184,10 +187,14 @@ impl Step {
     #[must_use]
     pub const fn profiles(self) -> &'static [Profile] {
         match self {
-            Self::Mise | Self::Runtime | Self::Github | Self::Integrations | Self::Adapters => {
-                EVERY
-            }
-            Self::Tools => EVERY,
+            Self::Mise
+            | Self::Runtime
+            | Self::Github
+            | Self::Tools
+            | Self::Integrations
+            | Self::Domyjob
+            | Self::Chat
+            | Self::Adapters => EVERY,
             Self::Scoop
             | Self::Winget
             | Self::Wezterm
@@ -204,7 +211,6 @@ impl Step {
             | Self::Haskell
             | Self::Racket
             | Self::Guard
-            | Self::Domyjob
             | Self::Fleet => MAC,
             Self::Ocomment => &[Profile::Linux, Profile::Windows],
             Self::Upgrade => &[],
@@ -226,6 +232,7 @@ impl Step {
             Self::Desktop => &[Self::Nix],
             Self::Tools | Self::Upgrade => &[Self::Mise, Self::Nix, Self::Desktop, Self::Scoop],
             Self::Integrations => &[Self::Tools, Self::Herdr],
+            Self::Chat => &[Self::Domyjob, Self::Integrations, Self::Claude],
             Self::Ocomment | Self::Domyjob | Self::Fleet | Self::Ocaml | Self::Haskell => {
                 &[Self::Tools]
             }
@@ -278,6 +285,7 @@ impl Step {
                 Self::Mise
                 | Self::Runtime
                 | Self::Integrations
+                | Self::Chat
                 | Self::Winget
                 | Self::Wezterm
                 | Self::Adapters,
@@ -355,6 +363,7 @@ impl Step {
                 &[Tool::Lefthook]
             }
             (Self::Integrations, Profile::Windows) => &[Tool::Starship, Tool::Zoxide],
+            (Self::Chat, _) => &[Tool::Domyjob],
             _ => &[],
         }
     }
@@ -370,10 +379,10 @@ impl Step {
     }
 }
 
-const ALL_BUT_ADAPTERS: [Step; 28] = {
-    let mut steps = [Step::Mise; 28];
+const ALL_BUT_ADAPTERS: [Step; 29] = {
+    let mut steps = [Step::Mise; 29];
     let mut index = 0;
-    while index < 28 {
+    while index < 29 {
         steps[index] = Step::ALL[index];
         index += 1;
     }

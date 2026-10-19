@@ -728,6 +728,10 @@ fn report_gate(
     std::fs::write(&file, serde_json::to_vec(report).unwrap()).unwrap();
     let mut variables = renovate_variables(repository);
     variables.push((
+        "RENOVATE_FIXTURE_MANIFEST",
+        repository.git(&["show", &format!("{offered}:Cargo.toml")]) + "\n",
+    ));
+    variables.push((
         "RENOVATE_FIXTURE_REPORT",
         file.to_string_lossy().into_owned(),
     ));
@@ -741,6 +745,345 @@ fn report_gate(
         &[],
         &values,
     )
+}
+
+const WORKSPACE_MANIFEST: &str = "[workspace]\nmembers = [\"member\"]\nexclude = [\"dependency\"]\nresolver = \"3\"\n[workspace.dependencies]\nrenamed = { package = \"actual-fixture\", version = \"1.0.1\" }\n[patch.crates-io]\nactual-fixture = { path = \"dependency\" }\n";
+const MEMBER_MANIFEST: &str = "[package]\nname = \"member\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[dependencies]\nrenamed = { workspace = true }\n";
+
+fn cargo_workspace_fixture(name: &str) -> (Repository, String) {
+    let (repository, _, parent) = renovate_fixture(name);
+    for directory in ["member/src", "dependency/src"] {
+        std::fs::create_dir_all(repository.path().join(directory)).unwrap();
+        std::fs::write(repository.path().join(directory).join("lib.rs"), "").unwrap();
+    }
+    std::fs::write(repository.path().join("Cargo.toml"), WORKSPACE_MANIFEST).unwrap();
+    std::fs::write(repository.path().join("member/Cargo.toml"), MEMBER_MANIFEST).unwrap();
+    std::fs::write(
+        repository.path().join("dependency/Cargo.toml"),
+        "[package]\nname = \"actual-fixture\"\nversion = \"1.0.1\"\nedition = \"2024\"\n[features]\nextra = []\n",
+    ).unwrap();
+    let generated = repository
+        .command(env!("CARGO"))
+        .args(["generate-lockfile", "--offline"])
+        .output()
+        .unwrap();
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+    repository.git(&["add", "--all"]);
+    let tree = repository.git(&["write-tree"]);
+    let base = repository.git(&["commit-tree", &tree, "-p", &parent, "-m", "workspace"]);
+    (repository, base)
+}
+
+fn workspace_report() -> serde_json::Value {
+    serde_json::json!({"repositories":{"local":{"packageFiles":{"cargo":[
+        {"packageFile":"Cargo.toml","lockFiles":["Cargo.lock"],"deps":[{
+            "depName":"renamed","packageName":"actual-fixture","datasource":"crate",
+            "depType":"workspace.dependencies","currentValue":"1.0.1","updates":[{"updateType":"patch","newValue":"1.0.2"}],"warnings":[]
+        }]},
+        {"packageFile":"member/Cargo.toml","lockFiles":["Cargo.lock"],"deps":[{
+            "depName":"renamed","datasource":"crate","depType":"dependencies",
+            "currentValue":"","skipReason":"inherited-dependency","updates":[],"warnings":[]
+        }]}
+    ]}}}})
+}
+
+fn workspace_offer(repository: &Repository, base: &str, manifest: &str) -> String {
+    std::fs::write(repository.path().join("member/Cargo.toml"), manifest).unwrap();
+    repository.git(&["add", "--all"]);
+    let tree = repository.git(&["write-tree"]);
+    repository.git(&["commit-tree", &tree, "-p", base, "-m", "member"])
+}
+
+#[test]
+fn renovate_verifies_inherited_cargo_and_ignores_member_comments() {
+    let (repository, base) = cargo_workspace_fixture("renovate-inherited-comments");
+    std::fs::write(
+        repository.path().join("member/Cargo.toml"),
+        format!("{MEMBER_MANIFEST}# comment only\n"),
+    )
+    .unwrap();
+    repository.git(&["add", "member/Cargo.toml"]);
+    let tree = repository.git(&["write-tree"]);
+    let offered = repository.git(&["commit-tree", &tree, "-p", &base, "-m", "comment"]);
+    let output = report_gate(&repository, &base, &offered, &workspace_report());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn renovate_attributes_changed_inherited_bindings_to_the_workspace_provider() {
+    for (name, manifest, kind, target) in [
+        (
+            "features",
+            MEMBER_MANIFEST.replace(
+                "workspace = true",
+                "workspace = true, features = [\"extra\"]",
+            ),
+            "dependencies",
+            None,
+        ),
+        (
+            "kind",
+            MEMBER_MANIFEST.replace("[dependencies]", "[dev-dependencies]"),
+            "dev-dependencies",
+            None,
+        ),
+        (
+            "target",
+            MEMBER_MANIFEST.replace("[dependencies]", "[target.'cfg(unix)'.dependencies]"),
+            "dependencies",
+            Some("cfg(unix)"),
+        ),
+    ] {
+        let (repository, base) = cargo_workspace_fixture(&format!("renovate-inherited-{name}"));
+        let offered = workspace_offer(&repository, &base, &manifest);
+        let mut report = workspace_report();
+        let reference = &mut report["repositories"]["local"]["packageFiles"]["cargo"][1]["deps"][0];
+        reference["depType"] = serde_json::json!(kind);
+        if let Some(target) = target {
+            reference["target"] = serde_json::json!(target);
+        }
+        assert_eq!(
+            refusal(&report_gate(&repository, &base, &offered, &report)).rule,
+            "push.dependencies",
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn renovate_blocks_new_references_and_new_member_manifests() {
+    let (repository, parent) = cargo_workspace_fixture("renovate-inherited-new-reference");
+    let empty = MEMBER_MANIFEST.replace("renamed = { workspace = true }\n", "");
+    let base = workspace_offer(&repository, &parent, &empty);
+    let offered = workspace_offer(&repository, &base, MEMBER_MANIFEST);
+    assert_eq!(
+        refusal(&report_gate(
+            &repository,
+            &base,
+            &offered,
+            &workspace_report()
+        ))
+        .rule,
+        "push.dependencies"
+    );
+
+    let (repository, base) = cargo_workspace_fixture("renovate-inherited-new-manifest");
+    std::fs::create_dir_all(repository.path().join("new-member/src")).unwrap();
+    std::fs::write(repository.path().join("new-member/src/lib.rs"), "").unwrap();
+    std::fs::write(
+        repository.path().join("new-member/Cargo.toml"),
+        MEMBER_MANIFEST.replace("name = \"member\"", "name = \"new-member\""),
+    )
+    .unwrap();
+    std::fs::write(
+        repository.path().join("Cargo.toml"),
+        WORKSPACE_MANIFEST.replace("[\"member\"]", "[\"member\", \"new-member\"]"),
+    )
+    .unwrap();
+    let offered = workspace_offer(&repository, &base, MEMBER_MANIFEST);
+    let mut report = workspace_report();
+    report["repositories"]["local"]["packageFiles"]["cargo"][1]["packageFile"] =
+        serde_json::json!("new-member/Cargo.toml");
+    assert_eq!(
+        refusal(&report_gate(&repository, &base, &offered, &report)).rule,
+        "push.dependencies"
+    );
+}
+
+#[test]
+fn renovate_keeps_workspace_provider_versions_subject_to_freshness() {
+    let (repository, base) = cargo_workspace_fixture("renovate-inherited-version");
+    std::fs::write(
+        repository.path().join("Cargo.toml"),
+        WORKSPACE_MANIFEST.replace("1.0.1", "1.0.0"),
+    )
+    .unwrap();
+    let offered = workspace_offer(&repository, &base, MEMBER_MANIFEST);
+    let mut report = workspace_report();
+    report["repositories"]["local"]["packageFiles"]["cargo"][0]["deps"][0]["currentValue"] =
+        serde_json::json!("1.0.0");
+    assert_eq!(
+        refusal(&report_gate(&repository, &base, &offered, &report)).rule,
+        "push.dependencies"
+    );
+}
+
+#[test]
+fn renovate_preserves_workspace_update_eligibility_and_requires_evidence_for_inspection() {
+    let (repository, base) = cargo_workspace_fixture("renovate-inherited-eligibility");
+    let offered = workspace_offer(
+        &repository,
+        &base,
+        &MEMBER_MANIFEST.replace(
+            "workspace = true",
+            "workspace = true, features = [\"extra\"]",
+        ),
+    );
+    for (field, value) in [
+        ("pendingChecks", serde_json::json!(true)),
+        ("isBreaking", serde_json::json!(true)),
+        ("updateType", serde_json::json!("major")),
+    ] {
+        let mut report = workspace_report();
+        report["repositories"]["local"]["packageFiles"]["cargo"][0]["deps"][0]["updates"][0]
+            [field] = value;
+        let output = report_gate(&repository, &base, &offered, &report);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let path = repository.scope.join("inherited-report.json");
+    std::fs::write(&path, serde_json::to_vec(&workspace_report()).unwrap()).unwrap();
+    assert_eq!(
+        refusal(&repository.dotguard(&["renovate", "inspect", path.to_str().unwrap()], "", &[]))
+            .rule,
+        "push.evidence"
+    );
+}
+
+#[test]
+fn renovate_refuses_misbound_and_failed_inherited_evidence() {
+    let (repository, base) = cargo_workspace_fixture("renovate-inherited-refusals");
+    let offered = workspace_offer(&repository, &base, &format!("{MEMBER_MANIFEST}# comment\n"));
+    let original = workspace_report();
+    for (field, value) in [
+        ("currentValue", serde_json::json!("1.0.1")),
+        ("currentValue", serde_json::Value::Null),
+        ("lockedVersion", serde_json::json!("1.0.1")),
+        ("currentVersion", serde_json::json!("1.0.1")),
+        ("currentDigest", serde_json::json!("")),
+        ("depType", serde_json::json!("workspace.dependencies")),
+        ("depName", serde_json::json!("absent")),
+        ("packageName", serde_json::json!("different-package")),
+        (
+            "registryUrls",
+            serde_json::json!(["https://wrong.invalid/index"]),
+        ),
+        ("warnings", serde_json::json!([{"message":"private-token"}])),
+        (
+            "updates",
+            serde_json::json!([{"updateType":"patch","newValue":"1.0.2"}]),
+        ),
+        ("target", serde_json::json!("cfg(windows)")),
+        ("registryUrls", serde_json::json!(false)),
+    ] {
+        let mut report = original.clone();
+        report["repositories"]["local"]["packageFiles"]["cargo"][1]["deps"][0][field] = value;
+        let rejected = refusal(&report_gate(&repository, &base, &offered, &report));
+        assert_eq!(rejected.rule, "push.evidence", "{field}");
+        assert!(
+            rejected
+                .evidence
+                .iter()
+                .all(|evidence| !evidence.contains("private-token"))
+        );
+    }
+    for member in [false, true] {
+        for field in ["packageFile", "lockFiles"] {
+            let mut report = original.clone();
+            let file =
+                &mut report["repositories"]["local"]["packageFiles"]["cargo"][usize::from(member)];
+            file[field] = if field == "packageFile" {
+                serde_json::json!("missing/Cargo.toml")
+            } else {
+                serde_json::json!(["member/Cargo.lock"])
+            };
+            assert_eq!(
+                refusal(&report_gate(&repository, &base, &offered, &report)).rule,
+                "push.evidence"
+            );
+        }
+    }
+    for (field, value) in [
+        ("currentValue", serde_json::json!("1.0.0")),
+        ("packageName", serde_json::json!("different-package")),
+        (
+            "registryUrls",
+            serde_json::json!(["https://wrong.invalid/index"]),
+        ),
+        ("skipReason", serde_json::json!("github-token-required")),
+        ("warnings", serde_json::json!([{"message":"lookup failed"}])),
+    ] {
+        let mut report = original.clone();
+        report["repositories"]["local"]["packageFiles"]["cargo"][0]["deps"][0][field] = value;
+        assert_eq!(
+            refusal(&report_gate(&repository, &base, &offered, &report)).rule,
+            "push.evidence"
+        );
+    }
+    for duplicate in [false, true] {
+        let mut report = original.clone();
+        let deps = report["repositories"]["local"]["packageFiles"]["cargo"][0]["deps"]
+            .as_array_mut()
+            .unwrap();
+        if duplicate {
+            deps.push(deps[0].clone());
+        } else {
+            deps.clear();
+        }
+        assert_eq!(
+            refusal(&report_gate(&repository, &base, &offered, &report)).rule,
+            "push.evidence"
+        );
+    }
+}
+
+#[test]
+fn renovate_metadata_never_replaces_committed_output_filenames() {
+    let (repository, parent) = cargo_workspace_fixture("renovate-inherited-collision");
+    for filename in [".gate-index", "metadata.json", "cargo-metadata.json"] {
+        std::fs::write(repository.path().join(filename), "committed source").unwrap();
+    }
+    let base = workspace_offer(&repository, &parent, MEMBER_MANIFEST);
+    let offered = workspace_offer(&repository, &base, &format!("{MEMBER_MANIFEST}# comment\n"));
+    let output = report_gate(&repository, &base, &offered, &workspace_report());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for filename in [".gate-index", "metadata.json", "cargo-metadata.json"] {
+        assert_eq!(
+            std::fs::read_to_string(repository.path().join(filename)).unwrap(),
+            "committed source"
+        );
+    }
+}
+
+#[test]
+fn renovate_refuses_failed_metadata_in_either_committed_snapshot() {
+    for baseline in [false, true] {
+        let (repository, parent) =
+            cargo_workspace_fixture(&format!("renovate-inherited-metadata-{baseline}"));
+        std::fs::write(repository.path().join("member/Cargo.toml"), "malformed = [").unwrap();
+        let broken = workspace_offer(&repository, &parent, "malformed = [");
+        let (base, offered) = if baseline {
+            let offered = workspace_offer(&repository, &broken, MEMBER_MANIFEST);
+            (broken, offered)
+        } else {
+            (parent, broken)
+        };
+        assert_eq!(
+            refusal(&report_gate(
+                &repository,
+                &base,
+                &offered,
+                &workspace_report()
+            ))
+            .rule,
+            "push.evidence"
+        );
+    }
 }
 
 fn backend_report(

@@ -33,7 +33,7 @@
     {"mode":"0755","path":".agents/skills/concise-source","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/concise-source/SKILL.md","sha256":"621a2e9f4e1ae8c84f38c3a4b70fa2e2ca122e72ed3832eff7c7ed6623e7eeef","type":"file"},
     {"mode":"0755","path":".agents/skills/delegation","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/delegation/SKILL.md","sha256":"129f7f59ef4dce0649dd9f54d79959b889a580718b9631385cdcccc8e50e4f49","type":"file"},
+    {"mode":"0644","path":".agents/skills/delegation/SKILL.md","sha256":"7d972270efb5d490c10bbb7a1a6f5f98db430978b907a31df38f8748d96e05e6","type":"file"},
     {"mode":"0755","path":".agents/skills/development-assurance","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/development-assurance/SKILL.md","sha256":"f740cd5fbab788c13c8b22baa7846ee7be7e9d196adf5a1531a9f30189d16d37","type":"file"},
     {"mode":"0755","path":".agents/skills/domyjob","sha256":null,"type":"dir"},
@@ -498,6 +498,8 @@
     {"condition":"onchange","phase":"after","position":11,"sha256":"c33b3672b1e171932ec14500e55d9c81fdd04ec2863dcc9f109d805b35cdd0c9","target":".chezmoiscripts/windows/11-sshd.ps1"},
     {"condition":"onchange","phase":"after","position":12,"sha256":"24af9eb26119259727d6fa859a8551ed39cb186e7d7a5d2859e237e182175515","target":".chezmoiscripts/windows/12-storage-scout.ps1"},
     {"condition":"always","phase":"after","position":13,"sha256":"27c1da3a68645060761bce3c839a2755c179d483f61b1470fd1e45003c985e2f","target":".chezmoiscripts/windows/13-ocomment.ps1"},
-    {"condition":"always","phase":"after","position":14,"sha256":"becb53823fd3d8f99cbdd18dbc40b8ea5897c58b1900053dbf623c70bcb33c1b","target":".chezmoiscripts/windows/14-adapters.ps1"}
+    {"condition":"onchange","phase":"after","position":14,"sha256":"e0e37d7638c5bb26ba553270b3f8b3e567ec8499d0d4db31fc4f97390f6e6549","target":".chezmoiscripts/windows/14-domyjob.ps1"},
+    {"condition":"always","phase":"after","position":15,"sha256":"f127e4b7cf32210f24f3f7a00a38ce06507a57c7e042ab3d215f4225cdc7ff1c","target":".chezmoiscripts/windows/15-chat.ps1"},
+    {"condition":"always","phase":"after","position":16,"sha256":"becb53823fd3d8f99cbdd18dbc40b8ea5897c58b1900053dbf623c70bcb33c1b","target":".chezmoiscripts/windows/16-adapters.ps1"}
   ]
 }
