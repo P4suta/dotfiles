@@ -381,10 +381,7 @@ pub fn select(root: &Path, issue: u64, scopes: &[PathBuf]) -> Result<()> {
         !scopes.is_empty(),
         "local implementation needs an explicit --path scope"
     );
-    for path in context::paths(&root, None, false)?
-        .into_iter()
-        .filter(|path| path != context::TRANSPORT)
-    {
+    for path in context::paths(&root, None, false)? {
         check_path(&root, &project, &path).with_context(|| {
             format!("late local selection cannot adopt unregistered dirty path {path}")
         })?;
@@ -448,10 +445,6 @@ pub fn guard_for(root: &Path, paths: &[PathBuf], home: &Path) -> Result<()> {
     for path in paths {
         let absolute = context::edit_path(&root, path)?;
         let path = context::relative(absolute.strip_prefix(&root)?)?;
-        ensure!(
-            path != context::TRANSPORT,
-            "local authority cannot write remote issue transport"
-        );
         check_path(&root, &project, &path)?;
     }
     Ok(())
@@ -463,7 +456,6 @@ pub fn check(root: &Path, base: Option<&str>, staged: bool) -> Result<()> {
     let root = context::checkout(root)?;
     let paths = context::paths(&root, base, staged)?
         .into_iter()
-        .filter(|path| path != context::TRANSPORT)
         .map(PathBuf::from)
         .collect::<Vec<_>>();
     guard_for(&root, &paths, &home()?)

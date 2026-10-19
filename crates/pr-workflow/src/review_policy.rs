@@ -1,3 +1,4 @@
+use super::evidence::{self, Packet};
 use super::{Github, Target, context};
 use anyhow::{Context, Result, ensure};
 use rules::review_routing_rules::{self as policy, ReviewLevel, ReviewRoute};
@@ -5,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 #[cfg(test)]
@@ -13,9 +14,8 @@ use std::path::{Path, PathBuf};
 mod git_fixture;
 
 const SCHEMA: u32 = 1;
-const PACKET_PREFIX: &str = "<!-- pr-review-assessment: ";
-const PACKET_SUFFIX: &str = " -->";
-const MAX_PACKET_BYTES: usize = 48 * 1024;
+/// Starts the line that once carried a signed assessment in a PR body, which a published document now refuses.
+pub(super) const PACKET_PREFIX: &str = "<!-- pr-review-assessment:";
 const MAX_ASSESSMENT_BYTES: usize = 16 * 1024;
 const REVIEW_EXCLUSION: &str = "@coderabbitai ignore";
 const PAGE_SIZE: usize = 100;
@@ -372,15 +372,10 @@ struct HistoricalReview {
     source: Option<platform::source_identity::Binding>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct Packet {
-    object: String,
-    raw: String,
-}
-
 pub(super) struct Checked {
     pub route: ReviewRoute,
+    /// The signed assessment object this check authenticated.
+    pub object: String,
     binding: Binding,
     root: PathBuf,
     assessment: Assessment,
@@ -388,26 +383,6 @@ pub(super) struct Checked {
     history: Option<HistoricalReview>,
     changed: BTreeSet<String>,
     source: platform::source_identity::Binding,
-}
-
-fn packet(body: &str) -> Result<Packet> {
-    let mut packets = body.lines().filter_map(|line| {
-        line.strip_prefix(PACKET_PREFIX)
-            .and_then(|line| line.strip_suffix(PACKET_SUFFIX))
-    });
-    let bytes = packets.next().context(
-        "PR importance assessment is missing; run pr-workflow assess for this exact diff",
-    )?;
-    ensure!(
-        packets.next().is_none() && body.matches(PACKET_PREFIX).count() == 1,
-        "PR importance assessment is duplicate or malformed"
-    );
-    ensure!(
-        bytes.len() <= MAX_PACKET_BYTES,
-        "PR importance assessment exceeds its bounded packet"
-    );
-    serde_json::from_str(bytes)
-        .map_err(|_| anyhow::anyhow!("PR importance assessment packet is malformed"))
 }
 
 fn authenticate(
@@ -469,9 +444,15 @@ fn check_at(
     head: &str,
     signer: &str,
 ) -> Result<Checked> {
+    super::refuse_local_evidence(body, || super::recheck(target, None))?;
     let current = capture_verified(github, root, &target.repo, base, head)?;
     let signers = context::signers_for_login(github, signer)?;
-    let statement = authenticate(&current, &packet(body)?, signers.path(), signer)?;
+    let packet = evidence::assessment(
+        &current.binding.repository,
+        &current.binding.head,
+        &current.binding.diff_sha256,
+    )?;
+    let statement = authenticate(&current, &packet, signers.path(), signer)?;
     let route = policy::route(statement.assessment.level.into());
     let ignore_count = body
         .lines()
@@ -483,15 +464,10 @@ fn check_at(
             ignore_count == 1 && target.generation == rules::pr_rules::Generation::Local,
             "low, medium, and high use a standing CodeRabbit PR suppression and local document generation"
         );
-        ensure!(
-            !body
-                .lines()
-                .any(|line| line.trim() == super::PAUSE_EXCLUSION),
-            "noncritical PR suppression is standing, not a temporary owner pause"
-        );
     }
     Ok(Checked {
         route,
+        object: packet.object,
         binding: current.binding,
         root: current.root,
         assessment: statement.assessment,
@@ -509,7 +485,6 @@ pub(super) fn assess(
     target: &Target,
     base: &str,
     assessment_file: &Path,
-    output: &Path,
     pr: Option<u64>,
 ) -> Result<()> {
     ensure!(
@@ -562,19 +537,18 @@ pub(super) fn assess(
         "HEAD",
     )?;
     authenticate(&final_current, &packet, signers.path(), &github.login)?;
-    let encoded = serde_json::to_string(&packet)?;
-    ensure!(
-        encoded.len() <= MAX_PACKET_BYTES,
-        "signed assessment exceeds its bounded packet"
+    let stored = evidence::store_assessment(
+        &platform::home::home().context("the owner home for the assessment is unavailable")?,
+        &statement.binding.repository,
+        &statement.binding.head,
+        &statement.binding.diff_sha256,
+        &packet.object,
+        &packet.raw,
+    )?;
+    println!(
+        "Current-diff importance assessment saved in owner-local state at {}; this is not review completion",
+        stored.display()
     );
-    let line = format!("{PACKET_PREFIX}{encoded}{PACKET_SUFFIX}\n");
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(output)?;
-    file.write_all(line.as_bytes())?;
-    file.sync_all()?;
-    println!("Current-diff importance assessment saved; this is not review completion");
     Ok(())
 }
 
@@ -1352,17 +1326,18 @@ pub(super) fn admit_ready(
     }
 }
 
+/// The assessment that `pr` last verified on this machine.
 fn previous(
     github: &Github,
     target: &Target,
-    body: &str,
+    pr: u64,
     signer: &str,
     root: &Path,
 ) -> Result<Option<Statement>> {
-    if !body.contains(PACKET_PREFIX) {
+    let Some(object) = evidence::remembered(&target.repo, pr)? else {
         return Ok(None);
-    }
-    let packet = packet(body)?;
+    };
+    let packet = evidence::object(&target.repo, &object)?;
     let (_, payload) = packet
         .raw
         .split_once("\n\n")
@@ -1443,7 +1418,7 @@ fn prepare_history(
     };
     let live = super::live_document(github, target, pr)?;
     let signer = assessment_signer(github, target, &live.author, &live.source)?;
-    let Some(prior) = previous(github, target, &live.body, signer, &current.root)? else {
+    let Some(prior) = previous(github, target, pr, signer, &current.root)? else {
         return Ok(None);
     };
     if policy::route(prior.assessment.level.into()) == ReviewRoute::Cli
@@ -1529,11 +1504,10 @@ pub(super) fn preserve_edit(
     github: &Github,
     target: &Target,
     pr: u64,
-    live: &super::LiveDocument,
     checked: &Checked,
 ) -> Result<()> {
     require_resolved_threads(github, target, pr, &checked.binding.head)?;
-    if let Some(prior) = previous(github, target, &live.body, &checked.signer, &checked.root)? {
+    if let Some(prior) = previous(github, target, pr, &checked.signer, &checked.root)? {
         if policy::route(prior.assessment.level.into()) == ReviewRoute::Cli
             && checked.route != ReviewRoute::Cli
         {
@@ -1625,20 +1599,22 @@ mod tests {
     }
 
     #[test]
-    fn the_body_requires_exactly_one_bounded_assessment_packet() {
-        let valid =
-            format!("{PACKET_PREFIX}{{\"object\":\"object\",\"raw\":\"raw\"}}{PACKET_SUFFIX}");
-        assert!(packet(&valid).is_ok());
+    fn a_published_document_refuses_local_workflow_evidence() {
+        let recheck = || "pr-workflow check".to_owned();
+        crate::refuse_local_evidence("## Why\n\nA reason.\n\n@coderabbitai ignore\n", recheck)
+            .expect("the standing ignore line stays allowed");
         for body in [
-            String::new(),
-            format!("{valid}\n{valid}"),
-            valid.replace("\"raw\":\"raw\"", "\"raw\":\"raw\",\"raw\":\"other\""),
-            format!(
-                "{PACKET_PREFIX}{}{PACKET_SUFFIX}",
-                "x".repeat(MAX_PACKET_BYTES + 1)
-            ),
+            format!("Text.\n{PACKET_PREFIX} {{\"object\":\"o\",\"raw\":\"r\"}} -->\n"),
+            format!("  {PACKET_PREFIX}{{}} -->"),
+            format!("Text.\n{}\n", crate::PAUSE_EXCLUSION),
         ] {
-            assert!(packet(&body).is_err());
+            let error = crate::refuse_local_evidence(&body, recheck).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("can't carry local workflow evidence"),
+                "{error:#}"
+            );
         }
     }
 

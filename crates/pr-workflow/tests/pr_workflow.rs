@@ -171,7 +171,15 @@ impl Fixture {
     ) -> Result<Command> {
         let root = self.directory.path();
         let public = fs::read_to_string(self.signing_key()?.with_extension("pub"))?;
+        // pr-workflow refuses a malformed repository before it reads an assessment, so none gets stored for one.
+        let plain = repo.split_once('/').is_some_and(|(owner, name)| {
+            !owner.is_empty()
+                && !owner.starts_with('.')
+                && !owner.contains(':')
+                && !name.contains('/')
+        });
         let assessment = if !legacy_assessment
+            || !plain
             || operation == "start"
             || operation == "assess"
             || operation.starts_with("issue ")
@@ -180,12 +188,10 @@ impl Fixture {
         } else {
             Some(self.assessment(root, repo, &self.base, "HEAD")?.0)
         };
-        if let Some(assessment) = &assessment
-            && self.body.exists()
-        {
+        if assessment.is_some() && self.body.exists() {
             fs::write(
                 &self.body,
-                self.assessed_body(&fs::read_to_string(&self.body)?, assessment),
+                self.assessed_body(&fs::read_to_string(&self.body)?),
             )?;
         }
         let live_body = fs::read_to_string(if self.body.exists() {
@@ -241,12 +247,8 @@ impl Fixture {
         Ok(command)
     }
 
-    fn assessed_body(&self, body: &str, assessment: &str) -> String {
-        let body = body
-            .lines()
-            .filter(|line| !line.starts_with("<!-- pr-review-assessment: "))
-            .collect::<Vec<_>>()
-            .join("\n");
+    /// The body with the standing review exclusion of a noncritical route, which carries no assessment.
+    fn assessed_body(&self, body: &str) -> String {
         let standing = if self.level != "critical"
             && !body
                 .lines()
@@ -256,9 +258,11 @@ impl Fixture {
         } else {
             "\n"
         };
-        format!("{body}\n{standing}{assessment}\n")
+        format!("{}\n{standing}", body.trim_end())
     }
 
+    /// Signs the fixture assessment of `head` and stores it where pr-workflow reads it.
+    /// Returns the signed object and the public signing key.
     fn assessment(
         &self,
         root: &std::path::Path,
@@ -314,15 +318,25 @@ impl Fixture {
             "blast_radius":"Every fixture account would be affected by the privileged operation.", "blast_radius_kind":"systemic",
             "rollback":"An exposed credential cannot be recalled after publication.", "rollback_kind":"irreversible"
         }));
+        let diff_sha256 = platform::build_inputs::hex(&Sha256::digest(&diff.stdout));
         let statement = serde_json::json!({
-            "schema":1,"signer":"P4suta","binding":{"repository":repo,"base":base,"head":head,"diff_sha256":platform::build_inputs::hex(&Sha256::digest(&diff.stdout))},
+            "schema":1,"signer":"P4suta","binding":{"repository":repo,"base":base,"head":head,"diff_sha256":diff_sha256},
             "assessment":{"level":self.level,"model":"fixture model","rationale":"The actual committed fixture change has the selected consequence scope.","evidence":[{"path":path,"change":"The actual committed file changed at this exact head."}],"severe":severe,"finding_dispositions":[]},"history":null
         });
         let signed =
             platform::signed_git::create(root, &head, &tree, &serde_json::to_vec(&statement)?)?;
-        let packet = serde_json::json!({"object":signed.object,"raw":signed.raw});
+        for home in [self.directory.path(), self.context_home.path()] {
+            pr_workflow::store_assessment(
+                home,
+                repo,
+                &head,
+                &diff_sha256,
+                &signed.object,
+                &signed.raw,
+            )?;
+        }
         Ok((
-            format!("<!-- pr-review-assessment: {packet} -->"),
+            signed.object,
             fs::read_to_string(key.with_extension("pub"))?,
         ))
     }
@@ -558,7 +572,6 @@ impl ForkFixture {
 
     fn assess(&self) -> Result<()> {
         let input = self.fixture.context_home.path().join("assessment.json");
-        let output = self.fixture.context_home.path().join("assessment.md");
         fs::write(
             &input,
             serde_json::to_vec(&serde_json::json!({
@@ -572,19 +585,18 @@ impl ForkFixture {
             .command("assess")?
             .args(["--base", &self.fixture.base, "--assessment-file"])
             .arg(&input)
-            .arg("--output")
-            .arg(&output)
             .output()?;
         assert!(
             result.status.success(),
             "{}",
             String::from_utf8_lossy(&result.stderr)
         );
-        fs::write(
-            &self.fixture.body,
-            self.fixture
-                .assessed_body(BODY, &fs::read_to_string(output)?),
-        )?;
+        assert!(
+            String::from_utf8_lossy(&result.stdout).contains("saved in owner-local state"),
+            "{}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+        fs::write(&self.fixture.body, self.fixture.assessed_body(BODY))?;
         Ok(())
     }
 
@@ -594,22 +606,6 @@ impl ForkFixture {
             .args(["--title", "fix: preserve edits", "--body-file"])
             .arg(&self.fixture.body)
             .args(["--head", head, "--base", "main", "--issue", "23"]);
-        Ok(command)
-    }
-
-    fn cloned_command(&self, root: &std::path::Path, home: &std::path::Path) -> Result<Command> {
-        let configured = self.command("start")?;
-        let variables: Vec<_> = configured
-            .get_envs()
-            .filter_map(|(key, value)| value.map(|value| (key.to_owned(), value.to_owned())))
-            .collect();
-        let mut command = fixture_process::command(env!("CARGO_BIN_EXE_pr-workflow"), root);
-        command
-            .current_dir(root)
-            .envs(variables)
-            .env("HOME", home)
-            .env("USERPROFILE", home)
-            .arg("change-check");
         Ok(command)
     }
 
@@ -742,7 +738,7 @@ fn fork_publication_refuses_mismatched_owner_head_and_unknown_source_metadata() 
         assert!(!output.status.success());
         refusal(&output);
     }
-    let (legacy, _) = fixture.fixture.assessment(
+    fixture.fixture.assessment(
         fixture.fixture.directory.path(),
         FORK_TARGET,
         &fixture.fixture.base,
@@ -752,7 +748,7 @@ fn fork_publication_refuses_mismatched_owner_head_and_unknown_source_metadata() 
         &fixture.fixture.body,
         fixture
             .fixture
-            .assessed_body(&format!("{BODY}\nCloses #23.\n"), &legacy),
+            .assessed_body(&format!("{BODY}\nCloses #23.\n")),
     )?;
     let legacy = fixture.create("contributor:feature")?.output()?;
     assert!(!legacy.status.success());
@@ -881,45 +877,64 @@ fn fork_sources_keep_personal_target_issue_authority() -> Result<()> {
 }
 
 #[test]
-fn fresh_fork_clones_authenticate_issue_transport_without_owner_local_state() -> Result<()> {
-    let fixture = ForkFixture::new()?;
-    let root = fixture.fixture.directory.path();
-    let start = fixture
-        .command("start")?
-        .args(["--issue", "23", "--path", "body.md"])
-        .output()?;
+fn issue_contexts_stay_in_owner_local_state_and_never_reach_a_clone() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let root = platform::issue_context::checkout(fixture.directory.path())?;
+    let mut start = fixture.personal_command("start")?;
+    start.args(["--issue", "23"]);
+    let variables: Vec<_> = start
+        .get_envs()
+        .filter_map(|(key, value)| value.map(|value| (key.to_owned(), value.to_owned())))
+        .collect();
+    let started = start.output()?;
     assert!(
-        start.status.success(),
+        started.status.success(),
         "{}",
-        String::from_utf8_lossy(&start.stderr)
+        String::from_utf8_lossy(&started.stderr)
     );
+    assert!(!root.join(".pr-workflow").exists());
     fs::write(root.join("body.md"), "Prior checked implementation.\n")?;
+    git(&root, &["add", "body.md"])?;
     git(
-        root,
-        &["add", "body.md", platform::issue_context::TRANSPORT],
+        &root,
+        &["commit", "--quiet", "-m", "checked implementation"],
     )?;
-    git(root, &["commit", "--quiet", "-m", "checked implementation"])?;
     let parent = tempfile::tempdir()?;
-    let fresh = fixture.clone_into(parent.path())?;
+    let fresh = parent.path().join("checkout");
+    git(
+        &root,
+        &[
+            "clone",
+            "--quiet",
+            "--no-local",
+            root.to_str().context("fixture checkout path")?,
+            fresh.to_str().context("fresh clone path")?,
+        ],
+    )?;
+    let origin = "https://github.com/P4suta/project.git";
+    git(&fresh, &["remote", "set-url", "origin", origin])?;
+    git(
+        &fresh,
+        &[
+            "config",
+            "--local",
+            &format!("url.{origin}.insteadOf"),
+            origin,
+        ],
+    )?;
     let home = tempfile::tempdir()?;
     assert!(platform::issue_context::local_for(&fresh, home.path()).is_err());
-    fs::write(fresh.join("body.md"), "Fresh scoped implementation.\n")?;
-    let check = fixture.cloned_command(&fresh, home.path())?.output()?;
-    assert!(
-        check.status.success(),
-        "{}",
-        String::from_utf8_lossy(&check.stderr)
-    );
-    assert!(String::from_utf8_lossy(&check.stdout).contains("bound to live issues"));
-    fs::write(fresh.join("outside.rs"), "fn outside() {}\n")?;
-    let unscoped = fixture.cloned_command(&fresh, home.path())?.output()?;
-    assert!(!unscoped.status.success());
-    assert_eq!(rule(&unscoped), "pr.issue-context");
-    assert_eq!(
-        git(&fresh, &["remote", "get-url", "origin"])?,
-        format!("https://github.com/{FORK_SOURCE}.git")
-    );
-    assert!(!fixture.fixture.log()?.contains("\ncreate\n"));
+    fs::write(fresh.join("body.md"), "Fresh change.\n")?;
+    let check = fixture_process::command(env!("CARGO_BIN_EXE_pr-workflow"), &fresh)
+        .current_dir(&fresh)
+        .envs(variables.iter().cloned())
+        .env("HOME", home.path())
+        .env("USERPROFILE", home.path())
+        .arg("change-check")
+        .output()?;
+    assert!(!check.status.success());
+    assert_eq!(rule(&check), "pr.issue-context");
+    assert!(String::from_utf8_lossy(&check.stderr).contains("checked issue context missing"));
     Ok(())
 }
 
@@ -1191,7 +1206,7 @@ fn a_new_local_project_prepares_unborn_scoped_work_without_github() -> Result<()
     git(root, &["update-ref", "refs/heads/main", &first_head])?;
     platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], home.path())?;
     assert!(!home.path().join("offline-gh.log").exists());
-    assert!(!root.join(platform::issue_context::TRANSPORT).exists());
+    assert!(!root.join(".pr-workflow").exists());
     Ok(())
 }
 
@@ -1236,11 +1251,9 @@ fn local_issues_keep_separate_scopes_and_refuse_closed_stale_or_late_work() -> R
     assert!(platform::issue_context::guard_for(root, &[PathBuf::from("first.rs")], home).is_err());
     platform::issue_context::guard_for(root, &[PathBuf::from("second.rs")], home)?;
     fs::create_dir_all(root.join(".pr-workflow"))?;
-    fs::write(
-        root.join(platform::issue_context::TRANSPORT),
-        r#"{"schema":1,"receipts":[]}"#,
-    )?;
+    fs::write(root.join(LEGACY_TRANSPORT), r#"{"schema":1,"receipts":[]}"#)?;
     assert!(platform::issue_context::guard_for(root, &[PathBuf::from("forged.rs")], home).is_err());
+    fs::remove_dir_all(root.join(".pr-workflow"))?;
     fs::write(root.join("late.rs"), "fn late() {}\n")?;
     let late =
         local_command(root, home, &["select", "--issue", "2", "--path", "late.rs"])?.output()?;
@@ -1461,6 +1474,8 @@ fn creation_refuses_an_invalid_branch_and_reports_a_failed_request() -> Result<(
 }
 
 const PAUSE_MARKER: &str = "<!-- coderabbit-pause -->";
+/// The checkout file where an earlier release wrote issue contexts, which grants no authority.
+const LEGACY_TRANSPORT: &str = ".pr-workflow/contexts.json";
 
 const BODY: &str = "## Why\nAvoid losing edits.\n\n## Changes\nPreserve the original input.\n\n## Validation\nThe targeted regression test passed.\n";
 
@@ -1724,13 +1739,11 @@ fn checked_issue_context_guards_scoped_edits_and_rejects_repo_hints_and_replay()
     let root = platform::issue_context::checkout(fixture.directory.path())?;
     let paths = [PathBuf::from("body.md")];
     fs::create_dir_all(root.join(".pr-workflow"))?;
-    fs::write(
-        root.join(platform::issue_context::TRANSPORT),
-        r#"{"schema":1,"receipts":[]}"#,
-    )?;
+    fs::write(root.join(LEGACY_TRANSPORT), r#"{"schema":1,"receipts":[]}"#)?;
     assert!(
         platform::issue_context::guard_for(&root, &paths, fixture.context_home.path()).is_err()
     );
+    fs::remove_dir_all(root.join(".pr-workflow"))?;
     fs::write(root.join("body.md"), "Prior authorized content.\n")?;
     let mut start = fixture.personal_command("start")?;
     start.args(["--issue", "23"]);
@@ -1871,7 +1884,8 @@ fn native_fixture_checks_ignore_the_parent_github_event() -> Result<()> {
             "--exact",
             "a_new_local_project_prepares_unborn_scoped_work_without_github",
             "change_gate_refuses_missing_forged_closed_and_unscoped_contexts",
-            "fresh_fork_clones_authenticate_issue_transport_without_owner_local_state",
+            "every_worktree_of_a_repository_finds_the_context_of_its_branch",
+            "issue_contexts_stay_in_owner_local_state_and_never_reach_a_clone",
             "issue_checks_use_the_actual_transaction_index_and_isolate_signature_objects",
             "working_change_checks_use_owner_context_and_cover_all_local_changes",
             "--test-threads=2",
@@ -1885,14 +1899,15 @@ fn native_fixture_checks_ignore_the_parent_github_event() -> Result<()> {
         stdout,
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(stdout.contains("5 passed; 0 failed"), "{stdout}");
+    assert!(stdout.contains("6 passed; 0 failed"), "{stdout}");
     Ok(())
 }
 
 #[test]
-fn explicit_ci_context_accepts_its_head_and_refuses_foreign_identity_or_head() -> Result<()> {
+fn every_worktree_of_a_repository_finds_the_context_of_its_branch() -> Result<()> {
     let fixture = Fixture::new(BODY)?;
-    let root = fixture.directory.path();
+    let root = platform::issue_context::checkout(fixture.directory.path())?;
+    let branch = git(&root, &["symbolic-ref", "--short", "HEAD"])?;
     let mut start = fixture.personal_command("start")?;
     start.args(["--issue", "23"]);
     let variables: Vec<_> = start
@@ -1905,53 +1920,51 @@ fn explicit_ci_context_accepts_its_head_and_refuses_foreign_identity_or_head() -
         "{}",
         String::from_utf8_lossy(&started.stderr)
     );
-    fs::write(root.join("body.md"), "Changed input.\n")?;
+    git(&root, &["switch", "--quiet", "-c", "parking"])?;
+    let parent = tempfile::tempdir()?;
+    let worktree = parent.path().join("second");
     git(
-        root,
-        &["add", "body.md", platform::issue_context::TRANSPORT],
+        &root,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            worktree.to_str().context("worktree path")?,
+            &branch,
+        ],
     )?;
-    let foreign = Fixture::new("Foreign CI repository.\n")?;
-    let event = fixture.context_home.path().join("event.json");
-    for (repository, head, expected) in [
-        ("P4suta/project", fixture.head.as_str(), None),
-        (
-            "P4suta/foreign",
-            fixture.head.as_str(),
-            Some("CI repository identities differ"),
-        ),
-        (
-            "P4suta/project",
-            foreign.head.as_str(),
-            Some("Not a valid commit name"),
-        ),
-    ] {
-        fs::write(
-            &event,
-            serde_json::to_vec(&serde_json::json!({
-                "repository":{"full_name":"P4suta/project"},
-                "pull_request":{
-                    "base":{"repo":{"full_name":"P4suta/project"}},
-                    "head":{"ref":"feature","sha":head}
-                }
-            }))?,
-        )?;
-        let output = fixture_process::command(env!("CARGO_BIN_EXE_pr-workflow"), root)
-            .current_dir(root)
-            .envs(variables.iter().cloned())
-            .env("GITHUB_ACTIONS", "true")
-            .env("GITHUB_EVENT_PATH", &event)
-            .env("GITHUB_REPOSITORY", repository)
-            .args(["change-check", "--staged"])
-            .output()?;
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if let Some(reason) = expected {
-            assert!(!output.status.success(), "{stderr}");
-            assert!(stderr.contains(reason), "{stderr}");
-        } else {
-            assert!(output.status.success(), "{stderr}");
-            assert!(String::from_utf8_lossy(&output.stdout).contains("bound to live issues"));
-        }
-    }
+    let worktree = platform::issue_context::checkout(&worktree)?;
+    platform::issue_context::guard_for(
+        &worktree,
+        &[PathBuf::from("body.md")],
+        fixture.context_home.path(),
+    )?;
+    fs::write(
+        worktree.join("body.md"),
+        "Changed in the second worktree.\n",
+    )?;
+    git(&worktree, &["add", "body.md"])?;
+    let staged = fixture_process::command(env!("CARGO_BIN_EXE_pr-workflow"), &worktree)
+        .current_dir(&worktree)
+        .envs(variables.iter().cloned())
+        .args(["change-check", "--staged"])
+        .output()?;
+    assert!(
+        staged.status.success(),
+        "{}",
+        String::from_utf8_lossy(&staged.stderr)
+    );
+    assert!(String::from_utf8_lossy(&staged.stdout).contains("bound to live issues"));
+    assert!(!worktree.join(".pr-workflow").exists() && !root.join(".pr-workflow").exists());
+    assert!(
+        platform::issue_context::guard_for(
+            &root,
+            &[PathBuf::from("body.md")],
+            fixture.context_home.path()
+        )
+        .is_err(),
+        "the parking branch of the first worktree has no context"
+    );
     Ok(())
 }
 
@@ -1983,30 +1996,13 @@ fn working_change_checks_use_owner_context_and_cover_all_local_changes() -> Resu
         "{}",
         String::from_utf8_lossy(&started.stderr)
     );
-    assert!(
-        git(
-            &root,
-            &[
-                "show",
-                &format!("HEAD:{}", platform::issue_context::TRANSPORT)
-            ]
-        )
-        .is_err()
-    );
+    assert!(!root.join(".pr-workflow").exists());
     fs::write(root.join("body.md"), "Changed registered input.\n")?;
     let unstaged = check()?;
     assert!(
         unstaged.status.success(),
         "{}",
         String::from_utf8_lossy(&unstaged.stderr)
-    );
-    fs::write(
-        root.join(platform::issue_context::TRANSPORT),
-        r#"{"schema":1,"receipts":[]}"#,
-    )?;
-    assert!(
-        check()?.status.success(),
-        "working repository hints are not owner context"
     );
     git(&root, &["add", "body.md"])?;
     git(
@@ -2076,7 +2072,7 @@ fn an_origin_change_during_signing_cannot_rebind_the_checked_destination() -> Re
     let refused = start.output()?;
     assert!(!refused.status.success());
     assert_eq!(refusal(&refused)["rule"], "pr.stack");
-    assert!(!root.join(platform::issue_context::TRANSPORT).exists());
+    assert!(!root.join(".pr-workflow").exists());
     fs::write(config, original)?;
     assert!(platform::issue_context::local_for(&root, fixture.context_home.path()).is_err());
     Ok(())
@@ -2115,7 +2111,6 @@ fn change_gate_refuses_missing_forged_closed_and_unscoped_contexts() -> Result<(
     );
     fs::write(root.join("body.md"), "Changed input.\n")?;
     git(&root, &["add", "body.md"])?;
-    git(&root, &["add", platform::issue_context::TRANSPORT])?;
     let accepted = check()?.output()?;
     assert!(
         accepted.status.success(),
@@ -2128,20 +2123,33 @@ fn change_gate_refuses_missing_forged_closed_and_unscoped_contexts() -> Result<(
     fs::write(root.join("unregistered.rs"), "fn unregistered() {}\n")?;
     git(&root, &["add", "unregistered.rs"])?;
     assert!(!check()?.output()?.status.success());
-    let mut manifest = platform::issue_context::local_for(&root, fixture.context_home.path())?;
-    manifest
-        .receipts
-        .first_mut()
-        .context("fixture checked context missing")?
-        .context
-        .scopes
-        .push("unregistered.rs".into());
-    fs::write(
-        root.join(platform::issue_context::TRANSPORT),
-        serde_json::to_vec(&manifest)?,
-    )?;
-    git(&root, &["add", platform::issue_context::TRANSPORT])?;
-    assert!(!check()?.output()?.status.success());
+    let state = fixture
+        .context_home
+        .path()
+        .join(".local/state/pr-workflow/contexts");
+    let mut forged = 0;
+    for entry in fs::read_dir(&state)? {
+        let path = entry?.path();
+        if path.extension().is_none_or(|extension| extension != "json")
+            || path.to_string_lossy().contains(".adoption")
+        {
+            continue;
+        }
+        let mut local: serde_json::Value = serde_json::from_slice(&fs::read(&path)?)?;
+        local["manifest"]["receipts"][0]["context"]["scopes"]
+            .as_array_mut()
+            .context("fixture checked scopes")?
+            .push("unregistered.rs".into());
+        fs::write(&path, serde_json::to_vec(&local)?)?;
+        forged += 1;
+    }
+    assert_eq!(forged, 1, "one repository state file");
+    let refused = check()?.output()?;
+    assert!(
+        !refused.status.success(),
+        "forged owner-local scopes fail their signature"
+    );
+    assert_eq!(refusal(&refused)["rule"], "pr.issue-context");
     Ok(())
 }
 
@@ -2207,10 +2215,7 @@ fn issue_checks_use_the_actual_transaction_index_and_isolate_signature_objects()
         String::from_utf8_lossy(&start.stderr)
     );
     fs::write(root.join("body.md"), "Changed registered input.\n")?;
-    git(
-        &root,
-        &["add", "body.md", platform::issue_context::TRANSPORT],
-    )?;
+    git(&root, &["add", "body.md"])?;
     let configured = fixture.personal_command("start")?;
     let variables: Vec<_> = configured
         .get_envs()
@@ -2243,10 +2248,7 @@ fn issue_checks_use_the_actual_transaction_index_and_isolate_signature_objects()
     assert_eq!(fs::read_dir(&owned)?.count(), 0);
     let index = fixture.context_home.path().join("transaction-index");
     fs::write(root.join("unregistered.rs"), "fn unregistered() {}\n")?;
-    for arguments in [
-        vec!["read-tree", "HEAD"],
-        vec!["add", platform::issue_context::TRANSPORT, "unregistered.rs"],
-    ] {
+    for arguments in [vec!["read-tree", "HEAD"], vec!["add", "unregistered.rs"]] {
         let output = fixture_git::command("git", &root.join("gitconfig"))
             .current_dir(&root)
             .env("GIT_INDEX_FILE", &index)
@@ -2769,7 +2771,7 @@ fn a_draft_readied_during_the_pause_carries_the_pause_lines() -> Result<()> {
                 let error = String::from_utf8_lossy(&output.stderr);
                 assert!(
                     if generation == "local" {
-                        error.contains("standing, not a temporary owner pause")
+                        error.contains("can't carry local workflow evidence")
                     } else {
                         error.contains("paused")
                     },
@@ -2787,7 +2789,7 @@ fn paused_pr_reviews_are_not_awaited() -> Result<()> {
         for (body, expected) in [
             (BODY.to_owned(), "CodeRabbit review route: None"),
             (excluded(), "CodeRabbit review route: None"),
-            (pause_excluded(), "standing, not a temporary owner pause"),
+            (pause_excluded(), "can't carry local workflow evidence"),
         ] {
             let fixture = Fixture::new(BODY)?;
             if let Some(marker) = marker {
@@ -2853,7 +2855,7 @@ fn a_pr_readied_during_the_pause_owes_its_review_after_resumption() -> Result<()
     let mut fixture = Fixture::new(BODY)?;
     fixture.level = "critical";
     fixture.pause("paused-pr")?;
-    let body = format!("{BODY}\n@coderabbitai ignore\n{PAUSE_MARKER}\n");
+    let body = format!("{BODY}\n@coderabbitai ignore\n");
     let view = |draft: bool| {
         serde_json::json!({"title":"fix: preserve edits","body":body,"state":"OPEN","isDraft":draft})
             .to_string()
@@ -2885,29 +2887,72 @@ fn a_pr_readied_during_the_pause_owes_its_review_after_resumption() -> Result<()
     Ok(())
 }
 
+/// Edits critical PR 17 under the owner's pause `marker`, starting from `live` and an optional recorded pause exclusion.
+/// Returns whether the edit passed, its standard error, whether gh received it, and whether the pause record remains.
+fn edit_during_pause(
+    marker: Option<&str>,
+    draft: bool,
+    live: &str,
+    recorded: bool,
+    edited: &str,
+) -> Result<(bool, String, bool, bool)> {
+    let mut fixture = Fixture::new(edited)?;
+    fixture.level = "critical";
+    if let Some(marker) = marker {
+        fixture.pause(marker)?;
+    }
+    let record = fixture
+        .directory
+        .path()
+        .join(".local/state/pr-workflow/pauses/owner__project/pr-17");
+    if recorded {
+        fs::create_dir_all(record.parent().context("pause record directory")?)?;
+        fs::write(&record, "")?;
+    }
+    let view = serde_json::json!({"title":"fix: preserve edits","body":live,"state":"OPEN","isDraft":draft});
+    let output = fixture
+        .command("edit")?
+        .args(["--title", "fix: preserve edits", "--body-file"])
+        .arg(&fixture.body)
+        .args(["--pr", "17"])
+        .env("GH_FIXTURE_VIEW", view.to_string())
+        .output()?;
+    Ok((
+        output.status.success(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+        fs::read_to_string(&fixture.log)
+            .unwrap_or_default()
+            .contains("\nedit\n"),
+        record.try_exists()?,
+    ))
+}
+
 #[test]
 fn an_edit_cannot_restore_review_of_a_ready_pr_during_the_pause() -> Result<()> {
     let excluded = format!("{BODY}\n@coderabbitai ignore\n");
-    let pause_excluded = format!("{excluded}{PAUSE_MARKER}\n");
-    for (marker, draft, live, edited, accepted) in [
+    // Each row: the owner's pause, a draft, the live body, a recorded pause exclusion, the edited body, and acceptance.
+    for (marker, draft, live, recorded, edited, accepted) in [
         (
             Some("paused-pr"),
             false,
-            pause_excluded.as_str(),
             excluded.as_str(),
-            false,
+            true,
+            excluded.as_str(),
+            true,
         ),
         (
             Some("paused-pr"),
             true,
-            pause_excluded.as_str(),
+            excluded.as_str(),
+            true,
             excluded.as_str(),
             true,
         ),
         (
             None,
             false,
-            pause_excluded.as_str(),
+            excluded.as_str(),
+            true,
             excluded.as_str(),
             true,
         ),
@@ -2915,61 +2960,74 @@ fn an_edit_cannot_restore_review_of_a_ready_pr_during_the_pause() -> Result<()> 
             Some("paused-pr"),
             false,
             excluded.as_str(),
-            pause_excluded.as_str(),
+            false,
+            excluded.as_str(),
             true,
         ),
         (
             Some("paused-pr"),
             false,
-            pause_excluded.as_str(),
-            pause_excluded.as_str(),
+            excluded.as_str(),
             true,
+            BODY,
+            false,
         ),
-        (Some("paused-pr"), false, excluded.as_str(), BODY, false),
-        (Some("paused"), false, excluded.as_str(), BODY, false),
-        (Some("paused-pr"), true, excluded.as_str(), BODY, true),
         (
             Some("paused-pr"),
             false,
             excluded.as_str(),
+            false,
+            BODY,
+            false,
+        ),
+        (Some("paused"), false, excluded.as_str(), false, BODY, false),
+        (Some("paused-pr"), true, excluded.as_str(), true, BODY, true),
+        (Some("paused-pr"), false, BODY, false, BODY, true),
+        (
+            Some("paused-cli"),
+            false,
             excluded.as_str(),
+            false,
+            BODY,
             true,
         ),
-        (Some("paused-pr"), false, BODY, BODY, true),
-        (Some("paused-cli"), false, excluded.as_str(), BODY, true),
-        (None, false, excluded.as_str(), BODY, true),
+        (None, false, excluded.as_str(), true, BODY, true),
     ] {
-        let mut fixture = Fixture::new(edited)?;
-        fixture.level = "critical";
-        if let Some(marker) = marker {
-            fixture.pause(marker)?;
-        }
-        let view = serde_json::json!({"title":"fix: preserve edits","body":live,"state":"OPEN","isDraft":draft});
-        let output = fixture
-            .command("edit")?
-            .args(["--title", "fix: preserve edits", "--body-file"])
-            .arg(&fixture.body)
-            .args(["--pr", "17"])
-            .env("GH_FIXTURE_VIEW", view.to_string())
-            .output()?;
-        let error = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(
-            output.status.success(),
-            accepted,
-            "{marker:?} {draft} {error}"
-        );
-        assert_eq!(
-            fs::read_to_string(&fixture.log)
-                .unwrap_or_default()
-                .contains("\nedit\n"),
-            accepted
-        );
-        if !accepted {
+        let (passed, error, published, remains) =
+            edit_during_pause(marker, draft, live, recorded, edited)?;
+        assert_eq!(passed, accepted, "{marker:?} {draft} {recorded} {error}");
+        assert_eq!(published, accepted);
+        if accepted {
+            let paused_pr = matches!(marker, Some("paused" | "paused-pr"));
+            assert_eq!(
+                remains,
+                edited.contains("@coderabbitai ignore") && (paused_pr || recorded),
+                "{marker:?} {draft} {recorded}: the edit keeps a pause record only while the body excludes review"
+            );
+        } else {
             assert!(
                 error.contains("PR reviews are paused") && error.contains("keep the standalone"),
                 "{error}"
             );
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn a_body_carrying_local_workflow_evidence_never_reaches_github() -> Result<()> {
+    for marker in [
+        "<!-- pr-review-assessment: {\"object\":\"0\",\"raw\":\"r\"} -->",
+        PAUSE_MARKER,
+    ] {
+        let fixture = Fixture::new(&format!("{BODY}\n{marker}\n"))?;
+        let output = fixture.document("create", "fix: preserve edits")?;
+        assert!(!output.status.success());
+        assert_eq!(rule(&output), "pr.local-evidence");
+        assert_eq!(
+            mutations(&fs::read_to_string(&fixture.log).unwrap_or_default()),
+            [] as [String; 0]
+        );
     }
     Ok(())
 }
@@ -4139,7 +4197,7 @@ fn a_branch_sharing_work_with_an_open_pr_is_refused_with_the_stack_command() -> 
         let (packet, _) = fixture.assessment(&checkout, "P4suta/project", "origin/main", head)?;
         fs::write(
             &fixture.body,
-            fixture.assessed_body(&fs::read_to_string(&fixture.body)?, &packet),
+            fixture.assessed_body(&fs::read_to_string(&fixture.body)?),
         )?;
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("GIT_") {
@@ -4278,11 +4336,10 @@ impl Fixture {
             .env("GH_STACK_FIXTURE_LEASE", lease)
             .args(&arguments[1..]);
         if arguments[0] == "create" || arguments[0] == "merge" {
-            let (packet, _) =
-                self.assessment(checkout, "P4suta/project", "origin/parent", "HEAD")?;
+            self.assessment(checkout, "P4suta/project", "origin/parent", "HEAD")?;
             fs::write(
                 &self.body,
-                self.assessed_body(&fs::read_to_string(&self.body)?, &packet),
+                self.assessed_body(&fs::read_to_string(&self.body)?),
             )?;
             command
                 .env("GH_FIXTURE_HEAD", git(checkout, &["rev-parse", "HEAD"])?)

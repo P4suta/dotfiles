@@ -1,4 +1,4 @@
-//! Checked issue contexts, with owner-local state distinct from repository transport.
+//! Checked issue contexts, kept only in owner-local state that every worktree of a repository shares.
 
 pub use crate::signed_git::git;
 use anyhow::{Context as _, Result, ensure};
@@ -9,7 +9,6 @@ use std::fs;
 use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 
-pub const TRANSPORT: &str = ".pr-workflow/contexts.json";
 const STATE: &str = ".local/state/pr-workflow/contexts";
 const SCHEMA: u8 = 1;
 const MAX_CONTEXTS: usize = 64;
@@ -245,7 +244,7 @@ pub fn snapshot(
         .to_owned();
     let dirty = paths(root, None, false)?;
     let mut initial_dirty = BTreeMap::new();
-    for path in dirty.into_iter().filter(|path| path != TRANSPORT) {
+    for path in dirty {
         let path = relative(Path::new(&path))?;
         let bytes = match fs::symlink_metadata(root.join(&path)) {
             Ok(metadata) if metadata.file_type().is_symlink() => Some(
@@ -328,12 +327,8 @@ pub fn authenticate(root: &Path, receipt: &Receipt, signers: &Path) -> Result<()
     }
     Ok(())
 }
-fn state(root: &Path) -> Result<PathBuf> {
-    let home = crate::home::home().context("issue-context owner home missing")?;
-    state_for(root, &home)
-}
 
-fn state_for(root: &Path, home: &Path) -> Result<PathBuf> {
+fn state_directory(root: &Path, home: &Path) -> Result<PathBuf> {
     let directory = home.join(STATE);
     fs::create_dir_all(&directory)?;
     let directory = crate::paths::canonical(&directory)?;
@@ -341,8 +336,31 @@ fn state_for(root: &Path, home: &Path) -> Result<PathBuf> {
         !directory.starts_with(root),
         "issue contexts belong to owner-local state outside the checkout"
     );
+    Ok(directory)
+}
+
+/// The contexts of the repository `root` belongs to, which every worktree of it shares.
+fn state_for(root: &Path, home: &Path) -> Result<PathBuf> {
+    let key = crate::build_inputs::hex(&Sha256::digest(
+        common_git(root)?.as_os_str().as_encoded_bytes(),
+    ));
+    Ok(state_directory(root, home)?.join(format!("{key}.json")))
+}
+
+/// The state of the checkout `root` alone, which holds its adoption approvals and the contexts of earlier releases.
+fn checkout_state_for(root: &Path, home: &Path) -> Result<PathBuf> {
     let key = crate::build_inputs::hex(&Sha256::digest(root.as_os_str().as_encoded_bytes()));
-    Ok(directory.join(format!("{key}.json")))
+    Ok(state_directory(root, home)?.join(format!("{key}.json")))
+}
+
+/// The repository's contexts, or the contexts an earlier release kept for the checkout alone.
+fn existing_state(root: &Path, home: &Path) -> Result<Option<PathBuf>> {
+    for path in [state_for(root, home)?, checkout_state_for(root, home)?] {
+        if path.try_exists()? {
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
 }
 
 /// # Errors
@@ -358,7 +376,7 @@ pub fn adoption_request(
         "adoption approval requires the original snapshot"
     );
     Ok((
-        state_for(&root, home)?.with_extension("adoption.json"),
+        checkout_state_for(&root, home)?.with_extension("adoption.json"),
         AdoptionApproval {
             common_git: common_git(&root)?,
             origin: git(&root, &["remote", "get-url", "origin"], None)?,
@@ -380,7 +398,7 @@ fn read_approval(path: &Path) -> Result<AdoptionApproval> {
 /// Returns an error for newly dirty implementation without a prior context or owner approval.
 pub fn authorize_initial(root: &Path, context: &mut Context, adopt_existing: bool) -> Result<()> {
     let home = crate::home::home().context("issue-context owner home missing")?;
-    let state = state_for(root, &home)?;
+    let state = checkout_state_for(root, &home)?;
     let (approval_path, expected) = adoption_request(root, &home, context)?;
     if adopt_existing {
         ensure!(
@@ -416,7 +434,7 @@ pub fn authorize_initial(root: &Path, context: &mut Context, adopt_existing: boo
         context.adopted = true;
         return Ok(());
     }
-    let previous = if state.exists() {
+    let previous = if existing_state(root, &home)?.is_some() {
         Some(local_for(root, &home)?)
     } else {
         None
@@ -501,10 +519,12 @@ pub(crate) fn write(path: &Path, value: &impl Serialize) -> Result<()> {
 }
 
 /// # Errors
-/// Returns an error if saving owner state or repository transport fails.
+/// Returns an error if saving owner state fails.
 pub fn persist(root: &Path, receipt: Receipt, expected: &Binding) -> Result<()> {
     let root = checkout(root)?;
-    let state = state(&root)?;
+    let home = crate::home::home().context("issue-context owner home missing")?;
+    let state = state_for(&root, &home)?;
+    let checkout_state = checkout_state_for(&root, &home)?;
     let lock = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -517,12 +537,11 @@ pub fn persist(root: &Path, receipt: Receipt, expected: &Binding) -> Result<()> 
         "checkout identity changed before issue-context persistence"
     );
     let adoption = if receipt.context.adopted {
-        let home = crate::home::home().context("issue-context owner home missing")?;
         let mut original = receipt.context.clone();
         original.adopted = false;
         let (approval, expected) = adoption_request(&root, &home, &original)?;
         ensure!(
-            !state.with_extension("adopted.json").exists(),
+            !checkout_state.with_extension("adopted.json").exists(),
             "owner adoption was already consumed"
         );
         ensure!(
@@ -533,8 +552,8 @@ pub fn persist(root: &Path, receipt: Receipt, expected: &Binding) -> Result<()> 
     } else {
         None
     };
-    let mut local: Local = if state.is_file() {
-        serde_json::from_slice(&fs::read(&state)?)?
+    let mut local: Local = if let Some(existing) = existing_state(&root, &home)? {
+        serde_json::from_slice(&fs::read(existing)?)?
     } else {
         Local {
             checkout: expected.checkout.clone(),
@@ -547,12 +566,26 @@ pub fn persist(root: &Path, receipt: Receipt, expected: &Binding) -> Result<()> 
         }
     };
     ensure!(
-        local.checkout == expected.checkout
-            && local.common_git == expected.common_git
+        local.common_git == expected.common_git
             && local.origin == expected.origin
             && local.manifest.schema == SCHEMA,
         "owner-local issue-context identity differs"
     );
+    local.checkout.clone_from(&expected.checkout);
+    // Another worktree may have deleted the branch of an earlier context, which then authorizes nothing.
+    local.manifest.receipts.retain(|previous| {
+        git(
+            &root,
+            &[
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{}", previous.context.branch),
+            ],
+            None,
+        )
+        .is_ok()
+    });
     require_scope_retention(&local.manifest, &receipt.context)?;
     let history_id = if receipt.object.is_empty() {
         format!(
@@ -570,7 +603,7 @@ pub fn persist(root: &Path, receipt: Receipt, expected: &Binding) -> Result<()> 
         write(&history, &receipt)?;
     }
     if let Some(approval) = adoption {
-        fs::rename(approval, state.with_extension("adopted.json"))?;
+        fs::rename(approval, checkout_state.with_extension("adopted.json"))?;
     }
     local.manifest.receipts.retain(|previous| {
         previous.context.branch != receipt.context.branch
@@ -582,8 +615,7 @@ pub fn persist(root: &Path, receipt: Receipt, expected: &Binding) -> Result<()> 
         local.manifest.receipts.len() <= MAX_CONTEXTS,
         "too many active issue contexts"
     );
-    write(&state, &local)?;
-    write_transport(&root, local.manifest)
+    write(&state, &local)
 }
 
 fn require_scope_retention(previous: &Manifest, requested: &Context) -> Result<()> {
@@ -616,33 +648,6 @@ fn require_scope_retention(previous: &Manifest, requested: &Context) -> Result<(
     Ok(())
 }
 
-fn write_transport(root: &Path, manifest: Manifest) -> Result<()> {
-    let branch = branch(root)?;
-    let active = Manifest {
-        schema: SCHEMA,
-        receipts: manifest
-            .receipts
-            .into_iter()
-            .filter(|receipt| receipt.context.branch == branch)
-            .collect(),
-    };
-    if active
-        .receipts
-        .iter()
-        .any(|receipt| receipt.context.destination.required)
-    {
-        let target = root.join(TRANSPORT);
-        fs::create_dir_all(target.parent().context("issue transport parent missing")?)?;
-        ensure!(
-            crate::paths::canonical(target.parent().context("issue transport parent missing")?)?
-                .starts_with(root),
-            "issue transport parent escapes the checkout"
-        );
-        write(&target, &active)?;
-    }
-    Ok(())
-}
-
 /// # Errors
 /// Returns an error if owner context lacks data or differs from the checkout.
 pub fn local(root: &Path) -> Result<Manifest> {
@@ -655,7 +660,7 @@ pub fn local(root: &Path) -> Result<Manifest> {
 pub fn optional_local(root: &Path) -> Result<Option<Manifest>> {
     let home = crate::home::home().context("issue-context owner home missing")?;
     let root = checkout(root)?;
-    if state_for(&root, &home)?.try_exists()? {
+    if existing_state(&root, &home)?.is_some() {
         local_for(&root, &home).map(Some)
     } else {
         Ok(None)
@@ -663,61 +668,20 @@ pub fn optional_local(root: &Path) -> Result<Option<Manifest>> {
 }
 
 /// # Errors
-/// Returns an error for unreadable or malformed existing committed or staged transport.
-pub fn optional_transport(root: &Path, staged: bool) -> Result<Option<Manifest>> {
-    let paths = if staged {
-        crate::signed_git::index_git(root, &["ls-files", "--stage", "--", TRANSPORT])?
-    } else {
-        git(
-            root,
-            &["ls-tree", "--name-only", "HEAD", "--", TRANSPORT],
-            None,
-        )?
-    };
-    if paths.trim().is_empty() {
-        Ok(None)
-    } else {
-        transport(root, staged).map(Some)
-    }
-}
-
-/// # Errors
-/// Returns an error if supplied owner context lacks data or differs from the checkout.
+/// Returns an error if supplied owner context lacks data or differs from the repository.
 pub fn local_for(root: &Path, home: &Path) -> Result<Manifest> {
     let root = checkout(root)?;
-    let local: Local = serde_json::from_slice(&fs::read(state_for(&root, home)?).context("checked issue context missing; run pr-workflow start --repo OWNER/REPO --issue NUMBER --path PATH")?)?;
+    let path = existing_state(&root, home)?.context(
+        "checked issue context missing; run pr-workflow start --repo OWNER/REPO --issue NUMBER --path PATH",
+    )?;
+    let local: Local = serde_json::from_slice(&fs::read(path)?)?;
     ensure!(
-        local.checkout == root
-            && local.common_git == common_git(&root)?
+        local.common_git == common_git(&root)?
             && local.origin == git(&root, &["remote", "get-url", "origin"], None)?
             && local.manifest.schema == SCHEMA,
         "owner-local issue-context identity differs"
     );
     Ok(local.manifest)
-}
-
-/// # Errors
-/// Returns an error for missing, malformed, or empty transport.
-pub fn transport(root: &Path, staged: bool) -> Result<Manifest> {
-    let reference = if staged {
-        format!(":{TRANSPORT}")
-    } else {
-        format!("HEAD:{TRANSPORT}")
-    };
-    let text = if staged {
-        crate::signed_git::index_git(root, &["show", &reference])?
-    } else {
-        git(root, &["show", &reference], None)?
-    };
-    let manifest: Manifest =
-        serde_json::from_str(&text).context("signed issue-context transport missing")?;
-    ensure!(
-        manifest.schema == SCHEMA
-            && !manifest.receipts.is_empty()
-            && manifest.receipts.len() <= MAX_CONTEXTS,
-        "invalid issue-context transport"
-    );
-    Ok(manifest)
 }
 
 /// # Errors
@@ -801,10 +765,6 @@ pub fn guard_for(root: &Path, paths: &[PathBuf], home: &Path) -> Result<()> {
                 .strip_prefix(&root)
                 .context("edit path lies outside the context checkout")?,
         )?;
-        ensure!(
-            relative != TRANSPORT,
-            "issue-context transport is written only by pr-workflow start"
-        );
         let verdict = rules::pr_rules::context_gate(rules::pr_rules::ContextFacts {
             required: classification
                 .as_ref()
@@ -1111,7 +1071,7 @@ mod tests {
             &expected,
         )?;
         let before = state_contents(directory)?;
-        let transport_before = fs::read(root.join(TRANSPORT))?;
+        assert!(!root.join(".pr-workflow").exists());
         let error = persist(
             root,
             receipt(context(FIRST_SOURCE, &["alpha"]), OMITTED_OBJECT),
@@ -1120,7 +1080,6 @@ mod tests {
         .unwrap_err();
         assert!(error.to_string().contains("--path beta"));
         assert_eq!(state_contents(directory)?, before);
-        assert_eq!(fs::read(root.join(TRANSPORT))?, transport_before);
         assert!(!directory.join(OMITTED_OBJECT).exists());
 
         persist(
