@@ -1,0 +1,322 @@
+# Packages each profile installs through its native package manager.
+
+# Each Nix package names the mise tool that replaces it on a host without Nix, or an empty string for none.
+[platforms.linux.nix.packages]
+actionlint = "actionlint"
+age = "age"
+air = "air"
+asciinema = "pipx:asciinema"
+ast-grep = "ast-grep"
+atuin = "atuin"
+bacon = "cargo:bacon"
+bat = "bat"
+bottom = "bottom"
+broot = "cargo:broot"
+carapace = "carapace"
+cargo-audit = "cargo:cargo-audit"
+cargo-binstall = "cargo:cargo-binstall"
+cargo-deny = "cargo:cargo-deny"
+cargo-expand = "cargo:cargo-expand"
+cargo-llvm-cov = "cargo:cargo-llvm-cov"
+cargo-machete = "cargo:cargo-machete"
+cargo-mutants = "cargo:cargo-mutants"
+cargo-nextest = "cargo:cargo-nextest"
+chezmoi = "chezmoi"
+choose = "choose"
+code2prompt = "cargo:code2prompt"
+cosign = "cosign"
+crane = "crane"
+csvlens = "cargo:csvlens"
+ctop = "ctop"
+dasel = "dasel"
+delta = "delta"
+difftastic = "difftastic"
+dive = "dive"
+doggo = "doggo"
+doppler = "doppler"
+dua = "dua"
+duckdb = "duckdb"
+duf = "duf"
+dust = "dust"
+eza = "eza"
+fastfetch = "fastfetch"
+fd = "fd"
+fq = "aqua:wader/fq"
+fx = "fx"
+fzf = "fzf"
+gh = "gh"
+gh-dash = "aqua:dlvhdr/gh-dash"
+ghq = "ghq"
+git-absorb = "cargo:git-absorb"
+git-cliff = "git-cliff"
+git-sizer = "aqua:github/git-sizer"
+git-town = "aqua:git-town/git-town"
+gitleaks = "gitleaks"
+glow = "glow"
+go-task = "task"
+goreleaser = "goreleaser"
+gotestsum = "gotestsum"
+gping = "gping"
+grex = "grex"
+gron = "gron"
+grpcurl = "grpcurl"
+grype = "grype"
+gum = "gum"
+hadolint = "hadolint"
+herdr = "herdr"
+hexyl = "hexyl"
+hurl = "hurl"
+hyperfine = "hyperfine"
+jaq = "jaq"
+jc = "jc"
+jless = "jless"
+jq = "jq"
+jujutsu = "jj"
+just = "just"
+lazydocker = "lazydocker"
+lazygit = "lazygit"
+lazyjournal = "lazyjournal"
+lefthook = "lefthook"
+lnav = "lnav"
+mdbook = "mdbook"
+mergiraf = "cargo:mergiraf"
+miller = "miller"
+miniserve = "aqua:svenstaro/miniserve"
+mprocs = "github:pvolok/dekit"
+navi = "navi"
+numbat = "numbat"
+nushell = "aqua:nushell/nushell"
+oha = "oha"
+onefetch = "aqua:o2sh/onefetch"
+opencode = "aqua:anomalyco/opencode"
+osv-scanner = "osv-scanner"
+ouch = "aqua:ouch-org/ouch"
+ov = "aqua:noborus/ov"
+pastel = "aqua:sharkdp/pastel"
+pulseaudio = ""
+presenterm = "cargo:presenterm"
+process-compose = "process-compose"
+procs = "aqua:dalance/procs"
+qsv = "qsv"
+rainfrog = "cargo:rainfrog"
+rclone = "rclone"
+regclient = "regctl"
+repomix = "npm:repomix"
+restic = "restic"
+ripgrep = "ripgrep"
+sad = "aqua:ms-jpq/sad"
+sccache = "sccache"
+sd = "sd"
+semgrep = "semgrep"
+serie = "cargo:serie"
+shellcheck = "shellcheck"
+shfmt = "shfmt"
+sops = "sops"
+starship = "starship"
+syft = "syft"
+tailspin = "cargo:tailspin"
+taplo = "taplo"
+tealdeer = ""
+television = "television"
+tokei = "cargo:tokei"
+tre-command = "aqua:dduan/tre"
+trippy = "cargo:trippy"
+trivy = "trivy"
+trufflehog = "trufflehog"
+ttyd = "ttyd"
+typos = "github:crate-ci/typos"
+typst = "typst"
+usql = "usql"
+vegeta = "aqua:tsenart/vegeta"
+vhs = "vhs"
+viddy = "viddy"
+vivid = "vivid"
+watchexec = "watchexec"
+websocat = "websocat"
+xan = "github:medialab/xan"
+xh = "xh"
+yazi = "yazi"
+yq-go = "yq"
+zizmor = "zizmor"
+zoxide = "zoxide"
+
+[platforms.mac.brew]
+casks = ["codex", "gcloud-cli"]
+formulae = [
+  "ast-grep",
+  "bat",
+  "broot",
+  "choose-rust",
+  "dua-cli",
+  "eza",
+  "fd",
+  "fzf",
+  "ripgrep",
+  "sad",
+  "sd",
+  "television",
+  "tre-command",
+  "yazi",
+  "zoxide",
+  "bottom",
+  "duf",
+  "dust",
+  "fastfetch",
+  "gping",
+  "hyperfine",
+  "mprocs",
+  "procs",
+  "viddy",
+  "csvlens",
+  "dasel",
+  "duckdb",
+  "fx",
+  "grpcurl",
+  "gron",
+  "hurl",
+  "jaq",
+  "jc",
+  "jless",
+  "jq",
+  "miller",
+  "oha",
+  "qsv",
+  "rainfrog",
+  "vegeta",
+  "websocat",
+  "xan",
+  "xh",
+  "yq",
+  "doggo",
+  "lnav",
+  "rclone",
+  "restic",
+  "tailspin",
+  "trippy",
+  "difftastic",
+  "gh",
+  "ghq",
+  "git-absorb",
+  "git-cliff",
+  "git-delta",
+  "git-filter-repo",
+  "git-sizer",
+  "git-town",
+  "jj",
+  "lazygit",
+  "mergiraf",
+  "serie",
+  "crane",
+  "ctop",
+  "dive",
+  "lazydocker",
+  "regclient",
+  "actionlint",
+  "age",
+  "cosign",
+  "gitleaks",
+  "grype",
+  "hadolint",
+  "osv-scanner",
+  "reuse",
+  "semgrep",
+  "sops",
+  "syft",
+  "trivy",
+  "trufflehog",
+  "zizmor",
+  "atuin",
+  "carapace",
+  "gum",
+  "herdr",
+  "just",
+  "lefthook",
+  "navi",
+  "numbat",
+  "nushell",
+  "ov",
+  "pastel",
+  "shfmt",
+  "starship",
+  "tealdeer",
+  "vivid",
+  "watchexec",
+  "asciinema",
+  "code2prompt",
+  "glow",
+  "go-task",
+  "grex",
+  "hexyl",
+  "mdbook",
+  "miniserve",
+  "onefetch",
+  "ouch",
+  "presenterm",
+  "typst",
+  "vhs",
+  "opencode",
+  "chezmoi",
+  "shellcheck",
+  "taplo",
+  "typos-cli",
+  "cargo-binstall",
+  "pnpm",
+  "sccache",
+  "bacon",
+  "cargo-audit",
+  "cargo-deny",
+  "cargo-expand",
+  "cargo-llvm-cov",
+  "cargo-mutants",
+  "cargo-nextest",
+  "tokei",
+  "delve",
+  "gopls",
+  "goreleaser",
+  "gotestsum",
+  "govulncheck",
+  "mas",
+  "swiftlint",
+  "xcbeautify",
+  "xcodes",
+  "fourmolu",
+  "haskell-stack",
+  "elan-init",
+]
+
+[platforms.mac.racket]
+collections = ["compiler-lib", "rackunit-lib"]
+
+[platforms.windows.scoop]
+apps = [
+  "actionlint",
+  "ast-grep",
+  "bat",
+  "codex",
+  "delta",
+  "eza",
+  "fd",
+  "fzf",
+  "gitleaks",
+  "jq",
+  "just",
+  "lazygit",
+  "lefthook",
+  "opencode",
+  "ripgrep",
+  "rumdl",
+  "shellcheck",
+  "starship",
+  "taplo",
+  "typos",
+  "uv",
+  "win32yank",
+  "zoxide",
+]
+buckets = ["main", "extras"]
+installer_commit = "1e2f334083d609986d8c8bc9e31ae8e87c39fab4"
+installer_sha256 = "94f983b190438311e006b957db7c8422709e0ba62a6c2ac04e278164108f2512"
+winget_duplicates = ["Starship.Starship", "ajeetdsouza.zoxide", "junegunn.fzf"]
+
+[platforms.windows.winget]
+apps = []

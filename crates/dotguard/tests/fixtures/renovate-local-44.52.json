@@ -1,0 +1,28 @@
+{
+  "problems": [],
+  "repositories": {
+    "local": {
+      "problems": [{"level":40,"msg":"Updating multiple npm lock files is deprecated and support will be removed in future versions."}],
+      "packageFiles": {
+        "bundler": [{
+          "packageFile":"backend/Gemfile",
+          "deps":[
+            {"depName":"tzinfo-data","datasource":"rubygems","updates":[],"warnings":[],"skipReason":"invalid-value"},
+            {"depName":"bootsnap","datasource":"rubygems","lockedVersion":"1.17.0","updates":[{"newVersion":"1.26.0","updateType":"minor","isLockfileUpdate":true}],"warnings":[]}
+          ]
+        }],
+        "github-actions": [{
+          "packageFile":".github/workflows/backend.yml",
+          "deps":[
+            {"depName":"ruby","datasource":"ruby-version","skipStage":"extract","skipReason":"unspecified-version","depType":"uses-with","updates":[]},
+            {"depName":"ubuntu","datasource":"github-runners","depType":"github-runner","currentValue":"latest","skipReason":"invalid-version","updates":[]}
+          ]
+        }],
+        "dockerfile": [{
+          "packageFile":"frontend/Dockerfile",
+          "deps":[{"depName":"node","currentValue":"24-alpine","datasource":"docker","updates":[{"newValue":"26-alpine","updateType":"major","isBreaking":true}],"warnings":[]}]
+        }]
+      }
+    }
+  }
+}

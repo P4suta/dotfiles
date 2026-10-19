@@ -1,0 +1,16 @@
+#:schema ./schemas/repository.schema.json
+# `dotfiles repository generate` writes `README.md`, `LICENSE-MIT`, and `LICENSE-APACHE` from this file, and `just check` refuses any drift from them.
+
+name = "dotfiles"
+summary = "One chezmoi source for Mac, Linux, Windows, and WSL with Rust-driven setup"
+install = """
+git clone https://github.com/P4suta/dotfiles.git
+cd dotfiles
+mise install
+chezmoi init --source ."""
+usage = """
+just diff CONFIG_ABSOLUTE_PATH NATIVE_HOME_ABSOLUTE_PATH
+just apply CONFIG_ABSOLUTE_PATH NATIVE_HOME_ABSOLUTE_PATH FRESH_BACKUP_DIRECTORY
+just check"""
+copyright = "Yasunobu"
+license = "MIT OR Apache-2.0"

@@ -1,0 +1,4 @@
+$ErrorActionPreference = 'Stop'
+{{ includeTemplate "partials/inputs" (list .platforms.windows.herdr) }}
+& (Join-Path $env:USERPROFILE '.local\bin\dotfiles.exe') --root $env:CHEZMOI_WORKING_TREE setup herdr --config $env:CHEZMOI_CONFIG_FILE --live
+exit $LASTEXITCODE

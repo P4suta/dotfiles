@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Checked pull request authoring
-
-Status: accepted.
 
 ## Context
 
@@ -26,7 +27,7 @@ The skill requires readback and a final live-document check.
 
 Three Kani harnesses import the production transition core and quantify every operation, generation mode, check outcome, and draft state.
 Acceptance and refusal witnesses must stay reachable, every expected harness must run, and a false claim that local creation may skip the draft must fail with a counterexample.
-The `check:proofs` gate runs these obligations beside the maintenance proofs in isolated model directories.
+The `just proofs` gate runs these obligations beside the maintenance proofs in isolated model directories.
 Native tests drive the CLI through a compiled `gh` fixture.
 A refused document never starts a mutation, an accepted one passes exact arguments and body bytes, and a `gh` error neither retries nor reports success.
 Nothing here proves Markdown semantics, prose quality, service availability, or the truth of a validation statement.

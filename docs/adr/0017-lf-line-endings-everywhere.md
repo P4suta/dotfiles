@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Normalize line endings to LF on every host and agent write
-
-Status: accepted.
 
 ## Context
 
@@ -32,7 +33,7 @@ Content detection also keeps a path whose index entry already holds text with CR
 An edit to a repository that commits CRLF without attributes thus stays a change to the edited lines.
 `line-endings normalize` and `just check` ignore the index entry, as `git add --renormalize` does, so they still refuse committed CRLF and convert it on request.
 The hook keeps a file outside every Git work tree, because no attributes can declare an exception for it.
-The decision, the byte statistics, and the conversion live in `xtask/src/eol_rules.rs`.
+The decision, the byte statistics, and the conversion live in `crates/dotfiles/src/eol_rules.rs`.
 Its Kani harnesses check the decision for every attribute combination, index state, staging mode, and statistic.
 They also compare the statistics and the binary verdict of every four-byte input with Git's byte classes.
 They check the conversion of each byte of every four-byte input too.

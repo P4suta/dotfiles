@@ -1,0 +1,1 @@
+dotfiles-refusal/2 {"rule":"push.paused","cause":"pushes are paused \"here\"\n","evidence":["marker present: é"],"next":"git status --short --branch","bypass":null}

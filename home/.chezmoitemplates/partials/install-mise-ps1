@@ -1,0 +1,31 @@
+$version = {{ includeTemplate "partials/ps_quote" .mise.version }}
+$sha256 = {{ includeTemplate "partials/ps_quote" (index .mise.sha256 "windows-x64") }}
+$bin = Join-Path $env:USERPROFILE '.local\bin'
+$target = Join-Path $bin 'mise.exe'
+$current = if (Test-Path $target) { ((& $target --version 2>$null) -split ' ')[0] }
+if ($current -eq $version) {
+    exit 0
+}
+$scope = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+New-Item -ItemType Directory -Path $scope | Out-Null
+try {
+    $archive = Join-Path $scope 'mise.zip'
+    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/jdx/mise/releases/download/v$version/mise-v$version-windows-x64.zip" -OutFile $archive
+    $actual = (Get-FileHash -Algorithm SHA256 -Path $archive).Hash.ToLowerInvariant()
+    if ($actual -ne $sha256) {
+        throw "mise $version for windows-x64 has SHA-256 $actual, not the pinned $sha256"
+    }
+    Expand-Archive -Path $archive -DestinationPath $scope
+    New-Item -ItemType Directory -Force -Path $bin | Out-Null
+    foreach ($name in 'mise.exe', 'mise-shim.exe') {
+        $installed = Join-Path $bin $name
+        Get-ChildItem -Path $bin -Filter "$name.*.old" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+        # Windows refuses to overwrite a running executable but lets a process rename it.
+        if (Test-Path $installed) {
+            Move-Item -Force -Path $installed -Destination "$installed.$PID.old"
+        }
+        Copy-Item -Path (Join-Path $scope "mise\bin\$name") -Destination $installed
+    }
+} finally {
+    Remove-Item -Recurse -Force -Path $scope
+}

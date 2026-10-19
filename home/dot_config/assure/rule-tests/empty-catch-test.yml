@@ -1,0 +1,7 @@
+id: empty-catch
+valid:
+  - "try { run(); } catch (error) { console.error('run failed', error); }"
+  - "try { run(); } catch (error) { throw new Error('run failed', { cause: error }); }"
+invalid:
+  - "try { run(); } catch (error) {}"
+  - "try { run(); } catch {}"

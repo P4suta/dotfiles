@@ -1,0 +1,8 @@
+id: lint-allow
+valid:
+  - "#[expect(dead_code, reason = \"the fixture reads it\")]\nfn unused() {}"
+  - "#![deny(clippy::panic)]\nfn checked() {}"
+  - "fn text() -> &'static str { \"#[allow(dead_code)]\" }"
+invalid:
+  - "#[allow(dead_code)]\nfn unused() {}"
+  - "#![allow(clippy::panic)]\nfn anything() {}"

@@ -1,0 +1,70 @@
+# Each generic anti-pattern that these machines refuse, the weakness it answers, and the check that refuses it in each language in use.
+# `ast-grep:<id>` names a rule under `rules/`, whose fixtures under `rule-tests/` it must refuse and whose corrected forms it must admit.
+# `psscriptanalyzer:<rule>` and `clippy:<lint>` name a linter's own rule, which the repository's lint stages run.
+# A language a pattern lists under `uncovered` has no check yet, and the reason says why.
+
+languages = ["rust", "shell", "typescript", "powershell"]
+
+[[pattern]]
+id = "magic-number"
+weakness = "CWE-1106"
+rust = "ast-grep:magic-number"
+typescript = "ast-grep:typescript-magic-number"
+uncovered = { shell = "shell words carry numbers as text, so a structural rule can't tell a count from an argument", powershell = "ast-grep has no PowerShell grammar and PSScriptAnalyzer no such rule" }
+
+[[pattern]]
+id = "hard-coded-location"
+weakness = "CWE-547"
+rust = "ast-grep:hard-coded-location"
+typescript = "ast-grep:typescript-hard-coded-location"
+uncovered = { shell = "a startup file names the fixed system paths it sources by design", powershell = "ast-grep has no PowerShell grammar and PSScriptAnalyzer no such rule" }
+
+[[pattern]]
+id = "swallowed-error"
+weakness = "CWE-390"
+rust = "ast-grep:swallowed-error"
+shell = "ast-grep:shell-swallowed-error"
+typescript = "ast-grep:empty-catch"
+powershell = "psscriptanalyzer:PSAvoidUsingEmptyCatchBlock"
+
+[[pattern]]
+id = "catalog-suppression"
+weakness = "CWE-1164"
+rust = "ast-grep:catalog-suppression"
+uncovered = { shell = "ast-grep reads no suppression comment in shell here", typescript = "ast-grep reads no suppression comment in TypeScript here", powershell = "ast-grep has no PowerShell grammar" }
+
+[[pattern]]
+id = "lint-allow"
+weakness = "CWE-1164"
+rust = "ast-grep:lint-allow"
+uncovered = { shell = "ast-grep reads no ShellCheck directive comment in shell here", typescript = "ast-grep reads no lint directive comment in TypeScript here", powershell = "ast-grep has no PowerShell grammar" }
+
+[[pattern]]
+id = "retired-term"
+weakness = "CWE-1106"
+rust = "ast-grep:retired-term"
+uncovered = { shell = "the shared shell templates name no retired identifier", typescript = "the shared TypeScript adapters name no retired identifier", powershell = "the shared PowerShell scripts name no retired identifier" }
+
+[[pattern]]
+id = "core-effect"
+weakness = "Ports and Adapters"
+rust = "ast-grep:core-effect"
+uncovered = { shell = "a script is an adapter", typescript = "the plugins are adapters with no core", powershell = "a script is an adapter" }
+
+[[pattern]]
+id = "core-bare-text"
+weakness = "CWE-1106"
+rust = "ast-grep:core-bare-text"
+uncovered = { shell = "a script is an adapter", typescript = "the plugins are adapters with no core", powershell = "a script is an adapter" }
+
+[[pattern]]
+id = "core-panic"
+weakness = "CWE-248"
+rust = "ast-grep:core-panic"
+uncovered = { shell = "a script is an adapter", typescript = "the plugins are adapters with no core", powershell = "a script is an adapter" }
+
+[[pattern]]
+id = "core-shared-state"
+weakness = "CWE-1109"
+rust = "ast-grep:core-shared-state"
+uncovered = { shell = "a script is an adapter", typescript = "the plugins are adapters with no core", powershell = "a script is an adapter" }

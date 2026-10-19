@@ -3,9 +3,9 @@
   "outcome": "implemented",
   "reason": "Prose cut to the minimum without changing the skill's instructions.",
   "evidence": [
-    "dot_agents/skills/systematic-fixes/SKILL.md",
-    "guard/tests/empty_commit.rs",
-    "xtask/src/hooks.rs"
+    "home/dot_agents/skills/systematic-fixes/SKILL.md",
+    "crates/dotguard/tests/empty_commit.rs",
+    "crates/dotfiles/src/hooks.rs"
   ],
   "revisit": null
 }

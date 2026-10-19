@@ -1,329 +1,319 @@
-#![expect(
-    clippy::disallowed_methods,
-    reason = "integration tests spawn the binaries and real tools they verify"
-)]
-
 use anyhow::{Context, Result, ensure};
-use dotfiles_xtask::next_action::{
-    Environment, HostStatus, Observed, PullRequest, Recommendation, classify_checks,
-    decision_backlog, github_repository, host_status, inspect, perform, recommend,
-};
-use dotfiles_xtask::next_action_rules::{
-    Checks, Head, Host, Pr, State, Step, Upstream, decide, executable,
-};
-use dotfiles_xtask::skill_ops::catalog;
 use serde_json::{Value, json};
+use skill_ops::catalog;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
+use xtask::next_action::{
+    Environment, HostStatus, Observed, PullRequest, Recommendation, classify_checks,
+    decision_backlog, github_repository, host_status, inspect, perform, recommend,
+};
+use xtask::next_action_rules::{Checks, Head, Host, Pr, State, Step, Upstream, decide, executable};
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the shared constructor for fixture Git processes"
-)]
-#[path = "../../guard/tests/support/fixture_git.rs"]
+#[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
-/// A clean, pushed draft PR with passing checks.
+use fixture_git::fixture_process;
+
+/// A clean, pushed draft PR with successful checks.
 /// Each case changes the fields that define its state.
-fn published() -> State {
-    State {
-        host: Host::Ready,
-        head: Head::Feature,
-        dirty: false,
-        undecided: false,
-        incomplete: false,
-        behind_base: false,
-        ahead_base: true,
-        upstream: Upstream::Current,
-        push_paused: false,
-        pr: Pr::Draft,
-        checks: Checks::Passing,
-        workflows: true,
-        review_paused: false,
-    }
-}
+const PUBLISHED: State = State {
+    host: Host::Ready,
+    head: Head::Feature,
+    dirty: false,
+    undecided: false,
+    incomplete: false,
+    behind_base: false,
+    ahead_base: true,
+    upstream: Upstream::Current,
+    push_paused: false,
+    pr: Pr::Draft,
+    checks: Checks::Success,
+    workflows: true,
+    review_paused: false,
+};
 
 #[test]
 fn every_state_maps_to_its_single_next_step() {
-    let base = published();
-    let cases = [
-        (
-            State {
-                host: Host::TempUnset,
-                head: Head::Detached,
-                ..base
-            },
-            Step::SetTemp,
-        ),
-        (
-            State {
-                host: Host::VolumeMissing,
-                dirty: true,
-                ..base
-            },
-            Step::MountVolume,
-        ),
-        (
-            State {
-                host: Host::TempMissing,
-                head: Head::Detached,
-                ..base
-            },
-            Step::CreateTemp,
-        ),
-        (
-            State {
-                head: Head::Detached,
-                ..base
-            },
-            Step::AttachBranch,
-        ),
-        (
-            State {
-                head: Head::Default,
-                dirty: true,
-                ..base
-            },
-            Step::BranchFromDefault,
-        ),
-        (
-            State {
-                head: Head::Default,
-                behind_base: true,
-                ..base
-            },
-            Step::BranchFromDefault,
-        ),
-        (
-            State {
-                head: Head::Default,
-                ahead_base: false,
-                behind_base: true,
-                ..base
-            },
-            Step::FastForward,
-        ),
-        (
-            State {
-                head: Head::Default,
-                ahead_base: false,
-                ..base
-            },
-            Step::StartBranch,
-        ),
-        (
-            State {
-                undecided: true,
-                incomplete: true,
-                dirty: true,
-                ..base
-            },
-            Step::DraftDecisions,
-        ),
-        (
-            State {
-                incomplete: true,
-                dirty: true,
-                ..base
-            },
-            Step::CompleteDecisions,
-        ),
-        (
-            State {
-                dirty: true,
-                pr: Pr::Merged,
-                ..base
-            },
-            Step::Commit,
-        ),
-        (
-            State {
-                pr: Pr::Merged,
-                behind_base: true,
-                ..base
-            },
-            Step::Finished,
-        ),
-        (
-            State {
-                pr: Pr::Closed,
-                ..base
-            },
-            Step::Reopen,
-        ),
-        (
-            State {
-                upstream: Upstream::Behind,
-                behind_base: true,
-                ..base
-            },
-            Step::SyncUpstream,
-        ),
-        (
-            State {
-                behind_base: true,
-                upstream: Upstream::Rewritten,
-                ..base
-            },
-            Step::Rebase,
-        ),
-        (
-            State {
-                ahead_base: false,
-                pr: Pr::None,
-                ..base
-            },
-            Step::StartWork,
-        ),
-        (
-            State {
-                upstream: Upstream::Rewritten,
-                push_paused: true,
-                review_paused: true,
-                ..base
-            },
-            Step::AwaitPushResume,
-        ),
-        (
-            State {
-                upstream: Upstream::Ahead,
-                ..base
-            },
-            Step::Push,
-        ),
-        (
-            State {
-                upstream: Upstream::Absent,
-                pr: Pr::Unknown,
-                ..base
-            },
-            Step::Push,
-        ),
-        (
-            State {
-                upstream: Upstream::Ahead,
-                review_paused: true,
-                ..base
-            },
-            Step::Push,
-        ),
-        (
-            State {
-                upstream: Upstream::Ahead,
-                review_paused: true,
-                pr: Pr::Ready,
-                ..base
-            },
-            Step::AwaitReviewResume,
-        ),
-        (
-            State {
-                upstream: Upstream::Rewritten,
-                review_paused: true,
-                pr: Pr::Unknown,
-                ..base
-            },
-            Step::InspectGithub,
-        ),
-        (
-            State {
-                upstream: Upstream::Rewritten,
-                ..base
-            },
-            Step::ForcePush,
-        ),
-        (
-            State {
-                upstream: Upstream::Diverged,
-                ..base
-            },
-            Step::IntegrateUpstream,
-        ),
-        (
-            State {
-                upstream: Upstream::Diverged,
-                behind_base: true,
-                push_paused: true,
-                review_paused: true,
-                pr: Pr::Ready,
-                ..base
-            },
-            Step::IntegrateUpstream,
-        ),
-        (
-            State {
-                pr: Pr::Unknown,
-                ..base
-            },
-            Step::InspectGithub,
-        ),
-        (
-            State {
-                pr: Pr::None,
-                ..base
-            },
-            Step::CreatePr,
-        ),
-        (
-            State {
-                checks: Checks::Failing,
-                review_paused: true,
-                ..base
-            },
-            Step::FixChecks,
-        ),
-        (
-            State {
-                checks: Checks::Pending,
-                ..base
-            },
-            Step::AwaitChecks,
-        ),
-        (
-            State {
-                checks: Checks::None,
-                ..base
-            },
-            Step::AwaitChecks,
-        ),
-        (
-            State {
-                checks: Checks::None,
-                workflows: false,
-                ..base
-            },
-            Step::MarkReady,
-        ),
-        (
-            State {
-                checks: Checks::Pending,
-                workflows: false,
-                ..base
-            },
-            Step::AwaitChecks,
-        ),
-        (
-            State {
-                review_paused: true,
-                ..base
-            },
-            Step::AwaitReviewResume,
-        ),
-        (base, Step::MarkReady),
-        (
-            State {
-                pr: Pr::Ready,
-                ..base
-            },
-            Step::AwaitReview,
-        ),
-    ];
-    for (state, expected) in cases {
+    for &(state, expected) in CASES {
         assert_eq!(decide(state), expected, "{state:?}");
     }
 }
+
+/// Each state and the one step it maps to.
+const CASES: &[(State, Step)] = &[
+    (
+        State {
+            host: Host::TempUnset,
+            head: Head::Detached,
+            ..PUBLISHED
+        },
+        Step::SetTemp,
+    ),
+    (
+        State {
+            host: Host::VolumeMissing,
+            dirty: true,
+            ..PUBLISHED
+        },
+        Step::MountVolume,
+    ),
+    (
+        State {
+            host: Host::TempMissing,
+            head: Head::Detached,
+            ..PUBLISHED
+        },
+        Step::CreateTemp,
+    ),
+    (
+        State {
+            head: Head::Detached,
+            ..PUBLISHED
+        },
+        Step::AttachBranch,
+    ),
+    (
+        State {
+            head: Head::Default,
+            dirty: true,
+            ..PUBLISHED
+        },
+        Step::BranchFromDefault,
+    ),
+    (
+        State {
+            head: Head::Default,
+            behind_base: true,
+            ..PUBLISHED
+        },
+        Step::BranchFromDefault,
+    ),
+    (
+        State {
+            head: Head::Default,
+            ahead_base: false,
+            behind_base: true,
+            ..PUBLISHED
+        },
+        Step::FastForward,
+    ),
+    (
+        State {
+            head: Head::Default,
+            ahead_base: false,
+            ..PUBLISHED
+        },
+        Step::StartBranch,
+    ),
+    (
+        State {
+            undecided: true,
+            incomplete: true,
+            dirty: true,
+            ..PUBLISHED
+        },
+        Step::DraftDecisions,
+    ),
+    (
+        State {
+            incomplete: true,
+            dirty: true,
+            ..PUBLISHED
+        },
+        Step::CompleteDecisions,
+    ),
+    (
+        State {
+            dirty: true,
+            pr: Pr::Merged,
+            ..PUBLISHED
+        },
+        Step::Commit,
+    ),
+    (
+        State {
+            pr: Pr::Merged,
+            behind_base: true,
+            ..PUBLISHED
+        },
+        Step::Finished,
+    ),
+    (
+        State {
+            pr: Pr::Closed,
+            ..PUBLISHED
+        },
+        Step::Reopen,
+    ),
+    (
+        State {
+            upstream: Upstream::Behind,
+            behind_base: true,
+            ..PUBLISHED
+        },
+        Step::SyncUpstream,
+    ),
+    (
+        State {
+            behind_base: true,
+            upstream: Upstream::Rewritten,
+            ..PUBLISHED
+        },
+        Step::Rebase,
+    ),
+    (
+        State {
+            ahead_base: false,
+            pr: Pr::None,
+            ..PUBLISHED
+        },
+        Step::StartWork,
+    ),
+    (
+        State {
+            upstream: Upstream::Rewritten,
+            push_paused: true,
+            review_paused: true,
+            ..PUBLISHED
+        },
+        Step::AwaitPushResume,
+    ),
+    (
+        State {
+            upstream: Upstream::Ahead,
+            ..PUBLISHED
+        },
+        Step::Push,
+    ),
+    (
+        State {
+            upstream: Upstream::Absent,
+            pr: Pr::Unknown,
+            ..PUBLISHED
+        },
+        Step::Push,
+    ),
+    (
+        State {
+            upstream: Upstream::Ahead,
+            review_paused: true,
+            ..PUBLISHED
+        },
+        Step::Push,
+    ),
+    (
+        State {
+            upstream: Upstream::Ahead,
+            review_paused: true,
+            pr: Pr::Ready,
+            ..PUBLISHED
+        },
+        Step::AwaitReviewResume,
+    ),
+    (
+        State {
+            upstream: Upstream::Rewritten,
+            review_paused: true,
+            pr: Pr::Unknown,
+            ..PUBLISHED
+        },
+        Step::InspectGithub,
+    ),
+    (
+        State {
+            upstream: Upstream::Rewritten,
+            ..PUBLISHED
+        },
+        Step::ForcePush,
+    ),
+    (
+        State {
+            upstream: Upstream::Diverged,
+            ..PUBLISHED
+        },
+        Step::IntegrateUpstream,
+    ),
+    (
+        State {
+            upstream: Upstream::Diverged,
+            behind_base: true,
+            push_paused: true,
+            review_paused: true,
+            pr: Pr::Ready,
+            ..PUBLISHED
+        },
+        Step::IntegrateUpstream,
+    ),
+    (
+        State {
+            pr: Pr::Unknown,
+            ..PUBLISHED
+        },
+        Step::InspectGithub,
+    ),
+    (
+        State {
+            pr: Pr::None,
+            ..PUBLISHED
+        },
+        Step::CreatePr,
+    ),
+    (
+        State {
+            checks: Checks::Failure,
+            review_paused: true,
+            ..PUBLISHED
+        },
+        Step::FixChecks,
+    ),
+    (
+        State {
+            checks: Checks::Pending,
+            ..PUBLISHED
+        },
+        Step::AwaitChecks,
+    ),
+    (
+        State {
+            checks: Checks::None,
+            ..PUBLISHED
+        },
+        Step::AwaitChecks,
+    ),
+    (
+        State {
+            checks: Checks::None,
+            workflows: false,
+            ..PUBLISHED
+        },
+        Step::MarkReady,
+    ),
+    (
+        State {
+            checks: Checks::Pending,
+            workflows: false,
+            ..PUBLISHED
+        },
+        Step::AwaitChecks,
+    ),
+    (
+        State {
+            review_paused: true,
+            ..PUBLISHED
+        },
+        Step::AwaitReviewResume,
+    ),
+    (PUBLISHED, Step::MarkReady),
+    (
+        State {
+            pr: Pr::Ready,
+            ..PUBLISHED
+        },
+        Step::AwaitReview,
+    ),
+];
 
 #[test]
 fn only_local_reversible_steps_are_executable() {
@@ -363,7 +353,7 @@ fn failing_checks_outrank_pending_and_an_empty_rollup_reports_none() {
     assert_eq!(classify_checks(&[]), Checks::None);
     assert_eq!(
         classify_checks(&[success.clone(), skipped.clone()]),
-        Checks::Passing
+        Checks::Success
     );
     assert_eq!(
         classify_checks(&[success.clone(), running]),
@@ -371,10 +361,10 @@ fn failing_checks_outrank_pending_and_an_empty_rollup_reports_none() {
     );
     assert_eq!(
         classify_checks(&[context_pending.clone(), failed]),
-        Checks::Failing
+        Checks::Failure
     );
     assert_eq!(classify_checks(&[context_pending]), Checks::Pending);
-    assert_eq!(classify_checks(&[success, context_error]), Checks::Failing);
+    assert_eq!(classify_checks(&[success, context_error]), Checks::Failure);
 }
 
 #[test]
@@ -443,7 +433,7 @@ fn an_unmounted_volume_is_reported_before_a_missing_directory() {
 #[test]
 fn skills_without_a_current_or_complete_decision_are_listed() -> Result<()> {
     let root = tempfile::tempdir()?;
-    let tree = root.path().join("dot_agents/skills");
+    let tree = root.path().join("home/dot_agents/skills");
     for name in ["alpha", "beta", "gamma"] {
         fs::create_dir_all(tree.join(name))?;
         fs::write(
@@ -461,7 +451,7 @@ fn skills_without_a_current_or_complete_decision_are_listed() -> Result<()> {
                 "revision": revisions.skills[name].revision,
                 "outcome": "keep",
                 "reason": reason,
-                "evidence": [format!("dot_agents/skills/{name}/SKILL.md")],
+                "evidence": [format!("home/dot_agents/skills/{name}/SKILL.md")],
                 "revisit": null,
             }))?,
         )?;
@@ -516,6 +506,10 @@ impl Fixture {
     }
 
     fn git(&self, directory: &Path, arguments: &[&str]) -> Result<()> {
+        self.capture(directory, arguments).map(drop)
+    }
+
+    fn capture(&self, directory: &Path, arguments: &[&str]) -> Result<String> {
         let output = fixture_git::command("git", &self.config)
             .current_dir(directory)
             .args(arguments)
@@ -525,7 +519,26 @@ impl Fixture {
             "git {arguments:?}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        Ok(())
+        Ok(String::from_utf8(output.stdout)?.trim().to_owned())
+    }
+
+    fn rebased_history(&self) -> Result<()> {
+        let tree = self.capture(
+            &self.clone,
+            &["merge-tree", "--write-tree", "origin/main", "HEAD"],
+        )?;
+        let mut parent = self.capture(&self.clone, &["rev-parse", "origin/main"])?;
+        for message in ["rebased change", "rebased upstream"] {
+            parent = self.capture(
+                &self.clone,
+                &["commit-tree", &tree, "-p", &parent, "-m", message],
+            )?;
+        }
+        self.git(&self.clone, &["read-tree", "--reset", "-u", &parent])?;
+        self.git(
+            &self.clone,
+            &["update-ref", "refs/heads/feat/topic", &parent],
+        )
     }
 
     fn commit(&self, name: &str) -> Result<()> {
@@ -681,7 +694,7 @@ fn github_states_name_the_pull_request_and_its_command() -> Result<()> {
             ),
         ),
         (
-            on_github(Some(("OPEN", true, Checks::Failing)), false),
+            on_github(Some(("OPEN", true, Checks::Failure)), false),
             Step::FixChecks,
             Some("gh pr checks 7 --repo P4suta/dotfiles"),
         ),
@@ -691,35 +704,35 @@ fn github_states_name_the_pull_request_and_its_command() -> Result<()> {
             Some("gh pr checks 7 --repo P4suta/dotfiles --watch"),
         ),
         (
-            on_github(Some(("OPEN", true, Checks::Passing)), false),
+            on_github(Some(("OPEN", true, Checks::Success)), false),
             Step::MarkReady,
             Some("pr-workflow ready --repo P4suta/dotfiles --issue <issue> --pr 7"),
         ),
         (
-            on_github(Some(("OPEN", true, Checks::Passing)), true),
+            on_github(Some(("OPEN", true, Checks::Success)), true),
             Step::AwaitReviewResume,
             None,
         ),
         (
-            on_github(Some(("OPEN", false, Checks::Passing)), false),
+            on_github(Some(("OPEN", false, Checks::Success)), false),
             Step::AwaitReview,
-            Some("gh pr view 7 --repo P4suta/dotfiles --comments"),
+            Some("pr-workflow check --repo P4suta/dotfiles --issue <issue> --pr 7 --final"),
         ),
         (
-            on_github(Some(("MERGED", false, Checks::Passing)), false),
+            on_github(Some(("MERGED", false, Checks::Success)), false),
             Step::Finished,
             None,
         ),
         (
             Observed {
                 unpushed: 1,
-                ..on_github(Some(("OPEN", false, Checks::Passing)), true)
+                ..on_github(Some(("OPEN", false, Checks::Success)), true)
             },
             Step::AwaitReviewResume,
             None,
         ),
         (
-            on_github(Some(("CLOSED", false, Checks::Failing)), false),
+            on_github(Some(("CLOSED", false, Checks::Failure)), false),
             Step::Reopen,
             Some("gh pr reopen 7 --repo P4suta/dotfiles"),
         ),
@@ -730,7 +743,7 @@ fn github_states_name_the_pull_request_and_its_command() -> Result<()> {
         assert_eq!(recommendation.command.as_deref(), command, "{step:?}");
         assert!(!recommendation.executable);
         let line = serde_json::to_value(&recommendation)?;
-        assert_eq!(line["action"], serde_json::to_value(step)?);
+        assert_eq!(line["action"], step.key());
         assert_eq!(line["state"]["host"]["status"], "ready");
     }
     Ok(())
@@ -789,7 +802,7 @@ impl Fixture {
         paths.extend(std::env::split_paths(
             &std::env::var_os("PATH").context("PATH")?,
         ));
-        let mut command = Command::new(env!("CARGO_BIN_EXE_dotfiles-xtask"));
+        let mut command = fixture_process::command(env!("CARGO_BIN_EXE_xtask"), self.scope.path());
         command
             .current_dir(&self.clone)
             .env("PATH", std::env::join_paths(paths)?)
@@ -811,8 +824,12 @@ fn gh_directory() -> &'static tempfile::TempDir {
     static DIRECTORY: OnceLock<tempfile::TempDir> = OnceLock::new();
     DIRECTORY.get_or_init(|| {
         let directory = tempfile::tempdir().unwrap();
-        let result = Command::new("rustc")
-            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/gh.rs"))
+        let result = platform::process::command("rustc")
+            .arg("--edition=2024")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../crates/pr-workflow/tests/fixtures/gh.rs"
+            ))
             .arg("-o")
             .arg(
                 directory
@@ -867,7 +884,7 @@ fn a_rebased_pushed_branch_is_force_pushed_and_upstream_commits_are_pulled_first
         recommendation.command.as_deref(),
         Some("git rebase origin/main")
     );
-    fixture.git(&fixture.clone, &["rebase", "--quiet", "origin/main"])?;
+    fixture.rebased_history()?;
     let recommendation = recommend(fixture.next()?);
     assert_eq!(recommendation.action, Step::ForcePush);
     assert_eq!(
@@ -1009,13 +1026,13 @@ fn the_coderabbit_pause_file_holds_a_push_whose_pr_is_unknown() -> Result<()> {
 fn executing_draft_decisions_writes_the_draft_and_leaves_its_reason_to_complete() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.git(&fixture.clone, &["switch", "--quiet", "-c", "feat/topic"])?;
-    let skill = fixture.clone.join("dot_agents/skills/alpha");
+    let skill = fixture.clone.join("home/dot_agents/skills/alpha");
     fs::create_dir_all(&skill)?;
     fs::write(
         skill.join("SKILL.md"),
         "---\nname: alpha\ndescription: Check alpha.\n---\n# Contract\nCheck it.\n",
     )?;
-    let policy = fixture.clone.join("dot_config/skill-ops/policy.json");
+    let policy = fixture.clone.join("home/dot_config/skill-ops/policy.json");
     fs::create_dir_all(policy.parent().context("policy directory")?)?;
     fs::write(
         &policy,
@@ -1083,7 +1100,7 @@ fn execute_refuses_host_steps_it_cannot_complete() -> Result<()> {
 
 #[test]
 fn a_merged_pull_request_names_its_branch_for_retirement() {
-    let recommendation = recommend(on_github(Some(("MERGED", false, Checks::Passing)), false));
+    let recommendation = recommend(on_github(Some(("MERGED", false, Checks::Success)), false));
     assert_eq!(
         recommendation.summary,
         "PR #7 is merged; retire feat/topic and its worktree"
@@ -1116,7 +1133,7 @@ fn execute_runs_the_step_and_then_reports_the_one_after_it() -> Result<()> {
     let output = fixture.cli(&["--offline", "--execute"])?.output()?;
     let stderr = String::from_utf8(output.stderr.clone())?;
     assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, b"");
     assert!(
         stderr.contains("`push` is not a local, reversible step")
             && stderr.contains("(`git push -u origin feat/topic`)"),
@@ -1162,7 +1179,7 @@ fn online_inspection_reads_the_pull_request_and_compares_with_its_base() -> Resu
         line["state"]["pull_request"],
         json!({
             "number": 7, "url": "https://github.com/owner/project/pull/7", "state": "OPEN",
-            "draft": true, "base": "feat/base", "checks": "passing",
+            "draft": true, "base": "feat/base", "checks": "success",
         })
     );
     let log = fs::read_to_string(fixture.scope.path().join("gh.log"))?;
@@ -1178,7 +1195,8 @@ fn online_inspection_reads_the_pull_request_and_compares_with_its_base() -> Resu
         .cli(&[])?
         .env("GH_FIXTURE_LIST", listed.to_string())
         .output()?;
-    assert_eq!(reported(&output)?["action"], "await-review-resume");
+    assert!(!output.status.success());
+    assert!(String::from_utf8(output.stderr)?.contains("the current PR repository is unknown"));
 
     let output = fixture
         .cli(&[])?

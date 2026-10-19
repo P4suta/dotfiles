@@ -1,0 +1,281 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Baselines",
+  "type": "object",
+  "properties": {
+    "metric": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Metric"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Metric": {
+      "description": "One deterministic metric and its recorded value.\nWall time appears only as an advisory note, so no entry can gate on it.",
+      "oneOf": [
+        {
+          "description": "The public functions of the decision core that a Kani harness proves, which merging two harnesses of one decision leaves unchanged.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "proved-subjects"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "exact"
+          ]
+        },
+        {
+          "description": "The rejecting probes of the decision core.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "probes"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "exact"
+          ]
+        },
+        {
+          "description": "The unsafe blocks, functions, and implementations of the workspace.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "unsafe-sites"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "exact"
+          ]
+        },
+        {
+          "description": "The mutants of the decision core that its tests let survive, which `just proofs` measures.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "mutants-missed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "exact"
+          ]
+        },
+        {
+          "description": "The mutants of the decision core that timed out without a non-terminating entry, which `just proofs` measures.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "mutants-timed-out"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "exact"
+          ]
+        },
+        {
+          "description": "A wall time measured on one host, which never gates.",
+          "type": "object",
+          "properties": {
+            "advisory": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "wall-millis"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "advisory"
+          ]
+        },
+        {
+          "description": "The lowest text contrast in thousandths and the palette pair that reaches it.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "minimum-contrast"
+            },
+            "pair": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "exact",
+            "pair"
+          ]
+        },
+        {
+          "description": "The external programs a shell starts while reading its startup files.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "shell-exec-count"
+            },
+            "shell": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "shell",
+            "exact"
+          ]
+        },
+        {
+          "description": "The gate processes one Git hook spawns, which `crates/dotfiles/tests/hook_exec_count.rs` counts through stand-ins.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "hook": {
+              "type": "string"
+            },
+            "metric": {
+              "type": "string",
+              "const": "exec-count"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "hook",
+            "exact"
+          ]
+        },
+        {
+          "description": "The instructions a benchmark executes under Valgrind.",
+          "type": "object",
+          "properties": {
+            "bench": {
+              "type": "string"
+            },
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "ir"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "bench",
+            "exact"
+          ]
+        },
+        {
+          "description": "The bytes live at a benchmark's peak heap usage.",
+          "type": "object",
+          "properties": {
+            "bench": {
+              "type": "string"
+            },
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "heap-peak"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "bench",
+            "exact"
+          ]
+        },
+        {
+          "description": "The bytes of the stripped binary that every host installs.",
+          "type": "object",
+          "properties": {
+            "exact": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "metric": {
+              "type": "string",
+              "const": "binary-size"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "exact"
+          ]
+        }
+      ]
+    }
+  }
+}

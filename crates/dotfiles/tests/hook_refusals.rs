@@ -1,0 +1,403 @@
+//! The hook dispatcher, run as installed.
+//! Each refusal comes last on standard error.
+
+use anyhow::{Result, ensure};
+use dotfiles::refusal::Refusal;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+#[path = "../../dotguard/tests/support/fixture_git.rs"]
+mod fixture_git;
+
+#[path = "support/catalog.rs"]
+mod catalog;
+
+#[path = "../../../xtask/tests/support/incident_fixture.rs"]
+mod incident_fixture;
+
+/// An isolated home with stand-ins for dotguard and lefthook, and a repository holding one staged file.
+struct Host {
+    scope: tempfile::TempDir,
+}
+
+impl Host {
+    fn new() -> Result<Self> {
+        let scope = incident_fixture::scope()?;
+        let bin = scope.path().join("home/.local/bin");
+        fs::create_dir_all(&bin)?;
+        fs::create_dir_all(scope.path().join("repository"))?;
+        fs::write(
+            scope.path().join("gitconfig"),
+            "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+        )?;
+        let status = platform::process::command("rustc")
+            .args(["--edition", "2024"])
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dotguard.rs"))
+            .arg("-o")
+            .arg(bin.join(format!("dotguard{}", std::env::consts::EXE_SUFFIX)))
+            .status()?;
+        ensure!(status.success(), "fixture dotguard compilation failed");
+        let status = platform::process::command("rustc")
+            .args(["--edition", "2024"])
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lefthook.rs"))
+            .arg("-o")
+            .arg(bin.join(format!("lefthook{}", std::env::consts::EXE_SUFFIX)))
+            .status()?;
+        ensure!(status.success(), "fixture lefthook compilation failed");
+        catalog::install(&scope.path().join("home"))?;
+        let host = Self { scope };
+        host.run("git", &["init", "-q"])?;
+        fs::write(host.repository().join("a.txt"), "a\n")?;
+        host.run("git", &["add", "a.txt"])?;
+        Ok(host)
+    }
+
+    fn home(&self) -> PathBuf {
+        self.scope.path().join("home")
+    }
+
+    fn repository(&self) -> PathBuf {
+        self.scope.path().join("repository")
+    }
+
+    fn command(&self, program: &str) -> Command {
+        let mut command = fixture_git::command(program, &self.scope.path().join("gitconfig"));
+        command
+            .current_dir(self.repository())
+            .env("HOME", self.home())
+            .env("USERPROFILE", self.home());
+        command
+    }
+
+    fn run(&self, program: &str, arguments: &[&str]) -> Result<Output> {
+        let output = self.command(program).args(arguments).output()?;
+        ensure!(
+            output.status.success(),
+            "{program} {arguments:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(output)
+    }
+
+    fn hook(&self, arguments: &[&str]) -> Result<Output> {
+        Ok(self
+            .command(env!("CARGO_BIN_EXE_dotfiles"))
+            .arg("hook")
+            .args(arguments)
+            .output()?)
+    }
+
+    fn bare_gate_failure(&self) -> Result<Output> {
+        let status = platform::process::command("rustc")
+            .args(["--edition", "2024"])
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/just.rs"))
+            .arg("-o")
+            .arg(
+                self.home()
+                    .join(".local/bin")
+                    .join(format!("dotguard{}", std::env::consts::EXE_SUFFIX)),
+            )
+            .status()?;
+        ensure!(status.success(), "fixture failing gate compilation failed");
+        self.hook(&["pre-commit"])
+    }
+
+    fn empty_commit(&self) -> Result<()> {
+        let tree = String::from_utf8(self.run("git", &["write-tree"])?.stdout)?;
+        let base = String::from_utf8(
+            self.run("git", &["commit-tree", tree.trim(), "-m", "base"])?
+                .stdout,
+        )?;
+        let empty = String::from_utf8(
+            self.run(
+                "git",
+                &["commit-tree", tree.trim(), "-p", base.trim(), "-m", "empty"],
+            )?
+            .stdout,
+        )?;
+        self.run("git", &["update-ref", "HEAD", empty.trim()])?;
+        Ok(())
+    }
+}
+
+/// The record a refused command printed as its last line.
+fn refusal(output: &Output) -> Refusal {
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let refusal = Refusal::parse(stderr.lines().last().unwrap_or_default())
+        .unwrap_or_else(|| panic!("the last line is not a refusal: {stderr}"));
+    assert!(refusal.is_complete(), "{refusal:?}");
+    refusal
+}
+
+#[test]
+fn a_paused_push_is_refused_without_a_waiver() -> Result<()> {
+    let host = Host::new()?;
+    let marker = host.home().join(".config/git/push-paused");
+    fs::create_dir_all(marker.parent().unwrap())?;
+    fs::write(&marker, "")?;
+    let refused =
+        refusal(&host.hook(&["pre-push", "--", "origin", "https://example.invalid/r"])?);
+    assert_eq!(refused.rule, "push.paused");
+    assert_eq!(refused.bypass, None);
+    assert!(refused.evidence[0].contains("push-paused"), "{refused:?}");
+    Ok(())
+}
+
+#[test]
+fn a_gate_that_changes_the_staged_tree_refuses_the_commit() -> Result<()> {
+    let host = Host::new()?;
+    let refused = refusal(&host.hook(&["pre-commit"])?);
+    assert_eq!(refused.rule, "commit.staged-tree");
+    assert_eq!(refused.bypass, None);
+    Ok(())
+}
+
+#[test]
+fn a_commit_that_adds_an_unowned_parser_is_refused_with_its_next_action() -> Result<()> {
+    let host = Host::new()?;
+    fs::create_dir_all(host.repository().join("src"))?;
+    fs::write(
+        host.repository().join("src/lib.rs"),
+        "pub fn parse(text: &str) -> bool {\n    text.is_empty()\n}\n",
+    )?;
+    host.run("git", &["add", "src/lib.rs"])?;
+    let refused = refusal(&host.hook(&["pre-commit"])?);
+    assert_eq!(refused.rule, "assure.added");
+    assert!(
+        refused.evidence[0].starts_with("src/lib.rs:1: parser has no owner")
+            && refused.evidence[0].contains("next: add fuzz/fuzz_targets/"),
+        "{refused:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_child_refusal_stays_last_and_a_bare_failure_gets_its_own_record() -> Result<()> {
+    let host = Host::new()?;
+    let message = host.scope.path().join("message");
+    fs::write(&message, "fixture\n")?;
+    let relayed = host.hook(&["commit-msg", "--", message.to_str().unwrap()])?;
+    assert_eq!(refusal(&relayed).rule, "commit.language");
+    assert!(
+        !String::from_utf8_lossy(&relayed.stderr).contains("Error:"),
+        "nothing follows a relayed refusal"
+    );
+    let failed = refusal(&host.bare_gate_failure()?);
+    eprintln!("{}", failed.line());
+    assert_eq!(failed.rule, "hook.gate");
+    assert_eq!(
+        failed.next.as_deref().unwrap_or_default(),
+        "dotguard pre-commit"
+    );
+    Ok(())
+}
+
+#[test]
+fn native_output_replays_preserve_the_real_hook_failure_without_new_incidents() -> Result<()> {
+    const TEST: &str = "native_output_replays_preserve_the_real_hook_failure_without_new_incidents";
+    if incident_fixture::run(TEST)? {
+        return Ok(());
+    }
+    let host = Host::new()?;
+    let consent = host.home().join(platform::incidents::EXPERIMENTAL);
+    fs::create_dir_all(consent.parent().unwrap())?;
+    fs::write(consent, skill_ops::incident_rules::EXPERIMENTAL_OPT_IN)?;
+    let failed = host.bare_gate_failure()?;
+    assert_eq!(refusal(&failed).rule, "hook.gate");
+    let state = host.scope.path().join("state");
+    let primary = skill_ops::incidents(&state)?;
+    assert_eq!(primary.len(), 1);
+    assert_eq!(primary[0].rule, "hook.gate");
+    let body = String::from_utf8(failed.stderr)?;
+    let mut event = serde_json::json!({
+        "hook_event_name": "PostToolUse",
+        "session_id": "owned-native-delivery",
+        "tool_use_id": "failed-hook",
+        "tool_name": "Bash",
+        "tool_input": {"command": "dotfiles hook pre-commit"},
+        "tool_response": body,
+    });
+    assert!(!skill_ops::record_native_failure(&state, "codex", &event)?);
+    assert_eq!(skill_ops::incidents(&state)?, primary);
+    fs::write(host.repository().join("past.log"), &body)?;
+    host.run("git", &["add", "past.log"])?;
+    let viewed = host.run("git", &["show", ":past.log"])?;
+    assert_eq!(viewed.status.code(), Some(0));
+    assert_eq!(String::from_utf8(viewed.stdout)?, body);
+    event["tool_use_id"] = serde_json::json!("successful-log-read");
+    event["tool_input"] = serde_json::json!({"command": "git show :past.log"});
+    assert!(!skill_ops::record_native_failure(&state, "codex", &event)?);
+    assert_eq!(skill_ops::incidents(&state)?, primary);
+    incident_fixture::preserve(host.scope);
+    Ok(())
+}
+
+#[test]
+fn post_commit_refreshes_changed_tools_once_and_keeps_failed_installations_stale() -> Result<()> {
+    use platform::build_inputs::{CRATES, content_hash};
+    use platform::freshness::{Built, Embedded, lagging, verify};
+
+    let host = Host::new()?;
+    let consent = host.home().join(platform::incidents::EXPERIMENTAL);
+    fs::create_dir_all(consent.parent().unwrap())?;
+    fs::write(consent, skill_ops::incident_rules::EXPERIMENTAL_OPT_IN)?;
+    for krate in CRATES {
+        fs::create_dir_all(host.repository().join(krate).join("src"))?;
+    }
+    let library = host.repository().join("crates/platform/src/lib.rs");
+    fs::write(
+        host.repository().join("crates/platform/Cargo.toml"),
+        "[package]\nname = \"platform\"\n",
+    )?;
+    fs::write(&library, "pub fn current() {}\n")?;
+    for built in Built::ALL {
+        let directory = host.home().join(".local/state/dotfiles/installed");
+        fs::create_dir_all(&directory)?;
+        let record = serde_json::json!({"schema":1,"build":{"revision":"fixture","root":platform::paths::canonical(&host.repository())?,"hash":content_hash(&host.repository())?}});
+        fs::write(directory.join(built.binary()), serde_json::to_vec(&record)?)?;
+    }
+    let stamp = Embedded {
+        revision: "fixture".into(),
+        root: host.repository(),
+        hash: content_hash(&host.repository())?,
+    };
+    let just = host
+        .home()
+        .join(".local/bin")
+        .join(format!("just{}", std::env::consts::EXE_SUFFIX));
+    let status = platform::process::command("rustc")
+        .args(["--edition", "2024"])
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/just.rs"))
+        .args(["-o"])
+        .arg(&just)
+        .status()?;
+    ensure!(status.success(), "fixture just compilation failed");
+    let events = host.scope.path().join("hook-events");
+    let run = |failure: Option<&str>| -> Result<Output> {
+        let mut command = host.command(env!("CARGO_BIN_EXE_dotfiles"));
+        let mut path = vec![just.parent().unwrap().to_path_buf()];
+        path.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+        command
+            .args(["hook", "post-commit"])
+            .env("PATH", std::env::join_paths(path)?)
+            .env("FIXTURE_HOOK_LOG", &events)
+            .env("FIXTURE_INSTALLATION_RECORD", serde_json::to_string(&serde_json::json!({"schema":1,"build":{"revision":"fixture","root":platform::paths::canonical(&host.repository())?,"hash":content_hash(&host.repository())?}}))?);
+        if let Some(failure) = failure {
+            command.env("FIXTURE_INSTALL_FAILURE", failure);
+        } else {
+            command.env_remove("FIXTURE_INSTALL_FAILURE");
+        }
+        Ok(command.output()?)
+    };
+    fs::write(&library, "pub fn changed() {}\n")?;
+    let stale = verify(Built::SkillOps, &stamp, None, Some(&host.repository())).unwrap_err();
+    let stale = stale.downcast_ref::<platform::refusal::Refusal>().unwrap();
+    assert_eq!(stale.rule, "tool.stale");
+    println!("\n{}", stale.line());
+    let refreshed = run(None)?;
+    assert!(
+        refreshed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&refreshed.stderr)
+    );
+    assert_eq!(
+        lagging(&host.home(), &host.repository())?,
+        Vec::<Built>::new()
+    );
+    let installed = "install-review-guard\ninstall-pr-workflow\ninstall-skill-ops\n";
+    assert_eq!(fs::read_to_string(&events)?, installed);
+    assert!(run(None)?.status.success());
+    assert_eq!(fs::read_to_string(&events)?, installed);
+    fs::write(&library, "pub fn changed_again() {}\n")?;
+    let failed = run(Some("install-skill-ops"))?;
+    assert!(failed.status.success());
+    assert!(
+        String::from_utf8_lossy(&failed.stderr)
+            .contains("reinstalling tools built from changed sources failed")
+    );
+    assert_eq!(
+        lagging(&host.home(), &host.repository())?,
+        [Built::SkillOps]
+    );
+    assert!(run(None)?.status.success());
+    assert_eq!(
+        lagging(&host.home(), &host.repository())?,
+        Vec::<Built>::new()
+    );
+    host.empty_commit()?;
+    fs::write(&library, "pub fn refused_change() {}\n")?;
+    let previous = fs::read_to_string(&events)?;
+    assert_eq!(refusal(&run(None)?).rule, "commit.empty");
+    assert_eq!(fs::read_to_string(&events)?, previous);
+    Ok(())
+}
+
+#[test]
+fn a_repository_with_its_own_lefthook_configuration_has_its_mise_configuration_trusted_first()
+-> Result<()> {
+    let host = Host::new()?;
+    let status = platform::process::command("rustc")
+        .args(["--edition", "2024"])
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mise.rs"))
+        .arg("-o")
+        .arg(
+            host.home()
+                .join(".local/bin")
+                .join(format!("mise{}", std::env::consts::EXE_SUFFIX)),
+        )
+        .status()?;
+    ensure!(status.success(), "fixture mise compilation failed");
+    let log = host.scope.path().join("mise.log");
+    let configuration = host.repository().join("mise.toml");
+    fs::write(&configuration, "[tools]\n")?;
+    let hook = || {
+        host.command(env!("CARGO_BIN_EXE_dotfiles"))
+            .env("MISE_FIXTURE_LOG", &log)
+            .args(["hook", "pre-commit"])
+            .output()
+    };
+    assert_eq!(refusal(&hook()?).rule, "commit.staged-tree");
+    assert!(
+        !log.exists(),
+        "a repository without its own hooks keeps its trust"
+    );
+    fs::write(host.repository().join("lefthook.yml"), "pre-commit: {}\n")?;
+    assert_eq!(refusal(&hook()?).rule, "hook.lefthook");
+    let recorded = fs::read_to_string(&log)?;
+    let trusted: Vec<_> = recorded
+        .lines()
+        .map(|line| {
+            line.strip_prefix("trust --quiet ")
+                .map(|path| dotfiles::canonical(Path::new(path)).ok())
+        })
+        .collect();
+    assert_eq!(
+        trusted,
+        [Some(Some(dotfiles::canonical(&configuration)?))],
+        "{recorded}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_lefthook_configuration_that_cannot_be_loaded_refuses_the_hook() -> Result<()> {
+    let host = Host::new()?;
+    fs::write(host.repository().join("lefthook.yml"), "pre-push: {}\n")?;
+    let refused =
+        refusal(&host.hook(&["pre-push", "--", "origin", "https://example.invalid/r"])?);
+    assert_eq!(refused.rule, "hook.lefthook");
+    assert_eq!(refused.next.as_deref().unwrap_or_default(), "lefthook dump");
+    assert_eq!(refused.bypass, None);
+    assert!(
+        refused
+            .evidence
+            .iter()
+            .any(|item| item.contains("invalid lefthook configuration")),
+        "{refused:?}"
+    );
+    Ok(())
+}

@@ -1,0 +1,7 @@
+usage_language = "rust"
+name = "x"
+summary = "An x"
+install = "cargo install x"
+usage = "x --help"
+copyright = "X"
+license = "MIT OR Apache-2.0"

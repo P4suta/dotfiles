@@ -1,0 +1,1 @@
+{"permission":{"read":"allow","bash":{"*":"ask","rm *":"deny"},"memory":"deny"}}

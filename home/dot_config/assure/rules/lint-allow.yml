@@ -1,0 +1,13 @@
+id: lint-allow
+language: rust
+severity: error
+message: An allow attribute silences a lint without expiring, and an inner one silences it for a whole file or crate.
+note: Fix the code the lint names, or put `#[expect(..., reason = "...")]` on the one item it concerns.
+metadata:
+  cwe: CWE-1164
+  ruleset: Clippy allow_attributes
+rule:
+  any:
+    - kind: attribute_item
+    - kind: inner_attribute_item
+  regex: '^#!?\[\s*allow\s*\('

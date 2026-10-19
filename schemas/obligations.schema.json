@@ -1,0 +1,587 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Manifest",
+  "type": "object",
+  "properties": {
+    "non-terminating": {
+      "description": "The mutants that run forever by construction, as cargo-mutants names them, whose timeouts the gate admits.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/NonTerminating"
+      }
+    },
+    "obligation": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Obligation"
+      }
+    },
+    "pilot": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PilotEntry"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "AlloyCheck": {
+      "description": "One property of an Alloy model, as three named commands that share one scope.",
+      "type": "object",
+      "properties": {
+        "assertion": {
+          "description": "A `check` command that must find no counterexample.",
+          "type": "string"
+        },
+        "counterexample": {
+          "description": "A `check` command over a mutated fact that must find a counterexample, which shows the assertion can fail.",
+          "type": "string"
+        },
+        "instance": {
+          "description": "A `run` command that must find an instance, ruling out a vacuous assertion.",
+          "type": "string"
+        },
+        "scope": {
+          "description": "The scope each of the three commands states, such as `for 4 but 12 steps`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "assertion",
+        "instance",
+        "counterexample",
+        "scope"
+      ]
+    },
+    "AlloySolver": {
+      "description": "The Boolean satisfiability solvers an Alloy obligation may pin, each running in Java without a native library.",
+      "type": "string",
+      "enum": [
+        "sat4j"
+      ]
+    },
+    "KaniFlag": {
+      "description": "The flags a Kani obligation may pass, pinned with the Kani version in `skill_proofs::KANI_VERSION`.",
+      "type": "string",
+      "enum": [
+        "function-contracts",
+        "loop-contracts",
+        "quantifiers",
+        "stubbing"
+      ]
+    },
+    "LeanRefinement": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "constant": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "bounded-kani"
+            },
+            "source": {
+              "type": "string"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "source",
+            "constant",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "generated-vectors"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "source-translation"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "entrypoint": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "selected-cases"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "entrypoint"
+          ]
+        }
+      ]
+    },
+    "LeanTheorem": {
+      "description": "One theorem and the bridge that binds it to the Rust code.",
+      "type": "object",
+      "properties": {
+        "bridge": {
+          "description": "The Kani harness or Rust test that binds it, as `<path>::<function>`.",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module that states it, such as `Dotfiles.SkillPlan`.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The full name, such as `Dotfiles.SkillPlan.plan_correct`.",
+          "type": "string"
+        },
+        "refinement": {
+          "$ref": "#/$defs/LeanRefinement"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "module",
+        "bridge",
+        "refinement"
+      ]
+    },
+    "LintTool": {
+      "description": "The linters a `lint` obligation may name.",
+      "type": "string",
+      "enum": [
+        "shellcheck",
+        "psscriptanalyzer"
+      ]
+    },
+    "NonTerminating": {
+      "description": "A mutant known to run forever, with the reason no test can end it.",
+      "type": "object",
+      "properties": {
+        "mutant": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "mutant",
+        "reason"
+      ]
+    },
+    "Obligation": {
+      "description": "One obligation and the verifier that discharges it.",
+      "oneOf": [
+        {
+          "description": "Every harness in `source` must pass, and every harness in `probes` must fail on an assertion.",
+          "type": "object",
+          "properties": {
+            "flags": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/KaniFlag"
+              }
+            },
+            "probes": {
+              "description": "Harness definitions placed after `mod production;`, which names the module under proof.",
+              "type": "string",
+              "default": ""
+            },
+            "source": {
+              "type": "string"
+            },
+            "verifier": {
+              "type": "string",
+              "const": "kani"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "source"
+          ]
+        },
+        {
+          "description": "A function contract in `source`, proved by its `proof_for_contract` harness under `flags`.",
+          "type": "object",
+          "properties": {
+            "flags": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/KaniFlag"
+              }
+            },
+            "function": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "verifier": {
+              "type": "string",
+              "const": "kani-contract"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "source",
+            "function",
+            "flags"
+          ]
+        },
+        {
+          "description": "A consumer schema and its governed targets.",
+          "type": "object",
+          "properties": {
+            "close_root": {
+              "type": "boolean",
+              "default": false
+            },
+            "encoded_sha256": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "extensions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/SchemaExtension"
+              }
+            },
+            "resources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Vendored"
+              }
+            },
+            "schema": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string"
+            },
+            "targets": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "undeclared": {
+              "type": "array",
+              "default": [],
+              "items": {
+                "type": "string"
+              }
+            },
+            "verifier": {
+              "type": "string",
+              "const": "json-schema"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "schema",
+            "sha256",
+            "targets"
+          ]
+        },
+        {
+          "description": "A linter run with its committed settings.",
+          "type": "object",
+          "properties": {
+            "finding": {
+              "type": "string"
+            },
+            "probe": {
+              "type": "string"
+            },
+            "settings": {
+              "type": "string"
+            },
+            "tool": {
+              "$ref": "#/$defs/LintTool"
+            },
+            "verifier": {
+              "type": "string",
+              "const": "lint"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "tool",
+            "settings",
+            "probe",
+            "finding"
+          ]
+        },
+        {
+          "description": "A Quint model, which `just proofs` checks offline in its pinned image.",
+          "type": "object",
+          "properties": {
+            "distinct_states": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "graph": {
+              "description": "The committed reachable state graph, which `TLC` must dump again and a test replays edge for edge.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "inductive": {
+              "description": "An inductive invariant that Apalache proves for every limit the model chooses, which a bounded Apalache run of `quint::APALACHE_STEPS` steps backs.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "invariant": {
+              "type": "string"
+            },
+            "main": {
+              "type": "string"
+            },
+            "probe": {
+              "type": "string"
+            },
+            "samples": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "seed": {
+              "type": "string"
+            },
+            "spec": {
+              "type": "string"
+            },
+            "steps": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "symbolic": {
+              "description": "The module and constant initializer of a symbolic Apalache check.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SymbolicQuint"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "traces": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "verifier": {
+              "type": "string",
+              "const": "quint"
+            },
+            "witnesses": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "spec",
+            "main",
+            "probe",
+            "invariant",
+            "witnesses",
+            "seed",
+            "samples",
+            "steps",
+            "distinct_states",
+            "traces"
+          ]
+        },
+        {
+          "description": "An Alloy 6 model, which `just proofs` checks offline in its pinned image.",
+          "type": "object",
+          "properties": {
+            "checks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AlloyCheck"
+              }
+            },
+            "solver": {
+              "$ref": "#/$defs/AlloySolver"
+            },
+            "spec": {
+              "type": "string"
+            },
+            "verifier": {
+              "type": "string",
+              "const": "alloy"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "spec",
+            "solver",
+            "checks"
+          ]
+        },
+        {
+          "description": "A Lean 4 package, which `just proofs` builds and checks offline in its pinned image.",
+          "type": "object",
+          "properties": {
+            "package": {
+              "description": "The package directory, which holds `lean-toolchain`, the lakefile, and `Axioms.lean`.",
+              "type": "string"
+            },
+            "theorems": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/LeanTheorem"
+              }
+            },
+            "verifier": {
+              "type": "string",
+              "const": "lean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "package",
+            "theorems"
+          ]
+        }
+      ]
+    },
+    "PilotEntry": {
+      "description": "A tool tried on named subjects for one issue, which discharges no obligation.",
+      "type": "object",
+      "properties": {
+        "decision": {
+          "description": "The decision record that adopts, rejects, or defers the tool.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "exit": {
+          "description": "What result adopts the tool.",
+          "type": "string"
+        },
+        "issue": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "subjects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "subjects",
+        "exit",
+        "issue"
+      ]
+    },
+    "SchemaExtension": {
+      "type": "string",
+      "enum": [
+        "claude-command-failure-policy"
+      ]
+    },
+    "SymbolicQuint": {
+      "type": "object",
+      "properties": {
+        "constants": {
+          "type": "string"
+        },
+        "main": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "main",
+        "constants"
+      ]
+    },
+    "Vendored": {
+      "description": "A vendored schema file and the SHA-256 it must keep.",
+      "type": "object",
+      "properties": {
+        "encoded_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "schema": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "sha256"
+      ]
+    }
+  }
+}

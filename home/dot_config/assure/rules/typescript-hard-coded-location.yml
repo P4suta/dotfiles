@@ -1,0 +1,29 @@
+id: typescript-hard-coded-location
+language: typescript
+severity: error
+message: A URL, host, or absolute path sits inline in code instead of in configuration.
+note: Name it in a module-level const or read it from configuration, and use the name.
+metadata:
+  cwe: CWE-547
+  ruleset: SEI CERT MSC03-J
+ignores:
+  - "**/*.test.ts"
+  - "**/tests/**"
+rule:
+  kind: string_fragment
+  regex: '([a-z][a-z0-9+.-]*://[A-Za-z0-9])|(^/(usr|etc|opt|var|tmp|home|bin|sbin|nix|dev|proc|Applications|Library|System)(/|$))|(^[A-Za-z]:[\\/])|(\b[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\b)'
+  not:
+    inside:
+      stopBy: end
+      kind: lexical_declaration
+      regex: '^const '
+      inside:
+        any:
+          - kind: program
+          - kind: export_statement
+      not:
+        has:
+          stopBy: end
+          any:
+            - kind: arrow_function
+            - kind: function_expression

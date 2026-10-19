@@ -1,0 +1,8 @@
+# The structural rules every repository on this machine keeps, which `ast-grep scan --config` applies.
+# Each rule names its basis in `metadata` and its corrective next action in `note`.
+ruleDirs:
+  - rules
+utilDirs:
+  - utils
+testConfigs:
+  - testDir: rule-tests

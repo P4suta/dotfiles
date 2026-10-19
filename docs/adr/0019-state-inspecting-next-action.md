@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Recommend the next workflow step from inspected state
-
-Status: accepted.
 
 ## Context
 

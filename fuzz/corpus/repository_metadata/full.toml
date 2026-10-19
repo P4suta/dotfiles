@@ -1,0 +1,12 @@
+name = "dotfiles"
+summary = "One chezmoi source for Mac, Linux, Windows, and WSL"
+install = """
+git clone https://github.com/P4suta/dotfiles.git
+mise install"""
+usage = "just check"
+copyright = "Owner"
+license = "MIT OR Apache-2.0"
+
+[[consent]]
+contributor = "Contributor"
+evidence = "https://github.com/P4suta/dotfiles/issues/1#issuecomment-1"

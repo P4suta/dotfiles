@@ -1,0 +1,170 @@
+# Values every profile shares.
+
+# The pinned CodeRabbit CLI, which mise installs and the review guard checks, with one artifact per host platform.
+[coderabbit]
+version = "0.8.2"
+
+[coderabbit.platforms.linux-arm64]
+artifact = "coderabbit-linux-arm64.zip"
+sha256 = "3b08717d40d51fd2d884a4ef0d97f3e01726cca7163653b38405313ad398dc8f"
+
+[coderabbit.platforms.linux-x64]
+artifact = "coderabbit-linux-x64.zip"
+sha256 = "a6344485153c5889c91bae71d9172c0d2d7d3924a45661173030e28570bb7bb2"
+
+[coderabbit.platforms.macos-arm64]
+artifact = "coderabbit-darwin-arm64.zip"
+sha256 = "6091d03164b47190b4dbb20de97312f79bde03fc35b4b7c2705f8f4d3ba8067e"
+
+[coderabbit.platforms.macos-x64]
+artifact = "coderabbit-darwin-x64.zip"
+sha256 = "c00982108b0f816df0cb96c427c1b99d59161cd9150c57749dd1f20b418d1d08"
+
+[coderabbit.platforms.windows-x64]
+artifact = "coderabbit-windows-x64.zip"
+sha256 = "d8f613b64fad7ccc33b0a09cc2218ab218071fb3fef25e15bc211789107e72d4"
+
+# The SSH keys herdr-agent serves, which the machine-local configuration replaces.
+[herdr_agent]
+public_keys = []
+
+# The OCaml switch and the tools opam installs into it.
+[ocaml]
+compiler = "5.5.0"
+platform_tools = ["dune", "ocaml-lsp-server", "ocamlformat", "odoc", "utop"]
+switch = "5.5.0"
+
+# The Tokyo Night colors of every themed tool, which the profile gate holds every rendered color literal to.
+[palette]
+bg = "#1a1b26"
+bg_dim = "#15161e"
+bg_highlight = "#292e42"
+bg_panel = "#1f2335"
+blue = "#7aa2f7"
+blue1 = "#2ac3de"
+bright_black = "#414868"
+# Tokyo Night's own comment color, #565f89, reaches only 2.76:1 on bg, so this lighter shade of its hue keeps muted text legible.
+comment = "#7a83ae"
+cyan = "#7dcfff"
+diff_add = "#283b4d"
+diff_add_gutter = "#293652"
+diff_del = "#3f2d3d"
+diff_del_gutter = "#453036"
+fg = "#c0caf5"
+fg_dim = "#a9b1d6"
+green = "#9ece6a"
+magenta = "#bb9af7"
+orange = "#ff9e64"
+purple = "#9d7cd8"
+red = "#f7768e"
+selection = "#33467c"
+surface = "#3b4261"
+teal = "#73daca"
+yellow = "#e0af68"
+
+# Each pair of palette colors that a theme draws text with, which the profile gate holds to a text contrast of 4.5:1.
+# Borders, gutters, and the terminal's fixed color slots draw no text of the palette's choosing, so they have no pair.
+[[contrast]]
+foreground = "fg"
+background = "bg"
+used = "the body text of every terminal, editor, and prompt"
+
+[[contrast]]
+foreground = "fg_dim"
+background = "bg"
+used = "the fzf list"
+
+[[contrast]]
+foreground = "fg_dim"
+background = "bg_highlight"
+used = "the kitty inactive tab"
+
+[[contrast]]
+foreground = "comment"
+background = "bg"
+used = "comments, hints, and muted text in Nushell, starship, and opencode"
+
+[[contrast]]
+foreground = "blue"
+background = "bg"
+used = "headings, functions, and the starship directory"
+
+[[contrast]]
+foreground = "blue1"
+background = "bg"
+used = "Nushell file sizes and literals"
+
+[[contrast]]
+foreground = "cyan"
+background = "bg"
+used = "types, operators, and the fzf prompt"
+
+[[contrast]]
+foreground = "green"
+background = "bg"
+used = "strings and the success prompt character"
+
+[[contrast]]
+foreground = "magenta"
+background = "bg"
+used = "keywords and the Git branch"
+
+[[contrast]]
+foreground = "purple"
+background = "bg"
+used = "the opencode accent text"
+
+[[contrast]]
+foreground = "orange"
+background = "bg"
+used = "numbers and emphasis"
+
+[[contrast]]
+foreground = "red"
+background = "bg"
+used = "errors and the failure prompt character"
+
+[[contrast]]
+foreground = "teal"
+background = "bg"
+used = "kitty links and Nushell external arguments"
+
+[[contrast]]
+foreground = "yellow"
+background = "bg"
+used = "warnings, durations, and flags"
+
+[[contrast]]
+foreground = "fg"
+background = "bg_highlight"
+used = "the selected fzf line"
+
+[[contrast]]
+foreground = "fg"
+background = "bg_panel"
+used = "the opencode panels"
+
+[[contrast]]
+foreground = "fg"
+background = "selection"
+used = "selected text in kitty and Ghostty"
+
+[[contrast]]
+foreground = "bg"
+background = "blue"
+used = "the kitty active tab"
+
+[[contrast]]
+foreground = "bg"
+background = "yellow"
+used = "the Nushell search result"
+
+[[contrast]]
+foreground = "fg"
+background = "diff_add"
+used = "added lines in delta and opencode"
+
+[[contrast]]
+foreground = "fg"
+background = "diff_del"
+used = "removed lines in delta and opencode"

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "review_every": 50,
+  "minimum_pair_sessions": 5,
+  "pair_percent": 80,
+  "max_entry_words": 1200,
+  "requirements": [
+    {"skill": "skill-operations", "dependencies": ["portable-skills"]},
+    {"skill": "verification-tools", "dependencies": ["type-contracts", "executable-policy"]},
+    {"skill": "type-contracts", "dependencies": ["executable-policy"]},
+    {"skill": "formal-assurance", "dependencies": ["functional-architecture"]}
+  ],
+  "bundles": {
+    "skill-maintenance": ["portable-skills", "skill-operations"],
+    "implementation-assurance": ["development-assurance", "formal-assurance", "functional-architecture", "verification-tools"]
+  }
+}

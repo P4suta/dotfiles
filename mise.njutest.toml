@@ -1,0 +1,5 @@
+[tools]
+"cargo:https://github.com/P4suta/njutest" = { version = "rev:46d5b5f4446503162ea18189756249231abb6fc7", crate = "njutest", locked = true, os = [
+  "macos",
+  "linux",
+] }

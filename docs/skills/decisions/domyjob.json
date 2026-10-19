@@ -1,9 +1,11 @@
 {
-  "revision": "886172a5ea7bb78819eb970b8f61cf00d33b6ad760b8cb922eeadf73daf16c3e",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "594617a1b5543fcd94d1cc7e95622b6b48ba0a9464514d1bd73e65d6bb14cb31",
+  "outcome": "implemented",
+  "reason": "Keep persistent remote job identity, snapshot transport, and remote exit status separate from machine synchronization.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
-    "dot_agents/skills/domyjob/SKILL.md"
+    "home/dot_agents/skills/domyjob/SKILL.md",
+    "home/dot_agents/skills/domyjob/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

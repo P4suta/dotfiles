@@ -1,6 +1,11 @@
 **/target/
+# The build outputs of the Lean package, which `just proofs` writes.
+specs/lean/.lake/
 **/__pycache__/
 node_modules/
 .migration-imported
 .doppler/
 *.local.toml
+# mise.lock names the uv lock of each Python tool under .mise/locks/, which a fresh install needs.
+.mise/*
+!.mise/locks/

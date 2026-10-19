@@ -1,7 +1,10 @@
+---
+status: amended
+changed_by: [route-coderabbit-by-current-pr-importance.md]
+---
 # Scope the CodeRabbit owner pause
-
-Status: accepted.
 Extends the owner pause of [ADR 0007](0007-reserved-review-capacity.md).
+The current importance routing and pause obligations are amended by [the importance decision](route-coderabbit-by-current-pr-importance.md).
 
 ## Context
 
@@ -28,7 +31,7 @@ After resumption, a PR excluded only for the pause reports the review as due aga
 A review that CodeRabbit itself paused, skipped, or rate-limited stays pending, and only the owner's PR pause lifts the obligation.
 The skills point at the guard status and these commands instead of restating the pause rules.
 
-The pure scope, CLI admission, request, and obligation rules live in `xtask/src/review_rules.rs` and `xtask/src/pr_rules.rs` with Kani harnesses and rejecting counterexamples beside the existing ones.
+The pure scope, CLI admission, request, and obligation rules live in `crates/coderabbit-guard/src/review_rules.rs` and `crates/pr-workflow/src/pr_rules.rs` with Kani harnesses and rejecting counterexamples beside the existing ones.
 
 ## Alternatives
 

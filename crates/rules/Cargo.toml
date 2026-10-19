@@ -1,0 +1,11 @@
+[package]
+name = "rules"
+description = "The pure decision core of every dotfiles tool, which reaches no file, process, network, clock, or environment"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

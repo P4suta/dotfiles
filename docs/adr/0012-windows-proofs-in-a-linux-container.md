@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Run the Kani proofs on Windows in a pinned Linux container
-
-Status: accepted.
 
 ## Context
 

@@ -1,0 +1,160 @@
+#:schema ../schemas/baselines.schema.json
+# The deterministic metrics `just check` and `just proofs` hold exactly, so a change that moves one records the new value here.
+# Wall time stays advisory, and the schema refuses any threshold on it.
+
+[[metric]]
+metric = "proved-subjects"
+exact = 263
+
+[[metric]]
+metric = "probes"
+exact = 356
+
+# The three unsafe blocks and the console handler of the Win32 sites in policy/unsafe-sites.toml, and the read past a slice in the Miri fixture.
+[[metric]]
+metric = "unsafe-sites"
+exact = 5
+
+# The lowest text contrast, in thousandths, among the palette's text pairs.
+[[metric]]
+metric = "minimum-contrast"
+exact = 4627
+pair = "comment on bg"
+
+# Initial instruction and heap ceilings of the merged guard, measured with Rust 1.99.0, Valgrind 3.19.0, and gungraun 0.20.0 in the pinned proof image.
+# The runner refuses a measurement that exceeds its ceiling with exit status 3, and the proofs refuse an improvement until the baseline records it.
+# Repeated refused-push and rewritten-message measurements varied by one instruction, so the instruction ratchet admits one instruction of improvement.
+[[metric]]
+metric = "ir"
+bench = "scan"
+exact = 1913162
+
+[[metric]]
+metric = "heap-peak"
+bench = "scan"
+exact = 160
+
+[[metric]]
+metric = "ir"
+bench = "strip"
+exact = 7291
+
+[[metric]]
+metric = "heap-peak"
+bench = "strip"
+exact = 663
+
+[[metric]]
+metric = "ir"
+bench = "classify"
+exact = 62877
+
+[[metric]]
+metric = "heap-peak"
+bench = "classify"
+exact = 0
+
+[[metric]]
+metric = "ir"
+bench = "git_status"
+exact = 447016
+
+[[metric]]
+metric = "heap-peak"
+bench = "git_status"
+exact = 45572
+
+[[metric]]
+metric = "ir"
+bench = "pre_push_denied"
+exact = 890288
+
+[[metric]]
+metric = "heap-peak"
+bench = "pre_push_denied"
+exact = 21150
+
+[[metric]]
+metric = "ir"
+bench = "commit_message_clean"
+exact = 1177427
+
+[[metric]]
+metric = "heap-peak"
+bench = "commit_message_clean"
+exact = 7504
+
+[[metric]]
+metric = "ir"
+bench = "commit_message_attribution"
+exact = 1577131
+
+[[metric]]
+metric = "heap-peak"
+bench = "commit_message_attribution"
+exact = 8530
+
+# The size, in bytes, of the stripped release-guard binary of the local policy gate.
+[[metric]]
+metric = "binary-size"
+exact = 546392
+
+# The mutation campaign of `just proofs` over the decision core.
+[[metric]]
+metric = "mutants-missed"
+exact = 0
+
+[[metric]]
+metric = "mutants-timed-out"
+exact = 0
+
+# Shell initialization reads generated caches without starting external programs.
+[[metric]]
+metric = 'shell-exec-count'
+shell = 'zsh'
+exact = 0
+
+[[metric]]
+metric = 'shell-exec-count'
+shell = 'nu'
+exact = 0
+
+[[metric]]
+metric = 'shell-exec-count'
+shell = 'pwsh'
+exact = 0
+
+[[metric]]
+metric = "exec-count"
+hook = "pre-commit"
+exact = 7
+
+[[metric]]
+metric = "exec-count"
+hook = "commit-msg"
+exact = 3
+
+[[metric]]
+metric = "exec-count"
+hook = "pre-push"
+exact = 4
+
+[[metric]]
+metric = "exec-count"
+hook = "post-commit"
+exact = 1
+
+[[metric]]
+metric = "exec-count"
+hook = "post-checkout"
+exact = 3
+
+[[metric]]
+metric = "exec-count"
+hook = "post-merge"
+exact = 3
+
+[[metric]]
+metric = "exec-count"
+hook = "reference-transaction"
+exact = 1

@@ -1,0 +1,5 @@
+[profiles]
+mac = ["mac"]
+
+[unknown]
+key = 1

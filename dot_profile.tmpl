@@ -1,4 +1,0 @@
-{{- $context := merge (dict) . (index .platforms .profile) -}}
-{{- if eq .profile "linux" -}}
-{{ includeTemplate "profiles/linux/dot_profile.tmpl" $context }}
-{{- else -}}{{ fail "Target is unavailable for this profile" }}{{- end -}}

@@ -1,0 +1,32 @@
+[package]
+name = "prose"
+description = "The persisted writing standard's checker and its pinned linters"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "prose"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.6", features = ["derive", "env"] }
+dotguard = { path = "../dotguard" }
+platform = { path = "../platform" }
+pulldown-cmark = "0.13"
+rules = { path = "../rules" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.11.0"
+skill-ops = { path = "../skill-ops" }
+tempfile = "3.27"
+toml = "1.0"
+
+[dev-dependencies]
+yaml-rust2 = "0.13"
+
+[lints]
+workspace = true

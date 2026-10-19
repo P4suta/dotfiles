@@ -1,0 +1,5 @@
+{{- if eq .profile "mac" -}}
+{{ include ".chezmoitemplates/native/bashrc/mac" }}
+{{- else -}}
+{{ includeTemplate (printf "native/bashrc/%s.tmpl" .profile) . }}
+{{- end -}}

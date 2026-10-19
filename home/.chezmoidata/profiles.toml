@@ -1,0 +1,15 @@
+# Named sets of profiles that targets.toml and retired.toml refer to.
+
+[profiles]
+mac = ["mac"]
+linux = ["linux"]
+windows = ["windows"]
+wsl = ["wsl"]
+# Hosts with a POSIX shell.
+unix = ["mac", "linux", "wsl"]
+# Hosts that run their own desktop instead of borrowing Windows'.
+native = ["mac", "linux", "windows"]
+# Hosts with a graphical desktop session that these dotfiles configure.
+desktop = ["mac", "linux"]
+# Linux hosts that run systemd user units.
+systemd = ["linux", "wsl"]

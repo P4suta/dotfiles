@@ -1,8 +1,8 @@
 # Agent instruction audit
 
-Every managed global `CLAUDE.md` and `AGENTS.md` renders the partials `.chezmoitemplates/agent_policy`, `.chezmoitemplates/prose_policy`, and `.chezmoitemplates/remote_machines`, and nothing else.
-The OpenCode prompts under `dot_config/opencode/agents/` and `dot_config/opencode/commands/` add instructions when they run.
-This document classifies every line of those partials and prompts.
+Every managed global `CLAUDE.md` and `AGENTS.md` renders the partials `home/.chezmoitemplates/partials/agent_policy`, `home/.chezmoitemplates/partials/prose_policy`, and `home/.chezmoitemplates/partials/remote_machines`, and nothing else.
+The OpenCode prompts under `home/dot_config/opencode/agents/` and `home/dot_config/opencode/commands/` add instructions when they run.
+This document classifies every line of those shared templates and prompts.
 A retained text line holds judgment no mechanism can enforce, or it stays until the named follow-up mechanizes it.
 Headings, template actions that render nothing, and front matter lines take the classes `Heading:`, `Directive:`, and `Setting:`.
 No class admits a line whose template action renders output.
@@ -17,7 +17,7 @@ No class admits a line whose template action renders output.
 - a removed line without a valid holder
 - a repository path named outside a quote that doesn't exist
 - a root dispatcher that does more than select the same file in a native profile
-- a profile template that renders more than the partials
+- a profile template that renders more than the shared templates
 - a file a client loads as instructions anywhere else in the source tree, such as `CLAUDE.md` or `AGENTS.md`
 
 A `Gate` row names an existing gate source file, and a `Skill` row names an existing skill.
@@ -96,18 +96,27 @@ Once run, `pr-workflow start` refuses a personal non-fork repository without a q
 Follow-up F4: nothing stops a direct `gh pr create`.
 Whether a diff fits an issue's scope stays judgment.
 
-> - For every implementation change, run `skill-ops load formal-assurance verification-tools` and meet the obligations of the skills it loads before declaring the change complete.
+> - In personal repositories, use stable descriptive document paths and name new ADRs after the decision with a front-matter date, as the shared `adr` skill describes.
 
-Follow-up F5: `dot_config/skill-ops/policy.json` makes `verification-tools` load `type-contracts` and `executable-policy`.
-The observer hook records skill loads, but completion doesn't require them yet.
+Follow-up F8: the shared `adr` skill states the convention, and `xtask/src/adr.rs` checks the dotfiles collection.
+Other personal repositories have no shared ADR gate.
+Choosing a descriptive name still requires reading the decision.
 
-> - Before declaring work complete, run `skill-ops check` and resolve what it reports.
+>   Preserve existing filenames and references, and regenerate shared indexes from source records when the repository has a generator.
 
-Follow-up F6: the `skill-ops stop` hook already blocks completion in Claude Code and Codex, and OpenCode has no blocking completion hook.
+Follow-up F8: the dotfiles index has a generator, but no shared gate checks index drift and historical reference preservation across personal repositories.
+
+> - For implementation changes, read the relevant formal-assurance and verification-tools skill instructions directly and meet their verification obligations.
+
+Judgment: selecting relevant skill instructions and checking their verification obligations requires a review of the implementation and its evidence.
+
+> - Keep experimental skill maintenance off by default, and don't run or require its loading, observation, analysis, triage, or checks without this machine's explicit opt-in.
+
+Judgment: the owner controls each machine's opt-in, and verification duties still apply without skill maintenance.
 
 > - Keep the CodeRabbit CLI and PR review pools separate, apply adaptive thresholds where they apply, and hold a push or PR update while review capacity stays unverified.
 
-Follow-up F7: the CodeRabbit guard enforces the floored budget and refuses unverifiable capacity for a CLI review in `xtask/src/review_guard.rs`.
+Follow-up F7: the CodeRabbit guard enforces the floored budget and refuses unverifiable capacity for a CLI review in `crates/coderabbit-guard/src/lib.rs`.
 No gate represents the PR review pool or its thresholds, or holds a push on its capacity.
 
 > - Never declare a PR complete while supported review findings, required checks, or a review of its current head remain outstanding.
@@ -168,7 +177,7 @@ The notes file stays machine-local, and the agent reads it when needed instead o
 Judgment: what counts as private depends on the destination.
 This repository's secret scan covers only its own publication snapshot.
 
-### `dot_config/opencode/agents/reviewer.md`
+### `home/dot_config/opencode/agents/reviewer.md`
 
 > ---
 
@@ -286,7 +295,7 @@ Judgment: whether a finding holds requires reading the change.
 
 Judgment: whether the change holds up requires reading it.
 
-### `dot_config/opencode/commands/commit.md`
+### `home/dot_config/opencode/commands/commit.md`
 
 > ---
 
@@ -344,7 +353,7 @@ Judgment: the heredoc keeps a multi-line message intact through the shell, and n
 
 Judgment: whether the commit holds the intended changes requires reading its contents.
 
-### `dot_config/opencode/commands/pr.md`
+### `home/dot_config/opencode/commands/pr.md`
 
 > ---
 
@@ -378,7 +387,7 @@ Follow-up F4: nothing stops a direct `gh pr create` yet.
 
 Judgment: which result the reader needs depends on the task.
 
-### `dot_config/opencode/commands/review.md`
+### `home/dot_config/opencode/commands/review.md`
 
 > ---
 
@@ -426,26 +435,27 @@ Each removed line names what holds it now:
 - `Merged`: the retained line containing the quoted fragment rewords or restates it.
 - `Contradicted`: the named retained line or skill states the rule that applies instead.
 
-No gate refuses work done without loading a skill, and F5 adds a completion gate for `formal-assurance` and `verification-tools` only.
+Formal-assurance and verification-tools obligations still require reading their relevant instructions and checking implementation evidence.
+Experimental skill maintenance stays off until the machine's explicit opt-in.
 
 | Former line | Held by | Mechanism |
 | --- | --- | --- |
 | The Japanese reply line. | Merged | Reworded as `Reply in Japanese`. |
-| Follow Conventional Commits and omit AI attribution footers and session URLs. | Gate | Dotguard `commit-msg` strips agent attribution and session URLs in `guard/src/attribution.rs`. |
+| Follow Conventional Commits and omit AI attribution footers and session URLs. | Gate | Dotguard `commit-msg` strips agent attribution and session URLs in `crates/dotguard/src/attribution.rs`. |
 | Keep diffs reviewable by editing the smallest relevant region. | Merged | Merged into `Make the smallest change`. |
 | Load `pull-request` before GitHub-bound implementation. | Skill | The `pull-request` skill description states the same trigger. |
-| Personal non-fork repositories require an existing issue. | Gate and skill | `pr-workflow start`, `create`, and `edit` refuse a personal non-fork without an open, finished issue in `xtask/src/pr_workflow.rs`, and `pull-request` states the rule for external projects and forks. |
+| Personal non-fork repositories require an existing issue. | Gate and skill | `pr-workflow start`, `create`, and `edit` refuse a personal non-fork without an open, finished issue in `crates/pr-workflow/src/lib.rs`, and `pull-request` states the rule for external projects and forks. |
 | Confirm that the diff stays within the issue's scope. | Merged | Reworded as `for PR creation, document edits, and ready transitions`. |
 | Load `formal-assurance` for every implementation change. | Skill | The retained `skill-ops load formal-assurance` line loads `formal-assurance`, which states the obligations. |
-| Load `verification-tools` and `type-contracts` for implementation work. | Skill | The retained `skill-ops load formal-assurance` line loads `verification-tools`, and `dot_config/skill-ops/policy.json` adds `type-contracts` and `executable-policy`. |
-| Load `ci-budget` before an authorized push or PR update. | Gate and skill | The pre-push dispatcher refuses while `~/.config/git/push-paused` exists in `xtask/src/hooks.rs`, and `ci-budget` states the local checks. |
-| Load `coderabbit-review` for an initial substantive PR. | Gate and skill | The CodeRabbit guard admits a CLI review only within verified allowance in `xtask/src/review_guard.rs`, and `coderabbit-review` states the trigger. |
-| Use `floor(capacity * 0.9 * 0.8)` budgets and hold publication on unverified capacity. | Gate | The CodeRabbit guard floors the budget once and refuses unverifiable CLI capacity in `xtask/src/review_rules.rs`. |
+| Load `verification-tools` and `type-contracts` for implementation work. | Skill | The retained `skill-ops load formal-assurance` line loads `verification-tools`, and `home/dot_config/skill-ops/policy.json` adds `type-contracts` and `executable-policy`. |
+| Load `ci-budget` before an authorized push or PR update. | Gate and skill | The pre-push dispatcher refuses while `~/.config/git/push-paused` exists in `crates/dotfiles/src/hooks.rs`, and `ci-budget` states the local checks. |
+| Load `coderabbit-review` for an initial substantive PR. | Gate and skill | The CodeRabbit guard admits a CLI review only within verified allowance in `crates/coderabbit-guard/src/lib.rs`, and `coderabbit-review` states the trigger. |
+| Use `floor(capacity * 0.9 * 0.8)` budgets and hold publication on unverified capacity. | Gate | The CodeRabbit guard floors the budget once and refuses unverifiable CLI capacity in `crates/rules/src/review_rules.rs`. |
 | Elapsed time alone gives no permission to push. | Merged | Merged into `while review capacity stays unverified`. |
-| Honor an owner-imposed CodeRabbit pause. | Gate | The CodeRabbit guard refuses every service call while paused in `xtask/src/review_rules.rs`, with a Kani proof. |
+| Honor an owner-imposed CodeRabbit pause. | Gate | The CodeRabbit guard refuses every service call while paused in `crates/rules/src/review_rules.rs`, with a Kani proof. |
 | Use `reliability` for intermittent failures. | Skill | `reliability` states the trigger in its description and the rule in its body. |
 | Load `dotfiles` for dotfiles changes. | Skill | `dotfiles` states the trigger and the rule in its description. |
-| Prefer `skill-ops load NAME` for shared skills. | Gate and skill | The `skill-ops stop` hook refuses completion with pending maintenance in `xtask/src/bin/skill-ops.rs` and names `skill-operations`. |
+| Prefer `skill-ops load NAME` for shared skills. | Gate and skill | The `skill-ops stop` hook refuses completion with pending maintenance in `crates/skill-ops/src/main.rs` and names `skill-operations`. |
 | Commit and push only on request. | Merged | Merged into `only when the owner asks`. |
 | CodeRabbit automatically reviews ready PRs. | Skill | `coderabbit-review` states it once. |
 | Load `coderabbit-review` on an existing PR or an authorized PR update. | Skill | `coderabbit-review` states the trigger in its description and the inspection in its body. |
@@ -453,16 +463,16 @@ No gate refuses work done without loading a skill, and F5 adds a completion gate
 | Explain unsupported findings with concrete evidence. | Skill | `coderabbit-review` states it once. |
 | The PR completion line, before the current wording. | Merged | Reworded as `Never declare a PR complete`. |
 | A passing CodeRabbit check alone doesn't establish a completed review. | Skill | `coderabbit-review` states it once. |
-| Use the existing PR review before requesting a CLI review of the same diff. | Gate and skill | `coderabbit-review` states the order, and the guard enforces the CLI budget in `xtask/src/review_guard.rs`. |
+| Use the existing PR review before requesting a CLI review of the same diff. | Gate and skill | `coderabbit-review` states the order, and the guard enforces the CLI budget in `crates/coderabbit-guard/src/lib.rs`. |
 | Commit, push, PR replies, thread resolution, manual review triggers, and merge still require authorization. | Merged | Merged into `only when the owner asks`. |
-| The former nine-sentence prose rules and their rationale. | Gate | The global pre-commit hook runs `ocomment fix --tidy --staged`, which reflows a touched paragraph in `dot_config/lefthook/global.yml`. |
+| The former nine-sentence prose rules and their rationale. | Gate | The global pre-commit hook runs `ocomment fix --tidy --staged`, which reflows a touched paragraph in `home/dot_config/lefthook/global.yml`. |
 | Use the `multi-machine` skill for remote execution. | Skill | `multi-machine` and `domyjob` state the trigger in their descriptions. |
 | The template actions that rendered the machine-local notes file into every instruction file. | Merged | The retained line names the file to read instead: `when it exists, before operating another host`. |
 | In `commit.md`, wrap an optional body at 100 characters. | Contradicted | It contradicted `Never wrap prose to a fixed column`, and the command keeps the reason line. |
-| In `commit.md`, never append attribution footers. | Gate | Dotguard `commit-msg` strips agent attribution in `guard/src/attribution.rs`. |
+| In `commit.md`, never append attribution footers. | Gate | Dotguard `commit-msg` strips agent attribution in `crates/dotguard/src/attribution.rs`. |
 | In `commit.md`, the Japanese reply line. | Merged | Restated by `Reply in Japanese`. |
 | In `pr.md`, open a pull request using `gh`. | Merged | Superseded by `for PR creation, document edits, and ready transitions`. |
-| In `pr.md`, the English title of at most 72 characters in imperative mood. | Contradicted | `pull-request` requires an English Conventional Commits title unless the destination has its own rules, and `pr-workflow` checks the syntax in `xtask/src/pr_workflow.rs`. |
+| In `pr.md`, the English title of at most 72 characters in imperative mood. | Contradicted | `pull-request` requires an English Conventional Commits title unless the destination has its own rules, and `pr-workflow` checks the syntax in `crates/pr-workflow/src/lib.rs`. |
 | In `pr.md`, a body with `## Summary`, `## Changes`, and `## Notes` sections. | Contradicted | `pull-request` prescribes `Why`, `Changes`, and `Validation` when the destination has no template. |
 | In `pr.md`, run `gh pr create` with the base, title, and body. | Merged | Replaced by `create the PR with`. |
 | In `pr.md`, the Japanese reply line. | Merged | Restated by `Reply in Japanese`. |
@@ -471,6 +481,7 @@ No gate refuses work done without loading a skill, and F5 adds a completion gate
 ## Follow-ups
 
 F1 lands with issue #44.
+F8 continues the shared ADR work of issue #110.
 The others have no scoped issue yet, and each gets its own issue under #42 before implementation.
 
 ### F1:
@@ -495,17 +506,14 @@ A repository opts out with `git config guard.commits off` when its own instructi
 
 The managed agent permission profiles deny `gh pr create`, `gh pr edit`, and `gh pr ready`, and the denial names the matching `pr-workflow` command.
 
-### F5:
-
-`skill-ops stop` refuses completion of a session whose observed edits change implementation files without observed loads of `formal-assurance` and `verification-tools`.
-It names `skill-ops load formal-assurance verification-tools`.
-
-### F6:
-
-The OpenCode `skill-ops` plugin in `dot_config/opencode/plugins/skill-ops.ts` runs `skill-ops check` when a session goes idle and reports its refusal to the agent.
-
 ### F7:
 
 The pre-push dispatcher asks the CodeRabbit guard for the PR review pool's capacity before pushing a branch with an open PR.
 It keeps that capacity apart from the CLI pool, with the applicable adaptive threshold.
 It refuses the push when the capacity stays unverified or runs out, and it names the pool and the capacity it found.
+
+### F8:
+
+Reuse the existing ADR checker and index generator through an installed command for personal repositories.
+Preserve historical document names and references, and check the exact staged or pushed tree.
+Adopt the same checker in repository checks and required CI.

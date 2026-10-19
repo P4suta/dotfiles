@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+{{ includeTemplate "partials/inputs" (list) }}
+exec "$HOME/.local/bin/dotfiles" --root "$CHEZMOI_WORKING_TREE" setup fcitx5 --config "$CHEZMOI_CONFIG_FILE" --live

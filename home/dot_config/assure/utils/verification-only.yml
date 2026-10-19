@@ -1,0 +1,13 @@
+# Code that only a test or a proof harness compiles, which may panic to report a failure.
+id: verification-only
+language: rust
+rule:
+  inside:
+    stopBy: end
+    any:
+      - kind: mod_item
+      - kind: function_item
+      - kind: impl_item
+    follows:
+      kind: attribute_item
+      regex: ^#\[(cfg\((test|kani|any\(test, kani\))\)|test|kani::)

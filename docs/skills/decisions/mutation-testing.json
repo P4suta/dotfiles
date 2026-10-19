@@ -1,9 +1,17 @@
 {
-  "revision": "e49086a34f9b096809e0a05fbc5a7a0455f074498c4e7e29ecf76aa3bebe8795",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "a27e5628bf75e6a454349cb7eb1b69c3498f6fca8815d85e2bb40846ea671b7c",
+  "outcome": "implemented",
+  "reason": "Keep survivor classification and invariant repair separate from proof completion.\nDeclare the optional njutest engine at exact source revision 46d5b5f4446503162ea18189756249231abb6fc7 while keeping native cargo-mutants authoritative and hosted mutation paused.\nValidate original offline reports, source and operator correspondence, execution origin, and the assertion-free sensitivity control before considering adoption.\nThe focused ordinary adapter and control suite passed 16 cases, including the added negative control.\nImported assessments grant no execution credit, and actual native parity, complete campaign results, proofs, and cold versus warm measurements remain pending.",
   "evidence": [
-    "dot_agents/skills/mutation-testing/SKILL.md"
+    "home/dot_agents/skills/mutation-testing/SKILL.md",
+    "docs/adr/verification-proportional-to-code-shape.md",
+    "home/dot_agents/skills/mutation-testing/tools.toml",
+    "mise.njutest.toml",
+    "xtask/src/njutest_producer.rs",
+    "xtask/src/njutest_assessment.rs",
+    "xtask/schema/njutest/manifest.json",
+    "docs/adr/assess-pinned-mutation-engine-before-adoption.md",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

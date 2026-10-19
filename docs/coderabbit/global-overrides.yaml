@@ -2,8 +2,10 @@
 language: en-US
 reviews:
   auto_review:
-    enabled: true
-    auto_incremental_review: true
+    enabled: false
+    labels: ["review:critical"]
+    description_keyword: ""
+    auto_incremental_review: false
     auto_pause_after_reviewed_commits: 5
     drafts: false
   pre_merge_checks:

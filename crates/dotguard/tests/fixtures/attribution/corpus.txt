@@ -1,0 +1,37 @@
+feat: add the widget
+
+Adds the widget the settings page links to.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01AAAAAAAAAAAAAAAAAAAAAA
+=====
+fix: keep the cache warm
+
+Co-authored-by: Example Person <person@example.com>
+Signed-off-by: Example Person <person@example.com>
+=====
+docs: explain the CLAUDE.md contract
+
+The Claude-Session: prefix is what the hook looks for.
+See https://claude.ai/code/session_01BBBBBBBBBBBBBBBBBBBBBB for the transcript.
+=====
+chore: bump the toolchain
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+https://claude.ai/code/session_01CCCCCCCCCCCCCCCCCCCCCC
+
+=====
+refactor: split the parser
+
+co-authored-by: Claude <NoReply@Anthropic.COM>
+Co-authored-by: Another Person <another@example.org>
+=====
+test: cover the empty input
+
+  Claude-Session:   https://claude.ai/code/session_01DDDDDDDDDDDDDDDDDDDDDD
+Claude-Session: none
+=====
+feat: nothing to strip
+
+Body only.

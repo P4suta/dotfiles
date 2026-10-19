@@ -1,9 +1,11 @@
 {
-  "revision": "d0b5ee6dd7834c178e2cf921095b7b01a5d2e1d1aaa85082e383c55db9a95c76",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "3e027b20985c6fd883d16e23bc51667abb5f18586f1af2dcd41c61570dadc7ff",
+  "outcome": "implemented",
+  "reason": "Keep effective hook diagnosis and staged scopes separate from gate implementations.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
-    "dot_agents/skills/lefthook/SKILL.md"
+    "home/dot_agents/skills/lefthook/SKILL.md",
+    "home/dot_agents/skills/lefthook/tools.toml",
+    "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
 }

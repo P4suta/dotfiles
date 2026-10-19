@@ -1,17 +1,13 @@
 use anyhow::{Result, ensure};
-use dotfiles_xtask::change::{Source, gates, paths};
 use std::fs;
 use std::path::Path;
+use xtask::change::{Source, gates, paths};
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the shared constructor for fixture Git processes"
-)]
-#[path = "../../guard/tests/support/fixture_git.rs"]
+#[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
 fn git(directory: &Path, arguments: &[&str]) -> Result<()> {
-    let output = fixture_git::command("git", &directory.with_extension("gitconfig"))
+    let output = fixture_git::command("git", &directory.join("global.gitconfig"))
         .arg("-C")
         .arg(directory)
         .args(arguments)
@@ -55,12 +51,31 @@ fn commit(root: &Path, files: &[(&str, &str)]) -> Result<()> {
 }
 
 #[test]
+fn a_committed_lint_baseline_may_shrink_but_never_grow() -> Result<()> {
+    let repository = repository()?;
+    let root = repository.path();
+    let baseline = xtask::lint::Stage::Yamllint.baseline();
+    commit(root, &[(&baseline, "[findings.\"a.yml\"]\ncolons = 2\n")])?;
+    fs::write(root.join(&baseline), "[findings.\"a.yml\"]\ncolons = 1\n")?;
+    assert_eq!(
+        xtask::lint::baseline_growth(root, "HEAD")?,
+        Vec::<String>::new()
+    );
+    fs::write(
+        root.join(&baseline),
+        "[findings.\"a.yml\"]\ncolons = 3\n\n[findings.\"b.yml\"]\nindentation = 1\n",
+    )?;
+    assert_eq!(xtask::lint::baseline_growth(root, "HEAD")?.len(), 2);
+    Ok(())
+}
+
+#[test]
 fn a_markdown_only_branch_selects_the_prose_gate_alone() -> Result<()> {
     let repository = repository()?;
     commit(repository.path(), &[("docs/guide.md", "words\n")])?;
     let base = Source::Base("main".into());
     assert_eq!(paths(repository.path(), &base)?, ["docs/guide.md"]);
-    assert_eq!(gates(repository.path(), &base)?.names(), "prose");
+    assert_eq!(gates(repository.path(), &base)?.to_string(), "prose");
     Ok(())
 }
 
@@ -69,7 +84,7 @@ fn a_rust_change_selects_the_rust_gate() -> Result<()> {
     let repository = repository()?;
     commit(repository.path(), &[("xtask/src/new.rs", "fn main() {}\n")])?;
     let selected = gates(repository.path(), &Source::Base("main".into()))?;
-    assert_eq!(selected.names(), "prose,skills,rust,profiles");
+    assert_eq!(selected.to_string(), "prose,skills,rust,profiles");
     Ok(())
 }
 
@@ -81,7 +96,7 @@ fn an_unknown_path_selects_every_gate() -> Result<()> {
         &[("docs/guide.md", "words\n"), ("unlisted/file", "x\n")],
     )?;
     let selected = gates(repository.path(), &Source::Base("main".into()))?;
-    assert_eq!(selected.names(), "prose,skills,rust,profiles");
+    assert_eq!(selected.to_string(), "prose,skills,rust,profiles,proofs");
     Ok(())
 }
 
@@ -96,7 +111,7 @@ fn a_rename_classifies_both_the_old_and_the_new_path() -> Result<()> {
     git(root, &["mv", "xtask/src/old.rs", "docs/old.md"])?;
     git(root, &["commit", "--quiet", "-m", "move"])?;
     let selected = gates(root, &Source::Base("main".into()))?;
-    assert_eq!(selected.names(), "prose,skills,rust,profiles");
+    assert_eq!(selected.to_string(), "prose,skills,rust,profiles");
     Ok(())
 }
 
@@ -104,10 +119,11 @@ fn a_rename_classifies_both_the_old_and_the_new_path() -> Result<()> {
 fn staged_paths_are_classified_and_unstaged_ones_are_not() -> Result<()> {
     let repository = repository()?;
     let root = repository.path();
-    fs::write(root.join("dot_zshrc.tmpl"), "x\n")?;
-    git(root, &["add", "dot_zshrc.tmpl"])?;
+    fs::create_dir_all(root.join("home"))?;
+    fs::write(root.join("home/dot_zshrc.tmpl"), "x\n")?;
+    git(root, &["add", "home/dot_zshrc.tmpl"])?;
     fs::write(root.join("xtask.rs"), "x\n")?;
-    assert_eq!(gates(root, &Source::Staged)?.names(), "prose,profiles");
+    assert_eq!(gates(root, &Source::Staged)?.to_string(), "prose,profiles");
     Ok(())
 }
 

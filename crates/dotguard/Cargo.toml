@@ -1,0 +1,38 @@
+[package]
+name = "dotguard"
+description = "Local policy gate: refuses destructive git operations, foreign-script contamination and agent attribution"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+# The prose gate runs the ocomment binary, configured in `home/dot_config/ocomment/config.toml`.
+# The guard starts on every Git command, so it takes only the platform crate's host facts, process constructor, and refusal format.
+[dependencies]
+platform = { path = "../platform", default-features = false }
+rules = { path = "../rules" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+anyhow = "1.0"
+platform = { path = "../platform", default-features = false, features = [
+  "tools",
+] }
+tempfile = "3.27"
+
+# The workspace forbids unsafe code, which no #[expect] can lift.
+# The console control handler makes the one foreign call here, and policy/unsafe-sites.toml lists it, so this table repeats the workspace lints with unsafe code denied.
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unfulfilled_lint_expectations = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+undocumented_unsafe_blocks = "deny"

@@ -1,0 +1,3 @@
+#!/bin/sh
+#MISE description="Audit signing posture in local repositories"
+exec dotfiles git-audit --directory "$HOME" "$@"

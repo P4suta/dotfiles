@@ -1,6 +1,7 @@
+---
+status: accepted
+---
 # Shared skills and typed repository governance
-
-Status: accepted.
 
 ## Context
 

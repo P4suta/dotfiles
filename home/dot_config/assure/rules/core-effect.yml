@@ -1,0 +1,35 @@
+id: core-effect
+language: rust
+severity: error
+message: The core reaches a file, process, network, environment, clock, thread, or random source.
+note: Gather the fact in an adapter and pass it to the core as a value, or define a port in the core that the adapter implements.
+metadata:
+  basis: Ports and Adapters (Cockburn 2005); functional core, imperative shell (Bernhardt 2012)
+files:
+  - "**/rules/src/**/*.rs"
+  - "**/core/src/**/*.rs"
+  - "**/*-core/src/**/*.rs"
+  - "**/*_core/src/**/*.rs"
+  - "**/domain/**/*.rs"
+rule:
+  any:
+    - kind: scoped_identifier
+      regex: '^(::)?(std|tokio|async_std)::(fs|net|process|env|thread)\b'
+    - kind: scoped_identifier
+      regex: '^(::)?std::time::(SystemTime|Instant)\b'
+    - kind: scoped_identifier
+      regex: '^(::)?(rand|getrandom)::'
+    - kind: use_declaration
+      regex: '\b(std|tokio|async_std)::(\{[^}]*\b)?(fs|net|process|env|thread)\b'
+    - kind: use_declaration
+      regex: '\bstd::time::(\{[^}]*\b)?(SystemTime|Instant)\b'
+    - kind: use_declaration
+      regex: '\b(rand|getrandom)::'
+  not:
+    any:
+      - matches: verification-only
+      - inside:
+          kind: scoped_identifier
+      - inside:
+          stopBy: end
+          kind: use_declaration

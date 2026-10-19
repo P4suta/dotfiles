@@ -1,0 +1,2 @@
+{{- $context := dict "profile" .profile "chezmoi" .chezmoi "domyjobMcp" (includeTemplate "partials/domyjob_mcp" .) -}}
+{{ includeTemplate (printf "native/opencode/%s.json.tmpl" .profile) $context -}}

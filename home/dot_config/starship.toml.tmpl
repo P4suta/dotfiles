@@ -1,0 +1,5 @@
+{{- if has .profile (list "mac" "windows" "linux") -}}
+{{ includeTemplate (printf "native/starship/%s.toml.tmpl" .profile) . }}
+{{- else -}}
+{{ include (printf ".chezmoitemplates/native/starship/%s.toml" .profile) }}
+{{- end -}}

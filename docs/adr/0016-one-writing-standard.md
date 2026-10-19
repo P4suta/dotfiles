@@ -1,6 +1,8 @@
+---
+status: amended
+changed_by: [persisted-prose-gates.md]
+---
 # Enforce one writing standard on persisted prose and replies
-
-Status: accepted.
 
 ## Context
 
@@ -16,10 +18,10 @@ A repository style named `Dotfiles` adds rules that refuse requester attribution
 The checker itself adds the sentence-per-line rule and a language gate that refuses non-Latin letters in persisted text.
 Japanese replies run through textlint with `preset-ja-technical-writing` and through the Japanese attribution and hedging rules in `japanese.toml`.
 
-The repository vendors the four style packages under `dot_config/prose/styles`.
+The repository vendors the four style packages under `home/dot_config/prose/styles`.
 `packages.toml` records each upstream archive, its digest, and a digest of the vendored tree, and `mise.toml` pins Vale.
 The textlint packages carry their own `bun.lock`.
-The checker refuses a missing configuration, a changed style tree, or another Vale version, and names `mise run install:prose` as the remedy.
+The checker refuses a missing configuration, a changed style tree, or another Vale version, and names `just install-prose` as the remedy.
 
 The enforcement points cover these channels:
 
@@ -46,7 +48,7 @@ Exemptions cover only text that people in this repository never write, such as t
 Established terms live in the Vale vocabulary, and a finding gets deletion or restructuring, never a synonym.
 No ledger admits existing findings, so every finding outside an exemption fails.
 Vale skips a document line that holds only a template action.
-Kani proves the exemption, destination, and rewrite rules in `xtask/src/prose_rules.rs`.
+Kani proves the exemption, destination, and rewrite rules in `crates/prose/src/prose_rules.rs`.
 
 A continued turn that lacks the rewrite mark, such as one another Stop hook continued, still gets its one rewrite request.
 
@@ -60,7 +62,7 @@ Downloading the packages with `vale sync` on each run depends on the network at 
 
 Every sentence in the repository meets the full standard.
 A reply that fails the checker gets one rewrite request, and the hook then ends the turn with the findings.
-OpenCode shows those findings in a notification, and it reports a missing checker with the `mise run install:prose` remedy.
-The commit-msg hook refuses a commit to a personal repository until `mise run install:prose` installs the checker.
+OpenCode shows those findings in a notification, and it reports a missing checker with the `just install-prose` remedy.
+The commit-msg hook refuses a commit to a personal repository until `just install-prose` installs the checker.
 OComment reads no PowerShell script, systemd unit, or property list, so comments in those files stay outside the comment gate.
 Updating a style package means vendoring the new release and recording its digests in `packages.toml`.

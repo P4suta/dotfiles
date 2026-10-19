@@ -1,0 +1,15 @@
+feat(guard): gate dotguard instruction count, heap peak, and binary size
+
+dotguard runs on every git call and every hook, so its work now carries
+deterministic budgets: one Valgrind instruction ceiling and one DHAT heap
+peak per benchmark, and one ceiling for the size of the stripped binary.
+
+The benchmarks run over a committed corpus and through the four entry
+points a git call meets: the status passthrough, a denied force push, a
+clean commit message, and a message with attribution.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+
+https://claude.ai/code/session_01Qesu5tQNhqmtGkaDTgErZki
