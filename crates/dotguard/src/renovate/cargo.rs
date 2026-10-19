@@ -147,12 +147,18 @@ struct CargoDependency {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct Reference {
+struct RegistryReference {
     owner: String,
     lockfile: String,
     declaration: Declaration,
     provider: Declaration,
     dependency: CargoDependency,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum Reference {
+    Registry(Box<RegistryReference>),
+    Local { lockfile: String, package: String },
 }
 
 struct Snapshot {
@@ -236,6 +242,48 @@ impl Snapshot {
         Ok(())
     }
 
+    fn local_reference(
+        &self,
+        workspace: &Path,
+        record: &Record,
+        provider: &Declaration,
+        dependency: &CargoDependency,
+        lockfile: String,
+    ) -> Result<Reference, &'static str> {
+        let Declaration::Detailed(details) = provider else {
+            return Err("local Cargo metadata has no local provider");
+        };
+        let declared = details
+            .path
+            .as_deref()
+            .ok_or("local Cargo provider path is absent")?;
+        let path = dependency
+            .path
+            .as_deref()
+            .ok_or("local Cargo metadata path is absent")?;
+        if details.workspace.is_some()
+            || details.version.is_some()
+            || details.registry.is_some()
+            || details.git.is_some()
+            || details.branch.is_some()
+            || details.tag.is_some()
+            || details.rev.is_some()
+            || dependency.registry.is_some()
+            || dependency.name
+                != details
+                    .package
+                    .as_deref()
+                    .unwrap_or(&record.dependency.dep_name)
+            || self.relative(path)? != self.relative(&workspace.join(declared))?
+        {
+            return Err("local Cargo provider does not match committed metadata");
+        }
+        Ok(Reference::Local {
+            lockfile,
+            package: dependency.name.clone(),
+        })
+    }
+
     fn reference(
         &mut self,
         record: &Record,
@@ -295,8 +343,8 @@ impl Snapshot {
         let dependency = dependencies
             .next()
             .ok_or("inherited Cargo metadata dependency is absent")?;
-        if dependencies.next().is_some() || dependency.path.is_some() {
-            return Err("inherited Cargo metadata dependency is ambiguous or local");
+        if dependencies.next().is_some() {
+            return Err("inherited Cargo metadata dependency is ambiguous");
         }
         let owner = self.relative(&metadata.workspace_root.join(MANIFEST))?;
         let lockfile = self.relative(&metadata.workspace_root.join(LOCKFILE))?;
@@ -310,19 +358,30 @@ impl Snapshot {
                     .cloned()
             })
             .ok_or("workspace dependency declaration is absent")?;
+        if dependency.path.is_some() {
+            return self
+                .local_reference(
+                    &metadata.workspace_root,
+                    record,
+                    &provider,
+                    dependency,
+                    lockfile,
+                )
+                .map(Some);
+        }
         let (name, _) = provider
             .provider(&record.dependency.dep_name)
             .ok_or("workspace dependency is not a registry provider")?;
         if dependency.name != name {
             return Err("Cargo package identity is inconsistent");
         }
-        Ok(Some(Reference {
+        Ok(Some(Reference::Registry(Box::new(RegistryReference {
             owner,
             lockfile,
             declaration: declaration.clone(),
             provider,
             dependency: dependency.clone(),
-        }))
+        }))))
     }
 }
 
@@ -356,6 +415,37 @@ fn validate_inherited(record: &Record) -> Result<(), &'static str> {
     Ok(())
 }
 
+fn reference_changed(
+    found: &Found,
+    record: &Record,
+    current: &Reference,
+    owner: &str,
+    baselines: &mut BTreeMap<String, Snapshot>,
+) -> Result<bool, &'static str> {
+    if found.scope_unknown {
+        return Ok(true);
+    }
+    let Some(baseline) = found
+        .baselines_by_file
+        .get(&record.file)
+        .or_else(|| found.baselines_by_file.get(owner))
+        .or_else(|| found.baselines_by_file.values().next())
+    else {
+        return Ok(false);
+    };
+    if !baselines.contains_key(baseline) {
+        baselines.insert(
+            baseline.clone(),
+            Snapshot::new(&found.repository, baseline)?,
+        );
+    }
+    let previous = baselines
+        .get_mut(baseline)
+        .ok_or("Cargo baseline is unavailable")?
+        .reference(record, Some(owner))?;
+    Ok(previous.as_ref() != Some(current))
+}
+
 pub(super) fn bind(records: &[Record], found: Option<&Found>) -> Result<Bindings, &'static str> {
     let inherited: Vec<_> = records
         .iter()
@@ -376,9 +466,28 @@ pub(super) fn bind(records: &[Record], found: Option<&Found>) -> Result<Bindings
     for (index, record) in inherited {
         validate_inherited(record)?;
         let dependency = &record.dependency;
-        let reference = snapshot
+        let current = snapshot
             .reference(record, None)?
             .ok_or("inherited Cargo declaration is absent or inconsistent")?;
+        let reference = match &current {
+            Reference::Registry(reference) => reference,
+            Reference::Local { lockfile, package } => {
+                if !lock_matches(record, lockfile)
+                    || dependency
+                        .registry_urls
+                        .as_ref()
+                        .is_some_and(|registries| !registries.is_empty())
+                    || dependency
+                        .package_name
+                        .as_ref()
+                        .is_some_and(|name| name != package)
+                {
+                    return Err("inherited local Cargo evidence is inconsistent");
+                }
+                bindings.inherited.insert(index);
+                continue;
+            }
+        };
         if !lock_matches(record, &reference.lockfile)
             || !registry_matches(dependency, &reference.dependency)
             || dependency
@@ -422,27 +531,7 @@ pub(super) fn bind(records: &[Record], found: Option<&Found>) -> Result<Bindings
         {
             return Err("Cargo workspace provider does not match committed lookup evidence");
         }
-        let changed = found.scope_unknown
-            || if let Some(baseline) = found
-                .baselines_by_file
-                .get(&record.file)
-                .or_else(|| found.baselines_by_file.get(&reference.owner))
-                .or_else(|| found.baselines_by_file.values().next())
-            {
-                if !baselines.contains_key(baseline) {
-                    baselines.insert(
-                        baseline.clone(),
-                        Snapshot::new(&found.repository, baseline)?,
-                    );
-                }
-                let previous = baselines
-                    .get_mut(baseline)
-                    .ok_or("Cargo baseline is unavailable")?
-                    .reference(record, Some(&reference.owner))?;
-                previous.as_ref() != Some(&reference)
-            } else {
-                false
-            };
+        let changed = reference_changed(found, record, &current, &reference.owner, &mut baselines)?;
         bindings.inherited.insert(index);
         if changed {
             bindings.touched.insert(provider_index);
