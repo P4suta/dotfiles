@@ -1402,6 +1402,14 @@ verifier = "kani"
 source = "crates/rules/src/review_routing_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_a_nonowner_signing_a_bot_assessment() {
+    assert_eq!(production::assessment_signer(true, false, true), production::AssessmentSigner::RepositoryOwner);
+}
+#[kani::proof]
+fn reject_owner_substitution_for_a_bot_fork() {
+    assert_eq!(production::assessment_signer(true, true, false), production::AssessmentSigner::RepositoryOwner);
+}
+#[kani::proof]
 fn reject_a_routine_change_spending_the_cli_review_pool() {
     assert_eq!(production::route(production::ReviewLevel::Medium), production::ReviewRoute::Cli);
 }

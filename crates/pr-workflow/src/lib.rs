@@ -423,6 +423,8 @@ struct HeadRepository {
 #[derive(Deserialize)]
 struct ReviewAuthor {
     login: String,
+    #[serde(default)]
+    is_bot: bool,
 }
 
 #[derive(Deserialize)]
