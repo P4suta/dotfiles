@@ -39,6 +39,8 @@ Changes to mise's shim layout, environment variables, or operating-system execut
 ## Consequences
 
 Installation needs a direct executable or a dependency supplied by mise instead of recursively invoking a shim.
+On Windows, `exec_auto_install = false` prevents shell shims from provisioning unrelated project tools before a command starts.
+Use `dotfiles mise-install` to prepare missing tools explicitly.
 Canonicalization and invalid PATH errors fail before the installer starts.
 Development and container entrypoints build the maintained runtime before invoking its installer.
 Keeping a raw shell `mise install` command would leave login-shell PATH changes outside the shared boundary.
