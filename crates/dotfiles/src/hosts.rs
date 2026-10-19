@@ -981,6 +981,25 @@ fn workflows_at(repository: &Path, commit: &str) -> Result<Vec<(String, String)>
     Ok(workflows)
 }
 
+fn profile_repository(repository: &Path, commit: &str) -> Result<bool> {
+    let paths = git_text(
+        repository,
+        &[
+            "ls-tree",
+            "--name-only",
+            "-r",
+            commit,
+            "--",
+            PROFILE_ROOT,
+            PROFILE_RUNTIME,
+        ],
+    )?;
+    Ok(crate::hosts_rules::profile_gate(
+        paths.lines().any(|path| path == PROFILE_ROOT),
+        paths.lines().any(|path| path == PROFILE_RUNTIME),
+    ))
+}
+
 /// The verdict on a profile commit's notes for every family its own workflows require.
 pub(crate) fn admission(repository: &Path, commit: &str) -> Result<Verdict> {
     let commit = git_text(
@@ -988,22 +1007,7 @@ pub(crate) fn admission(repository: &Path, commit: &str) -> Result<Verdict> {
         &["rev-parse", "--verify", &format!("{commit}^{{commit}}")],
     )
     .with_context(|| format!("commit {commit} is not in this checkout; fetch it first"))?;
-    let paths = git_text(
-        repository,
-        &[
-            "ls-tree",
-            "--name-only",
-            "-r",
-            &commit,
-            "--",
-            PROFILE_ROOT,
-            PROFILE_RUNTIME,
-        ],
-    )?;
-    if !crate::hosts_rules::profile_gate(
-        paths.lines().any(|path| path == PROFILE_ROOT),
-        paths.lines().any(|path| path == PROFILE_RUNTIME),
-    ) {
+    if !profile_repository(repository, &commit)? {
         return Ok(admit([false; 3], [Evidence::Missing; 3]));
     }
     let tree = git_text(repository, &["rev-parse", &format!("{commit}^{{tree}}")])?;
@@ -2306,13 +2310,23 @@ pub(crate) fn check(home: &Path, gate: &str) -> Result<()> {
     let root = PathBuf::from(git_text(Path::new("."), &["rev-parse", "--show-toplevel"])?);
     let clean = git(&root, &["status", "--porcelain", "--untracked-files=all"])?.is_empty();
     let commit = git_text(&root, &["rev-parse", "HEAD"])?;
-    let tree = git_text(&root, &["rev-parse", &format!("{commit}^{{tree}}")])?;
-    let required = required(&workflows_at(&root, &commit)?)?;
     let native = native(home)?;
     if clean {
         recover_pending(&native, &root)?;
         recover_workspaces(&native, &root)?;
     }
+    if !profile_repository(&root, &commit)? {
+        if clean {
+            for family in Family::ALL {
+                pending::Lease::acquire(&root, family)?.retire_unverified(&root)?;
+            }
+        }
+        bail!(
+            "hosts check requires a dotfiles profile repository; run this project's native checks through domyjob"
+        );
+    }
+    let tree = git_text(&root, &["rev-parse", &format!("{commit}^{{tree}}")])?;
+    let required = required(&workflows_at(&root, &commit)?)?;
     if required == [false; 3] {
         println!("The CI matrix requires no OS family; nothing to check");
         return Ok(());

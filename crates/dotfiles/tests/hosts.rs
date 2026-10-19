@@ -2234,6 +2234,69 @@ const VALID_STAGES: &str =
     r#"{"code":0,"real":0,"applied":{"drifted_targets":[],"verification_error":null}}"#;
 
 #[test]
+fn non_profile_checks_refuse_before_starting_jobs() -> Result<()> {
+    for removed in [
+        vec![".chezmoiroot"],
+        vec!["crates/dotfiles/Cargo.toml"],
+        vec![".chezmoiroot", "crates/dotfiles/Cargo.toml"],
+    ] {
+        let fixture = RemoteCheck::new()?;
+        for path in removed {
+            git(&fixture.root, &["rm", path])?;
+        }
+        git(
+            &fixture.root,
+            &["commit", "--quiet", "-m", "ordinary project"],
+        )?;
+        let output = fixture.command(&fixture.root, "", VALID_STAGES)?.output()?;
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains("hosts check requires a dotfiles profile repository"),
+            "{error}"
+        );
+        assert!(!fixture.executions.exists());
+        assert!(!fixture.root.join(".git/hosts-pending/linux.json").exists());
+        require_admission(&fixture.root, "HEAD")?;
+    }
+    Ok(())
+}
+
+#[test]
+fn non_profile_checks_retire_terminal_execution_and_keep_history() -> Result<()> {
+    let fixture = RemoteCheck::new()?;
+    let profile = git(&fixture.root, &["rev-parse", "HEAD"])?;
+    let failed = fixture
+        .command(&fixture.root, "no-report-1", VALID_STAGES)?
+        .output()?;
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("unverified history"));
+    let pending = fixture.root.join(".git/hosts-pending/linux.json");
+    let history_path = fixture.root.join(".git/hosts-pending/linux.history.json");
+    let history = fs::read(&history_path)?;
+    let executions = fs::read(&fixture.executions)?;
+    assert!(pending.is_file());
+    git(&fixture.root, &["rm", ".chezmoiroot"])?;
+    git(
+        &fixture.root,
+        &["commit", "--quiet", "-m", "ordinary project"],
+    )?;
+    let output = fixture.command(&fixture.root, "", VALID_STAGES)?.output()?;
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        error.contains("hosts check requires a dotfiles profile repository"),
+        "{error}"
+    );
+    assert!(!pending.exists());
+    assert_eq!(fs::read(history_path)?, history);
+    assert_eq!(fs::read(&fixture.executions)?, executions);
+    require_admission(&fixture.root, "HEAD")?;
+    assert!(require_admission(&fixture.root, &profile).is_err());
+    Ok(())
+}
+
+#[test]
 fn pending_submissions_stage_only_the_verified_bundle_outside_git_metadata() -> Result<()> {
     let fixture = RemoteCheck::new()?;
     let interrupted = fixture
