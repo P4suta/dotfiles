@@ -20,12 +20,41 @@ const TEMP_ENVIRONMENT: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
 const HOSTS_PUSH_GATE: &str = "mise x -- just hosts gate {1} {2}";
 const CARGO_MANIFEST: &str = "Cargo.toml";
 const CARGO_LOCK: &str = "Cargo.lock";
-pub const CI_PROOFS_ENTRY: &str = "mise x -- just proofs-ci";
-pub const CI_PHASE_ENTRY: &str = "mise x -- just proofs-ci --phase \"$PHASE\"";
-const CI_PROOFS_SELECTED: &str = "contains(env.GATES, 'proofs')";
-const CI_PHASE_VALUE: &str = "${{ matrix.phase }}";
-const CI_MAX_PARALLEL: i64 = 2;
-const CI_PROOF_TIMEOUT: &str = "${{ matrix.phase == 'kani' && 120 || 60 }}";
+const CI_RESULTS_GUARD: &str = "test \"$RESULTS\" = success";
+const CI_READ_PERMISSION_COUNT: usize = 2;
+const LIGHTWEIGHT_JOBS: &str = r#"  check:
+    name: required (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Report the checked-out source
+        shell: bash
+        run: git log -1 --format='commit=%H%ntree=%T'
+      - name: Report the native admission boundary
+        shell: bash
+        run: |
+          printf '%s\n' 'Native admission is enforced by the local hosts gate before push.' 'CI reports the checked-out source and does not rerun or attest native checks.'
+  required:
+    name: required
+    needs: [check]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refuse a missing, skipped, failed, or cancelled job
+        shell: bash
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          test "$RESULTS" = success
+"#;
 
 pub(crate) fn command(root: &Path, tool: Tool, arguments: &[&str]) -> Result<()> {
     run(tool.command(), root, tool.program(), arguments)
@@ -103,57 +132,23 @@ pub fn push_hook_findings(configuration: &str) -> Result<Vec<String>> {
     })
 }
 
-fn proof_phase_findings(job: &yaml_rust2::Yaml) -> Vec<String> {
-    use yaml_rust2::Yaml;
+fn lightweight_findings(document: &yaml_rust2::Yaml) -> Result<Vec<String>> {
     let mut found = Vec::new();
-    let steps = job["steps"].as_vec();
-    let full = steps.is_some_and(|steps| {
-        steps.iter().any(|step| {
-            step["run"].as_str() == Some(CI_PROOFS_ENTRY)
-                && (step["if"].is_badvalue() || step["if"].as_str() == Some(CI_PROOFS_SELECTED))
-        })
-    });
-    let matrix = &job["strategy"]["matrix"];
-    if full && matrix.is_badvalue() {
-        return found;
+    if document["permissions"].as_hash().is_none_or(|permissions| {
+        permissions.len() != CI_READ_PERMISSION_COUNT
+            || document["permissions"]["contents"].as_str() != Some("read")
+            || document["permissions"]["issues"].as_str() != Some("read")
+    }) {
+        found.push("CI permissions must remain contents: read and issues: read".into());
     }
-    let mut counts = [0u8; 3];
-    let mut unknown = false;
-    for value in matrix["phase"].as_vec().into_iter().flatten() {
-        let position = crate::proof_ci_phase::Phase::ALL
-            .iter()
-            .position(|phase| Some(phase.name()) == value.as_str());
-        if let Some(count) = position.and_then(|position| counts.get_mut(position)) {
-            *count = count.saturating_add(1);
-        } else {
-            unknown = true;
-        }
+    let expected = yaml_rust2::YamlLoader::load_from_str(LIGHTWEIGHT_JOBS)?
+        .into_iter()
+        .next()
+        .context("the lightweight CI contract holds a document")?;
+    if document["jobs"] != expected {
+        found.push("CI must only report source and native admission on all three operating systems and refuse unsuccessful jobs".into());
     }
-    if !crate::proof_budget_rules::ci_phases_complete(counts, unknown)
-        || matrix.as_hash().is_none_or(|axes| axes.len() != 1)
-    {
-        found.push("the proofs matrix must contain every known partition exactly once without include or exclude overrides".into());
-    }
-    let strategy = &job["strategy"];
-    if strategy["fail-fast"] != Yaml::Boolean(false)
-        || !strategy["max-parallel"]
-            .as_i64()
-            .is_some_and(|parallel| (1..=CI_MAX_PARALLEL).contains(&parallel))
-        || job["timeout-minutes"].as_str() != Some(CI_PROOF_TIMEOUT)
-    {
-        found.push("the proofs matrix must collect every partition with at most two jobs and its phase-specific job limits".into());
-    }
-    if job["env"]["PHASE"].as_str() != Some(CI_PHASE_VALUE)
-        || !steps.is_some_and(|steps| {
-            steps.iter().any(|step| {
-                step["run"].as_str() == Some(CI_PHASE_ENTRY)
-                    && step["if"].as_str() == Some(CI_PROOFS_SELECTED)
-            })
-        })
-    {
-        found.push("every proofs matrix job must execute its selected mandatory partition through the checked CI entry".into());
-    }
-    found
+    Ok(found)
 }
 
 /// Refusals for a CI workflow that the settings in `policy/github.toml` can't rely on.
@@ -177,10 +172,7 @@ pub fn workflow_findings(workflow: &str, policy: &str) -> Result<Vec<String>> {
         }
     }
     let jobs = document["jobs"].as_hash().context("ci.yml holds no jobs")?;
-    if !proofs_run_on_linux(&document) {
-        found.push("the proofs job must run on Linux, the push gate's proof target".into());
-    }
-    found.extend(proof_phase_findings(&document["jobs"]["proofs"]));
+    found.extend(lightweight_findings(&document)?);
     let required: Vec<&str> = policy
         .get("ruleset")
         .and_then(|ruleset| ruleset.get("main"))
@@ -222,11 +214,9 @@ pub fn workflow_findings(workflow: &str, policy: &str) -> Result<Vec<String>> {
         }
         let guard = job["steps"].as_vec().into_iter().flatten().any(|step| {
             step["env"]["RESULTS"].as_str() == Some("${{ join(needs.*.result, ' ') }}")
-                && step["run"].as_str().is_some_and(|run| {
-                    run.contains("success) ;;")
-                        && !run.contains("skipped")
-                        && run.contains("exit 1")
-                })
+                && step["run"]
+                    .as_str()
+                    .is_some_and(|run| run.trim() == CI_RESULTS_GUARD)
         });
         if !guard {
             found.push(format!(
@@ -264,13 +254,6 @@ pub fn workflow_findings(workflow: &str, policy: &str) -> Result<Vec<String>> {
         }
     }
     Ok(found)
-}
-
-fn proofs_run_on_linux(document: &yaml_rust2::Yaml) -> bool {
-    document["jobs"]["proofs"]["runs-on"]
-        .as_str()
-        .and_then(dotfiles::hosts::label_family)
-        == Some(dotfiles::hosts_rules::Family::Linux)
 }
 
 /// The tracked Cargo manifests that declare independent workspaces.

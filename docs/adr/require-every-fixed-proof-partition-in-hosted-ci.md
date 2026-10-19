@@ -1,5 +1,6 @@
 ---
-status: proposed
+status: superseded
+changed_by: [native-verification-with-lightweight-ci.md]
 date: 2026-10-13
 ---
 # Require every fixed proof partition in hosted CI

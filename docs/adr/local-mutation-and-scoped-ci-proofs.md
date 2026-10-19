@@ -1,6 +1,7 @@
 ---
 date: 2026-10-13
-status: accepted
+status: amended
+changed_by: [native-verification-with-lightweight-ci.md]
 ---
 # Keep mutation testing local while CI verifies its declared proof campaign
 

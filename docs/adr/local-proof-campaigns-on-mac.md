@@ -1,7 +1,7 @@
 ---
 date: 2026-10-12
 status: amended
-changed_by: [fixed-cpu-budgets-beside-mac-proof-campaigns.md]
+changed_by: [fixed-cpu-budgets-beside-mac-proof-campaigns.md, native-verification-with-lightweight-ci.md]
 ---
 # Run local proof campaigns on Mac and keep Linux CI
 

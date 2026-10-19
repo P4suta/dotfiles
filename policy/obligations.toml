@@ -1177,18 +1177,6 @@ fn reject_wrapping_an_unrepresentable_host_elapsed() {
 fn reject_a_noncanonical_host_elapsed_fraction() {
     assert!(production::elapsed_millis(0, 1_000_000).is_some());
 }
-#[kani::proof]
-fn reject_a_missing_ci_partition() {
-    assert!(production::ci_phases_complete([1, 0, 1], false));
-}
-#[kani::proof]
-fn reject_a_duplicated_ci_partition() {
-    assert!(production::ci_phases_complete([1, 2, 1], false));
-}
-#[kani::proof]
-fn reject_an_unknown_ci_partition() {
-    assert!(production::ci_phases_complete([1; 3], true));
-}
 use production::{BUDGET_MILLIS, Verdict, verdict};
 #[kani::proof]
 fn reject_a_ci_campaign_requiring_mutation() {

@@ -55,8 +55,8 @@
 | [2026-10-11 Bind profile evidence to repositories that own the profile runtime](profile-evidence-scope.md) | proposed |  |
 | [2026-10-11 Start mise installations without mise shims](shim-free-mise-installation.md) | proposed |  |
 | [2026-10-11 Push the candidate its gates already verified](source-bound-push-validation.md) | amended | [2026-10-12](local-proof-campaigns-on-mac.md) |
-| [2026-10-12 Keep fixed processor budgets beside Mac proof campaigns](fixed-cpu-budgets-beside-mac-proof-campaigns.md) | amended | [2026-10-13](local-mutation-and-scoped-ci-proofs.md) |
-| [2026-10-12 Run local proof campaigns on Mac and keep Linux CI](local-proof-campaigns-on-mac.md) | amended | [2026-10-12](fixed-cpu-budgets-beside-mac-proof-campaigns.md) |
+| [2026-10-12 Keep fixed processor budgets beside Mac proof campaigns](fixed-cpu-budgets-beside-mac-proof-campaigns.md) | amended | [2026-10-13](local-mutation-and-scoped-ci-proofs.md), [2026-10-19](native-verification-with-lightweight-ci.md) |
+| [2026-10-12 Run local proof campaigns on Mac and keep Linux CI](local-proof-campaigns-on-mac.md) | amended | [2026-10-12](fixed-cpu-budgets-beside-mac-proof-campaigns.md), [2026-10-19](native-verification-with-lightweight-ci.md) |
 | [2026-10-12 Classify native failures from delivery signals before output replays](native-failure-signals-before-output-replays.md) | proposed |  |
 | [2026-10-12 Recover native PATH before constructing candidate environments](native-path-before-candidate-environments.md) | proposed |  |
 | [2026-10-12 Persist remote execution ownership before submission](persist-remote-execution-ownership.md) | proposed |  |
@@ -67,10 +67,10 @@
 | [2026-10-13 Bind private verifier phase evidence](bind-private-verifier-phase-evidence.md) | proposed |  |
 | [2026-10-13 Enable experimental skill maintenance only through explicit local opt-in](experimental-skill-maintenance-by-explicit-opt-in.md) | accepted |  |
 | [2026-10-13 Keep local issue authority separate from remote publication](keep-local-issue-authority-separate-from-remote-publication.md) | proposed |  |
-| [2026-10-13 Keep mutation testing local while CI verifies its declared proof campaign](local-mutation-and-scoped-ci-proofs.md) | accepted |  |
+| [2026-10-13 Keep mutation testing local while CI verifies its declared proof campaign](local-mutation-and-scoped-ci-proofs.md) | amended | [2026-10-19](native-verification-with-lightweight-ci.md) |
 | [2026-10-13 Protect local host candidate execution](protect-local-host-candidate-execution.md) | proposed |  |
 | [2026-10-13 Run Renovate through a process from the same source build](renovate-behind-a-source-matched-process.md) | proposed |  |
-| [2026-10-13 Require every fixed proof partition in hosted CI](require-every-fixed-proof-partition-in-hosted-ci.md) | proposed |  |
+| [2026-10-13 Require every fixed proof partition in hosted CI](require-every-fixed-proof-partition-in-hosted-ci.md) | superseded | [2026-10-19](native-verification-with-lightweight-ci.md) |
 | [2026-10-13 Retain Miri sysroots with fresh interpretation](retain-miri-sysroots-with-fresh-interpretation.md) | proposed |  |
 | [2026-10-13 Route CodeRabbit by current PR importance](route-coderabbit-by-current-pr-importance.md) | accepted |  |
 | [2026-10-13 Speak fixed development events through an optional desktop queue](speak-fixed-development-events-through-an-optional-desktop-queue.md) | amended | [2026-10-14](report-optional-notification-failures-with-fixed-warnings.md) |
@@ -80,3 +80,4 @@
 | [2026-10-15 Prove portable component scans with erased witnesses](prove-portable-component-scans-with-erased-witnesses.md) | proposed |  |
 | [2026-10-16 Evaluate fixed parser domains before symbolic selection](finite-shell-parser-ctfe.md) | proposed |  |
 | [2026-10-17 Run spoken Git commands in the matching policy companion](isolate-spoken-git-in-the-matching-companion.md) | proposed |  |
+| [2026-10-19 Make native verification authoritative and keep hosted CI lightweight](native-verification-with-lightweight-ci.md) | accepted |  |

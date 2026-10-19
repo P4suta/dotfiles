@@ -1,7 +1,7 @@
 ---
 date: 2026-10-12
 status: amended
-changed_by: [local-mutation-and-scoped-ci-proofs.md]
+changed_by: [local-mutation-and-scoped-ci-proofs.md, native-verification-with-lightweight-ci.md]
 ---
 # Keep fixed processor budgets beside Mac proof campaigns
 

@@ -33,13 +33,6 @@ pub const fn mutation_required(campaign: ProofCampaign) -> bool {
     matches!(campaign, ProofCampaign::Full)
 }
 
-/// The hosted phase matrix must contain Kani, runtime checks, and metrics with models exactly once.
-#[must_use]
-pub const fn ci_phases_complete(counts: [u8; 3], unknown: bool) -> bool {
-    let [kani, runtime, metrics_models] = counts;
-    kani == 1 && runtime == 1 && metrics_models == 1 && !unknown
-}
-
 #[must_use]
 pub const fn mutant_jobs(available: usize) -> usize {
     match available {
@@ -203,18 +196,6 @@ mod proofs {
                 && remainder_nanos == NANOS_PER_MILLI - 1
                 && elapsed.is_none()
         );
-    }
-
-    #[cfg(kani)]
-    #[kani::proof]
-    #[kani::unwind(4)]
-    fn every_ci_phase_inventory_requires_each_known_partition_exactly_once() {
-        let counts: [u8; 3] = kani::any();
-        let unknown: bool = kani::any();
-        let complete = ci_phases_complete(counts, unknown);
-        assert_eq!(complete, counts.iter().all(|count| *count == 1) && !unknown);
-        kani::cover!(complete);
-        kani::cover!(!complete);
     }
 
     pub fn spec_mutation_required(campaign: ProofCampaign) {
@@ -451,27 +432,6 @@ mod tests {
             (usize::MAX, MUTANT_JOB_LIMIT),
         ] {
             assert_eq!(mutant_jobs(available), expected);
-        }
-    }
-
-    #[test]
-    fn ci_phases_require_exactly_one_result_each_and_no_unknown_phase() {
-        for counts in [
-            [0, 1, 1],
-            [1, 0, 1],
-            [1, 1, 0],
-            [1, 1, 1],
-            [2, 1, 1],
-            [1, 2, 1],
-            [1, 1, 2],
-            [u8::MAX, 1, 1],
-        ] {
-            for unknown in [false, true] {
-                assert_eq!(
-                    ci_phases_complete(counts, unknown),
-                    counts == [1, 1, 1] && !unknown
-                );
-            }
         }
     }
 

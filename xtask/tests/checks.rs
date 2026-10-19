@@ -120,7 +120,7 @@ fn formatter_fixture(root: &Path) -> Result<()> {
 #[test]
 fn full_lint_checks_new_files_without_reading_ignored_or_binary_content() -> Result<()> {
     let scope = tempfile::tempdir()?;
-    let root = scope.path();
+    let root = &fixture_process::directory(scope.path());
     let global = root.join("global.gitconfig");
     fs::write(&global, "")?;
     fs::write(root.join(".gitignore"), "ignored.rs\nglobal.gitconfig\n")?;

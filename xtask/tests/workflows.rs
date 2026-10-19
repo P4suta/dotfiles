@@ -1,10 +1,8 @@
-use anyhow::{Context, Result, bail, ensure};
-use std::collections::BTreeMap;
+use anyhow::{Context, Result, ensure};
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use xtask::quality::{push_hook_findings, workflow_findings};
-use yaml_rust2::YamlLoader;
 
 #[path = "../../crates/dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
@@ -14,40 +12,50 @@ fn repository(path: &str) -> String {
 }
 
 const POLICY: &str = "[ruleset.main]\nrequired_status_checks = [\"required\"]\n";
-const MISE_PINS: &str = "home/.chezmoidata/versions.toml";
-const CONTROL_VERSION: &str = "0.0.1";
-const PRODUCER_SYSTEM_PATH: &str = "/usr/bin:/bin";
-const REHEARSAL_TOKEN: &str = "${{ github.token }}";
-const CARGO_CACHE_INPUTS: &str = "${{ hashFiles('**/Cargo.lock', 'mise.toml', '!**/target/**', '!**/.git/**', '!**/node_modules/**', '!**/.venv/**') }}";
-
-const WORKFLOW: &str = "on:
+const WORKFLOW: &str = r#"name: ci
+on:
   pull_request:
   merge_group:
+permissions:
+  contents: read
+  issues: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   check:
-    runs-on: ubuntu-latest
+    name: required (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
     steps:
-      - run: mise x -- just check
-  proofs:
-    runs-on: ubuntu-latest
-    steps:
-      - run: mise x -- just proofs-ci
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Report the checked-out source
+        shell: bash
+        run: git log -1 --format='commit=%H%ntree=%T'
+      - name: Report the native admission boundary
+        shell: bash
+        run: |
+          printf '%s\n' 'Native admission is enforced by the local hosts gate before push.' 'CI reports the checked-out source and does not rerun or attest native checks.'
   required:
     name: required
-    needs: [check, proofs]
+    needs: [check]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - env:
+      - name: Refuse a missing, skipped, failed, or cancelled job
+        shell: bash
+        env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          for result in $RESULTS; do
-            case \"$result\" in
-              success) ;;
-              *) exit 1 ;;
-            esac
-          done
-";
+          test "$RESULTS" = success
+"#;
 
 #[test]
 fn pre_push_cannot_diverge_from_the_verified_hosts_gate() {
@@ -67,271 +75,106 @@ fn pre_push_cannot_diverge_from_the_verified_hosts_gate() {
 }
 
 #[test]
-fn the_ci_workflow_provides_what_the_ruleset_requires() {
-    assert_eq!(
-        workflow_findings(
-            &repository(".github/workflows/ci.yml"),
-            &repository("policy/github.toml")
-        )
-        .unwrap(),
-        Vec::<String>::new()
-    );
-    assert_eq!(
-        workflow_findings(WORKFLOW, POLICY).unwrap(),
-        Vec::<String>::new()
-    );
-}
-
-fn rehearsal_tokens(text: &str) -> Result<()> {
-    let workflow = YamlLoader::load_from_str(text)?;
-    let [workflow] = workflow.as_slice() else {
-        bail!("CI must contain one workflow document")
-    };
-    for name in ["rehearsal", "rehearsal-wsl"] {
-        let job = &workflow["jobs"][name];
-        let steps: Vec<_> = job["steps"]
-            .as_vec()
-            .context("rehearsal steps are missing")?
-            .iter()
-            .filter(|step| {
-                step["run"]
-                    .as_str()
-                    .is_some_and(|script| script.contains("just rehearse --disposable-host"))
-            })
-            .collect();
-        let [step] = steps.as_slice() else {
-            bail!("{name} requires exactly one rehearsal entry")
-        };
-        ensure!(
-            step["env"]["GITHUB_TOKEN"].as_str() == Some(REHEARSAL_TOKEN),
-            "{name} must provide its job token to the actual rehearsal process"
-        );
-    }
-    ensure!(
-        workflow["jobs"]["rehearsal-wsl"]["env"]["WSLENV"]
-            .as_str()
-            .is_some_and(|names| names.split(':').any(|name| name == "GITHUB_TOKEN")),
-        "WSL must transport GITHUB_TOKEN into the rehearsal distribution"
-    );
-    Ok(())
-}
-
-#[test]
-fn rehearsal_authentication_reaches_native_and_wsl_installers() -> Result<()> {
-    // GitHub supplies the job token, and WSL implements WSLENV transport.
-    // Hosted rehearsal must exercise the authenticated installer boundary.
-    let current = repository(".github/workflows/ci.yml");
-    rehearsal_tokens(&current)?;
-    let binding = format!("          GITHUB_TOKEN: {REHEARSAL_TOKEN}\n");
-    assert_eq!(current.matches(&binding).count(), 2);
-    for offset in [current.find(&binding), current.rfind(&binding)] {
-        let mut changed = current.clone();
-        let offset = offset.context("rehearsal token binding")?;
-        changed.replace_range(offset..offset + binding.len(), "");
-        assert!(rehearsal_tokens(&changed).is_err());
-    }
-    let changed = current.replace("WSLENV: CI:GITHUB_TOKEN:", "WSLENV: CI:");
-    assert_ne!(changed, current);
-    assert!(rehearsal_tokens(&changed).is_err());
-    Ok(())
-}
-
-#[test]
-fn cargo_caches_bind_every_consumer_lock_without_generated_trees() -> Result<()> {
-    // GitHub evaluates hashFiles.
-    // The patterns follow CargoWorkload's source boundary.
-    let workflow = YamlLoader::load_from_str(&repository(".github/workflows/ci.yml"))?;
-    let [workflow] = workflow.as_slice() else {
-        bail!("CI must contain one workflow document")
-    };
-    for (name, prefix) in [
-        ("check", "cargo-${{ runner.os }}-"),
-        ("proofs", "proofs-${{ matrix.phase }}-"),
-    ] {
-        let caches: Vec<_> = workflow["jobs"][name]["steps"]
-            .as_vec()
-            .context("CI job steps are missing")?
-            .iter()
-            .filter(|step| {
-                step["uses"]
-                    .as_str()
-                    .is_some_and(|action| action.starts_with("actions/cache@"))
-            })
-            .collect();
-        let [cache] = caches.as_slice() else {
-            bail!("{name} requires exactly one Cargo cache")
-        };
+fn lightweight_ci_reports_source_and_keeps_all_native_families_required() {
+    for workflow in [repository(".github/workflows/ci.yml"), WORKFLOW.into()] {
         assert_eq!(
-            cache["with"]["key"].as_str(),
-            Some(format!("{prefix}{CARGO_CACHE_INPUTS}").as_str()),
-            "{name} must invalidate cached materials when any consumer lock changes"
+            workflow_findings(&workflow, POLICY).unwrap(),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            dotfiles::hosts::required(&[("ci.yml".into(), workflow)]).unwrap(),
+            [true; 3]
         );
     }
-    Ok(())
 }
 
 #[test]
-fn ci_uses_the_explicit_proof_entry_for_the_paused_mutation_campaign() -> Result<()> {
-    let current = YamlLoader::load_from_str(&repository(".github/workflows/ci.yml"))?;
-    let [current] = current.as_slice() else {
-        bail!("CI must contain one workflow document")
-    };
-    assert_eq!(
-        current["jobs"]["check"]["env"]["MISE_DISABLE_TOOLS"].as_str(),
-        Some("cargo:kani-verifier"),
-        "Code environment tests require the pinned mutation tool to be installed"
-    );
-    assert!(!rules::proof_budget_rules::mutation_required(
-        rules::proof_budget_rules::ProofCampaign::Ci
-    ));
-    for text in [repository(".github/workflows/ci.yml"), WORKFLOW.to_owned()] {
-        let workflow = YamlLoader::load_from_str(&text)?;
-        let [workflow] = workflow.as_slice() else {
-            bail!("CI must contain one workflow document")
-        };
-        let steps = workflow["jobs"]["proofs"]["steps"]
-            .as_vec()
-            .context("the proofs job has no steps")?;
-        assert!(
-            steps.iter().any(|step| matches!(
-                step["run"].as_str(),
-                Some(xtask::quality::CI_PROOFS_ENTRY | xtask::quality::CI_PHASE_ENTRY)
-            )),
-            "the proofs job must call its explicit CI entry"
-        );
-    }
-    Ok(())
-}
-
-#[test]
-fn a_hosted_partition_cannot_omit_duplicate_or_skip_required_work() {
-    let current = repository(".github/workflows/ci.yml");
-    let (prefix, proofs) = current.split_once("\n  proofs:\n").unwrap();
-    let (proofs, suffix) = proofs.split_once("\n  minimum-git:\n").unwrap();
-    for (from, to, expected) in [
+fn lightweight_ci_refuses_missing_reports_heavy_work_and_suppressed_failures() {
+    for (from, to) in [
+        ("  merge_group:\n", ""),
+        ("  pull_request:\n", ""),
+        ("contents: read", "contents: write"),
+        ("issues: read", "issues: write"),
+        ("  issues: read\n", "  issues: read\n  id-token: write\n"),
         (
-            "phase: [kani, runtime, metrics-models]",
-            "phase: [kani, runtime]",
-            "every known partition exactly once",
+            "git log -1 --format='commit=%H%ntree=%T'",
+            "git log -1 --format=%H",
         ),
         (
-            "phase: [kani, runtime, metrics-models]",
-            "phase: [kani, runtime, runtime]",
-            "every known partition exactly once",
+            "git log -1 --format='commit=%H%ntree=%T'",
+            "mise x -- just check",
         ),
         (
-            "phase: [kani, runtime, metrics-models]",
-            "phase: [kani, runtime, metrics-models, unknown]",
-            "every known partition exactly once",
+            "git log -1 --format='commit=%H%ntree=%T'",
+            "git log -1 --format='commit=%H%ntree=%T' || true",
         ),
         (
-            "fail-fast: false",
-            "fail-fast: true",
-            "collect every partition",
+            "does not rerun or attest native checks",
+            "verifies native checks",
         ),
-        ("max-parallel: 2", "max-parallel: 3", "at most two jobs"),
+        ("persist-credentials: false", "persist-credentials: true"),
         (
-            "timeout-minutes: ${{ matrix.phase == 'kani' && 120 || 60 }}",
-            "timeout-minutes: 60",
-            "job limit",
+            "checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "checkout@main",
         ),
+        ("fail-fast: false", "fail-fast: true"),
         (
-            "timeout-minutes: ${{ matrix.phase == 'kani' && 120 || 60 }}",
-            "timeout-minutes: ${{ matrix.phase == 'runtime' && 120 || 60 }}",
-            "job limit",
+            "ubuntu-latest, macos-latest, windows-latest",
+            "ubuntu-latest, macos-latest",
         ),
         (
-            "timeout-minutes: ${{ matrix.phase == 'kani' && 120 || 60 }}",
-            "timeout-minutes: ${{ matrix.phase == 'kani' && 120 || 120 }}",
-            "job limit",
+            "ubuntu-latest, macos-latest, windows-latest",
+            "ubuntu-latest, macos-latest, macos-latest",
+        ),
+        ("runs-on: ${{ matrix.os }}", "runs-on: ubuntu-latest"),
+        (
+            "os: [ubuntu-latest, macos-latest, windows-latest]",
+            "os: [ubuntu-latest, macos-latest, windows-latest]\n        exclude: [{os: windows-latest}]",
+        ),
+        ("needs: [check]", "needs: []"),
+        ("if: always()", "if: success()"),
+        (
+            "test \"$RESULTS\" = success",
+            "test \"$RESULTS\" = success || true",
+        ),
+        ("test \"$RESULTS\" = success", "true"),
+        (
+            "    timeout-minutes: 5",
+            "    continue-on-error: true\n    timeout-minutes: 5",
         ),
         (
-            "PHASE: ${{ matrix.phase }}",
-            "PHASE: kani",
-            "execute its selected mandatory partition",
+            "        shell: bash",
+            "        continue-on-error: true\n        shell: bash",
         ),
         (
-            xtask::quality::CI_PHASE_ENTRY,
-            "mise x -- just proofs-ci --phase kani",
-            "execute its selected mandatory partition",
+            "      - name: Report the checked-out source",
+            "      - run: mise install\n      - name: Report the checked-out source",
         ),
         (
-            "phase: [kani, runtime, metrics-models]",
-            "phase: [kani, runtime, metrics-models]\n        exclude: [{phase: runtime}]",
-            "without include or exclude overrides",
+            "      - name: Report the checked-out source",
+            "      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9\n      - name: Report the checked-out source",
+        ),
+        (
+            "      - name: Report the checked-out source",
+            "      - name: Report the checked-out source\n        if: false",
+        ),
+        ("    name: required\n", "    name: other\n"),
+        (
+            "  required:\n",
+            "  extra:\n    runs-on: ubuntu-latest\n    steps:\n      - run: just proofs\n  required:\n",
         ),
     ] {
-        assert_eq!(proofs.matches(from).count(), 1, "fixture subject: {from}");
-        let changed = format!(
-            "{prefix}\n  proofs:\n{}\n  minimum-git:\n{suffix}",
-            proofs.replacen(from, to, 1)
-        );
-        let findings = workflow_findings(&changed, POLICY).unwrap();
-        assert!(
-            findings.iter().any(|finding| finding.contains(expected)),
-            "missing {expected}: {findings:?}"
+        let changed = WORKFLOW.replacen(from, to, 1);
+        assert_ne!(changed, WORKFLOW, "missing fixture input: {from}");
+        assert_ne!(
+            workflow_findings(&changed, POLICY).unwrap(),
+            Vec::<String>::new(),
+            "{from} -> {to}"
         );
     }
 }
 
-#[test]
-fn a_workflow_the_ruleset_cannot_rely_on_is_refused() {
-    for (from, to, expected) in [
-        ("  merge_group:\n", "", "does not run on merge_group"),
-        (
-            "[check, proofs]",
-            "[check]",
-            "does not wait for the proofs job",
-        ),
-        (
-            "if: always()",
-            "if: success()",
-            "must run with `if: always()`",
-        ),
-        (
-            "success) ;;",
-            "success | skipped) ;;",
-            "must refuse every result other than success",
-        ),
-        (
-            "    runs-on: ubuntu-latest",
-            "    continue-on-error: true\n    runs-on: ubuntu-latest",
-            "suppresses failure",
-        ),
-        (
-            "just proofs-ci",
-            "cargo run -- proofs-ci",
-            "calls `cargo run`",
-        ),
-        (
-            "  proofs:\n    runs-on: ubuntu-latest",
-            "  proofs:\n    runs-on: macos-latest",
-            "the proofs job must run on Linux",
-        ),
-        (
-            "name: required\n",
-            "name: aggregate\n",
-            "which no job of ci.yml reports",
-        ),
-    ] {
-        let workflow = WORKFLOW.replacen(from, to, 1);
-        let found = workflow_findings(&workflow, POLICY).unwrap();
-        assert!(
-            found.iter().any(|line| line.contains(expected)),
-            "{expected} missing from {found:?}"
-        );
-    }
-}
-
-fn pinned_mise(text: &str) -> Result<String> {
-    model::data::parse(MISE_PINS, text)
-        .map_err(anyhow::Error::msg)?
-        .mise
-        .and_then(|release| release.version)
-        .context("the source data must declare mise.version")
-}
-
-fn producer_bash(global: &Path) -> Result<Command> {
+fn workflow_bash(global: &Path) -> Result<Command> {
     if !cfg!(windows) {
         return Ok(platform::tool::Tool::Bash.command());
     }
@@ -347,106 +190,30 @@ fn producer_bash(global: &Path) -> Result<Command> {
     Ok(platform::process::command(shell))
 }
 
-fn produced_mise(script: &str, pins: &str) -> Result<String> {
-    let fixture = tempfile::tempdir()?;
-    let source = fixture.path().join(MISE_PINS);
-    fs::create_dir_all(source.parent().context("pin source parent is missing")?)?;
-    fs::write(source, pins)?;
-    let mut command = producer_bash(&fixture.path().join("gitconfig"))?;
-    let path = if cfg!(windows) {
-        std::env::join_paths([Path::new(command.get_program())
-            .parent()
-            .context("native Bash directory is missing")?])?
-    } else {
-        PRODUCER_SYSTEM_PATH.into()
-    };
-    command
-        .env_clear()
-        .env("PATH", path)
-        .env("HOME", fixture.path())
-        .env("USERPROFILE", fixture.path())
-        .env("TMPDIR", fixture.path())
-        .env("TEMP", fixture.path())
-        .env("TMP", fixture.path())
-        .env("GITHUB_OUTPUT", "mise output")
-        .current_dir(fixture.path())
-        .args([
-            "--noprofile",
-            "--norc",
-            "-e",
-            "-o",
-            "pipefail",
-            "-c",
-            script,
-        ])
-        .stdin(Stdio::null());
-    if cfg!(windows) {
-        command.env(
-            "SystemRoot",
-            std::env::var_os("SystemRoot").context("Windows system root is missing")?,
-        );
-    }
-    let output = command.output()?;
-    ensure!(
-        output.status.success(),
-        "CI mise producer failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    fs::read_to_string(fixture.path().join("mise output")).context("read CI producer output")
-}
-
 #[test]
-fn every_ci_mise_producer_executes_against_the_typed_release_pin() -> Result<()> {
-    // Native Bash executes the CI source.
-    // GitHub expression evaluation and WSL installation remain separate boundaries.
-    let workflow = YamlLoader::load_from_str(&repository(".github/workflows/ci.yml"))?;
-    let [workflow] = workflow.as_slice() else {
-        bail!("CI must contain one workflow document")
-    };
-    let mut producers = BTreeMap::new();
-    for (name, job) in workflow["jobs"].as_hash().context("CI jobs are missing")? {
-        for step in job["steps"].as_vec().context("CI job steps are missing")? {
-            if step["id"].as_str() != Some("mise") {
-                continue;
-            }
-            ensure!(
-                step["shell"].as_str() == Some("bash"),
-                "mise producer requires bash"
-            );
-            let name = name.as_str().context("CI job name must be a string")?;
-            let script = step["run"]
-                .as_str()
-                .context("mise producer has no run block")?;
-            ensure!(
-                producers.insert(name, script).is_none(),
-                "duplicate mise producer"
-            );
-        }
-    }
-    assert_eq!(
-        producers.keys().copied().collect::<Vec<_>>(),
-        ["check", "classify", "minimum-git", "proofs", "rehearsal"]
-    );
-    let pins = repository(MISE_PINS);
-    ensure!(
-        pinned_mise(&pins)? != CONTROL_VERSION,
-        "control must change the actual pin"
-    );
-    let mut changed: toml::Table = toml::from_str(&pins)?;
-    changed
-        .get_mut("mise")
-        .and_then(toml::Value::as_table_mut)
-        .context("mise source table is missing")?
-        .insert(
-            "version".into(),
-            toml::Value::String(CONTROL_VERSION.into()),
-        );
-    let changed = toml::to_string(&changed)?;
-    for (job, script) in producers {
-        for source in [&pins, &changed] {
-            let expected = format!("version={}\n", pinned_mise(source)?);
-            assert_eq!(produced_mise(script, source)?, expected, "{job}");
-        }
+fn final_status_accepts_only_a_successful_matrix() -> Result<()> {
+    use yaml_rust2::YamlLoader;
+    let workflow = repository(".github/workflows/ci.yml");
+    let documents = YamlLoader::load_from_str(&workflow).unwrap();
+    let guard = documents[0]["jobs"]["required"]["steps"][0]["run"]
+        .as_str()
+        .unwrap();
+    assert_eq!(guard.trim(), "test \"$RESULTS\" = success");
+    let fixture = tempfile::tempdir()?;
+    for result in [
+        "success",
+        "failure",
+        "cancelled",
+        "skipped",
+        "",
+        "success failure",
+    ] {
+        let status = workflow_bash(&fixture.path().join("gitconfig"))?
+            .env("RESULTS", result)
+            .args(["-e", "-c", guard])
+            .status()
+            .unwrap();
+        assert_eq!(status.success(), result == "success", "{result}");
     }
     Ok(())
 }
