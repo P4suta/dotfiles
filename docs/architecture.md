@@ -69,7 +69,7 @@ The `pre-commit` and `pre-push` hooks refuse a change that adds a gap.
 | Command | Runs |
 | --- | --- |
 | `just check` | The gates a change selects: the lint stages, prose, links, and generated files, the shared skills, the core boundary and the structural catalog, the Rust packages, and the profiles. |
-| `just push-check` | Native implementation checks, plus the proof campaign on Mac and fixed CPU measurement budgets on Linux. The hosts gate records these results, and pre-push admits only matching candidate evidence. |
+| `just push-check` | Optional native implementation checks, plus the proof campaign on Mac and fixed CPU measurement budgets on Linux. The hosts gate records actual results for explicit native verification. |
 | `just check-staged` | The pre-commit check: the lint stages over the staged files, then the prose of documents and of the comments `OComment` reads. |
 | `just baselines` | The refusal of a lint baseline under `policy/lint-baselines/` that grew since a base, which the native check runs from its selected base. |
 | `just profiles` | Every profile's rendering, an isolated apply and verification, the committed manifests, the ignore and remove audit, and the script input audit. |
@@ -83,7 +83,9 @@ The edit guard and staged pre-commit check enforce that authority before publica
 The [lightweight hosted workflow](adr/native-verification-with-lightweight-ci.md) reports its checked-out commit and tree on all three OS families and preserves required status propagation.
 It installs no project toolchain and repeats no native tests, proofs, or provisioning rehearsals.
 Its successful status doesn't independently establish native verification or issue authority.
-The owner-operated local gates remain authoritative, and an actor can bypass that boundary outside the normal workflow.
+The [candidate publication policy](adr/optional-native-verification-before-publication.md) makes native verification optional for dotfiles.
+Pre-push and PR readiness read this policy from the exact candidate commit, and missing policy still requires native evidence.
+Local staged checks, required hosted checks, signing, issue authority, and the assessed review route remain active.
 
 Prose gates check persisted files, comments, Markdown, commit messages, issues, pull requests, and release notes.
 The adapters setup step and `just install-prose` remove retired Claude Code and Codex reply hooks and the OpenCode reply plugin.

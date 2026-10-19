@@ -2067,7 +2067,7 @@ fn make_ready(
         Checks::Incomplete
     };
     planned(Operation::Ready, target, Some(pr), draft, issue, checks)?;
-    dotfiles::hosts::require_admission(Path::new("."), head)?;
+    dotfiles::hosts::require_publication_admission(Path::new("."), head)?;
     dotfiles::assure::ready(Path::new("."), &dotfiles::assure::installed()?, base, head)?;
     admit_review_request(
         Operation::Ready,

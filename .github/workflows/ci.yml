@@ -27,7 +27,7 @@ jobs:
       - name: Report the native admission boundary
         shell: bash
         run: |
-          printf '%s\n' 'Native admission is enforced by the local hosts gate before push.' 'CI reports the checked-out source and does not rerun or attest native checks.'
+          printf '%s\n' 'Native checks follow the committed publication policy.' 'CI reports the checked-out source and does not rerun or attest native checks.'
   required:
     name: required
     needs: [check]

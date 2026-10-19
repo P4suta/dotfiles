@@ -1,7 +1,8 @@
 use anyhow::{Context, Result, ensure};
 use dotfiles::hosts::{
     Managed, Peer, Tailnet, evidence, hub_user, label_family, managed, outcome, pinned, push_gate,
-    remote_gate, render, require_admission, required, scanned, select, tailnet, wrap,
+    remote_gate, render, require_admission, require_publication_admission, required, scanned,
+    select, tailnet, wrap,
 };
 use dotfiles::hosts_rules::{Evidence, Family};
 use std::fmt::Write as _;
@@ -1801,6 +1802,113 @@ fn profile_admission_uses_the_commit_and_leaves_other_repositories_to_their_gate
     fs::remove_file(root.join("crates/dotfiles/Cargo.toml"))?;
     assert!(require_admission(root, &profile).is_err());
     require_admission(root, &head)?;
+    Ok(())
+}
+
+fn publication_fixture() -> Result<tempfile::TempDir> {
+    let scope = tempfile::tempdir()?;
+    let root = scope.path();
+    fs::write(
+        root.join("gitconfig"),
+        "[user]\nname = Fixture\nemail = fixture@example.com\n[commit]\ngpgsign = false\n",
+    )?;
+    fs::create_dir_all(root.join(".github/workflows"))?;
+    fs::create_dir_all(root.join("crates/dotfiles"))?;
+    fs::create_dir_all(root.join("policy"))?;
+    fs::write(root.join(".chezmoiroot"), "home\n")?;
+    fs::write(
+        root.join("crates/dotfiles/Cargo.toml"),
+        "[package]\nname = 'dotfiles'\n",
+    )?;
+    fs::write(
+        root.join(".github/workflows/ci.yml"),
+        "jobs:\n  test:\n    runs-on: ubuntu-latest\n",
+    )?;
+    git(root, &["init", "--quiet"])?;
+    git(root, &["add", ".github", ".chezmoiroot", "crates"])?;
+    git(root, &["commit", "--quiet", "-m", "profile"])?;
+    Ok(scope)
+}
+
+fn commit_publication_policy(root: &Path, policy: &str) -> Result<String> {
+    fs::write(root.join("policy/native-publication.toml"), policy)?;
+    git(root, &["add", "policy/native-publication.toml"])?;
+    git(root, &["commit", "--quiet", "-m", "publication policy"])?;
+    git(root, &["rev-parse", "HEAD"])
+}
+
+#[test]
+fn optional_native_publication_needs_no_notes_and_keeps_manual_admission_strict() -> Result<()> {
+    let scope = publication_fixture()?;
+    let root = scope.path();
+    let commit = commit_publication_policy(root, "require_native = false\n")?;
+    require_publication_admission(root, &commit)?;
+    assert!(require_admission(root, &commit).is_err());
+    assert!(git(root, &["rev-parse", "--verify", dotfiles::hosts::NOTES]).is_err());
+    assert!(require_publication_admission(root, "missing-commit").is_err());
+    Ok(())
+}
+
+#[test]
+fn native_publication_defaults_to_strict_and_ignores_dirty_policy() -> Result<()> {
+    let scope = publication_fixture()?;
+    let root = scope.path();
+    let missing = git(root, &["rev-parse", "HEAD"])?;
+    fs::write(
+        root.join("policy/native-publication.toml"),
+        "require_native = false\n",
+    )?;
+    assert!(require_publication_admission(root, &missing).is_err());
+    let required = commit_publication_policy(root, "require_native = true\n")?;
+    fs::write(
+        root.join("policy/native-publication.toml"),
+        "require_native = false\n",
+    )?;
+    let error = require_publication_admission(root, &required)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("no linux gate result"), "{error}");
+    Ok(())
+}
+
+#[test]
+fn native_publication_rejects_malformed_unknown_and_incomplete_policy() -> Result<()> {
+    let scope = publication_fixture()?;
+    let root = scope.path();
+    for policy in [
+        "require_native = ",
+        "require_native = 'false'\n",
+        "require_native = false\nunknown = true\n",
+        "",
+    ] {
+        let commit = commit_publication_policy(root, policy)?;
+        let error = require_publication_admission(root, &commit)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("invalid policy/native-publication.toml"),
+            "{error}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn native_publication_reads_the_pushed_commit_instead_of_checkout_head() -> Result<()> {
+    let scope = publication_fixture()?;
+    let root = scope.path();
+    let optional = commit_publication_policy(root, "require_native = false\n")?;
+    let required = commit_publication_policy(root, "require_native = true\n")?;
+    let update = |commit: &str| {
+        format!(
+            "refs/heads/feature {commit} refs/heads/feature {}\n",
+            "0".repeat(40)
+        )
+    };
+    let github = "git@github.com:owner/project.git";
+    push_gate(root, github, update(&optional).as_bytes())?;
+    git(root, &["checkout", "--quiet", &optional])?;
+    assert!(push_gate(root, github, update(&required).as_bytes()).is_err());
     Ok(())
 }
 

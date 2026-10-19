@@ -1,6 +1,6 @@
 ---
 status: amended
-changed_by: [profile-evidence-scope.md, source-bound-push-validation.md]
+changed_by: [profile-evidence-scope.md, source-bound-push-validation.md, optional-native-verification-before-publication.md]
 ---
 # Require a passing gate on every operating system family before push
 

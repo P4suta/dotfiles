@@ -40,7 +40,7 @@ const LIGHTWEIGHT_JOBS: &str = r#"  check:
       - name: Report the native admission boundary
         shell: bash
         run: |
-          printf '%s\n' 'Native admission is enforced by the local hosts gate before push.' 'CI reports the checked-out source and does not rerun or attest native checks.'
+          printf '%s\n' 'Native checks follow the committed publication policy.' 'CI reports the checked-out source and does not rerun or attest native checks.'
   required:
     name: required
     needs: [check]
@@ -105,7 +105,7 @@ pub fn workflows(root: &Path) -> Result<()> {
     checks.finish()
 }
 
-/// Requires pre-push to admit the canonical hosts evidence without a second validation environment.
+/// Requires pre-push to apply the candidate's publication policy without another validation environment.
 ///
 /// # Errors
 ///
@@ -126,7 +126,7 @@ pub fn push_hook_findings(configuration: &str) -> Result<Vec<String>> {
         Vec::new()
     } else {
         vec![
-            "pre-push must consume the canonical hosts evidence and preserve its ref-update input"
+            "pre-push must apply the candidate publication policy and preserve its ref-update input"
                 .into(),
         ]
     })

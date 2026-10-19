@@ -41,7 +41,7 @@ jobs:
       - name: Report the native admission boundary
         shell: bash
         run: |
-          printf '%s\n' 'Native admission is enforced by the local hosts gate before push.' 'CI reports the checked-out source and does not rerun or attest native checks.'
+          printf '%s\n' 'Native checks follow the committed publication policy.' 'CI reports the checked-out source and does not rerun or attest native checks.'
   required:
     name: required
     needs: [check]
@@ -58,7 +58,7 @@ jobs:
 "#;
 
 #[test]
-fn pre_push_cannot_diverge_from_the_verified_hosts_gate() {
+fn pre_push_uses_the_canonical_candidate_publication_gate() {
     let hook = repository("lefthook.yml");
     assert_eq!(push_hook_findings(&hook).unwrap(), Vec::<String>::new());
     assert_eq!(dotfiles::hosts::DEFAULT_GATE, "just push-check");
@@ -75,7 +75,7 @@ fn pre_push_cannot_diverge_from_the_verified_hosts_gate() {
 }
 
 #[test]
-fn lightweight_ci_reports_source_and_keeps_all_native_families_required() {
+fn lightweight_ci_reports_source_and_keeps_all_native_families_available() {
     for workflow in [repository(".github/workflows/ci.yml"), WORKFLOW.into()] {
         assert_eq!(
             workflow_findings(&workflow, POLICY).unwrap(),

@@ -1,4 +1,4 @@
-//! Cross-platform push evidence: managed SSH access to one host per OS family, gate runs through domyjob, and Git notes that pre-push and `pr-workflow ready` require.
+//! Cross-platform native evidence and commit-bound publication admission.
 
 use crate::hosts_rules::{Evidence, Family, Key, Start, Verdict, admit, gated, pin, record, start};
 use crate::runtime::Real;
@@ -29,6 +29,7 @@ const KANI_HEALTH_RESULT: &str = "test result: ok. 1 passed; 0 failed;";
 const RELEASE_PINS: &str = "home/.chezmoidata/versions.toml";
 const PROFILE_ROOT: &str = ".chezmoiroot";
 const PROFILE_RUNTIME: &str = "crates/dotfiles/Cargo.toml";
+const PUBLICATION_POLICY: &str = "policy/native-publication.toml";
 const JOB_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const MISSING_JOB: &str = "domyjob: remote node refused the request: MissingJob";
 const REQUEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -133,7 +134,7 @@ pub enum Action {
         #[arg(long)]
         capture: Option<PathBuf>,
     },
-    /// Refuse pushed GitHub branches that lack a passing note for an operating system family in their CI matrix.
+    /// Enforce each pushed GitHub branch commit's native publication policy.
     /// Reads pre-push input.
     Gate { remote: String, url: String },
 }
@@ -1085,6 +1086,41 @@ pub fn require_admission(repository: &Path, commit: &str) -> Result<()> {
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PublicationPolicy {
+    require_native: bool,
+}
+
+/// Applies the publication policy stored in the candidate commit.
+///
+/// # Errors
+///
+/// Returns an error for an unreadable commit, invalid policy, or failed native admission.
+pub fn require_publication_admission(repository: &Path, commit: &str) -> Result<()> {
+    let commit = git_text(
+        repository,
+        &["rev-parse", "--verify", &format!("{commit}^{{commit}}")],
+    )
+    .with_context(|| format!("commit {commit} is not in this checkout; fetch it first"))?;
+    let policy = git(
+        repository,
+        &["ls-tree", "--name-only", &commit, "--", PUBLICATION_POLICY],
+    )?;
+    if !policy.is_empty() {
+        let text = String::from_utf8(git(
+            repository,
+            &["show", &format!("{commit}:{PUBLICATION_POLICY}")],
+        )?)?;
+        let policy: PublicationPolicy = toml::from_str(&text)
+            .with_context(|| format!("invalid {PUBLICATION_POLICY} at {commit}"))?;
+        if !policy.require_native {
+            return Ok(());
+        }
+    }
+    require_admission(repository, &commit)
+}
+
 fn github(url: &str) -> bool {
     url.contains("github.com:") || url.contains("github.com/")
 }
@@ -1103,7 +1139,7 @@ pub fn push_gate(repository: &Path, url: &str, input: &[u8]) -> Result<()> {
         };
         let deletion = local.bytes().all(|byte| byte == b'0');
         if gated(github(url), remote_ref.starts_with("refs/heads/"), deletion) {
-            require_admission(repository, local)?;
+            require_publication_admission(repository, local)?;
         }
     }
     Ok(())

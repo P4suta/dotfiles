@@ -1,12 +1,14 @@
 ---
 date: 2026-10-19
-status: accepted
+status: amended
+changed_by: [optional-native-verification-before-publication.md]
 ---
 # Make native verification authoritative and keep hosted CI lightweight
 
 ## Status
 
 The owner accepted this verification boundary on 2026-10-19 under [issue 165](https://github.com/P4suta/dotfiles/issues/165).
+The owner later made the native publication prerequisite optional in [its amendment](optional-native-verification-before-publication.md).
 
 ## Context
 

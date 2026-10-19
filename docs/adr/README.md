@@ -23,7 +23,7 @@
 | [0017 Normalize line endings to LF on every host and agent write](0017-lf-line-endings-everywhere.md) | accepted |  |
 | [0018 Turn off persistent agent memory in the native client profiles](0018-agent-memory-off.md) | accepted |  |
 | [0019 Recommend the next workflow step from inspected state](0019-state-inspecting-next-action.md) | accepted |  |
-| [0020 Require a passing gate on every operating system family before push](0020-os-family-push-evidence.md) | amended | [2026-10-11](profile-evidence-scope.md), [2026-10-11](source-bound-push-validation.md) |
+| [0020 Require a passing gate on every operating system family before push](0020-os-family-push-evidence.md) | amended | [2026-10-11](profile-evidence-scope.md), [2026-10-11](source-bound-push-validation.md), [2026-10-19](optional-native-verification-before-publication.md) |
 | [0021 Check that every agent instruction line has a class](0021-checked-agent-instruction-audit.md) | accepted |  |
 | [0022 Refuse installed tools built from stale sources](0022-refuse-tools-built-from-stale-sources.md) | amended | [2026-10-11](source-bound-push-validation.md) |
 | [0023 Give the repository a layout that shows what it manages](0023-repository-layout-and-target-architecture.md) | accepted |  |
@@ -80,4 +80,5 @@
 | [2026-10-15 Prove portable component scans with erased witnesses](prove-portable-component-scans-with-erased-witnesses.md) | proposed |  |
 | [2026-10-16 Evaluate fixed parser domains before symbolic selection](finite-shell-parser-ctfe.md) | proposed |  |
 | [2026-10-17 Run spoken Git commands in the matching policy companion](isolate-spoken-git-in-the-matching-companion.md) | proposed |  |
-| [2026-10-19 Make native verification authoritative and keep hosted CI lightweight](native-verification-with-lightweight-ci.md) | accepted |  |
+| [2026-10-19 Make native verification authoritative and keep hosted CI lightweight](native-verification-with-lightweight-ci.md) | amended | [2026-10-19](optional-native-verification-before-publication.md) |
+| [2026-10-19 Make native verification optional before publication](optional-native-verification-before-publication.md) | accepted |  |
