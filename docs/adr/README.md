@@ -18,7 +18,7 @@
 | [0012 Run the Kani proofs on Windows in a pinned Linux container](0012-windows-proofs-in-a-linux-container.md) | accepted |  |
 | [0013 Mark a PR ready only after every check passes](0013-ready-only-after-passing-checks.md) | accepted |  |
 | [0014 Bind tracked skill decisions to each skill revision](0014-per-skill-decision-records.md) | accepted |  |
-| [0015 Scope the CodeRabbit owner pause](0015-scoped-coderabbit-pause.md) | amended | [2026-10-13](route-coderabbit-by-current-pr-importance.md) |
+| [0015 Scope the CodeRabbit owner pause](0015-scoped-coderabbit-pause.md) | amended | [2026-10-13](route-coderabbit-by-current-pr-importance.md), [2026-10-20](keep-workflow-evidence-local.md) |
 | [0016 Enforce one writing standard on persisted prose and replies](0016-one-writing-standard.md) | amended | [2026-10-10](persisted-prose-gates.md) |
 | [0017 Normalize line endings to LF on every host and agent write](0017-lf-line-endings-everywhere.md) | accepted |  |
 | [0018 Turn off persistent agent memory in the native client profiles](0018-agent-memory-off.md) | accepted |  |
@@ -63,7 +63,7 @@
 | [2026-10-12 Bind acquisition plans to pinned inputs and reusable material identities](pinned-acquisition-plans-and-content-addressed-materials.md) | proposed |  |
 | [2026-10-13 Admit native work from a complete resource plan](admit-native-work-from-a-complete-resource-plan.md) | proposed |  |
 | [2026-10-13 Assess a pinned mutation engine before adoption](assess-pinned-mutation-engine-before-adoption.md) | proposed |  |
-| [2026-10-13 Authenticate issue context at edit and integration boundaries](authenticate-issue-context-at-edit-and-integration-boundaries.md) | proposed |  |
+| [2026-10-13 Authenticate issue context at edit and integration boundaries](authenticate-issue-context-at-edit-and-integration-boundaries.md) | amended | [2026-10-20](keep-workflow-evidence-local.md) |
 | [2026-10-13 Bind private verifier phase evidence](bind-private-verifier-phase-evidence.md) | proposed |  |
 | [2026-10-13 Enable experimental skill maintenance only through explicit local opt-in](experimental-skill-maintenance-by-explicit-opt-in.md) | accepted |  |
 | [2026-10-13 Keep local issue authority separate from remote publication](keep-local-issue-authority-separate-from-remote-publication.md) | proposed |  |
@@ -72,7 +72,7 @@
 | [2026-10-13 Run Renovate through a process from the same source build](renovate-behind-a-source-matched-process.md) | proposed |  |
 | [2026-10-13 Require every fixed proof partition in hosted CI](require-every-fixed-proof-partition-in-hosted-ci.md) | superseded | [2026-10-19](native-verification-with-lightweight-ci.md) |
 | [2026-10-13 Retain Miri sysroots with fresh interpretation](retain-miri-sysroots-with-fresh-interpretation.md) | proposed |  |
-| [2026-10-13 Route CodeRabbit by current PR importance](route-coderabbit-by-current-pr-importance.md) | accepted |  |
+| [2026-10-13 Route CodeRabbit by current PR importance](route-coderabbit-by-current-pr-importance.md) | amended | [2026-10-20](keep-workflow-evidence-local.md) |
 | [2026-10-13 Speak fixed development events through an optional desktop queue](speak-fixed-development-events-through-an-optional-desktop-queue.md) | amended | [2026-10-14](report-optional-notification-failures-with-fixed-warnings.md) |
 | [2026-10-13 Validate Renovate reports before classifying freshness](validated-renovate-reports.md) | proposed |  |
 | [2026-10-14 Partition Cargo artifacts by physical source root](partition-cargo-artifacts-by-physical-source-root.md) | proposed |  |
@@ -84,4 +84,5 @@
 | [2026-10-19 Make native verification authoritative and keep hosted CI lightweight](native-verification-with-lightweight-ci.md) | amended | [2026-10-19](optional-native-verification-before-publication.md) |
 | [2026-10-19 Make native verification optional before publication](optional-native-verification-before-publication.md) | accepted |  |
 | [2026-10-19 Repository owner assessments for bot pull requests](repository-owner-assessments-for-bot-pull-requests.md) | proposed |  |
+| [2026-10-20 Keep workflow evidence on the owner's machines](keep-workflow-evidence-local.md) | accepted |  |
 | [2026-10-20 Keep every managed behavior the same on every host](same-behavior-on-every-host.md) | accepted |  |

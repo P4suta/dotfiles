@@ -1,8 +1,9 @@
 {
-  "revision": "12912974863a83e77c0adbbc0672f7a6100676010e851819b76b048155fbf1e1",
+  "revision": "78856c719dd83a0f8fdd85be01063a3dc4dd6795a3cb6f54b74913b122aab047",
   "outcome": "implemented",
-  "reason": "Keep the checked PR workflow and its publication boundaries unchanged while aligning the gh-stack binding with v0.2.1.\nThe installed command reports version 0.2.1, and its help retains the existing stack command surface.",
+  "reason": "The revision moves the assessment, pause record, and issue context into owner-local state, refuses them in published documents, and raises the default open PR limit to three.",
   "evidence": [
+    "docs/adr/keep-workflow-evidence-local.md",
     "crates/platform/src/local_issues.rs",
     "crates/platform/src/source_identity.rs",
     "crates/platform/tests/source_identity.rs",

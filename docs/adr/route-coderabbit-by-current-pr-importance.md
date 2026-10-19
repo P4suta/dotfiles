@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [keep-workflow-evidence-local.md]
 date: 2026-10-13
 ---
 # Route CodeRabbit by current PR importance

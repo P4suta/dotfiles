@@ -92,11 +92,13 @@ Use the [importance criteria](importance.md) for every PR.
 Prepare a bounded JSON assessment of the actual committed diff and sign it with the existing trusted Git identity:
 
 ```console
-pr-workflow assess --repo OWNER/REPO --base main --assessment-file importance.json --output importance.packet
+pr-workflow assess --repo OWNER/REPO --base origin/main --assessment-file importance.json
 ```
 
-The command creates a new packet file and refuses to overwrite one.
-Copy its single signed classification line into the PR body.
+The command stores the signed statement in owner-local state, and every later command reads it from there.
+Keep it out of the PR body, which refuses it.
+Another machine reassesses instead of reading evidence from GitHub.
+Pass the remote base, because a stale local `main` widens the bound diff.
 The signed statement binds the exact repository, merge base, head, diff, and assessment.
 Fork contributions also bind the verified source and destination repository identities.
 Use the source owner's qualified head when publishing to an upstream repository.

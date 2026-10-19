@@ -2991,7 +2991,7 @@ fn local_create_is_draft_and_passes_the_checked_body_by_file() -> Result<()> {
     Ok(())
 }
 
-/// A user with the default limit of one open PR adds new work to it instead of opening another.
+/// A user at the default limit of three open PRs adds new work to the oldest instead of opening another.
 /// PRs of other users and PRs from the same branch never count.
 #[test]
 fn create_refuses_a_second_open_pr_by_the_same_author_and_names_the_first() -> Result<()> {
@@ -3015,7 +3015,9 @@ fn create_refuses_a_second_open_pr_by_the_same_author_and_names_the_first() -> R
     };
     let output = create(&serde_json::json!([
         pr(9, "Other", "theirs"),
-        pr(12, "P4suta", "feature")
+        pr(12, "P4suta", "feature"),
+        pr(13, "P4suta", "second"),
+        pr(15, "P4suta", "third")
     ]))?;
     assert!(
         output.status.success(),
@@ -3025,7 +3027,8 @@ fn create_refuses_a_second_open_pr_by_the_same_author_and_names_the_first() -> R
     fs::remove_file(&fixture.log)?;
     let output = create(&serde_json::json!([
         pr(14, "P4suta", "later"),
-        pr(11, "p4suta", "earlier")
+        pr(11, "p4suta", "earlier"),
+        pr(16, "P4suta", "latest")
     ]))?;
     let record = refusal(&output);
     assert_eq!(record["rule"], "pr.wip");
