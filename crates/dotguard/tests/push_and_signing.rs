@@ -798,6 +798,120 @@ fn workspace_offer(repository: &Repository, base: &str, manifest: &str) -> Strin
     repository.git(&["commit-tree", &tree, "-p", base, "-m", "member"])
 }
 
+fn local_workspace_fixture(name: &str) -> (Repository, String, serde_json::Value) {
+    let (repository, parent) = cargo_workspace_fixture(name);
+    std::fs::write(
+        repository.path().join("Cargo.toml"),
+        WORKSPACE_MANIFEST.replace(
+            "package = \"actual-fixture\", version = \"1.0.1\"",
+            "package = \"actual-fixture\", path = \"dependency\"",
+        ),
+    )
+    .unwrap();
+    repository.git(&["add", "Cargo.toml"]);
+    let tree = repository.git(&["write-tree"]);
+    let base = repository.git(&["commit-tree", &tree, "-p", &parent, "-m", "local provider"]);
+    let mut report = workspace_report();
+    report["repositories"]["local"]["packageFiles"]["cargo"][0]["deps"][0] = serde_json::json!({
+        "depName":"renamed", "packageName":"actual-fixture", "datasource":"crate",
+        "depType":"workspace.dependencies", "currentValue":"",
+        "skipReason":"path-dependency", "updates":[], "warnings":[]
+    });
+    (repository, base, report)
+}
+
+#[test]
+fn renovate_verifies_inherited_local_cargo_dependencies() {
+    let (repository, base, report) = local_workspace_fixture("renovate-inherited-local");
+    let offered = workspace_offer(&repository, &base, &format!("{MEMBER_MANIFEST}# comment\n"));
+    let output = report_gate(&repository, &base, &offered, &report);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn renovate_rejects_forged_inherited_local_cargo_evidence() {
+    let (repository, base, original) = local_workspace_fixture("renovate-local-refusals");
+    let offered = workspace_offer(&repository, &base, &format!("{MEMBER_MANIFEST}# comment\n"));
+    for (field, value) in [
+        ("packageName", serde_json::json!("different-package")),
+        (
+            "registryUrls",
+            serde_json::json!(["https://wrong.invalid/index"]),
+        ),
+        ("depName", serde_json::json!("absent")),
+        ("lockedVersion", serde_json::json!("1.0.1")),
+        (
+            "updates",
+            serde_json::json!([{"updateType":"patch","newValue":"1.0.2"}]),
+        ),
+    ] {
+        let mut report = original.clone();
+        report["repositories"]["local"]["packageFiles"]["cargo"][1]["deps"][0][field] = value;
+        assert_eq!(
+            refusal(&report_gate(&repository, &base, &offered, &report)).rule,
+            "push.evidence",
+            "{field}"
+        );
+    }
+    let mut report = original.clone();
+    report["repositories"]["local"]["packageFiles"]["cargo"][1]["lockFiles"] =
+        serde_json::json!(["member/Cargo.lock"]);
+    assert_eq!(
+        refusal(&report_gate(&repository, &base, &offered, &report)).rule,
+        "push.evidence"
+    );
+    let path = repository.path().join("Cargo.toml");
+    std::fs::write(
+        &path,
+        std::fs::read_to_string(&path).unwrap().replace(
+            "path = \"dependency\"",
+            "path = \"dependency\", version = \"1.0.1\"",
+        ),
+    )
+    .unwrap();
+    let mixed = workspace_offer(&repository, &base, MEMBER_MANIFEST);
+    assert_eq!(
+        refusal(&report_gate(&repository, &base, &mixed, &original)).rule,
+        "push.evidence"
+    );
+}
+
+#[test]
+fn renovate_rejects_inherited_local_cargo_sources_outside_the_snapshot() {
+    let (repository, base, report) = local_workspace_fixture("renovate-local-escape");
+    let outside = repository.scope.join("external");
+    std::fs::create_dir_all(outside.join("src")).unwrap();
+    for name in ["Cargo.toml", "src/lib.rs"] {
+        std::fs::copy(
+            repository.path().join("dependency").join(name),
+            outside.join(name),
+        )
+        .unwrap();
+    }
+    let path = repository.path().join("Cargo.toml");
+    std::fs::write(
+        &path,
+        std::fs::read_to_string(&path).unwrap().replace(
+            "path = \"dependency\"",
+            &format!("path = {:?}", outside.to_string_lossy()),
+        ),
+    )
+    .unwrap();
+    let offered = workspace_offer(&repository, &base, MEMBER_MANIFEST);
+    let rejected = refusal(&report_gate(&repository, &base, &offered, &report));
+    assert_eq!(rejected.rule, "push.evidence");
+    assert!(
+        rejected
+            .evidence
+            .iter()
+            .any(|line| line.contains("escapes the committed snapshot"))
+    );
+}
+
 #[test]
 fn renovate_verifies_inherited_cargo_and_ignores_member_comments() {
     let (repository, base) = cargo_workspace_fixture("renovate-inherited-comments");
