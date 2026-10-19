@@ -3619,13 +3619,7 @@ fn scoped_install_preserves_other_managed_skills_policy_and_history() -> Result<
     assert!(installed.catalog.skills.contains_key("other-owned"));
     assert!(installed.catalog.skills.contains_key("pull-request"));
     assert_eq!(installed.engine_hash, "existing-native-engine");
-    assert_eq!(
-        installed
-            .reviewed
-            .get("pull-request")
-            .map(|reviewed| &reviewed.revision),
-        Some(&installed.catalog.skills["pull-request"].revision)
-    );
+    assert!(installed.reviewed.is_empty());
     assert_eq!(installed.policy_hash, ops::hash(&policy)?);
     assert_eq!(
         ops::read_json::<serde_json::Value>(&history)?,
@@ -3665,6 +3659,122 @@ fn scoped_install_preserves_other_managed_skills_policy_and_history() -> Result<
         ))
         .is_err()
     );
+    Ok(())
+}
+
+fn scoped_install_fixture() -> Result<(tempfile::TempDir, tempfile::TempDir, PathBuf)> {
+    use skill_ops as ops;
+    let source = tempfile::tempdir()?;
+    let home = tempfile::tempdir()?;
+    for name in ["pull-request", "base-skill"] {
+        let skill = source.path().join("home/dot_agents/skills").join(name);
+        fs::create_dir_all(&skill)?;
+        fs::write(
+            skill.join("SKILL.md"),
+            format!(
+                "---\nname: {name}\ndescription: Inspect the fixture.\n---\n# Fixture\nPreserve the source.\n"
+            ),
+        )?;
+        let alias = source.path().join("home/dot_claude/skills");
+        fs::create_dir_all(&alias)?;
+        fs::write(
+            alias.join(format!("symlink_{name}")),
+            format!("../../.agents/skills/{name}"),
+        )?;
+    }
+    let policy = ops::Policy {
+        schema: 1,
+        review_every: 50,
+        minimum_pair_sessions: 5,
+        pair_percent: 80,
+        max_entry_words: 1200,
+        requirements: Vec::new(),
+        bundles: std::collections::BTreeMap::default(),
+    };
+    ops::write_json(
+        &source.path().join("home/dot_config/skill-ops/policy.json"),
+        &policy,
+        false,
+    )?;
+    ops::write_json(
+        &home.path().join(".config/skill-ops/policy.json"),
+        &policy,
+        false,
+    )?;
+    let catalog = install_other_skills(source.path(), &home.path().join(".agents/skills"))?;
+    let approved = ops::Approved {
+        catalog_hash: ops::hash(&catalog)?,
+        catalog,
+        policy_hash: ops::hash(&policy)?,
+        engine_hash: "existing-native-engine".into(),
+        reviewed: [(
+            "pull-request".into(),
+            ops::Reviewed {
+                revision: "prior-reviewed-revision".into(),
+                size: false,
+            },
+        )]
+        .into(),
+    };
+    ops::write_json(
+        &home.path().join(".config/skill-ops/approved.json"),
+        &approved,
+        false,
+    )?;
+    let binary = source.path().join("built-binary");
+    fs::write(&binary, "native executable fixture")?;
+    Ok((source, home, binary))
+}
+
+#[test]
+fn scoped_install_ignores_experimental_records_without_opt_in() -> Result<()> {
+    use skill_ops as ops;
+    let (source, home, binary) = scoped_install_fixture()?;
+    let decisions = source.path().join(ops::DECISIONS);
+    fs::create_dir_all(&decisions)?;
+    fs::write(
+        decisions.join("pull-request.json"),
+        "invalid experimental record",
+    )?;
+    let manifest = home.path().join(".config/skill-ops/approved.json");
+    let before = ops::read_approved(&manifest)?;
+    assert!(!platform::incidents::enabled_at(home.path()));
+    pr_workflow::deploy(source.path(), &binary, home.path(), |paths| {
+        apply_pr_skill(source.path(), &home.path().join(".agents/skills"), paths)
+    })?;
+    let after = ops::read_approved(&manifest)?;
+    assert!(after.catalog.skills.contains_key("pull-request"));
+    assert_eq!(after.reviewed, before.reviewed);
+    Ok(())
+}
+
+#[test]
+fn scoped_install_requires_experimental_decisions_only_after_opt_in() -> Result<()> {
+    let (source, home, binary) = scoped_install_fixture()?;
+    fs::write(
+        home.path().join(platform::incidents::EXPERIMENTAL),
+        rules::incident_rules::EXPERIMENTAL_OPT_IN,
+    )?;
+    assert!(platform::incidents::enabled_at(home.path()));
+    let manifest = home.path().join(".config/skill-ops/approved.json");
+    let before = fs::read(&manifest)?;
+    let error = pr_workflow::deploy(source.path(), &binary, home.path(), |_| {
+        panic!("must not apply before experimental decision checks")
+    })
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("pull-request has no decision"),
+        "{error:#}"
+    );
+    assert_eq!(fs::read(&manifest)?, before);
+    fs::write(
+        home.path().join(platform::incidents::DISABLED),
+        "owner stop",
+    )?;
+    assert!(!platform::incidents::enabled_at(home.path()));
+    pr_workflow::deploy(source.path(), &binary, home.path(), |paths| {
+        apply_pr_skill(source.path(), &home.path().join(".agents/skills"), paths)
+    })?;
     Ok(())
 }
 

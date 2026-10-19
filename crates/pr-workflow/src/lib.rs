@@ -2893,7 +2893,8 @@ pub(crate) fn install(binary: &std::path::Path, user_directory: &std::path::Path
     Ok(())
 }
 
-/// Installs the reviewed PR skill through `apply` and the `pr-workflow` binary under `user_directory`, then records the new catalog.
+/// Installs the checked PR skill through `apply` and the `pr-workflow` binary under `user_directory`, then records the new catalog.
+/// Experimental decision checks require the machine's opt-in.
 ///
 /// # Errors
 ///
@@ -2906,7 +2907,10 @@ pub fn deploy(
     mut apply: impl FnMut(&[PathBuf]) -> Result<()>,
 ) -> Result<()> {
     use skill_ops as ops;
-    ops::check_catalog(source)?;
+    let experimental = platform::incidents::enabled_at(user_directory);
+    if experimental {
+        ops::check_catalog(source)?;
+    }
     let manifest = user_directory.join(".config/skill-ops/approved.json");
     let mut approved = ops::read_approved(&manifest)?;
     ensure!(
@@ -2945,16 +2949,18 @@ pub fn deploy(
         .context("planned PR skill is missing")?
         .references
         .retain(|name| available.contains(name));
-    let reviewed = ops::adoptable_revisions(
-        &expected,
-        &ops::tracked_decisions(&source.join(ops::DECISIONS))?,
-    );
-    match reviewed.get("pull-request") {
-        Some(skill) => approved
-            .reviewed
-            .insert("pull-request".into(), skill.clone()),
-        None => approved.reviewed.remove("pull-request"),
-    };
+    if experimental {
+        let reviewed = ops::adoptable_revisions(
+            &expected,
+            &ops::tracked_decisions(&source.join(ops::DECISIONS))?,
+        );
+        match reviewed.get("pull-request") {
+            Some(skill) => approved
+                .reviewed
+                .insert("pull-request".into(), skill.clone()),
+            None => approved.reviewed.remove("pull-request"),
+        };
+    }
     let tree = source.join("home/dot_agents/skills/pull-request");
     let symlink = source.join("home/dot_claude/skills/symlink_pull-request");
     let paths: Vec<_> = skill_ops::skill_source_paths(source)?
