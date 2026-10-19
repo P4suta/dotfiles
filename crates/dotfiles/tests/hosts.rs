@@ -2104,6 +2104,7 @@ impl RemoteCheck {
             .env("GIT_COMMITTER_EMAIL", "fixture@example.com")
             .env("HOSTS_FIXTURE_STATUS", r#"{"Self":{"DNSName":"phone.example.ts.net.","OS":"android","Online":true},"Peer":{"a":{"DNSName":"box.example.ts.net.","OS":"linux","TailscaleIPs":["100.64.0.2"],"Online":true}}}"#)
             .env("HOSTS_FIXTURE_EXECUTIONS", &self.executions)
+            .env("HOSTS_FIXTURE_METADATA", fixture_process::directory(&self.root.join(".git")))
             .env("HOSTS_FIXTURE_INTERRUPTION", interruption)
             .env("HOSTS_FIXTURE_STAGES", stages)
             .env("DOTFILES_EXPECTED_FAILURE", "");
@@ -2123,6 +2124,65 @@ impl RemoteCheck {
 
 const VALID_STAGES: &str =
     r#"{"code":0,"real":0,"applied":{"drifted_targets":[],"verification_error":null}}"#;
+
+#[test]
+fn pending_submissions_stage_only_the_verified_bundle_outside_git_metadata() -> Result<()> {
+    let fixture = RemoteCheck::new()?;
+    let interrupted = fixture
+        .command(&fixture.root, "submission", VALID_STAGES)?
+        .output()?;
+    assert!(!interrupted.status.success());
+    let error = String::from_utf8_lossy(&interrupted.stderr);
+    assert!(
+        error.contains("SSH acknowledgement connection timed out"),
+        "{error}"
+    );
+    let pending_path = fixture.root.join(".git/hosts-pending/linux.json");
+    let pending: serde_json::Value = serde_json::from_slice(&fs::read(&pending_path)?)?;
+    assert_eq!(pending["state"], "prepared");
+    let submission = pending["submission"]
+        .as_str()
+        .context("fixture submission")?;
+    let captured = |suffix: &str| {
+        fixture
+            .executions
+            .with_extension(format!("{submission}.{suffix}"))
+    };
+    let bundle = fixture.root.join(".git/hosts-pending/linux/head.bundle");
+    assert_eq!(fs::read(&bundle)?, fs::read(captured("bundle"))?);
+    let program: Vec<String> = serde_json::from_value(pending["program"].clone())?;
+    assert_eq!(
+        fs::read_to_string(captured("program"))?,
+        format!("{program:?}")
+    );
+    let staged = PathBuf::from(fs::read_to_string(captured("cwd"))?);
+    assert!(!staged.starts_with(fixture_process::directory(&fixture.root.join(".git"))));
+    assert!(
+        !staged.exists(),
+        "the failed submission must remove its staging directory"
+    );
+    assert!(require_admission(&fixture.root, "HEAD").is_err());
+    let recovered = fixture.command(&fixture.root, "", VALID_STAGES)?.output()?;
+    ensure!(
+        recovered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&fixture.executions)?
+            .lines()
+            .collect::<Vec<_>>(),
+        [format!("box:{submission}")]
+    );
+    let staged = PathBuf::from(fs::read_to_string(captured("cwd"))?);
+    assert!(
+        !staged.exists(),
+        "the accepted submission must remove its staging directory"
+    );
+    assert!(!pending_path.exists());
+    require_admission(&fixture.root, "HEAD")?;
+    Ok(())
+}
 
 #[test]
 fn pending_recovery_needs_no_new_workspace_capacity() -> Result<()> {

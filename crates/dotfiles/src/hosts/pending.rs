@@ -393,18 +393,42 @@ impl Lease {
     fn run(&self, native: &Real, mut execution: Execution) -> Result<(Execution, GateRun)> {
         let reference = format!("{}:{}", execution.host, execution.submission);
         if pending_action(execution.state, false, false) == PendingAction::Submit {
-            let mut submission = super::command(native, Tool::Domyjob);
-            submission
-                .current_dir(self.snapshot())
-                .args([
-                    "run",
-                    &execution.host,
-                    "--submission",
-                    &execution.submission,
-                    "--",
-                ])
-                .args(&execution.program);
-            let (status, output) = super::job_output(submission, Some(super::REQUEST_LIMIT))?;
+            let snapshot = tempfile::tempdir()?;
+            let submitted = (|| -> Result<_> {
+                let directory = platform::paths::canonical(snapshot.path())?;
+                let metadata = platform::paths::canonical(
+                    self.directory
+                        .parent()
+                        .context("pending Git metadata directory")?,
+                )?;
+                ensure!(
+                    !directory.starts_with(metadata),
+                    "submission staging must live outside Git metadata"
+                );
+                let bundle = fs::read(self.snapshot().join(BUNDLE))?;
+                ensure!(
+                    digest(&bundle) == execution.bundle_hash,
+                    "pending source bundle changed"
+                );
+                fs::write(directory.join(BUNDLE), bundle)?;
+                let mut submission = super::command(native, Tool::Domyjob);
+                submission
+                    .current_dir(&directory)
+                    .args([
+                        "run",
+                        &execution.host,
+                        "--submission",
+                        &execution.submission,
+                        "--",
+                    ])
+                    .args(&execution.program);
+                super::job_output(submission, Some(super::REQUEST_LIMIT))
+            })();
+            platform::cleanup::report(
+                snapshot.close(),
+                "remove the remote submission staging directory",
+            );
+            let (status, output) = submitted?;
             ensure!(
                 status.success(),
                 "{reference}: submit pending remote job: {output}; resume with `dotfiles hosts check`"

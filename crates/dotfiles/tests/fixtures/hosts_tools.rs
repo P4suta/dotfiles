@@ -55,6 +55,18 @@ fn main() {
         }
         "on" => println!("{alias}:probe"),
         "run" => {
+            let directory = std::env::current_dir().unwrap();
+            if let Ok(metadata) = std::env::var("HOSTS_FIXTURE_METADATA") {
+                if directory.starts_with(metadata) {
+                    eprintln!("a Git metadata directory cannot be sent as source");
+                    std::process::exit(1);
+                }
+                let entries: Vec<_> = std::fs::read_dir(&directory)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().file_name())
+                    .collect();
+                assert_eq!(entries, [std::ffi::OsString::from("head.bundle")]);
+            }
             let job = args
                 .windows(2)
                 .find_map(|pair| (pair[0] == "--submission").then_some(pair[1].as_str()))
@@ -71,6 +83,11 @@ fn main() {
                 let mut executions = String::new();
                 file.read_to_string(&mut executions).unwrap();
                 let bundle = std::fs::read("head.bundle").unwrap();
+                std::fs::write(
+                    std::path::Path::new(&path).with_extension(format!("{job}.cwd")),
+                    directory.to_str().unwrap(),
+                )
+                .unwrap();
                 let saved = std::path::Path::new(&path).with_extension(format!("{job}.bundle"));
                 let program =
                     &args[args.iter().position(|argument| argument == "--").unwrap() + 1..];
