@@ -1,7 +1,7 @@
 {
-  "revision": "6f246c58f5cbd6459b954c8da0171b82e408c88080850f3b7e4af6008fdd72ce",
+  "revision": "e93b797e815f8bd394613b3b09bf1914f2fd13de04991943fa5fd5021a31eeec",
   "outcome": "implemented",
-  "reason": "Keep command discovery and argument preservation separate from typed orchestration.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "reason": "Keep command discovery and argument preservation separate from typed orchestration.\nAlign the just binding with 1.59.0; the installed command reports 1.59.0 and `just --list` exposes the repository's current recipes.\nThe inventory test continues to reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
     "home/dot_agents/skills/just/SKILL.md",
     "home/dot_agents/skills/just/tools.toml",

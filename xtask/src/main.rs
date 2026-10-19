@@ -584,16 +584,31 @@ where
     Ok(())
 }
 
+const SKILL_TARGETS: [&str; 3] = [
+    ".agents/skills",
+    ".claude/skills",
+    ".config/skill-ops/policy.json",
+];
+
 fn install_shared_skills(root: &Path) -> Result<()> {
     skill_ops::check_catalog(root)?;
-    let mut paths = skill_source_paths(root)?;
-    ensure!(!paths.is_empty(), "no skill files to install");
-    paths.push(root.join("home/dot_config/skill-ops/policy.json"));
-    apply_sources(root, "dirs,files,symlinks", paths)
+    ensure!(
+        !skill_source_paths(root)?.is_empty(),
+        "no skill files to install"
+    );
+    let user_directory = user_directory()?;
+    let status = Tool::chezmoi_in(root)
+        .args(["apply", "--include", "dirs,files,symlinks", "--parent-dirs"])
+        .args(SKILL_TARGETS.map(|target| user_directory.join(target)))
+        .status()
         .context("scoped skill installation failed")?;
+    ensure!(
+        status.success(),
+        "scoped skill installation failed with {status}"
+    );
     skill_ops::skill_install::install_catalog(
         root,
-        &user_directory()?,
+        &user_directory,
         xtask::profiles::native_profile()?,
     )
 }

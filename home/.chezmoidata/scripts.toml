@@ -13,6 +13,5 @@
 ".chezmoiscripts/unix/13-racket.sh" = "mac"
 ".chezmoiscripts/unix/14-guard.sh" = "mac"
 ".chezmoiscripts/unix/15-ocomment.sh" = "linux"
-".chezmoiscripts/unix/16-domyjob.sh" = "mac"
 ".chezmoiscripts/unix/17-fleet.sh" = "mac"
 ".chezmoiscripts/unix/18-retire-tmux.sh" = "linux"

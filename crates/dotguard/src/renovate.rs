@@ -23,6 +23,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
+mod cargo;
 pub mod report;
 
 const DEFAULT_UPDATE_TYPES: &str = "minor patch pin pinDigest";
@@ -52,6 +53,7 @@ pub(crate) struct Update {
     new_value: String,
     new_digest: String,
     breaking: bool,
+    inherited_touched: bool,
 }
 
 pub fn dispatch(args: &[String]) -> i32 {
@@ -180,7 +182,12 @@ fn gate_ref(remote: &str, input: &str) -> i32 {
         return unavailable("Renovate did not produce verified evidence for the offered commit");
     };
 
-    let checked = read_report(&report);
+    let checked = std::fs::read(&report)
+        .map_err(|_| "the required report could not be read".to_owned())
+        .and_then(|bytes| {
+            report::parse_for_push(&bytes, &update_types(), &found)
+                .map_err(|error| error.to_string())
+        });
     if let Some(dir) = report.parent() {
         platform::cleanup::remove_dir_all(dir);
     }
@@ -230,6 +237,7 @@ fn outdated_refusal(blocked: &[String]) -> Refusal {
 }
 
 struct Found {
+    repository: String,
     changed_files: Vec<String>,
     added_by_file: BTreeMap<String, String>,
     baselines_by_file: BTreeMap<String, String>,
@@ -297,6 +305,10 @@ fn scope(remote: &str, input: &str) -> Result<Option<Found>, String> {
     changed_files.sort_unstable();
     changed_files.dedup();
     Ok(Some(Found {
+        repository: real_git::capture(&["rev-parse", "--show-toplevel"])
+            .ok_or("the repository root is unavailable")?
+            .trim()
+            .to_owned(),
         changed_files,
         added_by_file,
         baselines_by_file,
@@ -314,7 +326,7 @@ fn classify(
     let mut blocked = Vec::new();
     let mut outdated = Vec::new();
     for c in updates {
-        if !found.changed_files.iter().any(|f| f == &c.package_file) {
+        if !c.inherited_touched && !found.changed_files.iter().any(|f| f == &c.package_file) {
             continue;
         }
         let line = format!(
@@ -329,19 +341,21 @@ fn classify(
             needed: rules::freshness_rules::Need::Required,
             evidence: true,
             breaking: c.breaking,
-            touched: touched(
-                c,
-                found.added_by_file.get(&c.package_file).map(String::as_str),
-                found.scope_unknown,
-            ) || contexts
-                .iter()
-                .find(|context| context.package_file == c.package_file)
-                .is_some_and(|context| {
-                    let replacement = protocol_text(&c.replace_string);
-                    !replacement.is_empty()
-                        && context.after.matches(&replacement).count()
-                            > context.before.matches(&replacement).count()
-                }),
+            touched: c.inherited_touched
+                || touched(
+                    c,
+                    found.added_by_file.get(&c.package_file).map(String::as_str),
+                    found.scope_unknown,
+                )
+                || contexts
+                    .iter()
+                    .find(|context| context.package_file == c.package_file)
+                    .is_some_and(|context| {
+                        let replacement = protocol_text(&c.replace_string);
+                        !replacement.is_empty()
+                            && context.after.matches(&replacement).count()
+                                > context.before.matches(&replacement).count()
+                    }),
         }) == rules::freshness_rules::Verdict::Outdated
         {
             blocked.push(line);
@@ -845,7 +859,7 @@ fn checkout_snapshot(root: &str, offered: Option<&str>) -> Option<PathBuf> {
     std::fs::create_dir_all(&snapshot).ok()?;
     let prefix = format!("{}/", snapshot.display());
     // The offered commit reaches checkout-index through a temporary index, so the repository's own index stays untouched.
-    let offered_index = snapshot.join(".gate-index");
+    let offered_index = snapshot.with_extension("index");
     let staged = match offered {
         Some(sha) => {
             let index = offered_index.to_string_lossy().into_owned();
@@ -1234,6 +1248,7 @@ mod tests {
             new_value: "9.9".into(),
             new_digest: String::new(),
             breaking: false,
+            inherited_touched: false,
         }
     }
 

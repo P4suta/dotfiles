@@ -38,22 +38,24 @@ fn invalid(location: impl Into<String>, reason: &'static str) -> ReportError {
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Dependency {
-    dep_name: String,
-    updates: Vec<Candidate>,
+pub(super) struct Dependency {
+    pub(super) dep_name: String,
+    pub(super) updates: Vec<Candidate>,
     #[serde(default)]
-    warnings: Vec<Value>,
+    pub(super) warnings: Vec<Value>,
     #[serde(default = "enabled")]
-    enabled: bool,
-    current_value: Option<String>,
-    current_digest: Option<String>,
-    locked_version: Option<String>,
-    current_version: Option<String>,
+    pub(super) enabled: bool,
+    pub(super) current_value: Option<String>,
+    pub(super) current_digest: Option<String>,
+    pub(super) locked_version: Option<String>,
+    pub(super) current_version: Option<String>,
     replace_string: Option<String>,
-    skip_reason: Option<String>,
-    datasource: Option<String>,
-    package_name: Option<String>,
-    dep_type: Option<String>,
+    pub(super) skip_reason: Option<String>,
+    pub(super) datasource: Option<String>,
+    pub(super) package_name: Option<String>,
+    pub(super) dep_type: Option<String>,
+    pub(super) target: Option<String>,
+    pub(super) registry_urls: Option<Vec<String>>,
 }
 
 const fn enabled() -> bool {
@@ -62,7 +64,7 @@ const fn enabled() -> bool {
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Candidate {
+pub(super) struct Candidate {
     #[serde(default, deserialize_with = "update_kind")]
     update_type: Option<String>,
     #[serde(default, deserialize_with = "update_kind")]
@@ -87,10 +89,11 @@ fn update_kind<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Stri
 }
 
 #[derive(Debug)]
-struct Record {
-    manager: String,
-    file: String,
-    dependency: Dependency,
+pub(super) struct Record {
+    pub(super) manager: String,
+    pub(super) file: String,
+    pub(super) dependency: Dependency,
+    pub(super) lock_files: Option<Vec<String>>,
 }
 
 impl Record {
@@ -107,6 +110,22 @@ impl Record {
 /// # Errors
 /// Rejects malformed reports, error-level problems, and unverified dependency lookups.
 pub fn parse(bytes: &[u8], types: &str) -> Result<CheckedReport, ReportError> {
+    parse_inner(bytes, types, None)
+}
+
+pub(super) fn parse_for_push(
+    bytes: &[u8],
+    types: &str,
+    found: &super::Found,
+) -> Result<CheckedReport, ReportError> {
+    parse_inner(bytes, types, Some(found))
+}
+
+fn parse_inner(
+    bytes: &[u8],
+    types: &str,
+    found: Option<&super::Found>,
+) -> Result<CheckedReport, ReportError> {
     let Document(document) = serde_json::from_slice(bytes)
         .map_err(|_| invalid("report", "invalid JSON or duplicate fields"))?;
     let root = document
@@ -125,8 +144,13 @@ pub fn parse(bytes: &[u8], types: &str) -> Result<CheckedReport, ReportError> {
         .and_then(Value::as_object)
         .ok_or_else(|| invalid("repositories.local.packageFiles", "expected an object"))?;
     let records = dependency_records(managers)?;
+    let bindings =
+        super::cargo::bind(&records, found).map_err(|reason| invalid("Cargo workspace", reason))?;
     let mut updates = Vec::new();
-    for record in &records {
+    for (index, record) in records.iter().enumerate() {
+        if bindings.inherited.contains(&index) {
+            continue;
+        }
         let dependency = &record.dependency;
         let skip = skip(dependency);
         let facts = LookupFacts {
@@ -193,6 +217,7 @@ pub fn parse(bytes: &[u8], types: &str) -> Result<CheckedReport, ReportError> {
                 .unwrap_or_default(),
                 new_digest: candidate.new_digest.clone().unwrap_or_default(),
                 breaking: candidate.is_breaking,
+                inherited_touched: bindings.touched.contains(&index),
             });
         }
     }
@@ -240,6 +265,11 @@ fn dependency_records(managers: &Map<String, Value>) -> Result<Vec<Record>, Repo
                     manager: manager.clone(),
                     file: name.to_owned(),
                     dependency,
+                    lock_files: file
+                        .get("lockFiles")
+                        .map(|value| serde_json::from_value(value.clone()))
+                        .transpose()
+                        .map_err(|_| invalid(location, "invalid lockfile ownership"))?,
                 });
             }
         }

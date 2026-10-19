@@ -1,9 +1,12 @@
 {
-  "revision": "888f5ede6c7d3a7ad9a1e7f1b9fac40e711b48ff03fb8355e698e1a0609cac12",
+  "revision": "f147359d65416d42a73278ca512f4a814bc2409a919086b50f7c621756eade85",
   "outcome": "implemented",
-  "reason": "Choose the model tier by difficulty and consequence: implementation, design, and hard-to-reverse work on the top tier, routine supervision on the cheapest; project commands and storage-scout are enforced by the shell hook.",
+  "reason": "Task-scoped domyjob rooms carry delegate status, blockers, questions, and resource claims with explicit ownership and expiry across managed clients, while preserving task authorization and native resource locking.",
   "evidence": [
     "home/dot_agents/skills/delegation/SKILL.md",
+    "crates/dotfiles/src/setup.rs",
+    "crates/dotfiles/tests/chat.rs",
+    "docs/native-chat.md",
     "crates/rules/src/shell_write_rules.rs",
     "crates/rules/src/disk_scan_rules.rs"
   ],
