@@ -15,7 +15,7 @@ coderabbit-guard = { path = "../crates/coderabbit-guard" }
 dotfiles = { path = "../crates/dotfiles" }
 dotguard = { path = "../crates/dotguard" }
 flate2 = "1.1.10"
-jsonschema = { version = "=0.20.0", default-features = false, features = [
+jsonschema = { version = "=0.58.6", default-features = false, features = [
   "draft201909",
   "draft202012",
 ] }
