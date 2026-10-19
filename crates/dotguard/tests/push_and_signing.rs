@@ -873,6 +873,33 @@ fn renovate_verifies_inherited_local_cargo_dependencies() {
 }
 
 #[test]
+fn renovate_verifies_versioned_local_cargo_dependencies() {
+    for (version, name) in [
+        ("1.0.1", "local-publication-version"),
+        ("^1.0.1", "local-compatible-version"),
+        ("=1.0.1", "local-exact-version"),
+    ] {
+        let (repository, base, report) = local_workspace_fixture(name);
+        let path = repository.path().join("Cargo.toml");
+        std::fs::write(
+            &path,
+            std::fs::read_to_string(&path).unwrap().replace(
+                "path = \"dependency\"",
+                &format!("path = \"dependency\", version = {version:?}"),
+            ),
+        )
+        .unwrap();
+        let offered = workspace_offer(&repository, &base, MEMBER_MANIFEST);
+        let output = report_gate(&repository, &base, &offered, &report);
+        assert!(
+            output.status.success(),
+            "{version}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
 fn renovate_rejects_forged_inherited_local_cargo_evidence() {
     let (repository, base, original) = local_workspace_fixture("renovate-local-refusals");
     let offered = workspace_offer(&repository, &base, &format!("{MEMBER_MANIFEST}# comment\n"));
@@ -902,20 +929,6 @@ fn renovate_rejects_forged_inherited_local_cargo_evidence() {
         serde_json::json!(["member/Cargo.lock"]);
     assert_eq!(
         refusal(&report_gate(&repository, &base, &offered, &report)).rule,
-        "push.evidence"
-    );
-    let path = repository.path().join("Cargo.toml");
-    std::fs::write(
-        &path,
-        std::fs::read_to_string(&path).unwrap().replace(
-            "path = \"dependency\"",
-            "path = \"dependency\", version = \"1.0.1\"",
-        ),
-    )
-    .unwrap();
-    let mixed = workspace_offer(&repository, &base, MEMBER_MANIFEST);
-    assert_eq!(
-        refusal(&report_gate(&repository, &base, &mixed, &original)).rule,
         "push.evidence"
     );
 }
