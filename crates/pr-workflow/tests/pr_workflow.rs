@@ -3881,6 +3881,53 @@ fn ready_refuses_a_pr_that_adds_an_unowned_parser_until_its_fuzz_target_exists()
 const PASSING: &str = r#"[{"status":"COMPLETED","conclusion":"SUCCESS"}]"#;
 const FAILING: &str = r#"[{"status":"COMPLETED","conclusion":"FAILURE"}]"#;
 
+#[test]
+fn the_owner_can_ready_and_merge_a_bot_pull_request() -> Result<()> {
+    let body = format!("{BODY}\nCloses #23.\n");
+    let fixture = Fixture::new(&body)?;
+    let views = [
+        (true, "DRAFT"),
+        (true, "DRAFT"),
+        (false, "CLEAN"),
+        (false, "CLEAN"),
+        (false, "MERGED"),
+    ]
+    .into_iter()
+    .map(|(draft, state)| -> Result<String> {
+        let original = read(17, &fixture.head, draft, &body, PASSING, state);
+        let (_, encoded) = original.split_once('=').context("fixture view")?;
+        let mut view: serde_json::Value = serde_json::from_str(encoded)?;
+        view.as_object_mut().context("fixture object")?.extend(
+            serde_json::json!({
+                "author":{"login":"app/renovate","is_bot":true},
+                "headRefName":"feature","headRepository":{"name":"project"},
+                "headRepositoryOwner":{"login":"P4suta"},"isCrossRepository":false
+            })
+            .as_object()
+            .context("bot fixture")?
+            .clone(),
+        );
+        Ok(format!("17={view}"))
+    })
+    .collect::<Result<Vec<_>>>()?
+    .join("\n");
+    let output = fixture
+        .personal_command("merge")?
+        .args(["--pr", "17", "--interval", "0"])
+        .env("GH_FIXTURE_VIEWS", views)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = fixture.log()?;
+    assert_eq!(mutations(&log), ["ready", "merge"]);
+    assert!(!log.contains("users/app/renovate/ssh_signing_keys"));
+    assert!(log.contains(&format!("\n--match-head-commit\n{}\n", fixture.head)));
+    Ok(())
+}
+
 /// One read of a PR for `GH_FIXTURE_VIEWS`.
 /// `merge` holds the merge state of GitHub, or `MERGED` for a merged PR.
 fn read(number: u64, head: &str, draft: bool, body: &str, checks: &str, merge: &str) -> String {

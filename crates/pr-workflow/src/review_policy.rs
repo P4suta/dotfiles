@@ -1242,7 +1242,7 @@ pub(super) fn live_binding_at(
     body: &str,
     live: &super::LiveDocument,
 ) -> Result<Checked> {
-    let signer = assessment_signer(github, target, live)?;
+    let signer = assessment_signer(github, target, &live.author, &live.source)?;
     let checked = check_at(
         root,
         github,
@@ -1261,18 +1261,19 @@ pub(super) fn live_binding_at(
     Ok(checked)
 }
 
-fn assessment_signer<'a>(
+pub(super) fn assessment_signer<'a>(
     github: &'a Github,
     target: &Target,
-    live: &'a super::LiveDocument,
+    creator: &'a super::ReviewAuthor,
+    source: &super::LiveSource,
 ) -> Result<&'a str> {
     let repository = github.repository(&target.repo)?;
     match policy::assessment_signer(
-        live.author.is_bot,
+        creator.is_bot,
         github.login.eq_ignore_ascii_case(&repository.owner.login),
-        live.source.is_cross_repository == Some(false),
+        source.is_cross_repository == Some(false),
     ) {
-        policy::AssessmentSigner::Creator => Ok(&live.author.login),
+        policy::AssessmentSigner::Creator => Ok(&creator.login),
         policy::AssessmentSigner::RepositoryOwner => Ok(&github.login),
         policy::AssessmentSigner::Unavailable => anyhow::bail!(
             "bot assessments require the authenticated repository owner and the same source repository"
@@ -1441,7 +1442,7 @@ fn prepare_history(
         return Ok(None);
     };
     let live = super::live_document(github, target, pr)?;
-    let signer = assessment_signer(github, target, &live)?;
+    let signer = assessment_signer(github, target, &live.author, &live.source)?;
     let Some(prior) = previous(github, target, &live.body, signer, &current.root)? else {
         return Ok(None);
     };
