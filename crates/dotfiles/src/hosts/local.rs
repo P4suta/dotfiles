@@ -244,6 +244,8 @@ fn captured_source(directory: &Path, bundle: &Path, candidate: &Candidate<'_>) -
         .arg("-C")
         .arg(directory)
         .args(["-c", "advice.detachedHead=false", "clone", "--quiet"])
+        // A host's fsmonitor daemon would leave its socket in the sealed checkout, which holds only files and directories.
+        .args(["--config", "core.fsmonitor=false"])
         .arg(bundle)
         .arg(CHECKOUT)
         .env("GIT_CONFIG_GLOBAL", &empty)

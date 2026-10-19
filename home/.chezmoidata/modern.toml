@@ -98,7 +98,7 @@ tool = "dust"
 version = "1.2.6"
 reason = "It bounds its output and walks in parallel, and storage-scout plans scans and cleanup."
 keep = "None."
-next = "`dust {args}` for a quick view, or `storage-scout scan` for scans and cleanup"
+next = "`storage-scout scan <path>` for disk usage and `storage-scout clean` to reclaim space, since the hook refuses every recursive size walk, including dust"
 
 [[modern.tools]]
 legacy = ["ps"]

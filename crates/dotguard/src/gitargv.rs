@@ -51,6 +51,9 @@ pub trait Repository {
         branch: &str,
         upstream: Option<&str>,
     ) -> Option<bool>;
+    /// Whether the index or worktree holds a change to a tracked file, which `reset --hard` or a forced checkout discards.
+    /// Returns `None` when the repository state gives no answer.
+    fn holds_tracked_changes(&self, globals: &[String]) -> Option<bool>;
 }
 
 /// No repository: the gate judges every command on its words alone, and permits a rebase without a named branch.
@@ -67,6 +70,10 @@ impl Repository for Unread {
     }
 
     fn rewrites_published(&self, _: &[String], _: &str, _: Option<&str>) -> Option<bool> {
+        None
+    }
+
+    fn holds_tracked_changes(&self, _: &[String]) -> Option<bool> {
         None
     }
 }
@@ -174,6 +181,11 @@ struct Invocation<'a> {
 }
 
 impl Invocation<'_> {
+    /// Whether a forced reset or checkout could discard work, which only a known clean tree rules out.
+    fn discards_work(&self) -> bool {
+        self.repo.holds_tracked_changes(self.globals) != Some(false)
+    }
+
     /// The stack command, for a refused rewrite of published history.
     fn stack(&self) -> Next {
         Next::Shell(stack_command(self.repo.slug(self.globals).as_deref()))
@@ -962,7 +974,7 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
         ));
     }
     match sub {
-        "reset" if has("--hard") => Some(Denial::new(
+        "reset" if has("--hard") && call.discards_work() => Some(Denial::new(
             Rule::Force,
             "git reset --hard",
             "--hard discards every uncommitted change with no reflog entry to get it back.\n\
@@ -983,7 +995,8 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
         }
 
         "checkout" | "switch"
-            if has("--force") || has("--discard-changes") || flags.iter().any(|a| short_cluster(a).is_some_and(|c| c.contains('f'))) =>
+            if (has("--force") || has("--discard-changes") || flags.iter().any(|a| short_cluster(a).is_some_and(|c| c.contains('f'))))
+                && call.discards_work() =>
         {
             Some(Denial::new(
                 Rule::Force,
@@ -1530,6 +1543,45 @@ mod tests {
                 ("topic", _) => Some(true),
                 _ => None,
             }
+        }
+
+        fn holds_tracked_changes(&self, _: &[String]) -> Option<bool> {
+            None
+        }
+    }
+
+    /// A checkout whose tracked files hold a change, or none.
+    struct Tree(bool);
+
+    impl Repository for Tree {
+        fn slug(&self, _: &[String]) -> Option<String> {
+            None
+        }
+
+        fn current_branch(&self, _: &[String]) -> Option<String> {
+            None
+        }
+
+        fn rewrites_published(&self, _: &[String], _: &str, _: Option<&str>) -> Option<bool> {
+            None
+        }
+
+        fn holds_tracked_changes(&self, _: &[String]) -> Option<bool> {
+            Some(self.0)
+        }
+    }
+
+    #[test]
+    fn a_forced_reset_or_checkout_passes_only_a_clean_tree() {
+        for line in [
+            "reset --hard",
+            "-C cache reset --hard FETCH_HEAD",
+            "checkout --force main",
+            "switch --discard-changes main",
+        ] {
+            assert!(inspect_in(&argv(line), &Tree(false)).is_none(), "{line}");
+            assert!(inspect_in(&argv(line), &Tree(true)).is_some(), "{line}");
+            assert!(inspect(&argv(line)).is_some(), "{line}");
         }
     }
 

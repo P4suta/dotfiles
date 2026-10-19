@@ -11,8 +11,8 @@ mod corpus;
 
 const CATALOG: &str = include_str!("../../../policy/native-materials.toml");
 const PROJECT: &str =
-    "[tools]\nrust={version='1.99.0',components=['rust-src','clippy','rustfmt']}\n";
-const LOCK: &str = "lockfile_version=3\n[[tools.rust]]\nversion='1.99.0'\nbackend='core:rust'\nspecifiers=['1.99.0']\n[tools.rust.options]\ncomponents='rust-src,clippy,rustfmt'\n";
+    "[tools]\nrust={version='1.99.1',components=['rust-src','clippy','rustfmt']}\n";
+const LOCK: &str = "lockfile_version=3\n[[tools.rust]]\nversion='1.99.1'\nbackend='core:rust'\nspecifiers=['1.99.1']\n[tools.rust.options]\ncomponents='rust-src,clippy,rustfmt'\n";
 const EXPECTED_METADATA_CASES: usize = 36 + corpus::STDLIB_CASE_COUNT;
 const ORIGINAL_STDLIB_MEMBER: &str =
     "rust-src-nightly/rust-src/lib/rustlib/src/rust/library/Cargo.lock";
@@ -119,7 +119,7 @@ fn current_pins_and_manifest_capture_are_checked_before_acquisition() -> Result<
     let captured = fixture.capture()?;
     fs::write(
         fixture.root.join("mise.toml"),
-        PROJECT.replace("1.99.0", "1.98.0"),
+        PROJECT.replace("1.99.1", "1.98.0"),
     )?;
     let fetches = Cell::new(0);
     assert!(

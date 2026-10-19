@@ -5,6 +5,7 @@
 use crate::ignore_rules::matches;
 use crate::profile_rules::Profile;
 use platform::step::{Family, Step};
+use platform::tool::Provision;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -648,7 +649,7 @@ pub fn unprovided(data: &Value) -> Vec<String> {
         let platform = &data["platforms"][profile.name()];
         for step in Step::ALL.into_iter().filter(|step| step.runs_on(profile)) {
             for tool in step.requires(profile) {
-                let provided = tool.package(profile).is_some_and(|(pointer, entry)| {
+                let packaged = tool.package(profile).is_some_and(|(pointer, entry)| {
                     let list = platform.pointer(pointer);
                     list.and_then(Value::as_array)
                         .is_some_and(|items| items.iter().any(|item| item == entry))
@@ -656,6 +657,18 @@ pub fn unprovided(data: &Value) -> Vec<String> {
                             .and_then(Value::as_object)
                             .is_some_and(|items| items.get(entry).is_some_and(|spec| spec != ""))
                 });
+                let mise_listed = platform["tools"].as_object().is_some_and(|sets| {
+                    sets.values()
+                        .filter_map(Value::as_array)
+                        .flatten()
+                        .any(|item| item == tool.program())
+                });
+                // The tools step installs only what the profile lists, so only a dedicated setup step provides a tool by running.
+                let installed_by_step = matches!(
+                    tool.provision(),
+                    Provision::Setup(installer) if installer != Step::Tools && installer.runs_on(profile)
+                );
+                let provided = packaged || mise_listed || installed_by_step;
                 if !provided {
                     found.push(format!(
                         "{}: the step {} needs {}, which the profile doesn't install",

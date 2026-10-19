@@ -206,6 +206,8 @@ fn a_copy_named_git_refuses_skipped_hooks_and_records_the_refusal() {
 #[test]
 fn a_copy_named_git_refuses_destructive_commands_unless_waived() {
     let wrapper = Wrapper::new("force");
+    std::fs::write(wrapper.scope.join("repository/tracked"), "work").unwrap();
+    assert!(wrapper.run(&["add", "tracked"], None).status.success());
     let refusal = last_record(&wrapper.run(&["reset", "--hard"], None));
     assert_eq!(refusal.rule, "git.force");
     assert_eq!(

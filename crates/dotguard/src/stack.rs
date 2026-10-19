@@ -109,6 +109,19 @@ impl Repository for Checkout {
         git(globals, &["symbolic-ref", "--quiet", "--short", "HEAD"])
     }
 
+    fn holds_tracked_changes(&self, globals: &[String]) -> Option<bool> {
+        git(
+            globals,
+            &[
+                "--no-optional-locks",
+                "status",
+                "--porcelain",
+                "--untracked-files=no",
+            ],
+        )
+        .map(|status| !status.is_empty())
+    }
+
     fn rewrites_published(
         &self,
         globals: &[String],

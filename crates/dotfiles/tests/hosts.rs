@@ -3449,6 +3449,12 @@ fn one_head_reports_every_failing_host_and_stage() -> Result<()> {
         "[user]\nname = Fixture\nemail = fixture@example.com\n[commit]\ngpgsign = false\n",
     )?;
     fs::write(root.join(".gitignore"), "gitconfig\n")?;
+    fs::write(root.join(".chezmoiroot"), "home\n")?;
+    fs::create_dir_all(root.join("crates/dotfiles"))?;
+    fs::write(
+        root.join("crates/dotfiles/Cargo.toml"),
+        "[package]\nname = \"dotfiles\"\n",
+    )?;
     fs::write(
         root.join(".github/workflows/ci.yml"),
         "jobs:\n  test:\n    strategy:\n      matrix:\n        os: [ubuntu-latest, macos-latest, windows-latest]\n    runs-on: ${{ matrix.os }}\n",

@@ -11,7 +11,7 @@ mod host_materials;
 #[path = "../examples/support/artifact_material_corpus.rs"]
 mod corpus;
 
-const PIN: &str = "2.73.0";
+const PIN: &str = "2.73.1";
 const CHECKSUM: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 const GLOBAL: &str = "[tools]\nglobal = '1.2.3'\n";
 
