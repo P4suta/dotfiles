@@ -5,7 +5,6 @@ use anyhow::{Context, Result, ensure};
 use platform::issue_context::{self as state, Receipt};
 use serde::Deserialize;
 use std::collections::BTreeSet;
-use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -124,93 +123,13 @@ pub(super) fn start(
     Ok(())
 }
 
-fn identity(root: &Path) -> Result<(String, Option<String>)> {
-    if std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true") {
-        let path =
-            std::env::var_os("GITHUB_EVENT_PATH").context("trusted CI event path missing")?;
-        let event: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
-        let repository = event["repository"]["full_name"]
-            .as_str()
-            .context("CI repository identity missing")?;
-        ensure!(
-            std::env::var("GITHUB_REPOSITORY").as_deref() == Ok(repository),
-            "CI repository identities differ"
-        );
-        if let Some(pr) = event.get("pull_request") {
-            ensure!(
-                pr["base"]["repo"]["full_name"].as_str() == Some(repository),
-                "CI PR destination differs"
-            );
-            let branch = pr["head"]["ref"]
-                .as_str()
-                .context("CI head branch missing")?;
-            let head = pr["head"]["sha"]
-                .as_str()
-                .context("CI head source missing")?;
-            state::git(root, &["merge-base", "--is-ancestor", head, "HEAD"], None)?;
-            return Ok((repository.to_owned(), Some(branch.to_owned())));
-        }
-        ensure!(
-            event.get("merge_group").is_some(),
-            "unsupported issue-context CI event"
-        );
-        return Ok((repository.to_owned(), None));
-    }
+fn identity(root: &Path) -> Result<(String, String)> {
     let url = state::git(root, &["remote", "get-url", "origin"], None)?;
     Ok((
         super::github_slug(url.trim())
             .context("issue-context origin is not an exact GitHub repository")?,
-        Some(state::branch(root)?),
+        state::branch(root)?,
     ))
-}
-
-#[derive(Deserialize)]
-struct QueuePull {
-    state: String,
-    head: QueueHead,
-    base: QueueBase,
-}
-
-#[derive(Deserialize)]
-struct QueueHead {
-    r#ref: String,
-    sha: String,
-}
-
-#[derive(Deserialize)]
-struct QueueBase {
-    repo: QueueRepository,
-}
-
-#[derive(Deserialize)]
-struct QueueRepository {
-    full_name: String,
-}
-
-fn queue_branches(github: &Github, root: &Path, repository: &str) -> Result<BTreeSet<String>> {
-    let head = state::git(root, &["rev-parse", "HEAD"], None)?;
-    let pulls: Vec<QueuePull> = github.read(&format!(
-        "repos/{repository}/commits/{}/pulls?per_page={KEY_PAGE_LIMIT}",
-        head.trim()
-    ))?;
-    ensure!(
-        !pulls.is_empty() && pulls.len() < KEY_PAGE_LIMIT,
-        "merge group has no complete live PR provenance"
-    );
-    let mut branches = BTreeSet::new();
-    for pr in pulls {
-        ensure!(
-            pr.state == "open" && pr.base.repo.full_name.eq_ignore_ascii_case(repository),
-            "merge-group PR provenance differs"
-        );
-        state::git(
-            root,
-            &["merge-base", "--is-ancestor", &pr.head.sha, "HEAD"],
-            None,
-        )?;
-        branches.insert(pr.head.r#ref);
-    }
-    Ok(branches)
 }
 
 fn require_registered_paths(scopes: &[String], paths: &[String]) -> Result<()> {
@@ -233,42 +152,15 @@ fn require_registered_paths(scopes: &[String], paths: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn selected_native_context(
-    root: &Path,
-    branch: &str,
-    staged: bool,
-) -> Result<Option<(state::Manifest, bool)>> {
-    if let Some(mut manifest) = state::optional_local(root)? {
-        manifest
-            .receipts
-            .retain(|receipt| receipt.context.branch == branch);
-        if !manifest.receipts.is_empty() {
-            if let Some(mut transport) = state::optional_transport(root, staged)? {
-                transport
-                    .receipts
-                    .retain(|receipt| receipt.context.branch == branch);
-                if !transport.receipts.is_empty() {
-                    ensure!(
-                        selected_repository(&transport)?
-                            .eq_ignore_ascii_case(&selected_repository(&manifest)?),
-                        "owner-local and signed transport destinations differ"
-                    );
-                }
-            }
-            return Ok(Some((manifest, false)));
-        }
-    }
-    let Some(mut manifest) = state::optional_transport(root, staged)? else {
+/// The owner-local contexts of `branch`, which any worktree of the repository may have registered.
+fn selected_context(root: &Path, branch: &str) -> Result<Option<state::Manifest>> {
+    let Some(mut manifest) = state::optional_local(root)? else {
         return Ok(None);
     };
     manifest
         .receipts
         .retain(|receipt| receipt.context.branch == branch);
-    ensure!(
-        !manifest.receipts.is_empty(),
-        "signed issue transport does not bind the current branch"
-    );
-    Ok(Some((manifest, true)))
+    Ok((!manifest.receipts.is_empty()).then_some(manifest))
 }
 
 fn selected_repository(manifest: &state::Manifest) -> Result<String> {
@@ -292,32 +184,21 @@ fn selected_repository(manifest: &state::Manifest) -> Result<String> {
 
 struct ChangeDestination {
     repository: String,
-    branch: Option<String>,
+    branch: String,
     destination: Destination,
     selected: Option<state::Manifest>,
 }
 
-fn change_destination(root: &Path, staged: bool, github: &Github) -> Result<ChangeDestination> {
+fn change_destination(root: &Path, github: &Github) -> Result<ChangeDestination> {
     let (mut repository, branch) = identity(root)?;
-    let native = std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true");
-    let selected = if native {
-        selected_native_context(
-            root,
-            branch.as_deref().context("native branch missing")?,
-            staged,
-        )?
-    } else {
-        None
-    };
-    if let Some((manifest, _)) = &selected {
+    let selected = selected_context(root, &branch)?;
+    if let Some(manifest) = &selected {
         repository = selected_repository(manifest)?;
     }
     let destination = destination(github, &repository)?;
-    if native {
-        super::source_identity(github, root, &repository)?;
-    }
+    super::source_identity(github, root, &repository)?;
     if (!destination.personal || destination.fork)
-        && let Some((manifest, transported)) = &selected
+        && let Some(manifest) = &selected
     {
         ensure!(
             manifest
@@ -326,11 +207,10 @@ fn change_destination(root: &Path, staged: bool, github: &Github) -> Result<Chan
                 .all(|receipt| !receipt.context.destination.required),
             "required issue context cannot be downgraded to external or fork policy"
         );
-        let keys = if *transported
-            || manifest
-                .receipts
-                .iter()
-                .any(|receipt| !receipt.object.is_empty())
+        let keys = if manifest
+            .receipts
+            .iter()
+            .any(|receipt| !receipt.object.is_empty())
         {
             Some(signers(github, &repository)?)
         } else {
@@ -352,7 +232,7 @@ fn change_destination(root: &Path, staged: bool, github: &Github) -> Result<Chan
         repository,
         branch,
         destination,
-        selected: selected.map(|(manifest, _)| manifest),
+        selected,
     })
 }
 
@@ -410,18 +290,12 @@ fn registered_context(
 
 pub(super) fn check(root: &Path, base: Option<&str>, staged: bool) -> Result<()> {
     let root = state::checkout(root)?;
-    if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
-        && platform::local_issues::active(&root)?
-    {
+    if platform::local_issues::active(&root)? {
         platform::local_issues::check(&root, base, staged)?;
         println!("Local issue context accepted; project verification remains required");
         return Ok(());
     }
     let paths = state::paths(&root, base, staged)?;
-    let paths: Vec<_> = paths
-        .into_iter()
-        .filter(|path| path != state::TRANSPORT)
-        .collect();
     if paths.is_empty() {
         println!("Issue context: no implementation change");
         return Ok(());
@@ -436,35 +310,15 @@ pub(super) fn check(root: &Path, base: Option<&str>, staged: bool) -> Result<()>
         branch,
         destination,
         selected,
-    } = change_destination(&root, staged, &github)?;
+    } = change_destination(&root, &github)?;
     if !destination.personal || destination.fork {
         println!("Issue context follows the external or fork destination policy");
         return Ok(());
     }
-    let working =
-        base.is_none() && !staged && std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true");
-    let mut manifest = if working {
-        if let Some(selected) = selected {
-            selected
-        } else {
-            state::local(&root)?
-        }
-    } else {
-        state::transport(&root, staged)?
-    };
-    let branches = match branch {
-        Some(branch) => BTreeSet::from([branch]),
-        None => queue_branches(&github, &root, &repository)?,
-    };
-    if working {
-        manifest
-            .receipts
-            .retain(|receipt| branches.contains(&receipt.context.branch));
-    }
-    ensure!(
-        !manifest.receipts.is_empty(),
-        "checked issue context missing for the current branch"
-    );
+    let manifest = selected.context(
+        "checked issue context missing for the current branch; run pr-workflow start --repo OWNER/REPO --issue NUMBER --path PATH in any worktree of this repository",
+    )?;
+    let branches = BTreeSet::from([branch]);
     let RegisteredChanges { scopes, prior } = registered_context(
         &root,
         &github,

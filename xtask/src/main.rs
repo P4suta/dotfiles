@@ -257,13 +257,32 @@ fn check_staged(root: &Path) -> Result<()> {
     )
 }
 
+/// Where the issue context of a change gets checked.
+#[derive(Clone, Copy, PartialEq)]
+enum IssueContext {
+    /// Owner-local state on this host.
+    Local,
+    /// The originating host, before the push that sent this captured candidate, because the context stays in that host's owner-local state.
+    Origin,
+}
+
 /// Runs the checks of each selected gate.
 /// A change that selects fewer gates skips only the checks it can't affect.
-fn check(root: &Path, gates: Gates, reference: &str) -> Result<()> {
+fn check(root: &Path, gates: Gates, reference: &str, context: IssueContext) -> Result<()> {
     let mut checks = Checks::default();
-    checks.run("issue.context", || {
-        pr_workflow::check_issue_context(root, (reference != "HEAD").then_some(reference), false)
-    });
+    if context == IssueContext::Local {
+        checks.run("issue.context", || {
+            pr_workflow::check_issue_context(
+                root,
+                (reference != "HEAD").then_some(reference),
+                false,
+            )
+        });
+    } else {
+        println!(
+            "Skipping issue.context: the originating host checked it before push, and its owner-local state stays there"
+        );
+    }
     if gates.contains(Gate::Prose) {
         check_prose(root, reference, &mut checks);
     }
@@ -476,7 +495,12 @@ fn run() -> Result<()> {
             xtask::rehearsal::run(&cli.root, disposable_host)?;
         }
         Action::Check { scope } if scope.staged() => check_staged(&cli.root)?,
-        Action::Check { scope } => check(&cli.root, scope.resolve(&cli.root)?, scope.reference())?,
+        Action::Check { scope } => check(
+            &cli.root,
+            scope.resolve(&cli.root)?,
+            scope.reference(),
+            IssueContext::Local,
+        )?,
         Action::Baselines { base, write } => {
             if write {
                 xtask::lint::write_baselines(&cli.root)?;
@@ -520,7 +544,7 @@ fn push_check(root: &Path) -> Result<()> {
     };
     xtask::skill_proofs::verify_push(
         family,
-        || check(root, Gates::ALL, "HEAD"),
+        || check(root, Gates::ALL, "HEAD", IssueContext::Origin),
         || xtask::skill_proofs::verify(root),
         || benchmarks(root, true),
     )
