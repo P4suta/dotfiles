@@ -1,7 +1,7 @@
 {
-  "revision": "4e022bfe7fe8d34d4048717b76a4377110c2430ca82eb02cf8319204e385e296",
+  "revision": "c53b5e3d5c0281cc7bc80962945da147ad4c2805c2637673c373857d85618f47",
   "outcome": "implemented",
-  "reason": "Bind the tool declaration to the pinned mise 2026.10.9 bootstrap.\nThe five launcher checksums match the official release checksum file and asset digests.\nThe archive consumer and its fixtures use the same engine version, and the Windows member index comes from the verified release archive.\nThe inventory checks the declared version against the managed installation.",
+  "reason": "Align the skill tool binding with mise 2026.10.11 and its official bootstrap checksum material.\nThe existing trust, execution, and locked installation workflow stays unchanged.\nNative bootstrap verification remains pending rollout.",
   "evidence": [
     "home/dot_agents/skills/mise/SKILL.md",
     "home/dot_agents/skills/mise/tools.toml",

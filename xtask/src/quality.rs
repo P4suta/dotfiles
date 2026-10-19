@@ -625,7 +625,6 @@ impl Contract {
                 .to_owned();
             referenced.push((id, contents));
         }
-        let mut options = jsonschema::options();
         let identifiers: std::collections::BTreeSet<&str> = referenced
             .iter()
             .map(|(id, _)| id.as_str())
@@ -635,10 +634,9 @@ impl Contract {
         for (_, contents) in &referenced {
             known_references(contents, &identifiers)?;
         }
-        for (id, contents) in referenced {
-            options.with_document(id, contents);
-        }
-        let validator = options
+        let registry = jsonschema::Registry::new().extend(referenced)?.prepare()?;
+        let validator = jsonschema::options()
+            .with_registry(&registry)
             .build(&document)
             .map_err(|error| anyhow::anyhow!("compile {schema}: {error}"))?;
         Ok(Self {
@@ -667,12 +665,9 @@ impl Contract {
             crate::schema_rules::Verdict::Violates => {
                 let errors: Vec<String> = self
                     .validator
-                    .validate(instance)
-                    .err()
-                    .into_iter()
-                    .flatten()
+                    .iter_errors(instance)
                     .take(QUOTED_ERRORS)
-                    .map(|error| format!("{} at `{}`", error, error.instance_path))
+                    .map(|error| format!("{} at `{}`", error, error.instance_path()))
                     .collect();
                 Some(format!(
                     "the {profile} profile renders {target}, which breaks {schema}: {}",

@@ -1,10 +1,11 @@
 {
-  "revision": "0a38aac369d75e4a4a12e5ce8b8a0fa036b909358cce22cdc377eaa526f3734f",
+  "revision": "14538ebb25872d2cb7e300e942f199fdbe42709812f3f3172371c4d76b8038e8",
   "outcome": "implemented",
-  "reason": "Audit metadata, generated artifacts, licenses, and the live GitHub description through the same installed checker, while reporting drift without mutating settings.\nThe governance tests reject absent and stale metadata evidence.",
+  "reason": "Preserve repository governance behavior while adopting the merged serde_json lockfile update and refreshing the managed skill's catalog identity.",
   "evidence": [
     "home/dot_agents/skills/github-repository/SKILL.md",
     "home/dot_agents/skills/github-repository/assets/baseline.json",
+    "home/dot_agents/skills/github-repository/scripts/repo-settings/Cargo.lock",
     "home/dot_agents/skills/github-repository/scripts/repo-settings/tests/governance.rs",
     "crates/dotfiles/src/repository.rs",
     "docs/adr/repository-metadata-and-generated-artifacts.md"

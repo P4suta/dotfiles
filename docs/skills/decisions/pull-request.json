@@ -1,7 +1,7 @@
 {
-  "revision": "54aaba32a086fd0fdea204fdcb06bd8885ede08ad8168832d98b82d0fe36167f",
+  "revision": "12912974863a83e77c0adbbc0672f7a6100676010e851819b76b048155fbf1e1",
   "outcome": "implemented",
-  "reason": "Preserve local issue development and authenticated issue-first remote publication.\nRequire a current-diff AI assessment and one exclusive CodeRabbit route while keeping authenticated prior findings.\nBind fork contributions to verified source, destination, and repository-network identities.\nThe reference now uses active sentences while preserving severity thresholds, source bindings, exclusive review routes, and finding history.\nThe two review cores passed five normal Kani harnesses and nine rejecting probes, and focused missing-review regressions passed.\nThe fork adapter, network obligation, current native gates, service adoption, and rollout remain pending.",
+  "reason": "Keep the checked PR workflow and its publication boundaries unchanged while aligning the gh-stack binding with v0.2.1.\nThe installed command reports version 0.2.1, and its help retains the existing stack command surface.",
   "evidence": [
     "crates/platform/src/local_issues.rs",
     "crates/platform/src/source_identity.rs",

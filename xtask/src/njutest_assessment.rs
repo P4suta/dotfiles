@@ -157,10 +157,11 @@ fn closed_document(document: Document, bytes: &[u8]) -> Result<Value> {
         .build(&original)
         .map_err(|error| anyhow::anyhow!("invalid pinned schema: {error}"))?;
     let value: Value = serde_json::from_slice(bytes)?;
-    if let Err(errors) = validator.validate(&value) {
-        let problems: Vec<_> = errors
-            .map(|error| format!("{}: {error}", error.instance_path))
-            .collect();
+    let problems: Vec<_> = validator
+        .iter_errors(&value)
+        .map(|error| format!("{}: {error}", error.instance_path()))
+        .collect();
+    if !problems.is_empty() {
         anyhow::bail!(
             "incompatible pinned {document:?} document: {}",
             problems.join("; ")
