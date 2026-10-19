@@ -10,16 +10,19 @@
 {{- $_ := set $current "hooks" (includeTemplate "partials/without_skill_ops_hooks" (dig "hooks" (dict) $current) | fromJson) -}}
 {{- $tool := ".local/bin/dotfiles" -}}
 {{- if eq .profile "windows" }}{{ $tool = ".local/bin/dotfiles.exe" }}{{ end -}}
-{{- $command := includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool) -}}
+{{- $runtime := joinPath .chezmoi.homeDir $tool -}}
 {{- $hooks := dig "hooks" (dict) $current -}}
 {{- $pre := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PreToolUse" (list) $hooks) "suffixes" (list " claude-bash" " issue-guard")) | fromJson -}}
-{{- $own_pre := dict "matcher" "Bash|shell|exec_command" "hooks" (list (dict "type" "command" "command" (printf "%s claude-bash" $command))) -}}
+{{- $shell := includeTemplate "partials/codex_runtime_hook" (dict "profile" .profile "tool" $runtime "arguments" "claude-bash") | fromJson -}}
+{{- $own_pre := dict "matcher" "Bash|shell|exec_command" "hooks" (list $shell) -}}
 {{- $_ := set $hooks "PreToolUse" (concat $pre (list $own_pre)) -}}
-{{- $issue := dict "matcher" "apply_patch|Edit|Write|MultiEdit|edit|write" "hooks" (list (dict "type" "command" "command" (printf "%s issue-guard" $command))) -}}
+{{- $edit := includeTemplate "partials/codex_runtime_hook" (dict "profile" .profile "tool" $runtime "arguments" "issue-guard") | fromJson -}}
+{{- $issue := dict "matcher" "apply_patch|Edit|Write|MultiEdit|edit|write" "hooks" (list $edit) -}}
 {{- $_ := set $hooks "PreToolUse" (concat (dig "PreToolUse" (list) $hooks) (list $issue)) -}}
 {{- range $event, $point := dict "SessionStart" "start" "Stop" "stop" -}}
 {{-   $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list (printf " assure %s" $point))) | fromJson -}}
-{{-   $own := dict "hooks" (list (dict "type" "command" "command" (printf "%s assure %s" $command $point))) -}}
+{{-   $hook := includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" (printf "assure %s" $point)) | fromJson -}}
+{{-   $own := dict "hooks" (list $hook) -}}
 {{-   $_ := set $hooks $event (concat $groups (list $own)) -}}
 {{- end -}}
 {{- if eq (includeTemplate "partials/skill_ops_experimental" .) "true" -}}
