@@ -4,6 +4,7 @@ pub mod artifacts;
 pub mod assure;
 pub mod claude_hook;
 pub mod claude_timing;
+pub mod codex_hooks;
 pub mod desktop;
 pub mod health;
 pub mod hooks;

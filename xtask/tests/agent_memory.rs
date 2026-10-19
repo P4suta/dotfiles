@@ -167,6 +167,8 @@ fn render_merged_with_mode(
     for file in [
         template,
         ".chezmoitemplates/partials/sh_quote",
+        ".chezmoitemplates/partials/ps_quote",
+        ".chezmoitemplates/partials/codex_runtime_hook",
         ".chezmoitemplates/partials/without_skill_ops_hooks",
         ".chezmoitemplates/partials/without_runtime_handlers",
         ".chezmoitemplates/partials/skill_ops_experimental",
@@ -314,6 +316,183 @@ fn canonical_codex_bash_events_reach_the_shared_shell_guard() {
                 .all(|hook| hook.get("onFailure").is_none()),
             "unsupported Codex failure policy: {shell}"
         );
+    }
+}
+
+#[test]
+fn codex_runtime_hooks_have_native_windows_commands() {
+    for profile in ["mac", "linux", "windows", "wsl"] {
+        let rendered: Value = serde_json::from_str(&render_merged(
+            profile,
+            "dot_codex/modify_hooks.json",
+            ".codex/hooks.json",
+            "{}",
+        ))
+        .unwrap();
+        let handlers: Vec<_> = rendered["hooks"]
+            .as_object()
+            .unwrap()
+            .values()
+            .flat_map(|groups| groups.as_array().unwrap())
+            .flat_map(|group| group["hooks"].as_array().unwrap())
+            .filter(|hook| hook["command"].as_str().is_some_and(runs_the_runtime))
+            .collect();
+        assert_eq!(handlers.len(), 4, "{profile}: {rendered}");
+        for handler in handlers {
+            assert_eq!(
+                handler["commandWindows"].is_string(),
+                profile == "windows",
+                "{profile}: {handler}"
+            );
+            if profile == "windows" {
+                assert!(
+                    handler["commandWindows"]
+                        .as_str()
+                        .unwrap()
+                        .contains("codex-hooks run")
+                );
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+const CODEX_HOOK_PROBE: &str = "DOTFILES_CODEX_HOOK_PROBE";
+#[cfg(windows)]
+const CODEX_HOOK_INPUT: &str = "hook input 日本語\n";
+
+#[cfg(windows)]
+#[test]
+fn codex_hook_child_receives_standard_input() {
+    use std::io::Read;
+
+    let Some(receipt) = std::env::var_os(CODEX_HOOK_PROBE) else {
+        return;
+    };
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input).unwrap();
+    std::fs::write(receipt, &input).unwrap();
+    assert_eq!(input, CODEX_HOOK_INPUT);
+}
+
+#[cfg(windows)]
+fn windows_codex_hook(tool: &std::path::Path) -> Value {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let scope = tempfile::tempdir().unwrap();
+    let config = scope.path().join("chezmoi.json");
+    std::fs::write(&config, "{}").unwrap();
+    let output = xtask::profiles::chezmoi(
+        &xtask::source_state(root),
+        scope.path(),
+        &config,
+        &scope.path().join("home"),
+    )
+    .arg("--override-data")
+    .arg(json!({"hook": {"profile": "windows", "tool": tool, "arguments": "--exact codex_hook_child_receives_standard_input --nocapture"}}).to_string())
+    .args(["execute-template", "{{ includeTemplate \"partials/codex_runtime_hook\" .hook }}"])
+    .output()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[cfg(windows)]
+fn run_codex_hook(
+    shell: &std::path::Path,
+    command: &str,
+    receipt: &std::path::Path,
+    input: &str,
+) -> std::process::Output {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut child = platform::process::command(shell)
+        .args(["-NoProfile", "-NonInteractive", "-Command", command])
+        .env(CODEX_HOOK_PROBE, receipt)
+        .env("PATH", "")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[cfg(windows)]
+#[test]
+fn codex_windows_hooks_preserve_paths_input_and_child_failures() {
+    let scope = tempfile::tempdir().unwrap();
+    let directory = scope
+        .path()
+        .join("home with ' & %USERPROFILE% ! $ (日本語)");
+    std::fs::create_dir(&directory).unwrap();
+    let tool = directory.join("runtime.exe");
+    std::fs::copy(std::env::current_exe().unwrap(), &tool).unwrap();
+    let receipt = scope.path().join("receipt");
+    let hook = windows_codex_hook(&tool);
+    let selected = platform::process::command("mise")
+        .args(["which", "pwsh"])
+        .output()
+        .unwrap();
+    assert!(
+        selected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    let shells = [
+        std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe"),
+        std::path::PathBuf::from(String::from_utf8(selected.stdout).unwrap().trim()),
+    ];
+    for shell in shells {
+        if receipt.exists() {
+            std::fs::remove_file(&receipt).unwrap();
+        }
+        let legacy = run_codex_hook(
+            &shell,
+            hook["command"].as_str().unwrap(),
+            &receipt,
+            CODEX_HOOK_INPUT,
+        );
+        assert!(!legacy.status.success());
+        assert!(!receipt.exists(), "the legacy command reached the child");
+
+        let command = hook["commandWindows"].as_str().unwrap();
+        let valid = run_codex_hook(&shell, command, &receipt, CODEX_HOOK_INPUT);
+        assert!(
+            valid.status.success(),
+            "{}",
+            String::from_utf8_lossy(&valid.stderr)
+        );
+        assert_eq!(std::fs::read_to_string(&receipt).unwrap(), CODEX_HOOK_INPUT);
+
+        let rejected = run_codex_hook(&shell, command, &receipt, "wrong input");
+        assert_eq!(rejected.status.code(), Some(101));
+        assert_eq!(std::fs::read_to_string(&receipt).unwrap(), "wrong input");
+
+        std::fs::remove_file(&receipt).unwrap();
+        let missing = windows_codex_hook(&directory.join("missing-runtime.exe"));
+        let failed = run_codex_hook(
+            &shell,
+            missing["commandWindows"].as_str().unwrap(),
+            &receipt,
+            CODEX_HOOK_INPUT,
+        );
+        assert_eq!(failed.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&failed.stderr).contains("missing-runtime.exe"));
+        assert!(!receipt.exists());
     }
 }
 

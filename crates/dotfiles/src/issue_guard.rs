@@ -4,7 +4,7 @@ use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use serde_json::Value;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const BLOCK: i32 = 2;
 const PATCH_PATHS: &[&str] = &[
@@ -77,6 +77,27 @@ fn mutation_paths(event: &Event) -> Result<Option<Vec<PathBuf>>> {
     }
 }
 
+fn edit_checkout(cwd: &Path, paths: &[PathBuf]) -> Result<PathBuf> {
+    if cwd
+        .ancestors()
+        .any(|directory| directory.join(".git").exists())
+    {
+        return platform::issue_context::checkout(cwd);
+    }
+    let path = paths.first().context("edit has no target")?;
+    let absolute = if path.is_absolute() {
+        path.clone()
+    } else {
+        cwd.join(path)
+    };
+    let parent = absolute.parent().context("edit has no parent directory")?;
+    let existing = parent
+        .ancestors()
+        .find(|directory| directory.is_dir())
+        .context("edit has no existing parent directory")?;
+    platform::issue_context::checkout(existing)
+}
+
 /// # Errors
 /// Returns an error for an unsupported mutation packet or missing issue context.
 pub fn check(input: &str) -> Result<()> {
@@ -90,7 +111,7 @@ pub fn check(input: &str) -> Result<()> {
             .as_deref()
             .context("edit event has no working directory")?,
     )?;
-    let root = platform::issue_context::checkout(&cwd)?;
+    let root = edit_checkout(&cwd, &paths)?;
     let mut mutations = Vec::new();
     for path in paths {
         let path = if path.is_absolute() {
@@ -150,6 +171,53 @@ pub fn hook() -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_existing_checkout_keeps_its_boundary_and_outside_sessions_find_new_paths() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let repository = scope.path().join("repository");
+        std::fs::create_dir(&repository)?;
+        let initialized = platform::process::command("git")
+            .args(["init", "--quiet"])
+            .current_dir(&repository)
+            .output()?;
+        ensure!(initialized.status.success(), "{initialized:?}");
+        let root = crate::canonical(&repository)?;
+        let new = repository.join("new/directory/file.rs");
+        assert_eq!(edit_checkout(scope.path(), &[new])?, root);
+        let outside = scope.path().join("outside.rs");
+        assert_eq!(
+            edit_checkout(&repository, std::slice::from_ref(&outside))?,
+            root
+        );
+        assert!(platform::issue_context::edit_path(&root, &outside).is_err());
+        assert!(edit_checkout(scope.path(), &[outside]).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn edits_from_outside_the_checkout_still_require_its_issue_authority() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let repository = scope.path().join("repository");
+        std::fs::create_dir(&repository)?;
+        let initialized = platform::process::command("git")
+            .args(["init", "--quiet"])
+            .current_dir(&repository)
+            .output()?;
+        ensure!(initialized.status.success(), "{initialized:?}");
+        let packet = serde_json::json!({
+            "cwd": scope.path(),
+            "tool_name": "apply_patch",
+            "tool_input": {"command": format!("*** Add File: {}\n", repository.join("new.rs").display())}
+        });
+        let error = check(&packet.to_string()).unwrap_err();
+        assert!(
+            format!("{error:#}")
+                .contains("implementation edits require a checked destination-bound issue context"),
+            "{error:#}"
+        );
+        Ok(())
+    }
 
     #[test]
     fn supported_mutations_include_moves_and_read_tools_remain_available() -> Result<()> {

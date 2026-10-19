@@ -291,7 +291,7 @@ fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
             message,
         ));
     }
-    if let Some(message) = path_conversion_refusal(command, cfg!(windows)) {
+    if let Some(message) = path_conversion_refusal(command, cfg!(windows) && !powershell(&event)) {
         findings.push(blocked(
             "hook.path-conversion",
             skill_ops::incident_rules::Source::GateRefusal,
@@ -547,10 +547,24 @@ fn record(blocked: &Blocked) {
 /// Returns an error when it can't read standard input, the event doesn't parse as JSON, or a shell event has no command.
 pub fn run() -> Result<()> {
     let mut event = String::new();
+    let shell_context = std::env::var(crate::codex_hooks::SHELL_CONTEXT).ok();
     let findings = std::io::stdin()
         .read_to_string(&mut event)
         .context("read the tool event")
-        .and_then(|_| checked_events(&event))
+        .and_then(|_| {
+            if cfg!(windows) && shell_context.as_deref() == Some(crate::codex_hooks::POWERSHELL) {
+                let mut value: Value = serde_json::from_str(&event).context("PreToolUse event is not JSON")?;
+                if value["tool_name"] == "Bash"
+                    && value["tool_input"]["command"].is_string()
+                    && value["tool_input"].get("shell").is_none()
+                {
+                    value["tool_input"]["shell"] = crate::codex_hooks::POWERSHELL.into();
+                }
+                checked_events(&value.to_string())
+            } else {
+                checked_events(&event)
+            }
+        })
         .unwrap_or_else(|error| {
         vec![Blocked {
             rule: "hook.inspection",
