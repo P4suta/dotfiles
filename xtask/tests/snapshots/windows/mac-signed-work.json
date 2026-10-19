@@ -70,7 +70,7 @@
     {"mode":"0644","path":".agents/skills/github-repository/assets/baseline.json","sha256":"b31ed45d27a0b7f08ef8d68c7e7600bef6e53391e40f1fb7c5f987bde9499f70","type":"file"},
     {"mode":"0755","path":".agents/skills/github-repository/scripts","sha256":null,"type":"dir"},
     {"mode":"0755","path":".agents/skills/github-repository/scripts/repo-settings","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/github-repository/scripts/repo-settings/Cargo.lock","sha256":"c3f6cb3288478a9cfd47a52dcda557c7629ee7359a84c00a3e2a5e242a6db458","type":"file"},
+    {"mode":"0644","path":".agents/skills/github-repository/scripts/repo-settings/Cargo.lock","sha256":"3af544f24e9d289801402a82e0daa5a92744ed9125ad7bcef81f202be438d968","type":"file"},
     {"mode":"0644","path":".agents/skills/github-repository/scripts/repo-settings/Cargo.toml","sha256":"83c6ee0b657335e6164b3965631a2a5e71fddf1ec35832f32fe04263eb4eec2b","type":"file"},
     {"mode":"0755","path":".agents/skills/github-repository/scripts/repo-settings/src","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/github-repository/scripts/repo-settings/src/lib.rs","sha256":"0fab0998ab55a8018c971a780fe2697ea23000d7430be001eb163ab9810fee0e","type":"file"},
