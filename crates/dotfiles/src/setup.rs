@@ -686,7 +686,37 @@ fn macos_defaults(context: &TemplateData, runner: &mut impl Runner) -> Result<()
     Ok(())
 }
 
+/// The domyjob client configuration, whose `machines` table names every machine this host starts jobs on.
+const DOMYJOB_CONFIG: &str = ".config/domyjob/config.toml";
+
+/// The machines this host's domyjob configuration names, in order, or none without a readable configuration.
+fn domyjob_machines(home: &Path) -> Vec<String> {
+    let mut machines: Vec<String> = fs::read_to_string(home.join(DOMYJOB_CONFIG))
+        .ok()
+        .and_then(|text| text.parse::<toml::Table>().ok())
+        .and_then(|table| {
+            table
+                .get("machines")
+                .and_then(toml::Value::as_table)
+                .map(|machines| machines.keys().cloned().collect())
+        })
+        .unwrap_or_default();
+    machines.sort();
+    machines
+}
+
+/// Removes the finished jobs this host started on each machine, which otherwise keep their workspaces and once filled the Windows system drive.
+/// A machine that can't answer keeps its jobs until the next upgrade.
+fn clean_domyjob(context: &TemplateData, runner: &mut impl Runner) {
+    for machine in domyjob_machines(&context.home) {
+        optional(runner, Tool::Domyjob, &["clean", &machine]);
+    }
+}
+
 fn tools(context: &TemplateData, runner: &mut impl Runner, upgrade: bool) -> Result<()> {
+    if upgrade {
+        clean_domyjob(context, runner);
+    }
     if context.profile == Profile::Windows {
         #[cfg(windows)]
         crate::windows::steps::run(context, Step::Tools)?;
@@ -1176,7 +1206,7 @@ mod tests {
     struct Recording(Vec<String>);
     impl crate::runtime::Runner for Recording {
         fn available(&self, tool: Tool) -> bool {
-            matches!(tool, Tool::Mise | Tool::Nix)
+            matches!(tool, Tool::Mise | Tool::Nix | Tool::Domyjob)
         }
         fn run(&mut self, tool: Tool, arguments: &[OsString]) -> Result<crate::runtime::Reply> {
             let words: Vec<_> = arguments.iter().map(|a| a.to_string_lossy()).collect();
@@ -1366,6 +1396,42 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_timer_cleans_finished_domyjob_jobs_on_every_configured_machine() {
+        let scope = tempfile::tempdir().unwrap();
+        let context = TemplateData {
+            source: scope.path().into(),
+            home: scope.path().into(),
+            profile: Profile::Mac,
+            data: serde_json::json!({}),
+        };
+        let config = scope.path().join(DOMYJOB_CONFIG);
+        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        fs::write(
+            &config,
+            "[machines.win]\nlabels = [\"windows\"]\n\n[machines.linux]\n",
+        )
+        .unwrap();
+        for upgrade in [false, true] {
+            let mut runner = Recording(Vec::new());
+            tools(&context, &mut runner, upgrade).unwrap();
+            let cleaned: Vec<&str> = runner
+                .0
+                .iter()
+                .map(String::as_str)
+                .filter(|command| command.starts_with("domyjob clean"))
+                .collect();
+            let expected: &[&str] = if upgrade {
+                &["domyjob clean linux", "domyjob clean win"]
+            } else {
+                &[]
+            };
+            assert_eq!(cleaned, expected, "{:?}", runner.0);
+        }
+        fs::write(&config, "machines = [").unwrap();
+        assert_eq!(domyjob_machines(scope.path()), Vec::<String>::new());
     }
 
     #[test]
