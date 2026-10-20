@@ -20,7 +20,8 @@ const TEMP_ENVIRONMENT: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
 const HOSTS_PUSH_GATE: &str = "mise x -- just hosts gate {1} {2}";
 const CARGO_MANIFEST: &str = "Cargo.toml";
 const CARGO_LOCK: &str = "Cargo.lock";
-const CI_RESULTS_GUARD: &str = "test \"$RESULTS\" = success";
+/// The required job's refusal of every result other than success, for any number of needed jobs.
+const CI_RESULTS_GUARD: &str = "[[ \"$RESULTS\" =~ ^success( success)*$ ]]";
 const CI_READ_PERMISSION_COUNT: usize = 2;
 const LIGHTWEIGHT_JOBS: &str = r#"  check:
     name: required (${{ matrix.os }})
@@ -78,7 +79,7 @@ const LIGHTWEIGHT_JOBS: &str = r#"  check:
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          test "$RESULTS" = success
+          [[ "$RESULTS" =~ ^success( success)*$ ]]
 "#;
 
 pub(crate) fn command(root: &Path, tool: Tool, arguments: &[&str]) -> Result<()> {

@@ -79,7 +79,7 @@ jobs:
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          test "$RESULTS" = success
+          [[ "$RESULTS" =~ ^success( success)*$ ]]
 "#;
 
 #[test]
@@ -176,11 +176,8 @@ fn lightweight_ci_refuses_missing_reports_heavy_work_and_suppressed_failures() {
             "run: cargo run --locked --package xtask -- check",
         ),
         ("if: always()", "if: success()"),
-        (
-            "test \"$RESULTS\" = success",
-            "test \"$RESULTS\" = success || true",
-        ),
-        ("test \"$RESULTS\" = success", "true"),
+        ("( success)*$ ]]", "( success)*$ ]] || true"),
+        ("[[ \"$RESULTS\" =~ ^success( success)*$ ]]", "true"),
         (
             "    timeout-minutes: 5",
             "    continue-on-error: true\n    timeout-minutes: 5",
@@ -241,22 +238,24 @@ fn final_status_accepts_only_a_successful_matrix() -> Result<()> {
     let guard = documents[0]["jobs"]["required"]["steps"][0]["run"]
         .as_str()
         .unwrap();
-    assert_eq!(guard.trim(), "test \"$RESULTS\" = success");
+    assert_eq!(guard.trim(), "[[ \"$RESULTS\" =~ ^success( success)*$ ]]");
     let fixture = tempfile::tempdir()?;
-    for result in [
-        "success",
-        "failure",
-        "cancelled",
-        "skipped",
-        "",
-        "success failure",
+    for (result, passes) in [
+        ("success", true),
+        ("success success", true),
+        ("failure", false),
+        ("cancelled", false),
+        ("skipped", false),
+        ("", false),
+        ("success failure", false),
+        ("skipped success", false),
     ] {
         let status = workflow_bash(&fixture.path().join("gitconfig"))?
             .env("RESULTS", result)
             .args(["-e", "-c", guard])
             .status()
             .unwrap();
-        assert_eq!(status.success(), result == "success", "{result}");
+        assert_eq!(status.success(), passes, "{result}");
     }
     Ok(())
 }
