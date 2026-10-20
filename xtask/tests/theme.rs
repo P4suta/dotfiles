@@ -15,9 +15,31 @@ const GIT_CONTEXT_TEST: &str = "a_prompt_renders_its_fixture_repository_in_a_for
 const CALLER_BRANCH: &str = "caller-branch";
 const FZF_TARGET: &str = ".config/fzf/fzfrc";
 const RECOLORED_FZF_FOREGROUND: &str = "#ff0000";
+const RENDER_ENVIRONMENT_FIXTURE: &str = "DOTFILES_THEME_RENDER_ENVIRONMENT_FIXTURE";
+const RENDER_ENVIRONMENT_TEST: &str = "the_grid_renderers_ignore_the_callers_rendering_environment";
 
 fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
+}
+
+fn rendered_mac_profile() -> Result<serde_json::Value> {
+    let scope = tempfile::tempdir()?;
+    let home = scope.path().join("home");
+    fs::create_dir(&home)?;
+    let config = scope.path().join("chezmoi.json");
+    let data = xtask::profiles::fixture(xtask::profile_rules::Profile::Mac, root(), &home)?;
+    fs::write(&config, serde_json::to_vec(&json!({"data": data}))?)?;
+    let rendered = xtask::profiles::chezmoi(root(), scope.path(), &config, &home)
+        .arg("--override-data")
+        .arg(data.to_string())
+        .args(["dump", "--include", "files", "--format", "json"])
+        .output()?;
+    assert!(
+        rendered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rendered.stderr)
+    );
+    Ok(serde_json::from_slice(&rendered.stdout)?)
 }
 
 #[test]
@@ -67,23 +89,7 @@ fn a_grid_records_each_cell_and_one_changed_color_breaks_the_full_match() {
 
 #[test]
 fn the_rendered_fzf_grid_matches_and_rejects_a_changed_foreground() -> Result<()> {
-    let scope = tempfile::tempdir()?;
-    let home = scope.path().join("home");
-    fs::create_dir(&home)?;
-    let config = scope.path().join("chezmoi.json");
-    let data = xtask::profiles::fixture(xtask::profile_rules::Profile::Mac, root(), &home)?;
-    fs::write(&config, serde_json::to_vec(&json!({"data": data}))?)?;
-    let rendered = xtask::profiles::chezmoi(root(), scope.path(), &config, &home)
-        .arg("--override-data")
-        .arg(data.to_string())
-        .args(["dump", "--include", "files", "--format", "json"])
-        .output()?;
-    assert!(
-        rendered.status.success(),
-        "{}",
-        String::from_utf8_lossy(&rendered.stderr)
-    );
-    let dump: serde_json::Value = serde_json::from_slice(&rendered.stdout)?;
+    let dump = rendered_mac_profile()?;
     let config = dump[FZF_TARGET]["contents"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("the rendered profile has no fzf configuration"))?;
@@ -105,6 +111,51 @@ fn the_rendered_fzf_grid_matches_and_rejects_a_changed_foreground() -> Result<()
     let refusals = xtask::theme::check_grids(root(), "mac", &changed, false)?;
     assert_eq!(refusals.len(), 1, "{refusals:?}");
     assert!(refusals[0].contains("mac-fzf.grid"), "{refusals:?}");
+    Ok(())
+}
+
+#[test]
+fn the_grid_renderers_ignore_the_callers_rendering_environment() -> Result<()> {
+    if std::env::var_os(RENDER_ENVIRONMENT_FIXTURE).is_some() {
+        let dump = rendered_mac_profile()?;
+        let refusals = xtask::theme::check_grids(root(), "mac", &dump, false)?;
+        assert!(refusals.is_empty(), "{refusals:#?}");
+        return Ok(());
+    }
+    let scope = tempfile::tempdir()?;
+    let options = scope.path().join("caller.fzfrc");
+    fs::write(&options, "--color=bw\n--prompt=caller\n")?;
+    let output = platform::process::command(std::env::current_exe()?)
+        .args([RENDER_ENVIRONMENT_TEST, "--exact", "--nocapture"])
+        .env(RENDER_ENVIRONMENT_FIXTURE, "1")
+        .envs([
+            ("NO_COLOR", "1"),
+            ("FORCE_COLOR", "1"),
+            ("CLICOLOR", "0"),
+            ("CLICOLOR_FORCE", "1"),
+            ("COLORTERM", "caller"),
+            ("TERM", "dumb"),
+            ("COLUMNS", "10"),
+            ("LINES", "5"),
+            ("LANG", "C"),
+            ("LC_ALL", "C"),
+            ("LC_CTYPE", "C"),
+            ("LC_COLLATE", "C"),
+            ("LC_MESSAGES", "C"),
+            ("FZF_DEFAULT_OPTS", "--color=bw --prompt=caller"),
+            ("FZF_DEFAULT_COMMAND", "exit 1"),
+            ("BAT_THEME", "TwoDark"),
+            ("BAT_STYLE", "numbers"),
+            ("STARSHIP_SHELL", "tcsh"),
+        ])
+        .env("FZF_DEFAULT_OPTS_FILE", &options)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "the grids inherited the caller's rendering environment:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     Ok(())
 }
 
