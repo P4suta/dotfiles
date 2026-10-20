@@ -194,11 +194,11 @@ pub fn run(
     execute(command)
 }
 
-/// Prints whether each required and optional terminal component works.
+/// Prints whether each required and optional terminal component works, and the host drift that [`crate::doctor`] finds.
 ///
 /// # Errors
 ///
-/// Returns an error when the native home can't resolve, a Windows check can't run, or `strict` holds true and the host lacks a required component.
+/// Returns an error when the native home can't resolve, a Windows or drift check can't run, or `strict` holds true and the host lacks a required component or drifted.
 pub fn doctor(strict: bool) -> Result<()> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .context("native home is unavailable")?;
@@ -246,6 +246,8 @@ pub fn doctor(strict: bool) -> Result<()> {
         println!("git:core.hooksPath: missing or changed managed hooks path");
         missing += 1;
     }
+    missing += crate::doctor::shadowed(&native)?;
+    missing += crate::doctor::source_drift(&mut native)?;
     if cfg!(windows) {
         missing += windows_missing(&mut native)?;
     }

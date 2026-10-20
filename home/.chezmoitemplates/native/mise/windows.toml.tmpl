@@ -9,14 +9,4 @@
 {{ $tool | quote }} = {{ $version | quote }}
 {{- end }}
 
-[settings]
-experimental = true
-exec_auto_install = false
-# A project's configuration loads only after `mise trust` records its exact contents.
-paranoid = true
-# domyjob runs the owner's own projects in this work area, and each new workspace path would otherwise have its mise.toml refused.
-trusted_config_paths = [{{ joinPath (env "LOCALAPPDATA") "domyjob/state/v3/work" | quote }}]
-cargo.binstall = true
-
-[settings.github]
-credential_command = {{ includeTemplate "partials/mise-github-credential" . }}
+{{ includeTemplate "partials/mise_settings" . }}

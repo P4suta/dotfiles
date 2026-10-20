@@ -1,2 +1,2 @@
 #!/bin/sh
-exec {{ includeTemplate "partials/sh_quote" (printf "%s/.local/bin/dotfiles" .chezmoi.homeDir) }} doctor "$@"
+exec {{ includeTemplate "partials/sh_quote" (printf "%s/.local/bin/dotfiles" .chezmoi.homeDir) }} --root {{ includeTemplate "partials/sh_quote" .chezmoi.workingTree }} doctor --strict "$@"
