@@ -210,11 +210,49 @@ fn selected_paths(root: &Path, base: Option<&str>, staged: bool) -> Result<Vec<S
     } else {
         git(root, &arguments, None)?
     };
+    let mut paths = split_paths(&output)?;
+    if staged && let Some(merged) = upstream_merge(root) {
+        let differing = split_paths(&crate::signed_git::index_git(
+            root,
+            &[
+                "diff",
+                "--name-only",
+                "--no-renames",
+                "-z",
+                "--cached",
+                &merged,
+            ],
+        )?)?;
+        paths.retain(|path| differing.contains(path));
+    }
+    Ok(paths)
+}
+
+fn split_paths(output: &str) -> Result<Vec<String>> {
     output
         .split('\0')
         .filter(|path| !path.is_empty())
         .map(|path| relative(Path::new(path)))
         .collect()
+}
+
+/// The commit of an in-progress merge that the remote default branch already holds.
+/// A path staged with that commit's content came from the default branch, not from this branch's work.
+fn upstream_merge(root: &Path) -> Option<String> {
+    let merged = git(root, &["rev-parse", "-q", "--verify", "MERGE_HEAD"], None).ok()?;
+    let merged = merged.trim().to_owned();
+    git(
+        root,
+        &[
+            "merge-base",
+            "--is-ancestor",
+            &merged,
+            "refs/remotes/origin/HEAD",
+        ],
+        None,
+    )
+    .ok()?;
+    Some(merged)
 }
 
 /// # Errors

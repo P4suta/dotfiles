@@ -142,14 +142,52 @@ fn foreign_waiver() -> Option<String> {
         .map(|line| format!("ALLOW_FOREIGN=1 {line}"))
 }
 
+/// The Git attribute that sets the language policy in a committed `.gitattributes`, so every clone shares it.
+const LANG_ATTRIBUTE: &str = "dotguard-lang";
+
 /// The language policy for the current repository.
 ///
-/// `guard.lang` defaults to English and accepts `japanese` and `off`, and every refusal names it.
+/// `git config guard.lang` sets it for one clone, and the `dotguard-lang` attribute of the repository root sets it for every clone.
+/// Both accept `japanese` and `off`, the default is English, and every refusal names both.
 ///
 ///     git config guard.lang japanese
-///     git config guard.lang off
+///     * dotguard-lang=japanese    (a line of .gitattributes)
 fn lang_mode() -> Option<lang::Mode> {
-    lang::Mode::parse(real_git::capture(&["config", "--get", "guard.lang"]).as_deref())
+    let configured = real_git::capture(&["config", "--get", "guard.lang"]);
+    let committed = || {
+        lang_attributes(&["."], true)
+            .into_iter()
+            .next()
+            .and_then(|(_, value)| value)
+    };
+    lang::Mode::parse(configured.or_else(committed).as_deref())
+}
+
+/// The `dotguard-lang` value of each of `paths`, from the staged `.gitattributes` files when `cached` and the working tree otherwise.
+fn lang_attributes(paths: &[&str], cached: bool) -> Vec<(String, Option<String>)> {
+    if paths.is_empty() {
+        return Vec::new();
+    }
+    let mut arguments = vec!["check-attr", "-z"];
+    if cached {
+        arguments.push("--cached");
+    }
+    arguments.extend([LANG_ATTRIBUTE, "--"]);
+    arguments.extend(paths);
+    let output = real_git::capture(&arguments).unwrap_or_default();
+    lang::attributes(&output)
+        .into_iter()
+        .map(|(path, value)| (path.to_owned(), value.map(str::to_owned)))
+        .collect()
+}
+
+/// The paths among `paths` whose `dotguard-lang` attribute turns the content scan off.
+fn switched_off(paths: &[&str], cached: bool) -> Vec<String> {
+    lang_attributes(paths, cached)
+        .into_iter()
+        .filter(|(_, value)| value.is_some() && lang::Mode::parse(value.as_deref()).is_none())
+        .map(|(path, _)| path)
+        .collect()
 }
 
 fn comment_char() -> char {
@@ -281,9 +319,14 @@ fn pre_commit() -> i32 {
     let Some(diff) = staged::staged_diff() else {
         return 0;
     };
-    let files: Vec<_> = staged::scan_diff(&diff)
+    let found = staged::scan_diff(&diff);
+    let off = switched_off(
+        &found.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+        true,
+    );
+    let files: Vec<_> = found
         .into_iter()
-        .filter(|f| !staged::is_suppressed(&f.path))
+        .filter(|f| !off.contains(&f.path) && !staged::is_suppressed(&f.path))
         .collect();
     if files.is_empty() {
         return 0;
@@ -318,8 +361,9 @@ fn pre_commit() -> i32 {
 }
 
 fn scan_paths(paths: &[String]) -> i32 {
+    let off = switched_off(&paths.iter().map(String::as_str).collect::<Vec<_>>(), false);
     let mut diagnostics = Vec::new();
-    for p in paths {
+    for p in paths.iter().filter(|p| !off.contains(p)) {
         let Ok(text) = std::fs::read_to_string(p) else {
             continue;
         };

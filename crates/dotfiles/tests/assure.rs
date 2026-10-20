@@ -447,6 +447,91 @@ fn a_decision_module_is_owned_by_its_own_harness_and_tests_are_never_read() -> R
     Ok(())
 }
 
+const MAGIC: &str = "pub fn retries() -> u32 {\n    3\n}\n";
+
+#[test]
+fn a_pure_revert_passes_each_point_and_a_revert_that_adds_a_gap_does_not() -> Result<()> {
+    let catalog = catalog()?;
+    let fixture = Fixture::new()?;
+    let root = &fixture.root;
+    fixture.write("src/retries.rs", MAGIC)?;
+    fixture.commit("an older magic number")?;
+    fixture.write(
+        "src/retries.rs",
+        "const RETRIES: u32 = 3;\npub fn retries() -> u32 {\n    RETRIES\n}\n",
+    )?;
+    let named = fixture.commit("name the retries")?;
+    fixture.git(&["update-ref", "refs/remotes/origin/main", &named])?;
+    let push = |to: &str| format!("refs/heads/main {to} refs/heads/main {named}\n");
+
+    fixture.git(&["revert", "--no-commit", &named])?;
+    assert_eq!(emitted_rule(assure::commit(root, &catalog)), None);
+    fixture.git(&["commit", "--quiet", "--no-edit"])?;
+    let reverted = fixture.git(&["rev-parse", "HEAD"])?;
+    assert_eq!(
+        emitted_rule(assure::push(
+            root,
+            &catalog,
+            "origin",
+            push(&reverted).as_bytes()
+        )),
+        None
+    );
+    assert_eq!(
+        emitted_rule(assure::ready(root, &catalog, "main", &reverted)),
+        None
+    );
+
+    fixture.git(&["reset", "--quiet", "--hard", &named])?;
+    fixture.git(&["revert", "--no-commit", &named])?;
+    fixture.write(
+        "src/wait.rs",
+        "pub fn wait(seconds: u64) -> u64 {\n    seconds * 1000\n}\n",
+    )?;
+    fixture.stage()?;
+    assert_eq!(
+        emitted_rule(assure::commit(root, &catalog)).as_deref(),
+        Some("assure.added")
+    );
+    fixture.git(&["commit", "--quiet", "--no-edit"])?;
+    let mixed = fixture.git(&["rev-parse", "HEAD"])?;
+    assert_eq!(
+        emitted_rule(assure::push(
+            root,
+            &catalog,
+            "origin",
+            push(&mixed).as_bytes()
+        ))
+        .as_deref(),
+        Some("assure.added")
+    );
+    assert_eq!(
+        emitted_rule(assure::ready(root, &catalog, "main", &mixed)).as_deref(),
+        Some("assure.added")
+    );
+    Ok(())
+}
+
+#[test]
+fn numbers_in_code_that_verifies_demonstrates_or_derives_are_admitted() -> Result<()> {
+    let catalog = catalog()?;
+    let fixture = Fixture::new()?;
+    for path in [
+        "fuzz/fuzz_targets/retries.rs",
+        "examples/retries.rs",
+        "src/generated.rs",
+        "src/parser/tests.rs",
+        "src/parser/kani_laws.rs",
+        "src/retries.rs",
+    ] {
+        fixture.write(path, MAGIC)?;
+    }
+    let refused = assure::stop(&fixture.root, &catalog)?;
+    let paths: Vec<_> = refused.gaps.iter().map(|gap| gap.path.as_str()).collect();
+    assert_eq!(paths, ["src/retries.rs"]);
+    Ok(())
+}
+
 #[test]
 fn this_repository_has_no_gap() -> Result<()> {
     let catalog = catalog()?;

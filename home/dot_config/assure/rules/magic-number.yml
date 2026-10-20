@@ -6,15 +6,34 @@ note: Name the value in a const beside its use or in the crate's constants modul
 metadata:
   cwe: CWE-1106
   ruleset: SEI CERT DCL06-C
+# Code that verifies, demonstrates, or derives from another source states its numbers where a reader needs them.
 ignores:
   - "**/tests/**"
   - "**/benches/**"
+  - "**/examples/**"
+  - "**/fuzz/**"
+  - "**/fixtures/**"
+  - "**/testdata/**"
+  - "**/tests.rs"
+  - "**/*_tests.rs"
+  - "**/proofs.rs"
+  - "**/kani_laws.rs"
+  - "**/generated/**"
+  - "**/generated.rs"
+  - "**/*_generated.rs"
 rule:
   any:
+    # Zero, one, and two mean an identity, a unit, a pair, or a half, and a power of two up to 1024 in a size position means a size.
     - kind: integer_literal
       not:
-        regex: '^[01](_?[iu](8|16|32|64|128|size))?$'
+        any:
+          - regex: '^[012](_?[iu](8|16|32|64|128|size))?$'
+          - all:
+              - regex: '^(4|8|16|32|64|128|256|512|1024)(_?usize)?$'
+              - matches: size-position
     - kind: float_literal
+      not:
+        regex: '^[012]\.0*(_?f(32|64))?$'
   not:
     any:
       - matches: verification-only

@@ -599,3 +599,91 @@ fn a_surviving_mutant_or_an_unnamed_timeout_fails_and_a_named_timeout_passes() {
         2
     );
 }
+
+/// Whether the closure refuses `decide` for want of a production caller.
+fn uncalled(module: &str, caller: &str) -> bool {
+    let checkout = fixture(module, caller);
+    closure(checkout.path(), &parse_manifest(LISTED).unwrap())
+        .unwrap()
+        .refusals
+        .iter()
+        .any(|refusal| refusal.contains("no production code calls"))
+}
+
+#[test]
+fn a_caller_counts_as_production_unless_its_predicate_excludes_an_ordinary_build() {
+    for predicate in [
+        "any(windows, test)",
+        "not(test)",
+        "feature = \"test-utils\"",
+        "all(unix, any(windows, not(kani)))",
+        "any(test, not(target_os = \"linux\"))",
+        "true",
+        "test(unreadable)",
+    ] {
+        let caller =
+            format!("#[cfg({predicate})]\nfn main() {{ rules::a_rules::decide(true); }}\n");
+        assert!(!uncalled(PROVED, &caller), "{predicate}");
+    }
+    for predicate in [
+        "test",
+        "all(test, windows)",
+        "any(test, kani)",
+        "false",
+        "any()",
+    ] {
+        let caller =
+            format!("#[cfg({predicate})]\nfn main() {{ rules::a_rules::decide(true); }}\n");
+        assert!(uncalled(PROVED, &caller), "{predicate}");
+    }
+    let both = "#[cfg(unix)]\n#[cfg(test)]\nfn main() { rules::a_rules::decide(true); }\n";
+    assert!(uncalled(PROVED, both));
+}
+
+#[test]
+fn only_items_that_compile_under_kani_supply_harnesses_and_proof() {
+    let decide = "pub fn decide(a: bool) -> bool { !a }\n";
+    let harness = "#[kani::proof]\nfn decide_negates() { let a: bool = kani::any(); assert!(decide(a) != a); }";
+    for (predicate, proved) in [
+        ("kani", true),
+        ("any(test, kani)", true),
+        ("all(test, not(kani))", false),
+        ("test", false),
+        ("all(kani, unix)", false),
+    ] {
+        let module =
+            format!("{decide}#[cfg({predicate})]\nmod proofs {{\nuse super::*;\n{harness}\n}}\n");
+        let checkout = fixture(&module, CALLER);
+        let measured = closure(checkout.path(), &parse_manifest(LISTED).unwrap()).unwrap();
+        assert_eq!(measured.harnesses == 1, proved, "{predicate}");
+        assert_eq!(
+            measured
+                .refusals
+                .iter()
+                .any(|refusal| refusal.contains("`decide` has no harness")),
+            !proved,
+            "{predicate}: {:#?}",
+            measured.refusals
+        );
+    }
+    let test_only = format!(
+        "{decide}#[cfg(any(test, kani))]\nmod proofs {{\nuse super::*;\n{harness}\n#[cfg(all(test, not(kani)))]\nfn helper() {{ decide(true); }}\n#[test]\nfn example() {{ decide(false); }}\n}}\n"
+    );
+    let checkout = fixture(&test_only, CALLER);
+    let measured = closure(checkout.path(), &parse_manifest(LISTED).unwrap()).unwrap();
+    assert!(measured.refusals.is_empty(), "{:#?}", measured.refusals);
+    let unproved = format!(
+        "{decide}#[cfg(any(test, kani))]\nmod proofs {{\nuse super::*;\n#[cfg(all(test, not(kani)))]\n{harness}\n#[test]\nfn example() {{ decide(false); }}\n}}\n#[cfg(kani)]\n#[kani::proof]\nfn other() {{}}\n"
+    );
+    let checkout = fixture(&unproved, CALLER);
+    let measured = closure(checkout.path(), &parse_manifest(LISTED).unwrap()).unwrap();
+    assert_eq!(measured.harnesses, 1);
+    assert!(
+        measured
+            .refusals
+            .iter()
+            .any(|refusal| refusal.contains("`decide` has no harness")),
+        "{:#?}",
+        measured.refusals
+    );
+}
