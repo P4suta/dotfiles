@@ -7,6 +7,7 @@ use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
 use proc_macro2::{TokenStream, TokenTree};
 use quote::ToTokens;
+use rules::cfg_rules::{self, Step};
 use rules::obligation_rules::{self, Better, Pilot, Reason, Standing, Subject, Verdict};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -736,13 +737,81 @@ fn has_attribute(attributes: &[syn::Attribute], path: &[&str]) -> bool {
 
 /// Whether an item compiles only for tests or proofs.
 fn verification_only(attributes: &[syn::Attribute]) -> bool {
-    has_attribute(attributes, &["test"])
-        || attributes.iter().any(|attribute| {
-            attribute.path().is_ident("cfg") && {
-                let text = attribute.meta.to_token_stream().to_string();
-                text.contains("test") || text.contains("kani")
-            }
-        })
+    has_attribute(attributes, &["test"]) || !cfg_rules::in_production(&cfg_steps(attributes))
+}
+
+/// The `cfg` attributes of an item as one sequence of postfix steps, in which an unreadable attribute stays unknown.
+fn cfg_steps(attributes: &[syn::Attribute]) -> Vec<Step> {
+    let mut steps = Vec::new();
+    for attribute in attributes {
+        if !attribute.path().is_ident("cfg") {
+            continue;
+        }
+        let mut predicate = Vec::new();
+        let read = match &attribute.meta {
+            syn::Meta::List(list) => list
+                .parse_args_with(|input: syn::parse::ParseStream<'_>| {
+                    cfg_predicate(input, &mut predicate)
+                })
+                .is_ok(),
+            _ => false,
+        };
+        if read {
+            steps.append(&mut predicate);
+        } else {
+            steps.push(Step::Unknown);
+        }
+    }
+    steps
+}
+
+/// Appends one `cfg` predicate in postfix order, as the Rust Reference's grammar of configuration predicates reads it.
+fn cfg_predicate(input: syn::parse::ParseStream<'_>, steps: &mut Vec<Step>) -> syn::Result<()> {
+    if input.peek(syn::LitBool) {
+        steps.push(Step::Literal(input.parse::<syn::LitBool>()?.value));
+        return Ok(());
+    }
+    let name: syn::Ident = input.parse()?;
+    if input.peek(syn::Token![=]) {
+        input.parse::<syn::Token![=]>()?;
+        input.parse::<syn::LitStr>()?;
+        steps.push(Step::Unknown);
+        return Ok(());
+    }
+    if !input.peek(syn::token::Paren) {
+        steps.push(if name == "test" {
+            Step::Test
+        } else if name == "kani" {
+            Step::Kani
+        } else {
+            Step::Unknown
+        });
+        return Ok(());
+    }
+    let content;
+    syn::parenthesized!(content in input);
+    let mut count: u8 = 0;
+    while !content.is_empty() {
+        cfg_predicate(&content, steps)?;
+        count = count
+            .checked_add(1)
+            .ok_or_else(|| content.error("too many predicates"))?;
+        if !content.is_empty() {
+            content.parse::<syn::Token![,]>()?;
+        }
+    }
+    steps.push(match name.to_string().as_str() {
+        "all" => Step::All(count),
+        "any" => Step::Any(count),
+        "not" if count == 1 => Step::Not,
+        _ => {
+            return Err(syn::Error::new(
+                name.span(),
+                "not a configuration predicate",
+            ));
+        }
+    });
+    Ok(())
 }
 
 fn is_harness(attributes: &[syn::Attribute]) -> bool {
@@ -939,9 +1008,7 @@ pub fn module(source: &str) -> Result<Module> {
         let attributes = item_attributes(item);
         if verification_only(attributes) {
             harnesses(item, "", &mut found.harnesses);
-            if compiles_for_kani(attributes) {
-                calls(item.to_token_stream(), &mut found.verified);
-            }
+            proved(item, &mut found.verified);
             continue;
         }
         let mut mentioned = BTreeSet::new();
@@ -963,20 +1030,34 @@ pub fn module(source: &str) -> Result<Module> {
     Ok(found)
 }
 
-/// Whether a verification-only item also compiles under Kani, so what it mentions counts as proved.
+/// Whether an item compiles under Kani, so its harnesses and what it mentions count as proved.
 fn compiles_for_kani(attributes: &[syn::Attribute]) -> bool {
-    attributes.iter().any(|attribute| {
-        attribute.path().is_ident("cfg")
-            && attribute
-                .meta
-                .to_token_stream()
-                .to_string()
-                .contains("kani")
-    })
+    !has_attribute(attributes, &["test"]) && cfg_rules::in_proof(&cfg_steps(attributes))
+}
+
+/// What a verification item mentions in the parts of it that compile under Kani.
+fn proved(item: &syn::Item, found: &mut BTreeSet<String>) {
+    if !compiles_for_kani(item_attributes(item)) {
+        return;
+    }
+    if let syn::Item::Mod(syn::ItemMod {
+        content: Some((_, items)),
+        ..
+    }) = item
+    {
+        for item in items {
+            proved(item, found);
+        }
+    } else {
+        calls(item.to_token_stream(), found);
+    }
 }
 
 /// The Kani harnesses an item declares, named by the paths in compiler metadata.
 fn harnesses(item: &syn::Item, prefix: &str, found: &mut BTreeSet<String>) {
+    if !compiles_for_kani(item_attributes(item)) {
+        return;
+    }
     match item {
         syn::Item::Fn(function) if is_harness(&function.attrs) => {
             found.insert(format!("{prefix}{}", function.sig.ident));
