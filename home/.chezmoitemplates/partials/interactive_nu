@@ -1,0 +1,29 @@
+{{- /*
+  The shortcuts and functions from shell.toml in Nushell syntax, which both Nushell configurations include.
+  Rendering fails when a function in shell.toml lacks its definition here.
+*/ -}}
+{{- $defined := list "mkcd" "y" "proj" -}}
+{{- range .shell.functions }}
+{{-   if not (has .name $defined) }}{{ fail (printf "interactive_nu lacks the shell.toml function %s" .name) }}{{ end }}
+{{- end -}}
+{{- range .shell.aliases }}
+alias {{ .name }} = {{ .command }}
+{{- end }}
+
+def --env mkcd [directory: path] {
+  mkdir $directory
+  cd $directory
+}
+
+def --env y [...args] {
+  let cwd_file = (mktemp --tmpdir yazi-cwd.XXXXXX)
+  ^yazi ...$args --cwd-file $cwd_file
+  let cwd = (open --raw $cwd_file | str trim)
+  rm --force --permanent $cwd_file
+  if ($cwd | is-not-empty) and $cwd != $env.PWD { cd $cwd }
+}
+
+def --env proj [...query: string] {
+  let target = (ghq list --full-path | ^fzf --prompt "repo> " --exact --select-1 --exit-0 --query ($query | str join " ") | complete | get stdout | str trim)
+  if ($target | is-not-empty) { cd $target } else { print "no repository matched" }
+}

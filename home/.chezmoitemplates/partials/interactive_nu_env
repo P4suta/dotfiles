@@ -1,0 +1,14 @@
+{{- /* The editor, pager, and tool configuration variables from shell.toml in Nushell syntax, which every Nushell environment file includes. */ -}}
+{{- $shell := .shell -}}
+{{- $editor := "" -}}
+{{- range $shell.editors -}}
+{{-   if and (not $editor) (lookPath (index (splitList " " .) 0)) }}{{ $editor = . }}{{ end -}}
+{{- end -}}
+{{- if not $editor }}{{ $editor = $shell.fallback_editor.unix }}{{ end -}}
+$env.EDITOR = {{ $editor | toJson }}
+$env.VISUAL = $env.EDITOR
+$env.PAGER = {{ $shell.pager | toJson }}
+$env.LESS = {{ $shell.less | toJson }}
+$env.MANPAGER = "sh -c 'col -bx | bat --language=man --plain'"
+$env.BAT_CONFIG_PATH = ($env.HOME? | default $nu.home-dir | path join ".config" "bat" "config")
+$env.FZF_DEFAULT_OPTS_FILE = ($env.HOME? | default $nu.home-dir | path join ".config" "fzf" "fzfrc")
