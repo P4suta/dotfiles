@@ -1,7 +1,7 @@
 ---
 date: 2026-10-19
 status: amended
-changed_by: [optional-native-verification-before-publication.md]
+changed_by: [optional-native-verification-before-publication.md, gate-pull-requests-that-skip-local-hooks.md]
 ---
 # Make native verification authoritative and keep hosted CI lightweight
 
@@ -9,6 +9,7 @@ changed_by: [optional-native-verification-before-publication.md]
 
 The owner accepted this verification boundary on 2026-10-19 under [issue 165](https://github.com/P4suta/dotfiles/issues/165).
 The owner later made the native publication prerequisite optional in [its amendment](optional-native-verification-before-publication.md).
+A [hosted dependency gate](gate-pull-requests-that-skip-local-hooks.md) now checks pull requests that skip the local hooks.
 
 ## Context
 
