@@ -1,30 +1,33 @@
 # Lean hosted workflows
 
-The project's one local command stays the authority, and hosted CI repeats its fast deterministic part plus what only GitHub can observe.
+The project's own check command stays the authority, and hosted CI runs the checks selected by affected contracts plus what only GitHub can observe.
 A hosted run that checks nothing never gates a merge, because an automatic merge then trusts nothing.
 
 ## Every change
 
-- Run format, lint, type checks, and unit and integration tests on one Linux runner within ten minutes.
+- Run format, lint, type checks, and unit and integration tests on one pinned Linux runner.
 - Expose one required summary job, and keep every other job behind it.
 - Trigger on `pull_request` and `merge_group`, and never also on `push` for the same commits.
 - Cancel a superseded run of the same ref with `concurrency`.
-- Give every job `timeout-minutes`, and skip jobs a change can't affect with path filters while the summary job still reports.
+- Use job timeouts only as safety stops with inconclusive results, and skip jobs a change can't affect with path filters while the summary job still reports.
 - Cache dependencies by lockfile digest.
 - Upload an artifact only when a person downloads it, and keep it seven days at most.
 - Pin actions by commit SHA and let Renovate move them.
 
 ## Where heavy checks run
 
-| Check | Hosted pull request | Local or native host | On demand or release |
-| --- | --- | --- | --- |
-| Fuzzing | Replay the committed corpus as ordinary tests | Time-boxed campaigns that commit new crashes as seeds | `workflow_dispatch` |
-| Mutation testing | Never | Diff-scoped runs before review | Full runs before a release |
-| Formal proofs | Changed modules, when they finish in minutes | The project gate | The full campaign before a release |
-| Benchmarks | Never as a gate | Fixed-budget local runs | On demand |
-| macOS and Windows | Code with platform-specific paths only | The owner's machines through `multi-machine` | Release builds |
+Use the project's pinned container or documented hosted runner for every selected check.
+Follow `formal-assurance` for exploration bounds and incomplete results.
 
-A macOS minute costs about ten Linux minutes and a Windows minute about two, so a matrix entry needs a platform-specific path to earn its place.
+| Check | Selected change | On demand or release |
+| --- | --- | --- |
+| Fuzzing | Replay the committed corpus and explore affected input boundaries | Broader configured exploration with new crashes kept as seeds |
+| Mutation testing | Changed contracts and their dependencies | Full configured operator set |
+| Formal proofs | Changed contracts and their dependencies | Full proof inventory |
+| Benchmarks | Deterministic operation counts for affected algorithms | Timings as observations, never verdicts |
+| macOS and Windows | Affected platform behavior | Supported release targets |
+
+Keep CI lean by selecting relevant checks and reusing exact-source evidence, never by requiring the owner's hosts.
 
 ## Schedules
 

@@ -38,5 +38,5 @@ Capture cleanup errors without replacing the original failure.
 Bound diagnostic output and redact secrets without suppressing the information that explains the failure.
 Make timeout reports name the condition still pending.
 
-Use existing project gates and native machine commands before publication.
-Use `resource-coordination` for a large shared-machine campaign and `ci-budget` to keep diagnosis off hosted runs.
+Use existing project gates and documented platform runners before publication.
+Use `resource-coordination` for a large campaign and `ci-budget` to select checks by the changed contract.

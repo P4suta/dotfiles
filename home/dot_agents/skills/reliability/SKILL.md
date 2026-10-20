@@ -34,12 +34,12 @@ Read the library and OS contract before relying on scheduling, atomicity, durabi
 
 For a discovered defect, use `systematic-fixes` to keep a failing reproducer and establish its cause.
 Control the clock, input seed, schedule, resource identity, or injected failure that triggers it.
-When OS behavior matters, exercise the supported native platforms through `multi-machine`.
-Use `development-assurance`, `rust-invariants`, and fitting proof or model tools for the affected contract.
+When OS behavior matters, exercise supported platforms through the project's documented hosted runners or pinned container.
+Use `formal-assurance` for reproducible verdicts, and `development-assurance`, `rust-invariants`, and fitting proof or model tools for the affected contract.
 
 A rerun, extra sleep, larger timeout, extra retry, or serial execution alone fixes nothing.
 Repair the responsible dependency or protocol, then show that the original failure stops and valid behavior still works.
-Keep bounded test timeouts as hang diagnostics, and keep polling or retries only where the external contract requires them.
+Keep test timeouts as inconclusive hang diagnostics, and keep polling or retries only where the external contract requires them.
 Preserve primary errors, causal logs, and cancellation or cleanup outcomes without exposing credentials.
 
 Use `ci-budget` to finish local verification before an authorized publication.

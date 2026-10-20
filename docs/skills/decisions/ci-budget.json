@@ -1,9 +1,10 @@
 {
-  "revision": "5a23505d00307ac25686bad7027ba6fa6e8baa347d42bc6aa28c2527b2f477d9",
+  "revision": "0a66915ceeef02dd7277d3a2cb2a24da32c0a300e5a16f52457144764e3b27fc",
   "outcome": "implemented",
-  "reason": "The revision gives hosted CI one lean design in a new reference, with a fast deterministic gate, no schedules, and heavy verification on local hosts.",
+  "reason": "Select CI checks by affected contracts in reproducible project runners instead of time budgets or required owner hosts.",
   "evidence": [
     "home/dot_agents/skills/ci-budget/SKILL.md",
+    "home/dot_agents/skills/ci-budget/references/lean-workflows.md",
     "crates/dotfiles/src/hosts.rs",
     "docs/adr/0020-os-family-push-evidence.md"
   ],

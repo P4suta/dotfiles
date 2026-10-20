@@ -1,7 +1,7 @@
 {
-  "revision": "1a7da6223ce3419b879fe59c51bed1eb74e610091eb9bdfd86a6c8bf4766b8aa",
+  "revision": "558bb43cd8ae33561318e93547baabd925e2821aa2a6af8a0f7ccef9d7ff67e5",
   "outcome": "implemented",
-  "reason": "Add the judgment the structural gates can't make, where the core boundary goes and which domain types to name, and point at the compiler boundary of the Rust core and the shared ast-grep catalog that refuse the rest; formal-assurance loads it.",
+  "reason": "Use the project's pinned structural checker instead of an owner-local assure configuration as the architectural gate.",
   "evidence": [
     "home/dot_agents/skills/functional-architecture/SKILL.md",
     "home/dot_config/skill-ops/policy.json",

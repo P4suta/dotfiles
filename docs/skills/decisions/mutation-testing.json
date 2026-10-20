@@ -1,7 +1,7 @@
 {
-  "revision": "a27e5628bf75e6a454349cb7eb1b69c3498f6fca8815d85e2bb40846ea671b7c",
+  "revision": "cb60da4f834ab12ab6eabc34ed2546f659e781ba1121ab069dd5bb541de719e3",
   "outcome": "implemented",
-  "reason": "Keep survivor classification and invariant repair separate from proof completion.\nDeclare the optional njutest engine at exact source revision 46d5b5f4446503162ea18189756249231abb6fc7 while keeping native cargo-mutants authoritative and hosted mutation paused.\nValidate original offline reports, source and operator correspondence, execution origin, and the assertion-free sensitivity control before considering adoption.\nThe focused ordinary adapter and control suite passed 16 cases, including the added negative control.\nImported assessments grant no execution credit, and actual native parity, complete campaign results, proofs, and cold versus warm measurements remain pending.",
+  "reason": "Use the project's pinned mutation workflow and reproducible runner, and keep timeouts inconclusive instead of counting them as mutant outcomes.",
   "evidence": [
     "home/dot_agents/skills/mutation-testing/SKILL.md",
     "docs/adr/verification-proportional-to-code-shape.md",

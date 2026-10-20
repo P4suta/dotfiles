@@ -9,6 +9,8 @@ metadata:
 
 # Using storage-scout
 
+Keep this owner-side convenience within the boundary in `formal-assurance`.
+
 Run the installed `storage-scout` on the machine that owns the inspected storage.
 The project-owned [storage-scout skill](https://github.com/P4suta/storage-scout/blob/main/skills/storage-scout/SKILL.md) holds the command procedure, so load its local copy when the checkout exists.
 Check the installed version and relevant `--help` before relying on version-specific options or JSON fields.

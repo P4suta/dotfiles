@@ -13,6 +13,8 @@ Record one disposition for each property.
 
 A small arithmetic helper needs a complete native proof, never an exception backed by unit tests.
 Try isolation and decomposition before accepting a verifier limitation.
+State bounded coverage by input size or unwinding.
+Elapsed time never establishes a verifier limitation.
 A disproved property calls for a corrected contract or implementation, never a testing exception.
 
 Record an alternative beside the contract with its reason, source binding, exact commands, result, limits, supported-core proofs, and revisit condition.

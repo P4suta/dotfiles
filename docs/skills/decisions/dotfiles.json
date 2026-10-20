@@ -1,7 +1,7 @@
 {
-  "revision": "b4dab7524d4f0554092749cde4782c470d00fb1f751b311305bead288c64531a",
+  "revision": "af1f455f2b267bdc710962db543b8e9dfba214029723a0848b88c114fffe0c96",
   "outcome": "implemented",
-  "reason": "Keep native profile application and state preservation separate from remote transport and skill discovery.\nAlign the managed tool declarations with project pins: chezmoi 2.73.1, ansible-core 2.21.5, and zsh 5.9.2.\nThe installed Windows chezmoi reports v2.73.1; Linux Ansible and zsh execution remain pending later rollout verification.",
+  "reason": "Separate project verification through documented runners from owner-host caches and authorized configuration rollout checks.",
   "evidence": [
     "home/dot_agents/skills/dotfiles/SKILL.md",
     "home/dot_agents/skills/dotfiles/tools.toml",
