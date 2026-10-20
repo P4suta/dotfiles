@@ -603,6 +603,33 @@ fn reject_requiring_a_context_in_a_scratch_repository() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/source_sync_rules.rs"
+probes = '''
+use production::{Checkout, Decision, Remote, SkipReason, decide, preflight};
+#[kani::proof]
+fn reject_moving_a_dirty_source() {
+    assert!(decide(Checkout { on_main: true, clean: false }, Remote::FastForward) == Decision::Move);
+}
+#[kani::proof]
+fn reject_fetching_an_off_main_source() {
+    assert!(preflight(Checkout { on_main: false, clean: true }).is_none());
+}
+#[kani::proof]
+fn reject_moving_after_a_failed_fetch() {
+    assert!(decide(Checkout { on_main: true, clean: true }, Remote::FetchFailed) == Decision::Move);
+}
+#[kani::proof]
+fn reject_discarding_a_local_commit() {
+    assert!(decide(Checkout { on_main: true, clean: true }, Remote::Diverged) == Decision::Move);
+}
+#[kani::proof]
+fn reject_skipping_a_clean_fast_forward() {
+    assert!(decide(Checkout { on_main: true, clean: true }, Remote::FastForward) == Decision::Skip(SkipReason::Diverged));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/hook_failure_rules.rs"
 probes = '''
 #[kani::proof]

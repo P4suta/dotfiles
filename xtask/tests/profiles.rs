@@ -720,19 +720,19 @@ fn assert_rehearsal_home_isolation() {
 }
 
 #[test]
-fn every_owner_source_clones_over_ssh_without_transport_overrides() {
+fn every_owner_source_clones_over_https_without_transport_overrides() {
     use dotfiles::setup::OwnerSource;
     let scope = tempfile::tempdir().unwrap();
     let global = scope.path().join("gitconfig");
     fs::write(
         &global,
-        "[url \"git@github.com:P4suta/\"]\n\tinsteadOf = https://github.com/P4suta/\n[url \"git@github.com:\"]\n\tpushInsteadOf = https://github.com/\n",
+        "[url \"git@github.com:\"]\n\tpushInsteadOf = https://github.com/\n",
     )
     .unwrap();
     for (source, expected) in [
-        (OwnerSource::Ocomment, "git@github.com:P4suta/OComment"),
-        (OwnerSource::Domyjob, "git@github.com:P4suta/domyjob"),
-        (OwnerSource::Fleet, "git@github.com:P4suta/fleet"),
+        (OwnerSource::Ocomment, "https://github.com/P4suta/OComment"),
+        (OwnerSource::Domyjob, "https://github.com/P4suta/domyjob"),
+        (OwnerSource::Fleet, "https://github.com/P4suta/fleet"),
     ] {
         let mut arguments = source.clone_arguments(&scope.path().join("checkout"));
         let clone = arguments

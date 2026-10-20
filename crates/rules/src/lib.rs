@@ -88,6 +88,7 @@ pub mod skill_gate_rules;
 pub mod skill_plan_rules;
 pub mod skill_rules;
 pub mod source_name_rules;
+pub mod source_sync_rules;
 pub mod stale_rules;
 pub mod start_health_rules;
 pub mod target_rules;

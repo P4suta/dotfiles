@@ -41,7 +41,7 @@ fn tools(scope: &Path) -> Result<PathBuf> {
 }
 
 #[test]
-fn applied_git_profiles_keep_scoped_owner_fetches_and_all_pushes_on_ssh() -> Result<()> {
+fn applied_git_profiles_fetch_over_https_and_keep_all_pushes_on_ssh() -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let scope = tempfile::tempdir()?;
     let initial = scope.path().join("initial.gitconfig");
@@ -104,6 +104,15 @@ fn check_profile(
         "{}",
         String::from_utf8_lossy(&rendered.stderr)
     );
+    let github = profiles::chezmoi(root, &fixture, &config, &home)
+        .args(["execute-template", "--file"])
+        .arg(root.join("home/dot_config/gh/config.yml.tmpl"))
+        .output()?;
+    ensure!(
+        github.status.success(),
+        "render the GitHub CLI configuration"
+    );
+    assert!(String::from_utf8(github.stdout)?.contains("git_protocol: https\n"));
     let scratch = dotfiles::host_checks::Scratch::new(&config)?;
     let command = scratch.command("git");
     let applied = PathBuf::from(
@@ -157,6 +166,8 @@ fn check_profile(
         "https://github.com/third-party/public.git",
         "https://github.com/P4suta/OComment",
         "https://github.com/P4suta/OComment.git",
+        "https://github.com/P4suta/private-fixture.git",
+        "https://github.com/P4suta/public-fixture.git",
     ] {
         let output = run(url)?;
         ensure!(
@@ -187,12 +198,12 @@ fn assert_urls(repository: &Path, applied: &Path) -> Result<()> {
         ),
         (
             "https://github.com/P4suta/private-fixture.git",
-            "git@github.com:P4suta/private-fixture.git",
+            "https://github.com/P4suta/private-fixture.git",
             "git@github.com:P4suta/private-fixture.git",
         ),
         (
             "https://github.com/P4suta/public-fixture.git",
-            "git@github.com:P4suta/public-fixture.git",
+            "https://github.com/P4suta/public-fixture.git",
             "git@github.com:P4suta/public-fixture.git",
         ),
         (

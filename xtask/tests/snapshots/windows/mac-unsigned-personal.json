@@ -304,12 +304,12 @@
     {"mode":"0755","path":".config/fzf","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/fzf/fzfrc","sha256":"56287784ff7a0976c992422c42e1b618ea1165cf879cdeeda1dfeee515fd5b65","type":"file"},
     {"mode":"0755","path":".config/gh","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".config/gh/config.yml","sha256":"6c56d0e9293e39177793a4b8ac3c3ce5ef4847d9283764d52a6359df1c0f7368","type":"file"},
+    {"mode":"0644","path":".config/gh/config.yml","sha256":"08646e5c48489749a1cc9b9df298c850a2d86da6a47de07b74f2520f926b513f","type":"file"},
     {"mode":"0755","path":".config/ghostty","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/ghostty/config","sha256":"ad3121f75ad267f621e66532b2526260005853c18da96519b572d87df724112a","type":"file"},
     {"mode":"0755","path":".config/git","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/git/attributes","sha256":"c9066b7104dba3adf0a04fbbf208bc812467fb6a5ba922efb92706b594c0f7e3","type":"file"},
-    {"mode":"0644","path":".config/git/config","sha256":"e0fed51890f20a192f02b46ec993a347615468b5bd7866b346eca368fdcf53af","type":"file"},
+    {"mode":"0644","path":".config/git/config","sha256":"c6da6aa26a92825300eae9ed3f6c6534605ba6b66713b3bd09b293b75b3ac042","type":"file"},
     {"mode":"0755","path":".config/git/hooks","sha256":null,"type":"dir"},
     {"mode":"0755","path":".config/git/hooks/commit-msg","sha256":"acc2e216d3b6aab3055bb37e2aa663ecb1ae3b8d41e32ea205117fbb76bb9518","type":"file"},
     {"mode":"0755","path":".config/git/hooks/post-checkout","sha256":"906bf786c7368ee9c497ce29e5aa2de43885ff12f3c8f12e4c28a2500283d1a6","type":"file"},
@@ -549,7 +549,7 @@
     {"mode":"0644","path":"Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist","sha256":"23d2659fda306176b6841a3e58f234d4f5c63451a00778e3b69d1b660cca87b8","type":"file"}
   ],
   "scripts": [
-    {"condition":"always","phase":"before","position":0,"sha256":"29370a3cf1c08963c139235bac0169a54100e6ad5abb56aa81910f00d75972d9","target":".chezmoiscripts/unix/00-mise.sh"},
+    {"condition":"always","phase":"before","position":0,"sha256":"66c3c5319e2162018a48e2f407fa44210949c6e6231bfe237bb4013fbbe1b43b","target":".chezmoiscripts/unix/00-mise.sh"},
     {"condition":"always","phase":"before","position":1,"sha256":"18c93726e5cc04bf6abcc0170fca31fb549c3cc49bb64b0642b4dcd7aea297f6","target":".chezmoiscripts/unix/01-runtime.sh"},
     {"condition":"onchange","phase":"before","position":2,"sha256":"6d7ed7f72a136550609bd1e627c210694053116696033e4bb990511bac94d455","target":".chezmoiscripts/unix/02-github.sh"},
     {"condition":"onchange","phase":"after","position":3,"sha256":"5e7f94f9794e745624ac29cf2b2fc6d2dca0213348ba4a5057f2981cd5d09ae0","target":".chezmoiscripts/unix/04-desktop.sh"},

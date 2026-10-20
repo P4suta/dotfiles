@@ -293,7 +293,7 @@
     {"mode":"0755","path":".config/git","sha256":null,"type":"dir"},
     {"mode":"0600","path":".config/git/allowed_signers","sha256":"a27e662231221b7f12bb38f3c4dedd81de3bf8f6caa49e18402748e508d4137d","type":"file"},
     {"mode":"0644","path":".config/git/attributes","sha256":"c9066b7104dba3adf0a04fbbf208bc812467fb6a5ba922efb92706b594c0f7e3","type":"file"},
-    {"mode":"0644","path":".config/git/config","sha256":"94e0b61f481a90b757e97d3b2d1ec5379351628421d9409e6634d0adf5d8f042","type":"file"},
+    {"mode":"0644","path":".config/git/config","sha256":"cb02b8673ca19ab4c03b42e68658a07d2a0d8bdb00ec7ef7fd6d1cdea3d19124","type":"file"},
     {"mode":"0755","path":".config/git/hooks","sha256":null,"type":"dir"},
     {"mode":"0755","path":".config/git/hooks/commit-msg","sha256":"0c05614b53ddbe33702603a98badc9ce4d9702b5896e227be5820c58691d5f25","type":"file"},
     {"mode":"0755","path":".config/git/hooks/post-checkout","sha256":"5ef7d72d1a216a9cb08685fec478fc896de3362f91d9e9bae8dc30c7514b9c44","type":"file"},
@@ -507,7 +507,7 @@
     {"mode":"0644","path":"Documents/PowerShell/Microsoft.PowerShell_profile.ps1","sha256":"9d00714270b46bd7d45ebd927cfc95d74f1b69b367027b6a0d5694f0259ac825","type":"file"}
   ],
   "scripts": [
-    {"condition":"always","phase":"before","position":0,"sha256":"996e067c25501cfff22bb4a100ac583e076d143e78dfe7b0eea11c534448ac5f","target":".chezmoiscripts/windows/00-mise.ps1"},
+    {"condition":"always","phase":"before","position":0,"sha256":"3aabd9e19cbe86eeaedb82e3dc1670c3e9167c5caa6ddbfb1100fe61ed9085bc","target":".chezmoiscripts/windows/00-mise.ps1"},
     {"condition":"always","phase":"before","position":1,"sha256":"f5334a942e3c04f9cba32d64e7fa51743418eb0e1bcac5703dbf74413ed3a7eb","target":".chezmoiscripts/windows/01-runtime.ps1"},
     {"condition":"onchange","phase":"before","position":2,"sha256":"8e3c9a045236db83c0194a87a800dcf592baefa5051327c0d75dfa04a7187589","target":".chezmoiscripts/windows/02-github.ps1"},
     {"condition":"onchange","phase":"after","position":3,"sha256":"0ee49ae7c147fb41ae9ea2954b703a5d4cdace839d587661098d8fb2b881ecf0","target":".chezmoiscripts/windows/03-scoop.ps1"},
