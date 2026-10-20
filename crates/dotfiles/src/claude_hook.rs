@@ -6,6 +6,7 @@ use crate::shell_write_rules::{
     Source, Verdict, body_sources, inspect, next_action, program, segments,
 };
 use anyhow::{Context, Result};
+use dotguard::provenance_rules;
 use serde_json::Value;
 use std::io::Read;
 use std::io::Write;
@@ -79,6 +80,14 @@ fn attribution_refusal(command: &str, directory: Option<&Path>) -> Option<String
             return Some(format!(
                 "Refused: this gh command sends a body with an AI attribution line (body line {number}: {line}).\nNext action: {}",
                 body_rules::next_action(reason)
+            ));
+        }
+        let provenance = provenance_rules::find(&text);
+        if provenance_rules::verdict(provenance.is_some()) == provenance_rules::Verdict::Refuse {
+            let (number, phrase) = provenance?;
+            return Some(format!(
+                "Refused: this gh command sends a body that says how its text came about (body line {number}: `{phrase}`).\nNext action: {}",
+                provenance_rules::NEXT_ACTION
             ));
         }
     }
@@ -1101,6 +1110,34 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn every_provenance_phrase_is_refused_and_a_quoted_one_admitted() {
+        for phrase in provenance_rules::PHRASES {
+            for template in [
+                "gh pr create --title t --body \"Body {}.\"",
+                "gh issue comment 3 -b \"Notes {} here.\"",
+                "gh pr review 3 --approve --body \"Checked {}.\"",
+                "gh api repos/a/b/issues/3/comments -f body=\"{}\"",
+                "gh pr create --body-file - <<'EOF'\nBody.\n{}\nEOF",
+            ] {
+                let command = template.replace("{}", phrase);
+                let message = refused(&command);
+                assert!(
+                    message.contains("says how its text came about")
+                        && message.contains("Rewrite that sentence"),
+                    "{command}: {message}"
+                );
+            }
+        }
+        let quoted = "gh pr comment 3 --body 'Search old notes for `ai-assisted`.'";
+        assert_eq!(
+            refusal(&bash(quoted))
+                .unwrap()
+                .map(|blocked| blocked.message),
+            None
+        );
     }
 
     #[test]

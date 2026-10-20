@@ -348,6 +348,52 @@ fn a_committed_attribute_admits_japanese_and_turns_the_scan_off_for_its_paths() 
     );
 }
 
+/// A commit message that says how its text came about gets refused with the phrase and a rewrite, and a quoted phrase passes.
+#[test]
+fn a_provenance_phrase_in_a_commit_message_is_refused_with_a_rewrite() {
+    let checkout = Checkout::new("provenance");
+    let message = checkout.path().join("MESSAGE");
+    for phrase in dotguard::provenance_rules::PHRASES {
+        std::fs::write(
+            &message,
+            format!("fix: keep edits\n\nThis came {phrase}.\n"),
+        )
+        .unwrap();
+        let output = checkout
+            .command(env!("CARGO_BIN_EXE_dotguard"))
+            .arg("commit-msg")
+            .arg(&message)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{phrase}");
+        let refused = last_record(&output);
+        assert_eq!(refused.rule, "commit.provenance");
+        assert!(
+            refused.cause.contains(phrase) && refused.cause.contains("Rewrite that sentence"),
+            "{}",
+            refused.cause
+        );
+    }
+    for text in [
+        "fix: keep edits\n\nThe parser keeps edits.\n",
+        "fix: keep edits\n\nOld notes mention `AI-assisted` reviews.\n",
+        "fix: keep edits\n\n# This came AI-assisted, in a comment line.\n",
+    ] {
+        std::fs::write(&message, text).unwrap();
+        let output = checkout
+            .command(env!("CARGO_BIN_EXE_dotguard"))
+            .arg("commit-msg")
+            .arg(&message)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{text}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
 /// Runs `arguments` through the wrapper with an editor that writes `message`.
 fn edited(checkout: &Checkout, arguments: &[&str], message: &str) -> std::process::Output {
     checkout

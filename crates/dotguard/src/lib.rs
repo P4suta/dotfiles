@@ -21,7 +21,9 @@ pub mod postcommit;
 pub mod prepush;
 pub mod real_git;
 pub use platform::refusal;
-pub use rules::{gate_rules, git_ref_rules, guard_rules, postcommit_rules, reaper_rules};
+pub use rules::{
+    gate_rules, git_ref_rules, guard_rules, postcommit_rules, provenance_rules, reaper_rules,
+};
 pub mod renovate;
 pub mod stack;
 pub mod staged;

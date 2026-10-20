@@ -441,7 +441,7 @@ Experimental skill maintenance stays off until the machine's explicit opt-in.
 | Former line | Held by | Mechanism |
 | --- | --- | --- |
 | The Japanese reply line. | Merged | Reworded as `Reply in Japanese`. |
-| Follow Conventional Commits and omit AI attribution footers and session URLs. | Gate | Dotguard `commit-msg` strips agent attribution and session URLs in `crates/dotguard/src/attribution.rs`. |
+| Follow Conventional Commits and omit AI attribution footers and session URLs. | Gate | Dotguard `commit-msg` strips agent attribution and session URLs in `crates/dotguard/src/attribution.rs` and refuses provenance phrases in `crates/rules/src/provenance_rules.rs`. |
 | Keep diffs reviewable by editing the smallest relevant region. | Merged | Merged into `Make the smallest change`. |
 | Load `pull-request` before GitHub-bound implementation. | Skill | The `pull-request` skill description states the same trigger. |
 | Personal non-fork repositories require an existing issue. | Gate and skill | `pr-workflow start`, `create`, and `edit` refuse a personal non-fork without an open, finished issue in `crates/pr-workflow/src/lib.rs`, and `pull-request` states the rule for external projects and forks. |
