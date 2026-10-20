@@ -1,7 +1,7 @@
 {
-  "revision": "f15fe33f0c5c8c7e8a6a8425606325be989fbdf0fc7ef0ea0c30029ebe455614",
+  "revision": "03e38c1e663df4ca49f56ed92905b5206ffeb67caeb2adf53e62d786805689a5",
   "outcome": "implemented",
-  "reason": "Keep proof selection and implementation refinement separate from installing verification tools.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "reason": "The revision lets ci-budget decide which assessed requirements hosted CI runs, so full proof campaigns stay on local hosts.",
   "evidence": [
     "home/dot_agents/skills/formal-assurance/SKILL.md",
     "docs/adr/verification-proportional-to-code-shape.md",
