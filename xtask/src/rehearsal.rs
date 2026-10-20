@@ -99,6 +99,8 @@ pub fn configuration(root: &Path, profile: Profile, home: &Path) -> Result<Strin
     };
     let mut text = identity;
     let name = profile.name();
+    // The shared toolchains install on every real host, so the rehearsal keeps only what its profile's steps require.
+    text.push_str("[data.shared_tools]\ncommon = []\n\n");
     write!(
         text,
         "[data.platforms.{name}.tools]\ncommon = [{}]\npersonal = []\nwork = []\n\n",

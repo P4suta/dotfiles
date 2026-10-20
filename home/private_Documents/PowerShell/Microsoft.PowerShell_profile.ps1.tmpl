@@ -13,14 +13,14 @@ if (-not (Get-Module PSReadLine)) {
     return
 }
 
-foreach ($init in 'starship', 'mise', 'zoxide') {
+foreach ($init in 'starship', 'mise', 'zoxide', 'ls-colors') {
     $script = Join-Path $HOME ".cache\pwsh\$init.ps1"
     if (Test-Path -LiteralPath $script) {
         . $script
     }
 }
 
-Set-PSReadLineOption -EditMode Emacs
+{{ includeTemplate "partials/interactive_pwsh" . }}
 if (-not [Console]::IsOutputRedirected) {
     Set-PSReadLineOption -PredictionSource History -PredictionViewStyle ListView
 }
@@ -30,6 +30,11 @@ Set-PSReadLineKeyHandler -Chord Ctrl+r -ScriptBlock {
     Import-Module PSFzf
     Set-PsFzfOption -PSReadlineChordReverseHistory Ctrl+r
     Invoke-FzfPsReadlineHandlerHistory
+}
+Set-PSReadLineKeyHandler -Chord Ctrl+t -ScriptBlock {
+    Import-Module PSFzf
+    Set-PsFzfOption -PSReadlineChordProvider Ctrl+t
+    Invoke-FzfPsReadlineHandlerProvider
 }
 
 if (Get-Command Enable-TransientPrompt -ErrorAction Ignore) {

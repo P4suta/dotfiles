@@ -30,11 +30,7 @@ def --env dotfiles-prepend-path [] {
 }
 dotfiles-prepend-path
 
-$env.EDITOR = {{ if lookPath "zed" }}"zed --wait"{{ else if lookPath "code" }}"code --wait"{{ else }}"nano"{{ end }}
-$env.VISUAL = $env.EDITOR
-$env.PAGER = "ov"
-$env.MANPAGER = "sh -c 'col -bx | bat --language=man --plain'"
-$env.FZF_DEFAULT_OPTS_FILE = ($home | path join ".config" "fzf" "fzfrc")
+{{ includeTemplate "partials/interactive_nu_env" . }}
 $env.DOTFILES_NU_SESSION = "1"
 
 let is_remote_ssh = (($env.SSH_CONNECTION? | default "") | is-not-empty)

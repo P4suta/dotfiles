@@ -1,23 +1,30 @@
 # Tools mise installs on each profile, and how many it builds at once.
-# `common` installs on every machine of the profile, and `personal` and `work` follow the machine's role.
+# `shared_tools.common` installs on every profile, and a profile leaves one out only through a `shared_tools.skip` entry that states why.
+# Each profile's own `common` adds what only that profile needs, and `personal` and `work` follow the machine's role.
 # versions.toml holds their pinned versions.
+
+[shared_tools]
+common = [
+  "rust",
+  "go",
+  "node",
+  "bun",
+  "uv",
+  "java",
+  "erlang",
+  "gleam",
+  "rebar",
+  "aqua:pnpm/pnpm",
+  "golangci-lint",
+  "cargo:cargo-semver-checks",
+]
 
 [platforms.linux.mise]
 jobs = 2
 
 [platforms.linux.tools]
 common = [
-  "bun",
-  "go",
-  "java",
-  "node",
   "opam",
-  "rust",
-  "uv",
-  "erlang",
-  "gleam",
-  "rebar",
-  "aqua:pnpm/pnpm",
   "google-java-format",
   "gradle",
   "jbang",
@@ -28,8 +35,6 @@ common = [
   "go:golang.org/x/vuln/cmd/govulncheck",
   "go:honnef.co/go/tools/cmd/staticcheck",
   "go:mvdan.cc/gofumpt",
-  "golangci-lint",
-  "cargo:cargo-semver-checks",
 ]
 personal = []
 work = []
@@ -39,32 +44,21 @@ jobs = 8
 
 [platforms.mac.tools]
 common = [
-  "bun",
   "ghc",
-  "go",
-  "java",
-  "node",
   "opam",
   "racket",
-  "rust",
-  "uv",
-  "erlang",
-  "gleam",
-  "rebar",
   "cabal",
   "google-java-format",
   "gradle",
   "jbang",
   "maven",
   "go:mvdan.cc/gofumpt",
-  "golangci-lint",
   "go:honnef.co/go/tools/cmd/staticcheck",
   "npm:repomix",
   "air",
   "aqua:dlvhdr/gh-dash",
   "aqua:wader/fq",
   "cargo:cargo-machete",
-  "cargo:cargo-semver-checks",
   "mvnd",
   "process-compose",
   "usql",
@@ -76,21 +70,24 @@ work = []
 [platforms.windows.tools]
 common = [
   "python",
-  "rust",
   "cargo:cargo-edit",
-  "gleam",
-  "erlang",
-  "node",
   "deno",
-  "bun",
   "yamllint",
   "doppler",
+  "bottom",
+  "ghq",
+  "yazi",
+  "vivid",
+  "aqua:noborus/ov",
 ]
 personal = []
 work = []
 
 [platforms.wsl.tools]
 common = [
+  "ghq",
+  "yazi",
+  "aqua:noborus/ov",
   "ast-grep",
   "bat",
   "eza",
@@ -137,12 +134,6 @@ common = [
   "aqua:ouch-org/ouch",
   "chezmoi",
   "shellcheck",
-  "bun",
-  "go",
-  "node",
-  "rust",
-  "uv",
-  "aqua:pnpm/pnpm",
   "cargo:cargo-llvm-cov",
   "cargo:tokei",
   "github:crate-ci/typos",

@@ -23,6 +23,8 @@ pub struct Data {
     /// The foreground and background palette names that some theme draws text with, each of which keeps a text contrast of 4.5:1.
     pub contrast: Option<Vec<ContrastPair>>,
     pub platforms: Option<Platforms>,
+    /// The tools mise installs on every profile.
+    pub shared_tools: Option<SharedTools>,
     /// Named sets of profiles.
     pub profiles: Option<BTreeMap<String, Vec<String>>>,
     /// Targets that only the profiles of the named set receive.
@@ -33,6 +35,111 @@ pub struct Data {
     pub scripts: Option<BTreeMap<String, String>>,
     /// The modern command-line tools that replace legacy ones for agents, pinned on every profile.
     pub modern: Option<Modern>,
+    /// The interactive behavior every shell a profile configures renders in its own syntax.
+    pub shell: Option<Shell>,
+}
+
+/// The shortcuts, functions, history, line editing keys, and pager and editor variables of every interactive shell.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Shell {
+    /// Commands each shell keeps in its history, which PowerShell caps at its own limit.
+    pub history_size: u32,
+    pub edit_mode: EditMode,
+    /// Editors in order of preference, each with its options, of which a host takes the first it finds.
+    pub editors: Vec<String>,
+    pub fallback_editor: FallbackEditor,
+    pub pager: String,
+    /// The `LESS` options for the programs that still page through less.
+    pub less: String,
+    pub keys: Vec<ShellKey>,
+    pub aliases: Vec<ShellAlias>,
+    pub functions: Vec<ShellFunction>,
+}
+
+/// The line editor mode of every shell.
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EditMode {
+    #[default]
+    Vi,
+    Emacs,
+}
+
+/// The editor of a host that has none of the preferred editors, for each OS family.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct FallbackEditor {
+    pub unix: String,
+    pub windows: String,
+}
+
+/// One insert-mode key and the action every shell binds it to.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShellKey {
+    pub chord: Chord,
+    pub action: KeyAction,
+}
+
+/// A key chord that every shell's line editor can bind.
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq, Serialize)]
+pub enum Chord {
+    #[default]
+    #[serde(rename = "alt+left")]
+    AltLeft,
+    #[serde(rename = "alt+right")]
+    AltRight,
+    #[serde(rename = "alt+b")]
+    AltB,
+    #[serde(rename = "alt+f")]
+    AltF,
+    #[serde(rename = "alt+backspace")]
+    AltBackspace,
+    #[serde(rename = "ctrl+left")]
+    CtrlLeft,
+    #[serde(rename = "ctrl+right")]
+    CtrlRight,
+    #[serde(rename = "ctrl+a")]
+    CtrlA,
+    #[serde(rename = "ctrl+e")]
+    CtrlE,
+    #[serde(rename = "ctrl+k")]
+    CtrlK,
+    #[serde(rename = "ctrl+u")]
+    CtrlU,
+    #[serde(rename = "ctrl+w")]
+    CtrlW,
+}
+
+/// A line editing action that every shell's line editor provides.
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyAction {
+    #[default]
+    WordLeft,
+    WordRight,
+    KillWord,
+    KillToStart,
+    KillToEnd,
+    LineStart,
+    LineEnd,
+}
+
+/// A shortcut that stands for one command and its options.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShellAlias {
+    pub name: String,
+    pub command: String,
+}
+
+/// A function that each shell defines in its own syntax, because it changes the directory or asks for a choice.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShellFunction {
+    pub name: String,
+    pub summary: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
@@ -230,6 +337,17 @@ pub struct Platforms {
     pub mac: Option<Mac>,
     pub windows: Option<Windows>,
     pub wsl: Option<Wsl>,
+}
+
+/// The tools mise installs on every profile, their versions, and the shared tools a profile leaves out.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SharedTools {
+    pub common: Option<Vec<String>>,
+    /// The version of a shared tool on every profile whose own `tool_versions` names none.
+    pub versions: Option<BTreeMap<String, String>>,
+    /// For each profile, the shared tools it leaves out and the reason.
+    pub skip: Option<BTreeMap<String, BTreeMap<String, String>>>,
 }
 
 /// The tools mise installs: `common` on every machine, and `personal` or `work` by the machine's role.

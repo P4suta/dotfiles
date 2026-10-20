@@ -5,11 +5,6 @@ case $- in
   *) return ;;
 esac
 
-HISTCONTROL=ignoreboth
-HISTSIZE=100000
-HISTFILESIZE=100000
-shopt -s histappend checkwinsize
-
 if [[ -x /opt/homebrew/bin/brew ]]; then
   eval "$(/opt/homebrew/bin/brew shellenv || true)"
 fi
@@ -24,6 +19,8 @@ if [[ -t 0 ]] && [[ -t 1 ]] \
   && command -v nu >/dev/null 2>&1; then
   exec nu
 fi
+
+{{ includeTemplate "partials/interactive_posix" (dict "syntax" "bash" "data" .) }}
 
 if [[ -x "${HOME}/.local/bin/mise" ]]; then
   eval "$("${HOME}/.local/bin/mise" activate bash || true)"
@@ -40,7 +37,4 @@ command -v starship >/dev/null && eval "$(starship init bash || true)"
 command -v zoxide   >/dev/null && eval "$(zoxide init bash || true)"
 command -v atuin    >/dev/null && eval "$(atuin init bash --disable-up-arrow || true)"
 command -v fzf      >/dev/null && eval "$(fzf --bash || true)"
-export FZF_DEFAULT_OPTS_FILE="${HOME}/.config/fzf/fzfrc"
-
-command -v bat   >/dev/null && export MANPAGER="sh -c 'col -bx | bat -l man -p'"
-command -v vivid >/dev/null && LS_COLORS="$(vivid generate tokyonight-night || true)" && export LS_COLORS
+command -v vivid    >/dev/null && LS_COLORS="$(vivid generate tokyonight-night || true)" && export LS_COLORS

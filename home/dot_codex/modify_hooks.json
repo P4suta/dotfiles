@@ -5,6 +5,9 @@
   On Windows it first runs the process-start probe, as the Claude Code session does.
   The stop hook refuses to end a turn while a file it changed holds such a shape.
   The pre-tool hook blocks a malformed or file-writing shell command before Codex runs it, through the decision core every managed client shares.
+  The timing hook records the duration of each shell command and reports its measured duration to Codex, as it does for Claude Code.
+  Codex takes a rewritten command only beside an approval of it, and these hooks approve nothing.
+  The shell hook refuses a legacy command there with its exact replacement instead of running the replacement.
 */ -}}
 {{- $current := dict -}}
 {{- if trim .chezmoi.stdin -}}{{- $current = fromJson .chezmoi.stdin -}}{{- end -}}
@@ -13,10 +16,15 @@
 {{- if eq .profile "windows" }}{{ $tool = ".local/bin/dotfiles.exe" }}{{ end -}}
 {{- $runtime := joinPath .chezmoi.homeDir $tool -}}
 {{- $hooks := dig "hooks" (dict) $current -}}
-{{- $pre := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PreToolUse" (list) $hooks) "suffixes" (list " claude-bash" " issue-guard")) | fromJson -}}
+{{- $shells := "Bash|shell|exec_command" -}}
+{{- $timed := "claude-timing --client codex" -}}
+{{- $pre := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PreToolUse" (list) $hooks) "suffixes" (list " claude-bash" " issue-guard" (printf " %s" $timed))) | fromJson -}}
 {{- $shell := includeTemplate "partials/codex_runtime_hook" (dict "profile" .profile "tool" $runtime "arguments" "claude-bash" "trace" true) | fromJson -}}
-{{- $own_pre := dict "matcher" "Bash|shell|exec_command" "hooks" (list $shell) -}}
+{{- $timing := includeTemplate "partials/codex_runtime_hook" (dict "profile" .profile "tool" $runtime "arguments" $timed "trace" true) | fromJson -}}
+{{- $own_pre := dict "matcher" $shells "hooks" (list $shell $timing) -}}
 {{- $_ := set $hooks "PreToolUse" (concat $pre (list $own_pre)) -}}
+{{- $post := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PostToolUse" (list) $hooks) "suffixes" (list (printf " %s" $timed))) | fromJson -}}
+{{- $_ := set $hooks "PostToolUse" (concat $post (list (dict "matcher" $shells "hooks" (list $timing)))) -}}
 {{- $edit := includeTemplate "partials/codex_runtime_hook" (dict "profile" .profile "tool" $runtime "arguments" "issue-guard" "trace" true) | fromJson -}}
 {{- $issue := dict "matcher" "apply_patch|Edit|Write|MultiEdit|edit|write" "hooks" (list $edit) -}}
 {{- $_ := set $hooks "PreToolUse" (concat (dig "PreToolUse" (list) $hooks) (list $issue)) -}}
