@@ -7,6 +7,10 @@ use std::path::Path;
 #[path = "../../crates/platform/tests/support/fixture_process.rs"]
 mod fixture_process;
 
+const PROFILE_APPLY_FIXTURE: &str = "DOTFILES_SKILL_APPLY_SOURCE";
+const PROFILE_APPLY_TEST: &str =
+    "profile_apply_records_changed_skills_before_scoped_pr_install_without_enabling_maintenance";
+
 fn catalog_source() -> Result<tempfile::TempDir> {
     let source = tree()?;
     let root = source.path();
@@ -62,7 +66,10 @@ fn install_catalog_command(source: &Path, home: &Path) -> Result<()> {
     fs::create_dir_all(configuration.parent().expect("configuration parent"))?;
     fs::write(
         configuration,
-        toml::to_string(&json!({"sourceDir":source}))?,
+        toml::to_string(&json!({
+            "sourceDir": source,
+            "data": {"profile": xtask::profiles::native_profile()?.name()}
+        }))?,
     )?;
     let output = fixture_process::command(env!("CARGO_BIN_EXE_xtask"), source)
         .current_dir(source)
@@ -79,6 +86,26 @@ fn install_catalog_command(source: &Path, home: &Path) -> Result<()> {
     anyhow::ensure!(
         output.status.success(),
         "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+fn apply_profile_command(source: &Path, home: &Path) -> Result<()> {
+    let output = fixture_process::command(std::env::current_exe()?, source)
+        .args(["--exact", PROFILE_APPLY_TEST, "--nocapture"])
+        .env(PROFILE_APPLY_FIXTURE, source)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("XDG_CACHE_HOME", home.join(".cache"))
+        .env("XDG_STATE_HOME", home.join(".local/state"))
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
     Ok(())
@@ -112,12 +139,14 @@ fn refuse_catalog_drift(source: &Path, user: &Path, binary: &Path) -> Result<()>
             .contains("installed skill catalog differs")
     );
     let mut applied = false;
-    assert!(
-        pr_workflow::deploy(source, binary, user, |_| {
-            applied = true;
-            Ok(())
-        })
-        .is_err()
+    let error = pr_workflow::deploy(source, binary, user, |_| {
+        applied = true;
+        Ok(())
+    })
+    .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "unrelated installed managed skills have changed; preserve and review them before installation"
     );
     assert!(!applied);
     assert_eq!(fs::read(&manifest)?, approved_bytes);
@@ -125,8 +154,20 @@ fn refuse_catalog_drift(source: &Path, user: &Path, binary: &Path) -> Result<()>
 }
 
 #[test]
-fn static_catalog_installation_allows_scoped_pr_updates_without_enabling_maintenance() -> Result<()>
-{
+fn profile_apply_records_changed_skills_before_scoped_pr_install_without_enabling_maintenance()
+-> Result<()> {
+    if let Some(source) = std::env::var_os(PROFILE_APPLY_FIXTURE) {
+        let home = platform::home::home().expect("fixture home");
+        return dotfiles::profiles::operate(
+            Path::new(&source),
+            dotfiles::profiles::NativeAction::Apply,
+            &home.join(".config/chezmoi/chezmoi.toml"),
+            &home,
+            true,
+            None,
+            Some(&home.join("profile-backup")),
+        );
+    }
     for owner_disabled in [false, true] {
         let source = catalog_source()?;
         let home = tempfile::tempdir()?;
@@ -162,7 +203,11 @@ fn static_catalog_installation_allows_scoped_pr_updates_without_enabling_mainten
                 ),
             )?;
             track_catalog(source.path())?;
-            install_catalog_command(source.path(), user)?;
+            if revision == "initial" {
+                install_catalog_command(source.path(), user)?;
+            } else {
+                apply_profile_command(source.path(), user)?;
+            }
             assert!(
                 manifest.is_file(),
                 "shared-skill installation must record the approved catalog"

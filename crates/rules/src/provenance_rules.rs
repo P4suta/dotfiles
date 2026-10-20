@@ -36,9 +36,10 @@ pub const NEXT_ACTION: &str = "Rewrite that sentence about the change itself, in
 /// The one-based line and the phrase of the first provenance phrase in prose.
 /// Fenced code blocks and inline code spans don't count, so a document can quote a phrase.
 ///
-/// Exempt as disproportionate: Kani spends past its budget on the string search of even a three-byte word.
-/// Evidence: `crates/rules/src/provenance_rules.rs::tests::each_phrase_is_found_in_prose_and_skipped_in_code`.
-/// Reconsider when a cargo-fuzz target owns this function.
+/// Exempt as disproportionate: an eleven-byte domain composes eleven phrase candidates at each position with UTF-8 line trimming and Markdown delimiter state.
+/// The exhaustive enumeration covers three-byte prefixes of one eight-byte phrase.
+/// Evidence: `crates/rules/src/provenance_rules.rs::tests::provenance_phrases_enumerate_every_short_markdown_prefix`.
+/// Reconsider when the Markdown scan gives delimiter transitions their own contract apart from line trimming and phrase lookup.
 #[must_use]
 pub fn find(text: &str) -> Option<(usize, &'static str)> {
     let mut fenced = false;
@@ -108,6 +109,84 @@ fn matches_at(bytes: &[u8], position: usize, phrase: &[u8]) -> bool {
 mod proofs {
     use super::*;
 
+    #[cfg(test)]
+    fn code_prefix(bytes: &[u8]) -> bool {
+        let mut delimiter = 0;
+        let mut run = 0;
+        for &byte in bytes {
+            if byte == b'`' {
+                run += 1;
+            } else if run != 0 {
+                delimiter = if delimiter == 0 {
+                    run
+                } else if delimiter == run {
+                    0
+                } else {
+                    delimiter
+                };
+                run = 0;
+            }
+        }
+        if run != 0 {
+            delimiter = if delimiter == 0 {
+                run
+            } else if delimiter == run {
+                0
+            } else {
+                delimiter
+            };
+        }
+        delimiter != 0
+    }
+
+    #[cfg(test)]
+    fn reference_find(text: &str) -> Option<(usize, &'static str)> {
+        let mut fenced = false;
+        for (line_index, line) in text.lines().enumerate() {
+            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
+                fenced = !fenced;
+                continue;
+            }
+            if fenced {
+                continue;
+            }
+            let bytes = line.as_bytes();
+            let mut first: Option<(usize, &str)> = None;
+            for phrase in PHRASES {
+                for (start, candidate) in bytes.windows(phrase.len()).enumerate() {
+                    let boundary_before = start
+                        .checked_sub(1)
+                        .and_then(|index| bytes.get(index))
+                        .is_none_or(|byte| !byte.is_ascii_alphanumeric());
+                    let boundary_after = bytes
+                        .get(start + phrase.len())
+                        .is_none_or(|b| !b.is_ascii_alphanumeric());
+                    if boundary_before
+                        && boundary_after
+                        && candidate.eq_ignore_ascii_case(phrase.as_bytes())
+                        && bytes
+                            .get(..start)
+                            .is_some_and(|prefix| !code_prefix(prefix))
+                        && first.is_none_or(|(earlier, _)| start < earlier)
+                    {
+                        first = Some((start, phrase));
+                    }
+                }
+            }
+            if let Some((_, phrase)) = first {
+                return Some((line_index + 1, phrase));
+            }
+        }
+        None
+    }
+
+    #[cfg(test)]
+    pub fn spec_find(text: &str) -> bool {
+        let actual = find(text);
+        assert_eq!(actual, reference_find(text));
+        actual.is_some()
+    }
+
     pub fn spec_verdict(found: bool) {
         assert_eq!(verdict(found) == Verdict::Refuse, found);
     }
@@ -125,6 +204,14 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provenance_phrases_enumerate_every_short_markdown_prefix() {
+        for bytes in crate::domain::words(b"`~\nA ", 3) {
+            let prefix = core::str::from_utf8(&bytes).unwrap();
+            proofs::spec_find(&alloc::format!("{prefix}as an ai"));
+        }
+    }
 
     #[test]
     fn every_input_meets_the_specification() {

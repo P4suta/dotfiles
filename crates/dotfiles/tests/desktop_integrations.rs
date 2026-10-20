@@ -266,6 +266,34 @@ impl OpenCodeApplyFixture {
         fs::create_dir_all(&home)?;
         copy_opencode_templates(&managed)?;
         fs::write(checkout.join(".chezmoiroot"), "home\n")?;
+        for relative in ["dot_agents/skills/example", "dot_claude/skills"] {
+            fs::create_dir_all(managed.join(relative))?;
+        }
+        fs::write(
+            managed.join("dot_agents/skills/example/SKILL.md"),
+            "---\nname: example\ndescription: Inspect the fixture.\n---\nPreserve the source.\n",
+        )?;
+        fs::write(
+            managed.join("dot_claude/skills/symlink_example"),
+            "../../.agents/skills/example\n",
+        )?;
+        skill_ops::write_json(
+            &managed.join("dot_config/skill-ops/policy.json"),
+            &serde_json::json!({"schema":1,"review_every":3,"minimum_pair_sessions":2,
+                "pair_percent":80,"max_entry_words":100,"requirements":[],"bundles":{}}),
+            false,
+        )?;
+        let catalog = skill_ops::catalog(&managed.join("dot_agents/skills"))?;
+        skill_ops::write_json(
+            &checkout.join(skill_ops::DECISIONS).join("example.json"),
+            &serde_json::json!({
+                "revision": catalog.skills["example"].revision,
+                "outcome": "keep",
+                "reason": "The fixture checks native profile application.",
+                "evidence": ["home/dot_agents/skills/example/SKILL.md"]
+            }),
+            false,
+        )?;
         for krate in platform::build_inputs::CRATES {
             fs::create_dir_all(checkout.join(krate).join("src"))?;
         }

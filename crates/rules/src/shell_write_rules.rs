@@ -288,9 +288,10 @@ impl PartialEq<&str> for Program {
 
 /// The program that the command word `text` names.
 ///
-/// Exempt as disproportionate: Kani spends past its budget on the string search of even a three-byte word.
-/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::a_program_name_drops_its_directory_case_and_suffixes`.
-/// Reconsider when a cargo-fuzz target owns this function.
+/// Exempt as disproportionate: even a two-byte normalization domain composes reverse delimiter search, UTF-8 suffix decoding, and allocated case folding.
+/// The exhaustive enumeration covers four-byte words over a four-byte alphabet.
+/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::program_names_enumerate_a_small_alphabet_through_four_bytes`.
+/// Reconsider when normalization exposes allocation-free byte boundaries before constructing its output.
 #[must_use]
 pub fn program(text: &str) -> Program {
     let name = text.rsplit(['/', '\\']).next().unwrap_or(text);
@@ -345,9 +346,10 @@ const STDERR: &str = "/dev/stderr";
 
 /// Whether the flags of `sed` or `perl` request in-place edits, or `awk` loads the `inplace` extension.
 ///
-/// Exempt as disproportionate: Kani spends past its budget on the string search of even a three-byte word.
-/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::in_place_editor_flags_are_refused`.
-/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+/// Exempt as disproportionate: sixteen total bytes across a name and two arguments compose UTF-8 flag searches, long options, and cross-argument lookahead.
+/// The exhaustive argument matrix covers five names, seven first arguments, and four second arguments.
+/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::in_place_flags_enumerate_every_short_argument_pair`.
+/// Reconsider when a byte classifier with its own contract handles individual arguments before lookahead.
 #[must_use]
 pub fn in_place_flag(name: &str, arguments: &[&str]) -> bool {
     let editor = matches!(name, "sed" | "perl");
@@ -386,9 +388,10 @@ pub fn in_place_flag(name: &str, arguments: &[&str]) -> bool {
 ///
 /// A `>` in a print statement always names a redirect target under the awk grammar, never a comparison, and `>>` only appends.
 ///
-/// Exempt as disproportionate: Kani spends past its budget on the string search of even a three-byte word.
-/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::awk_programs_that_write_files_are_refused`.
-/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+/// Exempt as disproportionate: eight input bytes compose up to nine statement partitions with UTF-8 trimming, quoting, and escape state.
+/// The exhaustive enumeration covers three-byte print suffixes over a four-byte alphabet.
+/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::awk_redirects_enumerate_every_short_print_suffix`.
+/// Reconsider when quote and escape state has a byte-transition contract separate from statement partitioning.
 #[must_use]
 pub fn awk_program_writes(program: &str) -> bool {
     program
@@ -829,6 +832,106 @@ fn inspect_at(command: &str, depth: usize, ignored: &[&str]) -> Verdict {
 mod proofs {
     use super::*;
 
+    #[cfg(test)]
+    pub fn spec_program(text: &str) -> bool {
+        let bytes = text.as_bytes();
+        let start = bytes
+            .iter()
+            .rposition(|byte| matches!(byte, b'/' | b'\\'))
+            .map_or(0, |position| position + 1);
+        let mut end = bytes.len();
+        if end - start >= 4
+            && bytes
+                .get(end - 4..)
+                .is_some_and(|suffix| suffix.eq_ignore_ascii_case(b".exe"))
+        {
+            end -= 4;
+        }
+        while end > start
+            && bytes
+                .get(end - 1)
+                .is_some_and(|byte| byte.is_ascii_digit() || *byte == b'.')
+        {
+            end -= 1;
+        }
+        let actual = program(text);
+        assert_eq!(actual.as_str().len(), end - start);
+        for (index, byte) in actual.as_str().bytes().enumerate() {
+            assert_eq!(
+                Some(byte),
+                bytes.get(start + index).map(u8::to_ascii_lowercase)
+            );
+        }
+        actual.as_str() != text
+    }
+
+    #[cfg(test)]
+    pub fn spec_in_place_flag(name: &str, arguments: &[&str]) -> bool {
+        let editor = matches!(name.as_bytes(), b"sed" | b"perl");
+        let awk = matches!(name.as_bytes(), b"awk" | b"gawk");
+        let end = arguments
+            .iter()
+            .position(|word| *word == "--")
+            .unwrap_or(arguments.len());
+        let expected =
+            arguments
+                .iter()
+                .take(end)
+                .enumerate()
+                .any(|(index, word)| match word.as_bytes() {
+                    [b'-', b'-', flags @ ..] => {
+                        editor && (flags == b"in-place" || flags.starts_with(b"in-place="))
+                    }
+                    [b'-', flags @ ..] if !flags.is_empty() => {
+                        editor && flags.contains(&b'i')
+                            || awk
+                                && (flags == b"iinplace"
+                                    || flags == b"i"
+                                        && arguments.get(index + 1) == Some(&"inplace"))
+                    }
+                    _ => false,
+                });
+        let actual = in_place_flag(name, arguments);
+        assert_eq!(actual, expected);
+        actual
+    }
+
+    #[cfg(test)]
+    fn reference_awk_redirect(statement: &str) -> bool {
+        let bytes = statement.trim_start().as_bytes();
+        if !(bytes.starts_with(b"print ")
+            || bytes.starts_with(b"print(")
+            || bytes.starts_with(b"printf ")
+            || bytes.starts_with(b"printf("))
+        {
+            return false;
+        }
+        let mut quoted = false;
+        let mut escaped = false;
+        for (index, &byte) in bytes.iter().enumerate() {
+            if escaped {
+                escaped = false;
+            } else if quoted && byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                quoted = !quoted;
+            } else if !quoted && byte == b'>' && bytes.get(index + 1) != Some(&b'=') {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[cfg(test)]
+    pub fn spec_awk_program(program: &str) -> bool {
+        let expected = program
+            .split([';', '{', '}', '\n'])
+            .any(reference_awk_redirect);
+        let actual = awk_program_writes(program);
+        assert_eq!(actual, expected);
+        actual
+    }
+
     /// The verdict never admits a file-writing command, the refusal reasons keep their precedence, and each refusal names a file tool.
     pub fn spec_verdict(interpreter: bool, in_place: bool, file: bool) {
         let result = verdict(interpreter, in_place, file);
@@ -896,6 +999,32 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn program_names_enumerate_a_small_alphabet_through_four_bytes() {
+        for bytes in crate::domain::words(b"A./1", 4) {
+            proofs::spec_program(core::str::from_utf8(&bytes).unwrap());
+        }
+    }
+
+    #[test]
+    fn awk_redirects_enumerate_every_short_print_suffix() {
+        for bytes in crate::domain::words(b" >\"=", 3) {
+            let suffix = core::str::from_utf8(&bytes).unwrap();
+            proofs::spec_awk_program(&alloc::format!("print{suffix}"));
+        }
+    }
+
+    #[test]
+    fn in_place_flags_enumerate_every_short_argument_pair() {
+        for name in ["sed", "perl", "awk", "gawk", "other"] {
+            for first in ["", "--", "-i", "-pi", "--in-place", "-iinplace", "inplace"] {
+                for second in ["", "--", "-i", "inplace"] {
+                    proofs::spec_in_place_flag(name, &[first, second]);
+                }
+            }
+        }
+    }
 
     #[test]
     #[cfg_attr(miri, ignore = "nested shell regressions allocate parsed command text")]

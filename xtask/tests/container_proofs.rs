@@ -218,7 +218,7 @@ fn miri_discovery_refuses_empty_incomplete_and_duplicate_inventories() {
 }
 
 #[test]
-fn miri_batch_results_refuse_missing_changed_duplicate_and_slow_tests() {
+fn miri_batch_results_refuse_missing_changed_duplicate_and_failed_tests() {
     use xtask::skill_proofs::{MiriTest, validate_miri_batch};
     let expected = [MiriTest {
         name: "unit::case".to_owned(),
@@ -267,7 +267,7 @@ fn miri_batch_results_refuse_missing_changed_duplicate_and_slow_tests() {
 }
 
 #[test]
-fn miri_batch_durations_separate_interpreted_time_from_the_host_budget() {
+fn miri_batch_durations_are_advisory_and_well_formed() {
     use xtask::skill_proofs::{MiriTest, validate_miri_batch};
     let expected = [MiriTest {
         name: "unit::case".to_owned(),
@@ -307,32 +307,85 @@ fn miri_batch_durations_separate_interpreted_time_from_the_host_budget() {
     assert!(validate_miri_batch(&missing, &expected, 1).is_err());
     validate_miri_batch(&report("399"), &expected, 29_999).unwrap();
     for elapsed_ms in [30_001, u64::MAX] {
-        assert!(validate_miri_batch(&report("1e-9"), &expected, elapsed_ms).is_err());
+        validate_miri_batch(&report("1e-9"), &expected, elapsed_ms).unwrap();
     }
 }
 
 #[test]
-fn proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results() -> anyhow::Result<()> {
-    if incident_fixture::run("proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results")? {
+fn completed_proof_verdicts_ignore_elapsed_time_and_incomplete_proofs_lack_evidence() {
+    let expected = ["bounded-contract"];
+    let valid = json!({"verification_results":{"summary":{"status":"completed","executed":1,"failed":0,"successful":1},"results":[{"harness_id":expected[0],"status":"Success","checks":[{"category":"assertion","status":"Success"},{"category":"cover","status":"Satisfied"},{"category":"cover","status":"Satisfied"}]}]}});
+    validate_results(&valid, &expected, false).unwrap();
+    for elapsed_ms in [0, 30_000, 30_001, 60_000, u64::MAX] {
+        let mut measured = valid.clone();
+        measured["verification_results"]["results"][0]["duration_ms"] = json!(elapsed_ms);
+        validate_results(&measured, &expected, false).unwrap();
+    }
+    for status in ["Failure", "Timeout", "Undetermined", "Skipped", "Unknown"] {
+        let mut incomplete = valid.clone();
+        incomplete["verification_results"]["results"][0]["status"] = json!(status);
+        incomplete["verification_results"]["results"][0]["checks"] = json!([]);
+        incomplete["verification_results"]["summary"]["failed"] = json!(1);
+        incomplete["verification_results"]["summary"]["successful"] = json!(0);
+        for counterexample in [false, true] {
+            let error = validate_results(&incomplete, &expected, counterexample)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("proof did not complete"), "{error}");
+            assert!(error.contains("inconclusive"), "{error}");
+            assert!(!error.contains("required proof failed"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn a_counterexample_with_unfinished_properties_is_missing_evidence() {
+    let expected = ["incomplete-counterexample"];
+    let report = json!({"verification_results":{"summary":{"status":"completed","executed":1,"failed":1,"successful":0},"results":[{"harness_id":expected[0],"status":"Failure","checks":[{"category":"assertion","status":"Failure"},{"category":"unwinding assertion","status":"Unknown"}]}]}});
+    let error = validate_results(&report, &expected, true)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("proof did not complete"), "{error}");
+}
+
+#[test]
+fn completed_miri_verdicts_ignore_host_speed() {
+    use xtask::skill_proofs::{MiriTest, validate_miri_batch};
+    let expected = [MiriTest {
+        name: "bounded-test".into(),
+        ignored: false,
+    }];
+    let report = miri_events(&[
+        json!({"type":"test","event":"timeout","name":"bounded-test"}),
+        json!({"type":"test","event":"ok","name":"bounded-test"}),
+        json!({"type":"suite","event":"ok","failed":0,"exec_time":0.001}),
+    ]);
+    for elapsed_ms in [0, 30_000, 30_001, 60_000, u64::MAX] {
+        validate_miri_batch(&report, &expected, elapsed_ms).unwrap();
+    }
+    let incomplete = miri_events(&[
+        json!({"type":"test","event":"timeout","name":"bounded-test"}),
+        json!({"type":"suite","event":"ok","failed":0,"exec_time":0.001}),
+    ]);
+    assert!(validate_miri_batch(&incomplete, &expected, 60_000).is_err());
+}
+
+#[test]
+fn proof_gate_rejects_empty_missing_vacuous_and_failed_results() -> anyhow::Result<()> {
+    if incident_fixture::run("proof_gate_rejects_empty_missing_vacuous_and_failed_results")? {
         return Ok(());
     }
     let expected = ["actual-production-contract"];
     let valid = json!({"verification_results":{"summary":{"status":"completed","executed":1,"failed":0,"successful":1},"results":[{"harness_id":expected[0],"status":"Success","duration_ms":1200,"checks":[{"category":"assertion","status":"Success"},{"category":"cover","status":"Satisfied"},{"category":"cover","status":"Satisfied"}]}]}});
     let mut slow = valid.clone();
     slow["verification_results"]["results"][0]["duration_ms"] = json!(30_001);
-    let failure = validate_results(&slow, &expected, false).unwrap_err();
-    platform::report(&failure);
-    let error = failure.to_string();
-    assert!(
-        error.contains("actual-production-contract took 30001 ms"),
-        "{error}"
-    );
+    validate_results(&slow, &expected, false)?;
     let mut unmeasured = valid.clone();
     unmeasured["verification_results"]["results"][0]
         .as_object_mut()
         .unwrap()
         .remove("duration_ms");
-    assert!(validate_results(&unmeasured, &expected, false).is_err());
+    validate_results(&unmeasured, &expected, false)?;
     validate_results(&valid, &expected, false)?;
     let mut impossible = valid.clone();
     impossible["verification_results"]["results"][0]["checks"]
@@ -365,8 +418,11 @@ fn proof_gate_rejects_empty_missing_vacuous_failed_and_slow_results() -> anyhow:
 }
 
 #[test]
-fn proof_results_collect_budget_and_other_harness_failures() -> anyhow::Result<()> {
-    if incident_fixture::run("proof_results_collect_budget_and_other_harness_failures")? {
+fn proof_results_collect_completed_harness_failures_independent_of_duration() -> anyhow::Result<()>
+{
+    if incident_fixture::run(
+        "proof_results_collect_completed_harness_failures_independent_of_duration",
+    )? {
         return Ok(());
     }
     let expected = ["slow", "broken"];
@@ -386,7 +442,7 @@ fn proof_results_collect_budget_and_other_harness_failures() -> anyhow::Result<(
     failed["verification_results"]["results"][1]["checks"][0]["status"] = json!("Failure");
     let failure = validate_results(&failed, &expected, false).unwrap_err();
     let diagnostic = format!("{failure:#}");
-    assert!(diagnostic.contains("slow took 30001 ms"), "{diagnostic}");
+    assert!(!diagnostic.contains("slow took"), "{diagnostic}");
     assert!(diagnostic.contains("broken"), "{diagnostic}");
     assert!(diagnostic.contains("required proof failed"), "{diagnostic}");
     platform::report(&failure);

@@ -19,6 +19,7 @@ pub const THEOREMS: [&str; 2] = [
 const POSTCONDITION: &str = r"
 #[cfg(kani)]
 #[kani::proof]
+#[kani::unwind(1)]
 fn host_elapsed_rounds_up_without_overflow_or_understatement() {
     let whole_millis: u128 = kani::any();
     let remainder_nanos: u32 = kani::any();
@@ -33,8 +34,7 @@ fn host_elapsed_rounds_up_without_overflow_or_understatement() {
 }
 #[cfg(kani)]
 fn cover_elapsed_boundaries(whole_millis: u128, remainder_nanos: u32, elapsed: Option<u64>) {
-    kani::cover!(whole_millis == u128::from(BUDGET_MILLIS)
-        && remainder_nanos == 0 && elapsed == Some(BUDGET_MILLIS));
+    kani::cover!(whole_millis == 0 && remainder_nanos == 0 && elapsed == Some(0));
     kani::cover!(whole_millis == u128::from(u64::MAX)
         && remainder_nanos == NANOS_PER_MILLI - 1 && elapsed.is_none());
 }

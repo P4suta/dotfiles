@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [proof-verdicts-never-depend-on-time.md]
 date: 2026-10-07
 ---
 # Enforce formal obligations and deterministic metrics through one repository manifest
@@ -61,8 +62,9 @@ Every gating metric stays deterministic: proved subjects and probe counts, survi
 The same holds for instruction counts, peak heap bytes, binary size, process counts, and distinct model states.
 A metric baseline only moves toward the better value.
 Measured wall time stays advisory, and the manifest types can't express a wall-time threshold.
-The fixed per-harness budget of `proof_budget_rules` bounds a run instead of measuring it.
-A harness past the budget counts as one that never finished, and the gate never compares two runs by time.
+Explicit input and unwind bounds define each Kani claim, and Kani's completed result decides its verdict.
+The harness timeout is only a hang cap: reaching it leaves missing evidence with an inconclusive verdict, never a failed proof or an exemption.
+Miri uses complete selected test inventories, and elapsed measurements remain advisory in both gates.
 
 ### Pilots and rejected tools
 
