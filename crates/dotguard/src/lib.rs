@@ -22,7 +22,8 @@ pub mod prepush;
 pub mod real_git;
 pub use platform::refusal;
 pub use rules::{
-    gate_rules, git_ref_rules, guard_rules, postcommit_rules, provenance_rules, reaper_rules,
+    gate_rules, git_ref_rules, guard_rules, local_state_rules, postcommit_rules, provenance_rules,
+    reaper_rules,
 };
 pub mod renovate;
 pub mod stack;
