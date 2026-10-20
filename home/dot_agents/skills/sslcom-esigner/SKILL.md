@@ -7,7 +7,7 @@ description: >-
 
 # Authenticode signing
 
-Use `code-signing` for the credential and verification contract, `doppler` for CI delivery, and `approval-boundaries` before an AI-assisted signing approval.
+Use `code-signing` for the credential and verification contract, `doppler` for CI delivery, and `approval-boundaries` before a signing approval.
 Read [the shared Windows procedure](../code-signing/references/windows.md) and the repository's intended publisher and formats.
 Reuse the valid existing order and issued certificate instead of buying or resetting credentials to fill a missing local value.
 Confirm enrollment, Credential ID, signing capability, and the intended publisher from public metadata.
