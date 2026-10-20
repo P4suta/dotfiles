@@ -58,8 +58,13 @@ enum Commands {
         #[arg(long)]
         rewrite: bool,
     },
-    /// Claude Code `PreToolUse` and `PostToolUse` hook for Bash and PowerShell: sets each command's timeout from its measured durations.
-    ClaudeTiming,
+    /// `PreToolUse` and `PostToolUse` hook for shell commands: records each command's duration and reports the measured duration.
+    /// For Claude Code it also sets the command's timeout from its measured durations.
+    ClaudeTiming {
+        /// The client whose hook protocol the output follows.
+        #[arg(long, value_enum, default_value_t)]
+        client: dotfiles::claude_timing::Client,
+    },
     /// Refuse supported implementation edits without a checked issue context.
     IssueGuard,
     /// Execute Codex hooks with local evidence or inspect their recent results.
@@ -220,7 +225,7 @@ fn run(mut cli: Cli) -> Result<()> {
             emulator, session, child, &arguments,
         )?),
         Commands::ClaudeBash { rewrite } => dotfiles::claude_hook::run(rewrite)?,
-        Commands::ClaudeTiming => dotfiles::claude_timing::run()?,
+        Commands::ClaudeTiming { client } => dotfiles::claude_timing::run(client)?,
         Commands::IssueGuard => std::process::exit(dotfiles::issue_guard::hook()?),
         Commands::CodexHooks { request } => std::process::exit(codex_hooks::run(request)?),
         Commands::Notifications { action } => dotfiles::notifications::run(action)?,

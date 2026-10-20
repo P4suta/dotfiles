@@ -1,18 +1,18 @@
-{{- $tools := concat .platforms.linux.tools.common (index .platforms.linux.tools .role) -}}
+{{- $pairs := includeTemplate "partials/mise_tools" (dict "platform" .platforms.linux "shared" .shared_tools "profile" .profile "role" .role) | fromJson -}}
+{{- $listed := dict -}}
+{{- range $pairs }}{{ $_ := set $listed (index . 0) true }}{{ end -}}
 {{- $nix := stat (joinPath .chezmoi.homeDir ".nix-profile/bin/nu") -}}
 {{- if not $nix -}}
 {{-   range $_, $spec := .platforms.linux.nix.packages -}}
-{{-     if $spec }}{{ $tools = append $tools $spec }}{{ end -}}
+{{-     if and $spec (not (hasKey $listed $spec)) }}{{ $pairs = append $pairs (list $spec "latest") }}{{ $_ := set $listed $spec true }}{{ end -}}
 {{-   end -}}
 {{- end -}}
-{{- $tools = uniq $tools -}}
 {{- $pins := includeTemplate "partials/modern-pins" . | fromJson -}}
 [tools]
-{{- range $tools }}
-{{- if not (hasKey $pins .) }}
-{{- if eq . "erlang" }}
-{{- end }}
-{{ . | quote }} = {{ if hasKey $.platforms.linux.tool_versions . }}{{ index $.platforms.linux.tool_versions . | quote }}{{ else }}"latest"{{ end }}
+{{- range $pairs }}
+{{- $tool := index . 0 }}
+{{- if not (hasKey $pins $tool) }}
+{{ $tool | quote }} = {{ index . 1 | quote }}
 {{- end }}
 {{- end }}
 {{- range $tool, $version := $pins }}

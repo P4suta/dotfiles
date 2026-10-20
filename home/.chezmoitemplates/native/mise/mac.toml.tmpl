@@ -1,8 +1,9 @@
 {{- $pins := includeTemplate "partials/modern-pins" . | fromJson -}}
 [tools]
-{{- range (concat .platforms.mac.tools.common (index .platforms.mac.tools .role) | uniq) }}
-{{- if not (or (eq . "ghc") (hasKey $pins .)) }}
-{{ . | quote }} = {{ if hasKey $.platforms.mac.tool_versions . }}{{ index $.platforms.mac.tool_versions . | quote }}{{ else }}"latest"{{ end }}
+{{- range (includeTemplate "partials/mise_tools" (dict "platform" .platforms.mac "shared" .shared_tools "profile" .profile "role" .role) | fromJson) }}
+{{- $tool := index . 0 }}
+{{- if not (or (eq $tool "ghc") (hasKey $pins $tool)) }}
+{{ $tool | quote }} = {{ index . 1 | quote }}
 {{- end }}
 {{- end }}
 {{- range $tool, $version := $pins }}

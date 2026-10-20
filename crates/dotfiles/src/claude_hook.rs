@@ -222,7 +222,7 @@ pub(crate) struct Blocked {
 /// The session identity an event without one records, so the incident still deduplicates.
 const NO_SESSION: &str = "no-session";
 
-fn shell_command(event: &Value) -> Result<String> {
+pub(crate) fn shell_command(event: &Value) -> Result<String> {
     let input = &event["tool_input"];
     let command = input.get("command").or_else(|| input.get("cmd"));
     match command {
