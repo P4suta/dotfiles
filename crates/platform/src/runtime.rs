@@ -107,30 +107,27 @@ impl Real {
         self.prepare_hook(crate::process::repository_command(program), false)
     }
 
+    /// A hook gate leaves `CARGO_TARGET_DIR` as the caller set it, so each build runs in its own workspace's `target` directory.
+    /// A child that copies the tree and builds the copy, such as a cargo-mutants campaign, would otherwise build into an inherited directory that the next hook run trusts.
     fn prepare_hook(&self, command: Command, codex: bool) -> Command {
-        let mut command = self.prepare(command, codex);
-        let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
-        let start = self
-            .directory
-            .clone()
-            .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_else(|| self.home.clone());
-        let checkout = hook_checkout(&start);
-        let target = hook_target(
-            configured.as_deref(),
-            std::env::var_os("TEMP").map(PathBuf::from).as_deref(),
-            &self.home,
-            &checkout,
-        );
-        if configured.as_deref() != Some(target.as_path())
-            && let Err(error) = claim_hook_target(&target, &checkout)
-        {
-            eprintln!(
-                "dotfiles: storage-scout can't reap {} later: {error:#}",
-                target.display()
+        let command = self.prepare(command, codex);
+        if std::env::var_os("CARGO_TARGET_DIR").is_none() {
+            let start = self
+                .directory
+                .clone()
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_else(|| self.home.clone());
+            let checkout = hook_checkout(&start);
+            retire_hook_target(
+                &hook_target(
+                    None,
+                    std::env::var_os("TEMP").map(PathBuf::from).as_deref(),
+                    &self.home,
+                    &checkout,
+                ),
+                &checkout,
             );
         }
-        command.env("CARGO_TARGET_DIR", target);
         command
     }
 
@@ -322,6 +319,21 @@ pub fn claim_hook_target(target: &Path, checkout: &Path) -> Result<()> {
         .append(true)
         .open(target.join("owner.lock"))?;
     Ok(())
+}
+
+/// Removes the directory where earlier hook gates of `checkout` built, once its owner marker shows that `checkout` claimed it.
+/// No hook reads that directory again, and storage-scout keeps a marked directory while its checkout exists.
+pub fn retire_hook_target(target: &Path, checkout: &Path) {
+    let claimed = fs::read(target.join("owner.json"))
+        .ok()
+        .and_then(|marker| serde_json::from_slice::<serde_json::Value>(&marker).ok())
+        .is_some_and(|marker| {
+            marker["schema"] == OWNER_SCHEMA
+                && marker["keyed_to"].as_str().map(Path::new) == Some(checkout)
+        });
+    if claimed {
+        crate::cleanup::remove_dir_all(target);
+    }
 }
 
 /// The Cargo target directory of one checkout's hook gates, outside its worktree.

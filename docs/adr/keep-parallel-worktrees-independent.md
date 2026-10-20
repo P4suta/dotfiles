@@ -1,6 +1,7 @@
 ---
-status: accepted
+status: amended
 date: 2026-10-20
+changed_by: [leave-the-cargo-target-to-each-workspace.md]
 ---
 # Keep parallel worktrees independent
 
