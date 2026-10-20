@@ -226,12 +226,8 @@ pub(crate) fn preflight(
         if let Some(source) = owner_source(step)
             && !owner_checkout(context, source)?.join(".git").exists()
         {
-            let mut arguments = args(&[
-                "-c",
-                "core.sshCommand=ssh -o BatchMode=yes",
-                "ls-remote",
-                "--heads",
-            ]);
+            let mut arguments =
+                args(&["-c", "credential.interactive=false", "ls-remote", "--heads"]);
             arguments.push(source.clone_url().into());
             if !runner.run(Tool::Git, &arguments)?.success {
                 unmet.push(format!(
@@ -332,7 +328,7 @@ pub const GUARD_PROFILE: &str = "release-guard";
 const CLAUDE_INSTALLER: &str = "https://claude.ai/install.sh";
 const CLAUDE_WINDOWS_INSTALLER: &str = "https://claude.ai/install.ps1";
 const ONEPASSWORD_APP: &str = "/Applications/1Password.app";
-const OWNER_SSH: &str = "git@github.com:P4suta";
+const OWNER_HTTPS: &str = "https://github.com/P4suta";
 
 /// `cargo install` overwrites each binary in place, which Windows refuses while that binary runs, so each one moves aside first.
 fn install_crate(
@@ -469,7 +465,8 @@ pub(crate) fn execute(context: &TemplateData, runner: &mut impl Runner, step: St
         Step::Mise => mise(runner)?,
         Step::Github => github(runner)?,
         Step::Nix => nix(context, runner)?,
-        Step::Tools | Step::Upgrade => tools(context, runner, matches!(step, Step::Upgrade))?,
+        Step::Tools => tools(context, runner, false)?,
+        Step::Upgrade => upgrade(context, runner)?,
         Step::Integrations => integrations(context, runner)?,
         Step::Chat => chat(context, runner)?,
         Step::Desktop => crate::desktop::refresh(context, runner)?,
@@ -602,7 +599,7 @@ fn github(runner: &mut impl Runner) -> Result<()> {
         checked(
             runner,
             Tool::Gh,
-            &args(&["config", "set", "-h", "github.com", "git_protocol", "ssh"]),
+            &args(&["config", "set", "-h", "github.com", "git_protocol", "https"]),
         )?;
     } else {
         eprintln!(
@@ -761,6 +758,28 @@ fn clean_domyjob(context: &TemplateData, runner: &mut impl Runner) {
     for machine in domyjob_machines(&context.home) {
         optional(runner, Tool::Domyjob, &["clean", &machine]);
     }
+}
+
+fn upgrade(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
+    crate::source_sync::upgrade(
+        &context.config,
+        &context.home,
+        runner,
+        |source, backup, runner| {
+            crate::profiles::operate(
+                source,
+                crate::profiles::NativeAction::Apply,
+                &context.config,
+                &context.home,
+                true,
+                None,
+                Some(backup),
+            )?;
+            let current = load(source, &context.config, &context.home)?;
+            tools(&current, runner, true)
+        },
+    )?;
+    Ok(())
 }
 
 fn tools(context: &TemplateData, runner: &mut impl Runner, upgrade: bool) -> Result<()> {
@@ -1072,7 +1091,7 @@ impl OwnerSource {
     }
 
     fn clone_url(self) -> String {
-        format!("{OWNER_SSH}/{}", self.repository())
+        format!("{OWNER_HTTPS}/{}", self.repository())
     }
 
     /// `git` arguments that clone this source into `checkout`.

@@ -74,14 +74,7 @@
 	helper =
 	helper = !gh auth git-credential
 
-# Public OComment source installs fetch unattended without an SSH agent.
-# A release artifact would remove this HTTPS self-mapping.
-[url "https://github.com/P4suta/OComment"]
-	insteadOf = https://github.com/P4suta/OComment
-# Other owner repositories fetch and push over SSH.
-[url "git@github.com:P4suta/"]
-	insteadOf = https://github.com/P4suta/
-# Every GitHub push uses SSH, while third-party HTTPS fetches need no credentials.
+# GitHub fetches use HTTPS with gh credentials, and every push uses SSH.
 [url "git@github.com:"]
 	pushInsteadOf = https://github.com/
 {{- if .signing.enabled }}

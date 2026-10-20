@@ -3,12 +3,8 @@
   The .chezmoiignore file excludes hosts.yml, which holds the OAuth token.
   The template mirrors the shape gh rewrites this file into.
 */ -}}
-{{ if eq .profile "wsl" -}}
-# Authentication stays in the gh credential store on each machine.
-{{ else -}}
-# Git uses SSH through the native or forwarded 1Password SSH agent.
-{{ end -}}
-git_protocol: ssh
+# HTTPS Git operations use gh's credential store on each machine.
+git_protocol: https
 prompt: enabled
 aliases:
     co: pr checkout

@@ -19,6 +19,10 @@ pub fn record(hook: &str, cause: &str) {
     let Some(home) = platform::home::home() else {
         return;
     };
+    record_in(&home, hook, cause);
+}
+
+pub(crate) fn record_in(home: &Path, hook: &str, cause: &str) {
     if let Err(error) = append(&home.join(LOG), hook, cause) {
         eprintln!("dotfiles: the hook failure record is unavailable: {error:#}");
     }
