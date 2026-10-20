@@ -1,7 +1,7 @@
 {
-  "revision": "f616e860e84beae250b0041e5c05d6415504ef82f68df1b99e3fe3352328dbef",
+  "revision": "605da63ed78be7a460965d9f6e797b3738f7db9857f13139fc7096e42608ce20",
   "outcome": "implemented",
-  "reason": "End with the same pointer as the other assurance skills to the machine gate that reports and refuses verification gaps, since the gate, not the skill, now enforces the owner of each shape.",
+  "reason": "Use the shared reproducibility contract and project platform runners instead of mandatory owner hosts or project-local owner tooling.",
   "evidence": [
     "home/dot_agents/skills/development-assurance/SKILL.md",
     "docs/adr/verification-proportional-to-code-shape.md",

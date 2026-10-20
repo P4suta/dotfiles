@@ -1,7 +1,7 @@
 {
-  "revision": "91f8a2ceaec85c180c1da6dacdcc83045c0d671c7fc3cd43d679c802b162a119",
+  "revision": "b370adb28de93062d256b898374a3c5a5b970ca6ec8cd162e3fb0fd5db5415d0",
   "outcome": "implemented",
-  "reason": "State that a skill never repeats a version or budget a gate pins, which the skill check now refuses, and end with the same pointer as the other assurance skills to the machine gate that reports and refuses verification gaps.",
+  "reason": "Require completed reproducible project checks while keeping inconclusive evidence and owner-side policy outside a passing verdict.",
   "evidence": [
     "home/dot_agents/skills/executable-policy/SKILL.md",
     "docs/adr/verification-proportional-to-code-shape.md",

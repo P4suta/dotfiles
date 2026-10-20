@@ -11,7 +11,7 @@ metadata:
 
 Treat fitting verification tools as part of a project's implementation contract.
 Choose them by the property they establish, never by a fixed list of popular names.
-Use `type-contracts` for typing, `formal-assurance` for proofs, `reliability` for uncontrolled dependencies, and `executable-policy` for enforcement.
+Use `type-contracts` for typing, `formal-assurance` for proofs and reproducible verdicts, `reliability` for uncontrolled dependencies, and `executable-policy` for enforcement.
 
 ## Establish the required coverage
 
@@ -35,9 +35,9 @@ Never suppress the boundary or weaken the property to get a passing result.
 
 ## Make adoption durable
 
-Wire required checks into the authoritative project command and fitting local hooks, and let `ci-budget` decide which of them hosted CI runs.
+Wire required checks into the authoritative project command and fitting local hooks, and use `ci-budget` to select checks by the changed contract.
 Use `executable-policy` to verify that the actual gate rejects a representative defect.
-Run available native checks through `multi-machine`, and use `ci-budget` before publishing a coherent update.
+Run native checks through the project's documented hosted platform runners or pinned container.
 Use `resource-coordination` for expensive campaigns, because adopting a tool grants no unbounded fuzz run or paid service.
 
 When a new tool or configuration proves useful, inventory the owner's active projects for the same uncovered property.
@@ -46,5 +46,4 @@ Track adoption, incompatibility with concrete evidence, and pending work instead
 New projects inherit the current capability baseline, and an old project's absence from a recent task grants no permanent exemption.
 Use `skill-operations` to record adoption evidence and proposals that move repeated assurance work into maintained checks.
 
-These machines report a repository's verification gaps when a session starts, and refuse new ones at commit, push, the end of a turn, and `pr-workflow ready`.
-Each refusal names its next action, and the repository's `assure.toml` names the owner of each shape.
+Keep owner-side tooling within the boundary in `formal-assurance`.

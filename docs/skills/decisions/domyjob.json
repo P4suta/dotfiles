@@ -1,7 +1,7 @@
 {
-  "revision": "594617a1b5543fcd94d1cc7e95622b6b48ba0a9464514d1bd73e65d6bb14cb31",
+  "revision": "58e9eb820dd1218d358b486b4e7dc49014db9653543e820068742ee716135142",
   "outcome": "implemented",
-  "reason": "Keep persistent remote job identity, snapshot transport, and remote exit status separate from machine synchronization.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "reason": "Keep remote execution an owner-side convenience without making its transport or state a project verification prerequisite.",
   "evidence": [
     "home/dot_agents/skills/domyjob/SKILL.md",
     "home/dot_agents/skills/domyjob/tools.toml",

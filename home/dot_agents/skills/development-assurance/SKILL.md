@@ -20,7 +20,7 @@ For documentation-only edits, check accuracy and examples instead of adding arti
 Keep fast deterministic specifications for pure rules, adapter contract tests at real boundaries, and integration or end-to-end tests for the workflows that need them.
 Cover failure, interruption, cancellation, cleanup, retries, and concurrent transitions where the contract includes them.
 Use realistic fixtures, fault injection, property tests, fuzzing, or model checking to answer a concrete uncertainty.
-For every implementation change, use `formal-assurance` and require source-bound proofs wherever they apply.
+For every implementation change, use `formal-assurance` for reproducible verdicts and require source-bound proofs wherever they apply.
 Choose a verifier that checks the implementation language, or refine the code explicitly to a Lean 4 model.
 Genuine semantic or empirical boundaries need checked, justified alternatives.
 Use `mutation-testing` to check that tests detect broken behavior, and `resource-coordination` before a campaign that occupies a shared machine.
@@ -33,11 +33,10 @@ Never log credentials, private inputs, bearer capabilities, or sensitive payload
 
 Keep one source of truth for executable contracts, and put consequential design reasoning in an ADR.
 Run the repository's lint, typecheck, test, and security gates, and never weaken them to finish a change.
-Before a push, exercise the affected platforms on the owner's Mac, Windows, and Linux machines through `multi-machine` and `domyjob`.
-Use CI to confirm the hosted-only checks after local assurance, and never push a known platform gap to see what breaks.
+Exercise affected platforms through the project's documented hosted runners or pinned container.
+Before an authorized push, complete available project checks and report hosted checks still pending.
 Use `concise-source` to express intent in code and keep exceptions narrow.
 Finish known necessary corrections through `ideal-first-development`.
 Report what passed, the evidence for it, and any unverified boundary.
 
-These machines report a repository's verification gaps when a session starts, and refuse new ones at commit, push, the end of a turn, and `pr-workflow ready`.
-Each refusal names its next action, and the repository's `assure.toml` names the owner of each shape.
+Keep owner-side tooling within the boundary in `formal-assurance`.

@@ -16,11 +16,12 @@ Never spend credits, raise limits, or trigger a duplicate paid review to get ano
 
 Verify eventual consistency through the promised state under a bounded observation deadline.
 Distinguish an unavailable prerequisite from a negative business result.
-Use a local deterministic adapter for success, malformed data, partial response, timeout, and ambiguous outcome, plus the necessary real contract check.
+Use a local deterministic adapter for success, malformed data, partial response, timeout, and ambiguous outcome in the project's reproducible gate.
+Keep necessary live contract observations separate and report unavailable prerequisites as missing evidence.
 
 ## Make environmental inputs explicit
 
-Pin the toolchain and dependencies, use lockfiles, and identify the source snapshot each check uses.
+Pin the toolchain, dependencies, and external verification inputs by version or digest, and identify the source snapshot each check uses.
 Fix the working directory, relevant environment, locale, timezone, encoding, and configuration precedence instead of inheriting an incidental shell session.
 Preserve user-owned configuration and credentials while isolating test output and runtime state.
 Never redefine common home variables to make one profile masquerade as another.
@@ -36,4 +37,4 @@ Probe the condition the user needs, such as a ready endpoint, not only process e
 
 Treat resource limits, cache eviction, disk exhaustion, file-descriptor limits, and subprocess output backpressure as external failure inputs.
 Control their limits in tests and keep the primary cause.
-When the contract includes platform behavior, run native Mac, Linux, and Windows checks through the owner's machine workflow.
+When the contract includes platform behavior, use the project's documented hosted platform runners or pinned container.

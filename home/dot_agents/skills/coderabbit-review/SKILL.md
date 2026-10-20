@@ -8,6 +8,7 @@ description: >-
 # CodeRabbit review
 
 CodeRabbit analyzes, and the current agent implements authorized fixes.
+Keep owner-side service review and publication policy separate from the project's reproducible checks under `formal-assurance`.
 Keep the user's commit, push, PR comment, and approval boundaries.
 Never start a second independent model review or a cloud coding task to fetch findings.
 Use the authenticated PR importance assessment to select the required route.
@@ -24,7 +25,7 @@ Read `coderabbit --guard-status --json` first: `reviews.cli` and `reviews.pr` st
 Run the project's relevant checks before requesting a service review.
 Check `coderabbit --version` and `coderabbit auth status`, and read `coderabbit review --help` when choosing options.
 Use only the dotfiles-installed `coderabbit` or `cr` guard, including inside `mise x`.
-The guard enforces the rolling local limits, the `floor(capacity * 0.9 * 0.8)` budget, inactive paid usage, and the Mac as the sole review executor, and it runs its own preflight.
+The guard enforces machine-local review policy, verified allowance, and inactive paid usage, and runs its own preflight.
 Exit code 75 means a guard refusal: report it and continue independent work without another service attempt.
 Never invoke `coderabbit-vendor`, install another CLI, edit or delete guard state, or raise limits to get around a refusal.
 Never schedule an automatic retry for the end of a window.

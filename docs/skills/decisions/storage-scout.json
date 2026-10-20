@@ -1,7 +1,7 @@
 {
-  "revision": "ce8d11c9a358f76dc40f9495f5fe1abbca05b930b2f32261586c29e7161a0ed5",
+  "revision": "ada55957062770fd354f1c26fd4597c611444c3c2151c1a427fb620d9d4a1a2a",
   "outcome": "implemented",
-  "reason": "Keep owned artifact selection and tool refusals separate from NAS retention and transfer.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "reason": "Keep storage inspection and cleanup within the shared owner-side convenience boundary instead of making them project verification requirements.",
   "evidence": [
     "home/dot_agents/skills/storage-scout/SKILL.md",
     "home/dot_agents/skills/storage-scout/tools.toml",

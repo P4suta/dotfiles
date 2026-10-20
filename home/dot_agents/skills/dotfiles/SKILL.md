@@ -36,7 +36,9 @@ Never turn a focused change into a full profile apply, bootstrap, system provisi
 Keep credentials, authentication, shell history, caches, review ledgers, and other runtime state on their own machine, and never copy them between hosts.
 Report a needed owner login as pending.
 
-Run the affected checks on the Mac, Linux, and Windows hosts with the existing project gates before an authorized push.
+Run affected project checks through its documented hosted platform runners or pinned container before claiming a verification verdict.
+Use owner hosts only as optional caches for project verification.
+Check an authorized configuration rollout on its affected hosts.
 After applying, inspect the installed files and exercise the native command or discovery behavior without spending service allowance.
 Distinguish a rendered preview, a passing build, an applied configuration, and a verified installed runtime in the report.
 Report a failed or unreachable host as pending, and keep durable job identities while resolving it.

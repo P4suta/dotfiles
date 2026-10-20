@@ -28,6 +28,8 @@ Return a new state instead of mutating shared state.
 ## Gates
 
 - In Rust, the core lives in a crate without dependencies or the standard library that denies the panic lints, so the compiler refuses an effect or a panic.
-- `ast-grep scan --config ~/.config/assure/sgconfig.yml` refuses an effect, bare text, a panic, or shared state in core paths, and each finding's note names the fix.
+- The project's pinned structural checker refuses an effect, bare text, a panic, or shared state in core paths, and each finding's note names the fix.
 - Other languages enforce the dependency direction with their own checker: dependency-cruiser, import-linter, depguard, or ArchUnit.
 - The proofs and property tests that `formal-assurance` requires target each pure core function first.
+
+Keep owner-side tooling within the boundary in `formal-assurance`.
