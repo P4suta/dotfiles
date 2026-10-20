@@ -725,6 +725,11 @@
         "reason": {
           "type": "string"
         },
+        "stream": {
+          "description": "Whether the legacy command stays admitted when it reads only standard input, such as `wc -l` in a pipeline.",
+          "type": "boolean",
+          "default": false
+        },
         "tool": {
           "description": "The mise tool that installs the preferred command on every profile.",
           "type": "string"

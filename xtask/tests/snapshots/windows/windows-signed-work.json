@@ -175,7 +175,7 @@
     {"mode":"0644","path":".agents/skills/xtask/SKILL.md","sha256":"7cdf522545822063f306321b6f03adab3f441de5e00ad6560db3a49a95dddc23","type":"file"},
     {"mode":"0755","path":".claude","sha256":null,"type":"dir"},
     {"mode":"0644","path":".claude/CLAUDE.md","sha256":"720083f59418cff9426c695a002e653f7ab9dcbe24307fd1d88693af3baa96dd","type":"file"},
-    {"mode":"0644","path":".claude/settings.json","sha256":"bdcfcda7af310ab50456ebd72c647cad7be7b32596338dcc63e1cbd9b714eb80","type":"file"},
+    {"mode":"0644","path":".claude/settings.json","sha256":"2592ddc585e8f3ab10cef1f69bb241e9a2952b7730056567e4e27528372dae4d","type":"file"},
     {"mode":"0755","path":".claude/skills","sha256":null,"type":"dir"},
     {"mode":null,"path":".claude/skills/adr","sha256":"9b8e31020dff356ca92cb806d020175f98f38768f22fefcfb0f44c8e09403c97","type":"symlink"},
     {"mode":null,"path":".claude/skills/apple-notarization","sha256":"c0361723511ce15f683e83d994b910fb37c0585ec2b2530794c3e54805c624f6","type":"symlink"},

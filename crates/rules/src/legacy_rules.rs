@@ -54,10 +54,94 @@ pub fn invokes(arguments: &[&str], when: &[&str]) -> bool {
         })
 }
 
+/// Whether a mapped command reads only standard input: every argument names an option or `-`.
+#[must_use]
+pub fn reads_stream(arguments: &[&str]) -> bool {
+    arguments.iter().all(|argument| argument.starts_with('-'))
+}
+
+/// A legacy invocation whose output the preferred tool repeats byte for byte.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Replacement {
+    /// `cat FILE...` without options prints each file.
+    Files,
+    /// `sed -n 'Np' FILE` or `sed -n 'A,Bp' FILE` prints lines `first` through `last`.
+    Lines { first: u64, last: u64 },
+}
+
+/// The exact replacement for the legacy command `name` with `arguments`, or `None` when the preferred tool could print anything else.
+#[must_use]
+pub fn replacement(name: &str, arguments: &[&str]) -> Option<Replacement> {
+    match (name, arguments) {
+        ("cat", [_, ..]) if arguments.iter().all(|argument| operand(argument)) => {
+            Some(Replacement::Files)
+        }
+        ("sed", ["-n", script, file]) if operand(file) => {
+            let range = script.strip_suffix('p')?;
+            let (first, last) = range.split_once(',').unwrap_or((range, range));
+            let (first, last) = (line(first)?, line(last)?);
+            (first <= last).then_some(Replacement::Lines { first, last })
+        }
+        _ => None,
+    }
+}
+
+/// A file operand, which no option or standard input stands in for.
+fn operand(argument: &str) -> bool {
+    !argument.is_empty() && !argument.starts_with('-')
+}
+
+/// A line number counted from one.
+fn line(text: &str) -> Option<u64> {
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    text.parse().ok().filter(|number| *number > 0)
+}
+
 /// The properties Kani proves for every input and the tests check over every input they list.
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn only_an_optionless_cat_or_a_line_print_has_a_replacement() {
+        let kind: u8 = kani::any();
+        kani::assume(kind < 8);
+        let found = match kind {
+            0 => replacement("cat", &["a"]),
+            1 => replacement("sed", &["-n", "2,4p", "a"]),
+            2 => replacement("sed", &["-n", "3p", "a"]),
+            3 => replacement("cat", &["-n", "a"]),
+            4 => replacement("cat", &[]),
+            5 => replacement("sed", &["-n", "4,2p", "a"]),
+            6 => replacement("sed", &["-n", "0p", "a"]),
+            _ => replacement("sed", &["2,4p", "a"]),
+        };
+        assert_eq!(found.is_some(), kind < 3);
+        kani::cover!(found == Some(Replacement::Files));
+        kani::cover!(found == Some(Replacement::Lines { first: 2, last: 4 }));
+        kani::cover!(found.is_none());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn a_stream_reader_names_no_file() {
+        let kind: u8 = kani::any();
+        kani::assume(kind < 4);
+        let stream = match kind {
+            0 => reads_stream(&[]),
+            1 => reads_stream(&["-l"]),
+            2 => reads_stream(&["-l", "-"]),
+            _ => reads_stream(&["-l", "a"]),
+        };
+        assert_eq!(stream, kind < 3);
+        kani::cover!(stream);
+        kani::cover!(!stream);
+    }
 
     #[cfg(kani)]
     #[kani::proof]
@@ -158,5 +242,47 @@ mod tests {
         for argument in ["file", "--linesx", "--l", "-c", "--lc"] {
             assert!(!invokes(&[argument], &["--lines", "-l"]), "{argument}");
         }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "text matching is exercised by the native rules tests")]
+    fn only_exact_invocations_have_a_replacement() {
+        assert_eq!(replacement("cat", &["a", "b c"]), Some(Replacement::Files));
+        assert_eq!(
+            replacement("sed", &["-n", "12,40p", "a"]),
+            Some(Replacement::Lines {
+                first: 12,
+                last: 40
+            })
+        );
+        assert_eq!(
+            replacement("sed", &["-n", "7p", "a"]),
+            Some(Replacement::Lines { first: 7, last: 7 })
+        );
+        for (name, arguments) in [
+            ("cat", &[][..]),
+            ("cat", &["-n", "a"]),
+            ("cat", &["a", "-"]),
+            ("sed", &["-n", "2,4p"]),
+            ("sed", &["-n", "2,4p", "a", "b"]),
+            ("sed", &["2,4p", "a"]),
+            ("sed", &["-n", "2,4d", "a"]),
+            ("sed", &["-n", "4,2p", "a"]),
+            ("sed", &["-n", "0,2p", "a"]),
+            ("sed", &["-n", "$p", "a"]),
+            ("sed", &["-n", "1,+3p", "a"]),
+            ("sed", &["-n", "2,4p", "-"]),
+            ("ls", &["a"]),
+        ] {
+            assert_eq!(replacement(name, arguments), None, "{name} {arguments:?}");
+        }
+    }
+
+    #[test]
+    fn a_stream_reader_names_only_options() {
+        assert!(reads_stream(&[]));
+        assert!(reads_stream(&["-l"]));
+        assert!(reads_stream(&["-l", "-"]));
+        assert!(!reads_stream(&["-l", "file"]));
     }
 }

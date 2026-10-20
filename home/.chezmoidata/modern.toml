@@ -183,13 +183,14 @@ next = "hexyl {args}"
 [[modern.tools]]
 legacy = ["wc"]
 when = ["-l", "--lines"]
+stream = true
 preferred = "tokei"
 tool = "cargo:tokei"
 # renovate: datasource=github-releases depName=XAMPPRocky/tokei extractVersion=^v(?<version>.+)$
 version = "15.0.0"
 reason = "It counts code, comments, and blanks per language instead of raw lines."
 keep = "Counting the lines of a stream that holds no code."
-next = "tokei for code, or `rg --count-matches ''` for the lines of other files"
+next = "tokei for code, or `rg -c ''` for the lines of other files"
 
 [[modern.tools]]
 legacy = ["time"]

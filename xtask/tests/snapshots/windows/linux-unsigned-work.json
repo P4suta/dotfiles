@@ -177,7 +177,7 @@
     {"mode":"0755","path":".claude","sha256":null,"type":"dir"},
     {"mode":"0644","path":".claude/CLAUDE.md","sha256":"720083f59418cff9426c695a002e653f7ab9dcbe24307fd1d88693af3baa96dd","type":"file"},
     {"mode":"0755","path":".claude/bashenv.sh","sha256":"9e345e97b6f74b4ccd326340b222920408d5b0b85c2c26639557143576fe8ebc","type":"file"},
-    {"mode":"0644","path":".claude/settings.json","sha256":"86e6231a4cae23c256a6c8dcb783941ed0bf5525d79151fa7cab9cfd61730c12","type":"file"},
+    {"mode":"0644","path":".claude/settings.json","sha256":"3820cd09146756564cffa9a8585317bd8b0bfe7532235962cc8c95b5df99e1b4","type":"file"},
     {"mode":"0755","path":".claude/shims","sha256":null,"type":"dir"},
     {"mode":"0644","path":".claude/shims/.keep","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","type":"file"},
     {"mode":"0755","path":".claude/skills","sha256":null,"type":"dir"},

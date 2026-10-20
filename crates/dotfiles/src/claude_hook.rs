@@ -24,6 +24,9 @@ const BLOCK: i32 = 2;
 /// The rule of a command whose inspection didn't finish.
 const INSPECTION: &str = "hook.inspection";
 
+/// The rule of a legacy command the modern tool table maps.
+const LEGACY: &str = "hook.legacy";
+
 /// A Git Bash path such as `/c/Users/x` names `C:/Users/x` to Windows programs.
 fn native_path(path: &str) -> PathBuf {
     if cfg!(windows) {
@@ -262,6 +265,87 @@ fn powershell(event: &Value) -> bool {
 
 const POWERSHELL_PARSE: &str = "$tokens = $null; $errors = $null; $ast = [System.Management.Automation.Language.Parser]::ParseInput([Console]::In.ReadToEnd(), [ref]$tokens, [ref]$errors); $writes = @($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FileRedirectionAst] -and -not ($node.Location -is [System.Management.Automation.Language.VariableExpressionAst] -and $node.Location.VariablePath.UserPath -ieq 'null')}, $true)).Count -gt 0; @{errors = @($errors); file_write = $writes} | ConvertTo-Json -Depth 4 -Compress";
 
+/// The redirect and `tee` targets inside the session's checkout that its ignore rules exclude, so no commit carries what they write.
+/// A target with an expansion, a glob, or a parent step never counts, because the hook can't tell where it lands.
+fn ignored_targets(command: &str, directory: Option<&Path>) -> Vec<String> {
+    let Some(directory) = directory.and_then(|directory| crate::canonical(directory).ok()) else {
+        return Vec::new();
+    };
+    let Some(root) = crate::line_endings::work_tree(&directory)
+        .ok()
+        .flatten()
+        .and_then(|root| crate::canonical(&root).ok())
+    else {
+        return Vec::new();
+    };
+    crate::shell_write_rules::write_targets(command)
+        .iter()
+        .map(crate::shell_write_rules::Target::as_str)
+        .filter(|target| {
+            !target.is_empty()
+                && !target.contains(['$', '~', '*', '?', '[', '`'])
+                && Path::new(target)
+                    .components()
+                    .all(|part| !matches!(part, std::path::Component::ParentDir))
+                && directory
+                    .join(target)
+                    .strip_prefix(&root)
+                    .is_ok_and(|relative| ignored(&root, relative))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Whether the checkout at `root` ignores `relative`.
+fn ignored(root: &Path, relative: &Path) -> bool {
+    !relative.as_os_str().is_empty()
+        && crate::tool::Tool::Git
+            .command()
+            .arg("-C")
+            .arg(root)
+            .args(["check-ignore", "-q", "--"])
+            .arg(relative)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+}
+
+/// The command that replaces an event's legacy shell command when the preferred tool prints the same bytes and the replacement passes every rule.
+pub(crate) fn exact_rewrite(event: &Value) -> Option<String> {
+    if event["tool_name"] != "Bash"
+        || !event["tool_input"]["command"].is_string()
+        || powershell(event)
+    {
+        return None;
+    }
+    let replaced = crate::legacy::replacement(&shell_command(event).ok()?)?;
+    let mut rewritten = event.clone();
+    rewritten["tool_input"]["command"] = Value::String(replaced.clone());
+    checked_events(&rewritten.to_string())
+        .ok()?
+        .is_empty()
+        .then_some(replaced)
+}
+
+/// Whether the hook refuses the event's command for a policy reason it can decide without the syntax validators.
+pub(crate) fn refused(event: &Value) -> bool {
+    policy_refusals(&event.to_string()).is_ok_and(|findings| !findings.is_empty())
+        && exact_rewrite(event).is_none()
+}
+
+/// The client output that runs `replaced` in place of the event's command and names it for the agent.
+fn rewrite_output(event: &Value, replaced: &str) -> Value {
+    let mut input = event["tool_input"].clone();
+    let original = input["command"].as_str().unwrap_or_default().to_owned();
+    input["command"] = Value::String(replaced.to_owned());
+    serde_json::json!({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "updatedInput": input,
+        "additionalContext": format!("dotfiles ran `{replaced}` in place of the legacy `{original}`; the preferred tool prints the same bytes.")
+    }})
+}
+
 /// The independent policy refusals for one event.
 /// Client and subagent events share the same command policy.
 fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
@@ -314,7 +398,17 @@ fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
             ),
         ));
     }
-    if let Verdict::Refuse(reason) = inspect(command)
+    let written = match inspect(command) {
+        Verdict::Refuse(crate::shell_write_rules::Reason::FileRedirect) => {
+            let ignored = ignored_targets(command, event["cwd"].as_str().map(Path::new));
+            crate::shell_write_rules::inspect_except(
+                command,
+                &ignored.iter().map(String::as_str).collect::<Vec<_>>(),
+            )
+        }
+        verdict => verdict,
+    };
+    if let Verdict::Refuse(reason) = written
         && (!powershell(&event) || reason != crate::shell_write_rules::Reason::FileRedirect)
     {
         findings.push(blocked(
@@ -340,7 +434,7 @@ fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
         });
     for message in legacy.refusals {
         findings.push(blocked(
-            "hook.legacy",
+            LEGACY,
             skill_ops::incident_rules::Source::GateRefusal,
             message,
         ));
@@ -544,11 +638,12 @@ fn record(blocked: &Blocked) {
 }
 
 /// Reads one event from standard input and exits 2, the blocking status, with the refusal on standard error.
+/// With `rewrite`, a client that applies a hook's input rewrite runs an exact replacement instead of a refused legacy command.
 ///
 /// # Errors
 ///
 /// Returns an error when it can't read standard input, the event doesn't parse as JSON, or a shell event has no command.
-pub fn run() -> Result<()> {
+pub fn run(rewrite: bool) -> Result<()> {
     let mut event = String::new();
     let shell_context = std::env::var(crate::codex_hooks::SHELL_CONTEXT).ok();
     let findings = std::io::stdin()
@@ -577,6 +672,14 @@ pub fn run() -> Result<()> {
         }]
         });
     if !findings.is_empty() {
+        if rewrite
+            && findings.iter().all(|blocked| blocked.rule == LEGACY)
+            && let Ok(value) = serde_json::from_str::<Value>(&event)
+            && let Some(replaced) = exact_rewrite(&value)
+        {
+            println!("{}", rewrite_output(&value, &replaced));
+            return Ok(());
+        }
         for blocked in &findings {
             record(blocked);
             eprintln!("{}\n", blocked.message);
@@ -619,6 +722,79 @@ mod tests {
             .unwrap()
             .unwrap_or_else(|| panic!("admitted: {command}"))
             .message
+    }
+
+    #[test]
+    fn an_exact_legacy_command_runs_its_replacement_and_tells_the_agent() {
+        let event: Value = serde_json::from_str(&bash("cat Cargo.toml")).unwrap();
+        let replaced = exact_rewrite(&event).unwrap();
+        assert_eq!(
+            replaced,
+            "bat --plain --paging=never --binary=as-text Cargo.toml"
+        );
+        let output = rewrite_output(&event, &replaced);
+        assert_eq!(
+            output["hookSpecificOutput"]["updatedInput"]["command"],
+            replaced.as_str()
+        );
+        assert!(
+            output["hookSpecificOutput"]["additionalContext"]
+                .as_str()
+                .unwrap()
+                .contains("`cat Cargo.toml`")
+        );
+        assert!(
+            output["hookSpecificOutput"]
+                .get("permissionDecision")
+                .is_none()
+        );
+        assert!(!super::refused(&event));
+        for command in [
+            "cat Cargo.toml > copy.toml",
+            "cat Cargo.toml | grep x",
+            "cat -n Cargo.toml",
+        ] {
+            let event: Value = serde_json::from_str(&bash(command)).unwrap();
+            assert_eq!(exact_rewrite(&event), None, "{command}");
+            assert!(super::refused(&event), "{command}");
+        }
+    }
+
+    #[test]
+    fn a_redirect_into_an_ignored_path_of_the_checkout_passes() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let initialized = platform::process::command("git")
+            .args(["init", "--quiet"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(initialized.status.success(), "{initialized:?}");
+        std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+        let event = |command: &str| {
+            json!({"tool_name": "Bash", "cwd": root, "tool_input": {"command": command}})
+                .to_string()
+        };
+        let writes = |command: &str| {
+            policy_refusals(&event(command))
+                .unwrap()
+                .iter()
+                .any(|finding| finding.rule == "hook.shell-write")
+        };
+        for command in [
+            "printf x > target/out.txt",
+            "cargo test 2> target/test.log | tee target/copy.log",
+        ] {
+            assert!(!writes(command), "{command}");
+        }
+        for command in [
+            "printf x > out.txt",
+            "printf x > target/../out.txt",
+            "printf x > \"$HOME/target/out.txt\"",
+            "printf x > target/out.txt; printf y > notes.txt",
+        ] {
+            assert!(writes(command), "{command}");
+        }
     }
 
     #[test]

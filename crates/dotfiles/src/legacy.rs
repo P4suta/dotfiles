@@ -215,6 +215,60 @@ fn script_refusal(
     Ok(findings)
 }
 
+/// Appends an admitted bypass to the owner's Git bypass log, or under unit tests to the thread's own record.
+fn record_bypass(reason: &str, words: &[String]) {
+    #[cfg(not(test))]
+    dotguard::bypass::record("bypassed", dotguard::bypass::Rule::Legacy, reason, words);
+    #[cfg(test)]
+    tests::BYPASSES.with(|log| {
+        log.borrow_mut()
+            .push(format!("{reason}\t{}", words.join(" ")));
+    });
+}
+
+/// The preferred command that prints exactly what `command` prints, when it starts with `cat FILE...` or `sed -n 'A,Bp' FILE`.
+/// Only the leading legacy words change, so the rest of the command line keeps its quoting and expansions.
+#[must_use]
+pub fn replacement(command: &str) -> Option<String> {
+    const BAT: &str = "bat --plain --paging=never --binary=as-text";
+    let words = segments(command).into_iter().next()?;
+    let (first, rest) = words.split_first()?;
+    let arguments: Vec<&str> = rest.iter().map(String::as_str).collect();
+    let remainder = command.trim_start().strip_prefix(first.as_str())?;
+    let blank = |text: &str| text.starts_with([' ', '\t']);
+    if !blank(remainder) {
+        return None;
+    }
+    match legacy_rules::replacement(first, &arguments)? {
+        legacy_rules::Replacement::Files => Some(format!("{BAT}{remainder}")),
+        legacy_rules::Replacement::Lines { first, last } => {
+            let after = remainder.trim_start().strip_prefix("-n")?;
+            if !blank(after) {
+                return None;
+            }
+            let (script, tail) = shell_word(after.trim_start())?;
+            (Some(script) == arguments.get(1).copied())
+                .then(|| format!("{BAT} --line-range {first}:{last}{tail}"))
+        }
+    }
+}
+
+/// The text of one leading shell word without a backslash, variable, or substitution, and the text after it.
+fn shell_word(text: &str) -> Option<(&str, &str)> {
+    let first = text.chars().next()?;
+    let (word, tail) = if let quote @ ('\'' | '"') = first {
+        let inner = &text[1..];
+        let end = inner.find(quote)?;
+        (&inner[..end], &inner[end + 1..])
+    } else {
+        let end = text
+            .find(|c: char| c.is_whitespace() || ";|&<>()".contains(c))
+            .unwrap_or(text.len());
+        text.split_at(end)
+    };
+    (!word.contains(['\\', '$', '`', '\'', '"'])).then_some((word, tail))
+}
+
 fn inspect(command: &str, directory: Option<&Path>, table: &Modern, depth: usize) -> Findings {
     let nested = depth < DEPTH;
     let mut findings = Findings::default();
@@ -240,6 +294,7 @@ fn inspect(command: &str, directory: Option<&Path>, table: &Modern, depth: usize
                     &arguments,
                     &tool.when.iter().map(String::as_str).collect::<Vec<_>>(),
                 )
+                && !(tool.stream && legacy_rules::reads_stream(&arguments))
         });
         let bypassed = bypass.is_some_and(|value| legacy_rules::bypass_names(value, name));
         match (legacy_rules::verdict(tool.is_some(), false, bypassed), tool) {
@@ -250,12 +305,7 @@ fn inspect(command: &str, directory: Option<&Path>, table: &Modern, depth: usize
                 let reason = bypass
                     .and_then(|value| value.split_once(':'))
                     .map_or("", |(_, reason)| reason.trim());
-                dotguard::bypass::record(
-                    "bypassed",
-                    dotguard::bypass::Rule::Legacy,
-                    reason,
-                    &words,
-                );
+                record_bypass(reason, &words);
             }
             _ => {}
         }
@@ -275,6 +325,58 @@ fn inspect(command: &str, directory: Option<&Path>, table: &Modern, depth: usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    thread_local! {
+        /// The bypasses a test admitted, which stay out of the owner's Git bypass log.
+        pub(super) static BYPASSES: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    #[test]
+    fn exact_replacements_change_only_the_leading_legacy_words() {
+        for (command, expected) in [
+            (
+                "cat Cargo.toml",
+                "bat --plain --paging=never --binary=as-text Cargo.toml",
+            ),
+            (
+                "cat 'a b.txt' \"$HOME/c\" | jaq .x",
+                "bat --plain --paging=never --binary=as-text 'a b.txt' \"$HOME/c\" | jaq .x",
+            ),
+            (
+                "sed -n '2,4p' src/main.rs",
+                "bat --plain --paging=never --binary=as-text --line-range 2:4 src/main.rs",
+            ),
+            (
+                "  sed -n 7p notes.md | rg x",
+                "bat --plain --paging=never --binary=as-text --line-range 7:7 notes.md | rg x",
+            ),
+        ] {
+            assert_eq!(replacement(command).as_deref(), Some(expected), "{command}");
+        }
+        for command in [
+            "cat -n Cargo.toml",
+            "cat",
+            "cat <<'EOF'\nx\nEOF",
+            "/bin/cat Cargo.toml",
+            "env cat Cargo.toml",
+            "cd x && cat Cargo.toml",
+            "sed -n '2,4p'",
+            "sed -n \"$range\" file",
+            "sed -i '2,4p' file",
+            "sed -n '$p' file",
+            "ls -la",
+        ] {
+            assert_eq!(replacement(command), None, "{command}");
+        }
+    }
+
+    #[test]
+    fn a_line_count_of_a_stream_passes_and_of_a_file_names_rg() {
+        assert_eq!(refusal("rg x src | wc -l", None).unwrap(), None);
+        assert_eq!(refusal("git log --oneline | wc -l -", None).unwrap(), None);
+        let message = refused("wc -l src/main.rs");
+        assert!(message.contains("`rg -c ''`"), "{message}");
+    }
 
     fn refused(command: &str) -> String {
         refusal(command, None)
@@ -330,6 +432,14 @@ mod tests {
         ] {
             assert_eq!(refusal(command, None).unwrap(), None, "{command}");
         }
+        BYPASSES.with(|log| {
+            assert!(
+                log.borrow()
+                    .iter()
+                    .any(|line| line.starts_with("a caller parses GNU grep output\t")),
+                "{log:?}"
+            );
+        });
         for command in [
             "DOTFILES_LEGACY_BYPASS='find: reason' grep x f",
             "DOTFILES_LEGACY_BYPASS='grep:' grep x f",

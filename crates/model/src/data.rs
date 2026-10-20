@@ -67,6 +67,9 @@ pub struct ModernTool {
     /// The flags that mark an invocation as legacy when the tool replaces only some uses, such as `-l` for `wc`.
     #[serde(default)]
     pub when: Vec<String>,
+    /// Whether the legacy command stays admitted when it reads only standard input, such as `wc -l` in a pipeline.
+    #[serde(default)]
+    pub stream: bool,
     /// The command the next action names.
     pub preferred: String,
     /// The mise tool that installs the preferred command on every profile.

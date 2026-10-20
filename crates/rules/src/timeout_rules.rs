@@ -64,11 +64,20 @@ pub fn timeout(observed: Option<u64>, default: u64, requested: Option<u64>, limi
     }
 }
 
-/// The hook reports a run that took longer than its expectation, so the next one can run in the background.
+/// The fewest recent runs that make an expectation firm enough to warn about.
+pub const MIN_SAMPLES: usize = 5;
+
+/// A run shorter than this never earns the advice to move to the background, in milliseconds.
+pub const BACKGROUND_FLOOR_MS: u64 = 30_000;
+
+/// The hook reports a long run that took well past a firm expectation, so the next one can run in the background.
+/// Well past means beyond the timeout margin: half again plus ten seconds.
 #[must_use]
-pub const fn overran(expected: Option<u64>, took: u64) -> bool {
+pub const fn overran(expected: Option<u64>, samples: usize, took: u64) -> bool {
     match expected {
-        Some(expected) => took > expected,
+        Some(expected) => {
+            samples >= MIN_SAMPLES && took >= BACKGROUND_FLOOR_MS && took > with_margin(expected)
+        }
         None => false,
     }
 }
@@ -99,10 +108,16 @@ mod proofs {
         }
     }
 
-    pub fn spec_overran(expected: Option<u64>, took: u64) {
+    /// A warning needs a firm expectation, a long run, and a run past half again plus ten seconds.
+    pub fn spec_overran(expected: Option<u64>, samples: usize, took: u64) {
         assert_eq!(
-            overran(expected, took),
-            expected.is_some_and(|limit| took > limit)
+            overran(expected, samples, took),
+            expected.is_some_and(|expected| {
+                samples >= 5
+                    && took >= 30_000
+                    && u128::from(took)
+                        > u128::from(expected) + u128::from(expected / 2) + u128::from(START_UP_MS)
+            })
         );
     }
 
@@ -135,11 +150,13 @@ mod proofs {
     #[kani::proof]
     fn a_run_overran_only_past_a_known_expectation() {
         let expected: Option<u64> = kani::any();
+        let samples: usize = kani::any();
         let took: u64 = kani::any();
-        spec_overran(expected, took);
-        let overran = overran(expected, took);
+        spec_overran(expected, samples, took);
+        let overran = overran(expected, samples, took);
         kani::cover!(overran);
-        kani::cover!(!overran & expected.is_some());
+        kani::cover!(!overran & expected.is_some() & (samples >= MIN_SAMPLES));
+        kani::cover!(!overran & expected.is_some_and(|expected| took > expected));
     }
 
     #[cfg(kani)]
@@ -185,8 +202,10 @@ mod tests {
                     }
                 }
             }
-            for took in VALUES {
-                proofs::spec_overran(observed, took);
+            for took in VALUES.into_iter().chain([29_999, 30_000, 160_000, 160_001]) {
+                for samples in [0, MIN_SAMPLES - 1, MIN_SAMPLES, WINDOW] {
+                    proofs::spec_overran(observed, samples, took);
+                }
             }
         }
     }
@@ -250,8 +269,11 @@ mod tests {
 
     #[cfg_attr(not(miri), test)]
     fn only_a_run_beyond_its_expectation_overran() {
-        assert!(overran(Some(10), 11));
-        assert!(!overran(Some(10), 10));
-        assert!(!overran(None, 1_000_000));
+        assert!(overran(Some(100_000), MIN_SAMPLES, 160_001));
+        assert!(!overran(Some(100_000), MIN_SAMPLES, 160_000));
+        assert!(!overran(Some(100_000), MIN_SAMPLES - 1, 600_000));
+        assert!(!overran(Some(3_000), WINDOW, BACKGROUND_FLOOR_MS - 1));
+        assert!(overran(Some(3_000), WINDOW, BACKGROUND_FLOOR_MS));
+        assert!(!overran(None, WINDOW, 1_000_000));
     }
 }

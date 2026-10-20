@@ -32,6 +32,8 @@ const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 const MILLIS_PER_SECOND: u64 = 1000;
 /// The longest tool call identifier a start marker takes as its name.
 const MAX_CALL_ID: usize = 128;
+/// A start marker older than a day belongs to a call that never finished, such as one another hook refused.
+const STALE_MARKER_MS: u64 = 24 * 60 * 60 * MILLIS_PER_SECOND;
 
 /// Words that only prepare the shell.
 /// A command made of them alone has no signature of its own.
@@ -218,6 +220,23 @@ fn marker(home: &Path, id: &str) -> Option<PathBuf> {
     safe.then(|| state(home).join("starts").join(id))
 }
 
+/// Removes the start markers of calls that started more than a day before `now`.
+fn sweep(home: &Path, now: u64) {
+    let Ok(entries) = fs::read_dir(state(home).join("starts")) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| text.trim().parse::<u64>().ok())
+            .is_some_and(|started| now.saturating_sub(started) > STALE_MARKER_MS)
+        {
+            platform::cleanup::remove_file(&path);
+        }
+    }
+}
+
 /// Appends one run as a single line write, so concurrent hooks never interleave inside a record.
 fn record(home: &Path, run: &Run) -> Result<()> {
     let directory = state(home);
@@ -260,6 +279,22 @@ fn compact(directory: &Path, path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The call's input with a raised timeout and the shell hook's exact replacement, or `None` when neither applies.
+/// The shell hook rewrites the same command, so whichever update the client applies last runs it.
+fn updated_input(input: &Value, raised: Option<u64>, rewritten: Option<&str>) -> Option<Value> {
+    if raised.is_none() && rewritten.is_none() {
+        return None;
+    }
+    let mut updated = input.clone();
+    if let Some(millis) = raised {
+        updated["timeout"] = json!(millis);
+    }
+    if let Some(rewritten) = rewritten {
+        updated["command"] = json!(rewritten);
+    }
+    Some(updated)
+}
+
 fn context(event: &str, text: &str) -> Value {
     json!({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}})
 }
@@ -277,15 +312,21 @@ pub(crate) fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Valu
     let command = input["command"]
         .as_str()
         .context("shell event has no command")?;
-    let signature = signature(command);
+    let name = event["hook_event_name"].as_str().unwrap_or_default();
+    let rewritten = (name == "PreToolUse")
+        .then(|| crate::claude_hook::exact_rewrite(event))
+        .flatten();
+    let signature = signature(rewritten.as_deref().unwrap_or(command));
     let runs = history(home);
     let latest = window(&runs, &signature);
     let observed = percentile(&latest);
     let id = event["tool_use_id"].as_str().unwrap_or_default();
-    let name = event["hook_event_name"].as_str().unwrap_or_default();
     match name {
         "PreToolUse" => {
-            if let Some(path) = marker(home, id) {
+            sweep(home, now);
+            if let Some(path) = marker(home, id)
+                && (rewritten.is_some() || !crate::claude_hook::refused(event))
+            {
                 fs::create_dir_all(path.parent().context("marker directory")?)?;
                 fs::write(path, now.to_string())?;
             }
@@ -314,11 +355,11 @@ pub(crate) fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Valu
                 );
             }
             let mut output = context(name, &text);
-            if let Timeout::Set(millis) = decided
-                && requested != Some(millis)
-            {
-                let mut updated = input.clone();
-                updated["timeout"] = json!(millis);
+            let raised = match decided {
+                Timeout::Set(millis) if requested != Some(millis) => Some(millis),
+                _ => None,
+            };
+            if let Some(updated) = updated_input(input, raised, rewritten.as_deref()) {
                 output["hookSpecificOutput"]["updatedInput"] = updated;
             }
             Ok(Some(output))
@@ -343,7 +384,7 @@ pub(crate) fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Valu
                     succeeded: name == "PostToolUse",
                 },
             )?;
-            Ok(overran(observed, millis).then(|| {
+            Ok(overran(observed, latest.len(), millis).then(|| {
                 context(
                     name,
                     &format!(
@@ -453,22 +494,69 @@ mod tests {
             pre["hookSpecificOutput"]["updatedInput"]["description"],
             "d"
         );
-        let post = handle(
-            &event("PostToolUseFailure", "just check", None),
-            home,
-            800_000,
-        )
-        .unwrap()
-        .unwrap();
+        assert_eq!(
+            handle(
+                &event("PostToolUseFailure", "just check", None),
+                home,
+                800_000,
+            )
+            .unwrap(),
+            None,
+            "one earlier run makes no firm expectation"
+        );
+        let lines = fs::read_to_string(state(home).join("history.jsonl")).unwrap();
+        assert_eq!(lines.lines().count(), 2);
+        assert!(lines.contains("\"succeeded\":false"));
+    }
+
+    #[test]
+    fn only_a_long_run_well_past_a_firm_expectation_warns() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path();
+        for _ in 0..crate::timeout_rules::MIN_SAMPLES {
+            record(
+                home,
+                &Run {
+                    signature: "just check".into(),
+                    millis: 100_000,
+                    succeeded: true,
+                },
+            )
+            .unwrap();
+        }
+        let mut now = 0;
+        let mut finish = |took: u64| {
+            handle(&event("PreToolUse", "just check", None), home, now).unwrap();
+            now += took;
+            let post = handle(&event("PostToolUse", "just check", None), home, now).unwrap();
+            now += 1;
+            post
+        };
+        assert_eq!(finish(160_000), None);
+        let post = finish(400_000).unwrap();
         assert!(
             post["hookSpecificOutput"]["additionalContext"]
                 .as_str()
                 .unwrap()
                 .contains("run_in_background")
         );
-        let lines = fs::read_to_string(state(home).join("history.jsonl")).unwrap();
-        assert_eq!(lines.lines().count(), 2);
-        assert!(lines.contains("\"succeeded\":false"));
+    }
+
+    #[test]
+    fn a_refused_call_leaves_no_marker_and_stale_markers_go() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path();
+        let starts = state(home).join("starts");
+        fs::create_dir_all(&starts).unwrap();
+        fs::write(starts.join("toolu_old"), "0").unwrap();
+        fs::write(starts.join("toolu_recent"), STALE_MARKER_MS.to_string()).unwrap();
+        let now = STALE_MARKER_MS + 1_000;
+        handle(&event("PreToolUse", "grep -r x .", None), home, now).unwrap();
+        assert!(!starts.join("toolu_1").exists());
+        assert!(!starts.join("toolu_old").exists());
+        assert!(starts.join("toolu_recent").exists());
+        handle(&event("PreToolUse", "just check", None), home, now).unwrap();
+        assert!(starts.join("toolu_1").exists());
     }
 
     #[test]

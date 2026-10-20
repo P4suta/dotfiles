@@ -53,7 +53,11 @@ enum Commands {
         arguments: Vec<OsString>,
     },
     /// Claude Code `PreToolUse` hook for Bash and PowerShell: refuses recursive disk scans and file writes through inline interpreters, heredocs, and redirects.
-    ClaudeBash,
+    ClaudeBash {
+        /// Run an exact modern replacement through the client's input rewrite instead of refusing the legacy command.
+        #[arg(long)]
+        rewrite: bool,
+    },
     /// Claude Code `PreToolUse` and `PostToolUse` hook for Bash and PowerShell: sets each command's timeout from its measured durations.
     ClaudeTiming,
     /// Refuse supported implementation edits without a checked issue context.
@@ -216,7 +220,7 @@ fn run() -> Result<()> {
         } => exit(dotfiles::terminal::run(
             emulator, session, child, &arguments,
         )?),
-        Commands::ClaudeBash => dotfiles::claude_hook::run()?,
+        Commands::ClaudeBash { rewrite } => dotfiles::claude_hook::run(rewrite)?,
         Commands::ClaudeTiming => dotfiles::claude_timing::run()?,
         Commands::IssueGuard => std::process::exit(dotfiles::issue_guard::hook()?),
         Commands::CodexHooks { request } => std::process::exit(codex_hooks::run(request)?),
