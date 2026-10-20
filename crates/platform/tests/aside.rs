@@ -1,34 +1,49 @@
 use platform::aside;
 use platform::process::command;
 use std::fs;
+use std::io::{BufRead, Read, Write};
 use std::path::Path;
 use std::process::Child;
 
-/// A copy of a system program that keeps running for a few seconds, so its image stays mapped while the test replaces it.
-fn run_copy(binary: &Path) -> Child {
-    if cfg!(windows) {
-        command(binary)
-            .args(["-n", "6", "127.0.0.1"])
-            .stdout(std::process::Stdio::null())
-            .spawn()
-            .unwrap()
-    } else {
-        command(binary).arg("5").spawn().unwrap()
+const CHILD: &str = "DOTFILES_ASIDE_TEST_CHILD";
+const READY: &str = "installed binary is running";
+
+#[test]
+fn hold_running_binary() {
+    if std::env::var_os(CHILD).is_some() {
+        println!("{READY}");
+        std::io::stdout().flush().unwrap();
+        std::io::stdin().read_to_end(&mut Vec::new()).unwrap();
     }
 }
 
+fn run_copy(binary: &Path) -> Child {
+    let mut child = command(binary)
+        .args(["--exact", "hold_running_binary", "--nocapture"])
+        .env(CHILD, "1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut output = std::io::BufReader::new(child.stdout.take().unwrap());
+    loop {
+        let mut line = String::new();
+        assert!(output.read_line(&mut line).unwrap() > 0);
+        if line.contains(READY) {
+            break;
+        }
+    }
+    child.stdout = Some(output.into_inner());
+    child
+}
+
 #[test]
-fn a_running_binary_is_replaced_and_its_aside_copy_swept_later() {
+fn a_running_binary_is_replaced_without_moving_its_public_path() {
     let scope = tempfile::tempdir().unwrap();
-    let system = if cfg!(windows) {
-        Path::new(r"C:\Windows\System32\PING.EXE")
-    } else {
-        Path::new("/bin/sleep")
-    };
     let target = scope
         .path()
         .join(format!("tool{}", std::env::consts::EXE_SUFFIX));
-    fs::copy(system, &target).unwrap();
+    fs::copy(std::env::current_exe().unwrap(), &target).unwrap();
     let mut running = run_copy(&target);
     let staged = scope.path().join("staged");
     fs::write(&staged, b"replacement").unwrap();
@@ -47,17 +62,31 @@ fn a_running_binary_is_replaced_and_its_aside_copy_swept_later() {
             .filter(|entry| entry.file_name().to_string_lossy().ends_with(".old"))
             .count()
     };
-    assert_eq!(asides(scope.path()), 1);
-    aside::sweep(&target);
-    assert_eq!(
-        asides(scope.path()),
-        usize::from(cfg!(windows)),
-        "a running aside copy stays until a later installation"
-    );
-    running.kill().ok();
-    running.wait().unwrap();
+    assert_eq!(asides(scope.path()), 0);
     aside::sweep(&target);
     assert_eq!(asides(scope.path()), 0);
+    assert!(running.try_wait().unwrap().is_none());
+    running.stdin.take();
+    assert!(running.wait().unwrap().success());
+    aside::sweep(&target);
+    assert_eq!(asides(scope.path()), 0);
+}
+
+#[test]
+fn replacement_sweeps_old_asides_without_removing_the_installed_binary() {
+    let scope = tempfile::tempdir().unwrap();
+    let target = scope.path().join("tool");
+    let old = scope.path().join("tool.42.old");
+    let unrelated = scope.path().join("another.42.old");
+    fs::write(&target, b"previous").unwrap();
+    fs::write(&old, b"old").unwrap();
+    fs::write(&unrelated, b"unrelated").unwrap();
+    let staged = scope.path().join("staged");
+    fs::write(&staged, b"replacement").unwrap();
+    aside::replace(&staged, &target).unwrap();
+    assert_eq!(fs::read(&target).unwrap(), b"replacement");
+    assert!(!old.exists());
+    assert!(unrelated.exists());
 }
 
 #[test]
@@ -68,4 +97,53 @@ fn a_failed_installation_restores_the_previous_binary() {
     let missing = scope.path().join("never-staged");
     assert!(aside::replace(&missing, &target).is_err());
     assert_eq!(fs::read(&target).unwrap(), b"previous");
+    assert!(aside::install(&missing, &target).is_err());
+    assert_eq!(fs::read(&target).unwrap(), b"previous");
+}
+
+#[test]
+fn readers_always_find_a_complete_binary_during_replacement() {
+    use std::sync::{
+        Barrier,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    const CONTENT: usize = 4096;
+    const REPLACEMENTS: usize = 256;
+    let scope = tempfile::tempdir().unwrap();
+    let target = scope.path().join("tool");
+    fs::write(&target, [0; CONTENT]).unwrap();
+    let ready = Barrier::new(2);
+    let finished = AtomicBool::new(false);
+    std::thread::scope(|threads| {
+        let reader = threads.spawn(|| {
+            ready.wait();
+            let mut observations = 0;
+            loop {
+                let bytes = fs::read(&target)?;
+                assert!(bytes == [0; CONTENT] || bytes == [1; CONTENT]);
+                observations += 1;
+                if finished.load(Ordering::Acquire) {
+                    break;
+                }
+            }
+            Ok::<_, std::io::Error>(observations)
+        });
+        ready.wait();
+        let result = (|| {
+            for index in 0..REPLACEMENTS {
+                let staged = scope.path().join("staged");
+                fs::write(&staged, [u8::from(index % 2 == 0); CONTENT])?;
+                if index % 2 == 0 {
+                    aside::replace(&staged, &target)?;
+                } else {
+                    aside::install(&staged, &target)?;
+                }
+            }
+            Ok::<_, anyhow::Error>(())
+        })();
+        finished.store(true, Ordering::Release);
+        assert!(reader.join().unwrap().unwrap() > 0);
+        result.unwrap();
+    });
 }

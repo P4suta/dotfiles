@@ -10,7 +10,8 @@ target="$HOME/.local/bin/mise"
 if [ -x "$target" ] && [ "$("$target" --version 2>/dev/null | cut -d ' ' -f 1)" = "$version" ]; then
   exit 0
 fi
-scope="$(mktemp -d)"
+mkdir -p "$HOME/.local/bin"
+scope="$(mktemp -d "$HOME/.local/bin/.mise-install.XXXXXX")"
 trap 'rm -rf "$scope"' EXIT
 curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --max-time 300 \
   --output "$scope/mise" "https://github.com/jdx/mise/releases/download/v$version/mise-v$version-$asset"
@@ -24,5 +25,4 @@ if [ "$actual" != "$sha256" ]; then
   exit 1
 fi
 chmod 0755 "$scope/mise"
-mkdir -p "$HOME/.local/bin"
 mv -f "$scope/mise" "$target"

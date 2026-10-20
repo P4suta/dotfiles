@@ -524,7 +524,7 @@
     {"mode":"0755","path":".local/bin/session-reaper","sha256":"e28971aa410fd798cb50414c6591d3f68cf919cf5ff94ae52b6fafbe55c0c7bb","type":"file"}
   ],
   "scripts": [
-    {"condition":"always","phase":"before","position":0,"sha256":"29370a3cf1c08963c139235bac0169a54100e6ad5abb56aa81910f00d75972d9","target":".chezmoiscripts/unix/00-mise.sh"},
+    {"condition":"always","phase":"before","position":0,"sha256":"66c3c5319e2162018a48e2f407fa44210949c6e6231bfe237bb4013fbbe1b43b","target":".chezmoiscripts/unix/00-mise.sh"},
     {"condition":"always","phase":"before","position":1,"sha256":"18c93726e5cc04bf6abcc0170fca31fb549c3cc49bb64b0642b4dcd7aea297f6","target":".chezmoiscripts/unix/01-runtime.sh"},
     {"condition":"onchange","phase":"before","position":2,"sha256":"6d7ed7f72a136550609bd1e627c210694053116696033e4bb990511bac94d455","target":".chezmoiscripts/unix/02-github.sh"},
     {"condition":"onchange","phase":"after","position":3,"sha256":"8b92f3f3bb8edd86d08b7e7eb15c457483fde579a956d3802a47913dd8253487","target":".chezmoiscripts/unix/05-tools.sh"},

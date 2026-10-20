@@ -508,6 +508,17 @@ impl Tool {
         command
     }
 
+    /// Reads the effective machine-local configuration without overriding its source.
+    #[must_use]
+    pub fn chezmoi_configuration(config: &std::path::Path) -> Command {
+        let mut command = Self::Chezmoi.command();
+        command
+            .arg("--config")
+            .arg(config)
+            .args(["--no-tty", "dump-config", "--format", "json"]);
+        command
+    }
+
     /// A process for this program that keeps a Git hook's repository variables.
     #[must_use]
     pub fn hook_command(self) -> Command {

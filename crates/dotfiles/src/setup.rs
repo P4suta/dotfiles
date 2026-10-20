@@ -310,12 +310,7 @@ pub(crate) fn git_wrapper(bin: &Path) -> Result<()> {
     if fs::read(&wrapper).is_ok_and(|current| current == wanted) {
         return Ok(());
     }
-    let aside = crate::aside::move_aside(&wrapper)?;
-    if let Err(error) = replace(&wrapper, &wanted, true) {
-        crate::aside::restore(&wrapper, aside);
-        return Err(error);
-    }
-    Ok(())
+    crate::aside::install(&bin.join("dotguard.exe"), &wrapper)
 }
 
 /// The Git guard, which every Git command starts.
@@ -330,7 +325,33 @@ const CLAUDE_WINDOWS_INSTALLER: &str = "https://claude.ai/install.ps1";
 const ONEPASSWORD_APP: &str = "/Applications/1Password.app";
 const OWNER_HTTPS: &str = "https://github.com/P4suta";
 
-/// `cargo install` overwrites each binary in place, which Windows refuses while that binary runs, so each one moves aside first.
+fn installation_stage(root: &Path) -> Result<tempfile::TempDir> {
+    fs::create_dir_all(root)?;
+    Ok(tempfile::Builder::new()
+        .prefix(".dotfiles-install-")
+        .tempdir_in(root)?)
+}
+
+fn publish_installation(stage: &Path, root: &Path, binaries: &[&str]) -> Result<()> {
+    let bin = stage.join("bin");
+    for binary in binaries {
+        ensure!(
+            bin.join(format!("{binary}{}", std::env::consts::EXE_SUFFIX))
+                .is_file(),
+            "cargo installation did not produce {binary}"
+        );
+    }
+    let entries = fs::read_dir(bin)?.collect::<std::io::Result<Vec<_>>>()?;
+    ensure!(
+        !entries.is_empty(),
+        "cargo installation produced no binaries"
+    );
+    for entry in entries {
+        crate::aside::install(&entry.path(), &root.join("bin").join(entry.file_name()))?;
+    }
+    Ok(())
+}
+
 fn install_crate(
     context: &TemplateData,
     runner: &mut impl Runner,
@@ -338,14 +359,7 @@ fn install_crate(
     binaries: &[&str],
 ) -> Result<()> {
     let root = context.home.join(".local");
-    let mut moved = Vec::new();
-    for binary in binaries {
-        let target = root
-            .join("bin")
-            .join(format!("{binary}{}", std::env::consts::EXE_SUFFIX));
-        let aside = crate::aside::move_aside(&target)?;
-        moved.push((target, aside));
-    }
+    let stage = installation_stage(&root)?;
     // mise runs Cargo with the toolchain the checkout pins, so no host Cargo decides the build.
     let mut arguments = vec![
         "-C".into(),
@@ -356,20 +370,14 @@ fn install_crate(
     ];
     arguments.extend(cargo_install_arguments(
         &context.source.join(relative),
-        &root,
+        stage.path(),
         binaries,
     ));
     if relative == GUARD_CRATE {
         arguments.extend(args(&["--profile", GUARD_PROFILE]));
     }
-    let result = checked(runner, Tool::Mise, &arguments);
-    if result.is_err() {
-        for (target, aside) in moved {
-            crate::aside::restore(&target, aside);
-        }
-    }
-    result?;
-    Ok(())
+    checked(runner, Tool::Mise, &arguments)?;
+    publish_installation(stage.path(), &root, binaries)
 }
 
 pub(crate) fn vendor_installer(
@@ -1116,16 +1124,15 @@ fn source_tool(context: &TemplateData, runner: &mut impl Runner, step: Step) -> 
         fs::create_dir_all(checkout.parent().context("checkout parent is missing")?)?;
         checked(runner, Tool::Git, &source.clone_arguments(&checkout))?;
     }
-    let arguments = cargo_install_arguments(
-        &checkout.join(relative),
-        &context.home.join(if matches!(step, Step::Domyjob) {
-            ".cargo"
-        } else {
-            ".local"
-        }),
-        &[],
-    );
+    let root = context.home.join(if matches!(step, Step::Domyjob) {
+        ".cargo"
+    } else {
+        ".local"
+    });
+    let stage = installation_stage(&root)?;
+    let arguments = cargo_install_arguments(&checkout.join(relative), stage.path(), &[]);
     checked(runner, Tool::Cargo, &arguments)?;
+    publish_installation(stage.path(), &root, &[])?;
     checked(runner, binary, &args(&[source.probe()]))?;
     Ok(())
 }
@@ -1273,6 +1280,101 @@ fn retire_tmux(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cargo_builds_leave_installed_tools_present_until_every_binary_is_ready() -> Result<()> {
+        struct Build {
+            root: PathBuf,
+            success: bool,
+            complete: bool,
+        }
+        impl Runner for Build {
+            fn available(&self, _: Tool) -> bool {
+                true
+            }
+
+            fn run(&mut self, _: Tool, arguments: &[OsString]) -> Result<crate::runtime::Reply> {
+                for binary in ["first", "second"] {
+                    assert_eq!(
+                        fs::read(
+                            self.root
+                                .join("bin")
+                                .join(format!("{binary}{}", std::env::consts::EXE_SUFFIX))
+                        )?,
+                        b"previous"
+                    );
+                }
+                let stage = PathBuf::from(
+                    &arguments
+                        .windows(2)
+                        .find(|pair| pair[0] == "--root")
+                        .unwrap()[1],
+                );
+                assert_ne!(stage, self.root);
+                let bin = stage.join("bin");
+                fs::create_dir_all(&bin)?;
+                fs::write(
+                    bin.join(format!("first{}", std::env::consts::EXE_SUFFIX)),
+                    b"replacement",
+                )?;
+                if self.complete {
+                    fs::write(
+                        bin.join(format!("second{}", std::env::consts::EXE_SUFFIX)),
+                        b"replacement",
+                    )?;
+                }
+                Ok(crate::runtime::Reply {
+                    success: self.success,
+                    bytes: Vec::new(),
+                })
+            }
+
+            fn run_installed(&mut self, _: &Path, _: &[OsString]) -> Result<crate::runtime::Reply> {
+                unreachable!()
+            }
+        }
+        for (success, complete) in [(false, true), (true, false), (true, true)] {
+            let scope = tempfile::tempdir()?;
+            let root = scope.path().join(".local");
+            fs::create_dir_all(root.join("bin"))?;
+            for binary in ["first", "second"] {
+                fs::write(
+                    root.join("bin")
+                        .join(format!("{binary}{}", std::env::consts::EXE_SUFFIX)),
+                    b"previous",
+                )?;
+            }
+            let context = TemplateData {
+                source: scope.path().join("source"),
+                home: scope.path().to_path_buf(),
+                config: scope.path().join("chezmoi.toml"),
+                profile: Profile::Mac,
+                data: serde_json::json!({}),
+            };
+            let mut runner = Build {
+                root: root.clone(),
+                success,
+                complete,
+            };
+            let result = install_crate(&context, &mut runner, RUNTIME_CRATE, &["first", "second"]);
+            assert_eq!(result.is_ok(), success && complete);
+            for binary in ["first", "second"] {
+                assert_eq!(
+                    fs::read(
+                        root.join("bin")
+                            .join(format!("{binary}{}", std::env::consts::EXE_SUFFIX))
+                    )?,
+                    if success && complete {
+                        &b"replacement"[..]
+                    } else {
+                        &b"previous"[..]
+                    }
+                );
+            }
+            assert_eq!(fs::read_dir(root)?.count(), 1);
+        }
+        Ok(())
+    }
+
     struct RuntimeInstall(Vec<OsString>);
 
     impl Runner for RuntimeInstall {

@@ -110,6 +110,12 @@ pub fn permitted(
     }
 }
 
+/// A live apply uses the configured checkout or its rooted chezmoi source state.
+#[must_use]
+pub const fn application_source(configured_checkout: bool, configured_state: bool) -> bool {
+    configured_checkout || configured_state
+}
+
 #[must_use]
 pub fn secret_ready(present: bool, nonempty: bool, unresolved_reference: bool) -> bool {
     present && nonempty && !unresolved_reference
@@ -170,6 +176,23 @@ pub fn host_edit_refused(changed: bool, merged: bool, keeps_host_keys: bool) -> 
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_application_source(checkout: bool, state: bool) {
+        let admitted = application_source(checkout, state);
+        assert_eq!(!admitted, !checkout && !state);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn an_apply_requires_the_configured_source() {
+        let checkout: bool = kani::any();
+        let state: bool = kani::any();
+        spec_application_source(checkout, state);
+        let admitted = application_source(checkout, state);
+        kani::cover!(admitted && checkout);
+        kani::cover!(admitted && !checkout && state);
+        kani::cover!(!admitted);
+    }
 
     #[cfg(kani)]
     #[kani::proof]
@@ -327,6 +350,18 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_configured_checkout_or_source_state_admits_an_apply() {
+        for checkout in [false, true] {
+            for state in [false, true] {
+                proofs::spec_application_source(checkout, state);
+            }
+        }
+        assert!(application_source(true, false));
+        assert!(application_source(false, true));
+        assert!(!application_source(false, false));
+    }
     use crate::domain::{flags, words};
     use alloc::vec::Vec;
 
