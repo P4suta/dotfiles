@@ -87,4 +87,5 @@ After a push, reassess the changed binding and complete only its selected route,
 When publication or another prerequisite stays unavailable, report the verified local fixes and the pending PR step.
 A resolved conversation or a passing rate-limit check proves no review or fix of the current code.
 Replies, thread resolution, new review triggers, commits, pushes, and merges each need user authorization.
+Write each reply in the owner's voice, as `pull-request` describes for published text.
 Use the `coderabbit` skill for Triage, planning, configuration, or service-side Finishing Touches.

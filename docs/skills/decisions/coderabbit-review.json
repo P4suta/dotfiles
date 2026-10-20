@@ -1,7 +1,7 @@
 {
-  "revision": "c388c862873f7cc967bb90caa25c9ff7144d7e1183702915f308e6a09a576fe4",
+  "revision": "370ac7dd1986a3ed6af6716d315878a3737c915b5e6f47f802767946c92cc7fe",
   "outcome": "implemented",
-  "reason": "Apply the authenticated assessment's exclusive route: none for routine changes, guarded CLI for high, and PR review for critical.\nKeep exact-diff evidence, supported findings, capacity, owner pauses, authorization, and private diagnostics protections.\nThis revision clarifies the existing obligations without changing review selection.\nThe two review cores passed five normal Kani harnesses and nine rejecting probes, and the completion parser replayed three seeds with an assertion-defect control.\nCurrent native gates, service analysis, and rollout remain pending.",
+  "reason": "The revision asks for review replies in the owner's voice, as the pull-request skill describes.",
   "evidence": [
     "home/dot_agents/skills/coderabbit-review/SKILL.md",
     "home/dot_agents/skills/pull-request/references/importance.md",

@@ -56,6 +56,8 @@ Without destination-specific rules, write an English [Conventional Commits](http
 `pr-workflow check` runs the prose checker on the title and body of a personal non-fork destination.
 Use `Why`, `Changes`, and `Validation` when no template exists, and state the actual validation outcome.
 Rewrite the description around the final change if the scope changed.
+Write every PR, issue, review, and comment in the owner's voice: flat, short, and about the change or the decision.
+Leave out who or what wrote it, the local workflow, and notes addressed to the owner.
 
 Use `pr-workflow start/check/create/edit/ready` instead of the corresponding `gh` mutation.
 Personal non-fork publication requires `--issue NUMBER`, a live open issue in the exact destination, and a visible closing reference in the body.

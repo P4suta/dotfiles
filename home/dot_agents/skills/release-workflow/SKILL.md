@@ -9,7 +9,7 @@ description: >-
 
 Read the project's actual workflow, registry bindings, rulesets, environments, and accepted ADRs.
 Use `github-repository` for common settings, `doppler` for credential delivery, `rust-release` for crates.io, and `code-signing` for Apple or Windows distribution.
-Use `approval-boundaries` for an AI-assisted approval.
+Use `approval-boundaries` for an approval.
 Production approval requires strong explicit permission for that operation.
 
 Separate version preparation, candidate verification, signing, registry publication, and final GitHub publication.
