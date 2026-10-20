@@ -1,5 +1,6 @@
 ---
-status: proposed
+status: amended
+changed_by: [proof-verdicts-never-depend-on-time.md]
 date: 2026-10-13
 ---
 # Retain Miri sysroots with fresh interpretation
@@ -20,14 +21,14 @@ Run the pinned `cargo miri setup` before every use of the retained sysroot and r
 This setup command validates the upstream standard-library source and configuration fingerprint even with an explicit `MIRI_SYSROOT`.
 
 Keep launch targets within the disposable Code home.
-Every campaign still discovers the current test inventory, executes every required batch, validates complete results and budgets, and runs the undefined-behavior fixture.
+Every campaign still discovers the current test inventory, executes every required batch, validates complete results, and runs the undefined-behavior fixture.
 Measure each batch with the collector's host monotonic clock and retain its elapsed milliseconds, rounded upward, with the selected tests and raw result.
-Require that measurement during both collection and retained-report validation against the existing 30-second budget.
+Retain that measurement during collection and retained-report validation as advisory metadata under the [verdict amendment](proof-verdicts-never-depend-on-time.md).
 The measured Cargo invocation includes compilation and startup, so it is a conservative upper bound on interpreted execution time.
 The interpreted libtest JSON clock remains a protocol diagnostic because Miri replaces clocks under default isolation.
 Missing native timing is refused, and the full batch inventory, ignore states, isolation, and undefined-behavior fixture remain required.
 Partition exhaustive byte and casing tests into disjoint named shards without removing any original input or assertion.
-Run each such shard separately and keep ordinary tests grouped, so their combined execution does not conceal an over-budget workload.
+Run each such shard separately and keep ordinary tests grouped, bounding each invocation by its selected tests.
 No log, digest, or earlier success replaces execution or authorizes a complete Code note.
 
 The owner-managed cache and pinned compiler installation remain external trust boundaries.

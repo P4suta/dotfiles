@@ -79,9 +79,7 @@ const HOST_READS: [&str; 11] = [
 
 /// The term a token of a template expression stands for.
 ///
-/// Exempt as disproportionate: Kani runs past its budget on the string comparisons of even a short token.
-/// Evidence: `crates/rules/src/input_rules.rs::tests::each_token_names_its_term`.
-/// Reconsider when a cargo-fuzz target owns this function.
+/// Kani: proved for inputs up to 11 bytes.
 #[must_use]
 pub fn term(token: &str) -> Term {
     match token {
@@ -136,6 +134,37 @@ pub fn terms(expression: &str) -> Vec<Term> {
 mod proofs {
     use super::*;
 
+    pub fn spec_term(token: &str) -> Term {
+        let expected = match token.as_bytes() {
+            b"." | b"$" => Term::Context,
+            b"includeTemplate" => Term::Render,
+            b"output" | b"stat" | b"lstat" | b"glob" | b"env" | b"lookPath" | b"findExecutable"
+            | b"findOneExecutable" | b"isExecutable" | b"exec" | b"outputList" => Term::HostRead,
+            [b'.', b'c', b'h', b'e', b'z', b'm', b'o', b'i', ..]
+            | [b'$', b'.', b'c', b'h', b'e', b'z', b'm', b'o', b'i', ..] => Term::Chezmoi,
+            _ => Term::Data,
+        };
+        let actual = term(token);
+        assert_eq!(actual, expected);
+        actual
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn template_tokens_match_the_byte_specification_through_eleven_bytes() {
+        let bytes: [u8; 11] = kani::any();
+        let length: usize = kani::any();
+        kani::assume(length <= bytes.len());
+        if let Ok(token) = core::str::from_utf8(&bytes[..length]) {
+            let term = spec_term(token);
+            kani::cover!(term == Term::Data);
+            kani::cover!(term == Term::Context);
+            kani::cover!(term == Term::Chezmoi);
+            kani::cover!(term == Term::HostRead);
+        }
+    }
+
     pub const TERMS: [Term; 5] = [
         Term::Data,
         Term::Context,
@@ -185,6 +214,13 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn template_tokens_enumerate_a_small_alphabet_through_four_bytes() {
+        for bytes in crate::domain::words(b".$env", 4) {
+            proofs::spec_term(core::str::from_utf8(&bytes).unwrap());
+        }
+    }
     use alloc::vec::Vec;
 
     #[test]

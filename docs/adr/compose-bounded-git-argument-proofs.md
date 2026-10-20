@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [proof-verdicts-never-depend-on-time.md]
 date: 2026-10-09
 ---
 # Compose the bounded Git argument proofs through a scalar cursor
@@ -7,8 +8,8 @@ date: 2026-10-09
 ## Context
 
 The Git guard must retain every configuration setting before the subcommand and its exact source span.
-String allocation and variable slice construction make the combined bounded proof exceed its budget.
-The loop-contract pilot did not establish an unbounded proof within that budget.
+The earlier combined bounded proof composed string allocation and variable slice construction without producing completed evidence.
+The loop-contract pilot also supplied no completed unbounded proof.
 
 ## Decision
 
@@ -23,10 +24,10 @@ Configuration policy proofs partition the six values into three pairs and retain
 
 ## Validation
 
-The proof inventory executes every word, cursor, adapter, and policy partition under the unchanged proof budget.
+The proof inventory executes every word, cursor, adapter, and policy partition under explicit bounds, with completed results required by the [verdict amendment](proof-verdicts-never-depend-on-time.md).
 The attribution corpus and runtime tests cover the external Git boundaries.
 The existing [loop-contract decision](bounded-harness-over-kani-loop-contracts.md) records the limit beyond the bounded domain.
 
 ## Reconsider
 
-Reassess the composition when the supported grammar or cursor changes, or when the verifier can check the complete scan at a larger bound within the same budget.
+Reassess the composition when the supported grammar or cursor changes, or when the verifier checks the complete scan at a larger bound.

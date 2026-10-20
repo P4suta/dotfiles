@@ -29,24 +29,24 @@
 | [0023 Give the repository a layout that shows what it manages](0023-repository-layout-and-target-architecture.md) | accepted |  |
 | [2026-10-05 Reuse the `gh` login for the remote GitHub tool server](github-mcp-uses-the-github-cli-login.md) | accepted |  |
 | [2026-10-06 Report every gate refusal as one structured record](structured-gate-refusals.md) | accepted |  |
-| [2026-10-07 Enforce formal obligations and deterministic metrics through one repository manifest](checked-obligation-manifest.md) | accepted |  |
+| [2026-10-07 Enforce formal obligations and deterministic metrics through one repository manifest](checked-obligation-manifest.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
 | [2026-10-07 Name new decision records after their decision and place them by date](dated-decision-record-names.md) | accepted |  |
 | [2026-10-07 Refuse generic anti-patterns through one catalog of checks](generic-anti-pattern-catalog.md) | accepted |  |
 | [2026-10-07 Keep every decision in one pure core crate behind its adapters](pure-decision-core-behind-adapters.md) | accepted |  |
-| [2026-10-07 Replay the whole reachable state graph of each finite Quint model](state-graph-replay-of-finite-quint-models.md) | accepted |  |
+| [2026-10-07 Replay the whole reachable state graph of each finite Quint model](state-graph-replay-of-finite-quint-models.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
 | [2026-10-07 Require verification in proportion to code shape on every repository](verification-proportional-to-code-shape.md) | amended | [2026-10-20](keep-the-assure-owner-map-out-of-projects.md) |
 | [2026-10-08 Drop Aeneas extraction for the plan and ordering cores and try Verus next](aeneas-extraction-pilot.md) | accepted |  |
 | [2026-10-08 Record rule failures at their execution boundaries](automatic-rule-failure-observations.md) | proposed |  |
-| [2026-10-08 Keep bounded harnesses instead of Kani loop contracts for the Git argument scan](bounded-harness-over-kani-loop-contracts.md) | accepted |  |
+| [2026-10-08 Keep bounded harnesses instead of Kani loop contracts for the Git argument scan](bounded-harness-over-kani-loop-contracts.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
 | [2026-10-08 Bind installed tools to reviewed skills](installed-tools-and-reviewed-skills.md) | proposed |  |
 | [2026-10-08 Keep property fuzzing in the fuzz targets instead of bolero](no-bolero-beside-kani.md) | accepted |  |
 | [2026-10-08 Generate repository artifacts from checked metadata](repository-metadata-and-generated-artifacts.md) | proposed |  |
-| [2026-10-09 Compose the bounded Git argument proofs through a scalar cursor](compose-bounded-git-argument-proofs.md) | accepted |  |
-| [2026-10-09 Check review postconditions directly on bounded production calls](direct-bounded-review-postconditions.md) | accepted |  |
+| [2026-10-09 Compose the bounded Git argument proofs through a scalar cursor](compose-bounded-git-argument-proofs.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
+| [2026-10-09 Check review postconditions directly on bounded production calls](direct-bounded-review-postconditions.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
 | [2026-10-09 Bind incident prevention to exact records and committed evidence](incident-dispositions-bind-exact-records.md) | accepted |  |
-| [2026-10-09 Optimize checked MIR for the pinned Kani verifier](optimize-checked-kani-mir.md) | accepted |  |
-| [2026-10-09 Preserve source witnesses under checked Kani MIR](preserve-kani-source-covers.md) | accepted |  |
-| [2026-10-09 Validate skill catalogs before planning](validated-skill-plan-inputs.md) | accepted |  |
+| [2026-10-09 Optimize checked MIR for the pinned Kani verifier](optimize-checked-kani-mir.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
+| [2026-10-09 Preserve source witnesses under checked Kani MIR](preserve-kani-source-covers.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
+| [2026-10-09 Validate skill catalogs before planning](validated-skill-plan-inputs.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
 | [2026-10-10 Retain applied profile drift as advisory evidence](advisory-applied-profile-observations.md) | accepted |  |
 | [2026-10-10 Isolate code gates and retain native provisioning checks](isolated-code-and-native-host-gates.md) | amended | [2026-10-10](advisory-applied-profile-observations.md) |
 | [2026-10-10 Check prose before persistence](persisted-prose-gates.md) | accepted |  |
@@ -54,9 +54,9 @@
 | [2026-10-11 Preserve tool versions during application](preserve-tool-versions-during-apply.md) | proposed |  |
 | [2026-10-11 Bind profile evidence to repositories that own the profile runtime](profile-evidence-scope.md) | proposed |  |
 | [2026-10-11 Start mise installations without mise shims](shim-free-mise-installation.md) | proposed |  |
-| [2026-10-11 Push the candidate its gates already verified](source-bound-push-validation.md) | amended | [2026-10-12](local-proof-campaigns-on-mac.md) |
+| [2026-10-11 Push the candidate its gates already verified](source-bound-push-validation.md) | amended | [2026-10-12](local-proof-campaigns-on-mac.md), [2026-10-20](proof-verdicts-never-depend-on-time.md) |
 | [2026-10-12 Keep fixed processor budgets beside Mac proof campaigns](fixed-cpu-budgets-beside-mac-proof-campaigns.md) | amended | [2026-10-13](local-mutation-and-scoped-ci-proofs.md), [2026-10-19](native-verification-with-lightweight-ci.md) |
-| [2026-10-12 Run local proof campaigns on Mac and keep Linux CI](local-proof-campaigns-on-mac.md) | amended | [2026-10-12](fixed-cpu-budgets-beside-mac-proof-campaigns.md), [2026-10-19](native-verification-with-lightweight-ci.md) |
+| [2026-10-12 Run local proof campaigns on Mac and keep Linux CI](local-proof-campaigns-on-mac.md) | amended | [2026-10-12](fixed-cpu-budgets-beside-mac-proof-campaigns.md), [2026-10-19](native-verification-with-lightweight-ci.md), [2026-10-20](proof-verdicts-never-depend-on-time.md) |
 | [2026-10-12 Classify native failures from delivery signals before output replays](native-failure-signals-before-output-replays.md) | proposed |  |
 | [2026-10-12 Recover native PATH before constructing candidate environments](native-path-before-candidate-environments.md) | proposed |  |
 | [2026-10-12 Persist remote execution ownership before submission](persist-remote-execution-ownership.md) | proposed |  |
@@ -71,14 +71,14 @@
 | [2026-10-13 Protect local host candidate execution](protect-local-host-candidate-execution.md) | proposed |  |
 | [2026-10-13 Run Renovate through a process from the same source build](renovate-behind-a-source-matched-process.md) | proposed |  |
 | [2026-10-13 Require every fixed proof partition in hosted CI](require-every-fixed-proof-partition-in-hosted-ci.md) | superseded | [2026-10-19](native-verification-with-lightweight-ci.md) |
-| [2026-10-13 Retain Miri sysroots with fresh interpretation](retain-miri-sysroots-with-fresh-interpretation.md) | proposed |  |
+| [2026-10-13 Retain Miri sysroots with fresh interpretation](retain-miri-sysroots-with-fresh-interpretation.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
 | [2026-10-13 Route CodeRabbit by current PR importance](route-coderabbit-by-current-pr-importance.md) | amended | [2026-10-20](keep-workflow-evidence-local.md) |
 | [2026-10-13 Speak fixed development events through an optional desktop queue](speak-fixed-development-events-through-an-optional-desktop-queue.md) | amended | [2026-10-14](report-optional-notification-failures-with-fixed-warnings.md) |
 | [2026-10-13 Validate Renovate reports before classifying freshness](validated-renovate-reports.md) | proposed |  |
 | [2026-10-14 Partition Cargo artifacts by physical source root](partition-cargo-artifacts-by-physical-source-root.md) | proposed |  |
 | [2026-10-14 Report optional notification failures with fixed warnings](report-optional-notification-failures-with-fixed-warnings.md) | proposed |  |
-| [2026-10-15 Prove portable component scans with erased witnesses](prove-portable-component-scans-with-erased-witnesses.md) | proposed |  |
-| [2026-10-16 Evaluate fixed parser domains before symbolic selection](finite-shell-parser-ctfe.md) | proposed |  |
+| [2026-10-15 Prove portable component scans with erased witnesses](prove-portable-component-scans-with-erased-witnesses.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
+| [2026-10-16 Evaluate fixed parser domains before symbolic selection](finite-shell-parser-ctfe.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
 | [2026-10-17 Run spoken Git commands in the matching policy companion](isolate-spoken-git-in-the-matching-companion.md) | proposed |  |
 | [2026-10-19 Bind inherited Renovate Cargo records to committed workspace metadata](cargo-workspace-renovate-bindings.md) | proposed |  |
 | [2026-10-19 Make native verification authoritative and keep hosted CI lightweight](native-verification-with-lightweight-ci.md) | amended | [2026-10-19](optional-native-verification-before-publication.md), [2026-10-20](gate-pull-requests-that-skip-local-hooks.md) |
@@ -90,4 +90,5 @@
 | [2026-10-20 Keep the assure owner map out of projects](keep-the-assure-owner-map-out-of-projects.md) | accepted |  |
 | [2026-10-20 Keep workflow evidence on the owner's machines](keep-workflow-evidence-local.md) | accepted |  |
 | [2026-10-20 Leave the Cargo target to each workspace](leave-the-cargo-target-to-each-workspace.md) | accepted |  |
+| [2026-10-20 Proof verdicts never depend on time](proof-verdicts-never-depend-on-time.md) | accepted |  |
 | [2026-10-20 Keep every managed behavior the same on every host](same-behavior-on-every-host.md) | accepted |  |

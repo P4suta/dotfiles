@@ -48,11 +48,11 @@ pub fn verify_push(
     checks.finish()
 }
 
-/// Compares a Kani results document with the expected harnesses and the proof budget.
+/// Compares completed Kani results with the expected harnesses and properties.
 ///
 /// # Errors
 ///
-/// Returns an error when the run stops early or holds no harness, the harness set differs from `expected`, a harness lacks a measurement or exceeds the budget, or a result contradicts `counterexample`.
+/// Returns an error when evidence is incomplete or empty, the harness set differs from `expected`, or a completed result contradicts `counterexample`.
 /// A normal run must pass every proof with an assertion, two satisfied cover witnesses, and every property verified, and a counterexample run must fail every harness on an assertion.
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
     let summary = &value["verification_results"]["summary"];
@@ -60,7 +60,7 @@ pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) 
         summary["status"] == "completed"
             && summary["executed"].as_u64() == Some(expected.len() as u64)
             && !expected.is_empty(),
-        "proof execution is incomplete or empty"
+        "proof did not complete: incomplete or empty execution (missing evidence, inconclusive)"
     );
     let results = value["verification_results"]["results"]
         .as_array()
@@ -77,32 +77,36 @@ pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) 
         results.len() == expected.len() && names == expected.iter().copied().collect(),
         "unexpected, missing, or duplicate proof harness"
     );
-    let slow: Vec<String> = results
-        .iter()
-        .filter_map(|result| {
-            let duration = result["duration_ms"].as_u64();
-            (proof_budget_rules::verdict(duration) != proof_budget_rules::Verdict::Within).then(
-                || {
-                    format!(
-                        "{} took {} ms",
-                        result["harness_id"].as_str().unwrap_or_default(),
-                        duration
-                            .map_or_else(|| "unmeasured".to_owned(), |millis| millis.to_string())
+    for result in results {
+        let properties = result["checks"].as_array().filter(|checks| {
+            !checks.is_empty()
+                && checks.iter().all(|check| {
+                    matches!(
+                        check["status"].as_str(),
+                        Some("Success" | "Failure" | "Unreachable" | "Satisfied" | "Unsatisfiable")
                     )
-                },
-            )
-        })
-        .collect();
-    let mut checks = Checks::default();
-    checks.run("budget", || {
+                })
+        });
+        let completed_result = match (result["status"].as_str(), properties) {
+            (Some("Success"), Some(_)) => Some(true),
+            (Some("Failure"), Some(checks))
+                if checks.iter().any(|check| check["status"] == "Failure") =>
+            {
+                Some(false)
+            }
+            _ => None,
+        };
         ensure!(
-            slow.is_empty(),
-            "each proof harness must finish within {} ms; shrink its bounds or split it without weakening its assertions:\n{}",
-            proof_budget_rules::BUDGET_MILLIS,
-            slow.join("\n")
+            proof_budget_rules::verdict(completed_result)
+                != proof_budget_rules::Verdict::Inconclusive,
+            "proof did not complete: {} (missing evidence, inconclusive)",
+            result["harness_id"]
         );
-        Ok(())
-    });
+        if let Some(millis) = result["duration_ms"].as_u64() {
+            println!("Kani {}: {millis} ms (advisory)", result["harness_id"]);
+        }
+    }
+    let mut checks = Checks::default();
     if counterexample {
         checks.run("counterexample summary", || {
             ensure!(
@@ -330,20 +334,14 @@ fn verify_batch_command(
         "receipt",
         &fs::read(directory.join("results.json"))?,
     )?;
-    let mut checks = Checks::default();
-    checks.run("Kani exit", || {
-        ensure!(
-            status.success() != counterexample,
-            "Kani returned an unexpected outcome: {status}"
-        );
-        Ok(())
-    });
-    checks.run("Kani report", || {
-        let result: Value = skill_ops::read_json(&directory.join("results.json"))?;
-        validate_results(&result, expected, counterexample)
-    });
-    checks.finish()?;
-    skill_ops::read_json(&directory.join("results.json"))
+    let result: Value = skill_ops::read_json(&directory.join("results.json"))
+        .context("proof did not complete: missing Kani report (missing evidence, inconclusive)")?;
+    validate_results(&result, expected, counterexample)?;
+    ensure!(
+        status.success() != counterexample,
+        "Kani returned an unexpected outcome: {status}"
+    );
+    Ok(result)
 }
 
 const KANI_TOOL: &str = "cargo:kani-verifier";
@@ -2107,7 +2105,7 @@ pub const MIRI_TARGETS: &[Option<&str>] = if cfg!(target_os = "macos") {
     &[None, Some("x86_64-pc-windows-msvc")]
 };
 
-/// The tests in one Miri invocation, whose whole binary must meet the proof budget.
+/// The selected test limit for one Miri invocation.
 const MIRI_BATCH_TESTS: usize = 32;
 const MIRI_EXHAUSTIVE_FAMILIES: [&str; 3] = [
     "artifact_rules::tests::sha256_rejects_every_noncanonical_byte_at_every_position_",
@@ -2207,22 +2205,18 @@ pub fn miri_batches(output: &str) -> Result<Vec<Vec<MiriTest>>> {
         .collect())
 }
 
-/// Checks every selected test's completed outcome, ignore state, and binary duration.
+/// Checks every selected test's completed outcome and ignore state, reporting elapsed time as advisory.
 ///
 /// # Errors
 ///
-/// Returns an error for a missing, duplicate, changed, failed, or slow result.
+/// Returns an error for a missing, duplicate, changed, or failed result.
 pub fn validate_miri_batch(output: &str, expected: &[MiriTest], elapsed_ms: u64) -> Result<()> {
-    ensure!(
-        proof_budget_rules::verdict(Some(elapsed_ms)) == proof_budget_rules::Verdict::Within,
-        "Miri host invocation exceeds {} ms: {elapsed_ms}ms",
-        proof_budget_rules::BUDGET_MILLIS
-    );
+    println!("Miri host invocation: {elapsed_ms} ms (advisory)");
     let mut completed = BTreeMap::new();
     let mut suites = 0;
     for event in miri_events(output)? {
         match (event["type"].as_str(), event["event"].as_str()) {
-            (Some("suite" | "test"), Some("started")) => {}
+            (Some("suite" | "test"), Some("started")) | (Some("test"), Some("timeout")) => {}
             (Some("test"), Some(outcome @ ("ok" | "ignored"))) => {
                 let name = event["name"].as_str().context("missing Miri result name")?;
                 ensure!(
@@ -2425,7 +2419,7 @@ fn with_miri_sysroot<T>(
     )
 }
 
-/// Interprets the pure crates' tests under Miri for every target, each test binary within the proof budget, and refuses a fixture with undefined behavior.
+/// Interprets the pure crates' selected tests under Miri for every target and refuses a fixture with undefined behavior.
 pub(crate) fn verify_miri(root: &Path) -> Result<()> {
     crate::phase_evidence::run(
         root,
@@ -2602,7 +2596,7 @@ fn collect_miri_case(root: &Path, krate: &str, target: Option<&str>) -> Result<M
             validate_miri_batch(&report, &batch, elapsed_ms)?;
             let ignored = batch.iter().filter(|test| test.ignored).count();
             println!(
-                "Miri verified {} tests of {krate} for {} within the proof budget and retained {ignored} existing ignores",
+                "Miri verified {} tests of {krate} for {} and retained {ignored} existing ignores",
                 batch.len() - ignored,
                 target.unwrap_or("the host")
             );
@@ -2685,10 +2679,12 @@ fn prepare_rules(
             declared.len(),
             rejected_names.len()
         );
+        let duration = origin
+            .harness_duration_ms()
+            .map_or_else(|| "unmeasured".to_owned(), |millis| format!("{millis} ms"));
         println!(
-            "Kani origin sha256:{}, original harness duration={} ms; current readback reran all result decoders",
+            "Kani origin sha256:{}, original harness duration={duration} (advisory); current readback reran all result decoders",
             origin.identity(),
-            origin.harness_duration_ms()
         );
         return Ok(PreparedRules::Reused {
             proved: declared.len(),
@@ -2990,8 +2986,8 @@ mod tests {
         invalid.cases[0].runs[0].result.status = None;
         assert!(validate_miri_reports(&invalid).is_err());
         let mut invalid = valid.clone();
-        invalid.cases[0].runs[0].elapsed_ms = proof_budget_rules::BUDGET_MILLIS + 1;
-        assert!(validate_miri_reports(&invalid).is_err());
+        invalid.cases[0].runs[0].elapsed_ms = u64::MAX;
+        validate_miri_reports(&invalid)?;
         let mut missing = serde_json::to_value(&valid)?;
         missing["cases"][0]["runs"][0]
             .as_object_mut()
