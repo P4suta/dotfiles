@@ -534,6 +534,29 @@ fn reject_admitting_a_push_from_a_throwaway_repository() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/hook_failure_rules.rs"
+probes = '''
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_a_summary_that_drops_a_repeated_failure() {
+    let summaries = production::summarize(&[1_u8, 1]);
+    assert!(summaries.len() == 1 && summaries[0].count == 1);
+}
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_merging_two_hooks_into_one_summary() {
+    assert!(production::summarize(&[1_u8, 2]).len() == 1);
+}
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_reporting_the_first_cause_as_the_latest() {
+    let summaries = production::summarize(&[1_u8, 2, 1]);
+    assert!(summaries[0].latest == 0);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/eol_rules.rs"
 probes = '''
 use production::{Action, Attributes, Eol, Index, Staging, Text, action, content};

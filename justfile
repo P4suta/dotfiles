@@ -20,6 +20,11 @@ check *args: lint-tools
 push-check: lint-tools
     mise x -- cargo xtask push-check
 
+# The hosted gate for a pull request that skipped the local hooks, such as a Renovate update.
+dependency-gate: trust
+    mise x rust -- cargo check --locked --workspace --all-targets
+    mise x rust -- cargo test --locked --package xtask --test pins
+
 check-staged: lint-tools
     mise x -- cargo xtask check --staged
 

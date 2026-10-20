@@ -178,8 +178,7 @@ enum RepositoryRequest {
     },
 }
 
-fn run() -> Result<()> {
-    let mut cli = Cli::parse();
+fn run(mut cli: Cli) -> Result<()> {
     cli.root = dotfiles::canonical(&cli.root)?;
     let exit = dotfiles::secrets::exit;
     match cli.command {
@@ -225,7 +224,7 @@ fn run() -> Result<()> {
         Commands::IssueGuard => std::process::exit(dotfiles::issue_guard::hook()?),
         Commands::CodexHooks { request } => std::process::exit(codex_hooks::run(request)?),
         Commands::Notifications { action } => dotfiles::notifications::run(action)?,
-        Commands::Assure { point } => dotfiles::assure::hook(point)?,
+        Commands::Assure { point } => assure(point)?,
         Commands::Health { session } => health(session)?,
         Commands::Hook { hook, arguments } => dotfiles::hooks::run(hook, &arguments)?,
         Commands::PostCommitWorker { producer } => {
@@ -301,6 +300,14 @@ fn windows(_: Vec<OsString>) -> Result<()> {
     anyhow::bail!("the Windows setup runs only on Windows")
 }
 
+/// The verification gate's agent hooks, whose session start first reports the agent hooks that failed since the last one.
+fn assure(point: dotfiles::assure::AgentPoint) -> Result<()> {
+    if point == dotfiles::assure::AgentPoint::Start {
+        dotfiles::hook_failures::session_start();
+    }
+    dotfiles::assure::hook(point)
+}
+
 /// The health gate, which at session start prints its refusal instead of failing.
 fn health(session: bool) -> Result<()> {
     let home = platform::home::home().context("user directory is unavailable")?;
@@ -320,8 +327,41 @@ fn health(session: bool) -> Result<()> {
     }
 }
 
+/// The agent hook this command line runs, whose failures the next session start reports.
+fn agent_hook() -> Option<&'static str> {
+    let arguments: Vec<OsString> = std::env::args_os().skip(1).collect();
+    let session = arguments.iter().any(|argument| argument == "--session");
+    match arguments.first()?.to_str()? {
+        "claude-bash" => Some("claude-bash"),
+        "claude-timing" => Some("claude-timing"),
+        "issue-guard" => Some("issue-guard"),
+        "notifications" => Some("notifications"),
+        "assure" => Some("assure"),
+        "health" if session => Some("health"),
+        _ => None,
+    }
+}
+
 fn main() {
-    if let Err(error) = run() {
+    let hook = agent_hook();
+    if let Some(hook) = hook {
+        dotfiles::hook_failures::record_panics(hook);
+    }
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => {
+            if let Some(hook) = hook
+                && error.use_stderr()
+            {
+                dotfiles::hook_failures::record(hook, &error.to_string());
+            }
+            error.exit();
+        }
+    };
+    if let Err(error) = run(cli) {
+        if let Some(hook) = hook {
+            dotfiles::hook_failures::record(hook, &format!("{error:#}"));
+        }
         dotfiles::report(&error);
         std::process::exit(1);
     }

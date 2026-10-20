@@ -1,6 +1,7 @@
 {
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   // The shared preset holds the schedule, grouping, digest pins, and automerge policy.
+  // An automatic merge waits for the `required` status, which includes the dependency gate in ci.yml.
   extends: ['github>P4suta/renovate-config'],
   // A release waits three days before Renovate proposes it, so a pulled release never reaches a host.
   minimumReleaseAge: '3 days',

@@ -233,6 +233,7 @@ pub fn hook() -> Result<i32> {
             platform::report(&error);
             if error.downcast_ref::<platform::refusal::Refusal>().is_none() {
                 eprintln!("{}", platform::refusal::DEFECT);
+                crate::hook_failures::record("issue-guard", &format!("{error:#}"));
             }
             Ok(BLOCK)
         }

@@ -42,9 +42,34 @@ jobs:
         shell: bash
         run: |
           printf '%s\n' 'Native checks follow the committed publication policy.' 'CI reports the checked-out source and does not rerun or attest native checks.'
+  dependencies:
+    name: dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Leave the owner's changes to the local gate
+        if: github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner
+        shell: bash
+        run: |
+          printf '%s\n' 'The local pre-push gate checks the owner'"'"'s changes, so this job checks only pull requests from others, such as Renovate updates.'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
+        with:
+          version: 2026.10.11
+          sha256: f9612efcddda0ae55b62d3b6f82a6c860d5b54ebee0807d4f1a1d578055e1607
+          install_args: rust just
+          cache: false
+      - name: Compile the workspace and check the toolchain pins
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
+        shell: bash
+        run: just dependency-gate
   required:
     name: required
-    needs: [check]
+    needs: [check, dependencies]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -131,7 +156,25 @@ fn lightweight_ci_refuses_missing_reports_heavy_work_and_suppressed_failures() {
             "os: [ubuntu-latest, macos-latest, windows-latest]",
             "os: [ubuntu-latest, macos-latest, windows-latest]\n        exclude: [{os: windows-latest}]",
         ),
-        ("needs: [check]", "needs: []"),
+        ("needs: [check, dependencies]", "needs: []"),
+        ("needs: [check, dependencies]", "needs: [check]"),
+        (
+            "&& github.event.pull_request.user.login != github.repository_owner\n        with:\n          persist",
+            "\n        with:\n          persist",
+        ),
+        (
+            "jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde",
+            "jdx/mise-action@v5",
+        ),
+        (
+            "          sha256: f9612efcddda0ae55b62d3b6f82a6c860d5b54ebee0807d4f1a1d578055e1607\n",
+            "",
+        ),
+        ("cache: false", "cache: true"),
+        (
+            "run: just dependency-gate",
+            "run: cargo run --locked --package xtask -- check",
+        ),
         ("if: always()", "if: success()"),
         (
             "test \"$RESULTS\" = success",
