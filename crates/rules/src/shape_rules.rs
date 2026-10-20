@@ -3,6 +3,115 @@
 //! A shape names code that needs verification beyond example tests, like a parser.
 //! Data names the signals that find each shape, and each site they find has an owner, an exemption beside the code, or a gap.
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MapSource {
+    Owner,
+    Tracked,
+    Empty,
+}
+
+#[must_use]
+pub const fn map_source(owner_exists: bool, tracked: bool) -> MapSource {
+    match (owner_exists, tracked) {
+        (true, _) => MapSource::Owner,
+        (false, true) => MapSource::Tracked,
+        (false, false) => MapSource::Empty,
+    }
+}
+
+const SHA1_HEX_LENGTH: usize = 40;
+const SHA256_HEX_LENGTH: usize = 64;
+
+#[must_use]
+pub fn commit_id(bytes: &[u8]) -> bool {
+    if !matches!(bytes.len(), SHA1_HEX_LENGTH | SHA256_HEX_LENGTH) {
+        return false;
+    }
+    let mut rest = bytes;
+    while let [byte, tail @ ..] = rest {
+        if !byte.is_ascii_hexdigit() {
+            return false;
+        }
+        rest = tail;
+    }
+    true
+}
+
+#[cfg(any(test, kani))]
+mod input_proofs {
+    use super::*;
+
+    pub fn spec_source(owner_exists: bool, tracked: bool) {
+        let source = map_source(owner_exists, tracked);
+        assert_eq!(source == MapSource::Owner, owner_exists);
+        assert_eq!(source == MapSource::Tracked, !owner_exists && tracked);
+        assert_eq!(source == MapSource::Empty, !owner_exists && !tracked);
+    }
+
+    #[expect(
+        clippy::manual_is_ascii_check,
+        reason = "the specification states byte ranges independently of the production ASCII predicate"
+    )]
+    pub fn spec_commit_id(bytes: &[u8]) {
+        let mut valid = matches!(bytes.len(), SHA1_HEX_LENGTH | SHA256_HEX_LENGTH);
+        for byte in bytes {
+            valid &= matches!(byte, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F');
+        }
+        assert_eq!(commit_id(bytes), valid);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn the_owner_map_always_wins_and_only_a_tracked_file_can_migrate() {
+        let (owner_exists, tracked): (bool, bool) = (kani::any(), kani::any());
+        spec_source(owner_exists, tracked);
+        kani::cover!(map_source(owner_exists, tracked) == MapSource::Owner && tracked);
+        kani::cover!(map_source(owner_exists, tracked) == MapSource::Tracked);
+        kani::cover!(map_source(owner_exists, tracked) == MapSource::Empty);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(66)]
+    fn only_a_full_hexadecimal_commit_can_be_an_explicit_base() {
+        let bytes: [u8; SHA256_HEX_LENGTH] = kani::any();
+        let length = usize::from(kani::any::<u8>());
+        kani::assume(length <= SHA256_HEX_LENGTH);
+        if let Some(bytes) = bytes.get(..length) {
+            spec_commit_id(bytes);
+            kani::cover!(commit_id(bytes) && length == SHA1_HEX_LENGTH);
+            kani::cover!(commit_id(bytes) && length == SHA256_HEX_LENGTH);
+            kani::cover!(!commit_id(bytes) && length == SHA1_HEX_LENGTH);
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn map_selection_covers_every_input() {
+            for owner in [false, true] {
+                for tracked in [false, true] {
+                    spec_source(owner, tracked);
+                }
+            }
+        }
+
+        #[test]
+        fn commit_identity_rejects_refs_abbreviations_and_invalid_bytes() {
+            for length in 0..=SHA256_HEX_LENGTH + 1 {
+                spec_commit_id(&[b'a'; SHA256_HEX_LENGTH + 1][..length]);
+            }
+            for byte in u8::MIN..=u8::MAX {
+                spec_commit_id(&[byte; SHA1_HEX_LENGTH]);
+                spec_commit_id(&[byte; SHA256_HEX_LENGTH]);
+            }
+            assert!(!commit_id(b"refs/remotes/origin/main"));
+        }
+    }
+}
+
 /// The closed reasons an exemption may give.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Reason {

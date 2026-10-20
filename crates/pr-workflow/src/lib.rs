@@ -2078,7 +2078,7 @@ fn ready_command(target: &Target, pr: u64, rerun: &str) -> Result<()> {
         live.body,
         live.is_draft,
         checks(&live.status_check_rollup, &required),
-        (base, head),
+        head,
         rerun,
     )?;
     let live = live_document(&github, target, pr)?;
@@ -2244,7 +2244,7 @@ fn make_ready(
     body: String,
     draft: bool,
     report: Report,
-    (base, head): (&str, &str),
+    head: &str,
     rerun: &str,
 ) -> Result<String> {
     let live = live_document(github, target, pr)?;
@@ -2270,7 +2270,14 @@ fn make_ready(
     };
     planned(Operation::Ready, target, Some(pr), draft, issue, checks)?;
     dotfiles::hosts::require_publication_admission(Path::new("."), head)?;
-    dotfiles::assure::ready(Path::new("."), &dotfiles::assure::installed()?, base, head)?;
+    dotfiles::assure::ready(
+        Path::new("."),
+        &dotfiles::assure::installed()?,
+        live.base_ref_oid
+            .as_deref()
+            .context("PR base commit missing")?,
+        head,
+    )?;
     admit_review_request(
         Operation::Ready,
         target.generation,
@@ -2583,7 +2590,7 @@ fn merge_independent(
                     view.body,
                     true,
                     checks(&view.status_check_rollup, &required),
-                    (&view.base_ref_name, &view.head_ref_oid),
+                    &view.head_ref_oid,
                     rerun,
                 )?;
             }
@@ -2917,7 +2924,7 @@ fn merge_stack(
                         view.body,
                         true,
                         checks(&view.status_check_rollup, &required),
-                        (&view.base_ref_name, &view.head_ref_oid),
+                        &view.head_ref_oid,
                         rerun,
                     )?;
                     continue 'restart;

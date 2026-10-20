@@ -1637,7 +1637,23 @@ fn reject_completion_from_the_wrong_review_pool() {
 verifier = "kani"
 source = "crates/rules/src/shape_rules.rs"
 probes = '''
-use production::{Bound, Change, Exemption, Point, Verdict, exemption, lowered, verdict};
+use production::{Bound, Change, Exemption, MapSource, Point, Verdict, commit_id, exemption, lowered, map_source, verdict};
+#[kani::proof]
+fn reject_reading_a_project_map_after_migration() {
+    assert!(map_source(true, true) == MapSource::Tracked);
+}
+#[kani::proof]
+fn reject_an_untracked_project_map() {
+    assert!(map_source(false, false) == MapSource::Tracked);
+}
+#[kani::proof]
+fn reject_a_ref_as_an_explicit_base() {
+    assert!(commit_id(b"refs/remotes/origin/main"));
+}
+#[kani::proof]
+fn reject_refusing_a_full_commit() {
+    assert!(!commit_id(b"0123456789abcdef0123456789abcdef01234567"));
+}
 #[kani::proof]
 fn reject_refusing_a_commit_for_an_old_gap() {
     let old = Change { before: 1, after: 1, ..Change::default() };
