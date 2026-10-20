@@ -1,0 +1,100 @@
+# The interactive behavior of every shell a profile configures, which covers Nushell, Bash, Zsh, and PowerShell.
+# Each shell renders these values in its own syntax, so a shortcut, a key, or a variable behaves the same on every host.
+# A shell template fails to render when it lacks the translation of an entry here.
+
+[shell]
+# Every shell writes each command to its history as it runs.
+# PowerShell keeps at most 32767 commands, its own limit.
+history_size = 10_000_000
+# Vi mode, with the insert-mode keys below.
+edit_mode = "vi"
+# A host takes the first editor it finds, then the fallback of its OS family.
+editors = ["zed --wait", "code --wait"]
+fallback_editor = { unix = "nano", windows = "notepad" }
+pager = "ov"
+# Raw colors, quit when the text fits one screen, and keep the text on screen afterward.
+less = "-FRX"
+
+[[shell.keys]]
+chord = "alt+left"
+action = "word_left"
+
+[[shell.keys]]
+chord = "alt+b"
+action = "word_left"
+
+[[shell.keys]]
+chord = "ctrl+left"
+action = "word_left"
+
+[[shell.keys]]
+chord = "alt+right"
+action = "word_right"
+
+[[shell.keys]]
+chord = "alt+f"
+action = "word_right"
+
+[[shell.keys]]
+chord = "ctrl+right"
+action = "word_right"
+
+[[shell.keys]]
+chord = "alt+backspace"
+action = "kill_word"
+
+[[shell.keys]]
+chord = "ctrl+w"
+action = "kill_word"
+
+[[shell.keys]]
+chord = "ctrl+u"
+action = "kill_to_start"
+
+[[shell.keys]]
+chord = "ctrl+k"
+action = "kill_to_end"
+
+[[shell.keys]]
+chord = "ctrl+a"
+action = "line_start"
+
+[[shell.keys]]
+chord = "ctrl+e"
+action = "line_end"
+
+[[shell.aliases]]
+name = "ll"
+command = "eza --long --all --git --icons=auto"
+
+[[shell.aliases]]
+name = "la"
+command = "eza --all --icons=auto"
+
+[[shell.aliases]]
+name = "lt"
+command = "eza --tree --level=2 --icons=auto"
+
+[[shell.aliases]]
+name = "cat"
+command = "bat"
+
+[[shell.aliases]]
+name = "lg"
+command = "lazygit"
+
+[[shell.aliases]]
+name = "top"
+command = "btm"
+
+[[shell.functions]]
+name = "mkcd"
+summary = "Create a directory and enter it."
+
+[[shell.functions]]
+name = "y"
+summary = "Browse files with yazi and stay in the directory it leaves."
+
+[[shell.functions]]
+name = "proj"
+summary = "Enter a ghq repository, picking with fzf when the query matches more than one."

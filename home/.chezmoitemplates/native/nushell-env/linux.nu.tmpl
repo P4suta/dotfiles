@@ -13,11 +13,7 @@ def --env dotfiles-prepend-path [] {
 }
 dotfiles-prepend-path
 
-$env.EDITOR = {{ if lookPath "zed" }}"zed --wait"{{ else if lookPath "code" }}"code --wait"{{ else }}"nano"{{ end }}
-$env.VISUAL = $env.EDITOR
-$env.PAGER = "ov"
-$env.MANPAGER = "sh -c 'col -bx | bat --language=man --plain'"
-$env.FZF_DEFAULT_OPTS = "--height=60% --layout=reverse --border=rounded --info=inline --preview-window=border-rounded"
+{{ includeTemplate "partials/interactive_nu_env" . }}
 $env.DOTFILES_NU_SESSION = "1"
 
 let onepassword_agent = (($env.HOME? | default $nu.home-dir) | path join ".1password" "agent.sock")
