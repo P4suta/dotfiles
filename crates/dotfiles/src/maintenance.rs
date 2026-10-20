@@ -43,7 +43,7 @@ const MAC_AND_LINUX: &[Profile] = &[Profile::Mac, Profile::Linux];
 
 /// The jobs, in registration order.
 pub const JOBS: [Job; 6] = [
-    // Converges tools to their reviewed pins, refreshes integrations, and removes the finished domyjob jobs this host started.
+    // Fast-forwards and applies the merged main, converges tools to their reviewed pins, and cleans finished domyjob jobs.
     Job {
         name: "tools-upgrade",
         systemd: "tools-upgrade.timer",

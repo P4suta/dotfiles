@@ -3334,6 +3334,52 @@ mod tests {
     #[test]
     #[ignore = "requires the installed pinned Kani"]
     #[cfg(not(target_os = "windows"))]
+    fn source_sync_and_its_counterexamples_verify_against_production() -> Result<()> {
+        const SOURCE: &str = "crates/rules/src/source_sync_rules.rs";
+        const EXPECTED: (usize, usize) = (1, 5);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .context("the proof test has a workspace root")?;
+        let source_hash = platform::build_inputs::content_hash(root)?;
+        ensure!(
+            source_hash == platform::BUILD_HASH,
+            "source synchronization proof producer is stale"
+        );
+        let manifest = obligations::manifest(root)?;
+        let probes = manifest
+            .obligations
+            .iter()
+            .find_map(|obligation| match obligation {
+                Obligation::Kani { source, probes, .. } if source == SOURCE => Some(probes),
+                _ => None,
+            })
+            .context("source synchronization has a registered proof obligation")?;
+        kani_environment_version(root)?;
+        verify_kani_driver(root)?;
+        let verifier_hash = crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
+        let engine_hash = crate::phase_evidence::engine_digest(root)?;
+        let result = verify_rules(
+            root,
+            SOURCE,
+            probes,
+            &flags(&manifest, SOURCE),
+            &verifier_hash,
+            &engine_hash,
+        )?;
+        ensure!(
+            result == EXPECTED,
+            "source synchronization proof inventory differs: {result:?}"
+        );
+        ensure!(
+            platform::build_inputs::content_hash(root)? == source_hash,
+            "source synchronization changed during verification"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires the installed pinned Kani"]
+    #[cfg(not(target_os = "windows"))]
     fn assure_inputs_and_their_counterexamples_verify_against_production() -> Result<()> {
         const SOURCE: &str = "crates/rules/src/shape_rules.rs";
         const EXPECTED: (usize, usize) = (10, 10);
