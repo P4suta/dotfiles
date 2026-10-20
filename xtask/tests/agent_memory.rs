@@ -238,9 +238,8 @@ fn application_turns_off_memory_a_client_turned_back_on() {
         assert!(
             hook["hooks"][0]["command"]
                 .as_str()
-                .is_some_and(
-                    |command| command.ends_with(" claude-bash") && runs_the_runtime(command)
-                ),
+                .is_some_and(|command| command.ends_with(" claude-bash --rewrite")
+                    && runs_the_runtime(command)),
             "{profile}: {hook}"
         );
         assert_eq!(rendered["model"], json!("opus"), "{profile}");

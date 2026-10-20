@@ -238,14 +238,17 @@ fn hook_registration_is_stable_beside_the_skill_observer() -> Result<()> {
         stale["hooks"]["PostToolUse"].as_array().map(Vec::len),
         Some(1)
     );
-    assert!(stale["hooks"]["PostToolUse"][0].get("matcher").is_none());
+    assert_eq!(
+        stale["hooks"]["PostToolUse"][0]["matcher"],
+        line_endings::HOOK_MATCHER
+    );
     for retired in line_endings::RETIRED_HOOK_COMMANDS {
         let renamed = line_endings::merge_hooks(
             json!({"hooks":{"PostToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":retired}]}]}}),
         )?;
         assert_eq!(
             renamed["hooks"]["PostToolUse"],
-            json!([{"hooks":[{"type":"command","command":line_endings::HOOK_COMMAND,"timeout":30}]}]),
+            json!([{"matcher":line_endings::HOOK_MATCHER,"hooks":[{"type":"command","command":line_endings::HOOK_COMMAND,"timeout":30}]}]),
             "{retired} still runs beside its successor"
         );
     }

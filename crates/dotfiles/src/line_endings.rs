@@ -16,6 +16,10 @@ pub const HOOK_COMMAND: &str = "dotfiles line-endings hook";
 /// The seconds a client waits for the line-ending hook.
 const HOOK_TIMEOUT_SECONDS: u64 = 30;
 
+/// The Claude Code and Codex tools that can change a file, the only calls the hook follows.
+pub const HOOK_MATCHER: &str =
+    "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell|apply_patch|edit|write|shell|exec_command";
+
 /// `git check-attr -z` writes each attribute as its path, its name, and its value.
 const FIELDS_PER_ATTRIBUTE: usize = 3;
 /// The attributes the check asks for: `text`, `eol`, and `binary`.
@@ -432,8 +436,7 @@ pub fn run(request: Request) -> Result<()> {
 ///
 /// Returns an error when the settings or `hooks` hold something other than an object, `PostToolUse` holds something other than an array, or a group lacks a handler array.
 pub fn merge_hooks(mut value: Value) -> Result<Value> {
-    let expected =
-        json!({"hooks":[{"type":"command","command":HOOK_COMMAND,"timeout":HOOK_TIMEOUT_SECONDS}]});
+    let expected = json!({"matcher":HOOK_MATCHER,"hooks":[{"type":"command","command":HOOK_COMMAND,"timeout":HOOK_TIMEOUT_SECONDS}]});
     let entries = value
         .as_object_mut()
         .context("client settings must be a JSON object")?

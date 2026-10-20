@@ -628,7 +628,90 @@ pub fn body_sources(command: &str) -> Vec<Source> {
 /// Reconsider when a cargo-fuzz target owns this function.
 #[must_use]
 pub fn inspect(command: &str) -> Verdict {
-    inspect_at(command, 0)
+    inspect_at(command, 0, &[])
+}
+
+/// Like [`inspect`], except that a redirect or `tee` target that `ignored` names writes nothing a commit can carry.
+///
+/// Exempt as disproportionate: a shell parser over unbounded text needs fuzzing, which no verifier here owns yet.
+/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::writes_into_ignored_targets_are_admitted`.
+/// Reconsider when a cargo-fuzz target owns this function.
+#[must_use]
+pub fn inspect_except(command: &str, ignored: &[&str]) -> Verdict {
+    inspect_at(command, 0, ignored)
+}
+
+/// Every redirect and `tee` target at each depth that [`inspect`] reads, so the caller can ask the checkout which ones it ignores.
+///
+/// Exempt as disproportionate: a shell parser over unbounded text needs fuzzing, which no verifier here owns yet.
+/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::writes_into_ignored_targets_are_admitted`.
+/// Reconsider when a cargo-fuzz target owns this function.
+#[must_use]
+pub fn write_targets(command: &str) -> Vec<Target> {
+    let mut targets = Vec::new();
+    targets_at(command, 0, &mut targets);
+    targets
+}
+
+/// A file that a redirect or `tee` names, spelled as the command line spells it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Target(String);
+
+impl Target {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl PartialEq<&str> for Target {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+fn targets_at(command: &str, depth: usize, targets: &mut Vec<Target>) {
+    let scan = scan(command);
+    for (index, token) in scan.tokens.iter().enumerate() {
+        if *token == Token::Redirect
+            && writes_to(scan.tokens.get(index + 1))
+            && let Some(Token::Word { text, .. }) = scan.tokens.get(index + 1)
+        {
+            targets.push(Target(text.clone()));
+        }
+    }
+    for segment in scan.tokens.split(|token| *token == Token::Separator) {
+        let words = segment_words(segment);
+        let command = command_words(&words);
+        let Some((first, rest)) = command.split_first() else {
+            continue;
+        };
+        let name = program(first);
+        if name == "tee" {
+            targets.extend(
+                rest.iter()
+                    .filter(|a| !a.starts_with('-') && !matches!(**a, DISCARD | STDOUT))
+                    .map(|a| Target((*a).to_owned())),
+            );
+        }
+        if SCRIPT_SHELLS.contains(&name.as_str()) && depth < SCRIPT_DEPTH {
+            let flag = rest.iter().position(|word| {
+                word.starts_with('-') && !word.starts_with("--") && word.contains('c')
+            });
+            match flag {
+                Some(flag) => {
+                    if let Some(script) = rest.get(flag + 1) {
+                        targets_at(script, depth + 1, targets);
+                    }
+                }
+                None => {
+                    for body in &scan.heredocs {
+                        targets_at(body, depth + 1, targets);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Inspect recursive shell scripts through this many nested wrappers.
@@ -657,13 +740,17 @@ fn command_words<'a>(mut words: &'a [&'a str]) -> &'a [&'a str] {
     }
 }
 
-fn inspect_at(command: &str, depth: usize) -> Verdict {
+fn inspect_at(command: &str, depth: usize, ignored: &[&str]) -> Verdict {
     let scan = scan(command);
     let mut interpreter = false;
     let mut in_place = false;
     let mut file_write = false;
     for (index, token) in scan.tokens.iter().enumerate() {
-        if *token == Token::Redirect && writes_to(scan.tokens.get(index + 1)) {
+        let target = scan.tokens.get(index + 1);
+        if *token == Token::Redirect
+            && writes_to(target)
+            && !matches!(target, Some(Token::Word { text, .. }) if ignored.contains(&text.as_str()))
+        {
             file_write = true;
         }
     }
@@ -686,7 +773,7 @@ fn inspect_at(command: &str, depth: usize) -> Verdict {
                 interpreter = true;
             } else {
                 for script in scripts {
-                    let found = inspect_at(script, depth + 1);
+                    let found = inspect_at(script, depth + 1, ignored);
                     if matches!(found, Verdict::Refuse(_)) {
                         return found;
                     }
@@ -727,9 +814,9 @@ fn inspect_at(command: &str, depth: usize) -> Verdict {
             in_place = true;
         }
         if name == "tee"
-            && rest
-                .iter()
-                .any(|a| !a.starts_with('-') && !matches!(*a, DISCARD | STDOUT))
+            && rest.iter().any(|a| {
+                !a.starts_with('-') && !matches!(*a, DISCARD | STDOUT) && !ignored.contains(a)
+            })
         {
             file_write = true;
         }
@@ -791,6 +878,7 @@ mod tests {
         the_scanner_tells_each_redirect_from_a_descriptor_copy();
         a_heredoc_body_ends_at_its_delimiter_and_stays_out_of_the_words();
         segments_drop_empty_commands_and_stop_at_a_redirect();
+        writes_into_ignored_targets_are_admitted();
         an_assignment_names_a_variable_before_its_equals_sign();
         each_interpreter_runs_inline_only_through_its_own_flags();
         a_command_prefix_is_skipped_only_for_mise_and_the_wrappers();
@@ -888,6 +976,40 @@ mod tests {
         ] {
             assert_eq!(inspect(command), REFUSED_FILE, "{command}");
         }
+    }
+
+    #[cfg_attr(not(miri), test)]
+    fn writes_into_ignored_targets_are_admitted() {
+        for command in [
+            "cargo test > target/test.log",
+            "echo hi | tee target/a.txt",
+            "bash -c 'echo hi >> target/a.txt'",
+        ] {
+            let targets = write_targets(command);
+            assert!(!targets.is_empty(), "{command}");
+            let ignored: Vec<&str> = targets.iter().map(Target::as_str).collect();
+            assert_eq!(
+                inspect_except(command, &ignored),
+                Verdict::Admit,
+                "{command}"
+            );
+            assert_eq!(inspect(command), REFUSED_FILE, "{command}");
+        }
+        assert_eq!(
+            write_targets("echo a > one.txt 2> /dev/null; echo b | tee -a two.txt"),
+            ["one.txt", "two.txt"]
+        );
+        assert_eq!(
+            inspect_except(
+                "echo a > target/a.txt; echo b > notes.txt",
+                &["target/a.txt"]
+            ),
+            REFUSED_FILE
+        );
+        assert_eq!(
+            inspect_except("python -c 'x' > target/a.txt", &["target/a.txt"]),
+            Verdict::Refuse(Reason::InlineInterpreter)
+        );
     }
 
     #[test]

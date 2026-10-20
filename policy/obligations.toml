@@ -265,6 +265,21 @@ fn reject_admitting_a_mapped_legacy_command_without_a_bypass() {
 fn reject_refusing_a_listed_bootstrap_script() {
     assert!(verdict(true, true, false) == Verdict::Refuse);
 }
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_replacing_a_cat_with_options() {
+    assert!(production::replacement("cat", &["-n", "a"]).is_some());
+}
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_a_reversed_line_range() {
+    assert!(production::replacement("sed", &["-n", "4,2p", "a"]).is_some());
+}
+#[kani::proof]
+#[kani::unwind(4)]
+fn reject_a_stream_reader_that_names_a_file() {
+    assert!(production::reads_stream(&["-l", "a"]));
+}
 '''
 
 [[obligation]]
@@ -1680,6 +1695,14 @@ fn reject_a_timeout_above_the_client_limit() {
 #[kani::proof]
 fn reject_the_median_as_the_high_percentile() {
     assert!(percentile(&[1, 2, 3]) == Some(2));
+}
+#[kani::proof]
+fn reject_advising_the_background_for_a_short_run() {
+    assert!(production::overran(Some(1_000), 20, 29_000));
+}
+#[kani::proof]
+fn reject_a_warning_from_too_few_runs() {
+    assert!(production::overran(Some(100_000), 4, 600_000));
 }
 '''
 

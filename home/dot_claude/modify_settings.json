@@ -11,18 +11,19 @@
 {{- /*
 The shell hook refuses recursive disk-usage scans in Bash and PowerShell.
 It also refuses file writes through inline interpreters, heredocs, and redirects in Bash.
+Claude Code applies a hook's input rewrite, so here the hook runs the exact modern replacement of a legacy command instead of refusing it.
 It runs the same runtime binary the git hooks use.
 */ -}}
 {{- $tool := ".local/bin/dotfiles" -}}
 {{- if eq .profile "windows" }}{{ $tool = ".local/bin/dotfiles.exe" }}{{ end -}}
-{{- $hook := dict "type" "command" "onFailure" "block" "command" (printf "%s claude-bash" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
+{{- $hook := dict "type" "command" "onFailure" "block" "command" (printf "%s claude-bash --rewrite" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
 {{- /*
 The timing hook sets each shell command timeout from its measured durations.
 The tool events keep every group another installer added and replace only their own.
 */ -}}
 {{- $timing := dict "type" "command" "command" (printf "%s claude-timing" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
 {{- $hooks := dig "hooks" (dict) $current -}}
-{{- $pre := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PreToolUse" (list) $hooks) "suffixes" (list " claude-bash" " claude-timing" " issue-guard")) | fromJson -}}
+{{- $pre := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PreToolUse" (list) $hooks) "suffixes" (list " claude-bash" " claude-bash --rewrite" " claude-timing" " issue-guard")) | fromJson -}}
 {{- $_ := set $hooks "PreToolUse" (concat $pre (list (dict "matcher" "Bash|PowerShell" "hooks" (list $hook $timing)))) -}}
 {{- $issue := dict "type" "command" "command" (printf "%s issue-guard" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) "onFailure" "block" -}}
 {{- $_ := set $hooks "PreToolUse" (concat (dig "PreToolUse" (list) $hooks) (list (dict "matcher" "Edit|Write|MultiEdit|apply_patch" "hooks" (list $issue)))) -}}
