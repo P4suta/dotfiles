@@ -35,7 +35,7 @@ Never suppress the boundary or weaken the property to get a passing result.
 
 ## Make adoption durable
 
-Wire required checks into the authoritative project command, fitting local hooks, and required CI.
+Wire required checks into the authoritative project command and fitting local hooks, and let `ci-budget` decide which of them hosted CI runs.
 Use `executable-policy` to verify that the actual gate rejects a representative defect.
 Run available native checks through `multi-machine`, and use `ci-budget` before publishing a coherent update.
 Use `resource-coordination` for expensive campaigns, because adopting a tool grants no unbounded fuzz run or paid service.

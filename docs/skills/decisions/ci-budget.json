@@ -1,7 +1,7 @@
 {
-  "revision": "60f6ed70f99edab6a75e8cc0c86d904cea9b4423f51c25c177f5f69bb0b383bf",
+  "revision": "5a23505d00307ac25686bad7027ba6fa6e8baa347d42bc6aa28c2527b2f477d9",
   "outcome": "implemented",
-  "reason": "The revision renames the machine-local push hold to the established push pause of the git configuration vocabulary, with every sentence of the skill keeping its meaning.",
+  "reason": "The revision gives hosted CI one lean design in a new reference, with a fast deterministic gate, no schedules, and heavy verification on local hosts.",
   "evidence": [
     "home/dot_agents/skills/ci-budget/SKILL.md",
     "crates/dotfiles/src/hosts.rs",

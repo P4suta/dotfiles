@@ -498,6 +498,24 @@ fn reject_refusing_a_memory_directory_outside_a_project() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/git_ref_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_deleting_a_branch_ref() {
+    assert!(production::deletable(b"refs/heads/main"));
+}
+#[kani::proof]
+fn reject_refusing_a_tool_ref() {
+    assert!(!production::deletable(b"refs/codex/turn-diffs/x"));
+}
+#[kani::proof]
+fn reject_admitting_a_push_from_a_throwaway_repository() {
+    assert!(production::throwaway_admits(Some(true), true));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/eol_rules.rs"
 probes = '''
 use production::{Action, Attributes, Eol, Index, Staging, Text, action, content};
