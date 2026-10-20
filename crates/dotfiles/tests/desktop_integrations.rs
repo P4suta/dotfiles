@@ -299,7 +299,13 @@ impl OpenCodeApplyFixture {
         }
         let profile = dotfiles::profiles::native_profile()?;
         let config = scope.path().join("native.toml");
-        fs::write(&config, format!("[data]\nprofile = {:?}\n", profile.name()))?;
+        fs::write(
+            &config,
+            toml::to_string(&serde_json::json!({
+                "sourceDir": checkout,
+                "data": {"profile": profile.name()}
+            }))?,
+        )?;
         let state = scope.path().join("chezmoi-state");
         let installed_template = managed.join("dot_config/opencode/opencode.json.tmpl");
         fs::create_dir_all(

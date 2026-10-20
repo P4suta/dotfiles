@@ -3296,6 +3296,41 @@ mod tests {
     #[test]
     #[ignore = "requires the installed pinned Kani"]
     #[cfg(not(target_os = "windows"))]
+    fn application_and_replacement_rules_verify_against_production() -> Result<()> {
+        const SOURCES: [&str; 2] = [
+            "crates/rules/src/profile_rules.rs",
+            "crates/rules/src/aside_rules.rs",
+        ];
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .context("the proof test has a workspace root")?;
+        let source_hash = platform::build_inputs::content_hash(root)?;
+        ensure!(
+            source_hash == platform::BUILD_HASH,
+            "application proof producer is stale for the current source"
+        );
+        let mut manifest = obligations::manifest(root)?;
+        let closure = obligations::closure(root, &manifest)?;
+        ensure!(
+            closure.refusals.is_empty(),
+            "application proof inventory is not closed:\n{}",
+            closure.refusals.join("\n")
+        );
+        manifest.obligations.retain(|obligation| {
+            matches!(obligation, Obligation::Kani { source, .. } if SOURCES.contains(&source.as_str()))
+        });
+        ensure!(manifest.obligations.len() == SOURCES.len());
+        verify_kani(root, &manifest)?;
+        ensure!(
+            platform::build_inputs::content_hash(root)? == source_hash,
+            "application proof source changed during verification"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires the installed pinned Kani"]
+    #[cfg(not(target_os = "windows"))]
     fn acquired_material_and_mac_profile_rules_verify_against_production() -> Result<()> {
         const SOURCES: [&str; 2] = [
             "crates/rules/src/artifact_rules.rs",

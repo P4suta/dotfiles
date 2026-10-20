@@ -474,10 +474,12 @@ pub fn replace(path: &Path, bytes: &[u8], executable: bool) -> Result<()> {
                 FILE_MODE
             }))?;
     }
-    #[cfg(not(unix))]
-    let _ = executable;
     candidate.as_file().sync_all()?;
-    candidate.persist(path)?;
+    if executable {
+        crate::aside::replace(&candidate.into_temp_path(), path)?;
+    } else {
+        candidate.persist(path)?;
+    }
     Ok(())
 }
 

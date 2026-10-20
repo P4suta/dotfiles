@@ -1,5 +1,4 @@
-//! Windows refuses to replace or delete a running executable but lets a process rename it.
-//! An installer renames the current binary to an aside name, moves the new one in, and deletes aside copies on its next run.
+//! Names and recognizes the aside copies that earlier executable installations left behind.
 
 /// The aside name of a binary for one installing process, which displays as `<name>.<pid>.old`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

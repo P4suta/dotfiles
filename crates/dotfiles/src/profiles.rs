@@ -1,6 +1,6 @@
 //! The host's own profile: the native chezmoi actions with a machine-local configuration, and the transaction that applies it.
 
-use crate::profile_rules::{Mode, Profile, host_edit_refused, permitted};
+use crate::profile_rules::{Mode, Profile, application_source, host_edit_refused, permitted};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
@@ -484,12 +484,50 @@ pub fn configured_profile(data: &Value) -> Result<Profile> {
     }
 }
 
+fn application_root(root: &Path, config: &Path) -> Result<PathBuf> {
+    let configuration: Value = serde_json::from_slice(
+        &output(
+            &mut Tool::chezmoi_configuration(config),
+            "read configured chezmoi source",
+        )?
+        .stdout,
+    )?;
+    let configured = Path::new(
+        configuration["sourceDir"]
+            .as_str()
+            .context("chezmoi configuration requires sourceDir")?,
+    );
+    let configured = crate::canonical(configured).with_context(|| {
+        format!(
+            "configured chezmoi source {} is unavailable",
+            configured.display()
+        )
+    })?;
+    let root = crate::canonical(root)?;
+    let state = crate::source_state(&root);
+    let checkout = configured
+        .parent()
+        .filter(|parent| {
+            fs::read_to_string(parent.join(".chezmoiroot"))
+                .is_ok_and(|name| parent.join(name.trim()) == configured)
+        })
+        .unwrap_or(&configured);
+    ensure!(
+        application_source(configured == root, configured == state),
+        "apply must run from the configured chezmoi source {}; run this apply from {}",
+        configured.display(),
+        checkout.display()
+    );
+    Ok(root)
+}
+
 /// Runs a native chezmoi action on this host with a machine-local configuration.
 ///
 /// # Errors
 ///
 /// Returns an error when the configuration doesn't exist or lives inside the public source, or when it receives a relative path.
 /// It also fails when the configuration names an unknown profile or invalid skips.
+/// An apply from another checkout refuses before rendering or changing any target.
 /// Returns an error when a live apply lacks `--live`, this host's native profile, its native home, or a backup directory, or when chezmoi fails.
 /// Without `state`, chezmoi keeps its default database beside the configuration.
 pub fn operate(
@@ -514,6 +552,10 @@ pub fn operate(
         !crate::canonical(config)?.starts_with(root),
         "machine-local config belongs outside the public source"
     );
+    let application_root = matches!(action, NativeAction::Apply)
+        .then(|| application_root(root, config))
+        .transpose()?;
+    let root = application_root.as_deref().unwrap_or(root);
     let scope = tempfile::tempdir()?;
     let bytes = output(
         chezmoi(root, scope.path(), config, destination).args(["data", "--format", "json"]),
@@ -743,6 +785,89 @@ impl Drop for StateLock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_apply_from_another_checkout_preserves_configured_entry_points() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let source = scope.path().join("configured source");
+        let other = scope.path().join("temporary worktree");
+        let destination = scope.path().join("destination");
+        let config = scope.path().join("chezmoi.toml");
+        let state = scope.path().join("state");
+        let backup = scope.path().join("backup");
+        let targets = [
+            ".local/bin/dotfiles-doctor",
+            ".local/bin/dotfiles-refresh-desktop",
+            ".local/bin/dotfiles-refresh-integrations",
+            ".config/nushell/config.nu",
+            "Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist",
+        ];
+        let templates = [
+            "dot_local/bin/dotfiles-doctor.tmpl",
+            "dot_local/bin/dotfiles-refresh-desktop.tmpl",
+            "dot_local/bin/dotfiles-refresh-integrations.tmpl",
+            "dot_config/nushell/config.nu.tmpl",
+            "Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist.tmpl",
+        ];
+        for checkout in [&source, &other] {
+            fs::create_dir_all(checkout.join("home"))?;
+            fs::write(checkout.join(".chezmoiroot"), "home\n")?;
+            for template in templates {
+                let template = checkout.join("home").join(template);
+                fs::create_dir_all(template.parent().unwrap())?;
+                fs::write(
+                    template,
+                    "dotfiles --root {{ .chezmoi.workingTree | quote }}\n",
+                )?;
+            }
+        }
+        fs::create_dir_all(&destination)?;
+        for configured in [&source, &source.join("home")] {
+            fs::write(
+                &config,
+                format!(
+                    "sourceDir = {:?}\n[data]\nprofile = {:?}\n",
+                    configured.to_string_lossy().replace('\\', "/"),
+                    native_profile()?.name()
+                ),
+            )?;
+            assert_eq!(
+                application_root(&source, &config)?,
+                crate::canonical(&source)?
+            );
+            output(
+                chezmoi(&source, &state, &config, &destination).args(["apply", "--force"]),
+                "seed configured entry points",
+            )?;
+            let before = targets
+                .iter()
+                .map(|target| fs::read(destination.join(target)))
+                .collect::<std::io::Result<Vec<_>>>()?;
+            let error = operate(
+                &other,
+                NativeAction::Apply,
+                &config,
+                &destination,
+                true,
+                Some(&state),
+                Some(&backup),
+            )
+            .unwrap_err();
+            let message = format!("{error:#}");
+            assert!(message.contains("configured chezmoi source"), "{message}");
+            assert!(message.contains(&*source.to_string_lossy()), "{message}");
+            assert!(!backup.exists());
+            assert!(!state.join("apply.lock").exists());
+            for (target, previous) in targets.iter().zip(&before) {
+                let contents = fs::read(destination.join(target))?;
+                assert_eq!(&contents, previous);
+                let contents = String::from_utf8(contents)?;
+                assert!(contents.contains(&*source.to_string_lossy().replace('\\', "/")));
+                assert!(!contents.contains(&*other.to_string_lossy().replace('\\', "/")));
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn application_lock_refuses_overlap_and_does_not_steal_an_interrupted_lock() {

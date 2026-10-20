@@ -6,7 +6,8 @@ $current = if (Test-Path $target) { ((& $target --version 2>$null) -split ' ')[0
 if ($current -eq $version) {
     exit 0
 }
-$scope = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+New-Item -ItemType Directory -Force -Path $bin | Out-Null
+$scope = Join-Path $bin ('.mise-install.' + [guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path $scope | Out-Null
 try {
     $archive = Join-Path $scope 'mise.zip'
@@ -16,15 +17,10 @@ try {
         throw "mise $version for windows-x64 has SHA-256 $actual, not the pinned $sha256"
     }
     Expand-Archive -Path $archive -DestinationPath $scope
-    New-Item -ItemType Directory -Force -Path $bin | Out-Null
     foreach ($name in 'mise.exe', 'mise-shim.exe') {
         $installed = Join-Path $bin $name
         Get-ChildItem -Path $bin -Filter "$name.*.old" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-        # Windows refuses to overwrite a running executable but lets a process rename it.
-        if (Test-Path $installed) {
-            Move-Item -Force -Path $installed -Destination "$installed.$PID.old"
-        }
-        Copy-Item -Path (Join-Path $scope "mise\bin\$name") -Destination $installed
+        [IO.File]::Move((Join-Path $scope "mise\bin\$name"), $installed, $true)
     }
 } finally {
     Remove-Item -Recurse -Force -Path $scope

@@ -11,7 +11,6 @@ use anyhow::{Context, Result};
 
 use super::ocomment_rules::{Action, action};
 use crate::windows::{env, proc};
-use platform::aside_rules::{aside_name, is_aside};
 
 #[derive(Debug)]
 pub struct Options {
@@ -41,38 +40,8 @@ fn head(checkout: &Path) -> Result<Option<String>> {
     ))
 }
 
-/// Windows refuses to overwrite a running `ocomment.exe` but lets a process rename it, so the current binary moves aside and a later installation deletes it.
 fn install(built: &Path, dest: &Path) -> Result<()> {
-    let bin = dest.parent().context("no .local/bin parent")?;
-    std::fs::create_dir_all(bin)?;
-    let name = dest
-        .file_name()
-        .context("no binary name")?
-        .to_string_lossy()
-        .into_owned();
-    for entry in std::fs::read_dir(bin)?.flatten() {
-        if is_aside(name.as_bytes(), entry.file_name().as_encoded_bytes()) {
-            platform::cleanup::remove_file(&entry.path());
-        }
-    }
-    let staged = tempfile::NamedTempFile::new_in(bin)?;
-    std::fs::copy(built, staged.path()).context("staging ocomment.exe")?;
-    let (_, staged) = staged.keep()?;
-    let aside = bin.join(aside_name(&name, std::process::id()).to_string());
-    let moved = dest.exists();
-    if moved {
-        std::fs::rename(dest, &aside).context("moving the installed ocomment.exe aside")?;
-    }
-    if let Err(error) = std::fs::rename(&staged, dest) {
-        if moved {
-            platform::cleanup::report(
-                std::fs::rename(&aside, dest),
-                format_args!("restore {} from {}", dest.display(), aside.display()),
-            );
-        }
-        return Err(error).context("installing ocomment.exe");
-    }
-    Ok(())
+    platform::aside::install(built, dest)
 }
 
 fn build_command(checkout: &Path, target: &Path) -> Command {

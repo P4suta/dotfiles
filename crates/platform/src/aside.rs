@@ -1,5 +1,4 @@
-//! Replaces installed executables, including one that runs during the replacement.
-//! Windows refuses to overwrite or delete a running image but lets a process rename it, so the current binary moves aside first and a later installation deletes it.
+//! Replaces installed executables without removing their public paths.
 
 use crate::aside_rules::{aside_name, is_aside};
 use anyhow::{Context, Result};
@@ -56,16 +55,29 @@ pub fn restore(target: &Path, aside: Option<PathBuf>) {
     }
 }
 
-/// Moves `staged` to `target`, first moving a running `target` aside.
+/// Renames a complete `staged` file over `target` without moving `target` away first.
+/// Filesystems that refuse replacement leave the previous binary in place.
 ///
 /// # Errors
 ///
-/// Returns an error when `target` has no UTF-8 filename, or when it can't move `target` aside or rename `staged` to `target`.
+/// Returns an error when renaming fails, including a rename between filesystems.
 pub fn replace(staged: &Path, target: &Path) -> Result<()> {
-    let aside = move_aside(target)?;
-    if let Err(error) = fs::rename(staged, target) {
-        restore(target, aside);
-        return Err(error).with_context(|| format!("install {}", target.display()));
-    }
-    Ok(())
+    sweep(target);
+    fs::rename(staged, target).with_context(|| format!("install {}", target.display()))
+}
+
+/// Copies a built executable into a synced temporary file beside `target`, then replaces it.
+///
+/// # Errors
+///
+/// Returns an error when staging, syncing, or replacing the executable fails.
+pub fn install(built: &Path, target: &Path) -> Result<()> {
+    let bin = target
+        .parent()
+        .context("installed binary parent is missing")?;
+    fs::create_dir_all(bin)?;
+    let staged = tempfile::NamedTempFile::new_in(bin)?;
+    fs::copy(built, staged.path()).with_context(|| format!("stage {}", target.display()))?;
+    staged.as_file().sync_all()?;
+    replace(&staged.into_temp_path(), target)
 }
