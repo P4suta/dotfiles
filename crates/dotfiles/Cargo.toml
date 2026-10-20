@@ -12,6 +12,10 @@ default-run = "dotfiles"
 name = "dotfiles"
 path = "src/main.rs"
 
+[[bin]]
+name = "dotfiles-ssh-keygen"
+path = "src/bin/ssh-keygen.rs"
+
 [[test]]
 name = "hook_exec_count"
 harness = false

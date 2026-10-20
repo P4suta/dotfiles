@@ -18,6 +18,7 @@ A target missing from the first table reaches every profile.
 | `.config/dev-reaper` | unix | mac, linux, wsl |
 | `.config/dev-reaper/config` | unix | mac, linux, wsl |
 | `.config/dotfiles-nix` | linux | linux |
+| `.config/dotfiles/signing.toml` | desktop | mac, linux |
 | `.config/fcitx5` | linux | linux |
 | `.config/fcitx5/config` | linux | linux |
 | `.config/fcitx5/profile` | linux | linux |

@@ -547,7 +547,12 @@ pub(crate) fn execute(context: &TemplateData, runner: &mut impl Runner, step: St
 
 /// The installed runtime, the Git guard, and on the Mac the `CodeRabbit` guard, all built from this checkout.
 fn runtime(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
-    install_crate(context, runner, RUNTIME_CRATE, &["dotfiles"])?;
+    let binaries: &[&str] = if context.profile == Profile::Windows {
+        &["dotfiles"]
+    } else {
+        &["dotfiles", "dotfiles-ssh-keygen"]
+    };
+    install_crate(context, runner, RUNTIME_CRATE, binaries)?;
     install_crate(context, runner, "crates/skill-ops", &["skill-ops"])?;
     install_crate(context, runner, "crates/pr-workflow", &["pr-workflow"])?;
     if context.profile == Profile::Windows {
@@ -1249,6 +1254,55 @@ fn retire_tmux(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    struct RuntimeInstall(Vec<OsString>);
+
+    impl Runner for RuntimeInstall {
+        fn available(&self, _: Tool) -> bool {
+            true
+        }
+
+        fn run(&mut self, tool: Tool, arguments: &[OsString]) -> Result<crate::runtime::Reply> {
+            assert_eq!(tool, Tool::Mise);
+            self.0 = arguments.to_vec();
+            anyhow::bail!("stop after observing the runtime installation")
+        }
+
+        fn run_installed(&mut self, _: &Path, _: &[OsString]) -> Result<crate::runtime::Reply> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn every_unix_profile_installs_the_signing_executable() -> Result<()> {
+        for profile in Profile::ALL {
+            let scope = tempfile::tempdir()?;
+            let context = TemplateData {
+                source: scope.path().join("source"),
+                home: scope.path().to_path_buf(),
+                config: scope.path().join("chezmoi.toml"),
+                profile,
+                data: serde_json::json!({}),
+            };
+            let mut runner = RuntimeInstall(Vec::new());
+            assert!(execute(&context, &mut runner, Step::Runtime).is_err());
+            assert!(
+                runner
+                    .0
+                    .windows(2)
+                    .any(|pair| pair == ["--bin", "dotfiles"])
+            );
+            assert_eq!(
+                runner
+                    .0
+                    .windows(2)
+                    .any(|pair| pair == ["--bin", "dotfiles-ssh-keygen"]),
+                profile != Profile::Windows,
+                "{profile:?}",
+            );
+        }
+        Ok(())
+    }
+
     struct Refusing;
     impl crate::runtime::Runner for Refusing {
         fn available(&self, _: Tool) -> bool {

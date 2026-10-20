@@ -152,6 +152,16 @@
         }
       ]
     },
+    "ssh_signing": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SshSigning"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "targets": {
       "description": "Targets that only the profiles of the named set receive.",
       "type": [
@@ -1407,6 +1417,31 @@
         "chord",
         "action"
       ]
+    },
+    "SshSigning": {
+      "description": "The password manager's signing socket, with a machine-local override and home-relative Unix defaults.",
+      "type": "object",
+      "properties": {
+        "linux_socket": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mac_socket": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "socket": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "Sshd": {
       "type": "object",

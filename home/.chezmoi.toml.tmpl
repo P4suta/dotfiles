@@ -30,6 +30,11 @@ email = {{ $email | quote }}
 [data.signing]
 enabled = {{ ne $key "" }}
 public_key = {{ $key | quote }}
+{{- if has $profile (list "mac" "linux") }}
+
+[data.ssh_signing]
+socket = {{ dig "ssh_signing" "socket" "" . | quote }}
+{{- end }}
 
 [data.herdr_agent]
 public_keys = {{ dig "herdr_agent" "public_keys" (list) . | toJson }}

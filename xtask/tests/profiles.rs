@@ -88,26 +88,25 @@ fn the_configuration_template_writes_exactly_the_keys_its_consumers_read() {
             }
         }
         keys.sort();
-        assert_eq!(
-            keys,
-            [
-                "doppler.config",
-                "doppler.project",
-                "doppler.secrets.claude",
-                "doppler.secrets.codex",
-                "doppler.secrets.opencode",
-                "git.email",
-                "git.name",
-                "herdr_agent.public_keys",
-                "paths.projects",
-                "profile",
-                "role",
-                "signing.enabled",
-                "signing.public_key",
-            ],
-            "{}",
-            combination.name()
-        );
+        let mut expected = vec![
+            "doppler.config",
+            "doppler.project",
+            "doppler.secrets.claude",
+            "doppler.secrets.codex",
+            "doppler.secrets.opencode",
+            "git.email",
+            "git.name",
+            "herdr_agent.public_keys",
+            "paths.projects",
+            "profile",
+            "role",
+            "signing.enabled",
+            "signing.public_key",
+        ];
+        if matches!(combination.profile, Profile::Mac | Profile::Linux) {
+            expected.push("ssh_signing.socket");
+        }
+        assert_eq!(keys, expected, "{}", combination.name());
         assert_eq!(
             config
                 .get("interpreters")
