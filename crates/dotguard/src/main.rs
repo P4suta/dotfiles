@@ -4,12 +4,14 @@
 //!
 //! - `~/.local/bin/git` runs `dotguard git …`, which applies the argument policy and then executes git, and on Windows a copy named `git.exe` acts as the wrapper.
 //! - `~/.config/git/hooks/pre-push` runs `dotguard pre-push`, the force-push gate.
-//! - `~/.config/git/hooks/commit-msg` runs `dotguard commit-msg`, which strips attribution and checks the language.
+//! - `~/.config/git/hooks/commit-msg` runs `dotguard commit-msg`, which strips attribution, refuses provenance phrases, and checks the language.
 //! - `~/.config/git/hooks/pre-commit` runs `dotguard pre-commit`, the language and staged-diff gates.
 //!
 //! `core.hooksPath` in the global Git configuration points every repository at that hooks directory, so no repository needs to opt in.
 
-use dotguard::{attribution, bypass, gitargv, lang, prepush, real_git, refusal, staged};
+use dotguard::{
+    attribution, bypass, gitargv, lang, prepush, provenance_rules, real_git, refusal, staged,
+};
 
 use bypass::Rule;
 use dotguard::git_wrapper::INVOKED;
@@ -110,7 +112,7 @@ fn usage() {
          usage:\n  \
          dotguard git <args…>        apply policy, then exec the real git\n  \
          dotguard pre-push <remote>  refuse deletions and non-fast-forward pushes (reads stdin)\n  \
-         dotguard commit-msg <file>  strip agent attribution, refuse foreign scripts\n  \
+         dotguard commit-msg <file>  strip agent attribution, refuse provenance phrases and foreign scripts\n  \
          dotguard pre-commit         refuse foreign scripts in the staged diff\n  \
          dotguard post-commit        re-sign an unsigned HEAD, or roll it back\n  \
          dotguard renovate-gate <remote>  refuse a push that leaves a touched dependency stale (reads stdin)\n  \
@@ -174,6 +176,25 @@ fn commit_msg(path: &str) -> i32 {
         eprintln!(
             "::notice:: removed {removed} agent attribution line(s) from the commit message."
         );
+    }
+
+    let provenance = provenance_rules::find(&lang::commit_message_body(&cleaned, comment_char()));
+    if provenance_rules::verdict(provenance.is_some()) == provenance_rules::Verdict::Refuse
+        && let Some((number, phrase)) = provenance
+    {
+        let message = std::path::absolute(path)
+            .map_or_else(|_| path.to_owned(), |file| file.display().to_string());
+        refusal::Refusal::new(
+            "commit.provenance",
+            format!(
+                "the commit message says how its text came about with `{phrase}`. {}",
+                provenance_rules::NEXT_ACTION
+            ),
+            refusal::command(&["git", "commit", "<options>", "--edit", "--file", &message]),
+        )
+        .evidence(format!("commit message line {number}: {phrase}"))
+        .emit();
+        return 1;
     }
 
     let Some(mode) = lang_mode() else { return 0 };

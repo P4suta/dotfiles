@@ -405,6 +405,24 @@ fn reject_an_empty_deleting_next_action() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/provenance_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_admitting_a_found_phrase() {
+    assert!(production::verdict(true) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_refusing_clean_prose() {
+    assert!(production::verdict(false) == production::Verdict::Refuse);
+}
+#[kani::proof]
+fn reject_an_empty_rewrite_action() {
+    assert!(production::NEXT_ACTION.is_empty());
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/boundary_rules.rs"
 probes = '''
 use production::{Core, breach};
