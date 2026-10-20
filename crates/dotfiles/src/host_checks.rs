@@ -345,9 +345,13 @@ impl Scratch {
         )?;
         let guard = platform::tool::Tool::Dotguard.program();
         let environment = crate::hosts::code_environment(root, native_home)?;
+        // Cargo names a path crate's build by its workspace-relative path, so each checkout keeps its own build of the guard.
+        let checkout = platform::paths::canonical(root)?;
         let build = native_home
             .join(platform::code_environment::HOST_CACHE)
-            .join(RUNTIME_BUILD);
+            .join(RUNTIME_BUILD)
+            .join(platform::runtime::checkout_key(&checkout));
+        platform::runtime::claim_hook_target(&build, &checkout)?;
         let status = environment
             .command(platform::tool::Tool::Cargo.program())?
             .args([

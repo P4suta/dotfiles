@@ -538,6 +538,18 @@ fn reject_admitting_a_forced_checkout_whose_hunks_were_never_saved() {
 fn reject_admitting_a_forced_checkout_beyond_bare_pathspecs() {
     assert!(production::saved_discard_admits(false, Some(true)));
 }
+#[kani::proof]
+fn reject_discarding_the_worktree_copy_of_a_staged_deletion() {
+    assert!(!production::entry_holds_work(b'D', b' ', true));
+}
+#[kani::proof]
+fn reject_protecting_a_deletion_with_no_worktree_copy() {
+    assert!(production::entry_holds_work(b'D', b' ', false));
+}
+#[kani::proof]
+fn reject_discarding_a_staged_modification() {
+    assert!(!production::entry_holds_work(b'M', b' ', false));
+}
 '''
 
 [[obligation]]
