@@ -22,7 +22,7 @@ const COMMENT_CASES: [(&str, usize, &str, &str); 3] = [
     (
         "xtask/src/quality.rs",
         246,
-        "Returns every workspace whose lockfile is missing or needs an update.",
+        "Returns every workspace whose lockfile will need an update.",
         "Reports every workspace with a missing or stale lockfile.",
     ),
     (
@@ -280,7 +280,7 @@ fn assert_gate_comment_findings(stderr: &str) {
             COMMENT_CASES[0].1,
             "Microsoft.Contractions",
         ),
-        (COMMENT_CASES[1].0, COMMENT_CASES[1].1, "write-good.E-Prime"),
+        (COMMENT_CASES[1].0, COMMENT_CASES[1].1, "Google.Will"),
         (
             COMMENT_CASES[2].0,
             COMMENT_CASES[2].1,
@@ -422,12 +422,9 @@ fn original_comment_style_failures_are_reported_and_corrected_comments_pass() ->
                 "Google.Contractions",
                 "Microsoft.Contractions",
                 "Google.Passive",
-                "Microsoft.Passive",
-                "write-good.E-Prime",
-                "write-good.Passive",
             ]
         } else {
-            &["write-good.E-Prime"]
+            &["Google.Will"]
         };
         for rule in rules {
             expected.insert((path, line, *rule));
@@ -458,7 +455,7 @@ fn original_comment_style_failures_are_reported_and_corrected_comments_pass() ->
             .evidence
             .iter()
             .any(|evidence| evidence.contains("Microsoft.Contractions")
-                && evidence.contains("write-good.E-Prime"))
+                && evidence.contains("Google.Will"))
     );
     write_comment_fixture(root, true)?;
     assert_eq!(prose::findings(root, prose::Scope::Comments, &bundle)?, []);

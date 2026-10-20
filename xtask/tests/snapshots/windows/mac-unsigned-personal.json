@@ -509,7 +509,7 @@
     {"mode":"0644","path":".config/prose/textlint/bun.lock","sha256":"6ecc915060ec2db36f09bf82c973eb89854a2107832203e0622e6330fe3b7ff8","type":"file"},
     {"mode":"0644","path":".config/prose/textlint/package.json","sha256":"c52af08097f5cfe9fae7c9c891f31ab5d9dddbfcba736235a1dfeeb741f722d0","type":"file"},
     {"mode":"0644","path":".config/prose/textlint/textlintrc.json","sha256":"2013fee3a85d0f89679e3f0402c985e8bb3da55ce51ea8c25542879768b1f4b2","type":"file"},
-    {"mode":"0644","path":".config/prose/vale.ini","sha256":"f7146c2a9217d871b5a8c4f57f108e617479a05c8c2e50d95dc2d7d9bc99ac80","type":"file"},
+    {"mode":"0644","path":".config/prose/vale.ini","sha256":"35d4e2212b8fadde78c740639c7c723ad1fd256d4805b150c285ced713404dca","type":"file"},
     {"mode":"0644","path":".config/prose/vocabulary-sources.tsv","sha256":"8f260f2ed08584299758a1115e18c39edcbc1a850737ecf4860051e4364026f3","type":"file"},
     {"mode":"0755","path":".config/session-reaper","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/session-reaper/config","sha256":"015f59667aaf320d9e5f4ee4113990d43d52bc6cb08f9bfdf4a21316652f1b97","type":"file"},
