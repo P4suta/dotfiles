@@ -1,7 +1,7 @@
 {
-  "revision": "6ebd019fe985b8e6fb2a38a7ea2eb6e1e90aabc23d34be8a69a510f42d47d27b",
+  "revision": "a1d3564c059ccf51fa913a6beba23f58e4dc5b175692c00e1443f42a5d754736",
   "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "The revision drops the five-field approval record and the AI-assisted label, and asks for a one- or two-sentence comment in the owner's voice.",
   "evidence": [
     "home/dot_agents/skills/approval-boundaries/SKILL.md"
   ],

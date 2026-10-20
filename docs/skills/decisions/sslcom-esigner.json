@@ -1,7 +1,7 @@
 {
-  "revision": "4c3fe9904c40439777416a58adb91da7b17f5da346845f6bddc1906b50ebda71",
+  "revision": "a5ac34e1e6937af5a004f8efe215fad8816453744c5411fff45d090a7912c2a2",
   "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "The revision removes the AI-assisted qualifier from the signing approval pointer.",
   "evidence": [
     "home/dot_agents/skills/sslcom-esigner/SKILL.md"
   ],

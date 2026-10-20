@@ -1,7 +1,7 @@
 {
-  "revision": "c17bd436cb3ecfc9cf4724d67755950cf262c9602db4689bfd3a843aa8b2f87d",
+  "revision": "a473ba182a4c9e4513cd898884ada4126da8553ebe1cebcae7a6b160078144d6",
   "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "The revision removes the AI-assisted qualifier from the approval pointer.",
   "evidence": [
     "home/dot_agents/skills/release-workflow/SKILL.md"
   ],

@@ -1,7 +1,7 @@
 ---
 name: approval-boundaries
 description: >-
-  Assess or record an AI-assisted PR or workflow approval with exact scope, evidence, and user authorization.
+  Assess and submit a PR or workflow approval with exact scope, evidence, and user authorization.
   Use for approval actions and protected release gates, not ordinary read-only code review.
 ---
 
@@ -18,21 +18,12 @@ For signing or publication, also bind it to the verified candidate identity, ver
 Check the target immediately before approving, and reassess after a changed head, a new attempt, or a different candidate.
 Read the job that uses the environment, including called workflows, instead of inferring its effects from the environment name.
 
-Write a short English approval record with these fields:
-
-```text
-Decision: APPROVE | REQUEST_CHANGES | COMMENT | HOLD
-Scope: code review | credential verification | signing | registry publication | Release publication
-Target: repository; PR and head SHA, or workflow/run/attempt/environment; candidate identity when applicable
-Evidence: the relevant successful checks and any unresolved finding
-Authorization: the user's explicit permitted operation and applicable limits
-```
-
-Fill in every field before posting.
-Mark the assessment as AI-assisted when submitting it through the owner's account.
-Never claim an independent human review, and never use another identity to approve the owner's own PR.
-Put the same scope and evidence in a GitHub deployment approval comment.
-Keep credentials and private payloads out of the record.
+Write the approval or review comment in the owner's voice, as `pull-request` describes for published text.
+State what the review checked and anything still open in one or two plain sentences.
+Leave out field labels, authorization notes, and any description of who or what wrote it.
+A deployment approval comment names the same scope and evidence in the same voice.
+Never approve the owner's own PR from another identity.
+Keep credentials and private payloads out of every comment.
 
 Never approve while relevant checks fail, blocking findings remain, required evidence goes missing, or the operation exceeds the permission.
 Never use administrator bypass, change reviewers, weaken rulesets, or turn off immutability to make an approval possible.
