@@ -143,12 +143,16 @@ pub fn check(input: &str) -> Result<()> {
     let Some(paths) = mutation_paths(&event)? else {
         return Ok(());
     };
-    let cwd = crate::canonical(
-        event
-            .cwd
-            .as_deref()
-            .context("edit event has no working directory")?,
-    )?;
+    let given = event
+        .cwd
+        .as_deref()
+        .context("edit event has no working directory")?;
+    // A session can outlive its directory, such as a removed worktree, so absolute targets then stand on their own.
+    let cwd = if given.exists() {
+        crate::canonical(given)?
+    } else {
+        given.to_path_buf()
+    };
     let paths: Vec<PathBuf> = paths
         .into_iter()
         .map(|path| {
@@ -351,6 +355,30 @@ mod tests {
             "tool_input": {"file_path": repository.join("target/scratch/probe.rs")}
         });
         check(&ignored.to_string())?;
+        Ok(())
+    }
+
+    #[test]
+    fn a_session_whose_directory_is_gone_gets_the_same_decisions() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let repository = scope.path().join("repository");
+        self::repository(&repository, true)?;
+        let gone = scope.path().join("removed-worktree");
+        let write = |target: PathBuf| {
+            serde_json::json!({
+                "cwd": gone,
+                "tool_name": "Write",
+                "tool_input": {"file_path": target}
+            })
+            .to_string()
+        };
+        check(&write(scope.path().join("config/new.yaml")))?;
+        let error = check(&write(repository.join("new.rs"))).unwrap_err();
+        assert!(
+            format!("{error:#}")
+                .contains("implementation edits require a checked destination-bound issue context"),
+            "{error:#}"
+        );
         Ok(())
     }
 

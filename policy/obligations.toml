@@ -1039,6 +1039,24 @@ fn reject_a_contradiction_without_what_it_contradicted() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/local_state_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_admitting_committed_issue_contexts() {
+    assert!(!production::is_local_state(b".pr-workflow/contexts.json"));
+}
+#[kani::proof]
+fn reject_refusing_a_name_that_only_starts_alike() {
+    assert!(production::is_local_state(b".pr-workflows/x"));
+}
+#[kani::proof]
+fn reject_refusing_an_ordinary_source_file() {
+    assert!(production::is_local_state(b"src/main.rs"));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/lint_rules.rs"
 probes = '''
 use production::{Fault, fault, shrinks};

@@ -198,6 +198,32 @@ fn a_foreign_staged_line_is_refused_with_a_bypass_that_repeats_the_commit() {
     assert_eq!(checkout.succeeds(&["log", "--format=%s"], &[]), "add a");
 }
 
+/// Local workflow state belongs in no repository, so a commit that adds it fails and one that deletes it passes.
+#[test]
+fn a_commit_that_adds_local_workflow_state_is_refused_and_its_deletion_passes() {
+    let checkout = Checkout::new("local-state");
+    std::fs::create_dir_all(checkout.path().join(".pr-workflow")).unwrap();
+    std::fs::write(checkout.path().join(".pr-workflow/contexts.json"), "{}\n").unwrap();
+    std::fs::write(checkout.path().join("a.txt"), "plain\n").unwrap();
+    checkout.succeeds(&["add", "a.txt", ".pr-workflow/contexts.json"], &[]);
+    let refused = last_record(&checkout.run(&["commit", "-q", "-m", "add state"], &[]));
+    assert_eq!(refused.rule, "commit.local-state");
+    assert_eq!(
+        refused.next.as_deref().unwrap_or_default(),
+        "git rm -r --cached --quiet -- .pr-workflow/contexts.json"
+    );
+    // A repository that already holds an old copy records it here through plumbing, then drops it through the hooks.
+    let tree = checkout.succeeds(&["write-tree"], &[]);
+    let old = checkout.succeeds(&["commit-tree", &tree, "-m", "old copy"], &[]);
+    checkout.succeeds(&["update-ref", "HEAD", &old], &[]);
+    checkout.succeeds(&["rm", "-q", ".pr-workflow/contexts.json"], &[]);
+    checkout.succeeds(&["commit", "-q", "-m", "drop state"], &[]);
+    assert_eq!(
+        checkout.succeeds(&["log", "-1", "--format=%s"], &[]),
+        "drop state"
+    );
+}
+
 /// The next step keeps every option of the refused commit, so an amend stays an amend.
 #[test]
 fn a_foreign_message_is_refused_with_a_retry_that_keeps_the_amend() {
