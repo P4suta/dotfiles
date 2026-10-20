@@ -59,6 +59,6 @@ fn the_hosted_gate_installs_the_pinned_mise_release() {
     let mise = &table(VERSIONS)["mise"];
     let version = mise["version"].as_str().unwrap();
     let digest = mise["sha256"]["linux-x64"].as_str().unwrap();
-    assert!(WORKFLOW.contains(&format!("          version: {version}\n")));
+    assert!(WORKFLOW.contains(&format!("          version: v{version}\n")));
     assert!(WORKFLOW.contains(&format!("          sha256: {digest}\n")));
 }

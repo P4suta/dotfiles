@@ -58,7 +58,7 @@ const LIGHTWEIGHT_JOBS: &str = r#"  check:
       - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
         with:
-          version: 2026.10.11
+          version: v2026.10.11
           sha256: f9612efcddda0ae55b62d3b6f82a6c860d5b54ebee0807d4f1a1d578055e1607
           install_args: rust just
           cache: false
