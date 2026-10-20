@@ -1,11 +1,12 @@
 {
-  "revision": "03e38c1e663df4ca49f56ed92905b5206ffeb67caeb2adf53e62d786805689a5",
+  "revision": "f33a281ad3da186514040293cbd3b8837c466b7e02b5cd5558d5de5ca2ecce99",
   "outcome": "implemented",
-  "reason": "The revision lets ci-budget decide which assessed requirements hosted CI runs, so full proof campaigns stay on local hosts.",
+  "reason": "Define reproducible verdicts once with deterministic exploration bounds, inconclusive stops, portable heavy checks, and owner-side conveniences that add no project files.",
   "evidence": [
     "home/dot_agents/skills/formal-assurance/SKILL.md",
     "docs/adr/verification-proportional-to-code-shape.md",
     "home/dot_agents/skills/formal-assurance/references/scoping.md",
+    "home/dot_agents/skills/formal-assurance/references/verifiers.md",
     "docs/skills/assurance-scope-evaluation.md",
     "docs/adr/0012-windows-proofs-in-a-linux-container.md",
     "xtask/tests/container_proofs.rs",

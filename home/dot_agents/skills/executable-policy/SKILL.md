@@ -23,7 +23,7 @@ An instruction or an installed executable alone makes no required gate.
 
 Parse structured data with the format's parser, and discover the checked scope from authoritative manifests.
 Reject missing inputs, tools, and harnesses, and incomplete or empty coverage.
-Distinguish passing, failing, unsupported, skipped, and stale evidence, and accept only a completed applicable check.
+Distinguish passing, failing, inconclusive, unsupported, skipped, and stale evidence, and accept only a completed applicable check.
 Bind evidence to the exact source, configuration, tool version, and target or operation.
 Use a revision or explicit transition as identity instead of time-based success.
 
@@ -38,10 +38,9 @@ Verify that the entry point rejects the defect with a useful diagnostic and acce
 Detect the removal, narrowing, or deletion of required coverage where the project can enforce it.
 Never add tests that only match headings, tool names, generated wording, or implementation details.
 
-Use `development-assurance`, `formal-assurance`, and `reliability` for the implementation's correctness and external assumptions.
-Run native checks through `multi-machine`, and use `ci-budget` for publication.
+Use `development-assurance`, `formal-assurance`, and `reliability` for correctness, reproducible verdicts, and external assumptions.
+Run native checks through the project's documented hosted runners or pinned container, and use `ci-budget` for change selection.
 After moving a rule into code, cut its skill down to the remaining judgment, invocation, failure handling, and limits.
-A skill never repeats a version or budget that a gate pins, and the skill check refuses one that does.
+A skill never repeats a version or exploration bound that a gate pins, and the skill check refuses one that does.
 
-These machines report a repository's verification gaps when a session starts, and refuse new ones at commit, push, the end of a turn, and `pr-workflow ready`.
-Each refusal names its next action, and the repository's `assure.toml` names the owner of each shape.
+Keep owner-side tooling within the boundary in `formal-assurance`.

@@ -5,11 +5,12 @@
 Isolate the pure decision core, quantify valid and invalid inputs, and assert the actual invariant and failure behavior.
 Make assumptions, loop bounds, abstractions, and stubs explicit, and keep the admitted input space nonempty.
 Require successful unwinding assertions or another justified completeness argument.
+Set each harness's unwinding and input bounds explicitly.
 Require every expected harness to run and every asserted contract to stay reachable.
 Use cover properties to detect contradictory assumptions and unreachable assertions.
 Turn counterexamples into deterministic regressions.
 Check the installed toolchain and features in [Kani's documentation](https://model-checking.github.io/kani/).
-Kani lacks a native Windows build, so run the same pinned gate on a Linux host, such as a pinned container over a read-only view of the checkout.
+Kani lacks a native Windows build, so run the same pinned gate in the project's pinned Linux container or documented hosted Linux runner.
 
 ## Lean 4
 

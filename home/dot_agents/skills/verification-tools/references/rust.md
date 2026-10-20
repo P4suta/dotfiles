@@ -15,8 +15,9 @@ When memory or race behavior crosses an interpreter's supported boundary, use [s
 Check the exact sanitizer, target, dependencies, linking, and instrumentation coverage before claiming a result.
 For synchronization algorithms, use a concurrency model checker such as [Loom](https://docs.rs/loom/latest/loom/) with faithful primitives and explicit exploration bounds.
 
-Check locked dependencies for current vulnerability advisories through maintained [RustSec tooling](https://github.com/rustsec/rustsec).
+Check locked dependencies with maintained [RustSec tooling](https://github.com/rustsec/rustsec) and an immutable advisory snapshot.
+Record its revision or digest so every contributor checks the same input.
 Enforce dependency source, license, and version policy when the project's distribution or threat boundary requires it.
-Treat advisory freshness and offline operation as distinct evidence, and never report cached data as a current audit.
+Treat current advisory freshness as a separate observation, and never report a cached snapshot as a current audit.
 For input-heavy APIs, maintain bounded property or fuzz checks with preserved seeds and minimized regressions.
 Use `mutation-testing` to establish that important assertions detect representative broken behavior.

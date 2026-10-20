@@ -1,7 +1,7 @@
 {
-  "revision": "370ac7dd1986a3ed6af6716d315878a3737c915b5e6f47f802767946c92cc7fe",
+  "revision": "a8a4e76f4af87f428f83065e3f8a8f2271889bdb94390ae8d72925eeb0929e63",
   "outcome": "implemented",
-  "reason": "The revision asks for review replies in the owner's voice, as the pull-request skill describes.",
+  "reason": "Separate owner-side service review from project verification and leave executor and allowance policy in machine-local configuration.",
   "evidence": [
     "home/dot_agents/skills/coderabbit-review/SKILL.md",
     "home/dot_agents/skills/pull-request/references/importance.md",

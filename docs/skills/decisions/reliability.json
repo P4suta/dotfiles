@@ -1,10 +1,12 @@
 {
-  "revision": "10f600a4f960294ad191986635e6266889ee2418fdafb28f61f3edb2c3ded396",
+  "revision": "b67d26b2b5efde5f2dbef26a568422b145001d31e5ca265cbb51520577bd8598",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Use pinned verification inputs, project runners, and deterministic adapters while keeping timeouts and unavailable live observations inconclusive.",
   "evidence": [
     "home/dot_agents/skills/reliability/SKILL.md",
-    "home/dot_agents/skills/reliability/references/time-and-randomness.md"
+    "home/dot_agents/skills/reliability/references/time-and-randomness.md",
+    "home/dot_agents/skills/reliability/references/boundaries-and-environment.md",
+    "home/dot_agents/skills/reliability/references/tests-and-diagnostics.md"
   ],
   "revisit": null
 }

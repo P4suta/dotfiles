@@ -1,7 +1,7 @@
 {
-  "revision": "c3676fd1b7c0acea63bca3c2d848e46bba26cabe892f4d4cd18f998e18185110",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "f0bbe51a30941efde86efa65309bbf7596d390673388c11715884a8cd0ba4bbc",
+  "outcome": "implemented",
+  "reason": "Separate resource allocation and permission from reproducible verdicts, and use project runners with owner hosts serving only as optional caches.",
   "evidence": [
     "home/dot_agents/skills/resource-coordination/SKILL.md"
   ],

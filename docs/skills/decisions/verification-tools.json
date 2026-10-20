@@ -1,12 +1,13 @@
 {
-  "revision": "77b115b5dc5a99fbfc59282363e645fb87042a53055aeaaf980c7eb50b15656b",
+  "revision": "ab2213c17ac533525634545e2794f161f17ea813c05f495c06a574833746862d",
   "outcome": "implemented",
-  "reason": "The revision lets ci-budget decide which required checks hosted CI runs, so heavy verification stays on local hosts.",
+  "reason": "Adopt reproducible project checks with pinned tools and advisory inputs, and use documented platform runners instead of required owner machines.",
   "evidence": [
     "crates/platform/src/code_environment.rs",
     "crates/dotfiles/tests/hosts.rs",
     "mise.toml",
     "home/dot_agents/skills/verification-tools/SKILL.md",
+    "home/dot_agents/skills/verification-tools/references/rust.md",
     "docs/adr/verification-proportional-to-code-shape.md",
     "docs/adr/0003-local-skill-operations.md",
     "crates/rules/src/skill_rules.rs",
