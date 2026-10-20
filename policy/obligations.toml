@@ -534,6 +534,37 @@ fn reject_admitting_a_push_from_a_throwaway_repository() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/cfg_rules.rs"
+probes = '''
+use production::{Step, in_production, in_proof};
+#[kani::proof]
+fn reject_dropping_a_windows_caller_from_production() {
+    assert!(!in_production(&[Step::Unknown, Step::Test, Step::Any(2)]));
+}
+#[kani::proof]
+fn reject_dropping_not_test_from_production() {
+    assert!(!in_production(&[Step::Test, Step::Not]));
+}
+#[kani::proof]
+fn reject_scanning_test_only_code() {
+    assert!(in_production(&[Step::Test]));
+}
+#[kani::proof]
+fn reject_proof_evidence_from_a_test_only_helper() {
+    assert!(in_proof(&[Step::Test, Step::Kani, Step::Not, Step::All(2)]));
+}
+#[kani::proof]
+fn reject_proof_evidence_behind_an_unknown_option() {
+    assert!(in_proof(&[Step::Kani, Step::Unknown, Step::All(2)]));
+}
+#[kani::proof]
+fn reject_proof_evidence_from_unreadable_syntax() {
+    assert!(in_proof(&[Step::Kani, Step::All(2)]));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/eol_rules.rs"
 probes = '''
 use production::{Action, Attributes, Eol, Index, Staging, Text, action, content};
