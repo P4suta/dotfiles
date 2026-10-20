@@ -7,9 +7,6 @@ format = 1
 [findings."home/.chezmoiexternal.toml"]
 syntax = 1
 
-[findings."home/.chezmoitemplates/native/starship/wsl.toml"]
-format = 1
-
 [findings."home/dot_codex/modify_config.toml"]
 syntax = 1
 

@@ -42,8 +42,8 @@ A target missing from the first table reaches every profile.
 | `.config/kitty` | linux | linux |
 | `.config/kitty/kitty.conf` | linux | linux |
 | `.config/kitty/tokyo-night.conf` | linux | linux |
-| `.config/lazygit` | mac | mac |
-| `.config/lazygit/config.yml` | mac | mac |
+| `.config/lazygit` | unix | mac, linux, wsl |
+| `.config/lazygit/config.yml` | unix | mac, linux, wsl |
 | `.config/mise/tasks` | unix | mac, linux, wsl |
 | `.config/mise/tasks/git-audit` | unix | mac, linux, wsl |
 | `.config/nushell` | desktop | mac, linux |
@@ -98,6 +98,7 @@ A target missing from the first table reaches every profile.
 | `.zprofile` | mac | mac |
 | `.zshrc` | mac | mac |
 | `AppData` | windows | windows |
+| `AppData/Local/lazygit/config.yml` | windows | windows |
 | `AppData/Roaming/herdr/config.toml` | windows | windows |
 | `Documents` | windows | windows |
 | `Documents/PowerShell/Microsoft.PowerShell_profile.ps1` | windows | windows |
