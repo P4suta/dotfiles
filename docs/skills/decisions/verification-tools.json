@@ -1,7 +1,7 @@
 {
-  "revision": "5f030e94ef26515afcf3b0897f9362cb80c9757f0f82721b63b02322ca39b188",
+  "revision": "77b115b5dc5a99fbfc59282363e645fb87042a53055aeaaf980c7eb50b15656b",
   "outcome": "implemented",
-  "reason": "Align the Docker CLI declaration with the project pin 29.9.1.\nThe installed CLI reports Docker version 29.9.1, and the existing container isolation, proof, target, and coverage requirements remain unchanged.\nThis metadata update does not run a container preflight.",
+  "reason": "The revision lets ci-budget decide which required checks hosted CI runs, so heavy verification stays on local hosts.",
   "evidence": [
     "crates/platform/src/code_environment.rs",
     "crates/dotfiles/tests/hosts.rs",

@@ -1,12 +1,13 @@
 ---
 name: ci-budget
 description: >-
-  Reduce avoidable GitHub Actions runs by verifying coherent changes locally and managing an explicit push pause.
-  Use before authorized pushes or PR updates, when Actions allowance runs low, or when mapping CI checks to the owner's native machines.
+  Keep hosted CI lean: design workflows that run a fast deterministic gate and leave heavy verification to local hosts, and verify coherent changes locally before an explicit push.
+  Use when adding or changing GitHub Actions workflows, schedules, fuzzing, mutation, proofs, or OS matrices, before authorized pushes or PR updates, and when Actions allowance runs low.
 ---
 
-# Local verification before pushing
+# Lean CI and local verification before pushing
 
+Design hosted workflows from [lean workflows](references/lean-workflows.md): a fast deterministic gate on every change, no schedules, and heavy verification on local or native hosts.
 Required hosted checks and the current-head PR review stay the final gates.
 An active owner-imposed push pause overrides any push authorization until the owner explicitly resumes pushes.
 
