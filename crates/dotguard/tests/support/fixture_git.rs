@@ -47,10 +47,12 @@ pub fn inheriting(
             .into_iter()
             .filter(|(name, _)| !name.to_string_lossy().starts_with("GIT_")),
     );
+    // Fixture repositories live under the temporary directory, which the guard otherwise treats as throwaway.
     command
         .env(fixture_process::INCIDENT_STATE, incident_state)
         .env("GIT_CONFIG_GLOBAL", global)
         .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("XDG_CONFIG_HOME", global.with_extension("config-home"));
+        .env("XDG_CONFIG_HOME", global.with_extension("config-home"))
+        .env("DOTGUARD_STRICT_TEMPORARY", "1");
     command
 }

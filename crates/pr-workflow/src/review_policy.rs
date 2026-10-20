@@ -1138,7 +1138,7 @@ struct Branch {
     commit: CommitObject,
 }
 
-fn path_segment(value: &str) -> Result<String> {
+pub(super) fn path_segment(value: &str) -> Result<String> {
     let mut encoded = String::new();
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
