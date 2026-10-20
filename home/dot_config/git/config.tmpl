@@ -1,4 +1,4 @@
-{{- /* One Git policy on every host: profiles differ only in the executables they declare and the macOS file monitor. */ -}}
+{{- /* One Git policy on every host: profiles differ only in the executables they declare and the file system watcher that Git ships for macOS and Windows. */ -}}
 {{- $palette := .palette -}}
 [user]
 	name = {{ .git.name | quote }}
@@ -19,10 +19,11 @@
 	# The hooks run each repository's own lefthook configuration, so no repository installs lefthook hooks, which would replace these.
 	# The signing hooks turn themselves off while commit.gpgsign stays off.
 	hooksPath = ~/.config/git/hooks
-{{- if eq .profile "mac" }}
-	# The built-in FSEvents watcher turns `git status` in a large worktree from a full scan into a daemon query.
-	fsmonitor = true
+	# The untracked cache lets `git status` skip directories whose contents haven't changed.
 	untrackedCache = true
+{{- if has .profile (list "mac" "windows") }}
+	# Git ships a file system watcher only for macOS and Windows, and it turns `git status` in a large worktree from a full scan into a daemon query.
+	fsmonitor = true
 {{- end }}
 
 [interactive]

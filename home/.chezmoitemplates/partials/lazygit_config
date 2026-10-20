@@ -1,0 +1,21 @@
+# Every host renders this body where its lazygit looks: ~/.config/lazygit on the Mac, Linux, and WSL, through a support-folder link on the Mac, and %LOCALAPPDATA%\lazygit on Windows.
+gui:
+  nerdFontsVersion: "3"
+  showDivergenceFromBaseBranch: arrowAndNumber
+  theme:
+    activeBorderColor: ["{{ .palette.blue }}", bold]
+    inactiveBorderColor: ["{{ .palette.surface }}"]
+    searchingActiveBorderColor: ["{{ .palette.yellow }}", bold]
+    optionsTextColor: ["{{ .palette.blue }}"]
+    selectedLineBgColor: ["{{ .palette.bg_highlight }}"]
+    cherryPickedCommitFgColor: ["{{ .palette.bg }}"]
+    cherryPickedCommitBgColor: ["{{ .palette.magenta }}"]
+    markedBaseCommitFgColor: ["{{ .palette.bg }}"]
+    markedBaseCommitBgColor: ["{{ .palette.yellow }}"]
+    unstagedChangesColor: ["{{ .palette.red }}"]
+    defaultFgColor: ["{{ .palette.fg }}"]
+
+git:
+  paging:
+    colorArg: always
+    pager: delta --dark --paging=never
