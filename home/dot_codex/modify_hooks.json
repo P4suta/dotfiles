@@ -2,6 +2,7 @@
 {{- /*
   Codex reads its hooks from this file, so each profile sets the verification hooks and keeps unrelated handlers.
   A session starts with the verification report, which lists the repository's code shapes that nothing verifies with their next actions.
+  On Windows it first runs the process-start probe, as the Claude Code session does.
   The stop hook refuses to end a turn while a file it changed holds such a shape.
   The pre-tool hook blocks a malformed or file-writing shell command before Codex runs it, through the decision core every managed client shares.
 */ -}}
@@ -20,10 +21,13 @@
 {{- $issue := dict "matcher" "apply_patch|Edit|Write|MultiEdit|edit|write" "hooks" (list $edit) -}}
 {{- $_ := set $hooks "PreToolUse" (concat (dig "PreToolUse" (list) $hooks) (list $issue)) -}}
 {{- range $event, $point := dict "SessionStart" "start" "Stop" "stop" -}}
-{{-   $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list (printf " assure %s" $point))) | fromJson -}}
-{{-   $hook := includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" (printf "assure %s" $point) "trace" true) | fromJson -}}
-{{-   $own := dict "hooks" (list $hook) -}}
-{{-   $_ := set $hooks $event (concat $groups (list $own)) -}}
+{{-   $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list " health --session" (printf " assure %s" $point))) | fromJson -}}
+{{-   $own := list -}}
+{{-   if and (eq $event "SessionStart") (eq $.profile "windows") -}}
+{{-     $own = append $own (includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" "health --session" "trace" true) | fromJson) -}}
+{{-   end -}}
+{{-   $own = append $own (includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" (printf "assure %s" $point) "trace" true) | fromJson) -}}
+{{-   $_ := set $hooks $event (concat $groups (list (dict "hooks" $own))) -}}
 {{- end -}}
 {{- if eq (includeTemplate "partials/skill_ops_experimental" .) "true" -}}
 {{- $observe := dict "type" "command" "command" "skill-ops observe --client codex" "timeout" 10 -}}

@@ -1,5 +1,5 @@
 {{- /*
-  Global Claude Code permissions in ~/.claude/settings.json.
+  Global Claude Code settings in ~/.claude/settings.json, the same on every profile.
 
   Delegated development needs a small, targeted deny list.
   Ordinary operations pass.
@@ -8,24 +8,18 @@
   Deny categories, for searching the entries:
   - Destructive filesystem: rm -rf and its variants, find -delete, xargs rm, rmdir
   - Privilege escalation: sudo
-  - Git history rewrites: force push, hard reset, rebase -i, filter-branch, update-ref -d, clean -fd
-  - Git signing bypass: --no-verify, --no-gpg-sign, `-c commit.gpgsign=false`, `-c core.hooksPath=`, `git config commit.gpgsign false`, and similar
   - Network code execution: curl|sh, wget|sh
   - Permission tampering: chmod 777
   - Package installation: brew install, which keeps a human in the loop
   - Secret file reads and writes: .env, id_*, *.key, *.pem, .aws/credentials, .netrc, .npmrc, .kube/config, .docker/config.json, and similar
   - Files the dotfiles manage: direct Write or Edit of .gitconfig, .bashrc, .profile, and .claude/settings.json itself
 
-  Left out of the deny list on purpose:
-  - `Bash(git commit:*)` would block every commit in delegated development.
-    Only the signing bypass flags fail, and the post-commit hook signs every commit.
-  - `Bash(git config *)` covers too much.
-    Only the signing keys fail.
-  - `Bash(git reset:*)` would block the useful soft and mixed resets.
-    Only `--hard` fails.
+  Git commands stay out of the deny list.
+  The Git guard runs on every host, refuses history rewrites and signing or hook bypasses with the sanctioned next step, and admits the tool-owned operations a prefix rule can't tell apart.
 
   dot_claude/modify_settings.json sets these keys over the file Claude Code last wrote, and an array here, such as permissions.deny, replaces the array the client wrote.
   A runtime change to a key set here, such as `/advisor` changing advisorModel, reverts on the next apply, and every other key the client wrote stays.
+  The client keeps permissions.allow and permissions.defaultMode, which the owner sets at a prompt.
   Edit this template and apply to change one of these keys.
 
   Deny entry syntax:
@@ -34,7 +28,6 @@
   */ -}}
 {
   "permissions": {
-    "allow": [],
     "deny": [
       "Bash(rm -rf:*)",
       "Bash(rm -r:*)",
@@ -50,32 +43,6 @@
       "Bash(find * -exec rm:*)",
       "Bash(xargs rm:*)",
       "Bash(sudo:*)",
-      "Bash(git push --force:*)",
-      "Bash(git push -f:*)",
-      "Bash(git push --force-with-lease:*)",
-      "Bash(git reset --hard:*)",
-      "Bash(git rebase -i:*)",
-      "Bash(git rebase --interactive:*)",
-      "Bash(git filter-branch:*)",
-      "Bash(git filter-repo:*)",
-      "Bash(git update-ref -d:*)",
-      "Bash(git clean -fd:*)",
-      "Bash(git clean -fdx:*)",
-      "Bash(git checkout --:*)",
-      "Bash(git commit --no-verify:*)",
-      "Bash(git commit -n:*)",
-      "Bash(git commit --no-gpg-sign:*)",
-      "Bash(git -c commit.gpgsign=false:*)",
-      "Bash(git -c gpg.format=:*)",
-      "Bash(git -c core.hooksPath=:*)",
-      "Bash(git -c gpg.ssh.program=:*)",
-      "Bash(git push --no-verify:*)",
-      "Bash(git config commit.gpgsign false:*)",
-      "Bash(git config --global commit.gpgsign false:*)",
-      "Bash(git config --unset commit.gpgsign:*)",
-      "Bash(git config --unset gpg.format:*)",
-      "Bash(git config --unset gpg.ssh.allowedSignersFile:*)",
-      "Bash(git config core.hooksPath:*)",
       "Bash(curl * | sh:*)",
       "Bash(curl * | bash:*)",
       "Bash(curl * |sh:*)",

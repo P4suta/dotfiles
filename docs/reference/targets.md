@@ -44,25 +44,12 @@ A target missing from the first table reaches every profile.
 | `.config/kitty/tokyo-night.conf` | linux | linux |
 | `.config/lazygit` | mac | mac |
 | `.config/lazygit/config.yml` | mac | mac |
-| `.config/lefthook` | mac | mac |
-| `.config/lefthook/global.yml` | mac | mac |
 | `.config/mise/tasks` | unix | mac, linux, wsl |
 | `.config/mise/tasks/git-audit` | unix | mac, linux, wsl |
 | `.config/nushell` | desktop | mac, linux |
 | `.config/nushell/config.nu` | desktop | mac, linux |
 | `.config/nushell/env.nu` | desktop | mac, linux |
 | `.config/nushell/login.nu` | mac | mac |
-| `.config/ocomment` | native | mac, linux, windows |
-| `.config/ocomment/config.toml` | native | mac, linux, windows |
-| `.config/opencode/agents` | mac | mac |
-| `.config/opencode/agents/reviewer.md` | mac | mac |
-| `.config/opencode/commands` | mac | mac |
-| `.config/opencode/commands/commit.md` | mac | mac |
-| `.config/opencode/commands/pr.md` | mac | mac |
-| `.config/opencode/commands/review.md` | mac | mac |
-| `.config/opencode/themes` | mac | mac |
-| `.config/opencode/themes/tokyonight.json` | mac | mac |
-| `.config/opencode/tui.json` | mac | mac |
 | `.config/session-reaper` | desktop | mac, linux |
 | `.config/session-reaper/config` | desktop | mac, linux |
 | `.config/shell` | desktop | mac, linux |
@@ -89,7 +76,7 @@ A target missing from the first table reaches every profile.
 | `.config/wezterm/wezterm.lua` | windows | windows |
 | `.config/xdg-terminals.list` | linux | linux |
 | `.local/bin/dev-reaper` | linux | linux |
-| `.local/bin/dotfiles-doctor` | linux | linux |
+| `.local/bin/dotfiles-doctor` | unix | mac, linux, wsl |
 | `.local/bin/dotfiles-doctor.ps1` | windows | windows |
 | `.local/bin/dotfiles-refresh-desktop` | desktop | mac, linux |
 | `.local/bin/dotfiles-refresh-integrations` | desktop | mac, linux |
@@ -140,7 +127,6 @@ A target missing from the first table reaches every profile.
 | `.chezmoiscripts/unix/12-haskell.sh` | mac | mac |
 | `.chezmoiscripts/unix/13-racket.sh` | mac | mac |
 | `.chezmoiscripts/unix/14-guard.sh` | mac | mac |
-| `.chezmoiscripts/unix/15-ocomment.sh` | linux | linux |
 | `.chezmoiscripts/unix/17-fleet.sh` | mac | mac |
 | `.chezmoiscripts/unix/18-retire-tmux.sh` | linux | linux |
 
@@ -172,7 +158,6 @@ Each profile in the set removes the target when it applies.
 | `.config/systemd/user/mise-upgrade.timer` | linux | linux |
 | `.gitconfig` | unix | mac, linux, wsl |
 | `.local/bin/dotctl.exe` | windows | windows |
-| `.local/bin/dotfiles-doctor` | mac | mac |
 | `.local/bin/dotfiles-wm-defaults` | mac | mac |
 | `.local/bin/dotfiles-xtask` | unix | mac, linux, wsl |
 | `.local/bin/dotfiles-xtask.exe` | windows | windows |

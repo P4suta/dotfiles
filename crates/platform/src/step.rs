@@ -193,6 +193,7 @@ impl Step {
             | Self::Tools
             | Self::Integrations
             | Self::Domyjob
+            | Self::Ocomment
             | Self::Chat
             | Self::Adapters => EVERY,
             Self::Scoop
@@ -212,7 +213,6 @@ impl Step {
             | Self::Racket
             | Self::Guard
             | Self::Fleet => MAC,
-            Self::Ocomment => &[Profile::Linux, Profile::Windows],
             Self::Upgrade => &[],
         }
     }
@@ -359,9 +359,8 @@ impl Step {
     #[must_use]
     pub fn requires(self, profile: Profile) -> &'static [Tool] {
         match (self, profile) {
-            (Self::Domyjob | Self::Fleet, _) | (Self::Ocomment, Profile::Linux) => {
-                &[Tool::Lefthook]
-            }
+            (Self::Domyjob | Self::Fleet, _)
+            | (Self::Ocomment, Profile::Mac | Profile::Linux | Profile::Wsl) => &[Tool::Lefthook],
             (Self::Integrations, Profile::Windows) => &[Tool::Starship, Tool::Zoxide],
             (Self::Chat, _) => &[Tool::Domyjob],
             _ => &[],

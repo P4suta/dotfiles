@@ -2900,7 +2900,7 @@ sha256 = "6d4a6e3c7adedffce8079ccaef0a4bab5f5718b054421b4475c788a0ae4bedfe"
 targets = [".claude/settings.json"]
 # Claude Code ignores an unknown setting, and the schema leaves its top level open, so the gate refuses an undeclared top-level key itself.
 close_root = true
-# Claude Code writes skipAutoPermissionPrompt when the owner accepts the auto mode prompt, and the WSL settings carry it, but SchemaStore doesn't declare it yet.
+# Claude Code writes skipAutoPermissionPrompt when the owner accepts the auto mode prompt, and every profile's settings carry it, but SchemaStore doesn't declare it yet.
 undeclared = ["skipAutoPermissionPrompt"]
 extensions = ["claude-command-failure-policy"]
 

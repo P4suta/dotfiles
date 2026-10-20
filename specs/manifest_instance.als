@@ -25,217 +25,203 @@ abstract sig Hook {}
 // P13 is .chezmoiscripts/unix/12-haskell.sh
 // P14 is .chezmoiscripts/unix/13-racket.sh
 // P15 is .chezmoiscripts/unix/14-guard.sh
-// P16 is .chezmoiscripts/unix/15-ocomment.sh
-// P17 is .chezmoiscripts/unix/17-fleet.sh
-// P18 is .chezmoiscripts/unix/18-retire-tmux.sh
-// P19 is .claude
-// P20 is .claude/bashenv.sh
-// P21 is .claude/shims
-// P22 is .claude/shims/.keep
-// P23 is .claude/skills
-// P24 is .claude/skills/orbstack
-// P25 is .config
-// P26 is .config/aerospace
-// P27 is .config/atuin
-// P28 is .config/atuin/config.toml
-// P29 is .config/bat
-// P30 is .config/bat/config
-// P31 is .config/borders
-// P32 is .config/dev-reaper
-// P33 is .config/dev-reaper/config
-// P34 is .config/dotfiles
-// P35 is .config/dotfiles-nix
-// P36 is .config/dotfiles/notifications
-// P37 is .config/fcitx5
-// P38 is .config/fcitx5/config
-// P39 is .config/fcitx5/profile
-// P40 is .config/fzf
-// P41 is .config/fzf/fzfrc
-// P42 is .config/gh
-// P43 is .config/gh/config.yml
-// P44 is .config/ghostty
-// P45 is .config/ghostty/config
-// P46 is .config/git
-// P47 is .config/git/hooks
-// P48 is .config/git/hooks/commit-msg
-// P49 is .config/git/hooks/dotguard-delegate.sh
-// P50 is .config/git/hooks/lefthook-delegate.sh
-// P51 is .config/git/hooks/post-checkout
-// P52 is .config/git/hooks/post-commit
-// P53 is .config/git/hooks/post-merge
-// P54 is .config/git/hooks/pre-commit
-// P55 is .config/git/hooks/pre-push
-// P56 is .config/git/hooks/reference-transaction
-// P57 is .config/git/hooks/renovate-freshness.sh
-// P58 is .config/git/hooks/storage-scout-delegate.sh
-// P59 is .config/git/hooks/strip-agent-trailers.sh
-// P60 is .config/git/template
-// P61 is .config/herdr
-// P62 is .config/herdr-agent
-// P63 is .config/herdr-agent/keys
-// P64 is .config/herdr/config.toml
-// P65 is .config/homebrew
-// P66 is .config/homebrew/Brewfile
-// P67 is .config/jj
-// P68 is .config/jj/config.toml
-// P69 is .config/kitty
-// P70 is .config/kitty/kitty.conf
-// P71 is .config/kitty/tokyo-night.conf
-// P72 is .config/lazygit
-// P73 is .config/lazygit/config.yml
-// P74 is .config/lefthook
-// P75 is .config/lefthook/global.yml
-// P76 is .config/mise
-// P77 is .config/mise/tasks
-// P78 is .config/mise/tasks/git-audit
-// P79 is .config/nushell
-// P80 is .config/nushell/autoload
-// P81 is .config/nushell/autoload/atuin.nu
-// P82 is .config/nushell/autoload/carapace.nu
-// P83 is .config/nushell/autoload/starship.nu
-// P84 is .config/nushell/autoload/zoxide.nu
-// P85 is .config/nushell/config.nu
-// P86 is .config/nushell/env.nu
-// P87 is .config/nushell/login.nu
-// P88 is .config/nushell/mise.nu
-// P89 is .config/ocomment
-// P90 is .config/ocomment/config.toml
-// P91 is .config/opencode
-// P92 is .config/opencode/agents
-// P93 is .config/opencode/agents/reviewer.md
-// P94 is .config/opencode/commands
-// P95 is .config/opencode/commands/commit.md
-// P96 is .config/opencode/commands/pr.md
-// P97 is .config/opencode/commands/review.md
-// P98 is .config/opencode/plugins
-// P99 is .config/opencode/plugins/prose.ts
-// P100 is .config/opencode/themes
-// P101 is .config/opencode/themes/tokyonight.json
-// P102 is .config/opencode/tui.json
-// P103 is .config/session-reaper
-// P104 is .config/session-reaper/config
-// P105 is .config/shell
-// P106 is .config/shell/github-token.sh
-// P107 is .config/shell/ssh-agent.sh
-// P108 is .config/sketchybar
-// P109 is .config/storage-scout
-// P110 is .config/storage-scout/auto.toml
-// P111 is .config/systemd
-// P112 is .config/systemd/user
-// P113 is .config/systemd/user/dev-cleanup.service
-// P114 is .config/systemd/user/dev-cleanup.timer
-// P115 is .config/systemd/user/dev-reaper.service
-// P116 is .config/systemd/user/dev-reaper.timer
-// P117 is .config/systemd/user/docker-prune.service
-// P118 is .config/systemd/user/docker-prune.timer
-// P119 is .config/systemd/user/dotfiles-desktop-refresh.service
-// P120 is .config/systemd/user/dotfiles-desktop-refresh.timer
-// P121 is .config/systemd/user/mise-upgrade.service
-// P122 is .config/systemd/user/mise-upgrade.timer
-// P123 is .config/systemd/user/session-reaper.service
-// P124 is .config/systemd/user/session-reaper.timer
-// P125 is .config/systemd/user/storage-scout.service
-// P126 is .config/systemd/user/tools-upgrade.service
-// P127 is .config/systemd/user/tools-upgrade.timer
-// P128 is .config/wezterm
-// P129 is .config/wezterm/wezterm.lua
-// P130 is .config/xdg-terminals.list
-// P131 is .gitconfig
-// P132 is .local
-// P133 is .local/bin
-// P134 is .local/bin/dev-reaper
-// P135 is .local/bin/dotctl.exe
-// P136 is .local/bin/dotfiles-doctor
-// P137 is .local/bin/dotfiles-doctor.ps1
-// P138 is .local/bin/dotfiles-refresh-desktop
-// P139 is .local/bin/dotfiles-refresh-integrations
-// P140 is .local/bin/dotfiles-refresh-integrations.ps1
-// P141 is .local/bin/dotfiles-retire-tmux
-// P142 is .local/bin/dotfiles-touchid
-// P143 is .local/bin/dotfiles-wm-defaults
-// P144 is .local/bin/dotfiles-wsl-ssh-keygen
-// P145 is .local/bin/dotfiles-xtask
-// P146 is .local/bin/dotfiles-xtask.exe
-// P147 is .local/bin/ghostty-herdr
-// P148 is .local/bin/ghostty-nu
-// P149 is .local/bin/git
-// P150 is .local/bin/kitty-herdr
-// P151 is .local/bin/kitty-nu
-// P152 is .local/bin/renovate-local
-// P153 is .local/bin/session-reaper
-// P154 is .local/share
-// P155 is .local/share/applications
-// P156 is .local/share/applications/kitty-herdr.desktop
-// P157 is .local/share/applications/kitty-nu.desktop
-// P158 is .profile
-// P159 is .zprofile
-// P160 is .zshrc
-// P161 is AppData
-// P162 is AppData/Roaming
-// P163 is AppData/Roaming/alacritty
-// P164 is AppData/Roaming/alacritty/alacritty.toml
-// P165 is AppData/Roaming/herdr
-// P166 is AppData/Roaming/herdr/config.toml
-// P167 is Documents
-// P168 is Documents/PowerShell
-// P169 is Documents/PowerShell/Microsoft.PowerShell_profile.ps1
-// P170 is Documents/PowerShell/modules
-// P171 is Documents/PowerShell/modules/00-readline.ps1
-// P172 is Documents/PowerShell/modules/05-mise.ps1
-// P173 is Documents/PowerShell/modules/10-tools.ps1
-// P174 is Documents/PowerShell/modules/20-herdr.ps1
-// P175 is Documents/PowerShell/modules/99-prompt.ps1
-// P176 is Library
-// P177 is Library/Application Support
-// P178 is Library/Application Support/lazygit
-// P179 is Library/Application Support/nushell
-// P180 is Library/LaunchAgents
-// P181 is Library/LaunchAgents/dev.dotfiles.desktop-refresh.plist
-// P182 is Library/LaunchAgents/dev.dotfiles.dev-cleanup.plist
-// P183 is Library/LaunchAgents/dev.dotfiles.dev-reaper.plist
-// P184 is Library/LaunchAgents/dev.dotfiles.mise-upgrade.plist
-// P185 is Library/LaunchAgents/dev.dotfiles.session-reaper.plist
-// P186 is Library/LaunchAgents/dev.dotfiles.storage-scout.plist
-// P187 is Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
-one sig P0, P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14, P15, P16, P17, P18, P19, P20, P21, P22, P23, P24, P25, P26, P27, P28, P29, P30, P31, P32, P33, P34, P35, P36, P37, P38, P39, P40, P41, P42, P43, P44, P45, P46, P47, P48, P49, P50, P51, P52, P53, P54, P55, P56, P57, P58, P59, P60, P61, P62, P63, P64, P65, P66, P67, P68, P69, P70, P71, P72, P73, P74, P75, P76, P77, P78, P79, P80, P81, P82, P83, P84, P85, P86, P87, P88, P89, P90, P91, P92, P93, P94, P95, P96, P97, P98, P99, P100, P101, P102, P103, P104, P105, P106, P107, P108, P109, P110, P111, P112, P113, P114, P115, P116, P117, P118, P119, P120, P121, P122, P123, P124, P125, P126, P127, P128, P129, P130, P131, P132, P133, P134, P135, P136, P137, P138, P139, P140, P141, P142, P143, P144, P145, P146, P147, P148, P149, P150, P151, P152, P153, P154, P155, P156, P157, P158, P159, P160, P161, P162, P163, P164, P165, P166, P167, P168, P169, P170, P171, P172, P173, P174, P175, P176, P177, P178, P179, P180, P181, P182, P183, P184, P185, P186, P187 extends Path {}
-one sig T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29, T30, T31, T32, T33, T34, T35, T36, T37, T38, T39, T40, T41, T42, T43, T44, T45, T46, T47, T48, T49, T50, T51, T52, T53, T54, T55, T56, T57, T58, T59, T60, T61, T62, T63, T64, T65, T66, T67, T68, T69, T70, T71, T72, T73, T74, T75, T76, T77, T78, T79, T80, T81, T82, T83, T84, T85, T86, T87, T88, T89, T90, T91, T92, T93, T94, T95, T96, T97, T98, T99, T100, T101, T102, T103, T104, T105, T106, T107, T108, T109, T110, T111, T112, T113, T114, T115, T116, T117, T118, T119, T120, T121, T122, T123, T124, T125, T126, T127, T128, T129, T130, T131, T132, T133, T134 extends Target {}
-one sig R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17, R18, R19, R20, R21, R22, R23, R24, R25, R26, R27, R28, R29, R30, R31, R32, R33 extends Retired {}
+// P16 is .chezmoiscripts/unix/17-fleet.sh
+// P17 is .chezmoiscripts/unix/18-retire-tmux.sh
+// P18 is .claude
+// P19 is .claude/bashenv.sh
+// P20 is .claude/shims
+// P21 is .claude/shims/.keep
+// P22 is .claude/skills
+// P23 is .claude/skills/orbstack
+// P24 is .config
+// P25 is .config/aerospace
+// P26 is .config/atuin
+// P27 is .config/atuin/config.toml
+// P28 is .config/bat
+// P29 is .config/bat/config
+// P30 is .config/borders
+// P31 is .config/dev-reaper
+// P32 is .config/dev-reaper/config
+// P33 is .config/dotfiles
+// P34 is .config/dotfiles-nix
+// P35 is .config/dotfiles/notifications
+// P36 is .config/fcitx5
+// P37 is .config/fcitx5/config
+// P38 is .config/fcitx5/profile
+// P39 is .config/fzf
+// P40 is .config/fzf/fzfrc
+// P41 is .config/gh
+// P42 is .config/gh/config.yml
+// P43 is .config/ghostty
+// P44 is .config/ghostty/config
+// P45 is .config/git
+// P46 is .config/git/hooks
+// P47 is .config/git/hooks/commit-msg
+// P48 is .config/git/hooks/dotguard-delegate.sh
+// P49 is .config/git/hooks/lefthook-delegate.sh
+// P50 is .config/git/hooks/post-checkout
+// P51 is .config/git/hooks/post-commit
+// P52 is .config/git/hooks/post-merge
+// P53 is .config/git/hooks/pre-commit
+// P54 is .config/git/hooks/pre-push
+// P55 is .config/git/hooks/reference-transaction
+// P56 is .config/git/hooks/renovate-freshness.sh
+// P57 is .config/git/hooks/storage-scout-delegate.sh
+// P58 is .config/git/hooks/strip-agent-trailers.sh
+// P59 is .config/git/template
+// P60 is .config/herdr
+// P61 is .config/herdr-agent
+// P62 is .config/herdr-agent/keys
+// P63 is .config/herdr/config.toml
+// P64 is .config/homebrew
+// P65 is .config/homebrew/Brewfile
+// P66 is .config/jj
+// P67 is .config/jj/config.toml
+// P68 is .config/kitty
+// P69 is .config/kitty/kitty.conf
+// P70 is .config/kitty/tokyo-night.conf
+// P71 is .config/lazygit
+// P72 is .config/lazygit/config.yml
+// P73 is .config/mise
+// P74 is .config/mise/tasks
+// P75 is .config/mise/tasks/git-audit
+// P76 is .config/nushell
+// P77 is .config/nushell/autoload
+// P78 is .config/nushell/autoload/atuin.nu
+// P79 is .config/nushell/autoload/carapace.nu
+// P80 is .config/nushell/autoload/starship.nu
+// P81 is .config/nushell/autoload/zoxide.nu
+// P82 is .config/nushell/config.nu
+// P83 is .config/nushell/env.nu
+// P84 is .config/nushell/login.nu
+// P85 is .config/nushell/mise.nu
+// P86 is .config/opencode
+// P87 is .config/opencode/plugins
+// P88 is .config/opencode/plugins/prose.ts
+// P89 is .config/session-reaper
+// P90 is .config/session-reaper/config
+// P91 is .config/shell
+// P92 is .config/shell/github-token.sh
+// P93 is .config/shell/ssh-agent.sh
+// P94 is .config/sketchybar
+// P95 is .config/storage-scout
+// P96 is .config/storage-scout/auto.toml
+// P97 is .config/systemd
+// P98 is .config/systemd/user
+// P99 is .config/systemd/user/dev-cleanup.service
+// P100 is .config/systemd/user/dev-cleanup.timer
+// P101 is .config/systemd/user/dev-reaper.service
+// P102 is .config/systemd/user/dev-reaper.timer
+// P103 is .config/systemd/user/docker-prune.service
+// P104 is .config/systemd/user/docker-prune.timer
+// P105 is .config/systemd/user/dotfiles-desktop-refresh.service
+// P106 is .config/systemd/user/dotfiles-desktop-refresh.timer
+// P107 is .config/systemd/user/mise-upgrade.service
+// P108 is .config/systemd/user/mise-upgrade.timer
+// P109 is .config/systemd/user/session-reaper.service
+// P110 is .config/systemd/user/session-reaper.timer
+// P111 is .config/systemd/user/storage-scout.service
+// P112 is .config/systemd/user/tools-upgrade.service
+// P113 is .config/systemd/user/tools-upgrade.timer
+// P114 is .config/wezterm
+// P115 is .config/wezterm/wezterm.lua
+// P116 is .config/xdg-terminals.list
+// P117 is .gitconfig
+// P118 is .local
+// P119 is .local/bin
+// P120 is .local/bin/dev-reaper
+// P121 is .local/bin/dotctl.exe
+// P122 is .local/bin/dotfiles-doctor
+// P123 is .local/bin/dotfiles-doctor.ps1
+// P124 is .local/bin/dotfiles-refresh-desktop
+// P125 is .local/bin/dotfiles-refresh-integrations
+// P126 is .local/bin/dotfiles-refresh-integrations.ps1
+// P127 is .local/bin/dotfiles-retire-tmux
+// P128 is .local/bin/dotfiles-touchid
+// P129 is .local/bin/dotfiles-wm-defaults
+// P130 is .local/bin/dotfiles-wsl-ssh-keygen
+// P131 is .local/bin/dotfiles-xtask
+// P132 is .local/bin/dotfiles-xtask.exe
+// P133 is .local/bin/ghostty-herdr
+// P134 is .local/bin/ghostty-nu
+// P135 is .local/bin/git
+// P136 is .local/bin/kitty-herdr
+// P137 is .local/bin/kitty-nu
+// P138 is .local/bin/renovate-local
+// P139 is .local/bin/session-reaper
+// P140 is .local/share
+// P141 is .local/share/applications
+// P142 is .local/share/applications/kitty-herdr.desktop
+// P143 is .local/share/applications/kitty-nu.desktop
+// P144 is .profile
+// P145 is .zprofile
+// P146 is .zshrc
+// P147 is AppData
+// P148 is AppData/Roaming
+// P149 is AppData/Roaming/alacritty
+// P150 is AppData/Roaming/alacritty/alacritty.toml
+// P151 is AppData/Roaming/herdr
+// P152 is AppData/Roaming/herdr/config.toml
+// P153 is Documents
+// P154 is Documents/PowerShell
+// P155 is Documents/PowerShell/Microsoft.PowerShell_profile.ps1
+// P156 is Documents/PowerShell/modules
+// P157 is Documents/PowerShell/modules/00-readline.ps1
+// P158 is Documents/PowerShell/modules/05-mise.ps1
+// P159 is Documents/PowerShell/modules/10-tools.ps1
+// P160 is Documents/PowerShell/modules/20-herdr.ps1
+// P161 is Documents/PowerShell/modules/99-prompt.ps1
+// P162 is Library
+// P163 is Library/Application Support
+// P164 is Library/Application Support/lazygit
+// P165 is Library/Application Support/nushell
+// P166 is Library/LaunchAgents
+// P167 is Library/LaunchAgents/dev.dotfiles.desktop-refresh.plist
+// P168 is Library/LaunchAgents/dev.dotfiles.dev-cleanup.plist
+// P169 is Library/LaunchAgents/dev.dotfiles.dev-reaper.plist
+// P170 is Library/LaunchAgents/dev.dotfiles.mise-upgrade.plist
+// P171 is Library/LaunchAgents/dev.dotfiles.session-reaper.plist
+// P172 is Library/LaunchAgents/dev.dotfiles.storage-scout.plist
+// P173 is Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist
+one sig P0, P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14, P15, P16, P17, P18, P19, P20, P21, P22, P23, P24, P25, P26, P27, P28, P29, P30, P31, P32, P33, P34, P35, P36, P37, P38, P39, P40, P41, P42, P43, P44, P45, P46, P47, P48, P49, P50, P51, P52, P53, P54, P55, P56, P57, P58, P59, P60, P61, P62, P63, P64, P65, P66, P67, P68, P69, P70, P71, P72, P73, P74, P75, P76, P77, P78, P79, P80, P81, P82, P83, P84, P85, P86, P87, P88, P89, P90, P91, P92, P93, P94, P95, P96, P97, P98, P99, P100, P101, P102, P103, P104, P105, P106, P107, P108, P109, P110, P111, P112, P113, P114, P115, P116, P117, P118, P119, P120, P121, P122, P123, P124, P125, P126, P127, P128, P129, P130, P131, P132, P133, P134, P135, P136, P137, P138, P139, P140, P141, P142, P143, P144, P145, P146, P147, P148, P149, P150, P151, P152, P153, P154, P155, P156, P157, P158, P159, P160, P161, P162, P163, P164, P165, P166, P167, P168, P169, P170, P171, P172, P173 extends Path {}
+one sig T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29, T30, T31, T32, T33, T34, T35, T36, T37, T38, T39, T40, T41, T42, T43, T44, T45, T46, T47, T48, T49, T50, T51, T52, T53, T54, T55, T56, T57, T58, T59, T60, T61, T62, T63, T64, T65, T66, T67, T68, T69, T70, T71, T72, T73, T74, T75, T76, T77, T78, T79, T80, T81, T82, T83, T84, T85, T86, T87, T88, T89, T90, T91, T92, T93, T94, T95, T96, T97, T98, T99, T100, T101, T102, T103, T104, T105, T106, T107, T108, T109, T110, T111, T112, T113, T114, T115, T116, T117, T118, T119, T120 extends Target {}
+one sig R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17, R18, R19, R20, R21, R22, R23, R24, R25, R26, R27, R28, R29, R30, R31, R32 extends Retired {}
 one sig H0, H1, H2, H3, H4, H5, H6 extends Hook {}
 
-fun parents: Path -> Path { P1 -> P0 + P2 -> P1 + P5 -> P4 + P6 -> P5 + P7 -> P5 + P8 -> P5 + P9 -> P5 + P10 -> P5 + P11 -> P5 + P12 -> P5 + P13 -> P5 + P14 -> P5 + P15 -> P5 + P16 -> P5 + P17 -> P5 + P18 -> P5 + P20 -> P19 + P21 -> P19 + P22 -> P21 + P23 -> P19 + P24 -> P23 + P26 -> P25 + P27 -> P25 + P28 -> P27 + P29 -> P25 + P30 -> P29 + P31 -> P25 + P32 -> P25 + P33 -> P32 + P34 -> P25 + P35 -> P25 + P36 -> P34 + P37 -> P25 + P38 -> P37 + P39 -> P37 + P40 -> P25 + P41 -> P40 + P42 -> P25 + P43 -> P42 + P44 -> P25 + P45 -> P44 + P46 -> P25 + P47 -> P46 + P48 -> P47 + P49 -> P47 + P50 -> P47 + P51 -> P47 + P52 -> P47 + P53 -> P47 + P54 -> P47 + P55 -> P47 + P56 -> P47 + P57 -> P47 + P58 -> P47 + P59 -> P47 + P60 -> P46 + P61 -> P25 + P62 -> P25 + P63 -> P62 + P64 -> P61 + P65 -> P25 + P66 -> P65 + P67 -> P25 + P68 -> P67 + P69 -> P25 + P70 -> P69 + P71 -> P69 + P72 -> P25 + P73 -> P72 + P74 -> P25 + P75 -> P74 + P76 -> P25 + P77 -> P76 + P78 -> P77 + P79 -> P25 + P80 -> P79 + P81 -> P80 + P82 -> P80 + P83 -> P80 + P84 -> P80 + P85 -> P79 + P86 -> P79 + P87 -> P79 + P88 -> P79 + P89 -> P25 + P90 -> P89 + P91 -> P25 + P92 -> P91 + P93 -> P92 + P94 -> P91 + P95 -> P94 + P96 -> P94 + P97 -> P94 + P98 -> P91 + P99 -> P98 + P100 -> P91 + P101 -> P100 + P102 -> P91 + P103 -> P25 + P104 -> P103 + P105 -> P25 + P106 -> P105 + P107 -> P105 + P108 -> P25 + P109 -> P25 + P110 -> P109 + P111 -> P25 + P112 -> P111 + P113 -> P112 + P114 -> P112 + P115 -> P112 + P116 -> P112 + P117 -> P112 + P118 -> P112 + P119 -> P112 + P120 -> P112 + P121 -> P112 + P122 -> P112 + P123 -> P112 + P124 -> P112 + P125 -> P112 + P126 -> P112 + P127 -> P112 + P128 -> P25 + P129 -> P128 + P130 -> P25 + P133 -> P132 + P134 -> P133 + P135 -> P133 + P136 -> P133 + P137 -> P133 + P138 -> P133 + P139 -> P133 + P140 -> P133 + P141 -> P133 + P142 -> P133 + P143 -> P133 + P144 -> P133 + P145 -> P133 + P146 -> P133 + P147 -> P133 + P148 -> P133 + P149 -> P133 + P150 -> P133 + P151 -> P133 + P152 -> P133 + P153 -> P133 + P154 -> P132 + P155 -> P154 + P156 -> P155 + P157 -> P155 + P162 -> P161 + P163 -> P162 + P164 -> P163 + P165 -> P162 + P166 -> P165 + P168 -> P167 + P169 -> P168 + P170 -> P168 + P171 -> P170 + P172 -> P170 + P173 -> P170 + P174 -> P170 + P175 -> P170 + P177 -> P176 + P178 -> P177 + P179 -> P177 + P180 -> P176 + P181 -> P180 + P182 -> P180 + P183 -> P180 + P184 -> P180 + P185 -> P180 + P186 -> P180 + P187 -> P180 }
-fun paths: Target -> Path { T0 -> P2 + T1 -> P3 + T2 -> P6 + T3 -> P7 + T4 -> P8 + T5 -> P9 + T6 -> P10 + T7 -> P11 + T8 -> P12 + T9 -> P13 + T10 -> P14 + T11 -> P15 + T12 -> P16 + T13 -> P17 + T14 -> P18 + T15 -> P20 + T16 -> P21 + T17 -> P22 + T18 -> P24 + T19 -> P27 + T20 -> P28 + T21 -> P29 + T22 -> P30 + T23 -> P32 + T24 -> P33 + T25 -> P35 + T26 -> P36 + T27 -> P37 + T28 -> P38 + T29 -> P39 + T30 -> P40 + T31 -> P41 + T32 -> P42 + T33 -> P43 + T34 -> P44 + T35 -> P45 + T36 -> P61 + T37 -> P62 + T38 -> P63 + T39 -> P64 + T40 -> P65 + T41 -> P66 + T42 -> P67 + T43 -> P68 + T44 -> P69 + T45 -> P70 + T46 -> P71 + T47 -> P72 + T48 -> P73 + T49 -> P74 + T50 -> P75 + T51 -> P77 + T52 -> P78 + T53 -> P79 + T54 -> P85 + T55 -> P86 + T56 -> P87 + T57 -> P89 + T58 -> P90 + T59 -> P92 + T60 -> P93 + T61 -> P94 + T62 -> P95 + T63 -> P96 + T64 -> P97 + T65 -> P100 + T66 -> P101 + T67 -> P102 + T68 -> P103 + T69 -> P104 + T70 -> P105 + T71 -> P107 + T72 -> P109 + T73 -> P110 + T74 -> P111 + T75 -> P113 + T76 -> P114 + T77 -> P115 + T78 -> P116 + T79 -> P117 + T80 -> P118 + T81 -> P119 + T82 -> P120 + T83 -> P121 + T84 -> P122 + T85 -> P123 + T86 -> P124 + T87 -> P125 + T88 -> P126 + T89 -> P127 + T90 -> P128 + T91 -> P129 + T92 -> P130 + T93 -> P134 + T94 -> P136 + T95 -> P137 + T96 -> P138 + T97 -> P139 + T98 -> P140 + T99 -> P141 + T100 -> P142 + T101 -> P144 + T102 -> P147 + T103 -> P148 + T104 -> P149 + T105 -> P150 + T106 -> P151 + T107 -> P152 + T108 -> P153 + T109 -> P154 + T110 -> P156 + T111 -> P157 + T112 -> P158 + T113 -> P159 + T114 -> P160 + T115 -> P161 + T116 -> P166 + T117 -> P167 + T118 -> P169 + T119 -> P176 + T120 -> P178 + T121 -> P179 + T122 -> P181 + T123 -> P182 + T124 -> P183 + T125 -> P185 + T126 -> P186 + T127 -> P187 + T128 -> P48 + T129 -> P51 + T130 -> P52 + T131 -> P53 + T132 -> P54 + T133 -> P55 + T134 -> P56 }
-fun realReceives: Target -> Profile { T0 -> (mac) + T1 -> (mac + linux + wsl) + T2 -> (linux) + T3 -> (mac + linux) + T4 -> (linux) + T5 -> (mac) + T6 -> (mac) + T7 -> (mac) + T8 -> (mac + linux) + T9 -> (mac) + T10 -> (mac) + T11 -> (mac) + T12 -> (linux) + T13 -> (mac) + T14 -> (linux) + T15 -> (mac + linux + wsl) + T16 -> (mac + linux + wsl) + T17 -> (mac + linux + wsl) + T18 -> (mac) + T19 -> (mac + linux + wsl) + T20 -> (mac + linux + wsl) + T21 -> (mac) + T22 -> (mac) + T23 -> (mac + linux) + T24 -> (mac + linux) + T25 -> (linux) + T26 -> (mac + linux + windows) + T27 -> (linux) + T28 -> (linux) + T29 -> (linux) + T30 -> (mac) + T31 -> (mac) + T32 -> (mac + linux + wsl) + T33 -> (mac + linux + wsl) + T34 -> (mac) + T35 -> (mac) + T36 -> (mac + linux) + T37 -> (mac) + T38 -> (mac) + T39 -> (mac + linux) + T40 -> (mac) + T41 -> (mac) + T42 -> (mac + linux + wsl) + T43 -> (mac + linux + wsl) + T44 -> (linux) + T45 -> (linux) + T46 -> (linux) + T47 -> (mac) + T48 -> (mac) + T49 -> (mac) + T50 -> (mac) + T51 -> (mac + linux + wsl) + T52 -> (mac + linux + wsl) + T53 -> (mac + linux) + T54 -> (mac + linux) + T55 -> (mac + linux) + T56 -> (mac) + T57 -> (mac + linux + windows) + T58 -> (mac + linux + windows) + T59 -> (mac) + T60 -> (mac) + T61 -> (mac) + T62 -> (mac) + T63 -> (mac) + T64 -> (mac) + T65 -> (mac) + T66 -> (mac) + T67 -> (mac) + T68 -> (mac + linux) + T69 -> (mac + linux) + T70 -> (mac + linux) + T71 -> (mac + linux) + T72 -> (mac + linux + windows) + T73 -> (mac + linux + windows) + T74 -> (linux + wsl) + T75 -> (linux) + T76 -> (linux) + T77 -> (linux) + T78 -> (linux) + T79 -> (linux) + T80 -> (linux) + T81 -> (linux) + T82 -> (linux) + T83 -> (wsl) + T84 -> (wsl) + T85 -> (linux) + T86 -> (linux) + T87 -> (linux) + T88 -> (linux) + T89 -> (linux) + T90 -> (windows) + T91 -> (windows) + T92 -> (linux) + T93 -> (linux) + T94 -> (linux) + T95 -> (windows) + T96 -> (mac + linux) + T97 -> (mac + linux) + T98 -> (windows) + T99 -> (linux) + T100 -> (mac) + T101 -> (wsl) + T102 -> (mac) + T103 -> (mac) + T104 -> (mac + linux + wsl) + T105 -> (linux) + T106 -> (linux) + T107 -> (linux) + T108 -> (linux) + T109 -> (linux) + T110 -> (linux) + T111 -> (linux) + T112 -> (linux) + T113 -> (mac) + T114 -> (mac) + T115 -> (windows) + T116 -> (windows) + T117 -> (windows) + T118 -> (windows) + T119 -> (mac) + T120 -> (mac) + T121 -> (mac) + T122 -> (mac) + T123 -> (mac) + T124 -> (mac) + T125 -> (mac) + T126 -> (mac) + T127 -> (mac) + T128 -> (mac + linux + windows + wsl) + T129 -> (mac + linux + windows + wsl) + T130 -> (mac + linux + windows + wsl) + T131 -> (mac + linux + windows + wsl) + T132 -> (mac + linux + windows + wsl) + T133 -> (mac + linux + windows + wsl) + T134 -> (mac + linux + windows + wsl) }
-fun realFiles: Hook -> Target { H0 -> T128 + H1 -> T129 + H2 -> T130 + H3 -> T131 + H4 -> T132 + H5 -> T133 + H6 -> T134 }
-fun realAt: Retired -> Path { R0 -> P26 + R1 -> P31 + R2 -> P49 + R3 -> P50 + R4 -> P57 + R5 -> P58 + R6 -> P59 + R7 -> P60 + R8 -> P80 + R9 -> P81 + R10 -> P82 + R11 -> P83 + R12 -> P84 + R13 -> P87 + R14 -> P88 + R15 -> P99 + R16 -> P106 + R17 -> P108 + R18 -> P121 + R19 -> P122 + R20 -> P131 + R21 -> P135 + R22 -> P136 + R23 -> P143 + R24 -> P145 + R25 -> P146 + R26 -> P152 + R27 -> P164 + R28 -> P171 + R29 -> P172 + R30 -> P173 + R31 -> P174 + R32 -> P175 + R33 -> P184 }
-fun realRemoves: Retired -> Profile { R0 -> (mac) + R1 -> (mac) + R2 -> (mac + linux + wsl) + R3 -> (mac + linux + wsl) + R4 -> (mac + linux + wsl) + R5 -> (mac + linux + wsl) + R6 -> (mac) + R7 -> (windows) + R8 -> (linux) + R9 -> (mac) + R10 -> (mac) + R11 -> (mac) + R12 -> (mac) + R13 -> (linux) + R14 -> (mac + linux) + R15 -> (mac + linux + wsl) + R16 -> (mac + linux + wsl) + R17 -> (mac) + R18 -> (linux) + R19 -> (linux) + R20 -> (mac + linux + wsl) + R21 -> (windows) + R22 -> (mac) + R23 -> (mac) + R24 -> (mac + linux + wsl) + R25 -> (windows) + R26 -> (mac) + R27 -> (windows) + R28 -> (windows) + R29 -> (windows) + R30 -> (windows) + R31 -> (windows) + R32 -> (windows) + R33 -> (mac) }
+fun parents: Path -> Path { P1 -> P0 + P2 -> P1 + P5 -> P4 + P6 -> P5 + P7 -> P5 + P8 -> P5 + P9 -> P5 + P10 -> P5 + P11 -> P5 + P12 -> P5 + P13 -> P5 + P14 -> P5 + P15 -> P5 + P16 -> P5 + P17 -> P5 + P19 -> P18 + P20 -> P18 + P21 -> P20 + P22 -> P18 + P23 -> P22 + P25 -> P24 + P26 -> P24 + P27 -> P26 + P28 -> P24 + P29 -> P28 + P30 -> P24 + P31 -> P24 + P32 -> P31 + P33 -> P24 + P34 -> P24 + P35 -> P33 + P36 -> P24 + P37 -> P36 + P38 -> P36 + P39 -> P24 + P40 -> P39 + P41 -> P24 + P42 -> P41 + P43 -> P24 + P44 -> P43 + P45 -> P24 + P46 -> P45 + P47 -> P46 + P48 -> P46 + P49 -> P46 + P50 -> P46 + P51 -> P46 + P52 -> P46 + P53 -> P46 + P54 -> P46 + P55 -> P46 + P56 -> P46 + P57 -> P46 + P58 -> P46 + P59 -> P45 + P60 -> P24 + P61 -> P24 + P62 -> P61 + P63 -> P60 + P64 -> P24 + P65 -> P64 + P66 -> P24 + P67 -> P66 + P68 -> P24 + P69 -> P68 + P70 -> P68 + P71 -> P24 + P72 -> P71 + P73 -> P24 + P74 -> P73 + P75 -> P74 + P76 -> P24 + P77 -> P76 + P78 -> P77 + P79 -> P77 + P80 -> P77 + P81 -> P77 + P82 -> P76 + P83 -> P76 + P84 -> P76 + P85 -> P76 + P86 -> P24 + P87 -> P86 + P88 -> P87 + P89 -> P24 + P90 -> P89 + P91 -> P24 + P92 -> P91 + P93 -> P91 + P94 -> P24 + P95 -> P24 + P96 -> P95 + P97 -> P24 + P98 -> P97 + P99 -> P98 + P100 -> P98 + P101 -> P98 + P102 -> P98 + P103 -> P98 + P104 -> P98 + P105 -> P98 + P106 -> P98 + P107 -> P98 + P108 -> P98 + P109 -> P98 + P110 -> P98 + P111 -> P98 + P112 -> P98 + P113 -> P98 + P114 -> P24 + P115 -> P114 + P116 -> P24 + P119 -> P118 + P120 -> P119 + P121 -> P119 + P122 -> P119 + P123 -> P119 + P124 -> P119 + P125 -> P119 + P126 -> P119 + P127 -> P119 + P128 -> P119 + P129 -> P119 + P130 -> P119 + P131 -> P119 + P132 -> P119 + P133 -> P119 + P134 -> P119 + P135 -> P119 + P136 -> P119 + P137 -> P119 + P138 -> P119 + P139 -> P119 + P140 -> P118 + P141 -> P140 + P142 -> P141 + P143 -> P141 + P148 -> P147 + P149 -> P148 + P150 -> P149 + P151 -> P148 + P152 -> P151 + P154 -> P153 + P155 -> P154 + P156 -> P154 + P157 -> P156 + P158 -> P156 + P159 -> P156 + P160 -> P156 + P161 -> P156 + P163 -> P162 + P164 -> P163 + P165 -> P163 + P166 -> P162 + P167 -> P166 + P168 -> P166 + P169 -> P166 + P170 -> P166 + P171 -> P166 + P172 -> P166 + P173 -> P166 }
+fun paths: Target -> Path { T0 -> P2 + T1 -> P3 + T2 -> P6 + T3 -> P7 + T4 -> P8 + T5 -> P9 + T6 -> P10 + T7 -> P11 + T8 -> P12 + T9 -> P13 + T10 -> P14 + T11 -> P15 + T12 -> P16 + T13 -> P17 + T14 -> P19 + T15 -> P20 + T16 -> P21 + T17 -> P23 + T18 -> P26 + T19 -> P27 + T20 -> P28 + T21 -> P29 + T22 -> P31 + T23 -> P32 + T24 -> P34 + T25 -> P35 + T26 -> P36 + T27 -> P37 + T28 -> P38 + T29 -> P39 + T30 -> P40 + T31 -> P41 + T32 -> P42 + T33 -> P43 + T34 -> P44 + T35 -> P60 + T36 -> P61 + T37 -> P62 + T38 -> P63 + T39 -> P64 + T40 -> P65 + T41 -> P66 + T42 -> P67 + T43 -> P68 + T44 -> P69 + T45 -> P70 + T46 -> P71 + T47 -> P72 + T48 -> P74 + T49 -> P75 + T50 -> P76 + T51 -> P82 + T52 -> P83 + T53 -> P84 + T54 -> P89 + T55 -> P90 + T56 -> P91 + T57 -> P93 + T58 -> P95 + T59 -> P96 + T60 -> P97 + T61 -> P99 + T62 -> P100 + T63 -> P101 + T64 -> P102 + T65 -> P103 + T66 -> P104 + T67 -> P105 + T68 -> P106 + T69 -> P107 + T70 -> P108 + T71 -> P109 + T72 -> P110 + T73 -> P111 + T74 -> P112 + T75 -> P113 + T76 -> P114 + T77 -> P115 + T78 -> P116 + T79 -> P120 + T80 -> P122 + T81 -> P123 + T82 -> P124 + T83 -> P125 + T84 -> P126 + T85 -> P127 + T86 -> P128 + T87 -> P130 + T88 -> P133 + T89 -> P134 + T90 -> P135 + T91 -> P136 + T92 -> P137 + T93 -> P138 + T94 -> P139 + T95 -> P140 + T96 -> P142 + T97 -> P143 + T98 -> P144 + T99 -> P145 + T100 -> P146 + T101 -> P147 + T102 -> P152 + T103 -> P153 + T104 -> P155 + T105 -> P162 + T106 -> P164 + T107 -> P165 + T108 -> P167 + T109 -> P168 + T110 -> P169 + T111 -> P171 + T112 -> P172 + T113 -> P173 + T114 -> P47 + T115 -> P50 + T116 -> P51 + T117 -> P52 + T118 -> P53 + T119 -> P54 + T120 -> P55 }
+fun realReceives: Target -> Profile { T0 -> (mac) + T1 -> (mac + linux + wsl) + T2 -> (linux) + T3 -> (mac + linux) + T4 -> (linux) + T5 -> (mac) + T6 -> (mac) + T7 -> (mac) + T8 -> (mac + linux) + T9 -> (mac) + T10 -> (mac) + T11 -> (mac) + T12 -> (mac) + T13 -> (linux) + T14 -> (mac + linux + wsl) + T15 -> (mac + linux + wsl) + T16 -> (mac + linux + wsl) + T17 -> (mac) + T18 -> (mac + linux + wsl) + T19 -> (mac + linux + wsl) + T20 -> (mac) + T21 -> (mac) + T22 -> (mac + linux) + T23 -> (mac + linux) + T24 -> (linux) + T25 -> (mac + linux + windows) + T26 -> (linux) + T27 -> (linux) + T28 -> (linux) + T29 -> (mac) + T30 -> (mac) + T31 -> (mac + linux + wsl) + T32 -> (mac + linux + wsl) + T33 -> (mac) + T34 -> (mac) + T35 -> (mac + linux) + T36 -> (mac) + T37 -> (mac) + T38 -> (mac + linux) + T39 -> (mac) + T40 -> (mac) + T41 -> (mac + linux + wsl) + T42 -> (mac + linux + wsl) + T43 -> (linux) + T44 -> (linux) + T45 -> (linux) + T46 -> (mac) + T47 -> (mac) + T48 -> (mac + linux + wsl) + T49 -> (mac + linux + wsl) + T50 -> (mac + linux) + T51 -> (mac + linux) + T52 -> (mac + linux) + T53 -> (mac) + T54 -> (mac + linux) + T55 -> (mac + linux) + T56 -> (mac + linux) + T57 -> (mac + linux) + T58 -> (mac + linux + windows) + T59 -> (mac + linux + windows) + T60 -> (linux + wsl) + T61 -> (linux) + T62 -> (linux) + T63 -> (linux) + T64 -> (linux) + T65 -> (linux) + T66 -> (linux) + T67 -> (linux) + T68 -> (linux) + T69 -> (wsl) + T70 -> (wsl) + T71 -> (linux) + T72 -> (linux) + T73 -> (linux) + T74 -> (linux) + T75 -> (linux) + T76 -> (windows) + T77 -> (windows) + T78 -> (linux) + T79 -> (linux) + T80 -> (mac + linux + wsl) + T81 -> (windows) + T82 -> (mac + linux) + T83 -> (mac + linux) + T84 -> (windows) + T85 -> (linux) + T86 -> (mac) + T87 -> (wsl) + T88 -> (mac) + T89 -> (mac) + T90 -> (mac + linux + wsl) + T91 -> (linux) + T92 -> (linux) + T93 -> (linux) + T94 -> (linux) + T95 -> (linux) + T96 -> (linux) + T97 -> (linux) + T98 -> (linux) + T99 -> (mac) + T100 -> (mac) + T101 -> (windows) + T102 -> (windows) + T103 -> (windows) + T104 -> (windows) + T105 -> (mac) + T106 -> (mac) + T107 -> (mac) + T108 -> (mac) + T109 -> (mac) + T110 -> (mac) + T111 -> (mac) + T112 -> (mac) + T113 -> (mac) + T114 -> (mac + linux + windows + wsl) + T115 -> (mac + linux + windows + wsl) + T116 -> (mac + linux + windows + wsl) + T117 -> (mac + linux + windows + wsl) + T118 -> (mac + linux + windows + wsl) + T119 -> (mac + linux + windows + wsl) + T120 -> (mac + linux + windows + wsl) }
+fun realFiles: Hook -> Target { H0 -> T114 + H1 -> T115 + H2 -> T116 + H3 -> T117 + H4 -> T118 + H5 -> T119 + H6 -> T120 }
+fun realAt: Retired -> Path { R0 -> P25 + R1 -> P30 + R2 -> P48 + R3 -> P49 + R4 -> P56 + R5 -> P57 + R6 -> P58 + R7 -> P59 + R8 -> P77 + R9 -> P78 + R10 -> P79 + R11 -> P80 + R12 -> P81 + R13 -> P84 + R14 -> P85 + R15 -> P88 + R16 -> P92 + R17 -> P94 + R18 -> P107 + R19 -> P108 + R20 -> P117 + R21 -> P121 + R22 -> P129 + R23 -> P131 + R24 -> P132 + R25 -> P138 + R26 -> P150 + R27 -> P157 + R28 -> P158 + R29 -> P159 + R30 -> P160 + R31 -> P161 + R32 -> P170 }
+fun realRemoves: Retired -> Profile { R0 -> (mac) + R1 -> (mac) + R2 -> (mac + linux + wsl) + R3 -> (mac + linux + wsl) + R4 -> (mac + linux + wsl) + R5 -> (mac + linux + wsl) + R6 -> (mac) + R7 -> (windows) + R8 -> (linux) + R9 -> (mac) + R10 -> (mac) + R11 -> (mac) + R12 -> (mac) + R13 -> (linux) + R14 -> (mac + linux) + R15 -> (mac + linux + wsl) + R16 -> (mac + linux + wsl) + R17 -> (mac) + R18 -> (linux) + R19 -> (linux) + R20 -> (mac + linux + wsl) + R21 -> (windows) + R22 -> (mac) + R23 -> (mac + linux + wsl) + R24 -> (windows) + R25 -> (mac) + R26 -> (windows) + R27 -> (windows) + R28 -> (windows) + R29 -> (windows) + R30 -> (windows) + R31 -> (windows) + R32 -> (mac) }
 pred real { checks/tree[parents] and checks/unique[paths] }
 
 // The real manifest with the first retired entry moved onto the first target, which a validator refuses.
-fun plantedOverlapReceives: Target -> Profile { T0 -> (mac) + T1 -> (mac + linux + wsl) + T2 -> (linux) + T3 -> (mac + linux) + T4 -> (linux) + T5 -> (mac) + T6 -> (mac) + T7 -> (mac) + T8 -> (mac + linux) + T9 -> (mac) + T10 -> (mac) + T11 -> (mac) + T12 -> (linux) + T13 -> (mac) + T14 -> (linux) + T15 -> (mac + linux + wsl) + T16 -> (mac + linux + wsl) + T17 -> (mac + linux + wsl) + T18 -> (mac) + T19 -> (mac + linux + wsl) + T20 -> (mac + linux + wsl) + T21 -> (mac) + T22 -> (mac) + T23 -> (mac + linux) + T24 -> (mac + linux) + T25 -> (linux) + T26 -> (mac + linux + windows) + T27 -> (linux) + T28 -> (linux) + T29 -> (linux) + T30 -> (mac) + T31 -> (mac) + T32 -> (mac + linux + wsl) + T33 -> (mac + linux + wsl) + T34 -> (mac) + T35 -> (mac) + T36 -> (mac + linux) + T37 -> (mac) + T38 -> (mac) + T39 -> (mac + linux) + T40 -> (mac) + T41 -> (mac) + T42 -> (mac + linux + wsl) + T43 -> (mac + linux + wsl) + T44 -> (linux) + T45 -> (linux) + T46 -> (linux) + T47 -> (mac) + T48 -> (mac) + T49 -> (mac) + T50 -> (mac) + T51 -> (mac + linux + wsl) + T52 -> (mac + linux + wsl) + T53 -> (mac + linux) + T54 -> (mac + linux) + T55 -> (mac + linux) + T56 -> (mac) + T57 -> (mac + linux + windows) + T58 -> (mac + linux + windows) + T59 -> (mac) + T60 -> (mac) + T61 -> (mac) + T62 -> (mac) + T63 -> (mac) + T64 -> (mac) + T65 -> (mac) + T66 -> (mac) + T67 -> (mac) + T68 -> (mac + linux) + T69 -> (mac + linux) + T70 -> (mac + linux) + T71 -> (mac + linux) + T72 -> (mac + linux + windows) + T73 -> (mac + linux + windows) + T74 -> (linux + wsl) + T75 -> (linux) + T76 -> (linux) + T77 -> (linux) + T78 -> (linux) + T79 -> (linux) + T80 -> (linux) + T81 -> (linux) + T82 -> (linux) + T83 -> (wsl) + T84 -> (wsl) + T85 -> (linux) + T86 -> (linux) + T87 -> (linux) + T88 -> (linux) + T89 -> (linux) + T90 -> (windows) + T91 -> (windows) + T92 -> (linux) + T93 -> (linux) + T94 -> (linux) + T95 -> (windows) + T96 -> (mac + linux) + T97 -> (mac + linux) + T98 -> (windows) + T99 -> (linux) + T100 -> (mac) + T101 -> (wsl) + T102 -> (mac) + T103 -> (mac) + T104 -> (mac + linux + wsl) + T105 -> (linux) + T106 -> (linux) + T107 -> (linux) + T108 -> (linux) + T109 -> (linux) + T110 -> (linux) + T111 -> (linux) + T112 -> (linux) + T113 -> (mac) + T114 -> (mac) + T115 -> (windows) + T116 -> (windows) + T117 -> (windows) + T118 -> (windows) + T119 -> (mac) + T120 -> (mac) + T121 -> (mac) + T122 -> (mac) + T123 -> (mac) + T124 -> (mac) + T125 -> (mac) + T126 -> (mac) + T127 -> (mac) + T128 -> (mac + linux + windows + wsl) + T129 -> (mac + linux + windows + wsl) + T130 -> (mac + linux + windows + wsl) + T131 -> (mac + linux + windows + wsl) + T132 -> (mac + linux + windows + wsl) + T133 -> (mac + linux + windows + wsl) + T134 -> (mac + linux + windows + wsl) }
-fun plantedOverlapFiles: Hook -> Target { H0 -> T128 + H1 -> T129 + H2 -> T130 + H3 -> T131 + H4 -> T132 + H5 -> T133 + H6 -> T134 }
-fun plantedOverlapAt: Retired -> Path { R0 -> P2 + R1 -> P31 + R2 -> P49 + R3 -> P50 + R4 -> P57 + R5 -> P58 + R6 -> P59 + R7 -> P60 + R8 -> P80 + R9 -> P81 + R10 -> P82 + R11 -> P83 + R12 -> P84 + R13 -> P87 + R14 -> P88 + R15 -> P99 + R16 -> P106 + R17 -> P108 + R18 -> P121 + R19 -> P122 + R20 -> P131 + R21 -> P135 + R22 -> P136 + R23 -> P143 + R24 -> P145 + R25 -> P146 + R26 -> P152 + R27 -> P164 + R28 -> P171 + R29 -> P172 + R30 -> P173 + R31 -> P174 + R32 -> P175 + R33 -> P184 }
-fun plantedOverlapRemoves: Retired -> Profile { R0 -> (mac) + R1 -> (mac) + R2 -> (mac + linux + wsl) + R3 -> (mac + linux + wsl) + R4 -> (mac + linux + wsl) + R5 -> (mac + linux + wsl) + R6 -> (mac) + R7 -> (windows) + R8 -> (linux) + R9 -> (mac) + R10 -> (mac) + R11 -> (mac) + R12 -> (mac) + R13 -> (linux) + R14 -> (mac + linux) + R15 -> (mac + linux + wsl) + R16 -> (mac + linux + wsl) + R17 -> (mac) + R18 -> (linux) + R19 -> (linux) + R20 -> (mac + linux + wsl) + R21 -> (windows) + R22 -> (mac) + R23 -> (mac) + R24 -> (mac + linux + wsl) + R25 -> (windows) + R26 -> (mac) + R27 -> (windows) + R28 -> (windows) + R29 -> (windows) + R30 -> (windows) + R31 -> (windows) + R32 -> (windows) + R33 -> (mac) }
+fun plantedOverlapReceives: Target -> Profile { T0 -> (mac) + T1 -> (mac + linux + wsl) + T2 -> (linux) + T3 -> (mac + linux) + T4 -> (linux) + T5 -> (mac) + T6 -> (mac) + T7 -> (mac) + T8 -> (mac + linux) + T9 -> (mac) + T10 -> (mac) + T11 -> (mac) + T12 -> (mac) + T13 -> (linux) + T14 -> (mac + linux + wsl) + T15 -> (mac + linux + wsl) + T16 -> (mac + linux + wsl) + T17 -> (mac) + T18 -> (mac + linux + wsl) + T19 -> (mac + linux + wsl) + T20 -> (mac) + T21 -> (mac) + T22 -> (mac + linux) + T23 -> (mac + linux) + T24 -> (linux) + T25 -> (mac + linux + windows) + T26 -> (linux) + T27 -> (linux) + T28 -> (linux) + T29 -> (mac) + T30 -> (mac) + T31 -> (mac + linux + wsl) + T32 -> (mac + linux + wsl) + T33 -> (mac) + T34 -> (mac) + T35 -> (mac + linux) + T36 -> (mac) + T37 -> (mac) + T38 -> (mac + linux) + T39 -> (mac) + T40 -> (mac) + T41 -> (mac + linux + wsl) + T42 -> (mac + linux + wsl) + T43 -> (linux) + T44 -> (linux) + T45 -> (linux) + T46 -> (mac) + T47 -> (mac) + T48 -> (mac + linux + wsl) + T49 -> (mac + linux + wsl) + T50 -> (mac + linux) + T51 -> (mac + linux) + T52 -> (mac + linux) + T53 -> (mac) + T54 -> (mac + linux) + T55 -> (mac + linux) + T56 -> (mac + linux) + T57 -> (mac + linux) + T58 -> (mac + linux + windows) + T59 -> (mac + linux + windows) + T60 -> (linux + wsl) + T61 -> (linux) + T62 -> (linux) + T63 -> (linux) + T64 -> (linux) + T65 -> (linux) + T66 -> (linux) + T67 -> (linux) + T68 -> (linux) + T69 -> (wsl) + T70 -> (wsl) + T71 -> (linux) + T72 -> (linux) + T73 -> (linux) + T74 -> (linux) + T75 -> (linux) + T76 -> (windows) + T77 -> (windows) + T78 -> (linux) + T79 -> (linux) + T80 -> (mac + linux + wsl) + T81 -> (windows) + T82 -> (mac + linux) + T83 -> (mac + linux) + T84 -> (windows) + T85 -> (linux) + T86 -> (mac) + T87 -> (wsl) + T88 -> (mac) + T89 -> (mac) + T90 -> (mac + linux + wsl) + T91 -> (linux) + T92 -> (linux) + T93 -> (linux) + T94 -> (linux) + T95 -> (linux) + T96 -> (linux) + T97 -> (linux) + T98 -> (linux) + T99 -> (mac) + T100 -> (mac) + T101 -> (windows) + T102 -> (windows) + T103 -> (windows) + T104 -> (windows) + T105 -> (mac) + T106 -> (mac) + T107 -> (mac) + T108 -> (mac) + T109 -> (mac) + T110 -> (mac) + T111 -> (mac) + T112 -> (mac) + T113 -> (mac) + T114 -> (mac + linux + windows + wsl) + T115 -> (mac + linux + windows + wsl) + T116 -> (mac + linux + windows + wsl) + T117 -> (mac + linux + windows + wsl) + T118 -> (mac + linux + windows + wsl) + T119 -> (mac + linux + windows + wsl) + T120 -> (mac + linux + windows + wsl) }
+fun plantedOverlapFiles: Hook -> Target { H0 -> T114 + H1 -> T115 + H2 -> T116 + H3 -> T117 + H4 -> T118 + H5 -> T119 + H6 -> T120 }
+fun plantedOverlapAt: Retired -> Path { R0 -> P2 + R1 -> P30 + R2 -> P48 + R3 -> P49 + R4 -> P56 + R5 -> P57 + R6 -> P58 + R7 -> P59 + R8 -> P77 + R9 -> P78 + R10 -> P79 + R11 -> P80 + R12 -> P81 + R13 -> P84 + R14 -> P85 + R15 -> P88 + R16 -> P92 + R17 -> P94 + R18 -> P107 + R19 -> P108 + R20 -> P117 + R21 -> P121 + R22 -> P129 + R23 -> P131 + R24 -> P132 + R25 -> P138 + R26 -> P150 + R27 -> P157 + R28 -> P158 + R29 -> P159 + R30 -> P160 + R31 -> P161 + R32 -> P170 }
+fun plantedOverlapRemoves: Retired -> Profile { R0 -> (mac) + R1 -> (mac) + R2 -> (mac + linux + wsl) + R3 -> (mac + linux + wsl) + R4 -> (mac + linux + wsl) + R5 -> (mac + linux + wsl) + R6 -> (mac) + R7 -> (windows) + R8 -> (linux) + R9 -> (mac) + R10 -> (mac) + R11 -> (mac) + R12 -> (mac) + R13 -> (linux) + R14 -> (mac + linux) + R15 -> (mac + linux + wsl) + R16 -> (mac + linux + wsl) + R17 -> (mac) + R18 -> (linux) + R19 -> (linux) + R20 -> (mac + linux + wsl) + R21 -> (windows) + R22 -> (mac) + R23 -> (mac + linux + wsl) + R24 -> (windows) + R25 -> (mac) + R26 -> (windows) + R27 -> (windows) + R28 -> (windows) + R29 -> (windows) + R30 -> (windows) + R31 -> (windows) + R32 -> (mac) }
 pred plantedOverlap { checks/tree[parents] and checks/unique[paths] }
 
 // The real manifest with the second hook run from the first hook's file, which a validator refuses.
-fun plantedHookReceives: Target -> Profile { T0 -> (mac) + T1 -> (mac + linux + wsl) + T2 -> (linux) + T3 -> (mac + linux) + T4 -> (linux) + T5 -> (mac) + T6 -> (mac) + T7 -> (mac) + T8 -> (mac + linux) + T9 -> (mac) + T10 -> (mac) + T11 -> (mac) + T12 -> (linux) + T13 -> (mac) + T14 -> (linux) + T15 -> (mac + linux + wsl) + T16 -> (mac + linux + wsl) + T17 -> (mac + linux + wsl) + T18 -> (mac) + T19 -> (mac + linux + wsl) + T20 -> (mac + linux + wsl) + T21 -> (mac) + T22 -> (mac) + T23 -> (mac + linux) + T24 -> (mac + linux) + T25 -> (linux) + T26 -> (mac + linux + windows) + T27 -> (linux) + T28 -> (linux) + T29 -> (linux) + T30 -> (mac) + T31 -> (mac) + T32 -> (mac + linux + wsl) + T33 -> (mac + linux + wsl) + T34 -> (mac) + T35 -> (mac) + T36 -> (mac + linux) + T37 -> (mac) + T38 -> (mac) + T39 -> (mac + linux) + T40 -> (mac) + T41 -> (mac) + T42 -> (mac + linux + wsl) + T43 -> (mac + linux + wsl) + T44 -> (linux) + T45 -> (linux) + T46 -> (linux) + T47 -> (mac) + T48 -> (mac) + T49 -> (mac) + T50 -> (mac) + T51 -> (mac + linux + wsl) + T52 -> (mac + linux + wsl) + T53 -> (mac + linux) + T54 -> (mac + linux) + T55 -> (mac + linux) + T56 -> (mac) + T57 -> (mac + linux + windows) + T58 -> (mac + linux + windows) + T59 -> (mac) + T60 -> (mac) + T61 -> (mac) + T62 -> (mac) + T63 -> (mac) + T64 -> (mac) + T65 -> (mac) + T66 -> (mac) + T67 -> (mac) + T68 -> (mac + linux) + T69 -> (mac + linux) + T70 -> (mac + linux) + T71 -> (mac + linux) + T72 -> (mac + linux + windows) + T73 -> (mac + linux + windows) + T74 -> (linux + wsl) + T75 -> (linux) + T76 -> (linux) + T77 -> (linux) + T78 -> (linux) + T79 -> (linux) + T80 -> (linux) + T81 -> (linux) + T82 -> (linux) + T83 -> (wsl) + T84 -> (wsl) + T85 -> (linux) + T86 -> (linux) + T87 -> (linux) + T88 -> (linux) + T89 -> (linux) + T90 -> (windows) + T91 -> (windows) + T92 -> (linux) + T93 -> (linux) + T94 -> (linux) + T95 -> (windows) + T96 -> (mac + linux) + T97 -> (mac + linux) + T98 -> (windows) + T99 -> (linux) + T100 -> (mac) + T101 -> (wsl) + T102 -> (mac) + T103 -> (mac) + T104 -> (mac + linux + wsl) + T105 -> (linux) + T106 -> (linux) + T107 -> (linux) + T108 -> (linux) + T109 -> (linux) + T110 -> (linux) + T111 -> (linux) + T112 -> (linux) + T113 -> (mac) + T114 -> (mac) + T115 -> (windows) + T116 -> (windows) + T117 -> (windows) + T118 -> (windows) + T119 -> (mac) + T120 -> (mac) + T121 -> (mac) + T122 -> (mac) + T123 -> (mac) + T124 -> (mac) + T125 -> (mac) + T126 -> (mac) + T127 -> (mac) + T128 -> (mac + linux + windows + wsl) + T129 -> (mac + linux + windows + wsl) + T130 -> (mac + linux + windows + wsl) + T131 -> (mac + linux + windows + wsl) + T132 -> (mac + linux + windows + wsl) + T133 -> (mac + linux + windows + wsl) + T134 -> (mac + linux + windows + wsl) }
-fun plantedHookFiles: Hook -> Target { H0 -> T128 + H1 -> T128 + H2 -> T130 + H3 -> T131 + H4 -> T132 + H5 -> T133 + H6 -> T134 }
-fun plantedHookAt: Retired -> Path { R0 -> P26 + R1 -> P31 + R2 -> P49 + R3 -> P50 + R4 -> P57 + R5 -> P58 + R6 -> P59 + R7 -> P60 + R8 -> P80 + R9 -> P81 + R10 -> P82 + R11 -> P83 + R12 -> P84 + R13 -> P87 + R14 -> P88 + R15 -> P99 + R16 -> P106 + R17 -> P108 + R18 -> P121 + R19 -> P122 + R20 -> P131 + R21 -> P135 + R22 -> P136 + R23 -> P143 + R24 -> P145 + R25 -> P146 + R26 -> P152 + R27 -> P164 + R28 -> P171 + R29 -> P172 + R30 -> P173 + R31 -> P174 + R32 -> P175 + R33 -> P184 }
-fun plantedHookRemoves: Retired -> Profile { R0 -> (mac) + R1 -> (mac) + R2 -> (mac + linux + wsl) + R3 -> (mac + linux + wsl) + R4 -> (mac + linux + wsl) + R5 -> (mac + linux + wsl) + R6 -> (mac) + R7 -> (windows) + R8 -> (linux) + R9 -> (mac) + R10 -> (mac) + R11 -> (mac) + R12 -> (mac) + R13 -> (linux) + R14 -> (mac + linux) + R15 -> (mac + linux + wsl) + R16 -> (mac + linux + wsl) + R17 -> (mac) + R18 -> (linux) + R19 -> (linux) + R20 -> (mac + linux + wsl) + R21 -> (windows) + R22 -> (mac) + R23 -> (mac) + R24 -> (mac + linux + wsl) + R25 -> (windows) + R26 -> (mac) + R27 -> (windows) + R28 -> (windows) + R29 -> (windows) + R30 -> (windows) + R31 -> (windows) + R32 -> (windows) + R33 -> (mac) }
+fun plantedHookReceives: Target -> Profile { T0 -> (mac) + T1 -> (mac + linux + wsl) + T2 -> (linux) + T3 -> (mac + linux) + T4 -> (linux) + T5 -> (mac) + T6 -> (mac) + T7 -> (mac) + T8 -> (mac + linux) + T9 -> (mac) + T10 -> (mac) + T11 -> (mac) + T12 -> (mac) + T13 -> (linux) + T14 -> (mac + linux + wsl) + T15 -> (mac + linux + wsl) + T16 -> (mac + linux + wsl) + T17 -> (mac) + T18 -> (mac + linux + wsl) + T19 -> (mac + linux + wsl) + T20 -> (mac) + T21 -> (mac) + T22 -> (mac + linux) + T23 -> (mac + linux) + T24 -> (linux) + T25 -> (mac + linux + windows) + T26 -> (linux) + T27 -> (linux) + T28 -> (linux) + T29 -> (mac) + T30 -> (mac) + T31 -> (mac + linux + wsl) + T32 -> (mac + linux + wsl) + T33 -> (mac) + T34 -> (mac) + T35 -> (mac + linux) + T36 -> (mac) + T37 -> (mac) + T38 -> (mac + linux) + T39 -> (mac) + T40 -> (mac) + T41 -> (mac + linux + wsl) + T42 -> (mac + linux + wsl) + T43 -> (linux) + T44 -> (linux) + T45 -> (linux) + T46 -> (mac) + T47 -> (mac) + T48 -> (mac + linux + wsl) + T49 -> (mac + linux + wsl) + T50 -> (mac + linux) + T51 -> (mac + linux) + T52 -> (mac + linux) + T53 -> (mac) + T54 -> (mac + linux) + T55 -> (mac + linux) + T56 -> (mac + linux) + T57 -> (mac + linux) + T58 -> (mac + linux + windows) + T59 -> (mac + linux + windows) + T60 -> (linux + wsl) + T61 -> (linux) + T62 -> (linux) + T63 -> (linux) + T64 -> (linux) + T65 -> (linux) + T66 -> (linux) + T67 -> (linux) + T68 -> (linux) + T69 -> (wsl) + T70 -> (wsl) + T71 -> (linux) + T72 -> (linux) + T73 -> (linux) + T74 -> (linux) + T75 -> (linux) + T76 -> (windows) + T77 -> (windows) + T78 -> (linux) + T79 -> (linux) + T80 -> (mac + linux + wsl) + T81 -> (windows) + T82 -> (mac + linux) + T83 -> (mac + linux) + T84 -> (windows) + T85 -> (linux) + T86 -> (mac) + T87 -> (wsl) + T88 -> (mac) + T89 -> (mac) + T90 -> (mac + linux + wsl) + T91 -> (linux) + T92 -> (linux) + T93 -> (linux) + T94 -> (linux) + T95 -> (linux) + T96 -> (linux) + T97 -> (linux) + T98 -> (linux) + T99 -> (mac) + T100 -> (mac) + T101 -> (windows) + T102 -> (windows) + T103 -> (windows) + T104 -> (windows) + T105 -> (mac) + T106 -> (mac) + T107 -> (mac) + T108 -> (mac) + T109 -> (mac) + T110 -> (mac) + T111 -> (mac) + T112 -> (mac) + T113 -> (mac) + T114 -> (mac + linux + windows + wsl) + T115 -> (mac + linux + windows + wsl) + T116 -> (mac + linux + windows + wsl) + T117 -> (mac + linux + windows + wsl) + T118 -> (mac + linux + windows + wsl) + T119 -> (mac + linux + windows + wsl) + T120 -> (mac + linux + windows + wsl) }
+fun plantedHookFiles: Hook -> Target { H0 -> T114 + H1 -> T114 + H2 -> T116 + H3 -> T117 + H4 -> T118 + H5 -> T119 + H6 -> T120 }
+fun plantedHookAt: Retired -> Path { R0 -> P25 + R1 -> P30 + R2 -> P48 + R3 -> P49 + R4 -> P56 + R5 -> P57 + R6 -> P58 + R7 -> P59 + R8 -> P77 + R9 -> P78 + R10 -> P79 + R11 -> P80 + R12 -> P81 + R13 -> P84 + R14 -> P85 + R15 -> P88 + R16 -> P92 + R17 -> P94 + R18 -> P107 + R19 -> P108 + R20 -> P117 + R21 -> P121 + R22 -> P129 + R23 -> P131 + R24 -> P132 + R25 -> P138 + R26 -> P150 + R27 -> P157 + R28 -> P158 + R29 -> P159 + R30 -> P160 + R31 -> P161 + R32 -> P170 }
+fun plantedHookRemoves: Retired -> Profile { R0 -> (mac) + R1 -> (mac) + R2 -> (mac + linux + wsl) + R3 -> (mac + linux + wsl) + R4 -> (mac + linux + wsl) + R5 -> (mac + linux + wsl) + R6 -> (mac) + R7 -> (windows) + R8 -> (linux) + R9 -> (mac) + R10 -> (mac) + R11 -> (mac) + R12 -> (mac) + R13 -> (linux) + R14 -> (mac + linux) + R15 -> (mac + linux + wsl) + R16 -> (mac + linux + wsl) + R17 -> (mac) + R18 -> (linux) + R19 -> (linux) + R20 -> (mac + linux + wsl) + R21 -> (windows) + R22 -> (mac) + R23 -> (mac + linux + wsl) + R24 -> (windows) + R25 -> (mac) + R26 -> (windows) + R27 -> (windows) + R28 -> (windows) + R29 -> (windows) + R30 -> (windows) + R31 -> (windows) + R32 -> (mac) }
 pred plantedHook { checks/tree[parents] and checks/unique[paths] }
 
 // The real manifest with the first hook's file received on the Mac alone, which a validator refuses.
-fun plantedMaskReceives: Target -> Profile { T0 -> (mac) + T1 -> (mac + linux + wsl) + T2 -> (linux) + T3 -> (mac + linux) + T4 -> (linux) + T5 -> (mac) + T6 -> (mac) + T7 -> (mac) + T8 -> (mac + linux) + T9 -> (mac) + T10 -> (mac) + T11 -> (mac) + T12 -> (linux) + T13 -> (mac) + T14 -> (linux) + T15 -> (mac + linux + wsl) + T16 -> (mac + linux + wsl) + T17 -> (mac + linux + wsl) + T18 -> (mac) + T19 -> (mac + linux + wsl) + T20 -> (mac + linux + wsl) + T21 -> (mac) + T22 -> (mac) + T23 -> (mac + linux) + T24 -> (mac + linux) + T25 -> (linux) + T26 -> (mac + linux + windows) + T27 -> (linux) + T28 -> (linux) + T29 -> (linux) + T30 -> (mac) + T31 -> (mac) + T32 -> (mac + linux + wsl) + T33 -> (mac + linux + wsl) + T34 -> (mac) + T35 -> (mac) + T36 -> (mac + linux) + T37 -> (mac) + T38 -> (mac) + T39 -> (mac + linux) + T40 -> (mac) + T41 -> (mac) + T42 -> (mac + linux + wsl) + T43 -> (mac + linux + wsl) + T44 -> (linux) + T45 -> (linux) + T46 -> (linux) + T47 -> (mac) + T48 -> (mac) + T49 -> (mac) + T50 -> (mac) + T51 -> (mac + linux + wsl) + T52 -> (mac + linux + wsl) + T53 -> (mac + linux) + T54 -> (mac + linux) + T55 -> (mac + linux) + T56 -> (mac) + T57 -> (mac + linux + windows) + T58 -> (mac + linux + windows) + T59 -> (mac) + T60 -> (mac) + T61 -> (mac) + T62 -> (mac) + T63 -> (mac) + T64 -> (mac) + T65 -> (mac) + T66 -> (mac) + T67 -> (mac) + T68 -> (mac + linux) + T69 -> (mac + linux) + T70 -> (mac + linux) + T71 -> (mac + linux) + T72 -> (mac + linux + windows) + T73 -> (mac + linux + windows) + T74 -> (linux + wsl) + T75 -> (linux) + T76 -> (linux) + T77 -> (linux) + T78 -> (linux) + T79 -> (linux) + T80 -> (linux) + T81 -> (linux) + T82 -> (linux) + T83 -> (wsl) + T84 -> (wsl) + T85 -> (linux) + T86 -> (linux) + T87 -> (linux) + T88 -> (linux) + T89 -> (linux) + T90 -> (windows) + T91 -> (windows) + T92 -> (linux) + T93 -> (linux) + T94 -> (linux) + T95 -> (windows) + T96 -> (mac + linux) + T97 -> (mac + linux) + T98 -> (windows) + T99 -> (linux) + T100 -> (mac) + T101 -> (wsl) + T102 -> (mac) + T103 -> (mac) + T104 -> (mac + linux + wsl) + T105 -> (linux) + T106 -> (linux) + T107 -> (linux) + T108 -> (linux) + T109 -> (linux) + T110 -> (linux) + T111 -> (linux) + T112 -> (linux) + T113 -> (mac) + T114 -> (mac) + T115 -> (windows) + T116 -> (windows) + T117 -> (windows) + T118 -> (windows) + T119 -> (mac) + T120 -> (mac) + T121 -> (mac) + T122 -> (mac) + T123 -> (mac) + T124 -> (mac) + T125 -> (mac) + T126 -> (mac) + T127 -> (mac) + T128 -> (mac) + T129 -> (mac + linux + windows + wsl) + T130 -> (mac + linux + windows + wsl) + T131 -> (mac + linux + windows + wsl) + T132 -> (mac + linux + windows + wsl) + T133 -> (mac + linux + windows + wsl) + T134 -> (mac + linux + windows + wsl) }
-fun plantedMaskFiles: Hook -> Target { H0 -> T128 + H1 -> T129 + H2 -> T130 + H3 -> T131 + H4 -> T132 + H5 -> T133 + H6 -> T134 }
-fun plantedMaskAt: Retired -> Path { R0 -> P26 + R1 -> P31 + R2 -> P49 + R3 -> P50 + R4 -> P57 + R5 -> P58 + R6 -> P59 + R7 -> P60 + R8 -> P80 + R9 -> P81 + R10 -> P82 + R11 -> P83 + R12 -> P84 + R13 -> P87 + R14 -> P88 + R15 -> P99 + R16 -> P106 + R17 -> P108 + R18 -> P121 + R19 -> P122 + R20 -> P131 + R21 -> P135 + R22 -> P136 + R23 -> P143 + R24 -> P145 + R25 -> P146 + R26 -> P152 + R27 -> P164 + R28 -> P171 + R29 -> P172 + R30 -> P173 + R31 -> P174 + R32 -> P175 + R33 -> P184 }
-fun plantedMaskRemoves: Retired -> Profile { R0 -> (mac) + R1 -> (mac) + R2 -> (mac + linux + wsl) + R3 -> (mac + linux + wsl) + R4 -> (mac + linux + wsl) + R5 -> (mac + linux + wsl) + R6 -> (mac) + R7 -> (windows) + R8 -> (linux) + R9 -> (mac) + R10 -> (mac) + R11 -> (mac) + R12 -> (mac) + R13 -> (linux) + R14 -> (mac + linux) + R15 -> (mac + linux + wsl) + R16 -> (mac + linux + wsl) + R17 -> (mac) + R18 -> (linux) + R19 -> (linux) + R20 -> (mac + linux + wsl) + R21 -> (windows) + R22 -> (mac) + R23 -> (mac) + R24 -> (mac + linux + wsl) + R25 -> (windows) + R26 -> (mac) + R27 -> (windows) + R28 -> (windows) + R29 -> (windows) + R30 -> (windows) + R31 -> (windows) + R32 -> (windows) + R33 -> (mac) }
+fun plantedMaskReceives: Target -> Profile { T0 -> (mac) + T1 -> (mac + linux + wsl) + T2 -> (linux) + T3 -> (mac + linux) + T4 -> (linux) + T5 -> (mac) + T6 -> (mac) + T7 -> (mac) + T8 -> (mac + linux) + T9 -> (mac) + T10 -> (mac) + T11 -> (mac) + T12 -> (mac) + T13 -> (linux) + T14 -> (mac + linux + wsl) + T15 -> (mac + linux + wsl) + T16 -> (mac + linux + wsl) + T17 -> (mac) + T18 -> (mac + linux + wsl) + T19 -> (mac + linux + wsl) + T20 -> (mac) + T21 -> (mac) + T22 -> (mac + linux) + T23 -> (mac + linux) + T24 -> (linux) + T25 -> (mac + linux + windows) + T26 -> (linux) + T27 -> (linux) + T28 -> (linux) + T29 -> (mac) + T30 -> (mac) + T31 -> (mac + linux + wsl) + T32 -> (mac + linux + wsl) + T33 -> (mac) + T34 -> (mac) + T35 -> (mac + linux) + T36 -> (mac) + T37 -> (mac) + T38 -> (mac + linux) + T39 -> (mac) + T40 -> (mac) + T41 -> (mac + linux + wsl) + T42 -> (mac + linux + wsl) + T43 -> (linux) + T44 -> (linux) + T45 -> (linux) + T46 -> (mac) + T47 -> (mac) + T48 -> (mac + linux + wsl) + T49 -> (mac + linux + wsl) + T50 -> (mac + linux) + T51 -> (mac + linux) + T52 -> (mac + linux) + T53 -> (mac) + T54 -> (mac + linux) + T55 -> (mac + linux) + T56 -> (mac + linux) + T57 -> (mac + linux) + T58 -> (mac + linux + windows) + T59 -> (mac + linux + windows) + T60 -> (linux + wsl) + T61 -> (linux) + T62 -> (linux) + T63 -> (linux) + T64 -> (linux) + T65 -> (linux) + T66 -> (linux) + T67 -> (linux) + T68 -> (linux) + T69 -> (wsl) + T70 -> (wsl) + T71 -> (linux) + T72 -> (linux) + T73 -> (linux) + T74 -> (linux) + T75 -> (linux) + T76 -> (windows) + T77 -> (windows) + T78 -> (linux) + T79 -> (linux) + T80 -> (mac + linux + wsl) + T81 -> (windows) + T82 -> (mac + linux) + T83 -> (mac + linux) + T84 -> (windows) + T85 -> (linux) + T86 -> (mac) + T87 -> (wsl) + T88 -> (mac) + T89 -> (mac) + T90 -> (mac + linux + wsl) + T91 -> (linux) + T92 -> (linux) + T93 -> (linux) + T94 -> (linux) + T95 -> (linux) + T96 -> (linux) + T97 -> (linux) + T98 -> (linux) + T99 -> (mac) + T100 -> (mac) + T101 -> (windows) + T102 -> (windows) + T103 -> (windows) + T104 -> (windows) + T105 -> (mac) + T106 -> (mac) + T107 -> (mac) + T108 -> (mac) + T109 -> (mac) + T110 -> (mac) + T111 -> (mac) + T112 -> (mac) + T113 -> (mac) + T114 -> (mac) + T115 -> (mac + linux + windows + wsl) + T116 -> (mac + linux + windows + wsl) + T117 -> (mac + linux + windows + wsl) + T118 -> (mac + linux + windows + wsl) + T119 -> (mac + linux + windows + wsl) + T120 -> (mac + linux + windows + wsl) }
+fun plantedMaskFiles: Hook -> Target { H0 -> T114 + H1 -> T115 + H2 -> T116 + H3 -> T117 + H4 -> T118 + H5 -> T119 + H6 -> T120 }
+fun plantedMaskAt: Retired -> Path { R0 -> P25 + R1 -> P30 + R2 -> P48 + R3 -> P49 + R4 -> P56 + R5 -> P57 + R6 -> P58 + R7 -> P59 + R8 -> P77 + R9 -> P78 + R10 -> P79 + R11 -> P80 + R12 -> P81 + R13 -> P84 + R14 -> P85 + R15 -> P88 + R16 -> P92 + R17 -> P94 + R18 -> P107 + R19 -> P108 + R20 -> P117 + R21 -> P121 + R22 -> P129 + R23 -> P131 + R24 -> P132 + R25 -> P138 + R26 -> P150 + R27 -> P157 + R28 -> P158 + R29 -> P159 + R30 -> P160 + R31 -> P161 + R32 -> P170 }
+fun plantedMaskRemoves: Retired -> Profile { R0 -> (mac) + R1 -> (mac) + R2 -> (mac + linux + wsl) + R3 -> (mac + linux + wsl) + R4 -> (mac + linux + wsl) + R5 -> (mac + linux + wsl) + R6 -> (mac) + R7 -> (windows) + R8 -> (linux) + R9 -> (mac) + R10 -> (mac) + R11 -> (mac) + R12 -> (mac) + R13 -> (linux) + R14 -> (mac + linux) + R15 -> (mac + linux + wsl) + R16 -> (mac + linux + wsl) + R17 -> (mac) + R18 -> (linux) + R19 -> (linux) + R20 -> (mac + linux + wsl) + R21 -> (windows) + R22 -> (mac) + R23 -> (mac + linux + wsl) + R24 -> (windows) + R25 -> (mac) + R26 -> (windows) + R27 -> (windows) + R28 -> (windows) + R29 -> (windows) + R30 -> (windows) + R31 -> (windows) + R32 -> (mac) }
 pred plantedMask { checks/tree[parents] and checks/unique[paths] }
 
 // The real manifest with a restricted directory given to every profile, which a validator refuses.
-fun plantedEmptyReceives: Target -> Profile { T0 -> (mac) + T1 -> (mac + linux + wsl) + T2 -> (linux) + T3 -> (mac + linux) + T4 -> (linux) + T5 -> (mac) + T6 -> (mac) + T7 -> (mac) + T8 -> (mac + linux) + T9 -> (mac) + T10 -> (mac) + T11 -> (mac) + T12 -> (linux) + T13 -> (mac) + T14 -> (linux) + T15 -> (mac + linux + wsl) + T16 -> (Profile) + T17 -> (mac + linux + wsl) + T18 -> (mac) + T19 -> (mac + linux + wsl) + T20 -> (mac + linux + wsl) + T21 -> (mac) + T22 -> (mac) + T23 -> (mac + linux) + T24 -> (mac + linux) + T25 -> (linux) + T26 -> (mac + linux + windows) + T27 -> (linux) + T28 -> (linux) + T29 -> (linux) + T30 -> (mac) + T31 -> (mac) + T32 -> (mac + linux + wsl) + T33 -> (mac + linux + wsl) + T34 -> (mac) + T35 -> (mac) + T36 -> (mac + linux) + T37 -> (mac) + T38 -> (mac) + T39 -> (mac + linux) + T40 -> (mac) + T41 -> (mac) + T42 -> (mac + linux + wsl) + T43 -> (mac + linux + wsl) + T44 -> (linux) + T45 -> (linux) + T46 -> (linux) + T47 -> (mac) + T48 -> (mac) + T49 -> (mac) + T50 -> (mac) + T51 -> (mac + linux + wsl) + T52 -> (mac + linux + wsl) + T53 -> (mac + linux) + T54 -> (mac + linux) + T55 -> (mac + linux) + T56 -> (mac) + T57 -> (mac + linux + windows) + T58 -> (mac + linux + windows) + T59 -> (mac) + T60 -> (mac) + T61 -> (mac) + T62 -> (mac) + T63 -> (mac) + T64 -> (mac) + T65 -> (mac) + T66 -> (mac) + T67 -> (mac) + T68 -> (mac + linux) + T69 -> (mac + linux) + T70 -> (mac + linux) + T71 -> (mac + linux) + T72 -> (mac + linux + windows) + T73 -> (mac + linux + windows) + T74 -> (linux + wsl) + T75 -> (linux) + T76 -> (linux) + T77 -> (linux) + T78 -> (linux) + T79 -> (linux) + T80 -> (linux) + T81 -> (linux) + T82 -> (linux) + T83 -> (wsl) + T84 -> (wsl) + T85 -> (linux) + T86 -> (linux) + T87 -> (linux) + T88 -> (linux) + T89 -> (linux) + T90 -> (windows) + T91 -> (windows) + T92 -> (linux) + T93 -> (linux) + T94 -> (linux) + T95 -> (windows) + T96 -> (mac + linux) + T97 -> (mac + linux) + T98 -> (windows) + T99 -> (linux) + T100 -> (mac) + T101 -> (wsl) + T102 -> (mac) + T103 -> (mac) + T104 -> (mac + linux + wsl) + T105 -> (linux) + T106 -> (linux) + T107 -> (linux) + T108 -> (linux) + T109 -> (linux) + T110 -> (linux) + T111 -> (linux) + T112 -> (linux) + T113 -> (mac) + T114 -> (mac) + T115 -> (windows) + T116 -> (windows) + T117 -> (windows) + T118 -> (windows) + T119 -> (mac) + T120 -> (mac) + T121 -> (mac) + T122 -> (mac) + T123 -> (mac) + T124 -> (mac) + T125 -> (mac) + T126 -> (mac) + T127 -> (mac) + T128 -> (mac + linux + windows + wsl) + T129 -> (mac + linux + windows + wsl) + T130 -> (mac + linux + windows + wsl) + T131 -> (mac + linux + windows + wsl) + T132 -> (mac + linux + windows + wsl) + T133 -> (mac + linux + windows + wsl) + T134 -> (mac + linux + windows + wsl) }
-fun plantedEmptyFiles: Hook -> Target { H0 -> T128 + H1 -> T129 + H2 -> T130 + H3 -> T131 + H4 -> T132 + H5 -> T133 + H6 -> T134 }
-fun plantedEmptyAt: Retired -> Path { R0 -> P26 + R1 -> P31 + R2 -> P49 + R3 -> P50 + R4 -> P57 + R5 -> P58 + R6 -> P59 + R7 -> P60 + R8 -> P80 + R9 -> P81 + R10 -> P82 + R11 -> P83 + R12 -> P84 + R13 -> P87 + R14 -> P88 + R15 -> P99 + R16 -> P106 + R17 -> P108 + R18 -> P121 + R19 -> P122 + R20 -> P131 + R21 -> P135 + R22 -> P136 + R23 -> P143 + R24 -> P145 + R25 -> P146 + R26 -> P152 + R27 -> P164 + R28 -> P171 + R29 -> P172 + R30 -> P173 + R31 -> P174 + R32 -> P175 + R33 -> P184 }
-fun plantedEmptyRemoves: Retired -> Profile { R0 -> (mac) + R1 -> (mac) + R2 -> (mac + linux + wsl) + R3 -> (mac + linux + wsl) + R4 -> (mac + linux + wsl) + R5 -> (mac + linux + wsl) + R6 -> (mac) + R7 -> (windows) + R8 -> (linux) + R9 -> (mac) + R10 -> (mac) + R11 -> (mac) + R12 -> (mac) + R13 -> (linux) + R14 -> (mac + linux) + R15 -> (mac + linux + wsl) + R16 -> (mac + linux + wsl) + R17 -> (mac) + R18 -> (linux) + R19 -> (linux) + R20 -> (mac + linux + wsl) + R21 -> (windows) + R22 -> (mac) + R23 -> (mac) + R24 -> (mac + linux + wsl) + R25 -> (windows) + R26 -> (mac) + R27 -> (windows) + R28 -> (windows) + R29 -> (windows) + R30 -> (windows) + R31 -> (windows) + R32 -> (windows) + R33 -> (mac) }
+fun plantedEmptyReceives: Target -> Profile { T0 -> (mac) + T1 -> (mac + linux + wsl) + T2 -> (linux) + T3 -> (mac + linux) + T4 -> (linux) + T5 -> (mac) + T6 -> (mac) + T7 -> (mac) + T8 -> (mac + linux) + T9 -> (mac) + T10 -> (mac) + T11 -> (mac) + T12 -> (mac) + T13 -> (linux) + T14 -> (mac + linux + wsl) + T15 -> (Profile) + T16 -> (mac + linux + wsl) + T17 -> (mac) + T18 -> (mac + linux + wsl) + T19 -> (mac + linux + wsl) + T20 -> (mac) + T21 -> (mac) + T22 -> (mac + linux) + T23 -> (mac + linux) + T24 -> (linux) + T25 -> (mac + linux + windows) + T26 -> (linux) + T27 -> (linux) + T28 -> (linux) + T29 -> (mac) + T30 -> (mac) + T31 -> (mac + linux + wsl) + T32 -> (mac + linux + wsl) + T33 -> (mac) + T34 -> (mac) + T35 -> (mac + linux) + T36 -> (mac) + T37 -> (mac) + T38 -> (mac + linux) + T39 -> (mac) + T40 -> (mac) + T41 -> (mac + linux + wsl) + T42 -> (mac + linux + wsl) + T43 -> (linux) + T44 -> (linux) + T45 -> (linux) + T46 -> (mac) + T47 -> (mac) + T48 -> (mac + linux + wsl) + T49 -> (mac + linux + wsl) + T50 -> (mac + linux) + T51 -> (mac + linux) + T52 -> (mac + linux) + T53 -> (mac) + T54 -> (mac + linux) + T55 -> (mac + linux) + T56 -> (mac + linux) + T57 -> (mac + linux) + T58 -> (mac + linux + windows) + T59 -> (mac + linux + windows) + T60 -> (linux + wsl) + T61 -> (linux) + T62 -> (linux) + T63 -> (linux) + T64 -> (linux) + T65 -> (linux) + T66 -> (linux) + T67 -> (linux) + T68 -> (linux) + T69 -> (wsl) + T70 -> (wsl) + T71 -> (linux) + T72 -> (linux) + T73 -> (linux) + T74 -> (linux) + T75 -> (linux) + T76 -> (windows) + T77 -> (windows) + T78 -> (linux) + T79 -> (linux) + T80 -> (mac + linux + wsl) + T81 -> (windows) + T82 -> (mac + linux) + T83 -> (mac + linux) + T84 -> (windows) + T85 -> (linux) + T86 -> (mac) + T87 -> (wsl) + T88 -> (mac) + T89 -> (mac) + T90 -> (mac + linux + wsl) + T91 -> (linux) + T92 -> (linux) + T93 -> (linux) + T94 -> (linux) + T95 -> (linux) + T96 -> (linux) + T97 -> (linux) + T98 -> (linux) + T99 -> (mac) + T100 -> (mac) + T101 -> (windows) + T102 -> (windows) + T103 -> (windows) + T104 -> (windows) + T105 -> (mac) + T106 -> (mac) + T107 -> (mac) + T108 -> (mac) + T109 -> (mac) + T110 -> (mac) + T111 -> (mac) + T112 -> (mac) + T113 -> (mac) + T114 -> (mac + linux + windows + wsl) + T115 -> (mac + linux + windows + wsl) + T116 -> (mac + linux + windows + wsl) + T117 -> (mac + linux + windows + wsl) + T118 -> (mac + linux + windows + wsl) + T119 -> (mac + linux + windows + wsl) + T120 -> (mac + linux + windows + wsl) }
+fun plantedEmptyFiles: Hook -> Target { H0 -> T114 + H1 -> T115 + H2 -> T116 + H3 -> T117 + H4 -> T118 + H5 -> T119 + H6 -> T120 }
+fun plantedEmptyAt: Retired -> Path { R0 -> P25 + R1 -> P30 + R2 -> P48 + R3 -> P49 + R4 -> P56 + R5 -> P57 + R6 -> P58 + R7 -> P59 + R8 -> P77 + R9 -> P78 + R10 -> P79 + R11 -> P80 + R12 -> P81 + R13 -> P84 + R14 -> P85 + R15 -> P88 + R16 -> P92 + R17 -> P94 + R18 -> P107 + R19 -> P108 + R20 -> P117 + R21 -> P121 + R22 -> P129 + R23 -> P131 + R24 -> P132 + R25 -> P138 + R26 -> P150 + R27 -> P157 + R28 -> P158 + R29 -> P159 + R30 -> P160 + R31 -> P161 + R32 -> P170 }
+fun plantedEmptyRemoves: Retired -> Profile { R0 -> (mac) + R1 -> (mac) + R2 -> (mac + linux + wsl) + R3 -> (mac + linux + wsl) + R4 -> (mac + linux + wsl) + R5 -> (mac + linux + wsl) + R6 -> (mac) + R7 -> (windows) + R8 -> (linux) + R9 -> (mac) + R10 -> (mac) + R11 -> (mac) + R12 -> (mac) + R13 -> (linux) + R14 -> (mac + linux) + R15 -> (mac + linux + wsl) + R16 -> (mac + linux + wsl) + R17 -> (mac) + R18 -> (linux) + R19 -> (linux) + R20 -> (mac + linux + wsl) + R21 -> (windows) + R22 -> (mac) + R23 -> (mac + linux + wsl) + R24 -> (windows) + R25 -> (mac) + R26 -> (windows) + R27 -> (windows) + R28 -> (windows) + R29 -> (windows) + R30 -> (windows) + R31 -> (windows) + R32 -> (mac) }
 pred plantedEmpty { checks/tree[parents] and checks/unique[paths] }
 
 Real_disjoint: check { real implies checks/disjoint[realReceives, paths, parents, realRemoves, realAt] } for 4

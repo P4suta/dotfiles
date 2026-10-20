@@ -321,7 +321,10 @@ fn health(session: bool) -> Result<()> {
 }
 
 fn main() {
-    if let Err(error) = run() {
+    // `dotfiles doctor` reads the installed runtime's build identity to tell whether it matches the applied source.
+    let result = dotfiles::freshness::print_build_identity()
+        .and_then(|printed| if printed { Ok(()) } else { run() });
+    if let Err(error) = result {
         dotfiles::report(&error);
         std::process::exit(1);
     }
