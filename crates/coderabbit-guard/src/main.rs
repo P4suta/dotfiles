@@ -9,9 +9,13 @@ fn main() {
         platform::home::home()
             .ok_or_else(|| anyhow::anyhow!("user directory is unavailable"))
             .and_then(|directory| {
-                coderabbit_guard::freshness::require_current(
-                    coderabbit_guard::freshness::Built::Coderabbit,
-                )?;
+                if let coderabbit_guard::freshness::Start::Delegated(code) =
+                    coderabbit_guard::freshness::start(
+                        coderabbit_guard::freshness::Built::Coderabbit,
+                    )?
+                {
+                    return Ok(code);
+                }
                 let args = std::env::args_os()
                     .skip(1)
                     .map(|arg| {

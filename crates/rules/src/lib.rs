@@ -48,6 +48,7 @@ pub mod ignore_rules;
 pub mod incident_rules;
 pub mod input_rules;
 pub mod instruction_rules;
+pub mod issue_guard_rules;
 pub mod legacy_rules;
 pub mod lint_rules;
 pub mod next_action_rules;

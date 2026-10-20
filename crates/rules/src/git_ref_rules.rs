@@ -20,10 +20,36 @@ pub const fn throwaway_admits(under_temporary: Option<bool>, pushes: bool) -> bo
     matches!(under_temporary, Some(true)) && !pushes
 }
 
+/// Whether the guard admits `git checkout --force -- <paths>`, which Lefthook runs to hide the unstaged hunks of partly staged files.
+/// Only the bare pathspec form qualifies, and only when Lefthook's saved patch holds every unstaged change of those paths, so the owner keeps every hunk it discards.
+#[must_use]
+pub const fn saved_discard_admits(pathspec_only: bool, saved: Option<bool>) -> bool {
+    pathspec_only && matches!(saved, Some(true))
+}
+
 /// The properties Kani proves for every input and the tests check over every input they list.
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_saved_discard(pathspec_only: bool, saved: Option<bool>) {
+        assert_eq!(
+            saved_discard_admits(pathspec_only, saved),
+            pathspec_only && saved == Some(true)
+        );
+        assert!(!saved_discard_admits(false, saved));
+        assert!(!saved_discard_admits(pathspec_only, None));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn a_forced_checkout_passes_only_when_its_discarded_hunks_are_saved() {
+        let pathspec_only: bool = kani::any();
+        let saved: Option<bool> = kani::any();
+        spec_saved_discard(pathspec_only, saved);
+        kani::cover!(saved_discard_admits(pathspec_only, saved));
+        kani::cover!(!saved_discard_admits(pathspec_only, saved));
+    }
 
     pub fn spec_deletable(name: &[u8]) {
         let full = name.get(..REFS.len()) == Some(REFS);
@@ -89,6 +115,7 @@ mod tests {
         for under_temporary in [None, Some(false), Some(true)] {
             for pushes in [false, true] {
                 proofs::spec_throwaway(under_temporary, pushes);
+                proofs::spec_saved_discard(pushes, under_temporary);
             }
         }
     }

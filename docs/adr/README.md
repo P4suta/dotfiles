@@ -85,5 +85,6 @@
 | [2026-10-19 Make native verification optional before publication](optional-native-verification-before-publication.md) | accepted |  |
 | [2026-10-19 Repository owner assessments for bot pull requests](repository-owner-assessments-for-bot-pull-requests.md) | proposed |  |
 | [2026-10-20 Admit Git operations that lose no owner work](admit-tool-owned-and-throwaway-git-operations.md) | accepted |  |
+| [2026-10-20 Keep parallel worktrees independent](keep-parallel-worktrees-independent.md) | accepted |  |
 | [2026-10-20 Keep workflow evidence on the owner's machines](keep-workflow-evidence-local.md) | accepted |  |
 | [2026-10-20 Keep every managed behavior the same on every host](same-behavior-on-every-host.md) | accepted |  |

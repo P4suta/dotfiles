@@ -1931,8 +1931,8 @@ fn system_root() -> PathBuf {
 }
 
 fn program_files() -> PathBuf {
-    const DEFAULT: &str = "C:/Program Files";
-    std::env::var_os("ProgramFiles").map_or_else(|| DEFAULT.into(), PathBuf::from)
+    std::env::var_os("ProgramFiles")
+        .map_or_else(|| crate::home::DEFAULT_PROGRAM_FILES.into(), PathBuf::from)
 }
 
 fn base_directories() -> Vec<PathBuf> {
