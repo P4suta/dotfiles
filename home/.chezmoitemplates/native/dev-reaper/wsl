@@ -1,0 +1,2 @@
+{{- /* WSL reaps the containers of the engine its Docker CLI reaches with the Linux values. */ -}}
+{{- include ".chezmoitemplates/native/dev-reaper/linux" -}}

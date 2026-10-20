@@ -16,6 +16,7 @@ pub mod integrations;
 pub mod issue_guard;
 pub mod legacy;
 pub mod line_endings;
+pub mod maintenance;
 pub mod notifications;
 pub mod profiles;
 pub mod ready_push;
