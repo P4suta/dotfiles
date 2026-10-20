@@ -60,7 +60,7 @@ paths = [
   "home/dot_profile.tmpl",
   "home/dot_zprofile.tmpl",
   "home/dot_zshrc.tmpl",
-  "home/.chezmoitemplates/native/bashrc/mac",
+  "home/.chezmoitemplates/native/bashrc/mac.tmpl",
   "home/.chezmoitemplates/native/bashrc/linux.tmpl",
   "home/.chezmoitemplates/native/bashrc/wsl.tmpl",
   "**/*.sh.tmpl",

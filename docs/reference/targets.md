@@ -15,16 +15,12 @@ A target missing from the first table reaches every profile.
 | `.claude/skills/orbstack` | mac | mac |
 | `.config/atuin` | unix | mac, linux, wsl |
 | `.config/atuin/config.toml` | unix | mac, linux, wsl |
-| `.config/bat` | mac | mac |
-| `.config/bat/config` | mac | mac |
 | `.config/dev-reaper` | unix | mac, linux, wsl |
 | `.config/dev-reaper/config` | unix | mac, linux, wsl |
 | `.config/dotfiles-nix` | linux | linux |
 | `.config/fcitx5` | linux | linux |
 | `.config/fcitx5/config` | linux | linux |
 | `.config/fcitx5/profile` | linux | linux |
-| `.config/fzf` | mac | mac |
-| `.config/fzf/fzfrc` | mac | mac |
 | `.config/gh` | unix | mac, linux, wsl |
 | `.config/gh/config.yml` | unix | mac, linux, wsl |
 | `.config/ghostty` | mac | mac |
@@ -40,8 +36,8 @@ A target missing from the first table reaches every profile.
 | `.config/kitty` | linux | linux |
 | `.config/kitty/kitty.conf` | linux | linux |
 | `.config/kitty/tokyo-night.conf` | linux | linux |
-| `.config/lazygit` | mac | mac |
-| `.config/lazygit/config.yml` | mac | mac |
+| `.config/lazygit` | unix | mac, linux, wsl |
+| `.config/lazygit/config.yml` | unix | mac, linux, wsl |
 | `.config/mise/tasks` | unix | mac, linux, wsl |
 | `.config/mise/tasks/git-audit` | unix | mac, linux, wsl |
 | `.config/nushell` | desktop | mac, linux |
@@ -92,6 +88,7 @@ A target missing from the first table reaches every profile.
 | `.zprofile` | mac | mac |
 | `.zshrc` | mac | mac |
 | `AppData` | windows | windows |
+| `AppData/Local/lazygit/config.yml` | windows | windows |
 | `AppData/Roaming/herdr/config.toml` | windows | windows |
 | `Documents` | windows | windows |
 | `Documents/PowerShell/Microsoft.PowerShell_profile.ps1` | windows | windows |

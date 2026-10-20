@@ -68,12 +68,26 @@ personal = []
 work = []
 
 [platforms.windows.tools]
-common = ["python", "cargo:cargo-edit", "deno", "yamllint", "doppler"]
+common = [
+  "python",
+  "cargo:cargo-edit",
+  "deno",
+  "yamllint",
+  "doppler",
+  "bottom",
+  "ghq",
+  "yazi",
+  "vivid",
+  "aqua:noborus/ov",
+]
 personal = []
 work = []
 
 [platforms.wsl.tools]
 common = [
+  "ghq",
+  "yazi",
+  "aqua:noborus/ov",
   "ast-grep",
   "bat",
   "eza",

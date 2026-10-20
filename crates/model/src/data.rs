@@ -35,6 +35,111 @@ pub struct Data {
     pub scripts: Option<BTreeMap<String, String>>,
     /// The modern command-line tools that replace legacy ones for agents, pinned on every profile.
     pub modern: Option<Modern>,
+    /// The interactive behavior every shell a profile configures renders in its own syntax.
+    pub shell: Option<Shell>,
+}
+
+/// The shortcuts, functions, history, line editing keys, and pager and editor variables of every interactive shell.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Shell {
+    /// Commands each shell keeps in its history, which PowerShell caps at its own limit.
+    pub history_size: u32,
+    pub edit_mode: EditMode,
+    /// Editors in order of preference, each with its options, of which a host takes the first it finds.
+    pub editors: Vec<String>,
+    pub fallback_editor: FallbackEditor,
+    pub pager: String,
+    /// The `LESS` options for the programs that still page through less.
+    pub less: String,
+    pub keys: Vec<ShellKey>,
+    pub aliases: Vec<ShellAlias>,
+    pub functions: Vec<ShellFunction>,
+}
+
+/// The line editor mode of every shell.
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EditMode {
+    #[default]
+    Vi,
+    Emacs,
+}
+
+/// The editor of a host that has none of the preferred editors, for each OS family.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct FallbackEditor {
+    pub unix: String,
+    pub windows: String,
+}
+
+/// One insert-mode key and the action every shell binds it to.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShellKey {
+    pub chord: Chord,
+    pub action: KeyAction,
+}
+
+/// A key chord that every shell's line editor can bind.
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq, Serialize)]
+pub enum Chord {
+    #[default]
+    #[serde(rename = "alt+left")]
+    AltLeft,
+    #[serde(rename = "alt+right")]
+    AltRight,
+    #[serde(rename = "alt+b")]
+    AltB,
+    #[serde(rename = "alt+f")]
+    AltF,
+    #[serde(rename = "alt+backspace")]
+    AltBackspace,
+    #[serde(rename = "ctrl+left")]
+    CtrlLeft,
+    #[serde(rename = "ctrl+right")]
+    CtrlRight,
+    #[serde(rename = "ctrl+a")]
+    CtrlA,
+    #[serde(rename = "ctrl+e")]
+    CtrlE,
+    #[serde(rename = "ctrl+k")]
+    CtrlK,
+    #[serde(rename = "ctrl+u")]
+    CtrlU,
+    #[serde(rename = "ctrl+w")]
+    CtrlW,
+}
+
+/// A line editing action that every shell's line editor provides.
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyAction {
+    #[default]
+    WordLeft,
+    WordRight,
+    KillWord,
+    KillToStart,
+    KillToEnd,
+    LineStart,
+    LineEnd,
+}
+
+/// A shortcut that stands for one command and its options.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShellAlias {
+    pub name: String,
+    pub command: String,
+}
+
+/// A function that each shell defines in its own syntax, because it changes the directory or asks for a choice.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShellFunction {
+    pub name: String,
+    pub summary: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
