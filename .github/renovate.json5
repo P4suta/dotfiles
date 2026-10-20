@@ -6,6 +6,8 @@
   minimumReleaseAge: '3 days',
   // Version changes arrive only through these managers, as pull requests that pass the required checks.
   enabledManagers: ['github-actions', 'mise', 'cargo', 'dockerfile', 'custom.regex'],
+  // Renovate finds no conda result for zsh, so zsh moves by hand.
+  ignoreDeps: ['conda:zsh'],
   customManagers: [
     {
       // Each pin in versions.toml that a `renovate:` comment precedes, with the lookup that comment names.
