@@ -15,8 +15,6 @@ A target missing from the first table reaches every profile.
 | `.claude/skills/orbstack` | mac | mac |
 | `.config/atuin` | unix | mac, linux, wsl |
 | `.config/atuin/config.toml` | unix | mac, linux, wsl |
-| `.config/bat` | mac | mac |
-| `.config/bat/config` | mac | mac |
 | `.config/dev-reaper` | desktop | mac, linux |
 | `.config/dev-reaper/config` | desktop | mac, linux |
 | `.config/dotfiles-nix` | linux | linux |
@@ -25,8 +23,6 @@ A target missing from the first table reaches every profile.
 | `.config/fcitx5` | linux | linux |
 | `.config/fcitx5/config` | linux | linux |
 | `.config/fcitx5/profile` | linux | linux |
-| `.config/fzf` | mac | mac |
-| `.config/fzf/fzfrc` | mac | mac |
 | `.config/gh` | unix | mac, linux, wsl |
 | `.config/gh/config.yml` | unix | mac, linux, wsl |
 | `.config/ghostty` | mac | mac |

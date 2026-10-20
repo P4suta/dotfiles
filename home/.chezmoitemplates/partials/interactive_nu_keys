@@ -1,0 +1,26 @@
+{{- /*
+  The insert-mode keys from shell.toml as Nushell keybinding records, which both Nushell configurations include inside `keybindings: [...]`.
+  Rendering fails when a key or action in shell.toml lacks its translation here.
+*/ -}}
+{{- $keys := dict
+  "alt+left" "modifier: alt, keycode: left" "alt+right" "modifier: alt, keycode: right"
+  "alt+b" "modifier: alt, keycode: char_b" "alt+f" "modifier: alt, keycode: char_f"
+  "alt+backspace" "modifier: alt, keycode: backspace"
+  "ctrl+left" "modifier: control, keycode: left" "ctrl+right" "modifier: control, keycode: right"
+  "ctrl+a" "modifier: control, keycode: char_a" "ctrl+e" "modifier: control, keycode: char_e"
+  "ctrl+k" "modifier: control, keycode: char_k" "ctrl+u" "modifier: control, keycode: char_u"
+  "ctrl+w" "modifier: control, keycode: char_w" -}}
+{{- $events := dict
+  "word_left" "{ edit: movewordleft }"
+  "word_right" "{ until: [{ send: historyhintwordcomplete } { edit: movewordright }] }"
+  "kill_word" "{ edit: backspaceword }"
+  "kill_to_start" "{ edit: cutfromlinestart }"
+  "kill_to_end" "{ edit: cuttolineend }"
+  "line_start" "{ edit: movetolinestart }"
+  "line_end" "{ until: [{ send: historyhintcomplete } { edit: movetolineend }] }" -}}
+{{- range .shell.keys }}
+{{-   $key := index $keys .chord }}
+{{-   $event := index $events .action }}
+{{-   if or (not $key) (not $event) }}{{ fail (printf "interactive_nu_keys lacks the translation of %s %s" .chord .action) }}{{ end }}
+    { name: {{ .action }}_{{ .chord | replace "+" "_" }}, {{ $key }}, mode: [emacs, vi_insert], event: {{ $event }} }
+{{- end }}

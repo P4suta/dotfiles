@@ -1,0 +1,66 @@
+{{- /*
+  The interactive behavior from shell.toml in PowerShell syntax, which the PowerShell profile includes after it loads PSReadLine.
+  Rendering fails when a key, action, or function in shell.toml lacks its translation here.
+*/ -}}
+{{- $shell := .shell -}}
+{{- $vi := eq $shell.edit_mode "vi" -}}
+{{- $chords := dict
+  "alt+left" "Alt+LeftArrow" "alt+right" "Alt+RightArrow" "alt+b" "Alt+b" "alt+f" "Alt+f" "alt+backspace" "Alt+Backspace"
+  "ctrl+left" "Ctrl+LeftArrow" "ctrl+right" "Ctrl+RightArrow"
+  "ctrl+a" "Ctrl+a" "ctrl+e" "Ctrl+e" "ctrl+k" "Ctrl+k" "ctrl+u" "Ctrl+u" "ctrl+w" "Ctrl+w" -}}
+{{- $functions := dict
+  "word_left" "BackwardWord" "word_right" "ForwardWord" "kill_word" "BackwardKillWord"
+  "kill_to_start" "BackwardDeleteLine" "kill_to_end" "ForwardDeleteLine" "line_start" "BeginningOfLine" "line_end" "EndOfLine" -}}
+{{- $defined := list "mkcd" "y" "proj" -}}
+{{- range $shell.functions }}
+{{-   if not (has .name $defined) }}{{ fail (printf "interactive_pwsh lacks the shell.toml function %s" .name) }}{{ end }}
+{{- end -}}
+{{- $editor := "" -}}
+{{- range $shell.editors -}}
+{{-   if and (not $editor) (lookPath (index (splitList " " .) 0)) }}{{ $editor = . }}{{ end -}}
+{{- end -}}
+{{- if not $editor }}{{ $editor = $shell.fallback_editor.windows }}{{ end -}}
+# Line editing in {{ $shell.edit_mode }} mode, with the insert-mode keys every shell binds.
+# PowerShell keeps at most 32767 history entries.
+Set-PSReadLineOption -EditMode {{ ternary "Vi" "Emacs" $vi }} -MaximumHistoryCount {{ min 32767 $shell.history_size }} -HistoryNoDuplicates -HistorySaveStyle SaveIncrementally
+{{- range $shell.keys }}
+{{-   $chord := index $chords .chord }}
+{{-   $function := index $functions .action }}
+{{-   if or (not $chord) (not $function) }}{{ fail (printf "interactive_pwsh lacks the translation of %s %s" .chord .action) }}{{ end }}
+Set-PSReadLineKeyHandler {{ if $vi }}-ViMode Insert {{ end }}-Chord '{{ $chord }}' -Function {{ $function }}
+{{- end }}
+
+$env:EDITOR = {{ includeTemplate "partials/ps_quote" $editor }}
+$env:VISUAL = $env:EDITOR
+$env:PAGER = {{ includeTemplate "partials/ps_quote" $shell.pager }}
+$env:LESS = {{ includeTemplate "partials/ps_quote" $shell.less }}
+$env:BAT_CONFIG_PATH = Join-Path $HOME '.config\bat\config'
+$env:FZF_DEFAULT_OPTS_FILE = Join-Path $HOME '.config\fzf\fzfrc'
+
+{{ range $shell.aliases -}}
+Remove-Item -Force -ErrorAction Ignore -LiteralPath 'Alias:{{ .name }}'
+function {{ .name }} { {{ .command }} @args }
+{{ end }}
+function mkcd([string]$Path) {
+    New-Item -ItemType Directory -Force -Path $Path | Out-Null
+    Set-Location -LiteralPath $Path
+}
+
+function y {
+    $cwdFile = New-TemporaryFile
+    yazi @args --cwd-file="$cwdFile"
+    $cwd = (Get-Content -Raw -LiteralPath $cwdFile).Trim()
+    Remove-Item -Force -LiteralPath $cwdFile
+    if ($cwd -and $cwd -ne $PWD.Path) {
+        Set-Location -LiteralPath $cwd
+    }
+}
+
+function proj {
+    $target = ghq list --full-path | fzf --prompt 'repo> ' --exact --select-1 --exit-0 --query "$args"
+    if ($target) {
+        Set-Location -LiteralPath $target
+    } else {
+        'no repository matched'
+    }
+}
