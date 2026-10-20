@@ -109,16 +109,28 @@ impl Real {
 
     fn prepare_hook(&self, command: Command, codex: bool) -> Command {
         let mut command = self.prepare(command, codex);
-        command.env(
-            "CARGO_TARGET_DIR",
-            hook_target(
-                std::env::var_os("CARGO_TARGET_DIR")
-                    .map(PathBuf::from)
-                    .as_deref(),
-                std::env::var_os("TEMP").map(PathBuf::from).as_deref(),
-                &self.home,
-            ),
+        let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
+        let start = self
+            .directory
+            .clone()
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| self.home.clone());
+        let checkout = hook_checkout(&start);
+        let target = hook_target(
+            configured.as_deref(),
+            std::env::var_os("TEMP").map(PathBuf::from).as_deref(),
+            &self.home,
+            &checkout,
         );
+        if configured.as_deref() != Some(target.as_path())
+            && let Err(error) = claim_hook_target(&target, &checkout)
+        {
+            eprintln!(
+                "dotfiles: storage-scout can't reap {} later: {error:#}",
+                target.display()
+            );
+        }
+        command.env("CARGO_TARGET_DIR", target);
         command
     }
 
@@ -245,9 +257,82 @@ pub const MISE_SESSION: &[&str] = &[
     "MISE_SHELL",
 ];
 
-/// The Cargo target directory every hook gate shares, so a linked worktree never keeps its own build.
+/// Where each checkout's hook build directory lives under the home directory.
+const HOME_TARGETS: &str = ".cache/dotfiles-targets";
+
+/// Where each checkout's hook build directory lives on the volume that holds `TEMP`.
+const VOLUME_TARGETS: &str = "cargo/dotfiles-targets";
+
+/// The hex digits of a checkout's path hash in the name of its hook build directory.
+const CHECKOUT_KEY_DIGITS: usize = 16;
+
+/// The storage-scout owner marker schema, whose `-temp-owner-v1` suffix storage-scout reads.
+const OWNER_SCHEMA: &str = "dotfiles-temp-owner-v1";
+
+/// A stable name for `checkout`: its directory name and the start of its Source root partition key.
 #[must_use]
-pub fn hook_target(configured: Option<&Path>, temp: Option<&Path>, home: &Path) -> PathBuf {
+pub fn checkout_key(checkout: &Path) -> String {
+    let name: String = checkout
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let digest = crate::cargo_target::source_key(checkout);
+    let short = digest.get(..CHECKOUT_KEY_DIGITS).unwrap_or(&digest);
+    format!("{name}-{short}")
+}
+
+/// The checkout a hook runs in: the nearest directory of `start` that holds a `.git` entry.
+#[must_use]
+pub fn hook_checkout(start: &Path) -> PathBuf {
+    let canonical = crate::paths::canonical(start).unwrap_or_else(|_| start.to_path_buf());
+    canonical
+        .ancestors()
+        .find(|directory| directory.join(".git").exists())
+        .map_or_else(|| canonical.clone(), Path::to_path_buf)
+}
+
+/// Marks `target` as a cache of `checkout` for storage-scout, which reaps it once the checkout disappears.
+///
+/// # Errors
+///
+/// Returns an error when writing the directory or its marker files fails.
+pub fn claim_hook_target(target: &Path, checkout: &Path) -> Result<()> {
+    fs::create_dir_all(target)?;
+    let marker = serde_json::to_vec(&serde_json::json!({
+        "schema": OWNER_SCHEMA,
+        "kept": false,
+        "role": "cache",
+        "keyed_to": checkout,
+    }))?;
+    let path = target.join("owner.json");
+    if fs::read(&path).ok().as_deref() != Some(marker.as_slice()) {
+        fs::write(&path, marker)?;
+    }
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(target.join("owner.lock"))?;
+    Ok(())
+}
+
+/// The Cargo target directory of one checkout's hook gates, outside its worktree.
+/// Each checkout keeps its own directory, because Cargo names a workspace's artifacts by workspace-relative paths and would reuse a sibling worktree's stale build.
+#[must_use]
+pub fn hook_target(
+    configured: Option<&Path>,
+    temp: Option<&Path>,
+    home: &Path,
+    checkout: &Path,
+) -> PathBuf {
     let volume = temp.and_then(|temp| {
         let mut parts = temp.components();
         match (parts.next(), parts.next()) {
@@ -264,8 +349,10 @@ pub fn hook_target(configured: Option<&Path>, temp: Option<&Path>, home: &Path) 
         volume,
     ) {
         (Target::Configured, Some(path), _) => path.to_path_buf(),
-        (Target::Development, _, Some(volume)) => volume.join("cargo/target"),
-        _ => home.join(".cache/dotfiles-target"),
+        (Target::Development, _, Some(volume)) => {
+            volume.join(VOLUME_TARGETS).join(checkout_key(checkout))
+        }
+        _ => home.join(HOME_TARGETS).join(checkout_key(checkout)),
     }
 }
 

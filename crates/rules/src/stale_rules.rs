@@ -56,10 +56,43 @@ pub const fn reinstalls(recorded: bool, source_matches: bool, recorded_matches: 
     recorded && source_matches && !recorded_matches
 }
 
+/// A stale tool that runs inside a dotfiles checkout builds that checkout's sources and runs the build once, instead of refusing.
+/// Parallel worktrees then never reinstall one shared binary over each other.
+/// A checkout named by a caller, the checkout that built the tool, and a run that already came from a checkout's build keep the refusal.
+#[must_use]
+pub const fn delegates(freshness: Freshness, origin: Origin, delegated: bool) -> bool {
+    matches!(freshness, Freshness::Stale) && matches!(origin, Origin::WorkingCopy) && !delegated
+}
+
 /// The properties Kani proves for every input and the tests check over every input they list.
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_delegates(state: Freshness, chosen: Origin, delegated: bool) {
+        let handed = delegates(state, chosen, delegated);
+        assert_eq!(
+            handed,
+            state == Freshness::Stale && chosen == Origin::WorkingCopy && !delegated
+        );
+        assert!(!handed || !runs(state));
+        assert!(!delegates(state, Origin::Explicit, delegated));
+        assert!(!delegates(state, Origin::BuildCheckout, delegated));
+        assert!(!delegates(state, chosen, true));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_a_stale_build_inside_its_working_copy_hands_the_run_to_that_checkout_once() {
+        let state = freshness(kani::any(), kani::any());
+        let Some(chosen) = origin(kani::any(), kani::any(), true) else {
+            return;
+        };
+        let delegated: bool = kani::any();
+        spec_delegates(state, chosen, delegated);
+        kani::cover!(delegates(state, chosen, delegated));
+        kani::cover!(!delegates(state, chosen, delegated));
+    }
 
     pub fn spec_freshness(found: bool, matching: bool) {
         let state = freshness(found, matching);
@@ -137,6 +170,11 @@ mod tests {
         for [explicit, working, built] in flags() {
             super::proofs::spec_origin(explicit, working, built);
             super::proofs::spec_reinstalls(explicit, working, built);
+        }
+        for [found, matching, explicit, working, delegated] in flags() {
+            if let Some(chosen) = super::origin(explicit, working, true) {
+                super::proofs::spec_delegates(super::freshness(found, matching), chosen, delegated);
+            }
         }
     }
 }

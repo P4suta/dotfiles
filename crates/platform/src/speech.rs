@@ -22,6 +22,10 @@ const QUEUE_LOCK: &str = "queue.lock";
 const WORKER_LOCK: &str = "worker.lock";
 const WAITING: &str = "waiting";
 pub const INTERNAL: &str = "DOTFILES_NOTIFICATION_INTERNAL";
+/// Windows PowerShell where WSL's default automount places the Windows system drive.
+pub const WSL_POWERSHELL: &str = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+/// The variable that names a WSL session's distribution.
+const WSL_DISTRIBUTION: &str = "WSL_DISTRO_NAME";
 const MAX_LEDGER: usize = 64;
 const MAX_STATE_BYTES: u64 = 16_384;
 const HEX_RADIX: u8 = 16;
@@ -160,6 +164,14 @@ pub fn frequency(home: &Path) -> io::Result<Frequency> {
     }
 }
 
+/// The Windows PowerShell that plays a clip on the Windows desktop of a WSL session, or `None` outside WSL or without Windows interop.
+#[must_use]
+pub fn wsl_windows_player() -> Option<std::path::PathBuf> {
+    (cfg!(target_os = "linux") && std::env::var_os(WSL_DISTRIBUTION).is_some())
+        .then(|| std::path::PathBuf::from(WSL_POWERSHELL))
+        .filter(|player| player.is_file())
+}
+
 #[must_use]
 pub fn desktop() -> Desktop {
     if [
@@ -167,13 +179,20 @@ pub fn desktop() -> Desktop {
         "SSH_TTY",
         "CI",
         "DOTFILES_HOST_CACHE",
-        "WSL_DISTRO_NAME",
         INTERNAL,
     ]
     .iter()
     .any(|name| std::env::var_os(name).is_some())
     {
         return Desktop::Headless;
+    }
+    // A WSL session sits on the Windows desktop, which plays its clips even without a WSLg display.
+    if std::env::var_os(WSL_DISTRIBUTION).is_some() {
+        return if wsl_windows_player().is_some() {
+            Desktop::Present
+        } else {
+            Desktop::Headless
+        };
     }
     if cfg!(target_os = "linux")
         && std::env::var_os("DISPLAY").is_none()

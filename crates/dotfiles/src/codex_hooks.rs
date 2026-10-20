@@ -132,6 +132,7 @@ fn capture(
     let mut child = match child {
         Ok(child) => child,
         Err(error) => {
+            crate::hook_failures::record(name, &error.to_string());
             record(
                 path,
                 &id,
@@ -156,6 +157,10 @@ fn capture(
         .stderr
         .get(..DIAGNOSTIC_BYTES)
         .unwrap_or(&output.stderr);
+    // A child that a signal ended can't record its own failure, and a `dotfiles` child records every other one.
+    if output.status.code().is_none() {
+        crate::hook_failures::record(name, &format!("the hook ended with {}", output.status));
+    }
     record(
         path,
         &id,

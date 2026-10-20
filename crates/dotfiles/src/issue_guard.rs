@@ -199,6 +199,15 @@ pub fn check(input: &str) -> Result<()> {
         }
     }
     for (root, mutations) in &checkouts {
+        let has_remote = platform::issue_context::git(root, &["remote"], None)
+            .ok()
+            .map(|remotes| !remotes.trim().is_empty());
+        let local_provider = platform::home::home()
+            .and_then(|home| platform::local_issues::active_for(root, &home).ok())
+            .unwrap_or(true);
+        if !crate::issue_guard_rules::needs_issue_context(has_remote, local_provider) {
+            continue;
+        }
         platform::issue_context::guard(root, mutations).map_err(|error| {
             platform::refusal::Refusal::new(
                 "pr.issue-context",
@@ -222,6 +231,7 @@ pub fn hook() -> Result<i32> {
             platform::report(&error);
             if error.downcast_ref::<platform::refusal::Refusal>().is_none() {
                 eprintln!("{}", platform::refusal::DEFECT);
+                crate::hook_failures::record("issue-guard", &format!("{error:#}"));
             }
             Ok(BLOCK)
         }
@@ -232,16 +242,31 @@ pub fn hook() -> Result<i32> {
 mod tests {
     use super::*;
 
+    /// A fixture remote on GitHub, which makes a checkout publishable.
+    const GITHUB_REMOTE: &str = "https://github.com/owner/fixture.git";
+
+    /// A new repository at `path`, with a GitHub `origin` when `published`.
+    fn repository(path: &Path, published: bool) -> Result<()> {
+        std::fs::create_dir_all(path)?;
+        let mut steps = vec![vec!["init", "--quiet"]];
+        if published {
+            steps.push(vec!["remote", "add", "origin", GITHUB_REMOTE]);
+        }
+        for step in steps {
+            let output = platform::process::command("git")
+                .args(&step)
+                .current_dir(path)
+                .output()?;
+            ensure!(output.status.success(), "{output:?}");
+        }
+        Ok(())
+    }
+
     #[test]
     fn an_existing_checkout_keeps_its_boundary_and_outside_sessions_find_new_paths() -> Result<()> {
         let scope = tempfile::tempdir()?;
         let repository = scope.path().join("repository");
-        std::fs::create_dir(&repository)?;
-        let initialized = platform::process::command("git")
-            .args(["init", "--quiet"])
-            .current_dir(&repository)
-            .output()?;
-        ensure!(initialized.status.success(), "{initialized:?}");
+        self::repository(&repository, true)?;
         let root = crate::canonical(&repository)?;
         let new = repository.join("new/directory/file.rs");
         assert_eq!(edit_checkout(&new)?, root);
@@ -257,12 +282,7 @@ mod tests {
         let session = scope.path().join("session");
         let other = scope.path().join("other");
         for repository in [&session, &other] {
-            std::fs::create_dir(repository)?;
-            let initialized = platform::process::command("git")
-                .args(["init", "--quiet"])
-                .current_dir(repository)
-                .output()?;
-            ensure!(initialized.status.success(), "{initialized:?}");
+            self::repository(repository, true)?;
         }
         let target = other.join("new.rs");
         assert_eq!(edit_checkout(&target)?, crate::canonical(&other)?);
@@ -285,12 +305,7 @@ mod tests {
     fn edits_from_outside_the_checkout_still_require_its_issue_authority() -> Result<()> {
         let scope = tempfile::tempdir()?;
         let repository = scope.path().join("repository");
-        std::fs::create_dir(&repository)?;
-        let initialized = platform::process::command("git")
-            .args(["init", "--quiet"])
-            .current_dir(&repository)
-            .output()?;
-        ensure!(initialized.status.success(), "{initialized:?}");
+        self::repository(&repository, true)?;
         let packet = serde_json::json!({
             "cwd": scope.path(),
             "tool_name": "apply_patch",
@@ -309,12 +324,7 @@ mod tests {
     fn an_edit_outside_every_checkout_needs_no_issue_context() -> Result<()> {
         let scope = tempfile::tempdir()?;
         let repository = scope.path().join("repository");
-        std::fs::create_dir(&repository)?;
-        let initialized = platform::process::command("git")
-            .args(["init", "--quiet"])
-            .current_dir(&repository)
-            .output()?;
-        ensure!(initialized.status.success(), "{initialized:?}");
+        self::repository(&repository, true)?;
         let outside = scope.path().join("config/new.yaml");
         for cwd in [scope.path(), repository.as_path()] {
             let packet = serde_json::json!({
@@ -341,6 +351,34 @@ mod tests {
             "tool_input": {"file_path": repository.join("target/scratch/probe.rs")}
         });
         check(&ignored.to_string())?;
+        Ok(())
+    }
+
+    #[test]
+    fn a_scratch_repository_without_a_remote_needs_no_issue_context() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let scratch = scope.path().join("scratch");
+        let published = scope.path().join("published");
+        self::repository(&scratch, false)?;
+        self::repository(&published, true)?;
+        let write = |path: PathBuf| {
+            serde_json::json!({
+                "cwd": scope.path(),
+                "tool_name": "Write",
+                "tool_input": {"file_path": path}
+            })
+            .to_string()
+        };
+        check(&write(scratch.join("src/probe.rs")))?;
+        let error = format!(
+            "{:#}",
+            check(&write(published.join("src/probe.rs"))).unwrap_err()
+        );
+        assert!(
+            error
+                .contains("implementation edits require a checked destination-bound issue context"),
+            "{error}"
+        );
         Ok(())
     }
 

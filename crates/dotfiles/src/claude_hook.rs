@@ -693,8 +693,9 @@ pub fn run(rewrite: bool) -> Result<()> {
             record(blocked);
             eprintln!("{}\n", blocked.message);
         }
-        if findings.iter().any(|blocked| blocked.rule == INSPECTION) {
+        if let Some(blocked) = findings.iter().find(|blocked| blocked.rule == INSPECTION) {
             eprintln!("{}", platform::refusal::DEFECT);
+            crate::hook_failures::record("claude-bash", &blocked.message);
         }
         eprintln!("{}", platform::refusal::IMPROVE);
         std::process::exit(BLOCK);

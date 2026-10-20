@@ -5,7 +5,7 @@
 
 use crate::build_inputs::content_hash;
 use crate::refusal::Refusal;
-use crate::stale_rules::{Origin, freshness, origin, reinstalls, runs};
+use crate::stale_rules::{Origin, delegates, freshness, origin, reinstalls, runs};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,16 @@ impl Built {
     pub const fn binary(self) -> &'static str {
         match self {
             Self::Coderabbit => "coderabbit",
+            Self::PrWorkflow => "pr-workflow",
+            Self::SkillOps => "skill-ops",
+        }
+    }
+
+    /// The workspace package that builds it.
+    #[must_use]
+    pub const fn package(self) -> &'static str {
+        match self {
+            Self::Coderabbit => "coderabbit-guard",
             Self::PrWorkflow => "pr-workflow",
             Self::SkillOps => "skill-ops",
         }
@@ -202,6 +212,94 @@ pub fn require_current(built: Built) -> Result<()> {
     let explicit = std::env::var_os(SOURCE_VARIABLE).map(PathBuf::from);
     let start = std::env::current_dir().ok();
     verify(built, &embedded(), explicit.as_deref(), start.as_deref())
+}
+
+/// Marks a run that a stale installed tool handed to its checkout's own build, so that build never hands it on again.
+pub const DELEGATED_VARIABLE: &str = "DOTFILES_CHECKOUT_BUILD";
+
+/// What a tool does after its freshness check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Start {
+    /// The build matches its sources, or no checkout shows otherwise, so the tool does its own work.
+    Run,
+    /// The build of the working copy ran with the same arguments and exited with this code.
+    Delegated(i32),
+}
+
+/// The check an installed tool makes first, which hands a run inside a stale working copy to that copy's own build.
+///
+/// # Errors
+///
+/// Returns a `tool.stale` refusal when the build lags a checkout it can't hand the run to, or an error when hashing or building fails.
+pub fn start(built: Built) -> Result<Start> {
+    let explicit = std::env::var_os(SOURCE_VARIABLE).map(PathBuf::from);
+    let start = std::env::current_dir().ok();
+    let stamp = embedded();
+    let located = locate(explicit.as_deref(), start.as_deref(), &stamp.root);
+    let matching = match &located {
+        Some((_, root)) => content_hash(root)? == stamp.hash,
+        None => false,
+    };
+    let state = freshness(located.is_some(), matching);
+    if runs(state) {
+        return Ok(Start::Run);
+    }
+    let (origin, root) = located.context("a stale build always has a checkout")?;
+    if delegates(
+        state,
+        origin,
+        std::env::var_os(DELEGATED_VARIABLE).is_some(),
+    ) {
+        return run_checkout_build(built, &root).map(Start::Delegated);
+    }
+    Err(stale(built, &stamp, origin, &root).into())
+}
+
+/// Builds `built` from `root` into that checkout's target and runs it with this process's arguments.
+fn run_checkout_build(built: Built, root: &Path) -> Result<i32> {
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .unwrap_or_else(|| root.join("target"));
+    let trusted = Tool::Mise
+        .command()
+        .args(["trust", "--quiet"])
+        .arg(root.join("mise.toml"))
+        .current_dir(root)
+        .status()
+        .context("mise could not trust the checkout")?;
+    ensure!(trusted.success(), "mise trust failed with {trusted}");
+    let status = Tool::Mise
+        .command()
+        .args(["x", "--", "cargo", "build", "--locked", "--quiet"])
+        .args(["--package", built.package(), "--bin", built.binary()])
+        .current_dir(root)
+        .env("CARGO_TARGET_DIR", &target)
+        .status()
+        .with_context(|| {
+            format!(
+                "building {} from {} failed to start",
+                built.binary(),
+                root.display()
+            )
+        })?;
+    ensure!(
+        status.success(),
+        "building {} from {} failed with {status}",
+        built.binary(),
+        root.display()
+    );
+    let program = target.join("debug").join(format!(
+        "{}{}",
+        built.binary(),
+        std::env::consts::EXE_SUFFIX
+    ));
+    let status = crate::process::repository_command(&program)
+        .args(std::env::args_os().skip(1))
+        .env(DELEGATED_VARIABLE, "1")
+        .status()
+        .with_context(|| format!("{} failed to start", program.display()))?;
+    Ok(status.code().unwrap_or(1))
 }
 
 fn record_path(home: &Path, built: Built) -> PathBuf {

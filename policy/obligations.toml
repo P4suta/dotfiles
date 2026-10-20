@@ -530,6 +530,55 @@ fn reject_refusing_a_tool_ref() {
 fn reject_admitting_a_push_from_a_throwaway_repository() {
     assert!(production::throwaway_admits(Some(true), true));
 }
+#[kani::proof]
+fn reject_admitting_a_forced_checkout_whose_hunks_were_never_saved() {
+    assert!(production::saved_discard_admits(true, Some(false)));
+}
+#[kani::proof]
+fn reject_admitting_a_forced_checkout_beyond_bare_pathspecs() {
+    assert!(production::saved_discard_admits(false, Some(true)));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/issue_guard_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_admitting_an_edit_in_a_published_checkout() {
+    assert!(!production::needs_issue_context(Some(true), false));
+}
+#[kani::proof]
+fn reject_admitting_an_edit_when_the_remote_is_unknown() {
+    assert!(!production::needs_issue_context(None, false));
+}
+#[kani::proof]
+fn reject_requiring_a_context_in_a_scratch_repository() {
+    assert!(production::needs_issue_context(Some(false), false));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/hook_failure_rules.rs"
+probes = '''
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_a_summary_that_drops_a_repeated_failure() {
+    let summaries = production::summarize(&[1_u8, 1]);
+    assert!(summaries.len() == 1 && summaries[0].count == 1);
+}
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_merging_two_hooks_into_one_summary() {
+    assert!(production::summarize(&[1_u8, 2]).len() == 1);
+}
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_reporting_the_first_cause_as_the_latest() {
+    let summaries = production::summarize(&[1_u8, 2, 1]);
+    assert!(summaries[0].latest == 0);
+}
 '''
 
 [[obligation]]
@@ -1718,6 +1767,18 @@ fn reject_rebuilding_from_a_foreign_checkout() {
 #[kani::proof]
 fn reject_skipping_changed_owned_sources() {
     assert!(!production::reinstalls(true, true, false));
+}
+#[kani::proof]
+fn reject_handing_a_named_checkout_to_its_build() {
+    assert!(production::delegates(production::freshness(true, false), production::Origin::Explicit, false));
+}
+#[kani::proof]
+fn reject_handing_a_handed_run_on_again() {
+    assert!(production::delegates(production::freshness(true, false), production::Origin::WorkingCopy, true));
+}
+#[kani::proof]
+fn reject_refusing_a_stale_working_copy() {
+    assert!(!production::delegates(production::freshness(true, false), production::Origin::WorkingCopy, false));
 }
 '''
 

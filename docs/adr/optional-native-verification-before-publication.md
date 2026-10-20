@@ -1,6 +1,7 @@
 ---
 date: 2026-10-19
-status: accepted
+status: amended
+changed_by: [gate-pull-requests-that-skip-local-hooks.md]
 ---
 # Make native verification optional before publication
 
@@ -8,6 +9,7 @@ status: accepted
 
 The owner accepted optional native checks and lightweight CI on 2026-10-19 under [issue 201](https://github.com/P4suta/dotfiles/issues/201).
 This amends the native publication prerequisite in [the earlier CI boundary](native-verification-with-lightweight-ci.md) and [OS family push evidence](0020-os-family-push-evidence.md).
+A [hosted dependency gate](gate-pull-requests-that-skip-local-hooks.md) later added a check for pull requests that skip the local hooks.
 
 ## Context
 

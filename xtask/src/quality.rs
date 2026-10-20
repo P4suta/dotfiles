@@ -20,7 +20,8 @@ const TEMP_ENVIRONMENT: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
 const HOSTS_PUSH_GATE: &str = "mise x -- just hosts gate {1} {2}";
 const CARGO_MANIFEST: &str = "Cargo.toml";
 const CARGO_LOCK: &str = "Cargo.lock";
-const CI_RESULTS_GUARD: &str = "test \"$RESULTS\" = success";
+/// The required job's refusal of every result other than success, for any number of needed jobs.
+const CI_RESULTS_GUARD: &str = "[[ \"$RESULTS\" =~ ^success( success)*$ ]]";
 const CI_READ_PERMISSION_COUNT: usize = 2;
 const LIGHTWEIGHT_JOBS: &str = r#"  check:
     name: required (${{ matrix.os }})
@@ -41,9 +42,34 @@ const LIGHTWEIGHT_JOBS: &str = r#"  check:
         shell: bash
         run: |
           printf '%s\n' 'Native checks follow the committed publication policy.' 'CI reports the checked-out source and does not rerun or attest native checks.'
+  dependencies:
+    name: dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Leave the owner's changes to the local gate
+        if: github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner
+        shell: bash
+        run: |
+          printf '%s\n' 'The local pre-push gate checks the owner'"'"'s changes, so this job checks only pull requests from others, such as Renovate updates.'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
+        with:
+          version: v2026.10.11
+          sha256: f9612efcddda0ae55b62d3b6f82a6c860d5b54ebee0807d4f1a1d578055e1607
+          install_args: rust just
+          cache: false
+      - name: Compile the workspace and check the toolchain pins
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
+        shell: bash
+        run: just dependency-gate
   required:
     name: required
-    needs: [check]
+    needs: [check, dependencies]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -53,7 +79,7 @@ const LIGHTWEIGHT_JOBS: &str = r#"  check:
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          test "$RESULTS" = success
+          [[ "$RESULTS" =~ ^success( success)*$ ]]
 "#;
 
 pub(crate) fn command(root: &Path, tool: Tool, arguments: &[&str]) -> Result<()> {
@@ -146,7 +172,7 @@ fn lightweight_findings(document: &yaml_rust2::Yaml) -> Result<Vec<String>> {
         .next()
         .context("the lightweight CI contract holds a document")?;
     if document["jobs"] != expected {
-        found.push("CI must only report source and native admission on all three operating systems and refuse unsuccessful jobs".into());
+        found.push("CI must report source and native admission on all three operating systems, gate pull requests from others, and refuse unsuccessful jobs".into());
     }
     Ok(found)
 }

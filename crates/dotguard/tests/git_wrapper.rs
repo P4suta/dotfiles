@@ -224,6 +224,63 @@ fn a_copy_named_git_refuses_destructive_commands_unless_waived() {
     assert!(log.lines().any(|line| line.contains("BYPASS")), "{log}");
 }
 
+/// Lefthook saves the unstaged hunks of partly staged files, then hides them with `checkout --force -- <paths>`.
+#[test]
+fn lefthooks_forced_checkout_passes_only_when_its_patch_holds_the_discarded_hunks() {
+    let wrapper = Wrapper::new("lefthook-partial");
+    let repository = wrapper.scope.join("repository");
+    for name in ["staged", "other"] {
+        std::fs::write(repository.join(name), "staged\n").unwrap();
+        assert!(wrapper.run(&["add", name], None).status.success());
+        std::fs::write(repository.join(name), "staged\nunstaged\n").unwrap();
+    }
+    let hide = ["checkout", "--force", "--", "staged", "other"];
+    assert_eq!(last_record(&wrapper.run(&hide, None)).rule, "git.force");
+    let diff = |name: &str| {
+        let output = wrapper.run(
+            &[
+                "diff",
+                "--binary",
+                "--unified=0",
+                "--no-color",
+                "--no-ext-diff",
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                "--patch",
+                "--submodule=short",
+                "--",
+                name,
+            ],
+            None,
+        );
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        output.stdout
+    };
+    let patch = repository.join(".git/info/lefthook-unstaged.patch");
+    std::fs::write(&patch, diff("staged")).unwrap();
+    assert_eq!(last_record(&wrapper.run(&hide, None)).rule, "git.force");
+    assert!(
+        std::fs::read_to_string(repository.join("other"))
+            .unwrap()
+            .contains("unstaged")
+    );
+    std::fs::write(&patch, [diff("staged"), diff("other")].concat()).unwrap();
+    let hidden = wrapper.run(&hide, None);
+    assert!(hidden.status.success(), "{}", text(&hidden.stderr));
+    for name in ["staged", "other"] {
+        assert_eq!(
+            std::fs::read_to_string(repository.join(name)).unwrap(),
+            "staged\n"
+        );
+    }
+    std::fs::write(repository.join("staged"), "staged\nagain\n").unwrap();
+    assert_eq!(
+        last_record(&wrapper.run(&["checkout", "--force", "--", "staged"], None)).rule,
+        "git.force",
+        "a hunk the patch never saw stays protected"
+    );
+}
+
 /// Git reads `--rep` as `--repo` and the next word as its value, so the refusal names only the branch Git deletes.
 #[test]
 fn an_abbreviated_option_value_is_not_a_deleted_branch() {

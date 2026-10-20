@@ -5,7 +5,15 @@ roots = [
     {{ joinPath .chezmoi.homeDir "Downloads/project" | quote }},
 {{- end }}
     {{ joinPath .chezmoi.homeDir "AppData/Local/domyjob" | quote }},
-    {{ dig "paths" "temp" (default (joinPath .chezmoi.homeDir "AppData/Local/Temp") (env "TEMP")) . | quote }},
+{{- $temp := dig "paths" "temp" (default (joinPath .chezmoi.homeDir "AppData/Local/Temp") (env "TEMP")) . }}
+    {{ $temp | quote }},
+{{- /* The hook build directory of every checkout, on the volume that holds TEMP, where platform::runtime::hook_target places it. */}}
+{{- $volume := regexFind "^[A-Za-z]:" $temp }}
+{{- if $volume }}
+    {{ joinPath (printf "%s/" $volume) "cargo/dotfiles-targets" | quote }},
+{{- else }}
+    {{ joinPath .chezmoi.homeDir ".cache/dotfiles-targets" | quote }},
+{{- end }}
 ]
 
 [report]
