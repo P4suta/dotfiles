@@ -300,7 +300,7 @@
     {"mode":"0755","path":".config/git/hooks/pre-commit","sha256":"0ae436d4df892fd5d8d6166952a910a62d227f52503b5c56dbdbf8cf43c01272","type":"file"},
     {"mode":"0755","path":".config/git/hooks/pre-push","sha256":"3d592334b560f8f60dcacc8f15897151406d742320256088a00d8318775dd3c4","type":"file"},
     {"mode":"0755","path":".config/git/hooks/reference-transaction","sha256":"d96363d17495ef6c38dc3ee1026a25f83cb06be4beeaec6fca32e9bfef759e4b","type":"file"},
-    {"mode":"0644","path":".config/git/ignore","sha256":"065804d259de8fb26d62838fde3e08d3bf49c56ff4b0676be5ac67a024def389","type":"file"},
+    {"mode":"0644","path":".config/git/ignore","sha256":"6a11e4852a725066f345648d0350545844fc76a9e9243955da78e6c6fab3d512","type":"file"},
     {"mode":"0755","path":".config/lefthook","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/lefthook/global.yml","sha256":"a52fa7ffa7ddac882c454bbc7a2669ce3b61daaa4b181a75a8ce777e2107ec19","type":"file"},
     {"mode":"0755","path":".config/mise","sha256":null,"type":"dir"},
