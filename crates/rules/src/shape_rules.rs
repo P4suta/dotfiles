@@ -271,6 +271,8 @@ pub struct Change {
     pub touched: usize,
     /// Budgets the change weakened or removed.
     pub lowered: usize,
+    /// The change only reverts earlier commits, so whatever it restores already stood in the history.
+    pub reverted: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -297,10 +299,12 @@ impl Verdict {
 
 /// The decision of `point` about `change`.
 /// Commits and pushes refuse only a gap the change adds, never one that already existed.
+/// A commit, push, or PR made only of reverts passes, because it restores code that already stood.
 #[must_use]
 pub const fn verdict(point: Point, change: Change) -> Verdict {
     match point {
         Point::Start if change.after > 0 => Verdict::Report,
+        Point::Commit | Point::Push | Point::Ready if change.reverted => Verdict::Admit,
         Point::Commit | Point::Push | Point::Stop | Point::Ready if change.added > 0 => {
             Verdict::Added
         }
@@ -335,18 +339,21 @@ mod proofs {
     ];
 
     /// Only the gaps a change adds refuse a commit or a push, a session start never refuses, and a PR in a repository with gaps must close one.
+    /// A revert passes every point but the end of a turn.
     pub fn spec_verdict(point: Point, change: Change) {
         let result = verdict(point, change);
+        let waived = change.reverted && matches!(point, Point::Commit | Point::Push | Point::Ready);
+        assert!(!waived || result == Verdict::Admit);
         assert_eq!(
             result == Verdict::Report,
             point == Point::Start && change.after > 0
         );
         assert_eq!(
             result == Verdict::Added,
-            point != Point::Start && change.added > 0
+            point != Point::Start && !waived && change.added > 0
         );
         if matches!(point, Point::Commit | Point::Push) {
-            assert_eq!(result.refuses(), change.added > 0);
+            assert_eq!(result.refuses(), !waived && change.added > 0);
         }
         assert_eq!(
             result == Verdict::Touched,
@@ -354,11 +361,12 @@ mod proofs {
         );
         assert_eq!(
             result == Verdict::Lowered,
-            point == Point::Ready && change.added == 0 && change.lowered > 0
+            point == Point::Ready && !waived && change.added == 0 && change.lowered > 0
         );
         assert_eq!(
             result == Verdict::Stalled,
             point == Point::Ready
+                && !waived
                 && change.added == 0
                 && change.lowered == 0
                 && change.before > 0
@@ -585,12 +593,15 @@ mod proofs {
             after: kani::any(),
             touched: kani::any(),
             lowered: kani::any(),
+            reverted: kani::any(),
         };
         spec_verdict(point, change);
         let result = verdict(point, change);
         kani::cover!(result == Verdict::Stalled);
         kani::cover!(result == Verdict::Touched);
         kani::cover!(point == Point::Commit && change.before > 0 && result == Verdict::Admit);
+        kani::cover!(point == Point::Push && change.added > 0 && result == Verdict::Admit);
+        kani::cover!(change.reverted && result == Verdict::Added);
     }
 
     #[cfg(kani)]
@@ -713,17 +724,20 @@ mod tests {
                         for touched in 0..2 {
                             for lowered in 0..2 {
                                 for after in 0..2 {
-                                    proofs::spec_verdict(
-                                        point,
-                                        Change {
-                                            added,
-                                            closed,
-                                            before,
-                                            after,
-                                            touched,
-                                            lowered,
-                                        },
-                                    );
+                                    for reverted in [false, true] {
+                                        proofs::spec_verdict(
+                                            point,
+                                            Change {
+                                                added,
+                                                closed,
+                                                before,
+                                                after,
+                                                touched,
+                                                lowered,
+                                                reverted,
+                                            },
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -1028,6 +1042,15 @@ mod tests {
             Verdict::Lowered
         );
         assert_eq!(verdict(Point::Ready, Change::default()), Verdict::Admit);
+        let revert = Change {
+            reverted: true,
+            lowered: 1,
+            ..added
+        };
+        for point in [Point::Commit, Point::Push, Point::Ready] {
+            assert_eq!(verdict(point, revert), Verdict::Admit);
+        }
+        assert_eq!(verdict(Point::Stop, revert), Verdict::Added);
         assert!(Verdict::Stalled.refuses());
         assert!(!Verdict::Report.refuses());
     }

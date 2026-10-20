@@ -3,6 +3,7 @@
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
@@ -125,20 +126,9 @@ fn in_checkout(path: &Path) -> Result<bool> {
         .any(|directory| directory.join(".git").exists()))
 }
 
-fn edit_checkout(cwd: &Path, paths: &[PathBuf]) -> Result<PathBuf> {
-    if cwd
-        .ancestors()
-        .any(|directory| directory.join(".git").exists())
-    {
-        return platform::issue_context::checkout(cwd);
-    }
-    let path = paths.first().context("edit has no target")?;
-    let absolute = if path.is_absolute() {
-        path.clone()
-    } else {
-        cwd.join(path)
-    };
-    let parent = absolute.parent().context("edit has no parent directory")?;
+/// The checkout that holds an absolute edit target, found from its nearest existing directory.
+fn edit_checkout(path: &Path) -> Result<PathBuf> {
+    let parent = path.parent().context("edit has no parent directory")?;
     let existing = parent
         .ancestors()
         .find(|directory| directory.is_dir())
@@ -187,9 +177,9 @@ pub fn check(input: &str) -> Result<()> {
     if checked.is_empty() {
         return Ok(());
     }
-    let root = edit_checkout(&cwd, &checked)?;
-    let mut mutations = Vec::new();
+    let mut checkouts: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
     for path in checked {
+        let root = edit_checkout(&path)?;
         let absolute = platform::issue_context::edit_path(&root, &path)?;
         let relative = absolute
             .strip_prefix(&root)
@@ -205,21 +195,20 @@ pub fn check(input: &str) -> Result<()> {
         )
         .is_ok();
         if !preparation {
-            mutations.push(absolute);
+            checkouts.entry(root).or_default().push(absolute);
         }
     }
-    if mutations.is_empty() {
-        return Ok(());
+    for (root, mutations) in &checkouts {
+        platform::issue_context::guard(root, mutations).map_err(|error| {
+            platform::refusal::Refusal::new(
+                "pr.issue-context",
+                "implementation edits require a checked destination-bound issue context",
+                "pr-workflow start --repo OWNER/REPO --issue NUMBER --path PATH",
+            )
+            .evidence(format!("{error:#}"))
+        })?;
     }
-    platform::issue_context::guard(&root, &mutations).map_err(|error| {
-        platform::refusal::Refusal::new(
-            "pr.issue-context",
-            "implementation edits require a checked destination-bound issue context",
-            "pr-workflow start --repo OWNER/REPO --issue NUMBER --path PATH",
-        )
-        .evidence(format!("{error:#}"))
-        .into()
-    })
+    Ok(())
 }
 
 /// # Errors
@@ -256,14 +245,40 @@ mod tests {
         ensure!(initialized.status.success(), "{initialized:?}");
         let root = crate::canonical(&repository)?;
         let new = repository.join("new/directory/file.rs");
-        assert_eq!(edit_checkout(scope.path(), &[new])?, root);
+        assert_eq!(edit_checkout(&new)?, root);
         let outside = scope.path().join("outside.rs");
-        assert_eq!(
-            edit_checkout(&repository, std::slice::from_ref(&outside))?,
-            root
-        );
         assert!(platform::issue_context::edit_path(&root, &outside).is_err());
-        assert!(edit_checkout(scope.path(), &[outside]).is_err());
+        assert!(edit_checkout(&outside).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn an_edit_in_another_checkout_gets_that_checkouts_decision() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let session = scope.path().join("session");
+        let other = scope.path().join("other");
+        for repository in [&session, &other] {
+            std::fs::create_dir(repository)?;
+            let initialized = platform::process::command("git")
+                .args(["init", "--quiet"])
+                .current_dir(repository)
+                .output()?;
+            ensure!(initialized.status.success(), "{initialized:?}");
+        }
+        let target = other.join("new.rs");
+        assert_eq!(edit_checkout(&target)?, crate::canonical(&other)?);
+        let packet = serde_json::json!({
+            "cwd": session,
+            "tool_name": "Write",
+            "tool_input": {"file_path": target}
+        });
+        let error = format!("{:#}", check(&packet.to_string()).unwrap_err());
+        assert!(
+            error
+                .contains("implementation edits require a checked destination-bound issue context")
+                && !error.contains("escapes the checkout"),
+            "{error}"
+        );
         Ok(())
     }
 

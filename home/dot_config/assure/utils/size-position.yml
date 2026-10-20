@@ -1,0 +1,21 @@
+# A size: the argument of a call that reserves, splits, or takes by it, or a factor of the binary unit 1024.
+id: size-position
+language: rust
+rule:
+  any:
+    - inside:
+        kind: arguments
+        inside:
+          kind: call_expression
+          has:
+            field: function
+            regex: (^|::|\.)(with_capacity|reserve|reserve_exact|chunks|chunks_exact|rchunks|windows|take|repeat)$
+    - inside:
+        kind: binary_expression
+        all:
+          - has:
+              field: operator
+              regex: ^(\*|/)$
+          - has:
+              kind: integer_literal
+              regex: ^1024(_?usize)?$
