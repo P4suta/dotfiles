@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [proof-verdicts-never-depend-on-time.md]
 date: 2026-10-08
 ---
 # Keep bounded harnesses instead of Kani loop contracts for the Git argument scan
@@ -16,10 +17,13 @@ The pilot ran Kani 0.68.0 with `CBMC` 6.11.0 from the pinned proof image, with `
 - `#[cfg_attr(kani, kani::loop_invariant(...))]` and `kani::loop_decreases` on a `while` statement compile on the stable toolchain when the crate root enables `stmt_expr_attributes` and `proc_macro_hygiene` only under `cfg(kani)`.
 - On the loop as written, which clones each setting into a `Vec<(String, Range<usize>)>`, the host killed `goto-instrument` for lack of memory after 4 min 21 s without a cap.
   Under a 10 GB cap it killed the process after 6 min 46 s, with the `format!` call reduced to plain string pushes.
-- A copy with the collection removed, which keeps only the index and a count over a `&[&str]` of up to 64 words, didn't finish within 75 minutes.
-  The gate's budget gives each harness 30 s.
+- A copy with the collection removed keeps only the index and a count over a `&[&str]` of up to 64 words.
+  That experiment didn't finish within 75 minutes and produced no completed proof.
 - The invariant has to admit an index one past the end, because a value-taking option as the last word steps over it, which the production code then clamps with `min`.
 - Stating that every policy setting before the subcommand reaches `config_override` for any length needs a quantified invariant over the words already read, which `-Z quantifiers` would add on top of the loop contract.
+
+These historical elapsed observations are advisory under the [verdict amendment](proof-verdicts-never-depend-on-time.md).
+They establish neither a proof verdict nor an exemption.
 
 ## Decision
 
@@ -29,9 +33,9 @@ The Git argument scan keeps the bounded harness that issue 84 adds, and the resi
 ## Alternatives
 
 Rewriting the scan to index a fixed-size array would make the contract tractable, but it would prove a different loop than the one the guard runs.
-Raising the proof budget for one harness would hide the cost from the gate that every other harness meets.
+A larger elapsed allowance would supply no evidence for the loop invariant.
 
 ## Reconsider
 
-Reconsider when a Kani release instruments a loop contract over a body that pushes to a `Vec` within the proof budget.
+Reconsider when a pinned Kani release completes instrumentation and verifies a loop contract over a body that pushes to a `Vec` for the stated input domain.
 Reconsider also when the guard's scan becomes a loop over indices.

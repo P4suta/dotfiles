@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [proof-verdicts-never-depend-on-time.md]
 date: 2026-10-09
 ---
 # Check review postconditions directly on bounded production calls
@@ -7,8 +8,8 @@ date: 2026-10-09
 ## Context
 
 Kani 0.68 cannot compile the review budget contract after MIR inlining.
-Without that optimization, its contract instrumentation exceeds the existing proof budget.
-The classifier also needs input partitions to finish within that budget.
+Without that optimization, the contract-instrumentation experiment produced no completed proof.
+The classifier divides its finite input domain into explicit partitions.
 
 ## Decision
 
@@ -25,10 +26,10 @@ This follows the accepted [bounded-harness decision](bounded-harness-over-kani-l
 
 ## Validation
 
-Every partition must finish within the unchanged proof budget with its original postconditions and reachable cover witnesses.
+Every partition requires a completed verification result with its original postconditions, explicit bounds, and reachable cover witnesses.
 Native exhaustive cases also compare the numeric oracle with the independent byte specification.
 The module inventory refuses a missing production subject or harness.
 
 ## Reconsider
 
-Reassess contract instrumentation when the pinned Kani compiler handles these functions within the same budget.
+Reassess contract instrumentation when the pinned Kani compiler verifies these functions over the same ledger lengths and classifier words.

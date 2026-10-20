@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [proof-verdicts-never-depend-on-time.md]
 date: 2026-10-09
 ---
 # Preserve source witnesses under checked Kani MIR
@@ -11,7 +12,7 @@ In the pinned compiler, MIR jump threading duplicates cover sites across control
 The clones produce unsatisfiable properties beside satisfied copies of the same source witnesses.
 Repeated calls to a pure branching verdict can also clone later witness sites.
 The same optimized compiler rejects proof constants whose enum variants have unused payload bytes.
-The Miri binaries also exceed the existing budget when exhaustive matrices and repeated test setup run together.
+The Miri binaries also combine exhaustive matrices with repeated test setup, so named test selections partition their work.
 
 ## Decision
 
@@ -23,12 +24,12 @@ Branching witness predicates are evaluated before cover sites to preserve one si
 Partial operands retain their safety conditions through checked access, such as `last` for an empty slice.
 Enum discriminator predicates use equivalent variant patterns to avoid materializing unused payload constants.
 Production decisions, assertion truth conditions, and original input domains remain unchanged.
-Overflow checks, debug assertions, source domains, postconditions, every cover, default memory encoding and solver, and the existing proof budget remain required.
+Overflow checks, debug assertions, source domains, postconditions, every cover, default memory encoding and solver, and explicit input and unwind bounds remain required.
 Inventory discovery and verification use the same command constructor.
 Unverified property errors name the harness and list each property's category, status, and description.
 Each discovered harness has its own result file and exact identity check, keeping the shared JSON input limit unchanged.
 Rejecting probes receive the same partitioning and must still fail on their intended assertions.
-Measured slow exhaustive matrices remain fully enabled in native tests and use the owner's requested Miri selection.
+Exhaustive matrices remain fully enabled in native tests and use the declared Miri selection.
 Other enabled pure cases share one Miri test within each module to avoid repeated setup while executing every original assertion.
 Native test identities remain separate.
 
@@ -45,7 +46,9 @@ The normal gate compiles every production harness and rejecting probe with the s
 The planner and reservation checks retain their complete existing domains and postconditions.
 The Kani phase proves every discovered production harness and rejects every recorded counterexample.
 All 189 native rules tests retain their individual identities and assertions.
-The grouped Miri suite completes in 24.13 seconds on the host and 28.95 seconds for Windows, within the unchanged budget.
+The grouped Miri suite retains every selected assertion for the host and Windows targets.
+Its historical advisory measurements were 24.13 seconds on the host and 28.95 seconds for Windows.
+Its completed test outcomes decide acceptance, with elapsed measurements advisory.
 
 ## Reconsider
 

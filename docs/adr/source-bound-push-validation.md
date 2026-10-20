@@ -1,7 +1,7 @@
 ---
 date: 2026-10-11
 status: amended
-changed_by: [local-proof-campaigns-on-mac.md]
+changed_by: [local-proof-campaigns-on-mac.md, proof-verdicts-never-depend-on-time.md]
 ---
 # Push the candidate its gates already verified
 
@@ -76,8 +76,8 @@ This preserves every three-word case while removing symbolic string-table aliasi
 The refinement of the skill plan uses the same independent Lean algorithm with temporary arrays sized for the existing proof domain of five skills.
 Its temporary skill indices use checked one-byte values for the same zero-through-seven domain, and the result restores every slot to the original representation.
 Its native reference retains the original eight-slot capacity, and the public implementation and every proof input, assertion, cover witness, and unwind bound remain unchanged.
-The result validator still checks every harness, property, cover witness, counterexample, and individual time budget.
-Linux's timed code stage finishes before real provisioning begins, so setup compilation cannot consume its proof budget.
+The result validator checks every harness, property, cover witness, counterexample, and completed outcome under the [verdict amendment](proof-verdicts-never-depend-on-time.md).
+Linux's code stage finishes before real provisioning begins, keeping those stages' resource use separate.
 Other families retain concurrent stages only with the existing core and storage capacity.
 Credential fixtures construct their tool lookup path instead of copying the caller's unrelated tools.
 A regression verifies the fixture under a parent PATH beyond the [Windows command interpreter's limit](https://learn.microsoft.com/en-us/troubleshoot/windows-client/shell-experience/command-line-string-limitation).

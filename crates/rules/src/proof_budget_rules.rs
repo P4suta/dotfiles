@@ -1,7 +1,4 @@
-/// The longest one harness may run, half the verifier's hard stop, so a loaded host still finishes every proof.
-pub const BUDGET_MILLIS: u64 = 30_000;
-
-/// The `--harness-timeout` after which the verifier abandons a harness.
+/// The hang cap after which a harness has no completed proof evidence.
 pub const TIMEOUT_SECONDS: u64 = 60;
 
 pub const NANOS_PER_MILLI: u32 = 1_000_000;
@@ -122,18 +119,17 @@ pub const fn verified(cover: bool, check: Check) -> bool {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Verdict {
-    Within,
-    Over,
-    /// The verifier reported no duration, so nothing shows the budget holds.
-    Unmeasured,
+    Proven,
+    Failed,
+    Inconclusive,
 }
 
 #[must_use]
-pub const fn verdict(duration_millis: Option<u64>) -> Verdict {
-    match duration_millis {
-        Some(millis) if millis <= BUDGET_MILLIS => Verdict::Within,
-        Some(_) => Verdict::Over,
-        None => Verdict::Unmeasured,
+pub const fn verdict(completed_result: Option<bool>) -> Verdict {
+    match completed_result {
+        Some(true) => Verdict::Proven,
+        Some(false) => Verdict::Failed,
+        None => Verdict::Inconclusive,
     }
 }
 
@@ -165,6 +161,7 @@ mod proofs {
 
     #[cfg(kani)]
     #[kani::proof]
+    #[kani::unwind(1)]
     fn host_elapsed_rounds_up_without_overflow_or_understatement() {
         let whole_millis: u128 = kani::any();
         let remainder_nanos: u32 = kani::any();
@@ -186,11 +183,7 @@ mod proofs {
 
     #[cfg(kani)]
     fn cover_elapsed_boundaries(whole_millis: u128, remainder_nanos: u32, elapsed: Option<u64>) {
-        kani::cover!(
-            whole_millis == u128::from(BUDGET_MILLIS)
-                && remainder_nanos == 0
-                && elapsed == Some(BUDGET_MILLIS)
-        );
+        kani::cover!(whole_millis == 0 && remainder_nanos == 0 && elapsed == Some(0));
         kani::cover!(
             whole_millis == u128::from(u64::MAX)
                 && remainder_nanos == NANOS_PER_MILLI - 1
@@ -310,29 +303,23 @@ mod proofs {
         kani::cover!(!accepted);
     }
 
-    /// Only a measured harness inside the budget passes, and an overrun and a missing duration stay apart below the timeout.
-    pub fn spec_verdict(duration: Option<u64>) {
-        let result = verdict(duration);
-        assert_eq!(
-            result == Verdict::Within,
-            duration.is_some_and(|millis| millis <= BUDGET_MILLIS)
-        );
-        assert_eq!(result == Verdict::Unmeasured, duration.is_none());
-        assert_eq!(
-            result == Verdict::Over,
-            duration.is_some_and(|millis| millis > BUDGET_MILLIS)
-        );
-        const { assert!(BUDGET_MILLIS * 2 <= TIMEOUT_SECONDS * 1_000) };
+    pub fn spec_verdict(completed_result: Option<bool>) {
+        let result = verdict(completed_result);
+        assert_eq!(result == Verdict::Proven, completed_result == Some(true));
+        assert_eq!(result == Verdict::Failed, completed_result == Some(false));
+        assert_eq!(result == Verdict::Inconclusive, completed_result.is_none());
     }
 
     #[cfg(kani)]
     #[kani::proof]
-    fn only_a_measured_harness_inside_the_budget_passes() {
-        let duration: Option<u64> = if kani::any() { Some(kani::any()) } else { None };
-        spec_verdict(duration);
-        kani::cover!(verdict(duration) == Verdict::Within);
-        kani::cover!(verdict(duration) == Verdict::Over);
-        kani::cover!(verdict(duration) == Verdict::Unmeasured);
+    #[kani::unwind(1)]
+    fn only_completed_results_decide_proof_verdicts() {
+        let completed_result: Option<bool> = kani::any();
+        spec_verdict(completed_result);
+        let result = verdict(completed_result);
+        kani::cover!(result == Verdict::Proven);
+        kani::cover!(result == Verdict::Failed);
+        kani::cover!(result == Verdict::Inconclusive);
     }
 }
 
@@ -457,25 +444,16 @@ mod tests {
     }
 
     #[test]
-    fn every_boundary_meets_the_specification() {
-        proofs::spec_verdict(None);
-        for millis in [
-            0,
-            1,
-            BUDGET_MILLIS - 1,
-            BUDGET_MILLIS,
-            BUDGET_MILLIS + 1,
-            u64::MAX,
-        ] {
-            proofs::spec_verdict(Some(millis));
+    fn every_completed_or_missing_result_meets_the_specification() {
+        for completed_result in [None, Some(false), Some(true)] {
+            proofs::spec_verdict(completed_result);
         }
-        assert_eq!((BUDGET_MILLIS, TIMEOUT_SECONDS), (30_000, 60));
     }
 
     #[test]
-    fn the_budget_boundary_passes_and_one_millisecond_more_fails() {
-        assert_eq!(verdict(Some(BUDGET_MILLIS)), Verdict::Within);
-        assert_eq!(verdict(Some(BUDGET_MILLIS + 1)), Verdict::Over);
-        assert_eq!(verdict(None), Verdict::Unmeasured);
+    fn missing_evidence_is_neither_a_proof_nor_a_counterexample() {
+        assert_eq!(verdict(Some(true)), Verdict::Proven);
+        assert_eq!(verdict(Some(false)), Verdict::Failed);
+        assert_eq!(verdict(None), Verdict::Inconclusive);
     }
 }

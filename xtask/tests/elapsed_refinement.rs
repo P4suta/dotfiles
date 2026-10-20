@@ -35,8 +35,8 @@ fn altered_native_claims_domains_calls_and_names_are_refused() {
             "let elapsed = model(whole_millis, remainder_nanos);",
         ),
         (
-            "#[kani::proof]\n    fn host_elapsed_rounds",
-            "#[kani::proof]\n    #[kani::stub(elapsed_millis, model)]\n    fn host_elapsed_rounds",
+            "#[kani::proof]\n    #[kani::unwind(1)]\n    fn host_elapsed_rounds",
+            "#[kani::proof]\n    #[kani::unwind(1)]\n    #[kani::stub(elapsed_millis, model)]\n    fn host_elapsed_rounds",
         ),
         (
             "pub const NANOS_PER_MILLI: u32 = 1_000_000;",

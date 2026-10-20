@@ -1,14 +1,15 @@
 ---
 date: 2026-10-12
 status: amended
-changed_by: [fixed-cpu-budgets-beside-mac-proof-campaigns.md, native-verification-with-lightweight-ci.md]
+changed_by: [fixed-cpu-budgets-beside-mac-proof-campaigns.md, native-verification-with-lightweight-ci.md, proof-verdicts-never-depend-on-time.md]
 ---
 # Run local proof campaigns on Mac and keep Linux CI
 
 ## Context
 
 The complete candidate needs extensive pure-core verification and independent native checks on every supported family.
-Allocating the local proof campaign to the faster available host reduces waiting, while target semantics and measured budgets remain part of its contract.
+Allocating the local proof campaign to the faster available host reduces waiting, while target semantics and deterministic bounds remain part of its contract.
+Elapsed measurements are advisory under the [verdict amendment](proof-verdicts-never-depend-on-time.md).
 
 ## Decision
 
@@ -31,14 +32,14 @@ The gate reuses an existing image only when Docker reports that operating system
 These images use Linux x86_64 binaries, but glibc still selects string operations from CPU features.
 Portable Quint and Alloy images keep their existing native Docker platform and offline model checks.
 
-Mac code and native provisioning run serially so setup can't consume the timed proof budget.
+Mac code and native provisioning run serially to keep their resource use separate.
 Linux keeps its existing serial stages, and Windows keeps its existing capacity requirements for concurrent stages.
 The [host rule](../../crates/rules/src/hosts_rules.rs), its rejecting probes in [the proof inventory](../../policy/obligations.toml), and [Docker boundary tests](../../xtask/tests/container_proofs.rs) enforce those conditions.
 
 ## Alternatives
 
 An independent Mac proof run prepares tools but can't replace an existing Linux code receipt.
-Changing only the execution host would omit Linux Miri interpretation and could overlap timed proofs with Mac provisioning.
+Changing only the execution host would omit Linux Miri interpretation and could overlap proofs with Mac provisioning.
 Interpreting x86_64 binaries or Valgrind baselines as native Arm measurements would change the measured contract.
 
 ## Consequences
