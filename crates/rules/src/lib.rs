@@ -66,6 +66,7 @@ pub mod profile_rules;
 pub mod proof_budget_rules;
 pub mod proof_image_prepare_rules;
 pub mod prose_rules;
+pub mod provenance_rules;
 pub mod ready_push_rules;
 pub mod reaper_rules;
 pub mod repository_rules;

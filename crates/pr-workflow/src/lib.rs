@@ -67,6 +67,7 @@ use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Args, Parser, Subcommand};
 use dotfiles::body_rules::{Verdict, next_action as body_next_action, verdict as body_verdict};
+use dotguard::provenance_rules;
 use prose::Publication::{Issue as ISSUE, PullRequest as PULL_REQUEST};
 use prose::prose_rules::standard_applies;
 use pulldown_cmark::{Event, Tag, TagEnd};
@@ -813,6 +814,25 @@ fn refuse_attribution(part: &str, text: &str, recheck: impl FnOnce() -> String) 
     Ok(())
 }
 
+/// Refuse a title or body that says how its text came about instead of describing the change.
+fn refuse_provenance(part: &str, text: &str, recheck: impl FnOnce() -> String) -> Result<()> {
+    let found = provenance_rules::find(text);
+    if provenance_rules::verdict(found.is_some()) == provenance_rules::Verdict::Refuse {
+        let (number, phrase) = found.context("a refused document names its phrase")?;
+        return Err(Refusal::new(
+            "pr.provenance",
+            format!(
+                "{part} line {number} says how its text came about. {}",
+                provenance_rules::NEXT_ACTION
+            ),
+            recheck(),
+        )
+        .evidence(format!("{part} line {number}: {phrase}"))
+        .into());
+    }
+    Ok(())
+}
+
 /// Refuses a document that carries workflow evidence, which stays in owner-local state.
 fn refuse_local_evidence(body: &str, recheck: impl FnOnce() -> String) -> Result<()> {
     for (number, line) in body.lines().enumerate() {
@@ -1103,6 +1123,8 @@ pub(crate) fn validate(
     }
     refuse_attribution("title", &title, || recheck(target, None))?;
     refuse_attribution("body", &body, || recheck(target, Some(&title)))?;
+    refuse_provenance("title", &title, || recheck(target, None))?;
+    refuse_provenance("body", &body, || recheck(target, Some(&title)))?;
     refuse_local_evidence(&body, || recheck(target, Some(&title)))?;
     let body_refusal = |cause: &str, evidence: String| {
         Refusal::new("pr.body", cause, recheck(target, Some(&title))).evidence(evidence)
@@ -1203,7 +1225,7 @@ fn validate_issue_contents(title: &str, body: String) -> Result<ValidatedDocumen
         single_line(title) && title.trim() == title && !unfinished(title),
         "the issue title must be a finished single line without surrounding whitespace"
     );
-    refuse_local_evidence(&body, || {
+    let issue_check = || {
         command(&[
             "pr-workflow",
             "issue",
@@ -1215,7 +1237,10 @@ fn validate_issue_contents(title: &str, body: String) -> Result<ValidatedDocumen
             "--body-file",
             "<body-file>",
         ])
-    })?;
+    };
+    refuse_provenance("title", title, issue_check)?;
+    refuse_provenance("body", &body, issue_check)?;
+    refuse_local_evidence(&body, issue_check)?;
     let visible = without_comments(&body);
     ensure!(
         !visible.trim().is_empty() && !unfinished(&prose(&visible)),

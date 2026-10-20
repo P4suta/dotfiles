@@ -866,6 +866,98 @@ fn scope(
     Ok((changed, limit))
 }
 
+/// The commit that the message of a `git revert` names, from its `This reverts commit <commit>.` line.
+fn reverted_commit(message: &str) -> Option<&str> {
+    message.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("This reverts commit ")?
+            .split([' ', '.'])
+            .next()
+            .filter(|commit| {
+                !commit.is_empty() && commit.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+    })
+}
+
+/// The tree that reverting `reverted` onto `onto` yields, or `None` when that revert conflicts or Git can't compute it.
+fn restored(root: &Path, reverted: &str, onto: &str) -> Result<Option<String>> {
+    let Some(parent) = resolve(root, &format!("{reverted}^"))? else {
+        return Ok(None);
+    };
+    let output = Tool::Git
+        .command()
+        .arg("-C")
+        .arg(root)
+        .args(["merge-tree", "--write-tree", "--no-messages"])
+        .arg(format!("--merge-base={reverted}"))
+        .args([onto, &parent])
+        .stderr(Stdio::null())
+        .output()
+        .context("start Git")?;
+    Ok(output.status.success().then(|| {
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .to_owned()
+    }))
+}
+
+/// Whether the change from `before` to `after` only reverts earlier commits, each exactly as `git revert` writes it.
+/// A commit reads the revert that Git is resolving, and a push or PR reads every commit it adds.
+fn reverting(root: &Path, point: Point, before: &Tree, after: &Tree) -> Result<bool> {
+    let tree = |commit: &str| {
+        git(root, &["rev-parse", &format!("{commit}^{{tree}}")])
+            .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_owned())
+    };
+    match (point, before, after) {
+        (Point::Commit, Tree::Commit(Some(head)), Tree::Index) => {
+            let Some(reverted) = resolve(root, "REVERT_HEAD")? else {
+                return Ok(false);
+            };
+            let Ok(index) = git(root, &["write-tree"]) else {
+                return Ok(false);
+            };
+            let index = String::from_utf8_lossy(&index).trim().to_owned();
+            Ok(restored(root, &reverted, head)?.is_some_and(|tree| tree == index))
+        }
+        (Point::Push | Point::Ready, Tree::Commit(Some(base)), Tree::Commit(Some(tip))) => {
+            let listed = git(
+                root,
+                &[
+                    "rev-list",
+                    "--reverse",
+                    "--parents",
+                    &format!("{base}..{tip}"),
+                ],
+            )?;
+            let listed = String::from_utf8_lossy(&listed);
+            let mut commits = listed.lines().peekable();
+            if commits.peek().is_none() {
+                return Ok(false);
+            }
+            for line in commits {
+                let [commit, parent] = line.split_whitespace().collect::<Vec<_>>()[..] else {
+                    return Ok(false);
+                };
+                let message = git(root, &["log", "-1", "--format=%B", commit])?;
+                let message = String::from_utf8_lossy(&message);
+                let Some(named) = reverted_commit(&message) else {
+                    return Ok(false);
+                };
+                let Some(reverted) = resolve(root, named)? else {
+                    return Ok(false);
+                };
+                if restored(root, &reverted, parent)? != Some(tree(commit)?) {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
 /// Decides `point` for the change from `before` to `after`.
 ///
 /// # Errors
@@ -908,6 +1000,7 @@ pub fn decide(
             .filter(|gap| changed.contains(&gap.path))
             .count(),
         lowered: lowered.len(),
+        reverted: reverting(root, point, before, after)?,
     };
     let verdict = shape_rules::verdict(point, change);
     let gaps = match verdict {

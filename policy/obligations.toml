@@ -405,6 +405,24 @@ fn reject_an_empty_deleting_next_action() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/provenance_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_admitting_a_found_phrase() {
+    assert!(production::verdict(true) == production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_refusing_clean_prose() {
+    assert!(production::verdict(false) == production::Verdict::Refuse);
+}
+#[kani::proof]
+fn reject_an_empty_rewrite_action() {
+    assert!(production::NEXT_ACTION.is_empty());
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/boundary_rules.rs"
 probes = '''
 use production::{Core, breach};
@@ -1558,6 +1576,16 @@ fn reject_an_exemption_with_an_open_reason() {
 #[kani::proof]
 fn reject_admitting_a_raised_ceiling() {
     assert!(!lowered(Bound::Ceiling, 0, Some(1)));
+}
+#[kani::proof]
+fn reject_refusing_a_pushed_revert() {
+    let revert = Change { added: 1, reverted: true, ..Change::default() };
+    assert!(verdict(Point::Push, revert).refuses());
+}
+#[kani::proof]
+fn reject_waiving_a_revert_at_the_end_of_a_turn() {
+    let revert = Change { added: 1, reverted: true, ..Change::default() };
+    assert!(verdict(Point::Stop, revert) == Verdict::Admit);
 }
 '''
 

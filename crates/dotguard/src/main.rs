@@ -4,12 +4,14 @@
 //!
 //! - `~/.local/bin/git` runs `dotguard git …`, which applies the argument policy and then executes git, and on Windows a copy named `git.exe` acts as the wrapper.
 //! - `~/.config/git/hooks/pre-push` runs `dotguard pre-push`, the force-push gate.
-//! - `~/.config/git/hooks/commit-msg` runs `dotguard commit-msg`, which strips attribution and checks the language.
+//! - `~/.config/git/hooks/commit-msg` runs `dotguard commit-msg`, which strips attribution, refuses provenance phrases, and checks the language.
 //! - `~/.config/git/hooks/pre-commit` runs `dotguard pre-commit`, the language and staged-diff gates.
 //!
 //! `core.hooksPath` in the global Git configuration points every repository at that hooks directory, so no repository needs to opt in.
 
-use dotguard::{attribution, bypass, gitargv, lang, prepush, real_git, refusal, staged};
+use dotguard::{
+    attribution, bypass, gitargv, lang, prepush, provenance_rules, real_git, refusal, staged,
+};
 
 use bypass::Rule;
 use dotguard::git_wrapper::INVOKED;
@@ -110,7 +112,7 @@ fn usage() {
          usage:\n  \
          dotguard git <args…>        apply policy, then exec the real git\n  \
          dotguard pre-push <remote>  refuse deletions and non-fast-forward pushes (reads stdin)\n  \
-         dotguard commit-msg <file>  strip agent attribution, refuse foreign scripts\n  \
+         dotguard commit-msg <file>  strip agent attribution, refuse provenance phrases and foreign scripts\n  \
          dotguard pre-commit         refuse foreign scripts in the staged diff\n  \
          dotguard post-commit        re-sign an unsigned HEAD, or roll it back\n  \
          dotguard renovate-gate <remote>  refuse a push that leaves a touched dependency stale (reads stdin)\n  \
@@ -140,14 +142,52 @@ fn foreign_waiver() -> Option<String> {
         .map(|line| format!("ALLOW_FOREIGN=1 {line}"))
 }
 
+/// The Git attribute that sets the language policy in a committed `.gitattributes`, so every clone shares it.
+const LANG_ATTRIBUTE: &str = "dotguard-lang";
+
 /// The language policy for the current repository.
 ///
-/// `guard.lang` defaults to English and accepts `japanese` and `off`, and every refusal names it.
+/// `git config guard.lang` sets it for one clone, and the `dotguard-lang` attribute of the repository root sets it for every clone.
+/// Both accept `japanese` and `off`, the default is English, and every refusal names both.
 ///
 ///     git config guard.lang japanese
-///     git config guard.lang off
+///     * dotguard-lang=japanese    (a line of .gitattributes)
 fn lang_mode() -> Option<lang::Mode> {
-    lang::Mode::parse(real_git::capture(&["config", "--get", "guard.lang"]).as_deref())
+    let configured = real_git::capture(&["config", "--get", "guard.lang"]);
+    let committed = || {
+        lang_attributes(&["."], true)
+            .into_iter()
+            .next()
+            .and_then(|(_, value)| value)
+    };
+    lang::Mode::parse(configured.or_else(committed).as_deref())
+}
+
+/// The `dotguard-lang` value of each of `paths`, from the staged `.gitattributes` files when `cached` and the working tree otherwise.
+fn lang_attributes(paths: &[&str], cached: bool) -> Vec<(String, Option<String>)> {
+    if paths.is_empty() {
+        return Vec::new();
+    }
+    let mut arguments = vec!["check-attr", "-z"];
+    if cached {
+        arguments.push("--cached");
+    }
+    arguments.extend([LANG_ATTRIBUTE, "--"]);
+    arguments.extend(paths);
+    let output = real_git::capture(&arguments).unwrap_or_default();
+    lang::attributes(&output)
+        .into_iter()
+        .map(|(path, value)| (path.to_owned(), value.map(str::to_owned)))
+        .collect()
+}
+
+/// The paths among `paths` whose `dotguard-lang` attribute turns the content scan off.
+fn switched_off(paths: &[&str], cached: bool) -> Vec<String> {
+    lang_attributes(paths, cached)
+        .into_iter()
+        .filter(|(_, value)| value.is_some() && lang::Mode::parse(value.as_deref()).is_none())
+        .map(|(path, _)| path)
+        .collect()
 }
 
 fn comment_char() -> char {
@@ -174,6 +214,25 @@ fn commit_msg(path: &str) -> i32 {
         eprintln!(
             "::notice:: removed {removed} agent attribution line(s) from the commit message."
         );
+    }
+
+    let provenance = provenance_rules::find(&lang::commit_message_body(&cleaned, comment_char()));
+    if provenance_rules::verdict(provenance.is_some()) == provenance_rules::Verdict::Refuse
+        && let Some((number, phrase)) = provenance
+    {
+        let message = std::path::absolute(path)
+            .map_or_else(|_| path.to_owned(), |file| file.display().to_string());
+        refusal::Refusal::new(
+            "commit.provenance",
+            format!(
+                "the commit message says how its text came about with `{phrase}`. {}",
+                provenance_rules::NEXT_ACTION
+            ),
+            refusal::command(&["git", "commit", "<options>", "--edit", "--file", &message]),
+        )
+        .evidence(format!("commit message line {number}: {phrase}"))
+        .emit();
+        return 1;
     }
 
     let Some(mode) = lang_mode() else { return 0 };
@@ -260,9 +319,14 @@ fn pre_commit() -> i32 {
     let Some(diff) = staged::staged_diff() else {
         return 0;
     };
-    let files: Vec<_> = staged::scan_diff(&diff)
+    let found = staged::scan_diff(&diff);
+    let off = switched_off(
+        &found.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+        true,
+    );
+    let files: Vec<_> = found
         .into_iter()
-        .filter(|f| !staged::is_suppressed(&f.path))
+        .filter(|f| !off.contains(&f.path) && !staged::is_suppressed(&f.path))
         .collect();
     if files.is_empty() {
         return 0;
@@ -297,8 +361,9 @@ fn pre_commit() -> i32 {
 }
 
 fn scan_paths(paths: &[String]) -> i32 {
+    let off = switched_off(&paths.iter().map(String::as_str).collect::<Vec<_>>(), false);
     let mut diagnostics = Vec::new();
-    for p in paths {
+    for p in paths.iter().filter(|p| !off.contains(p)) {
         let Ok(text) = std::fs::read_to_string(p) else {
             continue;
         };
