@@ -92,7 +92,8 @@ The credential-free Code stage checks a clean candidate bundle and supplies impl
 It doesn't authenticate the committed change's issue authority.
 The edit guard and staged pre-commit check enforce that authority before publication.
 The [lightweight hosted workflow](adr/native-verification-with-lightweight-ci.md) reports its checked-out commit and tree on all three OS families and preserves required status propagation.
-It installs no project toolchain and repeats no native tests, proofs, or provisioning rehearsals.
+It repeats no native tests, proofs, or provisioning rehearsals.
+For a pull request from someone other than the owner, such as a Renovate update, its [dependency gate](adr/gate-pull-requests-that-skip-local-hooks.md) installs Rust and compiles the workspace and checks the toolchain pins.
 Its successful status doesn't independently establish native verification or issue authority.
 The [candidate publication policy](adr/optional-native-verification-before-publication.md) makes native verification optional for dotfiles.
 Pre-push and PR readiness read this policy from the exact candidate commit, and missing policy still requires native evidence.
