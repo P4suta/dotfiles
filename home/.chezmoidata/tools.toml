@@ -146,6 +146,8 @@ common = [
   "cargo:cargo-llvm-cov",
   "cargo:tokei",
   "github:crate-ci/typos",
+  "aqua:openai/codex",
+  "aqua:anomalyco/opencode",
 ]
 personal = []
 work = []

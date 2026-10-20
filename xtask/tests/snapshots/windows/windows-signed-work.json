@@ -510,9 +510,10 @@
     {"condition":"onchange","phase":"after","position":10,"sha256":"2f8f249680f0a508860f33664e3155f733454a106cec7a8ff30f7a2531f3c24c","target":".chezmoiscripts/windows/10-keyboard.ps1"},
     {"condition":"onchange","phase":"after","position":11,"sha256":"c33b3672b1e171932ec14500e55d9c81fdd04ec2863dcc9f109d805b35cdd0c9","target":".chezmoiscripts/windows/11-sshd.ps1"},
     {"condition":"onchange","phase":"after","position":12,"sha256":"7d5c8495f35dd6d7a0242ba4ee701cbaf9a9f4b4f211225fea0fbdcb57f0da3d","target":".chezmoiscripts/windows/12-storage-scout.ps1"},
-    {"condition":"always","phase":"after","position":13,"sha256":"27c1da3a68645060761bce3c839a2755c179d483f61b1470fd1e45003c985e2f","target":".chezmoiscripts/windows/13-ocomment.ps1"},
-    {"condition":"onchange","phase":"after","position":14,"sha256":"e0e37d7638c5bb26ba553270b3f8b3e567ec8499d0d4db31fc4f97390f6e6549","target":".chezmoiscripts/windows/14-domyjob.ps1"},
-    {"condition":"always","phase":"after","position":15,"sha256":"f127e4b7cf32210f24f3f7a00a38ce06507a57c7e042ab3d215f4225cdc7ff1c","target":".chezmoiscripts/windows/15-chat.ps1"},
-    {"condition":"always","phase":"after","position":16,"sha256":"becb53823fd3d8f99cbdd18dbc40b8ea5897c58b1900053dbf623c70bcb33c1b","target":".chezmoiscripts/windows/16-adapters.ps1"}
+    {"condition":"onchange","phase":"after","position":13,"sha256":"55495a5bfefd38ebe49356fa31abe5e1cafbf3e551b9e27149f2dfc89a2211d2","target":".chezmoiscripts/windows/13-claude.ps1"},
+    {"condition":"always","phase":"after","position":14,"sha256":"27c1da3a68645060761bce3c839a2755c179d483f61b1470fd1e45003c985e2f","target":".chezmoiscripts/windows/14-ocomment.ps1"},
+    {"condition":"onchange","phase":"after","position":15,"sha256":"e0e37d7638c5bb26ba553270b3f8b3e567ec8499d0d4db31fc4f97390f6e6549","target":".chezmoiscripts/windows/15-domyjob.ps1"},
+    {"condition":"always","phase":"after","position":16,"sha256":"f127e4b7cf32210f24f3f7a00a38ce06507a57c7e042ab3d215f4225cdc7ff1c","target":".chezmoiscripts/windows/16-chat.ps1"},
+    {"condition":"always","phase":"after","position":17,"sha256":"becb53823fd3d8f99cbdd18dbc40b8ea5897c58b1900053dbf623c70bcb33c1b","target":".chezmoiscripts/windows/17-adapters.ps1"}
   ]
 }

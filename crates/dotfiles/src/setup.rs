@@ -13,6 +13,8 @@ pub use platform::step::Step;
 pub struct TemplateData {
     pub source: PathBuf,
     pub home: PathBuf,
+    /// The machine-local chezmoi configuration this setup reads, which a scheduled upgrade passes again.
+    pub config: PathBuf,
     pub profile: Profile,
     pub data: Value,
 }
@@ -39,6 +41,7 @@ pub(crate) fn load(source: &Path, config: &Path, home: &Path) -> Result<Template
     Ok(TemplateData {
         source: source.to_path_buf(),
         home: home.to_path_buf(),
+        config: config.to_path_buf(),
         profile,
         data,
     })
@@ -327,6 +330,7 @@ pub const RUNTIME_CRATE: &str = "crates/dotfiles";
 pub const GUARD_PROFILE: &str = "release-guard";
 
 const CLAUDE_INSTALLER: &str = "https://claude.ai/install.sh";
+const CLAUDE_WINDOWS_INSTALLER: &str = "https://claude.ai/install.ps1";
 const ONEPASSWORD_APP: &str = "/Applications/1Password.app";
 const OWNER_SSH: &str = "git@github.com:P4suta";
 
@@ -400,6 +404,51 @@ pub(crate) fn vendor_installer(
     Ok(())
 }
 
+/// Installs Claude Code through its vendor installer for this OS, unless the client already runs.
+fn claude(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
+    if runner.available(Tool::Claude) {
+        return Ok(());
+    }
+    if context.profile == Profile::Windows {
+        powershell_vendor_installer(runner, CLAUDE_WINDOWS_INSTALLER)
+    } else {
+        vendor_installer(runner, CLAUDE_INSTALLER, &[])
+    }
+}
+
+/// Downloads a vendor's PowerShell installer into a private directory and runs it, as `vendor_installer` does with a shell script.
+fn powershell_vendor_installer(runner: &mut impl Runner, url: &str) -> Result<()> {
+    let scope = tempfile::tempdir()?;
+    let script = scope.path().join("vendor-installer.ps1");
+    let download = format!(
+        "$ErrorActionPreference = 'Stop'; Invoke-RestMethod -Uri {} -OutFile {}",
+        crate::host_setup_rules::powershell_literal(url).as_str(),
+        crate::host_setup_rules::powershell_literal(&script.to_string_lossy()).as_str()
+    );
+    checked(
+        runner,
+        Tool::Pwsh,
+        &args(&[
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &download,
+        ]),
+    )?;
+    let mut invocation = args(&[
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+    ]);
+    invocation.push(script.into());
+    checked(runner, Tool::Pwsh, &invocation)?;
+    Ok(())
+}
+
 pub(crate) fn execute(context: &TemplateData, runner: &mut impl Runner, step: Step) -> Result<()> {
     match step {
         Step::Runtime => runtime(context, runner)?,
@@ -470,11 +519,7 @@ pub(crate) fn execute(context: &TemplateData, runner: &mut impl Runner, step: St
         Step::Ocomment | Step::Domyjob | Step::Fleet => source_tool(context, runner, step)?,
         Step::MacosDefaults => macos_defaults(context, runner)?,
         Step::ForgeKeys => forge_keys(runner)?,
-        Step::Claude => {
-            if !runner.available(Tool::Claude) {
-                vendor_installer(runner, CLAUDE_INSTALLER, &[])?;
-            }
-        }
+        Step::Claude => claude(context, runner)?,
         Step::Fcitx5 => fcitx(context, runner)?,
         Step::RetireTmux => retire_tmux(context, runner)?,
         #[cfg(windows)]
@@ -722,6 +767,8 @@ fn tools(context: &TemplateData, runner: &mut impl Runner, upgrade: bool) -> Res
         crate::windows::steps::run(context, Step::Tools)?;
         if upgrade {
             execute(context, runner, Step::Integrations)?;
+        } else {
+            windows_services(context, runner)?;
         }
         return Ok(());
     }
@@ -793,21 +840,41 @@ pub fn reload_agent(
     Ok(())
 }
 
+/// Registers the Windows upgrade task, which the storage-scout setup step's watcher task joins.
+fn windows_services(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
+    let logs = context.home.join(".local/state/dotfiles/log");
+    fs::create_dir_all(&logs)?;
+    let script = crate::maintenance::windows_upgrade_task(
+        &context.home.join(".local/bin/dotfiles.exe"),
+        &context.source,
+        &context.config,
+        &logs.join("tools-upgrade.log"),
+    );
+    checked(
+        runner,
+        Tool::Pwsh,
+        &args(&[
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &script,
+        ]),
+    )?;
+    Ok(())
+}
+
 fn services(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     fs::create_dir_all(context.home.join(".local/state/dotfiles/log"))?;
     if context.profile == Profile::Mac {
         let uid = String::from_utf8(checked(runner, Tool::Id, &args(&["-u"]))?)?;
         let domain = format!("gui/{}", uid.trim());
         unload_agent(runner, &domain, "dev.dotfiles.mise-upgrade")?;
-        for label in [
-            "tools-upgrade",
-            "desktop-refresh",
-            "session-reaper",
-            "dev-reaper",
-            "dev-cleanup",
-            "storage-scout",
-        ] {
-            let label = format!("dev.dotfiles.{label}");
+        for job in crate::maintenance::JOBS
+            .iter()
+            .filter(|job| job.runs_on(Profile::Mac))
+        {
+            let label = job.launchd();
             let plist = context
                 .home
                 .join("Library/LaunchAgents")
@@ -816,34 +883,31 @@ fn services(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
                 reload_agent(runner, &domain, &label, &plist)?;
             }
         }
-    } else if context.profile == Profile::Linux
+    } else if matches!(context.profile, Profile::Linux | Profile::Wsl)
         && runner.available(Tool::Systemctl)
         && runner
             .run(Tool::Systemctl, &args(&["--user", "show-environment"]))?
             .success
     {
-        optional(
-            runner,
-            Tool::Systemctl,
-            &["--user", "stop", "mise-upgrade.timer"],
-        );
-        let obsolete = context
-            .home
-            .join(".config/systemd/user/timers.target.wants/mise-upgrade.timer");
-        if fs::symlink_metadata(&obsolete).is_ok() {
-            fs::remove_file(obsolete)?;
+        for unit in crate::maintenance::RETIRED_UNITS {
+            optional(runner, Tool::Systemctl, &["--user", "stop", unit]);
+            let obsolete = context
+                .home
+                .join(".config/systemd/user/timers.target.wants")
+                .join(unit);
+            if fs::symlink_metadata(&obsolete).is_ok() {
+                fs::remove_file(obsolete)?;
+            }
         }
         checked(runner, Tool::Systemctl, &args(&["--user", "daemon-reload"]))?;
-        for unit in [
-            "tools-upgrade.timer",
-            "session-reaper.timer",
-            "dotfiles-desktop-refresh.timer",
-            "storage-scout.service",
-        ] {
+        for job in crate::maintenance::JOBS
+            .iter()
+            .filter(|job| job.runs_on(context.profile))
+        {
             checked(
                 runner,
                 Tool::Systemctl,
-                &args(&["--user", "enable", "--now", unit]),
+                &args(&["--user", "enable", "--now", job.systemd]),
             )?;
         }
     }
@@ -1222,6 +1286,132 @@ mod tests {
         }
     }
 
+    /// Every profile installs these agent clients, each through its own package route.
+    #[test]
+    fn every_profile_installs_every_agent_client() {
+        let data = |name: &str| -> toml::Table {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../home/.chezmoidata")
+                .join(name);
+            toml::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+        };
+        let packages = data("packages.toml");
+        let tools = data("tools.toml");
+        let listed = |value: &toml::Value| -> Vec<String> {
+            value
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item.as_str().unwrap().to_owned())
+                .collect()
+        };
+        let platforms = &packages["platforms"];
+        let mac: Vec<String> = [
+            listed(&platforms["mac"]["brew"]["casks"]),
+            listed(&platforms["mac"]["brew"]["formulae"]),
+        ]
+        .concat();
+        let linux: Vec<String> = platforms["linux"]["nix"]["packages"]
+            .as_table()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        let wsl = listed(&tools["platforms"]["wsl"]["tools"]["common"]);
+        let windows = listed(&platforms["windows"]["scoop"]["apps"]);
+        for client in ["codex", "opencode"] {
+            assert!(mac.iter().any(|item| item == client), "mac {client}");
+            assert!(linux.iter().any(|item| item == client), "linux {client}");
+            assert!(
+                wsl.iter()
+                    .any(|item| item.rsplit('/').next() == Some(client)),
+                "wsl {client}"
+            );
+            assert!(
+                windows.iter().any(|item| item == client),
+                "windows {client}"
+            );
+        }
+        for profile in Profile::ALL {
+            assert!(Step::Claude.runs_on(profile), "claude {profile:?}");
+        }
+    }
+
+    /// A host whose systemd user manager answers and whose commands all succeed.
+    struct Systemd(Vec<String>);
+    impl crate::runtime::Runner for Systemd {
+        fn available(&self, tool: Tool) -> bool {
+            tool == Tool::Systemctl
+        }
+        fn run(&mut self, tool: Tool, arguments: &[OsString]) -> Result<crate::runtime::Reply> {
+            let words: Vec<_> = arguments.iter().map(|a| a.to_string_lossy()).collect();
+            self.0
+                .push(format!("{} {}", tool.program(), words.join(" ")));
+            Ok(crate::runtime::Reply {
+                success: true,
+                bytes: Vec::new(),
+            })
+        }
+        fn run_installed(&mut self, _: &Path, _: &[OsString]) -> Result<crate::runtime::Reply> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn linux_and_wsl_enable_every_listed_job_and_stop_retired_units() {
+        for profile in [Profile::Linux, Profile::Wsl] {
+            let scope = tempfile::tempdir().unwrap();
+            let context = TemplateData {
+                source: scope.path().into(),
+                home: scope.path().into(),
+                config: scope.path().join("chezmoi.toml"),
+                profile,
+                data: serde_json::json!({}),
+            };
+            let mut runner = Systemd(Vec::new());
+            services(&context, &mut runner).unwrap();
+            for job in crate::maintenance::JOBS {
+                let enable = format!("systemctl --user enable --now {}", job.systemd);
+                assert_eq!(
+                    runner.0.contains(&enable),
+                    job.runs_on(profile),
+                    "{profile:?} {enable}"
+                );
+            }
+            for unit in crate::maintenance::RETIRED_UNITS {
+                let stop = format!("systemctl --user stop {unit}");
+                assert!(runner.0.contains(&stop), "{profile:?} {stop}");
+            }
+        }
+    }
+
+    #[test]
+    fn windows_registers_one_upgrade_task_with_the_applied_configuration() {
+        let scope = tempfile::tempdir().unwrap();
+        let context = TemplateData {
+            source: scope.path().into(),
+            home: scope.path().into(),
+            config: scope.path().join("chezmoi.toml"),
+            profile: Profile::Windows,
+            data: serde_json::json!({}),
+        };
+        let mut runner = Recording(Vec::new());
+        windows_services(&context, &mut runner).unwrap();
+        let registrations: Vec<&String> = runner
+            .0
+            .iter()
+            .filter(|command| command.contains("Register-ScheduledTask"))
+            .collect();
+        assert_eq!(registrations.len(), 1, "{:?}", runner.0);
+        assert!(
+            registrations[0].starts_with("pwsh "),
+            "{}",
+            registrations[0]
+        );
+        assert!(registrations[0].contains("'dotfiles-tools-upgrade'"));
+        assert!(registrations[0].contains("chezmoi.toml"));
+    }
+
     #[derive(Default)]
     struct ChatRecording {
         commands: Vec<String>,
@@ -1264,6 +1454,7 @@ mod tests {
             let context = TemplateData {
                 source: scope.path().into(),
                 home: scope.path().into(),
+                config: scope.path().join("chezmoi.toml"),
                 profile,
                 data: serde_json::json!({"domyjob": {"chat": {"peers": ["peer-one", "peer-two"]}}}),
             };
@@ -1294,6 +1485,7 @@ mod tests {
             let context = TemplateData {
                 source: scope.path().into(),
                 home: scope.path().into(),
+                config: scope.path().join("chezmoi.toml"),
                 profile: Profile::Linux,
                 data,
             };
@@ -1314,6 +1506,7 @@ mod tests {
         let context = TemplateData {
             source: scope.path().into(),
             home: scope.path().into(),
+            config: scope.path().join("chezmoi.toml"),
             profile: Profile::Linux,
             data: serde_json::json!({"domyjob": {"chat": {"peers": ["peer"]}}}),
         };
@@ -1337,6 +1530,7 @@ mod tests {
         let context = TemplateData {
             source: scope.path().into(),
             home: scope.path().into(),
+            config: scope.path().join("chezmoi.toml"),
             profile: Profile::Windows,
             data: serde_json::json!({}),
         };
@@ -1356,6 +1550,7 @@ mod tests {
         let context = TemplateData {
             source: scope.path().into(),
             home: scope.path().into(),
+            config: scope.path().join("chezmoi.toml"),
             profile: Profile::Linux,
             data: serde_json::json!({}),
         };
@@ -1373,6 +1568,7 @@ mod tests {
                 let context = TemplateData {
                     source: scope.path().into(),
                     home: scope.path().into(),
+                    config: scope.path().join("chezmoi.toml"),
                     profile,
                     data: serde_json::json!({}),
                 };
@@ -1404,6 +1600,7 @@ mod tests {
         let context = TemplateData {
             source: scope.path().into(),
             home: scope.path().into(),
+            config: scope.path().join("chezmoi.toml"),
             profile: Profile::Mac,
             data: serde_json::json!({}),
         };
@@ -1440,6 +1637,7 @@ mod tests {
         let context = TemplateData {
             source: scope.path().into(),
             home: scope.path().into(),
+            config: scope.path().join("chezmoi.toml"),
             profile: Profile::Mac,
             data: serde_json::json!({"paths": {"projects": scope.path()}}),
         };

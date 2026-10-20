@@ -17,11 +17,9 @@ A target missing from the first table reaches every profile.
 | `.config/atuin/config.toml` | unix | mac, linux, wsl |
 | `.config/bat` | mac | mac |
 | `.config/bat/config` | mac | mac |
-| `.config/dev-reaper` | desktop | mac, linux |
-| `.config/dev-reaper/config` | desktop | mac, linux |
+| `.config/dev-reaper` | unix | mac, linux, wsl |
+| `.config/dev-reaper/config` | unix | mac, linux, wsl |
 | `.config/dotfiles-nix` | linux | linux |
-| `.config/dotfiles/notifications` | native | mac, linux, windows |
-| `.config/dotfiles/notifications/**` | native | mac, linux, windows |
 | `.config/fcitx5` | linux | linux |
 | `.config/fcitx5/config` | linux | linux |
 | `.config/fcitx5/profile` | linux | linux |
@@ -50,32 +48,28 @@ A target missing from the first table reaches every profile.
 | `.config/nushell/config.nu` | desktop | mac, linux |
 | `.config/nushell/env.nu` | desktop | mac, linux |
 | `.config/nushell/login.nu` | mac | mac |
-| `.config/session-reaper` | desktop | mac, linux |
-| `.config/session-reaper/config` | desktop | mac, linux |
+| `.config/session-reaper` | unix | mac, linux, wsl |
+| `.config/session-reaper/config` | unix | mac, linux, wsl |
 | `.config/shell` | desktop | mac, linux |
 | `.config/shell/ssh-agent.sh` | desktop | mac, linux |
 | `.config/storage-scout` | native | mac, linux, windows |
 | `.config/storage-scout/auto.toml` | native | mac, linux, windows |
 | `.config/systemd` | systemd | linux, wsl |
-| `.config/systemd/user/dev-cleanup.service` | linux | linux |
-| `.config/systemd/user/dev-cleanup.timer` | linux | linux |
-| `.config/systemd/user/dev-reaper.service` | linux | linux |
-| `.config/systemd/user/dev-reaper.timer` | linux | linux |
-| `.config/systemd/user/docker-prune.service` | linux | linux |
-| `.config/systemd/user/docker-prune.timer` | linux | linux |
+| `.config/systemd/user/dev-cleanup.service` | systemd | linux, wsl |
+| `.config/systemd/user/dev-cleanup.timer` | systemd | linux, wsl |
+| `.config/systemd/user/dev-reaper.service` | systemd | linux, wsl |
+| `.config/systemd/user/dev-reaper.timer` | systemd | linux, wsl |
 | `.config/systemd/user/dotfiles-desktop-refresh.service` | linux | linux |
 | `.config/systemd/user/dotfiles-desktop-refresh.timer` | linux | linux |
-| `.config/systemd/user/mise-upgrade.service` | wsl | wsl |
-| `.config/systemd/user/mise-upgrade.timer` | wsl | wsl |
-| `.config/systemd/user/session-reaper.service` | linux | linux |
-| `.config/systemd/user/session-reaper.timer` | linux | linux |
+| `.config/systemd/user/session-reaper.service` | systemd | linux, wsl |
+| `.config/systemd/user/session-reaper.timer` | systemd | linux, wsl |
 | `.config/systemd/user/storage-scout.service` | linux | linux |
-| `.config/systemd/user/tools-upgrade.service` | linux | linux |
-| `.config/systemd/user/tools-upgrade.timer` | linux | linux |
+| `.config/systemd/user/tools-upgrade.service` | systemd | linux, wsl |
+| `.config/systemd/user/tools-upgrade.timer` | systemd | linux, wsl |
 | `.config/wezterm` | windows | windows |
 | `.config/wezterm/wezterm.lua` | windows | windows |
 | `.config/xdg-terminals.list` | linux | linux |
-| `.local/bin/dev-reaper` | linux | linux |
+| `.local/bin/dev-reaper` | systemd | linux, wsl |
 | `.local/bin/dotfiles-doctor` | unix | mac, linux, wsl |
 | `.local/bin/dotfiles-doctor.ps1` | windows | windows |
 | `.local/bin/dotfiles-refresh-desktop` | desktop | mac, linux |
@@ -90,7 +84,7 @@ A target missing from the first table reaches every profile.
 | `.local/bin/kitty-herdr` | linux | linux |
 | `.local/bin/kitty-nu` | linux | linux |
 | `.local/bin/renovate-local` | linux | linux |
-| `.local/bin/session-reaper` | linux | linux |
+| `.local/bin/session-reaper` | systemd | linux, wsl |
 | `.local/share` | linux | linux |
 | `.local/share/applications/kitty-herdr.desktop` | linux | linux |
 | `.local/share/applications/kitty-nu.desktop` | linux | linux |
@@ -122,7 +116,6 @@ A target missing from the first table reaches every profile.
 | `.chezmoiscripts/unix/07-fcitx5.sh` | linux | linux |
 | `.chezmoiscripts/unix/08-macos-defaults.sh` | mac | mac |
 | `.chezmoiscripts/unix/09-forge-keys.sh` | mac | mac |
-| `.chezmoiscripts/unix/10-claude.sh` | mac | mac |
 | `.chezmoiscripts/unix/11-ocaml.sh` | desktop | mac, linux |
 | `.chezmoiscripts/unix/12-haskell.sh` | mac | mac |
 | `.chezmoiscripts/unix/13-racket.sh` | mac | mac |
@@ -154,8 +147,10 @@ Each profile in the set removes the target when it applies.
 | `.config/opencode/plugins/prose.ts` | unix | mac, linux, wsl |
 | `.config/shell/github-token.sh` | unix | mac, linux, wsl |
 | `.config/sketchybar` | mac | mac |
-| `.config/systemd/user/mise-upgrade.service` | linux | linux |
-| `.config/systemd/user/mise-upgrade.timer` | linux | linux |
+| `.config/systemd/user/docker-prune.service` | linux | linux |
+| `.config/systemd/user/docker-prune.timer` | linux | linux |
+| `.config/systemd/user/mise-upgrade.service` | systemd | linux, wsl |
+| `.config/systemd/user/mise-upgrade.timer` | systemd | linux, wsl |
 | `.gitconfig` | unix | mac, linux, wsl |
 | `.local/bin/dotctl.exe` | windows | windows |
 | `.local/bin/dotfiles-wm-defaults` | mac | mac |

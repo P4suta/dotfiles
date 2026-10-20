@@ -58,14 +58,15 @@ def windowsAfter : Deps
   | 12 => [1]
   | 13 => [1]
   | 14 => [1]
+  | 18 => [1]
   | 23 => [7, 1]
   | 24 => [7, 1]
-  | 28 => [24, 10, 1]
-  | 29 => [0, 1, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 23, 24, 28]
+  | 28 => [24, 10, 18, 1]
+  | 29 => [0, 1, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 18, 23, 24, 28]
   | _ => []
 
 /-- The windows launchers in run order. -/
-def windowsOrder : List Nat := [0, 1, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 23, 24, 28, 29]
+def windowsOrder : List Nat := [0, 1, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 18, 23, 24, 28, 29]
 
 theorem windows_respected : DirectlyRespected windowsAfter windowsOrder := by decide +kernel
 
