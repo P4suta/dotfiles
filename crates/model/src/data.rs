@@ -23,6 +23,8 @@ pub struct Data {
     /// The foreground and background palette names that some theme draws text with, each of which keeps a text contrast of 4.5:1.
     pub contrast: Option<Vec<ContrastPair>>,
     pub platforms: Option<Platforms>,
+    /// The tools mise installs on every profile.
+    pub shared_tools: Option<SharedTools>,
     /// Named sets of profiles.
     pub profiles: Option<BTreeMap<String, Vec<String>>>,
     /// Targets that only the profiles of the named set receive.
@@ -335,6 +337,17 @@ pub struct Platforms {
     pub mac: Option<Mac>,
     pub windows: Option<Windows>,
     pub wsl: Option<Wsl>,
+}
+
+/// The tools mise installs on every profile, their versions, and the shared tools a profile leaves out.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SharedTools {
+    pub common: Option<Vec<String>>,
+    /// The version of a shared tool on every profile whose own `tool_versions` names none.
+    pub versions: Option<BTreeMap<String, String>>,
+    /// For each profile, the shared tools it leaves out and the reason.
+    pub skip: Option<BTreeMap<String, BTreeMap<String, String>>>,
 }
 
 /// The tools mise installs: `common` on every machine, and `personal` or `work` by the machine's role.

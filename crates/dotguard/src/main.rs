@@ -10,7 +10,8 @@
 //! `core.hooksPath` in the global Git configuration points every repository at that hooks directory, so no repository needs to opt in.
 
 use dotguard::{
-    attribution, bypass, gitargv, lang, prepush, provenance_rules, real_git, refusal, staged,
+    attribution, bypass, gitargv, lang, local_state_rules, prepush, provenance_rules, real_git,
+    refusal, staged,
 };
 
 use bypass::Rule;
@@ -303,6 +304,40 @@ fn picking() -> Option<bool> {
     Some(!exists("MERGE_HEAD")? && exists("CHERRY_PICK_HEAD")?)
 }
 
+/// Refuses a commit that adds or changes a path of the owner's local workflow state, which belongs in no repository.
+/// A deletion passes, so a repository can drop an old copy.
+fn local_state() -> Option<i32> {
+    let staged = real_git::capture(&[
+        "diff",
+        "--cached",
+        "--name-only",
+        "--no-renames",
+        "--diff-filter=ACMRT",
+        "-z",
+    ])?;
+    let found: Vec<&str> = staged
+        .split('\0')
+        .filter(|path| local_state_rules::is_local_state(path.as_bytes()))
+        .collect();
+    if found.is_empty() {
+        return None;
+    }
+    let mut unstage = vec!["git", "rm", "-r", "--cached", "--quiet", "--"];
+    unstage.extend(found.iter().copied());
+    found
+        .iter()
+        .fold(
+            refusal::Refusal::new(
+                "commit.local-state",
+                "the commit adds local workflow state, which lives in the owner's state directory and belongs in no repository",
+                refusal::command(&unstage),
+            ),
+            |refused, path| refused.evidence(format!("staged: {path}")),
+        )
+        .emit();
+    Some(1)
+}
+
 /// Whether the special reference `name` exists.
 /// Git keeps `MERGE_HEAD` and `CHERRY_PICK_HEAD` as files in the Git directory of the worktree under every reference storage format, and `git commit` checks those files.
 /// `git show-ref --exists` doesn't decide this on every supported Git version.
@@ -313,6 +348,9 @@ fn exists(name: &str) -> Option<bool> {
 }
 
 fn pre_commit() -> i32 {
+    if let Some(code) = local_state() {
+        return code;
+    }
     if lang_mode().is_none() {
         return 0;
     }

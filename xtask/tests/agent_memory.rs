@@ -336,8 +336,9 @@ fn codex_runtime_hooks_have_native_windows_commands() {
             .flat_map(|group| group["hooks"].as_array().unwrap())
             .filter(|hook| hook["command"].as_str().is_some_and(runs_the_runtime))
             .collect();
+        // The shell guard, the edit guard, the timing hook before and after each command, and the start and stop reports.
         // Windows adds the process-start probe at session start.
-        let expected = if profile == "windows" { 5 } else { 4 };
+        let expected = if profile == "windows" { 7 } else { 6 };
         assert_eq!(handlers.len(), expected, "{profile}: {rendered}");
         for handler in handlers {
             assert_eq!(

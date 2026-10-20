@@ -130,6 +130,17 @@
         "type": "string"
       }
     },
+    "shared_tools": {
+      "description": "The tools mise installs on every profile.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SharedTools"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "shell": {
       "description": "The interactive behavior every shell a profile configures renders in its own syntax.",
       "anyOf": [
@@ -1239,6 +1250,45 @@
             "null"
           ],
           "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SharedTools": {
+      "description": "The tools mise installs on every profile, their versions, and the shared tools a profile leaves out.",
+      "type": "object",
+      "properties": {
+        "common": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "skip": {
+          "description": "For each profile, the shared tools it leaves out and the reason.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "versions": {
+          "description": "The version of a shared tool on every profile whose own `tool_versions` names none.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
             "type": "string"
           }
         }

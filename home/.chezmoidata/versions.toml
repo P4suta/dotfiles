@@ -16,9 +16,12 @@ macos-arm64 = "62e86e51f834899610e9bd0ee37580cfe01fac5fff03002318e714fbdb86faeb"
 macos-x64 = "7e4328b82d9f8a785500c5624bc7bf36afec9bd9a5fadeca089a51c824f030b5"
 windows-x64 = "2337f9fdb13ba51d3bf5831cacec9c59e70fec9630e9ad30f65975eb6b83b162"
 
-[platforms.linux.tool_versions]
+# The versions of the shared tools on every profile, unless a profile's own `tool_versions` names another.
+[shared_tools.versions]
 java = "temurin-25"
 rust = "stable"
+
+[platforms.linux.tool_versions]
 
 [platforms.mac.tool_versions]
 # renovate: datasource=github-tags depName=haskell/cabal extractVersion=^cabal-install-v(?<version>.+)$
@@ -27,7 +30,5 @@ cabal = "3.16.1.0"
 ghc = "9.14.1"
 # renovate: datasource=github-releases depName=haskell/haskell-language-server
 haskell-language-server = "2.15.0.0"
-java = "temurin-25"
 # renovate: datasource=github-tags depName=racket/racket extractVersion=^v(?<version>.+)$
 racket = "9.3"
-rust = "stable"

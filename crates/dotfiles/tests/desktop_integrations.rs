@@ -41,7 +41,7 @@ fn pinned_tool(name: &str) -> Result<PathBuf> {
 }
 
 fn copy_opencode_templates(destination: &Path) -> Result<()> {
-    for directory in [".chezmoidata", ".chezmoitemplates/native/opencode"] {
+    for directory in [".chezmoidata"] {
         let target = destination.join(directory);
         fs::create_dir_all(&target)?;
         for entry in fs::read_dir(source().join(directory))? {

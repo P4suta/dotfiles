@@ -47,16 +47,21 @@ fn canonical(directory: &Path, working: &Path) -> io::Result<PathBuf> {
     };
     match crate::paths::canonical(&directory) {
         Ok(canonical) => Ok(canonical),
-        Err(error)
-            if matches!(
-                error.kind(),
-                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
-            ) =>
-        {
-            Ok(directory)
-        }
+        Err(error) if unresolved(&error) => Ok(directory),
         Err(error) => Err(error),
     }
+}
+
+/// The error Windows returns when it won't let this process follow a junction that an installer created, such as the Herdr and Codex `bin` links on `PATH`.
+/// Win32 names it `ERROR_UNTRUSTED_MOUNT_POINT`.
+const UNTRUSTED_MOUNT_POINT: i32 = 448;
+
+/// Whether canonicalizing failed only because the path doesn't resolve, so its written form stands.
+fn unresolved(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+    ) || cfg!(windows) && error.raw_os_error() == Some(UNTRUSTED_MOUNT_POINT)
 }
 
 fn named(component: &OsStr, name: &str) -> bool {
@@ -308,4 +313,23 @@ pub fn pty_command(command: &Command) -> portable_pty::CommandBuilder {
         }
     }
     terminal
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UNTRUSTED_MOUNT_POINT, unresolved};
+    use std::io;
+
+    #[test]
+    fn a_junction_windows_refuses_keeps_its_written_path_like_a_missing_one() {
+        assert!(unresolved(&io::Error::from(io::ErrorKind::NotFound)));
+        assert!(unresolved(&io::Error::from(io::ErrorKind::NotADirectory)));
+        assert_eq!(
+            unresolved(&io::Error::from_raw_os_error(UNTRUSTED_MOUNT_POINT)),
+            cfg!(windows)
+        );
+        assert!(!unresolved(&io::Error::from(
+            io::ErrorKind::PermissionDenied
+        )));
+    }
 }
