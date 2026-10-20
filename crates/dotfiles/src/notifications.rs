@@ -635,6 +635,17 @@ fn player() -> Result<Command> {
         hidden(&mut command);
         return Ok(command);
     }
+    if let Some(windows) = speech::wsl_windows_player() {
+        let mut command = platform::process::command(windows);
+        command.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            WINDOWS_PLAY,
+        ]);
+        return Ok(command);
+    }
     if let Some(nix_player) = platform::home::home().map(|home| home.join(NIX_PLAYER))
         && nix_player.is_absolute()
         && nix_player.is_file()
@@ -669,7 +680,13 @@ fn play(home: &Path, event: Event) -> Result<()> {
     let path = directory.join(AUDIO).join(format!("{}.wav", material.name));
     let mut command = player()?;
     if cfg!(windows) {
-        command.env("DOTFILES_SPEECH_WAV", &path);
+        command.env(SPEECH_WAV, &path);
+    } else if speech::wsl_windows_player().is_some() {
+        // WSL translates a variable that WSLENV marks with `/p` into the Windows form of its path.
+        command.env(SPEECH_WAV, &path).env(
+            WSLENV,
+            forwarded_path(std::env::var(WSLENV).ok().as_deref()),
+        );
     } else {
         command.arg(&path);
     }
@@ -678,6 +695,23 @@ fn play(home: &Path, event: Event) -> Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     bounded(&mut command, PLAYER_TIMEOUT)
+}
+
+/// The variable that carries the clip's path to the Windows player.
+const SPEECH_WAV: &str = "DOTFILES_SPEECH_WAV";
+/// The list of variables WSL passes to a Windows process.
+const WSLENV: &str = "WSLENV";
+
+/// `existing` with the clip's path variable added once, flagged for translation into a Windows path.
+fn forwarded_path(existing: Option<&str>) -> String {
+    let entry = format!("{SPEECH_WAV}/p");
+    let mut entries: Vec<&str> = existing
+        .unwrap_or_default()
+        .split(':')
+        .filter(|item| !item.is_empty() && item.split('/').next() != Some(SPEECH_WAV))
+        .collect();
+    entries.push(&entry);
+    entries.join(":")
 }
 
 fn bounded(command: &mut Command, timeout: Duration) -> Result<()> {
@@ -802,6 +836,19 @@ mod tests {
         huge[4..8].copy_from_slice(&(samples + 36).to_le_bytes());
         huge[40..44].copy_from_slice(&samples.to_le_bytes());
         assert!(pcm_duration(&huge).is_err());
+    }
+    #[test]
+    fn wsl_forwards_the_clip_path_once_and_keeps_other_variables() {
+        assert_eq!(forwarded_path(None), "DOTFILES_SPEECH_WAV/p");
+        assert_eq!(forwarded_path(Some("")), "DOTFILES_SPEECH_WAV/p");
+        assert_eq!(
+            forwarded_path(Some("USERPROFILE/p:WT_SESSION")),
+            "USERPROFILE/p:WT_SESSION:DOTFILES_SPEECH_WAV/p"
+        );
+        assert_eq!(
+            forwarded_path(Some("DOTFILES_SPEECH_WAV/u:PATH/l")),
+            "PATH/l:DOTFILES_SPEECH_WAV/p"
+        );
     }
     #[test]
     fn fixed_materials_refuse_unknown_event_and_callback_identity_is_opaque() {
