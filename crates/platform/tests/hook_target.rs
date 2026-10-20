@@ -1,4 +1,6 @@
-use platform::runtime::{Real, checkout_key, claim_hook_target, hook_checkout, hook_target};
+use platform::runtime::{
+    Real, checkout_key, claim_hook_target, hook_checkout, hook_target, retire_hook_target,
+};
 use platform::target_rules::{Target, target};
 use platform::tool::Tool;
 use std::ffi::OsStr;
@@ -133,15 +135,35 @@ fn a_hook_target_carries_a_storage_scout_cache_marker_for_its_checkout() -> anyh
 }
 
 #[test]
-fn hook_gates_build_outside_the_worktree() -> std::io::Result<()> {
+fn hook_gates_leave_the_cargo_target_to_each_workspace() -> std::io::Result<()> {
     let home = tempfile::tempdir()?;
     let native = Real::new(home.path()).expect("native");
     let command = native.hook_command(Tool::Lefthook);
-    let value = command
-        .get_envs()
-        .find(|(name, _)| *name == OsStr::new("CARGO_TARGET_DIR"))
-        .and_then(|(_, value)| value)
-        .expect("CARGO_TARGET_DIR is set");
-    assert!(Path::new(value).is_absolute());
+    assert!(
+        command
+            .get_envs()
+            .all(|(name, _)| name != OsStr::new("CARGO_TARGET_DIR")),
+        "a hook gate exports no Cargo target directory to its children"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_retired_hook_target_goes_only_when_its_checkout_claimed_it() -> anyhow::Result<()> {
+    let scope = tempfile::tempdir()?;
+    let checkout = scope.path().join("repository");
+    let other = scope.path().join("other");
+    let target = scope.path().join("targets/repository-0123");
+    claim_hook_target(&target, &other)?;
+    retire_hook_target(&target, &checkout);
+    assert!(target.is_dir(), "another checkout's directory stays");
+    claim_hook_target(&target, &checkout)?;
+    std::fs::create_dir_all(target.join("debug/deps"))?;
+    retire_hook_target(&target, &checkout);
+    assert!(!target.exists());
+    let unmarked = scope.path().join("targets/unmarked");
+    std::fs::create_dir_all(&unmarked)?;
+    retire_hook_target(&unmarked, &checkout);
+    assert!(unmarked.is_dir(), "a directory without a marker stays");
     Ok(())
 }
