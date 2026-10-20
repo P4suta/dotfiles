@@ -75,13 +75,21 @@ fn locating(globals: &[String]) -> Vec<String> {
 }
 
 fn git(globals: &[String], arguments: &[&str]) -> Option<String> {
+    git_exact(globals, arguments).map(|output| output.trim().to_owned())
+}
+
+/// Where the path starts in a `git status --porcelain` entry, after the index code, the worktree code, and a space.
+const STATUS_PATH_START: usize = 3;
+
+/// Git's output as it printed it, keeping the leading space of a status code.
+fn git_exact(globals: &[String], arguments: &[&str]) -> Option<String> {
     let located = locating(globals);
     let words: Vec<&str> = located
         .iter()
         .map(String::as_str)
         .chain(arguments.iter().copied())
         .collect();
-    real_git::capture(&words).map(|output| output.trim().to_owned())
+    real_git::capture(&words)
 }
 
 /// The diff Lefthook 2 saves for each partly staged file before it hides the file's unstaged hunks.
@@ -162,16 +170,35 @@ impl Repository for Checkout {
     }
 
     fn holds_tracked_changes(&self, globals: &[String]) -> Option<bool> {
-        git(
+        let status = git_exact(
             globals,
             &[
                 "--no-optional-locks",
                 "status",
                 "--porcelain",
+                "-z",
                 "--untracked-files=no",
             ],
-        )
-        .map(|status| !status.is_empty())
+        )?;
+        let root = PathBuf::from(git(globals, &["rev-parse", "--show-toplevel"])?);
+        let mut entries = status.split('\0').filter(|entry| !entry.is_empty());
+        while let Some(entry) = entries.next() {
+            let code = entry.as_bytes();
+            let (Some(&index), Some(&worktree), Some(path)) =
+                (code.first(), code.get(1), entry.get(STATUS_PATH_START..))
+            else {
+                return None;
+            };
+            // A rename or copy names its source in the next field.
+            if matches!(index, b'R' | b'C') {
+                entries.next();
+            }
+            let present = root.join(path).symlink_metadata().is_ok();
+            if crate::git_ref_rules::entry_holds_work(index, worktree, present) {
+                return Some(true);
+            }
+        }
+        Some(false)
     }
 
     fn saved_unstaged(&self, globals: &[String], paths: &[String]) -> Option<bool> {
