@@ -159,14 +159,14 @@ struct Anchor {
 
 pub(crate) struct KaniReadback {
     identity: String,
-    harness_duration_ms: u64,
+    harness_duration_ms: Option<u64>,
 }
 
 impl KaniReadback {
     pub(crate) fn identity(&self) -> &str {
         &self.identity
     }
-    pub(crate) fn harness_duration_ms(&self) -> u64 {
+    pub(crate) fn harness_duration_ms(&self) -> Option<u64> {
         self.harness_duration_ms
     }
 }
@@ -819,19 +819,14 @@ pub(crate) fn cached_kani(
         Disposition::Reuse => {
             let bytes = bytes.context("verified Kani anchor bytes")?;
             let anchor = anchor.context("verified Kani anchor document")?;
-            let mut harness_duration_ms = 0_u64;
+            let mut harness_duration_ms = Some(0_u64);
             for batch in &anchor.reports {
                 for report in batch.document["verification_results"]["results"]
                     .as_array()
                     .context("verified Kani result inventory")?
                 {
                     harness_duration_ms = harness_duration_ms
-                        .checked_add(
-                            report["duration_ms"]
-                                .as_u64()
-                                .context("verified Kani duration")?,
-                        )
-                        .context("Kani origin duration overflow")?;
+                        .and_then(|total| total.checked_add(report["duration_ms"].as_u64()?));
                 }
             }
             retain("Kani reused origin", "anchor", &bytes)?;
@@ -1265,10 +1260,6 @@ mod tests {
         assert!(validate_batches(&[valid(), valid(), rejected()], &expected, &probes).is_err());
         for (path, replacement) in [
             (
-                "/verification_results/results/0/duration_ms",
-                serde_json::json!(30001),
-            ),
-            (
                 "/verification_results/results/0/checks/0/status",
                 serde_json::json!("Failure"),
             ),
@@ -1287,6 +1278,15 @@ mod tests {
                 .pointer_mut(path)
                 .context("receipt fault path")? = replacement;
             assert!(validate_batches(&[broken, rejected()], &expected, &probes).is_err());
+        }
+        for duration in [
+            serde_json::json!(30001),
+            serde_json::json!(u64::MAX),
+            serde_json::Value::Null,
+        ] {
+            let mut advisory = valid();
+            advisory.document["verification_results"]["results"][0]["duration_ms"] = duration;
+            validate_batches(&[advisory, rejected()], &expected, &probes)?;
         }
         assert!(validate_batches(&[valid()], &expected, &probes).is_err());
         let mut missing_assertion = rejected();

@@ -38,6 +38,8 @@ const TERMINAL_TIMEOUT: Duration = Duration::from_secs(10);
 const TERMINAL_READ_BYTES: usize = 4096;
 const CURSOR_QUERY: &[u8] = b"\x1b[6n";
 const CONTAINER_OPTIONS_START: usize = 2;
+#[cfg(unix)]
+const GRID_SHELL: &str = "/bin/sh";
 #[cfg(windows)]
 const FZF_WSL_DISTRIBUTION: &str = "DOTFILES_FZF_WSL_DISTRIBUTION";
 #[cfg(windows)]
@@ -110,6 +112,31 @@ pub fn match_millis(golden: &[String], rendered: &[String]) -> u64 {
     agreed * MILLIS / all
 }
 
+fn grid_command(mut command: Command, home: &Path) -> Command {
+    command
+        .env_clear()
+        .envs(
+            ["PATH", "SystemRoot"]
+                .into_iter()
+                .filter_map(|name| std::env::var_os(name).map(|value| (name, value))),
+        )
+        .envs([
+            ("TERM", "xterm-256color"),
+            ("COLORTERM", "truecolor"),
+            ("LANG", "C.UTF-8"),
+            ("LC_ALL", "C.UTF-8"),
+        ])
+        .env("COLUMNS", GRID_COLUMNS.to_string())
+        .env("LINES", GRID_ROWS.to_string())
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XDG_CACHE_HOME", home.join(".cache"));
+    #[cfg(unix)]
+    command.env("SHELL", GRID_SHELL);
+    command
+}
+
 /// The rendered prompt of a starship configuration in a fixture repository under a fixture home, with its volatile modules off.
 fn starship_output(config: &str, scope: &Path) -> Result<Vec<u8>> {
     let mut table: toml::Table =
@@ -140,16 +167,14 @@ fn starship_output(config: &str, scope: &Path) -> Result<Vec<u8>> {
     let home = scope.join("home");
     let project = home.join("project");
     fs::create_dir_all(&project)?;
-    let status = Tool::Git
-        .command()
+    let status = grid_command(Tool::Git.command(), &home)
         .current_dir(&project)
         .args(["init", "--quiet", "--initial-branch", "main"])
         .status()?;
     ensure!(status.success(), "git init failed for the prompt fixture");
     let file = scope.join("starship.toml");
     fs::write(&file, toml::to_string(&table)?)?;
-    let output = Tool::Starship
-        .command()
+    let output = grid_command(Tool::Starship.command(), &home)
         .current_dir(&project)
         .args([
             "prompt",
@@ -169,12 +194,6 @@ fn starship_output(config: &str, scope: &Path) -> Result<Vec<u8>> {
         .env("PWD", &project)
         .env("STARSHIP_CONFIG", &file)
         .env("STARSHIP_CACHE", scope.join("cache"))
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env_remove("STARSHIP_SHELL")
-        .env("TERM", "xterm-256color")
-        .env("COLUMNS", GRID_COLUMNS.to_string())
-        .env("LINES", GRID_ROWS.to_string())
         .output()
         .context("start starship")?;
     ensure!(
@@ -189,7 +208,7 @@ fn starship_output(config: &str, scope: &Path) -> Result<Vec<u8>> {
 fn bat_output(root: &Path, config: &str, scope: &Path) -> Result<Vec<u8>> {
     let file = scope.join("bat-config");
     fs::write(&file, config)?;
-    let output = crate::tool::external("bat")
+    let output = grid_command(crate::tool::external("bat"), scope)
         .args([
             "--color=always",
             "--paging=never",
@@ -200,10 +219,6 @@ fn bat_output(root: &Path, config: &str, scope: &Path) -> Result<Vec<u8>> {
         .arg(root.join(PAGER_FIXTURE))
         .env("BAT_CONFIG_PATH", &file)
         .env("BAT_CACHE_PATH", scope.join("cache"))
-        .env("TERM", "xterm-256color")
-        .env("COLORTERM", "truecolor")
-        .env("COLUMNS", GRID_COLUMNS.to_string())
-        .env("LINES", GRID_ROWS.to_string())
         .output()
         .context("start bat")?;
     ensure!(
@@ -227,7 +242,7 @@ fn fzf_output(config: &str, scope: &Path) -> Result<Vec<u8>> {
         pixel_width: 0,
         pixel_height: 0,
     })?;
-    let mut command = Tool::Fzf.command();
+    let mut command = grid_command(Tool::Fzf.command(), scope);
     command
         .current_dir(scope)
         .args([
@@ -239,18 +254,17 @@ fn fzf_output(config: &str, scope: &Path) -> Result<Vec<u8>> {
             "--bind",
         ])
         .arg(format!("load:change-header({FZF_READY})"))
-        .env("FZF_DEFAULT_OPTS_FILE", &settings)
-        .env_remove("FZF_DEFAULT_OPTS")
-        .env_remove("FZF_DEFAULT_COMMAND")
-        .env("TERM", "xterm-256color")
-        .env("COLORTERM", "truecolor")
-        .env("COLUMNS", GRID_COLUMNS.to_string())
-        .env("LINES", GRID_ROWS.to_string());
+        .env("FZF_DEFAULT_OPTS_FILE", &settings);
+    let mut terminal = platform::process::pty_command(&command);
+    terminal.env_clear();
+    for (name, value) in command.get_envs() {
+        if let Some(value) = value {
+            terminal.env(name, value);
+        }
+    }
     let mut reader = pair.master.try_clone_reader()?;
     let mut writer = pair.master.take_writer()?;
-    let mut child = pair
-        .slave
-        .spawn_command(platform::process::pty_command(&command))?;
+    let mut child = pair.slave.spawn_command(terminal)?;
     drop(pair.slave);
     let (sender, receiver) = mpsc::channel();
     let reading = thread::spawn(move || {

@@ -1,12 +1,13 @@
 ---
-status: proposed
+status: amended
+changed_by: [proof-verdicts-never-depend-on-time.md]
 date: 2026-10-16
 ---
 # Evaluate fixed parser domains before symbolic selection
 
 ## Context
 
-The six continuation-parser harnesses have finite input domains, but symbolic execution of their nested scans exceeds the existing proof budget.
+The six continuation-parser harnesses have finite input domains with nested scans that can instead be evaluated over explicit finite tables.
 Their properties, admitted inputs, and reachable acceptance and refusal witnesses must remain required.
 The [obligation manifest](checked-obligation-manifest.md) binds each property to the actual implementation.
 
@@ -36,15 +37,16 @@ The rejecting checks must also demonstrate a property failure after corrupting p
 
 The trusted Rust compiler's constant evaluator executes the parser for these finite proofs.
 Kani checks the resulting finite relation instead of symbolically executing the parser's loops, so its former parser unwinding and safety-property counts are not retained as evidence.
-Compilation time belongs to the verification cost and must be reported beside backend time.
+Compilation time and backend time remain advisory output.
+The deterministic domain contains 48,128 shape combinations and the boundary harness's complete Cartesian prefix domain.
 Native tests, Miri, and mutation checks continue to exercise ordinary execution of the production function.
 This composition proves the existing finite contracts and makes no claim of equivalence for every possible input length or content.
 
 ## Alternatives
 
-Continuing symbolic loop expansion did not finish within the existing budget.
+The earlier symbolic loop-expansion experiment supplied no completed proof.
 A detached parser model would leave the production link unproved.
-Increasing the budget or dropping inputs would change the required contract rather than discharge it.
+Increasing an elapsed allowance supplies no proof evidence, and dropping inputs would change the required contract rather than discharge it.
 
 ## Reconsider
 

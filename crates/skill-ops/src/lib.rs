@@ -1438,10 +1438,7 @@ pub fn analyze(
     Ok(report)
 }
 
-/// The milliseconds in a second, which turn the proof budget into the words a skill would use.
-const MILLIS_PER_SECOND: u64 = 1000;
-
-/// The texts the checkout's gates pin, which a skill points at instead of repeating: each tool version of `mise.toml`, and the proof budget.
+/// The texts the checkout's gates pin, which a skill points at instead of repeating: each tool version of `mise.toml`, and the proof hang cap.
 ///
 /// # Errors
 ///
@@ -1468,7 +1465,7 @@ pub fn pinned_terms(root: &Path) -> Result<Vec<String>> {
             }
         }
     }
-    let seconds = proof_budget_rules::BUDGET_MILLIS / MILLIS_PER_SECOND;
+    let seconds = proof_budget_rules::TIMEOUT_SECONDS;
     terms.push(format!("{seconds}-second"));
     terms.push(format!("{seconds} seconds"));
     terms.sort();

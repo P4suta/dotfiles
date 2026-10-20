@@ -434,6 +434,11 @@ verifier = "kani"
 source = "crates/rules/src/provenance_rules.rs"
 probes = '''
 #[kani::proof]
+#[kani::unwind(12)]
+fn reject_missing_a_bounded_provenance_phrase() {
+    assert!(production::find("as an ai").is_none());
+}
+#[kani::proof]
 fn reject_admitting_a_found_phrase() {
     assert!(production::verdict(true) == production::Verdict::Admit);
 }
@@ -679,6 +684,11 @@ fn reject_rewriting_crlf_the_index_keeps() {
 verifier = "kani"
 source = "crates/rules/src/env_expansion_rules.rs"
 probes = '''
+#[kani::proof]
+#[kani::unwind(5)]
+fn reject_missing_a_bounded_variable_marker() {
+    assert!(production::marker("${a}").is_none());
+}
 #[kani::proof]
 fn reject_admitting_an_unexpanded_value() {
     assert!(production::verdict(true) == production::Verdict::Admit);
@@ -1019,6 +1029,11 @@ verifier = "kani"
 source = "crates/rules/src/input_rules.rs"
 probes = '''
 use production::{Term, Verdict, verdict};
+#[kani::proof]
+#[kani::unwind(12)]
+fn reject_hashing_a_bounded_host_read_token() {
+    assert!(production::term("env") == Term::Data);
+}
 #[kani::proof]
 fn reject_hashing_a_chezmoi_variable() {
     assert!(verdict(&[Term::Data, Term::Chezmoi]) == Verdict::Admit);
@@ -1374,8 +1389,8 @@ fn reject_rounding_a_positive_host_elapsed_down_to_zero() {
     assert!(production::elapsed_millis(0, 1) == Some(0));
 }
 #[kani::proof]
-fn reject_rounding_a_host_budget_overrun_down() {
-    assert!(production::elapsed_millis(u128::from(production::BUDGET_MILLIS), 1) == Some(production::BUDGET_MILLIS));
+fn reject_rounding_a_fractional_host_elapsed_down() {
+    assert!(production::elapsed_millis(1, 1) == Some(1));
 }
 #[kani::proof]
 fn reject_wrapping_an_unrepresentable_host_elapsed() {
@@ -1385,7 +1400,7 @@ fn reject_wrapping_an_unrepresentable_host_elapsed() {
 fn reject_a_noncanonical_host_elapsed_fraction() {
     assert!(production::elapsed_millis(0, 1_000_000).is_some());
 }
-use production::{BUDGET_MILLIS, Verdict, verdict};
+use production::{Verdict, verdict};
 #[kani::proof]
 fn reject_a_ci_campaign_requiring_mutation() {
     assert!(production::mutation_required(production::ProofCampaign::Ci));
@@ -1423,12 +1438,24 @@ fn reject_mutation_timeouts_having_a_success_exit() {
     assert!(production::mutation_exit(1, [0, 0, 1, 0]) == Some(production::MUTATION_CLEAN_EXIT));
 }
 #[kani::proof]
-fn reject_admitting_an_overrun() {
-    assert!(verdict(Some(BUDGET_MILLIS + 1)) == Verdict::Within);
+#[kani::unwind(1)]
+fn reject_failing_a_completed_proof() {
+    assert!(verdict(Some(true)) == Verdict::Failed);
 }
 #[kani::proof]
-fn reject_admitting_an_unmeasured_harness() {
-    assert!(verdict(None) == Verdict::Within);
+#[kani::unwind(1)]
+fn reject_admitting_an_incomplete_harness() {
+    assert!(verdict(None) == Verdict::Proven);
+}
+#[kani::proof]
+#[kani::unwind(1)]
+fn reject_counting_missing_evidence_as_a_failed_proof() {
+    assert!(verdict(None) == Verdict::Failed);
+}
+#[kani::proof]
+#[kani::unwind(1)]
+fn reject_admitting_a_failed_proof() {
+    assert!(verdict(Some(false)) == Verdict::Proven);
 }
 #[kani::proof]
 fn reject_admitting_an_undetermined_property() {
@@ -1443,7 +1470,7 @@ fn reject_an_overflow_under_checked_mir() {
     let value: u8 = kani::any();
     kani::assume(value == u8::MAX);
     let incremented = value + 1;
-    assert!(verdict(Some(u64::from(incremented))) == Verdict::Over);
+    assert!(incremented == 0);
 }
 '''
 
@@ -1715,6 +1742,11 @@ verifier = "kani"
 source = "crates/rules/src/shell_syntax_rules.rs"
 probes = '''
 #[kani::proof]
+#[kani::unwind(5)]
+fn reject_missing_a_bounded_windows_drive_path() {
+    assert!(!production::windows_path(" C:/"));
+}
+#[kani::proof]
 fn reject_admitting_unbalanced_quotes() {
     assert!(production::verdict(true, false, false) == production::Verdict::Admit);
 }
@@ -1745,6 +1777,21 @@ fn reject_an_empty_cause_or_next_action() {
 verifier = "kani"
 source = "crates/rules/src/shell_write_rules.rs"
 probes = '''
+#[kani::proof]
+#[kani::unwind(3)]
+fn reject_keeping_a_bounded_program_directory_or_case() {
+    assert!(production::program("/A").as_str() == "/A");
+}
+#[kani::proof]
+#[kani::unwind(6)]
+fn reject_missing_a_bounded_in_place_argument_pair() {
+    assert!(!production::in_place_flag("sed", &["-i", ""]));
+}
+#[kani::proof]
+#[kani::unwind(9)]
+fn reject_missing_a_bounded_awk_redirect() {
+    assert!(!production::awk_program_writes("print >x"));
+}
 #[kani::proof]
 fn reject_admitting_an_inline_interpreter() {
     assert!(production::verdict(true, false, false) == production::Verdict::Admit);
@@ -2409,7 +2456,7 @@ verifier = "kani"
 source = "crates/rules/src/host_setup_rules.rs"
 # The rejecting probes call the byte kernels used by the String transforms.
 # Native tests keep the original full String counterexamples.
-# This avoids standard-library search expansion while keeping the original bounds and proof budget.
+# This avoids standard-library search expansion while keeping the original input bounds and assertions.
 probes = '''
 use production::{FilterKeys, disable_managed_filter_keys, looks_like_stub, powershell_literal, stale_releases};
 #[kani::proof]

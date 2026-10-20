@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [proof-verdicts-never-depend-on-time.md]
 date: 2026-10-07
 ---
 # Replay the whole reachable state graph of each finite Quint model
@@ -43,5 +44,6 @@ Dropping the replay would leave the divergence the pilot built undetected.
 
 ## Reconsider
 
-Reconsider when a model's graph outgrows a reviewable diff, about 10 MB, or `TLC` can no longer dump it within the proof budget.
+Reconsider when a model's graph outgrows a reviewable diff, about 10 MB, or a changed model's state or transition count exceeds its declared finite scope.
 Such a model keeps its sampled traces and records why it has no graph.
+The historical elapsed observations remain advisory under the [verdict amendment](proof-verdicts-never-depend-on-time.md).

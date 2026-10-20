@@ -806,7 +806,7 @@ fn repository() -> Result<tempfile::TempDir> {
 }
 
 #[test]
-fn a_skill_that_repeats_a_pinned_version_or_the_proof_budget_is_refused() -> Result<()> {
+fn a_skill_that_repeats_a_pinned_version_or_the_proof_hang_cap_is_refused() -> Result<()> {
     let root = repository()?;
     fs::write(
         root.path().join("mise.toml"),
@@ -820,8 +820,8 @@ fn a_skill_that_repeats_a_pinned_version_or_the_proof_budget_is_refused() -> Res
     for (text, pin) in [
         ("Run Kani 0.68.0 on every harness.\n", "0.68.0"),
         (
-            "Each harness must finish within its 30-second budget.\n",
-            "30-second",
+            "An incomplete harness reaches its 60-second hang cap.\n",
+            "60-second",
         ),
         ("Build with Rust 1.99.0.\n", "1.99.0"),
     ] {
