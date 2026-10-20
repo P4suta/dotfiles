@@ -298,6 +298,7 @@
     {"mode":"0644","path":".config/dotfiles/notifications/audio/turn-completed.wav","sha256":"dba056e3504da9b6a4fafb5f28237cd8a2391e35044c2b90a62ac8f69876b011","type":"file"},
     {"mode":"0644","path":".config/dotfiles/notifications/frequency","sha256":"722cdd399249d70c5dac1ff2b103a0b271d8fb9816fa52af6ce6b88eda1d389a","type":"file"},
     {"mode":"0644","path":".config/dotfiles/notifications/materials.tsv","sha256":"307071fcaa0c631d96c7374441b98b3b36828da124a803846596f59e10d97bc5","type":"file"},
+    {"mode":"0644","path":".config/dotfiles/signing.toml","sha256":"c5968ee003fffc0829c1c5924fb08a80c2c8cf166335d1af535d5df633fc6b99","type":"file"},
     {"mode":"0700","path":".config/fcitx5","sha256":null,"type":"dir"},
     {"mode":"0600","path":".config/fcitx5/config","sha256":"04d05ebaa89f6f05f04a4d85078d58bb022b68274922552e075be71e1f034a7a","type":"file"},
     {"mode":"0600","path":".config/fcitx5/profile","sha256":"e72b4b73ec7b35d2fdf2e7aa7e3034cc811af51dd046ac8c7dd9adb7f8028d1b","type":"file"},

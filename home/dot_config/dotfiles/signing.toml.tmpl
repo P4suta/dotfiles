@@ -1,0 +1,1 @@
+socket = {{ or (dig "ssh_signing" "socket" "" .) (index .ssh_signing (printf "%s_socket" .profile)) | quote }}

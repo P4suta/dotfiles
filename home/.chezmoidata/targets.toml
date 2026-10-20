@@ -16,6 +16,7 @@
 ".config/atuin/config.toml" = "unix"
 ".config/dev-reaper" = "unix"
 ".config/dev-reaper/config" = "unix"
+".config/dotfiles/signing.toml" = "desktop"
 ".config/dotfiles-nix" = "linux"
 ".config/fcitx5" = "linux"
 ".config/fcitx5/config" = "linux"

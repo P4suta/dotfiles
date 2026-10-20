@@ -6,6 +6,32 @@
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/signing_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_signing_without_the_password_manager() {
+    assert!(production::route(true, production::Socket::Missing) == production::Route::PasswordManager);
+}
+#[kani::proof]
+fn reject_a_regular_file_as_the_signing_agent() {
+    assert!(production::route(true, production::Socket::NotSocket) == production::Route::PasswordManager);
+}
+#[kani::proof]
+fn reject_verification_requiring_an_agent() {
+    assert!(production::route(false, production::Socket::Missing) != production::Route::PasswordManager);
+}
+#[kani::proof]
+fn reject_a_working_directory_relative_socket() {
+    assert!(production::socket_path(false, false, false) != production::SocketPath::Invalid);
+}
+#[kani::proof]
+fn reject_an_empty_socket_override() {
+    assert!(production::socket_path(true, false, false) != production::SocketPath::Invalid);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/phase_receipt_rules.rs"
 probes = '''
 #[kani::proof]

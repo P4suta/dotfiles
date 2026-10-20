@@ -37,6 +37,16 @@ pub struct Data {
     pub modern: Option<Modern>,
     /// The interactive behavior every shell a profile configures renders in its own syntax.
     pub shell: Option<Shell>,
+    pub ssh_signing: Option<SshSigning>,
+}
+
+/// The password manager's signing socket, with a machine-local override and home-relative Unix defaults.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SshSigning {
+    pub socket: Option<String>,
+    pub mac_socket: Option<String>,
+    pub linux_socket: Option<String>,
 }
 
 /// The shortcuts, functions, history, line editing keys, and pager and editor variables of every interactive shell.

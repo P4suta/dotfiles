@@ -12,6 +12,10 @@ default-run = "dotfiles"
 name = "dotfiles"
 path = "src/main.rs"
 
+[[bin]]
+name = "dotfiles-ssh-keygen"
+path = "src/bin/ssh-keygen.rs"
+
 [[test]]
 name = "hook_exec_count"
 harness = false
@@ -27,7 +31,7 @@ model = { path = "../model" }
 platform = { path = "../platform" }
 prose = { path = "../prose" }
 rules = { path = "../rules" }
-serde ={ version = "1.0.229", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11.0"
 skill-ops = { path = "../skill-ops" }
@@ -43,7 +47,10 @@ rustix = { version = "1.1.5", features = ["fs"] }
 [target.'cfg(windows)'.dependencies]
 jiff = "0.2.37"
 junction = "2.0.0"
-windows-sys = { version = "0.61.2", features = ["Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61.2", features = [
+  "Win32_UI_Accessibility",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 # The workspace forbids unsafe code, which no #[expect] can lift.
 # The Windows keyboard settings make the foreign calls here, and policy/unsafe-sites.toml lists them, so this table repeats the workspace lints with unsafe code denied.

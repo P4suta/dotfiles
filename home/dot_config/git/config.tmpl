@@ -95,6 +95,8 @@
 {{- else if eq .profile "wsl" }}
 	# Signing and verification run the Windows OpenSSH ssh-keygen, which reaches the 1Password agent that WSL shares with Windows.
 	program = {{ joinPath .chezmoi.homeDir ".local/bin/dotfiles-wsl-ssh-keygen" | quote }}
+{{- else }}
+	program = {{ joinPath .chezmoi.homeDir ".local/bin/dotfiles-ssh-keygen" | quote }}
 {{- end }}
 	allowedSignersFile = ~/.config/git/allowed_signers
 [commit]

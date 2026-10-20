@@ -83,6 +83,7 @@ pub mod shell_cache_rules;
 pub mod shell_syntax_rules;
 pub mod shell_target_rules;
 pub mod shell_write_rules;
+pub mod signing_rules;
 pub mod skill_gate_rules;
 pub mod skill_plan_rules;
 pub mod skill_rules;

@@ -300,6 +300,7 @@
     {"mode":"0644","path":".config/dotfiles/notifications/audio/turn-completed.wav","sha256":"dba056e3504da9b6a4fafb5f28237cd8a2391e35044c2b90a62ac8f69876b011","type":"file"},
     {"mode":"0644","path":".config/dotfiles/notifications/frequency","sha256":"722cdd399249d70c5dac1ff2b103a0b271d8fb9816fa52af6ce6b88eda1d389a","type":"file"},
     {"mode":"0644","path":".config/dotfiles/notifications/materials.tsv","sha256":"307071fcaa0c631d96c7374441b98b3b36828da124a803846596f59e10d97bc5","type":"file"},
+    {"mode":"0644","path":".config/dotfiles/signing.toml","sha256":"4ad50e95890369f1c796ea579a4bf86c832a42af2b1983e20392117d9edd5206","type":"file"},
     {"mode":"0755","path":".config/fzf","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/fzf/fzfrc","sha256":"56287784ff7a0976c992422c42e1b618ea1165cf879cdeeda1dfeee515fd5b65","type":"file"},
     {"mode":"0755","path":".config/gh","sha256":null,"type":"dir"},
