@@ -401,3 +401,58 @@ fn a_lefthook_configuration_that_cannot_be_loaded_refuses_the_hook() -> Result<(
     );
     Ok(())
 }
+
+#[test]
+fn a_failed_lefthook_job_is_named_with_how_its_output_ended() -> Result<()> {
+    let host = Host::new()?;
+    fs::write(host.repository().join("lefthook.yml"), "pre-push: {}\n")?;
+    let push = |refusal: bool| {
+        let mut command = host.command(env!("CARGO_BIN_EXE_dotfiles"));
+        command.env("FIXTURE_LEFTHOOK_JOB", "issue-context").args([
+            "hook",
+            "pre-push",
+            "--",
+            "origin",
+            "https://example.invalid/r",
+        ]);
+        if refusal {
+            command.env("FIXTURE_LEFTHOOK_REFUSAL", "1");
+        } else {
+            command.env_remove("FIXTURE_LEFTHOOK_REFUSAL");
+        }
+        command.output()
+    };
+
+    let failed = push(false)?;
+    assert!(
+        String::from_utf8_lossy(&failed.stdout).contains("the change lacks an issue"),
+        "the job output still reaches the terminal"
+    );
+    let refused = refusal(&failed);
+    assert_eq!(refused.rule, "hook.gate");
+    assert!(refused.cause.contains("`issue-context`"), "{refused:?}");
+    assert_eq!(
+        refused.next.as_deref().unwrap_or_default(),
+        "lefthook run pre-push"
+    );
+    assert_eq!(
+        refused.evidence[1..],
+        [
+            "output: checking the change",
+            "output: the change lacks an issue",
+            "output: exit status 1",
+        ]
+    );
+
+    let refused = refusal(&push(true)?);
+    assert_eq!(refused.rule, "hook.gate");
+    assert_eq!(
+        refused.next.as_deref().unwrap_or_default(),
+        "just install-pr-workflow"
+    );
+    assert_eq!(
+        refused.evidence[1..],
+        ["tool.stale refused: the installed tool is stale"]
+    );
+    Ok(())
+}

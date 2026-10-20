@@ -59,50 +59,132 @@ fn piped(command: &mut Command, input: &[u8]) -> Result<()> {
     }
 }
 
-/// Runs one hook gate with `input` on its standard input and relays its standard error line by line.
-/// A gate that refuses with its own record keeps that record last.
-/// Any other failure becomes a `hook.gate` refusal that names `rerun`.
-fn gate(command: &mut Command, input: &[u8], rerun: &str) -> Result<()> {
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let mut stderr = child.stderr.take().context("gate errors are unavailable")?;
-    let relay = std::thread::spawn(move || {
+/// Copies `from` to `to` as it arrives, and returns every byte it read.
+/// A closed `to` stops the copy, and the bytes still reach the caller.
+fn relay(
+    mut from: impl Read + Send + 'static,
+    mut to: impl Write + Send + 'static,
+) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
         let mut seen = Vec::new();
         let mut chunk = [0; 8192];
-        // A closed standard error stops the relay, and the gate's errors still reach the caller through `seen`.
         let mut relaying = true;
-        while let Ok(count) = stderr.read(&mut chunk) {
+        while let Ok(count) = from.read(&mut chunk) {
             if count == 0 {
                 break;
             }
-            relaying = relaying && std::io::stderr().write_all(&chunk[..count]).is_ok();
+            relaying = relaying
+                && to
+                    .write_all(&chunk[..count])
+                    .and_then(|()| to.flush())
+                    .is_ok();
             seen.extend_from_slice(&chunk[..count]);
         }
         seen
-    });
+    })
+}
+
+/// What Lefthook prints before the name of each job that failed.
+const LEFTHOOK_FAILED: &str = "🥊";
+
+/// The lines at the end of a failed gate's output that its refusal quotes.
+const QUOTED_LINES: usize = 5;
+
+/// `text` without the terminal color and cursor sequences that start with `ESC [`.
+fn plain(text: &str) -> String {
+    let mut plain = String::with_capacity(text.len());
+    let mut characters = text.chars();
+    while let Some(character) = characters.next() {
+        if character == '\u{1b}' && characters.clone().next() == Some('[') {
+            characters.find(|next| ('@'..='~').contains(next) && *next != '[');
+        } else {
+            plain.push(character);
+        }
+    }
+    plain
+}
+
+/// The refusal for a gate that failed without its own record last.
+/// It names each Lefthook job that failed, and either the refusal that job printed or the last lines of the output.
+fn failure(output: &str, rerun: &str, status: &str) -> Refusal {
+    let output = plain(output);
+    let jobs: Vec<&str> = output
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix(LEFTHOOK_FAILED))
+        .map(|job| {
+            let job = job.trim();
+            job.rsplit_once(" (")
+                .filter(|(_, timing)| timing.ends_with(')'))
+                .map_or(job, |(name, _)| name)
+        })
+        .collect();
+    let cause = if jobs.is_empty() {
+        "a hook gate failed without a structured refusal; its output above names the cause"
+            .to_owned()
+    } else {
+        let names: Vec<String> = jobs.iter().map(|job| format!("`{job}`")).collect();
+        let noun = if jobs.len() == 1 { "job" } else { "jobs" };
+        format!(
+            "the Lefthook {noun} {} failed; the evidence quotes how it ended",
+            names.join(", ")
+        )
+    };
+    let nested = Refusal::find(&output);
+    let next = nested
+        .as_ref()
+        .and_then(|nested| nested.next.clone())
+        .unwrap_or_else(|| rerun.to_owned());
+    let mut refusal = Refusal::new("hook.gate", cause, next).evidence(format!("{rerun}: {status}"));
+    if let Some(nested) = nested {
+        let reason = nested.cause.lines().next().unwrap_or_default();
+        return refusal.evidence(format!("{} refused: {reason}", nested.rule));
+    }
+    let tail: Vec<&str> = output
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.trim().is_empty() && !line.trim().starts_with(LEFTHOOK_FAILED))
+        .collect();
+    for line in &tail[tail.len().saturating_sub(QUOTED_LINES)..] {
+        refusal = refusal.evidence(format!("output: {line}"));
+    }
+    refusal
+}
+
+/// Runs one hook gate with `input` on its standard input, and relays its output and errors as they arrive.
+/// A gate that refuses with its own record keeps that record last.
+/// Any other failure becomes a `hook.gate` refusal that names `rerun`, each failed Lefthook job, and how the output ended.
+fn gate(command: &mut Command, input: &[u8], rerun: &str) -> Result<()> {
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    // Lefthook prints each job's output and its summary on standard output.
+    let output = relay(
+        child.stdout.take().context("gate output is unavailable")?,
+        std::io::stdout(),
+    );
+    let errors = relay(
+        child.stderr.take().context("gate errors are unavailable")?,
+        std::io::stderr(),
+    );
     let written = child
         .stdin
         .take()
         .context("child input is unavailable")?
         .write_all(input);
     let status = child.wait()?;
-    let output = relay.join().unwrap_or_default();
+    let output = output.join().unwrap_or_default();
+    let errors = errors.join().unwrap_or_default();
     if !status.success() {
-        let output = String::from_utf8_lossy(&output);
-        let last = output.lines().rev().find(|line| !line.trim().is_empty());
+        let errors = String::from_utf8_lossy(&errors);
+        let last = errors.lines().rev().find(|line| !line.trim().is_empty());
         if last.is_some_and(|line| Refusal::find(line).is_some()) {
             return Err(crate::Relayed.into());
         }
-        return Err(Refusal::new(
-            "hook.gate",
-            "a hook gate failed without a structured refusal; its output above names the cause",
-            rerun,
-        )
-        .evidence(format!("{rerun}: {status}"))
-        .into());
+        let mut seen = String::from_utf8_lossy(&output).into_owned();
+        seen.push_str(&errors);
+        return Err(failure(&seen, rerun, &status.to_string()).into());
     }
     match written {
         Err(error) if error.kind() != std::io::ErrorKind::BrokenPipe => Err(error.into()),

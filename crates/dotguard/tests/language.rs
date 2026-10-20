@@ -301,6 +301,53 @@ fn a_language_refusal_outside_the_wrapper_names_the_override_without_a_bypass() 
     );
 }
 
+/// A committed attribute sets the language for every clone, and one path can turn the content scan off.
+/// The clone's own configuration still wins.
+#[test]
+fn a_committed_attribute_admits_japanese_and_turns_the_scan_off_for_its_paths() {
+    let checkout = Checkout::new("attribute");
+    let japanese = "日本語の説明を直す";
+    let write = |path: &str, text: &str| {
+        let path = checkout.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    write("a.txt", "plain\n");
+    checkout.succeeds(&["add", "a.txt"], &[]);
+    let refused = last_record(&checkout.run(&["commit", "-q", "-m", japanese], &[]));
+    assert_eq!(refused.rule, "commit.language");
+    assert!(refused.cause.contains("dotguard-lang"), "{}", refused.cause);
+
+    write(
+        ".gitattributes",
+        "* dotguard-lang=japanese\nfixtures/** dotguard-lang=off\n",
+    );
+    checkout.succeeds(&["add", ".gitattributes"], &[]);
+    checkout.succeeds(&["commit", "-q", "-m", japanese], &[]);
+
+    let cyrillic = format!("{}\n", char::from_u32(0x0441).unwrap());
+    write("fixtures/ru.txt", &cyrillic);
+    checkout.succeeds(&["add", "fixtures/ru.txt"], &[]);
+    checkout.succeeds(&["commit", "-q", "-m", "add a fixture"], &[]);
+
+    write("c.txt", "plain\n");
+    checkout.succeeds(&["add", "c.txt"], &[]);
+    checkout.succeeds(&["config", "guard.lang", "english"], &[]);
+    let refused = last_record(&checkout.run(&["commit", "-q", "-m", japanese], &[]));
+    assert_eq!(refused.rule, "commit.language");
+    checkout.succeeds(&["config", "--unset", "guard.lang"], &[]);
+    checkout.succeeds(&["commit", "-q", "-m", japanese], &[]);
+
+    write("b.txt", &cyrillic);
+    checkout.succeeds(&["add", "b.txt"], &[]);
+    let refused = last_record(&checkout.run(&["commit", "-q", "-m", "add b"], &[]));
+    assert_eq!(refused.rule, "commit.language");
+    assert_eq!(
+        refused.next.as_deref().unwrap_or_default(),
+        "git diff --cached -- b.txt"
+    );
+}
+
 /// Runs `arguments` through the wrapper with an editor that writes `message`.
 fn edited(checkout: &Checkout, arguments: &[&str], message: &str) -> std::process::Output {
     checkout
