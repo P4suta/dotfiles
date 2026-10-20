@@ -14,8 +14,9 @@
   - Secret file reads and writes: .env, id_*, *.key, *.pem, .aws/credentials, .netrc, .npmrc, .kube/config, .docker/config.json, and similar
   - Files the dotfiles manage: direct Write or Edit of .gitconfig, .bashrc, .profile, and .claude/settings.json itself
 
-  Git commands stay out of the deny list.
-  The Git guard runs on every host, refuses history rewrites and signing or hook bypasses with the sanctioned next step, and admits the tool-owned operations a prefix rule can't tell apart.
+  - Git hook, signing, and history bypasses: --no-verify, --no-gpg-sign, -c overrides of hooks or signing, force pushes, filter-branch
+  The Git guard runs on every host, refuses the same bypasses with the sanctioned next step, and admits the tool-owned operations a prefix rule can't tell apart, such as reset --hard of a clean tree.
+  So only the bypasses that no task ever needs stay here as a second check, and conditional Git operations stay with the guard.
 
   dot_claude/modify_settings.json sets these keys over the file Claude Code last wrote, and an array here, such as permissions.deny, replaces the array the client wrote.
   A runtime change to a key set here, such as `/advisor` changing advisorModel, reverts on the next apply, and every other key the client wrote stays.
@@ -52,6 +53,19 @@
       "Bash(chmod 777:*)",
       "Bash(chmod -R 777:*)",
       "Bash(brew install:*)",
+      "Bash(git commit --no-verify:*)",
+      "Bash(git commit -n:*)",
+      "Bash(git commit --no-gpg-sign:*)",
+      "Bash(git push --no-verify:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git -c commit.gpgsign=false:*)",
+      "Bash(git -c gpg.format=:*)",
+      "Bash(git -c gpg.ssh.program=:*)",
+      "Bash(git -c core.hooksPath=:*)",
+      "Bash(git filter-branch:*)",
+      "Bash(git filter-repo:*)",
       "Read(.env*)",
       "Read(id_rsa*)",
       "Read(id_ed25519*)",
