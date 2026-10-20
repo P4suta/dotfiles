@@ -1,13 +1,14 @@
 ---
 date: 2026-10-15
-status: proposed
+status: amended
+changed_by: [proof-verdicts-never-depend-on-time.md]
 ---
 # Prove portable component scans with erased witnesses
 
 ## Context
 
 Archive component validation must preserve its complete byte domain and reject Windows device aliases and destination redirects.
-Unrolling its full scan made the two destination and device proofs exceed the existing time budget.
+The earlier full scan unrolling supplied no completed destination or device proof.
 Whole-prefix quantified invariants also exposed unsupported verifier paths.
 The pinned CBMC contract library allocates object-indexed bookkeeping arrays, so its default object capacity adds substantial symbolic work even for short components.
 
@@ -32,7 +33,7 @@ This setting changes verifier bookkeeping capacity without narrowing the compone
 The driver and its setting contribute to the existing source-bound engine identity, so evidence from another configuration cannot supply the same cache identity.
 Retain each original receipt's effective object capacity and solver with the result.
 
-Use the existing thirty-second acceptance budget and retain all invariant, unwinding, arithmetic, pointer, and assertion obligations.
+Require completed verification under the [verdict amendment](proof-verdicts-never-depend-on-time.md), retaining all invariant, unwinding, arithmetic, pointer, and assertion obligations.
 Keep the [rejecting probes](../../policy/obligations.toml) tied to their original false assertions.
 An invariant failure, capacity error, timeout, or another tool failure cannot replace an intended rejection.
 Loop abstraction can overapproximate reachability, so its satisfied covers alone do not establish concrete traces.
@@ -51,4 +52,4 @@ The ordinary public API keeps its original single argument.
 The indexed scan changes the ordinary implementation shape, so its verification must identify that implementation rather than claim byte equality with the previous iterator loop.
 Native tests and every affected production harness and rejecting probe remain required before completion.
 Another subject may exceed the smaller object capacity and must then fail without credit until its verification plan addresses that requirement.
-The remaining time margin depends on the actual verifier and host, and the existing budget remains authoritative.
+Elapsed measurements remain advisory; verifier and capacity errors still supply no proof evidence.

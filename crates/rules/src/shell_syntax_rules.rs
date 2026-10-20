@@ -82,22 +82,20 @@ pub const fn cause(reason: Reason) -> &'static str {
 ///
 /// The letter must stand alone: a colon after a word, as in `https://`, marks no drive.
 ///
-/// Exempt as disproportionate: Kani spends past its budget on the string search of even a three-byte word.
-/// Evidence: `crates/rules/src/shell_syntax_rules.rs::tests::drive_paths_are_recognized_in_every_quoting`.
-/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+/// Kani: proved for inputs up to 4 bytes.
 #[must_use]
 pub fn windows_path(text: &str) -> bool {
-    let chars: Vec<char> = text.chars().collect();
-    let starts = matches!(chars.first(), Some(letter) if letter.is_ascii_alphabetic())
-        && matches!(chars.get(1), Some(':'))
-        && matches!(chars.get(DRIVE_SEPARATOR), Some('\\' | '/'));
-    let inside = chars.windows(DRIVE_WINDOW).any(|window| {
+    let bytes = text.as_bytes();
+    let starts = matches!(bytes.first(), Some(letter) if letter.is_ascii_alphabetic())
+        && matches!(bytes.get(1), Some(b':'))
+        && matches!(bytes.get(DRIVE_SEPARATOR), Some(b'\\' | b'/'));
+    let inside = bytes.windows(DRIVE_WINDOW).any(|window| {
         matches!(
             window,
-            [before, letter, ':', separator]
+            [before, letter, b':', separator]
                 if !before.is_ascii_alphabetic()
                     && letter.is_ascii_alphabetic()
-                    && matches!(separator, '\\' | '/')
+                    && matches!(separator, b'\\' | b'/')
         )
     });
     starts || inside
@@ -129,7 +127,7 @@ fn assignment_prefix(word: &str) -> bool {
 ///
 /// Exempt as disproportionate: a shell parser over unbounded text needs fuzzing, which no verifier here owns yet.
 /// Evidence: `crates/rules/src/shell_syntax_rules.rs::tests::the_incident_forms_are_refused`.
-/// Reconsider when the bolero pilot of issue 105 adopts fuzzing.
+/// Reconsider when a cargo-fuzz target owns this function.
 #[must_use]
 pub fn inspect(command: &str) -> Verdict {
     let mut unbalanced = false;
@@ -220,6 +218,34 @@ pub fn inspect(command: &str) -> Verdict {
 mod proofs {
     use super::*;
 
+    pub fn spec_windows_path(text: &str) -> bool {
+        let bytes = text.as_bytes();
+        let expected = bytes.windows(3).enumerate().any(|(index, path)| {
+            matches!(path, [letter, b':', b'/' | b'\\'] if letter.is_ascii_alphabetic())
+                && index
+                    .checked_sub(1)
+                    .and_then(|before| bytes.get(before))
+                    .is_none_or(|before| !before.is_ascii_alphabetic())
+        });
+        let actual = windows_path(text);
+        assert_eq!(actual, expected);
+        actual
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn windows_paths_match_the_byte_specification_through_four_bytes() {
+        let bytes: [u8; 4] = kani::any();
+        let length: usize = kani::any();
+        kani::assume(length <= bytes.len());
+        if let Ok(text) = core::str::from_utf8(&bytes[..length]) {
+            let found = spec_windows_path(text);
+            kani::cover!(found);
+            kani::cover!(!found);
+        }
+    }
+
     pub fn spec_checked(refused: bool, available: bool, errors: bool) {
         let parsed = if refused {
             Verdict::Refuse(Reason::UnbalancedQuotes)
@@ -286,6 +312,14 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_paths_enumerate_a_small_alphabet_through_four_bytes() {
+        for bytes in crate::domain::words(b"A:/\\ ", 4) {
+            proofs::spec_windows_path(core::str::from_utf8(&bytes).unwrap());
+        }
+        proofs::spec_windows_path("界C:/");
+    }
 
     const REFUSED_QUOTES: Verdict = Verdict::Refuse(Reason::UnbalancedQuotes);
     const REFUSED_PATH: Verdict = Verdict::Refuse(Reason::BrokenWindowsPath);

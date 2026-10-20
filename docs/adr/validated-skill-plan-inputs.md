@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [proof-verdicts-never-depend-on-time.md]
 date: 2026-10-09
 ---
 # Validate skill catalogs before planning
@@ -8,7 +9,8 @@ date: 2026-10-09
 
 A skill plan must reject unknown indices and cycles, include every requested dependency once, and preserve dependency order.
 The plan boundary previously combined validation, ordering, filtering, and heap allocation in one call.
-The five-node proof needs to cover arbitrary graph edges and ordered, repeated, and invalid requests within the existing proof budget.
+The five-node proof needs to cover arbitrary graph edges and ordered, repeated, and invalid requests.
+The [verdict amendment](proof-verdicts-never-depend-on-time.md) requires completed results for that domain and makes elapsed measurements advisory.
 
 ## Decision
 
