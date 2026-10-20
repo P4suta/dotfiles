@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use platform::build_inputs::{CRATES, content_hash, inputs};
 use platform::freshness::{
-    BUILD_IDENTITY_ARGUMENT, Built, Embedded, SOURCE_VARIABLE, embedded, lagging, locate,
-    record_installation, verify, verify_artifact,
+    BUILD_IDENTITY_ARGUMENT, Built, DELEGATED_VARIABLE, Embedded, SOURCE_VARIABLE, embedded,
+    lagging, locate, record_installation, verify, verify_artifact,
 };
 use platform::refusal::Refusal;
-use platform::stale_rules::{Freshness, Origin, freshness, origin, reinstalls, runs};
+use platform::stale_rules::{Freshness, Origin, delegates, freshness, origin, reinstalls, runs};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -503,6 +503,43 @@ fn reserved_metadata_is_read_only_and_does_not_grant_freshness() -> Result<()> {
         .output()?;
     assert!(!extra.status.success());
     Ok(())
+}
+
+#[test]
+fn a_build_handed_a_run_by_a_stale_working_copy_never_hands_it_on_again() -> Result<()> {
+    let scope = tempfile::tempdir()?;
+    let newer = fixture("pub fn rule() { /* merged after the build */ }")?;
+    let handed = fixture_process::command(env!("CARGO_BIN_EXE_pr-workflow"), scope.path())
+        .arg("--help")
+        .current_dir(newer.path())
+        .env_remove(SOURCE_VARIABLE)
+        .env(DELEGATED_VARIABLE, "1")
+        .output()?;
+    assert!(!handed.status.success());
+    let stderr = String::from_utf8_lossy(&handed.stderr);
+    let refusal = Refusal::find(&stderr).expect("the handed run emits a structured refusal");
+    assert_eq!(refusal.rule, "tool.stale", "{stderr}");
+    assert!(
+        stderr.contains("the checkout this command runs in"),
+        "{stderr}"
+    );
+    Ok(())
+}
+
+#[test]
+fn only_a_stale_working_copy_hands_the_run_to_its_own_build() {
+    let stale = freshness(true, false);
+    assert!(delegates(stale, Origin::WorkingCopy, false));
+    assert!(!delegates(stale, Origin::WorkingCopy, true));
+    assert!(!delegates(stale, Origin::Explicit, false));
+    assert!(!delegates(stale, Origin::BuildCheckout, false));
+    assert!(!delegates(
+        freshness(true, true),
+        Origin::WorkingCopy,
+        false
+    ));
+    assert_eq!(Built::PrWorkflow.package(), "pr-workflow");
+    assert_eq!(Built::Coderabbit.package(), "coderabbit-guard");
 }
 
 #[test]

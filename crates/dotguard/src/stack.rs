@@ -84,6 +84,50 @@ fn git(globals: &[String], arguments: &[&str]) -> Option<String> {
     real_git::capture(&words).map(|output| output.trim().to_owned())
 }
 
+/// The diff Lefthook 2 saves for each partly staged file before it hides the file's unstaged hunks.
+const LEFTHOOK_DIFF: [&str; 10] = [
+    "diff",
+    "--binary",
+    "--unified=0",
+    "--no-color",
+    "--no-ext-diff",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+    "--patch",
+    "--submodule=short",
+    "--",
+];
+
+/// The name Lefthook gives that patch in the repository's `info` directory.
+const LEFTHOOK_PATCH: &str = "lefthook-unstaged";
+
+/// Lefthook's saved patch for the worktree `globals` select.
+/// A linked worktree's patch carries its Git directory's name before the extension, as Lefthook names it.
+fn lefthook_patch(globals: &[String]) -> Option<PathBuf> {
+    let paths = git(
+        globals,
+        &[
+            "rev-parse",
+            ABSOLUTE_PATH,
+            "--git-path",
+            "info",
+            "--git-dir",
+            "--git-common-dir",
+        ],
+    )?;
+    let mut lines = paths.lines();
+    let (info, git_dir, common) = (lines.next()?, lines.next()?, lines.next()?);
+    let name = if git_dir == common {
+        format!("{LEFTHOOK_PATCH}.patch")
+    } else {
+        format!(
+            "{LEFTHOOK_PATCH}.{}.patch",
+            Path::new(git_dir).file_name()?.to_string_lossy()
+        )
+    };
+    Some(Path::new(info).join(name))
+}
+
 /// Whether the stack tooling holds the lease of the repository `globals` select.
 pub fn leased(globals: &[String]) -> bool {
     let token = std::env::var_os(TOKEN).map(std::ffi::OsString::into_encoded_bytes);
@@ -128,6 +172,19 @@ impl Repository for Checkout {
             ],
         )
         .map(|status| !status.is_empty())
+    }
+
+    fn saved_unstaged(&self, globals: &[String], paths: &[String]) -> Option<bool> {
+        let patch = std::fs::read(lefthook_patch(globals)?).ok()?;
+        let patch = String::from_utf8_lossy(&patch);
+        for path in paths {
+            let mut arguments = LEFTHOOK_DIFF.to_vec();
+            arguments.push(path);
+            if !patch.contains(git(globals, &arguments)?.as_str()) {
+                return Some(false);
+            }
+        }
+        Some(true)
     }
 
     fn under_temporary(&self, globals: &[String]) -> Option<bool> {
