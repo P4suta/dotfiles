@@ -57,6 +57,11 @@ pub trait Repository {
     /// Whether the repository's Git directory lies under the temporary directory, as a test fixture or probe does.
     /// Returns `None` when the repository state gives no answer.
     fn under_temporary(&self, globals: &[String]) -> Option<bool>;
+    /// Whether the patch Lefthook saves before it hides unstaged hunks holds every unstaged change of `paths`.
+    /// Returns `None` when the repository state gives no answer.
+    fn saved_unstaged(&self, _globals: &[String], _paths: &[String]) -> Option<bool> {
+        None
+    }
 }
 
 /// No repository: the gate judges every command on its words alone, and permits a rebase without a named branch.
@@ -191,6 +196,25 @@ impl Invocation<'_> {
     /// Whether a forced reset or checkout could discard work, which only a known clean tree rules out.
     fn discards_work(&self) -> bool {
         self.repo.holds_tracked_changes(self.globals) != Some(false)
+    }
+
+    /// Whether this is Lefthook's `checkout --force -- <paths>`, whose discarded hunks its saved patch holds.
+    fn saved_discard(&self) -> bool {
+        let paths = match self.args {
+            [force, separator, paths @ ..]
+                if self.sub == "checkout"
+                    && force == "--force"
+                    && separator == "--"
+                    && !paths.is_empty() =>
+            {
+                Some(paths)
+            }
+            _ => None,
+        };
+        crate::git_ref_rules::saved_discard_admits(
+            paths.is_some(),
+            paths.and_then(|paths| self.repo.saved_unstaged(self.globals, paths)),
+        )
     }
 
     /// The stack command, for a refused rewrite of published history.
@@ -1008,7 +1032,8 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
 
         "checkout" | "switch"
             if (has("--force") || has("--discard-changes") || flags.iter().any(|a| short_cluster(a).is_some_and(|c| c.contains('f'))))
-                && call.discards_work() =>
+                && call.discards_work()
+                && !call.saved_discard() =>
         {
             Some(Denial::new(
                 Rule::Force,

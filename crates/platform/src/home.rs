@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 /// Where Windows lives when `SystemRoot` names no directory.
 pub const DEFAULT_SYSTEM_ROOT: &str = "C:\\Windows";
 
+/// Where Windows installs programs for every user when `ProgramFiles` names no directory.
+pub const DEFAULT_PROGRAM_FILES: &str = "C:/Program Files";
+
 /// Where Homebrew installs on Apple silicon.
 const HOMEBREW_BIN: &str = "/opt/homebrew/bin";
 const HOMEBREW_SBIN: &str = "/opt/homebrew/sbin";
