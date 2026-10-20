@@ -430,7 +430,10 @@ fn a_failed_lefthook_job_is_named_with_how_its_output_ended() -> Result<()> {
     );
     let refused = refusal(&failed);
     assert_eq!(refused.rule, "hook.gate");
-    assert!(refused.cause.contains("`issue-context`"), "{refused:?}");
+    assert_eq!(
+        refused.cause,
+        "the Lefthook job `issue-context` failed; the evidence quotes how it ended"
+    );
     assert_eq!(
         refused.next.as_deref().unwrap_or_default(),
         "lefthook run pre-push"

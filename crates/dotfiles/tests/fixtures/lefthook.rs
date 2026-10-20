@@ -11,6 +11,7 @@ fn main() {
         }
         (Some("dump"), Some(_)) => println!("pre-push: {{}}"),
         (Some("run"), Some(job)) => {
+            println!("\u{1f94a} lefthook v2.2.1 hook: pre-push");
             println!("\u{1b}[1mchecking the change\u{1b}[0m");
             println!("the change lacks an issue");
             if std::env::var_os("FIXTURE_LEFTHOOK_REFUSAL").is_some() {

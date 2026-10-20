@@ -84,8 +84,11 @@ fn relay(
     })
 }
 
-/// What Lefthook prints before the name of each job that failed.
+/// What Lefthook prints before the name of each job that failed, and before its own name in the banner of a run.
 const LEFTHOOK_FAILED: &str = "🥊";
+
+/// How the banner of a Lefthook run continues after [`LEFTHOOK_FAILED`].
+const LEFTHOOK_BANNER: &str = "lefthook ";
 
 /// The lines at the end of a failed gate's output that its refusal quotes.
 const QUOTED_LINES: usize = 5;
@@ -111,8 +114,9 @@ fn failure(output: &str, rerun: &str, status: &str) -> Refusal {
     let jobs: Vec<&str> = output
         .lines()
         .filter_map(|line| line.trim().strip_prefix(LEFTHOOK_FAILED))
+        .map(str::trim)
+        .filter(|job| !job.starts_with(LEFTHOOK_BANNER))
         .map(|job| {
-            let job = job.trim();
             job.rsplit_once(" (")
                 .filter(|(_, timing)| timing.ends_with(')'))
                 .map_or(job, |(name, _)| name)
