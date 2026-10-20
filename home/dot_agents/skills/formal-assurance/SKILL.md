@@ -46,7 +46,7 @@ Treat timeouts, skipped harnesses, and solver failures as missing evidence.
 
 Bind results to the exact source, assumptions, verifier configuration, and target semantics, and reject stale receipts.
 Isolate generated proof models and compiler outputs per checkout and run.
-Add the assessed requirements to the authoritative project check and CI, with expected proof names, checked alternatives, and completeness checks.
+Add the assessed requirements to the authoritative project check, with expected proof names, checked alternatives, and completeness checks, and let `ci-budget` decide which of them hosted CI runs.
 Prove that the gate rejects a false claim or a broken implementation with the expected failure, not any tool error.
 Keep integration tests and real boundary checks for properties outside the verifier's semantics.
 Statistical claims need null comparisons.
