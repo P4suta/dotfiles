@@ -17,17 +17,4 @@ ghc = {{ printf "ref:%s" .platforms.mac.tool_versions.ghc | quote }}
 [tool_alias]
 ghc = "asdf:mise-plugins/mise-ghcup"
 
-[settings]
-experimental = true
-# A project's configuration loads only after `mise trust` records its exact contents.
-paranoid = true
-jobs = {{ .platforms.mac.mise.jobs }}
-# domyjob runs the owner's own projects in this work area, and each new workspace path would otherwise have its mise.toml refused.
-trusted_config_paths = [{{ joinPath .chezmoi.homeDir ".local/state/domyjob/v3/work" | quote }}]
-
-[settings.hook_env]
-chpwd_only = true
-
-[settings.github]
-gh_cli_tokens = true
-credential_command = {{ includeTemplate "partials/mise-github-credential" . }}
+{{ includeTemplate "partials/mise_settings" . }}

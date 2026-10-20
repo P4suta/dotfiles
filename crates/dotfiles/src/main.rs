@@ -343,6 +343,15 @@ fn agent_hook() -> Option<&'static str> {
 }
 
 fn main() {
+    // `dotfiles doctor` reads the installed runtime's build identity to tell whether it matches the applied source.
+    match dotfiles::freshness::print_build_identity() {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(error) => {
+            dotfiles::report(&error);
+            std::process::exit(1);
+        }
+    }
     let hook = agent_hook();
     if let Some(hook) = hook {
         dotfiles::hook_failures::record_panics(hook);

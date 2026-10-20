@@ -1,0 +1,28 @@
+{{- /*
+  The mise settings of every profile.
+  Only the job count, which follows each host's hardware, and the paths that differ by OS vary.
+  Windows also keeps `mise exec` from installing a missing tool, as docs/adr/shim-free-mise-installation.md records.
+*/ -}}
+{{- $work := joinPath .chezmoi.homeDir ".local/state/domyjob/v3/work" -}}
+{{- if eq .profile "windows" }}{{ $work = joinPath (env "LOCALAPPDATA") "domyjob/state/v3/work" }}{{ end -}}
+{{- $jobs := dig "platforms" .profile "mise" "jobs" nil . -}}
+[settings]
+experimental = true
+{{- if eq .profile "windows" }}
+exec_auto_install = false
+{{- end }}
+# A project's configuration loads only after `mise trust` records its exact contents.
+paranoid = true
+{{- if $jobs }}
+jobs = {{ $jobs }}
+{{- end }}
+# domyjob runs the owner's own projects in this work area, and each new workspace path would otherwise have its mise.toml refused.
+trusted_config_paths = [{{ $work | quote }}]
+cargo.binstall = true
+
+[settings.hook_env]
+chpwd_only = true
+
+[settings.github]
+gh_cli_tokens = true
+credential_command = {{ includeTemplate "partials/mise-github-credential" . }}

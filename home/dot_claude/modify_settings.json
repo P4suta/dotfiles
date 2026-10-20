@@ -64,8 +64,6 @@ Unrelated handlers remain in their existing groups.
 {{- $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list " notifications agent claude")) | fromJson -}}
 {{- $_ := set $hooks $event (concat $groups (list (dict "hooks" (list $notify)))) -}}
 {{- end -}}
-{{- if eq .profile "wsl" -}}
-{{- $managed = mergeOverwrite $managed (includeTemplate "native/claude-settings/wsl.json.tmpl" . | fromJson) -}}
-{{- end -}}
+{{- $managed = mergeOverwrite $managed (includeTemplate "partials/claude_settings" . | fromJson) -}}
 {{ mergeOverwrite $current $managed | toPrettyJson "  " | trim }}
 

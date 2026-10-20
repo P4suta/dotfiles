@@ -172,7 +172,7 @@ fn render_merged_with_mode(
         ".chezmoitemplates/partials/without_skill_ops_hooks",
         ".chezmoitemplates/partials/without_runtime_handlers",
         ".chezmoitemplates/partials/skill_ops_experimental",
-        ".chezmoitemplates/native/claude-settings/wsl.json.tmpl",
+        ".chezmoitemplates/partials/claude_settings",
     ] {
         let copy = source.join(file);
         std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
@@ -336,7 +336,9 @@ fn codex_runtime_hooks_have_native_windows_commands() {
             .flat_map(|group| group["hooks"].as_array().unwrap())
             .filter(|hook| hook["command"].as_str().is_some_and(runs_the_runtime))
             .collect();
-        assert_eq!(handlers.len(), 4, "{profile}: {rendered}");
+        // Windows adds the process-start probe at session start.
+        let expected = if profile == "windows" { 5 } else { 4 };
+        assert_eq!(handlers.len(), expected, "{profile}: {rendered}");
         for handler in handlers {
             assert_eq!(
                 handler["commandWindows"].is_string(),
@@ -712,23 +714,26 @@ fn experimental_hooks_require_local_consent_and_preserve_every_foreign_handler()
 }
 
 /// Every key a profile sets takes the profile's value, an array included as one value, and every other key keeps the host's value.
+/// Every profile sets the same deny list and keeps the permissions the client granted.
 #[test]
-fn a_profile_array_replaces_the_host_array_whether_or_not_it_is_empty() {
-    let host =
-        r#"{"permissions":{"allow":["Bash(host)"],"deny":["Bash(host)"],"ask":["Bash(host)"]}}"#;
-    let rendered: Value = serde_json::from_str(&render_merged(
-        "wsl",
-        "dot_claude/modify_settings.json",
-        ".claude/settings.json",
-        host,
-    ))
-    .unwrap();
-    let permissions = &rendered["permissions"];
-    assert_eq!(permissions["allow"], json!([]));
-    let deny = permissions["deny"].as_array().unwrap();
-    assert!(deny.contains(&json!("Bash(sudo:*)")));
-    assert!(!deny.contains(&json!("Bash(host)")));
-    assert_eq!(permissions["ask"], json!(["Bash(host)"]));
+fn a_profile_array_replaces_the_host_array_and_client_grants_stay() {
+    let host = r#"{"permissions":{"allow":["Bash(host)"],"deny":["Bash(host)"],"ask":["Bash(host)"],"defaultMode":"auto"}}"#;
+    for profile in ["mac", "linux", "windows", "wsl"] {
+        let rendered: Value = serde_json::from_str(&render_merged(
+            profile,
+            "dot_claude/modify_settings.json",
+            ".claude/settings.json",
+            host,
+        ))
+        .unwrap();
+        let permissions = &rendered["permissions"];
+        assert_eq!(permissions["allow"], json!(["Bash(host)"]), "{profile}");
+        let deny = permissions["deny"].as_array().unwrap();
+        assert!(deny.contains(&json!("Bash(sudo:*)")), "{profile}");
+        assert!(!deny.contains(&json!("Bash(host)")), "{profile}");
+        assert_eq!(permissions["ask"], json!(["Bash(host)"]), "{profile}");
+        assert_eq!(permissions["defaultMode"], json!("auto"), "{profile}");
+    }
 }
 
 #[test]
