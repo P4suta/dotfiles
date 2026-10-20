@@ -315,7 +315,7 @@
     {"mode":"0755","path":".config/git/hooks/pre-commit","sha256":"992717a512b4781b52aed492d80fb7c3b384997f29125fffa6565abc78f0dec5","type":"file"},
     {"mode":"0755","path":".config/git/hooks/pre-push","sha256":"eb6696e23f51ffb59ea601164e3ac0e5791cfe7315ff2a08b86ac3c2f8af8290","type":"file"},
     {"mode":"0755","path":".config/git/hooks/reference-transaction","sha256":"4fdb41fe001cd0d234acdd8e9c6a7c1a7f4b896bde6572583876db6d230ba2fe","type":"file"},
-    {"mode":"0644","path":".config/git/ignore","sha256":"065804d259de8fb26d62838fde3e08d3bf49c56ff4b0676be5ac67a024def389","type":"file"},
+    {"mode":"0644","path":".config/git/ignore","sha256":"6a11e4852a725066f345648d0350545844fc76a9e9243955da78e6c6fab3d512","type":"file"},
     {"mode":"0755","path":".config/herdr","sha256":null,"type":"dir"},
     {"mode":"0755","path":".config/herdr-agent","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/herdr-agent/keys","sha256":"10ed2b5dcb108beaa49f2fedfbd18e7778a2b21caae36d1122efe61334b94e1b","type":"file"},

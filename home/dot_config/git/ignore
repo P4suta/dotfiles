@@ -6,6 +6,9 @@
 # Claude Code's per-machine state inside a project.
 **/.claude/settings.local.json
 
+# The issue contexts an earlier pr-workflow wrote into the working tree, which now live in the owner's state directory.
+.pr-workflow/
+
 # What an assistant is told about a repository is the person's, not the project's.
 # These files are written for whichever tool is in front of the person holding the machine, they drift with that tool, and a contributor who is not using it needs CONTRIBUTING.md and the project's own docs instead.
 # A project that does want one checked in can `git add -f` it or unignore it in its own .gitignore.
