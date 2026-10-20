@@ -84,5 +84,6 @@
 | [2026-10-19 Make native verification authoritative and keep hosted CI lightweight](native-verification-with-lightweight-ci.md) | amended | [2026-10-19](optional-native-verification-before-publication.md) |
 | [2026-10-19 Make native verification optional before publication](optional-native-verification-before-publication.md) | accepted |  |
 | [2026-10-19 Repository owner assessments for bot pull requests](repository-owner-assessments-for-bot-pull-requests.md) | proposed |  |
+| [2026-10-20 Admit Git operations that lose no owner work](admit-tool-owned-and-throwaway-git-operations.md) | accepted |  |
 | [2026-10-20 Keep workflow evidence on the owner's machines](keep-workflow-evidence-local.md) | accepted |  |
 | [2026-10-20 Keep every managed behavior the same on every host](same-behavior-on-every-host.md) | accepted |  |

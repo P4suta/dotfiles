@@ -582,3 +582,105 @@ fn a_rebase_of_a_published_branch_runs_only_through_the_stack_lease() {
         "{log}"
     );
 }
+
+/// A test fixture or probe under the temporary directory holds no owner work, so only a push keeps its refusal there.
+#[test]
+fn a_throwaway_repository_admits_overrides_but_not_a_push() {
+    let wrapper = Wrapper::new("throwaway");
+    std::fs::write(
+        wrapper.scope.join("gitconfig"),
+        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+    )
+    .unwrap();
+    let unguarded = [("DOTGUARD_STRICT_TEMPORARY", "0")];
+    for arguments in [
+        &[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-q",
+            "-m",
+            "x",
+        ][..],
+        &["commit", "--allow-empty", "-q", "--no-verify", "-m", "y"][..],
+        &["reset", "--hard", "-q", "HEAD~1"][..],
+    ] {
+        let output = wrapper.run_env(arguments, None, &unguarded);
+        assert!(
+            output.status.success(),
+            "{arguments:?}: {}",
+            text(&output.stderr)
+        );
+    }
+    let push = wrapper.run_env(&["push", "--force", "origin", "main"], None, &unguarded);
+    assert_eq!(last_record(&push).rule, "git.force");
+    let guarded = wrapper.run(
+        &["commit", "--allow-empty", "-q", "--no-verify", "-m", "z"],
+        None,
+    );
+    assert_eq!(last_record(&guarded).rule, "git.no-verify");
+}
+
+/// `pr-workflow prune-merged` deletes the branches it verified under the stack lease, and the guard records the deletion as tooling.
+#[test]
+fn a_forced_branch_deletion_passes_only_under_the_stack_lease() {
+    let wrapper = Wrapper::new("prune-lease");
+    std::fs::write(
+        wrapper.scope.join("gitconfig"),
+        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+    )
+    .unwrap();
+    let succeeds = |arguments: &[&str]| {
+        let output = wrapper.run(arguments, None);
+        assert!(
+            output.status.success(),
+            "{arguments:?}: {}",
+            text(&output.stderr)
+        );
+    };
+    succeeds(&["commit", "--allow-empty", "-q", "-m", "x"]);
+    succeeds(&["branch", "merged"]);
+    let token = [("DOTGUARD_STACK", "token")];
+    assert_eq!(
+        last_record(&wrapper.run_env(&["branch", "-D", "merged"], None, &token)).rule,
+        "git.force"
+    );
+    std::fs::write(
+        wrapper.scope.join("repository/.git/dotguard-stack.lease"),
+        "token",
+    )
+    .unwrap();
+    let leased = wrapper.run_env(&["branch", "-D", "merged"], None, &token);
+    assert!(leased.status.success(), "{}", text(&leased.stderr));
+    let log = std::fs::read_to_string(wrapper.home().join(".local/state/git-bypass.log")).unwrap();
+    assert!(
+        log.lines()
+            .any(|line| line.contains("\tSTACK\t") && line.contains("git branch -D merged")),
+        "{log}"
+    );
+}
+
+/// Codex deletes its own turn refs, and a ref no porcelain command manages loses nothing the owner keeps.
+#[test]
+fn deleting_a_tool_ref_passes_and_deleting_a_branch_ref_does_not() {
+    let wrapper = Wrapper::new("tool-ref");
+    std::fs::write(
+        wrapper.scope.join("gitconfig"),
+        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+    )
+    .unwrap();
+    let succeeds = |arguments: &[&str]| {
+        let output = wrapper.run(arguments, None);
+        assert!(
+            output.status.success(),
+            "{arguments:?}: {}",
+            text(&output.stderr)
+        );
+    };
+    succeeds(&["commit", "--allow-empty", "-q", "-m", "x"]);
+    succeeds(&["update-ref", "refs/codex/turn-diffs/1", "HEAD"]);
+    succeeds(&["update-ref", "-d", "refs/codex/turn-diffs/1"]);
+    let refused = wrapper.run(&["update-ref", "-d", "refs/heads/main"], None);
+    assert_eq!(last_record(&refused).rule, "git.force");
+}
