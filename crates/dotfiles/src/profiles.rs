@@ -700,6 +700,7 @@ fn apply_live(
         "Application verified; managed-file backup retained at {}",
         backup.display()
     );
+    skill_ops::skill_install::install_catalog(root, destination, native_profile()?)?;
     crate::freshness::reinstall_lagging(destination, root)?;
     Ok(())
 }
