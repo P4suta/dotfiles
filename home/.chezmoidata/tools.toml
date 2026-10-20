@@ -85,12 +85,20 @@ common = [
   "bun",
   "yamllint",
   "doppler",
+  "bottom",
+  "ghq",
+  "yazi",
+  "vivid",
+  "aqua:noborus/ov",
 ]
 personal = []
 work = []
 
 [platforms.wsl.tools]
 common = [
+  "ghq",
+  "yazi",
+  "aqua:noborus/ov",
   "ast-grep",
   "bat",
   "eza",
@@ -146,6 +154,8 @@ common = [
   "cargo:cargo-llvm-cov",
   "cargo:tokei",
   "github:crate-ci/typos",
+  "aqua:openai/codex",
+  "aqua:anomalyco/opencode",
 ]
 personal = []
 work = []

@@ -195,6 +195,7 @@ impl Step {
             | Self::Domyjob
             | Self::Ocomment
             | Self::Chat
+            | Self::Claude
             | Self::Adapters => EVERY,
             Self::Scoop
             | Self::Winget
@@ -208,7 +209,6 @@ impl Step {
             Self::Desktop | Self::Ocaml => DESKTOP,
             Self::MacosDefaults
             | Self::ForgeKeys
-            | Self::Claude
             | Self::Haskell
             | Self::Racket
             | Self::Guard

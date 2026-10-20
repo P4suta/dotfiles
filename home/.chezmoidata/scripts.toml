@@ -7,7 +7,6 @@
 ".chezmoiscripts/unix/07-fcitx5.sh" = "linux"
 ".chezmoiscripts/unix/08-macos-defaults.sh" = "mac"
 ".chezmoiscripts/unix/09-forge-keys.sh" = "mac"
-".chezmoiscripts/unix/10-claude.sh" = "mac"
 ".chezmoiscripts/unix/11-ocaml.sh" = "desktop"
 ".chezmoiscripts/unix/12-haskell.sh" = "mac"
 ".chezmoiscripts/unix/13-racket.sh" = "mac"

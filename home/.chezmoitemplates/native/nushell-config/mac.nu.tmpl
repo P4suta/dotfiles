@@ -1,6 +1,6 @@
 $env.config = {
   show_banner: false
-  edit_mode: vi
+  edit_mode: {{ .shell.edit_mode }}
   buffer_editor: $env.EDITOR
   use_ansi_coloring: true
   bracketed_paste: true
@@ -20,7 +20,7 @@ $env.config = {
   }
 
   history: {
-    max_size: 10_000_000
+    max_size: {{ .shell.history_size }}
     sync_on_enter: true
     file_format: sqlite
     isolation: false
@@ -85,13 +85,7 @@ $env.config = {
   }
 
   keybindings: [
-    { name: word_left, modifier: alt, keycode: left, mode: [emacs, vi_insert], event: { edit: movewordleft } }
-    { name: word_right, modifier: alt, keycode: right, mode: [emacs, vi_insert], event: { until: [{ send: historyhintwordcomplete } { edit: movewordright }] } }
-    { name: word_left_b, modifier: alt, keycode: char_b, mode: [emacs, vi_insert], event: { edit: movewordleft } }
-    { name: word_right_f, modifier: alt, keycode: char_f, mode: [emacs, vi_insert], event: { until: [{ send: historyhintwordcomplete } { edit: movewordright }] } }
-    { name: kill_word, modifier: alt, keycode: backspace, mode: [emacs, vi_insert], event: { edit: backspaceword } }
-    { name: kill_line_start, modifier: control, keycode: char_u, mode: [emacs, vi_insert], event: { edit: cutfromlinestart } }
-    { name: kill_line_end, modifier: control, keycode: char_k, mode: [emacs, vi_insert], event: { edit: cuttolineend } }
+{{- includeTemplate "partials/interactive_nu_keys" . }}
   ]
 
   completions: {
@@ -132,44 +126,7 @@ source ($generated | path join television.nu)
 source ($generated | path join atuin.nu)
 source ($generated | path join zoxide.nu)
 source ($generated | path join ls-colors.nu)
-
-alias ll = eza --long --all --git --icons=auto
-alias la = eza --all --icons=auto
-alias lt = eza --tree --level=2 --icons=auto
-alias cat = bat
-alias lg = lazygit
-alias top = btm
-
+{{ includeTemplate "partials/interactive_nu" . }}
 def --wrapped opencode [...args] {
   ^dotfiles --root {{ .chezmoi.workingTree | toJson }} agent opencode --config {{ .chezmoi.configFile | toJson }} -- ...$args
-}
-
-def --env y [...args] {
-  let cwd_file = (mktemp --tmpdir yazi-cwd.XXXXXX)
-  ^yazi ...$args --cwd-file $cwd_file
-  let cwd = (open --raw $cwd_file | str trim)
-  if ($cwd | is-not-empty) and $cwd != $env.PWD { cd $cwd }
-  rm --force --permanent $cwd_file
-}
-
-def --env mkcd [directory: path] {
-  mkdir $directory
-  cd $directory
-}
-
-def --env proj [...query: string] {
-  let candidates = (ghq list --full-path | lines)
-  let filtered = if ($query | is-empty) {
-    $candidates
-  } else {
-    $candidates | where {|path| $query | all {|term| ($path | str lowercase) | str contains ($term | str lowercase) } }
-  }
-  let target = if (($filtered | length) == 1) {
-    ($filtered | first)
-  } else if (($filtered | length) == 0) {
-    ""
-  } else {
-    ($filtered | str join (char newline) | fzf --prompt "repo> " | str trim)
-  }
-  if ($target | is-not-empty) { cd $target } else { print "no repository matched" }
 }

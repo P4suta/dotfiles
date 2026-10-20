@@ -1,6 +1,0 @@
-[Unit]
-Description=Install the pinned mise-managed CLI tools
-
-[Service]
-Type=oneshot
-ExecStart=%h/.local/bin/dotfiles mise-install -y

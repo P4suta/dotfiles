@@ -27,6 +27,15 @@ pub const fn saved_discard_admits(pathspec_only: bool, saved: Option<bool>) -> b
     pathspec_only && matches!(saved, Some(true))
 }
 
+/// Whether one `git status --porcelain` entry holds work that a forced checkout or reset discards.
+/// The decision reads the entry's index code, its worktree code, and whether its file sits in the worktree.
+/// A deletion whose file no longer sits in the worktree loses nothing, because the forced operation restores the file, as in a clone made with `--no-checkout`.
+/// A staged deletion whose file still sits in the worktree, as after `git rm --cached`, keeps that copy at risk.
+#[must_use]
+pub const fn entry_holds_work(index: u8, worktree: u8, present: bool) -> bool {
+    !(matches!(index, b'D' | b' ') && matches!(worktree, b'D' | b' ') && !present)
+}
+
 /// The properties Kani proves for every input and the tests check over every input they list.
 #[cfg(any(test, kani))]
 mod proofs {
@@ -49,6 +58,27 @@ mod proofs {
         spec_saved_discard(pathspec_only, saved);
         kani::cover!(saved_discard_admits(pathspec_only, saved));
         kani::cover!(!saved_discard_admits(pathspec_only, saved));
+    }
+
+    pub fn spec_entry_holds_work(index: u8, worktree: u8, present: bool) {
+        let deletion_only =
+            (index == b'D' || index == b' ') && (worktree == b'D' || worktree == b' ');
+        assert_eq!(
+            entry_holds_work(index, worktree, present),
+            !deletion_only || present
+        );
+        assert!(entry_holds_work(index, worktree, true));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_a_deletion_without_a_worktree_copy_holds_no_work() {
+        let index: u8 = kani::any();
+        let worktree: u8 = kani::any();
+        let present: bool = kani::any();
+        spec_entry_holds_work(index, worktree, present);
+        kani::cover!(!entry_holds_work(index, worktree, present));
+        kani::cover!(entry_holds_work(index, worktree, present) && index == b'D');
     }
 
     pub fn spec_deletable(name: &[u8]) {
@@ -137,5 +167,25 @@ mod tests {
         assert!(throwaway_admits(Some(true), false));
         assert!(!throwaway_admits(Some(true), true));
         assert!(!throwaway_admits(Some(false), false));
+    }
+
+    #[test]
+    fn only_a_deletion_without_a_worktree_copy_holds_no_work() {
+        for code in [b"D ", b" D", b"DD"] {
+            assert!(!entry_holds_work(code[0], code[1], false), "{code:?}");
+            assert!(entry_holds_work(code[0], code[1], true), "{code:?}");
+        }
+        for code in [
+            b"M ", b" M", b"A ", b"AM", b"R ", b"C ", b"T ", b"UU", b"MD",
+        ] {
+            assert!(entry_holds_work(code[0], code[1], false), "{code:?}");
+        }
+        for index in 0..=u8::MAX {
+            for worktree in [b' ', b'D', b'M', b'A', b'?', 0, u8::MAX] {
+                for present in [false, true] {
+                    proofs::spec_entry_holds_work(index, worktree, present);
+                }
+            }
+        }
     }
 }

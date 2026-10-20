@@ -268,6 +268,8 @@
     {"mode":"0755","path":".config/assure/utils","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/assure/utils/size-position.yml","sha256":"f41d31d468f81597052cf407bae0827d6d5132d1c4a271cd6f2d7d82aab5b402","type":"file"},
     {"mode":"0644","path":".config/assure/utils/verification-only.yml","sha256":"4ab90686559a88e512449ac5936f678d7986db37a84534c0ce201c3e628040a5","type":"file"},
+    {"mode":"0755","path":".config/bat","sha256":null,"type":"dir"},
+    {"mode":"0644","path":".config/bat/config","sha256":"56ff5f193fb4119ea2a748368bd7c704868d5cf726efbd2cd17fbb4abdb0f3e8","type":"file"},
     {"mode":"0755","path":".config/coderabbit-guard","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/coderabbit-guard/policy.json","sha256":"cedc29c85ec527e882d4980ea31f86f5d8d35ff865b7574bb336058daea640ec","type":"file"},
     {"mode":"0755","path":".config/dotfiles","sha256":null,"type":"dir"},
@@ -284,6 +286,8 @@
     {"mode":"0644","path":".config/dotfiles/notifications/audio/turn-completed.wav","sha256":"dba056e3504da9b6a4fafb5f28237cd8a2391e35044c2b90a62ac8f69876b011","type":"file"},
     {"mode":"0644","path":".config/dotfiles/notifications/frequency","sha256":"722cdd399249d70c5dac1ff2b103a0b271d8fb9816fa52af6ce6b88eda1d389a","type":"file"},
     {"mode":"0644","path":".config/dotfiles/notifications/materials.tsv","sha256":"307071fcaa0c631d96c7374441b98b3b36828da124a803846596f59e10d97bc5","type":"file"},
+    {"mode":"0755","path":".config/fzf","sha256":null,"type":"dir"},
+    {"mode":"0644","path":".config/fzf/fzfrc","sha256":"56287784ff7a0976c992422c42e1b618ea1165cf879cdeeda1dfeee515fd5b65","type":"file"},
     {"mode":"0755","path":".config/git","sha256":null,"type":"dir"},
     {"mode":"0600","path":".config/git/allowed_signers","sha256":"4935f59f7696ca8ec411ddb7eec8420d95cee203a15c17f424814872288bd9ae","type":"file"},
     {"mode":"0644","path":".config/git/attributes","sha256":"c9066b7104dba3adf0a04fbbf208bc812467fb6a5ba922efb92706b594c0f7e3","type":"file"},
@@ -301,7 +305,7 @@
     {"mode":"0644","path":".config/lefthook/global.yml","sha256":"a52fa7ffa7ddac882c454bbc7a2669ce3b61daaa4b181a75a8ce777e2107ec19","type":"file"},
     {"mode":"0755","path":".config/mise","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/mise/config.njutest.toml","sha256":"4f6fb2e394a7d0ee9725b496ee3d50b55312a3092c639ba30ddd9a7dac36e349","type":"file"},
-    {"mode":"0644","path":".config/mise/config.toml","sha256":"1ae189bf27a3e51c2d35d196ba6b7232cf1f5301a9c940c9df5dc62890fb9983","type":"file"},
+    {"mode":"0644","path":".config/mise/config.toml","sha256":"06d6b9e311a4abcf8823172e2d4e3f3613b7570c6cc1f9a1899e2833dffba2ed","type":"file"},
     {"mode":"0755","path":".config/ocomment","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/ocomment/config.toml","sha256":"2248dbc390a2b96c5236fb23095899c19b72372fcd61a70fb8bf403898f48ecd","type":"file"},
     {"mode":"0755","path":".config/opencode","sha256":null,"type":"dir"},
@@ -497,7 +501,7 @@
     {"mode":"0644","path":"AppData/Roaming/herdr/config.toml","sha256":"199592df825b9a7ea6de9ea9ab94eb45e583ac0a9ff7a3b7d0e0fedec797830e","type":"file"},
     {"mode":"0700","path":"Documents","sha256":null,"type":"dir"},
     {"mode":"0755","path":"Documents/PowerShell","sha256":null,"type":"dir"},
-    {"mode":"0644","path":"Documents/PowerShell/Microsoft.PowerShell_profile.ps1","sha256":"8d89ec7f627a364da51b16345c5f66fc4a8f5fa1d0f7a38be402582bb1a17977","type":"file"}
+    {"mode":"0644","path":"Documents/PowerShell/Microsoft.PowerShell_profile.ps1","sha256":"9d00714270b46bd7d45ebd927cfc95d74f1b69b367027b6a0d5694f0259ac825","type":"file"}
   ],
   "scripts": [
     {"condition":"always","phase":"before","position":0,"sha256":"996e067c25501cfff22bb4a100ac583e076d143e78dfe7b0eea11c534448ac5f","target":".chezmoiscripts/windows/00-mise.ps1"},
@@ -505,7 +509,7 @@
     {"condition":"onchange","phase":"before","position":2,"sha256":"8e3c9a045236db83c0194a87a800dcf592baefa5051327c0d75dfa04a7187589","target":".chezmoiscripts/windows/02-github.ps1"},
     {"condition":"onchange","phase":"after","position":3,"sha256":"0ee49ae7c147fb41ae9ea2954b703a5d4cdace839d587661098d8fb2b881ecf0","target":".chezmoiscripts/windows/03-scoop.ps1"},
     {"condition":"always","phase":"after","position":4,"sha256":"73fc99662509aa7cfed0e0d3691faf5bd5c764017fb769ea0d5176063cf62024","target":".chezmoiscripts/windows/04-winget.ps1"},
-    {"condition":"onchange","phase":"after","position":5,"sha256":"5f3fc0d3188b16f2b028f93c79a789a76a0ea432e3e73a61337c8df9ae29faf5","target":".chezmoiscripts/windows/05-tools.ps1"},
+    {"condition":"onchange","phase":"after","position":5,"sha256":"424f094de6527295508e6675c121955b47cd58aceafeb50afc4fd8052d70764d","target":".chezmoiscripts/windows/05-tools.ps1"},
     {"condition":"always","phase":"after","position":6,"sha256":"a42655a9e269a6fdee96409161d4aa8b96a12c3c4aa353f4727df1da82ff06df","target":".chezmoiscripts/windows/06-wezterm.ps1"},
     {"condition":"onchange","phase":"after","position":7,"sha256":"b9dc7a6dd17ededb8e47d001e55df1bacc50b35e74901547975e2a280daa3565","target":".chezmoiscripts/windows/07-herdr.ps1"},
     {"condition":"always","phase":"after","position":8,"sha256":"73f6aae07e75a700dd1a5435a98e946b11adf49858bab539a6fef58e5b93907c","target":".chezmoiscripts/windows/08-integrations.ps1"},
@@ -513,9 +517,10 @@
     {"condition":"onchange","phase":"after","position":10,"sha256":"2f8f249680f0a508860f33664e3155f733454a106cec7a8ff30f7a2531f3c24c","target":".chezmoiscripts/windows/10-keyboard.ps1"},
     {"condition":"onchange","phase":"after","position":11,"sha256":"a881c81cc6838993d603749cd33ea1305a1efbf45155a6c60d2c28b632bb2d6b","target":".chezmoiscripts/windows/11-sshd.ps1"},
     {"condition":"onchange","phase":"after","position":12,"sha256":"f644066522fbf02dd3a4e01892f9af250692f94374eb07d1dc1c9158c1f38fac","target":".chezmoiscripts/windows/12-storage-scout.ps1"},
-    {"condition":"always","phase":"after","position":13,"sha256":"27c1da3a68645060761bce3c839a2755c179d483f61b1470fd1e45003c985e2f","target":".chezmoiscripts/windows/13-ocomment.ps1"},
-    {"condition":"onchange","phase":"after","position":14,"sha256":"e0e37d7638c5bb26ba553270b3f8b3e567ec8499d0d4db31fc4f97390f6e6549","target":".chezmoiscripts/windows/14-domyjob.ps1"},
-    {"condition":"always","phase":"after","position":15,"sha256":"f127e4b7cf32210f24f3f7a00a38ce06507a57c7e042ab3d215f4225cdc7ff1c","target":".chezmoiscripts/windows/15-chat.ps1"},
-    {"condition":"always","phase":"after","position":16,"sha256":"becb53823fd3d8f99cbdd18dbc40b8ea5897c58b1900053dbf623c70bcb33c1b","target":".chezmoiscripts/windows/16-adapters.ps1"}
+    {"condition":"onchange","phase":"after","position":13,"sha256":"55495a5bfefd38ebe49356fa31abe5e1cafbf3e551b9e27149f2dfc89a2211d2","target":".chezmoiscripts/windows/13-claude.ps1"},
+    {"condition":"always","phase":"after","position":14,"sha256":"27c1da3a68645060761bce3c839a2755c179d483f61b1470fd1e45003c985e2f","target":".chezmoiscripts/windows/14-ocomment.ps1"},
+    {"condition":"onchange","phase":"after","position":15,"sha256":"e0e37d7638c5bb26ba553270b3f8b3e567ec8499d0d4db31fc4f97390f6e6549","target":".chezmoiscripts/windows/15-domyjob.ps1"},
+    {"condition":"always","phase":"after","position":16,"sha256":"f127e4b7cf32210f24f3f7a00a38ce06507a57c7e042ab3d215f4225cdc7ff1c","target":".chezmoiscripts/windows/16-chat.ps1"},
+    {"condition":"always","phase":"after","position":17,"sha256":"becb53823fd3d8f99cbdd18dbc40b8ea5897c58b1900053dbf623c70bcb33c1b","target":".chezmoiscripts/windows/17-adapters.ps1"}
   ]
 }

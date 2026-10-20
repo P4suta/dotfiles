@@ -1,0 +1,109 @@
+{{- /*
+  The interactive behavior from shell.toml in Bash or Zsh syntax.
+  .bashrc and .zshrc include it with `syntax` set to `bash` or `zsh` and `data` set to the template data.
+  Rendering fails when a key, action, or function in shell.toml lacks its translation here.
+*/ -}}
+{{- $data := .data -}}
+{{- $shell := $data.shell -}}
+{{- $zsh := eq .syntax "zsh" -}}
+{{- $vi := eq $shell.edit_mode "vi" -}}
+{{- $sequences := dict
+  "alt+left" `\e[1;3D` "alt+right" `\e[1;3C` "alt+b" `\eb` "alt+f" `\ef` "alt+backspace" `\e\C-?`
+  "ctrl+left" `\e[1;5D` "ctrl+right" `\e[1;5C`
+  "ctrl+a" `\C-a` "ctrl+e" `\C-e` "ctrl+k" `\C-k` "ctrl+u" `\C-u` "ctrl+w" `\C-w` -}}
+{{- $zsh_sequences := dict
+  "alt+left" `^[[1;3D` "alt+right" `^[[1;3C` "alt+b" `^[b` "alt+f" `^[f` "alt+backspace" `^[^?`
+  "ctrl+left" `^[[1;5D` "ctrl+right" `^[[1;5C`
+  "ctrl+a" `^A` "ctrl+e" `^E` "ctrl+k" `^K` "ctrl+u" `^U` "ctrl+w" `^W` -}}
+{{- $readline := dict
+  "word_left" "backward-word" "word_right" "forward-word" "kill_word" "backward-kill-word"
+  "kill_to_start" "unix-line-discard" "kill_to_end" "kill-line" "line_start" "beginning-of-line" "line_end" "end-of-line" -}}
+{{- $widgets := dict
+  "word_left" "backward-word" "word_right" "forward-word" "kill_word" "backward-kill-word"
+  "kill_to_start" "backward-kill-line" "kill_to_end" "kill-line" "line_start" "beginning-of-line" "line_end" "end-of-line" -}}
+{{- $defined := list "mkcd" "y" "proj" -}}
+{{- range $shell.functions }}
+{{-   if not (has .name $defined) }}{{ fail (printf "interactive_posix lacks the shell.toml function %s" .name) }}{{ end }}
+{{- end -}}
+# History keeps {{ $shell.history_size }} commands and writes each one as it runs.
+{{- if $zsh }}
+HISTFILE="${HOME}/.zsh_history"
+HISTSIZE={{ $shell.history_size }}
+SAVEHIST={{ $shell.history_size }}
+setopt HIST_IGNORE_ALL_DUPS HIST_IGNORE_SPACE HIST_REDUCE_BLANKS
+setopt SHARE_HISTORY INC_APPEND_HISTORY EXTENDED_HISTORY
+setopt AUTO_CD INTERACTIVE_COMMENTS NO_BEEP
+{{- else }}
+HISTCONTROL=ignoreboth:erasedups
+HISTSIZE={{ $shell.history_size }}
+HISTFILESIZE={{ $shell.history_size }}
+shopt -s histappend checkwinsize
+PROMPT_COMMAND="history -a${PROMPT_COMMAND:+; ${PROMPT_COMMAND}}"
+{{- end }}
+
+# Line editing in {{ $shell.edit_mode }} mode, with the insert-mode keys every shell binds.
+{{- if $zsh }}
+{{- $keymap := ternary "viins" "emacs" $vi }}
+bindkey {{ ternary "-v" "-e" $vi }}
+{{- range $shell.keys }}
+{{-   $sequence := index $zsh_sequences .chord }}
+{{-   $widget := index $widgets .action }}
+{{-   if or (not $sequence) (not $widget) }}{{ fail (printf "interactive_posix lacks the zsh translation of %s %s" .chord .action) }}{{ end }}
+bindkey -M {{ $keymap }} '{{ $sequence }}' {{ $widget }}
+{{- end }}
+{{- else }}
+{{- $keymap := ternary "vi-insert" "emacs" $vi }}
+set -o {{ ternary "vi" "emacs" $vi }}
+if [[ -t 0 ]]; then
+  # Readline otherwise rebinds the terminal's own erase keys, such as Ctrl-W, over these bindings.
+  bind 'set bind-tty-special-chars off'
+{{- range $shell.keys }}
+{{-   $sequence := index $sequences .chord }}
+{{-   $function := index $readline .action }}
+{{-   if or (not $sequence) (not $function) }}{{ fail (printf "interactive_posix lacks the readline translation of %s %s" .chord .action) }}{{ end }}
+  bind -m {{ $keymap }} '"{{ $sequence }}": {{ $function }}'
+{{- end }}
+fi
+{{- end }}
+
+{{- $editor := "" }}
+{{- range $shell.editors }}
+{{-   if and (not $editor) (lookPath (index (splitList " " .) 0)) }}{{ $editor = . }}{{ end }}
+{{- end }}
+{{- if not $editor }}{{ $editor = $shell.fallback_editor.unix }}{{ end }}
+
+export EDITOR={{ includeTemplate "partials/sh_quote" $editor }}
+export VISUAL="${EDITOR}"
+export PAGER={{ includeTemplate "partials/sh_quote" $shell.pager }}
+export LESS={{ includeTemplate "partials/sh_quote" $shell.less }}
+export MANPAGER="sh -c 'col -bx | bat --language=man --plain'"
+export BAT_CONFIG_PATH="${HOME}/.config/bat/config"
+export FZF_DEFAULT_OPTS_FILE="${HOME}/.config/fzf/fzfrc"
+
+{{ range $shell.aliases -}}
+alias {{ .name }}={{ includeTemplate "partials/sh_quote" .command }}
+{{ end }}
+mkcd() {
+  mkdir -p -- "$1" && cd -- "$1" || return
+}
+
+y() {
+  local cwd_file cwd
+  cwd_file="$(mktemp -t yazi-cwd.XXXXXX)" || return
+  yazi "$@" --cwd-file="${cwd_file}"
+  cwd="$(command cat -- "${cwd_file}")"
+  command rm -f -- "${cwd_file}"
+  if [ -n "${cwd}" ] && [ "${cwd}" != "${PWD}" ]; then
+    cd -- "${cwd}" || return
+  fi
+}
+
+proj() {
+  local target
+  target="$(ghq list --full-path | fzf --prompt 'repo> ' --exact --select-1 --exit-0 --query "$*")"
+  if [ -n "${target}" ]; then
+    cd -- "${target}" || return
+  else
+    printf 'no repository matched\n'
+  fi
+}

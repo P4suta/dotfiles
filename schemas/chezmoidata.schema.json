@@ -130,6 +130,17 @@
         "type": "string"
       }
     },
+    "shell": {
+      "description": "The interactive behavior every shell a profile configures renders in its own syntax.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Shell"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "targets": {
       "description": "Targets that only the profiles of the named set receive.",
       "type": [
@@ -200,6 +211,24 @@
         "peers"
       ]
     },
+    "Chord": {
+      "description": "A key chord that every shell's line editor can bind.",
+      "type": "string",
+      "enum": [
+        "alt+left",
+        "alt+right",
+        "alt+b",
+        "alt+f",
+        "alt+backspace",
+        "ctrl+left",
+        "ctrl+right",
+        "ctrl+a",
+        "ctrl+e",
+        "ctrl+k",
+        "ctrl+u",
+        "ctrl+w"
+      ]
+    },
     "Coderabbit": {
       "description": "The pinned `CodeRabbit` command line and its artifact for each host platform.",
       "type": "object",
@@ -254,6 +283,31 @@
       "additionalProperties": false,
       "required": [
         "chat"
+      ]
+    },
+    "EditMode": {
+      "description": "The line editor mode of every shell.",
+      "type": "string",
+      "enum": [
+        "vi",
+        "emacs"
+      ]
+    },
+    "FallbackEditor": {
+      "description": "The editor of a host that has none of the preferred editors, for each OS family.",
+      "type": "object",
+      "properties": {
+        "unix": {
+          "type": "string"
+        },
+        "windows": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "unix",
+        "windows"
       ]
     },
     "Herdr": {
@@ -318,6 +372,19 @@
     "Hex": {
       "type": "string",
       "pattern": "^#[0-9a-f]{6}$"
+    },
+    "KeyAction": {
+      "description": "A line editing action that every shell's line editor provides.",
+      "type": "string",
+      "enum": [
+        "word_left",
+        "word_right",
+        "kill_word",
+        "kill_to_start",
+        "kill_to_end",
+        "line_start",
+        "line_end"
+      ]
     },
     "Linux": {
       "type": "object",
@@ -1177,6 +1244,119 @@
         }
       },
       "additionalProperties": false
+    },
+    "Shell": {
+      "description": "The shortcuts, functions, history, line editing keys, and pager and editor variables of every interactive shell.",
+      "type": "object",
+      "properties": {
+        "aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShellAlias"
+          }
+        },
+        "edit_mode": {
+          "$ref": "#/$defs/EditMode"
+        },
+        "editors": {
+          "description": "Editors in order of preference, each with its options, of which a host takes the first it finds.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fallback_editor": {
+          "$ref": "#/$defs/FallbackEditor"
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShellFunction"
+          }
+        },
+        "history_size": {
+          "description": "Commands each shell keeps in its history, which PowerShell caps at its own limit.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShellKey"
+          }
+        },
+        "less": {
+          "description": "The `LESS` options for the programs that still page through less.",
+          "type": "string"
+        },
+        "pager": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "history_size",
+        "edit_mode",
+        "editors",
+        "fallback_editor",
+        "pager",
+        "less",
+        "keys",
+        "aliases",
+        "functions"
+      ]
+    },
+    "ShellAlias": {
+      "description": "A shortcut that stands for one command and its options.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "command"
+      ]
+    },
+    "ShellFunction": {
+      "description": "A function that each shell defines in its own syntax, because it changes the directory or asks for a choice.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "summary"
+      ]
+    },
+    "ShellKey": {
+      "description": "One insert-mode key and the action every shell binds it to.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/KeyAction"
+        },
+        "chord": {
+          "$ref": "#/$defs/Chord"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "chord",
+        "action"
+      ]
     },
     "Sshd": {
       "type": "object",

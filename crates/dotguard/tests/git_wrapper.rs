@@ -281,6 +281,53 @@ fn lefthooks_forced_checkout_passes_only_when_its_patch_holds_the_discarded_hunk
     );
 }
 
+/// A clone made with `--no-checkout` has no index, so its status lists every file as a staged deletion that a forced checkout restores.
+#[test]
+fn a_forced_checkout_that_only_restores_deleted_files_passes() {
+    let wrapper = Wrapper::new("force-restore");
+    std::fs::write(
+        wrapper.scope.join("gitconfig"),
+        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+    )
+    .unwrap();
+    let repository = wrapper.scope.join("repository");
+    let succeeds = |arguments: &[&str]| {
+        let output = wrapper.run(arguments, None);
+        assert!(
+            output.status.success(),
+            "git {arguments:?}: {}",
+            text(&output.stderr)
+        );
+        text(&output.stdout).trim().to_owned()
+    };
+    std::fs::write(repository.join("kept"), "kept\n").unwrap();
+    succeeds(&["add", "kept"]);
+    let tree = succeeds(&["write-tree"]);
+    let commit = succeeds(&["commit-tree", &tree, "-m", "c"]);
+    succeeds(&["update-ref", "HEAD", &commit]);
+    let checkout = ["checkout", "--force", "--detach", commit.as_str()];
+
+    std::fs::remove_file(repository.join(".git/index")).unwrap();
+    std::fs::remove_file(repository.join("kept")).unwrap();
+    succeeds(&checkout);
+    assert_eq!(
+        std::fs::read_to_string(repository.join("kept")).unwrap(),
+        "kept\n"
+    );
+
+    succeeds(&["rm", "--quiet", "--cached", "kept"]);
+    std::fs::write(repository.join("kept"), "mine\n").unwrap();
+    assert_eq!(
+        last_record(&wrapper.run(&checkout, None)).rule,
+        "git.force",
+        "a staged deletion whose file stays in the worktree keeps that copy protected"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repository.join("kept")).unwrap(),
+        "mine\n"
+    );
+}
+
 /// Git reads `--rep` as `--repo` and the next word as its value, so the refusal names only the branch Git deletes.
 #[test]
 fn an_abbreviated_option_value_is_not_a_deleted_branch() {

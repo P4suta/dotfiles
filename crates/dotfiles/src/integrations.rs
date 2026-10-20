@@ -249,13 +249,21 @@ fn pwsh_caches(home: &Path, runner: &mut impl Runner) -> Result<()> {
             args(&["init", "powershell", "--print-full-init"]),
         ),
         ("zoxide", Tool::Zoxide, args(&["init", "powershell"])),
+        (
+            "ls-colors",
+            Tool::Vivid,
+            args(&["generate", "tokyonight-night"]),
+        ),
     ] {
         if runner.available(tool) {
             let text = String::from_utf8(initialization(runner, tool, &arguments)?)?;
-            let script = if name == "mise" {
-                deferred_mise(&text)
-            } else {
-                text
+            let script = match name {
+                "mise" => deferred_mise(&text),
+                "ls-colors" => format!(
+                    "$env:LS_COLORS = '{}'\n",
+                    text.trim_end().replace('\'', "''")
+                ),
+                _ => text,
             };
             replace(
                 &home.join(format!(".cache/pwsh/{name}.ps1")),
@@ -511,6 +519,41 @@ mod tests {
         assert_eq!(
             fs::read_to_string(home.path().join(".cache/pwsh/starship.ps1")).unwrap(),
             "unchanged powershell initialization\n"
+        );
+    }
+
+    struct Vivid;
+
+    impl Runner for Vivid {
+        fn available(&self, tool: Tool) -> bool {
+            tool == Tool::Vivid
+        }
+
+        fn run(&mut self, tool: Tool, arguments: &[OsString]) -> Result<Reply> {
+            assert_eq!(tool, Tool::Vivid);
+            assert_eq!(arguments, args(&["generate", "tokyonight-night"]));
+            Ok(Reply {
+                success: true,
+                bytes: b"di=01;34:*.rs=0;33\n".to_vec(),
+            })
+        }
+
+        fn run_installed(&mut self, program: &Path, _: &[OsString]) -> Result<Reply> {
+            anyhow::bail!("unexpected installed program {}", program.display())
+        }
+    }
+
+    #[test]
+    fn every_shell_receives_the_same_file_colors() {
+        let home = tempfile::tempdir().unwrap();
+        shell_caches(home.path(), &mut Vivid).unwrap();
+        assert_eq!(
+            fs::read_to_string(home.path().join(".cache/pwsh/ls-colors.ps1")).unwrap(),
+            "$env:LS_COLORS = 'di=01;34:*.rs=0;33'\n"
+        );
+        assert_eq!(
+            fs::read_to_string(home.path().join(".config/nushell/generated/ls-colors.nu")).unwrap(),
+            "$env.LS_COLORS = r#'di=01;34:*.rs=0;33'#\n"
         );
     }
 
