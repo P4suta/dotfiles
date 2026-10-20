@@ -262,7 +262,6 @@ impl Snapshot {
             .as_deref()
             .ok_or("local Cargo metadata path is absent")?;
         if details.workspace.is_some()
-            || details.version.is_some()
             || details.registry.is_some()
             || details.git.is_some()
             || details.branch.is_some()
