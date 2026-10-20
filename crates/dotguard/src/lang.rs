@@ -193,6 +193,27 @@ impl Mode {
     }
 }
 
+/// The fields of one record of `git check-attr -z`: the path, the attribute, and its value.
+const ATTRIBUTE_FIELDS: usize = 3;
+
+/// The path and value of each record that `git check-attr -z` printed, with `None` where no attribute sets a value.
+pub fn attributes(output: &str) -> Vec<(&str, Option<&str>)> {
+    output
+        .split('\0')
+        .collect::<Vec<_>>()
+        .as_chunks::<ATTRIBUTE_FIELDS>()
+        .0
+        .iter()
+        .map(|&[path, _, value]| {
+            let value = match value {
+                "unspecified" | "unset" => None,
+                value => Some(value),
+            };
+            (path, value)
+        })
+        .collect()
+}
+
 /// ASCII letters, the Latin-1 accents, and the extended Latin blocks U+0100–U+024F and U+1E00–U+1EFF.
 const fn latin(c: char) -> bool {
     c.is_ascii_alphabetic()
@@ -368,7 +389,8 @@ pub fn refusal(
     let mut cause = format!(
         "{cause}.\n\
          Cyrillic '\u{0441}' and Latin 'c' are indistinguishable on screen, so this is the same check that catches a homoglyph in an identifier and a bidi override in a comment.\n\
-         A repository that writes Japanese sets `git config guard.lang japanese`; one that carries multilingual fixtures sets `git config guard.lang off`."
+         A repository that writes Japanese commits `* dotguard-lang=japanese` in `.gitattributes`, and a path of multilingual fixtures gets `dotguard-lang=off` there.\n\
+         `git config guard.lang japanese` or `off` sets the same for one clone."
     );
     if bypass.is_none() {
         cause.push_str(
@@ -394,8 +416,8 @@ pub fn refusal(
 mod tests {
     use super::{
         AlignedSimplified, Diagnostic, Mode, SIMPLIFIED_EXTRA, SIMPLIFIED_EXTRA_BYTES,
-        SIMPLIFIED_EXTRA_TEXT, SIMPLIFIED_SEARCH_ALIGNMENT, commit_message_body, evidence, refusal,
-        scan,
+        SIMPLIFIED_EXTRA_TEXT, SIMPLIFIED_SEARCH_ALIGNMENT, attributes, commit_message_body,
+        evidence, refusal, scan,
     };
 
     #[test]
@@ -586,5 +608,23 @@ mod tests {
         assert!(Mode::parse(Some("off")).is_none());
         // A typo never turns the gate off.
         assert!(matches!(Mode::parse(Some("englsh")), Some(Mode::English)));
+    }
+
+    #[test]
+    fn attribute_records_keep_their_paths_and_only_set_values() {
+        let output = ".\0dotguard-lang\0japanese\0fixtures/a.json\0dotguard-lang\0off\0\
+                      src/a.rs\0dotguard-lang\0unspecified\0src/b.rs\0dotguard-lang\0unset\0";
+        assert_eq!(
+            attributes(output),
+            [
+                (".", Some("japanese")),
+                ("fixtures/a.json", Some("off")),
+                ("src/a.rs", None),
+                ("src/b.rs", None),
+            ]
+        );
+        let none: [(&str, Option<&str>); 0] = [];
+        assert_eq!(attributes(""), none);
+        assert_eq!(attributes("truncated\0dotguard-lang"), none);
     }
 }
