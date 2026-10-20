@@ -34,7 +34,7 @@
 | [2026-10-07 Refuse generic anti-patterns through one catalog of checks](generic-anti-pattern-catalog.md) | accepted |  |
 | [2026-10-07 Keep every decision in one pure core crate behind its adapters](pure-decision-core-behind-adapters.md) | accepted |  |
 | [2026-10-07 Replay the whole reachable state graph of each finite Quint model](state-graph-replay-of-finite-quint-models.md) | accepted |  |
-| [2026-10-07 Require verification in proportion to code shape on every repository](verification-proportional-to-code-shape.md) | accepted |  |
+| [2026-10-07 Require verification in proportion to code shape on every repository](verification-proportional-to-code-shape.md) | amended | [2026-10-20](keep-the-assure-owner-map-out-of-projects.md) |
 | [2026-10-08 Drop Aeneas extraction for the plan and ordering cores and try Verus next](aeneas-extraction-pilot.md) | accepted |  |
 | [2026-10-08 Record rule failures at their execution boundaries](automatic-rule-failure-observations.md) | proposed |  |
 | [2026-10-08 Keep bounded harnesses instead of Kani loop contracts for the Git argument scan](bounded-harness-over-kani-loop-contracts.md) | accepted |  |
@@ -87,6 +87,7 @@
 | [2026-10-20 Admit Git operations that lose no owner work](admit-tool-owned-and-throwaway-git-operations.md) | accepted |  |
 | [2026-10-20 Gate pull requests that skip the local hooks](gate-pull-requests-that-skip-local-hooks.md) | accepted |  |
 | [2026-10-20 Keep parallel worktrees independent](keep-parallel-worktrees-independent.md) | amended | [2026-10-20](leave-the-cargo-target-to-each-workspace.md) |
+| [2026-10-20 Keep the assure owner map out of projects](keep-the-assure-owner-map-out-of-projects.md) | accepted |  |
 | [2026-10-20 Keep workflow evidence on the owner's machines](keep-workflow-evidence-local.md) | accepted |  |
 | [2026-10-20 Leave the Cargo target to each workspace](leave-the-cargo-target-to-each-workspace.md) | accepted |  |
 | [2026-10-20 Keep every managed behavior the same on every host](same-behavior-on-every-host.md) | accepted |  |

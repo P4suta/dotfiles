@@ -33,7 +33,7 @@ impl Fixture {
             &config,
             "[user]\n\tname = Fixture\n\temail = fixture@example.com\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n",
         )?;
-        let root = scope.path().join("repository");
+        let root = scope.path().join("repository with 'quotes'");
         fs::create_dir(&root)?;
         let fixture = Self {
             scope,
@@ -41,6 +41,12 @@ impl Fixture {
             config,
         };
         fixture.git(&["init", "--quiet"])?;
+        fixture.git(&[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/P4suta/fixture.git",
+        ])?;
         fixture.write("README.md", "fixture\n")?;
         fixture.commit("start")?;
         Ok(fixture)
@@ -66,6 +72,26 @@ impl Fixture {
         }
         fs::write(path, text)?;
         Ok(())
+    }
+
+    fn catalog(&self) -> Result<Catalog> {
+        let mut catalog = catalog()?;
+        if let Some(anti) = &mut catalog.anti_patterns {
+            anti.config = catalog
+                .directory
+                .join(&anti.config)
+                .to_string_lossy()
+                .into_owned();
+        }
+        catalog.directory = self.scope.path().join("assure");
+        Ok(catalog)
+    }
+
+    fn owners(&self, text: &str) -> Result<std::path::PathBuf> {
+        let path = self.scope.path().join("assure/repos/p4suta__fixture.toml");
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(&path, text)?;
+        Ok(path)
     }
 
     fn stage(&self) -> Result<()> {
@@ -173,7 +199,7 @@ fn an_unowned_parser_is_refused_at_every_point_and_admitted_once_its_fuzz_target
     );
     fixture.git(&["update-ref", "refs/remotes/origin/main", &base])?;
     assert_eq!(
-        emitted_rule(assure::ready(root, &catalog, "main", &owned)),
+        emitted_rule(assure::ready(root, &catalog, &base, &owned)),
         None
     );
 
@@ -190,7 +216,7 @@ fn an_unowned_parser_is_refused_at_every_point_and_admitted_once_its_fuzz_target
         Some("assure.added")
     );
     assert_eq!(
-        emitted_rule(assure::ready(root, &catalog, "main", &unowned)).as_deref(),
+        emitted_rule(assure::ready(root, &catalog, &base, &unowned)).as_deref(),
         Some("assure.added")
     );
     incident_fixture::preserve(fixture.scope);
@@ -198,6 +224,271 @@ fn an_unowned_parser_is_refused_at_every_point_and_admitted_once_its_fuzz_target
 }
 
 const OWNERS_PATH: &str = "assure.toml";
+
+#[test]
+fn an_owner_side_map_takes_precedence_over_every_project_revision() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    fixture.write("src/lib.rs", PARSER)?;
+    fixture.write("fuzz/fuzz_targets/parse.rs", TARGET)?;
+    fixture.write("fuzz/corpus/parse/seed", "7")?;
+    fixture.write(OWNERS_PATH, "invalid project configuration")?;
+    fixture.commit("legacy configuration")?;
+    fixture.owners(OWNERS)?;
+    fixture.write("src/lib.rs", &format!("{PARSER}// changed\n"))?;
+    fixture.stage()?;
+    assert_eq!(
+        assure::stop(&fixture.root, &catalog)?.verdict,
+        Verdict::Admit
+    );
+    assert_eq!(rule(assure::commit(&fixture.root, &catalog)), None);
+    Ok(())
+}
+
+#[test]
+fn an_untracked_project_map_cannot_own_a_shape() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    fixture.write("src/lib.rs", PARSER)?;
+    fixture.write("fuzz/fuzz_targets/parse.rs", TARGET)?;
+    fixture.write("fuzz/corpus/parse/seed", "7")?;
+    fixture.write(OWNERS_PATH, OWNERS)?;
+    assert_eq!(
+        assure::stop(&fixture.root, &catalog)?.verdict,
+        Verdict::Added
+    );
+    Ok(())
+}
+
+#[test]
+fn deleting_a_legacy_map_without_migrating_cannot_hide_new_gaps() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    fixture.write("src/lib.rs", PARSER)?;
+    fixture.write("fuzz/fuzz_targets/parse.rs", TARGET)?;
+    fixture.write("fuzz/corpus/parse/seed", "7")?;
+    fixture.write(OWNERS_PATH, OWNERS)?;
+    fixture.commit("owned parser")?;
+    fixture.git(&["rm", "--", OWNERS_PATH])?;
+    assert_eq!(
+        rule(assure::commit(&fixture.root, &catalog)).as_deref(),
+        Some("assure.added")
+    );
+    Ok(())
+}
+
+#[test]
+fn ready_uses_the_explicit_commit_even_when_remote_tracking_refs_disagree() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    let base = fixture.git(&["rev-parse", "HEAD"])?;
+    fixture.write("src/lib.rs", PARSER)?;
+    let head = fixture.commit("add an unowned parser")?;
+    fixture.git(&["update-ref", "refs/remotes/origin/main", &head])?;
+    let refuse = || -> Result<Refusal> {
+        Ok(assure::ready(&fixture.root, &catalog, &base, &head)
+            .unwrap_err()
+            .downcast::<Refusal>()
+            .unwrap())
+    };
+    let first = refuse()?;
+    fixture.git(&["update-ref", "refs/remotes/origin/main", &base])?;
+    assert_eq!(first, refuse()?);
+    assert_eq!(first.rule, "assure.added");
+    assert!(first.cause.contains("owner's local catalog"));
+    let evidence = first.evidence.join("\n");
+    assert!(evidence.contains(&format!("base={base}")), "{evidence}");
+    assert!(
+        evidence.contains(&format!("sha256={}", catalog.sha256)),
+        "{evidence}"
+    );
+    assert!(
+        evidence.contains(&format!("version={}", catalog.version)),
+        "{evidence}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_tracked_map_migrates_with_the_printed_command_and_is_never_read_again() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    fixture.write("src/lib.rs", PARSER)?;
+    fixture.write("fuzz/fuzz_targets/parse.rs", TARGET)?;
+    fixture.write("fuzz/corpus/parse/seed", "7")?;
+    fixture.write(OWNERS_PATH, OWNERS)?;
+    let head = fixture.commit("tracked owner map")?;
+    let before = assure::stop(&fixture.root, &catalog)?;
+    assert_eq!(before.verdict, Verdict::Admit);
+    assert_eq!(before.inputs.base.as_deref(), Some(head.as_str()));
+    let command = before.migration.expect("migration command");
+    let path = assure::owner_path(&fixture.root, &catalog)?.unwrap();
+    assert!(command.contains(&path.to_string_lossy().to_string()));
+    let shell = if cfg!(windows) { "pwsh.exe" } else { "sh" };
+    let arguments = if cfg!(windows) {
+        vec!["-NoProfile", "-Command", &command]
+    } else {
+        vec!["-c", &command]
+    };
+    let output = fixture_git::command(shell, &fixture.config)
+        .args(arguments)
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "migration failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_to_string(&path)?, OWNERS);
+    assert!(!fixture.root.join(OWNERS_PATH).exists());
+    assert_eq!(fixture.git(&["ls-files", "--", OWNERS_PATH])?, "");
+    fixture.write(OWNERS_PATH, "malformed untracked project map")?;
+    fixture.write("src/lib.rs", &format!("{PARSER}// changed\n"))?;
+    let after = assure::stop(&fixture.root, &catalog)?;
+    assert_eq!(after.verdict, Verdict::Admit);
+    assert!(after.migration.is_none());
+    assert_eq!(after.inputs.owners.len(), 1);
+    assert!(
+        after
+            .inputs
+            .owners
+            .iter()
+            .all(|input| input.contains(&path.to_string_lossy().to_string())
+                && input.contains("sha256="))
+    );
+    Ok(())
+}
+
+#[test]
+fn a_malformed_owner_side_map_fails_without_falling_back() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    fixture.write(OWNERS_PATH, OWNERS)?;
+    fixture.commit("legacy map")?;
+    let path = fixture.owners("malformed owner map")?;
+    let error = assure::stop(&fixture.root, &catalog).unwrap_err();
+    let error = format!("{error:#}");
+    assert!(
+        error.contains(&path.to_string_lossy().to_string()),
+        "{error}"
+    );
+    assert!(error.contains(&catalog.sha256), "{error}");
+    Ok(())
+}
+
+#[test]
+fn origin_url_forms_and_case_resolve_the_same_owner_path() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    let expected = fixture
+        .scope
+        .path()
+        .join("assure/repos/p4suta__fixture.toml");
+    for origin in [
+        "https://github.com/P4suta/Fixture.git",
+        "git@github.com:p4suta/fixture.git",
+        "ssh://git@github.com/P4SUTA/FIXTURE.git/",
+    ] {
+        fixture.git(&["remote", "set-url", "origin", origin])?;
+        assert_eq!(
+            assure::owner_path(&fixture.root, &catalog)?,
+            Some(expected.clone())
+        );
+    }
+    for origin in [
+        "https://github.com/../fixture",
+        "https://example.com/p4suta/fixture.git",
+    ] {
+        fixture.git(&["remote", "set-url", "origin", origin])?;
+        assert_eq!(assure::owner_path(&fixture.root, &catalog)?, None);
+    }
+    fixture.git(&["remote", "remove", "origin"])?;
+    assert_eq!(assure::owner_path(&fixture.root, &catalog)?, None);
+    Ok(())
+}
+
+#[test]
+fn catalog_identity_uses_its_version_and_exact_file_bytes() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let path = fixture.scope.path().join("shapes.toml");
+    let text = "version = 7\nexclude = []\nshape = []\n";
+    fs::write(&path, text)?;
+    let first = assure::catalog(&path)?;
+    assert_eq!(first.version, 7);
+    assert_eq!(
+        first.sha256,
+        "99ea4765a401a01658ebe6cb1f87e215db783b433b3a2a6930636b5e617318a4"
+    );
+    fs::write(&path, format!("{text}# different bytes\n"))?;
+    let second = assure::catalog(&path)?;
+    assert_eq!(second.version, first.version);
+    assert_ne!(second.sha256, first.sha256);
+    let outcome = assure::stop(&fixture.root, &first)?;
+    assert_eq!(outcome.inputs.catalog_version, first.version);
+    assert_eq!(outcome.inputs.catalog_sha256, first.sha256);
+    fs::write(&path, "exclude = []\nshape = []\n")?;
+    assert_eq!(assure::catalog(&path)?.version, 1);
+    fs::write(&path, "version = 0\nexclude = []\nshape = []\n")?;
+    assert!(assure::catalog(&path).is_err());
+    Ok(())
+}
+
+#[test]
+fn a_missing_base_or_head_refusal_still_names_the_catalog_and_base() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    let head = fixture.git(&["rev-parse", "HEAD"])?;
+    let missing = "f".repeat(40);
+    for (base, head, rule) in [
+        (missing.as_str(), head.as_str(), "assure.base"),
+        (head.as_str(), missing.as_str(), "assure.head"),
+        ("main", head.as_str(), "assure.base"),
+    ] {
+        let refusal = assure::ready(&fixture.root, &catalog, base, head)
+            .unwrap_err()
+            .downcast::<Refusal>()
+            .unwrap();
+        assert_eq!(refusal.rule, rule);
+        let evidence = refusal.evidence.join("\n");
+        assert!(evidence.contains(&catalog.sha256), "{evidence}");
+        assert!(evidence.contains(&format!("base={base}")), "{evidence}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_new_branch_uses_the_advertised_upstream_default_instead_of_tracking_refs() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    let base = fixture.git(&["rev-parse", "HEAD"])?;
+    let upstream = fixture.scope.path().join("upstream.git");
+    let upstream = upstream.to_str().unwrap();
+    fixture.git(&["clone", "--bare", "--quiet", ".", upstream])?;
+    fixture.git(&["remote", "set-url", "origin", upstream])?;
+    fixture.write("src/lib.rs", PARSER)?;
+    let head = fixture.commit("unowned shape")?;
+    fixture.git(&["update-ref", "refs/remotes/origin/main", &head])?;
+    fixture.git(&[
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+    ])?;
+    let line = format!(
+        "refs/heads/topic {head} refs/heads/topic {}\n",
+        "0".repeat(40)
+    );
+    let refusal = assure::push(&fixture.root, &catalog, "origin", line.as_bytes())
+        .unwrap_err()
+        .downcast::<Refusal>()
+        .unwrap();
+    assert_eq!(refusal.rule, "assure.added");
+    assert!(
+        refusal
+            .evidence
+            .iter()
+            .any(|input| input.contains(&format!("base={base}")))
+    );
+    Ok(())
+}
 
 #[test]
 fn old_gaps_refuse_no_commit_or_push_but_a_touch_must_close_them_and_a_pr_must_close_one()
@@ -221,7 +512,7 @@ fn old_gaps_refuse_no_commit_or_push_but_a_touch_must_close_them_and_a_pr_must_c
         None
     );
     assert_eq!(
-        rule(assure::ready(root, &catalog, "main", &unrelated)).as_deref(),
+        rule(assure::ready(root, &catalog, &old, &unrelated)).as_deref(),
         Some("assure.stalled")
     );
 
@@ -236,7 +527,7 @@ fn old_gaps_refuse_no_commit_or_push_but_a_touch_must_close_them_and_a_pr_must_c
     )?;
     assert_eq!(assure::stop(root, &catalog)?.verdict, Verdict::Admit);
     let closing = fixture.commit("exempt one parser")?;
-    assert_eq!(rule(assure::ready(root, &catalog, "main", &closing)), None);
+    assert_eq!(rule(assure::ready(root, &catalog, &old, &closing)), None);
 
     fixture.write(
         "src/b.rs",
@@ -363,7 +654,7 @@ fn each_anti_pattern_is_refused_at_every_point_with_its_rule_and_next_action_unt
         Some("assure.added")
     );
     assert_eq!(
-        emitted_rule(assure::ready(root, &catalog, "main", &violating)).as_deref(),
+        emitted_rule(assure::ready(root, &catalog, &base, &violating)).as_deref(),
         Some("assure.added")
     );
 
@@ -381,7 +672,7 @@ fn each_anti_pattern_is_refused_at_every_point_with_its_rule_and_next_action_unt
         None
     );
     assert_eq!(
-        emitted_rule(assure::ready(root, &catalog, "main", &fixed)),
+        emitted_rule(assure::ready(root, &catalog, &base, &fixed)),
         None
     );
     incident_fixture::preserve(fixture.scope);
@@ -405,13 +696,13 @@ fn a_pr_that_weakens_a_budget_is_refused() -> Result<()> {
     )?;
     let raised = fixture.commit("raise the ceiling")?;
     assert_eq!(
-        rule(assure::ready(root, &catalog, "main", &raised)).as_deref(),
+        rule(assure::ready(root, &catalog, &base, &raised)).as_deref(),
         Some("assure.lowered")
     );
     fixture.write(OWNERS_PATH, "")?;
     let removed = fixture.commit("drop the budget")?;
     assert_eq!(
-        rule(assure::ready(root, &catalog, "main", &removed)).as_deref(),
+        rule(assure::ready(root, &catalog, &base, &removed)).as_deref(),
         Some("assure.lowered")
     );
     fixture.write(
@@ -419,7 +710,7 @@ fn a_pr_that_weakens_a_budget_is_refused() -> Result<()> {
         "[[budget]]\nname = \"mutants-missed\"\nceiling = 0\n",
     )?;
     let kept = fixture.commit("keep the budget")?;
-    assert_eq!(rule(assure::ready(root, &catalog, "main", &kept)), None);
+    assert_eq!(rule(assure::ready(root, &catalog, &base, &kept)), None);
     Ok(())
 }
 
@@ -478,7 +769,7 @@ fn a_pure_revert_passes_each_point_and_a_revert_that_adds_a_gap_does_not() -> Re
         None
     );
     assert_eq!(
-        emitted_rule(assure::ready(root, &catalog, "main", &reverted)),
+        emitted_rule(assure::ready(root, &catalog, &named, &reverted)),
         None
     );
 
@@ -506,7 +797,7 @@ fn a_pure_revert_passes_each_point_and_a_revert_that_adds_a_gap_does_not() -> Re
         Some("assure.added")
     );
     assert_eq!(
-        emitted_rule(assure::ready(root, &catalog, "main", &mixed)).as_deref(),
+        emitted_rule(assure::ready(root, &catalog, &named, &mixed)).as_deref(),
         Some("assure.added")
     );
     Ok(())

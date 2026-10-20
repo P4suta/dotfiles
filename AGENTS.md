@@ -45,7 +45,7 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 | A rule a gate decides | a `*_rules.rs` module in `crates/rules/src/`, re-exported by its caller's crate, and its Kani obligation with its probes in `policy/obligations.toml` |
 | A structural rule for every repository | `home/dot_config/assure/rules/` with its fixtures in `rule-tests/` and its entry in `catalog.toml` |
 | A code shape every repository must verify | `home/dot_config/assure/shapes.toml`, with fixtures in `crates/dotfiles/tests/assure.rs` |
-| The owner of a shape in this repository | `assure.toml`, and a parser's cargo-fuzz target and corpus under `fuzz/` |
+| The owner of a shape in this repository | `home/dot_config/assure/repos/p4suta__dotfiles.toml`, installed in the owner's configuration, and a parser's cargo-fuzz target and corpus under `fuzz/` |
 | A shared skill | `home/dot_agents/skills/<skill>/` and `docs/skills/decisions/<skill>.json` |
 | A durable design decision | a new record `docs/adr/<decision>.md` with `date:` in its front matter and no number, then `just gen` |
 

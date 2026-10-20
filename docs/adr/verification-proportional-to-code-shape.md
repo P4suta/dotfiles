@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [keep-the-assure-owner-map-out-of-projects.md]
 date: 2026-10-07
 ---
 # Require verification in proportion to code shape on every repository

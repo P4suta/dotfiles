@@ -1,4 +1,4 @@
-# What owns each code shape that the shape catalog of `~/.config/assure/shapes.toml` finds in this repository, and the budgets no change may weaken.
+# The owners and budgets for P4suta/dotfiles, installed at `~/.config/assure/repos/p4suta__dotfiles.toml`.
 # Each rule module owns its decisions through its own Kani harnesses, so only the other shapes need an entry.
 
 [[owner]]

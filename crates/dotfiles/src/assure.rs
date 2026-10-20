@@ -1,15 +1,16 @@
 //! The machine-level verification gate: finds the code shapes of the installed catalog in a repository, and decides each enforcement point from what owns them.
 //!
-//! The catalog at `~/.config/assure/shapes.toml` holds the signals, and each repository names its owners and budgets in its own `assure.toml`.
+//! The installed catalog and repository owner maps live under `~/.config/assure/`.
 //! An exemption sits in the comment block before the site it exempts.
 
 use crate::refusal::Refusal;
 use crate::shape_rules::{
-    self, Bound, Cause, Change, Exemption, Owner, Point, Signal, Site, Standing, Verdict,
+    self, Bound, Cause, Change, Exemption, MapSource, Owner, Point, Signal, Site, Standing, Verdict,
 };
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -18,8 +19,14 @@ use std::process::Stdio;
 /// The catalog every host receives, relative to the home directory.
 pub const CATALOG: &str = ".config/assure/shapes.toml";
 
-/// The file at a repository's root that names the owners of its shapes and its budgets.
+/// The tracked repository file read only during migration to the owner's configuration.
 pub const OWNERS: &str = "assure.toml";
+const REPOS: &str = "repos";
+const INITIAL_CATALOG_VERSION: u32 = 1;
+
+fn initial_catalog_version() -> u32 {
+    INITIAL_CATALOG_VERSION
+}
 
 /// The directory beside a cargo-fuzz `fuzz_targets` directory that holds each target's corpus.
 const CORPUS: &str = "corpus";
@@ -27,6 +34,10 @@ const CORPUS: &str = "corpus";
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Catalog {
+    #[serde(default = "initial_catalog_version")]
+    pub version: u32,
+    #[serde(skip)]
+    pub sha256: String,
     /// Path segments whose files verify code rather than ship it, which no signal reads.
     pub exclude: Vec<String>,
     #[serde(rename = "shape")]
@@ -105,7 +116,7 @@ impl BudgetSpec {
             (Some(value), None) => Ok((Bound::Ceiling, value)),
             (None, Some(value)) => Ok((Bound::Floor, value)),
             _ => bail!(
-                "{OWNERS}: budget `{}` needs exactly one of `ceiling` and `floor`",
+                "owner map: budget `{}` needs exactly one of `ceiling` and `floor`",
                 self.name
             ),
         }
@@ -120,6 +131,12 @@ impl BudgetSpec {
 pub fn catalog(path: &Path) -> Result<Catalog> {
     let text = std::fs::read_to_string(path).with_context(|| path.display().to_string())?;
     let mut catalog: Catalog = toml::from_str(&text).with_context(|| path.display().to_string())?;
+    ensure!(
+        catalog.version > 0,
+        "{}: catalog version must be positive",
+        path.display()
+    );
+    catalog.sha256 = digest(text.as_bytes());
     catalog.directory = path.parent().map(Path::to_path_buf).unwrap_or_default();
     let mut ids = BTreeSet::new();
     for shape in &catalog.shapes {
@@ -150,13 +167,164 @@ pub fn installed() -> Result<Catalog> {
     if !path.is_file() {
         return Err(Refusal::new(
             "assure.catalog",
-            "the shape catalog these machines verify every repository against is not installed",
+            "the owner's local shape catalog is not installed",
             "chezmoi apply",
         )
         .evidence(format!("missing {}", path.display()))
+        .evidence("owner's local catalog version=unavailable sha256=unavailable; base=not surveyed")
         .into());
     }
     catalog(&path)
+}
+
+fn digest(bytes: &[u8]) -> String {
+    platform::build_inputs::hex(&Sha256::digest(bytes))
+}
+
+/// The owner-side map for the checkout's GitHub origin, or none for an unsupported origin.
+///
+/// # Errors
+/// Returns an error when Git can't read the checkout's origin.
+pub fn owner_path(root: &Path, catalog: &Catalog) -> Result<Option<PathBuf>> {
+    let output = Tool::Git
+        .command()
+        .arg("-C")
+        .arg(root)
+        .args(["config", "--get", "remote.origin.url"])
+        .output()
+        .context("read checkout origin")?;
+    if output.status.code() == Some(1) {
+        return Ok(None);
+    }
+    ensure!(output.status.success(), "cannot read checkout origin");
+    let origin = std::str::from_utf8(&output.stdout)?.trim();
+    Ok(
+        platform::source_identity::github_slug(origin).map(|repository| {
+            let key = repository.to_ascii_lowercase().replace('/', "__");
+            catalog.directory.join(REPOS).join(format!("{key}.toml"))
+        }),
+    )
+}
+
+#[derive(Debug)]
+enum OwnerMap {
+    Local { path: PathBuf, bytes: Vec<u8> },
+    Tracked { destination: Option<PathBuf> },
+    Empty,
+}
+
+impl OwnerMap {
+    fn configuration(&self, root: &Path, tree: &Tree) -> Result<(Owners, Survey)> {
+        let (bytes, source) = match self {
+            Self::Local { path, bytes } => (Some(bytes.clone()), path.display().to_string()),
+            Self::Tracked { .. } => (
+                contents(root, tree, &[OWNERS.to_owned()])?.remove(OWNERS),
+                format!("tracked {OWNERS} at {tree:?}"),
+            ),
+            Self::Empty => (None, "no owner map".to_owned()),
+        };
+        let owners: Owners = match &bytes {
+            Some(bytes) => {
+                toml::from_str(std::str::from_utf8(bytes).context("owner map encoding")?)
+                    .with_context(|| format!("{source} doesn't parse"))?
+            }
+            None => Owners::default(),
+        };
+        let mut survey = Survey {
+            owner_input: format!(
+                "owner map: {source}; sha256={}",
+                bytes
+                    .as_ref()
+                    .map_or_else(|| "absent".to_owned(), |bytes| digest(bytes))
+            ),
+            ..Survey::default()
+        };
+        if matches!(self, Self::Tracked { .. }) {
+            survey.owning.insert(OWNERS.to_owned());
+        }
+        for budget in &owners.budgets {
+            survey.budgets.insert(budget.name.clone(), budget.bound()?);
+        }
+        Ok((owners, survey))
+    }
+
+    fn read(root: &Path, catalog: &Catalog, trees: &[&Tree]) -> Result<Self> {
+        let destination = owner_path(root, catalog)?;
+        let local_exists = destination
+            .as_ref()
+            .map(|path| path.try_exists())
+            .transpose()?
+            .unwrap_or(false);
+        let mut tracked = if local_exists {
+            false
+        } else {
+            split_nul(&git(root, &["ls-files", "-z", "--cached", "--", OWNERS])?)
+                .iter()
+                .any(|path| path == OWNERS)
+        };
+        if !local_exists && !tracked {
+            for tree in trees {
+                if let Tree::Commit(Some(commit)) = tree {
+                    tracked = split_nul(&git(
+                        root,
+                        &["ls-tree", "-z", "--name-only", commit, "--", OWNERS],
+                    )?)
+                    .iter()
+                    .any(|path| path == OWNERS);
+                    if tracked {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(match shape_rules::map_source(local_exists, tracked) {
+            MapSource::Owner => {
+                let path = destination.context("owner map path is unavailable")?;
+                let bytes = std::fs::read(&path).with_context(|| path.display().to_string())?;
+                Self::Local { path, bytes }
+            }
+            MapSource::Tracked => Self::Tracked { destination },
+            MapSource::Empty => Self::Empty,
+        })
+    }
+
+    fn migration(&self, root: &Path) -> Option<String> {
+        let Self::Tracked {
+            destination: Some(destination),
+        } = self
+        else {
+            return None;
+        };
+        let directory = destination.parent()?;
+        let source = root.join(OWNERS);
+        let (directory, source, destination, root) = (
+            directory.to_string_lossy(),
+            source.to_string_lossy(),
+            destination.to_string_lossy(),
+            root.to_string_lossy(),
+        );
+        #[cfg(not(windows))]
+        {
+            use crate::refusal::command;
+            Some(format!(
+                "{} && {} && {}",
+                command(&["mkdir", "-p", &directory]),
+                command(&["cp", &source, &destination]),
+                command(&["git", "-C", &root, "rm", "--", OWNERS]),
+            ))
+        }
+        #[cfg(windows)]
+        {
+            let quote = |value: &str| format!("'{}'", value.replace('\'', "''"));
+            Some(format!(
+                "New-Item -ItemType Directory -Force -Path {} && Copy-Item -LiteralPath {} -Destination {} && git -C {} rm -- {OWNERS}",
+                quote(&directory),
+                quote(&source),
+                quote(&destination),
+                quote(&root),
+            ))
+        }
+    }
 }
 
 /// One state of a repository that the gate reads.
@@ -349,6 +517,7 @@ pub struct Survey {
     budgets: BTreeMap<String, (Bound, u64)>,
     /// The owners file and every file and corpus an owner names, which decide sites outside their own file.
     owning: BTreeSet<String>,
+    owner_input: String,
 }
 
 impl Survey {
@@ -465,17 +634,24 @@ pub fn survey(
     tree: &Tree,
     scope: Option<&BTreeSet<String>>,
 ) -> Result<Survey> {
+    survey_with(
+        root,
+        catalog,
+        &OwnerMap::read(root, catalog, &[tree])?,
+        tree,
+        scope,
+    )
+}
+
+fn survey_with(
+    root: &Path,
+    catalog: &Catalog,
+    map: &OwnerMap,
+    tree: &Tree,
+    scope: Option<&BTreeSet<String>>,
+) -> Result<Survey> {
     let all = paths(root, tree)?;
-    let owners: Owners = match contents(root, tree, &[OWNERS.to_owned()])?.get(OWNERS) {
-        Some(bytes) => toml::from_str(std::str::from_utf8(bytes).context(OWNERS)?)
-            .with_context(|| format!("{OWNERS} doesn't parse"))?,
-        None => Owners::default(),
-    };
-    let mut result = Survey::default();
-    result.owning.insert(OWNERS.to_owned());
-    for budget in &owners.budgets {
-        result.budgets.insert(budget.name.clone(), budget.bound()?);
-    }
+    let (owners, mut result) = map.configuration(root, tree)?;
     let candidates: Vec<String> = all
         .iter()
         .filter(|path| scope.is_none_or(|scope| scope.contains(*path)))
@@ -596,7 +772,7 @@ fn anti_patterns(
     if !config.is_file() {
         return Err(Refusal::new(
             "assure.catalog",
-            "the anti-pattern catalog these machines apply to every repository is not installed",
+            "the owner's local anti-pattern catalog is not installed",
             "chezmoi apply",
         )
         .evidence(format!("missing {}", config.display()))
@@ -757,7 +933,7 @@ fn lowered(before: &Survey, after: &Survey) -> Vec<String> {
                 .budgets
                 .get(name)
                 .map_or_else(|| "removed".to_owned(), |(_, next)| next.to_string());
-            format!("{OWNERS}: budget `{name}` {kind} {value} became {now}")
+            format!("owner map: budget `{name}` {kind} {value} became {now}")
         })
         .collect()
 }
@@ -765,11 +941,56 @@ fn lowered(before: &Survey, after: &Survey) -> Vec<String> {
 /// What the gate concluded at one enforcement point.
 #[derive(Debug)]
 pub struct Outcome {
+    pub inputs: Inputs,
+    pub migration: Option<String>,
     pub verdict: Verdict,
     pub change: Change,
     /// The gaps behind the verdict: the added or touched ones when it refuses, and every gap otherwise.
     pub gaps: Vec<Gap>,
     pub lowered: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Inputs {
+    pub catalog_version: u32,
+    pub catalog_sha256: String,
+    pub base: Option<String>,
+    pub owners: BTreeSet<String>,
+}
+
+impl Inputs {
+    fn new(catalog: &Catalog, base: Option<String>) -> Self {
+        Self {
+            catalog_version: catalog.version,
+            catalog_sha256: catalog.sha256.clone(),
+            base,
+            owners: BTreeSet::new(),
+        }
+    }
+
+    fn description(&self) -> String {
+        format!(
+            "owner's local catalog version={} sha256={}; base={}",
+            self.catalog_version,
+            self.catalog_sha256,
+            self.base.as_deref().unwrap_or("empty tree"),
+        )
+    }
+
+    fn refusal(&self, mut refusal: Refusal) -> Refusal {
+        refusal = refusal.evidence(self.description());
+        for owner in &self.owners {
+            refusal = refusal.evidence(owner);
+        }
+        refusal
+    }
+
+    fn error(&self, error: anyhow::Error) -> anyhow::Error {
+        match error.downcast::<Refusal>() {
+            Ok(refusal) => self.refusal(refusal).into(),
+            Err(error) => error.context(self.description()),
+        }
+    }
 }
 
 impl Outcome {
@@ -780,22 +1001,22 @@ impl Outcome {
             Verdict::Admit | Verdict::Report => return None,
             Verdict::Added => (
                 "assure.added",
-                "the change adds code of a shape that nothing in the repository verifies, or code the anti-pattern catalog refuses",
+                "the owner's local catalog refuses a new unverified code shape or anti-pattern in this change",
                 "apply each gap's next action, then retry",
             ),
             Verdict::Touched => (
                 "assure.touched",
-                "a file this turn changed still holds a shape that nothing verifies, or code the anti-pattern catalog refuses",
+                "the owner's local catalog refuses an unverified code shape or anti-pattern in a file this turn changed",
                 "apply each listed gap's next action before finishing",
             ),
             Verdict::Lowered => (
                 "assure.lowered",
-                "the PR weakens a verification budget",
-                "restore each listed budget in assure.toml and meet it",
+                "the owner's local catalog refuses a weakened verification budget",
+                "restore each listed budget in the owner map and meet it",
             ),
             Verdict::Stalled => (
                 "assure.stalled",
-                "the repository has verification gaps and this PR closes none of them",
+                "the owner's local catalog finds verification gaps and this PR closes none of them",
                 "close at least one gap listed by the session start report in this PR",
             ),
         };
@@ -806,7 +1027,7 @@ impl Outcome {
         for budget in &self.lowered {
             refusal = refusal.evidence(budget.clone());
         }
-        Some(refusal)
+        Some(self.inputs.refusal(refusal))
     }
 }
 
@@ -825,7 +1046,7 @@ pub fn describe(catalog: &Catalog, gap: &Gap) -> String {
     let shape = catalog.shapes.iter().find(|shape| shape.id == gap.shape);
     let cause = match cause {
         Cause::Unowned => "has no owner",
-        Cause::BrokenOwner => "names an owner in assure.toml that lacks its marker or corpus",
+        Cause::BrokenOwner => "names an owner in the owner's map that lacks its marker or corpus",
         Cause::MalformedExemption => {
             "carries an exemption without one of semantic-boundary, no-decision, or disproportionate and a justification"
         }
@@ -847,11 +1068,12 @@ pub fn describe(catalog: &Catalog, gap: &Gap) -> String {
 fn scope(
     root: &Path,
     catalog: &Catalog,
+    map: &OwnerMap,
     before: &Tree,
     after: &Tree,
 ) -> Result<(BTreeSet<String>, Option<BTreeSet<String>>)> {
     let changed = changed(root, before, after)?;
-    let probe = |tree: &Tree| survey(root, catalog, tree, Some(&BTreeSet::new()));
+    let probe = |tree: &Tree| survey_with(root, catalog, map, tree, Some(&BTreeSet::new()));
     let owning: BTreeSet<String> = probe(before)?
         .owning
         .into_iter()
@@ -970,19 +1192,47 @@ pub fn decide(
     before: &Tree,
     after: &Tree,
 ) -> Result<Outcome> {
+    let base = match before {
+        Tree::Commit(Some(commit)) => resolve(root, commit)?
+            .context("comparison base is missing")
+            .map(Some)?,
+        Tree::Commit(None) => None,
+        Tree::Index | Tree::WorkingTree => bail!("comparison base must be a commit"),
+    };
+    let mut inputs = Inputs::new(catalog, base.clone());
+    let before = &Tree::Commit(base);
+    let map =
+        OwnerMap::read(root, catalog, &[before, after]).map_err(|error| inputs.error(error))?;
+    decide_with(root, catalog, point, before, after, &map, &mut inputs)
+        .map_err(|error| inputs.error(error))
+}
+
+fn decide_with(
+    root: &Path,
+    catalog: &Catalog,
+    point: Point,
+    before: &Tree,
+    after: &Tree,
+    map: &OwnerMap,
+    inputs: &mut Inputs,
+) -> Result<Outcome> {
     let full = matches!(point, Point::Ready | Point::Start);
     let (changed, limit) = if point == Point::Start {
         (BTreeSet::new(), None)
     } else {
-        scope(root, catalog, before, after)?
+        scope(root, catalog, map, before, after)?
     };
     let limit = if full { None } else { limit };
     let old = if point == Point::Start {
         Survey::default()
     } else {
-        survey(root, catalog, before, limit.as_ref())?
+        survey_with(root, catalog, map, before, limit.as_ref())?
     };
-    let new = survey(root, catalog, after, limit.as_ref())?;
+    if !old.owner_input.is_empty() {
+        inputs.owners.insert(old.owner_input.clone());
+    }
+    let new = survey_with(root, catalog, map, after, limit.as_ref())?;
+    inputs.owners.insert(new.owner_input.clone());
     let (old_keys, new_keys) = (old.keys(), new.keys());
     let lowered = lowered(&old, &new);
     let change = Change {
@@ -1019,6 +1269,8 @@ pub fn decide(
         _ => new.gaps,
     };
     Ok(Outcome {
+        inputs: inputs.clone(),
+        migration: map.migration(root),
         verdict,
         change,
         gaps,
@@ -1042,9 +1294,24 @@ pub fn repository() -> Option<PathBuf> {
 }
 
 fn enforce(catalog: &Catalog, outcome: &Outcome) -> Result<()> {
+    report_inputs(outcome);
     match outcome.refusal(catalog) {
         Some(refusal) => Err(refusal.into()),
         None => Ok(()),
+    }
+}
+
+fn report_inputs(outcome: &Outcome) {
+    eprintln!(
+        "assure: {:?}; {}",
+        outcome.verdict,
+        outcome.inputs.description()
+    );
+    for owner in &outcome.inputs.owners {
+        eprintln!("assure: {owner}");
+    }
+    if let Some(command) = &outcome.migration {
+        eprintln!("assure: migrate the tracked owner map to the owner's configuration: {command}");
     }
 }
 
@@ -1062,8 +1329,7 @@ pub fn commit(root: &Path, catalog: &Catalog) -> Result<()> {
 }
 
 /// The pre-push point: refuses a pushed commit that adds a gap to what the remote already holds.
-/// A new branch counts from where it leaves the remote's default branch.
-/// A push with no such base adds nothing, since every commit passed its pre-commit point.
+/// A new branch counts from the merge base with the upstream default commit advertised by Git.
 ///
 /// # Errors
 ///
@@ -1079,22 +1345,9 @@ pub fn push(root: &Path, catalog: &Catalog, remote: &str, input: &[u8]) -> Resul
             continue;
         }
         let base = if zero(theirs) {
-            None
+            upstream_base(root, catalog, remote, local)?
         } else {
-            resolve(root, theirs)?
-        };
-        let base = match base {
-            Some(base) => Some(base),
-            None => match resolve(root, &format!("refs/remotes/{remote}/HEAD"))? {
-                Some(default) => {
-                    let output = git(root, &["merge-base", local, &default]).ok();
-                    output.map(|bytes| String::from_utf8_lossy(&bytes).trim().to_owned())
-                }
-                None => None,
-            },
-        };
-        let Some(base) = base else {
-            continue;
+            explicit_base(root, catalog, remote, theirs)?
         };
         enforce(
             catalog,
@@ -1108,6 +1361,43 @@ pub fn push(root: &Path, catalog: &Catalog, remote: &str, input: &[u8]) -> Resul
         )?;
     }
     Ok(())
+}
+
+fn explicit_base(root: &Path, catalog: &Catalog, remote: &str, base: &str) -> Result<String> {
+    let inputs = Inputs::new(catalog, Some(base.to_owned()));
+    if !shape_rules::commit_id(base.as_bytes()) {
+        return Err(inputs
+            .refusal(Refusal::new(
+                "assure.base",
+                "the owner's local catalog requires an explicit base commit SHA",
+                "supply the PR base SHA or the merge base with the upstream default branch",
+            ))
+            .into());
+    }
+    resolve(root, base)?.ok_or_else(|| {
+        inputs
+            .refusal(Refusal::new(
+                "assure.base",
+                "the owner's local catalog cannot compare against a base commit missing locally",
+                crate::refusal::command(&["git", "fetch", remote, base]),
+            ))
+            .into()
+    })
+}
+
+fn upstream_base(root: &Path, catalog: &Catalog, remote: &str, head: &str) -> Result<String> {
+    let advertised = git(root, &["ls-remote", remote, "HEAD"])?;
+    let advertised = std::str::from_utf8(&advertised)?;
+    let Some(default) = advertised.split_whitespace().next() else {
+        return Err(Refusal::new(
+            "assure.base", "the owner's local catalog cannot compare a new branch without an upstream default commit",
+            crate::refusal::command(&["git", "ls-remote", remote, "HEAD"]),
+        ).evidence(format!("owner's local catalog version={} sha256={}; base=unavailable", catalog.version, catalog.sha256)).into());
+    };
+    let tip = explicit_base(root, catalog, remote, default)?;
+    let base = git(root, &["merge-base", head, &tip])?;
+    let base = std::str::from_utf8(&base)?.trim();
+    explicit_base(root, catalog, remote, base)
 }
 
 /// The agent stop point over the uncommitted changes.
@@ -1130,15 +1420,17 @@ pub fn start(root: &Path, catalog: &Catalog) -> Result<Option<String>> {
         root,
         catalog,
         Point::Start,
-        &Tree::Commit(None),
+        &Tree::Commit(resolve(root, "HEAD")?),
         &Tree::WorkingTree,
     )?;
+    report_inputs(&outcome);
     if outcome.verdict != Verdict::Report {
         return Ok(None);
     }
     let mut report = format!(
-        "This repository has {} verification gaps. Commits and pushes refuse only new ones, and each PR must close at least one:\n",
-        outcome.gaps.len()
+        "The owner's local catalog finds {} verification gaps in this repository ({}). Commits and pushes refuse only new ones, and each PR must close at least one:\n",
+        outcome.gaps.len(),
+        outcome.inputs.description(),
     );
     for gap in &outcome.gaps {
         report.push_str("- ");
@@ -1154,28 +1446,19 @@ pub fn start(root: &Path, catalog: &Catalog) -> Result<Option<String>> {
 ///
 /// Returns the refusal, or an error when Git fails or this checkout lacks the base or the head.
 pub fn ready(root: &Path, catalog: &Catalog, base: &str, head: &str) -> Result<()> {
-    let fetch = || crate::refusal::command(&["git", "fetch", "origin", base]);
-    let Some(tip) = resolve(root, &format!("refs/remotes/origin/{base}"))? else {
-        return Err(Refusal::new(
-            "assure.base",
-            "the PR's base branch is missing locally, so the gate can't compare the PR with it",
-            fetch(),
-        )
-        .evidence(format!("missing refs/remotes/origin/{base}"))
-        .into());
-    };
+    let base = explicit_base(root, catalog, "origin", base)?;
     let Some(head) = resolve(root, head)? else {
-        return Err(Refusal::new(
-            "assure.head",
-            "the PR's head commit is missing locally, so the gate can't survey it",
-            crate::refusal::command(&["git", "fetch", "origin"]),
-        )
-        .evidence(format!("missing {head}"))
-        .into());
+        return Err(Inputs::new(catalog, Some(base))
+            .refusal(
+                Refusal::new(
+                    "assure.head",
+                    "the owner's local catalog cannot survey a PR head commit missing locally",
+                    crate::refusal::command(&["git", "fetch", "origin"]),
+                )
+                .evidence(format!("missing {head}")),
+            )
+            .into());
     };
-    let base = String::from_utf8_lossy(&git(root, &["merge-base", &tip, &head])?)
-        .trim()
-        .to_owned();
     enforce(
         catalog,
         &decide(
@@ -1226,6 +1509,7 @@ pub fn hook(point: AgentPoint) -> Result<()> {
                 value["stop_hook_active"] == true
             };
             let outcome = stop(&root, &catalog)?;
+            report_inputs(&outcome);
             let reason = outcome.refusal(&catalog).map(|refusal| refusal.text());
             println!("{}", stop_response(reason.as_deref(), continued));
             Ok(())

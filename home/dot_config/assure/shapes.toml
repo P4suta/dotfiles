@@ -3,9 +3,10 @@
 # The signals start precise, so a site they find almost always has the shape.
 # A file under an `exclude` segment verifies code rather than ships it, so no signal reads it.
 # An owning file carries the `marker`, `in_file` lets the site's own file own it, and `corpus` requires a non-empty `fuzz/corpus/<target>/` beside the cargo-fuzz target `fuzz/fuzz_targets/<target>.rs`.
-# A repository names the owner of each other site in its own `assure.toml`.
+# The owner's map at `repos/<owner>__<repo>.toml` names each other site's owner, with lowercase repository keys from the origin URL.
 # An exemption sits in the comment block before the site as `Exempt as <reason>: <justification>`.
 
+version = 1
 exclude = ["tests", "fuzz", "benches", "examples", "fixtures", "testdata"]
 
 [[shape]]
@@ -19,7 +20,7 @@ signals = [{ suffix = "_rules.rs" }]
 [[shape]]
 id = "protocol"
 requirement = "a checked model of its invariants, bound to the implementation by a replay of the model's traces"
-next = "write a Quint model, replay its traces through the step function in a test, and name that test as the owner in assure.toml"
+next = "write a Quint model, replay its traces through the step function in a test, and name that test in the owner's local repository map"
 marker = ".qnt"
 signals = [
   { suffix = ".rs", prefix = "pub fn step(" },
@@ -29,7 +30,7 @@ signals = [
 [[shape]]
 id = "parser"
 requirement = "a cargo-fuzz target with a replayed corpus and round-trip properties"
-next = "add fuzz/fuzz_targets/<target>.rs with its corpus under fuzz/corpus/<target>/, replay the corpus in the repository's gate, and name the target as the owner in assure.toml"
+next = "add fuzz/fuzz_targets/<target>.rs with its corpus under fuzz/corpus/<target>/, replay the corpus in the repository's gate, and name the target in the owner's local repository map"
 marker = "fuzz_target!"
 corpus = true
 signals = [
