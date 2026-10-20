@@ -6,7 +6,15 @@
 use crate::gate_rules;
 use crate::gitargv::Repository;
 use crate::real_git;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Set to `1`, it guards a repository under the temporary directory like any other, as the guard's own tests need.
+/// Setting it only adds refusals, so it opens no path around the guard.
+pub const STRICT_TEMPORARY: &str = "DOTGUARD_STRICT_TEMPORARY";
+/// The system temporary directory on Linux and the Mac, beside the process's own.
+const UNIX_TEMPORARY: &str = "/tmp";
+/// The parent of every user's temporary directory on the Mac.
+const MACOS_TEMPORARY: &str = "/private/var/folders";
 
 /// The variable through which the stack tooling hands its lease token to the Git commands it runs.
 pub const TOKEN: &str = "DOTGUARD_STACK";
@@ -120,6 +128,25 @@ impl Repository for Checkout {
             ],
         )
         .map(|status| !status.is_empty())
+    }
+
+    fn under_temporary(&self, globals: &[String]) -> Option<bool> {
+        if std::env::var_os(STRICT_TEMPORARY).is_some_and(|value| value == "1") {
+            return Some(false);
+        }
+        // A worktree under the temporary directory still shares the owner's repository, so the common directory decides.
+        let common = git(globals, &["rev-parse", ABSOLUTE_PATH, "--git-common-dir"])?;
+        let common = platform::paths::canonical(Path::new(&common)).ok()?;
+        Some(
+            [
+                std::env::temp_dir(),
+                PathBuf::from(UNIX_TEMPORARY),
+                PathBuf::from(MACOS_TEMPORARY),
+            ]
+            .iter()
+            .filter_map(|root| platform::paths::canonical(root).ok())
+            .any(|root| common.starts_with(root)),
+        )
     }
 
     fn rewrites_published(

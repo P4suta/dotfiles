@@ -235,6 +235,14 @@ pub enum Commands {
         #[command(flatten)]
         polling: Polling,
     },
+    /// Delete local branches whose PR merged at their exact head, or whose changes the default branch already holds.
+    PruneMerged {
+        #[command(flatten)]
+        target: Target,
+        /// List the branches without deleting them.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Create, sync, rebase, and merge stacked PRs through the pinned gh-stack.
     Stack {
         #[command(subcommand)]
@@ -343,6 +351,7 @@ impl Commands {
             Self::Edit { .. } => "edit",
             Self::Ready { .. } => "ready",
             Self::Merge { .. } => "merge",
+            Self::PruneMerged { .. } => "prune-merged",
             Self::Stack { .. } => "stack",
             Self::Issue { .. } => "issue",
             Self::Local { .. } => "local",
@@ -1976,6 +1985,7 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
                 merge_independent(&github, &target, pr, polling, rerun)?;
             }
         }
+        Commands::PruneMerged { target, dry_run } => prune_merged(&target, dry_run)?,
         Commands::Stack { action } => stack(action, rerun)?,
         Commands::Issue { action } => issue(action)?,
         Commands::Local { action } => local::run(action)?,
@@ -2709,6 +2719,115 @@ fn gh_stack(target: &Target, lease: Option<&Lease>, args: &[&str]) -> Result<()>
         .into()),
         _ => bail!("gh-stack {} failed with {status}", args.join(" ")),
     }
+}
+
+/// One closed PR as the REST list reports it, with the head it merged.
+#[derive(Deserialize)]
+struct ClosedPr {
+    merged_at: Option<String>,
+    head: ClosedHead,
+}
+
+#[derive(Deserialize)]
+struct ClosedHead {
+    #[serde(rename = "ref")]
+    name: String,
+    sha: String,
+}
+
+/// Whether merging `branch` into `upstream` leaves the tree `upstream_tree`, so the upstream already holds every change.
+fn contained(upstream: &str, branch: &str, upstream_tree: &str) -> Result<bool> {
+    let output = Tool::Git
+        .command()
+        .args(["merge-tree", "--write-tree", upstream, branch])
+        .output()
+        .context("start git")?;
+    Ok(output.status.success()
+        && String::from_utf8_lossy(&output.stdout).lines().next() == Some(upstream_tree))
+}
+
+/// Deletes each local branch whose PR merged at its exact head, or whose changes the default branch already holds.
+/// It keeps the default branch and every branch a worktree checks out, and deletes under the stack lease, which the Git guard admits.
+fn prune_merged(target: &Target, dry_run: bool) -> Result<()> {
+    require_checkout(target)?;
+    let github = Github::connect()?;
+    let default = github
+        .repository(&target.repo)?
+        .default_branch
+        .context("the repository reports no default branch")?;
+    let upstream = format!("refs/remotes/origin/{default}");
+    let upstream_tree = git_output(&["rev-parse", "--verify", &format!("{upstream}^{{tree}}")])
+        .map_err(|error| {
+            Refusal::new(
+                "pr.prune",
+                format!("pruning compares branches with {upstream}, which this clone lacks"),
+                command(&["git", "fetch", "origin", &default]),
+            )
+            .evidence(format!("{error:#}"))
+        })?;
+    let upstream_tree = upstream_tree.trim();
+    let owner = target
+        .repo
+        .split_once('/')
+        .map(|(owner, _)| owner)
+        .context("the repository has no owner")?;
+    let checked_out: BTreeSet<String> = git_output(&["worktree", "list", "--porcelain"])?
+        .lines()
+        .filter_map(|line| line.strip_prefix("branch refs/heads/"))
+        .map(str::to_owned)
+        .collect();
+    let mut merged = Vec::new();
+    for line in git_output(&[
+        "for-each-ref",
+        "--format=%(refname:short) %(objectname)",
+        "refs/heads",
+    ])?
+    .lines()
+    {
+        let Some((branch, head)) = line.split_once(' ') else {
+            continue;
+        };
+        if branch == default || checked_out.contains(branch) {
+            continue;
+        }
+        let closed: Vec<ClosedPr> = github.read(&format!(
+            "repos/{}/pulls?state=closed&head={owner}:{}&per_page=100",
+            target.repo,
+            review_policy::path_segment(branch)?
+        ))?;
+        let reason = if closed
+            .iter()
+            .any(|pr| pr.merged_at.is_some() && pr.head.name == branch && pr.head.sha == head)
+        {
+            "its pull request merged at this head"
+        } else if contained(&upstream, branch, upstream_tree)? {
+            "the default branch holds its changes"
+        } else {
+            continue;
+        };
+        merged.push((branch.to_owned(), head.to_owned(), reason));
+    }
+    if dry_run {
+        for (branch, head, reason) in &merged {
+            println!("Would delete {branch} at {head}: {reason}");
+        }
+        return Ok(());
+    }
+    let lease = Lease::acquire()?;
+    for (branch, head, reason) in &merged {
+        let status = Tool::Git
+            .command()
+            .args(["branch", "-D", branch])
+            .env(STACK_TOKEN, &lease.token)
+            .status()
+            .context("start git")?;
+        ensure!(
+            status.success(),
+            "git branch -D {branch} failed with {status}"
+        );
+        println!("Deleted {branch} at {head}: {reason}");
+    }
+    Ok(())
 }
 
 /// Restacks the checked-out stack under the lease, pushing it with explicit leases.

@@ -54,6 +54,9 @@ pub trait Repository {
     /// Whether the index or worktree holds a change to a tracked file, which `reset --hard` or a forced checkout discards.
     /// Returns `None` when the repository state gives no answer.
     fn holds_tracked_changes(&self, globals: &[String]) -> Option<bool>;
+    /// Whether the repository's Git directory lies under the temporary directory, as a test fixture or probe does.
+    /// Returns `None` when the repository state gives no answer.
+    fn under_temporary(&self, globals: &[String]) -> Option<bool>;
 }
 
 /// No repository: the gate judges every command on its words alone, and permits a rebase without a named branch.
@@ -74,6 +77,10 @@ impl Repository for Unread {
     }
 
     fn holds_tracked_changes(&self, _: &[String]) -> Option<bool> {
+        None
+    }
+
+    fn under_temporary(&self, _: &[String]) -> Option<bool> {
         None
     }
 }
@@ -891,9 +898,14 @@ fn judge(argv: &[String], repo: &dyn Repository) -> Option<Denial> {
     let (i, settings) = globals(argv);
     let sub = argv.get(i)?;
     let rest = &argv[i + 1..];
+    let globals = &argv[..i];
+    // A throwaway repository holds no owner work, so only a push, which leaves it, keeps its refusal.
+    let refused = |effective: &str| {
+        !crate::git_ref_rules::throwaway_admits(repo.under_temporary(globals), effective == "push")
+    };
 
     for (setting, range) in &settings {
-        if let Some(mut denial) = config_override(setting, sub) {
+        if let Some(mut denial) = config_override(setting, sub).filter(|_| refused(sub)) {
             denial.next = Next::Git(
                 argv.iter()
                     .enumerate()
@@ -905,14 +917,13 @@ fn judge(argv: &[String], repo: &dyn Repository) -> Option<Denial> {
         }
     }
 
-    let globals = &argv[..i];
     if let Some(denial) = subcommand(&Invocation {
         globals,
         sub,
         args: rest,
         repo,
     }) {
-        return Some(denial);
+        return refused(sub).then_some(denial);
     }
 
     // An `alias.*` entry can expand to anything, including `push --force`.
@@ -930,6 +941,7 @@ fn judge(argv: &[String], repo: &dyn Repository) -> Option<Denial> {
                 args: &words[1..],
                 repo,
             })
+            && refused(first)
         {
             return Some(Denial {
                 reason: format!("alias {sub} -> {}", expansion.trim()),
@@ -1024,14 +1036,27 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
                 })
             };
             if force_delete {
-                Some(Denial::new(
-                    Rule::Force,
-                    "git branch -D",
-                    "-D deletes a branch whose commits are not merged anywhere.\n\
-                     git branch -d <name>   deletes it only if it is merged — if that refuses,\n\
-                     the commits really would become unreachable.",
-                    unforced(),
-                ))
+                let prune = command(&[
+                    "pr-workflow",
+                    "prune-merged",
+                    "--repo",
+                    call.repo.slug(call.globals).as_deref().unwrap_or("<OWNER/REPO>"),
+                ]);
+                // The leased workflow tooling deletes only branches it verified as merged.
+                Some(
+                    Denial::new(
+                        Rule::Force,
+                        "git branch -D",
+                        format!(
+                            "-D deletes a branch whose commits are not merged anywhere.\n\
+                             git branch -d <name>   deletes it only if it is merged — if that refuses,\n\
+                             the commits really would become unreachable.\n\
+                             {prune}   deletes squash-merged branches after it checks their pull requests"
+                        ),
+                        unforced(),
+                    )
+                    .stack(),
+                )
             } else if force_move {
                 Some(Denial::new(
                     Rule::Force,
@@ -1072,12 +1097,19 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
             _ => None,
         },
 
-        "update-ref" if has("-d") || has("--delete") => Some(Denial::new(
-            Rule::Force,
-            "git update-ref -d",
-            "Deleting a ref by hand bypasses every safety net the porcelain commands have.",
-            call.git(&["log", "--oneline", "-1", call.positional(0).unwrap_or("<ref>")]),
-        )),
+        "update-ref"
+            if (has("-d") || has("--delete"))
+                && !call
+                    .positional(0)
+                    .is_some_and(|name| crate::git_ref_rules::deletable(name.as_bytes())) =>
+        {
+            Some(Denial::new(
+                Rule::Force,
+                "git update-ref -d",
+                "Deleting a branch, tag, note, or stash ref by hand bypasses every safety net the porcelain commands have.",
+                call.git(&["log", "--oneline", "-1", call.positional(0).unwrap_or("<ref>")]),
+            ))
+        }
 
         "reflog" => match first_word(args) {
             Some("expire" | "delete") => Some(Denial::new(
@@ -1548,6 +1580,96 @@ mod tests {
         fn holds_tracked_changes(&self, _: &[String]) -> Option<bool> {
             None
         }
+
+        fn under_temporary(&self, _: &[String]) -> Option<bool> {
+            None
+        }
+    }
+
+    /// A checkout whose Git directory lies under the temporary directory, or elsewhere.
+    struct Throwaway(bool);
+
+    impl Repository for Throwaway {
+        fn slug(&self, _: &[String]) -> Option<String> {
+            None
+        }
+
+        fn current_branch(&self, _: &[String]) -> Option<String> {
+            None
+        }
+
+        fn rewrites_published(&self, _: &[String], _: &str, _: Option<&str>) -> Option<bool> {
+            None
+        }
+
+        fn holds_tracked_changes(&self, _: &[String]) -> Option<bool> {
+            None
+        }
+
+        fn under_temporary(&self, _: &[String]) -> Option<bool> {
+            Some(self.0)
+        }
+    }
+
+    #[test]
+    fn a_throwaway_repository_admits_every_refusal_except_a_push() {
+        for line in [
+            "-c commit.gpgsign=false commit -m x",
+            "-c core.hooksPath=/dev/null commit -m x",
+            "commit --no-verify -m x",
+            "commit --no-gpg-sign -m x",
+            "reset --hard",
+            "branch -D topic",
+        ] {
+            assert!(
+                inspect_in(&argv(line), &Throwaway(true)).is_none(),
+                "{line}"
+            );
+            assert!(
+                inspect_in(&argv(line), &Throwaway(false)).is_some(),
+                "{line}"
+            );
+        }
+        for line in ["push --force origin main", "push --no-verify origin main"] {
+            assert!(
+                inspect_in(&argv(line), &Throwaway(true)).is_some(),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_forced_branch_deletion_names_the_merged_branch_command_and_admits_the_lease() {
+        let denial = inspect_in(&argv("branch -D topic"), &Published).expect("refused");
+        assert!(denial.stack);
+        assert!(
+            denial
+                .hint
+                .contains("pr-workflow prune-merged --repo P4suta/dotfiles"),
+            "{}",
+            denial.hint
+        );
+        assert_eq!(denial.next.line().as_deref(), Some("git branch -d topic"));
+    }
+
+    #[test]
+    fn deleting_a_tool_ref_passes_and_deleting_an_owner_ref_does_not() {
+        for line in [
+            "update-ref -d refs/codex/turn-diffs/x",
+            "update-ref --delete refs/remotes/origin/topic",
+        ] {
+            assert!(inspect(&argv(line)).is_none(), "{line}");
+        }
+        for line in [
+            "update-ref -d refs/heads/main",
+            "update-ref -d refs/tags/v1",
+            "update-ref -d refs/notes/hosts",
+            "update-ref -d refs/stash",
+            "update-ref -d HEAD",
+            "update-ref -d topic",
+        ] {
+            assert!(inspect(&argv(line)).is_some(), "{line}");
+        }
     }
 
     /// A checkout whose tracked files hold a change, or none.
@@ -1568,6 +1690,10 @@ mod tests {
 
         fn holds_tracked_changes(&self, _: &[String]) -> Option<bool> {
             Some(self.0)
+        }
+
+        fn under_temporary(&self, _: &[String]) -> Option<bool> {
+            None
         }
     }
 

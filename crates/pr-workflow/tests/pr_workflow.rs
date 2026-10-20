@@ -4528,6 +4528,72 @@ fn a_stacked_pr_is_created_on_its_parent_and_linked_down_to_the_trunk() -> Resul
     Ok(())
 }
 
+/// A squash-merged branch and one the default branch already holds go, and an unmerged or checked-out branch stays.
+#[test]
+fn prune_merged_deletes_only_branches_that_merged() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let (checkout, lease) = fixture.stack_checkout("git@github.com:P4suta/project.git")?;
+    let scope = fixture.directory.path();
+    let base = git(&checkout, &["rev-parse", "origin/main"])?;
+    scoped_git(
+        &checkout,
+        scope,
+        &["update-ref", "refs/heads/landed", &base],
+    );
+    let prior = git(&checkout, &["rev-parse", "prior-topic"])?;
+    let parent = git(&checkout, &["rev-parse", "parent"])?;
+    // The fixture's Git forwards to the binary in Git's own exec path, so the run never meets whichever guard the host installed.
+    let real = PathBuf::from(git(&checkout, &["--exec-path"])?)
+        .join(format!("git{}", std::env::consts::EXE_SUFFIX));
+    let pulls = serde_json::json!([
+        {"merged_at":"2026-10-20T00:00:00Z","head":{"ref":"prior-topic","sha":prior}},
+        {"merged_at":null,"head":{"ref":"parent","sha":parent}}
+    ]);
+    let prune = |extra: &[&str]| -> Result<Output> {
+        let mut command = fixture.personal_command("prune-merged")?;
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("GIT_") {
+                command.env_remove(name);
+            }
+        }
+        Ok(command
+            .current_dir(&checkout)
+            .env("PWF_FIXTURE_REAL_GIT", &real)
+            .env("GIT_CONFIG_GLOBAL", scope.join("gitconfig"))
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GH_FIXTURE_PULLS", pulls.to_string())
+            .args(extra)
+            .output()?)
+    };
+    let preview = prune(&["--dry-run"])?;
+    let printed = String::from_utf8_lossy(&preview.stdout);
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    assert!(
+        printed.contains("Would delete prior-topic") && printed.contains("Would delete landed")
+    );
+    assert!(!printed.contains("parent") && !printed.contains("Would delete topic"));
+    assert!(git(&checkout, &["branch", "--list", "prior-topic"])?.contains("prior-topic"));
+
+    let output = prune(&[])?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let left = git(
+        &checkout,
+        &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+    )?;
+    let left: Vec<&str> = left.lines().collect();
+    assert_eq!(left, ["parent", "topic"]);
+    assert!(!lease.exists());
+    Ok(())
+}
+
 #[test]
 fn stack_sync_and_rebase_run_gh_stack_under_the_lease_and_release_it() -> Result<()> {
     let fixture = Fixture::new(BODY)?;
