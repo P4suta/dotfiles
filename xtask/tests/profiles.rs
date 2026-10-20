@@ -386,6 +386,92 @@ fn skipped_setup_scripts_need_a_target_name_and_a_reason() {
     );
 }
 
+/// The tools the mise configuration of `profile` installs, rendered from the source data with `extra` merged over it.
+fn rendered_tools(root: &Path, profile: Profile, extra: &serde_json::Value) -> Vec<String> {
+    let scope = tempfile::tempdir().unwrap();
+    let home = scope.path().join("home");
+    fs::create_dir(&home).unwrap();
+    let config = scope.path().join("chezmoi.toml");
+    let answers = profiles::Answers::fixture(
+        profile,
+        home.join("projects").to_string_lossy().into_owned(),
+    );
+    fs::write(&config, profiles::configuration(root, &answers).unwrap()).unwrap();
+    let mut data = virtual_host(root, profile, &home);
+    if let (Some(data), Some(extra)) = (data.as_object_mut(), extra.as_object()) {
+        data.extend(extra.clone());
+    }
+    let output = profiles::chezmoi(root, scope.path(), &config, &home)
+        .arg("--override-data")
+        .arg(data.to_string())
+        .arg("cat")
+        .arg(home.join(".config/mise/config.toml"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: toml::Table = toml::from_str(&String::from_utf8(output.stdout).unwrap()).unwrap();
+    parsed["tools"]
+        .as_table()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn every_profile_installs_each_shared_tool_unless_it_states_why_not() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let data = profiles::source_data(&root).unwrap();
+    let shared = &data["shared_tools"];
+    let common: Vec<String> = serde_json::from_value(shared["common"].clone()).unwrap();
+    assert_ne!(common, Vec::<String>::new());
+    for (name, skipped) in shared["skip"].as_object().into_iter().flatten() {
+        assert!(
+            Profile::ALL.iter().any(|profile| profile.name() == name),
+            "a skip names the unknown profile {name}"
+        );
+        for (tool, reason) in skipped.as_object().unwrap() {
+            assert!(
+                common.contains(tool),
+                "{name} skips {tool}, which no profile shares"
+            );
+            assert!(
+                reason
+                    .as_str()
+                    .is_some_and(|reason| !reason.trim().is_empty()),
+                "{name} skips {tool} without a reason"
+            );
+        }
+    }
+    let probe = "shared-probe".to_owned();
+    for profile in Profile::ALL {
+        let tools = rendered_tools(&root, profile, &serde_json::json!({}));
+        for tool in &common {
+            assert!(
+                tools.contains(tool) || shared["skip"][profile.name()][tool].is_string(),
+                "{} lacks the shared tool {tool} without a stated reason",
+                profile.name()
+            );
+        }
+        let added = serde_json::json!({"shared_tools": {"common": [probe]}});
+        assert!(
+            rendered_tools(&root, profile, &added).contains(&probe),
+            "{} misses a tool the shared list adds",
+            profile.name()
+        );
+        let skipped = serde_json::json!({"shared_tools": {"common": [probe], "skip": {profile.name(): {"shared-probe": "a fixture reason"}}}});
+        assert!(
+            !rendered_tools(&root, profile, &skipped).contains(&probe),
+            "{} installs a shared tool it skips",
+            profile.name()
+        );
+    }
+}
+
 /// How many `jq` entries the mise configuration renders when the personal list repeats the common one.
 fn rendered_tool_entries(
     mut chezmoi: std::process::Command,

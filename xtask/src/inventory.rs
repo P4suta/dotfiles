@@ -126,6 +126,29 @@ fn listed(tools: Option<&Tools>) -> Vec<String> {
         .collect()
 }
 
+/// Adds each shared tool for every profile that doesn't skip it.
+fn add_shared(inventory: &mut Inventory, shared: &model::data::SharedTools) {
+    let versions = shared.versions.clone().unwrap_or_default();
+    let skip = shared.skip.clone().unwrap_or_default();
+    for spec in shared.common.clone().unwrap_or_default() {
+        let profiles: Vec<Profile> = Profile::ALL
+            .iter()
+            .copied()
+            .filter(|profile| {
+                !skip
+                    .get(profile.name())
+                    .is_some_and(|skipped| skipped.contains_key(&spec))
+            })
+            .collect();
+        add(
+            inventory,
+            &profiles,
+            &spec,
+            versions.get(&spec).map(String::as_str),
+        );
+    }
+}
+
 /// The `brew "NAME"` and `cask "NAME"` lines of the Homebrew bundle that no template renders.
 fn brewfile(root: &Path) -> Result<Vec<String>> {
     let text =
@@ -232,6 +255,9 @@ pub fn inventory(root: &Path, policy: &Policy) -> Result<Inventory> {
         for spec in listed(wsl.tools.as_ref()) {
             add(&mut inventory, &[Profile::Wsl], &spec, None);
         }
+    }
+    if let Some(shared) = &data.shared_tools {
+        add_shared(&mut inventory, shared);
     }
     if let Some(modern) = &data.modern {
         for tool in &modern.tools {

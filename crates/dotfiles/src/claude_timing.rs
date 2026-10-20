@@ -299,24 +299,81 @@ fn context(event: &str, text: &str) -> Value {
     json!({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}})
 }
 
-/// The hook output for one event at `now`, given in milliseconds since the epoch.
+/// The agent client whose hook protocol the output follows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum Client {
+    /// Claude Code, which takes a raised timeout and an exact rewrite through `updatedInput`.
+    #[default]
+    Claude,
+    /// Codex, which takes `updatedInput` only beside an approval of the command.
+    /// The hook gives no approval, so Codex receives the timing context alone.
+    Codex,
+}
+
+/// The shell tool names each client sends.
+const CLAUDE_SHELLS: [&str; 2] = ["Bash", "PowerShell"];
+const CODEX_SHELLS: [&str; 5] = ["Bash", "PowerShell", "bash", "shell", "exec_command"];
+
+/// The hook output for one Claude Code event at `now`, given in milliseconds since the epoch.
 /// Returns `None` when the call needs nothing.
-pub(crate) fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Value>> {
-    if !matches!(event["tool_name"].as_str(), Some("Bash" | "PowerShell")) {
-        return Ok(None);
-    }
+#[cfg(test)]
+fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Value>> {
+    handle_for(event, home, now, Client::Claude)
+}
+
+/// The measured duration of a command, for a client that sets no timeout, or `None` before its first measured run.
+fn measured(event: &str, signature: &str, observed: Option<u64>, runs: usize) -> Option<Value> {
+    observed.map(|observed| {
+        context(
+            event,
+            &format!(
+                "`{signature}` usually finishes within {} (95th percentile of {runs} runs).",
+                seconds(observed)
+            ),
+        )
+    })
+}
+
+/// The shell command of a foreground shell call by `client`, or `None` for any other call.
+fn foreground_command(event: &Value, client: Client) -> Result<Option<String>> {
+    let shells: &[&str] = match client {
+        Client::Claude => &CLAUDE_SHELLS,
+        Client::Codex => &CODEX_SHELLS,
+    };
     let input = &event["tool_input"];
-    if input["run_in_background"].as_bool() == Some(true) {
+    if !event["tool_name"]
+        .as_str()
+        .is_some_and(|tool| shells.contains(&tool))
+        || input["run_in_background"].as_bool() == Some(true)
+    {
         return Ok(None);
     }
-    let command = input["command"]
-        .as_str()
-        .context("shell event has no command")?;
+    Ok(Some(match client {
+        Client::Claude => input["command"]
+            .as_str()
+            .context("shell event has no command")?
+            .to_owned(),
+        Client::Codex => crate::claude_hook::shell_command(event)?,
+    }))
+}
+
+/// The hook output for one event of `client` at `now`, given in milliseconds since the epoch.
+/// Returns `None` when the call needs nothing.
+pub(crate) fn handle_for(
+    event: &Value,
+    home: &Path,
+    now: u64,
+    client: Client,
+) -> Result<Option<Value>> {
+    let Some(command) = foreground_command(event, client)? else {
+        return Ok(None);
+    };
+    let input = &event["tool_input"];
     let name = event["hook_event_name"].as_str().unwrap_or_default();
-    let rewritten = (name == "PreToolUse")
+    let rewritten = (client == Client::Claude && name == "PreToolUse")
         .then(|| crate::claude_hook::exact_rewrite(event))
         .flatten();
-    let signature = signature(rewritten.as_deref().unwrap_or(command));
+    let signature = signature(rewritten.as_deref().unwrap_or(&command));
     let runs = history(home);
     let latest = window(&runs, &signature);
     let observed = percentile(&latest);
@@ -329,6 +386,9 @@ pub(crate) fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Valu
             {
                 fs::create_dir_all(path.parent().context("marker directory")?)?;
                 fs::write(path, now.to_string())?;
+            }
+            if client == Client::Codex {
+                return Ok(measured(name, &signature, observed, latest.len()));
             }
             let requested = input["timeout"].as_u64();
             let decided = timeout(
@@ -384,11 +444,15 @@ pub(crate) fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Valu
                     succeeded: name == "PostToolUse",
                 },
             )?;
+            let advice = match client {
+                Client::Claude => "; run it with run_in_background next time",
+                Client::Codex => "",
+            };
             Ok(overran(observed, latest.len(), millis).then(|| {
                 context(
                     name,
                     &format!(
-                        "`{signature}` took {}, beyond its expected {}; run it with run_in_background next time.",
+                        "`{signature}` took {}, beyond its expected {}{advice}.",
                         seconds(millis),
                         seconds(observed.unwrap_or_default())
                     ),
@@ -405,7 +469,7 @@ pub(crate) fn handle(event: &Value, home: &Path, now: u64) -> Result<Option<Valu
 ///
 /// Returns an error when it can't read standard input or parse it as JSON, the native home stays unset, or a shell event has no command.
 /// It also fails when it can't write the start marker or the run record.
-pub fn run() -> Result<()> {
+pub fn run(client: Client) -> Result<()> {
     let mut text = String::new();
     std::io::stdin().read_to_string(&mut text)?;
     let event: Value = serde_json::from_str(&text).context("hook event is not JSON")?;
@@ -414,7 +478,7 @@ pub fn run() -> Result<()> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_millis();
-    if let Some(output) = handle(&event, Path::new(&home), u64::try_from(now)?)? {
+    if let Some(output) = handle_for(&event, Path::new(&home), u64::try_from(now)?, client)? {
         println!("{output}");
     }
     Ok(())
@@ -456,6 +520,56 @@ mod tests {
             input["timeout"] = json!(timeout);
         }
         json!({"hook_event_name": name, "tool_name": "Bash", "tool_use_id": "toolu_1", "tool_input": input})
+    }
+
+    #[test]
+    fn codex_receives_the_timing_context_and_never_an_input_rewrite() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path();
+        let codex = |name: &str, id: &str, command: Value| json!({"hook_event_name": name, "tool_name": "exec_command", "tool_use_id": id, "tool_input": {"command": command}});
+        let check = json!(["bash", "-lc", "just check"]);
+        assert_eq!(
+            handle_for(
+                &codex("PreToolUse", "call_1", check.clone()),
+                home,
+                1_000,
+                Client::Codex
+            )
+            .unwrap(),
+            None,
+            "a command without history gets no context"
+        );
+        assert_eq!(
+            handle_for(
+                &codex("PostToolUse", "call_1", check.clone()),
+                home,
+                201_000,
+                Client::Codex
+            )
+            .unwrap(),
+            None
+        );
+        let pre = handle_for(
+            &codex("PreToolUse", "call_2", check),
+            home,
+            300_000,
+            Client::Codex,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            pre["hookSpecificOutput"]["additionalContext"],
+            "`just check` usually finishes within 200 s (95th percentile of 1 runs)."
+        );
+        assert!(pre["hookSpecificOutput"].get("updatedInput").is_none());
+        let legacy = codex("PreToolUse", "call_3", json!("cat README.md"));
+        let output = handle_for(&legacy, home, 400_000, Client::Codex).unwrap();
+        assert!(
+            output.is_none_or(|output| output["hookSpecificOutput"].get("updatedInput").is_none())
+        );
+        let write =
+            json!({"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "tool_input": {}});
+        assert_eq!(handle_for(&write, home, 0, Client::Codex).unwrap(), None);
     }
 
     #[test]

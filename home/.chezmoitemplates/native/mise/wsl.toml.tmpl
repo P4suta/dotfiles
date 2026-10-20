@@ -1,8 +1,9 @@
 {{- $pins := includeTemplate "partials/modern-pins" . | fromJson -}}
 [tools]
-{{- range (concat .platforms.wsl.tools.common (index .platforms.wsl.tools .role) | uniq) }}
-{{- if not (hasKey $pins .) }}
-{{ . | quote }} = "latest"
+{{- range (includeTemplate "partials/mise_tools" (dict "platform" .platforms.wsl "shared" .shared_tools "profile" .profile "role" .role) | fromJson) }}
+{{- $tool := index . 0 }}
+{{- if not (hasKey $pins $tool) }}
+{{ $tool | quote }} = {{ index . 1 | quote }}
 {{- end }}
 {{- end }}
 {{- range $tool, $version := $pins }}

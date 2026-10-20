@@ -1,0 +1,17 @@
+{{- /*
+  The mise tools of a profile as JSON pairs of a tool and its version: the shared tools it doesn't skip, then its own, each once.
+  A profile's own `tool_versions` wins over the shared versions, and a tool without either takes `latest`.
+  The caller passes `platform`, the profile's data, along with `shared`, `profile`, and `role`.
+*/ -}}
+{{- $skip := dig "skip" .profile (dict) .shared -}}
+{{- $versions := merge (deepCopy (dig "tool_versions" (dict) .platform)) (dig "versions" (dict) .shared) -}}
+{{- $tools := list -}}
+{{- range dig "common" (list) .shared -}}
+{{-   if not (hasKey $skip .) }}{{ $tools = append $tools . }}{{ end -}}
+{{- end -}}
+{{- $tools = concat $tools (dig "tools" "common" (list) .platform) (dig "tools" .role (list) .platform) | uniq -}}
+{{- $pairs := list -}}
+{{- range $tools -}}
+{{-   $pairs = append $pairs (list . (ternary (index $versions .) "latest" (hasKey $versions .))) -}}
+{{- end -}}
+{{- toJson $pairs -}}
