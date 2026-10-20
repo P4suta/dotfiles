@@ -21,6 +21,9 @@ const MIN_SWITCH_ABBREVIATION: usize = 2;
 /// Claude Code blocks the tool call and shows standard error to the model on this exit status.
 const BLOCK: i32 = 2;
 
+/// The rule of a command whose inspection didn't finish.
+const INSPECTION: &str = "hook.inspection";
+
 /// A Git Bash path such as `/c/Users/x` names `C:/Users/x` to Windows programs.
 fn native_path(path: &str) -> PathBuf {
     if cfg!(windows) {
@@ -344,7 +347,7 @@ fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
     }
     for message in legacy.unavailable {
         findings.push(blocked(
-            "hook.inspection",
+            INSPECTION,
             skill_ops::incident_rules::Source::MalformedInput,
             format!("Refused: command policy inspection could not finish: {message}.\nNext action: correct the script's path, permissions, encoding, or inspection limit before resubmitting."),
         ));
@@ -567,7 +570,7 @@ pub fn run() -> Result<()> {
         })
         .unwrap_or_else(|error| {
         vec![Blocked {
-            rule: "hook.inspection",
+            rule: INSPECTION,
             source: skill_ops::incident_rules::Source::MalformedInput,
             session: NO_SESSION.to_owned(),
             message: format!("Refused: command inspection could not finish: {error:#}.\nNext action: provide a valid tool event before resubmitting."),
@@ -578,6 +581,10 @@ pub fn run() -> Result<()> {
             record(blocked);
             eprintln!("{}\n", blocked.message);
         }
+        if findings.iter().any(|blocked| blocked.rule == INSPECTION) {
+            eprintln!("{}", platform::refusal::DEFECT);
+        }
+        eprintln!("{}", platform::refusal::IMPROVE);
         std::process::exit(BLOCK);
     }
     Ok(())
@@ -612,6 +619,27 @@ mod tests {
             .unwrap()
             .unwrap_or_else(|| panic!("admitted: {command}"))
             .message
+    }
+
+    #[test]
+    fn no_legacy_entry_suggests_a_command_that_another_rule_refuses() {
+        for tool in &crate::legacy::table().unwrap().tools {
+            let commands: Vec<&str> = if tool.next.contains('`') {
+                tool.next.split('`').skip(1).step_by(2).collect()
+            } else if tool.next.contains("{args}") {
+                vec![tool.next.as_str()]
+            } else {
+                Vec::new()
+            };
+            for command in commands {
+                let command = command.replace("{args}", ".").replace(['<', '>'], "");
+                assert!(
+                    refusal(&bash(&command)).unwrap().is_none(),
+                    "{:?} suggests `{command}`, which the hook refuses",
+                    tool.legacy
+                );
+            }
+        }
     }
 
     #[test]

@@ -1,6 +1,6 @@
 ---
 status: amended
-changed_by: [route-coderabbit-by-current-pr-importance.md]
+changed_by: [route-coderabbit-by-current-pr-importance.md, keep-workflow-evidence-local.md]
 ---
 # Scope the CodeRabbit owner pause
 Extends the owner pause of [ADR 0007](0007-reserved-review-capacity.md).

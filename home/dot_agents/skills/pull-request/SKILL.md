@@ -34,6 +34,7 @@ The new remote start supplies no retroactive authority for earlier local edits.
 
 Assess every PR using the [importance criteria](references/importance.md) before publication.
 The checked workflow requires an authenticated current-diff assessment and routes `low` and `medium` to no CodeRabbit review, `high` to the guarded CLI, and `critical` to PR review.
+The workflow keeps its assessments, pause records, and issue contexts in owner-local state, and published documents and tracked files never carry them.
 Keep severe levels exceptional and explain concrete consequences rather than escalating by filename or diff size.
 `coderabbit --guard-status --json` reports the separate PR and CLI pause scopes.
 A paused required route remains pending and never changes its classification.

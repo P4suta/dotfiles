@@ -25,6 +25,12 @@ const HEX_RADIX: u32 = 16;
 /// The version changes only with an incompatible format.
 pub const PREFIX: &str = "dotfiles-refusal/2 ";
 
+/// Ends every refusal's text, so an agent questions a gate that looks wrong instead of working around it.
+pub const IMPROVE: &str = "If this refusal looks wrong or costs more than it protects, propose a dotfiles change to the owner.";
+
+/// Ends a hook's report of a failure that no policy decided.
+pub const DEFECT: &str = "This hook failed rather than refused: report the output above to the owner as a dotfiles defect.";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Refusal {
     /// Stable dotted identifier of the gate rule, such as `git.force`.
@@ -146,6 +152,9 @@ impl Refusal {
             out.push_str(bypass);
             out.push('\n');
         }
+        out.push('\n');
+        out.push_str(IMPROVE);
+        out.push('\n');
         out
     }
 
@@ -358,7 +367,7 @@ impl Reader<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PREFIX, Refusal, command, quote, words};
+    use super::{IMPROVE, PREFIX, Refusal, command, quote, words};
 
     fn sample() -> Refusal {
         Refusal::new(
@@ -389,6 +398,7 @@ mod tests {
         assert!(rendered.starts_with("::error:: git.force refused: refusing"));
         assert!(rendered.contains("\nNext:\n  git stash push --include-untracked\n"));
         assert!(rendered.contains("\nWaiver:\n  ALLOW_FORCE=1"));
+        assert!(refusal.text().ends_with(&format!("\n{IMPROVE}\n")));
         assert_eq!(Refusal::find(&rendered), Some(refusal));
     }
 

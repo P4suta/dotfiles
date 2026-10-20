@@ -186,7 +186,7 @@ fn scan(command: &str) -> Scan {
                 }
                 scan.tokens.push(Token::Redirect);
             }
-            ';' | '|' | '(' | ')' | '{' | '}' | '&' => {
+            ';' | '|' | '(' | ')' | '{' | '}' | '&' if separates(c, &chars, index, started) => {
                 flush(&mut word, &mut plain, &mut started, &mut scan.tokens);
                 scan.tokens.push(Token::Separator);
             }
@@ -221,6 +221,15 @@ fn scan(command: &str) -> Scan {
     }
     flush(&mut word, &mut plain, &mut started, &mut scan.tokens);
     scan
+}
+
+/// A brace separates commands only as a whole word, as in `{ cmd; }`, never inside one, as in `${name}` or `HEAD^{tree}`.
+fn separates(c: char, chars: &[char], index: usize, started: bool) -> bool {
+    !matches!(c, '{' | '}')
+        || !started
+            && chars
+                .get(index)
+                .is_none_or(|next| next.is_whitespace() || matches!(next, ';' | '|' | '&' | ')'))
 }
 
 /// The words of each simple command in `command`, in order, each up to its first redirect.
@@ -1115,13 +1124,18 @@ mod tests {
                 Token::Separator,
                 plain("d"),
                 Token::Separator,
-                plain("e"),
+                plain("e{f}g"),
+                Token::Separator,
+                plain("h")
+            ]
+        );
+        assert_eq!(
+            scan("{ f; }").tokens,
+            [
                 Token::Separator,
                 plain("f"),
                 Token::Separator,
-                plain("g"),
-                Token::Separator,
-                plain("h")
+                Token::Separator
             ]
         );
         assert_eq!(scan("a\tb\rc").tokens, [plain("a"), plain("b"), plain("c")]);
@@ -1196,6 +1210,25 @@ mod tests {
     fn segments_drop_empty_commands_and_stop_at_a_redirect() {
         assert_eq!(segments("a b; ;c > f d"), [vec!["a", "b"], vec!["c"]]);
         assert_eq!(segments(" ; "), Vec::<Vec<String>>::new());
+    }
+
+    #[cfg_attr(not(miri), test)]
+    fn only_a_whole_word_brace_separates_commands() {
+        assert_eq!(
+            segments("git rev-parse HEAD^{tree}"),
+            [vec!["git", "rev-parse", "HEAD^{tree}"]]
+        );
+        assert_eq!(
+            segments("echo ${tree} {a,b}"),
+            [vec!["echo", "${tree}", "{a,b}"]]
+        );
+        assert_eq!(
+            segments("find . -exec rm {} \\;"),
+            [vec!["find", ".", "-exec", "rm", "{}", ";"]]
+        );
+        assert_eq!(segments("{ ls; }"), [vec!["ls"]]);
+        assert_eq!(segments("{ ls;}|x"), [vec!["ls"], vec!["x"]]);
+        assert_eq!(segments("f() { ls; }"), [vec!["f"], vec!["ls"]]);
     }
 
     #[cfg_attr(not(miri), test)]

@@ -1,11 +1,13 @@
 //! The pull request workflow: issue-scoped preparation, creation, document edits, ready transitions, and stacked branches.
 
 mod context;
+mod evidence;
 mod local;
 mod review_policy;
+pub use evidence::store_assessment;
 pub use local::Action as LocalAction;
 
-/// Validate the issue contexts selected by the actual local or CI change.
+/// Validate the owner-local issue contexts selected by the actual local change.
 ///
 /// # Errors
 ///
@@ -82,8 +84,11 @@ use std::time::{Duration, Instant};
 const TITLE_REQUEST: &str = "@coderabbitai";
 const SUMMARY_REQUEST: &str = "@coderabbitai summary";
 const REVIEW_EXCLUSION: &str = "@coderabbitai ignore";
-/// Marks an exclusion that lasts only while the owner pauses `CodeRabbit` PR reviews.
+/// The body line that once marked a pause exclusion, which owner-local state now records instead.
 const PAUSE_EXCLUSION: &str = "<!-- coderabbit-pause -->";
+
+/// The characters of a refused line that a refusal quotes.
+const EVIDENCE_PREVIEW: usize = 80;
 
 /// The delimiters of a generation placeholder.
 const PLACEHOLDER_OPEN: &str = "{{";
@@ -138,8 +143,6 @@ pub enum Commands {
         base: String,
         #[arg(long)]
         assessment_file: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
         /// Carry the prior actual PR assessment when changing its review route.
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
         pr: Option<u64>,
@@ -801,6 +804,27 @@ fn refuse_attribution(part: &str, text: &str, recheck: impl FnOnce() -> String) 
     Ok(())
 }
 
+/// Refuses a document that carries workflow evidence, which stays in owner-local state.
+fn refuse_local_evidence(body: &str, recheck: impl FnOnce() -> String) -> Result<()> {
+    for (number, line) in body.lines().enumerate() {
+        let line = line.trim();
+        if line.starts_with(review_policy::PACKET_PREFIX) || line == PAUSE_EXCLUSION {
+            return Err(Refusal::new(
+                "pr.local-evidence",
+                "published documents can't carry local workflow evidence; delete the line, because pr-workflow keeps assessments and pause exclusions in owner-local state",
+                recheck(),
+            )
+            .evidence(format!(
+                "body line {}: {}",
+                number + 1,
+                line.chars().take(EVIDENCE_PREVIEW).collect::<String>()
+            ))
+            .into());
+        }
+    }
+    Ok(())
+}
+
 fn single_line(value: &str) -> bool {
     !value.trim().is_empty() && !value.chars().any(char::is_control)
 }
@@ -1070,6 +1094,7 @@ pub(crate) fn validate(
     }
     refuse_attribution("title", &title, || recheck(target, None))?;
     refuse_attribution("body", &body, || recheck(target, Some(&title)))?;
+    refuse_local_evidence(&body, || recheck(target, Some(&title)))?;
     let body_refusal = |cause: &str, evidence: String| {
         Refusal::new("pr.body", cause, recheck(target, Some(&title))).evidence(evidence)
     };
@@ -1169,6 +1194,19 @@ fn validate_issue_contents(title: &str, body: String) -> Result<ValidatedDocumen
         single_line(title) && title.trim() == title && !unfinished(title),
         "the issue title must be a finished single line without surrounding whitespace"
     );
+    refuse_local_evidence(&body, || {
+        command(&[
+            "pr-workflow",
+            "issue",
+            "check",
+            "--repo",
+            "OWNER/REPO",
+            "--title",
+            title,
+            "--body-file",
+            "<body-file>",
+        ])
+    })?;
     let visible = without_comments(&body);
     ensure!(
         !visible.trim().is_empty() && !unfinished(&prose(&visible)),
@@ -1718,11 +1756,28 @@ fn excludes_review(body: &str) -> bool {
         .any(|line| line.trim() == REVIEW_EXCLUSION)
 }
 
-fn review_exclusion(body: &str) -> Exclusion {
-    exclusion(
+/// The exclusion of `pr`: its standalone ignore line, and whether owner-local state records the owner's pause as the reason.
+fn review_exclusion(repository: &str, pr: u64, body: &str) -> Result<Exclusion> {
+    Ok(exclusion(
         excludes_review(body),
-        body.lines().any(|line| line.trim() == PAUSE_EXCLUSION),
-    )
+        evidence::paused(repository, pr)?,
+    ))
+}
+
+/// Records or forgets the pause exclusion of `pr` after an operation published `body`.
+fn settle_pause(
+    repository: &str,
+    pr: u64,
+    route: rules::review_routing_rules::ReviewRoute,
+    body: &str,
+) -> Result<()> {
+    if !excludes_review(body) {
+        evidence::clear_pause(repository, pr)
+    } else if route == rules::review_routing_rules::ReviewRoute::Pr && pr_reviews_paused()? {
+        evidence::record_pause(repository, pr)
+    } else {
+        Ok(())
+    }
 }
 
 /// Refuse an operation that would request a `CodeRabbit` PR review while the owner pauses them.
@@ -1765,20 +1820,22 @@ fn admit_review_request(
                 "keep the standalone `{REVIEW_EXCLUSION}` line of this ready PR until the owner resumes PR reviews"
             ),
             _ => format!(
-                "keep the draft until the owner resumes PR reviews, or add the standalone lines `{REVIEW_EXCLUSION}` and `{PAUSE_EXCLUSION}` with pr-workflow edit so the review is owed again after resumption"
+                "keep the draft until the owner resumes PR reviews, or add the standalone `{REVIEW_EXCLUSION}` line with pr-workflow edit, which records in owner-local state that the review stays owed after resumption"
             ),
         }
     );
+    // During the owner's pause, a critical PR keeps the ignore line only for the pause, so pr-workflow records it as one.
+    let now = exclusion(excludes_review(body), excludes_review(body));
     ensure!(
-        keeps_pause_exclusion(operation, draft, was, review_exclusion(body)),
-        "CodeRabbit PR reviews are paused by the owner (`coderabbit --guard-status --json` reports reviews.pr paused), and without the standalone `{PAUSE_EXCLUSION}` line the review would not be owed after resumption; {}",
+        keeps_pause_exclusion(operation, draft, was, now),
+        "CodeRabbit PR reviews are paused by the owner (`coderabbit --guard-status --json` reports reviews.pr paused), and without the pause exclusion the review would not be owed after resumption; {}",
         if operation == Operation::Ready {
             format!(
-                "add the standalone `{PAUSE_EXCLUSION}` line beside `{REVIEW_EXCLUSION}` with pr-workflow edit, then rerun ready"
+                "add the standalone `{REVIEW_EXCLUSION}` line with pr-workflow edit, then rerun ready"
             )
         } else {
             format!(
-                "keep the standalone `{PAUSE_EXCLUSION}` line of this ready PR until the owner resumes PR reviews"
+                "keep the standalone `{REVIEW_EXCLUSION}` line of this ready PR until the owner resumes PR reviews"
             )
         }
     );
@@ -1872,12 +1929,11 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
             target,
             base,
             assessment_file,
-            output,
             pr,
         } => {
             target.conventional_required()?;
             let github = Github::connect()?;
-            review_policy::assess(&github, &target, &base, &assessment_file, &output, pr)?;
+            review_policy::assess(&github, &target, &base, &assessment_file, pr)?;
         }
         Commands::Start {
             target,
@@ -2001,6 +2057,7 @@ fn check_live(target: &Target, pr: u64, r#final: bool, rerun: &str) -> Result<()
     let github = Github::connect()?;
     let live = live_document(&github, target, pr)?;
     let checked = review_policy::live_binding(&github, target, &live.body, &live)?;
+    evidence::remember(&target.repo, pr, &checked.object)?;
     let document = validate(target, live.title, live.body, r#final)?;
     let destination = destination(&github, &target.repo)?;
     written_to_standard(destination, PULL_REQUEST, &document)?;
@@ -2084,7 +2141,9 @@ fn create(
         args.push("--draft".into());
     }
     let _body = write_document(&mut args, &document)?;
-    print!("{}", gh(&args)?);
+    let created = gh(&args)?;
+    print!("{created}");
+    evidence::remember(&target.repo, created_number(&created)?, &checked.object)?;
     Ok(())
 }
 
@@ -2094,13 +2153,18 @@ fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
     let github = Github::connect()?;
     let live = live_document(&github, &target, pr)?;
     let checked = review_policy::live_binding(&github, &target, &document.body, &live)?;
-    review_policy::preserve_edit(&github, &target, pr, &live, &checked)?;
+    review_policy::preserve_edit(&github, &target, pr, &checked)?;
     admit_review_request(
         Operation::Edit,
         target.generation,
         &document.body,
         checked.route,
-        || Ok((live.is_draft, review_exclusion(&live.body))),
+        || {
+            Ok((
+                live.is_draft,
+                review_exclusion(&target.repo, pr, &live.body)?,
+            ))
+        },
     )?;
     let destination = destination(&github, &target.repo)?;
     written_to_standard(destination, PULL_REQUEST, &document)?;
@@ -2124,11 +2188,12 @@ fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
         "edit".into(),
         pr.to_string().into(),
         "--repo".into(),
-        target.repo.into(),
+        target.repo.clone().into(),
     ];
     let _body = write_document(&mut args, &document)?;
     print!("{}", gh(&args)?);
-    Ok(())
+    evidence::remember(&target.repo, pr, &checked.object)?;
+    settle_pause(&target.repo, pr, checked.route, &document.body)
 }
 
 /// Validates a live document and moves the open draft to review, returning the checked body.
@@ -2176,15 +2241,17 @@ fn make_ready(
         target.generation,
         &document.body,
         reviewed.route,
-        || Ok((draft, review_exclusion(&document.body))),
+        || Ok((draft, review_exclusion(&target.repo, pr, &document.body)?)),
     )?;
     // The command walks the model of `specs/pr_ready.qnt`: head 0 carries the report this read returned.
     let reported = ready_step(pr_ready_rules::initial(), Move::Report(report))
         .unwrap_or_else(|_| pr_ready_rules::initial());
     let marked = ready_step(ready_step(reported, Move::View)?, Move::Mark)?;
+    settle_pause(&target.repo, pr, reviewed.route, &document.body)?;
     let mut args = arguments("ready", &target.repo);
     args.push(pr.to_string().into());
     print!("{}", gh(&args)?);
+    evidence::remember(&target.repo, pr, &reviewed.object)?;
     settle_ready(target, pr, head, marked)?;
     Ok(document.body)
 }
@@ -2318,7 +2385,7 @@ fn merge_state(
     };
     // GitHub itself holds a merge to the required checks, so the merge state reads the rollup alone.
     let (total, unfinished, failed, _) = tally(&view.status_check_rollup, &[]);
-    let mut exclusion = review_exclusion(&view.body);
+    let mut exclusion = review_exclusion(&target.repo, pr, &view.body)?;
     if matches!(lifecycle, Lifecycle::Draft | Lifecycle::Ready) {
         let signer = review_policy::assessment_signer(github, target, &view.author, &view.source)?;
         let reviewed = review_policy::check(
@@ -2331,6 +2398,7 @@ fn merge_state(
             &view.head_ref_oid,
             signer,
         )?;
+        evidence::remember(&target.repo, pr, &reviewed.object)?;
         review_policy::validate_live_source(&reviewed, &view.source)?;
         review_policy::labels(&reviewed, &view.labels)?;
         if lifecycle == Lifecycle::Ready
@@ -2412,29 +2480,26 @@ fn wait(target: &Target, pr: u64, polling: Polling, started: Instant) -> Result<
     Ok(())
 }
 
-/// Adds the `CodeRabbit` pause lines, so the draft becomes ready during the pause of the owner.
-/// After resumption, the PR needs the review again.
+/// Excludes the review for the owner's pause, so the draft becomes ready during the pause.
+/// The body keeps the ignore line, and owner-local state records that the PR needs the review again after resumption.
 fn add_pause_lines(target: &Target, pr: u64, view: &MergeView) -> Result<()> {
-    let mut body = view.body.trim_end().to_owned();
-    body.push('\n');
     if !excludes_review(&view.body) {
-        body.push('\n');
+        let mut body = view.body.trim_end().to_owned();
+        body.push_str("\n\n");
         body.push_str(REVIEW_EXCLUSION);
+        body.push('\n');
+        let document = validate(target, view.title.clone(), body, false)?;
+        let mut args = vec![
+            OsString::from("pr"),
+            "edit".into(),
+            pr.to_string().into(),
+            "--repo".into(),
+            target.repo.clone().into(),
+        ];
+        let _body = write_document(&mut args, &document)?;
+        print!("{}", gh(&args)?);
     }
-    body.push('\n');
-    body.push_str(PAUSE_EXCLUSION);
-    body.push('\n');
-    let document = validate(target, view.title.clone(), body, false)?;
-    let mut args = vec![
-        OsString::from("pr"),
-        "edit".into(),
-        pr.to_string().into(),
-        "--repo".into(),
-        target.repo.clone().into(),
-    ];
-    let _body = write_document(&mut args, &document)?;
-    print!("{}", gh(&args)?);
-    Ok(())
+    evidence::record_pause(&target.repo, pr)
 }
 
 /// The target of one PR's ready transition: its own closing issue unless the command named one.
@@ -2898,9 +2963,11 @@ fn create_stacked(document: DocumentArgs, head: &str, base: &str, rerun: &str) -
     let _body = write_document(&mut args, &document)?;
     let created = gh(&args)?;
     print!("{created}");
+    let number = created_number(&created)?;
+    evidence::remember(&target.repo, number, &checked.object)?;
     let mut link = vec!["link".to_owned(), "--base".to_owned(), trunk];
     link.extend(below.iter().map(u64::to_string));
-    link.push(created_number(&created)?.to_string());
+    link.push(number.to_string());
     gh_stack(
         &target,
         None,

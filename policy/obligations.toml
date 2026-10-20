@@ -462,6 +462,27 @@ fn reject_refusing_a_walk_without_sizes() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/agent_memory_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_admitting_a_claude_project_memory() {
+    use production::Part;
+    assert!(!production::memory([Part::Claude, Part::Projects, Part::Other, Part::Memory]));
+}
+#[kani::proof]
+fn reject_admitting_the_codex_memory_store() {
+    use production::Part;
+    assert!(!production::memory([Part::Codex, Part::Memories, Part::End, Part::End]));
+}
+#[kani::proof]
+fn reject_refusing_a_memory_directory_outside_a_project() {
+    use production::Part;
+    assert!(production::memory([Part::Claude, Part::Projects, Part::End, Part::Memory]));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/eol_rules.rs"
 probes = '''
 use production::{Action, Attributes, Eol, Index, Staging, Text, action, content};

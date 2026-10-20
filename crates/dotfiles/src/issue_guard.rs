@@ -4,7 +4,7 @@ use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use serde_json::Value;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 const BLOCK: i32 = 2;
 const PATCH_PATHS: &[&str] = &[
@@ -77,6 +77,54 @@ fn mutation_paths(event: &Event) -> Result<Option<Vec<PathBuf>>> {
     }
 }
 
+/// The components that name a client's persistent memory store under the home directory.
+const CLAUDE: &str = ".claude";
+const PROJECTS: &str = "projects";
+const MEMORY: &str = "memory";
+const CODEX: &str = ".codex";
+const MEMORIES: &str = "memories";
+
+fn memory(home: &Path, path: &Path) -> bool {
+    use crate::agent_memory_rules::Part;
+    let Ok(relative) = path.strip_prefix(home) else {
+        return false;
+    };
+    let mut components = relative.components();
+    crate::agent_memory_rules::memory(std::array::from_fn(|_| match components.next() {
+        None => Part::End,
+        Some(Component::Normal(name)) => match name.to_str() {
+            Some(CLAUDE) => Part::Claude,
+            Some(PROJECTS) => Part::Projects,
+            Some(MEMORY) => Part::Memory,
+            Some(CODEX) => Part::Codex,
+            Some(name) if name.starts_with(MEMORIES) => Part::Memories,
+            _ => Part::Other,
+        },
+        Some(_) => Part::Other,
+    }))
+}
+
+fn memory_refusal(path: &Path) -> anyhow::Error {
+    platform::refusal::Refusal::without_next(
+        "agent.memory",
+        "persistent agent memory stays off on every managed client, so no session reads this file; keep the lesson as a check, default, or command in the dotfiles repository, or as a document in the repository it concerns, and propose it to the owner",
+    )
+    .evidence(format!("edit path: {}", path.display()))
+    .into()
+}
+
+/// Whether the nearest existing directory of `path` lies in a Git checkout.
+fn in_checkout(path: &Path) -> Result<bool> {
+    let parent = path.parent().context("edit has no parent directory")?;
+    let existing = parent
+        .ancestors()
+        .find(|directory| directory.is_dir())
+        .context("edit has no existing parent directory")?;
+    Ok(crate::canonical(existing)?
+        .ancestors()
+        .any(|directory| directory.join(".git").exists()))
+}
+
 fn edit_checkout(cwd: &Path, paths: &[PathBuf]) -> Result<PathBuf> {
     if cwd
         .ancestors()
@@ -111,31 +159,51 @@ pub fn check(input: &str) -> Result<()> {
             .as_deref()
             .context("edit event has no working directory")?,
     )?;
-    let root = edit_checkout(&cwd, &paths)?;
-    let mut mutations = Vec::new();
+    let paths: Vec<PathBuf> = paths
+        .into_iter()
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                cwd.join(path)
+            }
+        })
+        .collect();
+    if let Some(home) = platform::home::home() {
+        let homes = [crate::canonical(&home).ok(), Some(home)];
+        if let Some(path) = paths
+            .iter()
+            .find(|path| homes.iter().flatten().any(|home| memory(home, path)))
+        {
+            return Err(memory_refusal(path));
+        }
+    }
+    let mut checked = Vec::new();
     for path in paths {
-        let path = if path.is_absolute() {
-            path
-        } else {
-            cwd.join(path)
-        };
+        if in_checkout(&path)? {
+            checked.push(path);
+        }
+    }
+    if checked.is_empty() {
+        return Ok(());
+    }
+    let root = edit_checkout(&cwd, &checked)?;
+    let mut mutations = Vec::new();
+    for path in checked {
         let absolute = platform::issue_context::edit_path(&root, &path)?;
         let relative = absolute
             .strip_prefix(&root)
             .context("edit path lies outside the repository")?;
-        let preparation = relative
-            .extension()
-            .is_some_and(|extension| extension == "md")
-            && platform::issue_context::git(
-                &root,
-                &[
-                    "check-ignore",
-                    "--",
-                    relative.to_str().context("non-UTF-8 edit path")?,
-                ],
-                None,
-            )
-            .is_ok();
+        let preparation = platform::issue_context::git(
+            &root,
+            &[
+                "check-ignore",
+                "--",
+                relative.to_str().context("non-UTF-8 edit path")?,
+            ],
+            None,
+        )
+        .is_ok();
         if !preparation {
             mutations.push(absolute);
         }
@@ -163,6 +231,9 @@ pub fn hook() -> Result<i32> {
         Ok(()) => Ok(0),
         Err(error) => {
             platform::report(&error);
+            if error.downcast_ref::<platform::refusal::Refusal>().is_none() {
+                eprintln!("{}", platform::refusal::DEFECT);
+            }
             Ok(BLOCK)
         }
     }
@@ -217,6 +288,78 @@ mod tests {
             "{error:#}"
         );
         Ok(())
+    }
+
+    #[test]
+    fn an_edit_outside_every_checkout_needs_no_issue_context() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let repository = scope.path().join("repository");
+        std::fs::create_dir(&repository)?;
+        let initialized = platform::process::command("git")
+            .args(["init", "--quiet"])
+            .current_dir(&repository)
+            .output()?;
+        ensure!(initialized.status.success(), "{initialized:?}");
+        let outside = scope.path().join("config/new.yaml");
+        for cwd in [scope.path(), repository.as_path()] {
+            let packet = serde_json::json!({
+                "cwd": cwd,
+                "tool_name": "Write",
+                "tool_input": {"file_path": outside}
+            });
+            check(&packet.to_string())?;
+        }
+        let mixed = serde_json::json!({
+            "cwd": scope.path(),
+            "tool_name": "apply_patch",
+            "tool_input": {"command": format!(
+                "*** Add File: {}\n*** Add File: {}\n",
+                outside.display(),
+                repository.join("new.rs").display()
+            )}
+        });
+        assert!(check(&mixed.to_string()).is_err());
+        std::fs::write(repository.join(".gitignore"), "target/\n")?;
+        let ignored = serde_json::json!({
+            "cwd": repository,
+            "tool_name": "Write",
+            "tool_input": {"file_path": repository.join("target/scratch/probe.rs")}
+        });
+        check(&ignored.to_string())?;
+        Ok(())
+    }
+
+    #[test]
+    fn a_client_memory_store_is_memory_and_its_neighbors_are_not() {
+        let home = Path::new("/home/owner");
+        for path in [
+            ".claude/projects/-home-owner-repo/memory/MEMORY.md",
+            ".claude/projects/p/memory",
+            ".codex/memories_1.sqlite",
+            ".codex/memories/entry.md",
+        ] {
+            assert!(memory(home, &home.join(path)), "{path}");
+        }
+        for path in [
+            ".claude/projects/p/session.jsonl",
+            ".claude/memory/note.md",
+            ".codex/config.toml",
+            "projects/repo/memory/note.md",
+        ] {
+            assert!(!memory(home, &home.join(path)), "{path}");
+        }
+        assert!(!memory(
+            home,
+            Path::new("/elsewhere/.claude/projects/p/memory/a.md")
+        ));
+        let refusal = format!(
+            "{:#}",
+            memory_refusal(&home.join(".codex/memories_1.sqlite"))
+        );
+        assert!(
+            refusal.contains("persistent agent memory stays off"),
+            "{refusal}"
+        );
     }
 
     #[test]

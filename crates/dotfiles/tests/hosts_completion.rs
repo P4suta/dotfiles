@@ -63,6 +63,12 @@ fn prepare(root: &Path, home: &Path, bin: &Path) -> Result<()> {
         "[user]\nname = Fixture\nemail = fixture@example.com\n[commit]\ngpgsign = false\n[core]\nhooksPath = absent-hooks\n",
     )?;
     fs::write(root.join(".gitignore"), "gitconfig\n")?;
+    fs::write(root.join(".chezmoiroot"), "home\n")?;
+    fs::create_dir_all(root.join("crates/dotfiles"))?;
+    fs::write(
+        root.join("crates/dotfiles/Cargo.toml"),
+        "[package]\nname = \"dotfiles\"\n",
+    )?;
     fs::write(
         root.join(".github/workflows/ci.yml"),
         "jobs:\n  test:\n    strategy:\n      matrix:\n        os: [ubuntu-latest, macos-latest, windows-latest]\n    runs-on: ${{ matrix.os }}\n",

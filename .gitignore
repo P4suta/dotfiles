@@ -5,6 +5,8 @@ specs/lean/.lake/
 node_modules/
 .migration-imported
 .doppler/
+# pr-workflow keeps issue contexts in owner-local state, and an earlier release wrote them here.
+.pr-workflow/
 *.local.toml
 # mise.lock names the uv lock of each Python tool under .mise/locks/, which a fresh install needs.
 .mise/*
