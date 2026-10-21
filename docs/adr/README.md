@@ -95,4 +95,5 @@
 | [2026-10-21 Apply from the configured source and replace tools atomically](apply-from-the-configured-source-and-replace-tools-atomically.md) | proposed |  |
 | [2026-10-21 Check the owner's reply language at Stop](check-owner-reply-language-at-stop.md) | proposed |  |
 | [2026-10-21 Keep hosts on the merged main](keep-hosts-on-the-merged-main.md) | accepted |  |
+| [2026-10-21 Run unbounded verifiers in limited containers](run-unbounded-verifiers-in-limited-containers.md) | proposed |  |
 | [2026-10-21 Sign through the password manager agent](sign-through-the-password-manager-agent.md) | accepted |  |

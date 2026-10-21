@@ -9,6 +9,8 @@ description: >-
 
 Ordinary bounded checks belong to the authorized development task.
 Use `formal-assurance` for reproducible verdicts and the project's documented pinned container or hosted runner for verification.
+Apply its bounded-tool rule through the project's bounded container entrypoint or `dotfiles bounded run`.
+A scheduling agreement never permits a native unbounded tool.
 Resource allocations and occupancy estimates govern scheduling, never the verdict.
 Work that can occupy a machine for hours, saturate CPU or memory, fill storage, disturb interactive use, or spend paid signing capacity needs the steps below.
 Before launching it, inspect the maintained tool's dry run, selected scope, previous measurement, and known running jobs.

@@ -343,9 +343,13 @@ fn run_in_storage<T>(
 /// Retains startup failure diagnostics and refuses an unavailable child or evidence storage.
 pub fn output(command: &mut Command, label: &str) -> Result<Output> {
     let directory = ACTIVE.with(|active| active.borrow().clone());
-    let result = match directory {
-        Some(directory) => recorded_output(command, label, &directory),
-        None => command.output().map_err(anyhow::Error::from),
+    let result = match dotfiles::bounded::command_output(command) {
+        Ok(Some(output)) => Ok(output),
+        Err(error) => Err(error),
+        Ok(None) => match directory {
+            Some(directory) => recorded_output(command, label, &directory),
+            None => command.output().map_err(anyhow::Error::from),
+        },
     };
     match &result {
         Ok(output) => {

@@ -32,8 +32,8 @@ impl Phase {
 /// Returns every failure in the selected partition, or refuses an unsupported host.
 pub fn verify(root: &Path, phase: Phase) -> Result<()> {
     ensure!(
-        cfg!(target_os = "linux"),
-        "hosted proof partitions require the native Linux target"
+        cfg!(target_os = "linux") && !dotfiles::bounded::requires_container(),
+        "proof partitions require Linux CI or a bounded container; use `just proofs` or `dotfiles bounded run`"
     );
     crate::elapsed_refinement::with_source(root, || {
         crate::quality::with_locked_workspaces(root, || verify_prepared(root, phase))

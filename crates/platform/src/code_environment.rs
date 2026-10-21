@@ -727,6 +727,9 @@ impl CodeEnvironment {
         temporary: &Path,
         empty: &Path,
     ) -> Result<()> {
+        if std::env::var("GITHUB_ACTIONS").is_ok_and(|value| value == "true") {
+            self.set("GITHUB_ACTIONS", "true");
+        }
         for (name, value) in [
             ("HOME", home.to_path_buf()),
             ("USERPROFILE", home.to_path_buf()),

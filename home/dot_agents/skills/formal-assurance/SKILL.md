@@ -20,7 +20,15 @@ A verdict the project relies on must be the same on any contributor's machine wi
 Bound verification by unwinding, input size, fixed run counts, and fixed seeds, never by wall-clock time or machine speed.
 A timeout or stop condition leaves a check inconclusive: missing evidence, never a pass, a failure, or a reason for exemption.
 Keep verdicts independent of a particular host or OS, private services, and owner-local state.
-Run heavy checks in the project's pinned container or documented hosted runners, with the same pinned tools for every contributor.
+Use the same pinned verification tools for every contributor.
+
+On owner machines, tools listed in `~/.config/dotfiles/bounded-tools.toml` run only in containers with the policy's memory, swap, CPU, process, and time limits.
+Use a project's bounded container entrypoint when it has one.
+Otherwise use `dotfiles bounded run --image <name@sha256:digest> --project . -- <project command>`.
+The runner applies the policy and reports limit stops as inconclusive.
+Native invocations refuse and name this route.
+This includes tools started by project tasks.
+GitHub Actions keeps native execution.
 
 Read [scoping and alternatives](references/scoping.md) when a property crosses verifier semantics, makes an empirical claim, or resists repeated proof attempts.
 An alternative needs a concrete reason, proofs for the supported core, current substitute evidence, explicit limits, and a reconsideration condition.

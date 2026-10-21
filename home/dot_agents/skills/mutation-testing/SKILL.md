@@ -11,6 +11,7 @@ metadata:
 
 Read the project's mutation configuration and maintained tasks before selecting a run.
 Use the project's pinned mutation tool and documented platform runner.
+Apply the bounded-tool rule in `formal-assurance` through the project's bounded container entrypoint or `dotfiles bounded run` on owner machines.
 Follow `formal-assurance` for reproducible verdicts and `resource-coordination` before an expensive campaign.
 Start with a dry run or changed-contract selection when it answers the question.
 
