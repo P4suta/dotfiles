@@ -39,3 +39,14 @@ An identity migration or successful authentication never authorizes a public rel
 
 The production organization decisions live in `crates/rules/src/doppler_organization_rules.rs` and their source-bound specifications in `xtask/tests/doppler_organization.rs`.
 The shared `doppler` credential lifecycle reference defines the reusable operating procedure.
+
+The organization helper's `retire-consumer` phase binds one consumer to a completed manual authentication run, its exact attempt, and the current main revision.
+It compares the deployed workflow with the reviewed authentication-only template, checks every purpose and environment, requires successful credential retrieval and explicit unrelated-access denial, and rejects remaining legacy references or unresolved whole-secret forwarding.
+The read-only invocation reports the matching legacy writers.
+An explicit `--apply` disconnects only those writers with target deletion disabled, checks main again before each change, and reads back the remaining sync metadata.
+Keep GitHub target-field deletion and account deletion separate.
+
+The existing source-bound organization proofs establish the apply, scope, and cutover decisions.
+GitHub and Doppler metadata, Git object identity, official pinned Actions, and the provider's access-denied semantics remain external trust assumptions.
+The adapter's refusal fixtures and a real read-only verification against the completed consumer run cover that boundary.
+A changed provider schema, action revision, event contract, or workflow template requires renewed adapter evidence before retirement.

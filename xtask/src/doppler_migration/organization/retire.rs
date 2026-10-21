@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::process::Stdio;
 
-fn syncs(client: &Client) -> Result<Vec<Value>> {
+pub(super) fn syncs(client: &Client) -> Result<Vec<Value>> {
     let response = client.read("/v3/integrations", &[])?;
     let integrations: Vec<Value> =
         decode(field(&response, "integrations")?.clone(), "integrations")?;
@@ -29,13 +29,14 @@ fn syncs(client: &Client) -> Result<Vec<Value>> {
     Ok(result)
 }
 
-fn disconnect(session: &Session, sync: &Value) -> Result<()> {
-    let change = Change::DisableSourceSync;
+pub(super) fn disconnect(
+    session: &Session,
+    sync: &Value,
+    change: Change,
+    cutover: Cutover,
+) -> Result<()> {
     let evidence = super::Evidence {
-        cutover: Cutover {
-            destination: true,
-            consumer: false,
-        },
+        cutover,
         ..evidence()
     };
     ensure!(
@@ -109,7 +110,15 @@ pub(super) fn stop_source(request: &Request, destination: &Session, report: &Rep
         }
     }
     for sync in &sources {
-        disconnect(&source, sync)?;
+        disconnect(
+            &source,
+            sync,
+            Change::DisableSourceSync,
+            Cutover {
+                destination: true,
+                consumer: false,
+            },
+        )?;
         println!(
             "Disconnected source sync {}/{}; GitHub fields preserved",
             text(sync, "project")?,

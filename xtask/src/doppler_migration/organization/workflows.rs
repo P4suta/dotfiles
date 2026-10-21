@@ -9,6 +9,10 @@ use yaml_rust2::{Yaml, YamlLoader};
 const VERIFY_NAME: &str = "Verify credential access";
 const WORKFLOW_COMPONENTS: usize = 3;
 const VERIFY_STEP_INDENT: usize = 6;
+const DISCOVERY_TRIGGER: &str =
+    "  push:\n    branches: [main]\n    paths:\n      - .github/workflows/verify-doppler.yml\n";
+const MANUAL_MAIN_CONDITION: &str = "    if: >-\n      github.event_name == 'workflow_dispatch' &&\n      github.ref == 'refs/heads/main'\n";
+const LEGACY_MAIN_CONDITION: &str = "    if: github.ref == 'refs/heads/main'\n";
 const APP_ACTION: &str = "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1";
 const APP_IDS: [&str; 8] = [
     "RELEASE_PLZ_APP_CLIENT_ID",
@@ -538,9 +542,9 @@ fn write_checked(path: &Path, baseline: Option<&str>, replacement: &str) -> Resu
     Ok(())
 }
 
-fn verification(report: &Report, consumers: &[&Consumer]) -> Result<String> {
+pub(super) fn verification(report: &Report, consumers: &[&Consumer]) -> Result<String> {
     let mut source = format!(
-        "---\nname: {VERIFY_NAME}\n\n'on':\n  workflow_dispatch:\n\npermissions: {{}}\n\nconcurrency:\n  group: verify-credentials\n  cancel-in-progress: false\n\njobs:\n"
+        "---\nname: {VERIFY_NAME}\n\n'on':\n{DISCOVERY_TRIGGER}  workflow_dispatch:\n\npermissions: {{}}\n\nconcurrency:\n  group: verify-credentials\n  cancel-in-progress: false\n\njobs:\n"
     );
     for consumer in consumers {
         for (index, environment) in consumer
@@ -553,7 +557,7 @@ fn verification(report: &Report, consumers: &[&Consumer]) -> Result<String> {
         {
             write!(
                 source,
-                "  {}_{index}:\n    name: Verify {} access\n    if: github.ref == 'refs/heads/main'\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    environment: {environment}\n    permissions:\n      id-token: write\n    steps:\n",
+                "  {}_{index}:\n    name: Verify {} access\n{MANUAL_MAIN_CONDITION}    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    environment: {environment}\n    permissions:\n      id-token: write\n    steps:\n",
                 consumer.purpose.config(),
                 consumer.purpose.config()
             )?;
@@ -587,6 +591,24 @@ fn verification(report: &Report, consumers: &[&Consumer]) -> Result<String> {
     }
     YamlLoader::load_from_str(&source)?;
     Ok(format!("{}\n", source.trim_end()))
+}
+
+pub(super) fn checked_verification(
+    report: &Report,
+    consumers: &[&Consumer],
+    source: &str,
+) -> Result<Yaml> {
+    let expected = verification(report, consumers)?;
+    let legacy = expected
+        .replace(DISCOVERY_TRIGGER, "")
+        .replace(MANUAL_MAIN_CONDITION, LEGACY_MAIN_CONDITION);
+    let mut actual = YamlLoader::load_from_str(source)?;
+    ensure!(
+        actual == YamlLoader::load_from_str(&expected)?
+            || actual == YamlLoader::load_from_str(&legacy)?,
+        "deployed authentication workflow differs from the reviewed non-publishing contract"
+    );
+    actual.pop().context("empty authentication workflow")
 }
 
 pub(super) fn rewrite(report: &Report) -> Result<()> {
@@ -693,7 +715,7 @@ fn documentation(consumers: &[&Consumer]) -> Result<String> {
             environments
         )?;
     }
-    document.push_str("\nThe manual **Verify credential access** workflow checks required fields and rejects access to an unrelated config.\nAutomation also creates a repository-scoped App token with contents read access.\nThis workflow performs no signing, notarization, registry publication, release creation, or deployment.\nExisting environment protections remain in force; their approval does not grant authority for another operation.\n\nAfter the reviewed workflows reach the default branch, run the credential-access check for that exact revision.\nKeep the current credential delivery until every purpose and environment succeeds and the denial checks pass.\nThen disconnect the corresponding Doppler-to-GitHub sync while preserving its target fields, check for remaining consumers, and remove the obsolete GitHub fields and legacy configs.\nAn expired or revoked registry key is a retirement candidate and must not be copied into a replacement config.\nUse the registry's native trusted publisher where supported; an unconfigured publisher stays unavailable until its owner configures the exact binding.\n\nStore only field names, identity metadata, source revisions, and verification outcomes in issues and logs.\nKeep credential values and native authentication state out of the repository.\n");
+    document.push_str("\nThe manual **Verify credential access** workflow checks required fields and rejects access to an unrelated config.\nA push that changes its file on main registers the workflow and skips every credential job.\nCredential jobs run only through a manual invocation on main.\nAutomation also creates a repository-scoped App token with contents read access.\nThis workflow performs no signing, notarization, registry publication, release creation, or deployment.\nExisting environment protections remain in force; their approval does not grant authority for another operation.\n\nAfter the reviewed workflows reach the default branch, run the credential-access check for that exact revision.\nKeep the current credential delivery until every purpose and environment succeeds and the denial checks pass.\nThen disconnect the corresponding Doppler-to-GitHub sync while preserving its target fields, check for remaining consumers, and remove the obsolete GitHub fields and legacy configs.\nAn expired or revoked registry key is a retirement candidate and must not be copied into a replacement config.\nUse the registry's native trusted publisher where supported; an unconfigured publisher stays unavailable until its owner configures the exact binding.\n\nStore only field names, identity metadata, source revisions, and verification outcomes in issues and logs.\nKeep credential values and native authentication state out of the repository.\n");
     Ok(document)
 }
 
@@ -727,6 +749,42 @@ mod tests {
                 refs: BTreeSet::new(),
                 events: BTreeSet::new(),
             }],
+        }
+    }
+
+    #[test]
+    fn verifier_registers_on_its_main_push_but_fetches_only_on_manual_main_runs() {
+        let consumer = consumer();
+        let unrelated = Consumer {
+            project: "unrelated".to_owned(),
+            ..consumer.clone()
+        };
+        let report = Report {
+            workplace: String::new(),
+            checkouts: std::path::PathBuf::new(),
+            repositories: Vec::new(),
+            configs: Vec::new(),
+            consumers: vec![consumer.clone(), unrelated],
+            legacy_registry: Vec::new(),
+        };
+        let source = verification(&report, &[&consumer]).unwrap();
+        let documents = YamlLoader::load_from_str(&source).unwrap();
+        let document = &documents[0];
+        assert_eq!(document["on"]["push"]["branches"][0].as_str(), Some("main"));
+        assert_eq!(
+            document["on"]["push"]["paths"][0].as_str(),
+            Some(VERIFY_WORKFLOW)
+        );
+        for job in document["jobs"].as_hash().unwrap().values() {
+            assert_eq!(
+                job["if"]
+                    .as_str()
+                    .unwrap()
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'"
+            );
         }
     }
 
