@@ -11,6 +11,8 @@ use std::path::Path;
 /// The one README template of every owner repository.
 const README: &str = include_str!("../assets/repository/README.template");
 
+const DOCUMENTATION_INDEX: &str = "docs/README.md";
+
 /// The license texts, which the Rust API Guidelines recommend shipping side by side.
 const MIT: &str = include_str!("../assets/repository/LICENSE-MIT");
 const APACHE: &str = include_str!("../assets/repository/LICENSE-APACHE");
@@ -33,7 +35,12 @@ pub fn metadata(root: &Path) -> Result<Repository> {
             root.display()
         )
     })?;
-    model::repository::parse(&text).map_err(|error| anyhow::anyhow!(error))
+    let parsed = model::repository::parse(&text).map_err(|error| anyhow::anyhow!(error))?;
+    anyhow::ensure!(
+        !parsed.documentation_index || root.join(DOCUMENTATION_INDEX).is_file(),
+        "{FILE}: documentation_index requires {DOCUMENTATION_INDEX} to be a file"
+    );
+    Ok(parsed)
 }
 
 /// The README and the license files that `metadata` generates.
@@ -47,7 +54,13 @@ pub fn generate(metadata: &Repository) -> Generated {
         }
         None => metadata.name.clone(),
     };
+    let documentation = if metadata.documentation_index {
+        format!("## Documentation\n\n[Read the documentation]({DOCUMENTATION_INDEX}).\n\n")
+    } else {
+        String::new()
+    };
     let readme = README
+        .replace("{documentation}", &documentation)
         .replace("{heading}", &heading)
         .replace("{summary}", metadata.summary.trim_end_matches('.'))
         .replace("{install}", metadata.install.trim_end())
@@ -281,6 +294,16 @@ pub fn check(root: &Path, remote: Option<&str>) -> Result<()> {
 mod tests {
     use super::*;
 
+    const INDEX: &str = "docs/README.md";
+    const README_PATH: &str = "README.md";
+    const LEGACY_README: &str = concat!(
+        "# Fixture\n\nA fixture repository.\n\n## Installation\n\n",
+        "```sh\ncargo install fixture\n```\n\n## Usage\n\n",
+        "```sh\nfixture --help\n```\n\n## License\n\n",
+        "Licensed under either of the [Apache License, Version 2.0](LICENSE-APACHE) or the [Massachusetts Institute of Technology (MIT) license](LICENSE-MIT), at your option.\n",
+        "You license each contribution you submit under the same two licenses, without other terms, unless you state otherwise.\n",
+    );
+
     fn fixture() -> tempfile::TempDir {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
@@ -355,5 +378,107 @@ mod tests {
             (single.rule.as_str(), single.evidence.as_slice()),
             ("repository.license", &["Cargo.toml".to_owned()][..])
         );
+    }
+
+    #[test]
+    fn the_documentation_index_is_optional_and_preserves_existing_output() {
+        let directory = fixture();
+        let root = directory.path();
+        let config = fs::read_to_string(root.join(FILE)).unwrap();
+        let original = generate(&metadata(root).unwrap());
+        assert_eq!(
+            fs::read_to_string(root.join(README_PATH)).unwrap(),
+            LEGACY_README
+        );
+        fs::create_dir(root.join("docs")).unwrap();
+        fs::write(root.join(INDEX), "# Documentation\n").unwrap();
+        for enabled in [true, false] {
+            fs::write(
+                root.join(FILE),
+                format!("{config}documentation_index = {enabled}\n"),
+            )
+            .unwrap();
+            write(root).unwrap();
+            check(root, None).unwrap();
+            let readme = fs::read_to_string(root.join(README_PATH)).unwrap();
+            assert_eq!(readme.matches(INDEX).count(), usize::from(enabled));
+            if enabled {
+                assert!(readme.contains(
+                    "## Documentation\n\n[Read the documentation](docs/README.md).\n\n## License\n"
+                ));
+            } else {
+                assert_eq!(readme, LEGACY_README);
+            }
+            for (path, text) in &original {
+                if *path != README_PATH {
+                    assert_eq!(fs::read_to_string(root.join(path)).unwrap(), *text);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_invalid_requested_index_leaves_generated_files_unchanged() {
+        let directory = fixture();
+        let root = directory.path();
+        let config = fs::read_to_string(root.join(FILE)).unwrap();
+        let original = generate(&metadata(root).unwrap());
+        fs::write(
+            root.join(FILE),
+            format!("{config}documentation_index = true\n"),
+        )
+        .unwrap();
+        fs::create_dir(root.join("docs")).unwrap();
+        for directory_at_index in [false, true] {
+            if directory_at_index {
+                fs::create_dir(root.join(INDEX)).unwrap();
+            }
+            let error = write(root).unwrap_err().to_string();
+            assert!(error.contains(INDEX), "{error}");
+            for (path, text) in &original {
+                assert_eq!(fs::read_to_string(root.join(path)).unwrap(), *text);
+            }
+        }
+    }
+
+    #[test]
+    fn a_non_boolean_documentation_setting_refuses_generation() {
+        let directory = fixture();
+        let root = directory.path();
+        let config = fs::read_to_string(root.join(FILE)).unwrap();
+        for value in ["\"true\"", "1", "[]"] {
+            fs::write(
+                root.join(FILE),
+                format!("{config}documentation_index = {value}\n"),
+            )
+            .unwrap();
+            assert!(metadata(root).is_err(), "{value}");
+        }
+    }
+
+    #[test]
+    fn a_documentation_placeholder_inside_project_text_stays_literal() {
+        let directory = fixture();
+        let root = directory.path();
+        let config = fs::read_to_string(root.join(FILE))
+            .unwrap()
+            .replace(
+                "A fixture repository",
+                "A fixture {documentation} repository",
+            )
+            .replace("fixture --help", "fixture {documentation}");
+        fs::create_dir(root.join("docs")).unwrap();
+        fs::write(root.join(INDEX), "# Documentation\n").unwrap();
+        for enabled in [true, false] {
+            fs::write(
+                root.join(FILE),
+                format!("{config}documentation_index = {enabled}\n"),
+            )
+            .unwrap();
+            write(root).unwrap();
+            let readme = fs::read_to_string(root.join(README_PATH)).unwrap();
+            assert!(readme.contains("A fixture {documentation} repository.\n"));
+            assert!(readme.contains("```sh\nfixture {documentation}\n```"));
+        }
     }
 }

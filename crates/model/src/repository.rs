@@ -24,6 +24,9 @@ pub struct Repository {
     /// The language of the usage block, such as `sh` or `rust`.
     #[serde(default = "shell")]
     pub usage_language: String,
+    /// Link the generated README to `docs/README.md`.
+    #[serde(default)]
+    pub documentation_index: bool,
     /// The copyright holder that `LICENSE-MIT` names.
     pub copyright: String,
     /// The license expression, which must read `MIT OR Apache-2.0`.

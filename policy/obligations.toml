@@ -20,6 +20,27 @@ fn reject_read_only_planning_mutating_the_destination() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/notify_chain_rules.rs"
+probes = '''
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_hiding_the_app_inside_dotfiles() {
+    assert!(!production::model::contract([1, 0, 0, 0], 2, true).1);
+}
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_forwarding_back_to_dotfiles() {
+    assert!(production::model::contract([0, 0, 0, 0], 1, true).0);
+}
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_discarding_an_unrelated_notifier() {
+    assert!(!production::model::contract([2, 0, 0, 0], 1, true).0);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/doppler_organization_rules.rs"
 probes = '''
 use production::{Change, Cutover, Evidence, Mode, Scope, Verdict, decide};
@@ -40,6 +61,75 @@ fn reject_retirement_before_consumer_verification() {
 #[kani::proof]
 fn reject_removing_a_used_config() {
     assert!(decide(Mode::Apply, Change::RemoveUnused, Evidence { unused: false, ..ready() }) == Verdict::Allowed);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/tool_lock_rules.rs"
+probes = '''
+use production::{Facts, Graph, Project, Sidecar, Verdict, entry};
+const COMPLETE: Facts = Facts {
+    pypi: true, uv: true, locked: true,
+    sidecar: Sidecar {
+        path: true, digest: true, directory: true,
+        graph: Graph { present: true, checksum: true },
+        project: Project { present: true, pin: true },
+    },
+};
+#[kani::proof]
+fn reject_a_missing_entry() {
+    assert!(entry(Facts { locked: false, ..COMPLETE }) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_missing_uv_reference() {
+    assert!(entry(Facts { uv: false, ..COMPLETE }) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_missing_path() {
+    let mut facts = COMPLETE;
+    facts.sidecar.path = false;
+    assert!(entry(facts) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_missing_digest() {
+    let mut facts = COMPLETE;
+    facts.sidecar.digest = false;
+    assert!(entry(facts) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_missing_directory() {
+    let mut facts = COMPLETE;
+    facts.sidecar.directory = false;
+    assert!(entry(facts) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_missing_graph() {
+    let mut facts = COMPLETE;
+    facts.sidecar.graph.present = false;
+    assert!(entry(facts) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_changed_graph() {
+    let mut facts = COMPLETE;
+    facts.sidecar.graph.checksum = false;
+    assert!(entry(facts) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_missing_project() {
+    let mut facts = COMPLETE;
+    facts.sidecar.project.present = false;
+    assert!(entry(facts) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_stale_project_pin() {
+    let mut facts = COMPLETE;
+    facts.sidecar.project.pin = false;
+    assert!(entry(facts) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_an_unreferenced_directory() {
+    assert!(production::directory(false) == Verdict::Complete);
 }
 '''
 
@@ -364,6 +454,27 @@ fn reject_passing_an_edited_readme() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/origin_rules.rs"
+probes = '''
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_refusing_a_github_transport_change() {
+    assert!(!production::same_origin("git@github.com:Owner/Repo.git", "https://github.com/owner/repo"));
+}
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_admitting_a_different_repository() {
+    assert!(production::same_origin("ssh://git@github.com/owner/repo.git", "https://github.com/owner/other.git"));
+}
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_normalizing_a_non_github_origin() {
+    assert!(production::same_origin("https://example.com/Owner/Repo.git", "https://example.com/owner/repo.git"));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/tool_rules.rs"
 probes = '''
 use production::{Coverage, Placement, coverage, placement};
@@ -546,6 +657,37 @@ fn reject_reading_a_namespaced_directive_as_prose() {
 #[kani::proof]
 fn reject_skipping_a_sentence_as_a_directive() {
     assert!(production::is_directive(b"A b."));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/tailscale_rules.rs"
+probes = '''
+#[kani::proof]
+#[kani::unwind(32)]
+fn reject_admitting_a_tailscale_login() {
+    assert!(production::verdict(&["login"]) == production::Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(32)]
+fn reject_admitting_bare_tailscale() {
+    assert!(production::verdict(&[]) == production::Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(32)]
+fn reject_admitting_a_debug_mutation() {
+    assert!(production::verdict(&["debug", "rebind"]) == production::Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(32)]
+fn reject_admitting_a_lock_mutation() {
+    assert!(production::verdict(&["lock", "init"]) == production::Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(32)]
+fn reject_refusing_tailscale_status() {
+    assert!(production::verdict(&["status"]) == production::Verdict::Refuse);
 }
 '''
 

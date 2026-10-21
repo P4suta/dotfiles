@@ -4,11 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 const GITHUB_HTTPS_PREFIX: &str = "https://github.com/";
-const GITHUB_REMOTE_PREFIXES: [&str; 3] = [
-    GITHUB_HTTPS_PREFIX,
-    "git@github.com:",
-    "ssh://git@github.com/",
-];
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -126,21 +121,7 @@ impl Checked {
 
 #[must_use]
 pub fn github_slug(url: &str) -> Option<String> {
-    let path = GITHUB_REMOTE_PREFIXES
-        .iter()
-        .find_map(|prefix| url.strip_prefix(prefix))?;
-    let path = path.strip_suffix('/').unwrap_or(path);
-    let path = path.strip_suffix(".git").unwrap_or(path);
-    let (owner, name) = path.split_once('/')?;
-    let valid = |part: &str| {
-        !part.is_empty()
-            && part != "."
-            && part != ".."
-            && part
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
-    };
-    (valid(owner) && valid(name)).then(|| format!("{owner}/{name}"))
+    rules::origin_rules::github_slug(url).map(str::to_owned)
 }
 
 /// # Errors

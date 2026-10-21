@@ -17,14 +17,14 @@ pub const BYPASS: &str = "DOTFILES_LEGACY_BYPASS";
 const SCRIPT_LIMIT: u64 = 1024 * 1024;
 
 /// How deep the hook follows scripts that a command runs.
-const DEPTH: usize = 4;
+pub(crate) const DEPTH: usize = 4;
 
 /// The shells whose script argument the hook reads.
 const SHELLS: [&str; 5] = ["sh", "bash", "zsh", "dash", "ksh"];
 
 mod translate;
 
-fn nested_scripts(command: &str) -> Vec<String> {
+pub(crate) fn nested_scripts(command: &str) -> Vec<String> {
     segments(command)
         .into_iter()
         .filter_map(|words| {
@@ -65,7 +65,7 @@ fn is_assignment(word: &str) -> bool {
 }
 
 /// The command words after the assignments and wrappers that only start it, and the bypass value an assignment names.
-fn command_words(words: &[String]) -> (&[String], Option<&str>) {
+pub(crate) fn command_words(words: &[String]) -> (&[String], Option<&str>) {
     let mut bypass = None;
     let mut rest = words;
     loop {

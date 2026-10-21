@@ -41,6 +41,7 @@ pub mod startup;
 pub mod state_graph;
 pub mod structure;
 pub mod theme;
+pub mod tool_locks;
 pub mod verification_env;
 
 pub use model::profile_rules;

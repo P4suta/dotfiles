@@ -255,14 +255,28 @@ pub fn parse_shellcheck(output: &str) -> Vec<(String, String)> {
 /// Paths that taplo names in its error records, with the rule each record breaks.
 #[must_use]
 pub fn parse_taplo(root: &Path, output: &str, rule: &str) -> Vec<(String, String)> {
-    output
+    let mut paths: Vec<_> = output
         .lines()
         .filter_map(|line| {
-            let (_, quoted) = line.split_once("path=\"")?;
-            let path = quoted.split('"').next()?;
+            let path = line
+                .split_once("path=\"")
+                .and_then(|(_, quoted)| quoted.split('"').next())
+                .or_else(|| {
+                    let location = line.trim_start().strip_prefix("┌─ ")?;
+                    let (location, column) = location.rsplit_once(':')?;
+                    let (path, row) = location.rsplit_once(':')?;
+                    (!row.is_empty()
+                        && !column.is_empty()
+                        && row.bytes().all(|byte| byte.is_ascii_digit())
+                        && column.bytes().all(|byte| byte.is_ascii_digit()))
+                    .then_some(path)
+                })?;
             Some((relative(root, path), rule.to_owned()))
         })
-        .collect()
+        .collect();
+    paths.sort_unstable();
+    paths.dedup();
+    paths
 }
 
 /// Paths that `rustfmt --check` would reformat, once each.
@@ -517,23 +531,11 @@ pub fn findings(root: &Path, stage: Stage, paths: &[String]) -> Result<Counts> {
     Ok(count(found))
 }
 
-/// The Taplo format and syntax findings over `files`, which one run each reports.
+/// Check syntax before formatting the valid files.
 fn taplo_findings(root: &Path, files: &[String]) -> Result<Vec<(String, String)>> {
+    let canonical_root = crate::canonical(root)?;
+    let root = canonical_root.as_path();
     let mut found = parse_taplo(
-        root,
-        &chunked(
-            root,
-            || {
-                let mut command = Tool::Taplo.command();
-                command.args(["fmt", "--check", "--colors", "never", "--"]);
-                command
-            },
-            files,
-            |output| parse_taplo(root, output, "format"),
-        )?,
-        "format",
-    );
-    found.extend(parse_taplo(
         root,
         &chunked(
             root,
@@ -546,6 +548,25 @@ fn taplo_findings(root: &Path, files: &[String]) -> Result<Vec<(String, String)>
             |output| parse_taplo(root, output, "syntax"),
         )?,
         "syntax",
+    );
+    let valid: Vec<String> = files
+        .iter()
+        .filter(|path| !found.iter().any(|(invalid, _)| *path == invalid))
+        .cloned()
+        .collect();
+    found.extend(parse_taplo(
+        root,
+        &chunked(
+            root,
+            || {
+                let mut command = Tool::Taplo.command();
+                command.args(["fmt", "--check", "--colors", "never", "--"]);
+                command
+            },
+            &valid,
+            |output| parse_taplo(root, output, "format"),
+        )?,
+        "format",
     ));
     found.retain(|(path, _)| !path.is_empty() && files.contains(path));
     Ok(found)
@@ -923,6 +944,64 @@ exit 1
         .to_string();
         assert!(error.contains("git"), "{error}");
         assert!(error.contains("invalid-linter-option"), "{error}");
+    }
+
+    #[test]
+    fn taplo_keeps_syntax_findings_without_trying_to_format_invalid_files() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("template.toml"), "{{ value }}\n").unwrap();
+        fs::write(root.path().join("format.toml"), "value=1\n").unwrap();
+        fs::write(root.path().join("clean.toml"), "value = 1\n").unwrap();
+        let template = "template.toml".to_owned();
+        assert_eq!(
+            count(taplo_findings(root.path(), std::slice::from_ref(&template)).unwrap()),
+            count([(template.clone(), "syntax".into())])
+        );
+        assert_eq!(
+            count(
+                taplo_findings(
+                    root.path(),
+                    &[template.clone(), "format.toml".into(), "clean.toml".into()]
+                )
+                .unwrap()
+            ),
+            count([
+                (template, "syntax".into()),
+                ("format.toml".into(), "format".into())
+            ])
+        );
+    }
+
+    #[test]
+    fn taplo_syntax_locations_keep_native_paths_and_ignore_summary_lines() {
+        for root in ["/repo", "C:/repo", r"C:\repo"] {
+            assert_eq!(
+                parse_taplo(
+                    Path::new(root),
+                    &format!(
+                        "error: invalid TOML\n  ┌─ {root}/a/b.toml:12:3\n  ┌─ {root}/a/b.toml:13:4\nERROR operation failed\n"
+                    ),
+                    "syntax"
+                ),
+                [("a/b.toml".to_owned(), "syntax".to_owned())]
+            );
+        }
+        assert_eq!(
+            parse_taplo(Path::new("/repo"), "ERROR operation failed\n", "syntax"),
+            Vec::<(String, String)>::new()
+        );
+        for location in [
+            "a.toml",
+            "a.toml::1",
+            "a.toml:1:",
+            "a.toml:row:1",
+            "a.toml:1:column",
+        ] {
+            assert_eq!(
+                parse_taplo(Path::new("/repo"), &format!("  ┌─ {location}\n"), "syntax"),
+                Vec::<(String, String)>::new()
+            );
+        }
     }
 
     #[test]

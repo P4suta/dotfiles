@@ -144,6 +144,57 @@ fn a_listed_proved_and_called_subject_passes() {
 }
 
 #[test]
+fn proof_count_refresh_preserves_other_metrics_and_comments() {
+    let checkout = fixture(PROVED, CALLER);
+    fs::create_dir(checkout.path().join("policy")).unwrap();
+    fs::write(checkout.path().join(xtask::obligations::MANIFEST), LISTED).unwrap();
+    let baseline = |proved, probes| {
+        format!(
+            "# Keep this comment and unrelated values.\n[[metric]]\nexact = {proved} # A trailing comment.\nmetric = 'proved-subjects'\n\n[[metric]]\nmetric = \"unsafe-sites\"\nexact = 5\n\n[[metric]]\nmetric = \"probes\"\nexact = {probes}\n"
+        )
+    };
+    let path = checkout.path().join(xtask::obligations::BASELINES);
+    fs::write(&path, baseline(0, 0)).unwrap();
+    let measured = closure(checkout.path(), &parse_manifest(LISTED).unwrap()).unwrap();
+    xtask::obligations::write_proof_counts(checkout.path()).unwrap();
+    let expected = baseline(measured.proved, measured.probes);
+    assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+    xtask::obligations::write_proof_counts(checkout.path()).unwrap();
+    assert_eq!(fs::read_to_string(path).unwrap(), expected);
+}
+
+#[test]
+fn proof_count_refresh_refuses_invalid_coverage_without_writing() {
+    let zero = "[[metric]]\nmetric = \"proved-subjects\"\nexact = 0\n\n[[metric]]\nmetric = \"probes\"\nexact = 0\n";
+    let reduced_subjects = zero.replace(
+        "metric = \"proved-subjects\"\nexact = 0",
+        "metric = \"proved-subjects\"\nexact = 2",
+    );
+    let reduced_probes = zero.replace(
+        "metric = \"probes\"\nexact = 0",
+        "metric = \"probes\"\nexact = 2",
+    );
+    let missing = "[[metric]]\nmetric = \"proved-subjects\"\nexact = 0\n";
+    let duplicate = format!("{zero}{missing}");
+    for (manifest, baseline, refusal) in [
+        (LISTED, reduced_subjects.as_str(), "would lower"),
+        (LISTED, reduced_probes.as_str(), "would lower"),
+        (LISTED, missing, "requires both"),
+        (LISTED, duplicate.as_str(), "duplicate proof count"),
+        ("", zero, "has no Kani obligation"),
+    ] {
+        let checkout = fixture(PROVED, CALLER);
+        fs::create_dir(checkout.path().join("policy")).unwrap();
+        fs::write(checkout.path().join(xtask::obligations::MANIFEST), manifest).unwrap();
+        let path = checkout.path().join(xtask::obligations::BASELINES);
+        fs::write(&path, baseline).unwrap();
+        let error = xtask::obligations::write_proof_counts(checkout.path()).unwrap_err();
+        assert!(error.to_string().contains(refusal), "{error:#}");
+        assert_eq!(fs::read_to_string(path).unwrap(), baseline);
+    }
+}
+
+#[test]
 fn an_unowned_function_an_unlisted_module_and_a_stray_harness_fail() {
     let unowned = format!("{PROVED}pub fn helper(a: u8) -> u8 {{ a + 1 }}\n");
     let checkout = fixture(

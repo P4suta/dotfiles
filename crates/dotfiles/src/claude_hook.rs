@@ -5,6 +5,7 @@ use crate::shell_syntax_rules;
 use crate::shell_write_rules::{
     Source, Verdict, body_sources, inspect, next_action, program, segments,
 };
+use crate::tailscale_rules;
 use anyhow::{Context, Result};
 use dotguard::provenance_rules;
 use serde_json::Value;
@@ -161,6 +162,39 @@ fn disk_scan_refusal(command: &str) -> Option<String> {
             disk_scan_rules::NEXT_ACTION
         )
     })
+}
+
+fn tailscale_refusals(command: &str, depth: usize) -> Vec<String> {
+    let mut messages = Vec::new();
+    for words in segments(command) {
+        let (words, _) = crate::legacy::command_words(&words);
+        let Some((first, arguments)) = words.split_first() else {
+            continue;
+        };
+        if program(first) != "tailscale" {
+            continue;
+        }
+        let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+        if tailscale_rules::verdict(&arguments) == tailscale_rules::Verdict::Refuse {
+            let subcommand = match arguments.as_slice() {
+                [group @ ("dns" | "debug" | "exit-node" | "lock"), child, ..] => {
+                    format!("{group} {child}")
+                }
+                [subcommand, ..] => (*subcommand).to_owned(),
+                [] => "(bare invocation)".to_owned(),
+            };
+            messages.push(format!(
+                "Refused: tailscale subcommand `{subcommand}` is not read-only.\nNext action: {}",
+                tailscale_rules::NEXT_ACTION
+            ));
+        }
+    }
+    if depth < crate::legacy::DEPTH {
+        for script in crate::legacy::nested_scripts(command) {
+            messages.extend(tailscale_refusals(&script, depth + 1));
+        }
+    }
+    messages
 }
 
 /// Whether a domyjob command passes the remote host an argument that looks like an absolute POSIX path, and whether the command turns Git Bash's path conversion off.
@@ -358,6 +392,8 @@ fn rewrite_output(event: &Value, replaced: &str) -> Value {
 /// The independent policy refusals for one event.
 /// Client and subagent events share the same command policy.
 fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
+    use skill_ops::incident_rules::Source::GateRefusal;
+
     let event: Value = serde_json::from_str(event).context("PreToolUse event is not JSON")?;
     let tool = event["tool_name"].as_str().unwrap_or_default();
     if !matches!(
@@ -380,19 +416,14 @@ fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
         message,
     };
     let mut findings = Vec::new();
+    for message in tailscale_refusals(command, 0) {
+        findings.push(blocked("hook.tailscale", GateRefusal, message));
+    }
     if let Some(message) = disk_scan_refusal(command) {
-        findings.push(blocked(
-            "hook.disk-scan",
-            skill_ops::incident_rules::Source::GateRefusal,
-            message,
-        ));
+        findings.push(blocked("hook.disk-scan", GateRefusal, message));
     }
     if let Some(message) = path_conversion_refusal(command, cfg!(windows) && !powershell(&event)) {
-        findings.push(blocked(
-            "hook.path-conversion",
-            skill_ops::incident_rules::Source::GateRefusal,
-            message,
-        ));
+        findings.push(blocked("hook.path-conversion", GateRefusal, message));
     }
     if !powershell(&event)
         && let shell_syntax_rules::Verdict::Refuse(reason) = shell_syntax_rules::inspect(command)
@@ -422,7 +453,7 @@ fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
     {
         findings.push(blocked(
             "hook.shell-write",
-            skill_ops::incident_rules::Source::GateRefusal,
+            GateRefusal,
             format!(
                 "Refused: this command writes a file through an inline interpreter, in-place editor, heredoc, or redirect.\nNext action: {}",
                 next_action(reason)
@@ -430,11 +461,7 @@ fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
         ));
     }
     if let Some(message) = attribution_refusal(command, event["cwd"].as_str().map(Path::new)) {
-        findings.push(blocked(
-            "hook.attribution",
-            skill_ops::incident_rules::Source::GateRefusal,
-            message,
-        ));
+        findings.push(blocked("hook.attribution", GateRefusal, message));
     }
     let legacy = crate::legacy::findings(command, event["cwd"].as_str().map(Path::new))
         .unwrap_or_else(|error| crate::legacy::Findings {
@@ -442,11 +469,7 @@ fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
             unavailable: vec![format!("{error:#}")],
         });
     for message in legacy.refusals {
-        findings.push(blocked(
-            LEGACY,
-            skill_ops::incident_rules::Source::GateRefusal,
-            message,
-        ));
+        findings.push(blocked(LEGACY, GateRefusal, message));
     }
     for message in legacy.unavailable {
         findings.push(blocked(
@@ -946,14 +969,194 @@ mod tests {
     }
 
     #[test]
+    fn read_only_tailscale_subcommands_are_admitted() {
+        for arguments in [
+            "status",
+            "status --json",
+            "ping linux",
+            "netcheck",
+            "ip -4",
+            "whois 100.64.0.1",
+            "version",
+            "dns status",
+            "exit-node list",
+            "lock status",
+            "metrics",
+            "bugreport",
+            "debug derp-map",
+            "debug daemon-goroutines",
+            "debug daemon-logs",
+            "debug daemon-bus-events",
+            "debug daemon-bus-graph",
+            "debug daemon-bus-queues",
+            "debug metrics",
+            "debug env",
+            "debug stat /dev/null",
+            "debug hostinfo",
+            "debug control-knobs",
+            "debug prefs",
+            "debug watch-ipn",
+            "debug netmap",
+            "debug via 1 192.0.2.0/24",
+            "debug peer-endpoint-changes linux",
+            "debug resolve linux",
+            "debug go-buildinfo",
+            "debug peer-relay-servers",
+            "debug statedir",
+        ] {
+            let command = format!("tailscale {arguments}");
+            assert_eq!(
+                refusal(&bash(&command))
+                    .unwrap()
+                    .map(|blocked| blocked.message),
+                None,
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn mutating_tailscale_subcommands_are_refused_with_the_next_action() {
+        for arguments in [
+            "up",
+            "down",
+            "login",
+            "logout",
+            "set",
+            "switch",
+            "ssh",
+            "serve",
+            "funnel",
+            "cert",
+            "file",
+            "drive",
+            "web",
+            "configure",
+            "update",
+            "syspolicy",
+            "dns",
+            "dns set",
+            "exit-node",
+            "exit-node suggest",
+            "lock",
+            "lock init",
+            "lock add",
+            "lock remove",
+            "lock sign",
+            "lock disable",
+            "lock log",
+            "debug",
+            "debug rebind",
+            "debug restun",
+            "debug localapi",
+            "debug local-creds",
+            "debug component-logs",
+            "debug set-expire",
+            "debug reload-config",
+            "debug --file=delete:received",
+            "unknown",
+            "--help",
+            "",
+        ] {
+            let command = format!("tailscale {arguments}");
+            let findings = policy_refusals(&bash(&command)).unwrap();
+            let blocked = findings
+                .iter()
+                .find(|finding| finding.rule == "hook.tailscale")
+                .unwrap_or_else(|| panic!("admitted: {command}"));
+            let evidence = if arguments.is_empty() {
+                "(bare invocation)"
+            } else {
+                arguments
+            };
+            assert!(blocked.message.contains(evidence), "{}", blocked.message);
+            assert!(blocked.message.contains("Next action: ask the owner to run it; a tailscale command can open a sign-in window on the owner's desktop"), "{}", blocked.message);
+        }
+    }
+
+    #[test]
+    fn tailscale_mutations_through_wrappers_and_paths_are_refused() {
+        for command in [
+            "sudo tailscale up",
+            "env tailscale up",
+            "env TS_DEBUG=1 tailscale up",
+            "TS_DEBUG=1 tailscale up",
+            "mise x -- tailscale up",
+            "mise exec -- tailscale up",
+            "sudo env TS_DEBUG=1 mise x -- tailscale up",
+            "command tailscale up",
+            "exec tailscale up",
+            "nohup tailscale up",
+            "nice tailscale up",
+            "tailscale status; tailscale up",
+            "tailscale status && tailscale up",
+            "tailscale status || tailscale up",
+            "tailscale up | bat",
+            "(tailscale up)",
+            "sh -c 'tailscale up'",
+            "bash -lc 'env tailscale up'",
+            "env sh -c 'mise x -- tailscale up'",
+            "sh -c \"sh -c 'tailscale up'\"",
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale up",
+            "/usr/local/bin/tailscale up",
+            "./tailscale up",
+            "tailscale.exe up",
+            r"'C:\Program Files\Tailscale\tailscale.exe' up",
+            "sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale up",
+        ] {
+            let message = refused(command);
+            assert!(message.contains("`up`"), "{command}: {message}");
+            assert!(
+                message.contains("ask the owner to run it"),
+                "{command}: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn tailscale_guard_preserves_read_only_wrappers_and_openssh() {
+        for command in [
+            "ssh linux",
+            "sudo ssh linux",
+            "mise x -- tailscale status",
+            "env sh -c 'tailscale status'",
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale status",
+            "tailscale.exe status",
+            "echo 'tailscale up'",
+            "rg tailscale Cargo.toml",
+        ] {
+            assert_eq!(
+                refusal(&bash(command))
+                    .unwrap()
+                    .map(|blocked| blocked.message),
+                None,
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn tailscale_guard_checks_every_agent_shell_client() {
+        for tool in ["Bash", "PowerShell", "bash", "exec_command", "shell"] {
+            let event = json!({"tool_name": tool, "tool_input": {"command": "tailscale up"}});
+            assert!(super::refused(&event), "{tool}");
+        }
+        let event =
+            json!({"tool_name": "shell", "tool_input": {"command": ["sh", "-c", "tailscale up"]}});
+        assert!(super::refused(&event));
+    }
+
+    #[test]
     fn compound_preflight_reports_independent_refusal_families_together() {
-        let command = "du -sh .; ls -la; python -c 'open(\"out\", \"w\").write(\"x\")'";
+        let command =
+            "du -sh .; ls -la; python -c 'open(\"out\", \"w\").write(\"x\")'; tailscale up";
         let message = refusal(&bash(command)).unwrap().unwrap().message;
         assert!(message.contains("walks a directory tree"), "{message}");
         assert!(message.contains("inline interpreter"), "{message}");
         assert!(message.contains("`ls` is a legacy command"), "{message}");
         assert!(message.contains("storage-scout"), "{message}");
         assert!(message.contains("Edit or Write tool"), "{message}");
+        assert!(message.contains("ask the owner to run it"), "{message}");
     }
 
     #[test]
