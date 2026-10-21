@@ -169,6 +169,7 @@ fn render_merged_with_mode(
         ".chezmoitemplates/partials/sh_quote",
         ".chezmoitemplates/partials/ps_quote",
         ".chezmoitemplates/partials/codex_runtime_hook",
+        ".chezmoitemplates/partials/codex_notify",
         ".chezmoitemplates/partials/without_skill_ops_hooks",
         ".chezmoitemplates/partials/without_runtime_handlers",
         ".chezmoitemplates/partials/skill_ops_experimental",
@@ -833,6 +834,177 @@ fn optional_spoken_hooks_keep_mixed_foreign_handlers_and_reapply_once() {
                     .as_str()
                     .is_some_and(|command| command.ends_with(" notifications agent claude")))
         );
+    }
+}
+
+fn codex_notify_fixtures() -> (Vec<String>, Vec<Vec<String>>) {
+    let dotfiles = vec![
+        "/synthetic/.local/bin/dotfiles".to_owned(),
+        "notifications".into(),
+        "agent".into(),
+        "codex".into(),
+    ];
+    let app = vec![
+        "/synthetic/Codex Computer Use.app/SkyComputerUseClient".to_owned(),
+        "turn-ended".into(),
+    ];
+    let wrap = |mut outer: Vec<String>, flag: &str, inner: &[String]| {
+        outer.extend([flag.to_owned(), serde_json::to_string(inner).unwrap()]);
+        outer
+    };
+    let third = vec![
+        "third-notifier".to_owned(),
+        "argument with spaces, \"quotes\", \\slashes, <>& and 日本語😀".into(),
+    ];
+    let mut deep = app.clone();
+    for depth in 0..21 {
+        deep = if depth % 2 == 0 {
+            wrap(dotfiles.clone(), "--forward-notify", &deep)
+        } else {
+            wrap(app.clone(), "--previous-notify", &deep)
+        };
+    }
+    let mut cases = vec![
+        Vec::new(),
+        dotfiles.clone(),
+        app.clone(),
+        third.clone(),
+        wrap(app.clone(), "--previous-notify", &dotfiles),
+        wrap(dotfiles.clone(), "--forward-notify", &app),
+        vec![
+            app[0].clone(),
+            "turn-ended".into(),
+            "--previous-notify".into(),
+            serde_json::to_string(&dotfiles).unwrap(),
+            "--".into(),
+        ],
+        wrap(dotfiles.clone(), "--forward-notify", &third),
+        wrap(
+            app.clone(),
+            "--previous-notify",
+            &wrap(dotfiles.clone(), "--forward-notify", &third),
+        ),
+        wrap(
+            third.clone(),
+            "--previous-notify",
+            &wrap(app.clone(), "--previous-notify", &third),
+        ),
+        vec!["dotfiles".into(), "unrelated-command".into()],
+        vec!["--forward-notify".into(), "[]".into()],
+        vec!["x".into(); 33],
+        deep,
+    ];
+    for invalid in [
+        "bad-json",
+        "null",
+        "[1]",
+        "{}",
+        r#"["x",]"#,
+        r#"["\ud800"]"#,
+        r#"["\udc00"]"#,
+        r#"["\q"]"#,
+        "[\"line\nfeed\"]",
+        "\u{c}[]",
+        "[]",
+    ] {
+        cases.push(wrap(
+            app.clone(),
+            "--previous-notify",
+            &[
+                "third-notifier".into(),
+                "--forward-notify".into(),
+                invalid.into(),
+            ],
+        ));
+    }
+    for json in [
+        r#"["\ud83d\ude00"]"#,
+        r#"["\uD83D\uDE00"]"#,
+        r#"["\u0041\t\b\f\r\n\\\"\/"]"#,
+    ] {
+        cases.push(vec![
+            app[0].clone(),
+            "turn-ended".into(),
+            "--previous-notify".into(),
+            json.into(),
+        ]);
+    }
+    (app, cases)
+}
+
+#[test]
+fn codex_notify_template_matches_the_rust_rule_on_every_profile() {
+    use rules::notify_chain_rules::{Command, normalize};
+    let (app, cases) = codex_notify_fixtures();
+    let wrap = |mut outer: Vec<String>, flag: &str, inner: &[String]| {
+        outer.extend([flag.to_owned(), serde_json::to_string(inner).unwrap()]);
+        outer
+    };
+    for profile in ["mac", "linux", "windows", "wsl"] {
+        for (index, previous) in cases.iter().enumerate() {
+            let host = format!("notify = {}\n", serde_json::to_string(previous).unwrap());
+            let rendered = render_merged(
+                profile,
+                "dot_codex/modify_config.toml",
+                ".codex/config.toml",
+                &host,
+            );
+            let parsed: toml::Value = toml::from_str(&rendered).unwrap();
+            let actual: Vec<String> = parsed["notify"].clone().try_into().unwrap();
+            let own: Vec<String> = if actual[0] == app[0] {
+                serde_json::from_str(&actual[3]).unwrap()
+            } else {
+                actual.clone()
+            };
+            assert_eq!(&own[1..4], ["notifications", "agent", "codex"]);
+            assert_eq!(own[0].ends_with("dotfiles.exe"), profile == "windows");
+            let expected = normalize(Command(previous.clone()), &own[0]);
+            assert_eq!(actual, expected.0, "{profile}, case {index}");
+            assert_eq!(normalize(expected.clone(), &own[0]), expected);
+            assert_eq!(
+                normalize(
+                    Command(wrap(own[..4].to_vec(), "--forward-notify", &actual)),
+                    &own[0]
+                ),
+                expected
+            );
+            if actual[0] == app[0] {
+                assert_eq!(
+                    normalize(
+                        Command(wrap(app.clone(), "--previous-notify", &actual)),
+                        &own[0]
+                    ),
+                    expected
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn codex_notify_keeps_the_app_outermost_without_a_return_edge() {
+    let dotfiles = vec!["dotfiles", "notifications", "agent", "codex"];
+    let app = vec![
+        "/synthetic/Codex Computer Use.app/SkyComputerUseClient".to_owned(),
+        "turn-ended".to_owned(),
+        "--previous-notify".to_owned(),
+        serde_json::to_string(&dotfiles).unwrap(),
+    ];
+    for profile in ["mac", "linux", "windows", "wsl"] {
+        let host = format!("notify = {}\n", serde_json::to_string(&app).unwrap());
+        let rendered = render_merged(
+            profile,
+            "dot_codex/modify_config.toml",
+            ".codex/config.toml",
+            &host,
+        );
+        let parsed: toml::Value = toml::from_str(&rendered).unwrap();
+        let notify: Vec<String> = parsed["notify"].clone().try_into().unwrap();
+        assert_eq!(notify[0], app[0]);
+        assert_eq!(&notify[1..3], ["turn-ended", "--previous-notify"]);
+        let previous: Vec<String> = serde_json::from_str(&notify[3]).unwrap();
+        assert_eq!(previous.len(), 4, "the app must call plain dotfiles");
+        assert_eq!(&previous[1..], ["notifications", "agent", "codex"]);
     }
 }
 
