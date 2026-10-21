@@ -59,6 +59,7 @@ pub mod notification_rules;
 pub mod obligation_rules;
 pub mod ocomment_rules;
 pub mod order_rules;
+pub mod origin_rules;
 pub mod path_conversion_rules;
 pub mod phase_receipt_rules;
 pub mod postcommit_rules;

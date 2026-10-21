@@ -605,7 +605,7 @@ pub fn persist(root: &Path, receipt: Receipt, expected: &Binding) -> Result<()> 
     };
     ensure!(
         local.common_git == expected.common_git
-            && local.origin == expected.origin
+            && rules::origin_rules::same_origin(&local.origin, &expected.origin)
             && local.manifest.schema == SCHEMA,
         "owner-local issue-context identity differs"
     );
@@ -715,7 +715,10 @@ pub fn local_for(root: &Path, home: &Path) -> Result<Manifest> {
     let local: Local = serde_json::from_slice(&fs::read(path)?)?;
     ensure!(
         local.common_git == common_git(&root)?
-            && local.origin == git(&root, &["remote", "get-url", "origin"], None)?
+            && rules::origin_rules::same_origin(
+                &local.origin,
+                &git(&root, &["remote", "get-url", "origin"], None)?,
+            )
             && local.manifest.schema == SCHEMA,
         "owner-local issue-context identity differs"
     );
@@ -1181,10 +1184,73 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn replacing_a_context_preserves_scopes_before_any_state_or_history_write() -> Result<()> {
+    fn origin_identity_contract(root: &Path) -> Result<()> {
+        snapshot_lineage_contract(root)?;
+        let home = crate::home::home().context("fixture home")?;
+        let state = state_for(root, &home)?;
+        let origins = [
+            TEST_ORIGIN,
+            "https://github.com/fixture/context.git",
+            "ssh://git@github.com/fixture/context.git",
+            "https://github.com/FiXtUrE/CoNtExT",
+            "git@github.com:FIXTURE/CONTEXT",
+        ];
+        for stored in origins {
+            for current in origins {
+                let expected = binding(root)?;
+                let original = receipt(context(FIRST_SOURCE, &["alpha"]), FIRST_OBJECT);
+                write(
+                    &state,
+                    &Local {
+                        checkout: expected.checkout,
+                        common_git: expected.common_git,
+                        origin: format!("{stored}\n"),
+                        manifest: Manifest {
+                            schema: SCHEMA,
+                            receipts: vec![original.clone()],
+                        },
+                    },
+                )?;
+                git(root, &["remote", "set-url", "origin", current], None)?;
+                assert_eq!(
+                    local_for(root, &home)?.receipts,
+                    std::slice::from_ref(&original)
+                );
+                persist(root, original.clone(), &binding(root)?)?;
+                assert_eq!(local_for(root, &home)?.receipts, [original]);
+                let saved: Local = serde_json::from_slice(&fs::read(&state)?)?;
+                assert_eq!(saved.origin, format!("{stored}\n"));
+            }
+        }
+        let before = fs::read(&state)?;
+        for different in [
+            "https://github.com/fixture/another.git",
+            "git@github.com:another/context.git",
+            "https://example.com/fixture/context.git",
+        ] {
+            git(root, &["remote", "set-url", "origin", different], None)?;
+            assert_eq!(
+                local_for(root, &home).unwrap_err().to_string(),
+                "owner-local issue-context identity differs"
+            );
+            assert_eq!(
+                persist(
+                    root,
+                    receipt(context(FIRST_SOURCE, &["alpha"]), OTHER_OBJECT),
+                    &binding(root)?,
+                )
+                .unwrap_err()
+                .to_string(),
+                "owner-local issue-context identity differs"
+            );
+            assert_eq!(fs::read(&state)?, before);
+        }
+        Ok(())
+    }
+
+    fn fixture_test(name: &str, contract: fn(&Path) -> Result<()>) -> Result<()> {
         if let Some(root) = std::env::var_os(CHILD_ROOT) {
-            return replacement_contract(Path::new(&root));
+            return contract(Path::new(&root));
         }
         let scope = tempfile::tempdir()?;
         let root = scope.path().join("checkout");
@@ -1203,7 +1269,7 @@ mod tests {
         )?;
         fixture_git(&root, &global, &["remote", "add", "origin", TEST_ORIGIN])?;
         let output = fixture_command(std::env::current_exe()?, &global)?
-            .args(["--exact", "issue_context::tests::replacing_a_context_preserves_scopes_before_any_state_or_history_write", "--nocapture"])
+            .args(["--exact", name, "--nocapture"])
             .env(CHILD_ROOT, &root)
             .env("HOME", &home)
             .env("USERPROFILE", &home)
@@ -1216,5 +1282,21 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         Ok(())
+    }
+
+    #[test]
+    fn replacing_a_context_preserves_scopes_before_any_state_or_history_write() -> Result<()> {
+        fixture_test(
+            "issue_context::tests::replacing_a_context_preserves_scopes_before_any_state_or_history_write",
+            replacement_contract,
+        )
+    }
+
+    #[test]
+    fn stored_origin_identity_survives_transport_changes_without_migration() -> Result<()> {
+        fixture_test(
+            "issue_context::tests::stored_origin_identity_survives_transport_changes_without_migration",
+            origin_identity_contract,
+        )
     }
 }
