@@ -1,8 +1,10 @@
 {
-  "revision": "a9c153f15bb185c0bb7fcdd44417f7b5770d3c77984cf90d0ba8a41a7a8f1de4",
+  "revision": "56d93472723a395928c71783db6abedec8150377acb1679bf3954896fb8771c8",
   "outcome": "implemented",
-  "reason": "The revision asks for every PR, issue, review, and comment in the owner's voice, flat and short, without notes about who wrote it or the local workflow.",
+  "reason": "PR creation derives independence from an in-memory merge of overlapping heads.\nShared commits and conflicts require a stack, Git execution failures stop creation, and no caller override bypasses the decision.",
   "evidence": [
+    "docs/adr/decide-pr-independence-from-merge-results.md",
+    "policy/obligations.toml",
     "docs/adr/keep-workflow-evidence-local.md",
     "crates/platform/src/local_issues.rs",
     "crates/platform/src/source_identity.rs",

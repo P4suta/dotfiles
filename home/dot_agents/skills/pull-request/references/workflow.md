@@ -77,7 +77,11 @@ pr-workflow stack merge --repo OWNER/REPO --pr 18
 pr-workflow merge --repo OWNER/REPO --pr 17 --pr 19
 ```
 
-`create` refuses a head that shares commits with another open PR, or touched paths unless `--independent`, and names `stack create` on that PR.
+`create` refuses a head that shares commits with another open PR and names `stack create` on that PR.
+When paths overlap, it runs `git merge-tree --write-tree` on the two heads using their merge base without changing the worktree or index.
+A clean merge permits an independent PR.
+A conflict refuses creation and names the conflicting PR and `stack create`.
+Git execution failures stop creation, and no flag overrides a conflict.
 `stack create` opens a draft on the parent's open PR and links the chain down to the trunk.
 `stack sync` and `stack rebase` hold the repository's stack lease, the only way dotguard admits a rebase or leased force push of a published branch besides an `ALLOW_FORCE` waiver.
 `merge` takes independent PRs in order.
