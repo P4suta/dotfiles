@@ -63,6 +63,10 @@ jobs:
           sha256: f9612efcddda0ae55b62d3b6f82a6c860d5b54ebee0807d4f1a1d578055e1607
           install_args: rust just
           cache: false
+      - name: Check tool locks for every host OS
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
+        shell: bash
+        run: just tool-locks
       - name: Compile the workspace and check the toolchain pins
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
         shell: bash
@@ -210,6 +214,27 @@ fn lightweight_ci_refuses_missing_reports_heavy_work_and_suppressed_failures() {
             workflow_findings(&changed, POLICY).unwrap(),
             Vec::<String>::new(),
             "{from} -> {to}"
+        );
+    }
+}
+
+#[test]
+fn lightweight_ci_refuses_lock_bypasses_and_budget_or_order_changes() {
+    for changed in [
+        WORKFLOW.replace("run: just tool-locks", "run: true"),
+        WORKFLOW.replace(
+            "      - name: Check tool locks for every host OS\n        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner\n",
+            "      - name: Check tool locks for every host OS\n",
+        ),
+        WORKFLOW.replacen("    timeout-minutes: 5", "    timeout-minutes: 20", 1),
+        WORKFLOW
+            .replace("run: just dependency-gate", "run: just tool-locks")
+            .replacen("run: just tool-locks", "run: just dependency-gate", 1),
+    ] {
+        assert_ne!(changed, WORKFLOW);
+        assert_ne!(
+            workflow_findings(&changed, POLICY).unwrap(),
+            Vec::<String>::new()
         );
     }
 }

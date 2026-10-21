@@ -3369,6 +3369,51 @@ mod tests {
     #[test]
     #[ignore = "requires the installed pinned Kani"]
     #[cfg(not(target_os = "windows"))]
+    fn tool_locks_and_their_counterexamples_verify_against_production() -> Result<()> {
+        const SOURCE: &str = "crates/rules/src/tool_lock_rules.rs";
+        const EXPECTED: (usize, usize) = (2, 10);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .context("the proof test has a workspace root")?;
+        let source_hash = platform::build_inputs::content_hash(root)?;
+        ensure!(
+            source_hash == platform::BUILD_HASH,
+            "tool lock proof producer is stale"
+        );
+        let manifest = obligations::manifest(root)?;
+        let probes = manifest
+            .obligations
+            .iter()
+            .find_map(|obligation| match obligation {
+                Obligation::Kani { source, probes, .. } if source == SOURCE => Some(probes),
+                _ => None,
+            })
+            .context("tool locks have a registered proof obligation")?;
+        kani_environment_version(root)?;
+        let verifier_hash = crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
+        let engine_hash = crate::phase_evidence::engine_digest(root)?;
+        let result = verify_rules(
+            root,
+            SOURCE,
+            probes,
+            &flags(&manifest, SOURCE),
+            &verifier_hash,
+            &engine_hash,
+        )?;
+        ensure!(
+            result == EXPECTED,
+            "tool lock proof inventory differs: {result:?}"
+        );
+        ensure!(
+            platform::build_inputs::content_hash(root)? == source_hash,
+            "tool lock source changed during verification"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires the installed pinned Kani"]
+    #[cfg(not(target_os = "windows"))]
     fn source_sync_and_its_counterexamples_verify_against_production() -> Result<()> {
         const SOURCE: &str = "crates/rules/src/source_sync_rules.rs";
         const EXPECTED: (usize, usize) = (1, 5);

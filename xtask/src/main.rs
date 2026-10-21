@@ -25,6 +25,8 @@ struct Cli {
 enum Action {
     CheckSecrets,
     CheckAdapters,
+    /// Checks portable uv locks for every tool, regardless of its OS filter.
+    ToolLocks,
     AnsibleSyntaxCheck,
     Profiles {
         #[arg(long)]
@@ -270,6 +272,7 @@ enum IssueContext {
 /// A change that selects fewer gates skips only the checks it can't affect.
 fn check(root: &Path, gates: Gates, reference: &str, context: IssueContext) -> Result<()> {
     let mut checks = Checks::default();
+    checks.run("tools.locks", || xtask::tool_locks::check(root));
     if context == IssueContext::Local {
         checks.run("issue.context", || {
             pr_workflow::check_issue_context(
@@ -438,6 +441,7 @@ fn run() -> Result<()> {
     match cli.command {
         Action::PushCheck => push_check(&cli.root)?,
         Action::CheckSecrets => xtask::quality::secrets(&cli.root)?,
+        Action::ToolLocks => xtask::tool_locks::check(&cli.root)?,
         Action::CheckAdapters => xtask::quality::adapters(&cli.root)?,
         Action::AnsibleSyntaxCheck => {
             ensure!(

@@ -513,6 +513,7 @@ fn the_check_command_reports_multiple_selected_gate_failures_in_one_run() -> Res
     assert_eq!(
         stages,
         [
+            "Checking tools.locks",
             "Checking issue.context",
             "Checking prose.lint",
             "Checking prose.adr",
@@ -537,6 +538,7 @@ fn the_check_command_reports_multiple_selected_gate_failures_in_one_run() -> Res
         .rsplit_once("selected stages failed:")
         .expect("the final failure summary");
     for failure in [
+        "tools.locks:",
         "prose.lint:",
         "prose.adr:",
         "skills.inventory:",

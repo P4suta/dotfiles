@@ -1977,12 +1977,12 @@ mod native_path_tests {
             include_bytes!("../../../.mise/locks/yamllint/1.38.0/uv.lock"),
         ),
         (
-            ".mise/locks/pypi-ansible-core/2.21.4/pyproject.toml",
-            include_bytes!("../../../.mise/locks/pypi-ansible-core/2.21.4/pyproject.toml"),
+            ".mise/locks/pypi-ansible-core/2.21.5/pyproject.toml",
+            include_bytes!("../../../.mise/locks/pypi-ansible-core/2.21.5/pyproject.toml"),
         ),
         (
-            ".mise/locks/pypi-ansible-core/2.21.4/uv.lock",
-            include_bytes!("../../../.mise/locks/pypi-ansible-core/2.21.4/uv.lock"),
+            ".mise/locks/pypi-ansible-core/2.21.5/uv.lock",
+            include_bytes!("../../../.mise/locks/pypi-ansible-core/2.21.5/uv.lock"),
         ),
     ];
 

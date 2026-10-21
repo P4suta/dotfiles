@@ -63,6 +63,10 @@ const LIGHTWEIGHT_JOBS: &str = r#"  check:
           sha256: f9612efcddda0ae55b62d3b6f82a6c860d5b54ebee0807d4f1a1d578055e1607
           install_args: rust just
           cache: false
+      - name: Check tool locks for every host OS
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
+        shell: bash
+        run: just tool-locks
       - name: Compile the workspace and check the toolchain pins
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
         shell: bash
@@ -172,7 +176,7 @@ fn lightweight_findings(document: &yaml_rust2::Yaml) -> Result<Vec<String>> {
         .next()
         .context("the lightweight CI contract holds a document")?;
     if document["jobs"] != expected {
-        found.push("CI must report source and native admission on all three operating systems, gate pull requests from others, and refuse unsuccessful jobs".into());
+        found.push("CI must report all three operating systems, check portable tool locks before gating pull requests from others, and refuse unsuccessful jobs".into());
     }
     Ok(found)
 }
