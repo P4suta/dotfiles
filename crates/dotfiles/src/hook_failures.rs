@@ -59,7 +59,11 @@ pub fn session_start() {
 /// Returns an error when creating, locking, or writing the log fails.
 pub fn append(path: &Path, hook: &str, cause: &str) -> Result<()> {
     fs::create_dir_all(path.parent().context("hook failure log directory")?)?;
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .append(true)
+        .open(path)?;
     file.lock()?;
     if file.metadata()?.len() < MAX_LOG_BYTES {
         file.write_all(line(hook, cause).as_bytes())?;
