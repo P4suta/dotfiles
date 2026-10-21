@@ -98,12 +98,6 @@ const PLACEHOLDER_CLOSE: &str = "}}";
 const REPOSITORY_PARTS: usize = 2;
 const MAX_IDENTITY_REPOSITORIES: usize = 2;
 const GITHUB: &str = "https://github.com";
-/// The URL prefixes of a GitHub remote, over HTTPS, SSH, and the short `git@host:path` SSH form.
-const GITHUB_REMOTE_PREFIXES: [&str; 3] = [
-    "https://github.com/",
-    "ssh://git@github.com/",
-    "git@github.com:",
-];
 /// A closing reference: a keyword such as `closes`, then the issue.
 const CLOSING_REFERENCE_WORDS: usize = 2;
 const SECONDS_PER_MINUTE: u64 = 60;
@@ -2684,14 +2678,7 @@ fn git_set(args: &[&str]) -> Result<BTreeSet<String>> {
 
 /// The `OWNER/REPO` a GitHub remote URL names.
 fn github_slug(url: &str) -> Option<String> {
-    let path = GITHUB_REMOTE_PREFIXES
-        .iter()
-        .find_map(|prefix| url.strip_prefix(prefix))?;
-    let path = path.strip_suffix('/').unwrap_or(path);
-    let path = path.strip_suffix(".git").unwrap_or(path);
-    let (owner, repository) = path.split_once('/')?;
-    (!owner.is_empty() && !repository.is_empty() && !repository.contains('/'))
-        .then(|| format!("{owner}/{repository}"))
+    rules::origin_rules::github_slug(url).map(str::to_owned)
 }
 
 /// Requires a current directory that holds a checkout whose `origin` matches the target repository.

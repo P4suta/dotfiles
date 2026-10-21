@@ -325,6 +325,27 @@ fn reject_passing_an_edited_readme() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/origin_rules.rs"
+probes = '''
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_refusing_a_github_transport_change() {
+    assert!(!production::same_origin("git@github.com:Owner/Repo.git", "https://github.com/owner/repo"));
+}
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_admitting_a_different_repository() {
+    assert!(production::same_origin("ssh://git@github.com/owner/repo.git", "https://github.com/owner/other.git"));
+}
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_normalizing_a_non_github_origin() {
+    assert!(production::same_origin("https://example.com/Owner/Repo.git", "https://example.com/owner/repo.git"));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/tool_rules.rs"
 probes = '''
 use production::{Coverage, Placement, coverage, placement};
