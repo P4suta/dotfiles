@@ -27,6 +27,75 @@ fn reject_discarding_an_unrelated_notifier() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/tool_lock_rules.rs"
+probes = '''
+use production::{Facts, Graph, Project, Sidecar, Verdict, entry};
+const COMPLETE: Facts = Facts {
+    pypi: true, uv: true, locked: true,
+    sidecar: Sidecar {
+        path: true, digest: true, directory: true,
+        graph: Graph { present: true, checksum: true },
+        project: Project { present: true, pin: true },
+    },
+};
+#[kani::proof]
+fn reject_a_missing_entry() {
+    assert!(entry(Facts { locked: false, ..COMPLETE }) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_missing_uv_reference() {
+    assert!(entry(Facts { uv: false, ..COMPLETE }) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_missing_path() {
+    let mut facts = COMPLETE;
+    facts.sidecar.path = false;
+    assert!(entry(facts) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_missing_digest() {
+    let mut facts = COMPLETE;
+    facts.sidecar.digest = false;
+    assert!(entry(facts) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_missing_directory() {
+    let mut facts = COMPLETE;
+    facts.sidecar.directory = false;
+    assert!(entry(facts) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_missing_graph() {
+    let mut facts = COMPLETE;
+    facts.sidecar.graph.present = false;
+    assert!(entry(facts) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_changed_graph() {
+    let mut facts = COMPLETE;
+    facts.sidecar.graph.checksum = false;
+    assert!(entry(facts) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_missing_project() {
+    let mut facts = COMPLETE;
+    facts.sidecar.project.present = false;
+    assert!(entry(facts) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_a_stale_project_pin() {
+    let mut facts = COMPLETE;
+    facts.sidecar.project.pin = false;
+    assert!(entry(facts) == Verdict::Complete);
+}
+#[kani::proof]
+fn reject_an_unreferenced_directory() {
+    assert!(production::directory(false) == Verdict::Complete);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/signing_rules.rs"
 probes = '''
 #[kani::proof]

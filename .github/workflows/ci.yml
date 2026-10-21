@@ -49,6 +49,10 @@ jobs:
           sha256: f9612efcddda0ae55b62d3b6f82a6c860d5b54ebee0807d4f1a1d578055e1607
           install_args: rust just
           cache: false
+      - name: Check tool locks for every host OS
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
+        shell: bash
+        run: just tool-locks
       - name: Compile the workspace and check the toolchain pins
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
         shell: bash

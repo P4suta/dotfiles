@@ -2306,6 +2306,7 @@ url_api = "https://api.github.com/repos/PowerShell/PowerShell/releases/assets/63
 version = "2.21.5"
 backend = "pypi:ansible-core"
 specifiers = ["2.21.5"]
+uv = { path = ".mise/locks/pypi-ansible-core/2.21.5", digest = "sha256:f3bed688613ffd03dfaf21e24cd36706f89297120d0b4ed8534cd1c843042011" }
 
 [[tools.python]]
 version = "3.14.8"
