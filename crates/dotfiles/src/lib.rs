@@ -33,7 +33,7 @@ pub use rules::{
     hook_failure_rules, hook_rules, host_setup_rules, hosts_rules, issue_guard_rules, legacy_rules,
     path_conversion_rules, ready_push_rules, repository_rules, shape_rules, shell_syntax_rules,
     shell_write_rules, signing_rules, skill_rules, source_sync_rules, start_health_rules,
-    timeout_rules,
+    tailscale_rules, timeout_rules,
 };
 #[cfg(windows)]
 pub mod windows;
