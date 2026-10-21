@@ -37,6 +37,8 @@ pub mod contrast_rules;
 pub mod cycle_rules;
 pub mod directive_rules;
 pub mod disk_scan_rules;
+pub mod doppler_migration_rules;
+pub mod doppler_organization_rules;
 pub mod env_expansion_rules;
 pub mod eol_rules;
 pub mod freshness_rules;

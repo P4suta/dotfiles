@@ -1,9 +1,10 @@
 {
-  "revision": "f3aa60e24297fec11e0655802eea8d8110cb4b9b0fc83e2c47dcf53267712ab6",
+  "revision": "627610c008f1803476cfd15a9c9b530bf0e9867ccd3f914b71c41c973426e2b3",
   "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Keep installer signing, notarization completion, and accepted-ticket stapling inputs within their required stages.\nPreserve the candidate and receipt when retrying completion.",
   "evidence": [
-    "home/dot_agents/skills/macos-pkg/SKILL.md"
+    "home/dot_agents/skills/macos-pkg/SKILL.md",
+    "docs/adr/purpose-scoped-doppler-workload-identities.md"
   ],
   "revisit": null
 }

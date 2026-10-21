@@ -1,9 +1,10 @@
 {
-  "revision": "100445b8b6e7c4d2ffe3dfcf9af6fe6c24340afda99d04b2aadc4284c0602594",
+  "revision": "53b34d28aac769829d53e0834de123c489faad5f37f7bceeb385392e079c82b2",
   "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Document Hex workload identity, package ownership, per-package token scope, and client compatibility.\nRetire superseded static keys while preserving the approved package and publication boundaries.",
   "evidence": [
-    "home/dot_agents/skills/registry-publishing/SKILL.md"
+    "home/dot_agents/skills/registry-publishing/SKILL.md",
+    "docs/adr/purpose-scoped-doppler-workload-identities.md"
   ],
   "revisit": null
 }

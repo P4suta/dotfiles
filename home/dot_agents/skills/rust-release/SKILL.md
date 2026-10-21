@@ -21,8 +21,13 @@ When changing an automatic release train, move `release` into an explicitly appr
 Prefer [crates.io trusted publishing](https://crates.io/docs/trusted-publishing) with exact repository, workflow, and environment bindings.
 Grant `id-token: write` only to the job that authenticates, and keep no long-lived registry token as a hidden fallback.
 First confirm trusted-publisher availability for each package and its registration state.
+Use `doppler` and its credential lifecycle reference for any stored bootstrap input and retirement.
+Treat an expired or revoked registry token as a retirement candidate instead of copying it into a new config.
+Remove obsolete token selection and fallback branches when the existing package uses trusted publishing.
+Leave an unpublished package or missing trusted-publisher registration unconfigured until the owner approves its setup.
 A first publication may need its own authorized narrow bootstrap credential.
 Never run that bootstrap only to test setup.
+After its authorized first publication and verified trusted-publisher setup, retire the bootstrap input and its GitHub mirror.
 Keep bootstrap input owner-managed, short-lived, and out of logs and repository state.
 
 Build and verify candidate `.crate` archives before registry authentication.

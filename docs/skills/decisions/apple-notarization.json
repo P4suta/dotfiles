@@ -1,9 +1,10 @@
 {
-  "revision": "b9cb094cfae4de3c7adbef190eb0ced8e7d64f04f1b191f00c5b2580e6b40e13",
+  "revision": "970db2c3b90a883feffdf70859454e7e3be7d0174e3754867b90d85a0939e8ba",
   "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Resume the preserved signed candidate with notarization-only inputs and finish accepted-ticket checks without refetching keys.\nTreat publication as a separate authorized operation.",
   "evidence": [
-    "home/dot_agents/skills/apple-notarization/SKILL.md"
+    "home/dot_agents/skills/apple-notarization/SKILL.md",
+    "docs/adr/purpose-scoped-doppler-workload-identities.md"
   ],
   "revisit": null
 }

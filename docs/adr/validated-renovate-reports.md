@@ -23,11 +23,18 @@ An empty string is a selected value.
 This decision is independent of the dependency manager.
 Keep the existing exact hosted-runner, matrix-input, and verified-counterpart contracts.
 
+Keep full-report inspection strict for every lookup.
+For a push with a verified source scope, require lookup evidence for changed manifests and affected inherited Cargo providers.
+Unknown source scope requires every lookup.
+Structural validation and repository error checks cover the complete report before source selection.
+An unrelated failed lookup supplies no freshness evidence and cannot hide a malformed record or a repository error.
+
 Report failures identify the manager, manifest, dependency, and a recognized reason without copying warning messages, HTTP payloads, or credentials.
 `dotguard renovate inspect <report.json>` checks saved lookup evidence without Docker and lists selected update candidates.
 Inspection does not establish freshness for a push, which still requires the offered-tree snapshot and source attribution.
 
 Kani verifies the production severity and lookup decisions over their complete scalar input domains, together with the existing freshness decision.
+It also verifies source selection for every combination of known scope, changed manifest, and affected inherited provider.
 Registered counterexamples must fail on assertions against those same functions.
 The JSON adapter depends on serde decoding and Renovate's field meanings, which the scalar Kani contract does not model.
 Typed validation tests, a minimized report from Renovate 44.52.0, native guard integration tests, and a committed fuzz corpus cover that boundary.

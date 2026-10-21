@@ -85,6 +85,12 @@ adapters: trust
 secrets: trust
     mise x -- cargo xtask check-secrets
 
+doppler-migrate *args: trust
+    mise x -- cargo xtask doppler-migrate {{args}}
+
+doppler-organize *args: trust
+    mise x -- cargo xtask doppler-organize {{args}}
+
 gen: trust
     mise x -- cargo xtask gen
 

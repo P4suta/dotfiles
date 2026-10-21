@@ -28,7 +28,9 @@ Receive only the owner's confirmation of the save.
 Never choose **Reset** to inspect the existing code.
 A reset breaks other automation and needs explicit authorization.
 
-Map the four values to the repository's designated environment secrets.
+Keep the four values in the canonical Windows-signing Doppler config and expose field references through each repository's signing config.
+Map those outputs to the signing tool's inputs only in its credential-bearing job.
+Use a GitHub environment secret only when the chosen delivery method still requires one.
 
 See the [signing credential guide](https://www.ssl.com/guide/esigner-signing-credential-guide/), [viewing or resetting an eSigner QR code](https://www.ssl.com/how-to/view-reset-esigner-qr-code-reset-pin/), [automated signing guide](https://www.ssl.com/how-to/automate-esigner-ev-code-signing/), and [SSL.com's GitHub signing action](https://github.com/SSLcom/esigner-codesign).
 

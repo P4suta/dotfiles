@@ -255,14 +255,28 @@ pub fn parse_shellcheck(output: &str) -> Vec<(String, String)> {
 /// Paths that taplo names in its error records, with the rule each record breaks.
 #[must_use]
 pub fn parse_taplo(root: &Path, output: &str, rule: &str) -> Vec<(String, String)> {
-    output
+    let mut paths: Vec<_> = output
         .lines()
         .filter_map(|line| {
-            let (_, quoted) = line.split_once("path=\"")?;
-            let path = quoted.split('"').next()?;
+            let path = line
+                .split_once("path=\"")
+                .and_then(|(_, quoted)| quoted.split('"').next())
+                .or_else(|| {
+                    let location = line.trim_start().strip_prefix("┌─ ")?;
+                    let (location, column) = location.rsplit_once(':')?;
+                    let (path, row) = location.rsplit_once(':')?;
+                    (!row.is_empty()
+                        && !column.is_empty()
+                        && row.bytes().all(|byte| byte.is_ascii_digit())
+                        && column.bytes().all(|byte| byte.is_ascii_digit()))
+                    .then_some(path)
+                })?;
             Some((relative(root, path), rule.to_owned()))
         })
-        .collect()
+        .collect();
+    paths.sort_unstable();
+    paths.dedup();
+    paths
 }
 
 /// Paths that `rustfmt --check` would reformat, once each.
@@ -956,6 +970,38 @@ exit 1
                 ("format.toml".into(), "format".into())
             ])
         );
+    }
+
+    #[test]
+    fn taplo_syntax_locations_keep_native_paths_and_ignore_summary_lines() {
+        for root in ["/repo", "C:/repo", r"C:\repo"] {
+            assert_eq!(
+                parse_taplo(
+                    Path::new(root),
+                    &format!(
+                        "error: invalid TOML\n  ┌─ {root}/a/b.toml:12:3\n  ┌─ {root}/a/b.toml:13:4\nERROR operation failed\n"
+                    ),
+                    "syntax"
+                ),
+                [("a/b.toml".to_owned(), "syntax".to_owned())]
+            );
+        }
+        assert_eq!(
+            parse_taplo(Path::new("/repo"), "ERROR operation failed\n", "syntax"),
+            Vec::<(String, String)>::new()
+        );
+        for location in [
+            "a.toml",
+            "a.toml::1",
+            "a.toml:1:",
+            "a.toml:row:1",
+            "a.toml:1:column",
+        ] {
+            assert_eq!(
+                parse_taplo(Path::new("/repo"), &format!("  ┌─ {location}\n"), "syntax"),
+                Vec::<(String, String)>::new()
+            );
+        }
     }
 
     #[test]

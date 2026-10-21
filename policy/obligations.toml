@@ -6,6 +6,20 @@
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/doppler_migration_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_copy_from_an_unverified_workplace() {
+    assert!(production::may_copy(production::Mode::Apply, false, true, true));
+}
+#[kani::proof]
+fn reject_read_only_planning_mutating_the_destination() {
+    assert!(production::may_copy(production::Mode::ReadOnly, true, true, true));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/bounded_rules.rs"
 probes = '''
 #[kani::proof]
@@ -40,6 +54,31 @@ fn reject_forwarding_back_to_dotfiles() {
 #[kani::unwind(8)]
 fn reject_discarding_an_unrelated_notifier() {
     assert!(!production::model::contract([2, 0, 0, 0], 1, true).0);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/doppler_organization_rules.rs"
+probes = '''
+use production::{Change, Cutover, Evidence, Mode, Scope, Verdict, decide};
+fn ready() -> Evidence {
+    Evidence { scope: Scope { workplace: true, repository: true }, capacity: true,
+        cutover: Cutover { destination: true, consumer: true }, unused: true }
+}
+#[kani::proof]
+fn reject_read_only_organization_writing() {
+    assert!(decide(Mode::ReadOnly, Change::Prepare, ready()) == Verdict::Allowed);
+}
+#[kani::proof]
+fn reject_retirement_before_consumer_verification() {
+    assert!(decide(Mode::Apply, Change::RetireConsumer, Evidence {
+        cutover: Cutover { destination: true, consumer: false }, ..ready()
+    }) == Verdict::Allowed);
+}
+#[kani::proof]
+fn reject_removing_a_used_config() {
+    assert!(decide(Mode::Apply, Change::RemoveUnused, Evidence { unused: false, ..ready() }) == Verdict::Allowed);
 }
 '''
 
@@ -526,6 +565,18 @@ fn reject_hiding_a_lookup_warning_with_verified_coverage() {
         selection: production::VersionSelection::Present,
         updates: false, warnings: true, covered: true,
     }) == production::LookupEvidence::Verified);
+}
+#[kani::proof]
+fn reject_unknown_scope_skipping_lookup() {
+    assert!(production::lookup_need(false, false, false) == production::Need::NotNeeded);
+}
+#[kani::proof]
+fn reject_a_changed_manifest_skipping_lookup() {
+    assert!(production::lookup_need(true, true, false) == production::Need::NotNeeded);
+}
+#[kani::proof]
+fn reject_an_inherited_dependency_skipping_lookup() {
+    assert!(production::lookup_need(true, false, true) == production::Need::NotNeeded);
 }
 '''
 
