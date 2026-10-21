@@ -5,6 +5,16 @@ pub enum Need {
     NotNeeded,
 }
 
+/// The lookup evidence needed by a manifest and its inherited dependencies.
+#[must_use]
+pub const fn lookup_need(known_scope: bool, changed_manifest: bool, inherited: bool) -> Need {
+    if !known_scope || changed_manifest || inherited {
+        Need::Required
+    } else {
+        Need::NotNeeded
+    }
+}
+
 /// The verified facts of one offered revision's dependency check.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Facts {
@@ -114,6 +124,32 @@ pub fn verdict(facts: Facts) -> Verdict {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_scope(known_scope: bool, changed_manifest: bool, inherited: bool) {
+        let result = lookup_need(known_scope, changed_manifest, inherited);
+        if !known_scope {
+            assert_eq!(result, Need::Required);
+        }
+        if changed_manifest || inherited {
+            assert_eq!(result, Need::Required);
+        }
+        if result == Need::NotNeeded {
+            assert!(known_scope && !changed_manifest && !inherited);
+        }
+        if known_scope && !changed_manifest && !inherited {
+            assert_eq!(result, Need::NotNeeded);
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn lookup_scope_keeps_unknown_changed_and_inherited_sources_required() {
+        let (known_scope, changed_manifest, inherited): (bool, bool, bool) = kani::any();
+        spec_scope(known_scope, changed_manifest, inherited);
+        let result = lookup_need(known_scope, changed_manifest, inherited);
+        kani::cover!(result == Need::Required);
+        kani::cover!(result == Need::NotNeeded);
+    }
 
     pub fn spec_lookup(facts: LookupFacts) {
         let result = lookup_evidence(facts);
@@ -252,6 +288,13 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::ProblemSeverity;
+
+    #[test]
+    fn every_source_scope_preserves_required_lookups() {
+        for [known_scope, changed_manifest, inherited] in crate::domain::flags() {
+            super::proofs::spec_scope(known_scope, changed_manifest, inherited);
+        }
+    }
 
     #[test]
     fn problem_severity_accepts_only_the_fixed_level_codes() {

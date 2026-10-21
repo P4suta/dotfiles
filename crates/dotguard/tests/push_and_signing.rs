@@ -11,11 +11,12 @@ mod fixture_git;
 const ZERO: &str = "0000000000000000000000000000000000000000";
 const RENOVATE_MANIFEST: &str = "[dependencies]\nfixture = \"1.0.1\"\n";
 const RENOVATE_REMOTE: &str = "https://example.invalid/fixture/repository.git";
-const MISE_BACKENDS: [(&str, &str, &str, &str); 4] = [
+const MISE_BACKENDS: [(&str, &str, &str, &str); 5] = [
     ("nu", "github-releases", "nushell/nushell", "0.116.0"),
     ("conda:zsh", "conda", "conda-forge/zsh", "5.9"),
     ("pypi:ansible-core", "pypi", "ansible-core", "2.21.4"),
     ("cargo-deny", "crate", "cargo-deny", "0.20.2"),
+    ("dotnet", "dotnet-version", "dotnet-sdk", "10.0.300"),
 ];
 const RENOVATE_MISE_MANIFEST: &str = "[tools]\nnu = \"0.116.0\"\n";
 const MISE_CI_EXPRESSION: &str = "${{ steps.mise.outputs.version }}";
@@ -201,7 +202,17 @@ fn renovate_fixture(name: &str) -> (Repository, String, String) {
     let literal_file = repository.path().join(MISE_LITERAL_FILE);
     std::fs::create_dir_all(literal_file.parent().unwrap()).unwrap();
     std::fs::write(literal_file, MISE_LITERAL_MANIFEST).unwrap();
-    repository.git(&["add", "Cargo.toml", "mise.toml", MISE_LITERAL_FILE]);
+    let workflow = ".github/workflows/ci.yml";
+    let path = repository.path().join(workflow);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, "name: CI\non: [push]\njobs: {}\n").unwrap();
+    repository.git(&[
+        "add",
+        "Cargo.toml",
+        "mise.toml",
+        MISE_LITERAL_FILE,
+        workflow,
+    ]);
     let tree = repository.git(&["write-tree"]);
     let offered = repository.git(&["commit-tree", &tree, "-p", &base, "-m", "dependency"]);
     repository.git(&["update-ref", "HEAD", &offered]);
@@ -1425,7 +1436,7 @@ fn renovate_refuses_other_ci_aliases_and_missing_ambiguous_or_failed_literal_sou
     for manager in ["regex", "github-actions"] {
         let mut wrong = mise_ci_report();
         wrong["repositories"]["local"]["packageFiles"][manager][0]["packageFile"] =
-            "other/file.toml".into();
+            "mise.toml".into();
         reports.push(("wrong-file", wrong));
     }
     let mut wrong_manager = mise_ci_report();
@@ -1442,6 +1453,51 @@ fn renovate_refuses_other_ci_aliases_and_missing_ambiguous_or_failed_literal_sou
             "{name}"
         );
     }
+}
+
+#[test]
+fn renovate_requires_lookup_evidence_only_for_the_known_changed_sources() {
+    let (repository, base, offered) = renovate_fixture("renovate-lookup-scope");
+    let mut report = backend_report(MISE_BACKENDS[0]);
+    report["repositories"]["local"]["packageFiles"]["nuget"] = serde_json::json!([{
+        "packageFile": "Directory.Build.props", "deps": [{
+            "depName": "Microsoft.CodeAnalysis.BannedApiAnalyzers",
+            "currentValue": "$(AnalyzerVersion)", "skipReason": "invalid-version",
+            "updates": []
+        }]
+    }]);
+    let output = report_gate(&repository, &base, &offered, &report);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let file = repository.scope.join("fixture-report.json");
+    let manual = repository.dotguard(&["renovate", "inspect", file.to_str().unwrap()], "", &[]);
+    assert_eq!(refusal(&manual).rule, "push.evidence");
+
+    let mut required = report.clone();
+    required["repositories"]["local"]["packageFiles"]["nuget"][0]["packageFile"] =
+        "mise.toml".into();
+    assert_eq!(
+        refusal(&report_gate(&repository, &base, &offered, &required)).rule,
+        "push.evidence"
+    );
+
+    let mut malformed = report.clone();
+    malformed["repositories"]["local"]["packageFiles"]["nuget"][0]["deps"][0]["currentValue"] =
+        123.into();
+    assert_eq!(
+        refusal(&report_gate(&repository, &base, &offered, &malformed)).rule,
+        "push.evidence"
+    );
+
+    report["problems"] = serde_json::json!([{"level": 50}]);
+    assert_eq!(
+        refusal(&report_gate(&repository, &base, &offered, &report)).rule,
+        "push.evidence"
+    );
 }
 
 #[test]

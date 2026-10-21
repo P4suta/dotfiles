@@ -548,6 +548,18 @@ fn reject_hiding_a_lookup_warning_with_verified_coverage() {
         updates: false, warnings: true, covered: true,
     }) == production::LookupEvidence::Verified);
 }
+#[kani::proof]
+fn reject_unknown_scope_skipping_lookup() {
+    assert!(production::lookup_need(false, false, false) == production::Need::NotNeeded);
+}
+#[kani::proof]
+fn reject_a_changed_manifest_skipping_lookup() {
+    assert!(production::lookup_need(true, true, false) == production::Need::NotNeeded);
+}
+#[kani::proof]
+fn reject_an_inherited_dependency_skipping_lookup() {
+    assert!(production::lookup_need(true, false, true) == production::Need::NotNeeded);
+}
 '''
 
 [[obligation]]
