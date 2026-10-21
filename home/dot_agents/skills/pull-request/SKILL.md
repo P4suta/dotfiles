@@ -46,7 +46,10 @@ Local creation always starts as a draft, and moving it to review needs separate 
 The workflow policy caps how many PRs one person may keep open.
 `create` refuses a new PR once that person reaches the cap, so add the work to the PR it names.
 `ready` refuses until every head check passes, so run it only when no scoped work remains.
-Open dependent work with `pr-workflow stack create`, because `create` refuses a branch sharing commits or paths with another open PR.
+Open dependent work with `pr-workflow stack create`.
+`create` refuses shared commits and merges overlapping heads in memory using their merge base.
+A clean merge permits an independent PR.
+A conflict names the PR to stack on.
 Restack with `pr-workflow stack sync` or `stack rebase`.
 Never use a manual rebase or force push.
 Merge with `pr-workflow merge` or `stack merge`.

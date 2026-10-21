@@ -1588,7 +1588,15 @@ fn reject_readying_without_the_pause_lines() {
 }
 #[kani::proof]
 fn reject_opening_a_dependent_branch_independently() {
-    assert!(production::dependency(true, false, true).is_none());
+    assert!(production::dependency(true, production::PathMerge::Clean).is_none());
+}
+#[kani::proof]
+fn reject_opening_conflicting_heads_independently() {
+    assert!(production::dependency(false, production::PathMerge::Conflict).is_none());
+}
+#[kani::proof]
+fn reject_requiring_a_stack_for_a_clean_merge() {
+    assert!(production::dependency(false, production::PathMerge::Clean).is_some());
 }
 '''
 

@@ -98,3 +98,4 @@
 | [2026-10-21 Deliver purpose-scoped credentials through workload identities](purpose-scoped-doppler-workload-identities.md) | accepted |  |
 | [2026-10-21 Run unbounded verifiers in limited containers](run-unbounded-verifiers-in-limited-containers.md) | proposed |  |
 | [2026-10-21 Sign through the password manager agent](sign-through-the-password-manager-agent.md) | accepted |  |
+| [2026-10-22 Decide PR independence from merge results](decide-pr-independence-from-merge-results.md) | proposed |  |

@@ -4297,7 +4297,7 @@ fn scoped_git(directory: &std::path::Path, scope: &std::path::Path, arguments: &
     String::from_utf8(output.stdout).unwrap().trim().to_owned()
 }
 
-/// A checkout with an `origin` holding `main` and the branches `a`, `feature` on top of `a`, `solo` touching what `a` touches, and `clean`.
+/// A checkout with shared commits, conflicting edits, clean overlapping edits, and disjoint paths.
 fn branches(scope: &std::path::Path) -> Result<PathBuf> {
     fs::write(
         scope.join("gitconfig"),
@@ -4306,9 +4306,9 @@ fn branches(scope: &std::path::Path) -> Result<PathBuf> {
     scoped_git(scope, scope, &["init", "-q", "--bare", "remote.git"]);
     scoped_git(scope, scope, &["init", "-q", "-b", "main", "checkout"]);
     let checkout = scope.join("checkout");
-    let commit = |branch: &str, from: &str, file: &str| -> Result<()> {
+    let commit = |branch: &str, from: &str, file: &str, contents: &str| -> Result<()> {
         scoped_git(&checkout, scope, &["checkout", "-q", "-B", branch, from]);
-        fs::write(checkout.join(file), branch)?;
+        fs::write(checkout.join(file), contents)?;
         scoped_git(&checkout, scope, &["add", file]);
         scoped_git(&checkout, scope, &["commit", "-q", "-m", branch]);
         scoped_git(&checkout, scope, &["push", "-q", "origin", branch]);
@@ -4320,18 +4320,74 @@ fn branches(scope: &std::path::Path) -> Result<PathBuf> {
         &["remote", "add", "origin", "../remote.git"],
     );
     fs::write(checkout.join("README"), "base")?;
-    scoped_git(&checkout, scope, &["add", "README"]);
+    fs::write(checkout.join("shared.txt"), "start\n1\n2\n3\n4\n5\nend\n")?;
+    scoped_git(&checkout, scope, &["add", "README", "shared.txt"]);
     scoped_git(&checkout, scope, &["commit", "-q", "-m", "base"]);
     scoped_git(&checkout, scope, &["push", "-q", "origin", "main"]);
-    commit("a", "main", "shared.txt")?;
-    commit("feature", "a", "feature.txt")?;
-    commit("solo", "main", "shared.txt")?;
-    commit("clean", "main", "clean.txt")?;
+    commit("a", "main", "shared.txt", "a\n1\n2\n3\n4\n5\nend\n")?;
+    commit("feature", "a", "feature.txt", "feature")?;
+    commit("solo", "main", "shared.txt", "solo\n1\n2\n3\n4\n5\nend\n")?;
+    commit(
+        "compatible",
+        "main",
+        "shared.txt",
+        "start\n1\n2\n3\n4\n5\ncompatible\n",
+    )?;
+    commit("identical", "main", "shared.txt", "a\n1\n2\n3\n4\n5\nend\n")?;
+    commit("clean", "main", "clean.txt", "clean")?;
     Ok(checkout)
 }
 
+fn create_among_open_prs(
+    fixture: &Fixture,
+    checkout: &std::path::Path,
+    head: &str,
+    open: &str,
+) -> Result<Output> {
+    let mut command = fixture.personal_command("create")?;
+    let (packet, _) = fixture.assessment(checkout, "P4suta/project", "origin/main", head)?;
+    fs::write(
+        &fixture.body,
+        fixture.assessed_body(&fs::read_to_string(&fixture.body)?),
+    )?;
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("GIT_") {
+            command.env_remove(name);
+        }
+    }
+    Ok(command
+        .current_dir(checkout)
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            fixture.directory.path().join("gitconfig"),
+        )
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("PWF_FIXTURE_FETCH_CHECKOUT", checkout)
+        .env(
+            "PWF_FIXTURE_FETCH_BARE",
+            fixture.directory.path().join("remote.git"),
+        )
+        .env("GH_FIXTURE_HEAD", git(checkout, &["rev-parse", head])?)
+        .env(
+            "GH_FIXTURE_BASE",
+            git(checkout, &["rev-parse", "origin/main"])?,
+        )
+        .env("GH_FIXTURE_ASSESSMENT", serde_json::to_string(&packet)?)
+        .env("GH_FIXTURE_LIST", open)
+        .args([
+            "--issue",
+            "23",
+            "--title",
+            "fix: preserve edits",
+            "--body-file",
+        ])
+        .arg(&fixture.body)
+        .args(["--head", head, "--base", "main"])
+        .output()?)
+}
+
 #[test]
-fn a_branch_sharing_work_with_an_open_pr_is_refused_with_the_stack_command() -> Result<()> {
+fn overlapping_prs_require_a_clean_merge_without_changing_the_checkout() -> Result<()> {
     let closed = format!("{BODY}\nCloses #23.\n");
     let fixture = Fixture::new(&closed)?;
     let checkout = branches(fixture.directory.path())?;
@@ -4344,54 +4400,10 @@ fn a_branch_sharing_work_with_an_open_pr_is_refused_with_the_stack_command() -> 
             "https://github.com/P4suta/project.git",
         ],
     )?;
-    let create = |head: &str, extra: &[&str]| -> Result<Output> {
-        let mut command = fixture.personal_command("create")?;
-        let (packet, _) = fixture.assessment(&checkout, "P4suta/project", "origin/main", head)?;
-        fs::write(
-            &fixture.body,
-            fixture.assessed_body(&fs::read_to_string(&fixture.body)?),
-        )?;
-        for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("GIT_") {
-                command.env_remove(name);
-            }
-        }
-        Ok(command
-            .current_dir(&checkout)
-            .env(
-                "GIT_CONFIG_GLOBAL",
-                fixture.directory.path().join("gitconfig"),
-            )
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("PWF_FIXTURE_FETCH_CHECKOUT", &checkout)
-            .env(
-                "PWF_FIXTURE_FETCH_BARE",
-                fixture.directory.path().join("remote.git"),
-            )
-            .env("GH_FIXTURE_HEAD", git(&checkout, &["rev-parse", head])?)
-            .env(
-                "GH_FIXTURE_BASE",
-                git(&checkout, &["rev-parse", "origin/main"])?,
-            )
-            .env("GH_FIXTURE_ASSESSMENT", serde_json::to_string(&packet)?)
-            .env(
-                "GH_FIXTURE_LIST",
-                r#"[{"number":5,"headRefName":"a","baseRefName":"main"}]"#,
-            )
-            .args([
-                "--issue",
-                "23",
-                "--title",
-                "fix: preserve edits",
-                "--body-file",
-            ])
-            .arg(&fixture.body)
-            .args(["--head", head, "--base", "main"])
-            .args(extra)
-            .output()?)
-    };
+    let create = |head: &str, open: &str| create_among_open_prs(&fixture, &checkout, head, open);
+    let open = r#"[{"number":5,"headRefName":"a","baseRefName":"main"}]"#;
     let quoted = platform::refusal::command(&[fixture.body.display().to_string()]);
-    let record = refusal(&create("feature", &["--independent"])?);
+    let record = refusal(&create("feature", open)?);
     assert_eq!(record["rule"], "pr.dependency");
     assert_eq!(
         record["next"],
@@ -4399,17 +4411,76 @@ fn a_branch_sharing_work_with_an_open_pr_is_refused_with_the_stack_command() -> 
             "pr-workflow stack create --repo P4suta/project --issue 23 --title 'fix: preserve edits' --body-file {quoted} --head feature --base a"
         )
     );
-    assert_eq!(refusal(&create("solo", &[])?)["rule"], "pr.dependency");
+    let record = refusal(&create("solo", open)?);
+    assert_eq!(record["rule"], "pr.dependency");
+    assert!(
+        record["cause"]
+            .as_str()
+            .unwrap()
+            .contains("conflicts with #5")
+    );
+    assert!(
+        record["next"]
+            .as_str()
+            .unwrap()
+            .ends_with("--head solo --base a")
+    );
     assert!(!fixture.log()?.contains("\ncreate\n"));
-    for (head, extra) in [("solo", &["--independent"][..]), ("clean", &[][..])] {
-        let output = create(head, extra)?;
+    fs::write(checkout.join("staged.txt"), "staged")?;
+    scoped_git(&checkout, fixture.directory.path(), &["add", "staged.txt"]);
+    fs::write(checkout.join("shared.txt"), "unstaged")?;
+    fs::write(checkout.join("untracked.txt"), "untracked")?;
+    let index = fs::read(checkout.join(".git/index"))?;
+    let head_before = scoped_git(&checkout, fixture.directory.path(), &["rev-parse", "HEAD"]);
+    for head in ["compatible", "identical", "clean"] {
+        let output = create(head, open)?;
         assert!(
             output.status.success(),
             "{head}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    assert_eq!(fixture.log()?.matches("\ncreate\n").count(), 2);
+    assert_eq!(fixture.log()?.matches("\ncreate\n").count(), 3);
+    let two = r#"[{"number":6,"headRefName":"compatible","baseRefName":"main"},{"number":5,"headRefName":"a","baseRefName":"main"}]"#;
+    let record = refusal(&create("solo", two)?);
+    assert!(
+        record["cause"]
+            .as_str()
+            .unwrap()
+            .contains("conflicts with #5")
+    );
+    scoped_git(
+        &checkout,
+        fixture.directory.path(),
+        &["config", "merge.renames", "invalid"],
+    );
+    let output = create("compatible", open)?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("merge-tree"));
+    assert_eq!(fixture.log()?.matches("\ncreate\n").count(), 3);
+    assert_eq!(fs::read(checkout.join(".git/index"))?, index);
+    assert_eq!(
+        scoped_git(&checkout, fixture.directory.path(), &["rev-parse", "HEAD"]),
+        head_before
+    );
+    assert_eq!(fs::read_to_string(checkout.join("shared.txt"))?, "unstaged");
+    assert_eq!(fs::read_to_string(checkout.join("staged.txt"))?, "staged");
+    assert_eq!(
+        fs::read_to_string(checkout.join("untracked.txt"))?,
+        "untracked"
+    );
+    Ok(())
+}
+
+#[test]
+fn create_has_no_independence_override() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let output = fixture.command("create")?.arg("--independent").output()?;
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("unexpected argument '--independent'")
+    );
+    assert!(!fixture.log.exists());
     Ok(())
 }
 

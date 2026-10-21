@@ -372,25 +372,28 @@ pub fn merge_step(state: MergeState, stacked: bool, paused: bool) -> Step {
     }
 }
 
-/// What a new branch shares with another open PR's branch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PathMerge {
+    Disjoint,
+    Clean,
+    Conflict,
+}
+
+/// Why a new branch must open on another open PR's branch.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Dependency {
     Commits,
-    Paths,
+    Conflict,
 }
 
 /// A branch that shares commits with another open PR opens only stacked on that PR.
-/// A branch that shares touched paths with another open PR also opens stacked on it, unless the branch carries a declaration of independence.
+/// Overlapping paths require a stack only when merging the two heads conflicts.
 #[must_use]
-pub fn dependency(
-    shared_commits: bool,
-    shared_paths: bool,
-    independent: bool,
-) -> Option<Dependency> {
+pub fn dependency(shared_commits: bool, merge: PathMerge) -> Option<Dependency> {
     if shared_commits {
         Some(Dependency::Commits)
-    } else if shared_paths && !independent {
-        Some(Dependency::Paths)
+    } else if merge == PathMerge::Conflict {
+        Some(Dependency::Conflict)
     } else {
         None
     }
@@ -634,12 +637,19 @@ mod proofs {
         assert_eq!(kind == Exclusion::None, !first);
         assert_eq!(kind == Exclusion::Owner, first && !second);
         assert_eq!(kind == Exclusion::Pause, first && second);
+        let merge = if !second {
+            PathMerge::Disjoint
+        } else if third {
+            PathMerge::Clean
+        } else {
+            PathMerge::Conflict
+        };
         assert_eq!(
-            dependency(first, second, third),
+            dependency(first, merge),
             if first {
                 Some(Dependency::Commits)
             } else if second && !third {
-                Some(Dependency::Paths)
+                Some(Dependency::Conflict)
             } else {
                 None
             }
@@ -754,6 +764,8 @@ mod proofs {
         kani::cover!(checks == HeadChecks::Success);
         kani::cover!((checks == HeadChecks::Pending) & (failed == 0));
         kani::cover!(!api_quota_available(remaining, reserve) & (reserve > 0));
+        kani::cover!(dependency(false, PathMerge::Clean).is_none());
+        kani::cover!(dependency(false, PathMerge::Conflict) == Some(Dependency::Conflict));
     }
 
     #[cfg(kani)]
