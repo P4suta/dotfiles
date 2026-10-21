@@ -10,6 +10,8 @@ const BACKUP: &str = ".dotfiles-native";
 const MARKER: &str = ".dotfiles-guard";
 const DOCKER_MARKER: &str = "/.dockerenv";
 const PODMAN_MARKER: &str = "/run/.containerenv";
+#[cfg(unix)]
+const ANY_EXECUTE: u32 = 0o111;
 
 fn current_route() -> Route {
     route(
@@ -107,6 +109,24 @@ fn publish(path: &Path, runtime: &Path, digest: &str) -> Result<()> {
     Ok(())
 }
 
+fn executable(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & ANY_EXECUTE != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
 fn discover(directory: &Path, policy: &Policy, found: &mut Vec<PathBuf>) -> Result<()> {
     let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
@@ -127,6 +147,7 @@ fn discover(directory: &Path, policy: &Policy, found: &mut Vec<PathBuf>) -> Resu
                     .iter()
                     .any(|tool| name == tool || cfg!(windows) && name == format!("{tool}.exe"))
             })
+            && executable(&path)
         {
             found.push(path);
         }
@@ -199,6 +220,36 @@ mod tests {
     fn protect(path: &Path, runtime: &Path, digest: &str) -> Result<()> {
         preserve_native(path)?;
         publish(path, runtime, digest)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discovery_skips_directory_and_dangling_symlinks_and_nonexecutables() -> Result<()> {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+
+        let scope = tempfile::tempdir()?;
+        let directory = scope.path().join("tools");
+        let package = scope.path().join("package");
+        fs::create_dir(&directory)?;
+        fs::create_dir(&package)?;
+        let tool = directory.join("cargo-kani");
+        let package_tool = package.join("kani");
+        for executable in [&tool, &package_tool] {
+            fs::write(executable, b"native")?;
+            fs::set_permissions(executable, fs::Permissions::from_mode(0o755))?;
+        }
+        let alias = directory.join("kani-driver");
+        symlink(&tool, &alias)?;
+        symlink(&package, directory.join("quint"))?;
+        symlink(scope.path().join("missing"), directory.join("cbmc"))?;
+        fs::write(directory.join("z3"), b"not executable")?;
+
+        let policy = Policy::parse(super::super::DEFAULT_POLICY)?;
+        let mut found = Vec::new();
+        discover(&directory, &policy, &mut found)?;
+        found.sort();
+        assert_eq!(found, vec![tool, alias]);
+        Ok(())
     }
 
     #[test]
