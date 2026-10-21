@@ -1,9 +1,10 @@
 {
-  "revision": "a5ac34e1e6937af5a004f8efe215fad8816453744c5411fff45d090a7912c2a2",
+  "revision": "d15935bccf9410bc181d7791721ff0ff9e1d53ec36d03973f36ffb6d52929afe",
   "outcome": "keep",
-  "reason": "The revision removes the AI-assisted qualifier from the signing approval pointer.",
+  "reason": "Separate Doppler workload authentication from SSL.com signing credentials and certificate enrollment.\nReuse valid signing identities and distinguish runtime failures from credential replacement.",
   "evidence": [
-    "home/dot_agents/skills/sslcom-esigner/SKILL.md"
+    "home/dot_agents/skills/sslcom-esigner/SKILL.md",
+    "docs/adr/purpose-scoped-doppler-workload-identities.md"
   ],
   "revisit": null
 }

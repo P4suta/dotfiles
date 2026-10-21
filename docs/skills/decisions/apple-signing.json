@@ -1,9 +1,10 @@
 {
-  "revision": "cbea6f0ec258936cc9cfda170f9412d729ec18216b9eb729177bbc4b9870c51e",
+  "revision": "31cd3c4435a4ea8d38c7581796a097a63aeebe557564f5db08250d1e74d081b7",
   "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Deliver certificate exports only to their signing stages and keep native identities local.\nKeep notarization completion free of signing exports and passwords.",
   "evidence": [
-    "home/dot_agents/skills/apple-signing/SKILL.md"
+    "home/dot_agents/skills/apple-signing/SKILL.md",
+    "docs/adr/purpose-scoped-doppler-workload-identities.md"
   ],
   "revisit": null
 }

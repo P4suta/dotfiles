@@ -1,9 +1,10 @@
 {
-  "revision": "cad5e4766d8afc92a89b335357201089bd6a1504e131d447e142eac4d7daece0",
+  "revision": "63a73b22a102974b982720eca974a62544608620bfcae0cde94a15b37784cb9d",
   "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Keep shared signing inputs canonical and separate retrieval authority, service operations, and public release authority.\nDeliver only the credentials each signing or completion stage needs.",
   "evidence": [
-    "home/dot_agents/skills/code-signing/SKILL.md"
+    "home/dot_agents/skills/code-signing/SKILL.md",
+    "docs/adr/purpose-scoped-doppler-workload-identities.md"
   ],
   "revisit": null
 }

@@ -82,6 +82,8 @@ See [Apple's command parser](https://github.com/apple-oss-distributions/Security
 ## Match the notarization key to the workflow
 
 The notarization API key authenticates submissions to Apple and differs from the signing key.
+Use a notarization-only protected config for a completion job that queries a preserved submission.
+It needs no certificate export, certificate password, or fresh signing.
 Read the workflow's `notarytool` arguments before choosing a key.
 
 - A team API key uses the `.p8` file, Key ID, and Issuer ID.
@@ -137,6 +139,7 @@ codesign --verify --verbose=2 -R='notarized' --check-notarization /path/to/binar
 Check the signing authority, Team ID, hardened runtime, and timestamp, not only the exit status.
 Apple staples no ticket to a standalone executable.
 Staple only a distributed `.app` bundle, disk image, or installer package.
+Staple and verify an accepted ticket without fetching a signing key or notarization API key.
 Verify archive checksums, build provenance, and the extracted binary's signature.
 
 See [Apple's native notarization test procedure](https://developer.apple.com/forums/thread/130560).

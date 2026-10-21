@@ -16,6 +16,9 @@ Select the identity by its exact public certificate selector instead of its posi
 A public `.cer` can't sign, so the owner's protected export must contain the matching private key.
 Validate the export with the native importer, certificate chain, and signing ACLs before claiming readiness.
 Keep durable exports in the owner's credential store.
+Use Doppler references for CI delivery of the required certificate export and password, and keep the native signing selector in the project's public configuration.
+An installer-signing job receives the Installer identity inputs it needs.
+A notarization completion job receives no signing export or signing password.
 
 Use a private temporary keychain, and restore the original keychain search list and order exactly.
 Pass passwords through native APIs or checked stdin instead of process arguments or verbose output.
@@ -23,3 +26,4 @@ Build final resources before signing, use hardened runtime and a trusted timesta
 Grant only the entitlements the product needs.
 Use `apple-notarization` after signing and `macos-pkg` for an installer.
 Report cleanup failures as unfinished work.
+A successful credential import or signature verification grants no new signing, notarization submission, or publication.

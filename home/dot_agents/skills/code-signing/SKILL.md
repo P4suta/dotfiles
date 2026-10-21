@@ -28,6 +28,7 @@ Read only the references the task needs:
 
 Use `apple-signing`, `apple-notarization`, and `macos-pkg` for Apple artifacts and `sslcom-esigner` for Windows.
 Use `release-evidence` for the digests, provenance, SBOM, and consumer verification that follow.
+Use the `doppler` credential lifecycle reference for canonical storage, purpose-scoped delivery, replacement, and retirement.
 Keep project secret names, credential references, signing identities, fingerprints, and evidence in the project's own records.
 
 ## Handle credentials through protected inputs
@@ -36,6 +37,9 @@ Keep private keys, certificate exports, passwords, and TOTP secrets in 1Password
 The owner manages 1Password, so never open the vault, list items, read fields, or inspect secret QR codes.
 Prepare named Doppler inputs, and let the owner enter the values through the protected UI.
 Use `doppler` for purpose-scoped CI delivery, and confirm readiness through names-only metadata.
+Keep one canonical credential per shared signing identity and reference only the fields each repository and stage needs.
+Separate Windows signing, macOS signing, and notarization completion credentials.
+Keep public publisher and certificate expectations with each project, and keep machine keychains local.
 Never paste secrets into chat, commits, reports, command arguments, or shell history.
 
 When a project still needs a GitHub secret, have the owner run `gh secret set NAME --repo OWNER/REPO --env ENVIRONMENT` with its hidden prompt.
@@ -50,6 +54,9 @@ Have the owner recover an existing eSigner enrollment secret instead of resettin
 
 Certificate revocation, credential resets, purchases, and public releases each need authorization for that action.
 Setting credentials or running a rehearsal grants no release.
+Metadata checks and authentication checks grant no signing rehearsal.
+State the intended service operation and its normal allowance before requesting an approval.
+An environment named `release` is an access boundary, never permission to publish.
 
 Build the final executable with its resources and icons before signing, because any later change breaks the signature.
 Use the repository's non-publishing release rehearsal when one exists, and tell the user it consumes the service's normal allowance.

@@ -10,6 +10,8 @@ description: >-
 Use `release-workflow`, `release-evidence`, and `approval-boundaries` for the common contract.
 Read the registry's current official documentation and the project's existing package identity, publishing environment, channel, and ownership.
 Prefer supported identity-based publishing.
+Use `doppler` and its credential lifecycle reference for protected inputs, shared references, OIDC delivery, and retirement.
+Check whether native identity has replaced an existing static token before preserving it during a migration.
 When the registry requires a token, use a narrow owner-managed Doppler credential.
 Never invent OIDC support or fall back to a broad static token without saying so.
 Build the candidate without publication credentials, then publish only its verified bytes through an explicitly approved stage.
@@ -25,7 +27,16 @@ Use supported digital attestations and verify their subject and publisher identi
 A Python package may keep its own build tool, but new surrounding automation belongs in Rust.
 
 For [Hex](https://hex.pm/docs/publish), check package metadata, included files, supported Erlang, Elixir, or Gleam dependencies, and the exact tarball checksum.
-When the registry requires key authentication, use a package-scoped key with only the publication permission.
+Prefer [Hex Workload Identity](https://hex.pm/docs/workload-identity) for GitHub Actions and bind the existing package to its exact repository, workflow filename, and protected environment.
+Check full package ownership, two-factor authentication, and the immutable repository binding before configuring it.
+Discover the OIDC audience from the production registry, exchange once per package with a fresh GitHub token, and keep the short-lived package token private.
+Use the client's required Bearer token format and never fall back to a saved API key.
+Check the pinned client's workload identity support before choosing its authentication path.
+Keep a required exchange adapter in maintained tooling, and pass the short-lived token only to its publishing process.
+Use clean client state and reject inherited static keys on the identity path.
+Public package identities need an existing package and can't publish its first release.
+Treat an authorized bootstrap as a separate operation with a narrow expiring key, then retire its stored copies after the identity path works.
+Keep staging and production endpoints distinct.
 
 For OCI, pin image inputs by digest, verify supported platforms, and bind provenance and the SBOM to the image or index digest.
 Verify actual registry content.

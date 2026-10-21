@@ -1,9 +1,10 @@
 {
-  "revision": "b66a70a5b795a20faeaae2361e7d1e68c9b7eeaea035590f64ca439560601247",
+  "revision": "13370c9e0ef857c84d6b5bc83902cc514997208e36f6fcf8e4dbb5c00ed53221",
   "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Use native crates.io trusted publishing and retire obsolete fixed-token fallbacks.\nKeep first publication and publisher registration within their own authorized setup.",
   "evidence": [
-    "home/dot_agents/skills/rust-release/SKILL.md"
+    "home/dot_agents/skills/rust-release/SKILL.md",
+    "docs/adr/purpose-scoped-doppler-workload-identities.md"
   ],
   "revisit": null
 }

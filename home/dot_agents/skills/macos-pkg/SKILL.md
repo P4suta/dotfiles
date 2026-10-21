@@ -10,6 +10,8 @@ description: >-
 Read the product's installation locations, privilege needs, supported macOS versions, architectures, and upgrade behavior.
 Use `apple-signing`, `apple-notarization`, and `release-evidence` for the surrounding stages.
 Sign the final executable with Developer ID Application before packaging and the installer with Developer ID Installer, each with its own protected credential inputs.
+Use `doppler` for purpose-scoped CI delivery, and keep the notarization key separate from both signing identities.
+Preserve accepted packages and their public receipts so a stapling retry needs no private signing material or new submission.
 
 Build with `pkgbuild` and `productbuild`, stable package identifiers, and a version matching the release candidate.
 Verify payload paths, ownership, permissions, symlinks, licenses, and bundled architectures before signing.

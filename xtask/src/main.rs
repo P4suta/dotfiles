@@ -23,6 +23,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Action {
+    DopplerMigrate(xtask::doppler_migration::Request),
+    DopplerOrganize(xtask::doppler_migration::organization::Request),
     CheckSecrets,
     CheckAdapters,
     AnsibleSyntaxCheck,
@@ -124,6 +126,8 @@ enum Action {
         output: PathBuf,
     },
     SkillPaths,
+    /// Prints skill content revisions without running maintenance analysis.
+    SkillRevisions,
     Install,
     InstallReviewGuard,
     InstallSkillOps,
@@ -436,6 +440,8 @@ fn run() -> Result<()> {
     let mut cli = Cli::parse();
     cli.root = xtask::canonical(&cli.root)?;
     match cli.command {
+        Action::DopplerMigrate(request) => xtask::doppler_migration::run(&request)?,
+        Action::DopplerOrganize(request) => xtask::doppler_migration::organization::run(&request)?,
         Action::PushCheck => push_check(&cli.root)?,
         Action::CheckSecrets => xtask::quality::secrets(&cli.root)?,
         Action::CheckAdapters => xtask::quality::adapters(&cli.root)?,
@@ -520,17 +526,32 @@ fn run() -> Result<()> {
         Action::Aliases => aliases(&cli.root)?,
         Action::FormatMetadata => format_metadata(&cli.root)?,
         Action::Snapshot { output } => export_checks(&cli.root, &output)?,
-        Action::SkillPaths => {
-            let mut output = std::io::stdout().lock();
-            for path in skill_source_paths(&cli.root)? {
-                output.write_all(path.to_str().context("non-UTF-8 skill source")?.as_bytes())?;
-                output.write_all(&[0])?;
-            }
-        }
+        Action::SkillPaths => print_skill_paths(&cli.root)?,
+        Action::SkillRevisions => print_skill_revisions(&cli.root)?,
         Action::Install => install_shared_skills(&cli.root)?,
         Action::InstallReviewGuard => install_review_guard(&cli.root)?,
         Action::InstallSkillOps => install_skill_ops(&cli.root)?,
     }
+    Ok(())
+}
+
+fn print_skill_paths(root: &Path) -> Result<()> {
+    let mut output = std::io::stdout().lock();
+    for path in skill_source_paths(root)? {
+        output.write_all(path.to_str().context("non-UTF-8 skill source")?.as_bytes())?;
+        output.write_all(&[0])?;
+    }
+    Ok(())
+}
+
+fn print_skill_revisions(root: &Path) -> Result<()> {
+    let revisions: std::collections::BTreeMap<_, _> =
+        skill_ops::catalog(&root.join("home/dot_agents/skills"))?
+            .skills
+            .into_iter()
+            .map(|(name, skill)| (name, skill.revision))
+            .collect();
+    println!("{}", serde_json::to_string_pretty(&revisions)?);
     Ok(())
 }
 
