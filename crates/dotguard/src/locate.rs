@@ -25,7 +25,7 @@ pub fn child(program: &str) -> Command {
 
 /// Doppler with the configured user scope and the hook environment.
 pub fn doppler() -> Option<Command> {
-    platform::tool::Tool::doppler_for_user().map(with_hook_environment)
+    platform::process::doppler_for_user().map(with_hook_environment)
 }
 
 fn with_hook_environment(mut c: Command) -> Command {

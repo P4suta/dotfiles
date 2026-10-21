@@ -506,9 +506,7 @@ fn current_renovate_report() -> serde_json::Value {
     }]}}}})
 }
 
-#[test]
-fn renovate_fetches_managed_credentials_without_exposing_them_or_overriding_the_environment() {
-    let (repository, base, offered) = renovate_fixture("renovate-managed-credentials");
+fn credential_tools_home(repository: &Repository) -> PathBuf {
     let home = repository.scope.join("configured home");
     let tools = home.join(".local/bin");
     std::fs::create_dir_all(&tools).unwrap();
@@ -522,6 +520,13 @@ fn renovate_fetches_managed_credentials_without_exposing_them_or_overriding_the_
         )
         .unwrap();
     }
+    home
+}
+
+#[test]
+fn renovate_fetches_managed_credentials_without_exposing_them_or_overriding_the_environment() {
+    let (repository, base, offered) = renovate_fixture("renovate-managed-credentials");
+    let home = credential_tools_home(&repository);
     let report = repository.scope.join("credential-report.json");
     std::fs::write(
         &report,

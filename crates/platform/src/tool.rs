@@ -499,16 +499,6 @@ impl Tool {
         self.program().into()
     }
 
-    /// A Doppler command with the user's absolute home as its authentication scope.
-    /// Returns `None` when the environment names no absolute home.
-    #[must_use]
-    pub fn doppler_for_user() -> Option<Command> {
-        let home = crate::home::home().filter(|home| home.is_absolute())?;
-        let mut command = Self::Doppler.command();
-        command.arg("--scope").arg(home);
-        Some(command)
-    }
-
     /// A chezmoi run that reads the invoking checkout.
     /// The default source names a bare repository whose head lags, so no installer may fall back to it.
     #[must_use]
