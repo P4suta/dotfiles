@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
+mod cutover;
 mod model;
 mod prepare;
 mod retire;
@@ -42,6 +43,12 @@ pub struct Request {
     source: Option<String>,
     #[arg(long)]
     source_config_dir: Option<PathBuf>,
+    #[arg(long)]
+    consumer: Option<String>,
+    #[arg(long)]
+    verification_run: Option<u64>,
+    #[arg(long)]
+    verification_attempt: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -52,6 +59,7 @@ enum Phase {
     Workflows,
     Verify,
     Cleanup,
+    RetireConsumer,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -243,7 +251,9 @@ fn read_report(request: &Request) -> Result<Report> {
             repository.directory.parent() == Some(request.checkouts.as_path()),
             "repository escaped the checkout scope"
         );
-        model::verify_repository(repository)?;
+        if request.phase != Phase::RetireConsumer {
+            model::verify_repository(repository)?;
+        }
     }
     Ok(report)
 }
@@ -252,15 +262,23 @@ fn read_report(request: &Request) -> Result<Report> {
 /// Refuses identity drift, unexpected resources, missing consumer evidence, and writes without `--apply`.
 pub fn run(request: &Request) -> Result<()> {
     ensure!(
+        request.phase == Phase::RetireConsumer
+            || request.consumer.is_none()
+                && request.verification_run.is_none()
+                && request.verification_attempt.is_none(),
+        "consumer verification arguments require --phase retire-consumer"
+    );
+    ensure!(
         request.checkouts.is_absolute() && request.report.is_absolute(),
         "absolute organization paths required"
     );
     ensure!(
-        request.apply
-            == matches!(
-                request.phase,
-                Phase::Prepare | Phase::StopSourceSyncs | Phase::Workflows | Phase::Cleanup
-            ),
+        request.phase == Phase::RetireConsumer
+            || request.apply
+                == matches!(
+                    request.phase,
+                    Phase::Prepare | Phase::StopSourceSyncs | Phase::Workflows | Phase::Cleanup
+                ),
         "mutation phases require --apply; read-only phases refuse it"
     );
     let session = Session::open(
@@ -286,6 +304,7 @@ pub fn run(request: &Request) -> Result<()> {
         Phase::Workflows => workflows::rewrite(&report)?,
         Phase::Verify => prepare::verify(&session, &report)?,
         Phase::Cleanup => retire::cleanup(request, &session, &report)?,
+        Phase::RetireConsumer => cutover::run(request, &session, &report)?,
     }
     Ok(())
 }
