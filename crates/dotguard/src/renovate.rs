@@ -28,6 +28,9 @@ pub mod report;
 
 const DEFAULT_UPDATE_TYPES: &str = "minor patch pin pinDigest";
 const LOOKUP_REQUEST_TIMEOUT: &str = "5s";
+const LOOKUP_TMPFS: &str = "/tmp:rw,nodev,nosuid,size=2g";
+const LOOKUP_CPUS: &str = "2";
+const LOOKUP_MEMORY: &str = "3g";
 const INSPECT_ARGUMENT_COUNT: usize = 2;
 
 /// The exit status of a subcommand the gate doesn't serve.
@@ -695,8 +698,14 @@ fn docker_plan(c: &RunConfig) -> (Vec<String>, Vec<&'static str>) {
         "--read-only".into(),
         "--cap-drop=ALL".into(),
         "--security-opt=no-new-privileges".into(),
+        "--cpus".into(),
+        LOOKUP_CPUS.into(),
+        "--memory".into(),
+        LOOKUP_MEMORY.into(),
+        "--memory-swap".into(),
+        LOOKUP_MEMORY.into(),
         "--tmpfs".into(),
-        "/tmp:rw,nodev,nosuid,size=512m".into(),
+        LOOKUP_TMPFS.into(),
         "--tmpfs".into(),
         format!(
             "{CONTAINERBASE}:rw,nodev,nosuid,size=64m,uid={},gid={},mode=0700",
@@ -1015,7 +1024,14 @@ mod run_tests {
         assert!(a.contains(&"--user 501:20".split(' ').next().unwrap().to_owned()));
         let user = a.iter().position(|x| x == "--user").map(|i| &a[i + 1]);
         assert_eq!(user, Some(&"501:20".to_owned()));
-        assert!(a.contains(&"/tmp:rw,nodev,nosuid,size=512m".to_owned()));
+        assert!(a.contains(&"/tmp:rw,nodev,nosuid,size=2g".to_owned()));
+        for (flag, value) in [("--cpus", "2"), ("--memory", "3g"), ("--memory-swap", "3g")] {
+            let actual = a
+                .iter()
+                .position(|arg| arg == flag)
+                .map(|i| a[i + 1].as_str());
+            assert_eq!(actual, Some(value), "{flag}");
+        }
         assert!(a.contains(
             &"/tmp/containerbase:rw,nodev,nosuid,size=64m,uid=501,gid=20,mode=0700".to_owned()
         ));
