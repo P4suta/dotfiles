@@ -38,7 +38,7 @@ fn run_copy(binary: &Path) -> Child {
 }
 
 #[test]
-fn a_running_binary_is_replaced_without_moving_its_public_path() {
+fn install_replaces_a_running_binary() {
     let scope = tempfile::tempdir().unwrap();
     let target = scope
         .path()
@@ -53,7 +53,7 @@ fn a_running_binary_is_replaced_without_moving_its_public_path() {
             "Windows let an installer overwrite a running image in place"
         );
     }
-    aside::replace(&staged, &target).unwrap();
+    aside::install(&staged, &target).unwrap();
     assert_eq!(fs::read(&target).unwrap(), b"replacement");
     let asides = |directory: &Path| {
         fs::read_dir(directory)
@@ -62,9 +62,9 @@ fn a_running_binary_is_replaced_without_moving_its_public_path() {
             .filter(|entry| entry.file_name().to_string_lossy().ends_with(".old"))
             .count()
     };
-    assert_eq!(asides(scope.path()), 0);
+    assert_eq!(asides(scope.path()), usize::from(cfg!(windows)));
     aside::sweep(&target);
-    assert_eq!(asides(scope.path()), 0);
+    assert_eq!(asides(scope.path()), usize::from(cfg!(windows)));
     assert!(running.try_wait().unwrap().is_none());
     running.stdin.take();
     assert!(running.wait().unwrap().success());
@@ -90,17 +90,31 @@ fn replacement_sweeps_old_asides_without_removing_the_installed_binary() {
 }
 
 #[test]
-fn a_failed_installation_restores_the_previous_binary() {
+fn a_failed_rename_leaves_the_previous_binary_in_place() {
     let scope = tempfile::tempdir().unwrap();
     let target = scope.path().join("tool");
     fs::write(&target, b"previous").unwrap();
     let missing = scope.path().join("never-staged");
-    assert!(aside::replace(&missing, &target).is_err());
+    let error = aside::replace(&missing, &target).unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<std::io::Error>().unwrap().kind(),
+        std::io::ErrorKind::NotFound
+    );
     assert_eq!(fs::read(&target).unwrap(), b"previous");
+    assert_eq!(fs::read_dir(scope.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn a_failed_staging_leaves_the_previous_binary_in_place() {
+    let scope = tempfile::tempdir().unwrap();
+    let target = scope.path().join("tool");
+    fs::write(&target, b"previous").unwrap();
+    let missing = scope.path().join("never-built");
     assert!(aside::install(&missing, &target).is_err());
     assert_eq!(fs::read(&target).unwrap(), b"previous");
 }
 
+#[cfg(not(windows))]
 #[test]
 fn readers_always_find_a_complete_binary_during_replacement() {
     use std::sync::{

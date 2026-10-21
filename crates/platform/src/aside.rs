@@ -1,4 +1,4 @@
-//! Replaces installed executables without removing their public paths.
+//! Replaces installed executables and recovers the previous binary when replacement fails.
 
 use crate::aside_rules::{aside_name, is_aside};
 use anyhow::{Context, Result};
@@ -55,15 +55,25 @@ pub fn restore(target: &Path, aside: Option<PathBuf>) {
     }
 }
 
-/// Renames a complete `staged` file over `target` without moving `target` away first.
-/// Filesystems that refuse replacement leave the previous binary in place.
+/// Renames a complete `staged` file into place at `target`.
+/// Windows moves the old binary aside first and restores it when replacement fails.
+/// Other systems rename directly over `target`.
 ///
 /// # Errors
 ///
-/// Returns an error when renaming fails, including a rename between filesystems.
+/// Returns an error when moving the old binary aside or renaming fails, including a rename between filesystems.
 pub fn replace(staged: &Path, target: &Path) -> Result<()> {
+    #[cfg(windows)]
+    let aside = move_aside(target)?;
+    #[cfg(not(windows))]
     sweep(target);
-    fs::rename(staged, target).with_context(|| format!("install {}", target.display()))
+    let result =
+        fs::rename(staged, target).with_context(|| format!("install {}", target.display()));
+    #[cfg(windows)]
+    if result.is_err() {
+        restore(target, aside);
+    }
+    result
 }
 
 /// Copies a built executable into a synced temporary file beside `target`, then replaces it.
