@@ -16,6 +16,11 @@
       "description": "The copyright holder that `LICENSE-MIT` names.",
       "type": "string"
     },
+    "documentation_index": {
+      "description": "Link the generated README to `docs/README.md`.",
+      "type": "boolean",
+      "default": false
+    },
     "install": {
       "description": "The commands that install the project, one per line.",
       "type": "string"
