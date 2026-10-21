@@ -20,6 +20,24 @@ fn reject_read_only_planning_mutating_the_destination() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/bounded_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_native_owner_execution() {
+    assert!(production::route(false, false) != production::Route::Refuse);
+}
+#[kani::proof]
+fn reject_unlimited_memory() {
+    assert!(production::limits(0, 0, 1, 1, 1).is_some());
+}
+#[kani::proof]
+fn reject_passing_after_oom() {
+    assert!(production::completion(true, false, true) == production::Completion::Passed);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/notify_chain_rules.rs"
 probes = '''
 #[kani::proof]

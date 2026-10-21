@@ -1,0 +1,8 @@
+version = 1
+tools = ["kani"]
+[limits]
+memory_mib = 0
+swap_mib = 0
+cpus = 1
+pids = 32
+seconds = 2

@@ -208,6 +208,7 @@ pub fn run_arguments(root: &Path, image: &str, script: &str) -> Vec<OsString> {
     .map(OsString::from)
     .into();
     arguments.push(mount);
+    arguments.extend(dotfiles::bounded::resource_arguments());
     arguments.extend([image, "bash", "-c", script].map(OsString::from));
     arguments
 }

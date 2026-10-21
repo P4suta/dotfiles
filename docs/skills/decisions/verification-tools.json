@@ -1,8 +1,10 @@
 {
-  "revision": "ab2213c17ac533525634545e2794f161f17ea813c05f495c06a574833746862d",
+  "revision": "eea08b6dc6e8f2b3596dff615c84329cd2d90cfa1b92d574117c3050ed7b90c1",
   "outcome": "implemented",
-  "reason": "Adopt reproducible project checks with pinned tools and advisory inputs, and use documented platform runners instead of required owner machines.",
+  "reason": "Route unbounded owner-side verification through the shared policy runner while preserving native CI and project-owned verification contracts.",
   "evidence": [
+    "home/dot_config/dotfiles/bounded-tools.toml",
+    "crates/dotfiles/tests/bounded.rs",
     "crates/platform/src/code_environment.rs",
     "crates/dotfiles/tests/hosts.rs",
     "mise.toml",

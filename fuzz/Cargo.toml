@@ -101,6 +101,13 @@ bench = false
 members = ["."]
 
 [[bin]]
+name = "bounded_policy"
+path = "fuzz_targets/bounded_policy.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "renovate_report"
 path = "fuzz_targets/renovate_report.rs"
 test = false

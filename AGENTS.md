@@ -25,7 +25,7 @@ One chezmoi source for Mac, Linux, Windows, and WSL, and the Rust tools that app
 ## Commands
 
 - `just check` runs the gates a change selects, and `just check-staged` runs the lint stages over the staged files before each commit.
-- `just proofs` runs the Kani proofs, in a Linux container on Windows.
+- `just proofs` runs the proof campaign in a bounded Linux container on owner machines and natively in CI.
 - `just profiles` renders every profile and compares it with the committed manifests.
 - `just diff`, `just apply`, and `just verify` preview, apply, and verify this host's profile.
 - `just gen` writes the generated files, such as the decision record index.

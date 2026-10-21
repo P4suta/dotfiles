@@ -1671,7 +1671,9 @@ pub fn code_environment(root: &Path, home: &Path) -> Result<CodeEnvironment> {
         immutable.extend(cargo.immutable_paths());
         immutable.extend(preparation.immutable_paths());
         let material_protections = local::Protection::seal_materials(materials.path(), &immutable)?;
-        let health_command = if rust.target() == crate::artifacts::Target::WindowsX64 {
+        let health_command = if rust.target() == crate::artifacts::Target::WindowsX64
+            || crate::bounded::requires_container()
+        {
             None
         } else {
             Some(kani_health_command(&rust, &preparation, cargo, workload)?)
@@ -1742,6 +1744,9 @@ fn kani_health_command(
     store.configure_health(&mut command)?;
     preparation.configure_health(&mut command)?;
     cargo.configure_environment(workload, &mut command)?;
+    if std::env::var("GITHUB_ACTIONS").is_ok_and(|value| value == "true") {
+        command.env("GITHUB_ACTIONS", "true");
+    }
     Ok(command)
 }
 

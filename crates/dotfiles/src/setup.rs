@@ -558,6 +558,15 @@ fn runtime(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
         &["dotfiles", "dotfiles-ssh-keygen"]
     };
     install_crate(context, runner, RUNTIME_CRATE, binaries)?;
+    let protected = runner.run_installed(
+        &context.home.join(".local/bin").join(if cfg!(windows) {
+            "dotfiles.exe"
+        } else {
+            "dotfiles"
+        }),
+        &args(&["bounded", "install"]),
+    )?;
+    ensure!(protected.success, "install native unbounded-tool guards");
     install_crate(context, runner, "crates/skill-ops", &["skill-ops"])?;
     install_crate(context, runner, "crates/pr-workflow", &["pr-workflow"])?;
     if context.profile == Profile::Windows {

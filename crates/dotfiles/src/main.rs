@@ -16,6 +16,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Run unbounded verification only inside a container with policy limits.
+    Bounded {
+        #[command(subcommand)]
+        action: dotfiles::bounded::Action,
+    },
     /// Install mise tools with no mise shims on PATH.
     MiseInstall {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -192,6 +197,7 @@ fn run(mut cli: Cli) -> Result<()> {
     cli.root = dotfiles::canonical(&cli.root)?;
     let exit = dotfiles::secrets::exit;
     match cli.command {
+        Commands::Bounded { action } => dotfiles::bounded::execute(action)?,
         Commands::MiseInstall { arguments } => {
             let home = platform::home::home().context("native home is unavailable")?;
             exit(
@@ -356,6 +362,14 @@ fn agent_hook() -> Option<&'static str> {
 }
 
 fn main() {
+    match dotfiles::bounded::dispatch() {
+        Ok(Some(status)) => dotfiles::secrets::exit(status),
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("{error:#}");
+            std::process::exit(1);
+        }
+    }
     // `dotfiles doctor` reads the installed runtime's build identity to tell whether it matches the applied source.
     match dotfiles::freshness::print_build_identity() {
         Ok(true) => return,

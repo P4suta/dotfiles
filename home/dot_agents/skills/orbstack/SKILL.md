@@ -11,7 +11,7 @@ metadata:
 
 OrbStack provides the Docker engine and the `docker` command on the Mac, so container commands from a project run unchanged there.
 Confirm with `docker context show` that the active context names `orbstack` before you blame a project for a container failure.
-Prefer a project's own container entrypoint, such as `just proofs`, over hand-written `docker run` commands.
+Use the bounded-tool rule in `formal-assurance`: prefer the project's bounded container entrypoint, such as `just proofs`, or use `dotfiles bounded run`.
 
 OrbStack shares the Mac's memory and CPU with the host and with every other agent.
 Check running containers and machines with `docker ps` and `orb list` before you start a large build, and follow `resource-coordination` for long proofs, fuzzing, and mutation campaigns.
