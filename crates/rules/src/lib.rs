@@ -56,6 +56,7 @@ pub mod lint_rules;
 pub mod local_state_rules;
 pub mod next_action_rules;
 pub mod notification_rules;
+pub mod notify_chain_rules;
 pub mod obligation_rules;
 pub mod ocomment_rules;
 pub mod order_rules;

@@ -6,6 +6,27 @@
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/notify_chain_rules.rs"
+probes = '''
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_hiding_the_app_inside_dotfiles() {
+    assert!(!production::model::contract([1, 0, 0, 0], 2, true).1);
+}
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_forwarding_back_to_dotfiles() {
+    assert!(production::model::contract([0, 0, 0, 0], 1, true).0);
+}
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_discarding_an_unrelated_notifier() {
+    assert!(!production::model::contract([2, 0, 0, 0], 1, true).0);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/tool_lock_rules.rs"
 probes = '''
 use production::{Facts, Graph, Project, Sidecar, Verdict, entry};
