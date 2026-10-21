@@ -58,6 +58,47 @@ pub(super) struct Dependency {
     pub(super) registry_urls: Option<Vec<String>>,
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(untagged)]
+enum ExtractedDependency {
+    Lookup(Dependency),
+    ContainerReference(ContainerReference),
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ContainerReference {
+    skip_reason: String,
+    replace_string: String,
+    datasource: String,
+    dep_type: String,
+    updates: Vec<Candidate>,
+    #[serde(default)]
+    warnings: Vec<Value>,
+    auto_replace_string_template: Option<String>,
+    skip_stage: Option<String>,
+}
+
+impl ContainerReference {
+    fn valid(&self, manager: &str) -> bool {
+        manager == "github-actions"
+            && self.skip_reason == "contains-variable"
+            && self.datasource == "docker"
+            && self.dep_type == "container"
+            && self.updates.is_empty()
+            && self.warnings.is_empty()
+            && self
+                .skip_stage
+                .as_deref()
+                .is_none_or(|stage| stage == "extract")
+            && self
+                .auto_replace_string_template
+                .as_deref()
+                .is_none_or(|template| !template.is_empty())
+            && container_reference(&self.replace_string)
+    }
+}
+
 const fn enabled() -> bool {
     true
 }
@@ -243,14 +284,33 @@ fn dependency_records(managers: &Map<String, Value>) -> Result<Vec<Record>, Repo
                 .get("deps")
                 .and_then(Value::as_array)
                 .ok_or_else(|| invalid(format!("{manager} / {name:?}"), "expected dependencies"))?;
+            let lock_files: Option<Vec<String>> = file
+                .get("lockFiles")
+                .map(|value| serde_json::from_value(value.clone()))
+                .transpose()
+                .map_err(|_| {
+                    invalid(
+                        format!("{manager} / {name:?}"),
+                        "invalid lockfile ownership",
+                    )
+                })?;
             for dependency in dependencies {
                 let name_hint = dependency
                     .get("depName")
                     .and_then(Value::as_str)
                     .unwrap_or("<missing>");
                 let location = format!("{manager} / {name:?} / {name_hint:?}");
-                let dependency: Dependency = serde_json::from_value(dependency.clone())
+                let extracted: ExtractedDependency = serde_json::from_value(dependency.clone())
                     .map_err(|_| invalid(location.clone(), "invalid dependency field types"))?;
+                let dependency = match extracted {
+                    ExtractedDependency::Lookup(dependency) => dependency,
+                    ExtractedDependency::ContainerReference(reference) => {
+                        if reference.valid(manager) {
+                            continue;
+                        }
+                        return Err(invalid(location, "unverified container reference"));
+                    }
+                };
                 if dependency.dep_name.is_empty()
                     || dependency.updates.iter().any(|candidate| {
                         candidate.update_type.is_none() && candidate.bucket.is_none()
@@ -265,11 +325,7 @@ fn dependency_records(managers: &Map<String, Value>) -> Result<Vec<Record>, Repo
                     manager: manager.clone(),
                     file: name.to_owned(),
                     dependency,
-                    lock_files: file
-                        .get("lockFiles")
-                        .map(|value| serde_json::from_value(value.clone()))
-                        .transpose()
-                        .map_err(|_| invalid(location, "invalid lockfile ownership"))?,
+                    lock_files: lock_files.clone(),
                 });
             }
         }
@@ -353,7 +409,15 @@ fn covered(records: &[Record], record: &Record) -> bool {
         && dependency.skip_reason.as_deref() == Some("invalid-version");
     let matrix = record.manager == "github-actions"
         && dependency.dep_type.as_deref() == Some("uses-with")
-        && dependency.skip_reason.as_deref() == Some("invalid-value")
+        && match dependency.skip_reason.as_deref() {
+            Some("invalid-value") => true,
+            Some("unsupported-version") => {
+                dependency.datasource.as_deref() == Some("java-version")
+                    && matches!(dependency.dep_name.as_str(), "java-jdk" | "java-jre")
+                    && dependency.package_name.as_deref() == Some(dependency.dep_name.as_str())
+            }
+            _ => false,
+        }
         && dependency
             .current_value
             .as_deref()
@@ -362,17 +426,33 @@ fn covered(records: &[Record], record: &Record) -> bool {
 }
 
 fn matrix_input(value: &str) -> bool {
+    expression(value).is_some_and(matrix_reference)
+}
+
+fn expression(value: &str) -> Option<&str> {
     value
         .strip_prefix("${{")
         .and_then(|value| value.strip_suffix("}}"))
         .map(|value| value.trim_matches(' '))
-        .and_then(|value| value.strip_prefix("matrix."))
-        .is_some_and(|name| {
-            !name.is_empty()
-                && name
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-        })
+}
+
+fn matrix_reference(value: &str) -> bool {
+    value.strip_prefix("matrix.").is_some_and(|name| {
+        !name.is_empty()
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    })
+}
+
+fn container_reference(value: &str) -> bool {
+    matrix_input(value)
+        || expression(value)
+            .and_then(|value| value.strip_suffix(" || null"))
+            .and_then(|value| value.split_once(" && "))
+            .is_some_and(|(container, image)| {
+                matrix_reference(container) && image.strip_suffix(".image") == Some(container)
+            })
 }
 
 fn counterpart<'a>(records: &'a [Record], file: &str, name: &str) -> Option<&'a Dependency> {

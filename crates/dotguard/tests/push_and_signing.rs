@@ -1624,6 +1624,146 @@ fn renovate_admits_only_matrix_expression_inputs() {
 }
 
 #[test]
+fn renovate_admits_supported_java_matrix_diagnostics() {
+    let (repository, base, offered) = renovate_fixture("renovate-java-matrix-inputs");
+    let mut report = matrix_input_report("${{ matrix.java }}");
+    let dependency =
+        &mut report["repositories"]["local"]["packageFiles"]["github-actions"][0]["deps"][0];
+    dependency["depName"] = "java-jdk".into();
+    dependency["packageName"] = "java-jdk".into();
+    dependency["datasource"] = "java-version".into();
+    dependency["skipReason"] = "unsupported-version".into();
+    let output = report_gate(&repository, &base, &offered, &report);
+    assert!(output.status.success(), "{output:?}");
+    for (field, value) in [
+        ("currentValue", serde_json::json!("latest")),
+        ("currentValue", serde_json::json!("21.x")),
+        ("datasource", serde_json::json!("docker")),
+        ("depName", serde_json::json!("unknown")),
+        ("packageName", serde_json::json!("java-jre")),
+        ("warnings", serde_json::json!([{"message":"lookup failed"}])),
+        ("updates", serde_json::json!([{"updateType":"major"}])),
+    ] {
+        let mut invalid = report.clone();
+        invalid["repositories"]["local"]["packageFiles"]["github-actions"][0]["deps"][0][field] =
+            value;
+        assert_eq!(
+            refusal(&report_gate(&repository, &base, &offered, &invalid)).rule,
+            "push.evidence",
+            "{field}"
+        );
+    }
+}
+
+fn container_reference_report(value: &str) -> serde_json::Value {
+    serde_json::json!({"repositories":{"local":{"packageFiles":{"github-actions":[{
+        "packageFile":".github/workflows/release.yml","deps":[{
+            "skipReason":"contains-variable","replaceString":value,
+            "datasource":"docker","depType":"container","updates":[],
+            "autoReplaceStringTemplate":"{{depName}}{{#if newValue}}:{{newValue}}{{/if}}"
+        }]
+    }]}}}})
+}
+
+#[test]
+fn renovate_admits_only_supported_nameless_container_references() {
+    let (repository, base, offered) = renovate_fixture("renovate-container-references");
+    for value in [
+        "${{ matrix.image }}",
+        "${{ matrix.container && matrix.container.image || null }}",
+    ] {
+        let report = container_reference_report(value);
+        let output = report_gate(&repository, &base, &offered, &report);
+        assert!(output.status.success(), "{value}: {output:?}");
+    }
+    let report =
+        container_reference_report("${{ matrix.container && matrix.container.image || null }}");
+    for (field, value) in [
+        ("replaceString", serde_json::json!("rust:1.95")),
+        (
+            "replaceString",
+            serde_json::json!("${{ matrix.image }}:latest"),
+        ),
+        ("replaceString", serde_json::json!("${{ env.IMAGE }}")),
+        (
+            "replaceString",
+            serde_json::json!("${{ matrix.image || 'rust:old' }}"),
+        ),
+        (
+            "replaceString",
+            serde_json::json!("${{ matrix.container && matrix.other.image || null }}"),
+        ),
+        (
+            "replaceString",
+            serde_json::json!("${{ matrix.container && matrix.container.image || 'rust:old' }}"),
+        ),
+        ("replaceString", serde_json::json!("${{ matrix. }}")),
+        ("replaceString", serde_json::json!("${{matrix..image}}")),
+        ("replaceString", serde_json::Value::Null),
+        ("datasource", serde_json::json!("github-tags")),
+        ("depType", serde_json::json!("action")),
+        ("skipReason", serde_json::json!("internal-error")),
+        ("depName", serde_json::json!("")),
+        ("depName", serde_json::Value::Null),
+        ("currentValue", serde_json::json!("1.95")),
+        ("currentDigest", serde_json::json!("sha256:missing")),
+        ("lockedVersion", serde_json::json!("1.95")),
+        ("currentVersion", serde_json::json!("1.95")),
+        ("autoReplaceStringTemplate", serde_json::json!(false)),
+        ("warnings", serde_json::json!([{"message":"lookup failed"}])),
+        ("warnings", serde_json::json!({})),
+        ("updates", serde_json::json!([{"updateType":"major"}])),
+        ("updates", serde_json::Value::Null),
+        ("skipStage", serde_json::json!("lookup")),
+        ("unknownField", serde_json::json!(true)),
+    ] {
+        let mut invalid = report.clone();
+        invalid["repositories"]["local"]["packageFiles"]["github-actions"][0]["deps"][0][field] =
+            value;
+        assert_eq!(
+            refusal(&report_gate(&repository, &base, &offered, &invalid)).rule,
+            "push.evidence",
+            "{field}"
+        );
+    }
+    let mut wrong_manager = report.clone();
+    let managers = wrong_manager["repositories"]["local"]["packageFiles"]
+        .as_object_mut()
+        .unwrap();
+    let files = managers.remove("github-actions").unwrap();
+    managers.insert("dockerfile".to_owned(), files);
+    assert_eq!(
+        refusal(&report_gate(&repository, &base, &offered, &wrong_manager)).rule,
+        "push.evidence"
+    );
+    let mut malformed_file = report.clone();
+    malformed_file["repositories"]["local"]["packageFiles"]["github-actions"][0]["lockFiles"] =
+        serde_json::json!(false);
+    assert_eq!(
+        refusal(&report_gate(&repository, &base, &offered, &malformed_file)).rule,
+        "push.evidence"
+    );
+    for field in [
+        "skipReason",
+        "replaceString",
+        "datasource",
+        "depType",
+        "updates",
+    ] {
+        let mut invalid = report.clone();
+        invalid["repositories"]["local"]["packageFiles"]["github-actions"][0]["deps"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert_eq!(
+            refusal(&report_gate(&repository, &base, &offered, &invalid)).rule,
+            "push.evidence",
+            "{field}"
+        );
+    }
+}
+
+#[test]
 fn renovate_refuses_wrong_warning_types_even_for_excluded_dependencies() {
     let (repository, base, offered) = renovate_fixture("renovate-warning-types");
     let mut accepted = Vec::new();
