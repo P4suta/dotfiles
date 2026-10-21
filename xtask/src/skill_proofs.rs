@@ -3208,6 +3208,54 @@ mod tests {
     #[test]
     #[ignore = "requires the installed pinned Kani"]
     #[cfg(not(target_os = "windows"))]
+    fn reply_language_decisions_and_their_counterexamples_verify_against_production() -> Result<()>
+    {
+        const EXPECTED: (usize, usize) = (9, 4);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        crate::phase_evidence::run(
+            root,
+            "reply language subject regression",
+            EXPECTED.0 + EXPECTED.1,
+            || {
+                let manifest = obligations::manifest(root)?;
+                let source = "crates/rules/src/reply_language_rules.rs";
+                let probes = manifest
+                    .obligations
+                    .iter()
+                    .find_map(|obligation| match obligation {
+                        Obligation::Kani {
+                            source: candidate,
+                            probes,
+                            ..
+                        } if candidate == source => Some(probes),
+                        _ => None,
+                    })
+                    .context("reply language decisions have a registered proof obligation")?;
+                kani_environment_version(root)?;
+                verify_kani_driver(root)?;
+                let verifier_hash =
+                    crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
+                let engine_hash = crate::phase_evidence::engine_digest(root)?;
+                let result = verify_rules(
+                    root,
+                    source,
+                    probes,
+                    &flags(&manifest, source),
+                    &verifier_hash,
+                    &engine_hash,
+                )?;
+                ensure!(
+                    result == EXPECTED,
+                    "reply language proof inventory differs: {result:?}"
+                );
+                Ok(())
+            },
+        )
+    }
+
+    #[test]
+    #[ignore = "requires the installed pinned Kani"]
+    #[cfg(not(target_os = "windows"))]
     fn review_decisions_and_their_counterexamples_verify_against_production() -> Result<()> {
         const SUBJECTS: [(&str, (usize, usize)); 3] = [
             ("crates/rules/src/review_routing_rules.rs", (4, 10)),

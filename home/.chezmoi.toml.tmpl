@@ -22,6 +22,7 @@ umask = 0o022
 [data]
 profile = {{ $profile | quote }}
 role = {{ $role | quote }}
+reply_language = {{ promptChoiceOnce . "reply_language" "Agent reply language" (list "Japanese" "English") (includeTemplate "partials/reply_language" .) | quote }}
 
 [data.git]
 name = {{ $name | quote }}

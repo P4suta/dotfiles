@@ -105,7 +105,7 @@
   "enabledPlugins": {
     "rust-analyzer-lsp@claude-plugins-official": true
   },
-  "language": "日本語",
+  "language": {{ includeTemplate "partials/reply_language" . | toJson }},
   "advisorModel": "opus",
   "skipDangerousModePermissionPrompt": true,
   "theme": "auto",

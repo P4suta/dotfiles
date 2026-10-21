@@ -1,0 +1,5 @@
+{{- $language := dig "reply_language" "Japanese" . -}}
+{{- if not (has $language (list "Japanese" "English")) -}}
+{{-   fail "reply_language must be Japanese or English" -}}
+{{- end -}}
+{{- $language -}}

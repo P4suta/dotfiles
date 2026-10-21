@@ -47,9 +47,30 @@ Judgment: resolving a conflict between instruction sources requires reading both
 
 Heading: groups the language lines.
 
+> {{ $language := includeTemplate "partials/reply_language" . -}}
+
+Directive: read the owner's configured reply language.
+
+> {{ if eq $language "Japanese" -}}
+
+Directive: select the Japanese line from the owner's configured reply language.
+
 > - Reply in Japanese.
 
-Follow-up F1: no hook reads a final reply yet.
+Judgment: the owner chooses a reply language.
+The Stop hook enforces that choice in Claude Code and Codex.
+
+> {{ else -}}
+
+Directive: select the English line for the other supported language.
+
+> - Reply in English.
+
+Judgment: the owner can choose English through the same data value.
+
+> {{ end -}}
+
+Directive: close the reply language selection.
 
 > - Write outward-facing artifacts such as commit messages, PRs, issues, code comments, documentation, and release notes in English.
 

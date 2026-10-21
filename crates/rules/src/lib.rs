@@ -73,6 +73,7 @@ pub mod prose_rules;
 pub mod provenance_rules;
 pub mod ready_push_rules;
 pub mod reaper_rules;
+pub mod reply_language_rules;
 pub mod repository_rules;
 pub mod resource_rules;
 pub mod review_completion_rules;

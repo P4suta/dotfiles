@@ -3079,6 +3079,29 @@ fn reject_dropping_an_unrelated_index_block() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/reply_language_rules.rs"
+probes = '''
+use production::{Counts, Language, Verdict, decide};
+#[kani::proof]
+fn reject_admitting_sentence_length_english_prose_in_japanese() {
+    assert!(decide(Language::Japanese, Counts { english_lines: 1, japanese_lines: 0, english_words: 4 }) == Verdict::Admit);
+}
+#[kani::proof]
+fn reject_refusing_a_short_acknowledgment() {
+    assert!(decide(Language::Japanese, Counts { english_lines: 1, japanese_lines: 0, english_words: 3 }) == Verdict::Rewrite);
+}
+#[kani::proof]
+fn reject_refusing_a_japanese_tie() {
+    assert!(decide(Language::Japanese, Counts { english_lines: 1, japanese_lines: 1, english_words: 4 }) == Verdict::Rewrite);
+}
+#[kani::proof]
+fn reject_refusing_english_configuration() {
+    assert!(decide(Language::English, Counts { english_lines: 1, japanese_lines: 0, english_words: 4 }) == Verdict::Rewrite);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/schema_rules.rs"
 probes = '''
 use production::{Standing, Target, Verdict, standing, verdict};
