@@ -220,8 +220,8 @@ fn run_with(
     );
     ensure!(!command.is_empty(), "consuming command is required");
     let executable = std::env::current_exe()?;
-    Tool::Doppler
-        .command()
+    platform::process::doppler_for_user()
+        .context("Doppler requires an absolute home directory")?
         .args([
             "run",
             "--project",

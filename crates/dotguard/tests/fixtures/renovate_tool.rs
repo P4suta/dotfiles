@@ -27,8 +27,16 @@ fn main() {
             );
         }
         "doppler" => {
+            let home = std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap();
+            let [scope_flag, scope_directory, command @ ..] = args.as_slice() else {
+                panic!("missing authentication scope")
+            };
+            assert_eq!(scope_flag, "--scope");
+            assert_eq!(scope_directory, &home);
+            assert!(Path::new(&home).is_absolute());
+            assert!(!std::env::current_dir().unwrap().starts_with(&home));
             assert_eq!(
-                args,
+                command,
                 [
                     "secrets",
                     "get",
