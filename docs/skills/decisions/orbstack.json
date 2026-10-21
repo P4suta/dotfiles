@@ -1,8 +1,9 @@
 {
-  "revision": "b36e4fd0238cc84cc210534b91b65d25c346888df364500b4a78c3c99dc0d2ca",
+  "revision": "65a8f98e42963b65709055b0a1b4479becbc89e217a1c786e0997f1f4d6b1c80",
   "outcome": "implemented",
-  "reason": "Cover the Mac's shared Docker engine, memory and disk resources, and machine deletion boundary, with installed help and upstream documentation.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "reason": "Use the shared bounded runner on OrbStack while preserving project entrypoints and the existing shared-engine and machine-deletion boundaries.",
   "evidence": [
+    "crates/dotfiles/src/bounded.rs",
     "home/dot_agents/skills/orbstack/SKILL.md",
     "home/dot_agents/skills/orbstack/tools.toml",
     "xtask/tests/tool_inventory.rs"

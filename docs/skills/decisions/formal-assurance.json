@@ -1,8 +1,11 @@
 {
-  "revision": "f33a281ad3da186514040293cbd3b8837c466b7e02b5cd5558d5de5ca2ecce99",
+  "revision": "a349155084d658153ee025fc1535657940c71d29b05eee56332d43ff6fce5050",
   "outcome": "implemented",
-  "reason": "Define reproducible verdicts once with deterministic exploration bounds, inconclusive stops, portable heavy checks, and owner-side conveniences that add no project files.",
+  "reason": "Define the bounded-tool rule once with policy limits, the shared container runner, native refusal through project tasks, inconclusive limit stops, and native GitHub Actions execution.",
   "evidence": [
+    "home/dot_config/dotfiles/bounded-tools.toml",
+    "crates/dotfiles/src/bounded.rs",
+    "crates/dotfiles/tests/bounded.rs",
     "home/dot_agents/skills/formal-assurance/SKILL.md",
     "docs/adr/verification-proportional-to-code-shape.md",
     "home/dot_agents/skills/formal-assurance/references/scoping.md",

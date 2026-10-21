@@ -34,9 +34,6 @@ pub const PROBE_CEILING: u64 = 1;
 
 /// The permission to turn off address randomization for stable loader instruction counts.
 const SECCOMP: &str = "--security-opt=seccomp=unconfined";
-const CONTAINER_CPUS: &str = "2";
-const CONTAINER_MEMORY: &str = "8g";
-const CONTAINER_PIDS: &str = "128";
 const CONTAINER_BUILD_JOBS: &str = "CARGO_BUILD_JOBS=2";
 const TRANSPORT_SCHEMA: u32 = 1;
 const REQUEST_FILE: &str = "request.json";
@@ -1057,9 +1054,7 @@ fn invocation_hash() -> Result<String> {
         INSTRUCTION_PROBE,
         PROBE_CEILING,
         REGRESSION_STATUS,
-        CONTAINER_CPUS,
-        CONTAINER_MEMORY,
-        CONTAINER_PIDS,
+        dotfiles::bounded::resource_arguments(),
         CONTAINER_BUILD_JOBS,
     ))?))
 }
@@ -1324,16 +1319,11 @@ fn container_command(root: &Path, image_id: &str, request: &Path, result: &Path)
             "--pull=never",
             "--platform",
             crate::container::LINUX_AMD64,
-            "--cpus",
-            CONTAINER_CPUS,
-            "--memory",
-            CONTAINER_MEMORY,
-            "--pids-limit",
-            CONTAINER_PIDS,
             SECCOMP,
             "--mount",
         ])
         .arg(bind_mount(root, CONTAINER_SOURCE, true))
+        .args(dotfiles::bounded::resource_arguments())
         .arg("--mount")
         .arg(bind_mount(request, CONTAINER_REQUEST, true))
         .arg("--mount")
@@ -1755,8 +1745,9 @@ mod tests {
             .collect::<Result<Vec<_>>>()?;
         for expected in [
             ["--cpus", "2"],
-            ["--memory", "8g"],
-            ["--pids-limit", "128"],
+            ["--memory", "2147483648"],
+            ["--memory-swap", "2147483648"],
+            ["--pids-limit", "256"],
             ["--env", "CARGO_BUILD_JOBS=2"],
             ["--platform", "linux/amd64"],
         ] {

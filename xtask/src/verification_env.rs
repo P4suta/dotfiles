@@ -14,10 +14,7 @@ use std::process::Output;
 
 const SMOKE_DIRECTORY: &str = "xtask/proofs/smoke";
 const ALLOY_JAR: &str = "/opt/alloy/alloy.jar";
-const MEMORY: &str = "1g";
 const JAVA_HEAP: &str = "-Xmx512m";
-const CPUS: &str = "2";
-const PIDS: &str = "128";
 const QUINT_STATES: u64 = 2;
 const LEAN_REJECTION_EXIT: i32 = 1;
 const LEAN_FALSE_DIAGNOSTIC: &str =
@@ -33,7 +30,10 @@ const TLC_METADATA_SEPARATORS: [usize; 3] = [4, 7, 10];
 const TLC_HELP_END: &str = "When using more than one worker, the reported depth might differ across runs. For small models, use a single worker. For large models, the diameter will almost always appear deterministic.";
 const IMAGE_IDENTITY_TEMPLATE: &str =
     r#"{"Id":{{json .Id}},"Os":{{json .Os}},"Architecture":{{json .Architecture}}}"#;
-const DRIVER_INPUTS: [&str; 9] = [
+const DRIVER_INPUTS: [&str; 12] = [
+    "crates/dotfiles/src/bounded.rs",
+    "crates/dotfiles/src/bounded/guard.rs",
+    "home/dot_config/dotfiles/bounded-tools.toml",
     "xtask/src/verification_env.rs",
     "xtask/src/skill_proofs.rs",
     "xtask/src/lean.rs",
@@ -194,19 +194,7 @@ pub(crate) fn inspect(tag: &str, expected_platform: &str) -> Result<ImageIdentit
 fn bounded(arguments: &mut Vec<OsString>) {
     arguments.splice(
         1..1,
-        [
-            "--pull",
-            "never",
-            "--cpus",
-            CPUS,
-            "--memory",
-            MEMORY,
-            "--pids-limit",
-            PIDS,
-            "--env",
-            "JVM_ARGS=-Xmx512m",
-        ]
-        .map(OsString::from),
+        ["--pull", "never", "--env", "JVM_ARGS=-Xmx512m"].map(OsString::from),
     );
 }
 
@@ -383,7 +371,10 @@ fn apalache_jar() -> String {
 }
 
 fn doctor_backend(root: &Path, backend: Backend) -> Environment {
-    if backend == Backend::Kani && cfg!(any(target_os = "macos", target_os = "linux")) {
+    if backend == Backend::Kani
+        && cfg!(any(target_os = "macos", target_os = "linux"))
+        && !dotfiles::bounded::requires_container()
+    {
         let driver = crate::skill_proofs::kani_environment_driver();
         let failure = driver.as_ref().err().map(|error| format!("{error:#}"));
         let version = crate::skill_proofs::kani_environment_version(root);

@@ -1,8 +1,9 @@
 {
-  "revision": "cb60da4f834ab12ab6eabc34ed2546f659e781ba1121ab069dd5bb541de719e3",
+  "revision": "9862145941808b593bb3765a7bee40126aa6da16e12ef589bca798088f6b1126",
   "outcome": "implemented",
-  "reason": "Use the project's pinned mutation workflow and reproducible runner, and keep timeouts inconclusive instead of counting them as mutant outcomes.",
+  "reason": "Run owner-side mutation tools through the shared bounded route while preserving the pinned workflow and inconclusive timeout semantics.",
   "evidence": [
+    "crates/dotfiles/src/bounded.rs",
     "home/dot_agents/skills/mutation-testing/SKILL.md",
     "docs/adr/verification-proportional-to-code-shape.md",
     "home/dot_agents/skills/mutation-testing/tools.toml",
