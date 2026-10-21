@@ -2405,6 +2405,70 @@ fn compare(baselines: &Baselines, measure: impl Fn(&Metric) -> Option<Measured>)
     refusals
 }
 
+#[derive(Deserialize)]
+struct CountPositions {
+    metric: Vec<CountPosition>,
+}
+
+#[derive(Deserialize)]
+struct CountPosition {
+    metric: String,
+    exact: Option<toml::Spanned<u64>>,
+}
+
+/// Refresh the proof counts from the closure gate, preserving every other byte.
+///
+/// # Errors
+///
+/// Refuse uncovered subjects, duplicate or missing counts, reductions, and file errors.
+pub fn write_proof_counts(root: &Path) -> Result<()> {
+    let measured = closure(root, &manifest(root)?)?;
+    ensure!(
+        measured.refusals.is_empty(),
+        "{}",
+        measured.refusals.join("\n")
+    );
+    let path = root.join(BASELINES);
+    let mut text = fs::read_to_string(&path)?;
+    parse_baselines(&text)?;
+    let positions: CountPositions = toml::from_str(&text)?;
+    let mut seen = BTreeSet::new();
+    let mut edits = Vec::new();
+    for position in positions.metric {
+        let value = match position.metric.as_str() {
+            "proved-subjects" => measured.proved,
+            "probes" => measured.probes,
+            _ => continue,
+        };
+        ensure!(
+            seen.insert(position.metric.clone()),
+            "duplicate proof count"
+        );
+        let exact = position.exact.context("proof count has no exact value")?;
+        ensure!(
+            obligation_rules::standing(Better::Higher, *exact.get_ref(), value)
+                != Standing::Regressed,
+            "{} would lower its proof count; restore the missing coverage",
+            position.metric
+        );
+        edits.push((exact.span(), value.to_string()));
+    }
+    ensure!(
+        seen.contains("proved-subjects") && seen.contains("probes"),
+        "proof count refresh requires both proved-subjects and probes"
+    );
+    edits.sort_by_key(|(span, _)| std::cmp::Reverse(span.start));
+    for (span, value) in edits {
+        text.replace_range(span, &value);
+    }
+    fs::write(path, text)?;
+    println!(
+        "Refreshed {BASELINES}: {} proved subjects and {} probes from the closure gate",
+        measured.proved, measured.probes
+    );
+    Ok(())
+}
+
 /// The closure gate of `just check`: the manifest, the pilots, and the metrics.
 ///
 /// # Errors

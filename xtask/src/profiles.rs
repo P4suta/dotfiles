@@ -142,6 +142,7 @@ pub const CONFIG_TEMPLATE: &str = ".chezmoi.toml.tmpl";
 pub struct Answers {
     pub profile: Profile,
     pub role: &'static str,
+    pub reply_language: &'static str,
     pub name: &'static str,
     pub email: &'static str,
     pub public_key: String,
@@ -156,6 +157,7 @@ impl Answers {
         Self {
             profile,
             role: "personal",
+            reply_language: "Japanese",
             name: "Example User",
             email: "user@example.invalid",
             public_key: String::new(),
@@ -188,6 +190,8 @@ pub fn configuration(root: &Path, answers: &Answers) -> Result<String> {
         .arg(format!("Dotfiles profile={}", answers.profile.name()))
         .arg("--promptChoice")
         .arg(format!("Machine role={}", answers.role))
+        .arg("--promptChoice")
+        .arg(format!("Agent reply language={}", answers.reply_language))
         .arg("--promptString")
         .arg(format!("Git author name={}", answers.name))
         .arg("--promptString")
@@ -1056,6 +1060,29 @@ impl<'a> Fixture<'a> {
                 &format!("{} render {target}", profile.name()),
             )?;
             let rendered = String::from_utf8_lossy(&rendered.stdout).into_owned();
+            if target == ".codex/config.toml" {
+                let config: toml::Table = toml::from_str(&rendered)?;
+                let notify: Vec<String> = config
+                    .get("notify")
+                    .context("Codex has no notify command")?
+                    .clone()
+                    .try_into()?;
+                let executable = if profile == Profile::Windows {
+                    "dotfiles.exe"
+                } else {
+                    "dotfiles"
+                };
+                let tool = self.destination.join(".local/bin").join(executable);
+                let canonical = rules::notify_chain_rules::normalize(
+                    rules::notify_chain_rules::Command(notify.clone()),
+                    &tool.to_string_lossy(),
+                );
+                ensure!(
+                    notify == canonical.0,
+                    "{} profile has a noncanonical Codex notify chain",
+                    profile.name()
+                );
+            }
             ensure!(
                 keeps_host_keys(&target, &host, &rendered)?,
                 "{}",

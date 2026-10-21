@@ -1,0 +1,73 @@
+{{- /*
+Both writers preserve the app outside dotfiles.
+notify_chain_rules is the Rust reference, checked against this template on every profile.
+*/ -}}
+{{- $maxDepth := 32 -}}
+{{- $maxArguments := 32 -}}
+{{- $dotfiles := list .tool "notifications" "agent" "codex" -}}
+{{- $command := .previous -}}
+{{- $links := list -}}
+{{- /* Validate the JSON string-vector grammar before fromJson, which otherwise aborts the modify step. */ -}}
+{{- $unicode := `u([0-9a-cA-Ce-fE-F][0-9a-fA-F]{3}|[dD][0-7][0-9a-fA-F]{2}|[dD][89aAbB][0-9a-fA-F]{2}\\u[dD][c-fC-F][0-9a-fA-F]{2})` -}}
+{{- $string := printf `"([^"\\\x00-\x1f]|\\(["\\/bfnrt]|%s))*"` $unicode -}}
+{{- $vector := printf `^[ \t\r\n]*\[[ \t\r\n]*(%s[ \t\r\n]*(,[ \t\r\n]*%s[ \t\r\n]*)*)?\][ \t\r\n]*$` $string $string -}}
+{{- range until $maxDepth -}}
+{{-   $valid := kindIs "slice" $command -}}
+{{-   if $valid -}}
+{{-     $valid = and (gt (len $command) 0) (le (len $command) $maxArguments) -}}
+{{-     range $command -}}{{- if not (kindIs "string" .) -}}{{- $valid = false -}}{{- end -}}{{- end -}}
+{{-   end -}}
+{{-   if not $valid -}}{{- break -}}{{- end -}}
+{{-   $program := index $command 0 -}}
+{{-   if eq $program "" -}}{{- break -}}{{- end -}}
+{{-   $kind := "other" -}}
+{{-   if and (regexMatch `(^|[/\\])dotfiles(\.exe)?$` $program) (ge (len $command) 4) -}}
+{{-     if and (eq (index $command 1) "notifications") (eq (index $command 2) "agent") (eq (index $command 3) "codex") -}}{{- $kind = "dotfiles" -}}{{- end -}}
+{{-   else if and (regexMatch `(^|[/\\])SkyComputerUseClient$` $program) (ge (len $command) 2) -}}
+{{-     if eq (index $command 1) "turn-ended" -}}{{- $kind = "app" -}}{{- end -}}
+{{-   end -}}
+{{-   $flag := "" -}}
+{{-   $json := "" -}}
+{{-   range $index, $word := $command -}}
+{{-     if and (gt $index 0) (has $word (list "--forward-notify" "--previous-notify")) -}}
+{{-       $flag = $word -}}
+{{-       if lt (add $index 1 | int) (len $command) -}}{{- $json = index $command (add $index 1 | int) -}}{{- end -}}
+{{-       $command = slice $command 0 $index -}}
+{{-       break -}}
+{{-     end -}}
+{{-   end -}}
+{{-   if eq (len $command) 0 -}}{{- break -}}{{- end -}}
+{{-   $forward := default "--forward-notify" $flag -}}
+{{-   if eq $kind "dotfiles" -}}
+{{-     $command = slice $command 0 (min (len $command) 4 | int) -}}
+{{-     $forward = "--forward-notify" -}}
+{{-   else if eq $kind "app" -}}
+{{-     $command = slice $command 0 (min (len $command) 2 | int) -}}
+{{-     $forward = "--previous-notify" -}}
+{{-   end -}}
+{{-   $links = append $links (dict "kind" $kind "command" $command "flag" $forward) -}}
+{{-   if or (eq $flag "") (not (regexMatch $vector $json)) -}}{{- break -}}{{- end -}}
+{{-   $command = fromJson $json -}}
+{{- end -}}
+{{- $selected := list (dict "kind" "dotfiles" "command" $dotfiles "flag" "--forward-notify") -}}
+{{- range $links -}}
+{{-   if eq .kind "app" -}}
+{{-     $selected = prepend $selected . -}}
+{{-     break -}}
+{{-   end -}}
+{{- end -}}
+{{- $seen := list -}}
+{{- range $links -}}
+{{-   $identity := toJson .command -}}
+{{-   if and (eq .kind "other") (lt (len $selected) $maxDepth) (not (has $identity $seen)) -}}
+{{-     $selected = append $selected . -}}
+{{-     $seen = append $seen $identity -}}
+{{-   end -}}
+{{- end -}}
+{{- $notify := list -}}
+{{- range reverse $selected -}}
+{{-   $command := .command -}}
+{{-   if gt (len $notify) 0 -}}{{- $command = concat $command (list .flag (toJson $notify)) -}}{{- end -}}
+{{-   $notify = $command -}}
+{{- end -}}
+{{- toJson $notify -}}

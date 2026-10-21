@@ -25,6 +25,8 @@ struct Cli {
 enum Action {
     CheckSecrets,
     CheckAdapters,
+    /// Checks portable uv locks for every tool, regardless of its OS filter.
+    ToolLocks,
     AnsibleSyntaxCheck,
     Profiles {
         #[arg(long)]
@@ -136,6 +138,9 @@ enum Action {
         base: Option<String>,
         #[arg(long)]
         write: bool,
+        /// Refresh the static proof counts without admitting reductions or uncovered subjects.
+        #[arg(long, requires = "write")]
+        proof_counts: bool,
     },
     /// Prove the production contracts.
     /// A scope that selects no proofs gate skips them.
@@ -270,6 +275,7 @@ enum IssueContext {
 /// A change that selects fewer gates skips only the checks it can't affect.
 fn check(root: &Path, gates: Gates, reference: &str, context: IssueContext) -> Result<()> {
     let mut checks = Checks::default();
+    checks.run("tools.locks", || xtask::tool_locks::check(root));
     if context == IssueContext::Local {
         checks.run("issue.context", || {
             pr_workflow::check_issue_context(
@@ -438,6 +444,7 @@ fn run() -> Result<()> {
     match cli.command {
         Action::PushCheck => push_check(&cli.root)?,
         Action::CheckSecrets => xtask::quality::secrets(&cli.root)?,
+        Action::ToolLocks => xtask::tool_locks::check(&cli.root)?,
         Action::CheckAdapters => xtask::quality::adapters(&cli.root)?,
         Action::AnsibleSyntaxCheck => {
             ensure!(
@@ -501,16 +508,11 @@ fn run() -> Result<()> {
             scope.reference(),
             IssueContext::Local,
         )?,
-        Action::Baselines { base, write } => {
-            if write {
-                xtask::lint::write_baselines(&cli.root)?;
-            } else {
-                let refusals =
-                    xtask::lint::baseline_growth(&cli.root, base.as_deref().unwrap_or("HEAD"))?;
-                ensure!(refusals.is_empty(), "{}", refusals.join("\n"));
-                println!("Every lint baseline only shrank");
-            }
-        }
+        Action::Baselines {
+            base,
+            write,
+            proof_counts,
+        } => baselines(&cli.root, base.as_deref(), write, proof_counts)?,
         Action::Decide { skill } => {
             println!("{}", skill_ops::decide(&cli.root, &skill)?);
         }
@@ -530,6 +532,19 @@ fn run() -> Result<()> {
         Action::Install => install_shared_skills(&cli.root)?,
         Action::InstallReviewGuard => install_review_guard(&cli.root)?,
         Action::InstallSkillOps => install_skill_ops(&cli.root)?,
+    }
+    Ok(())
+}
+
+fn baselines(root: &Path, base: Option<&str>, write: bool, proof_counts: bool) -> Result<()> {
+    if proof_counts {
+        xtask::obligations::write_proof_counts(root)?;
+    } else if write {
+        xtask::lint::write_baselines(root)?;
+    } else {
+        let refusals = xtask::lint::baseline_growth(root, base.unwrap_or("HEAD"))?;
+        ensure!(refusals.is_empty(), "{}", refusals.join("\n"));
+        println!("Every lint baseline only shrank");
     }
     Ok(())
 }
@@ -853,6 +868,23 @@ mod tests {
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }
+    }
+
+    #[test]
+    fn proof_count_refresh_requires_an_explicit_write() {
+        assert!(Cli::try_parse_from(["xtask", "baselines", "--write", "--proof-counts"]).is_ok());
+        assert!(Cli::try_parse_from(["xtask", "baselines", "--proof-counts"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "xtask",
+                "baselines",
+                "--write",
+                "--proof-counts",
+                "--base",
+                "HEAD"
+            ])
+            .is_err()
+        );
     }
 
     #[test]
