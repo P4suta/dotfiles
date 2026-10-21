@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::{Subcommand, ValueEnum};
 use platform::speech;
 use rules::notification_rules::{Decision, Desktop, Event, Frequency, Origin};
+use rules::notify_chain_rules;
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 use std::io::Read;
@@ -28,7 +29,6 @@ const POWERSHELL: &str = "System32/WindowsPowerShell/v1.0/powershell.exe";
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const LAST_PLAYBACK: &str = "last-playback.json";
-const MAX_FORWARD_ARGUMENTS: usize = 32;
 const MATERIAL_FIELD_COUNT: usize = 4;
 const MATERIAL_SIZE_FIELD: usize = 2;
 const MATERIAL_DURATION_FIELD: usize = 3;
@@ -409,9 +409,11 @@ fn forward_notify(vector: &str, payload: &str) -> Result<()> {
     let Ok(callback) = serde_json::from_str::<Vec<String>>(vector) else {
         return Ok(());
     };
-    if callback.len() > MAX_FORWARD_ARGUMENTS {
+    let Some(notify_chain_rules::Command(callback)) =
+        notify_chain_rules::forwarding(notify_chain_rules::Command(callback))
+    else {
         return Ok(());
-    }
+    };
     let Some((program, args)) = callback.split_first() else {
         return Ok(());
     };

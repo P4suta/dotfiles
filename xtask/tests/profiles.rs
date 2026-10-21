@@ -73,6 +73,7 @@ fn the_configuration_template_writes_exactly_the_keys_its_consumers_read() {
         let data = serde_json::to_value(&config["data"]).unwrap();
         assert_eq!(data["profile"], combination.profile.name());
         assert_eq!(data["role"], combination.role.name());
+        assert_eq!(data["reply_language"], "Japanese");
         assert_eq!(data["signing"]["enabled"], combination.signing);
         assert_eq!(data["paths"]["projects"], "/fixture/projects");
         let mut keys = Vec::new();
@@ -99,6 +100,7 @@ fn the_configuration_template_writes_exactly_the_keys_its_consumers_read() {
             "herdr_agent.public_keys",
             "paths.projects",
             "profile",
+            "reply_language",
             "role",
             "signing.enabled",
             "signing.public_key",
@@ -1171,12 +1173,22 @@ fn the_working_tree_is_the_checkout_root_under_a_chezmoiroot() {
     assert_eq!(canonical(Path::new(source)), canonical(&home), "{rendered}");
 }
 
+fn initialization_source(root: &Path, source: &Path) {
+    for path in [
+        ".chezmoi.toml.tmpl",
+        ".chezmoitemplates/partials/reply_language",
+    ] {
+        let destination = source.join(path);
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        fs::copy(root.join("home").join(path), destination).unwrap();
+    }
+}
+
 #[test]
 fn initialization_keeps_the_selected_checkout_and_existing_prompt_answers() {
     use std::process::Stdio;
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    let template = fs::read(root.join("home/.chezmoi.toml.tmpl")).unwrap();
     for rooted in [false, true] {
         let scope = tempfile::tempdir().unwrap();
         let directory = xtask::canonical(scope.path()).unwrap();
@@ -1199,13 +1211,14 @@ fn initialization_keeps_the_selected_checkout_and_existing_prompt_answers() {
         if rooted {
             fs::write(checkout.join(".chezmoiroot"), "home\n").unwrap();
         }
-        fs::write(source.join(".chezmoi.toml.tmpl"), &template).unwrap();
+        initialization_source(&root, &source);
         let destination = directory.join("destination");
         let config_home = destination.join(".config");
         let config = config_home.join("chezmoi/chezmoi.toml");
         fs::create_dir_all(config.parent().unwrap()).unwrap();
         let mut answers = profiles::Answers::fixture(Profile::Linux, "owned projects".into());
         answers.role = "work";
+        answers.reply_language = "English";
         answers.name = "Kept \"Author\"";
         answers.public_key = "ssh-ed25519 AAAA owned-fixture".into();
         let mut previous: toml::Table =

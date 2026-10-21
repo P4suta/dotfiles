@@ -5,7 +5,12 @@ A project's own instructions take precedence when they conflict.
 
 ## Language
 
+{{ $language := includeTemplate "partials/reply_language" . -}}
+{{ if eq $language "Japanese" -}}
 - Reply in Japanese.
+{{ else -}}
+- Reply in English.
+{{ end -}}
 - Write outward-facing artifacts such as commit messages, PRs, issues, code comments, documentation, and release notes in English.
 
 ## Environment

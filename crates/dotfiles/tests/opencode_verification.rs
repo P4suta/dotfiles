@@ -95,7 +95,7 @@ fn a_session_carries_the_start_report_and_a_stop_refusal_returns_once() -> Resul
         "{summary}"
     );
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("Verification gaps remain"),
+        String::from_utf8_lossy(&output.stderr).contains("Stop requirements remain unmet"),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );

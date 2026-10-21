@@ -289,6 +289,94 @@ fn enabled_malformed_or_unprepared_callbacks_remain_quiet() -> Result<()> {
 }
 
 #[test]
+fn codex_forwarding_cuts_cycles_before_launch_and_preserves_a_distinct_payload() -> Result<()> {
+    const MARKER_ENV: &str = "DOTFILES_NOTIFY_FIXTURE_MARKER";
+    let home = tempfile::tempdir()?;
+    let marker = home.path().join("forwarded");
+    let client = home
+        .path()
+        .join(format!("third-notifier{}", std::env::consts::EXE_SUFFIX));
+    let compiled = platform::process::command("rustc")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/notify-client.rs"))
+        .arg("-o")
+        .arg(&client)
+        .output()?;
+    ensure!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let dotfiles = home
+        .path()
+        .join(format!("dotfiles{}", std::env::consts::EXE_SUFFIX));
+    let app = home.path().join("SkyComputerUseClient");
+    std::fs::copy(&client, &dotfiles)?;
+    std::fs::copy(&client, &app)?;
+    let own = vec![
+        dotfiles.to_string_lossy().into_owned(),
+        "notifications".into(),
+        "agent".into(),
+        "codex".into(),
+    ];
+    let app_cycle = vec![
+        app.to_string_lossy().into_owned(),
+        "turn-ended".into(),
+        "--previous-notify".into(),
+        serde_json::to_string(&own)?,
+    ];
+    let indirect = vec![
+        client.to_string_lossy().into_owned(),
+        "--forward-notify".into(),
+        serde_json::to_string(&app_cycle)?,
+    ];
+    let mut app_with_payload_separator = app_cycle.clone();
+    app_with_payload_separator.push("--".into());
+    let payload = "opaque private payload with spaces and \"quotes\"";
+    for callback in [own, app_cycle, indirect, app_with_payload_separator] {
+        let output = runtime(home.path())
+            .env(MARKER_ENV, &marker)
+            .args([
+                "notifications",
+                "agent",
+                "codex",
+                "--forward-notify",
+                &serde_json::to_string(&callback)?,
+                payload,
+            ])
+            .output()?;
+        assert!(output.status.success(), "{output:?}");
+        assert!(
+            output.stdout.is_empty() && output.stderr.is_empty(),
+            "{output:?}"
+        );
+        assert!(
+            !marker.exists(),
+            "a callback with a return edge was launched"
+        );
+    }
+    let distinct =
+        serde_json::to_string(&[client.to_string_lossy().as_ref(), "argument with spaces"])?;
+    let output = runtime(home.path())
+        .env(MARKER_ENV, &marker)
+        .args([
+            "notifications",
+            "agent",
+            "codex",
+            "--forward-notify",
+            &distinct,
+            payload,
+        ])
+        .output()?;
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        output.stdout.is_empty() && output.stderr.is_empty(),
+        "{output:?}"
+    );
+    assert_eq!(std::fs::read_to_string(marker)?, format!("{payload}\n"));
+    Ok(())
+}
+
+#[test]
 fn optional_operation_failures_warn_without_changing_status_or_exposing_input() -> Result<()> {
     let home = tempfile::tempdir()?;
     let private_input = "private notification payload and identity";

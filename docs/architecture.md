@@ -72,6 +72,7 @@ Ordinary agents read the applicable skill instructions directly.
 The same gate applies the anti-pattern catalog beside it, and counts each finding as a gap.
 A repository names its owners and budgets in `assure.toml` at its root, and an exemption sits in the comment block that precedes the site it exempts, as [its decision record](adr/verification-proportional-to-code-shape.md) describes.
 `dotfiles assure start` reports the gaps when an agent session starts, and the stop hook refuses to end a turn that leaves a gap in a file it changed.
+Claude Code and Codex also pass the owner's `reply_language` to this hook to check final reply prose, with at most one continuation, as [the language decision](adr/check-owner-reply-language-at-stop.md) describes.
 The `pre-commit` and `pre-push` hooks refuse a change that adds a gap.
 `pr-workflow ready` also refuses a PR that weakens a budget, and in a repository with gaps one that closes none.
 

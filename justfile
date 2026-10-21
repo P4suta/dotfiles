@@ -14,6 +14,9 @@ lint-tools: (mise-install "python" "uv" "yamllint")
 mise-install *args: trust
     mise x rust -- cargo run --locked --package dotfiles --bin dotfiles -- mise-install {{args}}
 
+tool-locks: trust
+    mise x rust -- cargo xtask tool-locks
+
 check *args: lint-tools
     mise x -- cargo xtask check {{args}}
 

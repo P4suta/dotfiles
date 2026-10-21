@@ -517,23 +517,11 @@ pub fn findings(root: &Path, stage: Stage, paths: &[String]) -> Result<Counts> {
     Ok(count(found))
 }
 
-/// The Taplo format and syntax findings over `files`, which one run each reports.
+/// Check syntax before formatting the valid files.
 fn taplo_findings(root: &Path, files: &[String]) -> Result<Vec<(String, String)>> {
+    let root = crate::canonical(root).context("canonicalize Taplo input root")?;
+    let root = root.as_path();
     let mut found = parse_taplo(
-        root,
-        &chunked(
-            root,
-            || {
-                let mut command = Tool::Taplo.command();
-                command.args(["fmt", "--check", "--colors", "never", "--"]);
-                command
-            },
-            files,
-            |output| parse_taplo(root, output, "format"),
-        )?,
-        "format",
-    );
-    found.extend(parse_taplo(
         root,
         &chunked(
             root,
@@ -546,6 +534,25 @@ fn taplo_findings(root: &Path, files: &[String]) -> Result<Vec<(String, String)>
             |output| parse_taplo(root, output, "syntax"),
         )?,
         "syntax",
+    );
+    let valid: Vec<String> = files
+        .iter()
+        .filter(|path| !found.iter().any(|(invalid, _)| *path == invalid))
+        .cloned()
+        .collect();
+    found.extend(parse_taplo(
+        root,
+        &chunked(
+            root,
+            || {
+                let mut command = Tool::Taplo.command();
+                command.args(["fmt", "--check", "--colors", "never", "--"]);
+                command
+            },
+            &valid,
+            |output| parse_taplo(root, output, "format"),
+        )?,
+        "format",
     ));
     found.retain(|(path, _)| !path.is_empty() && files.contains(path));
     Ok(found)
@@ -923,6 +930,51 @@ exit 1
         .to_string();
         assert!(error.contains("git"), "{error}");
         assert!(error.contains("invalid-linter-option"), "{error}");
+    }
+
+    #[test]
+    fn taplo_keeps_syntax_findings_without_trying_to_format_invalid_files() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("template.toml"), "{{ value }}\n").unwrap();
+        fs::write(root.path().join("format.toml"), "value=1\n").unwrap();
+        fs::write(root.path().join("clean.toml"), "value = 1\n").unwrap();
+        let template = "template.toml".to_owned();
+        assert_eq!(
+            count(taplo_findings(root.path(), std::slice::from_ref(&template)).unwrap()),
+            count([(template.clone(), "syntax".into())])
+        );
+        assert_eq!(
+            count(
+                taplo_findings(
+                    root.path(),
+                    &[template.clone(), "format.toml".into(), "clean.toml".into()]
+                )
+                .unwrap()
+            ),
+            count([
+                (template, "syntax".into()),
+                ("format.toml".into(), "format".into())
+            ])
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn taplo_keeps_findings_when_the_input_root_is_a_symlink() {
+        let root = tempfile::tempdir().unwrap();
+        let files = root.path().join("files");
+        fs::create_dir(&files).unwrap();
+        fs::write(files.join("template.toml"), "{{ value }}\n").unwrap();
+        fs::write(files.join("format.toml"), "value=1\n").unwrap();
+        let alias = root.path().join("alias");
+        std::os::unix::fs::symlink(&files, &alias).unwrap();
+        assert_eq!(
+            count(taplo_findings(&alias, &["template.toml".into(), "format.toml".into()]).unwrap()),
+            count([
+                ("template.toml".into(), "syntax".into()),
+                ("format.toml".into(), "format".into())
+            ])
+        );
     }
 
     #[test]
