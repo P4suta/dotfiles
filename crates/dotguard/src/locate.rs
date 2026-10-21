@@ -20,7 +20,15 @@ pub fn hook_path() -> String {
 
 /// A `Command` with the hook `PATH` and automatic mise installation and pruning off.
 pub fn child(program: &str) -> Command {
-    let mut c = platform::process::command(program);
+    with_hook_environment(platform::process::command(program))
+}
+
+/// Doppler with the configured user scope and the hook environment.
+pub fn doppler() -> Option<Command> {
+    platform::tool::Tool::doppler_for_user().map(with_hook_environment)
+}
+
+fn with_hook_environment(mut c: Command) -> Command {
     c.env("PATH", hook_path())
         .env("MISE_AUTO_INSTALL", "false")
         .env("MISE_NOT_FOUND_AUTO_INSTALL", "false")
