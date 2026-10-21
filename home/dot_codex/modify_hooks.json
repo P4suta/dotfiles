@@ -4,6 +4,7 @@
   A session starts with the verification report, which lists the repository's code shapes that nothing verifies with their next actions.
   On Windows it first runs the process-start probe, as the Claude Code session does.
   The stop hook refuses to end a turn while a file it changed holds such a shape.
+  It also checks the final reply's prose in the owner's language, with at most one continuation.
   The pre-tool hook blocks a malformed or file-writing shell command before Codex runs it, through the decision core every managed client shares.
   The timing hook records the duration of each shell command and reports its measured duration to Codex, as it does for Claude Code.
   Codex takes a rewritten command only beside an approval of it, and these hooks approve nothing.
@@ -29,12 +30,14 @@
 {{- $issue := dict "matcher" "apply_patch|Edit|Write|MultiEdit|edit|write" "hooks" (list $edit) -}}
 {{- $_ := set $hooks "PreToolUse" (concat (dig "PreToolUse" (list) $hooks) (list $issue)) -}}
 {{- range $event, $point := dict "SessionStart" "start" "Stop" "stop" -}}
-{{-   $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list " health --session" (printf " assure %s" $point))) | fromJson -}}
+{{-   $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list " health --session" (printf " assure %s" $point) " assure stop --reply-language Japanese" " assure stop --reply-language English")) | fromJson -}}
 {{-   $own := list -}}
 {{-   if and (eq $event "SessionStart") (eq $.profile "windows") -}}
 {{-     $own = append $own (includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" "health --session" "trace" true) | fromJson) -}}
 {{-   end -}}
-{{-   $own = append $own (includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" (printf "assure %s" $point) "trace" true) | fromJson) -}}
+{{-   $arguments := printf "assure %s" $point -}}
+{{-   if eq $event "Stop" -}}{{- $arguments = printf "%s --reply-language %s" $arguments (includeTemplate "partials/reply_language" $) -}}{{- end -}}
+{{-   $own = append $own (includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" $arguments "trace" true) | fromJson) -}}
 {{-   $_ := set $hooks $event (concat $groups (list (dict "hooks" $own))) -}}
 {{- end -}}
 {{- if eq (includeTemplate "partials/skill_ops_experimental" .) "true" -}}

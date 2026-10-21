@@ -519,6 +519,8 @@ pub fn findings(root: &Path, stage: Stage, paths: &[String]) -> Result<Counts> {
 
 /// Check syntax before formatting the valid files.
 fn taplo_findings(root: &Path, files: &[String]) -> Result<Vec<(String, String)>> {
+    let root = crate::canonical(root).context("canonicalize Taplo input root")?;
+    let root = root.as_path();
     let mut found = parse_taplo(
         root,
         &chunked(
@@ -951,6 +953,25 @@ exit 1
             ),
             count([
                 (template, "syntax".into()),
+                ("format.toml".into(), "format".into())
+            ])
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn taplo_keeps_findings_when_the_input_root_is_a_symlink() {
+        let root = tempfile::tempdir().unwrap();
+        let files = root.path().join("files");
+        fs::create_dir(&files).unwrap();
+        fs::write(files.join("template.toml"), "{{ value }}\n").unwrap();
+        fs::write(files.join("format.toml"), "value=1\n").unwrap();
+        let alias = root.path().join("alias");
+        std::os::unix::fs::symlink(&files, &alias).unwrap();
+        assert_eq!(
+            count(taplo_findings(&alias, &["template.toml".into(), "format.toml".into()]).unwrap()),
+            count([
+                ("template.toml".into(), "syntax".into()),
                 ("format.toml".into(), "format".into())
             ])
         );

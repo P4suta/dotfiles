@@ -35,6 +35,7 @@ The tool events keep every group another installer added and replace only their 
 A session starts with the verification report, which lists the repository's code shapes that nothing verifies with their next actions.
 On Windows it first runs the process-start probe, which hands the agent a refusal while a hung Defender engine stalls every process start.
 The stop hook refuses to end a turn while a file it changed holds such a shape.
+It also checks the final reply's prose in the owner's language, with at most one continuation.
 Both events keep every group another installer added and replace only these.
 Unrelated handlers remain in their existing groups.
 */ -}}
@@ -43,9 +44,9 @@ Unrelated handlers remain in their existing groups.
 {{-   $session = append $session (dict "type" "command" "command" (printf "%s health --session" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool)))) -}}
 {{- end -}}
 {{- $session = append $session (dict "type" "command" "command" (printf "%s assure start" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool)))) -}}
-{{- $stop := dict "type" "command" "command" (printf "%s assure stop" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) -}}
+{{- $stop := dict "type" "command" "command" (printf "%s assure stop --reply-language %s" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool)) (includeTemplate "partials/reply_language" .)) -}}
 {{- range $event := list "SessionStart" "Stop" -}}
-{{-   $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list " health --session" " assure start" " assure stop")) | fromJson -}}
+{{-   $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list " health --session" " assure start" " assure stop" " assure stop --reply-language Japanese" " assure stop --reply-language English")) | fromJson -}}
 {{-   $own := dict "hooks" (list $stop) -}}
 {{-   if eq $event "SessionStart" -}}{{- $own = dict "hooks" $session -}}{{- end -}}
 {{-   $_ := set $hooks $event (concat $groups (list $own)) -}}
