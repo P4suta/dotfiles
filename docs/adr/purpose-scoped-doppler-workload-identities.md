@@ -42,6 +42,10 @@ The shared `doppler` credential lifecycle reference defines the reusable operati
 
 The organization helper's `retire-consumer` phase binds one consumer to a completed manual authentication run, its exact attempt, and the current main revision.
 It compares the deployed workflow with the reviewed authentication-only template, checks every purpose and environment, requires successful credential retrieval and explicit unrelated-access denial, and rejects remaining legacy references or unresolved whole-secret forwarding.
+The remaining-consumer review parses every first-party workflow and action from the same Git revision, including every legacy source field and sync metadata field.
+Inherited secrets may reach a local reusable workflow only when its source belongs to that complete reviewed tree.
+The review rejects missing or external inheritance targets, required legacy secret inputs, dynamic lookup, and whole-secret serialization.
+GitHub's [reusable workflow contract](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows) defines that external boundary.
 The read-only invocation reports the matching legacy writers.
 An explicit `--apply` disconnects only those writers with target deletion disabled, checks main again before each change, and reads back the remaining sync metadata.
 Keep GitHub target-field deletion and account deletion separate.

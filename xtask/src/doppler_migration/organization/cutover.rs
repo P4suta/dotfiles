@@ -4,13 +4,15 @@ use super::{
 };
 use anyhow::{Context, ensure};
 use rules::doppler_organization_rules::Change;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::process::Stdio;
-use yaml_rust2::Yaml;
+use yaml_rust2::{Yaml, YamlLoader};
 
 const GITHUB_OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
 const MAIN_BRANCH: &str = "main";
 const MANUAL_EVENT: &str = "workflow_dispatch";
+const SYNC_METADATA_FIELDS: [&str; 3] =
+    ["DOPPLER_CONFIG", "DOPPLER_ENVIRONMENT", "DOPPLER_PROJECT"];
 
 fn main_revision(repository: &Repository) -> Result<String> {
     let actual = gh(&format!("repos/{}", repository.name))?;
@@ -128,16 +130,27 @@ fn check_job(expected: &Yaml, actual: &Value, logs: &str) -> Result<()> {
 fn remaining_consumers(
     repository: &Repository,
     revision: &str,
+    report: &Report,
     consumers: &[&Consumer],
 ) -> Result<()> {
     let paths = git(
         &repository.directory,
         &["ls-tree", "-r", "--name-only", revision, "--", ".github"],
     )?;
-    let fields: BTreeSet<_> = consumers
+    let mut fields: BTreeSet<_> = consumers
         .iter()
         .flat_map(|consumer| consumer.aliases.keys().cloned())
         .collect();
+    fields.extend(SYNC_METADATA_FIELDS.map(str::to_owned));
+    for consumer in consumers {
+        let config = report
+            .configs
+            .iter()
+            .find(|config| config.project == consumer.project && config.config == consumer.source)
+            .context("legacy config inventory missing")?;
+        fields.extend(config.names.iter().cloned());
+    }
+    let mut sources = BTreeMap::new();
     for path in paths.lines().filter(|path| {
         (path.starts_with(".github/workflows/") || path.starts_with(".github/actions/"))
             && std::path::Path::new(path)
@@ -150,14 +163,104 @@ fn remaining_consumers(
             &repository.directory,
             &["show", &format!("{revision}:{path}")],
         )?;
-        check_secret_references(&source, &fields)
+        sources.insert(path.to_owned(), source);
+    }
+    check_workflow_sources(&sources, &fields)
+}
+
+fn check_workflow_sources(
+    sources: &BTreeMap<String, String>,
+    fields: &BTreeSet<String>,
+) -> Result<()> {
+    for (path, source) in sources {
+        check_secret_references(source, fields, sources)
             .with_context(|| format!("remaining consumer review at {path}"))?;
     }
     Ok(())
 }
 
-fn check_secret_references(source: &str, fields: &BTreeSet<String>) -> Result<()> {
-    let compact = source
+fn check_secret_references(
+    source: &str,
+    fields: &BTreeSet<String>,
+    sources: &BTreeMap<String, String>,
+) -> Result<()> {
+    let documents = YamlLoader::load_from_str(source)?;
+    ensure!(documents.len() == 1, "one workflow document is required");
+    check_yaml(&documents[0], YamlScope::Workflow, fields, sources)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum YamlScope {
+    Workflow,
+    Jobs,
+    Job,
+    Other,
+}
+
+fn check_yaml(
+    value: &Yaml,
+    scope: YamlScope,
+    fields: &BTreeSet<String>,
+    sources: &BTreeMap<String, String>,
+) -> Result<()> {
+    match value {
+        Yaml::String(value) => check_expression(value, fields)?,
+        Yaml::Array(values) => {
+            for value in values {
+                check_yaml(value, YamlScope::Other, fields, sources)?;
+            }
+        }
+        Yaml::Hash(entries) => {
+            if scope == YamlScope::Workflow
+                && let Some(declarations) = value["on"]["workflow_call"]["secrets"].as_hash()
+            {
+                for (name, declaration) in declarations {
+                    if name.as_str().is_some_and(|name| {
+                        fields.iter().any(|field| field.eq_ignore_ascii_case(name))
+                    }) {
+                        ensure!(
+                            matches!(
+                                declaration["required"],
+                                Yaml::BadValue | Yaml::Boolean(false)
+                            ),
+                            "a reusable workflow still requires a legacy credential"
+                        );
+                    }
+                }
+            }
+            for (key, child) in entries {
+                if key.as_str() == Some("secrets") && child.as_str() == Some("inherit") {
+                    ensure!(
+                        scope == YamlScope::Job,
+                        "secret inheritance must belong to a reviewed reusable job"
+                    );
+                    let target = value["uses"]
+                        .as_str()
+                        .context("inherited secret destination is unresolved")?;
+                    ensure!(
+                        target.starts_with("./.github/workflows/")
+                            && target
+                                .strip_prefix("./")
+                                .is_some_and(|path| sources.contains_key(path)),
+                        "inherited secrets leave the reviewed first-party workflow tree"
+                    );
+                }
+                let child_scope = match scope {
+                    YamlScope::Workflow if key.as_str() == Some("jobs") => YamlScope::Jobs,
+                    YamlScope::Jobs => YamlScope::Job,
+                    YamlScope::Workflow | YamlScope::Job | YamlScope::Other => YamlScope::Other,
+                };
+                check_yaml(key, YamlScope::Other, fields, sources)?;
+                check_yaml(child, child_scope, fields, sources)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn check_expression(value: &str, fields: &BTreeSet<String>) -> Result<()> {
+    let compact = value
         .chars()
         .filter(|c| !c.is_whitespace())
         .collect::<String>()
@@ -167,7 +270,7 @@ fn check_secret_references(source: &str, fields: &BTreeSet<String>) -> Result<()
         "dynamic secret access needs an explicit consumer review"
     );
     ensure!(
-        !compact.contains("tojson(secrets)") && !compact.contains("secrets:inherit"),
+        !compact.contains("tojson(secrets)"),
         "whole-secret forwarding needs an explicit consumer review"
     );
     ensure!(
@@ -220,7 +323,7 @@ fn verify_authentication(
         &["show", &format!("{revision}:{VERIFY_WORKFLOW}")],
     )?;
     let expected = workflows::checked_verification(report, consumers, &source)?;
-    remaining_consumers(repository, &revision, consumers)?;
+    remaining_consumers(repository, &revision, report, consumers)?;
     let response = gh(&format!(
         "repos/{name}/actions/runs/{number}/attempts/{attempt}/jobs?per_page=100"
     ))?;
@@ -499,6 +602,7 @@ mod tests {
         check_secret_references(
             "private-key: ${{ steps.credentials.outputs.GITHUB_APP_PRIVATE_KEY }}",
             &fields,
+            &BTreeMap::new(),
         )
         .unwrap();
         for source in [
@@ -509,9 +613,53 @@ mod tests {
             "secrets: inherit",
         ] {
             assert!(
-                check_secret_references(source, &fields).is_err(),
+                check_secret_references(source, &fields, &BTreeMap::new()).is_err(),
                 "{source}"
             );
         }
+    }
+
+    #[test]
+    fn local_inheritance_requires_the_complete_first_party_source_tree() {
+        let fields = BTreeSet::from(["PRIVATE_KEY".to_owned()]);
+        let entry =
+            "jobs:\n  publish:\n    uses: ./.github/workflows/publish.yml\n    secrets: inherit\n";
+        let publisher =
+            "on:\n  workflow_call:\njobs:\n  publish:\n    steps:\n      - run: echo public\n";
+        let sources = BTreeMap::from([
+            (".github/workflows/release.yml".to_owned(), entry.to_owned()),
+            (
+                ".github/workflows/publish.yml".to_owned(),
+                publisher.to_owned(),
+            ),
+        ]);
+        check_workflow_sources(&sources, &fields).unwrap();
+        let mut missing = sources.clone();
+        missing.remove(".github/workflows/publish.yml");
+        assert!(check_workflow_sources(&missing, &fields).is_err());
+        let mut external = sources.clone();
+        external.insert(
+            ".github/workflows/release.yml".to_owned(),
+            entry.replace(
+                "./.github/workflows/publish.yml",
+                "owner/other/.github/workflows/publish.yml@main",
+            ),
+        );
+        assert!(check_workflow_sources(&external, &fields).is_err());
+        let mut reader = sources.clone();
+        reader.insert(
+            ".github/workflows/publish.yml".to_owned(),
+            publisher.replace("echo public", "echo ${{ secrets.PRIVATE_KEY }}"),
+        );
+        assert!(check_workflow_sources(&reader, &fields).is_err());
+        let mut required = sources;
+        required.insert(
+            ".github/workflows/publish.yml".to_owned(),
+            publisher.replace(
+                "workflow_call:",
+                "workflow_call:\n    secrets:\n      PRIVATE_KEY:\n        required: true",
+            ),
+        );
+        assert!(check_workflow_sources(&required, &fields).is_err());
     }
 }

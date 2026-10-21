@@ -13,7 +13,9 @@ const DISCOVERY_TRIGGER: &str =
     "  push:\n    branches: [main]\n    paths:\n      - .github/workflows/verify-doppler.yml\n";
 const MANUAL_MAIN_CONDITION: &str = "    if: >-\n      github.event_name == 'workflow_dispatch' &&\n      github.ref == 'refs/heads/main'\n";
 const LEGACY_MAIN_CONDITION: &str = "    if: github.ref == 'refs/heads/main'\n";
-const APP_ACTION: &str = "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1";
+const APP_ACTION: &str = "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510";
+const LEGACY_APP_ACTION: &str =
+    "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1";
 const APP_IDS: [&str; 8] = [
     "RELEASE_PLZ_APP_CLIENT_ID",
     "RELEASE_PLZ_APP_ID",
@@ -599,16 +601,21 @@ pub(super) fn checked_verification(
     source: &str,
 ) -> Result<Yaml> {
     let expected = verification(report, consumers)?;
-    let legacy = expected
-        .replace(DISCOVERY_TRIGGER, "")
-        .replace(MANUAL_MAIN_CONDITION, LEGACY_MAIN_CONDITION);
     let mut actual = YamlLoader::load_from_str(source)?;
-    ensure!(
-        actual == YamlLoader::load_from_str(&expected)?
-            || actual == YamlLoader::load_from_str(&legacy)?,
+    for action in [APP_ACTION, LEGACY_APP_ACTION] {
+        let current = expected.replace(APP_ACTION, action);
+        let manual = current
+            .replace(DISCOVERY_TRIGGER, "")
+            .replace(MANUAL_MAIN_CONDITION, LEGACY_MAIN_CONDITION);
+        if actual == YamlLoader::load_from_str(&current)?
+            || actual == YamlLoader::load_from_str(&manual)?
+        {
+            return actual.pop().context("empty authentication workflow");
+        }
+    }
+    anyhow::bail!(
         "deployed authentication workflow differs from the reviewed non-publishing contract"
-    );
-    actual.pop().context("empty authentication workflow")
+    )
 }
 
 pub(super) fn rewrite(report: &Report) -> Result<()> {
@@ -785,6 +792,47 @@ mod tests {
                     .join(" "),
                 "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'"
             );
+        }
+    }
+
+    #[test]
+    fn only_reviewed_authentication_pins_and_registration_variants_are_accepted() {
+        let consumer = Consumer {
+            purpose: Purpose::Automation,
+            ..consumer()
+        };
+        let report = Report {
+            workplace: String::new(),
+            checkouts: std::path::PathBuf::new(),
+            repositories: Vec::new(),
+            configs: Vec::new(),
+            consumers: vec![
+                consumer.clone(),
+                Consumer {
+                    project: "unrelated".to_owned(),
+                    ..consumer.clone()
+                },
+            ],
+            legacy_registry: Vec::new(),
+        };
+        let source = verification(&report, &[&consumer]).unwrap();
+        for action in [
+            "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+            "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
+        ] {
+            let source = source.replace(APP_ACTION, action);
+            checked_verification(&report, &[&consumer], &source).unwrap();
+            let manual = source
+                .replace(DISCOVERY_TRIGGER, "")
+                .replace(MANUAL_MAIN_CONDITION, LEGACY_MAIN_CONDITION);
+            checked_verification(&report, &[&consumer], &manual).unwrap();
+            for changed in [
+                source.replace(action, "actions/create-github-app-token@unreviewed"),
+                source.replace("permission-contents: read", "permission-contents: write"),
+                source.replace("    steps:\n", "    steps:\n      - run: publish\n"),
+            ] {
+                assert!(checked_verification(&report, &[&consumer], &changed).is_err());
+            }
         }
     }
 
