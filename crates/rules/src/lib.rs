@@ -92,6 +92,7 @@ pub mod source_name_rules;
 pub mod source_sync_rules;
 pub mod stale_rules;
 pub mod start_health_rules;
+pub mod tailscale_rules;
 pub mod target_rules;
 pub mod timeout_rules;
 pub mod tool_rules;

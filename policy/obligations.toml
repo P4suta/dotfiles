@@ -533,6 +533,37 @@ fn reject_skipping_a_sentence_as_a_directive() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/tailscale_rules.rs"
+probes = '''
+#[kani::proof]
+#[kani::unwind(32)]
+fn reject_admitting_a_tailscale_login() {
+    assert!(production::verdict(&["login"]) == production::Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(32)]
+fn reject_admitting_bare_tailscale() {
+    assert!(production::verdict(&[]) == production::Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(32)]
+fn reject_admitting_a_debug_mutation() {
+    assert!(production::verdict(&["debug", "rebind"]) == production::Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(32)]
+fn reject_admitting_a_lock_mutation() {
+    assert!(production::verdict(&["lock", "init"]) == production::Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(32)]
+fn reject_refusing_tailscale_status() {
+    assert!(production::verdict(&["status"]) == production::Verdict::Refuse);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/disk_scan_rules.rs"
 probes = '''
 #[kani::proof]
