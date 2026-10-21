@@ -106,20 +106,23 @@ fn fetch(
         .purpose
         .fields()
         .iter()
-        .map(|name| {
-            format!(
-                "steps.{id}.outputs.{name} == '' || startsWith(steps.{id}.outputs.{name}, '${{')"
-            )
+        .flat_map(|name| {
+            [
+                format!("steps.{id}.outputs.{name} == ''"),
+                format!("startsWith(steps.{id}.outputs.{name}, '${{')"),
+            ]
         })
         .collect::<Vec<_>>()
-        .join(" || ");
+        .join(&format!(" ||\n{prefix}    "));
     rows.extend([
         format!(
             "{prefix}- name: Reject missing or unresolved {} credentials",
             consumer.purpose.config()
         ),
         format!("{prefix}  if: >-"),
-        format!("{prefix}    ${{{{ steps.{id}.outcome == 'success' && ({invalid}) }}}}"),
+        format!("{prefix}    ${{{{ steps.{id}.outcome == 'success' && ("),
+        format!("{prefix}    {invalid}"),
+        format!("{prefix}    ) }}}}"),
         format!("{prefix}  shell: bash"),
         format!("{prefix}  run: exit 1"),
         String::new(),
@@ -537,7 +540,7 @@ fn write_checked(path: &Path, baseline: Option<&str>, replacement: &str) -> Resu
 
 fn verification(report: &Report, consumers: &[&Consumer]) -> Result<String> {
     let mut source = format!(
-        "name: {VERIFY_NAME}\n\non:\n  workflow_dispatch:\n\npermissions: {{}}\n\nconcurrency:\n  group: verify-credentials\n  cancel-in-progress: false\n\njobs:\n"
+        "---\nname: {VERIFY_NAME}\n\n'on':\n  workflow_dispatch:\n\npermissions: {{}}\n\nconcurrency:\n  group: verify-credentials\n  cancel-in-progress: false\n\njobs:\n"
     );
     for consumer in consumers {
         for (index, environment) in consumer
@@ -583,7 +586,7 @@ fn verification(report: &Report, consumers: &[&Consumer]) -> Result<String> {
         }
     }
     YamlLoader::load_from_str(&source)?;
-    Ok(source)
+    Ok(format!("{}\n", source.trim_end()))
 }
 
 pub(super) fn rewrite(report: &Report) -> Result<()> {
