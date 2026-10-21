@@ -58,9 +58,9 @@ pub use rules::{pr_ready_rules, pr_rules, wip_rules};
 use crate::pr_ready_rules::{Action as Move, Report, Settlement, State, Workflow};
 use crate::pr_rules::{
     Blocker, Checks, Dependency, Effect, Exclusion, Generation, IssueGate, Lifecycle, MergeState,
-    Operation, Step, Stop, api_quota_available, coderabbit_body_marker_allowed, dependency,
-    exclusion, head_checks, issue_gate, keeps_pause_exclusion, merge_step, plan, requests_review,
-    review_request_allowed,
+    Operation, PathMerge, Step, Stop, api_quota_available, coderabbit_body_marker_allowed,
+    dependency, exclusion, head_checks, issue_gate, keeps_pause_exclusion, merge_step, plan,
+    requests_review, review_request_allowed,
 };
 use crate::refusal::{Refusal, command};
 use crate::tool::Tool;
@@ -201,10 +201,6 @@ pub enum Commands {
         /// Also keep CodeRabbit-created PRs as drafts.
         #[arg(long)]
         draft: bool,
-        /// Open the PR although it touches paths another open PR touches.
-        /// Shared commits still refuse.
-        #[arg(long)]
-        independent: bool,
     },
     /// Replace both title and body with one checked document.
     Edit {
@@ -1989,8 +1985,7 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
             head,
             base,
             draft,
-            independent,
-        } => create(document, &head, base, draft, independent, rerun)?,
+        } => create(document, &head, base, draft, rerun)?,
         Commands::Edit { document, pr } => edit(document, pr, rerun)?,
         Commands::Ready { target, pr } => ready_command(&target, pr, rerun)?,
         Commands::Merge {
@@ -2111,7 +2106,6 @@ fn create(
     head: &str,
     base: Option<String>,
     draft: bool,
-    independent: bool,
     rerun: &str,
 ) -> Result<()> {
     let body_file = document.body_file.clone();
@@ -2150,15 +2144,7 @@ fn create(
         Checks::Incomplete,
     )?;
     github.admit_work_in_progress(&target, &head)?;
-    refuse_dependent(
-        &github,
-        &target,
-        &head,
-        base.as_deref(),
-        independent,
-        &title,
-        &body_file,
-    )?;
+    refuse_dependent(&github, &target, &head, base.as_deref(), &title, &body_file)?;
     let mut args = arguments("create", &target.repo);
     args.extend([OsString::from("--head"), head.into()]);
     if let Some(base) = base {
@@ -2948,13 +2934,33 @@ fn merge_stack(
     }
 }
 
-/// Refuses an independent PR whose head shares commits, or unless declared independent touched paths, with another open PR.
+const GIT_MERGE_CONFLICT: i32 = 1;
+
+fn merge_heads(head: &str, other: &str) -> Result<PathMerge> {
+    let output = Tool::Git
+        .command()
+        .args(["merge-tree", "--write-tree", head, other])
+        .output()
+        .context("start git merge-tree")?;
+    if output.status.success() {
+        Ok(PathMerge::Clean)
+    } else if output.status.code() == Some(GIT_MERGE_CONFLICT) {
+        Ok(PathMerge::Conflict)
+    } else {
+        bail!(
+            "git merge-tree --write-tree {head} {other} failed with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+}
+
+/// Refuses shared commits or conflicting heads and names the required stack.
 fn refuse_dependent(
     github: &Github,
     target: &Target,
     head: &str,
     base: Option<&str>,
-    independent: bool,
     title: &str,
     body_file: &Path,
 ) -> Result<()> {
@@ -2980,13 +2986,25 @@ fn refuse_dependent(
         format!("refs/heads/{head}")
     };
     let commits = |tip: &str| git_set(&["rev-list", &format!("{trunk}..{tip}")]);
-    let paths = |tip: &str| git_set(&["diff", "--name-only", &format!("{trunk}...{tip}")]);
+    let paths = |tip: &str| {
+        git_set(&[
+            "diff",
+            "--name-only",
+            "--no-renames",
+            &format!("{trunk}...{tip}"),
+        ])
+    };
     let (own_commits, own_paths) = (commits(&tip)?, paths(&tip)?);
     for other in others {
         let theirs = format!("refs/remotes/origin/{}", other.head_ref_name);
         let shared_commits = !own_commits.is_disjoint(&commits(&theirs)?);
         let shared_paths = !own_paths.is_disjoint(&paths(&theirs)?);
-        let Some(found) = dependency(shared_commits, shared_paths, independent) else {
+        let merge = if shared_paths {
+            merge_heads(&tip, &theirs)?
+        } else {
+            PathMerge::Disjoint
+        };
+        let Some(found) = dependency(shared_commits, merge) else {
             continue;
         };
         let mut next = vec!["pr-workflow", "stack", "create", "--repo", &target.repo];
@@ -3012,20 +3030,20 @@ fn refuse_dependent(
                     "{head} contains commits of #{}, so it depends on that PR; open it as a stack on top of it",
                     other.number
                 ),
-                Dependency::Paths => format!(
-                    "{head} touches paths #{} touches; open it as a stack on top of that PR, or pass --independent when the changes do not depend on each other",
+                Dependency::Conflict => format!(
+                    "{head} conflicts with #{}; open it as a stack on top of that PR",
                     other.number
                 ),
             },
             command(&next),
         )
         .evidence(format!(
-            "#{} ({}) shares {}",
+            "#{} ({}): {}",
             other.number,
             other.head_ref_name,
             match found {
-                Dependency::Commits => "commits",
-                Dependency::Paths => "touched paths",
+                Dependency::Commits => "shared commits",
+                Dependency::Conflict => "git merge-tree --write-tree reports a conflict between the heads",
             }
         ))
         .into());
