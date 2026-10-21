@@ -3161,6 +3161,41 @@ mod tests {
 
     #[test]
     #[cfg(not(target_os = "windows"))]
+    fn notify_chain_decisions_and_their_counterexamples_verify_against_production() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let manifest = obligations::manifest(root)?;
+        let source = "crates/rules/src/notify_chain_rules.rs";
+        let probes = manifest
+            .obligations
+            .iter()
+            .find_map(|obligation| match obligation {
+                Obligation::Kani {
+                    source: candidate,
+                    probes,
+                    ..
+                } if candidate == source => Some(probes),
+                _ => None,
+            })
+            .context("notify chains have a registered proof obligation")?;
+        kani_environment_version(root)?;
+        let verifier_hash = crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
+        let engine_hash = crate::phase_evidence::engine_digest(root)?;
+        assert_eq!(
+            verify_rules(
+                root,
+                source,
+                probes,
+                &flags(&manifest, source),
+                &verifier_hash,
+                &engine_hash
+            )?,
+            (4, 3)
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(not(target_os = "windows"))]
     fn freshness_report_decisions_and_their_counterexamples_verify_against_production() -> Result<()>
     {
         const EXPECTED: (usize, usize) = (3, 6);

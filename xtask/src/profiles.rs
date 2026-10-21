@@ -1056,6 +1056,29 @@ impl<'a> Fixture<'a> {
                 &format!("{} render {target}", profile.name()),
             )?;
             let rendered = String::from_utf8_lossy(&rendered.stdout).into_owned();
+            if target == ".codex/config.toml" {
+                let config: toml::Table = toml::from_str(&rendered)?;
+                let notify: Vec<String> = config
+                    .get("notify")
+                    .context("Codex has no notify command")?
+                    .clone()
+                    .try_into()?;
+                let executable = if profile == Profile::Windows {
+                    "dotfiles.exe"
+                } else {
+                    "dotfiles"
+                };
+                let tool = self.destination.join(".local/bin").join(executable);
+                let canonical = rules::notify_chain_rules::normalize(
+                    rules::notify_chain_rules::Command(notify.clone()),
+                    &tool.to_string_lossy(),
+                );
+                ensure!(
+                    notify == canonical.0,
+                    "{} profile has a noncanonical Codex notify chain",
+                    profile.name()
+                );
+            }
             ensure!(
                 keeps_host_keys(&target, &host, &rendered)?,
                 "{}",
