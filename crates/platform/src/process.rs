@@ -204,6 +204,16 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
     construct::<true>(program)
 }
 
+/// A Doppler command with the user's absolute home as its authentication scope.
+/// Returns `None` when the environment names no absolute home.
+#[must_use]
+pub fn doppler_for_user() -> Option<Command> {
+    let home = crate::home::home().filter(|home| home.is_absolute())?;
+    let mut command = command("doppler");
+    command.arg("--scope").arg(home);
+    Some(command)
+}
+
 macro_rules! git_local_environment {
     ($first:literal $(, $name:literal)* $(,)?) => {
         /// The repository-local variables listed by `git rev-parse --local-env-vars`.

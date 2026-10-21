@@ -78,7 +78,12 @@ enum Commands {
         action: dotfiles::notifications::Action,
     },
     /// The agent hooks of the verification gate: the session start report of a repository's gaps, and the stop decision over the files a turn changed.
-    Assure { point: dotfiles::assure::AgentPoint },
+    Assure {
+        point: dotfiles::assure::AgentPoint,
+        /// Check Stop reply prose in this owner-selected language.
+        #[arg(long = "reply-language")]
+        language: Option<dotfiles::assure::ReplyLanguage>,
+    },
     /// Refuses work on a host whose process creation stalls, as it does when the Defender scan engine stops responding.
     Health {
         /// Prints a refusal to standard output, which a session start hook adds to the agent's context, and exits successfully.
@@ -229,7 +234,7 @@ fn run(mut cli: Cli) -> Result<()> {
         Commands::IssueGuard => std::process::exit(dotfiles::issue_guard::hook()?),
         Commands::CodexHooks { request } => std::process::exit(codex_hooks::run(request)?),
         Commands::Notifications { action } => dotfiles::notifications::run(action)?,
-        Commands::Assure { point } => assure(point)?,
+        Commands::Assure { point, language } => assure(point, language)?,
         Commands::Health { session } => health(session)?,
         Commands::Hook { hook, arguments } => dotfiles::hooks::run(hook, &arguments)?,
         Commands::PostCommitWorker { producer } => {
@@ -306,11 +311,14 @@ fn windows(_: Vec<OsString>) -> Result<()> {
 }
 
 /// The verification gate's agent hooks, whose session start first reports the agent hooks that failed since the last one.
-fn assure(point: dotfiles::assure::AgentPoint) -> Result<()> {
+fn assure(
+    point: dotfiles::assure::AgentPoint,
+    reply_language: Option<dotfiles::assure::ReplyLanguage>,
+) -> Result<()> {
     if point == dotfiles::assure::AgentPoint::Start {
         dotfiles::hook_failures::session_start();
     }
-    dotfiles::assure::hook(point)
+    dotfiles::assure::hook(point, reply_language.map(Into::into))
 }
 
 /// The health gate, which at session start prints its refusal instead of failing.

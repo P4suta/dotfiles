@@ -88,7 +88,12 @@ impl Fixture {
     }
 
     fn owners(&self, text: &str) -> Result<std::path::PathBuf> {
-        let path = self.scope.path().join("assure/repos/p4suta__fixture.toml");
+        let path = self
+            .scope
+            .path()
+            .join("assure")
+            .join("repos")
+            .join("p4suta__fixture.toml");
         fs::create_dir_all(path.parent().unwrap())?;
         fs::write(&path, text)?;
         Ok(path)

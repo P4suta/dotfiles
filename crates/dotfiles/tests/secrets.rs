@@ -9,6 +9,10 @@ mod fixture_process;
 fn scoped_doppler_execution_refuses_invalid_values_and_preserves_consumer_exit_status() -> Result<()>
 {
     let scope = tempfile::tempdir()?;
+    let home = scope.path().join("configured home");
+    let checkout = scope.path().join("checkout");
+    fs::create_dir(&home)?;
+    fs::create_dir(&checkout)?;
     let fake = scope
         .path()
         .join(format!("doppler{}", std::env::consts::EXE_SUFFIX));
@@ -29,7 +33,42 @@ fn scoped_doppler_execution_refuses_invalid_values_and_preserves_consumer_exit_s
         let consumed = scope.path().join(format!("consumer-{index}"));
         let doppler = scope.path().join(format!("doppler-{index}"));
         let output = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), scope.path())
-            .current_dir(scope.path())
+            .current_dir(&checkout)
+            .args([
+                "run-secrets",
+                "--project",
+                "fixture",
+                "--config",
+                "fixture",
+                "--names",
+                "API_KEY",
+                "--",
+            ])
+            .arg(&fake)
+            .arg("--consumer")
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("PATH", &path)
+            .env("FAKE_SECRET", value)
+            .env("FAKE_DOPPLER_LOG", &doppler)
+            .env("FAKE_CONSUMER_LOG", &consumed)
+            .output()?;
+        assert_eq!(
+            output.status.code(),
+            Some(if index == 0 { 37 } else { 1 }),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(consumed.exists(), index == 0);
+        assert_eq!(fs::read(doppler)?, b"scope and no-fallback verified");
+        assert!(!String::from_utf8_lossy(&output.stderr).contains(value) || value.is_empty());
+    }
+    for home in [None, Some(""), Some("relative-home")] {
+        let doppler = scope.path().join("invalid-home-doppler");
+        let consumed = scope.path().join("invalid-home-consumer");
+        let mut command = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), scope.path());
+        command
+            .current_dir(&checkout)
             .args([
                 "run-secrets",
                 "--project",
@@ -43,14 +82,21 @@ fn scoped_doppler_execution_refuses_invalid_values_and_preserves_consumer_exit_s
             .arg(&fake)
             .arg("--consumer")
             .env("PATH", &path)
-            .env("FAKE_SECRET", value)
+            .env("FAKE_SECRET", "fixture-only")
             .env("FAKE_DOPPLER_LOG", &doppler)
-            .env("FAKE_CONSUMER_LOG", &consumed)
-            .output()?;
-        assert_eq!(output.status.code(), Some(if index == 0 { 37 } else { 1 }));
-        assert_eq!(consumed.exists(), index == 0);
-        assert_eq!(fs::read(doppler)?, b"scope and no-fallback verified");
-        assert!(!String::from_utf8_lossy(&output.stderr).contains(value) || value.is_empty());
+            .env("FAKE_CONSUMER_LOG", &consumed);
+        for name in ["HOME", "USERPROFILE"] {
+            if let Some(home) = home {
+                command.env(name, home);
+            } else {
+                command.env_remove(name);
+            }
+        }
+        let output = command.output()?;
+        assert_eq!(output.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("absolute home directory"));
+        assert!(!doppler.exists());
+        assert!(!consumed.exists());
     }
     assert!(!scope.path().join(".doppler").exists());
     Ok(())

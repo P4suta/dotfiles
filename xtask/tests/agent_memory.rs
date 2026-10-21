@@ -174,6 +174,7 @@ fn render_merged_with_mode(
         ".chezmoitemplates/partials/without_runtime_handlers",
         ".chezmoitemplates/partials/skill_ops_experimental",
         ".chezmoitemplates/partials/claude_settings",
+        ".chezmoitemplates/partials/reply_language",
     ] {
         let copy = source.join(file);
         std::fs::create_dir_all(copy.parent().unwrap()).unwrap();

@@ -517,17 +517,27 @@ fn current_renovate_report() -> serde_json::Value {
     }]}}}})
 }
 
-#[test]
-fn renovate_fetches_managed_credentials_without_exposing_them_or_overriding_the_environment() {
-    let (repository, base, offered) = renovate_fixture("renovate-managed-credentials");
-    let tools = repository.path().join(".local/bin");
-    for name in ["chezmoi", "doppler"] {
+fn credential_tools_home(repository: &Repository) -> PathBuf {
+    let home = repository.scope.join("configured home");
+    let tools = home.join(".local/bin");
+    std::fs::create_dir_all(&tools).unwrap();
+    for name in ["docker", "id", "chezmoi", "doppler"] {
         std::fs::copy(
-            tools.join(format!("docker{}", std::env::consts::EXE_SUFFIX)),
+            repository
+                .path()
+                .join(".local/bin")
+                .join(format!("docker{}", std::env::consts::EXE_SUFFIX)),
             tools.join(format!("{name}{}", std::env::consts::EXE_SUFFIX)),
         )
         .unwrap();
     }
+    home
+}
+
+#[test]
+fn renovate_fetches_managed_credentials_without_exposing_them_or_overriding_the_environment() {
+    let (repository, base, offered) = renovate_fixture("renovate-managed-credentials");
+    let home = credential_tools_home(&repository);
     let report = repository.scope.join("credential-report.json");
     std::fs::write(
         &report,
@@ -577,6 +587,8 @@ fn renovate_fetches_managed_credentials_without_exposing_them_or_overriding_the_
         let mut variables = renovate_variables(&repository);
         variables.retain(|(name, _)| *name != "RENOVATE_GITHUB_COM_TOKEN");
         variables.extend([
+            ("HOME", home.to_string_lossy().into_owned()),
+            ("USERPROFILE", home.to_string_lossy().into_owned()),
             ("MISE_NOT_FOUND_AUTO_INSTALL", "true".to_owned()),
             ("MISE_AUTO_PRUNE", "true".to_owned()),
             ("RENOVATE_GITHUB_COM_TOKEN", explicit.to_owned()),

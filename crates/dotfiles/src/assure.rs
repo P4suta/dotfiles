@@ -4,6 +4,7 @@
 //! An exemption sits in the comment block before the site it exempts.
 
 use crate::refusal::Refusal;
+use crate::reply_language_rules::{self, Language};
 use crate::shape_rules::{
     self, Bound, Cause, Change, Exemption, MapSource, Owner, Point, Signal, Site, Standing, Verdict,
 };
@@ -1478,21 +1479,35 @@ pub enum AgentPoint {
     Stop,
 }
 
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub enum ReplyLanguage {
+    #[value(name = "Japanese")]
+    Japanese,
+    #[value(name = "English")]
+    English,
+}
+
+impl From<ReplyLanguage> for Language {
+    fn from(language: ReplyLanguage) -> Self {
+        match language {
+            ReplyLanguage::Japanese => Self::Japanese,
+            ReplyLanguage::English => Self::English,
+        }
+    }
+}
+
 /// The agent hook of `point`: the session start report on standard output, or the stop decision as the client's JSON.
 ///
 /// # Errors
 ///
 /// Returns an error when the hook input holds no JSON, the host lacks the catalog, or Git fails.
-pub fn hook(point: AgentPoint) -> Result<()> {
-    let Some(root) = repository() else {
-        if point == AgentPoint::Stop {
-            println!("{{}}");
-        }
-        return Ok(());
-    };
-    let catalog = installed()?;
+pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
     match point {
         AgentPoint::Start => {
+            let Some(root) = repository() else {
+                return Ok(());
+            };
+            let catalog = installed()?;
             if let Some(report) = start(&root, &catalog)? {
                 print!("{report}");
             }
@@ -1501,20 +1516,46 @@ pub fn hook(point: AgentPoint) -> Result<()> {
         AgentPoint::Stop => {
             let mut input = String::new();
             std::io::stdin().read_to_string(&mut input)?;
-            let continued = if input.trim().is_empty() {
-                false
+            let input = if input.trim().is_empty() {
+                StopInput::default()
             } else {
-                let value: serde_json::Value =
-                    serde_json::from_str(&input).context("the stop hook input is not JSON")?;
-                value["stop_hook_active"] == true
+                serde_json::from_str::<StopInput>(&input)
+                    .context("the stop hook input is invalid")?
             };
-            let outcome = stop(&root, &catalog)?;
-            report_inputs(&outcome);
-            let reason = outcome.refusal(&catalog).map(|refusal| refusal.text());
-            println!("{}", stop_response(reason.as_deref(), continued));
+            let mut reasons = Vec::new();
+            if let Some(language) = language
+                && reply_language_rules::check(
+                    language,
+                    input.last_assistant_message.as_deref().unwrap_or_default(),
+                ) == reply_language_rules::Verdict::Rewrite
+            {
+                reasons.push(
+                    "The reply prose must be in Japanese. Rewrite your last reply to the user in Japanese; keep code, commands, and outward artifacts as they are.".to_owned(),
+                );
+            }
+            if let Some(root) = repository() {
+                let catalog = installed()?;
+                let outcome = stop(&root, &catalog)?;
+                report_inputs(&outcome);
+                if let Some(refusal) = outcome.refusal(&catalog) {
+                    reasons.push(refusal.text());
+                }
+            }
+            let reason = (!reasons.is_empty()).then(|| reasons.join("\n\n"));
+            println!(
+                "{}",
+                stop_response(reason.as_deref(), input.stop_hook_active)
+            );
             Ok(())
         }
     }
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct StopInput {
+    #[serde(default)]
+    stop_hook_active: bool,
+    last_assistant_message: Option<String>,
 }
 
 /// The client's stop hook answer: block once with the reason, and end the turn incomplete when the agent already continued once.
@@ -1529,7 +1570,7 @@ pub fn stop_response(reason: Option<&str>, continued: bool) -> serde_json::Value
         Completion::EndIncomplete => serde_json::json!({
             "continue": false,
             "stopReason": reason,
-            "systemMessage": "Verification gaps remain in the files this turn changed; automatic continuation is bounded."
+            "systemMessage": "Stop requirements remain unmet; automatic continuation is bounded."
         }),
     }
 }

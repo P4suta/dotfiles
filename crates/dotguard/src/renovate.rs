@@ -841,7 +841,7 @@ fn doppler_token() -> Option<String> {
         .filter(|output| output.status.success())?;
     let scope = String::from_utf8(scope.stdout).ok()?;
     let (project, config) = doppler_scope(&scope)?;
-    let fetched = locate::child("doppler")
+    let fetched = locate::doppler()?
         .args([
             "secrets",
             "get",

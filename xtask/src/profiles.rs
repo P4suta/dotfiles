@@ -142,6 +142,7 @@ pub const CONFIG_TEMPLATE: &str = ".chezmoi.toml.tmpl";
 pub struct Answers {
     pub profile: Profile,
     pub role: &'static str,
+    pub reply_language: &'static str,
     pub name: &'static str,
     pub email: &'static str,
     pub public_key: String,
@@ -156,6 +157,7 @@ impl Answers {
         Self {
             profile,
             role: "personal",
+            reply_language: "Japanese",
             name: "Example User",
             email: "user@example.invalid",
             public_key: String::new(),
@@ -188,6 +190,8 @@ pub fn configuration(root: &Path, answers: &Answers) -> Result<String> {
         .arg(format!("Dotfiles profile={}", answers.profile.name()))
         .arg("--promptChoice")
         .arg(format!("Machine role={}", answers.role))
+        .arg("--promptChoice")
+        .arg(format!("Agent reply language={}", answers.reply_language))
         .arg("--promptString")
         .arg(format!("Git author name={}", answers.name))
         .arg("--promptString")
