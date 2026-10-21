@@ -364,6 +364,7 @@ pub(crate) fn run_arguments() -> Vec<OsString> {
         .map(OsString::from)
         .into();
     arguments.extend(owner_arguments());
+    arguments.extend(dotfiles::bounded::resource_arguments());
     arguments
 }
 

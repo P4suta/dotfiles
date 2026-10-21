@@ -24,7 +24,7 @@ pub const CRATES: [&str; 9] = [
 ];
 
 /// Files outside the crates' `src` directories that the compiler includes or that decide how the tools build.
-const SHARED: [&str; 45] = [
+const SHARED: [&str; 46] = [
     ".cargo/config.toml",
     ".chezmoiroot",
     ".github/workflows/ci.yml",
@@ -53,6 +53,7 @@ const SHARED: [&str; 45] = [
     "home/.chezmoitemplates/partials/njutest-mise.toml",
     "home/.chezmoiignore",
     "home/dot_agents/skills/pull-request/assets/workflow-policy.json",
+    "home/dot_config/dotfiles/bounded-tools.toml",
     "home/dot_config/opencode/plugins/skill-ops.ts",
     "home/dot_config/mise/config.njutest.toml.tmpl",
     "lefthook.yml",

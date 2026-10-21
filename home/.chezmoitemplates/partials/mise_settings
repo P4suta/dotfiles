@@ -26,3 +26,6 @@ chpwd_only = true
 [settings.github]
 gh_cli_tokens = true
 credential_command = {{ includeTemplate "partials/mise-github-credential" . }}
+
+[hooks]
+postinstall = "dotfiles bounded install"

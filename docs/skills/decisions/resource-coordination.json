@@ -1,8 +1,9 @@
 {
-  "revision": "f0bbe51a30941efde86efa65309bbf7596d390673388c11715884a8cd0ba4bbc",
+  "revision": "3e50b64fda2f4c196b975475d16ac85c675f228d0ba512fcff46e97b9175d3b0",
   "outcome": "implemented",
-  "reason": "Separate resource allocation and permission from reproducible verdicts, and use project runners with owner hosts serving only as optional caches.",
+  "reason": "Keep scheduling permission separate from the enforced bounded-tool rule and point to the shared runner without repeating its resource limits.",
   "evidence": [
+    "crates/dotfiles/src/bounded.rs",
     "home/dot_agents/skills/resource-coordination/SKILL.md"
   ],
   "revisit": null

@@ -24,6 +24,10 @@ const CHECKED_ADD_OVERFLOW: &str = "attempt to add with overflow";
 pub const KANI_BATCH_SIZE: usize = 16;
 const KANI_BATCH_TEST: &str =
     "a_kani_batch_verifies_every_harness_and_rejects_every_counterexample";
+const KANI_SUBJECT_TESTS: [&str; 2] = [
+    "skill_proofs::tests::notify_chain_decisions_and_their_counterexamples_verify_against_production",
+    "skill_proofs::tests::freshness_report_decisions_and_their_counterexamples_verify_against_production",
+];
 const MUTATION_CAMPAIGN_CASES: usize = 2;
 
 /// Run native checks and the family's required campaign or measurement budgets.
@@ -362,13 +366,13 @@ pub fn kani_environment_driver() -> Result<std::path::PathBuf> {
     Ok(installed_kani_directory()?.join(KANI_DRIVER))
 }
 
-/// Prepares the pinned Kani installation on its supported native route or Windows image route.
+/// Prepares Kani natively in CI or in the bounded owner-side image.
 ///
 /// # Errors
 ///
 /// Refuses unsupported pins, failed explicit installation or setup, and an unavailable prepared verifier.
 pub fn prepare_kani_environment(root: &Path) -> Result<()> {
-    if cfg!(windows) {
+    if cfg!(windows) || dotfiles::bounded::requires_container() {
         ensure_linux_engine()?;
         return ensure_image(root, &root.join(PROOF_IMAGE), &proof_image(root)?);
     }
@@ -456,6 +460,10 @@ pub fn kani_environment_version_matches(version: &str) -> bool {
 }
 
 fn installed_kani_command() -> Result<std::process::Command> {
+    ensure!(
+        !dotfiles::bounded::requires_container(),
+        "native Kani refuses on owner machines; use `just proofs` or `dotfiles bounded run`"
+    );
     let directory = installed_kani_directory()?;
     let mut command = checked_kani(platform::process::command(directory.join(KANI_DRIVER)));
     let mut path = vec![directory.join("bin"), directory.join("pyroot/bin")];
@@ -499,7 +507,7 @@ fn installed_kani_command() -> Result<std::process::Command> {
 pub fn smoke_kani_environment(root: &Path) -> Result<()> {
     let scope = tempfile::tempdir()?;
     let flags = BTreeSet::from(["stubbing"]);
-    if cfg!(windows) {
+    if cfg!(windows) || dotfiles::bounded::requires_container() {
         return smoke_kani_container(root, scope.path(), &flags);
     }
     kani_environment_version(root)?;
@@ -532,6 +540,7 @@ fn smoke_kani_container(
         crate::container::amd64_image_present(&image)?,
         "the existing Kani smoke image is unavailable; run its explicit preparation command"
     );
+    let image = verified_image_id(&image)?;
     for (name, body, counterexample) in [
         ("valid", KANI_VALID_SMOKE, false),
         ("rejected", KANI_REJECT_SMOKE, true),
@@ -543,8 +552,8 @@ fn smoke_kani_container(
             "type=bind,\"source={}\",target=/work",
             crate::canonical(directory)?.display()
         );
-        let status = Tool::Docker
-            .command()
+        let mut command = Tool::Docker.command();
+        command
             .args([
                 "run",
                 "--rm",
@@ -572,8 +581,8 @@ fn smoke_kani_container(
                 &format!("{}s", proof_budget_rules::TIMEOUT_SECONDS),
                 "--export-json",
                 "results.json",
-            ])
-            .status()?;
+            ]);
+        let status = crate::phase_evidence::output(&mut command, "bounded Kani smoke")?.status;
         ensure!(
             status.success() != counterexample,
             "Kani smoke returned another outcome: {status}"
@@ -856,6 +865,7 @@ fn container_campaign_arguments(
     .map(OsString::from)
     .into();
     arguments.push(mount);
+    arguments.extend(dotfiles::bounded::resource_arguments());
     arguments.extend(
         [
             "--volume",
@@ -886,10 +896,10 @@ fn container_campaign_arguments(
     arguments
 }
 
-/// Kani has no native build here, so the unchanged proof gate runs on a pinned Linux verification host that mounts this checkout read-only.
+/// Runs the unchanged proof gate in a bounded Linux container with the checkout read-only.
 fn verify_in_container(root: &Path, campaign: ProofCampaign) -> Result<()> {
     let root = crate::canonical(root)?;
-    crate::phase_evidence::run(&root, "Windows Linux proof container", 1, || {
+    crate::phase_evidence::run(&root, "bounded Linux proof container", 1, || {
         verify_container_measured(&root, campaign)
     })
 }
@@ -940,7 +950,7 @@ pub(crate) fn verified_image_id(image: &str) -> Result<String> {
         .to_owned())
 }
 
-/// Runs the complete proof campaign, with fixed measurement budgets on Linux and in the Windows container.
+/// Runs the complete proof campaign through the owner's bounded route or native CI.
 ///
 /// # Errors
 ///
@@ -970,15 +980,10 @@ fn verify_campaign_prepared(root: &Path, campaign: ProofCampaign) -> Result<()> 
         println!(
             "CI proof campaign: Kani, Miri, fuzz, benchmarks, and models; mutation and its fixture are deferred to the full native campaign."
         );
-    } else if cfg!(target_os = "macos") {
-        println!("Mac proof campaign: Kani, Miri, fuzz, mutation, and models.");
     }
-    if cfg!(target_os = "macos") {
-        println!(
-            "Fixed Linux x86_64 benchmark budgets require the Linux code-stage result from `dotfiles hosts check`."
-        );
-    }
-    if cfg!(any(target_os = "macos", target_os = "linux")) {
+    if cfg!(any(target_os = "macos", target_os = "linux"))
+        && !dotfiles::bounded::requires_container()
+    {
         checks.run("native proofs", || verify_native(root, campaign));
     } else {
         checks.run("container proofs", || verify_in_container(root, campaign));
@@ -1130,6 +1135,7 @@ pub(crate) fn verify_kani(root: &Path, manifest: &obligations::Manifest) -> Resu
 fn verify_kani_measured(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
     kani_environment_version(root)?;
     verify_kani_driver(root)?;
+    verify_kani_subject_regressions(root)?;
     let verifier_hash = crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
     let engine_hash = crate::phase_evidence::engine_digest(root)?;
     let (verified, rejected) = run_rule_subjects(
@@ -1211,6 +1217,37 @@ fn verify_kani_driver(root: &Path) -> Result<()> {
                 .any(|line| line.starts_with("test result: ok. 1 passed; 0 failed;")),
         "the Kani driver regression did not pass"
     );
+    Ok(())
+}
+
+fn verify_kani_subject_regressions(root: &Path) -> Result<()> {
+    ensure!(
+        !dotfiles::bounded::requires_container(),
+        "Kani subject regressions require the bounded proof campaign or native CI"
+    );
+    for test in KANI_SUBJECT_TESTS {
+        let output = crate::phase_evidence::output(
+            Tool::Cargo.command().current_dir(root).args([
+                "test",
+                "--locked",
+                "--package",
+                "xtask",
+                "--lib",
+                "--",
+                "--ignored",
+                "--exact",
+                test,
+            ]),
+            "Kani subject regression",
+        )?;
+        ensure!(
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .any(|line| line.starts_with("test result: ok. 1 passed; 0 failed;")),
+            "Kani subject regression {test} did not pass"
+        );
+    }
     Ok(())
 }
 
@@ -1370,6 +1407,10 @@ fn replay(root: &Path, directory: &str, target: &str, host: &str) -> Result<std:
 
 /// Replays every parser target over its committed corpus and refuses a fixture whose corpus makes its target panic.
 pub(crate) fn verify_fuzz(root: &Path) -> Result<()> {
+    ensure!(
+        !dotfiles::bounded::requires_container(),
+        "native fuzzing refuses on owner machines; use `just proofs` or `dotfiles bounded run`"
+    );
     let workload = fuzz_targets(&root.join(FUZZ_DIRECTORY))?.len() + 1;
     crate::phase_evidence::run(root, "fuzz targets and rejecting fixture", workload, || {
         verify_fuzz_measured(root)
@@ -1924,6 +1965,10 @@ fn decode_mutation_origin(origin: &MutationOrigin, package: &str) -> Result<Muta
 /// Mutates the decision core, holds its survivors and unexplained timeouts to their baselines, and refuses a fixture whose specification lost its assertion.
 /// Test times stay advisory: only the outcome of each mutant counts.
 fn verify_mutants(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
+    ensure!(
+        !dotfiles::bounded::requires_container(),
+        "native mutation testing refuses on owner machines; use `just proofs` or `dotfiles bounded run`"
+    );
     crate::phase_evidence::run(
         root,
         "mutation production and rejecting fixture",
@@ -2421,6 +2466,10 @@ fn with_miri_sysroot<T>(
 
 /// Interprets the pure crates' selected tests under Miri for every target and refuses a fixture with undefined behavior.
 pub(crate) fn verify_miri(root: &Path) -> Result<()> {
+    ensure!(
+        !dotfiles::bounded::requires_container(),
+        "native Miri refuses on owner machines; use `just proofs` or `dotfiles bounded run`"
+    );
     crate::phase_evidence::run(
         root,
         "Miri targets and UB fixture",
@@ -3160,6 +3209,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "the bounded proof campaign or native CI runs this Kani regression"]
     #[cfg(not(target_os = "windows"))]
     fn notify_chain_decisions_and_their_counterexamples_verify_against_production() -> Result<()> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
@@ -3195,6 +3245,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "the bounded proof campaign or native CI runs this Kani regression"]
     #[cfg(not(target_os = "windows"))]
     fn freshness_report_decisions_and_their_counterexamples_verify_against_production() -> Result<()>
     {

@@ -16,6 +16,59 @@ mod incident_fixture;
 const KANI_DRIVER_FIXTURE: &str = "DOTFILES_KANI_DRIVER_FIXTURE";
 const IMAGE_PLATFORM_FIXTURE: &str = "DOTFILES_IMAGE_PLATFORM_FIXTURE";
 
+#[test]
+fn proof_containers_have_hard_resource_limits() {
+    let arguments = container_run_arguments(Path::new("source"), "image", "target");
+    for option in ["--memory", "--memory-swap", "--cpus", "--pids-limit"] {
+        assert!(
+            arguments.iter().any(|argument| argument == option),
+            "missing {option}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires the bounded container route with the pinned Kani distribution"]
+fn bounded_policy_proofs_and_rejecting_controls() -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !dotfiles::bounded::requires_container(),
+        "use `dotfiles bounded run` for this proof test"
+    );
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .context("workspace root")?;
+    xtask::skill_proofs::kani_environment_version(root)?;
+    let manifest = xtask::obligations::manifest(root)?;
+    let (source, probes, flags) = manifest
+        .obligations
+        .iter()
+        .find_map(|obligation| match obligation {
+            xtask::obligations::Obligation::Kani {
+                source,
+                probes,
+                flags,
+            } if source == "crates/rules/src/bounded_rules.rs" => {
+                Some((root.join(source), probes, flags))
+            }
+            _ => None,
+        })
+        .context("bounded policy proof inventory")?;
+    let flags = flags.iter().map(|flag| flag.argument()).collect();
+    let scope = tempfile::tempdir()?;
+    let harnesses = xtask::obligations::module(&std::fs::read_to_string(&source)?)?.harnesses;
+    let expected: Vec<_> = harnesses.iter().map(String::as_str).collect();
+    xtask::skill_proofs::verify_file(&source, scope.path(), &expected, false, &flags)?;
+    let rejecting = scope.path().join("reject.rs");
+    std::fs::write(
+        &rejecting,
+        format!("#[path = {source:?}]\nmod production;\n{probes}"),
+    )?;
+    let harnesses = xtask::obligations::probe_harnesses(probes)?;
+    let expected: Vec<_> = harnesses.iter().map(String::as_str).collect();
+    xtask::skill_proofs::verify_file(&rejecting, scope.path(), &expected, true, &flags)?;
+    a_kani_batch_verifies_every_harness_and_rejects_every_counterexample()
+}
+
 fn run_kani_driver_fixture(test: &str) -> anyhow::Result<bool> {
     if std::env::var(KANI_DRIVER_FIXTURE).is_ok_and(|value| value == test) {
         anyhow::ensure!(
