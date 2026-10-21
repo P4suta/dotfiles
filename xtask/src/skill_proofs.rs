@@ -3346,9 +3346,9 @@ mod tests {
         const SUBJECTS: [(&str, (usize, usize)); 3] = [
             ("crates/rules/src/review_routing_rules.rs", (4, 10)),
             ("crates/rules/src/review_completion_rules.rs", (2, 1)),
-            ("crates/rules/src/pr_rules.rs", (8, 20)),
+            ("crates/rules/src/pr_rules.rs", (8, 22)),
         ];
-        const EXPECTED: (usize, usize) = (14, 31);
+        const EXPECTED: (usize, usize) = (14, 33);
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .context("the proof test has a workspace root")?;
