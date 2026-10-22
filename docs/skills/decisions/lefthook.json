@@ -1,9 +1,10 @@
 {
-  "revision": "3e027b20985c6fd883d16e23bc51667abb5f18586f1af2dcd41c61570dadc7ff",
+  "revision": "18b5cb86020e666962877c7891865d99f57655c09e590c2b27cae29d5c4863e7",
   "outcome": "implemented",
-  "reason": "Keep effective hook diagnosis and staged scopes separate from gate implementations.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "reason": "Keep effective hook diagnosis and staged scopes separate from gate implementations, and keep pre-push hooks to the fast gate on the current host.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [
     "home/dot_agents/skills/lefthook/SKILL.md",
+    "docs/adr/run-heavy-verification-at-the-release-gate.md",
     "home/dot_agents/skills/lefthook/tools.toml",
     "xtask/tests/tool_inventory.rs"
   ],
