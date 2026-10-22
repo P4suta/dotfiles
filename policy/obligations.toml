@@ -431,6 +431,26 @@ source = "crates/rules/src/legacy_rules.rs"
 probes = '''
 use production::{Verdict, verdict};
 #[kani::proof]
+#[kani::unwind(32)]
+fn reject_a_script_bypass_for_a_different_path() {
+    assert!(production::script_bypass_names("./y.sh: upstream", "./x.sh"));
+}
+#[kani::proof]
+#[kani::unwind(32)]
+fn reject_a_script_bypass_without_a_reason() {
+    assert!(production::script_bypass_names("./x.sh: ", "./x.sh"));
+}
+#[kani::proof]
+#[kani::unwind(32)]
+fn reject_a_legacy_entry_as_a_script_bypass() {
+    assert!(production::script_bypass_names("grep: upstream", "./x.sh"));
+}
+#[kani::proof]
+#[kani::unwind(32)]
+fn reject_splitting_a_script_bypass_at_its_drive_colon() {
+    assert!(!production::script_bypass_names("C:\\x.sh: upstream", "C:\\x.sh"));
+}
+#[kani::proof]
 fn reject_admitting_a_mapped_legacy_command_without_a_bypass() {
     assert!(verdict(true, false, false) == Verdict::Admit);
 }

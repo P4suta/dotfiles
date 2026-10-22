@@ -30,6 +30,15 @@ pub fn bypass_names(value: &str, legacy: &str) -> bool {
         .is_some_and(|(name, reason)| name.trim() == legacy && !reason.trim().is_empty())
 }
 
+/// Whether a bypass names the exact script path followed by `:` and a nonempty trimmed reason.
+#[must_use]
+pub fn script_bypass_names(value: &str, path: &str) -> bool {
+    value
+        .strip_prefix(path)
+        .and_then(|suffix| suffix.strip_prefix(':'))
+        .is_some_and(|reason| !reason.trim().is_empty())
+}
+
 /// Whether `arguments` make an invocation legacy, when the table maps only invocations with one of the `when` flags.
 /// A short flag such as `-l` also matches inside a cluster such as `-lc`, and a long flag also matches with `=VALUE`.
 ///
@@ -162,6 +171,28 @@ mod proofs {
 
     #[cfg(kani)]
     #[kani::proof]
+    #[kani::unwind(32)]
+    fn a_script_bypass_needs_the_exact_path_and_a_nonempty_reason() {
+        let kind: u8 = kani::any();
+        kani::assume(kind < 8);
+        let (value, path) = match kind {
+            0 => ("./x.sh: upstream", "./x.sh"),
+            1 => ("C:\\x.sh: upstream", "C:\\x.sh"),
+            2 => ("./x.sh: \u{2003}upstream\u{2003}", "./x.sh"),
+            3 => ("./y.sh: upstream", "./x.sh"),
+            4 => ("./x.sh: \u{2003}", "./x.sh"),
+            5 => ("grep: upstream", "./x.sh"),
+            6 => ("./x.shx: upstream", "./x.sh"),
+            _ => ("./x.sh upstream", "./x.sh"),
+        };
+        let matched = script_bypass_names(value, path);
+        assert_eq!(matched, kind < 3);
+        kani::cover!(matched);
+        kani::cover!(!matched);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
     #[kani::unwind(16)]
     fn conditional_entries_match_the_exact_flag_or_its_value() {
         let kind: u8 = kani::any();
@@ -230,6 +261,37 @@ mod tests {
         ] {
             assert!(!bypass_names(value, "grep"), "{value}");
         }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "text matching is exercised by the native rules tests")]
+    fn a_script_bypass_names_the_exact_path_including_drive_colons() {
+        for (value, path) in [
+            ("./x.sh: upstream", "./x.sh"),
+            ("/tmp/x.sh: pinned: upstream", "/tmp/x.sh"),
+            ("a b.sh:\u{2003}upstream\u{2003}", "a b.sh"),
+            ("C:\\tmp\\x.sh: upstream", "C:\\tmp\\x.sh"),
+        ] {
+            assert!(script_bypass_names(value, path), "{value}");
+        }
+        for value in [
+            "./y.sh: upstream",
+            "x.sh: upstream",
+            " ./x.sh: upstream",
+            "./x.sh : upstream",
+            "./x.shx: upstream",
+            "./x.sh",
+            "./x.sh:",
+            "./x.sh: \t\n\u{2003}",
+            "grep: upstream",
+        ] {
+            assert!(!script_bypass_names(value, "./x.sh"), "{value}");
+        }
+        assert!(!script_bypass_names("C: upstream", "C:\\tmp\\x.sh"));
+        assert!(!script_bypass_names(
+            "C:\\tmp\\y.sh: upstream",
+            "C:\\tmp\\x.sh"
+        ));
     }
 
     #[test]

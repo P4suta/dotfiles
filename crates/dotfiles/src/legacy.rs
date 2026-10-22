@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 const TABLE: &str = include_str!("../../../home/.chezmoidata/modern.toml");
 
 /// The variable whose value `LEGACY: REASON` admits one refused command and records why.
+/// Its value `SCRIPT_PATH: REASON` skips inspecting that one script and records why.
 pub const BYPASS: &str = "DOTFILES_LEGACY_BYPASS";
 
 /// The largest script the hook reads to inspect the commands it runs, 1 MiB.
@@ -111,8 +112,11 @@ fn script_path<'a>(name: &str, first: &'a str, arguments: &'a [String]) -> Optio
             .flatten()
             .map(String::as_str);
     }
-    if matches!(name, "source" | ".") {
-        return arguments.first().map(String::as_str);
+    if name == "source" || first == "." {
+        return arguments
+            .iter()
+            .find(|argument| !argument.starts_with('-'))
+            .map(String::as_str);
     }
     let shell_file = Path::new(first)
         .extension()
@@ -142,6 +146,12 @@ fn refusal_text(tool: &ModernTool, legacy: &str, arguments: &[&str]) -> String {
     )
 }
 
+fn script_bypass_hint(path: &str) -> String {
+    format!(
+        "To run this one script anyway, put its path and your reason before the command: {BYPASS}='{path}: <reason>' bash {path} ..."
+    )
+}
+
 /// Keep refusals and unavailable inspections independent across every script a command runs.
 #[derive(Debug, Default)]
 pub struct Findings {
@@ -158,6 +168,7 @@ impl Findings {
 
 /// Every mapped invocation and unavailable inspection in the command's bounded scripts.
 /// A bypass that names the entry with a reason admits the command and appends a line to the Git bypass log.
+/// A bypass that names the exact script path with a reason skips inspecting that script and records it once.
 ///
 /// # Errors
 ///
@@ -211,6 +222,8 @@ fn script_refusal(
         message.push_str("\nThe script ");
         message.push_str(path);
         message.push_str(" runs this command.");
+        message.push('\n');
+        message.push_str(&script_bypass_hint(path));
     }
     Ok(findings)
 }
@@ -280,11 +293,23 @@ fn inspect(command: &str, directory: Option<&Path>, table: &Modern, depth: usize
         let name = program(first);
         let name = name.as_str();
         if let Some(path) = script_path(name, first, rest) {
-            match script_refusal(path, directory, table, depth)
-                .with_context(|| format!("inspect the script {path}"))
+            if let Some(value) =
+                bypass.filter(|value| legacy_rules::script_bypass_names(value, path))
             {
-                Ok(report) => findings.append(report),
-                Err(error) => findings.unavailable.push(format!("{error:#}")),
+                let reason = value
+                    .strip_prefix(path)
+                    .and_then(|suffix| suffix.strip_prefix(':'))
+                    .map_or("", str::trim);
+                record_bypass(reason, &words);
+            } else {
+                match script_refusal(path, directory, table, depth)
+                    .with_context(|| format!("inspect the script {path}"))
+                {
+                    Ok(report) => findings.append(report),
+                    Err(error) => findings
+                        .unavailable
+                        .push(format!("{error:#}\n{}", script_bypass_hint(path))),
+                }
             }
         }
         let arguments: Vec<&str> = rest.iter().map(String::as_str).collect();
@@ -480,6 +505,164 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn a_script_bypass_admits_and_records_each_script_invocation_once() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("scan.sh"), "grep -r TODO .\n").unwrap();
+        for (invocation, path) in [
+            ("sh scan.sh argument", "scan.sh"),
+            ("bash scan.sh argument", "scan.sh"),
+            ("zsh scan.sh argument", "scan.sh"),
+            ("dash scan.sh argument", "scan.sh"),
+            ("ksh scan.sh argument", "scan.sh"),
+            ("source scan.sh argument", "scan.sh"),
+            (". scan.sh argument", "scan.sh"),
+            ("./scan.sh argument", "./scan.sh"),
+        ] {
+            let refused = refusal(invocation, Some(directory.path()))
+                .unwrap()
+                .unwrap_or_else(|| panic!("admitted: {invocation}"));
+            assert!(refused.contains("`grep` is a legacy command"), "{refused}");
+            assert!(
+                refused.contains(&format!("{BYPASS}='{path}: <reason>' bash {path}")),
+                "{refused}"
+            );
+            let command = format!("{BYPASS}='{path}: pinned upstream tag' {invocation}");
+            BYPASSES.with(|log| log.borrow_mut().clear());
+            assert_eq!(
+                refusal(&command, Some(directory.path())).unwrap(),
+                None,
+                "{command}"
+            );
+            BYPASSES.with(|log| {
+                assert_eq!(
+                    *log.borrow(),
+                    [format!(
+                        "pinned upstream tag\t{BYPASS}={path}: pinned upstream tag {invocation}"
+                    )],
+                    "{command}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn a_script_bypass_preserves_spaces_and_colons_in_paths_and_reasons() {
+        for path in ["C:\\tmp\\scan.sh", "/tmp/upstream:tag/install.sh", "a b.sh"] {
+            let command = format!("{BYPASS}='{path}: pinned: upstream' bash '{path}' argument");
+            BYPASSES.with(|log| log.borrow_mut().clear());
+            assert_eq!(refusal(&command, None).unwrap(), None, "{command}");
+            BYPASSES.with(|log| {
+                assert_eq!(
+                    *log.borrow(),
+                    [format!(
+                        "pinned: upstream\t{BYPASS}={path}: pinned: upstream bash {path} argument"
+                    )],
+                    "{command}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn a_script_bypass_requires_its_exact_path_and_a_reason() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("scan.sh"), "grep proof Cargo.toml\n").unwrap();
+        for value in [
+            "other.sh: upstream",
+            "./scan.sh: upstream",
+            " scan.sh: upstream",
+            "scan.sh : upstream",
+            "scan.shx: upstream",
+            "scan.sh",
+            "scan.sh:",
+            "scan.sh: \u{2003}",
+            "grep: upstream",
+        ] {
+            let command = format!("{BYPASS}='{value}' bash scan.sh");
+            BYPASSES.with(|log| log.borrow_mut().clear());
+            let message = refusal(&command, Some(directory.path())).unwrap().unwrap();
+            assert!(message.contains("`grep` is a legacy command"), "{command}");
+            BYPASSES.with(|log| assert!(log.borrow().is_empty(), "{command}"));
+        }
+    }
+
+    #[test]
+    fn a_script_bypass_keeps_sibling_commands_and_inline_scripts_inspected() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("scan.sh"), "grep proof Cargo.toml\n").unwrap();
+        let command = format!(
+            "{BYPASS}='scan.sh: upstream' bash scan.sh; grep proof Cargo.toml; bash scan.sh; bash -c 'awk 1 Cargo.toml'"
+        );
+        BYPASSES.with(|log| log.borrow_mut().clear());
+        let report = findings(&command, Some(directory.path())).unwrap();
+        assert!(report.unavailable.is_empty(), "{report:?}");
+        assert_eq!(report.refusals.len(), 3, "{report:?}");
+        let messages = report.refusals.join("\n");
+        assert_eq!(messages.matches("`grep` is a legacy command").count(), 2);
+        assert_eq!(messages.matches("`awk` is a legacy command").count(), 1);
+        BYPASSES.with(|log| assert_eq!(log.borrow().len(), 1));
+    }
+
+    #[test]
+    fn a_script_bypass_keeps_the_invocations_own_command_inspected() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("scan.sh"), "grep proof Cargo.toml\n").unwrap();
+        let mut table = table().unwrap().clone();
+        table.tools.push(ModernTool {
+            legacy: vec!["bash".to_owned()],
+            ..ModernTool::default()
+        });
+        let report = inspect(
+            &format!("{BYPASS}='scan.sh: upstream' bash scan.sh"),
+            Some(directory.path()),
+            &table,
+            0,
+        );
+        assert!(report.unavailable.is_empty(), "{report:?}");
+        assert_eq!(report.refusals.len(), 1, "{report:?}");
+        assert!(report.refusals[0].contains("`bash` is a legacy command"));
+    }
+
+    #[test]
+    fn a_script_bypass_skips_nested_and_unavailable_inspections_before_reading() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        std::fs::write(root.join("outer.sh"), "sh nested.sh; sh missing.sh\n").unwrap();
+        std::fs::write(root.join("nested.sh"), "grep proof Cargo.toml\n").unwrap();
+        std::fs::write(root.join("broken.sh"), [0xff]).unwrap();
+        std::fs::create_dir(root.join("directory.sh")).unwrap();
+        std::fs::File::create(root.join("oversize.sh"))
+            .unwrap()
+            .set_len(SCRIPT_LIMIT + 1)
+            .unwrap();
+        for path in [
+            "outer.sh",
+            "missing.sh",
+            "broken.sh",
+            "directory.sh",
+            "oversize.sh",
+        ] {
+            let message = refusal(&format!("sh {path}"), Some(root)).unwrap().unwrap();
+            assert!(
+                message.contains(&format!("{BYPASS}='{path}: <reason>'")),
+                "{message}"
+            );
+            let command = format!("{BYPASS}='{path}:  pinned upstream tag  ' sh {path}");
+            for depth in [0, DEPTH] {
+                BYPASSES.with(|log| log.borrow_mut().clear());
+                let report = inspect(&command, Some(root), table().unwrap(), depth);
+                assert!(report.refusals.is_empty(), "{path}: {report:?}");
+                assert!(report.unavailable.is_empty(), "{path}: {report:?}");
+                BYPASSES.with(|log| {
+                    let log = log.borrow();
+                    assert_eq!(log.len(), 1, "{path}");
+                    assert!(log[0].starts_with("pinned upstream tag\t"), "{log:?}");
+                });
+            }
+        }
     }
 
     #[test]
