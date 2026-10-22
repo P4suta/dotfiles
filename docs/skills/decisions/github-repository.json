@@ -1,14 +1,17 @@
 {
-  "revision": "4131d7c8b7d30937a010d7c9cc3566e70d861538b4add5f8e9d62e5e0e5480c5",
+  "revision": "e9786e272a1e4875367558b55bc94f2b4d381d282f2c4f3493f2f9e934345d1f",
   "outcome": "implemented",
-  "reason": "Preserve repository governance behavior while adopting the merged libc, syn, and unicode-ident lockfile maintenance and refreshing the managed skill's catalog identity.",
+  "reason": "Require a squash merge queue only after every required-check workflow supports merge_group, preserve complete live rulesets through verified updates, disable strict branch freshness with the queue, and enumerate the standalone decision's complete input domain.",
   "evidence": [
     "home/dot_agents/skills/github-repository/SKILL.md",
     "home/dot_agents/skills/github-repository/assets/baseline.json",
     "home/dot_agents/skills/github-repository/scripts/repo-settings/Cargo.lock",
+    "home/dot_agents/skills/github-repository/scripts/repo-settings/src/merge_queue_rules.rs",
+    "home/dot_agents/skills/github-repository/scripts/repo-settings/src/queue.rs",
+    "home/dot_agents/skills/github-repository/scripts/repo-settings/src/lib.rs",
     "home/dot_agents/skills/github-repository/scripts/repo-settings/tests/governance.rs",
-    "crates/dotfiles/src/repository.rs",
-    "docs/adr/repository-metadata-and-generated-artifacts.md"
+    "docs/adr/stack-first-pull-requests-through-a-merge-queue.md",
+    "policy/github.toml"
   ],
   "revisit": null
 }
