@@ -15,7 +15,9 @@ GitHub merges a stack of pull requests as one atomic operation and applies the r
 A workflow that runs on pull requests targeting the default branch runs for every member of a stack.
 A merge queue accepts a whole stack in order, and its workflows run on the `merge_group` event.
 Stacks need no setting, but they don't support automatic merging or the legacy synchronous merge endpoint.
-The pinned gh-stack drives stacks and their queue entries, yet pr-workflow resolves it from a pin in each target repository, which most repositories lack.
+`pr-workflow stack` already creates, syncs, rebases, and merges stacks through the pinned gh-stack, yet it resolves gh-stack from a pin in each target repository, which most repositories lack.
+The dotfiles policy in `policy/github.toml` already names a merge queue without strict checks, and its CI runs on `merge_group`.
+The live dotfiles ruleset still requires strict checks without a queue, and no pr-workflow path merges through one.
 
 The same aozora run showed three defects in the merge path.
 An automatic update by merge from the base invalidated the signed assessment, even when the pull request's diff stayed the same.
@@ -38,8 +40,10 @@ When a restack or base update keeps a member's diff, its signed assessment carri
 Any change to a member's diff still needs a new assessment.
 pr-workflow runs the owner-provisioned gh-stack in every repository, and the shared tool list pins it.
 
-The personal repository baseline adds a squash merge queue to the default-branch ruleset.
+The personal repository baseline requires a squash merge queue on a default branch that requires status checks.
+With the queue, the ruleset stops requiring an up-to-date branch, because the queue tests each change on the current base.
 `repo-settings` reports a workflow that reports a required check without a `merge_group` trigger, because the queue would never receive that check.
+It adds the queue only after every such workflow has the trigger.
 
 ## Consequences
 
