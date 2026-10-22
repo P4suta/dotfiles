@@ -21,6 +21,9 @@ const LOCATED_PARTS: usize = 4;
 /// The bytes that hold a shebang line.
 const HEAD_BYTES: usize = 32;
 
+/// The matching header lines of a Taplo formatting diff.
+const TAPLO_DIFF_HEADER_LINES: usize = 3;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Stage {
     Encoding,
@@ -255,25 +258,41 @@ pub fn parse_shellcheck(output: &str) -> Vec<(String, String)> {
 /// Paths that taplo names in its error records, with the rule each record breaks.
 #[must_use]
 pub fn parse_taplo(root: &Path, output: &str, rule: &str) -> Vec<(String, String)> {
-    let mut paths: Vec<_> = output
-        .lines()
-        .filter_map(|line| {
-            let path = line
-                .split_once("path=\"")
-                .and_then(|(_, quoted)| quoted.split('"').next())
-                .or_else(|| {
-                    let location = line.trim_start().strip_prefix("┌─ ")?;
-                    let (location, column) = location.rsplit_once(':')?;
-                    let (path, row) = location.rsplit_once(':')?;
-                    (!row.is_empty()
-                        && !column.is_empty()
-                        && row.bytes().all(|byte| byte.is_ascii_digit())
-                        && column.bytes().all(|byte| byte.is_ascii_digit()))
-                    .then_some(path)
-                })?;
-            Some((relative(root, path), rule.to_owned()))
-        })
-        .collect();
+    let mut paths: Vec<_> = if rule == "format" {
+        output
+            .lines()
+            .collect::<Vec<_>>()
+            .windows(TAPLO_DIFF_HEADER_LINES)
+            .filter_map(|record| {
+                let [header, before, after] = record else {
+                    return None;
+                };
+                let path = before.strip_prefix("--- a/")?;
+                (*header == format!("diff a/{path} b/{path}") && *after == format!("+++ b/{path}"))
+                    .then(|| (relative(root, path), rule.to_owned()))
+            })
+            .collect()
+    } else {
+        output
+            .lines()
+            .filter_map(|line| {
+                let path = line
+                    .split_once("path=\"")
+                    .and_then(|(_, quoted)| quoted.split('"').next())
+                    .or_else(|| {
+                        let location = line.trim_start().strip_prefix("┌─ ")?;
+                        let (location, column) = location.rsplit_once(':')?;
+                        let (path, row) = location.rsplit_once(':')?;
+                        (!row.is_empty()
+                            && !column.is_empty()
+                            && row.bytes().all(|byte| byte.is_ascii_digit())
+                            && column.bytes().all(|byte| byte.is_ascii_digit()))
+                        .then_some(path)
+                    })?;
+                Some((relative(root, path), rule.to_owned()))
+            })
+            .collect()
+    };
     paths.sort_unstable();
     paths.dedup();
     paths
@@ -533,6 +552,14 @@ pub fn findings(root: &Path, stage: Stage, paths: &[String]) -> Result<Counts> {
 
 /// Check syntax before formatting the valid files.
 fn taplo_findings(root: &Path, files: &[String]) -> Result<Vec<(String, String)>> {
+    taplo_findings_with(root, files, || Tool::Taplo.command())
+}
+
+fn taplo_findings_with(
+    root: &Path,
+    files: &[String],
+    command: impl Fn() -> Command,
+) -> Result<Vec<(String, String)>> {
     let root = crate::canonical(root).context("canonicalize Taplo input root")?;
     let root = root.as_path();
     let mut found = parse_taplo(
@@ -540,7 +567,7 @@ fn taplo_findings(root: &Path, files: &[String]) -> Result<Vec<(String, String)>
         &chunked(
             root,
             || {
-                let mut command = Tool::Taplo.command();
+                let mut command = command();
                 command.args(["lint", "--no-schema", "--colors", "never", "--"]);
                 command
             },
@@ -559,8 +586,8 @@ fn taplo_findings(root: &Path, files: &[String]) -> Result<Vec<(String, String)>
         &chunked(
             root,
             || {
-                let mut command = Tool::Taplo.command();
-                command.args(["fmt", "--check", "--colors", "never", "--"]);
+                let mut command = command();
+                command.args(["fmt", "--check", "--diff", "--colors", "never", "--"]);
                 command
             },
             &valid,
@@ -973,6 +1000,64 @@ exit 1
     }
 
     #[test]
+    fn taplo_keeps_findings_without_diagnostic_logs() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("template.toml"), "{{ value }}\n").unwrap();
+        fs::write(root.path().join("needs format.toml"), "value=1\n").unwrap();
+        fs::write(root.path().join("clean.toml"), "value = 1\n").unwrap();
+        let files = [
+            "template.toml".into(),
+            "needs format.toml".into(),
+            "clean.toml".into(),
+        ];
+        let found = taplo_findings_with(root.path(), &files, || {
+            let mut command = Tool::Taplo.command();
+            command.env("RUST_LOG", "off");
+            command
+        })
+        .unwrap();
+        assert_eq!(
+            count(found),
+            count([
+                ("template.toml".into(), "syntax".into()),
+                ("needs format.toml".into(), "format".into())
+            ])
+        );
+        assert_eq!(
+            fs::read_to_string(root.path().join("needs format.toml")).unwrap(),
+            "value=1\n"
+        );
+    }
+
+    #[test]
+    fn taplo_format_records_keep_paths_and_ignore_hunk_text() {
+        for root in ["/repo", "C:/repo", r"C:\repo"] {
+            let path = format!("{root}/needs format.toml");
+            let record = format!("diff a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n");
+            let body = "@@ -0,1 +0,1 @@\n+path=\"other.toml\"\n+++ b/other.toml\n";
+            assert_eq!(
+                parse_taplo(
+                    Path::new(root),
+                    &format!("{record}{body}{record}"),
+                    "format"
+                ),
+                [("needs format.toml".to_owned(), "format".to_owned())]
+            );
+            for malformed in [
+                "+++ b/other.toml\n",
+                "diff a/other.toml b/other.toml\n--- a/other.toml\n+++ b/changed.toml\n",
+                "--- a/other.toml\n+++ b/other.toml\n",
+                "ERROR path=\"other.toml\"\n",
+            ] {
+                assert_eq!(
+                    parse_taplo(Path::new(root), malformed, "format"),
+                    Vec::<(String, String)>::new()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn taplo_syntax_locations_keep_native_paths_and_ignore_summary_lines() {
         for root in ["/repo", "C:/repo", r"C:\repo"] {
             assert_eq!(
@@ -1045,7 +1130,7 @@ exit 1
         assert_eq!(
             parse_taplo(
                 root,
-                "ERROR taplo:format_files: the file is not properly formatted path=\"C:/repo/a/b.toml\"\n",
+                "diff a/C:/repo/a/b.toml b/C:/repo/a/b.toml\n--- a/C:/repo/a/b.toml\n+++ b/C:/repo/a/b.toml\n",
                 "format"
             ),
             [("a/b.toml".to_owned(), "format".to_owned())]
