@@ -20,10 +20,10 @@ For documentation-only edits, check accuracy and examples instead of adding arti
 Keep fast deterministic specifications for pure rules, adapter contract tests at real boundaries, and integration or end-to-end tests for the workflows that need them.
 Cover failure, interruption, cancellation, cleanup, retries, and concurrent transitions where the contract includes them.
 Use realistic fixtures, fault injection, property tests, fuzzing, or model checking to answer a concrete uncertainty.
-For every implementation change, use `formal-assurance` for reproducible verdicts and require source-bound proofs wherever they apply.
+For every implementation change, use `formal-assurance` to write source-bound proofs wherever they apply, and leave their full campaign to the release gate.
 Choose a verifier that checks the implementation language, or refine the code explicitly to a Lean 4 model.
 Genuine semantic or empirical boundaries need checked, justified alternatives.
-Use `mutation-testing` to check that tests detect broken behavior, and `resource-coordination` before a campaign that occupies a shared machine.
+Use `mutation-testing` at the release gate or on demand to check that tests detect broken behavior, and `resource-coordination` before a campaign that occupies a shared machine.
 Keep mocks faithful to the external contract, and check on the real system what a mock leaves unproven.
 Coverage percentages, snapshots of internal structure, repeated green runs, and a successful compile never stand in for the promised behavior.
 
@@ -32,9 +32,9 @@ Keep the primary error while reporting cleanup or recovery failures.
 Never log credentials, private inputs, bearer capabilities, or sensitive payloads.
 
 Keep one source of truth for executable contracts, and put consequential design reasoning in an ADR.
-Run the repository's lint, typecheck, test, and security gates, and never weaken them to finish a change.
-Exercise affected platforms through the project's documented hosted runners or pinned container.
-Before an authorized push, complete available project checks and report hosted checks still pending.
+Run the repository's fast lint, typecheck, test, and security gates on the current host, and never weaken them to finish a change.
+Leave other platforms and heavy campaigns to hosted CI and the release gate, where `ci-budget` places them.
+Before an authorized push, complete the fast gate and report hosted checks still pending.
 Use `concise-source` to express intent in code and keep exceptions narrow.
 Finish known necessary corrections through `ideal-first-development`.
 Report what passed, the evidence for it, and any unverified boundary.

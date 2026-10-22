@@ -2,8 +2,8 @@
 
 use super::Update;
 use rules::freshness_rules::{
-    LookupEvidence, LookupFacts, LookupSkip, ProblemSeverity, VersionSelection, lookup_evidence,
-    problem_severity,
+    LookupEvidence, LookupFacts, LookupSkip, Need, ProblemSeverity, VersionSelection,
+    lookup_evidence, lookup_need, problem_severity,
 };
 use serde::de::{Deserialize, Deserializer, Error, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Number, Value};
@@ -162,6 +162,16 @@ pub(super) fn parse_for_push(
     parse_inner(bytes, types, Some(found))
 }
 
+fn lookup_required(found: Option<&super::Found>, file: &str, inherited: bool) -> bool {
+    found.is_none_or(|scope| {
+        lookup_need(
+            !scope.scope_unknown,
+            scope.changed_files.iter().any(|changed| changed == file),
+            inherited,
+        ) == Need::Required
+    })
+}
+
 fn parse_inner(
     bytes: &[u8],
     types: &str,
@@ -190,6 +200,9 @@ fn parse_inner(
     let mut updates = Vec::new();
     for (index, record) in records.iter().enumerate() {
         if bindings.inherited.contains(&index) {
+            continue;
+        }
+        if !lookup_required(found, &record.file, bindings.touched.contains(&index)) {
             continue;
         }
         let dependency = &record.dependency;
@@ -484,6 +497,7 @@ fn covered_backend(records: &[Record], record: &Record) -> bool {
         "conda:zsh" => ("conda", "conda-forge/zsh"),
         "pypi:ansible-core" => ("pypi", "ansible-core"),
         "cargo-deny" => ("crate", "cargo-deny"),
+        "dotnet" => ("dotnet-version", "dotnet-sdk"),
         _ => return false,
     };
     let Some(verified) = counterpart(records, &record.file, &dependency.dep_name) else {

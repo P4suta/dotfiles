@@ -721,6 +721,20 @@ fn docker_plan(c: &RunConfig) -> (Vec<String>, Vec<&'static str>) {
         "RENOVATE_REQUIRE_CONFIG=optional".into(),
     ];
 
+    let managers = serde_json::json!([{
+        "customType": "regex",
+        "managerFilePatterns": [r"/(^|/)(\.mise|mise)\.toml$/"],
+        "matchStrings": [r#"(?:^|\r?\n)[ \t]*dotnet[ \t]*=[ \t]*[\"'](?<currentValue>\d+\.\d+\.\d+)[\"']"#],
+        "depNameTemplate": "dotnet",
+        "packageNameTemplate": "dotnet-sdk",
+        "datasourceTemplate": "dotnet-version",
+        "versioningTemplate": "semver"
+    }]);
+    args.extend([
+        "--env".into(),
+        format!("RENOVATE_CUSTOM_MANAGERS={managers}"),
+    ]);
+
     // Report destination: the log by default, or a JSON file when a path exists.
     if let Some(path) = &c.report_file {
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -1009,6 +1023,25 @@ mod run_tests {
             "renovate/renovate:44.52.0@sha256:778ff1b404d79ef7763f0c904ebb279a4138ffc1017181ad076b1648e37f6db"
         ));
         assert!(!image_is_pinned("alpine:3.20"));
+    }
+
+    #[test]
+    fn the_local_lookup_maps_mise_dotnet_to_the_official_sdk_datasource() {
+        let args = argv(&cfg(None, None));
+        let managers = args
+            .iter()
+            .filter_map(|arg| arg.strip_prefix("RENOVATE_CUSTOM_MANAGERS="))
+            .flat_map(|value| serde_json::from_str::<Vec<serde_json::Value>>(value).unwrap())
+            .collect::<Vec<_>>();
+        assert!(managers.iter().any(|manager| {
+            manager["depNameTemplate"] == "dotnet"
+                && manager["packageNameTemplate"] == "dotnet-sdk"
+                && manager["datasourceTemplate"] == "dotnet-version"
+                && manager["customType"] == "regex"
+                && manager["matchStrings"]
+                    .as_array()
+                    .is_some_and(|patterns| !patterns.is_empty())
+        }));
     }
 
     #[test]

@@ -81,8 +81,8 @@
 | [2026-10-16 Evaluate fixed parser domains before symbolic selection](finite-shell-parser-ctfe.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
 | [2026-10-17 Run spoken Git commands in the matching policy companion](isolate-spoken-git-in-the-matching-companion.md) | proposed |  |
 | [2026-10-19 Bind inherited Renovate Cargo records to committed workspace metadata](cargo-workspace-renovate-bindings.md) | proposed |  |
-| [2026-10-19 Make native verification authoritative and keep hosted CI lightweight](native-verification-with-lightweight-ci.md) | amended | [2026-10-19](optional-native-verification-before-publication.md), [2026-10-20](gate-pull-requests-that-skip-local-hooks.md) |
-| [2026-10-19 Make native verification optional before publication](optional-native-verification-before-publication.md) | amended | [2026-10-20](gate-pull-requests-that-skip-local-hooks.md) |
+| [2026-10-19 Make native verification authoritative and keep hosted CI lightweight](native-verification-with-lightweight-ci.md) | amended | [2026-10-19](optional-native-verification-before-publication.md), [2026-10-20](gate-pull-requests-that-skip-local-hooks.md), [2026-10-22](run-heavy-verification-at-the-release-gate.md) |
+| [2026-10-19 Make native verification optional before publication](optional-native-verification-before-publication.md) | amended | [2026-10-20](gate-pull-requests-that-skip-local-hooks.md), [2026-10-22](run-heavy-verification-at-the-release-gate.md) |
 | [2026-10-19 Repository owner assessments for bot pull requests](repository-owner-assessments-for-bot-pull-requests.md) | proposed |  |
 | [2026-10-20 Admit Git operations that lose no owner work](admit-tool-owned-and-throwaway-git-operations.md) | accepted |  |
 | [2026-10-20 Gate pull requests that skip the local hooks](gate-pull-requests-that-skip-local-hooks.md) | accepted |  |
@@ -95,6 +95,8 @@
 | [2026-10-21 Apply from the configured source and replace tools atomically](apply-from-the-configured-source-and-replace-tools-atomically.md) | proposed |  |
 | [2026-10-21 Check the owner's reply language at Stop](check-owner-reply-language-at-stop.md) | proposed |  |
 | [2026-10-21 Keep hosts on the merged main](keep-hosts-on-the-merged-main.md) | accepted |  |
+| [2026-10-21 Deliver purpose-scoped credentials through workload identities](purpose-scoped-doppler-workload-identities.md) | accepted |  |
 | [2026-10-21 Run unbounded verifiers in limited containers](run-unbounded-verifiers-in-limited-containers.md) | proposed |  |
 | [2026-10-21 Sign through the password manager agent](sign-through-the-password-manager-agent.md) | accepted |  |
 | [2026-10-22 Decide PR independence from merge results](decide-pr-independence-from-merge-results.md) | proposed |  |
+| [2026-10-22 Run heavy verification at the release gate](run-heavy-verification-at-the-release-gate.md) | accepted |  |

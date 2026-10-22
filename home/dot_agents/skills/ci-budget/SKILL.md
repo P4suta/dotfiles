@@ -1,22 +1,22 @@
 ---
 name: ci-budget
 description: >-
-  Keep hosted CI lean through change selection and reproducible project checks, and verify coherent changes before an explicit push.
+  Keep hosted CI lean with a fast gate on every change and heavy checks at the release gate, and verify coherent changes before an explicit push.
   Use when adding or changing GitHub Actions workflows, schedules, fuzzing, mutation, proofs, or OS matrices, before authorized pushes or PR updates, and when Actions allowance runs low.
 ---
 
 # Lean CI and local verification before pushing
 
-Design hosted workflows from [lean workflows](references/lean-workflows.md): a fast deterministic gate on every change, no schedules, and heavier checks selected by affected contracts.
-Use `formal-assurance` for reproducible verdicts and run selected heavy checks in the project's pinned container or documented hosted runners.
-Required hosted checks and the current-head PR review stay the final gates.
+Design hosted workflows from [lean workflows](references/lean-workflows.md): a fast deterministic gate on every change, no schedules, and heavy checks at the release gate.
+Use `formal-assurance` for reproducible verdicts and run heavy checks in the project's pinned container or documented hosted runners.
+Required hosted checks and the current-head PR review stay the final gates of a pull request.
 An active owner-imposed push pause overrides any push authorization until the owner explicitly resumes pushes.
 
 ## Prepare locally
 
 Read the diff, workflow triggers, required jobs, and project check entry points.
 Map each affected CI job to its local command and its required OS, architecture, environment, or service.
-Use the project's documented platform runner for every affected OS family in its matrix.
+Run the fast gate on the current host before a push, and leave other OS families to hosted CI and the release gate.
 The owner's hosts may cache artifacts and exact-source evidence within the owner-side tooling boundary in `formal-assurance`.
 Report hosted-only prerequisites as unverified locally, such as GitHub event permissions, OIDC, environment approval, and publication.
 Local verification grants no signing, publication, paid service calls, or self-hosted runner registration.

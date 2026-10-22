@@ -10,7 +10,7 @@ Handle artifact downloads and other untrusted inputs first, and fetch credential
 ## Shared release apps
 
 When one GitHub App serves many repositories, store its client ID and private key once in a purpose-specific shared config.
-Expose references to them through each repository's existing credential names.
+Expose only the required fields through each repository's purpose-specific config, and keep the mapping to workflow inputs explicit.
 When release-please and release-plz use different GitHub Apps, keep one shared config per App, and reference only the App the repository uses.
 Mint installation tokens scoped to the consuming repository and the permissions each step needs.
 The shared App key holds authority across all the App's installations, so every repository that receives it shares one trust boundary.
@@ -55,6 +55,8 @@ Keep repository-global and environment scopes, existing names, and unrelated fie
 Use a purpose-specific source config and `import_option: none` when Doppler already holds the approved canonical values.
 Verify the destination repository ID, environment name, enabled sync, and a successful first sync before calling the consumer migrated.
 Choose one method per consumer, and never let a failed OIDC login fall back to broader credentials.
+Retire a native sync only after the exact consumer revision authenticates through its replacement.
+Disconnect the old writer before deleting its GitHub copies, because an active sync can recreate them.
 
 ## Import values held only in GitHub
 
@@ -76,6 +78,8 @@ Reject empty outputs and unresolved references before signing or minting publica
 Confirm that the intended workflow, ref, and environment fetch their own config, and that other repositories and purposes fail.
 Use a non-publishing verification path when one exists, and keep the project's human approval steps.
 Credential migration grants no release or tag.
+An environment's name never supplies that authorization.
+Check downstream triggers before dispatching an authentication test, and keep signing, notarization, publication, and writable App checks out of that test.
 Never turn off immutability, rewrite release tags, or recreate a published release to get past a failure.
 Remove old GitHub secrets only after the Doppler path works and the approved store still holds the original values.
 Report local checks apart from real CI authentication, signing, and publication evidence.

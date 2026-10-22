@@ -1,9 +1,10 @@
 {
-  "revision": "b370adb28de93062d256b898374a3c5a5b970ca6ec8cd162e3fb0fd5db5415d0",
+  "revision": "df7a3ca9c3b603b70f0d88f83f27ff00b71fb785158412398584118a0fbf4a07",
   "outcome": "implemented",
-  "reason": "Require completed reproducible project checks while keeping inconclusive evidence and owner-side policy outside a passing verdict.",
+  "reason": "Call a fast checker from hooks and pull-request CI and a heavy one from the release workflow, which covers each supported OS.",
   "evidence": [
     "home/dot_agents/skills/executable-policy/SKILL.md",
+    "docs/adr/run-heavy-verification-at-the-release-gate.md",
     "docs/adr/verification-proportional-to-code-shape.md",
     "docs/adr/0003-local-skill-operations.md",
     "crates/skill-ops/tests/skill_ops.rs",

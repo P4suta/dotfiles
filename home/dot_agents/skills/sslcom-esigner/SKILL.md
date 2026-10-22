@@ -17,6 +17,12 @@ Keep login MFA, a rotating one-time code, certificate TOTP, and an enrollment PI
 The owner handles 1Password and QR codes in person.
 Use the service's reviewed pinned action or supported tooling in a fresh credential-bearing job with a verified candidate and no candidate-controlled code execution.
 Keep private values out of arguments, logs, and reports.
+Keep the canonical username, password, Credential ID, and persistent TOTP seed in a Windows-signing config, with field references for each consumer.
+Doppler OIDC authenticates the runner to that store.
+eSigner still needs its own signing credentials and authority for each signature.
+Fetch those inputs only in the authorized signing job, after candidate verification.
+An expired certificate, inactive signing credential, bad password, and runtime trust failure require different remedies.
+Reuse a valid identity, and never reset enrollment or rotate its TOTP seed to diagnose a failure before authentication.
 
 Check supported signing algorithms and trusted timestamp behavior in [SSL.com's current guide](https://www.ssl.com/guide/esigner-signing-credential-guide/).
 Diagnose Java or certificate-chain failures with the supported runtime and trust store, and never bypass TLS verification.

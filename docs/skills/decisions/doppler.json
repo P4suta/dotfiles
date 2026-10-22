@@ -1,11 +1,13 @@
 {
-  "revision": "c4f056ad2df66b37caa91853f17a28e8bcc596c6ca88b1feb6337564b6a61a77",
+  "revision": "c82c35b7bafb2917cb6ccfe005d8e132f8ba797c857774e52509d39e3ee194e0",
   "outcome": "implemented",
-  "reason": "Keep scoped secret delivery and owner authentication separate from release authorization.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "reason": "Keep credentials only for active consumers and deliver shared fields through purpose-scoped workload identities.\nRequire source-bound authentication evidence before retiring a live consumer, and distinguish credential access from signing or publication.\nDistinguish a selected account's config scope from every identity a workflow can exchange for.",
   "evidence": [
     "home/dot_agents/skills/doppler/SKILL.md",
     "home/dot_agents/skills/doppler/tools.toml",
-    "xtask/tests/tool_inventory.rs"
+    "xtask/tests/tool_inventory.rs",
+    "docs/adr/purpose-scoped-doppler-workload-identities.md",
+    "home/dot_agents/skills/doppler/references/credential-lifecycle.md"
   ],
   "revisit": null
 }
