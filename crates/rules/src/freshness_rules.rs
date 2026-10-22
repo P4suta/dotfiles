@@ -15,6 +15,11 @@ pub const fn lookup_need(known_scope: bool, changed_manifest: bool, inherited: b
     }
 }
 
+#[must_use]
+pub const fn introduced(pushed: bool, authored: bool) -> bool {
+    pushed && authored
+}
+
 /// The verified facts of one offered revision's dependency check.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Facts {
@@ -124,6 +129,25 @@ pub fn verdict(facts: Facts) -> Verdict {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_introduced(pushed: bool, authored: bool) {
+        let result = introduced(pushed, authored);
+        if result {
+            assert!(pushed && authored);
+        }
+        if pushed && authored {
+            assert!(result);
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn introduced_dependencies_need_both_source_comparisons() {
+        let (pushed, authored): (bool, bool) = kani::any();
+        spec_introduced(pushed, authored);
+        kani::cover!(introduced(pushed, authored));
+        kani::cover!(!introduced(pushed, authored));
+    }
 
     pub fn spec_scope(known_scope: bool, changed_manifest: bool, inherited: bool) {
         let result = lookup_need(known_scope, changed_manifest, inherited);
@@ -288,6 +312,13 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::ProblemSeverity;
+
+    #[test]
+    fn every_source_attribution_preserves_new_and_inherited_dependencies() {
+        for [pushed, authored] in crate::domain::flags() {
+            super::proofs::spec_introduced(pushed, authored);
+        }
+    }
 
     #[test]
     fn every_source_scope_preserves_required_lookups() {
