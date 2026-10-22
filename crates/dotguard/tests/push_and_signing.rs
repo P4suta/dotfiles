@@ -1290,6 +1290,17 @@ fn backend_report(
     }}}})
 }
 
+fn unlocked_backend_report(backend: (&str, &str, &str, &str)) -> serde_json::Value {
+    let mut report = backend_report(backend);
+    let diagnostic = report["repositories"]["local"]["packageFiles"]["mise"][0]["deps"][0]
+        .as_object_mut()
+        .unwrap();
+    diagnostic.remove("lockedVersion");
+    diagnostic.insert("depType".to_owned(), "tools".into());
+    diagnostic.insert("packageName".to_owned(), backend.0.into());
+    report
+}
+
 fn regex_counterpart(report: &mut serde_json::Value) -> &mut serde_json::Value {
     &mut report["repositories"]["local"]["packageFiles"]["regex"][0]["deps"][0]
 }
@@ -1536,6 +1547,99 @@ fn renovate_accepts_only_verified_backend_duplicates_and_still_checks_their_upda
 }
 
 #[test]
+fn renovate_unlocked_backend_uses_the_offered_literal_source() {
+    let (repository, _, initial) = renovate_fixture("renovate-unlocked-backend");
+    let mut rejected = Vec::new();
+    for backend in MISE_BACKENDS {
+        let (name, _, _, version) = backend;
+        let manifest = format!("[tools]\n{name:?} = {version:?}\n");
+        let offered = changed_file(&repository, "mise.toml", &manifest, &initial);
+        let report = unlocked_backend_report(backend);
+        std::fs::write(
+            repository.path().join("mise.toml"),
+            "working tree differs\n",
+        )
+        .unwrap();
+        let output = report_gate(&repository, &initial, &offered, &report);
+        if !output.status.success() {
+            rejected.push((name, String::from_utf8_lossy(&output.stderr).into_owned()));
+        }
+    }
+    assert!(
+        rejected.is_empty(),
+        "verified unlocked pins rejected: {rejected:?}"
+    );
+}
+
+#[test]
+fn renovate_unlocked_backends_reject_other_declarations_and_version_claims() {
+    let (repository, _, initial) = renovate_fixture("renovate-unlocked-source-refusals");
+    let backend = MISE_BACKENDS[4];
+    let report = unlocked_backend_report(backend);
+    for manifest in [
+        "[tools]\ndotnet = \"10.0.301\"\n",
+        "[other]\ndotnet = \"10.0.300\"\n",
+        "[tools]\nother = \"10.0.300\"\n",
+        "[tools]\ndotnet = { version = \"10.0.300\" }\n",
+        "invalid TOML",
+    ] {
+        let offered = changed_file(&repository, "mise.toml", manifest, &initial);
+        std::fs::write(
+            repository.path().join("mise.toml"),
+            "[tools]\ndotnet = \"10.0.300\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            refusal(&report_gate(&repository, &initial, &offered, &report)).rule,
+            "push.evidence",
+            "{manifest}"
+        );
+    }
+    let offered = changed_file(
+        &repository,
+        "mise.toml",
+        "[tools]\ndotnet = \"10.0.300\"\n",
+        &initial,
+    );
+    for (field, value) in [
+        ("depType", serde_json::json!("other")),
+        ("packageName", serde_json::json!("other")),
+        ("currentValue", serde_json::json!("10.0.301")),
+        ("currentVersion", serde_json::json!("10.0.301")),
+        ("currentDigest", serde_json::json!("unexpected")),
+        ("lockedVersion", serde_json::json!("10.0.301")),
+        ("lockedVersion", serde_json::json!("")),
+    ] {
+        let mut malformed = report.clone();
+        malformed["repositories"]["local"]["packageFiles"]["mise"][0]["deps"][0][field] = value;
+        assert_eq!(
+            refusal(&report_gate(&repository, &initial, &offered, &malformed)).rule,
+            "push.evidence",
+            "{field}"
+        );
+    }
+    let mut conflicting = report;
+    regex_counterpart(&mut conflicting)["currentVersion"] = "10.0.301".into();
+    assert_eq!(
+        refusal(&report_gate(&repository, &initial, &offered, &conflicting)).rule,
+        "push.evidence"
+    );
+}
+
+#[test]
+fn renovate_unlocked_backend_still_blocks_a_touched_outdated_pin() {
+    let (repository, base, offered) = renovate_fixture("renovate-unlocked-outdated");
+    let mut report = unlocked_backend_report(MISE_BACKENDS[0]);
+    regex_counterpart(&mut report)["updates"] = serde_json::json!([{
+        "updateType":"patch","newValue":"0.116.1","isBreaking":false
+    }]);
+    assert_eq!(
+        refusal(&report_gate(&repository, &base, &offered, &report)).rule,
+        "push.dependencies"
+    );
+}
+
+#[test]
 fn renovate_refuses_missing_mismatched_or_failed_backend_counterparts() {
     let (repository, base, offered) = renovate_fixture("renovate-bad-backend-coverage");
     let mut reports = Vec::new();
@@ -1586,8 +1690,24 @@ fn renovate_refuses_missing_mismatched_or_failed_backend_counterparts() {
         backend_report(("unknown", "crate", "unknown", "1.0.0")),
     ));
     for (name, report) in reports {
-        let output = report_gate(&repository, &base, &offered, &report);
-        assert_eq!(refusal(&output).rule, "push.evidence", "{name}");
+        for unlocked in [false, true] {
+            let mut report = report.clone();
+            if unlocked {
+                let diagnostic = report["repositories"]["local"]["packageFiles"]["mise"][0]["deps"]
+                    [0]
+                .as_object_mut()
+                .unwrap();
+                diagnostic.remove("lockedVersion");
+                diagnostic.insert("depType".to_owned(), "tools".into());
+                diagnostic.insert("packageName".to_owned(), MISE_BACKENDS[0].0.into());
+            }
+            let output = report_gate(&repository, &base, &offered, &report);
+            assert_eq!(
+                refusal(&output).rule,
+                "push.evidence",
+                "{name}, unlocked={unlocked}"
+            );
+        }
     }
 }
 

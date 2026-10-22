@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 mod cargo;
+mod mise;
 pub mod report;
 
 const DEFAULT_UPDATE_TYPES: &str = "minor patch pin pinDigest";
