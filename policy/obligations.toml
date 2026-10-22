@@ -1963,9 +1963,9 @@ fn reject_refusing_a_commit_for_an_old_gap() {
     assert!(verdict(Point::Commit, old).refuses());
 }
 #[kani::proof]
-fn reject_admitting_a_pr_that_closes_no_gap() {
+fn reject_refusing_a_pr_for_unchanged_debt() {
     let stalled = Change { before: 1, after: 1, ..Change::default() };
-    assert!(verdict(Point::Ready, stalled) == Verdict::Admit);
+    assert!(verdict(Point::Ready, stalled).refuses());
 }
 #[kani::proof]
 fn reject_an_exemption_with_an_open_reason() {

@@ -496,8 +496,7 @@ fn a_new_branch_uses_the_advertised_upstream_default_instead_of_tracking_refs() 
 }
 
 #[test]
-fn old_gaps_refuse_no_commit_or_push_but_a_touch_must_close_them_and_a_pr_must_close_one()
--> Result<()> {
+fn old_gaps_do_not_block_unrelated_prs_but_a_touched_file_must_close_them_at_stop() -> Result<()> {
     let catalog = catalog()?;
     let fixture = Fixture::new()?;
     let root = &fixture.root;
@@ -516,10 +515,11 @@ fn old_gaps_refuse_no_commit_or_push_but_a_touch_must_close_them_and_a_pr_must_c
         rule(assure::push(root, &catalog, "origin", line.as_bytes())),
         None
     );
-    assert_eq!(
-        rule(assure::ready(root, &catalog, &old, &unrelated)).as_deref(),
-        Some("assure.stalled")
-    );
+    assert_eq!(rule(assure::ready(root, &catalog, &old, &unrelated)), None);
+
+    fixture.write("src/a.rs", &format!("// unchanged parser\n{PARSER}"))?;
+    let adjacent = fixture.commit("document the existing parser")?;
+    assert_eq!(rule(assure::ready(root, &catalog, &old, &adjacent)), None);
 
     fixture.write("src/a.rs", &format!("{PARSER}// a touch\n"))?;
     let touched = assure::stop(root, &catalog)?;
@@ -746,6 +746,171 @@ fn a_decision_module_is_owned_by_its_own_harness_and_tests_are_never_read() -> R
 const MAGIC: &str = "pub fn retries() -> u32 {\n    3\n}\n";
 
 #[test]
+fn merging_existing_gaps_admits_inheritance_but_refuses_new_merge_edits() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    fixture.git(&["switch", "--quiet", "-c", "topic"])?;
+    fixture.write("docs/topic.md", "Topic documentation.\n")?;
+    fixture.commit("topic documentation")?;
+    fixture.git(&["switch", "--quiet", "main"])?;
+    fixture.write("src/lib.rs", PARSER)?;
+    let incoming = fixture.commit("legacy parser")?;
+    let upstream = fixture.scope.path().join("upstream.git");
+    let upstream = upstream.to_str().unwrap();
+    fixture.git(&["clone", "--bare", "--quiet", ".", upstream])?;
+    fixture.git(&["remote", "set-url", "origin", upstream])?;
+    fixture.git(&["switch", "--quiet", "topic"])?;
+    let old = fixture.git(&["rev-parse", "HEAD"])?;
+    fixture.git(&["merge", "--no-commit", "--no-ff", "main"])?;
+
+    assert_eq!(rule(assure::commit(&fixture.root, &catalog)), None);
+    assert_eq!(
+        assure::stop(&fixture.root, &catalog)?.verdict,
+        Verdict::Admit
+    );
+
+    fixture.write("src/new.rs", MAGIC)?;
+    fixture.stage()?;
+    assert_eq!(
+        rule(assure::commit(&fixture.root, &catalog)).as_deref(),
+        Some("assure.added")
+    );
+    fs::remove_file(fixture.root.join("src/new.rs"))?;
+    fixture.stage()?;
+    let merged = fixture.commit("merge main")?;
+    let push = |head: &str| format!("refs/heads/topic {head} refs/heads/topic {old}\n");
+    assert_eq!(
+        rule(assure::push(
+            &fixture.root,
+            &catalog,
+            "origin",
+            push(&merged).as_bytes()
+        )),
+        None
+    );
+    assert_eq!(
+        rule(assure::ready(&fixture.root, &catalog, &incoming, &merged)),
+        None
+    );
+
+    fixture.write("src/new.rs", MAGIC)?;
+    let added = fixture.commit("new violation after merging")?;
+    assert_eq!(
+        rule(assure::push(
+            &fixture.root,
+            &catalog,
+            "origin",
+            push(&added).as_bytes()
+        ))
+        .as_deref(),
+        Some("assure.added")
+    );
+    Ok(())
+}
+
+#[test]
+fn a_conflicted_worktree_merge_checks_the_resolution_against_both_parents() -> Result<()> {
+    let mut fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    let branch = fixture.scope.path().join("linked worktree with 'quotes'");
+    fixture.git(&[
+        "worktree",
+        "add",
+        "--quiet",
+        "-b",
+        "topic",
+        branch.to_str().unwrap(),
+    ])?;
+    fixture.write("README.md", "Main documentation.\n")?;
+    fixture.write("src/lib.rs", PARSER)?;
+    let incoming = fixture.commit("existing parser on main")?;
+    fixture.root = branch;
+    assert!(fixture.root.join(".git").is_file());
+    fixture.write("README.md", "Topic documentation.\n")?;
+    fixture.commit("topic documentation")?;
+    let conflict = fixture_git::command("git", &fixture.config)
+        .current_dir(&fixture.root)
+        .args(["merge", "--no-commit", "--no-ff", "main"])
+        .output()?;
+    assert_eq!(conflict.status.code(), Some(1));
+    assert_ne!(fixture.git(&["ls-files", "--unmerged"])?, "");
+    fixture.write("README.md", "Main and topic documentation.\n")?;
+    fixture.stage()?;
+    assert_eq!(rule(assure::commit(&fixture.root, &catalog)), None);
+    let inherited = assure::stop(&fixture.root, &catalog)?;
+    assert_eq!(inherited.verdict, Verdict::Admit);
+    assert!(inherited.inputs.inherited.contains(&incoming));
+
+    fixture.write("src/lib.rs", &format!("{PARSER}\n{MAGIC}"))?;
+    fixture.stage()?;
+    assert_eq!(
+        rule(assure::commit(&fixture.root, &catalog)).as_deref(),
+        Some("assure.added")
+    );
+    fixture.write(
+        "src/lib.rs",
+        &format!("// edited during resolution\n{PARSER}"),
+    )?;
+    fixture.stage()?;
+    assert_eq!(rule(assure::commit(&fixture.root, &catalog)), None);
+    assert_eq!(
+        assure::stop(&fixture.root, &catalog)?.verdict,
+        Verdict::Touched
+    );
+    Ok(())
+}
+
+#[test]
+fn merge_metadata_fails_closed_and_unpublished_parents_do_not_waive_push_gaps() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    let base = fixture.git(&["rev-parse", "HEAD"])?;
+    let upstream = fixture.scope.path().join("upstream.git");
+    fixture.git(&[
+        "clone",
+        "--bare",
+        "--quiet",
+        ".",
+        upstream.to_str().unwrap(),
+    ])?;
+    fixture.git(&["remote", "set-url", "origin", upstream.to_str().unwrap()])?;
+    let merge_path = fixture
+        .root
+        .join(fixture.git(&["rev-parse", "--git-path", "MERGE_HEAD"])?);
+    for invalid in [
+        String::new(),
+        "main\n".to_owned(),
+        format!("{}\n", "f".repeat(40)),
+    ] {
+        fs::write(&merge_path, invalid)?;
+        let error = assure::commit(&fixture.root, &catalog).unwrap_err();
+        assert!(format!("{error:#}").contains("MERGE_HEAD"));
+    }
+    fs::remove_file(&merge_path)?;
+    fixture.git(&["switch", "--quiet", "-c", "unpublished"])?;
+    fixture.write("src/lib.rs", PARSER)?;
+    fixture.commit("unpublished parser")?;
+    fixture.git(&["switch", "--quiet", "main"])?;
+    fixture.write("README.md", "Main documentation.\n")?;
+    fixture.commit("main documentation")?;
+    fixture.git(&["merge", "--no-commit", "--no-ff", "unpublished"])?;
+    assert_eq!(rule(assure::commit(&fixture.root, &catalog)), None);
+    let merged = fixture.commit("merge unpublished work")?;
+    let push = format!("refs/heads/main {merged} refs/heads/main {base}\n");
+    assert_eq!(
+        rule(assure::push(
+            &fixture.root,
+            &catalog,
+            "origin",
+            push.as_bytes()
+        ))
+        .as_deref(),
+        Some("assure.added")
+    );
+    Ok(())
+}
+
+#[test]
 fn a_pure_revert_passes_each_point_and_a_revert_that_adds_a_gap_does_not() -> Result<()> {
     let catalog = catalog()?;
     let fixture = Fixture::new()?;
@@ -804,6 +969,31 @@ fn a_pure_revert_passes_each_point_and_a_revert_that_adds_a_gap_does_not() -> Re
     assert_eq!(
         emitted_rule(assure::ready(root, &catalog, &named, &mixed)).as_deref(),
         Some("assure.added")
+    );
+    Ok(())
+}
+
+#[test]
+fn a_staged_revert_detects_renames_without_changing_refs() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    fixture.write("src/retries.rs", MAGIC)?;
+    fixture.commit("older magic number")?;
+    fixture.write(
+        "src/retries.rs",
+        "const RETRIES: u32 = 3;\npub fn retries() -> u32 { RETRIES }\n",
+    )?;
+    let named = fixture.commit("name the retries")?;
+    fixture.git(&["mv", "src/retries.rs", "src/renamed.rs"])?;
+    let head = fixture.commit("rename the module")?;
+    let refs = fixture.git(&["for-each-ref", "--format=%(refname) %(objectname)"])?;
+    fixture.git(&["revert", "--no-commit", &named])?;
+    assert_eq!(fixture.git(&["show", ":src/renamed.rs"])?, MAGIC.trim());
+    assert_eq!(rule(assure::commit(&fixture.root, &catalog)), None);
+    assert_eq!(fixture.git(&["rev-parse", "HEAD"])?, head);
+    assert_eq!(
+        fixture.git(&["for-each-ref", "--format=%(refname) %(objectname)"])?,
+        refs
     );
     Ok(())
 }

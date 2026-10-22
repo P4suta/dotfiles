@@ -24,6 +24,10 @@ pub const CATALOG: &str = ".config/assure/shapes.toml";
 pub const OWNERS: &str = "assure.toml";
 const REPOS: &str = "repos";
 const INITIAL_CATALOG_VERSION: u32 = 1;
+const COMPARISON_NAME: &str = "Assure";
+const COMPARISON_EMAIL: &str = "assure@localhost";
+const COMPARISON_DATE: &str = "2000-01-01T00:00:00+00:00";
+const COMPARISON_MESSAGE: &str = "chore: compare existing trees";
 
 fn initial_catalog_version() -> u32 {
     INITIAL_CATALOG_VERSION
@@ -956,6 +960,7 @@ pub struct Inputs {
     pub catalog_version: u32,
     pub catalog_sha256: String,
     pub base: Option<String>,
+    pub inherited: BTreeSet<String>,
     pub owners: BTreeSet<String>,
 }
 
@@ -965,17 +970,23 @@ impl Inputs {
             catalog_version: catalog.version,
             catalog_sha256: catalog.sha256.clone(),
             base,
+            inherited: BTreeSet::new(),
             owners: BTreeSet::new(),
         }
     }
 
     fn description(&self) -> String {
-        format!(
+        let mut description = format!(
             "owner's local catalog version={} sha256={}; base={}",
             self.catalog_version,
             self.catalog_sha256,
             self.base.as_deref().unwrap_or("empty tree"),
-        )
+        );
+        if !self.inherited.is_empty() {
+            description.push_str("; inherited=");
+            description.push_str(&self.inherited.iter().cloned().collect::<Vec<_>>().join(","));
+        }
+        description
     }
 
     fn refusal(&self, mut refusal: Refusal) -> Refusal {
@@ -1014,11 +1025,6 @@ impl Outcome {
                 "assure.lowered",
                 "the owner's local catalog refuses a weakened verification budget",
                 "restore each listed budget in the owner map and meet it",
-            ),
-            Verdict::Stalled => (
-                "assure.stalled",
-                "the owner's local catalog finds verification gaps and this PR closes none of them",
-                "close at least one gap listed by the session start report in this PR",
             ),
         };
         let mut refusal = Refusal::new(rule, cause, next);
@@ -1072,14 +1078,18 @@ fn scope(
     map: &OwnerMap,
     before: &Tree,
     after: &Tree,
+    inherited: &[Tree],
 ) -> Result<(BTreeSet<String>, Option<BTreeSet<String>>)> {
     let changed = changed(root, before, after)?;
     let probe = |tree: &Tree| survey_with(root, catalog, map, tree, Some(&BTreeSet::new()));
-    let owning: BTreeSet<String> = probe(before)?
+    let mut owning: BTreeSet<String> = probe(before)?
         .owning
         .into_iter()
         .chain(probe(after)?.owning)
         .collect();
+    for tree in inherited {
+        owning.extend(probe(tree)?.owning);
+    }
     let widened = changed.iter().any(|path| {
         owning
             .iter()
@@ -1102,28 +1112,75 @@ fn reverted_commit(message: &str) -> Option<&str> {
     })
 }
 
-/// The tree that reverting `reverted` onto `onto` yields, or `None` when that revert conflicts or Git can't compute it.
+fn comparison_commit(root: &Path, base: &str, tree: &str) -> Result<String> {
+    let output = Tool::Git
+        .command()
+        .arg("-C")
+        .arg(root)
+        .args([
+            "-c",
+            "commit.gpgSign=false",
+            "commit-tree",
+            tree,
+            "-p",
+            base,
+            "-m",
+            COMPARISON_MESSAGE,
+        ])
+        .env("GIT_AUTHOR_NAME", COMPARISON_NAME)
+        .env("GIT_COMMITTER_NAME", COMPARISON_NAME)
+        .env("GIT_AUTHOR_EMAIL", COMPARISON_EMAIL)
+        .env("GIT_COMMITTER_EMAIL", COMPARISON_EMAIL)
+        .env("GIT_AUTHOR_DATE", COMPARISON_DATE)
+        .env("GIT_COMMITTER_DATE", COMPARISON_DATE)
+        .output()
+        .context("construct an unreferenced comparison object")?;
+    ensure!(
+        output.status.success(),
+        "git commit-tree failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let commit = String::from_utf8(output.stdout)?.trim().to_owned();
+    ensure!(
+        shape_rules::commit_id(commit.as_bytes()),
+        "Git returned an invalid comparison object"
+    );
+    Ok(commit)
+}
+
+/// The tree that reverting `reverted` onto `onto` yields, or `None` when that revert conflicts.
 fn restored(root: &Path, reverted: &str, onto: &str) -> Result<Option<String>> {
     let Some(parent) = resolve(root, &format!("{reverted}^"))? else {
         return Ok(None);
     };
+    let left = comparison_commit(root, reverted, &format!("{onto}^{{tree}}"))?;
+    let right = comparison_commit(root, reverted, &format!("{parent}^{{tree}}"))?;
     let output = Tool::Git
         .command()
         .arg("-C")
         .arg(root)
         .args(["merge-tree", "--write-tree", "--no-messages"])
-        .arg(format!("--merge-base={reverted}"))
-        .args([onto, &parent])
-        .stderr(Stdio::null())
+        .args([&left, &right])
         .output()
         .context("start Git")?;
-    Ok(output.status.success().then(|| {
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .next()
-            .unwrap_or_default()
-            .to_owned()
-    }))
+    if output.status.code() == Some(1) {
+        return Ok(None);
+    }
+    ensure!(
+        output.status.success(),
+        "git merge-tree failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let tree = String::from_utf8(output.stdout)?
+        .lines()
+        .next()
+        .context("Git returned no restored tree")?
+        .to_owned();
+    ensure!(
+        shape_rules::commit_id(tree.as_bytes()),
+        "Git returned an invalid restored tree"
+    );
+    Ok(Some(tree))
 }
 
 /// Whether the change from `before` to `after` only reverts earlier commits, each exactly as `git revert` writes it.
@@ -1193,6 +1250,45 @@ pub fn decide(
     before: &Tree,
     after: &Tree,
 ) -> Result<Outcome> {
+    let inherited = if matches!(point, Point::Commit | Point::Stop)
+        && matches!(after, Tree::Index | Tree::WorkingTree)
+        && *before == Tree::Commit(resolve(root, "HEAD")?)
+    {
+        merge_parents(root)?
+    } else {
+        Vec::new()
+    };
+    decide_from(root, catalog, point, before, after, &inherited)
+}
+
+fn merge_parents(root: &Path) -> Result<Vec<String>> {
+    let path = git(root, &["rev-parse", "--git-path", "MERGE_HEAD"])?;
+    let path = root.join(String::from_utf8(path)?.trim());
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error).with_context(|| path.display().to_string()),
+    };
+    ensure!(!text.trim().is_empty(), "MERGE_HEAD has no parent commits");
+    text.lines()
+        .map(|line| {
+            ensure!(
+                shape_rules::commit_id(line.as_bytes()),
+                "MERGE_HEAD has an invalid parent commit"
+            );
+            resolve(root, line)?.context("MERGE_HEAD parent commit is missing")
+        })
+        .collect()
+}
+
+fn decide_from(
+    root: &Path,
+    catalog: &Catalog,
+    point: Point,
+    before: &Tree,
+    after: &Tree,
+    inherited: &[String],
+) -> Result<Outcome> {
     let base = match before {
         Tree::Commit(Some(commit)) => resolve(root, commit)?
             .context("comparison base is missing")
@@ -1201,9 +1297,17 @@ pub fn decide(
         Tree::Index | Tree::WorkingTree => bail!("comparison base must be a commit"),
     };
     let mut inputs = Inputs::new(catalog, base.clone());
+    inputs.inherited.extend(inherited.iter().cloned());
     let before = &Tree::Commit(base);
-    let map =
-        OwnerMap::read(root, catalog, &[before, after]).map_err(|error| inputs.error(error))?;
+    let inherited: Vec<_> = inherited
+        .iter()
+        .map(|commit| Tree::Commit(Some(commit.clone())))
+        .collect();
+    let trees: Vec<_> = [before, after]
+        .into_iter()
+        .chain(inherited.iter())
+        .collect();
+    let map = OwnerMap::read(root, catalog, &trees).map_err(|error| inputs.error(error))?;
     decide_with(root, catalog, point, before, after, &map, &mut inputs)
         .map_err(|error| inputs.error(error))
 }
@@ -1218,10 +1322,15 @@ fn decide_with(
     inputs: &mut Inputs,
 ) -> Result<Outcome> {
     let full = matches!(point, Point::Ready | Point::Start);
-    let (changed, limit) = if point == Point::Start {
+    let inherited: Vec<_> = inputs
+        .inherited
+        .iter()
+        .map(|commit| Tree::Commit(Some(commit.clone())))
+        .collect();
+    let (mut changed, limit) = if point == Point::Start {
         (BTreeSet::new(), None)
     } else {
-        scope(root, catalog, map, before, after)?
+        scope(root, catalog, map, before, after, &inherited)?
     };
     let limit = if full { None } else { limit };
     let old = if point == Point::Start {
@@ -1234,7 +1343,26 @@ fn decide_with(
     }
     let new = survey_with(root, catalog, map, after, limit.as_ref())?;
     inputs.owners.insert(new.owner_input.clone());
-    let (old_keys, new_keys) = (old.keys(), new.keys());
+    let mut known = Vec::new();
+    for tree in &inherited {
+        let survey = survey_with(root, catalog, map, tree, limit.as_ref())?;
+        inputs.owners.insert(survey.owner_input.clone());
+        known.push(survey);
+        if point == Point::Stop {
+            let paths: Vec<_> = changed.iter().cloned().collect();
+            let inherited_files = contents(root, tree, &paths)?;
+            let current_files = contents(root, after, &paths)?;
+            changed.retain(|path| inherited_files.get(path) != current_files.get(path));
+        }
+    }
+    let old_keys: Vec<_> = old
+        .keys()
+        .into_iter()
+        .chain(known.iter().flat_map(Survey::keys))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let new_keys = new.keys();
     let lowered = lowered(&old, &new);
     let change = Change {
         added: if point == Point::Start {
@@ -1243,7 +1371,7 @@ fn decide_with(
             shape_rules::fresh(&old_keys, &new_keys)
         },
         closed: shape_rules::fresh(&new_keys, &old_keys),
-        before: old.gaps.len(),
+        before: old_keys.len(),
         after: new.gaps.len(),
         touched: new
             .gaps
@@ -1350,14 +1478,29 @@ pub fn push(root: &Path, catalog: &Catalog, remote: &str, input: &[u8]) -> Resul
         } else {
             explicit_base(root, catalog, remote, theirs)?
         };
+        let merges = git(
+            root,
+            &[
+                "rev-list",
+                "--merges",
+                "--max-count=1",
+                &format!("{base}..{local}"),
+            ],
+        )?;
+        let inherited = if zero(theirs) || merges.is_empty() {
+            Vec::new()
+        } else {
+            vec![upstream_base(root, catalog, remote, local)?]
+        };
         enforce(
             catalog,
-            &decide(
+            &decide_from(
                 root,
                 catalog,
                 Point::Push,
                 &Tree::Commit(Some(base)),
                 &Tree::Commit(Some(local.to_owned())),
+                &inherited,
             )?,
         )?;
     }
@@ -1429,7 +1572,7 @@ pub fn start(root: &Path, catalog: &Catalog) -> Result<Option<String>> {
         return Ok(None);
     }
     let mut report = format!(
-        "The owner's local catalog finds {} verification gaps in this repository ({}). Commits and pushes refuse only new ones, and each PR must close at least one:\n",
+        "The owner's local catalog finds {} verification gaps in this repository ({}). Publication refuses new gaps and PR readiness also refuses weakened budgets:\n",
         outcome.gaps.len(),
         outcome.inputs.description(),
     );
@@ -1441,7 +1584,7 @@ pub fn start(root: &Path, catalog: &Catalog) -> Result<Option<String>> {
     Ok(Some(report))
 }
 
-/// The `pr-workflow ready` point: refuses a PR that adds a gap or weakens a budget, and in a repository with gaps one that closes none.
+/// The `pr-workflow ready` point: refuses a PR that adds a gap or weakens a budget.
 ///
 /// # Errors
 ///
