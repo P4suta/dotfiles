@@ -1,6 +1,6 @@
 ---
 status: amended
-changed_by: [keep-the-assure-owner-map-out-of-projects.md]
+changed_by: [keep-the-assure-owner-map-out-of-projects.md, assurance-follows-change-provenance.md]
 date: 2026-10-07
 ---
 # Require verification in proportion to code shape on every repository

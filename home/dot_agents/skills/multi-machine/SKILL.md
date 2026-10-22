@@ -32,6 +32,8 @@ For a long run, keep its job identity and inspect its status or logs without res
 Preserve exit status and the primary failure, and tell a transport interruption apart from the job's result.
 Resolve an uncertain start through the submission identity instead of launching a duplicate.
 Diagnose network reachability through `tailscale` and authentication through the configured SSH-agent boundary.
+Before treating a failed agent or credential-store call as expired credentials, compare the executable, user, environment, and login session with the owner's working context.
+Read [credential-context diagnosis](references/credential-context.md) when remote background execution can't reach credentials that work on the desktop.
 Never open the 1Password vault, relax approval settings, or turn off its key protections.
 
 Preserve the hub workflow, machine branches, signatures, hooks, line endings, and local work during synchronization.

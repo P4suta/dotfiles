@@ -19,5 +19,7 @@ For an installed client, check its version and the relevant `--help`.
 Use `run` to send the current checkout as a bounded snapshot, and `on` for a command in the remote home directory.
 Pass an explicit program after `--`, and keep the remote command's exit status.
 Keep the returned machine and job identity, and resolve an uncertain submission through it instead of retrying as a new job.
+Background jobs can have a different login session and credential access from the owner's desktop.
+Before requesting login or agent changes, follow the [credential-context diagnosis](../multi-machine/references/credential-context.md).
 Remote agent dispatch and message sending each need their own authorization, beyond remote build permission.
 Never bypass domyjob with a raw SSH command when an authorized owner-side operation depends on its snapshot, job identity, or environment boundary.

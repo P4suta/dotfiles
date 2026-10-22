@@ -753,9 +753,10 @@ impl CodeEnvironment {
             ),
             (
                 "MISE_CEILING_PATHS",
-                self.root
+                self.configuration
                     .parent()
-                    .context("checkout has no parent")?
+                    .and_then(Path::parent)
+                    .context("private project has no enclosing directory")?
                     .to_path_buf(),
             ),
             ("GIT_CONFIG_GLOBAL", empty.to_path_buf()),

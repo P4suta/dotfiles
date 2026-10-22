@@ -70,11 +70,14 @@ Ordinary agents read the applicable skill instructions directly.
 
 `home/dot_config/assure/shapes.toml` names the code shapes every repository on these machines must verify: pure decisions, protocols, and parsers, each with the signals that find it and the owner it needs.
 The same gate applies the anti-pattern catalog beside it, and counts each finding as a gap.
-A repository names its owners and budgets in `assure.toml` at its root, and an exemption sits in the comment block that precedes the site it exempts, as [its decision record](adr/verification-proportional-to-code-shape.md) describes.
+The owner's configuration names each repository's owners and budgets under `~/.config/assure/repos/`, as [the owner-map decision](adr/keep-the-assure-owner-map-out-of-projects.md) describes.
+An exemption sits in the comment block that precedes the site it exempts.
 `dotfiles assure start` reports the gaps when an agent session starts, and the stop hook refuses to end a turn that leaves a gap in a file it changed.
 Claude Code and Codex also pass the owner's `reply_language` to this hook to check final reply prose, with at most one continuation, as [the language decision](adr/check-owner-reply-language-at-stop.md) describes.
 The `pre-commit` and `pre-push` hooks refuse a change that adds a gap.
-`pr-workflow ready` also refuses a PR that weakens a budget, and in a repository with gaps one that closes none.
+`pr-workflow ready` also refuses a PR that weakens a budget.
+Existing gaps remain in the session report without requiring an unrelated repair in every PR.
+Merge checks account for inherited code, as [the change-provenance decision](adr/assurance-follows-change-provenance.md) describes.
 
 ## Gate map
 
