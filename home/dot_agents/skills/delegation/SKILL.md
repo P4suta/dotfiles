@@ -42,6 +42,7 @@ The underlying tool's locks still enforce access.
 
 Use project commands such as `just`, `xtask`, and `pr-workflow`, and the client's file tools.
 Never write files through inline interpreters, heredocs, or throwaway scripts.
+Agent write hooks lint each changed supported file immediately, and the Bash guard checks scripts before execution, so fix every reported finding before continuing.
 When a needed command lacks an implementation, add it to the project.
 For disk usage and cleanup, use `storage-scout scan` and `storage-scout clean`.
 The shell hook refuses recursive size scans.

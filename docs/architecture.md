@@ -52,6 +52,11 @@ The plan runs, in order:
 
 ## Verification on every repository
 
+Agent mutation hooks run `dotfiles lint-hook` over only the written paths.
+The same bounded linter adapter checks scripts before the Bash guard admits execution.
+The pure `lint_hook_rules` selects file types, linters, configuration sources, and admission, while repository configuration keeps its supported exclusions.
+Missing linters, timeouts, and findings block with reproducing commands.
+
 Codex runs command hooks through the configured session shell.
 The Windows profile uses PowerShell invocation syntax and `dotfiles codex-hooks run` to preserve each hook's input, output, and exit status.
 The wrapper records its start, child completion, and failure diagnostics under `~/.local/state/dotfiles/codex-hooks.jsonl`.

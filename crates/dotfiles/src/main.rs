@@ -72,6 +72,8 @@ enum Commands {
     },
     /// Refuse supported implementation edits without a checked issue context.
     IssueGuard,
+    /// Lint files written by an agent, reading its hook payload from standard input.
+    LintHook,
     /// Execute Codex hooks with local evidence or inspect their recent results.
     CodexHooks {
         #[command(subcommand)]
@@ -207,17 +209,7 @@ fn run(mut cli: Cli) -> Result<()> {
             );
         }
         Commands::GithubToken => github_token()?,
-        Commands::Repository { request } => match request {
-            RepositoryRequest::Generate { remote } => {
-                dotfiles::repository::write(&cli.root)?;
-                if let Some(remote) = remote {
-                    dotfiles::repository::write_description(&cli.root, &remote)?;
-                }
-            }
-            RepositoryRequest::Check { remote } => {
-                dotfiles::repository::check(&cli.root, remote.as_deref())?;
-            }
-        },
+        Commands::Repository { request } => repository(&cli.root, request)?,
         Commands::Agent {
             agent,
             config,
@@ -238,6 +230,7 @@ fn run(mut cli: Cli) -> Result<()> {
         Commands::ClaudeBash { rewrite } => dotfiles::claude_hook::run(rewrite)?,
         Commands::ClaudeTiming { client } => dotfiles::claude_timing::run(client)?,
         Commands::IssueGuard => std::process::exit(dotfiles::issue_guard::hook()?),
+        Commands::LintHook => std::process::exit(dotfiles::lint_hook::run()?),
         Commands::CodexHooks { request } => std::process::exit(codex_hooks::run(request)?),
         Commands::Notifications { action } => dotfiles::notifications::run(action)?,
         Commands::Assure { point, language } => assure(point, language)?,
@@ -292,6 +285,21 @@ fn run(mut cli: Cli) -> Result<()> {
         Commands::Hosts { action } => dotfiles::hosts::run(action)?,
         Commands::Artifacts { action } => dotfiles::artifacts::run(&cli.root, action)?,
         Commands::Windows { arguments } => windows(arguments)?,
+    }
+    Ok(())
+}
+
+fn repository(root: &Path, request: RepositoryRequest) -> Result<()> {
+    match request {
+        RepositoryRequest::Generate { remote } => {
+            dotfiles::repository::write(root)?;
+            if let Some(remote) = remote {
+                dotfiles::repository::write_description(root, &remote)?;
+            }
+        }
+        RepositoryRequest::Check { remote } => {
+            dotfiles::repository::check(root, remote.as_deref())?;
+        }
     }
     Ok(())
 }
@@ -354,6 +362,7 @@ fn agent_hook() -> Option<&'static str> {
         "claude-bash" => Some("claude-bash"),
         "claude-timing" => Some("claude-timing"),
         "issue-guard" => Some("issue-guard"),
+        "lint-hook" => Some("lint-hook"),
         "notifications" => Some("notifications"),
         "assure" => Some("assure"),
         "health" if session => Some("health"),

@@ -52,6 +52,7 @@ pub enum Tool {
     AstGrep,
     Atuin,
     Bash,
+    Biome,
     Brew,
     Bun,
     Cabal,
@@ -88,6 +89,7 @@ pub enum Tool {
     Go,
     Gpg,
     Gsettings,
+    Hadolint,
     Herdr,
     HerdrAgent,
     Hlint,
@@ -113,11 +115,13 @@ pub enum Tool {
     Opencode,
     Pwsh,
     Raco,
+    Ruff,
     Rustc,
     Rustfmt,
     Rustup,
     Sh,
     Shellcheck,
+    Shfmt,
     Ssh,
     SshKeygen,
     Starship,
@@ -145,13 +149,14 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 96] = [
+    pub const ALL: [Self; 100] = [
         Self::Actionlint,
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
         Self::AstGrep,
         Self::Atuin,
         Self::Bash,
+        Self::Biome,
         Self::Brew,
         Self::Bun,
         Self::Cabal,
@@ -188,6 +193,7 @@ impl Tool {
         Self::Go,
         Self::Gpg,
         Self::Gsettings,
+        Self::Hadolint,
         Self::Herdr,
         Self::HerdrAgent,
         Self::Hlint,
@@ -213,11 +219,13 @@ impl Tool {
         Self::Opencode,
         Self::Pwsh,
         Self::Raco,
+        Self::Ruff,
         Self::Rustc,
         Self::Rustfmt,
         Self::Rustup,
         Self::Sh,
         Self::Shellcheck,
+        Self::Shfmt,
         Self::Ssh,
         Self::SshKeygen,
         Self::Starship,
@@ -246,8 +254,16 @@ impl Tool {
 
     /// The program name, or the absolute path where the provider installs it outside PATH.
     #[must_use]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the exhaustive registry names every executable without hiding variant coverage"
+    )]
     pub fn program(self) -> &'static str {
         match self {
+            Self::Biome => "biome",
+            Self::Hadolint => "hadolint",
+            Self::Ruff => "ruff",
+            Self::Shfmt => "shfmt",
             Self::Actionlint => "actionlint",
             Self::CargoDeny => "cargo-deny",
             Self::Zizmor => "zizmor",
@@ -350,8 +366,16 @@ impl Tool {
     }
 
     #[must_use]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the exhaustive registry records every provider without hiding variant coverage"
+    )]
     pub fn provision(self) -> Provision {
         match self {
+            Self::Biome => Provision::Pinned("biome"),
+            Self::Hadolint => Provision::Pinned("hadolint"),
+            Self::Ruff => Provision::Pinned("ruff"),
+            Self::Shfmt => Provision::Pinned("shfmt"),
             Self::AnsibleGalaxy | Self::AnsiblePlaybook => Provision::Pinned("pypi:ansible-core"),
             Self::Actionlint => Provision::Pinned("actionlint"),
             Self::AstGrep => Provision::Pinned("ast-grep"),

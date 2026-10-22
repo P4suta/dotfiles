@@ -952,6 +952,31 @@ fn reject_rewriting_crlf_the_index_keeps() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/lint_hook_rules.rs"
+probes = '''
+#[kani::proof]
+#[kani::unwind(4)]
+fn reject_admitting_findings() {
+    assert!(production::admission(&[production::Outcome::Findings]) == production::Admission::Admit);
+}
+#[kani::proof]
+#[kani::unwind(4)]
+fn reject_admitting_missing_linters() {
+    assert!(production::admission(&[production::Outcome::Missing]) == production::Admission::Admit);
+}
+#[kani::proof]
+#[kani::unwind(4)]
+fn reject_blocking_unknown_types() {
+    assert!(production::admission(&[]) == production::Admission::Block);
+}
+#[kani::proof]
+fn reject_an_xargs_supplied_script() {
+    assert!(production::script_argument(true, production::ScriptInput::Missing, false) == production::ScriptArgument::Literal);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/env_expansion_rules.rs"
 probes = '''
 #[kani::proof]
