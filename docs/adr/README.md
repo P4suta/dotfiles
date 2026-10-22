@@ -100,4 +100,5 @@
 | [2026-10-21 Sign through the password manager agent](sign-through-the-password-manager-agent.md) | accepted |  |
 | [2026-10-22 Assurance follows change provenance](assurance-follows-change-provenance.md) | proposed |  |
 | [2026-10-22 Decide PR independence from merge results](decide-pr-independence-from-merge-results.md) | proposed |  |
+| [2026-10-22 First push requires an empty remote advertisement](first-push-requires-an-empty-remote-advertisement.md) | accepted |  |
 | [2026-10-22 Run heavy verification at the release gate](run-heavy-verification-at-the-release-gate.md) | accepted |  |

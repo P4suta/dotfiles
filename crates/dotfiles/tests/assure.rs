@@ -496,6 +496,135 @@ fn a_new_branch_uses_the_advertised_upstream_default_instead_of_tracking_refs() 
 }
 
 #[test]
+fn an_empty_remote_admits_a_complete_initial_tree_without_gaps() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    let upstream = fixture.scope.path().join("upstream.git");
+    let upstream = upstream.to_str().unwrap();
+    fixture.git(&["init", "--bare", "--quiet", upstream])?;
+    fixture.git(&["remote", "set-url", "origin", upstream])?;
+    let head = fixture.git(&["rev-parse", "HEAD"])?;
+    let line = format!(
+        "refs/heads/main {head} refs/heads/main {}\n",
+        "0".repeat(40)
+    );
+
+    assure::push(&fixture.root, &catalog, "origin", line.as_bytes())
+}
+
+#[test]
+fn an_empty_remote_refuses_a_gap_from_before_the_latest_commit() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    let upstream = fixture.scope.path().join("upstream.git");
+    let upstream = upstream.to_str().unwrap();
+    fixture.git(&["init", "--bare", "--quiet", upstream])?;
+    fixture.git(&["remote", "set-url", "origin", upstream])?;
+    fixture.write("src/lib.rs", PARSER)?;
+    fixture.commit("unowned shape")?;
+    fixture.write("README.md", "later metadata\n")?;
+    let head = fixture.commit("later commit")?;
+    let line = format!(
+        "refs/heads/main {head} refs/heads/main {}\n",
+        "0".repeat(40)
+    );
+
+    let refusal = assure::push(&fixture.root, &catalog, "origin", line.as_bytes())
+        .unwrap_err()
+        .downcast::<Refusal>()
+        .unwrap();
+    assert_eq!(refusal.rule, "assure.added");
+    assert!(
+        refusal
+            .evidence
+            .iter()
+            .any(|input| input.contains("base=empty tree")),
+        "{refusal:?}"
+    );
+    fixture.write(OWNERS_PATH, OWNERS)?;
+    fixture.write("fuzz/fuzz_targets/parse.rs", TARGET)?;
+    fixture.write("fuzz/corpus/parse/seed", "7")?;
+    let owned = fixture.commit("own the initial parser")?;
+    let owned_line = format!(
+        "refs/heads/main {owned} refs/heads/main {}\n",
+        "0".repeat(40)
+    );
+    assure::push(&fixture.root, &catalog, "origin", owned_line.as_bytes())?;
+    Ok(())
+}
+
+#[test]
+fn a_nonempty_remote_without_a_default_commit_is_never_an_empty_baseline() -> Result<()> {
+    for tag_only in [false, true] {
+        let fixture = Fixture::new()?;
+        let catalog = fixture.catalog()?;
+        let upstream = fixture.scope.path().join("upstream.git");
+        let upstream = upstream.to_str().unwrap();
+        let head = fixture.git(&["rev-parse", "HEAD"])?;
+        if tag_only {
+            fixture.git(&["init", "--bare", "--quiet", upstream])?;
+            fixture.git(&[
+                "--git-dir",
+                upstream,
+                "fetch",
+                "--quiet",
+                fixture.root.to_str().unwrap(),
+                "HEAD:refs/tags/kept",
+            ])?;
+        } else {
+            fixture.git(&["clone", "--bare", "--quiet", ".", upstream])?;
+        }
+        fixture.git(&["remote", "set-url", "origin", upstream])?;
+        fixture.git(&[
+            "--git-dir",
+            upstream,
+            "symbolic-ref",
+            "HEAD",
+            "refs/heads/unborn",
+        ])?;
+        assert_eq!(fixture.git(&["ls-remote", "origin", "HEAD"])?, "");
+        assert_ne!(fixture.git(&["ls-remote", "origin"])?, "");
+        let line = format!(
+            "refs/heads/topic {head} refs/heads/topic {}\n",
+            "0".repeat(40)
+        );
+
+        assert_eq!(
+            rule(assure::push(
+                &fixture.root,
+                &catalog,
+                "origin",
+                line.as_bytes()
+            ))
+            .as_deref(),
+            Some("assure.base"),
+            "tag_only={tag_only}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn an_unavailable_remote_cannot_supply_an_empty_baseline() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    let upstream = fixture.scope.path().join("missing.git");
+    fixture.git(&["remote", "set-url", "origin", upstream.to_str().unwrap()])?;
+    let head = fixture.git(&["rev-parse", "HEAD"])?;
+    let line = format!(
+        "refs/heads/main {head} refs/heads/main {}\n",
+        "0".repeat(40)
+    );
+
+    let error = assure::push(&fixture.root, &catalog, "origin", line.as_bytes()).unwrap_err();
+    assert!(
+        error.to_string().contains("ls-remote origin HEAD failed"),
+        "{error:#}"
+    );
+    Ok(())
+}
+
+#[test]
 fn old_gaps_do_not_block_unrelated_prs_but_a_touched_file_must_close_them_at_stop() -> Result<()> {
     let catalog = catalog()?;
     let fixture = Fixture::new()?;
