@@ -1685,6 +1685,30 @@ fn reject_opening_conflicting_heads_independently() {
 fn reject_requiring_a_stack_for_a_clean_merge() {
     assert!(production::dependency(false, production::PathMerge::Clean).is_some());
 }
+#[kani::proof]
+fn reject_checking_an_app_authored_pr_for_dependencies() {
+    assert!(production::dependency_skip("app/p4suta-release-plz", None, false, None).is_none());
+}
+#[kani::proof]
+fn reject_checking_a_bot_login_for_dependencies() {
+    assert!(production::dependency_skip("release-plz[bot]", None, false, None).is_none());
+}
+#[kani::proof]
+fn reject_checking_a_bot_author_type_for_dependencies() {
+    assert!(production::dependency_skip("release-plz", Some("Bot"), false, None).is_none());
+}
+#[kani::proof]
+fn reject_checking_a_reported_bot_for_dependencies() {
+    assert!(production::dependency_skip("release-plz", None, true, None).is_none());
+}
+#[kani::proof]
+fn reject_checking_a_pr_already_conflicting_with_its_base() {
+    assert!(production::dependency_skip("contributor", None, false, Some("CONFLICTING")).is_none());
+}
+#[kani::proof]
+fn reject_skipping_an_ordinary_pr_with_unknown_mergeability() {
+    assert!(production::dependency_skip("contributor", Some("User"), false, Some("UNKNOWN")).is_some());
+}
 '''
 
 [[obligation]]
