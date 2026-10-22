@@ -39,6 +39,27 @@ pub(super) fn disconnect(
         cutover,
         ..evidence()
     };
+    disconnect_with_evidence(session, sync, change, evidence)
+}
+
+pub(super) fn disconnect_unused(session: &Session, sync: &Value) -> Result<()> {
+    disconnect_with_evidence(
+        session,
+        sync,
+        Change::RemoveUnused,
+        super::Evidence {
+            unused: true,
+            ..evidence()
+        },
+    )
+}
+
+fn disconnect_with_evidence(
+    session: &Session,
+    sync: &Value,
+    change: Change,
+    evidence: super::Evidence,
+) -> Result<()> {
     ensure!(
         super::decide(session.mode, change, evidence) == super::Verdict::Allowed,
         "sync retirement was not authorized"
