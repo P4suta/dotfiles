@@ -1683,6 +1683,16 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
                     .context("the stop hook input is invalid")?
             };
             let mut reasons = Vec::new();
+            if language.is_some() {
+                let reply = prose::Input::new(
+                    "reply",
+                    input.last_assistant_message.as_deref().unwrap_or_default(),
+                    false,
+                );
+                for finding in prose::sentence_per_line(&reply) {
+                    reasons.push(format!("Reply line {}: {}", finding.line, finding.message));
+                }
+            }
             if let Some(language) = language
                 && reply_language_rules::check(
                     language,

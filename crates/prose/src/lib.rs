@@ -338,65 +338,10 @@ pub fn masked(text: &str) -> String {
     String::from_utf8(bytes).unwrap_or_else(|_| text.to_owned())
 }
 
-const ABBREVIATIONS: [&str; 16] = [
-    "e.g", "i.e", "etc", "vs", "cf", "approx", "no", "fig", "mr", "mrs", "ms", "dr", "st", "inc",
-    "ltd", "u.s",
-];
-
 /// Character columns, counted from one, where a second sentence starts on the same line.
+#[must_use]
 pub fn sentence_starts(line: &str) -> Vec<usize> {
-    let chars: Vec<char> = line.chars().collect();
-    let mut starts = Vec::new();
-    for (index, &character) in chars.iter().enumerate() {
-        if matches!(character, '。' | '！' | '？') {
-            let rest = chars[index + 1..]
-                .iter()
-                .position(|c| !matches!(c, '」' | '』' | '）' | ')' | '"'));
-            if let Some(offset) = rest {
-                let next = index + 1 + offset;
-                if !chars[next].is_whitespace() {
-                    starts.push(next + 1);
-                }
-            }
-            continue;
-        }
-        if !matches!(character, '.' | '!' | '?') || index == 0 {
-            continue;
-        }
-        let before = chars[index - 1];
-        if !(before.is_alphanumeric() || matches!(before, ')' | ']' | '"' | '\'' | '’' | '”')) {
-            continue;
-        }
-        let word: String = chars[..index]
-            .iter()
-            .rev()
-            .take_while(|c| c.is_alphanumeric() || **c == '.')
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
-        let lower = word.to_lowercase();
-        if ABBREVIATIONS.contains(&lower.as_str())
-            || (!word.is_empty() && word.chars().all(|c| c.is_ascii_digit() || c == '.'))
-            || (word.chars().count() == 1 && word.chars().all(char::is_uppercase))
-        {
-            continue;
-        }
-        let mut cursor = index + 1;
-        while cursor < chars.len() && matches!(chars[cursor], ')' | ']' | '"' | '\'' | '’' | '”')
-        {
-            cursor += 1;
-        }
-        let spaces = chars[cursor..].iter().take_while(|c| **c == ' ').count();
-        if spaces == 0 {
-            continue;
-        }
-        cursor += spaces;
-        if chars.get(cursor).is_some_and(|c| c.is_uppercase()) {
-            starts.push(cursor + 1);
-        }
-    }
-    starts
+    prose_rules::sentence_starts(line)
 }
 
 /// The sentence of `line` that contains the one-based character `column`.
@@ -460,20 +405,20 @@ impl Input {
     }
 }
 
-fn sentence_per_line(input: &Input) -> Vec<Finding> {
-    let visible = masked(&input.text);
-    let mut findings = Vec::new();
-    for (index, line) in visible.lines().enumerate() {
-        for column in sentence_starts(line) {
-            findings.push(input.finding(
-                index + 1,
-                column,
-                "Dotfiles.SentencePerLine",
-                "Start each sentence on its own line.",
-            ));
-        }
-    }
-    findings
+/// Checks sentence layout without running the persisted language or style linters.
+#[must_use]
+pub fn sentence_per_line(input: &Input) -> Vec<Finding> {
+    prose_rules::sentence_lines(&masked(&input.text))
+        .into_iter()
+        .map(|finding| {
+            input.finding(
+                finding.line,
+                finding.column,
+                prose_rules::SENTENCE_PER_LINE,
+                finding.violation.message(),
+            )
+        })
+        .collect()
 }
 
 fn language(input: &Input, mode: lang::Mode) -> Vec<Finding> {

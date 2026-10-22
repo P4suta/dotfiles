@@ -154,13 +154,17 @@ Judgment: authorization comes from the owner's own messages, and no tool separat
 
 Heading: groups the prose lines.
 
-> Write prose one sentence per line, in English and in Japanese: break after `。`, `！`, `？`, `.`, `!`, and `?`, and optionally after a clause when that clarifies structure.
+> Write prose one sentence per line in English and Japanese: break after `。`, `！`, `？`, `.`, `!`, and `?`.
 
-Follow-up F1: the global `pre-commit` hook already reflows committed comments and Markdown, and commit messages and PR documents remain unchecked.
+Follow-up F1: `prose check` and `dotfiles assure stop --reply-language` share the sentence layout decisions in `crates/rules/src/prose_rules.rs`.
 
-> Never wrap prose to a fixed column.
+> Never wrap a sentence across lines or put two sentences on one line.
 
 Follow-up F1: the same checker covers this form.
+
+> Split long sentences into shorter ones when a channel limits line length.
+
+Follow-up F1: the wrapped sentence refusal names this correction.
 
 > Never merge a paragraph onto one line.
 
@@ -178,9 +182,13 @@ Follow-up F1: the same checker covers this form.
 
 Follow-up F1: the line names the texts the hook covers and goes once F1 covers the rest.
 
-> Apply it yourself to commit messages, issue and PR bodies, and release notes.
+> The Stop hook applies the same rule to replies with `--reply-language`.
 
-Follow-up F1: the line names the texts the hook can't see and goes once F1 covers them.
+Follow-up F1: `crates/dotfiles/src/assure.rs` checks reply layout before the language decision.
+
+> Apply it yourself to commit messages, issue and PR bodies, release notes, and every agent reply.
+
+Follow-up F1: commit, publication, comment, and document checks share the reply layout rule.
 
 ### `remote_machines`
 
@@ -489,7 +497,7 @@ Experimental skill maintenance stays off until the machine's explicit opt-in.
 | The former nine-sentence prose rules and their rationale. | Gate | The global pre-commit hook runs `ocomment fix --tidy --staged`, which reflows a touched paragraph in `home/dot_config/lefthook/global.yml`. |
 | Use the `multi-machine` skill for remote execution. | Skill | `multi-machine` and `domyjob` state the trigger in their descriptions. |
 | The template actions that rendered the machine-local notes file into every instruction file. | Merged | The retained line names the file to read instead: `when it exists, before operating another host`. |
-| In `commit.md`, wrap an optional body at 100 characters. | Contradicted | It contradicted `Never wrap prose to a fixed column`, and the command keeps the reason line. |
+| In `commit.md`, wrap an optional body at 100 characters. | Contradicted | It contradicted `Never wrap a sentence across lines`, and the command keeps the reason line. |
 | In `commit.md`, never append attribution footers. | Gate | Dotguard `commit-msg` strips agent attribution in `crates/dotguard/src/attribution.rs`. |
 | In `commit.md`, the Japanese reply line. | Merged | Restated by `Reply in Japanese`. |
 | In `pr.md`, open a pull request using `gh`. | Merged | Superseded by `for PR creation, document edits, and ready transitions`. |

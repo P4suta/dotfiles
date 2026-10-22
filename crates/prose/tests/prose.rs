@@ -14,6 +14,8 @@ use fixture_git::fixture_process;
 
 const ATTRIBUTED: &str = "As requested, the parser keeps every edit.";
 const COMPLIANT: &str = "The parser keeps every edit.";
+const WRAPPED_BODY: &str = "fix(schema): version envelope schemas\n\nThe envelope entry docs feed the published JSON schemas, and the\nrelease gate refuses a schema change without a version bump.\n";
+const REPLY_SHAPE: &str = "# Results\n**Validation**\nThe checks passed.\nThe change is ready.\nResults:\n- The build passed.\n- The tests passed.\n\n| Check | Result |\n| --- | --- |\n| Build | One. Two. |\n\n```text\nOne. Two.\nA wrapped\nsentence.\n```\n\n> One. Two.\n> A wrapped\n> sentence.\n";
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -112,6 +114,86 @@ fn repository_rules_cover_hedging_comparison_lines_and_language() -> Result<()> 
 }
 
 #[test]
+fn every_channel_refuses_wrapped_sentences_at_the_first_line() -> Result<()> {
+    let bundle = source()?;
+    for channel in [
+        Channel::Commit,
+        Channel::Document,
+        Channel::Pr,
+        Channel::Issue,
+    ] {
+        let findings = prose::check(&bundle, channel, "message", WRAPPED_BODY)?;
+        let finding = findings
+            .iter()
+            .find(|finding| finding.rule == "Dotfiles.SentencePerLine")
+            .unwrap_or_else(|| panic!("{channel:?}: {findings:?}"));
+        assert_eq!((finding.line, finding.column), (3, 1), "{channel:?}");
+        assert!(finding.message.contains("shorter sentences"), "{finding:?}");
+    }
+    let inputs = prose::scanned_comments(&format!(
+        "{}\n",
+        json!({"path": "src/lib.rs", "report": {"comments": [
+            {"kind": "doc-line", "text": "/// The envelope entry docs feed the published JSON schemas, and the", "line": 10, "end_line": 10, "column": 1},
+            {"kind": "doc-line", "text": "/// release gate refuses a schema change without a version bump.", "line": 11, "end_line": 11, "column": 1}
+        ]}})
+    ))?;
+    let findings = prose::check_inputs(&bundle, &inputs)?;
+    assert!(
+        findings
+            .iter()
+            .any(|finding| { finding.rule == "Dotfiles.SentencePerLine" && finding.line == 10 }),
+        "{findings:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn japanese_reply_sentences_are_separate_even_without_spaces() -> Result<()> {
+    let findings = prose::check(
+        &source()?,
+        Channel::Document,
+        "reply",
+        "4 本とも ready になりました。ただ、最後の merge が失敗しています。",
+    )?;
+    assert!(
+        rules(&findings).contains(&"Dotfiles.SentencePerLine"),
+        "{findings:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn sentence_lines_keep_markdown_reply_shapes() -> Result<()> {
+    let bundle = source()?;
+    for channel in [
+        Channel::Document,
+        Channel::Commit,
+        Channel::Pr,
+        Channel::Issue,
+    ] {
+        let findings = prose::check(&bundle, channel, "reply", REPLY_SHAPE)?;
+        assert!(
+            !rules(&findings).contains(&"Dotfiles.SentencePerLine"),
+            "{channel:?}: {findings:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn sentence_layout_preserves_front_matter_and_code_fence_shapes() {
+    for text in [
+        "---\ntitle: One. Two.\nsummary: A wrapped\n  sentence.\n---\n\nThe checks passed.\n",
+        "~~~text\nOne. Two.\nA wrapped\nsentence.\n~~~\n",
+        "````md\n```text\nOne. Two.\n```\n````\n",
+        "    One. Two.\n    A wrapped\n    sentence.\n",
+    ] {
+        let findings = prose::sentence_per_line(&prose::Input::new("reply", text, false));
+        assert!(findings.is_empty(), "{text}: {findings:?}");
+    }
+}
+
+#[test]
 fn sentence_boundaries_ignore_abbreviations_numbers_and_code() {
     assert_eq!(prose::sentence_starts("One sentence. Two sentences."), [15]);
     assert_eq!(
@@ -135,6 +217,9 @@ fn sentence_boundaries_ignore_abbreviations_numbers_and_code() {
             .all(|line| prose::sentence_starts(line).is_empty())
     );
     assert_eq!(masked.lines().count(), 5);
+    let directive = "renovate: datasource=github-releases depName=koalaman/shellcheck extractVersion=^v(?<version>.+)$";
+    let masked = prose::masked(directive);
+    assert!(prose::sentence_starts(&masked).is_empty(), "{masked:?}");
 }
 
 #[test]

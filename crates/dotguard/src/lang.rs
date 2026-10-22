@@ -4,12 +4,12 @@
 //!
 //! Three problems arrive without anyone typing them, from a search result, a model that drifts between languages, or a rendered page:
 //!
-//! 1. **Another writing system.** These repositories use Japanese and English, so Hangul, Cyrillic, Thai, Devanagari, and the rest count as contamination.
+//! 1. **Another writing system:** these repositories use Japanese and English, so Hangul, Cyrillic, Thai, Devanagari, and the rest count as contamination.
 //!
-//! 2. **Simplified Chinese.** Japanese and Chinese share most ideographs, so `日本語` reads the same in both.
+//! 2. **Simplified Chinese:** the Japanese and Chinese writing systems share most ideographs, so `日本語` reads the same in both.
 //!    A Chinese sentence of any length contains simplified forms such as `这 个 说 时 门 现`, which Japanese lacks.
 //!
-//! 3. **Invisible characters.** Zero-width spaces, bidirectional overrides, and byte-order marks.
+//! 3. **Invisible characters:** zero-width spaces, bidirectional overrides, and byte-order marks have no place here.
 //!
 //! Latin-1 accents pass, as in `naïve`, `Gödel`, and `São`.
 //! Greek passes one letter at a time, so notation such as `λ`, `μs`, and `Σ` passes, but a run of three or more letters counts as a word.
@@ -52,20 +52,20 @@ const BLOCKED: &[(u32, u32, &str)] = &[
 /// Each range ends one codepoint before a kanji in daily Japanese use.
 /// Those kanji: U+8C37 `谷`, U+8D64 `赤`, U+8F9B `辛`, U+961C `阜`, U+7F36 `缶`, U+9577 `長`, U+9996 `首`, U+9AA8 `骨`, U+9E75 `鹵`, U+89D2 `角`, U+98A8 `風`, U+98DB `飛`, and U+9F8D `龍`.
 const SIMPLIFIED_RANGES: &[(u32, u32)] = &[
-    (0x8BA0, 0x8C36), // `讠` speech
-    (0x8D1D, 0x8D63), // `贝` shell
-    (0x8F66, 0x8F9A), // `车` cart
-    (0x95E8, 0x961B), // `门` gate
-    (0x7EA0, 0x7F35), // `纟` silk
-    (0x9485, 0x9576), // `钅` metal
-    (0x9963, 0x9995), // `饣` food
-    (0x9A6C, 0x9AA7), // `马` horse
-    (0x9C7C, 0x9CE2), // `鱼` fish
-    (0x9E1F, 0x9E74), // `鸟` bird
-    (0x89C1, 0x89D1), // `见` see
-    (0x9875, 0x98A7), // `页` page
-    (0x98CE, 0x98DA), // `风` wind
-    (0x9F7F, 0x9F8C), // `齿` tooth
+    (0x8BA0, 0x8C36), // `讠` is the speech radical.
+    (0x8D1D, 0x8D63), // `贝` is the shell radical.
+    (0x8F66, 0x8F9A), // `车` is the cart radical.
+    (0x95E8, 0x961B), // `门` is the gate radical.
+    (0x7EA0, 0x7F35), // `纟` is the silk radical.
+    (0x9485, 0x9576), // `钅` is the metal radical.
+    (0x9963, 0x9995), // `饣` is the food radical.
+    (0x9A6C, 0x9AA7), // `马` is the horse radical.
+    (0x9C7C, 0x9CE2), // `鱼` is the fish radical.
+    (0x9E1F, 0x9E74), // `鸟` is the bird radical.
+    (0x89C1, 0x89D1), // `见` means "see."
+    (0x9875, 0x98A7), // `页` is the page radical.
+    (0x98CE, 0x98DA), // `风` is the wind radical.
+    (0x9F7F, 0x9F8C), // `齿` is the tooth radical.
 ];
 
 /// The frequent simplified forms outside those runs.
@@ -231,12 +231,12 @@ const fn latin(c: char) -> bool {
 const fn japanese(c: char) -> bool {
     matches!(
         c,
-        '\u{3000}'..='\u{303F}' // `、。「」〜` and the iteration marks
-        | '\u{3040}'..='\u{30FF}' // hiragana, katakana
-        | '\u{31F0}'..='\u{31FF}' // phonetic extensions for Ainu
-        | '\u{3400}'..='\u{9FFF}' // CJK ideographs
-        | '\u{F900}'..='\u{FAFF}' // compatibility ideographs
-        | '\u{FF00}'..='\u{FFEF}' // halfwidth and fullwidth forms
+        '\u{3000}'..='\u{303F}' // This range contains `、。「」〜` and the iteration marks.
+        | '\u{3040}'..='\u{30FF}' // This range contains hiragana and katakana.
+        | '\u{31F0}'..='\u{31FF}' // This range contains phonetic extensions for Ainu.
+        | '\u{3400}'..='\u{9FFF}' // This range contains CJK ideographs.
+        | '\u{F900}'..='\u{FAFF}' // This range contains compatibility ideographs.
+        | '\u{FF00}'..='\u{FFEF}' // This range contains halfwidth and fullwidth forms.
     )
 }
 
