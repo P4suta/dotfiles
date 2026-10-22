@@ -1,9 +1,10 @@
 {
-  "revision": "605da63ed78be7a460965d9f6e797b3738f7db9857f13139fc7096e42608ce20",
+  "revision": "182547f5841446bbeead349b53aadf0413c65ad5ea50fd4d9164ab7dddd80554",
   "outcome": "implemented",
-  "reason": "Use the shared reproducibility contract and project platform runners instead of mandatory owner hosts or project-local owner tooling.",
+  "reason": "Keep proof authoring with each implementation change and the fast gate on the current host before a push, and leave heavy campaigns and other platforms to the release gate.",
   "evidence": [
     "home/dot_agents/skills/development-assurance/SKILL.md",
+    "docs/adr/run-heavy-verification-at-the-release-gate.md",
     "docs/adr/verification-proportional-to-code-shape.md",
     "home/dot_agents/skills/formal-assurance/references/scoping.md",
     "docs/skills/assurance-scope-evaluation.md"

@@ -1,7 +1,7 @@
 ---
 date: 2026-10-19
 status: amended
-changed_by: [gate-pull-requests-that-skip-local-hooks.md]
+changed_by: [gate-pull-requests-that-skip-local-hooks.md, run-heavy-verification-at-the-release-gate.md]
 ---
 # Make native verification optional before publication
 

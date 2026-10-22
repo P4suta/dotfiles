@@ -1,10 +1,11 @@
 {
-  "revision": "0a66915ceeef02dd7277d3a2cb2a24da32c0a300e5a16f52457144764e3b27fc",
+  "revision": "45030ecc79cfd32b4aeef5246fba88ac3a990f7dc9718be743ad4e9cfca142dc",
   "outcome": "implemented",
-  "reason": "Select CI checks by affected contracts in reproducible project runners instead of time budgets or required owner hosts.",
+  "reason": "Run the fast deterministic gate on every change, and place proofs, Miri, fuzzing, mutation, stress repeats, and macOS and Windows runs at the release gate.\nPer-change selection still ran heavy campaigns on most product pushes and pull requests and stalled daily development.",
   "evidence": [
     "home/dot_agents/skills/ci-budget/SKILL.md",
     "home/dot_agents/skills/ci-budget/references/lean-workflows.md",
+    "docs/adr/run-heavy-verification-at-the-release-gate.md",
     "crates/dotfiles/src/hosts.rs",
     "docs/adr/0020-os-family-push-evidence.md"
   ],

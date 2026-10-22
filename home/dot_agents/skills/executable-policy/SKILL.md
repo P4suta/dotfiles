@@ -17,8 +17,8 @@ Use `skill-operations` to track gaps and decide when a recurring workflow deserv
 Read the producers, consumers, project commands, local hooks, required CI, and existing exclusions.
 Write shared decision logic once with `rust-tooling` or the project's typed tooling.
 Use `xtask` and `just` for thin discoverable command entry points.
-Call the same checker from the developer command, hooks, and required CI.
-Check that the effective hook and workflow call it, including on each OS.
+Call the same checker from the developer command and its gate: hooks and pull-request CI for a fast check, or the release workflow for a heavy one.
+Check that the effective hook and workflow call it, and that the release workflow covers each supported OS.
 An instruction or an installed executable alone makes no required gate.
 
 Parse structured data with the format's parser, and discover the checked scope from authoritative manifests.
@@ -39,7 +39,7 @@ Detect the removal, narrowing, or deletion of required coverage where the projec
 Never add tests that only match headings, tool names, generated wording, or implementation details.
 
 Use `development-assurance`, `formal-assurance`, and `reliability` for correctness, reproducible verdicts, and external assumptions.
-Run native checks through the project's documented hosted runners or pinned container, and use `ci-budget` for change selection.
+Run native checks through the project's documented hosted runners or pinned container, and use `ci-budget` to place each check at the fast gate or the release gate.
 After moving a rule into code, cut its skill down to the remaining judgment, invocation, failure handling, and limits.
 A skill never repeats a version or exploration bound that a gate pins, and the skill check refuses one that does.
 

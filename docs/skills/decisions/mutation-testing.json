@@ -1,10 +1,11 @@
 {
-  "revision": "9862145941808b593bb3765a7bee40126aa6da16e12ef589bca798088f6b1126",
+  "revision": "8dac942554e65880551477f681f91bc42beaee4af82a93650dfa7048dc834c07",
   "outcome": "implemented",
-  "reason": "Run owner-side mutation tools through the shared bounded route while preserving the pinned workflow and inconclusive timeout semantics.",
+  "reason": "Place the full campaign at the release gate, and keep changed-contract runs on demand during development.",
   "evidence": [
     "crates/dotfiles/src/bounded.rs",
     "home/dot_agents/skills/mutation-testing/SKILL.md",
+    "docs/adr/run-heavy-verification-at-the-release-gate.md",
     "docs/adr/verification-proportional-to-code-shape.md",
     "home/dot_agents/skills/mutation-testing/tools.toml",
     "mise.njutest.toml",
